@@ -5259,7 +5259,7 @@
               "type": "object"
             },
             "diameter": {
-              "description": "Outer diameter of round stock in millimetres; present exactly when shape is \"cylinder\".",
+              "description": "Outer diameter of round stock in millimetres; present exactly when shape is \"cylinder\" or \"disc\".",
               "exclusiveMinimum": 0,
               "maximum": 200,
               "type": "number"
@@ -5385,9 +5385,17 @@
               "type": "string"
             },
             "shape": {
-              "const": "cylinder",
-              "description": "Set to \"cylinder\" for round stock (a rod or a tube); omit for a rectangular blank.",
-              "type": "string"
+              "anyOf": [
+                {
+                  "const": "cylinder",
+                  "type": "string"
+                },
+                {
+                  "const": "disc",
+                  "type": "string"
+                }
+              ],
+              "description": "The plan shape of round stock (#743): \"cylinder\" for a rod or a tube, \"disc\" for a round blank milled flat; omit for a rectangular blank."
             },
             "thickness": {
               "description": "Stock thickness along Z, in millimetres (the machine limit is 100).",

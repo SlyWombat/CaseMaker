@@ -14,6 +14,7 @@ import {
   pTranslate,
   pUnion,
   poly,
+  profileReachFrom,
   rectProfile,
   roundedRect,
   type Profile,
@@ -1845,6 +1846,13 @@ export interface SweptCut {
   name: string;
   depth: Mm;
   box: SweptBox;
+  /**
+   * #743 — the farthest XY distance from the STOCK'S CENTRE this cut can reach, mm: an upper
+   * bound like `box`, but read from the REGION and the path rather than from the box's corners.
+   * A round stock's "inside the rim" rule needs it, because a ⌀26 pocket's box corners lie in the
+   * air outside a ⌀30 disc it never enters.
+   */
+  reach: Mm;
 }
 
 /** The box grown by `by` mm on every side. */
@@ -1898,23 +1906,34 @@ function coverPoint(box: SweptBox | null, x: Mm, y: Mm): SweptBox {
  */
 export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { unparsedFace: 'estimate' })): SweptCut[] {
   const cuts: SweptCut[] = [];
-  const add = (id: string, name: string, depth: Mm, box: SweptBox, growBy: Mm) =>
-    cuts.push({ id, name, depth, box: grownBox(box, growBy) });
+  const centre: [number, number] = [job.stock.length / 2, job.stock.width / 2];
+  const add = (id: string, name: string, depth: Mm, box: SweptBox, growBy: Mm, reach: Mm) =>
+    cuts.push({ id, name, depth, box: grownBox(box, growBy), reach: reach + growBy });
 
   for (const item of plan.engraves) {
     const aabb = aabbOfProfile(item.profile);
     if (!aabb) continue;
     const box = { minX: aabb.min[0], maxX: aabb.max[0], minY: aabb.min[1], maxY: aabb.max[1] };
-    add(item.id, item.name, item.depth, box, 0);
+    add(item.id, item.name, item.depth, box, 0, profileReachFrom(item.profile, centre));
   }
   for (const trace of plan.traces) {
     let box: SweptBox | null = null;
-    for (const path of trace.paths) for (const [x, y] of path) box = coverPoint(box, x, y);
-    if (box !== null) add(trace.id, trace.name, trace.depth, box, sweepRadiusForJob(job, trace.depth));
+    let reach = 0;
+    for (const path of trace.paths) {
+      for (const [x, y] of path) {
+        box = coverPoint(box, x, y);
+        reach = Math.max(reach, Math.hypot(x - centre[0], y - centre[1]));
+      }
+    }
+    if (box !== null) add(trace.id, trace.name, trace.depth, box, sweepRadiusForJob(job, trace.depth), reach);
   }
   for (const drill of plan.drills) {
     let box: SweptBox | null = null;
-    for (const [x, y] of drill.holes) box = coverPoint(box, x, y);
+    let reach = 0;
+    for (const [x, y] of drill.holes) {
+      box = coverPoint(box, x, y);
+      reach = Math.max(reach, Math.hypot(x - centre[0], y - centre[1]));
+    }
     // A drill's hole is the cutter's own diameter, so the sweep is its flat radius; the depth
     // argument is 0 because only a V-bit's radius varies with depth and a V-bit cannot drill.
     // #668 — a BORE's hole is the job's own diameter, so the sweep is the HOLE's radius (a bore
@@ -1923,12 +1942,19 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
       drill.mode === 'bore' && drill.diameter !== null && drill.diameter > 0
         ? drill.diameter / 2
         : sweepRadiusForJob(job, 0);
-    if (box !== null) add(drill.id, drill.name, drill.depth, box, radius);
+    if (box !== null) add(drill.id, drill.name, drill.depth, box, radius, reach);
   }
   for (const thread of plan.threads) {
     const [x, y] = thread.position;
     const r = FASTENERS[thread.size].major / 2;
-    add(thread.id, thread.name, thread.depth, { minX: x, maxX: x, minY: y, maxY: y }, r);
+    add(
+      thread.id,
+      thread.name,
+      thread.depth,
+      { minX: x, maxX: x, minY: y, maxY: y },
+      r,
+      Math.hypot(x - centre[0], y - centre[1]),
+    );
   }
   // Cut-outs (#218) sweep the referenced outline plus the path offset (`inset`) and the cutter
   // radius. The outline's bounding box covers every point of the offset path, so growing it by
@@ -1937,7 +1963,7 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
     const aabb = aabbOfProfile(cutout.outline);
     if (!aabb) continue;
     const box = { minX: aabb.min[0], maxX: aabb.max[0], minY: aabb.min[1], maxY: aabb.max[1] };
-    add(cutout.id, cutout.name, cutout.depth, box, sweepRadiusForJob(job, 0) + cutout.inset);
+    add(cutout.id, cutout.name, cutout.depth, box, sweepRadiusForJob(job, 0) + cutout.inset, profileReachFrom(cutout.outline, centre));
   }
   return cuts;
 }
@@ -2041,15 +2067,34 @@ function rotaryMapSupport(map: RotaryMap): Profile {
   return pTranslate([-around, -around], rectProfile(map.stickout + 2 * around, 3 * around));
 }
 
+/**
+ * #743 D6 — the stock's plan outline in the job frame, for a job cut FLAT. A disc is its rim:
+ * a circle centred in the `D × D` box the job plans in, at the chord tolerance the arc engine uses
+ * everywhere; every other stock is the blank rectangle. `toPartPlan` and `toSetup` both read this,
+ * so the shape a border follows and the solid the sweep starts from are the same statement.
+ */
+export function flatStockOutline(stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'shape' | 'diameter'>): Profile {
+  if (stock.shape !== 'disc') return rectProfile(stock.length, stock.width);
+  const radius = (stock.diameter ?? stock.length) / 2;
+  return pTranslate(
+    [stock.length / 2, stock.width / 2],
+    circleProfile(radius, segmentsForRadius(radius)),
+  );
+}
+
 export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): PartPlan {
   // #240 — a job in the rotary chuck is planned on its MAP: X along the axis from the jaws, Y the
   // surface arc at the design radius, over the stick-out the jaws leave free. The same document
   // items, the same funnels; only the stock those coordinates are measured against changes. A
   // flat job reads its blank exactly as before.
   const rotary = rotaryMapOf(job);
+  // #743 D6 — A DISC'S STOCK OUTLINE IS ITS RIM. The box the job plans in is still `D × D`, but
+  // the stock inside it is the circle, so every rule stated as "the stock's edge" follows the rim
+  // with no code of its own: a border at an inset, a `stock-inset` cut-out, a chamfer of the
+  // outline. `flatStockOutline` is the one statement of it, shared with the setup's seed solid.
   const stockOutline = rotary
     ? rectProfile(rotary.stickout, rotary.circumference)
-    : rectProfile(job.stock.length, job.stock.width);
+    : flatStockOutline(job.stock);
   const { order } = resolveItems(job);
   // Read once: `labelGlyphMeasure` answers `null` for a face that is not parsed, which is the cue
   // to fall back. It is only built when the caller asked for the fallback, so the compile path

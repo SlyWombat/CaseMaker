@@ -304,6 +304,79 @@ export function aabbOfProfile(p: Profile): Aabb2 | null {
   }
 }
 
+/**
+ * #743 — HOW FAR any point of `profile` can lie from `point`: an UPPER bound, read off the
+ * profile's own expression tree. The round-stock check needs it because a region's bounding
+ * RECTANGLE is not its reach: a ⌀26 pocket centred in a ⌀30 disc has box corners 8 mm outside the
+ * rim it never enters, and a corner test would refuse a cut that is entirely inside the circle.
+ *
+ * Conservative where the tree does not say:
+ *
+ *   - a DIFFERENCE is inside its FIRST child (the shape being cut away from);
+ *   - an INTERSECTION is inside EVERY child, so the nearest of their bounds holds;
+ *   - a UNION or HULL is inside the farthest child;
+ *   - an OFFSET never reaches past its child plus a positive delta (a negative delta only
+ *     shrinks, so the child's own bound is already safe);
+ *   - the transforms recurse with the query point moved by their inverse — rotation and
+ *     reflection are rigid, and a scale multiplies the bound by its largest factor.
+ */
+export function profileReachFrom(p: Profile, point: Vec2): number {
+  const from = (x: number, y: number): number => Math.hypot(x - point[0], y - point[1]);
+  switch (p.kind) {
+    case 'p-poly': {
+      let max = 0;
+      for (const contour of p.contours) for (const [x, y] of contour) max = Math.max(max, from(x, y));
+      return max;
+    }
+    case 'p-rect': {
+      const [w, h] = p.size;
+      const x0 = p.center ? -w / 2 : 0;
+      const x1 = p.center ? w / 2 : w;
+      const y0 = p.center ? -h / 2 : 0;
+      const y1 = p.center ? h / 2 : h;
+      return Math.max(from(x0, y0), from(x1, y0), from(x0, y1), from(x1, y1));
+    }
+    case 'p-circle':
+      // A bare circle is centred on the origin; placement is a `p-translate` around it.
+      return Math.hypot(point[0], point[1]) + p.radius;
+    case 'p-union':
+    case 'p-hull':
+      return p.children.reduce((m, c) => Math.max(m, profileReachFrom(c, point)), 0);
+    case 'p-difference':
+      return p.children[0] ? profileReachFrom(p.children[0], point) : 0;
+    case 'p-intersection':
+      if (p.children.length === 0) return 0;
+      return p.children.reduce((m, c) => Math.min(m, profileReachFrom(c, point)), Infinity);
+    case 'p-offset':
+      return profileReachFrom(p.child, point) + Math.max(0, p.delta);
+    case 'p-translate':
+      return profileReachFrom(p.child, [point[0] - p.offset[0], point[1] - p.offset[1]]);
+    case 'p-rotate': {
+      const a = (p.degrees * Math.PI) / 180;
+      const c = Math.cos(a);
+      const s = Math.sin(a);
+      return profileReachFrom(p.child, [point[0] * c + point[1] * s, -point[0] * s + point[1] * c]);
+    }
+    case 'p-mirror': {
+      const [nx, ny] = p.normal;
+      const len2 = nx * nx + ny * ny;
+      if (!len2) return profileReachFrom(p.child, point);
+      const d = (2 * (point[0] * nx + point[1] * ny)) / len2;
+      return profileReachFrom(p.child, [point[0] - d * nx, point[1] - d * ny]);
+    }
+    case 'p-scale': {
+      const [sx, sy] = p.scale;
+      if (sx === 0 || sy === 0) {
+        // A collapsed axis has no inverse; the bounding box's corners are still a safe answer.
+        const b = aabbOfProfile(p);
+        if (!b) return 0;
+        return Math.max(from(b.min[0], b.min[1]), from(b.max[0], b.min[1]), from(b.min[0], b.max[1]), from(b.max[0], b.max[1]));
+      }
+      return Math.max(Math.abs(sx), Math.abs(sy)) * profileReachFrom(p.child, [point[0] / sx, point[1] / sy]);
+    }
+  }
+}
+
 function mergeAabb2(a: Aabb2, b: Aabb2): Aabb2 {
   return {
     min: [Math.min(a.min[0], b.min[0]), Math.min(a.min[1], b.min[1])],

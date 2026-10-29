@@ -207,15 +207,20 @@ export function HoldingPicture({
   const dims = round ? `⌀ ${fmt(stock.length)}` : `${fmt(stock.length)} × ${fmt(stock.width)}`;
   const formWord = form === 'rod' ? 'rod' : form === 'disc' ? 'disc' : 'blank';
   const rim = round ? ', gripped on its rim' : '';
+  // #743 §4.2 — TWO LINES OF GRIP RESIST TURNING LESS THAN TWO FACES. The picture already draws
+  // the circle; the caption says what that means at the jaws, and it is the sentence that sends a
+  // thin disc to the tape instead.
+  const discGrip =
+    form === 'disc' ? ' A disc is gripped on two lines; take light cuts, or tape it.' : '';
   const boardName = boardMm === null ? 'a waste board' : `a ${fmt(boardMm)} mm board`;
   const caption = ((): string => {
     switch (mount) {
       case 'ledge':
-        return `Top view. The fixed jaw is on the left; the ${formWord} sits on the soft jaws’ ledge${rim}.`;
+        return `Top view. The fixed jaw is on the left; the ${formWord} sits on the soft jaws’ ledge${rim}.${discGrip}`;
       case 'board':
-        return `Top view. The fixed jaw is on the left; the ${formWord} sits on ${boardName} between the jaws${rim}.`;
+        return `Top view. The fixed jaw is on the left; the ${formWord} sits on ${boardName} between the jaws${rim}.${discGrip}`;
       case 'block':
-        return `Top view. The fixed jaw is on the left; the ${formWord} is gripped as a block, its sides free.`;
+        return `Top view. The fixed jaw is on the left; the ${formWord} is gripped as a block, its sides free.${discGrip}`;
       case 'bed-tape':
         return `Top view. The ${formWord} is taped to the bed; the bed's front edge is nearest you.`;
       case 'bed-bracket':
@@ -1240,6 +1245,8 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
         boardMm,
         rotaryEnvelope,
         round: job.stockEntry?.form === 'rod' || job.stock.shape === 'cylinder',
+        // #743 D6 — a disc is round in plan but NOT a rod: the chuck and the bracket refuse it.
+        disc: job.stock.shape === 'disc',
         tape,
       }),
     [machine, accessories, answers.stock, boardMm, rotaryEnvelope, job, tape],
@@ -1361,7 +1368,11 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     // mount: with nothing on the pins the vise cannot hold the job at all, so only the operator's
     // own saved setup stands over the bed's default.
     if (answers.vise.source === 'saved') return;
-    const mount = defaultBedMount(profile, answers.stock, job.stockEntry?.form ?? null);
+    const mount = defaultBedMount(
+      profile,
+      answers.stock,
+      job.stock.shape === 'disc' ? 'disc' : (job.stockEntry?.form ?? null),
+    );
     if (mount === 'bed-tape') onBedHold(bedTapeHold(profile, null, tapeInsetMm), answers);
     else onBedHold(bedBracketHold(answers.stock, shopDefaults ?? null, null, bedAnchor(profile) ?? 1), answers);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1503,7 +1514,9 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
         };
   const seatPhrase = answers.vise.seat === 'floor' ? 'on the vise body' : 'on the jaws’ ledge';
 
-  const form = job.stockEntry?.form;
+  // #743 D7 — round is a fact about the STOCK: a disc is one even when no entry names it (j04),
+  // so the step's word and its picture read `stock.shape` first.
+  const form: JobStockForm | undefined = job.stock.shape === 'disc' ? 'disc' : job.stockEntry?.form;
   const heading = `How is the ${form === undefined ? 'blank' : formLabel(form).toLowerCase()} held?`;
 
   const finish = job.stockEntry?.finish;

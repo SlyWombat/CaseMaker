@@ -2266,11 +2266,13 @@ export function EngravePanel(): JSX.Element {
   // its own facts (`shape: 'cylinder'`, its diameter), and the stock entry may be absent. A tube
   // states a wall; anything else keeps the entry's word (or a plate's, with no entry).
   const stockFormWord =
-    job.stock.shape === 'cylinder'
-      ? job.stock.wall !== undefined && job.stock.wall > 0
-        ? 'tube'
-        : 'rod'
-      : formLabel(job.stockEntry?.form ?? 'plate').toLowerCase();
+    job.stock.shape === 'disc'
+      ? 'disc'
+      : job.stock.shape === 'cylinder'
+        ? job.stock.wall !== undefined && job.stock.wall > 0
+          ? 'tube'
+          : 'rod'
+        : formLabel(job.stockEntry?.form ?? 'plate').toLowerCase();
   // #726 P3 — a ROUND job (a rod or disc in the chuck) has no flat bottom face to pocket and no
   // bed to surface a mesh on. The Voids and Target object rows are not offered for it; a job that
   // already carries one still draws its row, so it can be taken away.

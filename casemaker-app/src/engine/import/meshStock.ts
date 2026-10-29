@@ -33,7 +33,18 @@ export const WELD_TOLERANCE_MM = 1e-3;
 export const RECTANGLE_COVER = 0.995;
 
 export type MeshStockResult =
-  | { ok: true; length: number; width: number; thickness: number; triangles: number }
+  | {
+      ok: true;
+      /**
+       * #743 D3 — set when the top face is the RIM OF A DISC (a circular prism), which the job
+       * carries as `stock.shape: 'disc'` and whose diameter is its square bounding box's side.
+       */
+      shape?: 'disc';
+      length: number;
+      width: number;
+      thickness: number;
+      triangles: number;
+    }
   | { ok: false; reason: string };
 
 function round(v: number): number {
@@ -190,6 +201,15 @@ export function meshAsStock(mesh: ParsedMesh, tol: number = WELD_TOLERANCE_MM): 
     top += Math.abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay)) / 2;
   }
   const cover = top / (length * width);
+  // #743 D3 — A ROUND BLANK FROM A FILE. The design's stock list has had a Disc form since #683;
+  // until now a circular prism could not be LOADED as one (it covers π/4 ≈ 78.5 % of its box and
+  // was refused as "not a rectangle"). Its top face is the rim: a square box, the circle's area,
+  // and every top-plane vertex inside that circle. That is a far stronger signature than π/4
+  // alone — a square would fill its box, and any face with the circle's area that fits inside it
+  // IS the circle.
+  if (topFaceIsDisc(xyz, maxZ, top, length, width, minX, minY, tol)) {
+    return { ok: true, shape: 'disc', length: round(length), width: round(width), thickness: round(thickness), triangles: used };
+  }
   if (cover < RECTANGLE_COVER) {
     const turned = rotatedRectangle(xyz, maxZ, tol, top);
     if (turned !== null) {
@@ -209,6 +229,43 @@ export function meshAsStock(mesh: ParsedMesh, tol: number = WELD_TOLERANCE_MM): 
   }
 
   return { ok: true, length: round(length), width: round(width), thickness: round(thickness), triangles: used };
+}
+
+/**
+ * #743 D3 — is the top face the RIM OF A DISC, within the weld tolerance? Three facts, each of
+ * which a non-disc fails by a wide margin:
+ *
+ *   - the bounding box is SQUARE (`D × D`), so the diameter is one number;
+ *   - the face's area is a circle's (`π/4` of the box — a rectangle fills it, a turned square too);
+ *   - every top-plane vertex lies INSIDE that circle (the circle fitted in the box's centre). A
+ *     face with the circle's area that fits entirely inside the circle is the circle.
+ *
+ * The polygon of a tessellated rim is a hair inside the true circle (`128` segments lose 0.04 %
+ * of the area), which the 0.5 % area tolerance absorbs; the vertices themselves sit on the circle
+ * to the file's own precision, so containment is held to the weld tolerance.
+ */
+function topFaceIsDisc(
+  xyz: number[],
+  maxZ: number,
+  topArea: number,
+  length: number,
+  width: number,
+  minX: number,
+  minY: number,
+  tol: number,
+): boolean {
+  if (Math.abs(length - width) > 2 * tol) return false;
+  const radius = length / 2;
+  if (!(radius > tol)) return false;
+  const circleArea = Math.PI * radius * radius;
+  if (Math.abs(topArea - circleArea) > 0.005 * circleArea) return false;
+  const cx = minX + radius;
+  const cy = minY + width / 2;
+  for (let i = 0; i < xyz.length; i += 3) {
+    if (Math.abs(xyz[i + 2]! - maxZ) > tol) continue;
+    if (Math.hypot(xyz[i]! - cx, xyz[i + 1]! - cy) > radius + tol) return false;
+  }
+  return true;
 }
 
 /**
@@ -300,8 +357,16 @@ export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 
 /** What a picked stock file turned out to be. */
 export type StockFileRead =
-  /** A closed rectangular prism: the stock is its box. */
-  | { kind: 'mesh'; name: string; sha256: string; length: number; width: number; thickness: number }
+  /** A closed prism: the stock is its box — or, #743 D3, its rim when the outline is a circle. */
+  | {
+      kind: 'mesh';
+      name: string;
+      sha256: string;
+      length: number;
+      width: number;
+      thickness: number;
+      shape?: 'disc';
+    }
   /**
    * A PrusaSlicer project with NEGATIVE VOLUMES: the blank and the design in one file (#410). The
    * caller reads it with `readDesignFile`, which gives the stock and the items together.
@@ -342,7 +407,15 @@ export async function readStockFile(file: File): Promise<StockFileRead> {
     const mesh = isStl ? parseStl(bytes) : parse3MF(bytes);
     const read = meshAsStock(mesh);
     if (!read.ok) return { kind: 'refused', name, reason: read.reason };
-    return { kind: 'mesh', name, sha256, length: read.length, width: read.width, thickness: read.thickness };
+    return {
+      kind: 'mesh',
+      name,
+      sha256,
+      length: read.length,
+      width: read.width,
+      thickness: read.thickness,
+      ...(read.shape === 'disc' ? { shape: 'disc' as const } : {}),
+    };
   } catch (e) {
     return { kind: 'refused', name, reason: e instanceof Error ? e.message : String(e) };
   }

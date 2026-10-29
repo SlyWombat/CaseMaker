@@ -284,9 +284,15 @@ export interface MountOptionArgs {
   /**
    * Whether the job's stock is ROUND (#240): a rod in step 2, or a box already in the axis frame.
    * The rotary chuck holds round stock; a plate or a block is refused with the sentence that
-   * points back at step 2.
+   * points back at step 2. A disc is round in PLAN but is not a rod — see {@link disc}.
    */
   round?: boolean;
+  /**
+   * #743 D6 — the stock is a DISC, a round blank milled flat. It is round in plan but is cut on
+   * its face: the chuck is not offered, and the bed's bracket cannot hold a rim (two points of
+   * contact, and clamps on its face cover the face being cut), so tape is the bed's only arm.
+   */
+  disc?: boolean;
   /** #715 — the tape the job would be held with, for the bed tape option's own line. */
   tape?: TapeHold | null;
 }
@@ -372,6 +378,32 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         out.push({ ...base, hint: null, disabled: true, reason: rodProblem, escape: null });
         continue;
       }
+    }
+
+    // #743 D6, Q15 — A DISC IS CUT ON ITS FACE. The chuck takes a rod, never a disc; the bracket
+    // holds a rim at two points and the cutter turns it, and clamps on a small disc cover the face
+    // being cut. Both are the STOCK's refusal — no machine change gives them back — so neither
+    // carries an escape. They are SHOWN, not hidden: the reason is what sends the operator to tape
+    // or the vise.
+    if (args.disc === true && mount === 'rotary') {
+      out.push({
+        ...base,
+        hint: null,
+        disabled: true,
+        reason: 'a disc is cut on its face — the rotary holds a rod',
+        escape: null,
+      });
+      continue;
+    }
+    if (args.disc === true && mount === 'bed-bracket') {
+      out.push({
+        ...base,
+        hint: null,
+        disabled: true,
+        reason: 'a disc touches the bracket at two points and turns under the cutter — tape it or hold it in the vise',
+        escape: null,
+      });
+      continue;
     }
 
     // Stock that cannot sit in the mount is the stock's own refusal; a machine change cannot fix it.
@@ -640,6 +672,9 @@ export function defaultBedMount(
   stock: { thickness: number },
   form: JobStockForm | null,
 ): BedMount {
+  // #743 D6 — A DISC IS TAPED. The bracket refuses a rim, so the profile's preference for a plate
+  // of this thickness says nothing about it; tape is the bed's only arm that holds a disc.
+  if (form === 'disc') return 'bed-tape';
   const preferred = preferredBedMount(profile, stock, form);
   if (preferred !== null) return preferred;
   if (stock.thickness <= 3) return 'bed-tape';

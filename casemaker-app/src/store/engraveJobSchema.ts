@@ -1367,10 +1367,10 @@ const stockObjectSchema = z
     // is width = thickness = diameter), because a `diameter` that disagrees with the box would be
     // two answers to one question.
     shape: z
-      .literal('cylinder')
+      .union([z.literal('cylinder'), z.literal('disc')])
       .optional()
       .describe(
-        'Set to "cylinder" for round stock (a rod or a tube); omit for a rectangular blank.',
+        'The plan shape of round stock (#743): "cylinder" for a rod or a tube, "disc" for a round blank milled flat; omit for a rectangular blank.',
       ),
     diameter: z
       .number()
@@ -1378,7 +1378,7 @@ const stockObjectSchema = z
       .positive()
       .max(Math.max(STOCK_LIMITS.width, STOCK_LIMITS.thickness))
       .optional()
-      .describe('Outer diameter of round stock in millimetres; present exactly when shape is "cylinder".'),
+      .describe('Outer diameter of round stock in millimetres; present exactly when shape is "cylinder" or "disc".'),
     // #713 — a tube's wall. OPTIONAL and never defaulted: absent is a rod or a rectangle, and every
     // document written before #713 keeps its exact shape. A tube entry without one is refused by
     // the root refinement in its own words.
@@ -1407,6 +1407,9 @@ const stockObjectSchema = z
     // plans in is as wide as that diameter and as deep OR as tall as it. TWO FRAMES, ONE ROD: the
     // stock step writes the rod standing on its end (`D × D × L`), and the Holding step's chuck
     // write normalises it to the axis frame (`L × D × D`). A rectangle states no diameter at all.
+    //
+    // #743 D6 — a DISC is the same rule with a square plan: `D × D × T`, the diameter on BOTH X
+    // and Y, and no bore. It is a round blank cut on its face, so it never has a tube's wall.
     if (stock.shape === 'cylinder') {
       if (stock.diameter === undefined) {
         ctx.addIssue({
@@ -1426,11 +1429,36 @@ const stockObjectSchema = z
           });
         }
       }
+    } else if (stock.shape === 'disc') {
+      if (stock.diameter === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['diameter'],
+          message: 'round stock states its diameter',
+        });
+      } else {
+        const across = Math.abs(stock.width - stock.diameter) <= 1e-9;
+        const deep = Math.abs(stock.length - stock.diameter) <= 1e-9;
+        if (!across || !deep) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['diameter'],
+            message: "a disc's box is D × D × T — as wide and as deep as its diameter",
+          });
+        }
+      }
+      if (stock.wall !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['wall'],
+          message: 'a disc has no bore, so it states no wall',
+        });
+      }
     } else if (stock.diameter !== undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['diameter'],
-        message: 'a diameter needs the cylinder shape',
+        message: 'a diameter needs the cylinder shape, or a disc',
       });
     }
     const colour = stock.colour;
@@ -2301,7 +2329,7 @@ type ParsedJobVersion = z.output<
 /** The v1 and v2 transforms, applied to a document that already parsed against its own branch. */
 function migrateParsedJob(job: ParsedJobVersion): EngraveJob {
   if (job.schemaVersion === 1) {
-    return {
+    return withDiscStock({
       ...job,
       // The v1 transform's work is unchanged; the v3 stamp is the one addition (#425). A v1 job
       // generates exactly the same program it did before the bump.
@@ -2320,12 +2348,27 @@ function migrateParsedJob(job: ParsedJobVersion): EngraveJob {
       shapes: [],
       // …and no combined shapes (#215): the optional key is simply absent, so a v1 job
       // round-trips byte-for-byte.
-    };
+    });
   }
   // v2 → v3 (#425): the literal and nothing else. `sources`/`package`/`runLog` stay ABSENT, not
   // null and not empty, so a migrated document keeps the byte-for-byte rule every optional key
   // follows. A v3 document passes through as parsed.
-  return job.schemaVersion === 2 ? { ...job, schemaVersion: 3 } : job;
+  return withDiscStock(job.schemaVersion === 2 ? { ...job, schemaVersion: 3 } : job);
+}
+
+/**
+ * #743 D6 — THE ONE DISC MIGRATION. Before this build a disc was a FORM LABEL only: the stock step
+ * wrote the D × D × T box and `stockEntry.form: 'disc'`, leaving `stock.shape` absent, so every
+ * reader saw a square blank. A disc's round fact now lives on the stock (D7), and a document whose
+ * entry says disc and whose box is square gains it on load. A box that is not square was never a
+ * disc the wizard could write; it is left exactly as stored rather than being squared behind the
+ * operator's back. A document that already states a shape is not touched.
+ */
+function withDiscStock(job: EngraveJob): EngraveJob {
+  if (job.stock.shape !== undefined || job.stockEntry?.form !== 'disc') return job;
+  const { length, width } = job.stock;
+  if (Math.abs(length - width) > 1e-9) return job;
+  return { ...job, stock: { ...job.stock, shape: 'disc', diameter: length } };
 }
 
 export const engraveJobSchema = z

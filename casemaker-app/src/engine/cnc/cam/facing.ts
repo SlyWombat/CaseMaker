@@ -54,6 +54,14 @@ import {
 export interface FacingStock {
   length: Mm;
   width: Mm;
+  /**
+   * #743 D6 — set on a ROUND BLANK milled flat. The raster then covers the rim's circle rather
+   * than the `D × D` box around it: the box's corners are air, and a box plan spends a fifth of
+   * its time there (1 − π/4).
+   */
+  shape?: 'disc';
+  /** The disc's outer diameter, mm; present exactly when `shape` is `'disc'`. */
+  diameter?: Mm;
 }
 
 /**
@@ -109,6 +117,7 @@ export function facingRasterLines(stock: FacingStock, stepOver: Mm, inset: Mm = 
   }
   if (!(stepOver > 0)) throw new Error(`facingRasterLines: stepOver must be > 0, got ${stepOver} mm`);
   if (!(inset >= 0)) throw new Error(`facingRasterLines: inset must be >= 0, got ${inset} mm`);
+  if (stock.shape === 'disc') return discRasterLines(stock, stepOver, inset);
 
   const alongX = stock.length >= stock.width;
   /** Distance along the line, and the span the lines step across. */
@@ -134,6 +143,39 @@ export function facingRasterLines(stock: FacingStock, stepOver: Mm, inset: Mm = 
     return alongX
       ? { start: [u0, v], end: [u1, v] }
       : { start: [v, u0], end: [v, u1] };
+  });
+}
+
+/**
+ * #743 D6 — THE RASTER OF A DISC'S FACE. "The stock's full extent" is its RIM, so the cutter's
+ * centre is held `inset` inside the circle (the caller passes its radius plus
+ * {@link FACING_EDGE_CLEARANCE_MM}, exactly as for a rectangle) and each line is the circle's CHORD
+ * at that Y: the cutter's disc then reaches the rim without ever hanging over its edge, which the
+ * verifier's stock-outline check would refuse. The box's corners are air, and rastering them is
+ * the fifth of the time this operation used to spend on nothing.
+ *
+ * Lines step across Y from the inner circle's bottom to its top, the far bound emitted last like a
+ * rectangle's, and directions alternate. The two tangent lines have zero-length chords: they cover
+ * the rim's own extreme points with the cutter's edge, and skipping them would leave the top and
+ * bottom of the circle one step-over from the nearest pass. A disc no wider than the cutter gets
+ * ONE line through its centre — the same degenerate answer a too-narrow rectangle gets.
+ */
+function discRasterLines(stock: FacingStock, stepOver: Mm, inset: Mm): RasterLine[] {
+  const centre: [number, number] = [stock.length / 2, stock.width / 2];
+  const diameter = stock.diameter ?? Math.min(stock.length, stock.width);
+  const radius = diameter / 2 - inset;
+  if (!(radius > 0)) return [{ start: [centre[0], centre[1]], end: [centre[0], centre[1]] }];
+  const lo = centre[1] - radius;
+  const hi = centre[1] + radius;
+  const offsets: number[] = [];
+  for (let v = lo; v < hi - 1e-9; v += stepOver) offsets.push(v);
+  offsets.push(hi);
+  return offsets.map((v, i) => {
+    const half = Math.sqrt(Math.max(0, radius * radius - (v - centre[1]) ** 2));
+    const forward = i % 2 === 0;
+    const u0 = forward ? centre[0] - half : centre[0] + half;
+    const u1 = forward ? centre[0] + half : centre[0] - half;
+    return { start: [u0, v], end: [u1, v] };
   });
 }
 

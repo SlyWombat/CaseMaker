@@ -1402,6 +1402,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         if (job.workholding.kind === 'rotary-chuck' && patchRod) {
           Object.assign(stock, rotaryBoxForRod(patch.width!, patch.thickness!));
           extraKeys.push('diameter');
+        } else if (!restatesRound && stock.shape === 'disc') {
+          // #743 D6 — a disc's box is SQUARE in plan: its length, its width and its diameter are
+          // one number, so a panel's edit of any of them moves all three and the schema never
+          // reads a disc whose box disagrees with its diameter.
+          const diameter = patch.diameter ?? patch.length ?? patch.width ?? stock.diameter;
+          if (diameter !== undefined) {
+            stock.length = diameter;
+            stock.width = diameter;
+            stock.diameter = diameter;
+            extraKeys.push('length', 'width', 'diameter');
+          }
         } else if (!restatesRound && stock.shape === 'cylinder') {
           // #240 — a round box's cross-section is ONE number: `width` and `diameter` move together,
           // and so does the other axis of the frame the box lies in — `thickness` in the axis frame,

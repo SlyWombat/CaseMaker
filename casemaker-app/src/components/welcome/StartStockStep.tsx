@@ -515,9 +515,15 @@ export function StartStockStep({
       setShelfId(null);
       if (read.kind === 'mesh') {
         // The box IS the stock, so the fields show it. A printed blank is the usual reason to load
-        // a mesh; the material answers whether it is one (#463).
-        setForm(isPrintedBlankMaterial(material) ? 'printed-blank' : 'block');
-        setDims({ ...EMPTY_DIMS, length: text(read.length), width: text(read.width), thickness: text(read.thickness) });
+        // a mesh; the material answers whether it is one (#463). #743 D3 — a file whose outline is
+        // a circle is a DISC: its form asks for the two numbers the rim has, not the square box.
+        if (read.shape === 'disc') {
+          setForm('disc');
+          setDims({ ...EMPTY_DIMS, diameter: text(read.length), thickness: text(read.thickness) });
+        } else {
+          setForm(isPrintedBlankMaterial(material) ? 'printed-blank' : 'block');
+          setDims({ ...EMPTY_DIMS, length: text(read.length), width: text(read.width), thickness: text(read.thickness) });
+        }
         if (isPrintedBlankMaterial(material)) setFinish('printed');
       }
       if (read.kind === 'design') setFinish('printed');

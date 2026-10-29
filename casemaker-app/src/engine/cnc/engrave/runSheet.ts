@@ -1197,7 +1197,9 @@ function buildDiagram(job: EngraveJob, plan: PartPlan): RunSheetDiagram {
   // `aabbOfProfile` keeps the un-shrunk box for a NEGATIVE offset (it will not guess how far a
   // concave region pulls in), so a `border` — an inward offset of the stock — would otherwise draw
   // as the whole blank. The stock outline is a known rectangle, so a border's true outer edge is
-  // `inset` in from every side (#215).
+  // `inset` in from every side (#215). #743 — not for a disc: its stock outline is the rim, and
+  // the shortcut would draw a square inset in the box. The plan's own profile is the ring's
+  // bounding box there, which is the circle the border follows.
   const borderInset = new Map<string, Mm>();
   for (const c of job.combined ?? []) if (c.kind === 'border') borderInset.set(c.id, c.inset);
 
@@ -1205,7 +1207,7 @@ function buildDiagram(job: EngraveJob, plan: PartPlan): RunSheetDiagram {
   for (const item of plan.engraves) {
     const inset = borderInset.get(item.id);
     const box =
-      inset !== undefined
+      inset !== undefined && job.stock.shape !== 'disc'
         ? { min: [inset, inset] as [Mm, Mm], max: [length - inset, width - inset] as [Mm, Mm] }
         : aabbOfProfile(item.profile);
     if (!box) continue; // empty region (e.g. whitespace-only text): no rectangle
@@ -3260,6 +3262,18 @@ function foundSteps(found: { offset: { x: number; y: number }; rotationDeg: numb
   ];
 }
 
+/**
+ * #743 §4.7 — the blank's own words on the run sheet: a DISC states the two numbers it has
+ * (diameter and thickness), every other stock its box. The box around a disc is derived and is
+ * never what the operator measures.
+ */
+export function runSheetStockLine(job: Pick<EngraveJob, 'stock'>): string {
+  const { stock } = job;
+  return stock.shape === 'disc'
+    ? `disc ⌀${fmtNum(stock.diameter ?? stock.length)} × ${fmtNum(stock.thickness)} mm ${MATERIAL_LABELS[stock.material]}`
+    : `${fmtNum(stock.length)} × ${fmtNum(stock.width)} × ${fmtNum(stock.thickness)} mm ${MATERIAL_LABELS[stock.material]}`;
+}
+
 export function buildRunSheet(
   job: EngraveJob,
   generated: RunSheetGenerated,
@@ -3272,7 +3286,7 @@ export function buildRunSheet(
   // same house setting, and the BLOCK's recommendation is made from the setting rather than from
   // `margins`, which may be the job's own past recommendation (#345 review).
   const margins = effectiveMargins(job, settings);
-  const { length, width, thickness, material } = job.stock;
+  const { length, width } = job.stock;
   const vise = jobVise(job);
   // The one funnel all three item lists go through (#214/#215), so a `border`/`frame`/`cutaway`
   // is here too while a `construction` item, a broken reference and a self-intersecting polygon
@@ -3398,7 +3412,7 @@ export function buildRunSheet(
       text:
         `The blank. Measure it. If it differs by more than ${fmtNum(options.blankToleranceMm ?? 0.5)} mm in any dimension, change the job ` +
         'and regenerate — do not run this file.',
-      value: `${fmtNum(length)} × ${fmtNum(width)} × ${fmtNum(thickness)} mm ${MATERIAL_LABELS[material]}`,
+      value: runSheetStockLine(job),
     },
     {
       text: tool

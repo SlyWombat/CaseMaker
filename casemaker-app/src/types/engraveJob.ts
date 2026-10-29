@@ -1586,20 +1586,27 @@ export interface EngraveJob {
     thickness: Mm;
     material: StockMaterial;
     /**
-     * The stock's plan shape (#240 §1, `/Rotary.md` R6). ABSENT is a rectangle — every pre-rotary
-     * job — and is kept absent through a save/open so those documents round-trip byte-for-byte.
-     * `'cylinder'` says the box around the stock is round stock. The box is still what the CAM
-     * plans in; the word says which way to read it, and nothing pretends a square is a cylinder.
+     * The stock's plan shape (#240 §1, `/Rotary.md` R6; #743 D6). ABSENT is a rectangle — every
+     * pre-rotary job — and is kept absent through a save/open so those documents round-trip
+     * byte-for-byte. `'cylinder'` says the box around the stock is round stock. The box is still
+     * what the CAM plans in; the word says which way to read it, and nothing pretends a square is
+     * a cylinder.
      *
      * TWO FRAMES, ONE ROD (#683, #713): the stock step writes a rod or tube STANDING ON ITS END in
      * the vise — `D × D × L` — and the Holding step's chuck write normalises it to the axis frame
      * — `L × D × D` (#240 slice 1). `cylinderFrameOf` within `stockStart.ts` reads which one a
      * document holds.
+     *
+     * `'disc'` is a round blank MILLED FLAT (#743 D6): a coin or a round plate lying on the bed or
+     * in the vise, cut on its face. Its box is `D × D × T`, square in plan. It is deliberately not
+     * `'cylinder'`: a standing cylinder already means "a rod held in the chuck", and `rodDimsOf`
+     * and every rotary reader treat it as one. A disc is never offered the chuck.
      */
-    shape?: 'cylinder';
+    shape?: 'cylinder' | 'disc';
     /**
-     * The rod's or tube's OUTER diameter, mm — present iff `shape` is `'cylinder'` (schema-checked
-     * against the box: the diameter is across one face and the rod's own length along the other).
+     * The rod's, tube's or disc's OUTER diameter, mm — present iff `shape` is `'cylinder'` or
+     * `'disc'` (schema-checked against the box: a cylinder is as wide as its diameter and as thick
+     * OR as long as it; a disc is as wide and as deep as it).
      */
     diameter?: Mm;
     /**

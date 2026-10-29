@@ -136,6 +136,25 @@ export function boxForForm(form: JobStockForm, size: StockSize): StockBox | null
 }
 
 /**
+ * The round facts a stock step writes BESIDE the box (#713, #743 D6): a rod or a tube is a
+ * `'cylinder'` with its outer diameter (and a tube's wall); a DISC is `'disc'` with its diameter —
+ * round in plan, cut on its face, and deliberately never a cylinder, so no rotary reader can take
+ * it for a rod. A rectangular form states the facts ABSENT, so an edit away from a round piece
+ * cannot inherit them.
+ */
+function roundStockOf(
+  form: JobStockForm,
+  diameter: number,
+  wall?: number | null,
+): Pick<EngraveJob['stock'], 'shape' | 'diameter' | 'wall'> {
+  if (form === 'disc') return { shape: 'disc', diameter, wall: undefined };
+  if (form === 'rod' || form === 'tube') {
+    return { shape: 'cylinder', diameter, wall: form === 'tube' ? (wall ?? undefined) : undefined };
+  }
+  return { shape: undefined, diameter: undefined, wall: undefined };
+}
+
+/**
  * Which way a round stock's box lies (#683, #240, #713): the chuck's AXIS frame (`L × D × D`) or
  * the vise's STANDING frame (`D × D × L`). Null when the stock is not round.
  *
@@ -165,6 +184,9 @@ export function cylinderFrameOf(
 export function rodDimsOf(
   stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'shape' | 'diameter'>,
 ): { diameter: number; length: number } | null {
+  // #743 D6 — A DISC IS NOT A ROD. Its box is square in plan, exactly the legacy square a rod
+  // reads as; answering a rod here would offer the chuck a piece that is cut on its face.
+  if (stock.shape === 'disc') return null;
   if (stock.shape === 'cylinder') {
     const frame = cylinderFrameOf(stock) ?? 'axis';
     return {
@@ -403,17 +425,12 @@ export function stockFromShelf(item: StockItem, machine: MillProfile): StockChoi
     );
   }
   // #713 — a round piece states the round facts with the standing box: a rod or a tube writes
-  // `shape: 'cylinder'` and its outer diameter, and a tube its wall. Everything else states them as
-  // ABSENT, so an edit from a rod to a plate takes the round facts away rather than leaving a
-  // rectangle that still claims to be a cylinder.
-  const round: Pick<EngraveJob['stock'], 'shape' | 'diameter' | 'wall'> =
-    form === 'rod' || form === 'tube'
-      ? {
-          shape: 'cylinder',
-          diameter: item.size.diameter ?? box.length,
-          wall: form === 'tube' ? (item.size.wall ?? undefined) : undefined,
-        }
-      : { shape: undefined, diameter: undefined, wall: undefined };
+  // `shape: 'cylinder'` and its outer diameter, and a tube its wall. #743 D6 — a disc writes its
+  // own shape and diameter instead: it is round in plan but is NOT a rod, and nothing that reads
+  // a cylinder may treat it as one. Everything else states them as ABSENT, so an edit from a rod
+  // to a plate takes the round facts away rather than leaving a rectangle that still claims to be
+  // a cylinder.
+  const round = roundStockOf(form, item.size.diameter ?? box.length, form === 'tube' ? item.size.wall : undefined);
   return {
     ok: true,
     choice: {
@@ -457,16 +474,10 @@ export function stockFromMade(made: MadeStock, machine: MillProfile, shelfId: st
   const problem = formProblem(made.form) ?? formSizeProblem(made.form, madeStockSize(made), machine);
   if (problem !== null) return { ok: false, reason: problem };
   // #713 — a rod or tube writes the cylinder stock with the standing box `D × D × L` and its outer
-  // diameter; a tube adds its wall. A rectangular form states the round facts as absent so a later
-  // edit cannot inherit them.
-  const round: Pick<EngraveJob['stock'], 'shape' | 'diameter' | 'wall'> =
-    made.form === 'rod' || made.form === 'tube'
-      ? {
-          shape: 'cylinder',
-          diameter: made.length,
-          wall: made.form === 'tube' ? made.wall : undefined,
-        }
-      : { shape: undefined, diameter: undefined, wall: undefined };
+  // diameter; a tube adds its wall. #743 D6 — a disc writes its own shape and diameter with the
+  // square `D × D × T` box. A rectangular form states the round facts as absent so a later edit
+  // cannot inherit them.
+  const round = roundStockOf(made.form, made.length, made.wall);
   return {
     ok: true,
     choice: {
@@ -537,17 +548,32 @@ export interface FileStock extends StockBox {
   sha256: string;
   material: StockMaterial;
   finish: JobStockFinish;
+  /**
+   * #743 D3 — set when the file's top face is a rim: a circular prism is a DISC, and the job
+   * carries its shape and diameter rather than the square box alone.
+   */
+  shape?: 'disc';
 }
 
-/** A mesh's box as this job's stock, or why not. Its form is a block (a printed one when printed). */
+/**
+ * A mesh's box as this job's stock, or why not. Its form is a disc when its outline is a circle,
+ * a block otherwise (a printed one when printed).
+ */
 export function stockFromFile(file: FileStock, machine: MillProfile): StockChoiceResult {
   const problem = boxProblem(file, machine);
   if (problem !== null) return { ok: false, reason: problem };
-  const form: JobStockForm = file.finish === 'printed' ? 'printed-blank' : 'block';
+  const disc = file.shape === 'disc';
+  const form: JobStockForm = disc ? 'disc' : file.finish === 'printed' ? 'printed-blank' : 'block';
   return {
     ok: true,
     choice: {
-      stock: { length: file.length, width: file.width, thickness: file.thickness, material: file.material },
+      stock: {
+        length: file.length,
+        width: file.width,
+        thickness: file.thickness,
+        material: file.material,
+        ...(disc ? { shape: 'disc' as const, diameter: file.length } : {}),
+      },
       entry: {
         kind: 'file',
         shelfId: null,
@@ -557,8 +583,12 @@ export function stockFromFile(file: FileStock, machine: MillProfile): StockChoic
         conductive: isMetalMaterial(file.material),
       },
       notes: [
-        `${mm(file.length)} × ${mm(file.width)} × ${mm(file.thickness)} mm, read from ${file.name} — its bounding box, ` +
-          `in ${MATERIAL_LABELS[file.material]}.`,
+        disc
+          ? `⌀${mm(file.length)} × ${mm(file.thickness)} mm, read from ${file.name} — its rim is a ` +
+            'circle, so the stock is a disc: the job plans in the square around it and every edge ' +
+            'rule follows the circle.'
+          : `${mm(file.length)} × ${mm(file.width)} × ${mm(file.thickness)} mm, read from ${file.name} — its bounding box, ` +
+            `in ${MATERIAL_LABELS[file.material]}.`,
       ],
     },
   };
@@ -810,6 +840,11 @@ export function jobItemCount(job: EngraveJob): number {
  */
 export function stockStillNamed(prev: EngraveJob['stock'], next: EngraveJob['stock']): boolean {
   if (prev.material !== next.material || prev.wall !== next.wall) return false;
+  // #743 D6 — A DISC IS ITS OWN PIECE. Its box (`D × D × T`) is exactly a square plate's, so the
+  // shape — not the box — says whether the entry still names the stock.
+  if (prev.shape === 'disc' || next.shape === 'disc') {
+    return prev.shape === next.shape && prev.diameter === next.diameter && prev.thickness === next.thickness;
+  }
   // #724 W3 — A ROD IS THE SAME PIECE IN EITHER FRAME. Entering the chuck re-states the box
   // (`D × D × L` standing → `L × D × D` along the axis, #713/#240); that is a statement about the
   // same piece, not an edit to it, and the box test below deleted the job's entry for it. Both
@@ -833,6 +868,11 @@ export function stockStillNamed(prev: EngraveJob['stock'], next: EngraveJob['sto
  * tube adds its wall. A rectangular piece states the box.
  */
 export function stockSizeWords(stock: EngraveJob['stock']): string {
+  // #743 D6 — a disc speaks its diameter and thickness, the two numbers its form asks for; its
+  // square box is derived and never shown.
+  if (stock.shape === 'disc') {
+    return `⌀${mm(stock.diameter ?? stock.width)} × ${mm(stock.thickness)} mm`;
+  }
   const rod = rodDimsOf(stock);
   if (stock.shape === 'cylinder' && rod !== null) {
     const wall = stock.wall !== undefined && stock.wall > 0 ? ` · wall ${mm(stock.wall)} mm` : '';

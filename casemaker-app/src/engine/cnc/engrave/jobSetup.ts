@@ -1,4 +1,4 @@
-import { rectProfile } from '@/engine/compiler/profile';
+import { profileReachFrom, rectProfile } from '@/engine/compiler/profile';
 import { placedSize, turnedFootprint } from '@/engine/cnc/engrave/targetScale';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { getTools, NO_TOOL_KEY, toolForJob } from '@/engine/cnc/toolRegistry';
@@ -22,6 +22,9 @@ import {
   cutoutOperationName,
   drillHoles,
   drillOperationName,
+  flatStockOutline,
+  itemOperationName,
+  itemProfile,
   jawGapFor,
   polygonSelfIntersects,
   primitiveLabel,
@@ -817,7 +820,7 @@ export function toSetup(
   fixture?: FixtureEnvelope,
   bed?: BedUnderFacts | null,
 ): Setup {
-  const { length, width, thickness } = job.stock;
+  const { thickness } = job.stock;
   // #240 slice 2 — a ROTARY job's part is a cylinder on the chuck: there is no vise to model, no
   // sacrificial board under it, and the work origin is the axis (`stubSetup` places a cylinder's
   // WCS there — the slice-1 fix). The chuck's facts are the job's own; the jaw diameter is the
@@ -845,7 +848,11 @@ export function toSetup(
   // defect produced, one step earlier.
   const defaultFixture = jobMount(job) === 'vise' ? viseEnvelope(job.stock, vise, job.sacrificial) : undefined;
   return stubSetup(
-    { kind: 'prism', outline: rectProfile(length, width), thickness },
+    // #743 D6 — the seed solid is the stock's own plan: a disc's circular prism is its rim
+    // extruded through the thickness, which is the cylinder the sweep starts from. It is a
+    // `prism` and not `Setup`'s `cylinder`, because that variant is the ROTARY frame — axis along
+    // X, work origin on the axis — and a disc is cut on its face with the origin on the top.
+    { kind: 'prism', outline: flatStockOutline(job.stock), thickness },
     workholding,
     // The default job's tool is number 1 (`flat-1.0`); the starting tool is stated because a
     // program cannot know the machine's active tool (/Simulation.md §1.1). The fixture is the
@@ -2361,29 +2368,52 @@ export function validateJob(
   // against the face's circle, less the job's edge margin: a convex box is inside the circle exactly
   // when all four are. The diameter is the smaller side, so a stored rectangle that is not square
   // still gets the circle the round face can actually fill.
-  const roundForm = job.stockEntry?.form;
-  if (roundForm === 'disc' || roundForm === 'rod') {
+  //
+  // #743 D7 — ROUND IS A FACT ABOUT THE STOCK, not about where it came from: the job reads
+  // `stock.shape`, so a disc described by a document with NO stock entry (j04) is checked too. A
+  // pre-#743 document states round only through its entry's form (`disc` or `rod`) and has no
+  // shape, and keeps that reading — the entry is the only statement it carries.
+  const roundShape = job.stock.shape;
+  const legacyRound =
+    roundShape === undefined &&
+    (job.stockEntry?.form === 'disc' || job.stockEntry?.form === 'rod');
+  if (roundShape === 'disc' || roundShape === 'cylinder' || legacyRound) {
+    const disc = roundShape === 'disc';
     const diameter = Math.min(job.stock.length, job.stock.width);
     const radius = diameter / 2 - job.edgeMargin;
-    const centreX = job.stock.length / 2;
-    const centreY = job.stock.width / 2;
     for (const cut of swept) {
-      const corners = [
-        [cut.box.minX, cut.box.minY],
-        [cut.box.maxX, cut.box.minY],
-        [cut.box.maxX, cut.box.maxY],
-        [cut.box.minX, cut.box.maxY],
-      ] as const;
-      const off = corners.some(([x, y]) => Math.hypot(x - centreX, y - centreY) > radius + 1e-6);
-      if (!off) continue;
+      // #743 — THE READING IS THE REGION'S REACH, not its box's corners. A centred ⌀26 pocket in
+      // a ⌀30 disc has corners in the air outside the rim it never enters; `reach` is the upper
+      // bound read from the profile and the path (see `SweptCut.reach`).
+      if (cut.reach <= radius + 1e-6) continue;
       findings.push({
         severity: 'error',
         code: 'item-off-round-stock',
         labelId: cut.id,
         message:
-          `${cut.name} reaches past the ⌀${fmt3(diameter)} mm face of the round stock: the ` +
+          `${cut.name} reaches past the ⌀${fmt3(diameter)} mm face of the ${disc ? 'disc' : 'round stock'}: the ` +
           `${fmt3(job.stock.length)} × ${fmt3(job.stock.width)} mm box around it has air at its ` +
           `corners, and the cut runs into that air. Keep it inside the circle, ` +
+          `${fmt3(job.edgeMargin)} mm in from the edge.`,
+      });
+    }
+    // #743 — REFERENCE-ONLY ITEMS SIT ON THE FACE TOO. A construction label is not cut, but it is
+    // where the design's material stays; the issue's own acceptance moves "Software" 2 mm out to
+    // see this refusal, and a job with NO stock entry carries no form to read it from — which is
+    // exactly why the check now reads `stock.shape` (#743 D7). A referenced combination (border,
+    // frame, cutaway) resolves only with the plan's context; those are the cut reading's, above.
+    for (const item of resolveItems(job).order) {
+      if (!item.enabled || !item.construction) continue;
+      const profile = itemProfile(item, job.customFonts);
+      const reach = profileReachFrom(profile, [job.stock.length / 2, job.stock.width / 2]);
+      if (reach <= radius + 1e-6) continue;
+      findings.push({
+        severity: 'error',
+        code: 'item-off-round-stock',
+        labelId: item.id,
+        message:
+          `${itemOperationName(item)} reaches past the ⌀${fmt3(diameter)} mm face of the ${disc ? 'disc' : 'round stock'}: ` +
+          `it sits outside the circle the stock actually has. Keep it inside the circle, ` +
           `${fmt3(job.edgeMargin)} mm in from the edge.`,
       });
     }

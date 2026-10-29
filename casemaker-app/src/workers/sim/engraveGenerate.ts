@@ -2943,7 +2943,8 @@ function facingProgram(
   try {
     const ir = raiseTravelOver(
       generateFacing(
-        { length: job.stock.length, width: job.stock.width },
+        // #743 D6 — a disc's top is its face: the raster covers the rim's circle, not the box.
+        { length: job.stock.length, width: job.stock.width, shape: job.stock.shape === 'disc' ? 'disc' : undefined, diameter: job.stock.diameter },
         tool,
         feeds.params,
         machine.rapidEstimate,
