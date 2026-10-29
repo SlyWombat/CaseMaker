@@ -1,4 +1,4 @@
-import { useEffect, type Ref } from 'react';
+import { useEffect, useMemo, type Ref } from 'react';
 import {
   useViewportStore,
   type ViewportTool,
@@ -8,6 +8,9 @@ import {
   type SidebarSectionId,
 } from '@/store/viewportStore';
 import { isSimSceneActive, useSimStore, type SimLayers } from '@/store/simStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useRotaryViewStore } from '@/store/rotaryViewStore';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { dispatchViewportCamera } from './viewportCamera';
 // #553 — the layer colours are the ONE source shared with `SimMeshes`, so the toggle swatch and
 // the drawn line can never drift apart (the toggles ARE the legend).
@@ -133,6 +136,18 @@ export function ViewportToolbar({ ref }: ViewportToolbarProps) {
   // user has switched to another section: the case-only groups mean nothing while it is up.
   const cncMode = simActive || isCncSection(activeSection);
 
+  // #716 — the map is a fixed top-down frame of its own (`RotaryViewCamera`); the generic presets
+  // would reframe the engrave scene (bed plate included) and break it. So while the map owns a
+  // rotary job's viewport, Top reads as the view and the four presets are disabled with the reason
+  // in their tooltip — the honest statement that this frame is not theirs to choose.
+  const engraveActive = !simActive && activeSection === 'cnc-engrave';
+  const job = useEngraveJobStore((s) => s.job);
+  const rotaryDesign = useRotaryViewStore((s) => s.design);
+  const mapLocked = useMemo(
+    () => engraveActive && rotaryDesign === 'map' && rotaryMapOf(job) !== null,
+    [engraveActive, rotaryDesign, job],
+  );
+
   // Keyboard shortcuts. Skip when the user is typing into a panel field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -156,6 +171,9 @@ export function ViewportToolbar({ ref }: ViewportToolbarProps) {
         setActiveTool('pan');
       } else if (k === 'o') {
         setActiveTool('orbit');
+      } else if (mapLocked && (k === '1' || k === '2' || k === '3' || k === '4')) {
+        // The map owns the camera; the preset keys would reframe it out of existence.
+        return;
       } else if (k === '1') {
         setCameraMode('perspective');
       } else if (k === '2') {
@@ -180,7 +198,7 @@ export function ViewportToolbar({ ref }: ViewportToolbarProps) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setActiveTool, setCameraMode, setViewMode, setShellRender, showBoard]);
+  }, [setActiveTool, setCameraMode, setViewMode, setShellRender, showBoard, mapLocked]);
 
   return (
     <div
@@ -224,7 +242,7 @@ export function ViewportToolbar({ ref }: ViewportToolbarProps) {
         aria-label="Camera mode"
       >
         {CAMERAS.map((c) => {
-          const active = cameraMode === c.id;
+          const active = mapLocked ? c.id === 'top' : cameraMode === c.id;
           return (
             <button
               key={c.id}
@@ -233,8 +251,14 @@ export function ViewportToolbar({ ref }: ViewportToolbarProps) {
               onClick={() => setCameraMode(c.id)}
               role="radio"
               aria-checked={active}
+              aria-disabled={mapLocked}
+              disabled={mapLocked}
               aria-label={c.label}
-              title={`${c.label} (${c.shortcut})`}
+              title={
+                mapLocked
+                  ? 'The map is a fixed top-down frame — switch to Stock to orbit'
+                  : `${c.label} (${c.shortcut})`
+              }
               data-testid={`viewport-camera-${c.id}`}
             >
               {c.label}

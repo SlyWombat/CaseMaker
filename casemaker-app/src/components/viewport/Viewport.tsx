@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GridFloor } from './GridFloor';
 import { SceneMeshes } from './SceneMeshes';
 import { EngraveLegend } from './EngraveLegend';
+import { RotaryViewControls } from './RotaryViewControls';
 import { MachineStatusStrip } from './MachineStatusStrip';
 import { SimLegend } from './SimLegend';
 import { SimTransport } from './SimTransport';
@@ -428,6 +429,9 @@ export function Viewport() {
             depth legend must not paint over a scene it does not describe — as DOM it did not follow
             the scene the way it did while it lived inside `EngravePreview` (review of ebf38c5). */}
         {engraveActive && !simActive && <EngraveLegend />}
+        {/* #716 — a rotary job's Map | Stock switch and its ⌀/around read-out, beside the legend.
+            Null for a flat job, so the flat preview's chrome is unchanged. */}
+        {engraveActive && !simActive && <RotaryViewControls />}
         {/* #349 — the simulation's sacrificial swatch, the same move. */}
         {simActive && <SimLegend />}
         {/* #198 — the transport rides over the bottom of the canvas while a simulation owns the

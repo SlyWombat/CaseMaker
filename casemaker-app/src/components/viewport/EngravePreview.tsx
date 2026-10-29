@@ -59,6 +59,12 @@ import { floorsForScrub, scrubStateAt } from './engraveScrub';
 import { warningOutlinesFor, type WarningRing } from './engraveWarning';
 import { EngravePrimitives } from './EngravePrimitives';
 import { foundTransform } from './foundTransform';
+import { useThree } from '@react-three/fiber';
+import { rotaryMapOf, type RotaryMap } from '@/engine/cnc/rotary/wrap';
+import { useRotaryViewStore } from '@/store/rotaryViewStore';
+import { RotaryMapDecorations } from './RotaryMapDecorations';
+import { ROTARY_MAP_NARROW_PX } from './rotaryMapView';
+import { wrapMapGeometry } from './rotaryStockView';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
 const STOCK_COLOR = '#c9a26b';
@@ -79,8 +85,21 @@ const SELECTED_FLOOR_GLOW = '#9adcff';
  * rebuild replaces the stock/floors as the user types, so without this the geometries would
  * accumulate (`renderer.info.memory.geometries` must stay bounded — #197).
  */
-function useMeshGeometry(mesh: NodeMeshOutput | null): THREE.BufferGeometry | null {
-  const geom = useMemo(() => (mesh ? geometryFromMesh(mesh) : null), [mesh]);
+function useMeshGeometry(
+  mesh: NodeMeshOutput | null,
+  /** #716 — non-null wraps the map geometry onto the stock cylinder (the Stock view). */
+  wrapRadius: number | null = null,
+  /** #716 — a floor is painted on the stock's SKIN (its colour is its depth), not buried in it. */
+  wrapLift = false,
+): THREE.BufferGeometry | null {
+  const geom = useMemo(() => {
+    if (!mesh) return null;
+    const map = geometryFromMesh(mesh);
+    if (wrapRadius === null) return map;
+    const wrapped = wrapMapGeometry(map, wrapRadius, wrapLift);
+    map.dispose();
+    return wrapped;
+  }, [mesh, wrapRadius, wrapLift]);
   useEffect(() => () => geom?.dispose(), [geom]);
   return geom;
 }
@@ -99,8 +118,19 @@ function useMeshGeometry(mesh: NodeMeshOutput | null): THREE.BufferGeometry | nu
  * the two directions cannot disagree; and because it is a store value rather than component state,
  * a rebuilt preview (which replaces every floor mesh) redraws with the highlight still on.
  */
-function Floor({ mesh, color, labelId }: { mesh: NodeMeshOutput; color: string; labelId: string }) {
-  const geom = useMeshGeometry(mesh);
+function Floor({
+  mesh,
+  color,
+  labelId,
+  wrapRadius = null,
+}: {
+  mesh: NodeMeshOutput;
+  color: string;
+  labelId: string;
+  /** #716 — the Stock view wraps the same floor onto the cylinder. */
+  wrapRadius?: number | null;
+}) {
+  const geom = useMeshGeometry(mesh, wrapRadius, wrapRadius !== null);
   const selected = useViewportStore((s) => isEngraveItemSelected(s.selection, labelId));
   if (!geom) return null;
   return (
@@ -605,6 +635,158 @@ function MachineBed() {
   );
 }
 
+/**
+ * #716 — THE ROTARY VIEW'S OWN FRAMING. The generic Top preset frames the scene's bounds, and an
+ * engrave preview's bounds include the 200 mm bed plate, which leaves an 85 × 62.8 mm map a small
+ * patch in the middle. Here the map is framed as the map (straight down, X right, around up) and
+ * the wrapped stock as a rod (a perspective three-quarter view), once per job and per switch — a
+ * later orbit is the operator's, not yanked back on every rebuild.
+ *
+ * #716 review — on a phone the Depth panel sits over the canvas's top-right corner and covered the
+ * map's top edge and the seam's 360° label. A narrow canvas is therefore framed inside the free
+ * area: the larger of the strip below the panel and the column beside it, measured from the DOM.
+ * The map's own label margins (taller on a narrow canvas, where its rows move apart) keep the
+ * projected words inside the same rectangle.
+ */
+const MAP_MARGIN_W_MM = 20;
+const MAP_MARGIN_H_MM = 12;
+/** A narrow canvas has two label rows below the map, so its bottom margin is taller. */
+const MAP_MARGIN_H_NARROW_MM = 18;
+/** The same 15% air the generic presets keep around what they frame. */
+const MAP_FIT = 1.15;
+/** Clearance, px, between the framed map and the Depth panel or the canvas edge. */
+const MAP_LEGEND_PAD_PX = 8;
+
+interface CanvasBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** The Depth panel's box in canvas pixels — the region a narrow map must not sit under. */
+function legendCanvasBox(canvas: HTMLCanvasElement): CanvasBox | null {
+  const el = document.querySelector('[data-testid="engrave-preview-legend"]');
+  if (el === null) return null;
+  const c = canvas.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return null;
+  return {
+    left: r.left - c.left,
+    top: r.top - c.top,
+    right: r.right - c.left,
+    bottom: r.bottom - c.top,
+  };
+}
+
+function RotaryViewCamera({ map, mode }: { map: RotaryMap; mode: 'map' | 'stock' }): null {
+  const { camera, controls, gl, size } = useThree() as {
+    camera: THREE.PerspectiveCamera;
+    controls: { target: THREE.Vector3; update?: () => void } | null;
+    gl: { domElement: HTMLCanvasElement };
+    size: { width: number; height: number };
+  };
+  // Wait for the preview: the preview's arrival is also when `AutoFrame` frames the scene, and this
+  // effect must run after it so the map is not left framed by the bed.
+  const previewReady = useEngravePreviewStore((s) => (s.preview === null ? 0 : 1));
+  const applied = useRef<string | null>(null);
+  useEffect(() => {
+    if (previewReady === 0) return;
+    const key = `${map.stickout}:${map.radius}:${mode}:${size.width}x${size.height}`;
+    if (applied.current === key) return;
+    const narrow = size.width < ROTARY_MAP_NARROW_PX;
+    let tries = 0;
+    let next: number | null = null;
+    const apply = (): void => {
+      // A narrow map is framed around the Depth panel, so the panel's box must exist. It commits
+      // beside the canvas AFTER this component's effects on the preview's first frame; wait a few
+      // frames for it rather than frame the map under a panel that is about to appear.
+      const legend = mode === 'map' && narrow ? legendCanvasBox(gl.domElement) : null;
+      if (mode === 'map' && narrow && legend === null && tries < 20) {
+        tries += 1;
+        next = requestAnimationFrame(apply);
+        return;
+      }
+      applied.current = key;
+      const fov = (camera.fov * Math.PI) / 180;
+      const tan = Math.tan(fov / 2);
+      const aspect = camera.aspect > 0 ? camera.aspect : 1;
+      const centre =
+        mode === 'map'
+          ? new THREE.Vector3(map.stickout / 2, map.circumference / 2, 0)
+          : new THREE.Vector3(map.stickout / 2, 0, -map.radius);
+      const up: [number, number, number] = mode === 'map' ? [0, 1, 0] : [0, 0, 1];
+      const dir =
+        mode === 'map'
+          ? new THREE.Vector3(0, 0, 1)
+          : new THREE.Vector3(0.55, -1, 0.6).normalize();
+      const focus = centre.clone();
+      let distance: number;
+      if (mode === 'map') {
+        // Fit BOTH axes: a phone's narrow aspect makes the horizontal field much smaller than the
+        // vertical, and a vertical-only fit cut the map's along axis off at 390 px. The margin
+        // covers the rulers and band labels, which stand outside the stock.
+        const halfW = map.stickout / 2 + MAP_MARGIN_W_MM;
+        const halfH = map.circumference / 2 + (narrow ? MAP_MARGIN_H_NARROW_MM : MAP_MARGIN_H_MM);
+        // The free area: the whole canvas on a wide screen; on a narrow one, the larger of what is
+        // below the Depth panel and what is left of it. Framing inside it keeps the map — and the
+        // labels the collision layout keeps — clear of the panel.
+        let target: CanvasBox = { left: 0, top: 0, right: size.width, bottom: size.height };
+        if (narrow && legend !== null) {
+          const below: CanvasBox = {
+            left: MAP_LEGEND_PAD_PX,
+            top: legend.bottom + MAP_LEGEND_PAD_PX,
+            right: size.width - MAP_LEGEND_PAD_PX,
+            bottom: size.height - MAP_LEGEND_PAD_PX,
+          };
+          const beside: CanvasBox = {
+            left: MAP_LEGEND_PAD_PX,
+            top: MAP_LEGEND_PAD_PX,
+            right: legend.left - MAP_LEGEND_PAD_PX,
+            bottom: size.height - MAP_LEGEND_PAD_PX,
+          };
+          const scaleOf = (box: CanvasBox): number =>
+            Math.min((box.right - box.left) / (2 * halfW), (box.bottom - box.top) / (2 * halfH));
+          const candidates = [below, beside].filter(
+            (box) => box.right - box.left >= 80 && box.bottom - box.top >= 80,
+          );
+          if (candidates.length > 0) {
+            target = candidates.reduce((a, b) => (scaleOf(b) > scaleOf(a) ? b : a));
+          }
+        }
+        const scale =
+          Math.min(
+            (target.right - target.left) / (2 * halfW),
+            (target.bottom - target.top) / (2 * halfH),
+          ) / MAP_FIT;
+        distance = size.height / 2 / (tan * scale);
+        // The map's centre projects to the canvas centre; shift the look-at point by the target
+        // rect's offset so the CONTENT, not the canvas, is what the free area centres.
+        const dx = (target.left + target.right) / 2 - size.width / 2;
+        const dy = (target.top + target.bottom) / 2 - size.height / 2;
+        focus.x -= dx / scale;
+        focus.y += dy / scale;
+      } else {
+        const halfW = map.stickout / 2 + 10;
+        const halfH = map.radius / 2 + 4;
+        distance = Math.max(halfW / (tan * aspect), halfH / tan) * 1.15;
+      }
+      camera.up.set(...up);
+      camera.position.copy(focus.clone().add(dir.multiplyScalar(distance)));
+      if (controls?.target) {
+        controls.target.copy(focus);
+        controls.update?.();
+      }
+      camera.lookAt(focus);
+    };
+    apply();
+    return () => {
+      if (next !== null) cancelAnimationFrame(next);
+    };
+  }, [map, mode, previewReady, camera, controls, gl, size.width, size.height]);
+  return null;
+}
+
 export function EngravePreview() {
   const preview = useEngravePreviewStore((s) => s.preview);
   // §5.7 — the design ↔ as-cut slider's position. `null` (the store's default and its state after
@@ -615,6 +797,12 @@ export function EngravePreview() {
   // #604 — the found position: the registration's offset/rotation move the drawn stock (and the
   // design on it) so the viewport shows where the blank actually sits, not where the plan assumed.
   const job = useEngraveJobStore((s) => s.job);
+  // #716 — the rotary view. `map` (the default) draws the stock's surface unrolled, exactly as the
+  // CAM authors it; `stock` wraps the SAME meshes onto the cylinder. A flat job is always `null`
+  // here and takes every branch as it did before this slice.
+  const designView = useRotaryViewStore((s) => s.design);
+  const rotary = useMemo(() => rotaryMapOf(job), [job]);
+  const wrapRadius = rotary !== null && designView === 'stock' ? rotary.radius : null;
   const machine = useMachineStore((s) => s.machine);
   const target = machine === null ? null : { host: machine.host, port: machine.port };
   const machineKey = machine === null ? null : `${machine.host}:${machine.port}`;
@@ -645,6 +833,9 @@ export function EngravePreview() {
   // Hooks run before the early return; the geometry is null until the first preview lands, and it
   // is replaced (with its old geometry disposed) whenever the slider settles on another stage.
   const scrub = preview ? scrubStateAt(preview, scrubStage) : null;
+  // The MAP stock geometry is built for both views: the Stock view uses the same scrub state's
+  // existence to know there is a body to draw, and replaces the coarse wrapped prism with a
+  // cylinder (a wrapped rectangular prism has four corners around, not a round rod).
   const stockGeom = useMeshGeometry(scrub?.mesh ?? null);
   // The ramp's upper bound: what this stock will allow at all (#205). The distinct-depth list the
   // legend used to build lives with the legend now (#349).
@@ -660,20 +851,40 @@ export function EngravePreview() {
 
   return (
     <group>
+      {rotary !== null && <RotaryViewCamera map={rotary} mode={designView} />}
       <group name="engrave-found" position={transform.position} rotation={transform.rotation}>
-        <mesh geometry={stockGeom} name="engrave-stock">
-        <meshStandardMaterial color={STOCK_COLOR} flatShading metalness={0.05} roughness={0.75} />
-      </mesh>
+        {wrapRadius !== null && rotary !== null ? (
+          <>
+            <mesh
+              position={[rotary.stickout / 2, 0, -rotary.radius]}
+              rotation={[0, 0, Math.PI / 2]}
+              name="engrave-stock-cylinder"
+            >
+              <cylinderGeometry args={[rotary.radius, rotary.radius, rotary.stickout, 96]} />
+              <meshStandardMaterial color={STOCK_COLOR} metalness={0.05} roughness={0.75} />
+            </mesh>
+          </>
+        ) : (
+          <mesh geometry={stockGeom} name="engrave-stock">
+            <meshStandardMaterial color={STOCK_COLOR} flatShading metalness={0.05} roughness={0.75} />
+          </mesh>
+        )}
 
-      {preview.sacrificial.map((s) => (
-        <Sacrificial key={s.id} mesh={s.mesh} name={`engrave-${s.id}`} label={s.label} />
-      ))}
+      {/* #716 — the Stock view draws only what wraps: the stock, its floors and the seam. The flat
+          overlays below are map-frame drawings (or a vise a rotary job does not sit in); leaving
+          them at z = 0 over a turned cylinder would describe a machine the job is not on. */}
+      {wrapRadius === null &&
+        rotary === null &&
+        preview.sacrificial.map((s) => (
+          <Sacrificial key={s.id} mesh={s.mesh} name={`engrave-${s.id}`} label={s.label} />
+        ))}
 
       {floors.map((f) => (
         <Floor
           key={f.labelId}
           mesh={f.mesh}
           labelId={f.labelId}
+          wrapRadius={wrapRadius}
           color={floorColor(f.depth, maxDepth, preview.colourBoundaryDepth)}
         />
       ))}
@@ -681,7 +892,7 @@ export function EngravePreview() {
       {/* #435 — the 3D primitives and the reference object. They are drawn from the JOB, not from
           the worker's preview: a refused shape (a sphere, a side-opening primitive) has no floor,
           and drawing it anyway is how its row and its by-name refusal remain visible together. */}
-      <EngravePrimitives />
+      {wrapRadius === null && <EngravePrimitives />}
 
       {/* §5.7 — the design the cut does not reach. Drawn after the floors so the amber is never
           hidden by a floor at the same XY; the lost region is on the top face, which is above
@@ -690,36 +901,40 @@ export function EngravePreview() {
           Only at the as-cut end: the lost layer is the FINAL difference between the design and what
           the cutter leaves, and painting it over a part-way state would call every not-yet-cut
           glyph "lost". Scrub back and the claim is withheld with the geometry. */}
-      {scrub.atCut &&
+      {wrapRadius === null &&
+        scrub.atCut &&
         preview.lost.map((l) => <Lost key={l.labelId} item={l} />)}
 
-      {preview.outlines.map((o) => (
-        <Outline key={`${o.labelId}:${o.level}`} {...o} />
-      ))}
+      {wrapRadius === null &&
+        preview.outlines.map((o) => <Outline key={`${o.labelId}:${o.level}`} {...o} />)}
 
-      {preview.voids.map((v) => (
-        <Void key={v.id} id={v.id} rings={v.rings} name={v.name} membrane={v.membrane} limit={v.limit} />
-      ))}
+      {wrapRadius === null &&
+        rotary === null &&
+        preview.voids.map((v) => (
+          <Void key={v.id} id={v.id} rings={v.rings} name={v.name} membrane={v.membrane} limit={v.limit} />
+        ))}
 
       {/* §5.4 — where the stock may sit relative to what the setup was registered against. Drawn
           at every slider position: it is a fact about the mount, not about how deep the cut is. */}
-      {preview.registration.map((band) => (
-        <RegistrationBand key={band.id} band={band} />
-      ))}
+      {wrapRadius === null &&
+        rotary === null &&
+        preview.registration.map((band) => <RegistrationBand key={band.id} band={band} />)}
 
       {/* #557 — the machine's bed plate, drawn under the vise so the setup reads as seated in the
-          real machine envelope rather than floating. */}
-      <MachineBed />
+          real machine envelope rather than floating. A rotary job is not on the vise: the map is
+          the stock's own surface, so neither the plate nor the jaws is drawn (#716). */}
+      {wrapRadius === null && rotary === null && <MachineBed />}
 
-      {preview.fixture.map((jaw) => (
-        <Jaw key={jaw.id} mesh={jaw.mesh} name={`engrave-${jaw.id}`} />
-      ))}
+      {wrapRadius === null &&
+        rotary === null &&
+        preview.fixture.map((jaw) => <Jaw key={jaw.id} mesh={jaw.mesh} name={`engrave-${jaw.id}`} />)}
 
       {/* #549 — blocked items' design outlines, drawn after the floors and fixture so they read
           over the clipped preview as the "here is where you put it" overlay. */}
-      <WarningOutlines />
+      {wrapRadius === null && <WarningOutlines />}
 
       {/* The work origin: the stock's top-front-left corner, with X and Y labelled. */}
+      {rotary === null && (
       <group name="engrave-axes">
         <mesh position={[axisLen / 2, 0, 0]}>
           <boxGeometry args={[axisLen, 0.4, 0.4]} />
@@ -736,11 +951,25 @@ export function EngravePreview() {
           Y
         </ProjectedLabel>
       </group>
+      )}
 
       {/* #519 item 1 — the registration's touch dots. INSIDE the found group (#604) on purpose: the
           touches are where the probe met the stock, so they move with the stock the viewport draws
           at its found position, not with the plan frame. */}
-      {touchesLayer && <TouchMarkers />}
+      {wrapRadius === null && touchesLayer && <TouchMarkers />}
+
+      {/* #716 — the map's own decorations: the around and along rulers, the seam and the two end
+          bands. Map view only: they are how the unrolled surface is read, and the wrapped stock
+          carries the seam below. */}
+      {rotary !== null && wrapRadius === null && <RotaryMapDecorations map={rotary} />}
+
+      {/* The seam on the wrapped stock: the top line where the map's two edges meet, A = 0. */}
+      {wrapRadius !== null && rotary !== null && (
+        <mesh position={[rotary.stickout / 2, 0, 0.04]} name="rotary-stock-seam">
+          <boxGeometry args={[rotary.stickout, 0.5, 0.1]} />
+          <meshBasicMaterial color="#f0d79b" />
+        </mesh>
+      )}
 
       </group>
       {/* #527 §6 — the machine layer's body at the live WPos, in the PLAN frame: #604 draws the
