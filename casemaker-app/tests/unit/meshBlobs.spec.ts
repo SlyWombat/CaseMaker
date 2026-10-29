@@ -27,7 +27,7 @@ import { parseJobFile, serializeJobFile } from '@/engine/cnc/engrave/jobFile';
 import { sweepUnusedMeshBlobs } from '@/store/meshBlobSweep';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { adoptInitialTargetBlob, ENGRAVE_JOB_KEY, reattachTargetBlob, useEngraveJobStore } from '@/store/engraveJobStore';
-import { setMeshBlobIO } from '@/platform/meshBlobs';
+import { putMeshBlob, setMeshBlobIO, sweepMeshBlobs } from '@/platform/meshBlobs';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 
 const SHA = 'b'.repeat(64);
@@ -159,6 +159,10 @@ describe('#728 the blob store review', () => {
     useEngraveJobStore.getState().setTargetObject({ ...TARGET });
     await vi.waitFor(() => expect(blobState()).toBe('unstored'));
     expect(job().targetObject?.data).toBe('QUJD');
+    // A removal and its undo do not forget the refusal: the bytes are offered to the store again.
+    useEngraveJobStore.getState().removeTargetObject();
+    useEngraveJobStore.getState().undoRemove();
+    await vi.waitFor(() => expect(blobState()).toBe('unstored'));
     const findings = withTargetBlobState(validateJob(job()), job(), blobState());
     const unstored = findings.find((f) => f.code === 'target-mesh-unstored');
     expect(unstored?.severity).toBe('warning');
@@ -170,7 +174,8 @@ describe('#728 the blob store review', () => {
     expect(findings.some((f) => f.code === 'target-mesh-missing')).toBe(true);
     const loading = withTargetBlobState(findings, { ...defaultEngraveJob(), targetObject: { ...NO_BYTES } }, 'loading');
     expect(loading.some((f) => f.code === 'target-mesh-missing')).toBe(false);
-    expect(loading.find((f) => f.code === 'target-mesh-loading')?.severity).toBe('info');
+    // A goal still blocks Generate while its shape is not here: the same severity, kinder words.
+    expect(loading.find((f) => f.code === 'target-mesh-loading')?.severity).toBe('error');
     // Once the store has answered that it does not hold it, the sentence is the import door again.
     const missing = withTargetBlobState(findings, { ...defaultEngraveJob(), targetObject: { ...NO_BYTES } }, 'missing');
     expect(missing.find((f) => f.code === 'target-mesh-missing')?.message).toContain('Import it again');
@@ -208,8 +213,17 @@ describe('#728 the blob store review', () => {
       delete: async (sha256) => void blobs.delete(sha256),
     });
     useEngraveJobStore.getState().setTargetObject({ ...TARGET });
-    expect(await sweepUnusedMeshBlobs()).toBe(1);
+    // A mesh with no touch on record starts its clock: another tab may hold it.
+    expect(await sweepUnusedMeshBlobs()).toBe(0);
+    expect(blobs.size).toBe(2);
+    // 31 days on, the unreferenced one goes; the open job's stays.
+    const later = Date.now() + 31 * 24 * 60 * 60 * 1000;
+    expect(await sweepMeshBlobs((sha) => sha === SHA, later)).toBe(1);
     expect([...blobs.keys()]).toEqual([SHA]);
+    // A mesh touched recently (another tab wrote it) is kept even when nothing here refers to it.
+    blobs.set('d'.repeat(64), 'R0hJ');
+    await putMeshBlob('d'.repeat(64), 'R0hJ');
+    expect(await sweepMeshBlobs(() => false)).toBe(0);
   });
 
   it('a file whose mesh does not match its fingerprint opens under the fingerprint of its bytes', async () => {

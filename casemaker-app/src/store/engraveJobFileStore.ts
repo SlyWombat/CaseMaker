@@ -357,8 +357,11 @@ function comparable(job: EngraveJob): string {
 /** The last saved text's comparable form, computed once per saved text. */
 let savedComparable: { text: string; key: string } | null = null;
 
-/** Note the comparable form of a text just written from `job`, so it is never re-parsed. */
-function rememberSaved(job: EngraveJob, text: string): string {
+/**
+ * Note the comparable form of a text just written from (or read into) `job`, so it is never
+ * re-parsed. Exported for the recent-job door, which sets `savedText` itself.
+ */
+export function rememberSaved(job: EngraveJob, text: string): string {
   savedComparable = { text, key: comparable(job) };
   return savedComparable.key;
 }

@@ -1236,8 +1236,9 @@ function storeTargetMesh(sha256: string, data: string): void {
 
 /**
  * #728 — after a write that may have put a target back (an undo), the blob state follows the
- * target: bytes in hand are ready, a hash alone is fetched again, none is none. Undoing a removal
- * made while the mesh was still loading used to leave it detached for good.
+ * target: bytes in hand are written to the store again (a refusal says so again, as at import), a
+ * hash alone is fetched again, none is none. Undoing a removal made while the mesh was still
+ * loading used to leave it detached for good.
  */
 function syncTargetBlob(): void {
   const target = useEngraveJobStore.getState().job.targetObject;
@@ -1246,8 +1247,9 @@ function syncTargetBlob(): void {
   } else if (target.data === undefined) {
     useEngraveJobStore.setState({ targetBlob: 'loading' });
     void reattachTargetBlob();
-  } else if (useEngraveJobStore.getState().targetBlob !== 'unstored') {
+  } else {
     useEngraveJobStore.setState({ targetBlob: 'ready' });
+    storeTargetMesh(target.sha256, target.data);
   }
 }
 

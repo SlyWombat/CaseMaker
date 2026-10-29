@@ -14,10 +14,10 @@
  * the document is replaced (its autosave must not write this job over the previous file).
  */
 
-import { parseJobFile } from '@/engine/cnc/engrave/jobFile';
+import { parseJobFile, serializeJobFile } from '@/engine/cnc/engrave/jobFile';
 import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 import { blankProjectForStock } from '@/library/blankProject';
-import { useEngraveJobFileStore } from './engraveJobFileStore';
+import { rememberSaved, useEngraveJobFileStore } from './engraveJobFileStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { clearHistory, useProjectStore } from './projectStore';
 import { useViewportStore } from './viewportStore';
@@ -48,12 +48,20 @@ export async function openRecentJob(recent: RecentJob): Promise<OpenRecentResult
   useEngraveJobFileStore.getState().newJob();
   useEngraveJobStore.getState().replace(parsed.job);
   // The bar's own records for the opened document, as `open()` sets them — minus the handle.
+  // #728 — the saved text is the document as opened: a mesh fingerprint corrected on the way in
+  // is the one recorded, and the dirty marker compares against it without re-parsing.
+  const saved = serializeJobFile(parsed.job);
+  rememberSaved(parsed.job, saved);
+  const opened = `Opened ${recent.name}${recentSavedAtWords(recent.at)}.`;
   useEngraveJobFileStore.setState({
     handle: null,
     fileName: recent.fileName,
-    savedText: text,
+    savedText: saved,
     dirty: false,
-    notice: { kind: 'ok', text: `Opened ${recent.name}${recentSavedAtWords(recent.at)}.` },
+    notice:
+      parsed.meshNote == null
+        ? { kind: 'ok', text: opened }
+        : { kind: 'warning', text: `${opened} ${parsed.meshNote}` },
     packageError: parsed.package !== null && !parsed.package.ok ? parsed.package.reason : null,
     sourceError: parsed.sourceError,
   });

@@ -2659,7 +2659,8 @@ export function setupProgramFindings(job: EngraveJob): JobFinding[] {
  * #728 — the findings as the open session sees the target mesh. The job alone cannot tell a mesh
  * this browser no longer holds from one the blob store has not answered for yet, so
  * `target-mesh-missing` read "Import it again" for a moment on every reload. While the store is
- * being asked it is an info line instead; once the store refused a copy of bytes the job holds,
+ * being asked it says "loading" instead — at the same severity, so a goal still blocks Generate
+ * until its shape is here; once the store refused a copy of bytes the job holds,
  * a warning says a reload would lose them. The other states change nothing.
  */
 export function withTargetBlobState(
@@ -2674,7 +2675,7 @@ export function withTargetBlobState(
     return findings.map((f) =>
       f.code === 'target-mesh-missing'
         ? {
-            severity: 'info' as const,
+            severity: f.severity,
             code: 'target-mesh-loading',
             labelId: target.id,
             message: `The ${role} mesh “${target.name}” is loading from this browser’s store.`,
