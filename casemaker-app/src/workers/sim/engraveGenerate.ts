@@ -50,6 +50,7 @@ import {
   drillPointAngle,
   flatEndMill,
   pointLength,
+  statedCuttingSize,
   tipNotRecorded,
   traceRadiusAt,
   type Tool,
@@ -1594,7 +1595,8 @@ export function engraveRegions(
   /** #748 — the whole document's supporting floors, or omitted to compute this plan's own. */
   floors?: ReadonlyMap<string, number>,
   /**
-   * #760 — the FINER flat that cuts this program's items afterwards (a rest pass), or null. The
+   * #760/#765 — the FINER cutter that cuts this program's items afterwards (a rest pass), or null:
+   * a flat at its radius, or a V at its TOP-FACE opening where the raised letters stand. The
    * raised-text finding is judged at its width: the letters end up as the rest opening leaves
    * them, so program 1's wider cutter is not the one to warn about when a finer one follows.
    */
@@ -1805,31 +1807,49 @@ export function engraveRegions(
   // lets the letters stay apart. The radius is captured as a const so the callback and the
   // measurement below cannot resolve two different cutters.
   //
-  // #760 — THE FINEST CUTTER WINS. A rest program after this one re-cuts what this opening leaves,
-  // and the raised letters end up at the smallest width that cuts them — so the finding must be
-  // judged there, not at program 1's cutter. `raisedCoFlat` is that later flat (the run's
-  // generator picks the finest one that will re-cut this program's items); when its radius is the
-  // smaller, both the measurement and the sentence use it.
+  // #760/#765 — THE FINEST CUTTER WINS. A rest program after this one re-cuts what this opening
+  // leaves, and the raised letters end up at the smallest width that cuts them — so the finding
+  // must be judged there, not at program 1's cutter. `raisedCoFlat` is that later cutter (the
+  // run's generator picks the finest one that will re-cut this program's items): a flat at its
+  // radius, a V at its TOP-FACE opening (where the raised letters stand — the plane width alone
+  // would call a sharply-tipped V clean while its top openings merge).
   const flatRadius = measureRadius;
-  const coUsable = raisedCoFlat === null || raisedCoFlat === undefined ? null : cuttingForTrace(raisedCoFlat);
-  const coRadius = coUsable !== null && coUsable.ok && coUsable.tool.shape === 'flat' ? coUsable.tool.radius : null;
-  const finerCoRadius =
-    cone === null && coRadius !== null && flatRadius !== null && coRadius < flatRadius - 1e-9 ? coRadius : null;
-  const raisedRadiusFor =
+  const coCone = raisedCoFlat === null || raisedCoFlat === undefined ? null : vCone(raisedCoFlat);
+  const coUsable = coCone === null && raisedCoFlat !== null && raisedCoFlat !== undefined ? cuttingForTrace(raisedCoFlat) : null;
+  const coFlatRadius = coUsable !== null && coUsable.ok && coUsable.tool.shape === 'flat' ? coUsable.tool.radius : null;
+  const ownRadiusAt = (cutawayId: string): number | null =>
     flatRadius === null
       ? null
-      : (cutawayId: string): number =>
-          finerCoRadius ??
-          (cone === null
-            ? flatRadius
-            : // #760 — the raised letters stand at full height: the width they are judged at is
-              // the cone's opening at the TOP FACE (`planeRadius + surfaceOutset`), the same
-              // number the pick's own `raisedTextMeasure` uses. The plane width alone would call a
-              // sharply-tipped V clean while its top openings merge.
-              planeRadiusFor(cutawayId) + (planeById.get(cutawayId)?.surfaceOutset ?? 0));
+      : cone === null
+        ? flatRadius
+        : planeRadiusFor(cutawayId) + (planeById.get(cutawayId)?.surfaceOutset ?? 0);
+  const coRadiusAt = (cutawayId: string): number | null => {
+    if (coFlatRadius !== null) return coFlatRadius;
+    if (coCone === null) return null;
+    const engrave = plan.engraves.find((e) => e.id === cutawayId);
+    if (engrave === undefined) return null;
+    const planeOut = vCarvePlane(coCone, engrave.depth, colourBoundaryDepth, floorById.get(cutawayId) ?? 0);
+    return planeOut.planeRadius + planeOut.surfaceOutset;
+  };
+  const judgeRadiusAt = (cutawayId: string): number | null => {
+    const own = ownRadiusAt(cutawayId);
+    const co = coRadiusAt(cutawayId);
+    return co !== null && (own === null || co < own - 1e-9) ? co : own;
+  };
+  const raisedRadiusFor =
+    flatRadius === null && coCone === null && coFlatRadius === null
+      ? null
+      : (cutawayId: string): number | null => judgeRadiusAt(cutawayId);
   const raisedMeasured =
     raisedRadiusFor === null ? [] : measureRaisedTexts(tl, job, plan.raisedTexts, raisedRadiusFor);
-  const raisedJudgeTool = finerCoRadius !== null ? raisedCoFlat! : tool;
+  // The sentence names the cutter whose width the rows actually used: the co-cutter when it is
+  // finer for at least one cut-away, else this program's own.
+  const coIsFiner = plan.raisedTexts.some((raised) => {
+    const own = ownRadiusAt(raised.id);
+    const co = coRadiusAt(raised.id);
+    return co !== null && (own === null || co < own - 1e-9);
+  });
+  const raisedJudgeTool = coIsFiner && raisedCoFlat !== null && raisedCoFlat !== undefined ? raisedCoFlat : tool;
 
   // #171/#345 — the cut regions a void check reads are built ONCE, below: the engrave openings,
   // the swept traces (#270) and — since #218 — each cut-out's kerf. A void-free job is the common
@@ -3650,11 +3670,12 @@ function generateRestPair(
     : roughRef;
   const roughJobKept = jobForSetup(job, roughRefKept, roughTool);
   /**
-   * #760 — THE FINEST FLAT THAT RE-CUTS THIS PROGRAM'S ITEMS AFTERWARDS. Only a LATER REST PASS
-   * (a ref with no items of its own) cuts the earlier program's leftovers, so only those tools can
-   * change the width the raised letters finally see. The raised-text finding is judged at the
-   * finest of them: program 1's 3.175 mm cutter is not what leaves the letters joined when a
-   * 1.0 mm rest pass follows. `fromIndex` is a `restTools` index (exclusive).
+   * #760/#765 — THE FINEST CUTTER THAT RE-CUTS THIS PROGRAM'S ITEMS AFTERWARDS. Only a LATER REST
+   * PASS (a ref with no items of its own) cuts the earlier program's leftovers, so only those
+   * tools can change the width the raised letters finally see. The raised-text finding is judged
+   * at the finest of them — a flat at its diameter, a V at its tip (its top-face opening is what
+   * the measure compares) — so program 1's 3.175 mm cutter is not what leaves the letters joined
+   * when a 1.0 mm flat or a 0.1 mm V follows. `fromIndex` is a `restTools` index (exclusive).
    */
   const laterRestFlat = (fromIndex: number): Tool | null => {
     let best: Tool | null = null;
@@ -3662,8 +3683,7 @@ function generateRestPair(
       const rest = restTools[j];
       const ref = group[j + 1];
       if (rest === null || rest === undefined || ref === undefined || ref.itemIds.length > 0) continue;
-      if (rest.shape !== 'flat') continue;
-      if (best === null || (cuttingDiameter(rest) ?? 0) < (cuttingDiameter(best) ?? 0)) best = rest;
+      if (best === null || (statedCuttingSize(rest) ?? Infinity) < (statedCuttingSize(best) ?? Infinity)) best = rest;
     }
     return best;
   };

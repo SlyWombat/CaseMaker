@@ -623,46 +623,41 @@ describe('#739 raised text warns when its gaps are narrower than the cutter', ()
   }, 150_000);
 });
 
-// #760 — THE PICK READS THE RAISED TEXT'S GAPS. A raised cut-away's detail is the narrowest gap
-// its letters keep — the same measurement `raised-text-fused` quotes — so the cutter that clears
-// the bulk may keep its width only when a FINER REST cutter meets the gaps, and the finding is
-// judged at that rest cutter's width, not program 1's. When no cutter fits, the pick says so in
-// one plain sentence and the job still cuts.
-describe('#760 the pick gives raised text a cutter that fits its gaps', () => {
-  it('j02 with no cutter named: a 1 mm rest cutter keeps "Software" readable', async () => {
+// #760/#765/#766 — THE PICK IS MEASURED. A raised cut-away's detail is what the simulation says
+// the cut leaves; the search tries the kind-valid plans (a clearance cutter plus a finer rest, a
+// V rest included) and hands back the best POSTING one. These two demo jobs are the acceptance:
+// j02's "Software" at 14 mm and the coin's at 3.6 mm both get a rest cutter that separates the
+// word (with the pinches that still touch named), and the run still cuts.
+describe('#760/#766 the measured pick gives raised text a cutter that fits its gaps', () => {
+  it('j02 with no cutter named: a finer rest separates "Software", and the run says how it chose', async () => {
     const variant = pickedVariant('j02-raised-cnx.json', REAL_JOBS);
     const { code, receipt, progress } = await cut(variant, SCRATCH);
     expect(code, allDiagnostics(receipt)).toBe(0);
     const lines = progress.join('\n');
-    // The clearance cutter cuts first and a finer rest cutter follows it — the plan the design
-    // route made before #762, now chosen from the measured gaps.
-    expect(lines).toContain('kz-corn-1-7');
+    expect(lines).toContain('Chosen by simulation');
     expect(lines).toContain('rest —');
-    // 1.08 mm clears a 1 mm cutter, so the raised warning must be GONE: the finding is judged at
-    // the rest program's width, which is the width the letters finally see.
+    // The 1.08 mm gaps are wider than the rest cutter the search finds (a V or a 1 mm flat), so
+    // the raised warning has nothing to say once the finding is judged at the rest's width.
     expect(
       allDiagnostics(receipt),
-      'the 1 mm rest program keeps "Software" apart, so no raised-text warning belongs on this run',
+      'the rest cutter separates "Software", so no raised-text warning belongs on this run',
     ).not.toContain('raised-text-fused');
   }, 150_000);
 
-  it('the coin disc with no cutter named: "CNX" is clean and "Software" gets the plain sentence', async () => {
+  it('the coin disc with no cutter named: the pick names the pinches that still touch, and "CNX" is left alone', async () => {
     const variant = pickedVariant('j04-coin-disc-pla.json', REAL_JOBS);
     const { code, receipt, progress } = await cut(variant, SCRATCH);
     expect(code, allDiagnostics(receipt)).toBe(0);
-    expect(
-      progress.join('\n'),
-      'no cutter keeps the 0.278 mm gaps, so the pick must say so plainly',
-    ).toContain('no cutter fits the 0.278 mm gaps; make the text larger or V-carve it');
+    const lines = progress.join('\n');
+    expect(lines, 'the pick is measured and explained').toContain('Chosen by simulation');
+    // The chosen rest states the raised pinches: how many, where, and the tightest gap.
+    expect(lines).toMatch(/pinches? in clear stay joined/);
+    expect(lines).toContain('0.278 mm');
+    // Judged at the FINEST cutter that cuts the item (the rest), not the clearance cutter: "CNX"
+    // survives that width and must not be warned about.
     const fused = receipt.diagnostics.filter((d) => d.code === 'raised-text-fused');
-    expect(fused, allDiagnostics(receipt)).toHaveLength(1);
-    const warning = fused[0]!;
-    expect(warning.message).toContain('"Software"');
-    expect(warning.message).toContain('0.278 mm');
-    // Judged at the FINEST cutter that cuts the item — the 1 mm rest program — not at the wider
-    // clearance cutter: "CNX" survives that width and must be left alone.
-    expect(warning.message).toContain('1 mm cutter');
-    expect(allDiagnostics(receipt), '"CNX" at 7 mm survives the 1 mm cutter').not.toContain('"CNX"');
+    for (const warning of fused) expect(warning.message).not.toContain('"CNX"');
+    expect(allDiagnostics(receipt), '"CNX" at 7 mm survives the rest cutter').not.toContain('"CNX"');
   }, 150_000);
 });
 

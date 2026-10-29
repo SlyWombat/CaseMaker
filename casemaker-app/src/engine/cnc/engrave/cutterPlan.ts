@@ -1,5 +1,12 @@
 /**
- * #762 — WHAT EACH ITEM IS, and which cutter the job gives it.
+ * #762 — WHAT EACH ITEM IS — and, since #766, the KIND-CHECK and reach rules the measured search
+ * uses to generate candidate plans.
+ *
+ * #766 made the CHOICE a simulation (`smartPick` + slice A): a plan is judged by what it would cut,
+ * not by a proxy. This module's `kindedWork` and `materialRefusal` still answer the question a
+ * candidate must pass before it is worth simulating, and `planCutters` remains the kind-shaped
+ * baseline candidate and the panel/legacy path where no evaluator is bound. The auto-pick surfaces
+ * (the CLI's no-cutter path and the Design panel) call the search.
  *
  * `roughPick`/`restToolPick` rank cutters by the AREA of the 2D design each one reaches. That is
  * the right rule for the flat work they were written for, and the wrong question for everything
@@ -207,6 +214,14 @@ export function materialRefusal(
   catalogue: readonly FeedCatalogueRow[],
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
+  /**
+   * #766 — OWNED CUTTERS ARE THE OPERATOR'S OWN. The catalogue's material list is advice for a
+   * shop's own bit, not a veto: Makera lists the 0.6 mm corn for PCB and carbon fibre, and the
+   * maintainer cuts PLA with it every day. With this set, an owned (`inv:`) cutter the catalogue
+   * would refuse by material is still a candidate — the simulatio decides — while a CATALOGUE
+   * cutter keeps the catalogue's own rule, and a broken or metal-line cutter is still refused.
+   */
+  opts?: { ownedVouches?: boolean },
 ): string | null {
   const tool = entry.tool;
   const condition = conditions?.get(entry.key) ?? null;
@@ -216,7 +231,8 @@ export function materialRefusal(
     return `${entry.key} is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}`;
   }
   const standing = catalogueStandingFor(coverage, job.stock.material, tool.name);
-  if (!standing.recommend) {
+  const ownedVouches = opts?.ownedVouches === true && !entry.key.startsWith('cat:');
+  if (!standing.recommend && !ownedVouches) {
     return standing.note ?? `${entry.key} is not listed for ${MATERIAL_LABELS[job.stock.material]}`;
   }
   // #762 — A BALL AND A THREAD ARE NOT RESOLVED BY `feedsFor`, and that is not a refusal of them:

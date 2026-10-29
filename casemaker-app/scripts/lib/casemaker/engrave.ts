@@ -72,11 +72,14 @@ import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, basename, isAbsolute } from 'node:path';
 
 import { engraveGenerate, type EngraveGenerated, type EngraveShopOpts } from '../../../src/workers/sim/engraveGenerate';
+// #766 — the measured search: slice A scores a candidate plan, B chooses, C writes the sentences.
+import { evaluatePlan, type CandidatePlan, type PlanEvaluation } from '../../../src/workers/sim/planEvaluate';
+import { smartPick } from '../../../src/engine/cnc/engrave/smartPick';
+import { explainSmartPick } from '../../../src/engine/cnc/engrave/smartPickWords';
 import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
 import { unionRemoval, restMachining } from '../../../src/workers/sim/engraveRest';
 import { restJobFor, roughPick, restToolPick, unroughedItems, vBitRestRefusal, type RestPassFacts } from '../../../src/engine/cnc/engrave/restPass';
 // #762 — the per-item-kind picker: what each item IS before the area-share rule is asked.
-import { planCutters } from '../../../src/engine/cnc/engrave/cutterPlan';
 import {
   REST_OVERLAP_KEY,
   REST_THIRD_TOOL_KEY,
@@ -1402,46 +1405,58 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     }
     outDir = args.out ?? dirname(path);
     mkdirSync(outDir, { recursive: true });
-    // #760/#762 — A JOB THAT NAMES NO CUTTER IS GIVEN ONE, by what each item IS. The area-share
-    // rule (`roughPick`/`restToolPick`) is right for the flat work it was written for; a goal, a
-    // thread, a chamfer, a bore or a cut-out asks a different question, and a job that mixes them
-    // needs a cutter for each kind (#762: 21 of 41 demo runs were refused for exactly this).
-    // `planCutters` answers per item kind, with the reach filter (flute/shoulder against the
-    // deepest cut, cut-outs included) and the material gate every pick must pass. It used to stop
-    // at "the job has no usable cutter", so every saved job had to pin a bit by hand — which is
-    // how a demo set came to cut raised 14 mm text with a 3.175 mm cutter its own findings said
-    // joined the letters. A job that names its cutters keeps them; `--tool`/`--rest` override.
+    // #766 — A JOB THAT NAMES NO CUTTER IS GIVEN ONE BY SIMULATION. The rules that came before
+    // (area share #762, item kind, the tightest raised gap #760/#765) each failed on a real job;
+    // this path now runs the measured search: plausible kind-valid plans are generated
+    // (`smartPick`), slice A scores each by what it would cut, and the best POSTING plan is the
+    // one written. The search's own sentence is printed, and `--tool`/`--rest` still override.
     if (parsed.job.toolKey === NO_TOOL_KEY && parsed.job.setups === undefined) {
       const job = parsed.job;
-      const reach = scanReach(job);
-      printReach(reach);
       if (args.tool === undefined && args.rest === undefined) {
-        // The goal finish's own grid, so the ball's budget is judged on the pitch the pass will
-        // sample (the job's own surface grid else the shop's `sim.columnFlatPitchYMm`).
-        const gridValue = shopDefaults?.['sim.columnFlatPitchYMm']?.value;
-        const gridPitchMm = typeof gridValue === 'number' && gridValue > 0 ? gridValue : null;
-        const plan = planCutters(job, reach, getTools(), catalogueRows, undefined, undefined, gridPitchMm);
-        for (const note of plan.notes) out.progress(`  plan      ${note}`);
-        if (plan.cutters.length === 0 || plan.unassigned.length > 0) {
-          const why =
-            plan.unassigned.length > 0
-              ? plan.unassigned.map((u) => `${u.name}: ${u.reason}`).join('; ')
-              : reach.recommendation.reason;
-          return stop(invalidJob(`${path} names no cutter, and none in the library can cut it: ${why}`));
+        // #766 — THE CHOICE IS MEASURED, NOT RULED. The search generates the kind-valid plans and
+        // slice A simulates each one: fidelity, pinches, time, risk. The chosen plan and its
+        // reasons are printed here; the run writes the plan the search chose.
+        const searchTools = getTools();
+        const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
+          evaluatePlan(job, plan, { tl, tools: searchTools, catalogue: catalogueRows, shop, calibration: null }, { level });
+        const pick = smartPick(job, searchTools, catalogueRows, evaluate);
+        const words = explainSmartPick(pick, searchTools);
+        out.progress(`  pick      ${words.verdict}`);
+        words.cutters.forEach((line, i) => out.progress(`  cutter ${i + 1}   ${line}`));
+        if (words.runnerUp !== null) out.progress(`  also      ${words.runnerUp}`);
+        if (words.buyThis !== null) out.progress(`  buy       ${words.buyThis}`);
+        for (const note of words.notes) out.progress(`  note      ${note}`);
+        if (process.env.CM_PICK_DEBUG === '1') {
+          for (const s of pick.considered) {
+            out.progress(
+              `  debug     ${s.plan.cutters.map((c) => c.key).join('+')} worst=${s.worstFidelity.toFixed(2)} stand=${s.raisedStandingMm2} joined=${s.raisedJoined} ok=${s.evaluation.ok} sec=${String(s.evaluation.seconds)} changes=${s.evaluation.toolChanges}`,
+            );
+          }
         }
-        job.toolKey = plan.cutters[0]!.key;
-        plan.cutters.forEach((c, i) => out.progress(`  cutter ${i + 1}   ${c.key} — ${c.reason}`));
-        if (plan.cutters.length > 1) {
+        // A plan the generator refuses is reported, not run: the search hands back the best plan
+        // that POSTS (`runnable`), and C's note names the refused best-measured one.
+        const chosen = pick.runnable;
+        if (chosen === null) {
+          return stop(
+            invalidJob(
+              `${path} names no cutter, and no plan the search tried can post: ${pick.notes.join(' ') || pick.bestMeasured.evaluation.refusal || 'the generator refuses every candidate'}`,
+            ),
+          );
+        }
+        job.toolKey = chosen.plan.cutters[0]!.key;
+        if (chosen.plan.cutters.length > 1) {
           const setup = jobSetups(job)[0]!;
           job.setups = [
             {
               ...setup,
-              tools: plan.cutters.map((c) => c.key),
-              toolItems: Object.fromEntries(plan.cutters.map((c) => [c.key, c.items])),
+              tools: chosen.plan.cutters.map((c) => c.key),
+              toolItems: Object.fromEntries(chosen.plan.cutters.map((c) => [c.key, [...c.items]])),
             },
           ];
         }
       } else {
+        const reach = scanReach(job);
+        printReach(reach);
         const restOff = args.rest === 'none';
         const pick = roughPick(reach);
         const first = args.tool ?? (restOff ? reach.recommendation.key : (pick.chosen?.key ?? reach.recommendation.key));

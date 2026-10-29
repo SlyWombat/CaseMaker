@@ -1,5 +1,10 @@
 /**
- * Recommend a cutter for an engrave job (#211).
+ * Recommend a cutter for an engrave job (#211) — the RULE path, kept beside #766's measured search.
+ *
+ * #766 makes the choice by simulation on the auto-pick surfaces (the CLI's no-cutter path and the
+ * Design panel's recommendation when the job names no cutter). This module still answers when no
+ * evaluator is bound — a pure caller, the picker's 'Why?' list, and the named/legacy routes — and
+ * its question (which cutter keeps every item intact) is the one the search's fidelity measures.
  *
  * The rule: **recommend the largest flat end mill that can cut every enabled label without
  * losing detail.** A larger cutter is stiffer, clears faster and breaks less; the only reason
