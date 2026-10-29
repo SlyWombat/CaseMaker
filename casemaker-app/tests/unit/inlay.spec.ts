@@ -8,12 +8,15 @@
  * sheets. DOCUMENT: a mixed, non-happy round trip on each half.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
-import { itemProfile, toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import { itemProfile, resolveItems, toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
@@ -28,7 +31,15 @@ import { vCone } from '@/engine/cnc/vProfile';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
-import type { EngraveJob, EngravePolygonShape, EngraveRectShape, EngraveShape } from '@/types/engraveJob';
+import type {
+  EngraveCombinedShape,
+  EngraveCutawayShape,
+  EngraveJob,
+  EngraveLabel,
+  EngravePolygonShape,
+  EngraveRectShape,
+  EngraveShape,
+} from '@/types/engraveJob';
 
 const TOOL_KEY = 'chamfer-90-vcarve';
 
@@ -114,6 +125,54 @@ function femaleJob(
     toolKey: bit.key,
     tool: bit.tool,
     shapes: [shape],
+    ...over,
+  };
+}
+
+const REAL_JOBS = join(__dirname, '..', '..', '..', 'docs', 'bench', '2026-10-28-z1-real-jobs', 'jobs');
+
+/** The j11 bench cutter as the inventory states it: a 30° engraver with a 0.5 mm flat tip. */
+function j11Cutter(): Tool {
+  return flatEndMill(0.5, {
+    id: null,
+    name: '30° engraving bit, 0.5 mm tip',
+    typeText: 'Engraving',
+    shape: 'engraving',
+    tipDiameter: 0.5,
+    diameter: 3.175,
+    angle: 30,
+    halfAngle: 15,
+  });
+}
+
+const J11_CONE = vCone(j11Cutter())!;
+
+/** One j11 female job, with the cutter it names snapshotted on the job as the store would keep it. */
+function j11(file = 'j11-inlay-female-30v.json'): EngraveJob {
+  const raw = JSON.parse(readFileSync(join(REAL_JOBS, file), 'utf8')) as Record<string, unknown>;
+  raw.tool = j11Cutter();
+  const parsed = parseEngraveJob(raw);
+  if (!parsed.ok) throw new Error(`${file} should parse: ${parsed.errors.join('; ')}`);
+  return parsed.job;
+}
+
+/** The male's own operations: a cutaway carrying a MALE marker (the construction islands do not). */
+const maleCuts = (job: EngraveJob): EngraveCutawayShape[] =>
+  (job.combined ?? []).filter(
+    (item): item is EngraveCutawayShape => item.kind === 'cutaway' && item.inlay?.role === 'male',
+  );
+
+function label(over: Partial<EngraveLabel> = {}): EngraveLabel {
+  return {
+    id: 'ff',
+    text: 'FF',
+    font: 'serif-default',
+    weight: 'bold',
+    size: 22,
+    position: { x: 20, y: 15 },
+    rotation: 0,
+    depth: 2,
+    enabled: true,
     ...over,
   };
 }
@@ -490,4 +549,246 @@ describe('the run sheet names each half (#673)', () => {
     expect(maleStep).toContain('1.8 mm proud');
     expect(maleStep).toContain('plane the male blank away');
   }, 120_000);
+});
+
+// #742 — EVERY FEMALE MARK MAKES ITS MALE. The derivation used to keep only marks on plain
+// `shapes`, so j11's combined ring and its (unmarked) lettering produced nothing. The bench fixture
+// now marks the lettering too; both regions must yield a plug.
+describe('every female mark makes its male (#742)', () => {
+  const TAN15 = Math.tan(Math.PI / 12);
+
+  it('j11: makes ONE male cutaway clearing around both the ring and the lettering', () => {
+    const female = j11();
+    const male = inlayMaleJob(female, J11_CONE);
+    expect(male.ok, male.ok ? '' : male.reason).toBe(true);
+    if (!male.ok) return;
+
+    const cuts = maleCuts(male.job);
+    expect(cuts).toHaveLength(1);
+    // Both regions are 4.8 mm pockets with a 1.3 mm gap: the plug is 3.5 mm deep and every island
+    // is eroded by the female floor's extent (4.8 mm × tan 15°). ONE inset serves both islands,
+    // which is why a mixed pair is refused rather than fitted at one of the two.
+    const cut = cuts[0]!;
+    expect(cut.outer).toBe('inlay-blank');
+    expect(cut.islands).toHaveLength(2);
+    expect(cut.depth).toBeCloseTo(3.5, 9);
+    expect(cut.inlay?.glueGapMm).toBeCloseTo(1.3, 9);
+    expect(cut.inlay?.pocketDepthMm).toBeCloseTo(4.8, 9);
+    expect(cut.inlay?.islandInsetMm).toBeCloseTo(4.8 * TAN15, 9);
+
+    const islands = cut.islands.map(
+      (id) =>
+        [...male.job.shapes, ...(male.job.combined ?? []), ...(male.job.vectors ?? [])].find(
+          (item) => item.id === id,
+        )!,
+    );
+    expect(new Set(islands.map((item) => item.id)).size).toBe(2);
+    // The ring's island is the mirrored cutaway; the lettering's is a vector of its glyph outline.
+    const ringIsland = islands.find((item) => item.kind === 'cutaway')!;
+    const textIsland = islands.find((item) => item.kind === 'vector')!;
+    expect(ringIsland.construction).toBe(true);
+    expect(textIsland.construction).toBe(true);
+    expect(textIsland.inlay).toBeUndefined();
+
+    // Both regions resolve through the real plan as ONE engrave region — the blank minus BOTH
+    // islands — with the ring's mirrored cutaway and the text's vector reachable by reference.
+    const plan = toPartPlan(male.job);
+    expect(plan.engraves).toHaveLength(1);
+    for (const engrave of plan.engraves) {
+      const cs = executeProfile(tl, engrave.profile);
+      expect(cs.area()).toBeGreaterThan(100);
+      cs.delete();
+    }
+
+    // And the derived document is one the schema accepts unchanged.
+    const parsed = parseEngraveJob(male.job);
+    expect(parsed.ok, parsed.ok ? '' : parsed.errors.join('; ')).toBe(true);
+  }, 120_000);
+
+  /** Every item's profile in the male's stock frame, built as `toPartPlan` builds them. */
+  function maleProfiles(job: EngraveJob): Map<string, ReturnType<typeof itemProfile>> {
+    const profiles = new Map<string, ReturnType<typeof itemProfile>>();
+    const { order } = resolveItems(job);
+    const ctx = {
+      stockOutline: itemProfile(job.shapes[0]!, job.customFonts),
+      profileOf: (id: string): ReturnType<typeof itemProfile> | null => profiles.get(id) ?? null,
+    };
+    for (const item of order) profiles.set(item.id, itemProfile(item, job.customFonts, ctx));
+    return profiles;
+  }
+
+  it('every island’s eroded top survives every male engrave profile', () => {
+    // THE REVIEW'S DEFECT: one cutaway PER region each cleared the blank except its own island,
+    // so the ring's cut erased the lettering's plug (and the lettering's erased the ring). Here
+    // every island's eroded top face — what the plug is after planing — must lie wholly
+    // outside every region the male cuts.
+    const female = j11();
+    const male = inlayMaleJob(female, J11_CONE);
+    if (!male.ok) throw new Error(male.reason);
+    const cuts = maleCuts(male.job);
+    expect(cuts.length).toBeGreaterThan(0);
+    // Judge EVERY island against EVERY engrave the male cuts, so the test cannot be satisfied by
+    // there being no second region: the old two-cutaway male is judged too, and each of its
+    // cutaways is found covering the other region's plug.
+    const tops = cuts.flatMap((cut) =>
+      cut.islands.map((islandId) => ({ islandId, inset: cut.inlay?.islandInsetMm ?? 0 })),
+    );
+    expect(tops.length).toBeGreaterThanOrEqual(2);
+    const plan = toPartPlan(male.job);
+    const profiles = maleProfiles(male.job);
+    const engraves = plan.engraves.map((engrave) => executeProfile(tl, engrave.profile));
+    try {
+      for (const { islandId, inset } of tops) {
+        expect(inset).toBeGreaterThan(0);
+        const islandProfile = profiles.get(islandId);
+        expect(islandProfile, islandId).toBeDefined();
+        if (islandProfile === undefined) continue;
+        const island = executeProfile(tl, islandProfile);
+        const eroded = makeClipperOffset(tl)(island.toPolygons() as [number, number][][], -inset);
+        island.delete();
+        expect(eroded.length, `${islandId} still has a top face`).toBeGreaterThan(0);
+        const top = tl.CrossSection.ofPolygons(eroded);
+        expect(top.area(), `${islandId}'s eroded top is not empty`).toBeGreaterThan(0.1);
+        for (const engrave of engraves) {
+          const overlap = engrave.intersect(top);
+          const area = overlap.area();
+          overlap.delete();
+          expect(area, `${islandId} is cut away by the male engrave`).toBeLessThan(1e-6);
+        }
+        top.delete();
+      }
+    } finally {
+      for (const engrave of engraves) engrave.delete();
+    }
+  }, 120_000);
+
+  it('refuses two female halves with different numbers, rather than fitting one at the other’s inset', () => {
+    const female = j11();
+    female.labels = female.labels.map((item) => ({ ...item, depth: 4.6 }));
+    const male = inlayMaleJob(female, J11_CONE);
+    expect(male.ok).toBe(false);
+    if (male.ok) return;
+    // One cutaway erodes every island by one inset; two different pairs cannot share it.
+    expect(male.reason).toContain('4.6 mm deep with a 1.3 mm glue gap');
+    expect(male.reason).toContain('4.6 mm deep with a 1.3 mm glue gap');
+    expect(male.reason).toContain('4.8 mm deep with a 1.3 mm glue gap');
+    // It names BOTH halves (the fixture's ring cutaway carries no name of its own) and the way out.
+    expect(male.reason).toContain('Cutaway and Engrave text "FF" are both female halves');
+    expect(male.reason).toContain('share one depth and one glue gap');
+  });
+
+  it('mirrors the lettering island back onto the female’s own text, point for point', () => {
+    const female = j11();
+    const male = inlayMaleJob(female, J11_CONE);
+    if (!male.ok) throw new Error(male.reason);
+    const textIsland = (male.job.vectors ?? []).find((item) => item.construction === true);
+    expect(textIsland).toBeDefined();
+    if (textIsland === undefined) return;
+
+    const rings = (profile: ReturnType<typeof itemProfile>): [number, number][][] => {
+      const cs = executeProfile(tl, profile);
+      const polygons = cs.toPolygons() as [number, number][][];
+      cs.delete();
+      return polygons;
+    };
+    const key = ([x, y]: [number, number]): string => `${x.toFixed(3)},${y.toFixed(3)}`;
+    const her = new Set(rings(itemProfile(female.labels[0]!, female.customFonts)).flat().map(key));
+    const raw = rings(itemProfile(textIsland, male.job.customFonts)).flat();
+    const back = new Set(raw.map(([x, y]) => key([x, male.job.stock.width - y])));
+
+    expect(her.size).toBeGreaterThan(20); // the glyphs, not an empty outline
+    expect(raw.length).toBeGreaterThan(20);
+    // The male's island, mirrored back about the blank's centre line, is her placed outline.
+    expect([...back].filter((p) => !her.has(p))).toEqual([]);
+    expect([...her].filter((p) => !back.has(p))).toEqual([]);
+    // …and it is a real mirror: the island as stored is not her outline.
+    expect(raw.map(key).filter((p) => !her.has(p)).length).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('a ring-only female still makes its male as before', () => {
+    const female = j11();
+    female.labels = female.labels.map((item) => ({ ...item, inlay: undefined }));
+    const male = inlayMaleJob(female, J11_CONE);
+    expect(male.ok, male.ok ? '' : male.reason).toBe(true);
+    if (!male.ok) return;
+    const cuts = maleCuts(male.job);
+    expect(cuts).toHaveLength(1);
+    const islandId = cuts[0]!.islands[0]!;
+    const island = (male.job.combined ?? []).find((item) => item.id === islandId) as
+      | EngraveCombinedShape
+      | undefined;
+    expect(island?.kind).toBe('cutaway');
+    expect(island?.construction).toBe(true);
+    expect(island?.inlay).toBeUndefined();
+    // Its references are mirrored COPIES, kept as construction items: the ring's two circles.
+    if (island?.kind !== 'cutaway') return;
+    const outer = male.job.shapes.find((item) => item.id === island.outer);
+    expect(outer?.kind).toBe('circle');
+    expect(outer?.construction).toBe(true);
+    expect(outer?.position).toEqual({ x: 40, y: 40 });
+    expect(island.islands).toHaveLength(1);
+  }, 120_000);
+
+  it('refuses a label marked female with no text, in a sentence that names what is missing', () => {
+    const job: EngraveJob = { ...femaleJob(), shapes: [], labels: [label({ text: '' , inlay: { role: 'female' } })] };
+    const male = inlayMaleJob(job, CONE);
+    expect(male.ok).toBe(false);
+    if (male.ok) return;
+    expect(male.reason).toContain('female half of an inlay');
+    expect(male.reason).toContain('no text');
+    // The sentence names the label, so a job with several marks says which one is refused.
+    expect(male.reason).toContain('Engrave text ""');
+  });
+
+  it('refuses a cutaway whose island item is missing rather than dropping the region', () => {
+    const outer = rect('ring-outer', { inlay: undefined });
+    const ring: EngraveCombinedShape = {
+      id: 'ring',
+      name: 'ring',
+      kind: 'cutaway',
+      position: { x: 0, y: 0 },
+      rotation: 0,
+      depth: 2,
+      enabled: true,
+      outer: 'ring-outer',
+      islands: ['ring-inner'],
+      inlay: { role: 'female' },
+    };
+    const job: EngraveJob = { ...femaleJob(), shapes: [outer], combined: [ring] };
+    const male = inlayMaleJob(job, CONE);
+    expect(male.ok).toBe(false);
+    if (male.ok) return;
+    expect(male.reason).toContain('female half of an inlay');
+    expect(male.reason).toContain('ring-inner');
+    expect(male.reason).toContain('is not in this job');
+  });
+
+  it('refuses a reference-only item’s mark, because no pocket was cut for a plug', () => {
+    const job: EngraveJob = {
+      ...femaleJob(),
+      shapes: [rect('design', { construction: true, inlay: { role: 'female' } })],
+    };
+    const male = inlayMaleJob(job, CONE);
+    expect(male.ok).toBe(false);
+    if (male.ok) return;
+    expect(male.reason).toContain('female half of an inlay');
+    expect(male.reason).toContain('no male can be made');
+    expect(male.reason).toContain('reference only');
+    expect(male.reason).toContain('no pocket');
+  });
+
+  it('refuses the whole male when one region’s numbers do not derive, instead of dropping it', () => {
+    const good = rect('good', { name: 'good' });
+    const bad = rect('bad', {
+      name: 'bad',
+      depth: 0.2,
+      inlay: { role: 'female', glueGapMm: 0.2 },
+    });
+    const male = inlayMaleJob({ ...femaleJob(), shapes: [good, bad] }, CONE);
+    expect(male.ok).toBe(false);
+    if (male.ok) return;
+    expect(male.reason).toContain('Rectangle "bad"');
+    expect(male.reason).toContain('glue gap');
+    expect(male.reason).toContain('mm');
+  });
 });

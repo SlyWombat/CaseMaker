@@ -40,16 +40,24 @@
  */
 
 import { newId } from '@/utils/id';
+import { labelOutline } from './partPlan';
+import { DEFAULT_INLAY_GLUE_GAP_MM } from './inlayDefaults';
 import type {
+  EngraveAnyItem,
   EngraveCombinedShape,
   EngraveJob,
+  EngraveLabel,
   EngraveShape,
+  EngraveVectorShape,
   InlayMark,
 } from '@/types/engraveJob';
+import type { CustomFont } from '@/types/textLabel';
 import type { VCone } from '../vProfile';
 
-/** The glue gap a new inlay half runs with when the operator states none, mm — labelled, not measured. */
-export const DEFAULT_INLAY_GLUE_GAP_MM = 0.2;
+// The pair's one labelled default lives in `inlayDefaults.ts` so `partPlan.ts` can read it without
+// importing this module (this module imports the plan's label outline); re-exported here so every
+// existing importer keeps its path.
+export { DEFAULT_INLAY_GLUE_GAP_MM };
 
 /**
  * #673 — every number an inlay pair runs with, derived once from the pocket depth, the glue gap
@@ -132,16 +140,20 @@ export function inlayGlueGap(mark: InlayMark): number {
   return mark.glueGapMm ?? DEFAULT_INLAY_GLUE_GAP_MM;
 }
 
-/** The inlay-marked items of a job (shapes and combined items), with their markers. */
+/**
+ * The items that carry an inlay mark, with their markers — the ONE owner of the set.
+ *
+ * #742 widened it to every kind a marker can be put on: labels (lettering is what most inlay jobs
+ * are), the simple shapes, the combined kinds the schema already accepts, and imported vectors.
+ * The findings, the recommendation, the run sheet and the male's derivation all read this list, so
+ * an item can never carry a mark one reader sees and another does not.
+ */
 export function inlayMarked(
   job: EngraveJob,
-): { item: EngraveShape | EngraveCombinedShape; mark: InlayMark }[] {
-  const out: { item: EngraveShape | EngraveCombinedShape; mark: InlayMark }[] = [];
-  for (const shape of job.shapes) {
-    if (shape.inlay !== undefined) out.push({ item: shape, mark: shape.inlay });
-  }
-  for (const combined of job.combined ?? []) {
-    if (combined.inlay !== undefined) out.push({ item: combined, mark: combined.inlay });
+): { item: EngraveAnyItem; mark: InlayMark }[] {
+  const out: { item: EngraveAnyItem; mark: InlayMark }[] = [];
+  for (const item of [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])]) {
+    if (item.inlay !== undefined) out.push({ item, mark: item.inlay });
   }
   return out;
 }
@@ -150,11 +162,14 @@ export function inlayMarked(
  * Mirror a region item in Y about the blank's centre line — the glue-up flip about the X axis.
  *
  * The transform is exact: the position's Y becomes `width − y`, the rotation NEGATES (a mirror
- * conjugates a rotation: `diag(1,−1)·R(r)·diag(1,−1) = R(−r)`), and a polygon's local points
- * mirror in their own Y. Rect, circle and slot are symmetric in their own frame, so their
+ * conjugates a rotation: `diag(1,−1)·R(r)·diag(1,−1) = R(−r)`), and a polygon's or vector's local
+ * points mirror in their own Y. Rect, circle and slot are symmetric in their own frame, so their
  * geometry needs nothing else.
  */
-export function mirrorShapeInY<T extends EngraveShape | EngraveCombinedShape>(shape: T, stockWidth: number): T {
+export function mirrorShapeInY<T extends EngraveShape | EngraveCombinedShape | EngraveVectorShape>(
+  shape: T,
+  stockWidth: number,
+): T {
   const base = {
     ...shape,
     position: { x: shape.position.x, y: stockWidth - shape.position.y },
@@ -162,6 +177,12 @@ export function mirrorShapeInY<T extends EngraveShape | EngraveCombinedShape>(sh
   };
   if (shape.kind === 'polygon') {
     return { ...base, points: shape.points.map(([x, y]) => [x, -y] as [number, number]) } as T;
+  }
+  if (shape.kind === 'vector') {
+    return {
+      ...base,
+      contours: shape.contours.map((ring) => ring.map(([x, y]) => [x, -y] as [number, number])),
+    } as T;
   }
   return base as T;
 }
@@ -171,34 +192,333 @@ export function inlayMaleJobName(femaleName: string): string {
   return `${femaleName} — male`;
 }
 
-export type InlayMaleResult = { ok: true; job: EngraveJob } | { ok: false; reason: string };
+/** A millimetre value in a refusal, printed to 0.001 mm without a trailing zero run. */
+function mm(value: number): string {
+  return String(Math.round(value * 1000) / 1000);
+}
+
+/**
+ * What a refusal calls an item, in the words the findings use (`jobSetup.itemLabel`). It lives
+ * here rather than being imported because `jobSetup.ts` imports this module.
+ */
+function inlayItemName(item: EngraveAnyItem): string {
+  if (!('kind' in item)) return `Engrave text "${item.text}"`;
+  const named = item.name !== undefined && item.name !== '' ? ` "${item.name}"` : '';
+  switch (item.kind) {
+    case 'rect':
+      return `Rectangle${named}`;
+    case 'circle':
+      return `Circle${named}`;
+    case 'slot':
+      return `Slot${named}`;
+    case 'polygon':
+      return `Polygon${named}`;
+    case 'border':
+      return `Border${named}`;
+    case 'frame':
+      return `Frame${named}`;
+    case 'cutaway':
+      return `Cutaway${named}`;
+    case 'vector':
+      return `Imported outline${named}`;
+  }
+}
+
+/** What a referenced item is to the item naming it, for the refusal sentence. */
+type MaleRefRole = 'outline' | 'island';
+
+/** One item kind's mirrored copies, collected per list of the male document. */
+interface MaleIslandItems {
+  shapes: EngraveShape[];
+  combined: EngraveCombinedShape[];
+  vectors: EngraveVectorShape[];
+}
+
+interface MaleCopyContext {
+  /** The male blank's width: the line the design mirrors about. */
+  stockWidth: number;
+  /** The plug depth every construction copy is given, mm (a construction item never cuts). */
+  depth: number;
+  /** Every item of the female's document, by id, for a combined item's references. */
+  byId: ReadonlyMap<string, EngraveAnyItem>;
+  customFonts: readonly CustomFont[];
+  /** The id of the marked region's own copy; referenced copies are named from it. */
+  rootId: string;
+  out: MaleIslandItems;
+  /** Original id → copy id, so a shared reference is copied once. */
+  copies: Map<string, string>;
+  /** The ids on the current reference path, so a cycle is refused rather than followed. */
+  visiting: Set<string>;
+}
+
+type MaleCopy = { ok: true; id: string } | { ok: false; reason: string };
+
+/** `it` for the marked region itself; `its island "x"` for an item it names. */
+function maleSubject(role: MaleRefRole | null, ref: string): string {
+  return role === null ? 'it' : `its ${role} "${ref}"`;
+}
+
+/** The name a mirrored copy carries, so the male's item list says what each construction is. */
+function maleCopyName(item: EngraveAnyItem, isRoot: boolean): string {
+  const suffix = isRoot ? 'plug' : 'mirror';
+  if (!('kind' in item)) return `Engrave text "${item.text}" (${suffix})`;
+  if (item.name !== undefined && item.name !== '') return `${item.name} (${suffix})`;
+  return isRoot ? 'male plug' : `mirror of ${inlayItemName(item)}`;
+}
+
+/** Strip every cut-only marker: a mirrored copy is a construction island, not a cut of its own. */
+function asConstruction<T extends EngraveShape | EngraveCombinedShape | EngraveVectorShape>(
+  item: T,
+  id: string,
+  depth: number,
+): T {
+  const base = {
+    ...item,
+    id,
+    depth,
+    enabled: true,
+    construction: true,
+    inlay: undefined,
+    texture: undefined,
+    prism: undefined,
+    vCarveDepth: undefined,
+    through: undefined,
+  };
+  return base as T;
+}
+
+/**
+ * A text label's placed outline as a construction VECTOR in the male document — the minimal model
+ * support #742 needs, because a label has no geometry field to mirror. The rings are mirrored in
+ * Y about the blank's centre line, then centred on their own box so the vector keeps the
+ * document's convention (contours relative to `position`, the box's centre).
+ */
+function pushLabelOutline(
+  label: EngraveLabel,
+  id: string,
+  outline: readonly (readonly [number, number][])[],
+  ctx: MaleCopyContext,
+  name: string,
+): string {
+  const mirrored = outline.map((ring) =>
+    ring.map(([x, y]) => [x, ctx.stockWidth - y] as [number, number]),
+  );
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const ring of mirrored) {
+    for (const [x, y] of ring) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  ctx.out.vectors.push({
+    id,
+    kind: 'vector',
+    name,
+    sourceName: label.text.trim() === '' ? 'text' : label.text.trim(),
+    contours: mirrored.map((ring) => ring.map(([x, y]) => [x - cx, y - cy] as [number, number])),
+    fillRule: 'NonZero',
+    width: Math.max(maxX - minX, 0.001),
+    height: Math.max(maxY - minY, 0.001),
+    position: { x: cx, y: cy },
+    rotation: 0,
+    depth: ctx.depth,
+    enabled: true,
+    construction: true,
+  });
+  return id;
+}
+
+/** Resolve one reference of a combined item to its mirrored copy. */
+function mirrorReference(ref: string, role: MaleRefRole, ctx: MaleCopyContext): MaleCopy {
+  const target = ctx.byId.get(ref);
+  if (target === undefined) {
+    return { ok: false, reason: `its ${role} "${ref}" is not in this job` };
+  }
+  if (!target.enabled) {
+    return { ok: false, reason: `its ${role} "${ref}" is switched off` };
+  }
+  return mirrorRegionIntoMale(target, `${ctx.rootId}-ref-${ref}`, ctx, role, false);
+}
+
+/**
+ * ONE female region — and everything a combined item references — as mirrored construction items
+ * in the male's document. Refused, with the clause that says why, when a kind cannot be expressed
+ * (a label with no text, a font that cannot be set here, a vector with no points) or a reference
+ * cannot be followed (missing, switched off, or a cycle).
+ */
+function mirrorRegionIntoMale(
+  item: EngraveAnyItem,
+  id: string,
+  ctx: MaleCopyContext,
+  role: MaleRefRole | null,
+  isRoot: boolean,
+): MaleCopy {
+  const memo = ctx.copies.get(item.id);
+  if (memo !== undefined) return { ok: true, id: memo };
+  const subject = maleSubject(role, item.id);
+  if (ctx.visiting.has(item.id)) {
+    return { ok: false, reason: `${subject} refers back to itself` };
+  }
+
+  ctx.visiting.add(item.id);
+  try {
+    let result: MaleCopy;
+    if (!('kind' in item)) {
+      let outline: [number, number][][] | null;
+      try {
+        outline = labelOutline(item, ctx.customFonts);
+      } catch {
+        // `resolveFont` throws when a face is not parsed (a custom font can also be unavailable).
+        return { ok: false, reason: `${subject} cannot be set in its font` };
+      }
+      if (outline === null || outline.length === 0) {
+        return {
+          ok: false,
+          reason: item.text.trim() === '' ? `${subject} has no text` : `${subject} has no shape`,
+        };
+      }
+      result = { ok: true, id: pushLabelOutline(item, id, outline, ctx, maleCopyName(item, isRoot)) };
+    } else if (item.kind === 'border') {
+      // A border follows the stock outline, which is a rectangle centred on the blank: the Y
+      // mirror maps it onto itself, so the copy is the same ring under a new id.
+      ctx.out.combined.push({ ...asConstruction(item, id, ctx.depth), name: maleCopyName(item, isRoot) });
+      result = { ok: true, id };
+    } else if (item.kind === 'frame') {
+      const around = mirrorReference(item.around, 'outline', ctx);
+      if (!around.ok) return around;
+      ctx.out.combined.push({
+        ...asConstruction(item, id, ctx.depth),
+        name: maleCopyName(item, isRoot),
+        around: around.id,
+      });
+      result = { ok: true, id };
+    } else if (item.kind === 'cutaway') {
+      const outer = mirrorReference(item.outer, 'outline', ctx);
+      if (!outer.ok) return outer;
+      const islands: string[] = [];
+      for (const island of item.islands) {
+        const copy = mirrorReference(island, 'island', ctx);
+        if (!copy.ok) return copy;
+        islands.push(copy.id);
+      }
+      ctx.out.combined.push({
+        ...asConstruction(item, id, ctx.depth),
+        name: maleCopyName(item, isRoot),
+        outer: outer.id,
+        islands,
+      });
+      result = { ok: true, id };
+    } else if (item.kind === 'vector') {
+      if (item.contours.length === 0) return { ok: false, reason: `${subject} has no shape` };
+      const mirrored = mirrorShapeInY(item, ctx.stockWidth);
+      ctx.out.vectors.push({ ...asConstruction(mirrored, id, ctx.depth), name: maleCopyName(item, isRoot) });
+      result = { ok: true, id };
+    } else {
+      const mirrored = mirrorShapeInY(item, ctx.stockWidth);
+      ctx.out.shapes.push({ ...asConstruction(mirrored, id, ctx.depth), name: maleCopyName(item, isRoot) });
+      result = { ok: true, id };
+    }
+    if (result.ok) ctx.copies.set(item.id, result.id);
+    return result;
+  } finally {
+    ctx.visiting.delete(item.id);
+  }
+}
+
+export type InlayMaleResult =
+  | { ok: true; job: EngraveJob }
+  | {
+      ok: false;
+      reason: string;
+      /** The marked item whose region refused, when the refusal is about one region. */
+      itemId?: string;
+    };
 
 /**
  * #673 — THE MALE BLANK'S DOCUMENT, derived from the female's.
  *
  * The male is an ordinary job: one blank (a copy of the female's, its measured bow dropped — it
- * is a different piece), the same cutter, and ONE cutaway per inlay region. The cutaway clears the
- * blank's inset minus the region's island, and the island is the design MIRRORED in Y. Its depth
- * is the derived `P = F − g`, and its marker stores the numbers it was built for, including the
- * island's erosion (`g·tanθ`), which `itemProfile` applies as a profile offset.
+ * is a different piece), the same cutter, and ONE cutaway whose islands are ALL the inlay regions.
+ * Each region's ISLAND is a construction copy of the marked item MIRRORED in Y (#742): a shape, a
+ * combined item with mirrored copies of everything it references, a vector, or a label converted
+ * to a vector of its placed glyph outline. The cutaway clears everything around those islands, so
+ * each one survives as a plug. Its depth is the derived `P = F − g`, and its marker stores the
+ * numbers it was built for, including the island's erosion (`F·tanθ`), which `itemProfile` applies
+ * as a profile offset.
  *
- * Refused (with the reason) when the female has no inlay region or one of its numbers does not
- * derive; the findings say the same sentence in the panel.
+ * Refused — with a sentence that names the region — when the female has no inlay region, when a
+ * region's numbers do not derive, or when a mark cannot be expressed as a mirrored island (text
+ * with no ink, a reference that is missing or switched off). Nothing is silently dropped: a male
+ * missing one of its regions would be an incomplete pair.
  */
 export function inlayMaleJob(job: EngraveJob, cone: VCone): InlayMaleResult {
-  const shapeIds = new Set(job.shapes.map((shape) => shape.id));
   const females = inlayMarked(job).filter(
-    (entry) => entry.mark.role === 'female' && shapeIds.has(entry.item.id),
-  ) as { item: EngraveShape; mark: InlayMark }[];
+    (entry) => entry.mark.role === 'female' && entry.item.enabled,
+  );
   if (females.length === 0) {
     return { ok: false, reason: 'this job has no inlay region to make a male for' };
   }
+  const byId = new Map<string, EngraveAnyItem>();
+  for (const item of [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])]) {
+    if (!byId.has(item.id)) byId.set(item.id, item);
+  }
   const margin = Math.max(job.edgeMargin, 0.5);
-  const derived = females
-    .map((entry) => ({ entry, check: inlayNumbers(cone, entry.item.depth, inlayGlueGap(entry.mark)) }))
-    .filter((row): row is { entry: (typeof females)[number]; check: { ok: true; numbers: InlayNumbers } } => row.check.ok);
-  if (derived.length === 0) {
-    return { ok: false, reason: 'the inlay numbers do not derive — fix the glue gap or the pocket depth first' };
+  const out: MaleIslandItems = { shapes: [], combined: [], vectors: [] };
+  const regions: { item: EngraveAnyItem; numbers: InlayNumbers; islandId: string }[] = [];
+  for (const { item, mark } of females) {
+    const who = inlayItemName(item);
+    // #742 — a REFERENCE item cuts nothing, so its "pocket" is not a pocket: a male derived from
+    // it would pair with a female half the female's own program never made. Refused in words, not
+    // dropped (the mark may be left over from before the item was made reference-only).
+    if (item.construction === true) {
+      return {
+        ok: false,
+        itemId: item.id,
+        reason:
+          `${who} is marked as the female half of an inlay, but no male can be made: it is ` +
+          'reference only, so there is no pocket for a plug to fit.',
+      };
+    }
+    const check = inlayNumbers(cone, item.depth, inlayGlueGap(mark));
+    if (!check.ok) {
+      return {
+        ok: false,
+        itemId: item.id,
+        reason: `${who} is marked as the female half of an inlay, but no male can be made: ${check.reason}.`,
+      };
+    }
+    const islandId = `inlay-plug-${regions.length + 1}`;
+    const copied = mirrorRegionIntoMale(
+      item,
+      islandId,
+      {
+        stockWidth: job.stock.width,
+        depth: check.numbers.plugDepthMm,
+        byId,
+        customFonts: job.customFonts,
+        rootId: islandId,
+        out,
+        copies: new Map(),
+        visiting: new Set(),
+      },
+      null,
+      true,
+    );
+    if (!copied.ok) {
+      return {
+        ok: false,
+        itemId: item.id,
+        reason: `${who} is marked as the female half of an inlay, but no male can be made: ${copied.reason}.`,
+      };
+    }
+    regions.push({ item, numbers: check.numbers, islandId });
   }
   // The construction items never cut, but the schema wants a real depth on every shape; the plug
   // depth is the honest one (it is the depth the island is carved around).
@@ -210,7 +530,7 @@ export function inlayMaleJob(job: EngraveJob, cone: VCone): InlayMaleResult {
       kind: 'rect',
       position: { x: job.stock.length / 2, y: job.stock.width / 2 },
       rotation: 0,
-      depth: derived[0]!.check.numbers.plugDepthMm,
+      depth: regions[0]!.numbers.plugDepthMm,
       cornerRadius: 0,
       width: Math.max(0.1, job.stock.length - 2 * margin),
       height: Math.max(0.1, job.stock.width - 2 * margin),
@@ -218,41 +538,67 @@ export function inlayMaleJob(job: EngraveJob, cone: VCone): InlayMaleResult {
       construction: true,
     },
   ];
-  const cuts: EngraveCombinedShape[] = [];
-  derived.forEach(({ entry, check }, index) => {
-    const n = check.numbers;
-    const mirrored = mirrorShapeInY(entry.item, job.stock.width);
-    const islandId = `inlay-plug-${index + 1}`;
-    const island: EngraveShape = {
-      ...mirrored,
-      id: islandId,
-      name: entry.item.name === undefined ? 'male plug' : `${entry.item.name} (plug)`,
-      depth: n.plugDepthMm,
-      construction: true,
-      inlay: undefined,
+  // #742 review — ONE CUTAWAY, because a plug is one piece of the male blank. One cutaway PER
+  // region each cleared the blank except for its OWN island, so with two marks the ring's cutaway
+  // erased the lettering's island (and the lettering's erased the ring): together they cut away
+  // the whole blank and no plug survived. The one cutaway names EVERY region as an island, so
+  // each is excluded from the region that clears around it.
+  //
+  // `itemProfile` erodes every island of a male cutaway by the ONE `islandInsetMm` the marker
+  // stores. Mixed pocket depths or glue gaps would therefore cut one region's island at another
+  // region's inset, and which one won would depend on document order — refuse them instead of
+  // silently making a pair that does not fit.
+  const first = regions[0]!.numbers;
+  for (const region of regions) {
+    const n = region.numbers;
+    if (
+      Math.abs(n.pocketDepthMm - first.pocketDepthMm) <= 1e-9 &&
+      Math.abs(n.glueGapMm - first.glueGapMm) <= 1e-9
+    ) {
+      continue;
+    }
+    return {
+      ok: false,
+      itemId: region.item.id,
+      reason:
+        `${inlayItemName(region.item)} and ${inlayItemName(regions[0]!.item)} are both female ` +
+        'halves of one inlay, but their pockets are ' +
+        `${mm(n.pocketDepthMm)} mm deep with a ${mm(n.glueGapMm)} mm glue gap and ` +
+        `${mm(first.pocketDepthMm)} mm deep with a ${mm(first.glueGapMm)} mm glue gap. A male ` +
+        'plug is one piece cut by one region around every island, so all the female halves must ' +
+        'share one depth and one glue gap: match them, or save this half as a job of its own.',
     };
-    shapes.push(island);
-    cuts.push({
+  }
+  const only = regions[0]!.item;
+  const onlyName = 'kind' in only ? only.name : `Engrave text "${only.text}"`;
+  const cuts: EngraveCombinedShape[] = [
+    {
       kind: 'cutaway',
-      id: `inlay-male-${index + 1}`,
-      name: entry.item.name === undefined ? 'male plug' : `${entry.item.name} — male plug`,
+      id: 'inlay-male-1',
+      name:
+        regions.length > 1
+          ? 'male plugs'
+          : onlyName === undefined || onlyName === ''
+            ? 'male plug'
+            : `${onlyName} — male plug`,
       position: { x: 0, y: 0 },
       rotation: 0,
-      depth: n.plugDepthMm,
+      depth: first.plugDepthMm,
       enabled: true,
       outer: blankId,
-      islands: [islandId],
+      islands: regions.map((region) => region.islandId),
       inlay: {
         role: 'male',
-        glueGapMm: n.glueGapMm,
-        pocketDepthMm: n.pocketDepthMm,
-        tanHalf: n.tanHalf,
+        glueGapMm: first.glueGapMm,
+        pocketDepthMm: first.pocketDepthMm,
+        tanHalf: first.tanHalf,
         // The island's TOP face is the plug's TIP (the V's hole grows with depth), so the island
-        // is eroded by the tip's inset — the female floor's extent — not by the base's ring.
-        islandInsetMm: n.endInsetMm,
+        // is eroded by the tip's inset — the female floor's extent — not by the base's ring. Every
+        // region shares it: the mixed-numbers refusal above is what makes one inset honest.
+        islandInsetMm: first.endInsetMm,
       },
-    });
-  });
+    },
+  ];
   const { flatness: _measuredOnTheFemale, ...stock } = job.stock;
   return {
     ok: true,
@@ -262,11 +608,13 @@ export function inlayMaleJob(job: EngraveJob, cone: VCone): InlayMaleResult {
       name: inlayMaleJobName(job.name),
       machineId: job.machineId,
       stock,
-      // The plug's island is a construction item; the cutaway is the one operation. No setups:
-      // the implicit single setup cuts every enabled region with the job's cutter.
+      // Each plug's island is a construction item (or items, for a combined region); the
+      // cutaways are the operations. No setups: the implicit single setup cuts every enabled
+      // region with the job's cutter.
       labels: [],
-      shapes,
-      combined: cuts,
+      shapes: [...shapes, ...out.shapes],
+      combined: [...out.combined, ...cuts],
+      ...(out.vectors.length === 0 ? {} : { vectors: out.vectors }),
       toolKey: job.toolKey,
       ...(job.tool === undefined ? {} : { tool: job.tool }),
       workholding: job.workholding,

@@ -72,6 +72,51 @@ const positionSchema = z.object({
   y: z.number().finite().describe("Y in millimetres from the stock's front-left corner."),
 });
 
+/**
+ * #673 — one half of a V-carve inlay, as the document stores it. The FEMALE keeps the operator's
+ * number (the glue gap); the MALE keeps the numbers it was BUILT for, which its sheet quotes and
+ * its geometry needs. Strict, so a hand-edited key is refused rather than silently dropped.
+ *
+ * Defined before `labelSchema` because since #742 a LABEL can carry the mark too: lettering is
+ * what most inlay jobs are.
+ */
+const inlayMarkSchema = z
+  .object({
+    role: z
+      .enum(['female', 'male'])
+      .describe("Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male')."),
+    glueGapMm: z
+      .number()
+      .finite()
+      .positive()
+      .max(20)
+      .optional()
+      .describe('Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).'),
+    pocketDepthMm: z
+      .number()
+      .finite()
+      .positive()
+      .max(20)
+      .optional()
+      .describe('Male only: the female pocket depth this male was built for, in millimetres.'),
+    tanHalf: z
+      .number()
+      .finite()
+      .positive()
+      .max(10)
+      .optional()
+      .describe('Male only: the cone half-angle tangent this male was built for.'),
+    islandInsetMm: z
+      .number()
+      .finite()
+      .nonnegative()
+      .max(20)
+      .optional()
+      .describe('Male only: the plug island’s erosion at its top face, in millimetres (the pocket depth times the half-angle tangent).'),
+  })
+  .strict()
+  .describe('A V-carve inlay half: its role and the glue-gap numbers it runs or was built for.');
+
 const labelSchema = z.object({
   id: z.string().min(1).describe('Unique id for this label within the job.'),
   text: z.string().max(MAX_TEXT_LENGTH).describe('The text to engrave.'),
@@ -114,6 +159,10 @@ const labelSchema = z.object({
     .boolean()
     .optional()
     .describe('Reference-only: cut nothing, but validators may use its geometry; omit for a real label.'),
+  // #742 — a label can be a female inlay half too. Optional, so a pre-#742 document keeps no key.
+  inlay: inlayMarkSchema
+    .optional()
+    .describe('This label is one half of a V-carve inlay; omit for an ordinary label.'),
 });
 
 /**
@@ -125,48 +174,6 @@ const labelSchema = z.object({
 const polygonPointSchema = z
   .tuple([z.number().finite(), z.number().finite()])
   .describe('An [x, y] point in millimetres, relative to the item position.');
-
-/**
- * #673 — one half of a V-carve inlay, as the document stores it. The FEMALE keeps the operator's
- * number (the glue gap); the MALE keeps the numbers it was BUILT for, which its sheet quotes and
- * its geometry needs. Strict, so a hand-edited key is refused rather than silently dropped.
- */
-const inlayMarkSchema = z
-  .object({
-    role: z
-      .enum(['female', 'male'])
-      .describe("Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male')."),
-    glueGapMm: z
-      .number()
-      .finite()
-      .positive()
-      .max(20)
-      .optional()
-      .describe('Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).'),
-    pocketDepthMm: z
-      .number()
-      .finite()
-      .positive()
-      .max(20)
-      .optional()
-      .describe('Male only: the female pocket depth this male was built for, in millimetres.'),
-    tanHalf: z
-      .number()
-      .finite()
-      .positive()
-      .max(10)
-      .optional()
-      .describe('Male only: the cone half-angle tangent this male was built for.'),
-    islandInsetMm: z
-      .number()
-      .finite()
-      .nonnegative()
-      .max(20)
-      .optional()
-      .describe('Male only: the plug island’s erosion, in millimetres (the glue gap times the half-angle tangent).'),
-  })
-  .strict()
-  .describe('A V-carve inlay half: its role and the glue-gap numbers it runs or was built for.');
 
 /**
  * #670 — a surface texture, as the document stores it: the pattern and its numbers. Strict, so a

@@ -215,6 +215,13 @@ export interface EngraveLabel {
    * `frame` or a `cutaway`. A label cleared as an ISLAND is the raised-text case.
    */
   construction?: boolean;
+  /**
+   * #742 — this label is one half of a V-CARVE INLAY, exactly as on a shape (#673): the text is
+   * the pocket in one blank (the FEMALE), and the male derivation makes the matching plug from
+   * the glyph outline mirrored in Y. One marker per half; an inlay is two JOBS, one per blank
+   * (see `engine/cnc/engrave/inlay.ts`).
+   */
+  inlay?: InlayMark;
 }
 
 /**
@@ -320,7 +327,7 @@ export interface TextureMark {
  * 0.2 mm — the module's labelled default). Her pocket depth is the shape's own `depth`.
  *
  * The MALE stores the numbers it was BUILT for, as provenance, plus the one derived number its
- * geometry needs (`islandInsetMm` = `glueGapMm · tan(halfAngle)`, the erosion of the island it
+ * geometry needs (`islandInsetMm` = `pocketDepthMm · tanHalf`, the erosion of the island it
  * carves around). A male is generated from a female by an action, not edited by hand; the run
  * sheet says to generate it again if the female changed.
  */

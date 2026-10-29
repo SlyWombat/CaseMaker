@@ -189,15 +189,26 @@ J['j10-plaque-30v'] = plaque('j10-plaque-30v', 'inv:kz-engrave-30-0-5')
 # ---------------------------------------------------------------------------------------------------
 # j11 Carbide 3D forum: V-carve inlay pockets for band logos in a cherry board. Modelled: the round
 # logo's female pocket — a ring 60 mm across, 4 mm wide, around "FF" in a serif — at the guide's
-# 5.1 mm pocket depth and 1.3 mm glue gap, then the male plug the app derives from it.
-def ffinlay(name, tool):
+# 1.3 mm glue gap, then the male plug the app derives from it. The 30° copy's pocket is 4.8 mm (not
+# the guide's 5.1 mm): that cutter's cone reaches its ⌀3.175 mm body at 4.992 mm, so 5.1 mm would be
+# cut by the bit's vertical body above the cone (#741). 4.8 mm sits inside that cone and leaves the
+# plug 3.5 mm deep with a 1.286 mm end inset (4.8 × tan 15°).
+def ffinlay(name, tool, label_inlay=False, pocket=5.1):
     j = base(name, 80, 80, 12, 'pla', tool, proud=5)
-    j['shapes'] = [circle('ring-outer', 40, 40, 60, 5.1, construction=True),
-                   circle('ring-inner', 40, 40, 52, 5.1, construction=True)]
-    j['combined'] = [cutaway('ring', 'ring-outer', ['ring-inner'], 5.1, inlay={"role": "female", "glueGapMm": 1.3})]
-    j['labels'] = [label('ff', 'FF', 40, 40, 22, 5.1, font='serif-default', weight='bold')]
+    j['shapes'] = [circle('ring-outer', 40, 40, 60, pocket, construction=True),
+                   circle('ring-inner', 40, 40, 52, pocket, construction=True)]
+    j['combined'] = [cutaway('ring', 'ring-outer', ['ring-inner'], pocket, inlay={"role": "female", "glueGapMm": 1.3})]
+    j['labels'] = [label('ff', 'FF', 40, 40, 22, pocket, font='serif-default', weight='bold')]
+    if label_inlay:
+        # #742 — the lettering is a female inlay half too, so the male is made for the ring AND the
+        # text. Only the 30° copy: the 90° job is #740's fixture, whose scene needs ONE plane-model
+        # label beside the inlay (and its 45° flank erodes both 5.1 mm pockets' floors anyway).
+        j['labels'][0]['inlay'] = {"role": "female", "glueGapMm": 1.3}
     return j
-J['j11-inlay-female-30v'] = ffinlay('j11-inlay-female-30v', 'inv:kz-engrave-30-0-5')
+J['j11-inlay-female-30v'] = ffinlay('j11-inlay-female-30v', 'inv:kz-engrave-30-0-5', label_inlay=True, pocket=4.8)
+# The 90° twin stays at the guide's 5.1 mm on purpose: it carries no inlay mark and is #740's
+# chamfer-tip scene, and #741 already refuses its 5.1 mm pocket on that cutter's 1.59 mm cone.
+# Moving it would change another issue's fixture without making the pocket cuttable.
 J['j11-inlay-female-90v'] = ffinlay('j11-inlay-female-90v', 'inv:kz-chamfer-90')
 
 # ---------------------------------------------------------------------------------------------------

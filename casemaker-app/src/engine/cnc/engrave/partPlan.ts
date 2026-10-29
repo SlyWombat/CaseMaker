@@ -1,5 +1,5 @@
 import { glyphProfile } from '@/engine/compiler/glyphs';
-import { DEFAULT_INLAY_GLUE_GAP_MM } from './inlay';
+import { DEFAULT_INLAY_GLUE_GAP_MM } from './inlayDefaults';
 import { textureCarries, textureNumbers, textureOperationName, textureStrokes } from './texture';
 import { fluteNumbers, fluteOperationName, fluteProfile } from './flute';
 import { prismNumbers, prismRingProfile } from './prism';
@@ -279,6 +279,42 @@ export function labelProfile(label: EngraveLabel, customFonts: readonly CustomFo
   const centred = pTranslate([-cx, -cy], glyphs);
   const rotated = pRotate(label.rotation, centred);
   return pTranslate([label.position.x, label.position.y], rotated);
+}
+
+/**
+ * The SAME placement as {@link labelProfile}, as flattened point rings in the stock frame.
+ *
+ * Most readers take the profile tree and let the worker evaluate it. Two cannot: the male inlay's
+ * island must be STORED as a construction item in a second document (#742), and the viewport's
+ * warning overlay (#549) draws plain rings. Both need the placed outline itself, so this is the
+ * one numeric implementation of labelProfile's three moves — centre on the ink box, rotate about
+ * that centre, translate to `position` — written out point by point.
+ *
+ * `null` when the text has no ink (an empty or whitespace-only line), when the face does not
+ * yield flattened contours, or when `resolveFont` throws because that face is not parsed yet.
+ * Unlike `labelProfile` (whose empty `p-poly` is kept so #201 can report it), a caller of THIS
+ * function has no region to cut and must say so.
+ */
+export function labelOutline(
+  label: EngraveLabel,
+  customFonts: readonly CustomFont[],
+): [number, number][][] | null {
+  const glyphs = glyphProfile(label.text, resolveFont(label.font, label.weight, customFonts), label.size);
+  if (glyphs.kind !== 'p-poly') return null;
+  const box = aabbOfProfile(glyphs);
+  if (!box) return null;
+  const cx = (box.min[0] + box.max[0]) / 2;
+  const cy = (box.min[1] + box.max[1]) / 2;
+  const a = (label.rotation * Math.PI) / 180;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return glyphs.contours.map((contour) =>
+    contour.map(([x, y]) => {
+      const px = x - cx;
+      const py = y - cy;
+      return [px * c - py * s + label.position.x, px * s + py * c + label.position.y] as [number, number];
+    }),
+  );
 }
 
 /**
@@ -677,10 +713,11 @@ export function itemProfile(
     case 'cutaway': {
       const outer = ctx?.profileOf(item.outer) ?? null;
       if (!outer) return emptyProfile();
-      // #673 — a MALE inlay half cuts the complement AROUND the plug, and the plug must sit
-      // inside the female's opening by the glue gap's slant (`g·tanθ`): the island is eroded by
-      // the inset the male stored when it was built. A profile node, so the geometry worker
-      // evaluates it — the preview, the CAM and the verifier all see the same edge.
+      // #673 — a MALE inlay half cuts the complement AROUND the plug. The plug's base sits
+      // inside the female's opening by the glue gap's slant (`g·tanθ`), and its END — the island's
+      // top face, which this erosion gives — is the female floor's extent (`F·tanθ`); the male
+      // stores that end inset. A profile node, so the geometry worker evaluates it — the preview,
+      // the CAM and the verifier all see the same edge.
       const inset = item.inlay?.role === 'male' ? (item.inlay.islandInsetMm ?? 0) : 0;
       const islands: Profile[] = [];
       for (const id of item.islands) {
