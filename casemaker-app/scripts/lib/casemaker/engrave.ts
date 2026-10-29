@@ -103,6 +103,7 @@ import {
   attributedDiagnostics,
   sweepPrograms,
   sweepSummary,
+  type ProgramSweepOutcome,
   type ProgramSweepSummary,
 } from '../../../src/engine/cnc/engrave/programSweep';
 import { buildCouponPrograms, type CouponRecord, type CouponRecordRow, type CouponSpec } from '../../../src/engine/cnc/engrave/couponJob';
@@ -260,6 +261,41 @@ function invalidDocument(code: string, message: string): EngraveFailure {
 /** A job document the command cannot read or the schema refuses (#733 item 3). */
 function invalidJob(message: string): EngraveFailure {
   return invalidDocument('invalid-job', message);
+}
+
+/**
+ * #749 — A CRASH IN THE GEOMETRY KERNEL IS A STOPPED RUN, NOT AN EXCEPTION.
+ *
+ * The kernel (manifold-3d's wasm) throws `RuntimeError: memory access out of bounds` when a CSG
+ * tree outgrows its 4 GiB heap. It is not a job-document problem and it is not recoverable here,
+ * but it must not escape the command: `--json` promises stdout is exactly one receipt (#478),
+ * and an uncaught throw leaves stdout empty — no stage, no reason, nothing for a caller to read
+ * (#749: `casemaker cut` on a through cut-out died after ~90 s with a 0-byte stdout).
+ *
+ * The receipt names the stage that was running, carries the kernel's own words, and says plainly
+ * that nothing was written. `source` is the receipt's own vocabulary ('findings' where the
+ * generator runs, 'simulation' where the sweep does); the refusal code is the same
+ * `stage-error` the generator's own stops use, so a caller needs no new vocabulary.
+ */
+function stageCrash(
+  stage: string,
+  gate: Receipt['gate'],
+  what: string,
+  program: string | null,
+  error: unknown,
+  source: 'findings' | 'simulation',
+): EngraveFailure {
+  const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  const message =
+    `the geometry kernel crashed while ${what} (the ${stage} stage): ${detail}. ` +
+    'Nothing was written. This is a fault in the geometry kernel, not a problem with the job.';
+  console.error(`casemaker cut: ${message}`);
+  return {
+    stage,
+    gate,
+    diagnostics: [diagnostic('stage-error', 'error', message, source, program)],
+    refusals: [{ code: 'stage-error', reason: message }],
+  };
 }
 
 /**
@@ -692,7 +728,18 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     // `threadSettings`). #733 — `shop.tools` is the registry snapshot; without it a setup's later
     // cutter (a `user:` or `inv:` key) is not on the worker's bench and the run stops at
     // `setup-rest-unavailable`.
-    const generated = engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
+    // #749 — the generator builds Clipper/Manifold CSG from the job's own geometry; a kernel
+    // crash there is caught (never a bare throw) and answered as a stopped run at `cam`.
+    let generated: EngraveGenerated;
+    try {
+      generated = engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
+    } catch (e) {
+      if (isCliExit(e)) throw e;
+      return {
+        ok: false,
+        failure: stageCrash('cam', 'generated', 'generating the toolpath', job.name, e, 'findings'),
+      };
+    }
     if (!generated.ok || generated.nc === null) {
       return {
         ok: false,
@@ -774,30 +821,49 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     // The web run store runs the same function, so the two realms cannot disagree about what
     // "every program swept" means.
     const sweptBox: { load: SimLoadOk | null } = { load: null };
-    const outcome = await sweepPrograms({
-      programs: generated.programs,
-      shopDrillPoint,
-      // `toolForProgram`'s reading: the job's own snapshot for the job's key, the registry for a
-      // setup's later cutter.
-      cutterFor: (program) =>
-        program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
-      load: async ({ program, cutter, drillPoint, priorRemoval }) =>
-        session.load(program.nc, toSetup(job, Z1), cutter, Z1.id, {
-          // #734 — the CAM posts a through move to `thickness + breakthrough`, so the sweep's floor
-          // must be the same: without it a correct through cut's retract reads as a rapid through
-          // material (j17 reproduced the bench's `rapid-through-stock` on 7 vertical retracts).
-          // Every program gets the floor, not only the first.
-          breakthroughMm: job.breakthrough,
-          // #744 — the list as the earlier programs left it; the session unions it into the one seed
-          // mesh the exact sweeper takes. An empty list is no seed.
-          ...(priorRemoval.length === 0 ? {} : { priorRemoval }),
-          ...(drillPoint === null ? {} : { drillPointDefault: drillPoint }),
-        }),
-      afterLoad: ({ index, result }) => {
-        if (index === sweptIndex) sweptBox.load = result;
-      },
-      initialRemoval: opts.priorRemoval === undefined ? [] : [opts.priorRemoval],
-    });
+    // #749 — WHICH PROGRAM WAS BEING SWEPT, so a kernel crash can name it. The walk itself is
+    // shared with the app and does not catch a load that throws; this boundary does, because the
+    // command line owns the session it must then dispose and the receipt it must still emit.
+    let sweeping = 'the program';
+    let outcome: ProgramSweepOutcome;
+    try {
+      outcome = await sweepPrograms({
+        programs: generated.programs,
+        shopDrillPoint,
+        // `toolForProgram`'s reading: the job's own snapshot for the job's key, the registry for a
+        // setup's later cutter.
+        cutterFor: (program) =>
+          program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
+        load: async ({ program, index, cutter, drillPoint, priorRemoval }) => {
+          sweeping =
+            (program.kind ?? 'engrave') === 'facing'
+              ? `the facing pass (${program.toolKey})`
+              : `program ${index + 1} (${program.toolKey})`;
+          return session.load(program.nc, toSetup(job, Z1), cutter, Z1.id, {
+            // #734 — the CAM posts a through move to `thickness + breakthrough`, so the sweep's floor
+            // must be the same: without it a correct through cut's retract reads as a rapid through
+            // material (j17 reproduced the bench's `rapid-through-stock` on 7 vertical retracts).
+            // Every program gets the floor, not only the first.
+            breakthroughMm: job.breakthrough,
+            // #744 — the list as the earlier programs left it; the session unions it into the one seed
+            // mesh the exact sweeper takes. An empty list is no seed.
+            ...(priorRemoval.length === 0 ? {} : { priorRemoval }),
+            ...(drillPoint === null ? {} : { drillPointDefault: drillPoint }),
+          });
+        },
+        afterLoad: ({ index, result }) => {
+          if (index === sweptIndex) sweptBox.load = result;
+        },
+        initialRemoval: opts.priorRemoval === undefined ? [] : [opts.priorRemoval],
+      });
+    } catch (e) {
+      if (isCliExit(e)) throw e;
+      session.dispose();
+      return {
+        ok: false,
+        failure: stageCrash('simulated', 'simulated', `simulating ${sweeping}`, job.name, e, 'simulation'),
+      };
+    }
 
     if (!outcome.ok) {
       const failure = outcome.failed;
@@ -855,12 +921,24 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     );
     // The material the run leaves, cumulative: the rest route's seed plus every program's removal,
     // unioned once here. Null when nothing was removed.
-    const removal: NodeMeshOutput | null =
-      outcome.priorRemoval.length === 0
-        ? null
-        : outcome.priorRemoval.length === 1
-          ? outcome.priorRemoval[0]!
-          : unionRemoval(tl, outcome.priorRemoval);
+    let removal: NodeMeshOutput | null;
+    try {
+      removal =
+        outcome.priorRemoval.length === 0
+          ? null
+          : outcome.priorRemoval.length === 1
+            ? outcome.priorRemoval[0]!
+            : unionRemoval(tl, outcome.priorRemoval);
+    } catch (e) {
+      // #749 — the same boundary as the sweep above: a union of the programs' removal meshes is
+      // kernel work, and a crash in it must still answer the one receipt.
+      if (isCliExit(e)) throw e;
+      session.dispose();
+      return {
+        ok: false,
+        failure: stageCrash('simulated', 'simulated', 'combining the programs’ removal', job.name, e, 'simulation'),
+      };
+    }
     return {
       ok: true,
       job,
