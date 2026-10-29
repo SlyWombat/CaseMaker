@@ -18,6 +18,12 @@
  * (`f = 0`, `rPlane = tipRadius`): a pointed bit draws a line `2·D·tanHalf` wide at the surface and
  * nothing at the bottom, which the run sheet says in words.
  *
+ * #748 — A CUT ON A POCKET'S FLOOR IS MEASURED FROM THAT FLOOR. The surface the item sits on is at
+ * depth `F` (0 at the stock top, the pocket's depth on a floor), and every distance is taken over
+ * the material thickness `D − F`: the surface opening is `(D − F)·tanHalf` per side, a film counts
+ * only where it lies below `F`, and a `D = F + 0.25` label inside a 4 mm recess has a 0.25 mm cone
+ * above it, not a 4.25 mm one. At `F = 0` each number is exactly the pre-#748 one.
+ *
  * THE STEPOVER is `ratio × 2·rPlane` — of the groove's width AT THE PLANE, never of the tip flat
  * ({@link vCarvePlaneStepover}, seed {@link DEFAULT_V_CARVE_STEPOVER_RATIO}).
  *
@@ -138,11 +144,26 @@ export function cutDepthAtDistance(cone: VCone, rho: number, cap: number): numbe
  *
  * All lengths are mm. `planeRadius` is the number the toolpath actually offsets the design by;
  * the floor and the surface are consequences of the cone, not separate offsets the CAM applies.
+ *
+ * #748 — `floor` is the SURFACE THE ITEM SITS ON: 0 for an item on the blank's top face, or the
+ * depth of the pocket/region whose floor it lies on. Every cone distance is measured from that
+ * surface, not from the stock's top face: a label 0.25 mm below a 4 mm pocket floor has a 0.25 mm
+ * cone above it, not a 4.25 mm one.
  */
 export interface VCarvePlane {
   /** The item's depth below the top face, mm. The tip plane. */
   depth: number;
-  /** The colour boundary's depth below the top face, mm; 0 when the blank states no film. */
+  /**
+   * #748 — the depth of the surface the item sits on, below the top face, mm: 0 at the stock top,
+   * the pocket's depth on a pocket floor. Never deeper than `depth`.
+   */
+  floor: number;
+  /** The cut's depth IN MATERIAL, `depth − floor`, mm. The cone's whole span from the tip up. */
+  material: number;
+  /**
+   * The colour boundary's depth below the top face, mm; 0 when the blank states no film OR the
+   * film is at or above the supporting floor (the recess already cut through it).
+   */
   film: number;
   /** `depth − film`, floored at 0: how far the floor is below the colour plane, mm. */
   belowPlane: number;
@@ -154,7 +175,10 @@ export interface VCarvePlane {
   floorInset: number;
   /** How much wider the surface opening is than the design, per side, mm. */
   surfaceOutset: number;
-  /** Floor-to-surface widening per side, mm — the whole cone's `depth·tanHalf` span. */
+  /**
+   * The cone's span per side, mm — `material·tanHalf`, from the cut floor up to the surface the
+   * item sits on.
+   */
   wallOffset: number;
 }
 
@@ -163,28 +187,47 @@ export interface VCarvePlane {
  * face (0/null for a blank with no print): the plane then IS the floor and `rPlane` is the tip
  * radius, which is the "a pointed bit draws a line" case the run sheet describes.
  *
+ * #748 — `floor` is the depth of the surface the item sits on (0 at the stock top). The whole
+ * model is measured FROM THAT SURFACE: the material thickness is `depth − floor`, a film only
+ * counts where it lies below the floor (`floor + 1 mm` for a film 1 mm under a pocket floor), and
+ * the surface opening — the widening the merge check and the sheet quote — is measured up to the
+ * floor, not up to the stock's top face. At `floor = 0` every number is exactly what it was.
+ *
  * A cut SHALLOWER than the film has no colour plane at all; it is modelled with the plane at the
  * floor (`belowPlane = 0`) so the arithmetic stays finite. The depth bounds that stop such a cut
  * hiding the second colour belong to the item's own depth intent (`item-depth-bound`), not here.
  */
-export function vCarvePlane(cone: VCone, depth: number, film: number | null): VCarvePlane {
+export function vCarvePlane(cone: VCone, depth: number, film: number | null, floor: number = 0): VCarvePlane {
   positive('depth', depth);
+  nonNegative('floor', floor);
+  // An item at or above its supporting floor cuts no material. The floor is clamped rather than
+  // refused: the plan only ever assigns a floor ABOVE the item's depth, so this is a caller's
+  // degenerate input, and 0 mm of material is the honest answer rather than a crash.
+  const surface = Math.min(floor, depth);
+  const material = depth - surface;
   const f = film === null || !Number.isFinite(film) || film <= 0 ? 0 : film;
+  // A film at or above the supporting floor is no plane: the material the item cuts is already
+  // past the colour boundary, so the design is correct at the cut floor and the groove is the tip.
+  const filmDepth = f > surface + 1e-9 ? f : 0;
+  const filmBelow = filmDepth === 0 ? 0 : filmDepth - surface;
   // The plane is the colour boundary when the cut reaches it. With no film it is the floor; with a
   // film the cut does not reach, there is no plane below the floor either, so the floor stands in.
-  const belowPlane = f > 0 ? Math.max(0, depth - f) : 0;
+  const belowPlane = filmBelow > 0 ? Math.max(0, material - filmBelow) : 0;
   const planeRadius = cone.tipRadius + belowPlane * cone.tanHalf;
   return {
     depth,
-    film: f,
+    floor: surface,
+    material,
+    film: filmDepth,
     belowPlane,
     planeRadius,
     grooveWidth: planeRadius * 2,
     floorInset: belowPlane * cone.tanHalf,
-    // From the plane to the top face. No film puts the plane at the floor, so the cone's whole
-    // depth widens the surface; a film wider than the cut stops at the cut's own depth.
-    surfaceOutset: (f > 0 ? Math.min(depth, f) : depth) * cone.tanHalf,
-    wallOffset: depth * cone.tanHalf,
+    // From the plane up to the SURFACE THE ITEM SITS ON. No film puts the plane at the floor, so
+    // the cone's whole material depth widens the surface; a film wider than the cut stops at the
+    // cut's own depth.
+    surfaceOutset: (filmBelow > 0 ? Math.min(material, filmBelow) : material) * cone.tanHalf,
+    wallOffset: material * cone.tanHalf,
   };
 }
 

@@ -746,6 +746,15 @@ export interface EngraveGenerated {
    * polygons, each drill's discs, and — since #287 — each single-line trace's swept region.
    */
   predicted: OraclePredicted[];
+  /**
+   * #748 — the floors this run's items sit on, mm below the top face (missing ids: the top face,
+   * 0). Computed once for the WHOLE document and carried on every program, because a program's
+   * sub-job holds only its own items: the run sheet reads this map to state a V-carve's floor
+   * inset from the floor the item is actually written into. OPTIONAL because a generated object
+   * can arrive without it — one stored by an older build — and the sheet then reads 0, the
+   * pre-#748 top-face answer.
+   */
+  floors?: Record<string, number>;
   /** Stage refusals, in stage order. Empty on a clean run. */
   errors: EngraveFailure[];
 }
@@ -885,6 +894,13 @@ export interface EngraveRegions {
    * and one of its regions asks for the variable carve.
    */
   cores: CoreCut[];
+  /**
+   * #748 — THE FLOOR EACH REGION SITS ON, mm below the top face: the pocket a label is written
+   * into, the recess a carve sits inside. Missing ids are on the stock's top face (0). The plane
+   * arithmetic above, the merge findings, the cores, the prediction, the preview, the panel and
+   * the sheet all read this one map, so no consumer re-derives what "the floor" means.
+   */
+  floors: Record<string, number>;
   predicted: OraclePredicted[];
   /**
    * #737 — the neck this job leaves for sawing off, in map millimetres, or null when it has none.
@@ -977,8 +993,27 @@ function metalLineFindings(job: EngraveJob, tool: Tool | null, catalogue: readon
  * Surface area that means two V openings really merged, mm² (#221). The floor is far above
  * Clipper2's ~1e-8 mm² noise and far below the sliver a 0.1 mm bridge across a 5 mm stroke leaves
  * (~0.5 mm²), so `vcarve-surface-merge` is raised for a merge and not for an offset artefact.
+ *
+ * This is the floor for the CROSS-item check, where the quantity is the intersection of two
+ * separate items' openings: any overlap at all means their two grooves meet. The intra-item
+ * check, which reads the closing of ONE item's opening, needs the larger floor below.
  */
 export const VCARVE_MERGE_AREA_MM2 = 0.001;
+
+/**
+ * How far a filled gap must RUN to be a ridge, mm (#748).
+ *
+ * The intra-item merge test closes the surface opening and asks what came back solid. That area is
+ * not only the gaps between strokes: a closing also fills the artwork's own sharp concave corners,
+ * which every outline has, and the fill grows with the outset. Measured on real type — the bench's
+ * 2.6 mm "13G" labels at 0.25 mm of material, outset 0.067 mm — the corner fill alone is 0.011 mm²,
+ * above {@link VCARVE_MERGE_AREA_MM2}. A merged gap is a STRIP, though: the ridge left below the
+ * colour plane runs along the strokes, while a corner fill is a knife-edge sliver. So the area is
+ * required to reach a gap-width strip (2 × the outset) at least this long — a quarter millimetre of
+ * run — and a corner sliver cannot reach it. At the same outset each 13G label fills 0.005–0.011 mm²;
+ * the thin fixture's tight script strokes fill 0.059–0.076 mm² and still warn.
+ */
+export const VCARVE_MERGE_RUN_MM = 0.25;
 
 /**
  * The material a tab ACTUALLY leaves at a deep pass, as polygons (#218).
@@ -1207,7 +1242,6 @@ function vCarveFindings(
   plan: PartPlan,
   tool: Tool,
   cone: VCone,
-  film: number | null,
   machine: MillProfile,
   planeById: ReadonlyMap<string, VCarvePlane>,
   designById: ReadonlyMap<string, Polygons>,
@@ -1217,6 +1251,12 @@ function vCarveFindings(
   const offset = makeClipperOffset(tl);
   const findings: JobFinding[] = [];
   const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+  // #748 — where the grooves meet: the surface the item sits on, and the words for it. The top
+  // face is the pre-#748 sentence, unchanged at floor 0.
+  const surfaceWords = (plane: VCarvePlane): string =>
+    plane.floor > 0 ? `the floor ${mm(plane.floor)} mm down` : 'the top face';
+  const floorWords = (plane: VCarvePlane): string =>
+    plane.floor > 0 ? ` at that ${mm(plane.floor)} mm floor` : '';
 
   for (const item of plan.engraves) {
     // #665 — a VARIABLE-depth item has no colour plane and no constant floor: its depth follows
@@ -1245,15 +1285,18 @@ function vCarveFindings(
       }
     }
 
-    if (film !== null && item.depth < film - 1e-9) {
+    // #748 — the plane's own film, not the document's: a colour boundary at or above the floor
+    // the item sits on is already cut through, and a boundary below the floor is reached by a cut
+    // `item.depth` deep below the TOP FACE exactly as before.
+    if (plane.film > 0 && item.depth < plane.film - 1e-9) {
       findings.push({
         severity: 'error',
         code: 'vcarve-above-colour-plane',
         labelId: item.id,
         message:
           `${item.name} is ${mm(item.depth)} mm deep, but this blank's colour plane is at ` +
-          `${mm(film)} mm: the cut never reaches the second colour, so the design cannot appear ` +
-          `there. Cut at least ${mm(film)} mm deep, or make the artwork a stroke trace.`,
+          `${mm(plane.film)} mm: the cut never reaches the second colour, so the design cannot appear ` +
+          `there. Cut at least ${mm(plane.film)} mm deep, or make the artwork a stroke trace.`,
       });
     }
 
@@ -1270,6 +1313,10 @@ function vCarveFindings(
 
   // Intra-item: closing the surface opening fills any gap narrower than twice its outset. What
   // comes back wider than the colour-plane design is exactly those gaps turned solid at the top.
+  // #748 — the floor it is measured against: a closing also fills the artwork's own sharp concave
+  // corners, so the area must reach a gap-width strip of {@link VCARVE_MERGE_RUN_MM} before it is a
+  // ridge between strokes rather than a corner sliver. Both the opening and the strip are taken at
+  // the floor the item sits on, so a label 0.25 mm into a pocket is judged at 0.25 mm of material.
   for (const item of plan.engraves) {
     const plane = planeById.get(item.id);
     const design = designById.get(item.id);
@@ -1278,15 +1325,20 @@ function vCarveFindings(
     if (plane.surfaceOutset <= 0 || surface.length === 0 || design.length === 0) continue;
     const closed = offset(surface, -plane.surfaceOutset);
     const gained = polygonsArea(tl, closed) - polygonsArea(tl, design);
-    if (gained > VCARVE_MERGE_AREA_MM2) {
+    const ridgeFloor = Math.max(
+      VCARVE_MERGE_AREA_MM2,
+      plane.surfaceOutset * 2 * VCARVE_MERGE_RUN_MM,
+    );
+    if (gained > ridgeFloor) {
       findings.push({
         severity: 'warning',
         code: 'vcarve-surface-merge',
         labelId: item.id,
         message:
           `two or more strokes of ${item.name} are closer than ${mm(plane.surfaceOutset * 2)} mm ` +
-          `(2 × the ${mm(plane.surfaceOutset)} mm surface wall offset): their V openings merge at ` +
-          `the top face and leave a ridge of the top colour below the colour plane.`,
+          `(2 × the ${mm(plane.surfaceOutset)} mm surface wall offset${floorWords(plane)}): their V ` +
+          `openings merge at ${surfaceWords(plane)} and leave a ridge of the top colour below the ` +
+          'colour plane.',
       });
     }
   }
@@ -1301,6 +1353,11 @@ function vCarveFindings(
       const sa = surfaceById.get(a.id);
       const sb = surfaceById.get(b.id);
       if (pa === undefined || pb === undefined || sa === undefined || sb === undefined) continue;
+      // #748 — openings only meet if they open INTO the same surface. Two items on different
+      // floors (a label in the pocket, the pocket itself) are separated by the pocket's wall and
+      // cannot merge at either face: their outsets are measured from different datums, so adding
+      // them is meaningless too.
+      if (pa.floor !== pb.floor) continue;
       if (intersectionArea(tl, sa, sb) > VCARVE_MERGE_AREA_MM2) {
         findings.push({
           severity: 'warning',
@@ -1308,7 +1365,7 @@ function vCarveFindings(
           labelId: a.id,
           message:
             `${a.name} and ${b.name} are closer than ${mm(pa.surfaceOutset + pb.surfaceOutset)} mm ` +
-            `at the top face (their two surface wall offsets added): their V openings merge, ` +
+            `at ${surfaceWords(pa)} (their two surface wall offsets added): their V openings merge, ` +
             `leaving a ridge of the top colour between them.`,
         });
       }
@@ -1371,6 +1428,72 @@ function threadPrediction(plan: ThreadMillPlan): OraclePredicted {
   };
 }
 
+/** #748 — the area below which a containing region is floating-point dust, mm². */
+const CONTAINMENT_AREA_EPS_MM2 = 1e-6;
+
+/**
+ * #748 — THE FLOOR EACH ENGRAVE SITS ON: one answer for a whole document's plan.
+ *
+ * An item lying WHOLLY inside another blind region — a label in a pocket, a carve in a recess —
+ * cuts into that region's floor, so its cone opens over `depth − floor` of material rather than
+ * over its full depth below the stock's top face. The floor is the DEEPEST other blind engrave
+ * that contains the item and is shallower than it: a pocket at 4 mm under a 0.25 mm-deep label
+ * gives 4, and a sub-pocket at 3 inside a pocket at 4 gives 3, never 0.
+ *
+ * "Contains" is the CONTAINER'S PROFILE holding the item's profile whole: the offset difference
+ * between the profiles is below {@link CONTAINMENT_AREA_EPS_MM2}, so a stroke poking past the
+ * pocket's rim does NOT sit on the floor. The profile is the pocket's MOUTH; a container whose
+ * walls slope (a V-carved pocket) has a smaller floor than its mouth, so an item inside the mouth
+ * but over the flank is read as on the floor — the plan knows the pocket's DEPTH, not a
+ * per-cutter wall profile, and #748 asks for the plan's floor rather than a second geometry model.
+ *
+ * Through, variable-depth, inlay and prism items are not floors: a through cut leaves no surface
+ * at its depth, and the other three have a floor that is a function of the design or of a
+ * different frame. Cut ORDER is not modelled either: this reads the document's plan, so a region
+ * a later program cuts is still a floor for the earlier one (the bench's j24 labels are cut after
+ * the recess, which is the same answer). A job whose floors live in another DOCUMENT — j24's split
+ * `-c` file, whose recess is in `-a` — cannot know them.
+ *
+ * Only items with a floor above 0 appear in the map; every missing id reads as 0.
+ */
+export function supportingFloors(tl: ManifoldToplevel, plan: PartPlan): Map<string, number> {
+  const floors = new Map<string, number>();
+  const items = plan.engraves;
+  if (items.length < 2) return floors;
+  const polygonsById = new Map<string, Polygons>();
+  const areaById = new Map<string, number>();
+  for (const engrave of items) {
+    const cs = executeProfile(tl, engrave.profile);
+    try {
+      const polygons = cs.toPolygons() as Polygons;
+      polygonsById.set(engrave.id, polygons);
+      areaById.set(engrave.id, polygons.length === 0 ? 0 : polygonsArea(tl, polygons));
+    } finally {
+      cs.delete();
+    }
+  }
+  for (const item of items) {
+    const itemArea = areaById.get(item.id) ?? 0;
+    const itemPolygons = polygonsById.get(item.id);
+    if (!(itemArea > CONTAINMENT_AREA_EPS_MM2) || itemPolygons === undefined) continue;
+    let floor = 0;
+    for (const container of items) {
+      if (container.id === item.id) continue;
+      if (container.through === true || container.variableDepth === true) continue;
+      if (container.inlay !== undefined || container.prism !== undefined) continue;
+      if (!(container.depth < item.depth - 1e-9) || !(container.depth > floor)) continue;
+      const containerPolygons = polygonsById.get(container.id);
+      if (containerPolygons === undefined || containerPolygons.length === 0) continue;
+      const shared = intersectionArea(tl, containerPolygons, itemPolygons);
+      // Wholly inside: the intersection is the item, up to polygonisation noise. A fixed 1 µm²
+      // floor plus a relative part, so a big pocket's numerical drift does not unseat a label.
+      if (shared >= itemArea - Math.max(CONTAINMENT_AREA_EPS_MM2, itemArea * 1e-6)) floor = container.depth;
+    }
+    if (floor > 0) floors.set(item.id, floor);
+  }
+  return floors;
+}
+
 /**
  * `tool` is HANDED IN (#305): this is worker-side, where neither the job store nor the tool
  * registry is visible, so the caller resolves it — `jobTool(job)` on the main thread, or
@@ -1380,6 +1503,12 @@ function threadPrediction(plan: ThreadMillPlan): OraclePredicted {
  *
  * `shop` carries the caller's engrave shop defaults (#451); only the warn ratio is read here, since
  * this stage measures and finds rather than emitting a peck path. See {@link EngraveShopOpts}.
+ *
+ * `floors` is #748's supporting-floor map. The run computes it ONCE for the whole document
+ * (`supportingFloors` on the full plan) and hands it to every program, because a program's sub-job
+ * holds only its own items and would not see the pocket another setup cuts. Omitted, it is
+ * computed from this call's own plan — the right answer for a whole-document caller (the preview,
+ * a test) and for a single-setup job.
  */
 export function engraveRegions(
   tl: ManifoldToplevel,
@@ -1396,6 +1525,8 @@ export function engraveRegions(
    * prediction, the verifier — reads them exactly as it reads a drawn pocket.
    */
   derivedCores?: readonly CoreCut[],
+  /** #748 — the whole document's supporting floors, or omitted to compute this plan's own. */
+  floors?: ReadonlyMap<string, number>,
 ): EngraveRegions {
   const plan = toPartPlan(
     job,
@@ -1410,6 +1541,10 @@ export function engraveRegions(
           })),
         },
   );
+  // #748 — THE FLOOR EACH ITEM SITS ON, one owner for the whole pipeline. Every plane below, the
+  // merge findings, the cores and the prediction read this map; the run hands in the document's
+  // map so a program's sub-job still knows the pocket another setup cuts.
+  const floorById = floors ?? supportingFloors(tl, plan);
   const mill = machine ?? jobMachine(job);
   const perChar = perCharFor(job);
   // The cutter, split into the things the pipeline needs from it (#405, #221). `radius` is the
@@ -1447,11 +1582,17 @@ export function engraveRegions(
   const planeRadiusFor = (labelId: string): number => {
     const engrave = engraveById.get(labelId);
     if (engrave === undefined || cone === null) return 0;
-    const plane = vCarvePlane(cone, engrave.depth, colourBoundaryDepth);
+    const plane = vCarvePlane(
+      cone,
+      engrave.depth,
+      colourBoundaryDepth,
+      floorById.get(labelId) ?? 0,
+    );
     // #673 — an INLAY has no colour plane: the flank is on the design at the TOP face and the
     // floor is the design eroded by the cut's whole depth, which is the variable carve's frame
     // with a flat cap. The plane radius is therefore `tip + depth·tan`, and the floor inset the
-    // whole depth's slant.
+    // whole depth's slant. #748 — "the top face" is the surface the item sits on, so the depth is
+    // the MATERIAL depth (`plane.material`), which is the whole depth on the stock top.
     //
     // #674 — a PRISM is the same convention for the same reason: its ring's boundary IS the mouth
     // at the top face (the shape's edge and the derived margin), so the flank stands on it and the
@@ -1461,8 +1602,8 @@ export function engraveRegions(
       engrave.inlay !== undefined || engrave.prism !== undefined
         ? {
             ...plane,
-            planeRadius: cone.tipRadius + engrave.depth * cone.tanHalf,
-            floorInset: engrave.depth * cone.tanHalf,
+            planeRadius: cone.tipRadius + plane.material * cone.tanHalf,
+            floorInset: plane.material * cone.tanHalf,
             surfaceOutset: 0,
           }
         : plane;
@@ -1643,7 +1784,9 @@ export function engraveRegions(
   if (cone !== null) {
     const offset = makeClipperOffset(tl);
     for (const engrave of plan.engraves) {
-      const plane = planeById.get(engrave.id) ?? vCarvePlane(cone, engrave.depth, colourBoundaryDepth);
+      const plane =
+        planeById.get(engrave.id) ??
+        vCarvePlane(cone, engrave.depth, colourBoundaryDepth, floorById.get(engrave.id) ?? 0);
       const design = designOf(engrave);
       if (design.length === 0) continue;
       // #584 — THE FLOOR IS WHAT THE TOOLPATH CAN REACH, not `design − floorInset`. The two are
@@ -1673,6 +1816,9 @@ export function engraveRegions(
         planeRadius: plane.planeRadius,
         floorInset: plane.floorInset,
         surfaceOutset: plane.surfaceOutset,
+        // #748 — the surface the item sits on. The preview draws the surface opening there, and the
+        // variable ladder starts its depth map from it.
+        ...(plane.floor > 0 ? { floorDepth: plane.floor } : {}),
       });
       designById.set(engrave.id, design);
       surfaceById.set(engrave.id, surface);
@@ -1692,7 +1838,13 @@ export function engraveRegions(
       if (engrave.variableDepth !== true) continue;
       const design = designById.get(engrave.id);
       if (design === undefined) continue;
-      const polygons = coreOffset(design, -coreOffsetRadius(cone, engrave.depth));
+      // #748 — the middle the V's width cannot reach is measured over the MATERIAL the item cuts:
+      // a carve 2 mm into a 1 mm pocket floor leaves a core sized by its 1 mm cap, not its 2 mm
+      // depth below the top face. The core itself still bottoms at the absolute `engrave.depth`,
+      // which is where the flat cutter pockets it.
+      const material = planeById.get(engrave.id)?.material ?? engrave.depth;
+      if (!(material > 0)) continue;
+      const polygons = coreOffset(design, -coreOffsetRadius(cone, material));
       if (polygons.length === 0) continue;
       const cs = tl.CrossSection.ofPolygons(polygons);
       const areaMm2 = cs.area();
@@ -1719,7 +1871,6 @@ export function engraveRegions(
           plan,
           tool,
           cone,
-          colourBoundaryDepth,
           mill,
           planeById,
           designById,
@@ -2122,7 +2273,12 @@ export function engraveRegions(
     ...regions.flatMap((c): OraclePredicted[] => {
       if (c.vCarve?.variable === true && cone !== null) {
         const design = c.polygons;
-        const cap = c.depth;
+        // #748 — the median carve runs over the MATERIAL under the surface it sits on: the cap is
+        // `depth − floor`, and the levels the oracle is told about are ABSOLUTE depths below the
+        // top face (`floor + level`), because that is the datum the sweep slices at.
+        const floor = floorById.get(c.id) ?? 0;
+        const cap = c.depth - floor;
+        if (!(cap > 0)) return [];
         const carveOffset = makeClipperOffset(tl);
         const ringAt = (level: number): Polygons => {
           // The removal at level z is ONE ring: the wall's lower part from `z·tan` in, through the
@@ -2144,7 +2300,7 @@ export function engraveRegions(
           return out;
         };
         return [cap * ORACLE_SHALLOW_DEPTH_FRACTION, cap].map(
-          (level): OraclePredicted => ({ depth: level, polygons: ringAt(level), itemId: c.id }),
+          (level): OraclePredicted => ({ depth: floor + level, polygons: ringAt(level), itemId: c.id }),
         );
       }
       return [
@@ -2280,6 +2436,7 @@ export function engraveRegions(
     cuts,
     chamfers: chamferCuts,
     cores,
+    floors: Object.fromEntries([...floorById].filter(([, floor]) => floor > 0)),
     predicted,
     neck,
     tool,
@@ -3154,6 +3311,8 @@ function generateRestPair(
   cursor: number,
   refCount: number,
   findings: JobFinding[],
+  /** #748 — the document's supporting floors, for every program this pair generates. */
+  floors?: ReadonlyMap<string, number>,
 ): {
   attempts: OneProgram[];
   posted: PostedProgram[];
@@ -3174,7 +3333,7 @@ function generateRestPair(
   if (roughTool === null || group.length < 2) {
     const roughJob = jobForSetup(job, roughRef, roughTool);
     const makeRough = (span: VacuumSpan): OneProgram =>
-      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', withNeck);
+      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', withNeck, undefined, floors);
     const roughOne = makeRough(roughSpan);
     attempts.push(roughOne);
     if (roughOne.ok && roughOne.nc !== null && roughOne.verify !== null) {
@@ -3191,7 +3350,7 @@ function generateRestPair(
   if (vCone(roughTool) !== null) {
     const makeV = (span: VacuumSpan): OneProgram =>
       // The V is never the run's last cut: the later program is (#737).
-      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', false);
+      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', false, undefined, floors);
     const vOne = makeV(roughSpan);
     attempts.push(vOne);
     if (!vOne.ok || vOne.nc === null || vOne.verify === null) {
@@ -3298,6 +3457,7 @@ function generateRestPair(
             // Only the LAST program of a run that ends here leaves the neck (#737).
             withNeck && r === restTools.length - 1,
             cuttable,
+            floors,
           );
         const coreOne = makeCore(coreSpan);
         attempts.push(coreOne);
@@ -3329,6 +3489,7 @@ function generateRestPair(
           // #737 — only the last program of the run leaves the neck.
           withNeck && r === restTools.length - 1,
           derived.length === 0 ? undefined : derived,
+          floors,
         );
       const ownOne = makeOwn(ownSpan);
       attempts.push(ownOne);
@@ -3396,6 +3557,8 @@ function generateRestPair(
       laterRestPass ? 'rough-only' : 'rough-and-finish',
       // The rough half of a pair never leaves the neck (#737).
       false,
+      undefined,
+      floors,
     );
   const keptOne = makeRoughKept(roughSpan);
   attempts.push(keptOne);
@@ -3481,6 +3644,8 @@ function generateRestPair(
           'rough-and-finish',
           // #737 — only the last program of the run leaves the neck.
           withNeck && r === restTools.length - 1,
+          undefined,
+          floors,
         );
       const ownOne = makeOwn(ownSpan);
       attempts.push(ownOne);
@@ -3536,7 +3701,7 @@ function generateRestPair(
     // What this cutter would cut of the EARLIER cutter's work, measured before the first program's
     // items were trimmed — an item the first cutter cannot enter is entirely this one's job. The
     // later cutter's own items are NOT in `measureJob`; they are measured only in its own program.
-    const design = engraveRegions(tl, measureJob, restTool, margins, shop, mill, catalogue);
+    const design = engraveRegions(tl, measureJob, restTool, margins, shop, mill, catalogue, undefined, floors);
     const restFeeds = feedsFor(
       catalogue,
       job.stock.material,
@@ -3565,7 +3730,7 @@ function generateRestPair(
     if (kept.length > 0) {
       const probe = { ...restJobFor(job, kept, restRef.toolKey), tool: restTool };
       const open = new Set(
-        engraveRegions(tl, probe, restTool, margins, shop, mill, catalogue)
+        engraveRegions(tl, probe, restTool, margins, shop, mill, catalogue, undefined, floors)
           .measured.filter((m) => m.openedArea > 0)
           .map((m) => m.labelId),
       );
@@ -3604,6 +3769,8 @@ function generateRestPair(
         'finish-only',
         // Only the LAST rest program of a pair that ends the run leaves the neck.
         withNeck && r === restTools.length - 1,
+        undefined,
+        floors,
       );
     const restOne = makeRest(restSpan);
     nextCursor += 1;
@@ -4038,8 +4205,28 @@ export function engraveGenerate(
   // job, `postZ1`'s default vacuum span. Deriving its single setup and re-filtering the lists would
   // drop disabled and construction items from the CAM's input, which is a behaviour change this
   // issue does not own.
+  //
+  // #748 — THE DOCUMENT'S SUPPORTING FLOORS, computed ONCE before any program is split: a program's
+  // sub-job holds only its own items, and the pocket a label is written into may be cut by another
+  // setup's program. One plan, one map, handed to every program so every file judges the label
+  // from the floor the run cuts under it.
+  const documentFloors = supportingFloors(tl, toPartPlan(job));
   if (job.setups === undefined) {
-    const one = generateOneProgram(tl, job, tool, catalogue, calibration, margins, shop, 'whole', true, 'rough-and-finish', true);
+    const one = generateOneProgram(
+      tl,
+      job,
+      tool,
+      catalogue,
+      calibration,
+      margins,
+      shop,
+      'whole',
+      true,
+      'rough-and-finish',
+      true,
+      undefined,
+      documentFloors,
+    );
     // #677 — a legacy document names ONE cutter, so a variable carve's core cannot be cleared: it
     // stands, and the warning says what to add. A job that has setups gets the same sentence from
     // the loop below, with the setup's number on it.
@@ -4146,6 +4333,8 @@ export function engraveGenerate(
             cursor === 0,
             'rough-and-finish',
             lastGroup,
+            undefined,
+            documentFloors,
           );
         const one = make(span);
         attempts.push(one);
@@ -4178,6 +4367,7 @@ export function engraveGenerate(
         cursor,
         refs.length,
         restFindings,
+        documentFloors,
       );
       attempts.push(...pair.attempts);
       posted.push(...pair.posted);
@@ -4378,13 +4568,19 @@ function generateOneProgram(
    * has no items of its own.
    */
   derivedCores?: readonly CoreCut[],
+  /**
+   * #748 — the DOCUMENT's supporting floors, computed once by `engraveGenerate`. A sub-job holds
+   * only this program's items and cannot see the pocket another setup cuts, so the map is handed
+   * in; omitted (a direct caller), `engraveRegions` computes it from this job's own plan.
+   */
+  floors?: ReadonlyMap<string, number>,
 ): OneProgram {
   // #347 — the JOB's machine, not the app's only one: the envelope, the spindle ceiling and the
   // frame below are read off the profile the document names. The POST is still `postZ1`'s dialect,
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, profiles, throughMask, chamfers, cores, predicted, findings, releasedPieces, neck } = engraveRegions(
+  const { plan, regions, profiles, throughMask, chamfers, cores, floors: floorById, predicted, findings, releasedPieces, neck } = engraveRegions(
     tl,
     job,
     tool,
@@ -4393,6 +4589,7 @@ function generateOneProgram(
     mill,
     catalogue,
     derivedCores,
+    floors,
   );
   /**
    * #667 — WHAT THIS PROGRAM IS ASKED TO REMOVE. `predicted` is the design at its stated depths,
@@ -5195,6 +5392,9 @@ function generateOneProgram(
       predicted: predictedForRun,
       // #737 — the neck this program leaves, for the run sheet's saw step.
       neck: neckProgram,
+      // #748 — the document's floors ride the program, so the sheet and the panel quote the floor
+      // the item is written into even when the item's own setup never cut it.
+      floors: floorById,
       // #677 — the V program's derived cores go UP to the run (which alone can see the setup's
       // later cutter); the core program's own facts go ON the program (the sheet's step).
       cores,

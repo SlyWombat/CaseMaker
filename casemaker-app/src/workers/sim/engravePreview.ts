@@ -266,6 +266,14 @@ export interface EngravePreview {
    * the line the panel draws and the `item-depth-bound` finding agree by construction.
    */
   colourBoundaryDepth: Mm | null;
+  /**
+   * #748 — the floor each item sits on, mm below the top face: the pocket a label is written into
+   * is here at its depth. Missing ids are on the stock's top face (0). Read off the same
+   * `engraveRegions` call as the cuts, so the V-carve row's plane arithmetic, the sheet and the
+   * merge findings all describe one floor. (Not to be confused with `floors` above, the drawn
+   * mesh per cut.)
+   */
+  supportingFloors: Record<string, number>;
   /** #211's cutter recommendation, with the compromise message completed here (see below). */
   recommendation: ToolRecommendation;
 }
@@ -407,7 +415,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // The job's own snapshot wins over its key's entry (design point 2, #305), resolved against
     // the list the main thread sent — the worker has no registry of its own to read.
     const tool = toolForJob(job, tools);
-    const { plan, measured, cuts, findings, colourBoundaryDepth } = engraveRegions(
+    const { plan, measured, cuts, findings, colourBoundaryDepth, floors: supportingFloors } = engraveRegions(
       tl,
       job,
       tool,
@@ -558,7 +566,9 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
         const outline = (level: EngravePreviewOutline['level'], depth: number, rings: [number, number][][]) => {
           if (rings.length > 0) outlines.push({ labelId: cut.id, level, depth, rings });
         };
-        outline('surface', 0, carve.surface);
+        // #748 — the surface opening is drawn at the surface the item sits on: the stock's top
+        // face, or the pocket floor a label is written into.
+        outline('surface', carve.floorDepth ?? 0, carve.surface);
         outline('plane', carve.planeDepth, carve.plane);
         outline('floor', cut.depth, carve.floor);
       }
@@ -744,6 +754,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       engravability: measured.map(({ polygons: _polygons, ...rest }) => rest),
       findings,
       colourBoundaryDepth,
+      supportingFloors,
       recommendation: {
         ...recommendation,
         reason: completeCompromiseReason(tl, job, recommendation, tools, shop.lostDetailWarnRatio ?? null),

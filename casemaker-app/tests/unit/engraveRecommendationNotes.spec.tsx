@@ -86,6 +86,7 @@ function previewWith(
     findings: [],
     stages: [],
     colourBoundaryDepth: null,
+    supportingFloors: {},
     recommendation: {
       key: PICK.key,
       compromise: false,

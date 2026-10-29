@@ -71,7 +71,7 @@ export interface VCarveRegion {
   plane: Polygons;
   /** The floor at `depth`, `floorInset` narrower per side. */
   floor: Polygons;
-  /** The opening at the top face, `surfaceOutset` wider per side. */
+  /** The opening at the surface the item sits on (#748), `surfaceOutset` wider per side. */
   surface: Polygons;
   /** The colour plane's depth below the top face, mm — the cut's depth when there is no film. */
   planeDepth: number;
@@ -85,8 +85,18 @@ export interface VCarveRegion {
    * `z = −d`, shallowest first. Where the cap cannot reach, the middle stands as a core this pass
    * does NOT cut; the flat bottom is the setup's flat end mill's own program, which pockets the
    * core at `depth` after this one (#677).
+   *
+   * #748 — `d` is measured from the SURFACE THE ITEM SITS ON, so a carve in a pocket stops at
+   * `depth − floorDepth` and its passes are `-(floorDepth + d)`. The constant-depth path above
+   * needs no such field: its one pass already goes to the absolute `depth`.
    */
   variable?: boolean;
+  /**
+   * #748 — the depth of the surface the item sits on, mm below the top face: the pocket floor a
+   * label is written into, 0 (absent) at the stock top. The variable ladder starts here and only
+   * the variable ladder reads it.
+   */
+  floorDepth?: number;
   /**
    * #673 — an INLAY half's region: the design is the TOP boundary and the floor is the design
    * eroded by the cut's whole depth. The CAM takes the glue gap so the floor's pass pitch can be
@@ -747,10 +757,24 @@ export function generateEngrave(
       // the bit's outer flank is in air at the wall. The core (what the cap's width cannot reach)
       // is left standing here on purpose: the flat end mill's own program pockets it at `depth`
       // after this one (#677), and `vcarve-variable-core` warns when no such cutter is set up.
+      //
+      // #748 — THE LADDER STARTS AT THE FLOOR. When the item sits on a pocket's floor, the
+      // material under the bit is `depth − floor` deep: the cap is that material depth and every
+      // pass is posted `floor` lower, so the same carve on a pocket floor cuts the same depth map
+      // as it would on the blank's top, shifted by the floor — instead of half of it in the air
+      // above the floor, reaching the floor only at the last rung.
       if (cone === null) {
         throw new Error(
           `generateEngrave: "${label.name ?? label.text}" asks for a variable-depth V-carve, and a ` +
             'flat cutter pockets a region at one depth; use a V-bit',
+        );
+      }
+      const floor = label.vCarve.floorDepth ?? 0;
+      const cap = label.depth - floor;
+      if (!(cap > 0)) {
+        throw new Error(
+          `generateEngrave: "${label.name ?? label.text}" sits on a floor ${floor} mm down and states ` +
+            `a depth of ${label.depth} mm, so it cuts no material; raise its depth above the floor`,
         );
       }
       // The feeds row caps the bite: its step-down is a depth, its step-over a radial width on the
@@ -760,10 +784,10 @@ export function generateEngrave(
         throw new Error(`generateEngrave: the variable V-carve's level pitch resolved to ${pitch} mm; it must be > 0`);
       }
       const ladder: PreparedPass[] = [];
-      for (const level of vCarveLevels(cone, label.depth, pitch)) {
+      for (const level of vCarveLevels(cone, cap, pitch)) {
         const rings = offset(label.polygons, -level.radius);
         if (rings.length === 0) continue; // this level's contour has collapsed into the medial axis
-        ladder.push({ rings: [rings], passes: [-level.depth], stepMm: pitch });
+        ladder.push({ rings: [rings], passes: [-(floor + level.depth)], stepMm: pitch });
       }
       if (ladder.length === 0) {
         throw new Error(

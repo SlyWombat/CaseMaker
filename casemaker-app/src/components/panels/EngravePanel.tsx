@@ -1128,7 +1128,11 @@ export function EngravePanel(): JSX.Element {
   const vCarveTechnical = (itemId: string): ReactNode => {
     const item = vCarveFactById.get(itemId);
     if (item === undefined || cone === null) return null;
-    const plane = filmPending ? null : vCarvePlane(cone, item.depth, film);
+    // #748 — the surface this item sits on: the pocket's floor from the same preview that draws
+    // the cuts, so the numbers here agree with the finding and the run sheet. No preview yet (or
+    // an older one) reads 0, the stock's top face.
+    const floor = preview?.supportingFloors?.[itemId] ?? 0;
+    const plane = filmPending ? null : vCarvePlane(cone, item.depth, film, floor);
     const stepover =
       plane === null || vCarveRow === null
         ? null
@@ -1148,7 +1152,9 @@ export function EngravePanel(): JSX.Element {
         </p>
         {plane !== null && (
           <p style={MUTED} data-testid={`engrave-vcarve-item-${item.id}`}>
-            {item.name} at {fmt(item.depth)} mm: {fmt(plane.grooveWidth)} mm groove at the plane —
+            {item.name} at {fmt(item.depth)} mm
+            {floor > 0 ? ` (on the ${fmt(floor)} mm floor it sits on)` : ''}:{' '}
+            {fmt(plane.grooveWidth)} mm groove at the plane —
             floor {fmt(plane.floorInset)} mm narrower per side, top opening{' '}
             {fmt(plane.surfaceOutset)} mm wider per side;{' '}
             {stepover === null

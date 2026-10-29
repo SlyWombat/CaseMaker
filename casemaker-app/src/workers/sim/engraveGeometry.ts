@@ -709,6 +709,12 @@ export interface CutRegion {
     planeRadius: number;
     floorInset: number;
     surfaceOutset: number;
+    /**
+     * #748 — the surface the item sits on, mm below the top face: the pocket floor a label is
+     * written into, absent (0) at the stock's top face. The preview draws the surface opening
+     * there; the fixed-depth toolpath does not read it.
+     */
+    floorDepth?: number;
   };
 }
 

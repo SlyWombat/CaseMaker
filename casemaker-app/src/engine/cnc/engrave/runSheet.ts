@@ -504,6 +504,14 @@ export interface RunSheetGenerated {
    */
   chamfer?: RunSheetChamferFacts | null;
   /**
+   * #748 — the floor each item sits on, mm below the top face (missing ids: the stock's top
+   * face, 0). `EngraveGenerated` carries the DOCUMENT's one map, so a V-carve in a pocket is
+   * described from the floor it is written into. Optional because a generated object stored by an
+   * older build has no map, and such a sheet must read 0 — the pre-#748 answer — rather than
+   * invent a floor.
+   */
+  floors?: Readonly<Record<string, number>>;
+  /**
    * #432 slice 3 — the FACING program: the skim of the blank's top, its own `.nc` beside the job
    * (`runSheetFaceFileName`), or null when none was produced. Optional because a generated object
    * stored by an older build has no such field, and a sheet for it must read exactly as it did
@@ -3947,12 +3955,17 @@ export function buildRunSheet(
       // width, cut as a ladder of level sets, and the floor's core is a flat end mill pocket's —
       // the run's own core program (#677). Its step replaces the plane statement, which describes
       // a constant floor this item does not have.
+      // #748 — the surface the item sits on: a label in a recess cuts into the recess's floor,
+      // so the cone over it spans `depth − floor`, not its whole depth below the top face.
+      const floor = generated.floors?.[item.id] ?? 0;
       if (item.variableDepth === true) {
         const levelPitch =
           params === null || !(cone.tanHalf > 0)
             ? null
             : Math.min(params.stepDown, params.stepOver / cone.tanHalf);
-        const levels = levelPitch !== null && levelPitch > 0 ? vCarveLevels(cone, item.depth, levelPitch) : null;
+        const cap = item.depth - floor;
+        const levels =
+          levelPitch !== null && levelPitch > 0 && cap > 0 ? vCarveLevels(cone, cap, levelPitch) : null;
         // #677 — the flat bottom is the run's own CORE CLEARANCE program when the setup names a
         // flat end mill after the V (the run's program list carries the facts); otherwise the core
         // stands and the step says what to add.
@@ -3971,7 +3984,9 @@ export function buildRunSheet(
             (levels === null
               ? ''
               : ` — ${levels.length} level${levels.length === 1 ? '' : 's'} at ${fmtNum(levelPitch as number)} mm`) +
-            `, down to ${fmtNum(item.depth)} mm at its centre. Where that cap cannot reach, the ` +
+            `, down to ${fmtNum(item.depth)} mm at its centre` +
+            (floor > 0 ? ` (${fmtNum(cap)} mm of material under the ${fmtNum(floor)} mm floor it sits on)` : '') +
+            '. Where that cap cannot reach, the ' +
             'middle stands as a core' +
             (clearance === undefined
               ? '; add a flat end mill to the setup and that cutter pockets it at that depth in its own program.'
@@ -3982,7 +3997,7 @@ export function buildRunSheet(
         });
         continue;
       }
-      const plane = vCarvePlane(cone, item.depth, film);
+      const plane = vCarvePlane(cone, item.depth, film, floor);
       // #740 — the row's fraction is its step-over over the diameter it was resolved on (a
       // chamfer's base, an engraver's tip), read back by the same function the CAM and the finding
       // use; dividing by the tip width refused a chamfer's flat-row number as ratio 14.2875.
@@ -4005,6 +4020,7 @@ export function buildRunSheet(
       cutSteps.push({
         text:
           `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+          (floor > 0 ? `on the ${fmtNum(floor)} mm floor it sits on, ` : '') +
           (film === null
             ? 'with no film the colour plane is the floor, and the cone reaches '
             : 'at the colour plane the cone reaches ') +
