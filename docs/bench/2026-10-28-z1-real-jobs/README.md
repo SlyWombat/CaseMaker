@@ -113,3 +113,9 @@ These jobs' files are not committed: their sources' licence is unstated or forbi
 - **Gear, stencil, clock face, ruler, Eurorack panel, phone stand, two-sided part, rotary pawn:** no source had both a photo of the finished part and inputs that could be obtained.
 
 The "after" pictures use `tools/set2/render.py` (v2's sweep, plus a two-colour laminate). Each program of a split job is swept in order onto the same stock.
+
+## 2026-10-29 v5 re-run: the app chooses every cutter
+
+The page (version 5) re-runs the set on main 9fcda93e with **no cutter named in any job**, so `casemaker cut` picks from the house tools plus Makera's full catalogue (#760's CLI path). The maintainer's question that started it: "why is the text in some of those demos not clear, are we selecting the wrong tool". The last page had pinned every cutter by hand. Results and fixes: #762 (cutters by item kind), #760 (raised text by its gaps), #765 (the coin's 3.6 mm "Software": the app says no cutter fits, a 0.6 mm corn reads), #766 (smart tool selection by simulated outcome — the top priority), #764 (a 3D goal item ends in a pit), #768 (an empty rest cutter crashes the command).
+
+New job files: `jobs/j04-coin-disc-faithful.json` (the proxy coin's items on a ⌀30 × 3 disc, #743), `jobs/j04-coin-disc-rest06.json` (the same with a 0.6 mm corn as the rest cutter, chosen by hand to test the app's claim), and `jobs/j27-mouse-shell-side1.json` (side 1 of the #754 shell as a goal mesh, generated from the test's closed form). The split-helix column's programs are `jobs/j26-split-helix-A.nc` / `-B.nc` (#753).
