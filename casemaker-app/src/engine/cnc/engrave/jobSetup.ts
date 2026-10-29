@@ -335,8 +335,9 @@ export type JobFindingCode =
   // — the neck is no longer than the last cutter is wide, so the cut pockets the neck away instead
   // of leaving a floor; `neck-not-cut` — no posted program carries the neck (the run's cutter cannot
   // leave a flat-bottomed band, or the program that would cut it was not posted);
-  // `neck-jaw-clearance` (warning) — the jaws beside the neck are not modelled as a solid, so the
-  // operator must air-cut it first.
+  // `neck-jaw-clearance` (warning) — the fixture beside the neck (the jaws for a chuck-side neck,
+  // the tailstock for a tailstock-side one) is not modelled as a solid, so the operator must
+  // air-cut it first.
   | 'neck-thin'
   | 'neck-in-band'
   | 'neck-cuts-item'

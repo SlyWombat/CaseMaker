@@ -192,14 +192,15 @@ export function rotaryJobFindings(
   // minimum is a labelled default (neck.ts), refused in words with every number and its unit.
   const neck = rotaryNeckFacts(job);
   if (neck !== null) {
-    // Every neck carries this, whatever else is wrong with it: the jaw clearance beside the cut is
-    // NOT checked. The keep-out is Case Maker's guess and the sweep models no jaw body, so the
-    // operator air-cuts the neck first and keeps checking by eye until the rotary is measured.
+    // Every neck carries this, whatever else is wrong with it: the clearance beside the cut is NOT
+    // checked. The keep-out is Case Maker's guess and the sweep models no body for the fixture that
+    // sits there — the jaws beside a chuck-side neck, the tailstock beside a tailstock-side one — so
+    // the operator air-cuts the neck first and keeps checking by eye until the rotary is measured.
     findings.push({
       severity: 'warning',
       code: 'neck-jaw-clearance',
       labelId: ROTARY_NECK_ID,
-      message: neckJawClearanceSentence(),
+      message: neckJawClearanceSentence(neck.end),
     });
     const stockDiameter = map.radius * 2;
     if (neck.diameterMm >= stockDiameter) {

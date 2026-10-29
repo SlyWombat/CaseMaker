@@ -1913,7 +1913,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
                     ? ` This ⌀${fmt(neck.diameter)} mm neck is below that minimum — make it thicker, shorten ` +
                       'the part, or choose a stronger stock.'
                     : '') +
-                  ` ${neckJawClearanceSentence()}`}
+                  ` ${neckJawClearanceSentence(neck.end)}`}
             </span>
           </FieldRow>
         )}

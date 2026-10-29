@@ -4666,10 +4666,12 @@ function generateOneProgram(
       const cutterDiameter = neckCutter.tool.radius * 2;
       // The CAM pulls the neck's region in by `ROTARY_NECK_EDGE_GRID_MM` at each end, so the floor
       // it can leave is that much shorter than the nominal neck: judge the LENGTH THE CUT KEEPS,
-      // not the drawing's. A neck within half a trim of the cutter is cut away even when the
-      // nominal figure says it is just wider.
-      const floorLength = neck.lengthMm - 2 * ROTARY_NECK_EDGE_GRID_MM;
-      if (floorLength <= cutterDiameter) {
+      // not the drawing's. The post writes X to 0.001 mm, so the boundary is compared in those
+      // integer thousandths: `6.002 - 0.002` is 6 to the post, and the answer must not depend on
+      // the binary residue the subtraction happens to leave behind.
+      const floorThousandths = Math.round((neck.lengthMm - 2 * ROTARY_NECK_EDGE_GRID_MM) * 1000);
+      const cutterThousandths = Math.round(cutterDiameter * 1000);
+      if (floorThousandths <= cutterThousandths) {
         findings.push({
           severity: 'error',
           code: 'neck-too-narrow-for-cutter',

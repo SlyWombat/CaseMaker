@@ -382,6 +382,11 @@ describe('#737 the neck for parting (station 3)', () => {
         'the part stays joined to the stock in the chuck and is not parted off.',
     );
     expect(tailNote).toContain('The safe minimum is ⌀2.94 mm');
+    // The TAILSTOCK is beside this neck, not the jaws: the warning names the fixture that stands
+    // there, and still tells the operator to air-cut it first.
+    expect(tailNote).toContain('The tailstock clearance beside the neck is not checked');
+    expect(tailNote).toContain('does not model the tailstock as a solid');
+    expect(tailNote).not.toContain('The jaw clearance beside the neck is not checked');
     expect(tailNote).toContain('Air-cut the neck first');
 
     fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-diameter'), { target: { value: '6' } });
@@ -440,12 +445,13 @@ describe('#737 the neck for parting (station 3)', () => {
     const held = job().workholding;
     expect(held.kind).toBe('rotary-chuck');
     if (held.kind === 'rotary-chuck') {
-      // ⌀7 mm on a ⌀7 mm rod is `neck-wider-than-part`; the default stays just inside the rod.
-      expect(held.rotary.neck).toEqual({ end: 'chuck', diameter: 6.9, length: 5 });
+      // ⌀7 mm on a ⌀7 mm rod is `neck-wider-than-part`; the default keeps a quarter of the rod
+      // off, so the tick offers a real ⌀5.3 mm neck rather than a token 0.1 mm reduction.
+      expect(held.rotary.neck).toEqual({ end: 'chuck', diameter: 5.3, length: 5 });
     }
-    expect((screen.getByTestId('engrave-setup-rotary-neck-diameter') as HTMLInputElement).value).toBe('6.9');
+    expect((screen.getByTestId('engrave-setup-rotary-neck-diameter') as HTMLInputElement).value).toBe('5.3');
     expect(screen.getByTestId('engrave-setup-rotary-neck-note').textContent).toContain(
-      'Case Maker starts the neck at ⌀6.9 mm',
+      'Case Maker starts the neck at ⌀5.3 mm',
     );
   });
 });

@@ -136,8 +136,18 @@ export interface RotaryNeckFacts extends RotaryNeckSpan {
 }
 
 /**
- * The gap the default neck keeps inside its rod, mm. A neck has to be narrower than the part it
- * holds — `neck-wider-than-part` refuses equality — so the default is capped just inside the rod.
+ * The fraction of the rod's diameter the default neck keeps at most: a quarter off the stock.
+ *
+ * A fixed clearance is a token on a slim rod — ⌀6.9 mm on a ⌀7 mm rod is not a neck, it is the rod
+ * with a scratch around it — so the cap scales with the stock. On thick stock the 7 mm labelled
+ * default still takes over; on a ⌀7 mm rod this offers ⌀5.3 mm.
+ */
+export const ROTARY_NECK_DEFAULT_FRACTION = 0.75;
+
+/**
+ * The hard ceiling the default keeps inside the rod, mm. The fraction already leaves a quarter of
+ * the stock, but rounding to the panel's 0.1 mm step could round a sub-millimetre rod's fraction
+ * back UP to the rod itself — `neck-wider-than-part` refuses equality — so this guards that edge.
  */
 const ROTARY_NECK_DEFAULT_CLEARANCE_MM = 0.1;
 
@@ -149,10 +159,10 @@ const ROTARY_NECK_DEFAULT_CLEARANCE_MM = 0.1;
  * in the chuck, so it does not part the part off. The tailstock side remains available for the
  * work that wants it; the panel states that consequence.
  *
- * The diameter is CAPPED to the rod: the ⌀7 mm default is meaningless on a ⌀7 mm or smaller rod,
- * where it would refuse `neck-wider-than-part` the instant the box is ticked. The default keeps
- * {@link ROTARY_NECK_DEFAULT_CLEARANCE_MM} inside the rod and is rounded to 0.1 mm, so it is
- * always strictly narrower than the stock it is cut from.
+ * The diameter is CAPPED to a {@link ROTARY_NECK_DEFAULT_FRACTION} of the rod: the ⌀7 mm default
+ * is meaningless on a ⌀7 mm or smaller rod, where it would refuse `neck-wider-than-part` the
+ * instant the box is ticked, and a token 0.1 mm reduction would be no neck at all. The result is
+ * rounded to the panel's 0.1 mm step and stays strictly narrower than the stock it is cut from.
  */
 export function defaultRotaryNeck(stockDiameterMm?: number | null): RotaryNeck {
   const rod = stockDiameterMm ?? null;
@@ -160,7 +170,11 @@ export function defaultRotaryNeck(stockDiameterMm?: number | null): RotaryNeck {
     rod === null || !Number.isFinite(rod)
       ? ROTARY_NECK_DIAMETER_MM
       : Math.round(
-          Math.min(ROTARY_NECK_DIAMETER_MM, Math.max(0, rod - ROTARY_NECK_DEFAULT_CLEARANCE_MM)) * 10,
+          Math.min(
+            ROTARY_NECK_DIAMETER_MM,
+            Math.max(0, rod * ROTARY_NECK_DEFAULT_FRACTION),
+            Math.max(0, rod - ROTARY_NECK_DEFAULT_CLEARANCE_MM),
+          ) * 10,
         ) / 10;
   return {
     end: 'chuck',
@@ -462,12 +476,24 @@ export function neckNoProgramSentence(): string {
 
 /**
  * "The jaw clearance beside the neck is not checked …" — the warning every neck carries. The map's
- * jaw keep-out is Case Maker's own guess and the sweep models no jaw body, so nothing in the app
- * can promise the cut clears the jaws; the operator air-cuts it first and keeps checking by eye
- * until the rotary is measured on the machine. One sentence, so the panel, the finding and the run
- * sheet cannot word the same limit three ways.
+ * keep-out is Case Maker's own guess and the sweep models no body for the fixture beside it, so
+ * nothing in the app can promise the cut clears it; the operator air-cuts the neck first and keeps
+ * checking by eye until the rotary is measured on the machine.
+ *
+ * Which fixture stands beside the neck depends on `end`: a CHUCK-side neck starts at the jaws, so
+ * the unchecked band is the jaws'; a TAILSTOCK-side neck ends at the tailstock's band, and naming
+ * the jaws there would warn about the wrong piece of the machine. One sentence per end, so the
+ * panel, the finding and the run sheet cannot word the same limit three ways.
  */
-export function neckJawClearanceSentence(): string {
+export function neckJawClearanceSentence(end: 'chuck' | 'tailstock' = 'chuck'): string {
+  if (end === 'tailstock') {
+    return (
+      'The tailstock clearance beside the neck is not checked: Case Maker keeps the neck clear of a ' +
+      'tailstock keep-out band it assumes — its own guess — and does not model the tailstock as a ' +
+      'solid. Air-cut the neck first, and do not trust that clearance until the rotary is measured ' +
+      'on the machine.'
+    );
+  }
   return (
     'The jaw clearance beside the neck is not checked: Case Maker keeps the neck clear of a jaw ' +
     'keep-out band it assumes — its own guess — and does not model the jaws as a solid. Air-cut the ' +

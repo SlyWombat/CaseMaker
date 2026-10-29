@@ -3013,7 +3013,7 @@ function neckSawSteps(facts: RunSheetNeckFacts | null | undefined): RunSheetStep
         `${saw} — ⌀${fmtNum(facts.diameterMm)} mm ` +
         `and ${fmtNum(facts.lengthMm)} mm long, from X ${fmtNum(facts.fromMm)} mm to X ${fmtNum(facts.toMm)} mm, ` +
         `and ${fmtNum(facts.depthMm)} mm deep. It is the program's last cut, made all the way round. ` +
-        neckJawClearanceSentence(),
+        neckJawClearanceSentence(facts.end),
       value: `⌀${fmtNum(facts.diameterMm)} × ${fmtNum(facts.lengthMm)} mm neck`,
     },
   ];
@@ -4119,6 +4119,10 @@ export function buildRunSheet(
     warnings.push({ text: message });
   };
   for (const f of generated.findings) {
+    // #737 — the neck step in its program's Cut section already carries this warning at the point
+    // of use, with the air-cut instruction. Carrying it here too printed the same warning twice on
+    // one sheet; the neck step is the one copy the operator reads beside the cut it describes.
+    if (f.code === 'neck-jaw-clearance') continue;
     if (f.severity === 'warning') pushWarning(f.code, f.message);
   }
   if (generated.verify) {
