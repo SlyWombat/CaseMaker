@@ -1619,7 +1619,10 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       code: 'fixture-unchecked',
       message:
         "the rotary's tailstock and the chuck body above its jaws are not modelled as obstacles yet: the " +
-        "cutter's proximity to them is NOT checked (the jaws are checked only as the space beyond the jaw face)",
+        "cutter's proximity to them is NOT checked (the jaws are checked only as the space beyond the jaw face" +
+        (jawReach > topZ + 1e-9
+          ? ')'
+          : ", up to the rod's top — no jaw size is recorded, so jaws standing taller than the rod are not checked)"),
     });
   }
   // Every check against it is done; the fixture is not part of the result, so release it now.
