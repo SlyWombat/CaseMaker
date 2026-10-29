@@ -47,8 +47,13 @@ export type ReceiptGate = (typeof RECEIPT_GATES)[number];
 export const RECEIPT_PROVENANCE_SOURCES = ['seeded', 'located', 'typed', 'measured'] as const;
 export type ReceiptProvenanceSource = (typeof RECEIPT_PROVENANCE_SOURCES)[number];
 
-/** Which list a diagnostic was raised from, so a receipt can render the same blocks the panels do. */
-export const RECEIPT_DIAGNOSTIC_SOURCES = ['findings', 'verify', 'simulation'] as const;
+/**
+ * Which list a diagnostic was raised from, so a receipt can render the same blocks the panels do.
+ *
+ * `frame` is the frame file's own report (#244/#747): a SEPARATE list from `verify`, because a
+ * frame fault is not a fault in the program and an operator must be able to tell the two apart.
+ */
+export const RECEIPT_DIAGNOSTIC_SOURCES = ['findings', 'verify', 'simulation', 'frame'] as const;
 
 const sha256 = z
   .string()
@@ -609,6 +614,15 @@ function engraveLines(receipt: Extract<Receipt, { command: 'engrave' }>): string
       (d) => d.program === program.name && d.source === 'verify' && d.severity === 'warning',
     )) {
       lines.push(`     warn  ${f.code}: ${f.message}`);
+    }
+    // #747 review — the FRAME's own findings print too, under the frame's label: a withheld
+    // frame's findings are warnings (the program passed), a handed-over frame's keep the
+    // verifier's severity, and either way the reader sees which file the sentence is about.
+    for (const f of receipt.diagnostics.filter(
+      (d) => d.program === program.name && d.source === 'frame',
+    )) {
+      const level = f.severity === 'error' ? 'ERROR' : f.severity === 'warning' ? 'warn ' : 'info ';
+      lines.push(`     frame ${level} ${f.code}: ${f.message}`);
     }
     if (program.sim !== null) {
       const sim = program.sim;

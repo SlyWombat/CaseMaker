@@ -233,18 +233,24 @@ export function collect(input: PreflightInput): PreflightRow[] {
   // limit and the tool — a Generate's work, not a keystroke's). Both reports are read: `verify` is
   // the job's program, `frameVerify` the frame file's (#244), and both are files the machine runs.
   //
-  // #747 — UNLESS THE FRAME WAS WITHHELD. A withheld frame is not a file the machine runs; its
-  // report is kept on the generated result so the receipt can carry every finding, but it is not a
-  // gate answer. The program it belongs to passed verification, so its findings must not block the
-  // cut; the absence is stated once, in the worker's own words, by the `no-frame` warning below.
+  // #747 — A WITHHELD FRAME'S REPORT IS CARRIED, BUT NOT AS A REFUSAL. The review's finding
+  // (2026-10-28): dropping the report here left its findings on the CLI receipt only, which is
+  // exactly the complaint the issue opened with. The program the frame belongs to passed
+  // verification, and a withheld frame is not a file the machine runs, so every finding is still
+  // read — demoted to a warning where the verifier said error — and each names the FILE it is about
+  // ("The frame file: …"), so a row can never be mistaken for one about the program. The absence
+  // itself is still stated once, in the worker's own words, by the `no-frame` warning below.
   const withheldFrame = gen !== null && gen.frameNc === null && gen.frameError != null;
-  const reports: (VerifyReport | null | undefined)[] = [gen?.verify, withheldFrame ? null : gen?.frameVerify];
-  for (const report of reports) {
+  const reports: { report: VerifyReport | null | undefined; frame: boolean }[] = [
+    { report: gen?.verify, frame: false },
+    { report: gen?.frameVerify, frame: true },
+  ];
+  for (const { report, frame } of reports) {
     for (const finding of report?.findings ?? []) {
       rows.push({
-        severity: finding.severity,
+        severity: frame && withheldFrame && finding.severity === 'error' ? 'warning' : finding.severity,
         code: finding.code,
-        message: finding.message,
+        message: frame ? `The frame file: ${finding.message}` : finding.message,
         owner: 'verify',
         cause: causeFor(scope, { line: finding.line }),
       });
@@ -254,8 +260,8 @@ export function collect(input: PreflightInput): PreflightRow[] {
   // #747 — A FRAME WITHHELD FROM A VERIFIED PROGRAM IS NOT A REFUSAL. The program above passed,
   // so the run is still savable and runnable; the frame is absent and the Generate says why (it
   // could not be traced at a reachable height, the post refused it, or its verifier did). That
-  // sentence is nowhere else: with a good program the `!gen.ok` branch below does not fire, and a
-  // withheld frame with a report has had its findings routed to the receipt instead of here.
+  // sentence is nowhere else: with a good program the `!gen.ok` branch below does not fire, and the
+  // frame's own findings above are warnings with no summary of why the file is absent.
   // Warning, because the CUT never depended on the trace — only the dry-run confirmation of the
   // work origin did.
   if (gen !== null && gen.ok && gen.nc !== null && gen.frameNc === null && gen.frameError != null) {

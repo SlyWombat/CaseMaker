@@ -623,6 +623,11 @@ export function EngraveCutSurface({
 
   const programCount = generated?.programs.length ?? pkg?.programs.length ?? 0;
   const noteCount = report.rows.filter((row) => row.severity === 'info').length;
+  // #747 review — A WARNING IS NOT FOLDED AWAY. A green gate with a withheld frame carries its
+  // `no-frame` warning in the closed details fold, where nobody would look; step 1's one line
+  // counts it, so the operator knows to open the fold and read it.
+  const warningCount = report.warningCount;
+  const warningWords = warningCount > 0 ? `${warningCount} warning${warningCount === 1 ? '' : 's'}` : null;
   // #703 — ONE TIME FOR THE CUT (audit B15). The run plan's total is the SETUP plus the cut, and
   // in a package that carries no toolpath the cut's own phase has no number at all — so the
   // 6 min 8 s the two steps printed was that plan total, not this cut's time. The steps print the
@@ -633,6 +638,7 @@ export function EngraveCutSurface({
   const step1Meta: string[] = [];
   if (programCount > 0) step1Meta.push(`${programCount} program${programCount === 1 ? '' : 's'}`);
   if (cutEstimate !== null) step1Meta.push(cutEstimate);
+  if (warningWords !== null) step1Meta.push(warningWords);
   if (noteCount > 0) step1Meta.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
   if (ackRequired) step1Meta.push(acknowledged ? 'clearance acknowledged' : 'clearance not acknowledged');
   const step1Summary = checked
@@ -640,7 +646,8 @@ export function EngraveCutSurface({
     : mountMismatch
       ? `the machine no longer holds ${jobMountWords(frozenMount)}`
       : report.errorCount > 0
-        ? `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}`
+        ? `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}` +
+          (warningWords === null ? '' : ` · ${warningWords}`)
         : ackRequired
           ? 'clearance not acknowledged'
           : 'clear';

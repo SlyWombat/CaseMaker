@@ -457,6 +457,10 @@ describe('#419 §3 the Cut surface', () => {
     draw({ job, report: reportOf([warning]), pkg, generated: generated([P1]), canDrive: true });
     const details = screen.getByTestId('engrave-cut-details') as HTMLDetailsElement;
     expect(details.open).toBe(false);
+    // #747 review — a warning is not hidden inside a closed fold: step 1's own line counts it.
+    // A withheld frame is exactly this case: the gate is green, the `no-frame` row is a warning,
+    // and without the count the operator would have to guess to open the fold and read it.
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('1 warning');
 
     // A blocking row opens the fold by itself: the sentence must be seen, not hidden.
     const blocking = row('error', 'err-x', 'the blank is not held');

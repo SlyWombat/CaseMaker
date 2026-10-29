@@ -195,6 +195,12 @@ describe('preflight: the program (the verifier, or the gate before one exists)',
       generated: generatedWith({ verify: report, frameVerify: report }),
     }).filter((r) => r.owner === 'verify');
     expect(rows).toHaveLength(report.findings.length * 2);
+    // And the reader can tell WHICH file each row is about: the frame's copy names the frame
+    // (#747 review) — the program's stays the verifier's own sentence, verbatim.
+    expect(rows.map((r) => r.message)).toEqual([
+      ...report.findings.map((f) => f.message),
+      ...report.findings.map((f) => `The frame file: ${f.message}`),
+    ]);
   });
 
   it('offers a WITHHELD frame as a warning, not a blocked cut (#747)', () => {
@@ -215,18 +221,24 @@ describe('preflight: the program (the verifier, or the gate before one exists)',
     expect(rows.filter((r) => r.severity === 'error')).toEqual([]);
   });
 
-  it('does not re-block a verified program with the withheld frame`s verifier findings (#747)', () => {
-    // The frame the worker WITHHELD because its own verifier refused it keeps its report on the
-    // generated result so the receipt can carry every finding (#747). That report is not a file
-    // the machine runs, so it must not become an error row here: the program it belongs to passed
-    // verification and the Cut gate must stay green apart from the withheld-frame warning.
+  it('carries a WITHHELD frame`s verifier findings as warnings that name the frame (#747)', () => {
+    // The review`s finding: the CLI receipt was not the only reader that needed them. The frame the
+    // worker WITHHELD because its own verifier refused it keeps its report on the generated result;
+    // the Cut gate reads it too, but not as a refusal — the program it belongs to passed, and a
+    // withdrawn frame is not a file the machine runs. Every finding is carried, demoted to a
+    // warning where the verifier said error, and prefixed with the file it is about.
     const frameReport = verifyProgram('G2 X0 Y0', VERIFY_CTX);
     expect(frameReport.findings.some((f) => f.severity === 'error')).toBe(true);
     const reason = `The frame file was withheld: its verifier found ${frameReport.findings.filter((f) => f.severity === 'error').length} errors.`;
     const rows = rowsFor(defaultEngraveJob(), {
       generated: generatedWith({ ok: true, nc: 'G90 G21\n', frameNc: null, frameVerify: frameReport, frameError: reason }),
     });
-    expect(rows.filter((r) => r.owner === 'verify' && r.severity === 'error')).toEqual([]);
+    const frameRows = rows.filter((r) => r.message.startsWith('The frame file: '));
+    expect(frameRows).toHaveLength(frameReport.findings.length);
+    expect(frameRows.map((r) => r.code)).toEqual(frameReport.findings.map((f) => f.code));
+    expect(frameRows.every((r) => r.severity === 'warning')).toBe(true);
+    // The gate stays green: nothing about the withheld frame blocks the verified program.
+    expect(rows.filter((r) => r.severity === 'error')).toEqual([]);
     const row = withCode(rows, 'no-frame')[0]!;
     expect(row.severity).toBe('warning');
     expect(row.message).toBe(reason);

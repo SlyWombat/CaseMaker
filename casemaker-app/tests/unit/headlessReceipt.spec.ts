@@ -254,6 +254,33 @@ describe('#478 the human output is rendered from the receipt', () => {
     expect(text).toContain('  sheet      badge-run-sheet.md  hash=deadbeef  time=1 min 35 s');
   });
 
+  it('prints a frame’s findings beside the program’s, under the frame’s own name (#747)', () => {
+    // #747 review — the frame's report is its OWN list. Its rows carry `source: 'frame'`, so the
+    // renderer can label them and an operator can never read one as a finding about the program.
+    // Both severities print: an error on a frame the machine WILL run, and the withholding warning.
+    const receipt = engraveReceipt({
+      diagnostics: [
+        diagnostic('vise-default', 'warning', 'the vise is the shipped set', 'findings', 'Badge'),
+        diagnostic(
+          'outside-envelope',
+          'error',
+          "a move to machine (0.000, 0.000, 0.000) leaves the Makera Z1's envelope",
+          'frame',
+          'Badge',
+        ),
+        diagnostic('no-frame', 'warning', 'The frame file was withheld: its verifier found 1 error.', 'frame', 'Badge'),
+      ],
+    });
+    const text = renderReceipt(receipt).join('\n');
+    expect(text).toContain(
+      "     frame ERROR outside-envelope: a move to machine (0.000, 0.000, 0.000) leaves the Makera Z1's envelope",
+    );
+    expect(text).toContain('     frame warn  no-frame: The frame file was withheld: its verifier found 1 error.');
+    // The program's own warning keeps its own label.
+    expect(text).toContain('     warn  vise-default: the vise is the shipped set');
+    expect(text).not.toContain('     frame warn  vise-default');
+  });
+
   it('renders a stopped run’s errors and refusal from the receipt', () => {
     const stopped = engraveReceipt({
       ok: false,

@@ -28,7 +28,7 @@ import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveJob } from '@/types/engraveJob';
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import { HUMAN, type CommandOptions } from '../../scripts/lib/casemaker/output';
-import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
+import { parseReceipt, renderReceipt, type Receipt } from '../../src/platform/headless/receipt';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
@@ -843,17 +843,25 @@ describe('#747 the frame is traced inside the envelope, and never gates a verifi
       receipt.outputs.some((o) => o.path.endsWith('.nc') && !o.path.endsWith('-frame.nc')),
       'the verified program itself is still written',
     ).toBe(true);
-    // The frame's findings, with their machine coordinates, are on the receipt like the program's.
+    // The frame's findings, with their machine coordinates, are on the receipt as the FRAME'S —
+    // `source: 'frame'`, so they cannot be read as the program's — and, the frame being withheld,
+    // demoted to warnings: the program itself passed and is still runnable.
     const frameErrors = receipt.diagnostics.filter(
-      (d) => d.severity === 'error' && d.source === 'verify' && d.message.includes('outside-envelope'),
+      (d) => d.source === 'frame' && d.message.includes('outside-envelope'),
     );
     expect(frameErrors.length, allDiagnostics(receipt)).toBeGreaterThan(0);
+    expect(frameErrors[0]!.severity).toBe('warning');
     expect(frameErrors[0]!.message).toContain("leaves the Makera Z1's envelope");
+    // The TEXT receipt prints them, labelled as the frame's, as well as carrying them as data.
+    const rendered = renderReceipt(receipt).join('\n');
+    expect(rendered).toContain('     frame warn  runner-error: outside-envelope:');
     // ... and why the frame is absent: a warning, because the program never depended on the trace.
     const withheld = receipt.diagnostics.find((d) => d.code === 'no-frame');
     expect(withheld, allDiagnostics(receipt)).toBeDefined();
     expect(withheld!.severity).toBe('warning');
+    expect(withheld!.source).toBe('frame');
     expect(withheld!.message).toContain('withheld');
+    expect(rendered).toContain('     frame warn  no-frame: The frame file was withheld');
     // The sheet says the program can still be cut, rather than "do not run this file".
     const sheetPath = receipt.outputs.find((o) => o.path.endsWith('-run-sheet.md'))!.path;
     const sheet = readFileSync(sheetPath, 'utf8');
