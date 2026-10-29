@@ -183,6 +183,8 @@ function TransportBar() {
   // #716 slice 2 — Stock | Unroll (rotary jobs only) and the indexed job's face ticks.
   const design = useSimStore((s) => s.design);
   const setDesign = useSimStore((s) => s.setDesign);
+  // #716 slice 2 — a refused crossing is said where the path is drawn, not only in the panel.
+  const crossing = useSimStore((s) => s.diagnostics.find((d) => d.code === 'axis-crossing') ?? null);
   // #691 — ONE time for the cut. A simulation the engrave run loaded for the job's own program has
   // a CAM estimate, and the Generate row already states it; printing the playback clock's own total
   // beside it gave two durations for one cut (audit B15). So the job's session borrows the run's
@@ -438,6 +440,11 @@ function TransportBar() {
       {stoppedAt && (
         <div data-testid="sim-pause-callout" style={CALLOUT}>
           {pauseMessage(stoppedAt)}
+        </div>
+      )}
+      {crossing !== null && (
+        <div data-testid="sim-refusal-callout" style={CALLOUT}>
+          {crossing.message}
         </div>
       )}
       {info && (

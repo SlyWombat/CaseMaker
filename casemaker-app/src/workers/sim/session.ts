@@ -443,7 +443,15 @@ export function disposeSweep(sweep: SweepResult): void {
 
 const refuse = (code: string, message: string): SimLoadRefused => ({ ok: false, pathOnly: false, diagnostics: [{ source: 'sweep', severity: 'error', code, message }] });
 
-const tagSweep = (d: SweepDiagnostic): SimDiagnostic => ({ source: 'sweep', severity: d.severity, code: d.code, message: d.message, ...(d.checkpoint !== undefined ? { checkpoint: d.checkpoint } : {}) });
+const tagSweep = (d: SweepDiagnostic): SimDiagnostic => ({
+  source: 'sweep',
+  severity: d.severity,
+  code: d.code,
+  message: d.message,
+  ...(d.checkpoint !== undefined ? { checkpoint: d.checkpoint } : {}),
+  ...(d.line !== undefined ? { line: d.line } : {}),
+  ...(d.step !== undefined ? { step: d.step } : {}),
+});
 
 /**
  * The worst checkpoint's 2D contour count, as a triangle count — the number the sweep's own

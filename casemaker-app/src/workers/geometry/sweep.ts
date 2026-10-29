@@ -219,6 +219,10 @@ export interface SweepDiagnostic {
   code: string;
   message: string;
   checkpoint?: number;
+  /** #716 slice 2 — the source line the fault is on, when the engine knows it. */
+  line?: number;
+  /** #716 slice 2 — the program step (0-based) the fault happens at, when it is known. */
+  step?: number;
 }
 
 /** A volume for a diagnostic, in mm³: three decimals for anything a person can see, else exponential. */

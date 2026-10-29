@@ -241,8 +241,13 @@ describe('columnSweep (whole-program)', () => {
     if (out.ok) return;
     const d = out.diagnostics.find((x) => x.code === 'axis-crossing');
     expect(d).toBeDefined();
-    expect(d?.message).toContain('line 42');
-    expect(d?.message).toContain('step 7');
+    // #716 slice 2 — the simulation's words: the move number, what the tip does, and that the
+    // picture stops there. The line/step are carried as fields so the panel can link the line.
+    expect(d?.line).toBe(42);
+    expect(d?.step).toBe(7);
+    expect(d?.message).toBe(
+      'Move 8 cuts through the centre: the cutter tip reaches 2 mm past the axis. The simulation stops there; the moves after it are drawn, not simulated.',
+    );
     expect(out.stats?.checkpointsSwept).toBe(0);
   });
 

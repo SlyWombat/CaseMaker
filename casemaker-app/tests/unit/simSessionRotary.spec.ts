@@ -169,7 +169,12 @@ describe('session routing — rotary', () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.pathOnly).toBe(true);
-    expect(r.diagnostics.some((d) => d.code === 'axis-crossing')).toBe(true);
+    const crossing = r.diagnostics.find((d) => d.code === 'axis-crossing');
+    expect(crossing).toBeDefined();
+    // #716 slice 2 — carried to the session with the move number and the stop clause intact.
+    expect(crossing?.message).toMatch(/^Move \d+ cuts through the centre: the cutter tip reaches 2 mm past the axis\. The simulation stops there; the moves after it are drawn, not simulated\.$/);
+    expect(crossing?.line).toBe(4); // the G1 Z-2 line of CROSSING
+    expect(crossing?.step).toBeDefined();
     expect(r.summary?.rotary).toBe(true);
     // The path is still drawable and the clock still runs; there is just no material.
     expect(s.stateAt(0)).not.toBeNull();

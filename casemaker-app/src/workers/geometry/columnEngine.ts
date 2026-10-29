@@ -1515,6 +1515,10 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       if (r.crossed) {
         stats.ms.total = performance.now() - t0;
         stats.checkpointsSwept = k;
+        // #716 slice 2 — the simulation's own words (design §3.9): the MOVE number, what the tip
+        // does, and that the picture stops at that move. The panel's line link comes from `line`;
+        // the move number is 1-based, the way the operator counts the program.
+        const past = -r.crossed.z;
         return {
           ok: false,
           stats,
@@ -1523,7 +1527,9 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
             {
               severity: 'error',
               code: 'axis-crossing',
-              message: `line ${m.line}: the cutter tip reaches radius Z ${r.crossed.z.toFixed(3)}, deeper than the tool radius ${cutter.radius.toFixed(4)} mm below the rotary axis, at step ${m.step}: a single-valued radius column cannot represent a cut that crosses the axis`,
+              line: m.line,
+              step: m.step,
+              message: `Move ${m.step + 1} cuts through the centre: the cutter tip reaches ${Number(past.toFixed(3))} mm past the axis. The simulation stops there; the moves after it are drawn, not simulated.`,
             },
           ],
         };

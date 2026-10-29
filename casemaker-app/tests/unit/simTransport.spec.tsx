@@ -128,6 +128,30 @@ describe('SimTransport (#198)', () => {
     expect(timed.getAttribute('title')).not.toContain('untimed');
   });
 
+  it('a refused crossing is stated where the path is drawn, with its move (#716)', () => {
+    setStore({
+      status: 'refused',
+      pathOnly: true,
+      path: fakePath(),
+      info: null,
+      diagnostics: [
+        {
+          source: 'sweep',
+          severity: 'error',
+          code: 'axis-crossing',
+          line: 42,
+          step: 7,
+          message:
+            'Move 8 cuts through the centre: the cutter tip reaches 2 mm past the axis. The simulation stops there; the moves after it are drawn, not simulated.',
+        },
+      ],
+    });
+    render(<SimTransport />);
+    const callout = screen.getByTestId('sim-refusal-callout');
+    expect(callout.textContent).toContain('Move 8 cuts through the centre');
+    expect(callout.textContent).toContain('not simulated');
+  });
+
   it('a rotary job offers Stock | Unroll, and an indexed job marks its faces (#716, #241)', () => {
     const info = {
       summary: { steps: 101, rotary: true, rotaryClass: 'indexed' },
