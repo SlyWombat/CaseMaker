@@ -139,9 +139,14 @@ function MeshSizeControls({
 }): JSX.Element {
   const scale = targetScale(target);
   const placed = placedSize(target);
-  const [locked, setLocked] = useState(() => isUniform(scale));
   const uniform = isUniform(scale);
-  const fit = stock === undefined ? null : fitToStockScale(target.size, stock, stock.edgeMargin);
+  // The lock follows the object: a different target (or a reload) starts from its own scale, so a
+  // stretched document is never silently collapsed by the next width typed.
+  const [lock, setLock] = useState<{ id: string; locked: boolean }>(() => ({ id: target.id, locked: uniform }));
+  const locked = lock.id === target.id ? lock.locked : uniform;
+  const setLocked = (next: boolean): void => setLock({ id: target.id, locked: next });
+  const fit =
+    stock === undefined ? null : fitToStockScale(target.size, stock, stock.edgeMargin, target.rotation);
 
   const axisField = (axis: 'x' | 'y' | 'z'): JSX.Element => (
     <label style={FIELD_LABEL}>
@@ -208,12 +213,18 @@ function MeshSizeControls({
           />
           <span>keep the aspect</span>
         </label>
-        {fit !== null && (
+        {stock !== undefined && (
           <button
             type="button"
             data-testid={`engrave-target-fit-${index}`}
-            title="The largest same-in-every-direction size that fits inside the blank less its edge margin, no taller than the blank; centred on the blank with its top at the top face."
+            disabled={fit === null}
+            title={
+              fit === null
+                ? 'The blank less its edge margin leaves no room to fit the object.'
+                : 'The largest same-in-every-direction size that fits inside the blank less its edge margin, as the object is turned, no taller than the blank; centred on the blank with its top at the top face.'
+            }
             onClick={() => {
+              if (fit === null) return;
               onChange({
                 scale: { x: fit, y: fit, z: fit },
                 position: { x: stock!.length / 2, y: stock!.width / 2, z: 0 },

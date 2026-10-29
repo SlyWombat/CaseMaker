@@ -97,3 +97,30 @@ describe('#722 — the mesh size controls', () => {
     expect(screen.queryByTestId('engrave-target-size-0')).toBeNull();
   });
 });
+
+describe('#722 review — the row', () => {
+  it('a stretched object loads unlocked, so a width keeps the stretch', () => {
+    const onChange = renderRow({ scale: { x: 0.25, y: 0.25, z: 0.5 } });
+    expect((screen.getByTestId('engrave-target-aspect-0') as HTMLInputElement).checked).toBe(false);
+    fireEvent.change(screen.getByTestId('engrave-target-size-x-0'), { target: { value: '100' } });
+    expect(onChange).toHaveBeenLastCalledWith({ scale: { x: 0.5, y: 0.25, z: 0.5 } });
+  });
+
+  it('Fit is disabled, with its reason, when the margins leave no room', () => {
+    const onChange = vi.fn<(patch: TargetObjectPatch) => void>();
+    render(
+      <EngraveTargetObjectRow
+        target={MESH}
+        index={0}
+        onChange={onChange}
+        onRemove={() => undefined}
+        findings={[]}
+        stock={{ ...STOCK, edgeMargin: 19 }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('engrave-target-expand-0'));
+    const fit = screen.getByTestId('engrave-target-fit-0') as HTMLButtonElement;
+    expect(fit.disabled).toBe(true);
+    expect(fit.title).toBe('The blank less its edge margin leaves no room to fit the object.');
+  });
+});

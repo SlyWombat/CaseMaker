@@ -1,5 +1,5 @@
 import { rectProfile } from '@/engine/compiler/profile';
-import { placedSize } from '@/engine/cnc/engrave/targetScale';
+import { placedSize, turnedFootprint } from '@/engine/cnc/engrave/targetScale';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { getTools, NO_TOOL_KEY, toolForJob } from '@/engine/cnc/toolRegistry';
 import {
@@ -891,7 +891,9 @@ export function validateGoalObject(
   const placed = placedSize(target);
   const depth = target.format === 'png' ? reliefNumbers(target.relief).maxDepthMm : placed.z;
   const hasVolume = placed.x > 0 && placed.y > 0 && depth > 0;
-  const fitsFootprint = placed.x <= length && placed.y <= width;
+  // The TURNED footprint: a goal rotated on the blank occupies its axis-aligned extents.
+  const footprint = turnedFootprint(placed.x, placed.y, target.rotation);
+  const fitsFootprint = footprint.x <= length + 1e-9 && footprint.y <= width + 1e-9;
   const fitsDepth = depth <= thickness;
   if (!hasVolume) {
     findings.push({

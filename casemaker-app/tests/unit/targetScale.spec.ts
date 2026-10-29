@@ -196,3 +196,26 @@ describe('#722 — the store writes the scale', () => {
     expect('scale' in (useEngraveJobStore.getState().job.targetObject ?? {})).toBe(false);
   });
 });
+
+describe('#722 review — a turned object', () => {
+  it('Fit to the stock uses the turned footprint', () => {
+    // 200 × 100 turned 90° occupies 100 × 200: room 74 × 36 → 0.18 (Y binds), not the unturned 0.25.
+    expect(fitToStockScale({ x: 200, y: 100, z: 4 }, STOCK, 1, 90)).toBeCloseTo(0.18, 9);
+    expect(fitToStockScale({ x: 200, y: 100, z: 4 }, STOCK, 1, 0)).toBeCloseTo(0.36, 9);
+  });
+
+  it('the size check refuses a goal whose turned footprint leaves the blank', () => {
+    const t = goal({ scale: { x: 0.25, y: 0.25, z: 0.25 }, rotation: 90 });
+    expect(validateGoalObject(t, STOCK).map((f) => f.code)).toContain('goal-object-oversize');
+    expect(validateGoalObject({ ...t, rotation: 0 }, STOCK).map((f) => f.code)).not.toContain('goal-object-oversize');
+  });
+
+  it('a scaled AND turned heightfield lands where the turned footprint says', () => {
+    const hf = sampleGoalHeightfield(goal({ scale: { x: 0.2, y: 0.2, z: 0.2 }, rotation: 90 }), { pitchMm: 0.25 });
+    // 40 × 20 turned 90° about (38, 19): X 28…48, Y −1…39.
+    expect(hf.x0).toBeCloseTo(28, 4);
+    expect(hf.y0).toBeCloseTo(-1, 4);
+    expect((hf.nx - 1) * hf.pitch).toBeGreaterThanOrEqual(20 - 1e-6);
+    expect((hf.ny - 1) * hf.pitch).toBeGreaterThanOrEqual(40 - 1e-6);
+  });
+});

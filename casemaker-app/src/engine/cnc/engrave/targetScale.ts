@@ -31,15 +31,26 @@ export function placedSize(
 }
 
 /**
- * The largest UNIFORM scale that fits the stock (#722 "Fit to the stock"): the footprint inside the
- * stock less the edge margin on every side, and the height no more than the stock's thickness.
- * Rotation is not considered: the footprint is the axis-aligned parsed bbox, so a turned object
- * may still need moving. Null when the stock leaves no room (margins eat the blank).
+ * The work-frame footprint of a box `w × h` turned `rotationDeg` about its centre, mm: the
+ * axis-aligned extents the heightfield grid and the stock actually see.
+ */
+export function turnedFootprint(w: number, h: number, rotationDeg: number): { x: number; y: number } {
+  const t = (rotationDeg * Math.PI) / 180;
+  const c = Math.abs(Math.cos(t));
+  const s = Math.abs(Math.sin(t));
+  return { x: w * c + h * s, y: w * s + h * c };
+}
+
+/**
+ * The largest UNIFORM scale that fits the stock (#722 "Fit to the stock"): the TURNED footprint
+ * inside the stock less the edge margin on every side, and the height no more than the stock's
+ * thickness. Null when the stock leaves no room (margins eat the blank).
  */
 export function fitToStockScale(
   size: { x: number; y: number; z: number },
   stock: { length: number; width: number; thickness: number },
   edgeMarginMm: number,
+  rotationDeg = 0,
 ): number | null {
   const room = {
     x: stock.length - 2 * edgeMarginMm,
@@ -48,7 +59,9 @@ export function fitToStockScale(
   };
   if (!(room.x > 0 && room.y > 0 && room.z > 0)) return null;
   if (!(size.x > 0 && size.y > 0 && size.z > 0)) return null;
-  return Math.min(room.x / size.x, room.y / size.y, room.z / size.z);
+  // The footprint scales linearly with a uniform scale, so the 1× turned extents set the limit.
+  const turned = turnedFootprint(size.x, size.y, rotationDeg);
+  return Math.min(room.x / turned.x, room.y / turned.y, room.z / size.z);
 }
 
 /**
