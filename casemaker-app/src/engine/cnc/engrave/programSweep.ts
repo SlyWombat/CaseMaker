@@ -229,8 +229,26 @@ export function refusalSummary(failure: ProgramSweepFailure): ProgramSweepSummar
   };
 }
 
-/** The two codes the session raises when it cannot start from another program's material. */
-const PRIOR_REFUSAL_CODES: ReadonlySet<string> = new Set(['prior-removal-column', 'prior-removal-rotary']);
+/**
+ * The codes that mean "this program cannot be the seeded one", so the walk sweeps it from the
+ * blank instead.
+ *
+ * `prior-removal-column` / `prior-removal-rotary`: the session states outright that the engine
+ * cannot start from another program's material.
+ *
+ * `dense-3d-refused` (#746): a DENSE FLAT program has its own engine — the column dexel — but
+ * only when it is loaded from a blank (`denseFlatRoutesToColumn` refuses a seed, because the
+ * column engine cannot be handed one). Seeded, the exact sweeper is the only engine left and it
+ * refuses the program by its own checkpoint cap, so the seeded walk would stop a job whose
+ * unseeded split (one program per file) generates and sweeps. Retrying from the blank routes it
+ * to the column engine, exactly as the two codes above do; a genuinely 3D program stays refused
+ * by that same cap, because the column route is flat-only.
+ */
+const PRIOR_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'prior-removal-column',
+  'prior-removal-rotary',
+  'dense-3d-refused',
+]);
 
 /**
  * Sweep every program, in cut order, on the stock the earlier ones left (#744/#733 item 4).

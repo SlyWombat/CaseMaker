@@ -49,6 +49,22 @@ const RAPID_IN_CHANNEL = ['S1000 M3', 'G0 X12 Y10 Z2', 'G0 Z-1', 'G0 X28', 'G0 Z
 const RAPID_IN_STOCK = ['S1000 M3', 'G0 X12 Y40 Z2', 'G0 Z-1', 'G0 X28', 'G0 Z2', 'M5'].join('\n');
 /** A drill program: one plunge, whose point is stated only in `drill.simDrillPoint`. */
 const DRILL_HOLE = ['S9000 M3', 'G0 X20 Y40 Z2', 'G1 Z-3 F100', 'G0 Z2', 'M5'].join('\n');
+/**
+ * A DENSE FLAT program (#746): more separate runs of cuts at one (segment, Z) than the exact
+ * sweep's `MAX_CHECKPOINTS`. It alternates two depths along the same channel, which is a legal
+ * (if pointless) 2.5D cut — and the shape a real 17-item program can reach. The column engine is
+ * the engine for a flat job this dense, but it cannot be handed a seed.
+ */
+const DENSE_FLAT = (() => {
+  const lines = ['S1000 M3', 'G0 X10 Y10 Z2'];
+  for (let i = 0; i < 1200; i++) {
+    const z = i % 2 === 0 ? -0.5 : -1;
+    const x = i % 2 === 0 ? 30 : 10;
+    lines.push(`G1 Z${z} F100`, `G1 X${x}`);
+  }
+  lines.push('G0 Z2', 'M5');
+  return lines.join('\n');
+})();
 
 const POINT = { deg: 118, source: 'the drill plan' };
 
@@ -153,6 +169,24 @@ describe('#744 one sweep per program, shared with the command line', () => {
     expect(drill.diagnostics.find((d) => d.code === 'drill-point-angle')?.message).toContain('118°');
     expect(drill.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   });
+
+  it('a dense flat program is swept from the blank, on its own engine, instead of stopping the run (#746)', async () => {
+    const tools = new Map<string, Tool>([
+      ['flat-2', FLAT_2],
+      ['flat-1', FLAT_1],
+    ]);
+    const { outcome, calls } = await sweep([program('flat-2', CHANNEL), program('flat-1', DENSE_FLAT)], tools);
+    if (!outcome.ok) throw new Error(JSON.stringify(outcome.failed?.diagnostics));
+    const dense = outcome.sweeps[1]!;
+    // Seeded, the exact engine is the only one left and it refuses the checkpoint count. From
+    // the blank the flat job routes to the column engine, which is the engine for a dense flat
+    // file — and the note says the seed was dropped.
+    expect(dense.engine).toBe('column');
+    expect(dense.fromBlank).toBe(true);
+    expect(dense.fromBlankCode).toBe('dense-3d-refused');
+    expect(dense.notes[0]?.message).toContain('program 2 (flat-1) was swept from the blank');
+    expect(calls.filter((c) => c.index === 1).map((c) => c.priorRemoval.length)).toEqual([1, 0]);
+  }, 120_000);
 
   it('the command line’s rest pass: a second walk seeded with the first walk’s removal', async () => {
     const tools = new Map<string, Tool>([['flat-2', FLAT_2], ['flat-1', FLAT_1]]);
