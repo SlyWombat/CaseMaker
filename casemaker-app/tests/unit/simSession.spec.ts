@@ -355,6 +355,8 @@ describe('simPath: the whole path, with kinds and times (#197)', () => {
     const p = session.simPath();
     expect(Array.from(p.kind)).toEqual([0, 1, 1, 0]);
     expect(p.xyz).toHaveLength(12);
+    // #716 slice 2 — a flat program commands no A, so the path carries no A array at all.
+    expect(p.a).toBeUndefined();
     const steps = Array.from(p.step);
     for (let i = 1; i < steps.length; i++) expect(steps[i]!).toBeGreaterThan(steps[i - 1]!);
     // The first rapid starts from an unknown position: a vertex, but no time on the clock.

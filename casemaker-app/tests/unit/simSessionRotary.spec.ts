@@ -39,8 +39,18 @@ describe('session routing — rotary', () => {
     expect(ok.checkpoints.length).toBeGreaterThan(0);
   });
 
-  it('carries a clamped shallow dip to the caller, outside diagnostics', () => {
+  it('the path carries the machine’s A at every vertex (#716 slice 2)', () => {
     const s = createSimSession(tl);
+    const r = s.load(WRAPPED, setup(), tool, null);
+    expect(r.ok).toBe(true);
+    const p = s.simPath();
+    expect(p.a).toBeDefined();
+    // G0 … A0, the plunge at A0, the turn to A360, the retract at A360.
+    expect(Array.from(p.a!)).toEqual([0, 0, 360, 360]);
+    s.dispose();
+  });
+
+  it('carries a clamped shallow dip to the caller, outside diagnostics', () => {    const s = createSimSession(tl);
     const r = s.load(CLAMPED, setup(), tool, null);
     expect(r.ok).toBe(true);
     if (!r.ok) return;

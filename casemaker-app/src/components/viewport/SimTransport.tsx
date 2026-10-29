@@ -16,6 +16,8 @@ import { formatDuration } from '@/engine/cnc/plan/format';
 import { isSimSceneActive, SIM_SPEEDS, useSimStore, type SimSpeed } from '@/store/simStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import type { PausePoint, ToolState } from '@/engine/cnc';
+import { toolPositionAt } from './simGeometry';
+import { aboveAxisWords, angleAtStep, rotaryAngleWords } from './rotarySimView';
 
 /**
  * A backgrounded tab's first frame can carry minutes of wall time, which at 100x would jump the
@@ -77,6 +79,18 @@ const BAR: CSSProperties = {
  * has a zero flex-basis, so it stays on the first line and grows; only the read-outs move down.
  */
 const ROW: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' };
+/**
+ * #716 slice 2 — the rotary read-out row (design §3.9): A within the turn and the turns, X, and Z
+ * as the height above the axis. Only drawn when the path carries A, so a flat program's transport
+ * keeps exactly the rows it had.
+ */
+const ROTARY_ROW: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 16,
+  flexWrap: 'wrap',
+  paddingLeft: 2,
+};
 const BTN: CSSProperties = {
   width: 30,
   height: 26,
@@ -157,6 +171,11 @@ function TransportBar() {
   const lastStep = stepCount > 0 ? stepCount - 1 : 0;
   const total = path ? totalTime(path) : 0;
   const line = path ? lineAtStep(path, step) : null;
+  // #716 slice 2 — a rotary program's read-out. The path carrying `a` is the discriminator: a
+  // flat program's path has no A array, and a rotary vertex before the first A word has none.
+  const rotaryProgram = path?.a !== undefined;
+  const rotaryAngle = path ? angleAtStep(path, step) : null;
+  const tip = path ? toolPositionAt(path, step) : null;
 
   // One frame loop, live only while `playing`. It reads the store non-reactively each frame so a
   // new `seconds`/`speed` never restarts it, and it stops itself on `end`/`pause` by not asking
@@ -331,6 +350,19 @@ function TransportBar() {
           line {line ?? '—'}
         </span>
       </div>
+      {rotaryProgram && (
+        <div style={ROTARY_ROW} data-testid="sim-rotary-readout">
+          <span data-testid="sim-rotary-a" style={READOUT}>
+            {rotaryAngle === null ? 'A —' : rotaryAngleWords(rotaryAngle)}
+          </span>
+          <span data-testid="sim-rotary-x" style={READOUT}>
+            X {tip === null ? '—' : Number(tip[0].toFixed(1))} mm
+          </span>
+          <span data-testid="sim-rotary-above-axis" style={READOUT}>
+            {tip === null ? 'above the axis —' : aboveAxisWords(tip[2])}
+          </span>
+        </div>
+      )}
       {stoppedAt && (
         <div data-testid="sim-pause-callout" style={CALLOUT}>
           {pauseMessage(stoppedAt)}

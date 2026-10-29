@@ -128,8 +128,24 @@ describe('SimTransport (#198)', () => {
     expect(timed.getAttribute('title')).not.toContain('untimed');
   });
 
-  it('shows the job’s one labelled estimate, not a second duration (#691)', () => {
-    // #691 / audit B15 — the Generate row states the CAM estimate; the transport used to state a
+  it('a rotary path reads A within the turn plus the turns, and Z above the axis (#716)', () => {
+    // The same 101 vertices; A runs to 900° over the program (2.5 turns), so step 50 is 450°.
+    const p = fakePath();
+    p.a = Float64Array.from(Array.from({ length: 101 }, (_, i) => (i / 100) * 900));
+    setStore({ path: p, step: 50 });
+    render(<SimTransport />);
+    expect(screen.getByTestId('sim-rotary-a').textContent).toBe('A 90° · 1 turn');
+    expect(screen.getByTestId('sim-rotary-x').textContent).toBe('X 50 mm');
+    expect(screen.getByTestId('sim-rotary-above-axis').textContent).toBe('above the axis 0 mm');
+
+    // A flat path has no A, so the row is not drawn at all.
+    cleanup();
+    setStore({ path: fakePath() });
+    render(<SimTransport />);
+    expect(screen.queryByTestId('sim-rotary-readout')).toBeNull();
+  });
+
+  it('shows the job’s one labelled estimate, not a second duration (#691)', () => {    // #691 / audit B15 — the Generate row states the CAM estimate; the transport used to state a
     // different simulated total for the same cut. A session the engrave run loaded borrows the
     // run's one figure, with its source word.
     useEngraveRunStore.setState({

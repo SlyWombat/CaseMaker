@@ -20,6 +20,7 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { LiveToolHead } from './LiveToolHead';
 import { toolPlacement } from './liveMachineTool';
 import { TouchMarkers } from './TouchMarkers';
+import { angleAtStep, turningRadians } from './rotarySimView';
 import {
   cleanStockGeometry,
   drawsSacrificial,
@@ -168,13 +169,41 @@ export function SimMeshes() {
 
   const visibleGouges = meshes ? meshes.gouges.filter((g) => step >= g.step) : [];
 
+  // #716 slice 2 — THE TURNING STOCK (design §3.9, R11a): the stock, the removed ghost, the gouges
+  // and the path turn with A(step) in ONE group; the cutter, the fixture and the touches stay. The
+  // stock's bounding box is invariant under the rotation, so the camera never chases it. A flat
+  // program (no A on the path) turns by 0 — its scene is exactly what it was.
+  const turning = path ? angleAtStep(path, step) : null;
+  const turningRad = turning === null ? 0 : turningRadians(turning);
+
   return (
     <group>
-      {stockGeom && (
-        <mesh geometry={stockGeom} name="sim-stock">
-          <meshStandardMaterial color={STOCK_COLOR} flatShading metalness={0.05} roughness={0.75} />
-        </mesh>
-      )}
+      <group name="sim-turning" rotation={[turningRad, 0, 0]}>
+        {stockGeom && (
+          <mesh geometry={stockGeom} name="sim-stock">
+            <meshStandardMaterial color={STOCK_COLOR} flatShading metalness={0.05} roughness={0.75} />
+          </mesh>
+        )}
+
+        {layers.removed && removalGeom && (
+          <mesh geometry={removalGeom} name="sim-removed">
+            {/* depthWrite:false is not optional — a transparent mesh that writes depth hides
+                everything inside it (issue #162; /Simulation.md §8). */}
+            <meshStandardMaterial color={REMOVED_COLOR} transparent opacity={0.25} depthWrite={false} metalness={0.05} roughness={0.8} />
+          </mesh>
+        )}
+
+        {visibleGouges.map((g) => (
+          <Gouge key={`${g.step}-${g.line}`} mesh={g.mesh} />
+        ))}
+
+        {layers.path && split && (
+          <LineLayer data={split.cuts} start={0} count={2 * cutSegments} color={PATH_COLOR} />
+        )}
+        {layers.rapids && split && (
+          <LineLayer data={split.rapids} start={0} count={2 * rapidSegments} color={RAPID_COLOR} dashed />
+        )}
+      </group>
 
       {showSacrificial && sacrificialGeom && (
         // #213 §4 — the sacrificial material as cut. OPAQUE: it is stock the cutter is meant to
@@ -182,25 +211,6 @@ export function SimMeshes() {
         <mesh geometry={sacrificialGeom} name="sim-sacrificial">
           <meshStandardMaterial color={SACRIFICIAL_COLOR} flatShading metalness={0.05} roughness={0.8} />
         </mesh>
-      )}
-
-      {layers.removed && removalGeom && (
-        <mesh geometry={removalGeom} name="sim-removed">
-          {/* depthWrite:false is not optional — a transparent mesh that writes depth hides
-              everything inside it (issue #162; /Simulation.md §8). */}
-          <meshStandardMaterial color={REMOVED_COLOR} transparent opacity={0.25} depthWrite={false} metalness={0.05} roughness={0.8} />
-        </mesh>
-      )}
-
-      {visibleGouges.map((g) => (
-        <Gouge key={`${g.step}-${g.line}`} mesh={g.mesh} />
-      ))}
-
-      {layers.path && split && (
-        <LineLayer data={split.cuts} start={0} count={2 * cutSegments} color={PATH_COLOR} />
-      )}
-      {layers.rapids && split && (
-        <LineLayer data={split.rapids} start={0} count={2 * rapidSegments} color={RAPID_COLOR} dashed />
       )}
 
       {layers.tool && (

@@ -177,6 +177,13 @@ export interface SimPath {
    */
   line?: Uint32Array;
   /**
+   * #716 slice 2 — the A axis at each vertex, degrees, UNWOUND (the machine's own A, so a
+   * multi-turn pass reads 1 234.5; the transport renders it as `A 154.5° · 3 turns`).
+   * Present only when the program commands A at all — a flat program has no array, like `line` —
+   * and NaN at a vertex before the first A word, where the machine's angle is unknown.
+   */
+  a?: Float64Array;
+  /**
    * Whether `t` is a FULL clock — feeds AND rapids, timed through the trapezoid on the machine's
    * rapid model (#281) — or feeds only. A session loaded with an explicit machine times rapids;
    * one loaded with NO machine (`machineId === null`) has no rapid model to time them with, so it
@@ -1039,6 +1046,8 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const kind: number[] = [];
     const t: number[] = [];
     const line: number[] = [];
+    const a: number[] = [];
+    let anyA = false;
     let cum = 0;
     let s = l.timeline.stateAt(-1); // the state before step 0
     for (let i = 0; i < events.length; i++) {
@@ -1070,6 +1079,9 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       t.push(cum);
       kind.push(ev.mode === 'rapid' ? 0 : s.spindle === 'off' ? 2 : 1);
       line.push(ev.line);
+      // #716 slice 2 — the machine's A at this vertex, NaN until the program states one.
+      if (s.a !== null) anyA = true;
+      a.push(s.a ?? Number.NaN);
     }
     return {
       xyz: Float32Array.from(xyz),
@@ -1077,6 +1089,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       kind: Uint8Array.from(kind),
       t: Float32Array.from(t),
       line: Uint32Array.from(line),
+      ...(anyA ? { a: Float64Array.from(a) } : {}),
       rapidsTimed: rapid !== null,
     };
   };
