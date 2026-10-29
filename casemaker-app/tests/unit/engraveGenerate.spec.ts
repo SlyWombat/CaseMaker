@@ -23,6 +23,14 @@ import { labelGlyphMeasure, traceSelfOverlaps, voidLimitForItem } from '@/engine
 import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { bindingVoidsByRegion } from '@/workers/sim/engraveGeometry';
 import { createSimSession } from '@/workers/sim/session';
+import {
+  enclosedPath,
+  kerfPolygons,
+  placeTabs,
+  profilePath,
+  tabBridgeRectangles,
+} from '@/engine/cnc/cam/profile';
+import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
 import { jobTool, setupProgramFindings, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup, setupPrograms } from '@/engine/cnc/engrave/programs';
 import { Z1 } from '@/engine/cnc/machine';
@@ -42,6 +50,7 @@ import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
+import { roundedDiamondPoints } from './fixtures/roundedDiamond';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { cuttingForTrace, cuttingRadiusForSweep, flatEndMill, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
@@ -2536,7 +2545,7 @@ describe('through-cuts and cut-outs (#218)', () => {
 
   it('the oracle predicts the material an interrupted pass LEAVES, not a square tab (#218)', () => {
     // The sweep stops with the cutter's CENTRE at the span ends, so at a deep pass the standing
-    // tab is the span band less the two round end discs. Predicting the plain `tabRectangles`
+    // tab is the span band less the two round end discs. Predicting the plain kerf-wide band
     // (which is what the void scan and the run sheet describe) leaves the disc-overhang as an
     // under-cut and refuses the save with "the simulation does not match the prediction".
     const job = cutoutJob();
@@ -2581,8 +2590,133 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(text).not.toContain('Only after the program ends');
   });
 
-  it('refuses a tab with no straight edge long enough to hold it, before any program is posted', () => {
-    // A 3 × 3 rect's outside path has 6.175 mm edges; a 4 mm tab needs 7.175 mm of centre path.
+  // #736 — TABS ON ARCS AND ON TRACED STRAIGHT SIDES. The two fixtures that refused before the
+  // fix: j12's round medallion, and the traced diamond sign of the real-jobs bench (j23).
+  /** j12's cutter in the test: the Makera 2 mm single flute, as a snapshot the job can name. */
+  const J12_TOOL = flatEndMill(2, {
+    name: 'O flute 2 mm',
+    fluteLength: 8,
+    shoulderLength: 8,
+    centreCutting: true,
+  });
+
+  /** A committed job from the typical-jobs set, parsed the way the CLI parses it. */
+  function typicalJob(file: string): EngraveJob {
+    const parsed = parseEngraveJob(
+      JSON.parse(
+        readFileSync(
+          new URL(`../../../docs/bench/2026-10-27-z1-typical-jobs/jobs/${file}`, import.meta.url),
+          'utf8',
+        ),
+      ),
+    );
+    if (!parsed.ok) throw new Error(`${file}: ${JSON.stringify(parsed.errors)}`);
+    return parsed.job;
+  }
+
+  /**
+   * A j12 job with the cutter and the board the bench ran it with. The committed fixture leaves
+   * `sacrificial.under` null (the shop's own default); the test states a board explicitly so the
+   * through cut meets the same setup as the bench. The geometry under test is the fixture's.
+   */
+  function j12Job(file: string): EngraveJob {
+    const job = typicalJob(file);
+    job.tool = J12_TOOL;
+    job.toolKey = 'bench:o-flute-2';
+    job.sacrificial = presetPartOnBoard();
+    return job;
+  }
+
+  /** Run the oracle over a generated job: the sweep must match the prediction at every level. */
+  function expectOracleMatches(job: EngraveJob, g: ReturnType<typeof generate>): void {
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc as string, toSetup(job, Z1), jobTool(job)!, Z1.id);
+      expect(load.ok).toBe(true);
+      if (!load.ok) throw new Error(JSON.stringify(load.diagnostics));
+      const report = session.oracle(g.predicted);
+      expect(report.ok).toBe(true);
+    } finally {
+      session.dispose();
+    }
+  }
+
+  it('places four tabs on j12’s round cut-out and generates the job (#736)', () => {
+    // A 70 mm square of 6.35 mm stock holding a 60 mm circle cut-out with four 3 mm tabs. Every
+    // joint on the circle turns ~2°, so the outline is ONE smooth edge; before #736 each short
+    // segment was treated as an edge, none could hold a 5 mm centre-path span, and generation
+    // stopped at `tab-unplaceable`. The proxy is the runnable variant: the alu job's cutter has
+    // no row in the metal feeds table here (#732).
+    const job = j12Job('j12-alu-medallion-proxy.json');
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(g.findings.some((f) => f.code === 'tab-unplaceable')).toBe(false);
+    // A tab is the bridge between the part and the waste: the loose-piece check must agree.
+    expect(g.findings.some((f) => f.code === 'loose-piece')).toBe(false);
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(g.through!.cutouts).toHaveLength(1);
+    expect(g.through!.cutouts[0]).toMatchObject({
+      id: 'profile',
+      tabs: { count: 4, widthMm: 3, heightMm: 1 },
+      spans: 4,
+      unplaceable: 0,
+    });
+    // The kept band follows the arc, and the oracle at the deep pass matches the sweep exactly.
+    expectOracleMatches(job, g);
+  });
+
+  it('j12’s aluminium original no longer refuses on its round tabs (#736)', () => {
+    // The alu job stops at `feeds` here (its cutter is not in the test's metal table, #732), but
+    // the tab question is answered before that stage: the refusal must be gone.
+    const g = generate(tl, j12Job('j12-alu-medallion.json'));
+    expect(g.findings.some((f) => f.code === 'tab-unplaceable')).toBe(false);
+  });
+
+  it('places four tabs on a traced diamond side and generates the job (#736)', () => {
+    // The j23 sign: a 78 mm square rotated 45°, 4 mm fillets, each 70 mm straight side traced as
+    // 14 five-mm collinear pieces. The artwork is licensed and not committed, so the outline is
+    // built here from its own dimensions (the bench README records the trace; the manifest its
+    // 110 mm span). No five-mm piece can hold a 3 mm tab — its centre-path span is 6.175 mm —
+    // while the 70 mm side can, once the collinear run is one edge.
+    const blank = dj().stock;
+    const job = cutoutJob(
+      { of: 'diamond', side: 'outside', inset: 0, tabs: { count: 4, width: 3, height: 1 } },
+      {
+        stock: { ...blank, length: 130, width: 130 },
+        shapes: [
+          {
+            kind: 'polygon',
+            id: 'diamond',
+            enabled: true,
+            position: { x: 65, y: 65 },
+            rotation: 0,
+            depth: 6,
+            construction: true,
+            points: roundedDiamondPoints(),
+          },
+        ],
+      },
+    );
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(g.findings.some((f) => f.code === 'tab-unplaceable')).toBe(false);
+    expect(g.findings.some((f) => f.code === 'loose-piece')).toBe(false);
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(g.through!.cutouts[0]).toMatchObject({ spans: 4, unplaceable: 0 });
+    expectOracleMatches(job, g);
+  });
+
+  it('refuses tabs the cut path has no free room for, before any program is posted (#736)', () => {
+    // A 3 × 3 rect's outside path is offset 1.5875 mm with ROUND joins, so its sides are 3 mm,
+    // its corners are quarter arcs and no joint turns anywhere near the 20° corner: the whole
+    // outline is ONE smooth edge of 4 × 3 + 2πr = 21.96 mm. Four 4 mm tabs need four 7.175 mm
+    // spans — 28.7 mm of path — so only two fit and the job refuses rather than free the part
+    // where a requested tab is missing. A genuinely short edge is refused outright: the 5 × 2
+    // rect in camProfile.spec holds no 7.175 mm span at all.
     const job = cutoutJob(
       { of: 'rect-1', side: 'outside', inset: 0, tabs: { count: 4, width: 4, height: 1 } },
       { shapes: [{ ...RECT, width: 3, height: 3 }] },
@@ -2596,6 +2730,8 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(f!.severity).toBe('error');
     expect(f!.labelId).toBe('cut-1');
     expect(f!.message).toContain('4 holding tabs');
+    expect(f!.message).toContain('2 could not be placed');
+    expect(f!.message).toContain('with enough free length');
   });
 
   it('refuses a through cut the cutter cannot reach above its shank', () => {
@@ -2689,31 +2825,27 @@ describe('through-cuts and cut-outs (#218)', () => {
   });
 
   /**
-   * #750 BOUNCE — one vector cut-out whose outline is TWO 20 × 12 mm parts `gap` apart, cut
-   * OUTSIDE with one 4 mm tab each. Parts A and B are less than a diameter apart, so their kerfs
-   * overlap and each pass crosses the facing edge of the other. B's tab is on that facing edge:
-   * A's kerf removes every bit of material B's tab keeps beyond B's own edge, so B is free. A's
-   * tab is on its far edge, so A stays held. The tab placement is a property of the contour's
-   * winding and start vertex (see `placeTabs`), chosen here so each tab lands on the edge named.
+   * #750 BOUNCE — one vector cut-out whose outline is TWO parts `gap` apart, cut OUTSIDE with
+   * one 4 mm tab each. Parts A and B are close enough that their kerfs overlap (the paths are
+   * `gap − 2r` apart and each kerf reaches `r`), so each pass crosses the facing edge of the
+   * other.
+   *
+   * Two shapes are needed because #736 changed where a lone tab lands: equidistant around the
+   * cut path, so the shape sets the side. The ORIGINAL 20 × 12 rectangle pair stays as the HOLD
+   * case: B's tab wraps a corner, and A's kerf cannot reach its arm across B's top edge, so B
+   * really does stay tied to the waste — asserted by geometry below, not only by the absence of
+   * a finding. The rectangle fixture moved to a trapezoid because arc placement changed where a
+   * lone tab lands: for the REFUSAL case B must take its tab on the facing left side, so B is a
+   * right trapezoid — 10 mm top, 30 mm bottom — of the same (10 + 30) / 2 × 12 = 240 mm² face.
    */
-  function twoPartJob(gap: number): EngraveJob {
-    const aLeft = -(gap / 2 + 20);
-    const aRight = -gap / 2;
-    const bLeft = gap / 2;
-    const bRight = gap / 2 + 20;
-    const clockwiseFromTopRight = (left: number, right: number): [number, number][] => [
-      [right, 6],
-      [left, 6],
-      [left, -6],
-      [right, -6],
-    ];
+  function pairJob(contours: [number, number][][], width: number): EngraveJob {
     const vector: EngraveVectorShape = {
       id: 'two-parts',
       kind: 'vector',
       sourceName: 'spec',
-      contours: [clockwiseFromTopRight(aLeft, aRight), clockwiseFromTopRight(bLeft, bRight)],
+      contours,
       fillRule: 'NonZero',
-      width: 40 + gap,
+      width,
       height: 12,
       position: { x: 50, y: 30 },
       rotation: 0,
@@ -2730,6 +2862,93 @@ describe('through-cuts and cut-outs (#218)', () => {
       },
       { vectors: [vector] },
     );
+  }
+
+  /** The original #750 fixture: two 20 × 12 rectangles. */
+  function rectanglePairContours(gap: number): [number, number][][] {
+    const rectangle = (left: number, right: number): [number, number][] => [
+      [right, 6],
+      [left, 6],
+      [left, -6],
+      [right, -6],
+    ];
+    return [rectangle(-(gap / 2 + 20), -gap / 2), rectangle(gap / 2, gap / 2 + 20)];
+  }
+
+  function rectanglePairJob(gap: number): EngraveJob {
+    return pairJob(rectanglePairContours(gap), 40 + gap);
+  }
+
+  /** The refusal fixture: A a rectangle, B a trapezoid whose facing LEFT side takes the tab. */
+  function twoPartJob(gap: number): EngraveJob {
+    const aLeft = -(gap / 2 + 20);
+    const aRight = -gap / 2;
+    const bLeft = gap / 2;
+    const rectangle = (left: number, right: number): [number, number][] => [
+      [right, 6],
+      [left, 6],
+      [left, -6],
+      [right, -6],
+    ];
+    /** CCW, the facing side vertical on the LEFT; the bottom runs 20 mm further than the top. */
+    const facingTrapezoid = (left: number): [number, number][] => [
+      [left + 10, 6],
+      [left, 6],
+      [left, -6],
+      [left + 30, -6],
+    ];
+    return pairJob([rectangle(aLeft, aRight), facingTrapezoid(bLeft)], 50 + gap);
+  }
+
+  for (const gap of [3.5, 4.0, 4.5]) {
+    it(`holds the original rectangle pair, ${gap} mm apart: B's tab survives the neighbour's kerf (#736, #750)`, () => {
+      const g = generate(tl, rectanglePairJob(gap));
+      expect(g.ok, JSON.stringify(g.findings)).toBe(true);
+      expect(g.stage).toBe('done');
+      expect(g.findings.filter((f) => f.code === 'loose-piece')).toEqual([]);
+
+      // The GEOMETRIC reason, not just the absent finding: B's lone tab is the bridge band
+      // `tabBridgeRectangles` builds. With A's kerf subtracted from it, what remains must still
+      // (a) be non-empty, (b) reach B's PART, and (c) reach the stock beyond B's OWN kerf — the
+      // waste across the cut. A's kerf only eats the corner's near arm; the arm over B's top
+      // edge survives and ties the part to the surrounding stock.
+      const R = 3.175 / 2;
+      const offset = makeClipperOffset(tl);
+      const path = profilePath(rectanglePairContours(gap), 'outside', R, 0, offset);
+      expect(path).toHaveLength(2);
+      const centroidX = (contour: readonly (readonly [number, number])[]): number =>
+        contour.reduce((sum, p) => sum + p[0], 0) / contour.length;
+      const byX = [...path].sort((a, b) => centroidX(a) - centroidX(b));
+      const aPath = byX[0]!;
+      const bPath = byX[byX.length - 1]!;
+      const aKerf = kerfPolygons([aPath], R, offset);
+      const bKerf = kerfPolygons([bPath], R, offset);
+      const bTabs = tabBridgeRectangles(placeTabs(bPath, 1, 4, R).spans, R);
+      expect(bTabs).toHaveLength(1);
+
+      const CS = tl.CrossSection;
+      const made: { delete(): void }[] = [];
+      const own = <T extends { delete(): void }>(value: T): T => {
+        made.push(value);
+        return value;
+      };
+      try {
+        const kept = own(CS.ofPolygons(enclosedPath(bTabs)));
+        const survived = own(kept.subtract(own(CS.ofPolygons(aKerf))));
+        expect(survived.area()).toBeGreaterThan(0.05);
+        // B's PART is the centre path eroded by the cutter radius (the finished outline).
+        const part = own(CS.ofPolygons(offset(enclosedPath([bPath]), -R)));
+        expect(own(survived.intersect(part)).area()).toBeGreaterThan(0.01);
+        // The waste is the stock outside B's part AND outside B's own kerf.
+        const stock = own(CS.square([100, 60], true));
+        const waste = own(
+          own(stock.subtract(part)).subtract(own(CS.ofPolygons(bKerf))),
+        );
+        expect(own(survived.intersect(waste)).area()).toBeGreaterThan(0.01);
+      } finally {
+        for (const handle of made) handle.delete();
+      }
+    });
   }
 
   for (const gap of [3.5, 4.0, 4.5]) {

@@ -121,6 +121,7 @@ import {
   placeTabs,
   profilePath,
   signedArea,
+  tabBars,
   tabBridgeRectangles,
   type ProfileCut,
   type ProfileSpan,
@@ -952,15 +953,16 @@ export const VCARVE_MERGE_AREA_MM2 = 0.001;
 /**
  * The material a tab ACTUALLY leaves at a deep pass, as polygons (#218).
  *
- * `tabRectangles` states the intent — `width` of material across the kerf — but the cutter
- * cannot start and stop at a square end. The deep passes stop with the cutter's CENTRE at the
+ * A tab's nominal shape is `width` of material across the kerf, but the cutter cannot start and
+ * stop at a square end. The deep passes stop with the cutter's CENTRE at the
  * span start and resume at the span end, so each end is an n-gon disc of radius r, the same
  * `circlePolygon` the sweep uses (`segmentsForRadius(r)`). What is left standing is the band
- * across the span LESS those two discs, which is the rectangle plus a shallow circular segment
- * at each end (area `r² (2 − π/2)` each). Predicting the plain rectangle left that material as
- * an under-cut in the oracle, which is exactly the check catching its own geometric idealisation
- * rather than a CAM mistake. The tab is still the bridge the operator asked for; this is its
- * shape where the cutter meets it.
+ * across the span LESS those two discs, which (for a straight span) is the band plus a shallow
+ * circular segment at each end (area `r² (2 − π/2)` each). The band follows the span's own
+ * points (#736), so on an arc the kept strip curves with the path. Predicting the plain rectangle
+ * left that material as an under-cut in the oracle, which is exactly the check catching its own
+ * geometric idealisation rather than a CAM mistake. The tab is still the bridge the operator
+ * asked for; this is its shape where the cutter meets it.
  */
 function tabKeptRegions(tl: ManifoldToplevel, spans: readonly ProfileSpan[], radius: number): Polygons {
   if (spans.length === 0 || !(radius > 0)) return [];
@@ -968,30 +970,25 @@ function tabKeptRegions(tl: ManifoldToplevel, spans: readonly ProfileSpan[], rad
   const n = segmentsForRadius(radius);
   const out: Polygons = [];
   for (const span of spans) {
-    const [x0, y0] = span.start;
-    const [x1, y1] = span.end;
-    const length = Math.hypot(x1 - x0, y1 - y0);
-    if (!(length > 0)) continue;
-    const nx = (-(y1 - y0) / length) * radius;
-    const ny = ((x1 - x0) / length) * radius;
-    // CCW like `circlePolygon`: CrossSection reads a clockwise contour as a hole, and a band
-    // wound that way would difference to nothing.
-    const band = CS.ofPolygons([
-      [
-        [x0 - nx, y0 - ny],
-        [x1 - nx, y1 - ny],
-        [x1 + nx, y1 + ny],
-        [x0 + nx, y0 + ny],
-      ],
-    ]);
-    const startDisc = CS.ofPolygons([circlePolygon(x0, y0, radius, n)]);
-    const endDisc = CS.ofPolygons([circlePolygon(x1, y1, radius, n)]);
+    // The SWEPT band: the span's own path, one radius either side, with NO inset. The cutter
+    // crosses the span at the tab top, so its swept plan is this band; the deep passes stop with
+    // its centre at the span's ends, removing the two end discs from that band. Trimming the band
+    // by the radius first (to the tab's material width) and then
+    // subtracting the discs double-counts the trim, and the oracle read the difference as an
+    // under-cut. The band comes from its one owner, `tabBars` (profile.ts), so the oracle and the
+    // CAM cannot hold two readings of one span; it is wound CW for a kerf subtraction, so reverse
+    // it to CCW — CrossSection reads a CW outer as a hole.
+    const [bandContour] = tabBars([span], 0, radius);
+    if (bandContour === undefined) continue;
+    const band = CS.ofPolygons([[...bandContour].reverse()]);
+    const startDisc = CS.ofPolygons([circlePolygon(span.start[0], span.start[1], radius, n)]);
+    const endDisc = CS.ofPolygons([circlePolygon(span.end[0], span.end[1], radius, n)]);
     try {
       const kept = CS.difference([band, startDisc, endDisc]);
       try {
         // Reversed to a NEGATIVE winding: the prediction appends these to the kerf, and a filled
         // (positive) contour inside the kerf would be swallowed by the union instead of carving
-        // the standing material out of it — the same convention `tabRectangles` uses.
+        // the standing material out of it — a negative winding carves instead of being filled.
         out.push(...(kept.toPolygons() as Polygons).map((contour) => [...contour].reverse()));
       } finally {
         kept.delete();
@@ -1718,7 +1715,8 @@ export function engraveRegions(
   // The tabs are kept as BRIDGES (#750): the kerf's width plus a whisker either side, so the
   // difference joins the part to the waste by area, not only along the kerf's own edges — an
   // imported outline's off-axis edge is a rounding away from the band, and the tab it was meant
-  // to keep then reads as a loose 38 mm² piece. The difference is per CONTOUR, not per cut-out:
+  // to keep then reads as a loose 38 mm² piece. The bridge follows the span's own points (#736),
+  // so on an arc it curves with the path. The difference is per CONTOUR, not per cut-out:
   // two contours can run a diameter apart, and the neighbour's pass removes material across this
   // tab's bridge. Subtracting all of a cut-out's tabs from all of its kerfs would punch that
   // material back into the neighbour's band and hold a part that is really free (#750 bounce).
@@ -1793,8 +1791,10 @@ export function engraveRegions(
           labelId: c.id,
           message:
             `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide, ` +
-            `but ${unplaceable} could not be placed on a straight edge long enough; the part ` +
-            'would be released where that tab was meant to hold it. Use a smaller tab width or count.',
+            `but ${unplaceable} could not be placed: the cut path has no straight or smoothly ` +
+            `curved edge with enough free length to hold ${unplaceable === 1 ? 'it' : 'them'}. The part ` +
+            `would be released where ${unplaceable === 1 ? 'that tab was' : 'those tabs were'} ` +
+            'meant to hold it. Use a smaller tab width or count, or a larger outline.',
         });
       }
       const kerf = kerfPolygons(path, radius, offset);
@@ -1829,9 +1829,9 @@ export function engraveRegions(
       });
       // Two levels, as the oracle needs them: the whole kerf is cut down to the tab top, and the
       // deep passes remove it everywhere except what the interrupted pass leaves standing. That
-      // kept region is the rectangle plus the two disc-lens corners (`tabKeptRegions`), not the
-      // plain rectangle: the sweep stops with a round cutter, and the oracle compares against the
-      // removal the file really makes.
+      // kept region is the swept band less the two end discs (`tabKeptRegions`) — the band follows
+      // the span's own path (#736), so an arc tab's is curved — because the sweep stops with a
+      // round cutter and the oracle compares against the removal the file really makes.
       if (c.tabs.count > 0) {
         const keptPredicted = spans.flatMap((one) => tabKeptRegions(tl, one, radius));
         cutoutPredicted.push({ depth: tabTop, polygons: kerf, itemId: c.id });
@@ -1896,7 +1896,7 @@ export function engraveRegions(
     // own `depthIntent` put it, and the ceiling of any void it sits over. A no-op for a job with
     // neither.
     ...itemDepthBoundFindings(job, colourBoundaryDepth, margins.boundaryMargin, bindingVoids),
-    // #218 — a tab the CAM could not place on a straight edge.
+    // #218 — a tab the CAM could not place on any edge.
     ...tabFindings,
   ]);
 
@@ -2173,7 +2173,7 @@ export function engraveRegions(
           }
           return entries;
         })),
-    // #218 — a cut-out's kerf at the tab top, and the same kerf less its tab rectangles at the
+    // #218 — a cut-out's kerf at the tab top, and the same kerf less its kept tab bands at the
     // through depth. Every placed tab is subtracted; an unplaced one is not, and its material is
     // correctly predicted as cut away.
     ...cutoutPredicted,
@@ -2277,7 +2277,8 @@ export function engraveRegions(
  * property of the caller's contour, not of the material, so the kept region is normalised and
  * filled on its own (a union of the bridges, overlapping ones included) before the difference.
  * `tabBridgeRectangles` widens each bridge a whisker past the band, so the subtraction cannot be
- * decided by two coincident edges.
+ * decided by two coincident edges; following the span's own points (#736), the bridge curves with
+ * an arc.
  *
  * A cut-out the job deliberately released (no tabs placed) is expected to be one of those parts:
  * it is the piece the operator asked to cut out, and `released-onto-board` (or the error
