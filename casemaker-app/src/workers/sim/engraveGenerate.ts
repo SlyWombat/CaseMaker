@@ -1409,7 +1409,7 @@ function threadPrediction(plan: ThreadMillPlan): OraclePredicted {
   let prev: { x: number; y: number; z: number } | null = null;
   for (const m of plan.moves) {
     if (m.kind === 'feed' && prev !== null) {
-      moves.push({ x0: prev.x, y0: prev.y, x1: m.x, y1: m.y, z: Math.min(prev.z, m.z) });
+      moves.push({ x0: prev.x, y0: prev.y, x1: m.x, y1: m.y, z: Math.min(prev.z, m.z), z0: prev.z, z1: m.z });
     }
     prev = { x: m.x, y: m.y, z: m.z };
   }

@@ -44,7 +44,6 @@ import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evalua
 import { CHUNK as SWEEP_CHUNK, FANOUT as SWEEP_FANOUT, SWEEP_TOLERANCES } from '@/workers/geometry/sweep';
 import {
   cutterReach,
-  distToSegment,
   surfaceAboveTip,
   threadCutter,
   type ColumnGrid,
@@ -104,6 +103,12 @@ export interface OracleThreadMove {
   y1: number;
   /** The move's LOWEST tip Z in the work frame, the same reduction `flatMovesOf` makes. */
   z: number;
+  /**
+   * #758 — the tip at each end of the move, when the program ramps Z along it. The simulator
+   * follows Z along the segment; the prediction does the same, so the two remain one model.
+   */
+  z0?: number;
+  z1?: number;
 }
 
 /**
@@ -525,11 +530,32 @@ function threadPredictedSlice(tl: ManifoldToplevel, grid: ColumnGrid, thread: Or
       const x = grid.u0 + (i0 + i) * grid.du;
       let floorHere = grid.initial;
       for (const m of moves) {
-        const rho = distToSegment(x, y, m.x0, m.y0, m.x1, m.y1);
-        if (rho > reach) continue;
-        const f = m.z + surfaceAboveTip(cutter, rho);
-        const floor = f < grid.base ? grid.base : f;
-        if (floor < floorHere) floorHere = floor;
+        // #758 — the same along-the-move Z the simulator follows, read the same way: the column's
+        // floor is the DEEPEST tip over the part of the move that covers it, and its candidates
+        // are the perpendicular foot and the segment's two ends. A pure plunge passes through
+        // every Z at one point, so its deepest end is the floor.
+        const dxs = m.x1 - m.x0;
+        const dys = m.y1 - m.y0;
+        const len2 = dxs * dxs + dys * dys;
+        const z0 = m.z0 ?? m.z;
+        const z1 = m.z1 ?? m.z;
+        for (let c = 0; c < 3; c++) {
+          let t = 0;
+          if (c === 0) {
+            if (len2 > 0) {
+              t = ((x - m.x0) * dxs + (y - m.y0) * dys) / len2;
+              t = t < 0 ? 0 : t > 1 ? 1 : t;
+            }
+          } else {
+            t = c === 1 ? 0 : 1;
+          }
+          const rho = Math.hypot(x - (m.x0 + t * dxs), y - (m.y0 + t * dys));
+          const zt = len2 > 0 ? z0 + (z1 - z0) * t : m.z;
+          if (rho > cutterReach(cutter, Math.max(0, grid.initial - zt))) continue;
+          const f = zt + surfaceAboveTip(cutter, rho);
+          const floor = f < grid.base ? grid.base : f;
+          if (floor < floorHere) floorHere = floor;
+        }
       }
       h[j * nu + i] = floorHere;
     }

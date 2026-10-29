@@ -304,15 +304,15 @@ describe('#756 a 2 mm band of the spiral, simulated against the wave', () => {
     // One 1° move on this wave changes Z by up to ~0.16 mm.
     expect(moveDz).toBeGreaterThan(0.1);
     expect(moveDz).toBeLessThan(0.2);
-    // The engine sweeps each move at min(z0, z1) (#758), so it may show the cut up to one move's
-    // ΔZ below the program — never more.
+    // #758 made the engine follow Z along each move; one move's ΔZ was the old worst case this
+    // test pinned, and the cut must still never read more than that below the program.
     expect(under).toBeLessThanOrEqual(moveDz + 0.02);
     // And never above the programmed tip beyond the grid's own quantisation.
     expect(over).toBeLessThan(0.05);
   });
 
-  // #758 — the simulation should follow Z along a move; today the swept wave reads ~0.15 mm under.
-  it.fails('#758 — the simulated wave is within 0.02 mm of the program (Z interpolated along each move)', () => {
+  // #758 — the simulation follows Z along each move: the swept wave is within 0.02 mm of the program.
+  it('#758 — the simulated wave is within 0.02 mm of the program (Z interpolated along each move)', () => {
     expect(measured().under).toBeLessThan(0.02);
   });
 

@@ -317,10 +317,13 @@ describe('engraveOracle (#206 §3)', () => {
               ...p,
               thread: {
                 ...p.thread,
-                moves: p.thread.moves.map((m) => ({
-                  ...m,
-                  z: m.z - (m.z + p.thread!.tipDepthMm) * 0.2,
-                })),
+                // #758 — the prediction follows the move's own two ends, so the bend must move
+                // them as well as the low end the older model read.
+                moves: p.thread.moves.map((m) => {
+                  const bend = (z: number | undefined): number | undefined =>
+                    z === undefined ? undefined : z - (z + p.thread!.tipDepthMm) * 0.2;
+                  return { ...m, z: bend(m.z) as number, z0: bend(m.z0), z1: bend(m.z1) };
+                }),
               },
             },
       );

@@ -360,6 +360,13 @@ export interface CutMove {
   v1: number;
   /** The move's LOWEST tip value (rotary: the tool tip's radius, mm) — the conservative rule. */
   z: number;
+  /**
+   * #758 — the tip at each END of the move, when the program ramps Z along the segment. `applyMove`
+   * then follows Z along the move (a sloped footprint) instead of sweeping the whole move at `z`;
+   * a constant-Z move, and every pre-#758 caller, leaves them absent.
+   */
+  z0?: number;
+  z1?: number;
 }
 
 /** What `applyMove` changed, or why it could not. */
@@ -619,6 +626,15 @@ export const ROTARY: ColumnParameterisation = {
     if (m.z <= -toolRadius) return { written: 0, crossed: { z: m.z }, clamped: null };
     const clamped = m.z < 0 ? { z: m.z } : null;
     const zt = m.z > 0 ? m.z : 0; // the clamped floor: never below the axis
+    // #758 — a ramp's tip is not one height: follow it along the segment. Every candidate point is
+    // judged at the tip height the tool has when it is there, so the foot's floor is the move's
+    // own Z at that point, not the whole move's lower end. A constant-Z move reads `z` twice.
+    const za0 = m.z0 ?? m.z;
+    const za1 = m.z1 ?? m.z;
+    const zAt = (t: number): number => za0 + (za1 - za0) * t;
+    // A move with no X/A travel is a plunge: the tip is at one point and passes through every Z
+    // on the segment, so the deepest end is the floor, not the end a foot parameter would pick.
+    const planar = m.u0 !== m.u1 || m.v0 !== m.v1;
     const rt = toolRadius;
     const { nu, nv, u0, du, dv, h } = grid;
     const xLo = Math.min(m.u0, m.u1);
@@ -695,6 +711,7 @@ export const ROTARY: ColumnParameterisation = {
         const x = u0 + i * du;
         let best2 = Infinity;
         let bestPhi = 0;
+        let bestZt = zt;
         for (let k = kLo; k <= kHi; k++) {
           const th = theta + k * 360;
           // The candidate points: the foot of the perpendicular in the arc-at-Z_t plane (exact
@@ -712,16 +729,18 @@ export const ROTARY: ColumnParameterisation = {
             const phiRad = phi * DEG;
             if (phiRad <= -Math.PI / 2 || phiRad >= Math.PI / 2) continue;
             const dx = x - (m.u0 + tc * dxs);
-            const dy = zt * Math.tan(phiRad);
+            const ztc = planar ? (zAt(tc) > 0 ? zAt(tc) : 0) : zt;
+            const dy = ztc * Math.tan(phiRad);
             const d2 = dx * dx + dy * dy;
             if (d2 < best2) {
               best2 = d2;
               bestPhi = phi;
+              bestZt = ztc;
             }
           }
         }
         if (best2 > rt * rt) continue;
-        const floor = zt / Math.cos(bestPhi * DEG);
+        const floor = bestZt / Math.cos(bestPhi * DEG);
         const idx = j * nu + i;
         if (floor < (h[idx] as number)) {
           h[idx] = floor;
@@ -868,6 +887,21 @@ export const FLAT: ColumnParameterisation = {
     // The cutter's XY reach at THIS tip Z: a flat end's radius, or the radius at which a cone's
     // flank is at the top face. Columns past it cannot be touched by the move.
     const reach = cutterReach(cutter, Math.max(0, initial - m.z));
+    // #758 — a ramp's floor follows the tip along the segment: each column takes the Z the tool has
+    // at its own foot, so a 3D finish is no longer swept at the move's lower end. Constant Z reads
+    // the same number at every foot.
+    //
+    // A PLAIN V-BIT keeps the low-end rule for now: its oracle model is a per-SEGMENT groove at one
+    // depth (#408/#674), and following a ramped V's Z would make the two models disagree — the
+    // flute's own acceptance fails on exactly that. A ramp-aware V-groove prediction is its own
+    // change; the cutters #758 names (a flat or ball 3D finish, and the thread whose prediction
+    // already follows the move) take the sloped rule.
+    const followsZ = cutter.tanHalf === null || cutter.toothRootRadius !== undefined;
+    const za0 = followsZ ? (m.z0 ?? m.z) : m.z;
+    const za1 = followsZ ? (m.z1 ?? m.z) : m.z;
+    const dxs = m.u1 - m.u0;
+    const dys = m.v1 - m.v0;
+    const len2 = dxs * dxs + dys * dys;
     let written = 0;
     const iLo = Math.max(0, Math.floor((xLo - reach - u0) / du));
     const iHi = Math.min(nu - 1, Math.ceil((xHi + reach - u0) / du));
@@ -882,13 +916,38 @@ export const FLAT: ColumnParameterisation = {
         // glyph's strokes: using the bbox diagonal cuts the wrong columns, and since the gouge
         // check reads the segment it should have used, the cut and the check then disagree by the
         // difference (#405 — FLAT was unreachable until a V trace, so nothing had compared them).
-        const rho = distToSegment(x, y, m.u0, m.v0, m.u1, m.v1);
-        if (rho > reach) continue;
-        // The floor this column is left at: the tip plane for a flat end, and the cone's flank
-        // height above it for a V-bit (#405). Clamped to `bottom` — the blank's bottom, or the
-        // board's breakthrough floor when the job cuts through (#218).
-        const f = m.z + surfaceAboveTip(cutter, rho);
-        const floor = f < bottom ? bottom : f;
+        // #758 — the tip the cutter has when it is over THIS column. The tool passes the column
+        // over an interval of the move, and with Z ramping along it the DEEPEST tip in that
+        // interval is the floor. The interval's candidates are the perpendicular foot and the
+        // segment's two ends: a column beside the move's start is still under the disc at the END,
+        // where the tip is deeper (a 0.04 mm clip the retract found before this rule). Each
+        // candidate is tested at its own tip height, so the reach of a cone shrinks as it rises.
+        let floor = Infinity;
+        let covered = false;
+        for (let c = 0; c < 3; c++) {
+          let tc = 0;
+          if (c === 0) {
+            if (len2 > 0) {
+              tc = ((x - m.u0) * dxs + (y - m.v0) * dys) / len2;
+              tc = tc < 0 ? 0 : tc > 1 ? 1 : tc;
+            }
+          } else {
+            tc = c === 1 ? 0 : 1;
+          }
+          const rhoC = distToSegment(x, y, m.u0 + tc * dxs, m.v0 + tc * dys, m.u0 + tc * dxs, m.v0 + tc * dys);
+          // A pure plunge has no foot to interpolate: the tip is at one (x, y) and passes through
+          // every Z on the segment, so the deepest end is the floor it leaves.
+          const zt = len2 > 0 ? za0 + (za1 - za0) * tc : m.z;
+          if (rhoC > cutterReach(cutter, Math.max(0, initial - zt))) continue;
+          covered = true;
+          // The floor this candidate leaves: the tip plane for a flat end, the cone's flank
+          // height above it otherwise (#405). Clamped to `bottom` — the blank's bottom, or the
+          // board's breakthrough floor when the job cuts through (#218).
+          const f = zt + surfaceAboveTip(cutter, rhoC);
+          const cand = f < bottom ? bottom : f;
+          if (cand < floor) floor = cand;
+        }
+        if (!covered) continue;
         const idx = j * nu + i;
         if (floor < (h[idx] as number)) {
           h[idx] = floor;
@@ -1245,6 +1304,8 @@ export function flatMovesOf(cp: Checkpoint, timeline: Timeline): CutMove[] {
       v0: y0,
       v1: y1,
       z: Math.min(z0, z1),
+      z0,
+      z1,
     });
   }
   return out;
@@ -1270,6 +1331,8 @@ export function rotaryMovesOf(cp: Checkpoint, timeline: Timeline): CutMove[] {
       v0: aStart ?? aEnd ?? 0,
       v1: aEnd ?? aStart ?? 0,
       z: Math.min(z0, z1),
+      z0,
+      z1,
     });
   }
   return out;
