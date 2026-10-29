@@ -349,6 +349,8 @@ function noCandidateReason(
   material: StockMaterial,
   shapeCount: number,
   shapeNotes: readonly string[],
+  /** #728 — the job needs BOTH a flat (`flat`) and a cone (`cone`): no single cutter serves it. */
+  bothShapes: { flat: string; cone: string } | null = null,
 ): string {
   if (toolCount === 0) return 'There are no cutters in the tool list to recommend from.';
   // #699 — when every cutter fell for the same missing number, saying "no flat end mill or V-bit
@@ -360,7 +362,12 @@ function noCandidateReason(
   // #702 — likewise when the JOB's own shape gates refused every cutter: the list may hold both
   // shapes, and the job may need both (a bore and an inlay), which no single cutter can serve.
   const allShape = shapeCount > 0 && shapeCount === toolCount;
-  const base = allMetalLine
+  // #728 — a job needing BOTH shapes has no single-cutter answer whatever else refused the list,
+  // so the base sentence says that rather than "no flat end mill … or V-bit", which is false
+  // whenever the list holds either.
+  const base = bothShapes !== null
+    ? `No single cutter can cut this job: ${bothShapes.flat}, and ${bothShapes.cone}. Give each its own cutter in a setup.`
+    : allMetalLine
     ? `Every cutter in the list is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[material]}.`
     : allSizeless
       ? 'No cutter in the list states a cutting diameter.'
@@ -510,9 +517,10 @@ export function recommendTool(
       : (job.cutouts ?? []).some((cutout) => cutout.enabled)
         ? 'the job has a cut-out, and a cut-out profiles with a flat end mill'
         : null;
+  // #728 — the SAME item set `validateJob` checks: every list, enabled, construction skipped.
   const needsCone =
-    ([...job.shapes, ...(job.combined ?? [])] as EngraveAnyItem[]).some(
-      (item) => item.enabled && 'vCarveDepth' in item && item.vCarveDepth === 'variable',
+    ([...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])] as EngraveAnyItem[]).some(
+      (item) => item.enabled && !item.construction && 'vCarveDepth' in item && item.vCarveDepth === 'variable',
     )
       ? 'the job has a variable-depth V-carve, which needs a V-bit’s flank'
       : inlayMarked(job).some(({ item }) => item.enabled)
@@ -700,6 +708,7 @@ export function recommendTool(
       job.stock.material,
       shapeCount,
       shapeNotes,
+      needsFlat !== null && needsCone !== null ? { flat: needsFlat, cone: needsCone } : null,
     ),
     conditionNote: null,
     catalogueNote: null,

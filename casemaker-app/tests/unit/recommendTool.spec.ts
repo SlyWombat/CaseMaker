@@ -980,6 +980,45 @@ describe('recommendTool — the computed pick states its size and its material r
       expect(rec.reason).toContain('refused by the job’s own operations');
       expect(rec.reason).toContain('bores a hole');
       expect(rec.reason).toContain('inlay half');
+      // #728 — the base sentence says the job needs both, not "no flat end mill … or V-bit".
+      expect(rec.reason).toMatch(/^No single cutter can cut this job: the job bores a hole/);
+    });
+
+    it('#728 — the both-shapes sentence holds when one cutter fell for another reason', () => {
+      const job: EngraveJob = {
+        ...jobWithLabel('l1', 'CASE', 1),
+        drills: [bore()],
+        shapes: [rect({ inlay: { role: 'female', glueGapMm: 0.2 } })],
+      };
+      const sizeless: ToolLibraryEntry = { ...flat(), key: 'inv:no-size', tool: { ...flat().tool, diameter: null } };
+      const rec = recommendTool(job, [flat(), vBit(2), sizeless], [], (_key) => [row('l1', 1)]);
+      expect(rec.key).toBeNull();
+      expect(rec.reason).toMatch(/^No single cutter can cut this job/);
+      expect(rec.reason).not.toContain('is a flat end mill — or');
+    });
+
+    it('#728 — a SWITCHED-OFF inlay half asks nothing of the cutter, in the pick and in the check', () => {
+      const job: EngraveJob = {
+        ...jobWithLabel('l1', 'CASE', 1),
+        drills: [bore()],
+        shapes: [rect({ enabled: false, inlay: { role: 'female', glueGapMm: 0.2 } })],
+      };
+      const rec = recommendTool(job, [flat(), vBit(2)], [], (_key) => [row('l1', 1)]);
+      expect(rec.key).toBe('inv:kz-flat-1');
+      const withPick: EngraveJob = { ...job, toolKey: rec.key!, tool: flat().tool };
+      expect(validateJob(withPick).some((f) => f.code === 'inlay-needs-cone')).toBe(false);
+    });
+
+    it('#728 — a variable V-carve on a LABEL or VECTOR gates the pick, as the check does', () => {
+      const base = jobWithLabel('l1', 'CASE', 1);
+      const job: EngraveJob = {
+        ...base,
+        labels: base.labels.map((l) => ({ ...l, vCarveDepth: 'variable' as const })),
+      };
+      const rec = recommendTool(job, [flat(), vBit(0.5)], shapeCatalogue, (_key) => [row('l1', 1)]);
+      expect(candidate(rec, 'inv:kz-flat-1').excluded).toBe('job-shape');
+      const withFlat: EngraveJob = { ...job, toolKey: 'inv:kz-flat-1', tool: flat().tool };
+      expect(validateJob(withFlat).some((f) => f.code === 'vcarve-variable-needs-cone')).toBe(true);
     });
   });
 });

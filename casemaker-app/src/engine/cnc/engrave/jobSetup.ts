@@ -1720,6 +1720,9 @@ export function validateJob(
   // below the pocket depth. A MALE half is generated, not edited, so its check is that the
   // numbers it stores still describe the cut it carries.
   for (const { item, mark } of inlayMarked(job)) {
+    // #728 — a switched-off (or construction) half is not cut, so it asks nothing of the cutter:
+    // the recommender counts enabled halves only, and the two must agree.
+    if (!item.enabled || item.construction === true) continue;
     const who = itemLabel(item);
     const inlayTool = jobTool(job);
     const inlayCone = inlayTool === null ? null : vCone(inlayTool);
