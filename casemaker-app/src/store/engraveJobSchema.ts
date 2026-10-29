@@ -1764,6 +1764,14 @@ const registrationSettingsSchema = z.object({
 const registrationPlanSchema = z.object({
   mount: mountSchema,
   stock: expectedStockSchema.describe('The stock as this plan expects to find it.'),
+  // #743 — a DISC's plan registers on its rim, and this is the diameter its touched span is
+  // checked against. OPTIONAL, so a rectangular blank's approved plan keeps its exact shape.
+  disc: z
+    .object({
+      diameterMm: z.number().finite().positive().describe('The disc diameter the job states, in millimetres.'),
+    })
+    .optional()
+    .describe('Present when the plan registers a disc on its rim; absent for a rectangular blank.'),
   surfacePoint: positionSchema.describe('Work-coordinate point where the surface is probed.'),
   seek: z
     .object({

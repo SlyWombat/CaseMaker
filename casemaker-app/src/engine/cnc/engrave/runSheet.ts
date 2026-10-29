@@ -1503,6 +1503,11 @@ function registrationSteps(
    */
   facingRun = false,
 ): RunSheetStep[] {
+  // #743 §4.6/§4.7 — A DISC IS REGISTERED ON ITS RIM, not on a rectangle's edges. Four touches
+  // through the centre-lines find the circle's extreme points; the centre sets the origin and the
+  // span against the stated ⌀ refuses a different piece. The rectangle's probe-plan touches below
+  // would name edges a disc does not have, so the disc branch replaces them outright.
+  if (job.stock.shape === 'disc') return discRegistrationSteps(job, onBoard, facingRun);
   const { length, width } = job.stock;
   // #449 — the tip is the shop's measured `registration.tipDiameterMm` when the caller passed the scan
   // settings; `PROBE_SPEC` (the same 2.0 mm, its labelled fallback) otherwise.
@@ -1536,33 +1541,7 @@ function registrationSteps(
       text: `Touch ${i + 1} of ${plan.touches.length}: ${words.edge}, ${words.where} — this gives ${readsWord(t)}.`,
     });
   });
-  steps.push({
-    // #410 review item 1 — the Z0 the whole job is cut against, and WHO set it. A second cutter's Z0
-    // is not a second touch-off: it is the difference between this tool's PRB and the new cutter's,
-    // so both numbers have to be readable later, on paper, by an operator with the machine in front
-    // of them. The reference is named as "the tool that set Z0" rather than as the probe, because
-    // nothing here knows which of the two was in the spindle: the cutter, freshly calibrated in the
-    // step above, or the probe — and the formula's second term is whichever one it was.
-    text:
-      (onBoard
-        ? facingRun
-          ? "Z0: the PART's top face — probe it with the probe you just fitted. NOT the board's top face."
-          : "Z0: the PART's top face — probe it, or touch off on it. NOT the board's top face."
-        : facingRun
-          ? "Z0: the blank's top face — probe it with the probe you just fitted."
-          : "Z0: the blank's top face — probe it, or touch off on it.") +
-      (facingRun
-        ? ' Record the reading AND the probe’s PRB: this job is skimmed before it is cut, so ' +
-          'this surface and the probe’s reading are what the facing cutter’s Z0 is worked out from ' +
-          'and — after the re-touch on the faced top — the engraving cutter’s too.'
-        : ' Record the reading AND the tool that made it: on a job cut by two cutters the second ' +
-          'program’s Z0 is worked out from this surface and the PRB of whichever tool took this ' +
-          'touch, so both go on this one blank — the first cutter’s own PRB is a separate reading, ' +
-          'taken where it is fitted.'),
-    record: facingRun
-      ? 'surface Z (mm) and the probe’s PRB (mm)'
-      : 'surface Z (mm) and the PRB of the tool that set Z0 (mm)',
-  });
+  steps.push(z0Step(onBoard, facingRun));
   steps.push({
     text:
       `X0 Y0 Z0 is the top-front-left corner of the ${onBoard ? 'part' : 'blank'}. That leaves the ` +
@@ -1588,6 +1567,72 @@ function registrationSteps(
   // writes notes as clauses, and the sheet prints sentences.
   for (const note of plan.notes) steps.push({ text: sentence(note) });
   return steps;
+}
+
+/**
+ * #410 review item 1 — the Z0 the whole job is cut against, and WHO set it. A second cutter's Z0
+ * is not a second touch-off: it is the difference between this tool's PRB and the new cutter's,
+ * so both numbers have to be readable later, on paper, by an operator with the machine in front
+ * of them. The reference is named as "the tool that set Z0" rather than as the probe, because
+ * nothing here knows which of the two was in the spindle: the cutter, freshly calibrated in the
+ * step above, or the probe — and the formula's second term is whichever one it was.
+ *
+ * Shared by the rectangle's sequence and the disc's (#743): whichever shape is registered, Z0 is
+ * the same measurement.
+ */
+function z0Step(onBoard: boolean, facingRun: boolean): RunSheetStep {
+  return {
+    text:
+      (onBoard
+        ? facingRun
+          ? "Z0: the PART's top face — probe it with the probe you just fitted. NOT the board's top face."
+          : "Z0: the PART's top face — probe it, or touch off on it. NOT the board's top face."
+        : facingRun
+          ? "Z0: the blank's top face — probe it with the probe you just fitted."
+          : "Z0: the blank's top face — probe it, or touch off on it.") +
+      (facingRun
+        ? ' Record the reading AND the probe’s PRB: this job is skimmed before it is cut, so ' +
+          'this surface and the probe’s reading are what the facing cutter’s Z0 is worked out from ' +
+          'and — after the re-touch on the faced top — the engraving cutter’s too.'
+        : ' Record the reading AND the tool that made it: on a job cut by two cutters the second ' +
+          'program’s Z0 is worked out from this surface and the PRB of whichever tool took this ' +
+          'touch, so both go on this one blank — the first cutter’s own PRB is a separate reading, ' +
+          'taken where it is fitted.'),
+    record: facingRun
+      ? 'surface Z (mm) and the probe’s PRB (mm)'
+      : 'surface Z (mm) and the PRB of the tool that set Z0 (mm)',
+  };
+}
+
+/**
+ * #743 §4.6/§4.7 — a DISC's registration in the operator's words. Four touches through the
+ * centre-lines; the centre sets the origin (the box's front-left corner, centre − R); the span is
+ * checked against the stated ⌀; and no rotation is read or written — the program is never rotated.
+ */
+function discRegistrationSteps(job: EngraveJob, onBoard: boolean, facingRun: boolean): RunSheetStep[] {
+  const diameter = job.stock.diameter ?? Math.min(job.stock.length, job.stock.width);
+  const radius = diameter / 2;
+  return [
+    {
+      text:
+        'Register: four touches on the rim, through its centre; the centre sets the origin. Two run along ' +
+        'the disc’s centre-line in X (left and right) and two along it in Y (front and back), so each finds ' +
+        'the extreme point of the circle. The centre is the midpoint of each opposite pair, and the diameter ' +
+        'is the span between them. The origin is the measured centre whatever the size: a blank more than ' +
+        `1 % off the job’s ⌀${fmtNum(diameter)} mm is a question — resize the job to the measured diameter, or ` +
+        'cut as is (the app asks it, and both spans are stated so an out-of-round blank is visible).',
+    },
+    z0Step(onBoard, facingRun),
+    {
+      text:
+        `X0 Y0 Z0 is the top-front-left corner of the box around the disc — the registration writes it as the rim’s ` +
+        `centre − ${fmtNum(radius)} mm on each axis. The program is never rotated: a disc has no rotation to read, ` +
+        'so if the design must line up with something on the disc, put a reference feature on it and register on that. ' +
+        'How well YOU set the origin is not modelled: the file places the blank at this corner and judges the jaws ' +
+        `against it, and this job’s ${fmtNum(job.edgeMargin)} mm edge margin is the gap the content keeps from the rim, ` +
+        'not a locating tolerance.',
+    },
+  ];
 }
 
 /**

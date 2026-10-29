@@ -100,6 +100,9 @@ function expectedWords(plan: RegistrationPlan): string {
   const z = `Z from the surface touch, within ±${plan.settings.surfaceToleranceMm} mm`;
   if (plan.bracketOrigin !== null) return `XY from the bracket (${plan.bracketOrigin.from}); ${z}`;
   if (plan.references !== undefined) return `X/Y from the earlier features; ${z}`;
+  // #743 — a disc's four rim touches set the centre and read the diameter, so the word is not a
+  // list of edges.
+  if (plan.disc !== undefined) return `X/Y from the rim's four centre-line touches (centre, and the diameter checked); ${z}`;
   const edges = plan.scans.map((s) => s.edge);
   if (edges.length === 0) return z;
   return `X/Y re-checked on the ${edges.join(' and ')} edge${edges.length === 1 ? '' : 's'}; ${z}`;
@@ -214,6 +217,13 @@ function planRegistrationAttempt(args: {
       };
     }
     input = { seatMachineZ: seat, seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, probe: args.probe };
+  }
+
+  // #743 D-2 — A DISC REGISTERS ON ITS RIM. The plan scans all four edges through the
+  // centre-lines (opposite pairs give the centre, the span gives the diameter); the stated
+  // diameter is the job's own, which the schema keeps equal to the box.
+  if (job.stock.shape === 'disc') {
+    input = { ...input, disc: { diameterMm: job.stock.diameter ?? job.stock.length } };
   }
 
   const result =

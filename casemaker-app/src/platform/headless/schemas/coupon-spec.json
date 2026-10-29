@@ -1815,6 +1815,20 @@
                             ],
                             "description": "Bracket origin when the plan found one, or null."
                           },
+                          "disc": {
+                            "description": "Present when the plan registers a disc on its rim; absent for a rectangular blank.",
+                            "properties": {
+                              "diameterMm": {
+                                "description": "The disc diameter the job states, in millimetres.",
+                                "exclusiveMinimum": 0,
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "diameterMm"
+                            ],
+                            "type": "object"
+                          },
                           "mount": {
                             "description": "How the stock is held: in the vise, on the bracket, or with tape.",
                             "enum": [
@@ -3405,6 +3419,20 @@
                           }
                         ],
                         "description": "Bracket origin when the plan found one, or null."
+                      },
+                      "disc": {
+                        "description": "Present when the plan registers a disc on its rim; absent for a rectangular blank.",
+                        "properties": {
+                          "diameterMm": {
+                            "description": "The disc diameter the job states, in millimetres.",
+                            "exclusiveMinimum": 0,
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "diameterMm"
+                        ],
+                        "type": "object"
                       },
                       "mount": {
                         "description": "How the stock is held: in the vise, on the bracket, or with tape.",

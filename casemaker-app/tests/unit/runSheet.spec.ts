@@ -748,6 +748,19 @@ describe('runSheet (#207)', () => {
       // The same job, asked for: the block is there, so the hold is a switch and not a deletion.
       expect(origin(dj(), SCAN).some((t) => t.startsWith('OPTIONAL, BEFORE THE FIRST CUT'))).toBe(true);
     });
+
+    it('#743 a disc registers on its rim, the centre sets the origin, and no rotation is read', () => {
+      const job = dj();
+      job.stock = { length: 30, width: 30, thickness: 3, material: 'pla', shape: 'disc', diameter: 30 };
+      const texts = origin(job).join(' ');
+      expect(texts).toContain('Register: four touches on the rim, through its centre; the centre sets the origin.');
+      expect(texts).toContain('centre-line in X');
+      expect(texts).toContain('centre − 15 mm on each axis');
+      expect(texts).toContain('⌀30 mm');
+      expect(texts).toContain('never rotated');
+      // It does not fall back to the rectangle's per-edge touches.
+      expect(texts).not.toContain('Touch 1 of');
+    });
   });
 
   // #489 — the sheet carries the cutter's own side profile, from the same model the app draws.

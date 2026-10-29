@@ -23,6 +23,7 @@ import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { applyHoldAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
+import { scaleJobAboutCentre } from '@/engine/cnc/engrave/scaleJob';
 import { getMeshBlob, putMeshBlob } from '@/platform/meshBlobs';
 import {
   itemKindWord,
@@ -1202,6 +1203,14 @@ export interface EngraveJobState {
    * reaches.
    */
   setJobMargins: (margins: EngraveMargins | null) => void;
+  /**
+   * #743 D-2 — RESIZE THE JOB TO A MEASURED DISC. Every item is scaled in X and Y about the
+   * stock's centre and the stock box (and a disc's ⌀) with them; depths and the cut's Z numbers are
+   * untouched. This is the registration step's answer to a disc more than 1 % off the stated
+   * diameter — the operator chose to resize rather than cut as is — so it is an ordinary document
+   * edit and lands on the undo-free write path like every other edit.
+   */
+  scaleJobAboutStockCentre: (factor: number) => void;
   replace: (job: EngraveJob) => void;
   reset: () => void;
   /**
@@ -2568,6 +2577,10 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         }
         return { ...job, margins: { ...margins } };
       }),
+
+    // #743 D-2 — the registration step's "resize the job" answer. `scaleJobAboutCentre` owns the
+    // field-by-field rules; the action is the one document write.
+    scaleJobAboutStockCentre: (factor) => apply((job) => scaleJobAboutCentre(job, factor)),
 
     replace: (job) => {
       const target = job.targetObject;

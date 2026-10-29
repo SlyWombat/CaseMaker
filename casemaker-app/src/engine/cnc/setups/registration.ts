@@ -82,6 +82,11 @@ export function registrationFor(
     /** Bracket (#427): the clamps and arms as placed, and whether to take the confirming touch. */
     mountObstacles?: PlanObstacle[];
     bracketConfirm?: boolean;
+    /**
+     * #743 D-2 — the stock is a disc and this is its stated diameter: the plan scans all four rim
+     * edges through the centre-lines instead of the rectangle's one-sided edges.
+     */
+    disc?: { diameterMm: number };
   },
   settings: RegistrationSettings,
 ): { plan: PlanResult; references: ReferenceFeature[] } {
@@ -101,6 +106,8 @@ export function registrationFor(
       bracketOrigin: input.bracketOrigin,
       mountObstacles: input.mountObstacles,
       bracketConfirm: input.bracketConfirm,
+      // #743 — a disc keeps its own four-edge plan; a rectangle's input has no `disc`.
+      ...(input.disc !== undefined ? { disc: input.disc } : {}),
     },
     settings,
   );

@@ -24,9 +24,11 @@ export function summarizePlan(plan: RegistrationPlan): string {
   const edges =
     plan.scans.length === 0
       ? 'no edge scan (the bracket fixes X and Y)'
-      : plan.mount === 'bracket'
-        ? `the right edge at Y ${n(plan.scans[0]!.along)} and the back edge at X ${n(plan.scans[1]!.along)} only to confirm the stock is in the bracket's corner (the bracket fixes X and Y)`
-      : plan.scans.map((sc) => `the ${sc.edge} edge at ${sc.edge === 'left' || sc.edge === 'right' ? 'Y' : 'X'} ${n(sc.along)}`).join(', ');
+      : plan.disc !== undefined
+        ? `the disc’s rim at its centre-lines — left, right, front and back — so each touch finds the extreme point of the circle (the centre is the midpoint of each opposite pair, the diameter the span)`
+        : plan.mount === 'bracket'
+          ? `the right edge at Y ${n(plan.scans[0]!.along)} and the back edge at X ${n(plan.scans[1]!.along)} only to confirm the stock is in the bracket's corner (the bracket fixes X and Y)`
+          : plan.scans.map((sc) => `the ${sc.edge} edge at ${sc.edge === 'left' || sc.edge === 'right' ? 'Y' : 'X'} ${n(sc.along)}`).join(', ');
   const clamps = plan.mountObstacles.filter((o) => o.kind === 'clamp').map((o) => o.label);
   const assumes =
     plan.mount === 'bracket'
@@ -74,5 +76,19 @@ export function summarizeOutcome(o: RegistrationOutcome): string {
   const verdict = o.withinMargin
     ? `within the ${n(o.margin)} mm margin — confirmed`
     : `outside the ${n(o.margin)} mm margin — set the origin from the measurement (after you confirm), or stop and re-seat`;
-  return `${found}; ${verdict}.`;
+  // #743 — a disc's rim has its own number: the span the touches found, against the stated ⌀.
+  // Both spans are always stated (an out-of-round blank is a fact, not a refusal), and a size more
+  // than 1 % off says the operator is asked — never that the origin is withheld.
+  const discWord =
+    o.disc === undefined
+      ? ''
+      : ` It measures ⌀${n(o.disc.measuredMm)} mm` +
+        (o.disc.spanXMm !== null && o.disc.spanYMm !== null
+          ? ` (⌀${n(o.disc.spanXMm)} across X, ⌀${n(o.disc.spanYMm)} across Y)`
+          : '') +
+        ` against the job’s ⌀${n(o.disc.statedMm)} mm — ${Math.round(o.disc.fraction * 1000) / 10} % ${
+          o.disc.mismatchMm >= 0 ? 'larger' : 'smaller'
+        }` +
+        (o.disc.askResize ? ', so the operator is asked: resize the job, or cut as is.' : ', within 1 %.');
+  return `${found}; ${verdict}.${discWord}`;
 }

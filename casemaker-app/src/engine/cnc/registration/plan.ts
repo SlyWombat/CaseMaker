@@ -181,6 +181,13 @@ export interface PlanInput {
   stock: ExpectedStock;
   mount: Mount;
   /**
+   * #743 D-2 — the stock is a DISC, and this is the diameter the job states. The plan then scans
+   * all FOUR edges through the centre-lines: opposite pairs give the centre and the span, which a
+   * plate's one-sided scans cannot (a plate's origin is its corner; a disc's is its centre − R).
+   * Absent for a rectangle, whose plan is unchanged.
+   */
+  disc?: { diameterMm: number };
+  /**
    * REQUIRED, and the CALLER's to supply: where the job expects the stock's top, in MACHINE Z, and what
    * that is from — the stock's thickness on the mount's known top (the vise's jaw top − proud, the
    * wasteboard + thickness). **Not G54 Z**: G54 Z is the CUTTER's zero (#387 — `G10 L2` writes it with
@@ -265,6 +272,8 @@ export interface PlanObstacle {
 export interface RegistrationPlan {
   mount: Mount;
   stock: ExpectedStock;
+  /** #743 D-2 — the disc this plan registers on its rim: its stated diameter. Absent for a rectangle. */
+  disc?: { diameterMm: number };
   /** #619 — the stock's thickness, mm, for the datum path's upper surface bound. */
   stockThicknessMm?: number;
   surfacePoint: { x: number; y: number };
@@ -411,11 +420,18 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       : `the ${name} edge is ${r3(hi - lo)} mm long — too short to keep a scan ${keepOff} mm clear of its rounded corners`;
 
   const scans: EdgeScan[] = [];
+  const disc = input.disc !== undefined;
   const midY = (stock.yMin + stock.yMax) / 2;
   const midX = (stock.xMin + stock.xMax) / 2;
   let bracketOrigin: RegistrationPlan['bracketOrigin'] = null;
   let mountObstacles: PlanObstacle[] = [];
   if (mount === 'bracket') {
+    // #743 — a disc is not a bracket part (its Holding option is shown refused): the bracket
+    // touches a rim at two points and the cutter turns it. A plan that asks anyway is refused
+    // rather than measured against a corner the disc never fills.
+    if (input.disc !== undefined) {
+      return { ok: false, reason: 'a disc is cut on its face and sits on tape or in the vise — the bracket holds a corner, not a rim' };
+    }
     if (!input.bracketOrigin) return { ok: false, reason: 'the bracket mount needs the origin from the machine’s anchor' };
     if (!input.mountObstacles) {
       return { ok: false, reason: 'the bracket mount needs where the clamps and the bracket’s arms are — the probe travels beside them' };
@@ -509,7 +525,11 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
             `the surface tolerance (${s.surfaceToleranceMm} mm) reaches the jaw tops ${r3(proud)} mm below the stock: the seek searches to ${r3(mountDatum.jawTopZ - s.surfaceToleranceMm)}, so a missing stock would read a jaw as the surface — check the stock is in the vise before registering`,
           );
         }
-        notes.push('the fixed jaw fixes X and rotation: the left-edge scan confirms it, the front-edge scan finds Y');
+        notes.push(
+          disc
+            ? 'the jaws touch a disc on two lines at its centre-line: all four rim edges are scanned, and the centre is the midpoint of each opposite pair'
+            : 'the fixed jaw fixes X and rotation: the left-edge scan confirms it, the front-edge scan finds Y',
+        );
       } else {
         // The jaws stand above the stock: every sideways move is made at the park height, which must clear
         // them — the seek band lies below the jaw tops, so a seek cannot mistake a jaw for the surface.
@@ -522,7 +542,9 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
         }
         jawAboveStock = true;
         notes.push(
-          `the stock sits ${r3(above)} mm below the jaw tops: a left-edge touch past the stock lands on the fixed jaw and reads ABOVE the surface band — that reading is the jaw, so the edge is where the readings go high; the fixed jaw fixes X and rotation, the front-edge scan finds Y`,
+          disc
+            ? `the disc sits ${r3(above)} mm below the jaw tops: a touch past either X edge lands on a jaw and reads ABOVE the surface band — that reading is the jaw, so the edge is where the readings go high; all four rim edges are scanned and the centre is the midpoint of each opposite pair`
+            : `the stock sits ${r3(above)} mm below the jaw tops: a left-edge touch past the stock lands on the fixed jaw and reads ABOVE the surface band — that reading is the jaw, so the edge is where the readings go high; the fixed jaw fixes X and rotation, the front-edge scan finds Y`,
         );
       }
     }
@@ -530,9 +552,27 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     if (typeof ys === 'string') return { ok: false, reason: ys };
     const xs = span(stock.xMin, stock.xMax, 'front');
     if (typeof xs === 'string') return { ok: false, reason: xs };
-    if (mount === 'tape') scans.push(scanFor('left', ys.lo, stock, s), scanFor('left', ys.hi, stock, s));
+    if (disc) {
+      // #743 D-2 — FOUR TOUCHES THROUGH THE CENTRE-LINES. A disc's origin is its centre less R,
+      // so both opposite edges are needed on each axis: the midpoint of each pair is the centre
+      // and the span between them is the diameter. Each line runs through the centre-line, where
+      // the circle's extreme point is — an off-line scan by δ misses it by about δ²/2R (a 1 mm
+      // error costs 0.033 mm on ⌀30, so a hand-placed line is honest, but a line anywhere else is
+      // not). A tape job gets all four; a vise job too — the jaws only FIX the X edges, they do
+      // not measure the disc.
+      const above = jawAboveStock ? { aboveIsEdge: true as const } : {};
+      scans.push(
+        { ...scanFor('left', midY, stock, s), ...above },
+        { ...scanFor('right', midY, stock, s), ...above },
+        scanFor('front', midX, stock, s),
+        scanFor('back', midX, stock, s),
+      );
+      notes.push(
+        `the disc is registered on its rim: left, right, front and back scans through its centre-lines; the centre is the midpoint of each opposite pair and the touched span is checked against the stated ⌀${r3(input.disc!.diameterMm)} mm`,
+      );
+    } else if (mount === 'tape') scans.push(scanFor('left', ys.lo, stock, s), scanFor('left', ys.hi, stock, s));
     else scans.push({ ...scanFor('left', midY, stock, s), ...(jawAboveStock ? { aboveIsEdge: true } : {}) });
-    scans.push(scanFor('front', midX, stock, s));
+    if (!disc) scans.push(scanFor('front', midX, stock, s));
   }
 
   if (mountDatum !== null) {
@@ -550,6 +590,8 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     plan: {
       mount,
       stock,
+      // #743 — present only on a disc, so a rectangular plan's record is unchanged.
+      ...(input.disc !== undefined ? { disc: input.disc } : {}),
       stockThicknessMm: input.stockThicknessMm,
       surfacePoint,
       seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },

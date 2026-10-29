@@ -200,7 +200,9 @@ export function planReferences(input: ReferencePlanInput, s: RegistrationSetting
           ? `the turn is read between ${rotation.between.join(' and ')}, ${rotation.separation} mm apart, to ±${rotation.resolutionMm} mm across the stock`
           : `the turn is NOT measurable: the references are ${rotation.separation} mm apart, so it could be read only to ±${rotation.resolutionMm} mm across the stock`,
       ...skipped.map((k) => `not scanned: ${k}`),
-      ...base.plan.notes.filter((n) => !/fixed jaw fixes|left edge at two points/.test(n)),
+      // #743 — a disc's rim note belongs to the four rim scans, which the reference walls REPLACE
+      // here: the plan must not claim to register on a rim it is not touching.
+      ...base.plan.notes.filter((n) => !/fixed jaw fixes|left edge at two points|is registered on its rim/.test(n)),
     ],
   };
   return { ok: true, plan };

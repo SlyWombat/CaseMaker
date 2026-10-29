@@ -16,6 +16,13 @@
  * something above the surface, and every touch landed where it was sent. `problems` says what is
  * missing; `applyCorrection` refuses on any of it.
  *
+ * #743 D-2 — A DISC'S SIZE IS NEVER ONE OF THOSE PROBLEMS. A disc is registered on four rim
+ * touches; the midpoint of each opposite pair is its CENTRE (always the origin, larger or smaller
+ * than stated) and the span is its diameter. A blank more than 1 % off the job's stated ⌀ is a
+ * QUESTION for the operator (`disc.question` — resize the job or cut as is), not a refusal: wood
+ * circle blanks are not perfectly round or perfectly sized, and the cut still happens. The two
+ * spans are always stated, so an out-of-round blank is visible rather than hidden behind a mean.
+ *
  * THE CORRECTION, in #387's order (decision Q12 — written only after the operator confirms):
  *   - X, Y: the current G54 moved by the offset (the bracket: the anchor's origin);
  *   - Z0 = surface + (cutter PRB − reference PRB), the reference being the probe's own `M491`.
@@ -64,6 +71,32 @@ export interface RegistrationOutcome {
   offset: { x: number; y: number };
   measured: { x: boolean; y: boolean };
   centre: { x: number; y: number };
+  /**
+   * #743 D-2 — a DISC's rim as measured: the span across each axis, their mean, and how far that
+   * mean is from the diameter the job states. Present only when the plan is for a disc. A span is
+   * null when an edge of that axis was not found (the `problems` say which).
+   *
+   * A DIFFERENT-SIZED DISC IS NOT A REFUSAL (the maintainer's decision, 2026-10-29): the origin is
+   * always the MEASURED CENTRE — a blank that is a little larger or smaller is still cut — and a
+   * difference of more than 1 % is a QUESTION (`question`), answered by resizing the job to the
+   * measured diameter or by cutting as is. Below 1 % the measurement is stated and the job is kept.
+   */
+  disc?: {
+    statedMm: number;
+    spanXMm: number | null;
+    spanYMm: number | null;
+    measuredMm: number;
+    /** measured − stated, mm: positive when the blank is larger than the job. */
+    mismatchMm: number;
+    /** |mismatchMm| / stated — the fraction the 1 % bar judges. */
+    fraction: number;
+    /** True above the 1 % bar: the operator is asked, and the origin waits for the answer. */
+    askResize: boolean;
+    /** |spanX − spanY| mm when both were found: the blank's own out-of-round, never refused. */
+    outOfRoundMm: number | null;
+    /** The question to answer when `askResize`, else null. One wording for the panel and the CLI. */
+    question: string | null;
+  };
   rotationDeg: number | null;
   /** How far the rotation moves the stock's far end, mm (over the stock's length). */
   rotationShiftMm: number | null;
@@ -97,6 +130,13 @@ export interface RegistrationOutcome {
 }
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
+/** Two decimals for a diameter in a sentence: the scan's own resolution is coarser than that. */
+const n2 = (v: number) => String(Math.round(v * 100) / 100);
+/**
+ * #743 D-2 — the maintainer's bar (2026-10-29): "anything more than 1% different ask the user if
+ * they want to resize the job or print as is". Strictly more than 1 % asks; 1 % exactly does not.
+ */
+export const DISC_RESIZE_QUESTION_FRACTION = 0.01;
 
 export function edgeFrom(record: ScanRecord, tipRadius: number): EdgeFinding {
   const { scan, touches } = record;
@@ -178,7 +218,10 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
   let rotationDeg: number | null = null;
   let rotationShiftMm: number | null = null;
   const lefts = edges.filter((e) => e.edge === 'left' && e.foundAt !== null);
-  if (lefts.length >= 2) {
+  // #743 — A DISC HAS NO ROTATION TO READ: its left scan is one line through the centre, and the
+  // program is never rotated. Two found left edges on a disc plan would be a plan this build does
+  // not write, so the rotation stays null rather than being derived from them.
+  if (plan.disc === undefined && lefts.length >= 2) {
     const [a, b] = [lefts[0]!, lefts[lefts.length - 1]!];
     if (b.along !== a.along) {
       const slope = (b.foundAt! - a.foundAt!) / (b.along - a.along);
@@ -205,9 +248,72 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
   }
 
   // Which axes the mount leaves to be found: the bracket's are the anchor's; the others need both.
-  if (plan.mount !== 'bracket') {
+  // #743 — a disc's centre is the midpoint of TWO opposite edges on each axis, so a single edge
+  // is not a measurement: every one of the four must be found.
+  if (plan.disc !== undefined) {
+    for (const edge of ['left', 'right', 'front', 'back'] as const) {
+      if (!edges.some((e) => e.edge === edge && e.foundAt !== null)) {
+        problems.push(`the rim: the ${edge} edge was not found, so the disc’s centre and diameter cannot be read`);
+      }
+    }
+  } else if (plan.mount !== 'bracket') {
     if (!measured.x) problems.push('X: no left edge was found');
     if (!measured.y) problems.push('Y: no front edge was found');
+  }
+
+  // #743 D-2 — THE MEASURED RIM, AND THE 1 % QUESTION. The touched span across each axis is the
+  // diameter; the two spans are stated as they were read (a wood blank is not perfectly round) and
+  // their mean is what the job's stated ⌀ is compared with. A difference is NEVER a refusal — the
+  // job is still cut, centred on the measured centre — but more than 1 % off is a QUESTION the
+  // operator answers (`resize` or `cut as is`); under 1 % the measurement is stated and carried on.
+  let disc: RegistrationOutcome['disc'];
+  if (plan.disc !== undefined) {
+    const foundAt = (edge: Edge): number | null => edges.find((e) => e.edge === edge && e.foundAt !== null)?.foundAt ?? null;
+    const [xL, xR, yF, yB] = [foundAt('left'), foundAt('right'), foundAt('front'), foundAt('back')];
+    const spanX = xL !== null && xR !== null ? r3(xR - xL) : null;
+    const spanY = yF !== null && yB !== null ? r3(yB - yF) : null;
+    const spans = [spanX, spanY].filter((v): v is number => v !== null);
+    if (spans.length > 0) {
+      const statedMm = plan.disc.diameterMm;
+      const measuredMm = r3(mean(spans));
+      const mismatchMm = r3(measuredMm - statedMm);
+      const fraction = statedMm > 0 ? Math.abs(mismatchMm) / statedMm : 0;
+      const askResize = fraction > DISC_RESIZE_QUESTION_FRACTION;
+      const outOfRoundMm = spanX !== null && spanY !== null ? r3(Math.abs(spanX - spanY)) : null;
+      const pct = `${Math.round(fraction * 1000) / 10} %`;
+      const side = mismatchMm > 0 ? 'larger' : mismatchMm < 0 ? 'smaller' : 'the same';
+      disc = {
+        statedMm,
+        spanXMm: spanX,
+        spanYMm: spanY,
+        measuredMm,
+        mismatchMm,
+        fraction,
+        askResize,
+        outOfRoundMm,
+        question: askResize
+          ? `The disc measures ⌀${n2(measuredMm)} mm; the job says ⌀${n2(statedMm)} mm — ${pct} ${side}. Resize the job to the measured diameter, or cut as is?`
+          : null,
+      };
+      // The measured rim, in the outcome's own words. Both spans are stated, always: it is how an
+      // out-of-round blank is reported, and how a centred-but-oval one is told from a round one.
+      const spanWords =
+        spanX !== null && spanY !== null
+          ? ` (⌀${n2(spanX)} mm across X, ⌀${n2(spanY)} mm across Y${outOfRoundMm! > s.fineStepMm ? ' — the rim is not quite round' : ''})`
+          : '';
+      notes.push(
+        `The disc measures ⌀${n2(measuredMm)} mm${spanWords}; the job says ⌀${n2(statedMm)} mm — ${pct} ${side}. ` +
+          (askResize
+            ? 'That is more than 1 %, so the job is not resized until you answer the question.'
+            : 'That is within the 1 % the question bar allows, so the job’s size is kept.'),
+      );
+      // #743 — out-of-round is a FACT, not a problem: the origin is the measured centre either way.
+      if (outOfRoundMm !== null && outOfRoundMm > s.fineStepMm) {
+        notes.push(
+          `The rim is not perfectly round: its X and Y spans differ by ${n2(outOfRoundMm)} mm, beyond the ${n2(s.fineStepMm)} mm the scan can resolve. The origin stays the measured centre.`,
+        );
+      }
+    }
   }
 
   let offset = { x: r3(mean(dxs)), y: r3(mean(dys)) };
@@ -266,6 +372,7 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
       x: r3((plan.stock.xMin + plan.stock.xMax) / 2 + offset.x),
       y: r3((plan.stock.yMin + plan.stock.yMax) / 2 + offset.y),
     },
+    ...(disc !== undefined ? { disc } : {}),
     rotationDeg,
     rotationShiftMm,
     xyChecked,

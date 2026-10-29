@@ -267,6 +267,12 @@ function fakeZ1(opts: {
    * height, so a descent must establish its own start absolutely.
    */
   headAtTravelForScans?: boolean;
+  /**
+   * #743 — the piece is a DISC: its top answers inside this circle (work XY) instead of inside the
+   * `actual` box. The circle is stated separately so a test can make the rim a different diameter
+   * from the box the job plans in — the D-2 mismatch case.
+   */
+  disc?: { centre: { x: number; y: number }; radius: number; radiusY?: number };
 }) {
   const inForce = opts.g54 ?? G54;
   const surface = opts.surface ?? SURFACE;
@@ -289,7 +295,13 @@ function fakeZ1(opts: {
   const RIM = opts.rim ?? 0.7;
   const zAt = (wx: number, wy: number): number | null => {
     if (opts.clamp && wx >= opts.clamp.xMin && wx <= opts.clamp.xMax) return surface + 2;
-    if (wx >= a.xMin - RIM && wx <= a.xMax + RIM && wy >= a.yMin - RIM && wy <= a.yMax + RIM) return surface;
+    if (opts.disc !== undefined) {
+      // #743 — a disc's top is the circle (or the ellipse of an out-of-round blank); every point
+      // outside its rim is a miss (or the jaw, below).
+      const rx = opts.disc.radius + RIM;
+      const ry = (opts.disc.radiusY ?? opts.disc.radius) + RIM;
+      if (((wx - opts.disc.centre.x) / rx) ** 2 + ((wy - opts.disc.centre.y) / ry) ** 2 <= 1) return surface;
+    } else if (wx >= a.xMin - RIM && wx <= a.xMax + RIM && wy >= a.yMin - RIM && wy <= a.yMax + RIM) return surface;
     if (opts.jaw && wx < a.xMin && wx > a.xMin - 10) return surface - 0.47;
     if (opts.jawAbove !== undefined && wx < a.xMin && wx > a.xMin - 10) return surface + opts.jawAbove;
     if (opts.tap && Math.abs(wx - (opts.tap.x - inForce.x)) < 0.5 && Math.abs(wy - (opts.tap.y - inForce.y)) < 0.5) return opts.tap.z;
@@ -1456,4 +1468,145 @@ describe('#633 the datum path widens its own seek, never the re-touch band', () 
     expect(rt.reason).toContain(`outside the expected ${min} to ${max}`);
     expect(z1.lines.some((l) => l.startsWith('G10 L2'))).toBe(false);
   });
+});
+
+describe('#743 a disc registers on its rim (D-2)', () => {
+  const DISC: ExpectedStock = { xMin: 0, yMin: 0, xMax: 30, yMax: 30, cornerRadius: 0 };
+  /** A tighter bisection than the shipped 0.5 mm, so the readings are the rim's rather than the step grid's. */
+  const DISC_S = { ...S, fineStepMm: 0.05 };
+  const discPlan = (mount: 'vise' | 'tape' = 'tape', settings = DISC_S): RegistrationPlan => {
+    const r = planRegistration(input(mount, { stock: DISC, disc: { diameterMm: 30 } }), settings);
+    if (!r.ok) throw new Error(r.reason);
+    return r.plan;
+  };
+
+  it('plans four scans through the centre-lines and carries the stated diameter', () => {
+    const p = discPlan();
+    expect(p.scans.map((s) => s.edge)).toEqual(['left', 'right', 'front', 'back']);
+    // Every line runs through the box's centre (15, 15) — where the circle's extreme points are.
+    expect(p.scans.map((s) => s.along)).toEqual([15, 15, 15, 15]);
+    expect(p.disc).toEqual({ diameterMm: 30 });
+    expect(p.notes.join(' ')).toContain('registered on its rim');
+  });
+
+  it('also plans all four for a vise disc — the jaws fix the X edges, they do not measure the rim', () => {
+    const p = discPlan('vise');
+    expect(p.scans.map((s) => s.edge)).toEqual(['left', 'right', 'front', 'back']);
+  });
+
+  it('refuses a bracket plan: a bracket holds a corner, not a rim', () => {
+    const r = planRegistration(input('bracket', { stock: DISC, disc: { diameterMm: 30 } }), S);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('not a rim');
+  });
+
+  it('reads ⌀30.00, sets the corner at centre − 15, and reads no rotation', async () => {
+    // The disc sits 1.2 mm left of where the job expects it: its true centre is (13.8, 15). The
+    // front/back lines then cross the circle 1.2 mm off its centre, which costs them δ²/2R each
+    // side (0.048 mm) — the design's own bound, well inside the edge margin.
+    const z1 = fakeZ1({
+      actual: { xMin: -1.2, yMin: 0, xMax: 28.8, yMax: 30, cornerRadius: 0 },
+      disc: { centre: { x: 13.8, y: 15 }, radius: 15 },
+    });
+    const p = discPlan();
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    const o = computeOutcome(p, r.data);
+    expect(o.problems).toEqual([]);
+    expect(o.usable).toBe(true);
+    // A disc has no rotation to read, and the program is never rotated.
+    expect(o.rotationDeg).toBeNull();
+    expect(o.disc?.statedMm).toBe(30);
+    expect(Math.abs(o.disc!.measuredMm - 30)).toBeLessThanOrEqual(0.15);
+    // The measured centre, and the same piece's origin: G54 moves by the centre's own offset, so
+    // the box's front-left corner is written at centre − R = (−1.2, 0), within the bisection.
+    expect(o.centre.x).toBeCloseTo(13.8, 1);
+    expect(o.centre.y).toBeCloseTo(15, 1);
+    expect(o.correctedG54.x).toBeCloseTo(G54.x - 1.2, 1);
+    expect(o.correctedG54.y).toBeCloseTo(G54.y, 1);
+    expect(o.disc!.spanXMm!).toBeCloseTo(30, 1);
+  });
+
+  it('a disc 1.4 % large is NOT refused: it asks, and the origin stays the measured centre', async () => {
+    const z1 = fakeZ1({
+      actual: { xMin: 0, yMin: 0, xMax: 30, yMax: 30, cornerRadius: 0 },
+      disc: { centre: { x: 15, y: 15 }, radius: 15.21 },
+    });
+    const p = discPlan();
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    const o = computeOutcome(p, r.data);
+    // #743 — a different-sized piece is never a problem: the origin is written from the measured
+    // centre, and the size is a QUESTION the operator answers.
+    expect(o.problems).toEqual([]);
+    expect(o.usable).toBe(true);
+    expect(o.withinMargin).toBe(true);
+    expect(o.disc!.measuredMm).toBeCloseTo(30.42, 1);
+    expect(o.disc!.fraction).toBeGreaterThan(0.01);
+    expect(o.disc!.askResize).toBe(true);
+    expect(o.disc!.question).toMatch(/Resize the job to the measured diameter, or cut as is\?$/);
+    // The disc is centred on the job's box: the measured centre IS the box centre, and the origin
+    // is that centre less R — the G54 does not move.
+    expect(o.centre.x).toBeCloseTo(15, 1);
+    expect(o.centre.y).toBeCloseTo(15, 1);
+    expect(o.correctedG54.x).toBeCloseTo(G54.x, 1);
+    // Both spans are stated, and the note names the question the panel will ask.
+    expect(o.notes.join(' ')).toMatch(/⌀30\.4\d mm across X, ⌀30\.4\d mm across Y/);
+    expect(o.notes.join(' ')).toContain('more than 1 %');
+  });
+
+  it('a disc 2 % SMALLER is asked about the same way — larger or smaller, the centre is the origin', async () => {
+    const z1 = fakeZ1({
+      actual: { xMin: 0, yMin: 0, xMax: 30, yMax: 30, cornerRadius: 0 },
+      disc: { centre: { x: 15, y: 15 }, radius: 14.7 },
+    });
+    const p = discPlan();
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    const o = computeOutcome(p, r.data);
+    expect(o.problems).toEqual([]);
+    expect(o.disc!.measuredMm).toBeLessThan(30);
+    expect(o.disc!.mismatchMm).toBeLessThan(0);
+    expect(o.disc!.askResize).toBe(true);
+    expect(o.centre.x).toBeCloseTo(15, 1);
+    expect(o.correctedG54.x).toBeCloseTo(G54.x, 1);
+  });
+
+  it('under 1 % it states the measured ⌀ and carries on without a question', async () => {
+    const z1 = fakeZ1({
+      actual: { xMin: 0, yMin: 0, xMax: 30, yMax: 30, cornerRadius: 0 },
+      disc: { centre: { x: 15, y: 15 }, radius: 15.1 },
+    });
+    const p = discPlan();
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    const o = computeOutcome(p, r.data);
+    expect(o.problems).toEqual([]);
+    expect(o.usable).toBe(true);
+    expect(o.disc!.fraction).toBeLessThanOrEqual(0.01);
+    expect(o.disc!.askResize).toBe(false);
+    expect(o.disc!.question).toBeNull();
+    expect(o.notes.join(' ')).toContain('within the 1 %');
+  });
+
+  it('an out-of-round blank states both spans and still centres on the measured centre', async () => {
+    // 30.60 mm across X, 29.52 mm across Y: not a circle, and a wood blank the maintainer wants
+    // cut anyway. The mean is within 1 %, so there is no question — only the fact.
+    const z1 = fakeZ1({
+      actual: { xMin: 0, yMin: 0, xMax: 30, yMax: 30, cornerRadius: 0 },
+      disc: { centre: { x: 15, y: 15 }, radius: 15.3, radiusY: 14.76 },
+    });
+    const p = discPlan();
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    const o = computeOutcome(p, r.data);
+    expect(o.problems).toEqual([]);
+    expect(o.disc!.askResize).toBe(false);
+    expect(o.disc!.outOfRoundMm!).toBeGreaterThan(0.5);
+    const notes = o.notes.join(' ');
+    expect(notes).toMatch(/across X/);
+    expect(notes).toContain('not perfectly round');
+    expect(o.centre.x).toBeCloseTo(15, 1);
+  });
+
 });

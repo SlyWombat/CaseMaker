@@ -167,6 +167,12 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const [written, setWritten] = useState<ApplyResult | null>(null);
   const [homeNote, setHomeNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * #743 D-2 — the operator's answer to a disc more than 1 % off the stated diameter: resize the
+   * job to the measured size, or cut as is. Held per measurement, so a re-run asks again.
+   */
+  const [discAnswer, setDiscAnswer] = useState<'resize' | 'as-is' | null>(null);
+  const scaleJobAboutStockCentre = useEngraveJobStore((s) => s.scaleJobAboutStockCentre);
   /** #587 — the executor's latest step narration, shown instead of a blanket "Talking…". */
   const [narration, setNarration] = useState<string | null>(null);
 
@@ -594,6 +600,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     setHomeNote(null);
     setError(null);
     setPrompt(null);
+    setDiscAnswer(null);
   }
 
   const outcome = result?.ok === true ? result.outcome : null;
@@ -728,6 +735,49 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                 </ul>
               )}
 
+              {/* #743 D-2 — THE DISC'S SIZE QUESTION. A blank more than 1 % off the stated ⌀ is
+                  not a refusal: the origin is the measured centre either way, and the operator
+                  answers — resize the job to what was measured, or cut as is. The origin waits for
+                  the answer so neither outcome is taken by accident. */}
+              {outcome.disc !== undefined && outcome.disc.askResize && phase === 'measured' && (
+                <div
+                  data-testid="engrave-registration-disc-question"
+                  data-answer={discAnswer ?? 'none'}
+                  style={{ ...BOX, borderColor: WARN }}
+                >
+                  <p style={{ fontSize: 12, color: WARN, margin: '0 0 6px' }}>{outcome.disc.question}</p>
+                  {discAnswer === null ? (
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        data-testid="engrave-registration-disc-resize"
+                        style={{ flex: 1, padding: 7 }}
+                        onClick={() => {
+                          scaleJobAboutStockCentre(outcome.disc!.measuredMm / outcome.disc!.statedMm);
+                          setDiscAnswer('resize');
+                        }}
+                      >
+                        Resize the job to ⌀{n(outcome.disc.measuredMm)} mm
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="engrave-registration-disc-as-is"
+                        style={{ flex: 1, padding: 7 }}
+                        onClick={() => setDiscAnswer('as-is')}
+                      >
+                        Cut as is
+                      </button>
+                    </div>
+                  ) : (
+                    <p style={{ ...MUTED, color: OK }} data-testid="engrave-registration-disc-answer">
+                      {discAnswer === 'resize'
+                        ? `The job was resized to ⌀${n(outcome.disc.measuredMm)} mm: the design covers the same fraction of the blank it was drawn for.`
+                        : `Cutting as is: the design keeps its drawn size, centred on the measured disc.`}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {spread !== null && (
                 <div
                   data-testid="engrave-registration-spread"
@@ -782,7 +832,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                 </div>
               )}
 
-              {phase === 'measured' && refusal === null && (
+              {phase === 'measured' && refusal === null && (outcome.disc?.askResize !== true || discAnswer !== null) && (
                 <>
                   <p style={MUTED}>
                     Writing the origin also asks you to take the probe out and fit the cutter; its{' '}
@@ -797,6 +847,14 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                     Write the origin from this measurement
                   </button>
                 </>
+              )}
+              {/* #743 — the disc's question is the one thing that holds the origin: it changes what
+                  the program will cut, so it is answered before the origin is written. */}
+              {phase === 'measured' && outcome.disc?.askResize === true && discAnswer === null && (
+                <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-disc-wait">
+                  Answer the disc’s size question first — resize the job or cut as is — then write
+                  the origin.
+                </p>
               )}
               {refusal !== null && (
                 <p style={{ ...MUTED, color: BAD }} data-testid="engrave-registration-refusal">

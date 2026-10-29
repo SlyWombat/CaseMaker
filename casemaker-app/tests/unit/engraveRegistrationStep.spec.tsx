@@ -76,6 +76,45 @@ function attachPlan(job: EngraveJob, plan: RegistrationPlan): EngraveJob {
   };
 }
 
+/** #743 — a ⌀30 TAPE disc: the four rim scans the plan writes through the centre-lines. */
+function makeDiscPlan(): RegistrationPlan {
+  const { settings } = registrationSettings(null);
+  const planned = planRegistration(
+    {
+      stock: { xMin: 0, yMin: 0, xMax: 30, yMax: 30, cornerRadius: 0 },
+      mount: 'tape',
+      expectedSurface: { machineZ: -55.131, from: 'the blank as the setup holds it' },
+      seekFromMachineZ: -3,
+      cutCentre: { x: 15, y: 15 },
+      disc: { diameterMm: 30 },
+    },
+    { ...settings, fineStepMm: 0.05 },
+  );
+  if (!planned.ok) throw new Error(planned.reason);
+  return planned.plan;
+}
+
+/** A disc job with the approved rim plan: one label near the centre, so the sheet has a cut. */
+function discJobWithPlan(plan: RegistrationPlan): EngraveJob {
+  const job = defaultEngraveJob();
+  job.name = 'Disc registration fixture';
+  job.stock = { length: 30, width: 30, thickness: 3, material: 'pla', shape: 'disc', diameter: 30 };
+  job.labels = [
+    {
+      id: 'txt',
+      text: 'HELLO',
+      font: 'sans-default',
+      weight: 'regular',
+      size: 5,
+      position: { x: 15, y: 17 },
+      rotation: 0,
+      depth: 0.5,
+      enabled: true,
+    },
+  ];
+  return attachPlan(job, plan);
+}
+
 function jobWithPlan(plan: RegistrationPlan): EngraveJob {
   const job = defaultEngraveJob();
   job.name = 'Registration step fixture';
@@ -124,6 +163,11 @@ interface FakeOptions {
   noCutterReading?: boolean;
   /** #475 — the surface the fake answers at each cut-extent touch, keyed by the sent XY. */
   spreadReadings?: readonly { x: number; y: number; z: number }[];
+  /**
+   * #743 — the piece is a DISC with these true spans, centred on the planned box: each rim edge is
+   * where that span puts it, so a test can make the blank a little larger or smaller than stated.
+   */
+  discSpans?: { x: number; y: number };
 }
 
 /**
@@ -168,11 +212,20 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
             if (opts.missFastTouch === true && g38 === 1) return reply(`[PRB:${lastX},${lastY},${stockZ}:0]\nok`);
             // The first two are the surface seek's fast and slow touch, at the registration point.
             if (g38 <= 2) return reply(`[PRB:${lastX},${lastY},${stockZ}:1]\nok`);
-            const scan = plan.scans.find((s) =>
-              s.edge === 'left' || s.edge === 'right'
-                ? Math.abs(lastY - s.along) < 1e-6
-                : Math.abs(lastX - s.along) < 1e-6,
+            // #743 — a DISC's four scans share one centre-line, so the `along` match alone would
+            // answer a right-edge scan with the left edge's rule. The side of the centre the probe
+            // is on (`outward`) tells the two apart; a one-scan axis still matches by `along`.
+            const centreX = (plan.stock.xMin + plan.stock.xMax) / 2;
+            const centreY = (plan.stock.yMin + plan.stock.yMax) / 2;
+            const xScans = plan.scans.filter(
+              (s) => (s.edge === 'left' || s.edge === 'right') && Math.abs(lastY - s.along) < 1e-6,
             );
+            const yScans = plan.scans.filter(
+              (s) => (s.edge === 'front' || s.edge === 'back') && Math.abs(lastX - s.along) < 1e-6,
+            );
+            const pickSide = (list: typeof plan.scans, at: number, centre: number) =>
+              list.length <= 1 ? list[0] : list.find((s) => Math.sign(at - centre) === s.outward);
+            const scan = pickSide(xScans, lastX, centreX) ?? pickSide(yScans, lastY, centreY);
             if (scan === undefined) {
               // #475/#591 — the cut extents. The executor places each touch by the offset the scans
               // FOUND, which is only as exact as the scan's fine step and rim correction, so a touch
@@ -183,7 +236,18 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
               return reply(`[PRB:${lastX},${lastY},${reading?.z ?? stockZ}:1]\nok`);
             }
             const at = scan.edge === 'left' || scan.edge === 'right' ? lastX : lastY;
-            const trueEdge = scan.expectedAt + (opts.edgeShiftMm ?? 0);
+            // #743 — a disc's rim is where the span puts it about the planned box's centre.
+            const discEdge =
+              opts.discSpans === undefined
+                ? null
+                : scan.edge === 'left'
+                  ? centreX - opts.discSpans.x / 2
+                  : scan.edge === 'right'
+                    ? centreX + opts.discSpans.x / 2
+                    : scan.edge === 'front'
+                      ? centreY - opts.discSpans.y / 2
+                      : centreY + opts.discSpans.y / 2;
+            const trueEdge = discEdge ?? scan.expectedAt + (opts.edgeShiftMm ?? 0);
             const inside = scan.outward * (at - trueEdge) < plan.settings.tipRadiusMm;
             return inside
               ? reply(`[PRB:${lastX},${lastY},${stockZ}:1]\nok`)
@@ -870,5 +934,55 @@ describe('#638 — the placement frame waits for the acceptance', () => {
     const recorded = firstRegistrationFor(jobA.id, TARGET)!;
     expect(recorded.plan).toEqual(planA);
     expect(recorded.plan).not.toEqual(planB);
+  });
+});
+
+describe('#743 D-2 — a different-sized disc asks the operator, and never refuses', () => {
+  it('a disc 1.4 % large shows the question; the origin waits, and Resize scales the job', async () => {
+    const plan = makeDiscPlan();
+    const job = discJobWithPlan(plan);
+    install(plan, { discSpans: { x: 30.42, y: 30.42 } });
+    beddedLocation();
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    await runStep();
+
+    const question = screen.getByTestId('engrave-registration-disc-question');
+    expect(question.textContent).toContain('Resize the job to the measured diameter, or cut as is?');
+    expect(question.textContent).toContain('⌀30.4');
+    // The origin waits for the answer: no Write button, and the sentence says why.
+    expect(screen.queryByTestId('engrave-registration-write')).toBeNull();
+    expect(screen.getByTestId('engrave-registration-disc-wait').textContent).toContain(
+      'Answer the disc’s size question first',
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-disc-resize'));
+    });
+    const scaled = useEngraveJobStore.getState().job;
+    expect(scaled.stock.diameter).toBeGreaterThan(30.3);
+    expect(scaled.stock.diameter).toBeLessThan(30.5);
+    // The design scaled with the blank: the label's size and its position about the centre.
+    expect(scaled.labels[0]!.size).toBeCloseTo(5 * (scaled.stock.diameter! / 30), 2);
+    expect(screen.getByTestId('engrave-registration-disc-answer').textContent).toContain('resized');
+    expect(screen.getByTestId('engrave-registration-write')).toBeTruthy();
+  });
+
+  it('Cut as is keeps the document and lets the origin be written', async () => {
+    const plan = makeDiscPlan();
+    const job = discJobWithPlan(plan);
+    install(plan, { discSpans: { x: 30.42, y: 30.42 } });
+    beddedLocation();
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    await runStep();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-disc-as-is'));
+    });
+    expect(useEngraveJobStore.getState().job.stock.diameter).toBe(30);
+    expect(useEngraveJobStore.getState().job.labels[0]!.size).toBe(5);
+    expect(screen.getByTestId('engrave-registration-disc-answer').textContent).toContain('Cutting as is');
+    expect(screen.getByTestId('engrave-registration-write')).toBeTruthy();
   });
 });
