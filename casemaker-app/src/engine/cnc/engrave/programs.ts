@@ -15,12 +15,17 @@
  * `toolItems` says which of the setup's items each cutter owns. A setup that names no map gets the
  * reading every pre-#472 document already had: the first cutter owns every item, and a later
  * cutter is a REST pass — the generator measures what the previous program left instead of walking
- * the item list again (the CLI route's behaviour, #410).
+ * the item list again (the CLI route's behaviour, #410). With a map (#746) each cutter cuts the
+ * items it owns; the rest pass still exists, but only for a cutter assigned NONE, and its geometry
+ * is the measured rest of the items the EARLIER cutter owns (the only items it could have left
+ * unfinished). A cutter assigned items is never a rest pass, so it is never handed another
+ * cutter's geometry, and #486's V-bit rest refusal never applies to it.
  *
- * A later ref's `itemIds` are the items the operator assigned to that cutter. They are not the
- * program's cut geometry — a rest program's geometry is the measured rest regions, built by the
- * generator — but they are the assignment the setup saved, and the items that must not be cut by
- * the earlier cutter.
+ * A later ref's `itemIds` are the items the operator assigned to that cutter, and they ARE the
+ * program's cut geometry: a later cutter cuts its own items as themselves — a through vector stays
+ * through, a bore stays a bore, a cut-out keeps its outline. (Before #746 a later ref's items were
+ * re-planned as "rest of …" pockets of the first cutter's design.) A later ref with NO items is
+ * #472's rest program, whose geometry is the measured rest of the earlier cutter's work.
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
@@ -79,11 +84,22 @@ export function jobForSetup(job: EngraveJob, ref: JobProgramRef, tool?: Tool | n
    * chamfer needs a cone — the two can never share one). Without the rim's outline the sub-job's
    * chamfer would be a broken reference, so a named item the program does NOT own arrives as a
    * CONSTRUCTION copy: referenceable, never cut. The same rule keeps a cut-out's `of` resolvable
-   * across a setup split.
+   * across a setup split, and #746 extends it to every other item a program's own items name:
+   * a frame's `around`, and a cutaway's `outer` and `islands` (a construction label island is
+   * how a raised-text panel is written). Operands may be labels, shapes, combined items or
+   * vectors — `findItem`'s whole set.
    */
   const referenced = new Set<string>();
   for (const c of job.cutouts ?? []) if (ids.has(c.id) && c.of !== 'stock-inset') referenced.add(c.of);
   for (const c of job.chamfers ?? []) if (ids.has(c.id) && c.of !== undefined) referenced.add(c.of);
+  for (const c of job.combined ?? []) {
+    if (!ids.has(c.id)) continue;
+    if (c.kind === 'frame') referenced.add(c.around);
+    else if (c.kind === 'cutaway') {
+      referenced.add(c.outer);
+      for (const island of c.islands) referenced.add(island);
+    }
+  }
   const referenceOnly = <T extends { id: string }>(list: readonly T[] | undefined): T[] =>
     (list ?? [])
       .filter((item) => referenced.has(item.id) && !ids.has(item.id))
@@ -93,7 +109,7 @@ export function jobForSetup(job: EngraveJob, ref: JobProgramRef, tool?: Tool | n
     ...rest,
     toolKey: ref.toolKey,
     ...(tool !== undefined && tool !== null ? { tool } : {}),
-    labels: job.labels.filter((item) => ids.has(item.id)),
+    labels: [...job.labels.filter((item) => ids.has(item.id)), ...referenceOnly(job.labels)],
     shapes: [...job.shapes.filter((item) => ids.has(item.id)), ...referenceOnly(job.shapes)],
     ...(job.combined !== undefined
       ? { combined: [...(keep(job.combined) ?? []), ...referenceOnly(job.combined)] }

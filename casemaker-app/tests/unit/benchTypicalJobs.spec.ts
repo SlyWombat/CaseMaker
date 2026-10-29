@@ -154,6 +154,83 @@ const BENCH_CUTTERS = [
     addedAt: '2026-10-27T00:00:00.000Z',
     notes: null,
   },
+  // #746 — THE REAL JOBS' THREE-CUTTER SET (j19, j24, j25), as the house location holds them:
+  // the two single-flute flats and the 30° 0.2 mm engraver, with their confirmed Makera ids.
+  {
+    id: 'kz-o-flute-m-3-175-12',
+    tool: {
+      number: null,
+      id: '112111313812',
+      name: 'Single Flute O-Flute Bit for Metal - 1/8" Shank 3.175mm * 12mm',
+      typeText: 'Flat End',
+      shape: 'flat',
+      handleDiameter: 3.175,
+      tipDiameter: 3.175,
+      diameter: 3.175,
+      cornerRadius: 0,
+      angle: null,
+      halfAngle: null,
+      fluteLength: 12,
+      shoulderLength: null,
+      stickout: null,
+      centreCutting: true,
+    },
+    origin: null,
+    quantity: 1,
+    codes: [],
+    addedAt: '2026-10-28T00:00:00.000Z',
+    notes: null,
+  },
+  {
+    id: 'kz-o-flute-m-1-5-6',
+    tool: {
+      number: null,
+      id: '112111153806',
+      name: 'Single Flute O-Flute Bit for Metal - 1/8" Shank 1.5mm * 6mm',
+      typeText: 'Flat End',
+      shape: 'flat',
+      handleDiameter: 3.175,
+      tipDiameter: 1.5,
+      diameter: 1.5,
+      cornerRadius: 0,
+      angle: null,
+      halfAngle: null,
+      fluteLength: 6,
+      shoulderLength: null,
+      stickout: null,
+      centreCutting: true,
+    },
+    origin: null,
+    quantity: 1,
+    codes: [],
+    addedAt: '2026-10-28T00:00:00.000Z',
+    notes: null,
+  },
+  {
+    id: 'kz-engrave-m-30-0-2',
+    tool: {
+      number: null,
+      id: '122111023830',
+      name: 'Single Flute Engraving Bit for Metal - 1/8" Shank 30° * 0.2mm',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      handleDiameter: 3.175,
+      tipDiameter: 0.2,
+      diameter: 3.175,
+      cornerRadius: null,
+      angle: 30,
+      halfAngle: 15,
+      fluteLength: null,
+      shoulderLength: null,
+      stickout: null,
+      centreCutting: null,
+    },
+    origin: null,
+    quantity: 1,
+    codes: [],
+    addedAt: '2026-10-28T00:00:00.000Z',
+    notes: null,
+  },
   // #738 — the real-jobs exercise's ball noses, as `2026-10-28-z1-real-jobs` used them.
   {
     id: 'kz-ball-nose-2-12',
@@ -284,6 +361,31 @@ function benchLocation(): string {
   doc.inventory.push(...BENCH_CUTTERS);
   locationPath = join(SCRATCH, 'location.json');
   writeFileSync(locationPath, JSON.stringify(doc));
+  // #746 — the three real-jobs cutters cut 6061 aluminium, a material the compiled starting table
+  // does not cover: the feed row must come from the vendor's catalogue for that exact cutter, as
+  // the house location has it. The two flats and the engraver share the exercise's numbers.
+  const catalogueTools = ['kz-o-flute-m-3-175-12', 'kz-o-flute-m-1-5-6', 'kz-engrave-m-30-0-2'].map((key) => {
+    const entry = BENCH_CUTTERS.find((c) => c.id === key)!;
+    return { key: `cat:${entry.tool.id}`, tool: entry.tool, provenance: 'fixture', contentHash: entry.id };
+  });
+  const catalogueFeeds = catalogueTools.map((row) => ({
+    cutterId: (row.tool as { id: string }).id,
+    material: '6061 Aluminum',
+    rpm: 10_000,
+    feed: 400,
+    plungeFeed: 100,
+    stepDown: 0.4,
+  }));
+  writeFileSync(
+    join(SCRATCH, 'catalogue.json'),
+    JSON.stringify({
+      kind: 'casemaker-catalogue',
+      schemaVersion: 1,
+      syncedAt: '2026-10-28T00:00:00.000Z',
+      tools: catalogueTools,
+      feeds: catalogueFeeds,
+    }),
+  );
   return locationPath;
 }
 
@@ -291,6 +393,7 @@ interface Run {
   code: number;
   receipt: Receipt;
   progress: string[];
+  outDir: string;
 }
 
 /** Run `casemaker cut <job>` the way the CLI does, capturing its receipt and progress lines. */
@@ -317,7 +420,12 @@ async function cut(
     options,
   );
   expect(receipt, 'the command must emit a receipt, even on a refusal').not.toBeNull();
-  return { code, receipt: parseReceipt(receipt!), progress };
+  return { code, receipt: parseReceipt(receipt!), progress, outDir };
+}
+
+/** The text of one `.nc` the run wrote. */
+function programText(run: Run, ncFile: string): string {
+  return readFileSync(join(run.outDir, ncFile), 'utf8');
 }
 
 /**
@@ -524,4 +632,91 @@ describe('#749 the j24 through cut-out sweeps its 103 repeated footprints', () =
     expect(program.sim!.removedVolumeMm3).toBeCloseTo(4705.0126, 1);
     expect(elapsed, `cut took ${elapsed} ms`).toBeLessThan(BUDGET_MS);
   }, 150_000);
+});
+
+// #746 — A SETUP'S LATER CUTTERS CUT THEIR OWN ITEMS. j19, j24 and j25 each name one setup with
+// three cutters and a `toolItems` map, and every one of them was refused before the fix: each item
+// assigned to a later cutter was re-planned as a REST pass of the first cutter's design ("rest of
+// Bore ⌀14", 10.3 mm deep on 10 mm stock; "rest of Pocket rect 78×48"), a cut-out lost the
+// construction outline it follows, and a V-bit after a flat was refused outright. The tests below
+// run the committed fixture as ONE job and read the written programs:
+//
+//   - every cutter gets exactly one program, in the setup's cut order;
+//   - the later cutter's program cuts ITS items at THEIR depth — a through item is posted to
+//     `thickness + breakthrough` and nothing at the first cutter's through depth leaks into it;
+//   - no program calls anything "rest of …" (that was the defect's fingerprint).
+describe('#746 a setup’s later cutters cut the items they own, as those items', () => {
+  /** Every engrave program the run wrote, in cut order. */
+  function programs(run: Run) {
+    const { receipt } = run;
+    if (receipt.command !== 'engrave' || receipt.details === null) throw new Error('not an engrave receipt');
+    return receipt.details.programs;
+  }
+
+  it('j19 accuracy sample: three programs, and the 1.5’s through items stay through', async () => {
+    const run = await cut('j19-accuracy-sample.json', REAL_JOBS);
+    const text = allDiagnostics(run.receipt);
+    // The defect's own refusals: a combined cutaway's operands were dropped from the sub-job, and a
+    // later cutter's items were re-planned as "rest of …".
+    expect(text, 'the combined cutaway’s construction operands must resolve').not.toContain('item-reference');
+    expect(text, 'no item may be re-planned as a rest pass it was not assigned').not.toContain('rest of');
+    expect(run.code, text).toBe(0);
+    const written = programs(run);
+    expect(written).toHaveLength(3);
+    // The flat cutter that owns the through vectors and bores cuts them THROUGH: 5 mm stock plus
+    // the setup's 0.3 mm breakthrough.
+    const fine = programText(run, written[1]!.ncFile);
+    expect(fine, 'the 1.5 mm cutter’s through items are posted through the stock').toContain('Z-5.3');
+    // The engraver owns the logo and its frame, at their stated 1.3 mm — not a rest of anything.
+    const engraver = programText(run, written[2]!.ncFile);
+    expect(engraver).toContain('Z-1.3');
+  }, 240_000);
+
+  it('j24 spoke wrench: the bore and cut-out on the 3.175, the notches on the 1.5, the labels on the engraver', async () => {
+    const run = await cut('j24-spoke-wrench.json', REAL_JOBS);
+    const text = allDiagnostics(run.receipt);
+    // Recorded: `depth-exceeds-stock` on "rest of Bore ⌀14" and "rest of Cut out outside Pocket
+    // circle ⌀44" (both 10.3 mm deep on a 10 mm stock), `item-reference` on "puck", and
+    // `through-tool-reach` on the later cutter for a cut-out that is the first cutter's.
+    for (const code of ['depth-exceeds-stock', 'item-reference', 'through-tool-reach', 'item-detail-lost']) {
+      expect(text, `the recorded ${code} refusal must not come back`).not.toContain(code);
+    }
+    expect(text).not.toContain('rest of');
+    expect(run.code, text).toBe(0);
+    const written = programs(run);
+    expect(written).toHaveLength(3);
+    // The first cutter owns the bore (⌀14, through) and the puck cut-out (through): 10 mm stock.
+    const rough = programText(run, written[0]!.ncFile);
+    expect(rough).toContain('Z-10.3');
+    // The 1.5 mm cutter owns four 4 mm notches. Its file must NOT carry the first cutter's through
+    // depth — that was "rest of Bore ⌀14", refused at 10.3 mm — and its own floor is 4 mm.
+    const notches = programText(run, written[1]!.ncFile);
+    expect(notches).toContain('Z-4');
+    expect(notches, 'the first cutter’s through bore must not be re-cut by the 1.5').not.toContain('Z-10.3');
+    // The engraver owns the labels at 4.25 mm, and nothing else.
+    const engraver = programText(run, written[2]!.ncFile);
+    expect(engraver).toContain('Z-4.25');
+    expect(engraver).not.toContain('Z-10.3');
+  }, 240_000);
+
+  it('j25 truing wrench: the hole and cut-out on the 3.175, the rotor slot on the 1.5, the grooves on the engraver', async () => {
+    const run = await cut('j25-truing-wrench.json', REAL_JOBS);
+    const text = allDiagnostics(run.receipt);
+    // Recorded: the job was refused `setup-rest-unavailable` because the third cutter is a V-bit —
+    // it was being asked to be a rest cutter instead of cutting its own grooves.
+    expect(text, 'a V-bit that owns items must not be refused as a rest cutter').not.toContain('setup-rest-unavailable');
+    expect(text).not.toContain('rest of');
+    expect(run.code, text).toBe(0);
+    const written = programs(run);
+    expect(written).toHaveLength(3);
+    // The 1.5 mm cutter owns the rotor slot, a THROUGH vector on 4 mm stock: posted to 4 + 0.3.
+    // The through flag is what the defect dropped, and re-planning it as a 4 mm-deep pocket on a
+    // 4 mm stock is what `depth-exceeds-stock` refused.
+    const slot = programText(run, written[1]!.ncFile);
+    expect(slot, 'the later cutter’s through slot stays through').toContain('Z-4.3');
+    // The engraver owns the three 0.3 mm grooves and cuts them at their own depth.
+    const grooves = programText(run, written[2]!.ncFile);
+    expect(grooves).toContain('Z-0.3');
+    expect(grooves, 'the engraver must not re-cut the earlier cutters’ work').not.toContain('Z-4.3');
+  }, 240_000);
 });

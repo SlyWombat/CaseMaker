@@ -6,10 +6,11 @@
 // the real command in process, with the fixture location so the owned cutters resolve, and holds
 // that a two-cutter setup posts two files with the two cutters' headers.
 //
-// Why the two cutters are assigned separate items: the generator measures a later cutter as a REST
-// pass over the material the first program's sweep left. Assigning the setup's two items to the two
-// cutters (#472's `toolItems`) makes the second program's cut a measured region rather than a
-// rest-of-everything prediction, which is the shape the faceplate and relief jobs have.
+// Why the two cutters are assigned separate items: #746 — each cutter cuts the items `toolItems`
+// assigns to it, as themselves, so a two-cutter setup is two genuine programs. (Before #746 the
+// later cutter was measured as a REST pass over the material the first program's sweep left.)
+// The second label is sized for the 3.175 mm cutter assigned to it: assigning fine text to a wide
+// cutter is `item-chars-lost`, and #746 finds that instead of hiding it behind a rest re-plan.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -91,6 +92,9 @@ function locationWithPointAngle(deg: number): string {
 function twoCutterJob(): EngraveJob {
   const base = defaultEngraveJob();
   const labels = base.labels.slice(0, 2).map((label) => ({ ...label, depth: 0.5 }));
+  // #746 — the second label is cut AS TEXT by the 3.175 mm clone, so it is sized for that cutter.
+  // At the shipped 12 mm its characters' counters would be narrower than the cutter.
+  labels[1] = { ...labels[1]!, size: 20 };
   const [a, b] = labels.map((label) => label.id);
   const setup: JobSetup = {
     id: 'setup-1',

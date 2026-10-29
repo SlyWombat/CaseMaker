@@ -31,7 +31,7 @@
  *     but not for a CAM or POST refusal, and a refusal with no reason is useless in the panel.
  */
 
-import type { EngraveItem, EngraveJob, EngraveMargins, EngraveTargetObject, JobSetup } from '@/types/engraveJob';
+import type { EngraveItem, EngraveJob, EngraveMargins, EngraveTargetObject } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 // package.json version for the post's `;@MKR|CAM|v=` header. Read from package.json directly
@@ -81,7 +81,6 @@ import {
   pureGoalObject,
   setupProgramFindings,
   toSetup,
-  toolItemsFor,
   validateGoalObject,
   validateJob,
   type JobFinding,
@@ -2905,25 +2904,33 @@ function coreTooNarrowFindings(
 }
 
 /**
- * One setup's rest pair, measured and generated (#472). `null` when the rough program did not
- * post; the finding for why the rest could not be measured is pushed into `findings`.
+ * One setup's multi-cutter run, measured and generated (#472, #746). `null` when the rough program
+ * did not post; the finding for why a later program could not be measured is pushed into
+ * `findings`.
+ *
+ * #746 — EACH CUTTER CUTS THE ITEMS IT OWNS. The refs arrive from `setupPrograms`, so each later
+ * ref's `itemIds` is the one `toolItemsFor` reading of the operator's assignment; this function
+ * does not re-derive ownership. A later cutter with items gets a `jobForSetup` program of exactly
+ * those items and NOTHING ELSE (a through vector stays through, a cut-out keeps its outline, a
+ * bore stays a bore). A later cutter with NO items is #472's rest pass: its geometry is the
+ * measured rest of the EARLIER cutter's UNFINISHED items — `measureJob` is the earlier ref's own
+ * sub-job, never the whole setup. A cutter that owns items is never a rest cutter, so a V-bit
+ * among them cuts its own work instead of being refused (#486 is a statement about rest passes).
  *
  * The order is the CLI route's (scripts/engrave-job.ts), and for its reasons: the first program is
  * generated, then SIMULATED, then the rest is measured against that sweep's own removal, then the
- * second program is generated and swept from the first one's result. Nothing here trusts an offset
- * standing in for a cut.
+ * later programs are generated and swept from the earlier ones' result. Nothing here trusts an
+ * offset standing in for a cut.
  *
- * #677 — A V FIRST AND ONE FLAT CUTTER AFTER IT IS THE CLEARANCE PAIR, not a rest pair. A cone
- * cannot be rest-measured (#486), but a variable-depth carve leaves a CORE the V's width cannot
- * reach, and the flat cutter pockets exactly that core at the cap in its own program. When the
- * setup's work holds a variable-depth shape and the later cutter owns no items, the rest machinery
- * is bypassed entirely: the V program is generated with its whole item set, its derived cores are
- * handed to the flat cutter, and the pair's order is the setup's own tool order.
+ * #677 — A V FIRST IS NEVER THE REST MODEL. A cone cannot be rest-measured (#486), but a
+ * variable-depth carve leaves a CORE the V's width cannot reach, and the first flat cutter after
+ * the V pockets exactly that core at the cap in its own program — after the V program, in the
+ * setup's own tool order. The V's items and every later cutter's items are still cut as themselves
+ * (#746); the core is the only geometry handed between cutters.
  */
 function generateRestPair(
   tl: ManifoldToplevel,
   job: EngraveJob,
-  setup: JobSetup,
   group: readonly JobProgramRef[],
   roughTool: Tool | null,
   restTools: readonly (Tool | null)[],
@@ -2969,22 +2976,15 @@ function generateRestPair(
     return { attempts, posted, link: null, cursor: nextCursor };
   }
 
-  // #677 — THE CLEARANCE PAIR (this function's doc). Preconditions, deliberately narrow: a cone
-  // first, exactly ONE later cutter, that cutter owning no items, and a variable-depth shape among
-  // the setup's work. Anything else keeps #472's rest model and #486's refusal.
-  const flatRef = group.length === 2 ? group[1]! : null;
-  const flatTool = restTools[0] ?? null;
-  const laterOwnsItems =
-    flatRef !== null && toolItemsFor(setup, flatRef.toolKey, 1).some((id) => setup.itemIds.includes(id));
-  const variableWork = setup.itemIds.some((id) =>
-    job.shapes.some(
-      (shape) => shape.id === id && shape.enabled && !shape.construction && shape.vCarveDepth === 'variable',
-    ),
-  );
-  if (vCone(roughTool) !== null && flatRef !== null && !laterOwnsItems && variableWork) {
-    const vJob = jobForSetup(job, roughRef, roughTool);
+  // #486/#677/#746 — A CONE FIRST IS NEVER A REST PASS. A V cuts the items it owns at the colour
+  // plane; what it cannot finish is a variable carve's CORE, which the first LATER FLAT pockets at
+  // the cap in its own program (#677). A later cutter that owns items cuts them too (#746): the
+  // core is handed to the first flat after the V, whether or not that flat owns items of its own.
+  const roughJob = jobForSetup(job, roughRef, roughTool);
+  if (vCone(roughTool) !== null) {
     const makeV = (span: VacuumSpan): OneProgram =>
-      generateOneProgram(tl, vJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', false);
+      // The V is never the run's last cut: the later program is (#737).
+      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', false);
     const vOne = makeV(roughSpan);
     attempts.push(vOne);
     if (!vOne.ok || vOne.nc === null || vOne.verify === null) {
@@ -2992,64 +2992,109 @@ function generateRestPair(
     }
     posted.push({ ref: roughRef, one: vOne, make: makeV, span: roughSpan });
 
-    if (flatTool === null) {
-      findings.push({
-        severity: 'error',
-        code: 'setup-rest-unavailable',
-        message:
-          `Setup ${flatRef.setupIndex} names ${flatRef.toolKey} after ${roughRef.toolKey}, but that ` +
-          'cutter is not on this bench. Add it to the tool library, or remove it from the setup.',
-      });
-      return { attempts, posted, link: null, cursor: nextCursor };
-    }
-    if (flatTool.shape !== 'flat') {
-      findings.push({
-        severity: 'error',
-        code: 'setup-rest-unavailable',
-        message:
-          `Setup ${flatRef.setupIndex} names ${flatRef.toolKey} after ${roughRef.toolKey}, but the ` +
-          'core a variable V-carve leaves is a flat bottom, and only a flat end mill clears it. ' +
-          'Name one, or remove the later cutter from the setup.',
-      });
-      return { attempts, posted, link: null, cursor: nextCursor };
-    }
+    // The cores still waiting for a flat. Only the FIRST flat after the V takes them: a second
+    // flat later in the setup owns its own items and has no business re-cutting the same floor.
+    let pendingCores: CoreCut[] = [...(vOne.cores ?? [])];
+    const takeCores = (flat: Tool): CoreCut[] => {
+      if (pendingCores.length === 0 || flat.shape !== 'flat') return [];
+      // A core the cutter cannot reach into is not a program — the pocket would open nothing.
+      // Those cores stay, and the warning says which cutter could take them.
+      const diameter = cuttingDiameter(flat) ?? 0;
+      const radius = diameter / 2;
+      const offset = makeClipperOffset(tl);
+      const cuttable =
+        radius > 0 ? pendingCores.filter((core) => offset(core.polygons, -radius).length > 0) : [];
+      const standing = pendingCores.filter((core) => !cuttable.includes(core));
+      if (standing.length > 0) findings.push(...coreTooNarrowFindings(standing, flat, diameter));
+      pendingCores = [];
+      return cuttable;
+    };
 
-    const cores = vOne.cores ?? [];
-    if (cores.length === 0) {
-      // The V's width reaches the middle at every point: the later cutter has nothing this slice
-      // knows how to give it, and #486's sentence is the honest one.
-      findings.push({
-        severity: 'error',
-        code: 'setup-rest-unavailable',
-        message:
-          `Setup ${roughRef.setupIndex} names ${flatRef.toolKey} after ${roughRef.toolKey}, but ` +
-          `${vBitRestRefusal(vJob, roughTool)}. The V-carve is the whole region job; remove the ` +
-          'later cutter from the setup, or name a flat cutter first.',
-      });
-      return { attempts, posted, link: null, cursor: nextCursor };
-    }
+    for (let r = 0; r < restTools.length; r++) {
+      const restTool = restTools[r]!;
+      const restRef = group[r + 1]!;
+      if (restTool === null) {
+        findings.push({
+          severity: 'error',
+          code: 'setup-rest-unavailable',
+          message:
+            `Setup ${restRef.setupIndex} names ${restRef.toolKey} as a later cutter, but that cutter ` +
+            'is not on this bench. Add it to the tool library, or remove it from the setup.',
+        });
+        break;
+      }
+      const ownsItems = restRef.itemIds.length > 0;
+      if (!ownsItems) {
+        // A later cutter with no items of its own has only the V's cores to cut, and only a flat
+        // can pocket those. Anything else is the V-carve being asked for a rest pass it has no
+        // capacity for; the sentence says what to change.
+        if (pendingCores.length > 0 && restTool.shape !== 'flat') {
+          findings.push({
+            severity: 'error',
+            code: 'setup-rest-unavailable',
+            message:
+              `Setup ${restRef.setupIndex} names ${restRef.toolKey} after ${roughRef.toolKey}, but the ` +
+              'core a variable V-carve leaves is a flat bottom, and only a flat end mill clears it. ' +
+              'Name one, or remove the later cutter from the setup.',
+          });
+          break;
+        }
+        if (pendingCores.length === 0) {
+          // The V's width reaches the middle at every point: the later cutter has nothing this
+          // slice knows how to give it, and #486's sentence is the honest one.
+          findings.push({
+            severity: 'error',
+            code: 'setup-rest-unavailable',
+            message:
+              `Setup ${roughRef.setupIndex} names ${restRef.toolKey} after ${roughRef.toolKey}, but ` +
+              `${vBitRestRefusal(roughJob, roughTool)}. The V-carve is the whole region job; remove the ` +
+              'later cutter from the setup, or name a flat cutter first.',
+          });
+          break;
+        }
+        const cuttable = takeCores(restTool);
+        if (cuttable.length === 0) break; // every core is narrower than the flat; the warning says so
+        // THE SECOND FILE: the flat cutter pockets the cores at the cap, after the V program — the
+        // setup's own tool order, which is the order the run plays the files in.
+        const coreSpan = spanAt(nextCursor);
+        nextCursor += 1;
+        const coreJob = jobForSetup(job, restRef, restTool);
+        const makeCore = (span: VacuumSpan): OneProgram =>
+          generateOneProgram(
+            tl,
+            coreJob,
+            restTool,
+            catalogue,
+            calibration,
+            margins,
+            shop,
+            span,
+            false,
+            'rough-and-finish',
+            // Only the LAST program of a run that ends here leaves the neck (#737).
+            withNeck && r === restTools.length - 1,
+            cuttable,
+          );
+        const coreOne = makeCore(coreSpan);
+        attempts.push(coreOne);
+        if (coreOne.ok && coreOne.nc !== null && coreOne.verify !== null) {
+          posted.push({ ref: restRef, one: coreOne, make: makeCore, span: coreSpan });
+        }
+        continue;
+      }
 
-    // A core the cutter cannot reach into is not a program — the pocket would open nothing. Those
-    // cores stay, and the warning says which cutter could take them.
-    const flatDiameter = cuttingDiameter(flatTool) ?? 0;
-    const flatRadius = flatDiameter / 2;
-    const offset = makeClipperOffset(tl);
-    const cuttable =
-      flatRadius > 0 ? cores.filter((core) => offset(core.polygons, -flatRadius).length > 0) : [];
-    const standing = cores.filter((core) => !cuttable.includes(core));
-    if (standing.length > 0) findings.push(...coreTooNarrowFindings(standing, flatTool, flatDiameter));
-
-    if (cuttable.length > 0) {
-      // THE SECOND FILE: the flat cutter pockets the cores at the cap, after the V program — the
-      // setup's own tool order, which is the order the run plays the files in.
-      const coreSpan = spanAt(nextCursor);
+      // #746 — the later cutter owns items: it cuts THEM, as themselves. The cores ride along in
+      // the same file when this is the first flat after the V; nothing else of the V's is handed
+      // over, and the V's own items are not re-planned for this cutter.
+      const derived = takeCores(restTool);
+      const ownJob = jobForSetup(job, restRef, restTool);
+      const ownSpan = spanAt(nextCursor);
       nextCursor += 1;
-      const coreJob = jobForSetup(job, flatRef, flatTool);
-      const makeCore = (span: VacuumSpan): OneProgram =>
+      const makeOwn = (span: VacuumSpan): OneProgram =>
         generateOneProgram(
           tl,
-          coreJob,
-          flatTool,
+          ownJob,
+          restTool,
           catalogue,
           calibration,
           margins,
@@ -3057,24 +3102,32 @@ function generateRestPair(
           span,
           false,
           'rough-and-finish',
-          withNeck,
-          cuttable,
+          // #737 — only the last program of the run leaves the neck.
+          withNeck && r === restTools.length - 1,
+          derived.length === 0 ? undefined : derived,
         );
-      const coreOne = makeCore(coreSpan);
-      attempts.push(coreOne);
-      if (coreOne.ok && coreOne.nc !== null && coreOne.verify !== null) {
-        posted.push({ ref: flatRef, one: coreOne, make: makeCore, span: coreSpan });
-      }
+      const ownOne = makeOwn(ownSpan);
+      attempts.push(ownOne);
+      if (!ownOne.ok || ownOne.nc === null || ownOne.verify === null) break;
+      posted.push({ ref: restRef, one: ownOne, make: makeOwn, span: ownSpan });
+    }
+
+    if (pendingCores.length > 0) {
+      // No later flat took them: the cores stand at the V's floor, and the warning names the
+      // cutter that would clear them. The V's own items were still cut by the V's program above.
+      findings.push(
+        ...coreWarningFindings(pendingCores, { setupIndex: roughRef.setupIndex, toolKey: roughRef.toolKey }),
+      );
     }
     return { attempts, posted, link: null, cursor: nextCursor };
   }
 
-  // The design as the SETUP asks for it, measured by the first cutter BEFORE any program is
-  // generated. It is measured over every setup item — including the ones assigned to a later cutter
-  // — because a share is a fraction of the design and an item the first cutter cannot enter at all
-  // is still part of it.
-  const setupRef: JobProgramRef = { ...roughRef, itemIds: setup.itemIds };
-  const measureJob = jobForSetup(job, setupRef, roughTool);
+  // #746 — THE EARLIER CUTTER'S ITEM SET, NOT THE SETUP'S. `measureJob` is the same sub-job the
+  // first program is built from, so the two readings cannot drift apart. Measuring the WHOLE setup
+  // here — including the items `toolItems` assigned to a later cutter — is what re-planned a later
+  // cutter's bore as "rest of Bore", its through vector as a deep pocket and its cut-out as an
+  // outline whose part had vanished.
+  const measureJob = roughJob;
   const measured = measureEngraving(tl, measureJob, roughTool);
   const glyphArea = measured.reduce((sum, m) => sum + m.glyphArea, 0);
   const openedArea = measured.reduce((sum, m) => sum + m.openedArea, 0);
@@ -3096,8 +3149,26 @@ function generateRestPair(
   // this cutter stays.
   const roughRefKept: JobProgramRef = { ...roughRef, itemIds: roughRef.itemIds.filter((id) => !unroughedIds.has(id)) };
   const roughJobKept = jobForSetup(job, roughRefKept, roughTool);
+  // #746 — ONLY A LATER CUTTER THAT OWNS NO ITEMS IS #472's REST PASS, and only that program
+  // finishes the first program's split floors. When every later cutter owns items, each cuts its
+  // own work and nobody will finish the rough's, so the first program cuts to depth itself rather
+  // than leaving a stock allowance standing for a rest pass that is never written.
+  const laterRestPass = group.slice(1).some((ref) => ref.itemIds.length === 0);
   const makeRoughKept = (span: VacuumSpan): OneProgram =>
-    generateOneProgram(tl, roughJobKept, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-only', false);
+    generateOneProgram(
+      tl,
+      roughJobKept,
+      roughTool,
+      catalogue,
+      calibration,
+      margins,
+      shop,
+      span,
+      withFacing,
+      laterRestPass ? 'rough-only' : 'rough-and-finish',
+      // The rough half of a pair never leaves the neck (#737).
+      false,
+    );
   const keptOne = makeRoughKept(roughSpan);
   attempts.push(keptOne);
   if (!keptOne.ok || keptOne.nc === null || keptOne.verify === null) {
@@ -3119,17 +3190,9 @@ function generateRestPair(
     return { attempts, posted, link: null, cursor: nextCursor };
   }
 
-  if (vBitRestRefusal(measureJob, roughTool) !== null) {
-    findings.push({
-      severity: 'error',
-      code: 'setup-rest-unavailable',
-      message:
-        `Setup ${roughRef.setupIndex} names ${roughRef.toolKey} first and then another cutter, but ` +
-        `${vBitRestRefusal(measureJob, roughTool)}. The V-carve is the whole region job; remove the ` +
-        'later cutter from the setup, or name a flat cutter first.',
-    });
-    return { attempts, posted, link: null, cursor: nextCursor };
-  }
+  // (A V-bit first never reaches here: the clearance branch above owns every cone, so #486's
+  // refusal is stated there — where a later cutter with no items of its own is the one asking for
+  // a rest pass — rather than guessed from a whole-setup measurement.)
 
   const roughFeeds = feedsFor(catalogue, job.stock.material, roughTool, mill, job.cutOverride, shop.feeds ?? undefined);
   const roughDiameter = cuttingDiameter(roughTool) ?? 0;
@@ -3165,17 +3228,52 @@ function generateRestPair(
       });
       break;
     }
-    const refusal = vBitRestRefusal(measureJob, restTool);
-    if (refusal !== null) {
+    // #746 — A CUTTER WITH ITEMS IS NOT A REST PASS. It cuts exactly the items `setupPrograms`
+    // assigned to it, as themselves: a through vector stays through, a bore stays a bore, a
+    // cut-out keeps its outline. It is handed none of the earlier cutter's geometry (the rest
+    // pass is the earlier cutter's own unfinished items, and those belong to a cutter that was
+    // assigned none), so nothing here is re-planned as "rest of …", and #486's V-bit rest
+    // refusal — a statement about rest cutters — never applies to it. A V that owns items cuts
+    // them as a V-carve, whatever the setup named before it.
+    if (restRef.itemIds.length > 0) {
+      const ownJob = jobForSetup(job, restRef, restTool);
+      const ownSpan = spanAt(nextCursor);
+      nextCursor += 1;
+      const makeOwn = (span: VacuumSpan): OneProgram =>
+        generateOneProgram(
+          tl,
+          ownJob,
+          restTool,
+          catalogue,
+          calibration,
+          margins,
+          shop,
+          span,
+          false,
+          'rough-and-finish',
+          // #737 — only the last program of the run leaves the neck.
+          withNeck && r === restTools.length - 1,
+        );
+      const ownOne = makeOwn(ownSpan);
+      attempts.push(ownOne);
+      if (!ownOne.ok || ownOne.nc === null || ownOne.verify === null) break;
+      posted.push({ ref: restRef, one: ownOne, make: makeOwn, span: ownSpan });
+      continue;
+    }
+    // Only a cutter assigned NO items is #472's rest pass, and only a rest pass is refused a
+    // V-bit (#486): its geometry is the measured rest of the EARLIER cutter's items.
+    const restRefusal = vBitRestRefusal(measureJob, restTool);
+    if (restRefusal !== null) {
       findings.push({
         severity: 'error',
         code: 'setup-rest-unavailable',
-        message: `Setup ${restRef.setupIndex}'s ${restRef.toolKey} cannot take the rest pass: ${refusal}.`,
+        message: `Setup ${restRef.setupIndex}'s ${restRef.toolKey} cannot take the rest pass: ${restRefusal}.`,
       });
       break;
     }
-    // What this cutter would cut over the WHOLE setup, measured before the first program's items
-    // were trimmed — an item the first cutter cannot enter is entirely this one's job.
+    // What this cutter would cut of the EARLIER cutter's work, measured before the first program's
+    // items were trimmed — an item the first cutter cannot enter is entirely this one's job. The
+    // later cutter's own items are NOT in `measureJob`; they are measured only in its own program.
     const design = engraveRegions(tl, measureJob, restTool, margins, shop, mill, catalogue);
     const restFeeds = feedsFor(
       catalogue,
@@ -3220,7 +3318,10 @@ function generateRestPair(
           'program already removed everything this cutter can open, so no second program is written ' +
           'for it.',
       });
-      break;
+      // This rest-only cutter has nothing left to cut, but a LATER ref may own items and still
+      // has a program to post, so the group goes on. (`break` here ended the whole group at the
+      // first empty rest.)
+      continue;
     }
     const restJobBase = restJobFor(job, kept, restRef.toolKey);
     // The generator's readers (`validateJob` inside `engraveRegions`, the verifier) resolve the
@@ -3742,7 +3843,6 @@ export function engraveGenerate(
     refs.length === 1 ? 'whole' : index === 0 ? 'first' : index === refs.length - 1 ? 'last' : 'middle';
 
   for (let s = 0; s < setups.length; s++) {
-    const setup = setups[s]!;
     const group = refs.filter((ref) => ref.setupIndex === s + 1);
     // #434 — A DRILL BIT IS NEVER A REST CUTTER. The setup's refs are partitioned into maximal
     // runs that keep their order: a drill ref is ONE program in place, and a run of end-mill refs
@@ -3803,7 +3903,6 @@ export function engraveGenerate(
       const pair = generateRestPair(
         tl,
         job,
-        setup,
         segmentRefs,
         roughTool,
         restTools,

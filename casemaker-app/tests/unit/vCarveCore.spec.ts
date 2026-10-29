@@ -16,6 +16,7 @@ import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { createSimSession, type SimSession } from '@/workers/sim/session';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup } from '@/engine/cnc/engrave/programs';
 import { engraveRegions } from '@/workers/sim/engraveGenerate';
@@ -27,7 +28,7 @@ import { vCone } from '@/engine/cnc/vProfile';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import type { EngraveJob, EngraveShape, JobSetup } from '@/types/engraveJob';
+import type { EngraveCutout, EngraveJob, EngraveShape, JobSetup } from '@/types/engraveJob';
 
 const TOOL_KEY = 'chamfer-90-vcarve';
 
@@ -306,4 +307,85 @@ describe('the unchanged document (#677)', () => {
       }).ok,
     ).toBe(false);
   }, 90_000);
+});
+
+// #746 — A V-BIT FOLLOWED BY A FLAT THAT OWNS ITS OWN ITEMS. The bench's sign (V-carved artwork,
+// outline cut with a flat) is licensed and not committed, so the substitution is the same SHAPE in
+// committed items: a variable-depth rect carved by the V, and a cut-out of a simple construction
+// rect owned by the flat. Before the fix this job was refused `setup-rest-unavailable` — "a V-bit
+// is not a rest cutter here ... remove the later cutter from the setup, or name a flat cutter
+// first" — because every later cutter was treated as a rest pass and a cone cannot be measured.
+describe('a V-bit followed by a flat that owns its own items (#746)', () => {
+  /** The V owns the V-carved plate; the flat owns a cut-out of a construction rect. */
+  function signJob(): EngraveJob {
+    const base = defaultEngraveJob();
+    const plate = rect('plate', 20, 10);
+    const outline = {
+      id: 'outline',
+      name: 'outline',
+      kind: 'rect',
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      depth: base.stock.thickness,
+      enabled: true,
+      width: 60,
+      height: 30,
+      cornerRadius: 0,
+      construction: true,
+    } as EngraveShape;
+    const trim: EngraveCutout = {
+      kind: 'cutout',
+      id: 'trim',
+      name: 'Outline cut',
+      enabled: true,
+      of: 'outline',
+      side: 'outside',
+      inset: 0,
+      tabs: { count: 4, width: 3, height: 0.8 },
+    };
+    return {
+      ...base,
+      labels: [],
+      traces: [],
+      toolKey: TOOL_KEY,
+      tool: V_TOOL,
+      cutOverride: { stepDown: 0.25, stepOver: 0.25 },
+      sacrificial: presetPartOnBoard(),
+      shapes: [plate, outline],
+      cutouts: [trim],
+      setups: [
+        {
+          ...setup('setup-1', ['plate', 'trim'], [TOOL_KEY, FLAT_TOOL.key]),
+          toolItems: { [TOOL_KEY]: ['plate'], [FLAT_TOOL.key]: ['trim'] },
+        },
+      ],
+    };
+  }
+
+  it('cuts the flat’s cut-out as a cut-out, after the V-carve, and the V’s core in the same file', () => {
+    const job = signJob();
+    const g = run(job);
+    expect(
+      g.ok,
+      JSON.stringify({
+        stage: g.stage,
+        errors: g.errors,
+        findings: g.findings.filter((f) => f.severity === 'error'),
+      }),
+    ).toBe(true);
+    // The refusal the signed artwork hit must not come back.
+    expect(g.findings.filter((f) => f.code === 'setup-rest-unavailable')).toEqual([]);
+    const programs = g.programs.filter((p) => (p.kind ?? 'engrave') === 'engrave');
+    expect(programs).toHaveLength(2);
+    expect(programs[0]!.toolKey).toBe(TOOL_KEY);
+    expect(programs[1]!.toolKey).toBe(FLAT_TOOL.key);
+    // THE CUT-OUT KEEPS ITS OUTLINE: the flat's file carries the through profile, and the V's file
+    // does not. A rest re-planning would have dropped the cut-out (and with it, `through`).
+    expect(programs[1]!.through?.cutouts.map((c) => c.id)).toEqual(['trim']);
+    expect(programs[0]!.through ?? null).toBeNull();
+    // …and the flat still pockets the V-carve's core in the same file, as #677 wrote it.
+    expect(programs[1]!.core?.cores.length ?? 0).toBeGreaterThan(0);
+    // No rest pass was invented for either cutter.
+    expect(g.restPass ?? null).toBeNull();
+  }, 120_000);
 });

@@ -24,7 +24,7 @@ import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBou
 import { bindingVoidsByRegion } from '@/workers/sim/engraveGeometry';
 import { createSimSession } from '@/workers/sim/session';
 import { jobTool, setupProgramFindings, toSetup } from '@/engine/cnc/engrave/jobSetup';
-import { setupPrograms } from '@/engine/cnc/engrave/programs';
+import { jobForSetup, setupPrograms } from '@/engine/cnc/engrave/programs';
 import { Z1 } from '@/engine/cnc/machine';
 import {
   itemConditionSummary,
@@ -45,7 +45,7 @@ import { defaultBadgeParams } from '@/types/badge';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { cuttingForTrace, cuttingRadiusForSweep, flatEndMill, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
-import type { EngraveCutout, EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem, EngraveVectorShape } from '@/types/engraveJob';
+import type { EngraveCombinedShape, EngraveCutout, EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem, EngraveVectorShape } from '@/types/engraveJob';
 
 /**
  * #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0` for
@@ -2211,7 +2211,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     }
   });
 
-  it('leaves items assigned to a later cutter out of the clearing program', () => {
+  it('a later cutter cuts the item assigned to it, as itself, and is not a rest pass (#746)', () => {
     const job: EngraveJob = {
       ...dj(),
       stock: { ...dj().stock, material: 'pla' },
@@ -2238,10 +2238,15 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
       }),
     ).toBe(true);
     expect(g.programs).toHaveLength(2);
-    // The first program cuts only the item assigned to it; the second is measured over the whole
-    // setup, so the item the first never touched is entirely its work.
+    // EACH file cuts the ONE label assigned to its cutter: the first program is not the whole
+    // design for the second to rest against, and the second is not "rest of" the first's work.
+    // (Before #746 the second program was measured over the whole setup and re-planned label b as
+    // a rest of label a.)
     expect(g.programs[0]!.cam!.operations).toBe(1);
-    expect(g.restPass!.rest.nc).toMatch(/\.nc$/);
+    expect(g.programs[1]!.toolKey).toBe(TOOL_REST.key);
+    expect(g.programs[1]!.cam!.operations).toBe(1);
+    expect(g.restPass ?? null).toBeNull();
+    expect(g.programs[1]!.nc).not.toContain('rest of');
   });
 
   it('refuses an assignment that names an item twice, or leaves one unassigned', () => {
@@ -2353,6 +2358,56 @@ describe('the per-cutter assignment (#472)', () => {
     const ids = job.labels.map((l) => l.id);
     const refs = setupPrograms(setupWith(job, [job.toolKey, TOOL_B.key]));
     expect(refs.map((r) => r.itemIds)).toEqual([ids, []]);
+  });
+
+  it('keeps the items a combined cutaway or frame names, as construction copies (#746)', () => {
+    const job = dj();
+    const [a, b] = job.labels.map((l) => l.id);
+    const box = {
+      id: 'box',
+      kind: 'rect',
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      depth: 1,
+      enabled: true,
+      width: 10,
+      height: 6,
+      cornerRadius: 0,
+      construction: true,
+    } as EngraveJob['shapes'][number];
+    const panel = {
+      id: 'panel',
+      kind: 'cutaway',
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      depth: 1,
+      enabled: true,
+      outer: 'box',
+      islands: [b!],
+    } as EngraveCombinedShape;
+    const rim = {
+      id: 'rim',
+      kind: 'frame',
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      depth: 1,
+      enabled: true,
+      around: a!,
+      gap: 1,
+      width: 1,
+    } as EngraveCombinedShape;
+    const document: EngraveJob = { ...job, shapes: [box], combined: [panel, rim] };
+    const sub = jobForSetup(
+      document,
+      { setupIndex: 1, setupId: 'setup-1', toolKey: job.toolKey, itemIds: ['panel', 'rim'] },
+      null,
+    );
+    // The program owns the two combined items; the items THEY name — which no setup item list owns
+    // — arrive referenceable and never cut, exactly as a cut-out's `of` already did (#669).
+    expect(sub.combined?.map((c) => c.id)).toEqual(['panel', 'rim']);
+    expect(sub.shapes.find((s) => s.id === 'box')?.construction).toBe(true);
+    expect(sub.labels.find((l) => l.id === a)?.construction).toBe(true);
+    expect(sub.labels.find((l) => l.id === b)?.construction).toBe(true);
   });
 
   it('drops an assignment that names a cutter or item the setup no longer holds', () => {
