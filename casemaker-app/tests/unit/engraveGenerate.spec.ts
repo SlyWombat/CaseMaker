@@ -45,7 +45,7 @@ import { defaultBadgeParams } from '@/types/badge';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { cuttingForTrace, cuttingRadiusForSweep, flatEndMill, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
-import type { EngraveCombinedShape, EngraveCutout, EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem, EngraveVectorShape } from '@/types/engraveJob';
+import type { EngraveCombinedShape, EngraveCutout, EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveShape, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem, EngraveVectorShape, JobSetup } from '@/types/engraveJob';
 
 /**
  * #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0` for
@@ -2180,14 +2180,23 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
       g.ok,
       JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error') }),
     ).toBe(true);
-    expect(g.programs).toHaveLength(2);
+    expect(g.programs).toHaveLength(3);
+    // #746 CUT-OUTS POST LAST. The first cutter also owns the cut-out, so its ordinary work is
+    // program 1, the rest pass is program 2, and the cut-out returns to the first cutter as the
+    // setup's LAST program — never cutting a part free before the rest pass has finished it.
+    expect(g.programs.map((p) => p.toolKey)).toEqual([job.toolKey, TOOL_REST.key, job.toolKey]);
 
     // The unsplit kinds keep their FULL depth in program 1's prediction. A through drill's plan
     // depth is the blank plus the breakthrough (12.3 mm), whatever depth the item states.
     const byItem = new Map(g.predicted.map((p) => [p.itemId, p]));
     expect(byItem.get(drill.id)?.depth).toBeCloseTo(12.3, 6);
     expect(byItem.get(trace.id)?.depth).toBeCloseTo(0.8, 6);
-    expect(byItem.get(cutout.id)?.depth).toBeCloseTo(12.3, 6);
+    // The cut-out is its owner's LAST program, so it is not in the first program's prediction —
+    // and the rest program does not cut it either: it owns no items, so it cuts only its rest
+    // regions and the profile is left for the cut-out's own file.
+    expect(byItem.get(cutout.id)).toBeUndefined();
+    expect(g.programs[1]!.through ?? null).toBeNull();
+    expect(g.programs[2]!.through?.cutouts.map((c) => c.id)).toEqual([cutout.id]);
     // …while the split labels are asked for their rough floors.
     for (const label of job.labels) {
       const predicted = byItem.get(label.id);
@@ -2752,6 +2761,190 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(f!.message).toContain('100 mm inset');
     expect(f!.message).toContain('no path');
   });
+});
+
+// #746 (bounced) — TWO SAFETY RULES ACROSS A SETUP'S CUTTERS. A cut-out releases the part it names,
+// so no program may cut one until every other program in the setup has finished; and an item the
+// first cutter cannot enter at all must be REFUSED BY NAME when no later cutter takes a rest pass,
+// never silently trimmed out of the only program that could have cut it.
+describe('a setup’s cut-outs and uncut items stay safe across cutters (#746)', () => {
+  const ORIENTATION = {
+    top: 'top',
+    bottom: 'bottom',
+    left: 'left',
+    right: 'right',
+    front: 'front',
+    back: 'back',
+  } as const;
+  const PROFILER = flatEndMill(3.175, {
+    name: '3.175 mm flat (cut-out)',
+    fluteLength: 20,
+    shoulderLength: 20,
+  });
+  const FINE = flatEndMill(1.0, { name: '1 mm flat (fine)', fluteLength: 20, shoulderLength: 20 });
+  const CUTTERS: ToolLibraryEntry[] = [
+    { key: 'user:flat-3.175-cutout-test', tool: PROFILER, provenance: 'test' },
+    { key: 'user:flat-1-fine-test', tool: FINE, provenance: 'test' },
+  ];
+
+  const block = (
+    id: string,
+    name: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    depth = 1,
+  ): EngraveShape => ({
+    id,
+    name,
+    kind: 'rect',
+    position: { x, y },
+    rotation: 0,
+    depth,
+    enabled: true,
+    width,
+    height,
+    cornerRadius: 0,
+  });
+
+  const setup = (itemIds: string[], tools: string[], toolItems: Record<string, string[]>): JobSetup => ({
+    id: 'setup-1',
+    orientation: { ...ORIENTATION },
+    mount: { kind: 'vise' },
+    itemIds,
+    tools,
+    toolItems,
+  });
+
+  const engravePrograms = (g: ReturnType<typeof generate>) =>
+    g.programs.filter((p) => (p.kind ?? 'engrave') === 'engrave');
+
+  it('cuts a cut-out after every other cutter’s work, splitting its owner into a final program (#746)', () => {
+    const base = dj();
+    const cut: EngraveCutout = {
+      kind: 'cutout',
+      id: 'cut-1',
+      name: 'Blank',
+      enabled: true,
+      of: 'stock-inset',
+      side: 'inside',
+      inset: 5,
+      tabs: { count: 4, width: 4, height: 1 },
+    };
+    const job: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, material: 'pla' },
+      labels: [],
+      shapes: [block('rim', 'Rim', 50, 42, 40, 14), block('inset', 'Inset', 50, 22, 12, 8, 0.5)],
+      toolKey: CUTTERS[0]!.key,
+      tool: PROFILER,
+      sacrificial: presetPartOnBoard(),
+      breakthrough: 0.3,
+      cutouts: [cut],
+      setups: [
+        setup(['rim', 'inset', cut.id], [CUTTERS[0]!.key, CUTTERS[1]!.key], {
+          [CUTTERS[0]!.key]: ['rim', cut.id],
+          [CUTTERS[1]!.key]: ['inset'],
+        }),
+      ],
+    };
+    const g = generate(tl, job, null, [], undefined, { tools: CUTTERS });
+    expect(
+      g.ok,
+      JSON.stringify({
+        stage: g.stage,
+        errors: g.errors,
+        findings: g.findings.filter((f) => f.severity === 'error'),
+      }),
+    ).toBe(true);
+    const programs = engravePrograms(g);
+    // THREE files: each cutter's own work in tool order, then the cut-out on its owner.
+    expect(programs.map((p) => p.toolKey)).toEqual([CUTTERS[0]!.key, CUTTERS[1]!.key, CUTTERS[0]!.key]);
+    // The cut-out is in the LAST file only: no earlier program machines a released part.
+    expect(programs.map((p) => (p.nc.match(/name=\[T\d+\]Cut out /g) ?? []).length)).toEqual([0, 0, 1]);
+    expect(programs.map((p) => p.through?.cutouts.map((c) => c.id) ?? [])).toEqual([[], [], [cut.id]]);
+    // Each item is cut exactly once, by its own cutter's file.
+    expect(programs[0]!.nc).toContain('"Rim"');
+    expect(programs[0]!.nc).not.toContain('"Inset"');
+    expect(programs[1]!.nc).toContain('"Inset"');
+    expect(programs[1]!.nc).not.toContain('"Rim"');
+    expect(programs[2]!.nc).not.toContain('"Rim"');
+    expect(programs[2]!.nc).not.toContain('"Inset"');
+  }, 120_000);
+
+  it('refuses by name when the first cutter cannot enter an item and no later cutter rests (#746)', () => {
+    const base = dj();
+    // A 2 mm slot cannot be entered by the 3.175 mm cutter that owns it. The fine cutter owns a
+    // different item, so NO rest pass exists — the slot must refuse by name, not vanish.
+    const job: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, material: 'pla' },
+      labels: [],
+      shapes: [
+        block('rim', 'Rim', 50, 42, 40, 14),
+        block('slot', 'Narrow', 50, 22, 2, 12),
+        block('small', 'Small', 50, 8, 8, 6, 0.5),
+      ],
+      toolKey: CUTTERS[0]!.key,
+      tool: PROFILER,
+      setups: [
+        setup(['rim', 'slot', 'small'], [CUTTERS[0]!.key, CUTTERS[1]!.key], {
+          [CUTTERS[0]!.key]: ['rim', 'slot'],
+          [CUTTERS[1]!.key]: ['small'],
+        }),
+      ],
+    };
+    const g = generate(tl, job, null, [], undefined, { tools: CUTTERS });
+    expect(g.ok, 'the 2 mm slot is owned by the 3.175 mm cutter and no rest pass exists').toBe(false);
+    expect(g.stage).toBe('findings');
+    const empty = g.findings.find((f) => f.code === 'item-empty' && f.labelId === 'slot');
+    expect(
+      empty,
+      JSON.stringify(g.findings.filter((f) => f.severity === 'error')),
+    ).toBeDefined();
+    expect(empty!.severity).toBe('error');
+    expect(empty!.message).toContain('"Narrow"');
+  }, 120_000);
+
+  it('cuts every assigned item exactly once across the cutters (#746)', () => {
+    const base = dj();
+    // The narrow slot is the fine cutter's: no item is unreachable, and none may be dropped.
+    const job: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, material: 'pla' },
+      labels: [],
+      shapes: [
+        block('rim', 'Rim', 50, 42, 40, 14),
+        block('slot', 'Narrow', 50, 22, 2, 12),
+        block('small', 'Small', 50, 8, 8, 6, 0.5),
+      ],
+      toolKey: CUTTERS[0]!.key,
+      tool: PROFILER,
+      setups: [
+        setup(['rim', 'slot', 'small'], [CUTTERS[0]!.key, CUTTERS[1]!.key], {
+          [CUTTERS[0]!.key]: ['rim'],
+          [CUTTERS[1]!.key]: ['slot', 'small'],
+        }),
+      ],
+    };
+    const g = generate(tl, job, null, [], undefined, { tools: CUTTERS });
+    expect(
+      g.ok,
+      JSON.stringify({
+        stage: g.stage,
+        errors: g.errors,
+        findings: g.findings.filter((f) => f.severity === 'error'),
+      }),
+    ).toBe(true);
+    const programs = engravePrograms(g);
+    expect(programs).toHaveLength(2);
+    // One file per item, and no item appears in two files: nothing is dropped, nothing is cut twice.
+    for (const name of ['Rim', 'Narrow', 'Small']) {
+      const files = programs.filter((p) => p.nc.includes(`"${name}"`));
+      expect(files, name).toHaveLength(1);
+    }
+  }, 120_000);
 });
 
 // #608 — a fitted surface plane is posted against: the program's FEED moves' Z follows the plane,

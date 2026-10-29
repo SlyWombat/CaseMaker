@@ -26,6 +26,15 @@
  * through, a bore stays a bore, a cut-out keeps its outline. (Before #746 a later ref's items were
  * re-planned as "rest of …" pockets of the first cutter's design.) A later ref with NO items is
  * #472's rest program, whose geometry is the measured rest of the earlier cutter's work.
+ *
+ * CUT-OUTS POST LAST, ACROSS THE SETUP'S CUTTERS. A cut-out releases the part it names, so cutting
+ * one while another program still has material to remove works on a part held only by its tabs (or,
+ * with no tabs, on a loose one). Within a program the CAM already posts profiles after every other
+ * operation class; across programs the split happens here: a multi-cutter setup's ordinary work is
+ * emitted in tool order, then every cut-out in tool order. An owner that also owns early items is
+ * therefore SPLIT into its early program and a final cut-out-only program on the same cutter — the
+ * operator still changes to that cutter once, and the cut-out is still the last thing it does. A
+ * one-cutter setup is not split: its single program already cuts its cut-outs last.
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
@@ -44,16 +53,34 @@ export interface JobProgramRef {
 
 /**
  * Every setup's programs, in cut order: one per tool, each carrying the items that tool owns.
+ * Cut-outs are moved to the end of their setup's list (and an owner that also has early items gets
+ * a second, cut-out-only ref), so no program cuts one before every other program has finished.
  */
 export function setupPrograms(job: EngraveJob): JobProgramRef[] {
-  return jobSetups(job).flatMap((setup, i) =>
-    setupTools(setup, job).map((toolKey, toolIndex) => ({
+  const cutoutIds = new Set((job.cutouts ?? []).map((cutout) => cutout.id));
+  return jobSetups(job).flatMap((setup, i) => {
+    const refs: JobProgramRef[] = setupTools(setup, job).map((toolKey, toolIndex) => ({
       setupIndex: i + 1,
       setupId: setup.id,
       toolKey,
       itemIds: toolItemsFor(setup, toolKey, toolIndex),
-    })),
-  );
+    }));
+    // A one-cutter setup cuts its own cut-outs last inside its program (the CAM's operation order),
+    // so there is nothing to move. A setup with no cut-outs keeps its refs exactly as they were.
+    if (refs.length <= 1) return refs;
+    if (!refs.some((ref) => ref.itemIds.some((id) => cutoutIds.has(id)))) return refs;
+    const early: JobProgramRef[] = [];
+    const late: JobProgramRef[] = [];
+    for (const ref of refs) {
+      const cutouts = ref.itemIds.filter((id) => cutoutIds.has(id));
+      const others = ref.itemIds.filter((id) => !cutoutIds.has(id));
+      // A rest-only ref (no items) stays in the early list: it has no cut-out to move, and it must
+      // finish the earlier cutter's work before the part is released.
+      if (others.length > 0 || cutouts.length === 0) early.push({ ...ref, itemIds: others });
+      if (cutouts.length > 0) late.push({ ...ref, itemIds: cutouts });
+    }
+    return [...early, ...late];
+  });
 }
 
 /**

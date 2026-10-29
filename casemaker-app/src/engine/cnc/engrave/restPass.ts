@@ -274,12 +274,16 @@ function restItemName(name: string | undefined, id: string): string {
  * frame. `fromDesign`'s `sourceName` discipline carries over: an operator reading the program back
  * has to be able to tell a region the FILE asked for from a region the FIRST PROGRAM left.
  *
- * What is REPLACED matters as much as what is carried. `labels`, `shapes`, `combined`, `traces` and
- * `drills` are emptied: this program cuts the rest and nothing else, and a design item left in it
- * would re-cut the whole design at the fine bit's pace — an hour of air-cutting in the middle of the
- * part. `keepOuts` is NOT touched: a void in the blank's underside is a property of the BLANK, which
- * this program shares, and a rest pass that could cut into the magnet pocket would be a worse
- * mistake than the one it fixed.
+ * What is REPLACED matters as much as what is carried. EVERY cutting item list is emptied —
+ * `labels`, `shapes`, `combined`, `traces`, `drills`, and also `cutouts`, `chamfers`, `threads` and
+ * `primitives`: this program cuts the rest and nothing else, and a design item left in it would
+ * re-cut the whole design at the fine bit's pace — an hour of air-cutting in the middle of the
+ * part. The cut-outs are the sharpest case (#746): a rest pass owns NO items, so a cut-out carried
+ * here is cut by a cutter that does not own it, and since the cut-out's owner posts it in its own
+ * final program the same profile would be cut twice — and the earlier cut would release the part
+ * before its owner reached it. `keepOuts` is NOT touched: a void in the blank's underside is a
+ * property of the BLANK, which this program shares, and a rest pass that could cut into the magnet
+ * pocket would be a worse mistake than the one it fixed.
  */
 export function restJobFor(
   job: EngraveJob,
@@ -315,6 +319,13 @@ export function restJobFor(
     traces: [],
     vectors,
     drills: [],
+    // #746 — the rest pass owns NO items. Every other cutting list belongs to a cutter that cuts
+    // (or posts) it in its own program: a cut-out left here would be cut by this rest cutter and
+    // then again by its owner's cut-out-last program, releasing the part early.
+    cutouts: [],
+    chamfers: [],
+    threads: [],
+    primitives: [],
     toolKey,
     // #472 — the rest job is ONE program for ONE cutter. A saved `setups[]` would make anything
     // that re-read the document inside the generator walk the whole job again from one of its own

@@ -405,6 +405,49 @@ describe('restJobFor (#410)', () => {
     expect(rest.name).toBe(`${job.name} rest`);
   });
 
+  it('carries no cut-out, chamfer, thread or primitive — the rest pass owns NO items (#746)', () => {
+    const job = fullJob();
+    job.cutouts = [
+      {
+        kind: 'cutout',
+        id: 'cut-1',
+        name: 'Badge',
+        enabled: true,
+        of: 'stock-inset',
+        side: 'inside',
+        inset: 5,
+        tabs: { count: 4, width: 4, height: 1 },
+      },
+    ];
+    job.chamfers = [{ kind: 'chamfer', id: 'ch-1', enabled: true, of: 'shp-1', side: 'outside', width: 0.5 }];
+    job.threads = [
+      {
+        kind: 'thread',
+        id: 'th-1',
+        position: { x: 10, y: 10 },
+        enabled: true,
+        size: 'M5',
+        standard: 'metric',
+        classFit: '6H',
+        depth: 5,
+        through: false,
+      },
+    ];
+    job.primitives = [
+      { kind: 'box', id: 'pr-1', position: { x: 10, y: 10 }, rotation: 0, enabled: true, depth: 1, width: 2, height: 2 },
+    ];
+
+    const rest = restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine');
+    // A rest-only cutter owns no items, so none of the job's cutting items may ride into its
+    // program. The cut-out is the sharpest case: its owner posts it in a final program (#746
+    // cut-out-last), so a copy here would be cut TWICE and would release the part before its
+    // owner reached it. The other lists are the same rule — this program cuts its rest regions.
+    expect(rest.cutouts).toEqual([]);
+    expect(rest.chamfers).toEqual([]);
+    expect(rest.threads).toEqual([]);
+    expect(rest.primitives).toEqual([]);
+  });
+
   it('clears the first cutter’s identity — key, materialised tool AND its typed feed', () => {
     const job = fullJob();
     const rest = restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine');

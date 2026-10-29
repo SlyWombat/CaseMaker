@@ -653,7 +653,21 @@ describe('#746 a setup’s later cutters cut the items they own, as those items'
     return receipt.details.programs;
   }
 
-  it('j19 accuracy sample: three programs, and the 1.5’s through items stay through', async () => {
+  /** The cutter key the program's own header states. */
+  function cutterOf(nc: string): string {
+    return /^;@CM\|TOOL\|key=(.+)$/m.exec(nc)?.[1] ?? 'no tool key';
+  }
+
+  /**
+   * Every Z word the program posts, exactly as written. `toContain('Z-4')` matched `Z-4.25` too;
+   * an exact word cannot (`'-4'` is not `'-4.25'`), so a floor assertion cannot be satisfied by a
+   * deeper cut on another item by accident.
+   */
+  function zWords(nc: string): string[] {
+    return [...nc.matchAll(/\bZ(-?\d+(?:\.\d+)?)\b/g)].map((match) => match[1]!);
+  }
+
+  it('j19 accuracy sample: four programs, the cut-out last, and the 1.5’s through items stay through', async () => {
     const run = await cut('j19-accuracy-sample.json', REAL_JOBS);
     const text = allDiagnostics(run.receipt);
     // The defect's own refusals: a combined cutaway's operands were dropped from the sub-job, and a
@@ -662,17 +676,28 @@ describe('#746 a setup’s later cutters cut the items they own, as those items'
     expect(text, 'no item may be re-planned as a rest pass it was not assigned').not.toContain('rest of');
     expect(run.code, text).toBe(0);
     const written = programs(run);
-    expect(written).toHaveLength(3);
+    // #746 CUT-OUTS POST LAST. The 3.175 owns `outline` (the cut-out) but also `skim`, so cutting
+    // both in one file would free the part before the 1.5 and the engraver touched it. The cut-out
+    // is the setup's final program, on the first cutter again.
+    expect(written).toHaveLength(4);
+    const nc = written.map((p) => programText(run, p.ncFile));
+    expect(nc.map(cutterOf)).toEqual([
+      'inv:kz-o-flute-m-3-175-12',
+      'inv:kz-o-flute-m-1-5-6',
+      'inv:kz-engrave-m-30-0-2',
+      'inv:kz-o-flute-m-3-175-12',
+    ]);
+    // Only the last file cuts the outline free; nothing before it may release the part.
+    for (const early of nc.slice(0, 3)) expect(early).not.toContain('Cut out ');
+    expect(nc[3]).toContain('Cut out ');
     // The flat cutter that owns the through vectors and bores cuts them THROUGH: 5 mm stock plus
     // the setup's 0.3 mm breakthrough.
-    const fine = programText(run, written[1]!.ncFile);
-    expect(fine, 'the 1.5 mm cutter’s through items are posted through the stock').toContain('Z-5.3');
+    expect(zWords(nc[1]!), 'the 1.5 mm cutter’s through items are posted through the stock').toContain('-5.3');
     // The engraver owns the logo and its frame, at their stated 1.3 mm — not a rest of anything.
-    const engraver = programText(run, written[2]!.ncFile);
-    expect(engraver).toContain('Z-1.3');
+    expect(zWords(nc[2]!), 'the engraver’s own floor is exactly 1.3 mm').toContain('-1.3');
   }, 240_000);
 
-  it('j24 spoke wrench: the bore and cut-out on the 3.175, the notches on the 1.5, the labels on the engraver', async () => {
+  it('j24 spoke wrench: the bore on the 3.175, the notches on the 1.5, the labels on the engraver, the cut-out last', async () => {
     const run = await cut('j24-spoke-wrench.json', REAL_JOBS);
     const text = allDiagnostics(run.receipt);
     // Recorded: `depth-exceeds-stock` on "rest of Bore ⌀14" and "rest of Cut out outside Pocket
@@ -684,22 +709,33 @@ describe('#746 a setup’s later cutters cut the items they own, as those items'
     expect(text).not.toContain('rest of');
     expect(run.code, text).toBe(0);
     const written = programs(run);
-    expect(written).toHaveLength(3);
-    // The first cutter owns the bore (⌀14, through) and the puck cut-out (through): 10 mm stock.
-    const rough = programText(run, written[0]!.ncFile);
-    expect(rough).toContain('Z-10.3');
+    expect(written).toHaveLength(4);
+    const nc = written.map((p) => programText(run, p.ncFile));
+    expect(nc.map(cutterOf)).toEqual([
+      'inv:kz-o-flute-m-3-175-12',
+      'inv:kz-o-flute-m-1-5-6',
+      'inv:kz-engrave-m-30-0-2',
+      'inv:kz-o-flute-m-3-175-12',
+    ]);
+    // The puck cut-out frees the part, so it is the LAST file and no earlier file cuts it.
+    for (const early of nc.slice(0, 3)) expect(early).not.toContain('Cut out ');
+    expect(nc[3]).toContain('Cut out ');
+    // The first cutter owns the bore (⌀14, through): 10 mm stock.
+    expect(zWords(nc[0]!), 'the bore is posted through the 10 mm stock').toContain('-10.3');
     // The 1.5 mm cutter owns four 4 mm notches. Its file must NOT carry the first cutter's through
-    // depth — that was "rest of Bore ⌀14", refused at 10.3 mm — and its own floor is 4 mm.
-    const notches = programText(run, written[1]!.ncFile);
-    expect(notches).toContain('Z-4');
-    expect(notches, 'the first cutter’s through bore must not be re-cut by the 1.5').not.toContain('Z-10.3');
+    // depth — that was "rest of Bore ⌀14", refused at 10.3 mm — and its own floor is exactly 4 mm
+    // (`Z-4` would also be a prefix of the engraver's `Z-4.25`; the exact word is not).
+    const notches = zWords(nc[1]!);
+    expect(notches, 'the 1.5’s own floor is exactly 4 mm').toContain('-4');
+    expect(notches, 'the first cutter’s through bore must not be re-cut by the 1.5').not.toContain('-10.3');
+    expect(notches, 'the engraver’s 4.25 mm floor is not the 1.5’s').not.toContain('-4.25');
     // The engraver owns the labels at 4.25 mm, and nothing else.
-    const engraver = programText(run, written[2]!.ncFile);
-    expect(engraver).toContain('Z-4.25');
-    expect(engraver).not.toContain('Z-10.3');
+    const engraver = zWords(nc[2]!);
+    expect(engraver, 'the engraver’s own floor is exactly 4.25 mm').toContain('-4.25');
+    expect(engraver).not.toContain('-10.3');
   }, 240_000);
 
-  it('j25 truing wrench: the hole and cut-out on the 3.175, the rotor slot on the 1.5, the grooves on the engraver', async () => {
+  it('j25 truing wrench: the hole on the 3.175, the rotor slot on the 1.5, the grooves on the engraver, the cut-out last', async () => {
     const run = await cut('j25-truing-wrench.json', REAL_JOBS);
     const text = allDiagnostics(run.receipt);
     // Recorded: the job was refused `setup-rest-unavailable` because the third cutter is a V-bit —
@@ -708,15 +744,24 @@ describe('#746 a setup’s later cutters cut the items they own, as those items'
     expect(text).not.toContain('rest of');
     expect(run.code, text).toBe(0);
     const written = programs(run);
-    expect(written).toHaveLength(3);
+    expect(written).toHaveLength(4);
+    const nc = written.map((p) => programText(run, p.ncFile));
+    expect(nc.map(cutterOf)).toEqual([
+      'inv:kz-o-flute-m-3-175-12',
+      'inv:kz-o-flute-m-1-5-6',
+      'inv:kz-engrave-m-30-0-2',
+      'inv:kz-o-flute-m-3-175-12',
+    ]);
+    // `bar-out` frees the bar, so it posts after every other cutter.
+    for (const early of nc.slice(0, 3)) expect(early).not.toContain('Cut out ');
+    expect(nc[3]).toContain('Cut out ');
     // The 1.5 mm cutter owns the rotor slot, a THROUGH vector on 4 mm stock: posted to 4 + 0.3.
     // The through flag is what the defect dropped, and re-planning it as a 4 mm-deep pocket on a
     // 4 mm stock is what `depth-exceeds-stock` refused.
-    const slot = programText(run, written[1]!.ncFile);
-    expect(slot, 'the later cutter’s through slot stays through').toContain('Z-4.3');
+    expect(zWords(nc[1]!), 'the later cutter’s through slot stays through').toContain('-4.3');
     // The engraver owns the three 0.3 mm grooves and cuts them at their own depth.
-    const grooves = programText(run, written[2]!.ncFile);
-    expect(grooves).toContain('Z-0.3');
-    expect(grooves, 'the engraver must not re-cut the earlier cutters’ work').not.toContain('Z-4.3');
+    const grooves = zWords(nc[2]!);
+    expect(grooves, 'the engraver’s own floor is exactly 0.3 mm').toContain('-0.3');
+    expect(grooves, 'the engraver must not re-cut the earlier cutters’ work').not.toContain('-4.3');
   }, 240_000);
 });

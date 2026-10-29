@@ -3040,17 +3040,34 @@ function generateRestPair(
           break;
         }
         if (pendingCores.length === 0) {
-          // The V's width reaches the middle at every point: the later cutter has nothing this
-          // slice knows how to give it, and #486's sentence is the honest one.
+          // #486 — a V-BIT cannot take a rest pass on a region job: it is the V-carve cutter
+          // itself, not a second program. The refusal is about THIS later cutter, so both the
+          // test and the sentence come from it — never from `roughTool`, whose refusal may be
+          // null (a trace-only V) and used to print "but null".
+          const restRefusal = vBitRestRefusal(roughJob, restTool);
+          if (restRefusal !== null) {
+            findings.push({
+              severity: 'error',
+              code: 'setup-rest-unavailable',
+              message:
+                `Setup ${restRef.setupIndex} names ${restRef.toolKey} after ${roughRef.toolKey}, but ` +
+                `${restRefusal}. Remove the later cutter from the setup, or name a flat cutter first.`,
+            });
+            break;
+          }
+          // #472/#746 — A FLAT WITH NO CORE WAITING IS NOT A REFUSAL. The V's only leftover is
+          // the variable carve's core, and the first flat after the V takes it; once it is taken
+          // (or the V left none) this cutter has nothing to measure and nothing to cut. Say so
+          // and move on, exactly as the flat-first branch does when a rest pass finds nothing.
           findings.push({
-            severity: 'error',
-            code: 'setup-rest-unavailable',
+            severity: 'warning',
+            code: 'setup-rest-nothing',
             message:
-              `Setup ${roughRef.setupIndex} names ${restRef.toolKey} after ${roughRef.toolKey}, but ` +
-              `${vBitRestRefusal(roughJob, roughTool)}. The V-carve is the whole region job; remove the ` +
-              'later cutter from the setup, or name a flat cutter first.',
+              `Setup ${restRef.setupIndex}'s ${restRef.toolKey} has nothing left to clean up: a ` +
+              "V-carve's only leftover is the core a flat pockets, and no core is waiting for this " +
+              'cutter. No program is written for it.',
           });
-          break;
+          continue;
         }
         const cuttable = takeCores(restTool);
         if (cuttable.length === 0) break; // every core is narrower than the flat; the warning says so
@@ -3144,16 +3161,20 @@ function generateRestPair(
       };
     });
   const unroughedIds = new Set(unroughed.map((u) => u.id));
-  // The first program leaves an item it cannot enter out entirely: with the item enabled,
-  // `engraveRegions` raises `item-empty` and stops the whole program. Everything else assigned to
-  // this cutter stays.
-  const roughRefKept: JobProgramRef = { ...roughRef, itemIds: roughRef.itemIds.filter((id) => !unroughedIds.has(id)) };
-  const roughJobKept = jobForSetup(job, roughRefKept, roughTool);
   // #746 — ONLY A LATER CUTTER THAT OWNS NO ITEMS IS #472's REST PASS, and only that program
   // finishes the first program's split floors. When every later cutter owns items, each cuts its
   // own work and nobody will finish the rough's, so the first program cuts to depth itself rather
   // than leaving a stock allowance standing for a rest pass that is never written.
   const laterRestPass = group.slice(1).some((ref) => ref.itemIds.length === 0);
+  // A rest pass takes over an item the first cutter cannot enter at all: `engraveRegions` would
+  // stop the first program on `item-empty`, and the rest pass's design still contains the item, so
+  // the item is trimmed from program 1 and cut by the finer cutter. With NO rest pass there is
+  // nobody to take it: keeping it in the program is what makes `item-empty` REFUSE the job by name
+  // instead of silently dropping the item from every program in the run.
+  const roughRefKept: JobProgramRef = laterRestPass
+    ? { ...roughRef, itemIds: roughRef.itemIds.filter((id) => !unroughedIds.has(id)) }
+    : roughRef;
+  const roughJobKept = jobForSetup(job, roughRefKept, roughTool);
   const makeRoughKept = (span: VacuumSpan): OneProgram =>
     generateOneProgram(
       tl,
@@ -3258,6 +3279,40 @@ function generateRestPair(
       attempts.push(ownOne);
       if (!ownOne.ok || ownOne.nc === null || ownOne.verify === null) break;
       posted.push({ ref: restRef, one: ownOne, make: makeOwn, span: ownSpan });
+      // #746 — A LATER REST PASS IS MEASURED AGAINST EVERY EARLIER PROGRAM, not program 1 only.
+      // This program cut its items to depth; if a rest-only cutter follows, this program's own
+      // removal joins the cumulative mesh, or the rest pass would plan its items a second time.
+      // (The walk's from-blank retry is `programSweep`'s; this measurement is only asked when a
+      // rest-only cutter actually needs it, so a group without one pays no sweep here.)
+      if (group.slice(r + 1).some((later) => later.itemIds.length === 0)) {
+        const ownSim = simulateProgram(tl, ownJob, ownOne.nc, restTool, calibration, shop);
+        const ownProblem = simRefusal(ownSim);
+        if (!ownSim.ok || ownProblem !== null) {
+          findings.push({
+            severity: 'error',
+            code: 'setup-rest-unavailable',
+            message:
+              `Setup ${restRef.setupIndex}'s ${restRef.toolKey} program could not be measured for a ` +
+              `later rest pass: ${ownProblem ?? 'the simulation refused it'}. Remove the later rest ` +
+              'cutter, or regenerate without it.',
+          });
+          break;
+        }
+        if (ownSim.meshes.removal !== null) {
+          removalMeshes = [...removalMeshes, ownSim.meshes.removal];
+          removal = unionRemoval(tl, removalMeshes);
+        } else if ((ownOne.cam?.cuttingMoves ?? 0) > 0) {
+          findings.push({
+            severity: 'error',
+            code: 'setup-rest-unavailable',
+            message:
+              `Setup ${restRef.setupIndex}'s ${restRef.toolKey} program cut material but recorded no ` +
+              'removal mesh, so a later rest pass cannot be measured against it. Remove the later ' +
+              'rest cutter, or regenerate without it.',
+          });
+          break;
+        }
+      }
       continue;
     }
     // Only a cutter assigned NO items is #472's rest pass, and only a rest pass is refused a
@@ -3385,7 +3440,7 @@ function generateRestPair(
           '.',
         restReason:
           `${restRef.toolKey} cleans up: the setup names it after ${roughRef.toolKey}, and its ` +
-          `regions are measured against what the first program's own sweep left.`,
+          `regions are measured against what the earlier programs' own sweeps left.`,
         unroughed: unroughed.filter((u) => reached.has(u.id)),
         regions: kept,
         rest1,
@@ -3397,9 +3452,10 @@ function generateRestPair(
         thirdToolSource: thirdRead.source,
       };
     }
-    // p2's own removal already contains p1's: it was swept with `priorRemoval`, so it is the
-    // cumulative part for any third cutter rather than another layer to add.
-    removal = p2.meshes.removal;
+    // p2's mesh is the material ITS OWN cuts removed (the seed only told the sweeper what was
+    // already gone), so the cumulative part for a third cutter is the union of every program's
+    // mesh — p1's, any owning cutter's, and this rest pass's.
+    removal = unionRemoval(tl, removalMeshes);
   }
 
   return {

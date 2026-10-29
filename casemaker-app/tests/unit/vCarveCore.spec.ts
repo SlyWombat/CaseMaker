@@ -28,7 +28,7 @@ import { vCone } from '@/engine/cnc/vProfile';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import type { EngraveCutout, EngraveJob, EngraveShape, JobSetup } from '@/types/engraveJob';
+import type { EngraveCutout, EngraveJob, EngraveShape, EngraveTraceItem, JobSetup } from '@/types/engraveJob';
 
 const TOOL_KEY = 'chamfer-90-vcarve';
 
@@ -50,6 +50,30 @@ const FLAT_TOOL: ToolLibraryEntry = {
   tool: flatEndMill(1.5, { name: '1.5 mm flat (v-carve core test)', fluteLength: 20, shoulderLength: 20 }),
   provenance: 'test',
 };
+
+/** A second flat: the rest-only cutter #472's pair tests put after the first. */
+const FLAT2_TOOL: ToolLibraryEntry = {
+  key: 'user:flat-2-vcarve-rest-test',
+  tool: flatEndMill(2, { name: '2 mm flat (v-carve rest test)', fluteLength: 20, shoulderLength: 20 }),
+  provenance: 'test',
+};
+
+/** A plain line trace — an item with no region for a rest cutter to measure. */
+function lineTrace(id: string): EngraveTraceItem {
+  return {
+    kind: 'line',
+    id,
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    points: [
+      [-10, 0],
+      [10, 0],
+    ],
+    closed: false,
+    depth: 0.3,
+    enabled: true,
+  };
+}
 
 const IDENTITY = { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' } as const;
 
@@ -387,5 +411,100 @@ describe('a V-bit followed by a flat that owns its own items (#746)', () => {
     expect(programs[1]!.core?.cores.length ?? 0).toBeGreaterThan(0);
     // No rest pass was invented for either cutter.
     expect(g.restPass ?? null).toBeNull();
+  }, 120_000);
+});
+
+// #472/#746 (bounced) — A REST-ONLY CUTTER AFTER A V-BIT. #486's refusal is about a V-BIT taking
+// a rest pass on a region job, not about every later cutter after one. A flat with nothing to
+// clean up is skipped with the same `setup-rest-nothing` sentence the flat-first branch uses; it
+// is never refused, and the sentence can never read "but null".
+describe('a rest-only cutter after a V-bit (#472)', () => {
+  const base = (parts: Partial<EngraveJob>): EngraveJob => ({
+    ...defaultEngraveJob(),
+    labels: [],
+    traces: [],
+    toolKey: TOOL_KEY,
+    tool: V_TOOL,
+    cutOverride: { stepDown: 0.25, stepOver: 0.25 },
+    ...parts,
+  });
+
+  const engravePrograms = (g: ReturnType<typeof generate>) =>
+    g.programs.filter((p) => (p.kind ?? 'engrave') === 'engrave');
+
+  const expectNoRefusal = (g: ReturnType<typeof generate>): void => {
+    expect(
+      g.ok,
+      JSON.stringify({
+        stage: g.stage,
+        errors: g.errors,
+        findings: g.findings.filter((f) => f.severity === 'error'),
+      }),
+    ).toBe(true);
+    expect(g.findings.filter((f) => f.code === 'setup-rest-unavailable')).toEqual([]);
+    expect(g.findings.filter((f) => f.message.includes('but null'))).toEqual([]);
+  };
+
+  it('lets a flat follow a V that owns only a trace and has no core to clear (#472)', () => {
+    const line = lineTrace('line');
+    const job = base({
+      traces: [line],
+      setups: [
+        {
+          ...setup('setup-1', ['line'], [TOOL_KEY, FLAT_TOOL.key]),
+          toolItems: { [TOOL_KEY]: ['line'], [FLAT_TOOL.key]: [] },
+        },
+      ],
+    });
+    const g = generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL] });
+    expectNoRefusal(g);
+    // The V program is the whole job; the flat has nothing to add, so no empty file is posted.
+    expect(engravePrograms(g)).toHaveLength(1);
+  }, 120_000);
+
+  it('does not refuse a third, rest-only flat after a V and a flat that owns its items (#472)', () => {
+    const plate = rect('plate', 20, 10);
+    const pocket = { ...rect('pocket', 30, 15, false), name: 'pocket' };
+    const job = base({
+      shapes: [plate, pocket],
+      setups: [
+        {
+          ...setup('setup-1', ['plate', 'pocket'], [TOOL_KEY, FLAT_TOOL.key, FLAT2_TOOL.key]),
+          toolItems: {
+            [TOOL_KEY]: ['plate'],
+            [FLAT_TOOL.key]: ['pocket'],
+            [FLAT2_TOOL.key]: [],
+          },
+        },
+      ],
+    });
+    const g = generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL, FLAT2_TOOL] });
+    expectNoRefusal(g);
+    const programs = engravePrograms(g);
+    // The V posts first and the owning flat second; the rest-only flat has nothing to clean.
+    expect(programs[0]!.toolKey).toBe(TOOL_KEY);
+    expect(programs[1]!.toolKey).toBe(FLAT_TOOL.key);
+  }, 120_000);
+
+  it('does not refuse a third, rest-only flat after a V trace and an owning flat (#472)', () => {
+    const line = lineTrace('line');
+    const pocket = { ...rect('pocket', 30, 15, false), name: 'pocket' };
+    const job = base({
+      traces: [line],
+      shapes: [pocket],
+      setups: [
+        {
+          ...setup('setup-1', ['line', 'pocket'], [TOOL_KEY, FLAT_TOOL.key, FLAT2_TOOL.key]),
+          toolItems: {
+            [TOOL_KEY]: ['line'],
+            [FLAT_TOOL.key]: ['pocket'],
+            [FLAT2_TOOL.key]: [],
+          },
+        },
+      ],
+    });
+    const g = generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL, FLAT2_TOOL] });
+    expectNoRefusal(g);
+    expect(engravePrograms(g).map((p) => p.toolKey)).toEqual([TOOL_KEY, FLAT_TOOL.key]);
   }, 120_000);
 });
