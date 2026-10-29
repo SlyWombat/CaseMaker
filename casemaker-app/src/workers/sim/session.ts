@@ -354,10 +354,13 @@ export function sweepsOnColumn(tool: Tool): boolean {
  * does not need this gate: it already routes to the dexel through `sweepsOnColumn` (#532), dense or
  * not, so keeping it out here leaves B's dense-flat routing flat-only, as #531 relies on.
  *
- * A REST PASS is NOT re-routed: the column engine cannot start from a previous program's material
- * (it would answer `prior-removal-column`), so a dense flat rest pass keeps its existing exact-sweep
- * `dense-3d-refused` refusal rather than trading it for a different one. This is routing only: the
- * dexel engine and its geometry are untouched.
+ * A REST PASS is NOT routed here: the column engine cannot start from a previous program's
+ * material (it would answer `prior-removal-column`), so a dense flat program handed a seed still
+ * goes to the exact sweep and is refused `dense-3d-refused`. The multi-program walk (`programSweep`,
+ * #746) then retries that program FROM THE BLANK — a real check of its own cuts, with an info note
+ * saying so — rather than ending the run. This guard stays because the seeded FIRST attempt must
+ * remain the exact sweep, not be routed away from its seed; the dexel engine and its geometry are
+ * untouched.
  */
 export function denseFlatRoutesToColumn(timeline: Timeline, tool: Tool, opts?: SimLoadOpts): boolean {
   return isDenseForExactSweep(timeline) && !opts?.priorRemoval && cuttingRadiusForSweep(tool).ok;
