@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { EngraveInlayFacts } from '@/components/panels/EngraveInlayFacts';
 import { RestCutterControl, type RestChoice } from '@/components/panels/RestCutterControl';
 import { itemOperationName } from '@/engine/cnc/engrave/partPlan';
 import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
@@ -7,7 +8,7 @@ import { rowOperationName, rowSummary } from '@/components/panels/engraveRowText
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { ShapePatch } from '@/store/engraveJobStore';
 import type { EngraveShape, TexturePattern } from '@/types/engraveJob';
-import { DEFAULT_INLAY_GLUE_GAP_MM, type InlayNumbers } from '@/engine/cnc/engrave/inlay';
+import type { InlayNumbers } from '@/engine/cnc/engrave/inlay';
 import {
   DEFAULT_MAX_TEXTURE_STROKES,
   textureOperationName,
@@ -122,9 +123,10 @@ export interface EngraveShapeRowProps {
   /**
    * #673 — the inlay half's own facts, present on a region carrying an inlay marker: the derived
    * numbers (`null` when they do not derive — the finding says why) and the action that saves the
-   * matching male blank as its own job (`null` while the job cannot make one).
+   * matching male blank as its own job (`null` while the job cannot make one). #742 — `refusal` is
+   * the panel's sentence for a mark the derivation cannot turn into a male.
    */
-  inlay?: { numbers: InlayNumbers | null; onSaveMale: (() => void) | null } | null;
+  inlay?: { numbers: InlayNumbers | null; onSaveMale: (() => void) | null; refusal?: string | null } | null;
   /**
    * #670 — the texture's own facts, present on a region carrying a texture marker: the numbers
    * the CAM runs with, how many strokes the pattern derives, and whether the cap shortened it.
@@ -479,49 +481,20 @@ export function EngraveShapeRow({
             : `${vCarve.coreCutterName} pockets it flat at that depth in its own program, after the V-carve.`}
         </p>
       )}
-      {/* #673 — THE INLAY HALF: the glue gap the operator decides, the derived plug numbers, and
-          the action that saves the matching male blank as its own job (one blank, one job). */}
+      {/* #673/#742 — THE INLAY HALF: the glue gap the operator decides, the derived plug numbers,
+          and the action that saves the matching male blank as its own job (one blank, one job).
+          The block is shared with the label row, which can be a female half too (#742). */}
       {inlay !== null && femaleInlay !== null && (
-        <div data-testid={`engrave-shape-inlay-${index}`} style={{ marginTop: 4 }}>
-          <p style={MUTED}>
-            The female half of a V-carve inlay: the design is the pocket, and a second blank is cut
-            as its plug.
-          </p>
-          <label style={FIELD_LABEL}>
-            <span>glue gap</span>
-            <input
-              type="number"
-              min={0.01}
-              step="0.05"
-              value={fmt(femaleInlay.glueGapMm ?? DEFAULT_INLAY_GLUE_GAP_MM)}
-              data-testid={`engrave-shape-inlay-gap-${index}`}
-              aria-label={`Shape ${index + 1} inlay glue gap`}
-              title="The vertical clearance between the plug's end and this pocket's floor, mm. The plug's edge sits in from the design by this gap times the V's half-angle tangent."
-              style={NUM}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (Number.isFinite(v) && v > 0) onChange({ inlay: { ...femaleInlay, glueGapMm: v } });
-              }}
-            />
-            <span>mm</span>
-          </label>
-          <p style={{ ...MUTED, ...(inlay.numbers === null ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-shape-inlay-note-${index}`}>
-            {inlay.numbers === null
-              ? 'The glue gap must be above zero and below the pocket depth for a plug to fit it.'
-              : `Pocket ${fmt(inlay.numbers.pocketDepthMm)} mm · plug ${fmt(inlay.numbers.plugDepthMm)} mm · ` +
-                `the plug's edge ${fmt(inlay.numbers.topInsetMm)} mm inside the design — the gap down the ` +
-                `flank is ${fmt(inlay.numbers.wallClearanceMm)} mm.`}
-          </p>
-          <button
-            type="button"
-            data-testid={`engrave-shape-inlay-male-${index}`}
-            disabled={inlay.onSaveMale === null}
-            title="Build the male blank — its own job, its own blank, the design mirrored — and save it as a file to open and cut next."
-            onClick={() => inlay.onSaveMale?.()}
-          >
-            Save the male blank…
-          </button>
-        </div>
+        <EngraveInlayFacts
+          prefix="engrave-shape"
+          index={index}
+          noun="Shape"
+          mark={femaleInlay}
+          numbers={inlay.numbers}
+          refusal={inlay.refusal ?? null}
+          onGlueGap={(mm) => onChange({ inlay: { ...femaleInlay, glueGapMm: mm } })}
+          onSaveMale={inlay.onSaveMale}
+        />
       )}
       {/* #670 — THE TEXTURE: the pattern, its spacing numbers, and the strokes they derive. The
           depth above is the pattern's floor; the note prints the numbers the CAM will run, from

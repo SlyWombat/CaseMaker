@@ -454,9 +454,10 @@ export type InlayMaleResult =
  * as a profile offset.
  *
  * Refused — with a sentence that names the region — when the female has no inlay region, when a
- * region's numbers do not derive, or when a mark cannot be expressed as a mirrored island (text
- * with no ink, a reference that is missing or switched off). Nothing is silently dropped: a male
- * missing one of its regions would be an incomplete pair.
+ * region's numbers do not derive, when two regions disagree on pocket depth or glue gap (the one
+ * cutaway erodes every island by one inset), or when a mark cannot be expressed as a mirrored
+ * island (text with no ink, a reference that is missing or switched off). Nothing is silently
+ * dropped: a male missing one of its regions would be an incomplete pair.
  */
 export function inlayMaleJob(job: EngraveJob, cone: VCone): InlayMaleResult {
   const females = inlayMarked(job).filter(
@@ -608,9 +609,9 @@ export function inlayMaleJob(job: EngraveJob, cone: VCone): InlayMaleResult {
       name: inlayMaleJobName(job.name),
       machineId: job.machineId,
       stock,
-      // Each plug's island is a construction item (or items, for a combined region); the
-      // cutaways are the operations. No setups: the implicit single setup cuts every enabled
-      // region with the job's cutter.
+      // Each plug's island is a construction item (or items, for a combined region); the ONE
+      // cutaway is the operation. No setups: the implicit single setup cuts the male's region
+      // with the job's cutter.
       labels: [],
       shapes: [...shapes, ...out.shapes],
       combined: [...out.combined, ...cuts],

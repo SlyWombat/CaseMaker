@@ -42,6 +42,7 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, itemKindWord, itemRowName, jobSetups, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { toolForJob } from '@/engine/cnc/toolRegistry';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import type { RestChoice } from '@/components/panels/RestCutterControl';
 import {
@@ -128,7 +129,9 @@ import {
   inlayGlueGap,
   inlayMaleJob,
   inlayMaleJobName,
+  inlayMarked,
   inlayNumbers,
+  type InlayMaleResult,
   type InlayNumbers,
 } from '@/engine/cnc/engrave/inlay';
 import { textureNumbers, textureStrokes, type TextureNumbers } from '@/engine/cnc/engrave/texture';
@@ -1535,34 +1538,50 @@ export function EngravePanel(): JSX.Element {
   // #673 — THE INLAY HALF: the derived plug numbers (null when they do not derive) and the action
   // that saves the MALE blank as its own job. The action is offered only when the female's job has
   // no blocking finding — a male built from a job that cannot cut would be a second broken job.
+  //
+  // #742 — THE MALE IS DERIVED ONCE PER JOB AND CUTTER, and every row that can carry a female mark
+  // reads the same result: a mark no male can be made from is SAID on its row (the refusal names
+  // the item) instead of a button that silently does nothing. The female-mark gate is read first,
+  // so an ordinary job pays one array scan and nothing else. Memoised because the derivation
+  // mirrors and copies the whole marked document; `tools` is a dependency because `jobTool`
+  // resolves through the registry when the job carries no snapshot.
+  const maleInlay = useMemo((): InlayMaleResult | null => {
+    const inlayTool = toolForJob(job, tools);
+    if (inlayTool === null) return null;
+    if (!inlayMarked(job).some((entry) => entry.mark.role === 'female' && entry.item.enabled)) return null;
+    const inlayCone = vCone(inlayTool);
+    return inlayCone === null ? null : inlayMaleJob(job, inlayCone);
+  }, [job, tools]);
+  const maleRefusal = maleInlay !== null && !maleInlay.ok ? maleInlay.reason : null;
   const saveMaleInlay = async (): Promise<void> => {
-    if (tool === null) return;
-    const inlayCone = vCone(tool);
-    if (inlayCone === null) return;
-    const result = inlayMaleJob(job, inlayCone);
-    if (!result.ok) return;
-    const parsed = parseEngraveJob(result.job);
+    if (maleInlay === null || !maleInlay.ok) return;
+    const parsed = parseEngraveJob(maleInlay.job);
     await saveJobFileText(
-      JSON.stringify(parsed.ok ? parsed.job : result.job, null, 2),
+      JSON.stringify(parsed.ok ? parsed.job : maleInlay.job, null, 2),
       jobFileName(inlayMaleJobName(job.name)),
     );
   };
-  const inlayFor = (
-    shape: EngraveShape,
-  ): { numbers: InlayNumbers | null; onSaveMale: (() => void) | null } | undefined => {
-    if (shape.inlay === undefined || shape.inlay.role !== 'female') return undefined;
-    const check = cone === null ? null : inlayNumbers(cone, shape.depth, inlayGlueGap(shape.inlay));
+  const inlayFactsFor = (
+    item: Pick<EngraveLabel, 'inlay' | 'depth'>,
+  ): { numbers: InlayNumbers | null; onSaveMale: (() => void) | null; refusal: string | null } | undefined => {
+    if (item.inlay === undefined || item.inlay.role !== 'female') return undefined;
+    const check = cone === null ? null : inlayNumbers(cone, item.depth, inlayGlueGap(item.inlay));
     const numbers = check !== null && check.ok ? check.numbers : null;
     return {
       numbers,
+      refusal: maleRefusal,
       onSaveMale:
-        numbers === null || blocked
+        numbers === null || blocked || maleRefusal !== null
           ? null
           : () => {
               void saveMaleInlay();
             },
     };
   };
+  // A shape's marker (#673) and a label's (#742) need exactly the same facts: the item's own depth
+  // is the pocket depth, and the male is derived from its profile or glyph outline.
+  const inlayFor = (shape: EngraveShape) => inlayFactsFor(shape);
+  const labelInlayFor = (label: EngraveLabel) => inlayFactsFor(label);
 
   // #670 — THE TEXTURE: the numbers the CAM runs with and the strokes they derive, from the same
   // module the plan calls. Derived once per shape edit, not per render of every row.
@@ -2797,6 +2816,7 @@ export function EngravePanel(): JSX.Element {
           split={split}
           rest={label.construction === true ? null : restFor(label.id)}
           technical={vCarveTechnical(label.id)}
+          inlay={labelInlayFor(label) ?? null}
           onChange={(patch) => updateLabel(label.id, patch)}
           onRemove={() => removeLabel(label.id)}
         />
@@ -2818,7 +2838,7 @@ export function EngravePanel(): JSX.Element {
                   coreCutterName: shape.vCarveDepth === 'variable' ? coreCutterFor(shape.id) : null,
                 }
           }
-          inlay={shape.construction === true ? null : (inlayFor(shape) ?? null)}
+          inlay={inlayFor(shape) ?? null}
           texture={shape.construction === true ? null : (textureFor(shape) ?? null)}
           prism={shape.construction === true ? null : (prismFor(shape) ?? null)}
           technical={vCarveTechnical(shape.id)}

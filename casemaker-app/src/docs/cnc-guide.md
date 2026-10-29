@@ -456,9 +456,16 @@ files are refused at import with the way out, and JPEG needs converting first.
 
 **Inlay (#673)** cuts a two-colour design as a PAIR of blanks. The operation adds a region carrying
 the **female** marker; its depth is the pocket depth and the row's **glue gap** (default 0.2 mm) is
-the vertical clearance the plug keeps off the pocket's floor. **Save the male blank…** builds the
+the vertical clearance the plug keeps off the pocket's floor. A label's row carries the same marker
+as a **female inlay half** checkbox, so lettering can be the pocket too: its plug is the
+text's own glyph outline, mirrored in Y. **Save the male blank…** builds the
 matching MALE job — its own document, its own copy of the blank, the design **mirrored** for the
-glue-up flip — with one cutaway cutting the complement around the plug. An inlay is two JOBS
+glue-up flip — with ONE cutaway cutting the complement around every plug. Every marked item that is
+cut is an island in that one cutaway, so a ring and the letters inside it are one pair of programs
+and neither region clears the other's plug away. The female halves in one job must share one pocket
+depth and one glue gap, because that one cutaway erodes every island by one inset; a mixed pair is
+refused on its row with a sentence naming both, so save it as two jobs, one male per female. An
+inlay is two JOBS
 because a job is one blank: each is generated, simulated, packaged and run on its own blank, and
 each run sheet says which half it is. The numbers all derive from the pocket depth, the glue gap
 and the V-bit's half-angle: the plug is `pocket − gap` deep, its edge sits `gap × tan(halfAngle)`
@@ -466,8 +473,11 @@ inside the design (so the visible ring is that width) and its end is exactly the
 extent, stopping the gap above the floor — the plug never reaches the floor and the two flanks
 self-align when clamped. Both halves use the same V-bit (`inlay-needs-cone`); a gap that is not
 above zero and below the pocket depth is refused (`inlay-gap`), and a variable-depth region cannot
-be an inlay half (`inlay-plane-depth`). After both runs, glue the male's machined face down into
-the female's pocket and plane the male blank away to the plug's base.
+be an inlay half (`inlay-plane-depth`). A mark no male can be made from is refused on its row in a
+plain sentence naming the item — text with no glyphs, a combined region whose island is missing or
+switched off, or an item set to reference only (it cuts no pocket for a plug to fit) — rather than
+silently saving a male that is missing a region. After both runs, glue the male's machined face down
+into the female's pocket and plane the male blank away to the plug's base.
 
 **Texture a surface (#670)** cuts a decorative pattern of short strokes over a region instead of
 pocketing it. The picker adds a **stipple**: a grid of cells one **pitch** apart (default 1 mm,

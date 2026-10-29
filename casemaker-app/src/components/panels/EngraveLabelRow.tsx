@@ -1,8 +1,10 @@
 import type { CSSProperties, JSX, ReactNode } from 'react';
 import { FontPicker, WeightPicker } from '@/components/panels/FontPicker';
+import { EngraveInlayFacts } from '@/components/panels/EngraveInlayFacts';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { RestCutterControl, type RestChoice } from '@/components/panels/RestCutterControl';
 import { itemOperationName } from '@/engine/cnc/engrave/partPlan';
+import type { InlayNumbers } from '@/engine/cnc/engrave/inlay';
 import { rowSummary, intentWord } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
@@ -83,6 +85,12 @@ export interface EngraveLabelRowProps {
   split?: LabelSplit | null;
   /** #687 — the row's Technical fold (the V-carve geometry), when this item has any. */
   technical?: ReactNode;
+  /**
+   * #742 — the label's inlay half, when it carries a female marker: the derived plug numbers
+   * (`null` when they do not derive) and the action that saves the male blank (`null` while the
+   * job cannot make one). The panel owns both readings, as on a shape row.
+   */
+  inlay?: { numbers: InlayNumbers | null; onSaveMale: (() => void) | null; refusal?: string | null } | null;
 }
 
 export function EngraveLabelRow({
@@ -98,8 +106,11 @@ export function EngraveLabelRow({
   recommended,
   split = null,
   technical = null,
+  inlay = null,
 }: EngraveLabelRowProps): JSX.Element {
   const depthInvalid = label.depth > maxDepth;
+  // #742 — the female inlay half's marker, narrowed once so the glue-gap write carries the role.
+  const femaleInlay = label.inlay?.role === 'female' ? label.inlay : null;
   // #440 — the recommendation CAN be the ceiling, but only where something under the label asks
   // for more than the blank can carry — its own typed depth, or a colour split or void it reaches —
   // and the ceiling is then the binding limit. The copy below has to say which of the two states it
@@ -259,6 +270,21 @@ export function EngraveLabelRow({
           />
           <span>reference only</span>
         </label>
+        {/* #742 — the same female marker a shape can carry: the lettering is the pocket, and the
+            male blank is derived from its glyph outline mirrored in Y. A reference-only label is
+            not cut, so it cannot be a pocket and the control is disabled. */}
+        <label style={FIELD_LABEL}>
+          <input
+            type="checkbox"
+            checked={label.inlay !== undefined}
+            disabled={label.construction === true}
+            data-testid={`engrave-label-inlay-check-${index}`}
+            aria-label={`Label ${index + 1} female inlay half`}
+            title="Make this text a female inlay pocket. A second blank is cut as its plug; the male's design is the lettering mirrored in Y, so save and cut it as its own job."
+            onChange={(e) => onChange({ inlay: e.target.checked ? { role: 'female' } : undefined })}
+          />
+          <span>female inlay half</span>
+        </label>
         {num('size', 'cap', 'Cap height, mm — the size the cutter has to reach through.')}
         {positionNum('x')}
         {positionNum('y')}
@@ -315,6 +341,21 @@ export function EngraveLabelRow({
           <span>mm</span>
         </label>
       </div>
+
+      {/* #742 — the label's inlay half: the glue gap, the derived plug numbers, the refusal when
+          no male can be made, and the action that saves the male blank as its own job. */}
+      {inlay !== null && femaleInlay !== null && (
+        <EngraveInlayFacts
+          prefix="engrave-label"
+          index={index}
+          noun="Label"
+          mark={femaleInlay}
+          numbers={inlay.numbers}
+          refusal={inlay.refusal ?? null}
+          onGlueGap={(mm) => onChange({ inlay: { ...femaleInlay, glueGapMm: mm } })}
+          onSaveMale={inlay.onSaveMale}
+        />
+      )}
 
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-label-maxdepth-${index}`}>
         Max depth {maxDepth} mm here — {maxDepthWhy}.{' '}

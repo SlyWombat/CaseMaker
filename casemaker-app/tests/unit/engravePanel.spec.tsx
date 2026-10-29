@@ -46,10 +46,12 @@ import { vCarvePlane, vCarveStepover, vCarveStepoverClampNote } from '@/engine/c
 import { itemName, V_BIT_CARVE_SENTENCE, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
 import type {
   EngraveCombinedShape,
+  EngraveCutawayShape,
   EngraveCutout,
   EngraveDrill,
   EngraveJob,
   EngraveKeepOut,
+  EngraveLabel,
   EngravePrimitive,
   EngraveShape,
   EngraveTargetObject,
@@ -3353,6 +3355,117 @@ describe('EngravePanel — inlay (#673)', () => {
     } finally {
       setJobFileIO(null);
     }
+  });
+
+  // #742 — the lettering is a female half too: the label's own checkbox writes the mark, the row
+  // states the plug numbers for ITS depth, and the male's document carries ONE cutaway whose
+  // islands are BOTH marked regions — the ring's and the text's.
+  it('marks a label as a female half and saves a male for the ring and the lettering (#742)', async () => {
+    const save = vi.fn(async (_text: string, _name: string) => ({ kind: 'downloaded' as const }));
+    setJobFileIO({ save, write: vi.fn(), open: vi.fn() });
+    try {
+      const FF: EngraveLabel = {
+        id: 'ff',
+        text: 'FF',
+        font: 'hershey-simplex',
+        weight: 'bold',
+        size: 10,
+        position: { x: 50, y: 30 },
+        rotation: 0,
+        depth: 2,
+        enabled: true,
+      };
+      act(() =>
+        useEngraveJobStore.setState({
+          job: {
+            ...defaultEngraveJob(),
+            labels: [FF],
+            traces: [],
+            toolKey: 'inv:v-673',
+            tool: V_TOOL,
+            shapes: [INLAY],
+          },
+        }),
+      );
+      render(<EngravePanel />);
+      expand('engrave-label');
+      fireEvent.click(screen.getByTestId('engrave-label-inlay-check-0'));
+      expect(useEngraveJobStore.getState().job.labels[0]!.inlay).toEqual({ role: 'female' });
+
+      const note = screen.getByTestId('engrave-label-inlay-note-0').textContent ?? '';
+      expect(note).toContain('Pocket 2 mm · plug 1.8 mm');
+      fireEvent.change(screen.getByTestId('engrave-label-inlay-gap-0'), { target: { value: '0.3' } });
+      expect(useEngraveJobStore.getState().job.labels[0]!.inlay).toEqual({ role: 'female', glueGapMm: 0.3 });
+      // ONE male cutaway erodes every island by one inset, so the pair must share its numbers:
+      // give the ring the label's 0.3 mm gap too (a mixed pair is refused rather than mis-fitted).
+      act(() =>
+        useEngraveJobStore.setState((state) => ({
+          job: {
+            ...state.job,
+            shapes: state.job.shapes.map((item) =>
+              item.id === INLAY.id ? { ...item, inlay: { role: 'female', glueGapMm: 0.3 } } : item,
+            ),
+          },
+        })),
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('engrave-label-inlay-male-0'));
+      });
+      expect(save).toHaveBeenCalledTimes(1);
+      const [text] = save.mock.calls[0]! as unknown as [string, string];
+      const parsed = parseEngraveJob(JSON.parse(text) as unknown);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      const maleCuts = (parsed.job.combined ?? []).filter(
+        (c): c is EngraveCutawayShape => c.kind === 'cutaway' && c.inlay?.role === 'male',
+      );
+      expect(maleCuts).toHaveLength(1);
+      expect(maleCuts[0]!.islands).toHaveLength(2);
+      expect(maleCuts[0]!.inlay?.glueGapMm).toBeCloseTo(0.3, 9);
+      // The text's island is the glyph outline as a construction vector, mirrored in Y.
+      expect(parsed.job.vectors ?? []).toHaveLength(1);
+      expect(parsed.job.vectors?.[0]?.construction).toBe(true);
+    } finally {
+      setJobFileIO(null);
+    }
+  });
+
+  // #742 — a mark no male can be made from is refused in a plain sentence on its row, not a button
+  // that silently does nothing.
+  it('says why no male can be made when the marked label has no text (#742)', () => {
+    const BLANK: EngraveLabel = {
+      id: 'blank',
+      text: '',
+      font: 'hershey-simplex',
+      weight: 'regular',
+      size: 10,
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      depth: 2,
+      enabled: true,
+    };
+    act(() =>
+      useEngraveJobStore.setState({
+        job: {
+          ...defaultEngraveJob(),
+          labels: [BLANK],
+          traces: [],
+          toolKey: 'inv:v-673',
+          tool: V_TOOL,
+          shapes: [],
+        },
+      }),
+    );
+    render(<EngravePanel />);
+    expand('engrave-label');
+    fireEvent.click(screen.getByTestId('engrave-label-inlay-check-0'));
+
+    const refusal = screen.getByTestId('engrave-label-inlay-refusal-0').textContent ?? '';
+    expect(refusal).toContain('Engrave text ""');
+    expect(refusal).toContain('no male can be made');
+    expect(refusal).toContain('has no text');
+    expect((screen.getByTestId('engrave-label-inlay-male-0') as HTMLButtonElement).disabled).toBe(true);
   });
 });
 
