@@ -3,7 +3,13 @@
 // CLOSED FORMS computed by hand, never against another run of the code.
 
 import { describe, it, expect } from 'vitest';
-import { pocketLoops, StepOverTooLargeError, type Polygons } from '@/engine/cnc/cam/pocket';
+import {
+  DENSE_CONTOUR_VERTICES,
+  pocketLoops,
+  simplifyContour,
+  StepOverTooLargeError,
+  type Polygons,
+} from '@/engine/cnc/cam/pocket';
 
 /** A CCW rectangle with its front-left at the origin. */
 function rect(w: number, h: number): Polygons {
@@ -62,6 +68,59 @@ function fakeRectOffset(region: Polygons, delta: number): Polygons {
     ],
   ];
 }
+
+/** A traced-looking circle: `n` points, radius `r`, a small radial wobble. */
+function tracedCircle(n: number, r: number, wobble = 0): [number, number][] {
+  return Array.from({ length: n }, (_, i) => {
+    const a = (2 * Math.PI * i) / n;
+    const rr = r + wobble * Math.sin(13 * a);
+    return [rr * Math.cos(a), rr * Math.sin(a)] as [number, number];
+  });
+}
+
+/** Distance from `p` to the nearest edge of the closed polygon, mm. */
+function distanceToRing(p: [number, number], ring: readonly [number, number][]): number {
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]!;
+    const b = ring[(i + 1) % ring.length]!;
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy);
+    const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (len * len)));
+    const q: [number, number] = [a[0] + t * dx, a[1] + t * dy];
+    best = Math.min(best, Math.hypot(p[0] - q[0], p[1] - q[1]));
+  }
+  return best;
+}
+
+describe('#751 dense traced contours are simplified before pocketing', () => {
+  it('a 6,048-point traced circle loses its redundant vertices, none moving past the chord tolerance', () => {
+    const dense = tracedCircle(6048, 46.5, 0.009);
+    const simple = simplifyContour(dense);
+    expect(simple.length).toBeLessThan(DENSE_CONTOUR_VERTICES);
+    expect(simple.length).toBeGreaterThan(100);
+    // Every original point is within ARC_CHORD_TOLERANCE_MM of a simplified edge.
+    for (const p of dense) expect(distanceToRing(p, simple)).toBeLessThanOrEqual(0.005 + 1e-9);
+  });
+
+  it('a contour at or below the threshold is returned byte-identical', () => {
+    const small = tracedCircle(DENSE_CONTOUR_VERTICES, 20, 0);
+    expect(simplifyContour(small)).toEqual(small);
+  });
+
+  it('pocketLoops rings the simplified contour, so the rings stay bounded', () => {
+    const dense = tracedCircle(6048, 20, 0.009);
+    const rings = pocketLoops([dense], 0.5, 0.4, (region, delta) => {
+      // A crude offset for this test only: scale about the origin, keeping the same points.
+      if (20 + delta <= 0) return [];
+      const k = (20 + delta) / 20;
+      return [region[0]!.map(([x, y]) => [x * k, y * k] as [number, number])];
+    });
+    expect(rings.length).toBeGreaterThan(1);
+    for (const ring of rings) for (const contour of ring) expect(contour.length).toBeLessThan(DENSE_CONTOUR_VERTICES);
+  });
+});
 
 describe('pocketLoops (#172)', () => {
   it('rings a 10 x 5 rectangle at r = 0.5, step-over 0.4 in exactly five rings', () => {

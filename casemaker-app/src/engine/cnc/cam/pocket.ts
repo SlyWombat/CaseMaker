@@ -10,10 +10,122 @@
  * holes CW (positive winding is material). One region is a list of closed contours.
  */
 
+import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
+
 export type Polygons = [number, number][][];
 
 /** Offsets a region by `delta` (delta < 0 shrinks). Injected so this file stays kernel-free. */
 export type OffsetFn = (region: Polygons, delta: number) => Polygons;
+
+/** #751 — the vertex count above which a contour is treated as a trace, not a design. */
+export const DENSE_CONTOUR_VERTICES = 1024;
+
+/** Perpendicular distance from `p` to the segment `a`→`b`, mm. */
+function pointSegmentDistance(
+  p: readonly [number, number],
+  a: readonly [number, number],
+  b: readonly [number, number],
+): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+  return Math.abs(dy * (p[0] - a[0]) - dx * (p[1] - a[1])) / len;
+}
+
+/**
+ * Ramer–Douglas–Peucker on one open chain, endpoints kept. ITERATIVE: a traced contour can be
+ * arbitrarily long, and a recursive split on a zigzag is as deep as the chain (a stack overflow
+ * on input the app does not control is worse than a slow simplification).
+ */
+function simplifyChain(
+  points: readonly (readonly [number, number])[],
+  tolerance: number,
+): [number, number][] {
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  const stack: [number, number][] = [[0, points.length - 1]];
+  while (stack.length > 0) {
+    const [lo, hi] = stack.pop() as [number, number];
+    const first = points[lo] as readonly [number, number];
+    const last = points[hi] as readonly [number, number];
+    let worst = -1;
+    let at = -1;
+    for (let i = lo + 1; i < hi; i++) {
+      const d = pointSegmentDistance(points[i] as readonly [number, number], first, last);
+      if (d > worst) {
+        worst = d;
+        at = i;
+      }
+    }
+    if (worst > tolerance && at > lo) {
+      keep[at] = 1;
+      stack.push([lo, at], [at, hi]);
+    }
+  }
+  const out: [number, number][] = [];
+  for (let i = 0; i < points.length; i++) {
+    if (keep[i] === 1) {
+      const p = points[i] as readonly [number, number];
+      out.push([p[0], p[1]]);
+    }
+  }
+  return out;
+}
+
+/**
+ * #751 — SIMPLIFY A CLOSED CONTOUR BEFORE POCKETING.
+ *
+ * A raster- or CAD-traced contour can carry thousands of vertices, with segments down to
+ * 0.004 mm — far below what the machine, the 0.1 mm simulation grid or the design's own
+ * `ARC_CHORD_TOLERANCE_MM` can resolve. Pocketing offsets that contour ONCE PER RING and posts a
+ * move per vertex, so a 6,048-point circle at 35 rings × 10 depths becomes two million moves:
+ * the exact sweep then holds 350 checkpoint solids and exhausts the 4 GiB wasm heap (#751).
+ *
+ * The contour is simplified with Ramer–Douglas–Peucker at `ARC_CHORD_TOLERANCE_MM` — the same
+ * chord tolerance every arc in the app is discretised at — so every kept vertex is needed and no
+ * point moves by more than a tolerance the design already accepts. The ring is split at its first
+ * vertex and the vertex farthest from it, so the closing edge is simplified like the rest of the
+ * ring; a contour at or below {@link DENSE_CONTOUR_VERTICES} is returned unchanged.
+ */
+export function simplifyContour(
+  contour: readonly (readonly [number, number])[],
+  tolerance: number = ARC_CHORD_TOLERANCE_MM,
+): [number, number][] {
+  const points = contour.map(([x, y]) => [x, y] as [number, number]);
+  // A contour the app itself tessellated (a glyph, an arc, a drawn shape) is left byte-identical:
+  // simplifying it would move a wall by up to the tolerance and break the CAM's own "inside the
+  // region shrunk by r" contract at its 0.001 mm margin. Only a traced/imported contour with more
+  // than 1,024 vertices — where the vertex itself is far below what the machine or the 0.1 mm
+  // simulation grid can resolve — is simplified.
+  if (points.length <= DENSE_CONTOUR_VERTICES || !(tolerance > 0)) return points;
+  const start = points[0] as [number, number];
+  let far = 0;
+  let best = -1;
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i] as [number, number];
+    const d = (p[0] - start[0]) ** 2 + (p[1] - start[1]) ** 2;
+    if (d > best) {
+      best = d;
+      far = i;
+    }
+  }
+  if (far === 0) return points;
+  const first = simplifyChain([...points.slice(0, far + 1)], tolerance);
+  // The second chain closes the ring: far … n−1, then back to the start point.
+  const second = simplifyChain([...points.slice(far), start], tolerance);
+  const out = [...first.slice(0, -1), ...second.slice(0, -1)];
+  return out.length >= 3 ? out : points;
+}
+
+/** Simplify every contour of a region at the same tolerance; holes stay holes. */
+export function simplifyRegion(
+  region: Polygons,
+  tolerance: number = ARC_CHORD_TOLERANCE_MM,
+): Polygons {
+  return region.map((contour) => simplifyContour(contour, tolerance));
+}
 
 /**
  * #191: a contour-parallel step-over larger than the tool radius leaves an uncut spine down
@@ -109,10 +221,13 @@ export function pocketLoops(
     throw new StepOverTooLargeError(stepOver, toolRadius, maxStepOver);
   }
 
+  // #751 — the rings are offsets of this one region, so simplifying it once bounds EVERY ring's
+  // vertex count. Without it a traced contour's 6,000 points become 2,000,000 posted moves.
+  const simple = simplifyRegion(region);
   const rings: Polygons[] = [];
-  const maxRings = Math.ceil(maxExtent(region) / stepOver) + 4;
+  const maxRings = Math.ceil(maxExtent(simple) / stepOver) + 4;
   let ring = 0;
-  let current = offset(region, -toolRadius);
+  let current = offset(simple, -toolRadius);
   while (!isEmptyRegion(current)) {
     rings.push(current);
     if (rings.length > maxRings) {
@@ -122,7 +237,7 @@ export function pocketLoops(
       );
     }
     ring += 1;
-    current = offset(region, -(toolRadius + ring * stepOver));
+    current = offset(simple, -(toolRadius + ring * stepOver));
   }
   return rings;
 }
