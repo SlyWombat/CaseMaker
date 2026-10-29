@@ -1398,6 +1398,33 @@ describe('engraveJobStore (#200)', () => {
 // The saved shape is §5.4's `{ orientation, mount, itemIds, tools, registration, remount }`: the
 // user's intent and the plan's provenance, never the planner's DERIVED `Setup` (rotation, stock
 // states with their removals, findings) — that is recomputed from the job and goes stale.
+describe('#752 — Engrave text on a rotary job reads the map', () => {
+  it('lays the line out on the map, and Reads around turns it onto the around axis', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    s().reset();
+    s().setStock({ shape: 'cylinder', diameter: 20, length: 20, width: 20, thickness: 50 }, 'computed');
+    s().setRotaryHolding(
+      { stickout: 35, gripDiameter: null, jawMode: 'reverse-inner', tailstock: true, source: 'test' },
+      jobVise(s().job),
+    );
+    s().replace({ ...s().job, labels: [], shapes: [] });
+
+    const along = s().addEngraveText('Zoomba', { depth: 0.5, font: 'sans-default', reads: 'along' });
+    const lineAlong = s().job.labels.find((l) => l.id === along)!;
+    // The map is stick-out × circumference, and the line sits in its middle band — not in the
+    // rod's 20 mm diameter box, which is what the flat blank would have said.
+    expect(lineAlong.position.x).toBeCloseTo(17.5, 1);
+    expect(lineAlong.position.y).toBeCloseTo(Math.PI * 10, 1);
+    expect(lineAlong.rotation).toBe(0);
+
+    const around = s().addEngraveText('Zoomba', { depth: 0.5, font: 'sans-default', reads: 'around' });
+    const lineAround = s().job.labels.find((l) => l.id === around)!;
+    expect(lineAround.rotation).toBe(90);
+  });
+});
+
 describe('JobSetup (#419 J2)', () => {
   // The registration planner's real fixture, copied from `registrationPlanner.spec.ts`: the shop's
   // own defaults and the badge blank of Appendix C. A REAL `planRegistration` answer is the point

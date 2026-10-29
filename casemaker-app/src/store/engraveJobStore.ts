@@ -929,7 +929,7 @@ export interface EngraveJobState {
    * placeholder's placement (or `addLabel`'s centre): the findings report the blank honestly
    * rather than the action throwing.
    */
-  addEngraveText: (text: string, opts: { depth: number; font: string }) => string;
+  addEngraveText: (text: string, opts: { depth: number; font: string; reads?: 'along' | 'around' }) => string;
   updateLabel: (id: string, patch: Partial<EngraveLabel>) => void;
   removeLabel: (id: string) => void;
   /** Set the cutter and stamp its source (#254). Defaults to `'user'`. */
@@ -1462,19 +1462,28 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       const placeholder = job.labels.find((l) => isSeedPlaceholder(job, l.id)) ?? null;
       const others = job.labels.filter((l) => l.id !== placeholder?.id);
       const pocket = (job.keepOuts ?? []).find((k) => k.id === BADGE_POCKET_KEEP_OUT_ID);
+      // #752 R-UI-4 — a ROTARY job's blank is its MAP: along is the stick-out, around is the
+      // circumference. Laying a line out on the rod's diameter box put it in a 20 mm band; the map
+      // is what the operator places text against (`rotary-flow.md` §3.7), so the seed reads it.
+      const map = rotaryMapOf(job);
       const fit = blankLabelSeed({
-        blank: {
-          length: job.stock.length,
-          width: job.stock.width,
-          pocket: pocket?.kind === 'rect' ? pocket : null,
-        },
+        blank:
+          map !== null
+            ? { length: map.stickout, width: map.circumference, pocket: null }
+            : {
+                length: job.stock.length,
+                width: job.stock.width,
+                pocket: pocket?.kind === 'rect' ? pocket : null,
+              },
         edgeMargin: job.edgeMargin,
         text,
         font: opts.font,
         weight: placeholder?.weight ?? others[0]?.weight ?? 'bold',
         depth: opts.depth,
         // #383/#700 — a badge's name reads along its long side; another blank follows its own line.
-        textAlong: textAlongFor(job),
+        // #752 — a ROTARY job's step asks Reads (along / around), and that answer wins: 'around'
+        // turns the line 90° on the map (the same `rotation: 90` blankLabelSeed gives a badge).
+        textAlong: opts.reads === 'around' ? 'y' : opts.reads === 'along' ? 'x' : textAlongFor(job),
         // The shop's band fill (#451), read here because `blankLabelSeed` is pure.
         bandFill: shopDefault('engrave.blankBandFill').value,
         measure,

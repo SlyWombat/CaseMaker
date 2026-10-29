@@ -23,6 +23,9 @@ import { newItemDepthFor, newTargetObjectId } from '@/store/engraveJobStore';
 import { readGoalObjectFile } from '@/engine/import/targetObject';
 import { FontPicker } from '@/components/panels/FontPicker';
 import { OperationPicker } from '@/components/panels/OperationPicker';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { RotaryOperationPicker } from './RotaryOperationPicker';
+import type { RotaryOperationId } from './rotaryOperations';
 import type { OperationTypeId } from '@/components/panels/operationTypes';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
@@ -36,11 +39,18 @@ const FIELDS: CSSProperties = { display: 'flex', gap: 8, alignItems: 'end', flex
 const FIELD_BOX: CSSProperties = { borderTop: '1px solid #2a2f36', marginTop: 10, paddingTop: 8 };
 const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: '6px 0 0' };
 
-/** What Create asks the shell to make; `null` = nothing new (the job already has its operation). */
+/**
+ * What Create asks the shell to make; `null` = nothing new (the job already has its operation).
+ *
+ * #752 — the rotary step widens two members rather than adding new types: `engrave` carries Reads
+ * (along / around), and a `v-carve` may carry text (a V-cut line) with an empty text meaning "a
+ * region to draw in the panel"; a `flute` may carry the length its wizard field states. A flat
+ * step creates the same members without those fields and behaves exactly as before.
+ */
 export type OperationChoice =
-  | { type: 'engrave'; text: string; depth: number; font: TextFont }
+  | { type: 'engrave'; text: string; depth: number; font: TextFont; reads?: 'along' | 'around' }
   | { type: 'surface'; target: EngraveTargetObject | null }
-  | { type: Exclude<OperationTypeId, 'engrave' | 'surface'> };
+  | { type: Exclude<OperationTypeId, 'engrave' | 'surface'>; text?: string; lengthMm?: number };
 
 export interface OperationStepProps {
   job: EngraveJob;
@@ -55,6 +65,14 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   // already has an operation starts with nothing selected, so Create finishes without adding a
   // duplicate — a template's seeded line IS the item step 4 would otherwise make.
   const [picked, setPicked] = useState<OperationTypeId | null>(hasOperations ? null : 'engrave');
+  // #752 R-UI-4 — on a rod in the chuck the step is the rotary one (§3.6): its own three groups,
+  // and each operation's one field. `rotaryPicked` is null on a job that already has work, so
+  // Create finishes without adding a duplicate — the same rule the flat picker follows.
+  const rotary = rotaryMapOf(job) !== null;
+  const [rotaryPicked, setRotaryPicked] = useState<RotaryOperationId | null>(hasOperations ? null : 'engrave');
+  const [reads, setReads] = useState<'along' | 'around'>('along');
+  const [vcarveText, setVcarveText] = useState('');
+  const [fluteLengthMm, setFluteLengthMm] = useState(20);
   const [text, setText] = useState('');
   // The blank's recommended depth (the stock kind decides it), editable here; never a hidden 0.5.
   const [depth, setDepth] = useState(() => newItemDepthFor(job));
@@ -66,15 +84,27 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   // #721 — what the goal makes: the part itself, or a mold to cast it in.
   const [makeMold, setMakeMold] = useState(false);
 
-  const choice: OperationChoice | null =
-    picked === 'engrave'
+  const surfaceChoice: OperationChoice = {
+    type: 'surface',
+    target:
+      surface === null || !makeMold || surface.format === 'png' ? surface : { ...surface, goalMode: 'mold' },
+  };
+  const choice: OperationChoice | null = rotary
+    ? rotaryPicked === 'engrave'
+      ? { type: 'engrave', text, depth, font, reads }
+      : rotaryPicked === 'v-carve'
+        ? { type: 'v-carve', text: vcarveText }
+        : rotaryPicked === 'pocket'
+          ? { type: 'pocket' }
+          : rotaryPicked === 'flute'
+            ? { type: 'flute', lengthMm: fluteLengthMm }
+            : rotaryPicked === 'relief'
+              ? surfaceChoice
+              : null
+    : picked === 'engrave'
       ? { type: 'engrave', text, depth, font }
       : picked === 'surface'
-        ? {
-            type: 'surface',
-            target:
-              surface === null || !makeMold || surface.format === 'png' ? surface : { ...surface, goalMode: 'mold' },
-          }
+        ? surfaceChoice
         : picked === null
           ? null
           : { type: picked };
@@ -92,7 +122,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   useLayoutEffect(() => {
     onChoiceChange(choice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked, text, depth, font, surface, makeMold, onChoiceChange]);
+  }, [picked, text, depth, font, surface, makeMold, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, onChoiceChange]);
 
   async function chooseGoal(file: File): Promise<void> {
     setSurfaceError(null);
@@ -108,17 +138,31 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
     }
   }
 
+  const engraveField = rotary ? rotaryPicked === 'engrave' : picked === 'engrave';
+  const surfaceField = rotary ? rotaryPicked === 'relief' : picked === 'surface';
+  const vcarveField = rotary && rotaryPicked === 'v-carve';
+  const pocketField = rotary && rotaryPicked === 'pocket';
+  const fluteField = rotary && rotaryPicked === 'flute';
+
   return (
     <div data-testid="engrave-setup-step-what" style={{ marginTop: 8 }}>
-      <OperationPicker
-        mode="select"
-        testidFor={(id) => `engrave-setup-what-${id}`}
-        onPick={setPicked}
-        surfaceAllowed={!hasOperations}
-        selected={picked}
-      />
+      {rotary ? (
+        <RotaryOperationPicker
+          selected={rotaryPicked}
+          onPick={setRotaryPicked}
+          testidFor={(id) => `start-wizard-op-rotary-${id}`}
+        />
+      ) : (
+        <OperationPicker
+          mode="select"
+          testidFor={(id) => `engrave-setup-what-${id}`}
+          onPick={setPicked}
+          surfaceAllowed={!hasOperations}
+          selected={picked}
+        />
+      )}
 
-      {picked === 'engrave' && (
+      {engraveField && (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
           <div style={FIELD_HEADING}>Engrave text</div>
           <div style={FIELDS}>
@@ -154,13 +198,85 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
               <span>Font</span>
               <FontPicker value={font} onChange={setFont} aria-label="Font" />
             </label>
+            {rotary && (
+              // #752 — §3.6's one field for text on a round stock: which way the line reads,
+              // along the rod by default (like a pencil's lettering).
+              <label style={FIELD_LABEL} data-testid="start-wizard-op-reads">
+                <span>Reads</span>
+                <select
+                  data-testid="start-wizard-op-reads-select"
+                  aria-label="Reads"
+                  style={FIELD}
+                  value={reads}
+                  onChange={(e) => setReads(e.target.value === 'around' ? 'around' : 'along')}
+                >
+                  <option value="along">along</option>
+                  <option value="around">around</option>
+                </select>
+                <span style={MUTED}>the rod</span>
+              </label>
+            )}
           </div>
         </div>
       )}
 
-      {picked === 'surface' && (
+      {vcarveField && (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
-          <div style={FIELD_HEADING}>Surface a mesh</div>
+          <div style={FIELD_HEADING}>V-carve</div>
+          <div style={FIELDS}>
+            <label style={FIELD_LABEL}>
+              <span>Text</span>
+              <input
+                type="text"
+                data-testid="start-wizard-op-vcarve-text"
+                aria-label="V-carve text"
+                style={{ width: 180 }}
+                value={vcarveText}
+                onChange={(e) => setVcarveText(e.target.value)}
+              />
+            </label>
+            <span style={MUTED}>Leave it empty to draw a region in the panel.</span>
+          </div>
+        </div>
+      )}
+
+      {pocketField && (
+        <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
+          <div style={FIELD_HEADING}>Pocket</div>
+          <p style={MUTED} data-testid="start-wizard-op-pocket-note">
+            The pocket’s size and place come in the panel — Create adds it, ready to drag.
+          </p>
+        </div>
+      )}
+
+      {fluteField && (
+        <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
+          <div style={FIELD_HEADING}>Flute</div>
+          <div style={FIELDS}>
+            <label style={FIELD_LABEL}>
+              <span>Length along</span>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                data-testid="start-wizard-op-flute-length"
+                aria-label="Flute length"
+                style={FIELD}
+                value={fluteLengthMm}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v)) setFluteLengthMm(v);
+                }}
+              />
+              <span style={MUTED}>mm</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {surfaceField && (
+        <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
+          <div style={FIELD_HEADING}>{rotary ? 'Relief from a mesh' : 'Surface a mesh'}</div>
           <div style={FIELDS}>
             <label style={FIELD_LABEL}>
               <span>Mesh</span>
@@ -236,5 +352,9 @@ export function operationCreateBlocked(choice: OperationChoice | null): string |
   }
   // The mesh is the operation's one field; Create waits for a file that read cleanly.
   if (choice.type === 'surface') return choice.target === null ? 'Choose the mesh to surface.' : null;
+  // #752 — a rotary flute's field is its length, and a length is a positive number.
+  if (choice.type === 'flute' && choice.lengthMm !== undefined) {
+    return !Number.isFinite(choice.lengthMm) || choice.lengthMm <= 0 ? 'The flute needs a length above 0 mm.' : null;
+  }
   return null;
 }

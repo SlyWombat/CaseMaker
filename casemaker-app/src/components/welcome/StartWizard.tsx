@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
-import { ensureSeedFontsLoaded } from '@/engine/fonts/registry';
+import { DEFAULT_FONT_ID, ensureSeedFontsLoaded } from '@/engine/fonts/registry';
 import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
 import { jobVise } from '@/engine/cnc/fixture';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
@@ -12,7 +12,7 @@ import { findTemplateAcrossSources } from '@/library/templateRegistry';
 import { blankProjectForStock } from '@/library/blankProject';
 import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
-import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { newItemDepthFor, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useLocationStore } from '@/store/locationStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
@@ -633,9 +633,12 @@ export function StartWizard(): JSX.Element {
         // #700 — the placeholder "New text" is never what was asked for, and neither is the
         // generic centre-of-stock placement: the line is made with the operator's text, depth and
         // face AND laid out to fit the blank it will be cut on, in one store write.
+        // #752 — on a rotary job the step also asked which way the line reads; that answer lays
+        // the line along the map's X (along) or turns it 90° onto the around axis.
         id = useEngraveJobStore.getState().addEngraveText(choice.text, {
           depth: choice.depth,
           font: choice.font,
+          ...(choice.reads === undefined ? {} : { reads: choice.reads }),
         });
       } else if (choice.type === 'surface') {
         // #685 — Surface a mesh is the one operation whose item is not a store "add": the file
@@ -644,6 +647,23 @@ export function StartWizard(): JSX.Element {
           useEngraveJobStore.getState().setTargetObject(choice.target);
           id = choice.target.id;
         }
+      } else if (choice.type === 'v-carve' && choice.text !== undefined && choice.text.trim() !== '') {
+        // #752 — a V-carved line on the map: the text IS the operation's field, so it is made
+        // like an engrave text and the cutter decides the V. Empty text is the region route below.
+        id = useEngraveJobStore.getState().addEngraveText(choice.text, {
+          depth: newItemDepthFor(useEngraveJobStore.getState().job),
+          font: DEFAULT_FONT_ID,
+        });
+      } else if (choice.type === 'flute' && choice.lengthMm !== undefined && choice.lengthMm > 0) {
+        // #752 — the wizard's one field for a flute is its length along; the line is created and
+        // its two points set to that length about its centre in one row the panel can still edit.
+        id = addOperationOfType('flute');
+        useEngraveJobStore.getState().updateTrace(id, {
+          points: [
+            [-choice.lengthMm / 2, 0],
+            [choice.lengthMm / 2, 0],
+          ],
+        });
       } else {
         id = addOperationOfType(choice.type);
       }
