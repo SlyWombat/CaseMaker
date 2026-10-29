@@ -60,6 +60,14 @@ Each issue names its job files in `jobs/`:
 - #734: j15-vader-pla-proxy-b-engrave, j17-faceplate-pla-proxy, j13-tool-tray (a false positive of the sweep floor, not a surfacing defect)
 - #735: j13-tool-tray-b-small-holes, j18-thread-a-bore-pla-proxy
 
+## Split-helix column (#753, 2026-10-29, simulated)
+
+`jobs/j26-split-helix-A.nc` and `j26-split-helix-B.nc` are the two posted halves of the split-helix acceptance: a ⌀20 rod, a 360° helix over X 5–25 with the ⌀3.175 flat's tip on the axis, piece B at A 180°. They are not hand-written — `casemaker-app/tests/unit/helpers/splitHelix.ts` builds the IR and posts it, and `tests/unit/exportSplitHelix.spec.ts` asserts the committed files are that generator's exact text, so the bench record cannot drift from the fixture. **No machine was used.**
+
+The app's Simulate panel was asked to open piece A on the rod's 30 × 20 × 20 box. It **refuses the program in the panel's own words** (`docs/bench/img/2026-10-29-split-helix/`): the panel's setup is a prism and the rotary engine needs a cylinder stock, and the exact route reports that an A word is tracked but not interpreted — so only the tool path is drawn, with the transport reading A 0° · 1 turn. The screens are `split-helix-opened.png`, `split-helix-refusal.png` and the refusal's full text `split-helix-refusal-words.png` / `.txt`. There are no material turning or Unroll screens of this program because the app cannot hold a rod in the Simulate panel today; the dowel's own Generate → Simulate flow is what draws a wrapped job.
+
+The split-helix acceptance itself is **simulated, not runnable today**: `casemaker-app/tests/unit/splitHelixColumn.spec.ts` sweeps both halves on the column engine and checks the removed volume, the complement and the mating band against an analytic oracle. A cut that reaches the axis exactly is refused by the verifier's R8 rule, and the rotary rules keep every Y at 0, so a flat end mill cannot run its side on the split face. A bounded below-axis allowance is a design decision on #753; the spec pins those two refusals (and the ball/V micro-finish and 3D-relief refusals) in their exact words.
+
 ## Second set (first run, 2026-10-28, later the same day)
 
 Seven more jobs, from sources that publish the finished part and something real to build from:

@@ -1,0 +1,9 @@
+refused
+rotary-axis an A word appears: the rotary axis is tracked but not interpreted, and V1 does not simulate rotary workline 11
+tool-change-ambiguous the starting tool was not stated, so whether T1 is a real change cannot be known; treated as oneline 4
+outside-envelope a move to machine (?, ?, 3.000) leaves the Makera Z1's envelopeline 5
+outside-envelope a move to machine (?, -110.000, 3.000) leaves the Makera Z1's envelopeline 6
+outside-envelope a move to machine (-90.000, -110.000, 3.000) leaves the Makera Z1's envelopeline 734
+rotary-stock the rotary column engine sweeps a cylinder stock; the setup's part is a prism
+This run is path-only: the sweep was refused, so no fixture, holder or material geometry was checked — only the tool path is drawn.
+Try again with a longer limit
