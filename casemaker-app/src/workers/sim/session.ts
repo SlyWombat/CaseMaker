@@ -972,14 +972,14 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         // `column.radius`), so the frame the oracle speaks is the frame the sweep made; the
         // prediction is already in map millimetres, which is the frame it is compared in.
         const radius = l.column.radius;
-        const sweep = cuttingRadiusForSweep(l.tool);
-        if (!sweep.ok) {
-          throw new Error(`oracle: a rotary run is a flat end mill's, and this run's cutter has no sweep radius: ${sweep.reason}`);
-        }
+        // #763 — the run's own resolved cutter profile (a flat, a ball or a V): the oracle's facet
+        // term is that cutter's edge, not a flat disc's.
+        const cutter = l.column.cutter;
         const report = computeRotaryOracle(tl, {
           grid,
           radius,
-          toolRadius: sweep.radius,
+          toolRadius: cutter.outerRadius ?? cutter.radius,
+          cutter,
           predicted,
         });
         return { ...report, frame: surface === null ? 'work' : 'surface' };

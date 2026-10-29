@@ -181,6 +181,83 @@ export function cutterReach(cutter: ColumnCutter, aboveTip: number): number {
  * re-reading a setting that may have changed since. Passed in, never read here: the geometry worker
  * does not import the location client (#382 review).
  */
+/**
+ * #763 — THE FLOOR a cutter leaves on one column of the rotary grid, given the tool's tip height
+ * `zt` (radius above the axis), the column's angular offset φ from the tool (radians) and its
+ * axial offset `dx`. The column is the ray `(dx, u·sinφ, u·cosφ)` for u ≥ 0; the cutter's body
+ * occupies a set of those points and the smallest u inside it is the floor. The flat's disc
+ * reproduces the model the engine has always used exactly (its plane lies at the tip's height, so
+ * the ray meets it at `zt/cosφ` and the disc's reach there is `dx² + (zt·tanφ)²`), which is why
+ * adding a body here cannot move a flat job.
+ */
+export function cutterFloorOnColumn(cutter: ColumnCutter, zt: number, phiRad: number, dx: number): number | null {
+  const cos = Math.cos(phiRad);
+  const sin = Math.sin(phiRad);
+  if (!(cos > 1e-9) || !(zt > 0)) return null;
+  // BALL (#532/#763): the sphere of R centred on the tool axis at zt + R.
+  if (cutter.cornerRadius !== undefined) {
+    const R = cutter.cornerRadius;
+    if (!(R > 0)) return null;
+    const c = zt + R;
+    const disc = c * c * cos * cos - (dx * dx + zt * zt + 2 * zt * R);
+    if (disc < 0) return null;
+    const u = c * cos - Math.sqrt(disc);
+    if (!(u > 0)) return null;
+    // Past the ball's own radius there is the shank, not the cap.
+    if (Math.hypot(dx, u * sin) > (cutter.outerRadius ?? R) + 1e-9) return null;
+    return u;
+  }
+  // FLAT: the disc at the tip's plane, exactly as before.
+  if (cutter.tanHalf === null) {
+    const dy = zt * Math.tan(phiRad);
+    if (dx * dx + dy * dy > cutter.radius * cutter.radius) return null;
+    return zt / cos;
+  }
+  // V (#405/#763): the flat tip first — under it the floor is the tip's plane.
+  const tipFloor = zt / cos;
+  if (Math.hypot(dx, tipFloor * sin) <= cutter.radius + 1e-12) return tipFloor;
+  const k = cutter.tanHalf;
+  const b = cutter.radius - zt * k;
+  const A = sin * sin - cos * cos * k * k;
+  const B = -2 * cos * k * b;
+  const C = dx * dx - b * b;
+  const roots: number[] = [];
+  if (Math.abs(A) < 1e-12) {
+    if (Math.abs(B) > 1e-12) roots.push(-C / B);
+  } else {
+    const disc = B * B - 4 * A * C;
+    if (disc >= 0) {
+      roots.push((-B - Math.sqrt(disc)) / (2 * A), (-B + Math.sqrt(disc)) / (2 * A));
+    }
+  }
+  roots.sort((p, q) => p - q);
+  for (const u of roots) {
+    if (!(u > tipFloor - 1e-9)) continue;
+    const S = k * (u * cos - zt) + cutter.radius;
+    if (S < -1e-9) continue;
+    if (cutter.outerRadius !== undefined && Math.hypot(dx, u * sin) > cutter.outerRadius + 1e-9) continue;
+    return u;
+  }
+  return null;
+}
+
+/**
+ * #763 — the ROTARY facet term for any cutter: the rise of the floor at the footprint's angular
+ * EDGE above the tip, in the arc-plane model `ROTARY.applyMove` uses. The edge is where the
+ * cutter's profile meets the stock's surface (`cutterReach(cutter, depth)`), the profile's own
+ * rise there is `surfaceAboveTip` (0 for a flat, R for a ball, the depth for an unbounded V), and
+ * the wedge's `1/cos φ` lifts it at that angle. For a flat this is exactly `facetTerm`:
+ * `√(Z_t² + r_t²) − Z_t`. The column oracle's band grows by it, and a level's reach.
+ */
+export function rotaryFacetTerm(cutter: ColumnCutter, tipAboveAxis: number, depth: number): number {
+  if (!(tipAboveAxis > 0)) return 0;
+  const reach = cutterReach(cutter, depth);
+  const edgeRise = surfaceAboveTip(cutter, reach);
+  const rise = Number.isFinite(edgeRise) ? edgeRise : depth;
+  const cos = tipAboveAxis / Math.hypot(tipAboveAxis, reach);
+  return (tipAboveAxis + rise) / cos - tipAboveAxis;
+}
+
 export interface DrillPointDefault {
   /** `drill.pointAngleDeg`, included, degrees. */
   deg: number;
@@ -512,6 +589,8 @@ export interface ColumnSweepOk {
   /** Work-frame Z of the stock's top: for a rotary job, the stock RADIUS (R6). */
   stockTopZ: number;
   radius: number;
+  /** #763 — the cutter profile the sweep resolved and used (the oracle's facet term reads it). */
+  cutter: ColumnCutter;
   /**
    * The FINAL grid — the material as the sweep left it, which is the whole answer this engine has
    * (#408). `meshAt(count - 1)` gives the same state as a display mesh; this is the sim-resolution
@@ -686,6 +765,11 @@ export const ROTARY: ColumnParameterisation = {
       }
       return { written, crossed: null, clamped };
     }
+    // #763 — the footprint is the CUTTER's, not a flat disc's: its profile above the tip
+    // (`surfaceAboveTip`) is read at the arc-plane distance, and the footprint's edge is where the
+    // profile meets the stock's surface at this tip height — `cutterReach`. A flat reads exactly
+    // as before (rise 0, footprint r_t); a ball is a sphere cap (rise R − √(R² − s²)); a V is the
+    // cone (rise (s − r_tip)/tan). The tip height follows the move (#758's candidates).
     // θ window: the nearest point can be anywhere on the segment, so θ is within φ_max of the
     // swept A interval. A span of a full turn or more covers every column.
     const fullTurn = aHi - aLo >= 360;
@@ -709,9 +793,7 @@ export const ROTARY: ColumnParameterisation = {
       const kHi = Math.ceil((aHi - theta + phiMax) / 360);
       for (let i = iLo; i <= iHi; i++) {
         const x = u0 + i * du;
-        let best2 = Infinity;
-        let bestPhi = 0;
-        let bestZt = zt;
+        let floorHere = Infinity;
         for (let k = kLo; k <= kHi; k++) {
           const th = theta + k * 360;
           // The candidate points: the foot of the perpendicular in the arc-at-Z_t plane (exact
@@ -730,20 +812,17 @@ export const ROTARY: ColumnParameterisation = {
             if (phiRad <= -Math.PI / 2 || phiRad >= Math.PI / 2) continue;
             const dx = x - (m.u0 + tc * dxs);
             const ztc = planar ? (zAt(tc) > 0 ? zAt(tc) : 0) : zt;
-            const dy = ztc * Math.tan(phiRad);
-            const d2 = dx * dx + dy * dy;
-            if (d2 < best2) {
-              best2 = d2;
-              bestPhi = phi;
-              bestZt = ztc;
-            }
+            // #763 — the floor THIS candidate leaves on THIS column for the cutter's own body:
+            // the material the body occupies along the column is removed, and the lowest such
+            // point is the floor. The body is the flat's disc, the ball's sphere or the V's cone.
+            const f = cutterFloorOnColumn(cutter, ztc, phiRad, dx);
+            if (f !== null && f < floorHere) floorHere = f;
           }
         }
-        if (best2 > rt * rt) continue;
-        const floor = bestZt / Math.cos(bestPhi * DEG);
+        if (!(floorHere < Infinity)) continue;
         const idx = j * nu + i;
-        if (floor < (h[idx] as number)) {
-          h[idx] = floor;
+        if (floorHere < (h[idx] as number)) {
+          h[idx] = floorHere < 0 ? 0 : floorHere;
           written++;
         }
       }
@@ -1391,18 +1470,19 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   // chamfer-profile work, and a drill or a thread mill about the A axis has no model here.
   const resolved = columnCutterFor(tool, opts?.drillPointDefault);
   if (!resolved.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: resolved.reason }] };
-  if (rotary && resolved.kind !== 'flat') {
+  // #763 — the rotary engine sweeps a FLAT, a BALL and a V now: each is a profile above the tip
+  // over the same arc-plane columns (R-UI-12). Drills, bull noses and thread mills stay refused —
+  // their bodies about a turntable axis are not modelled.
+  if (rotary && resolved.kind !== 'flat' && resolved.kind !== 'ball' && resolved.kind !== 'v') {
     const what =
-      resolved.kind === 'v'
-        ? 'a V-bit, whose cone about a turntable axis is a different body'
-        : resolved.kind === 'drill'
-          ? 'a drill, whose cone point about a turntable axis is not modelled'
-          : resolved.kind === 'ball' || resolved.kind === 'bull'
-            ? `a ${resolved.kind} nose, whose rounded tip about a turntable axis is not modelled`
-            : 'a thread mill, whose envelope about a turntable axis is not modelled';
+      resolved.kind === 'drill'
+        ? 'a drill, whose cone point about a turntable axis is not modelled'
+        : resolved.kind === 'bull'
+          ? 'a bull nose, whose rounded corner about a turntable axis is not modelled'
+          : 'a thread mill, whose envelope about a turntable axis is not modelled';
     return {
       ok: false,
-      diagnostics: [{ severity: 'error', code: 'tool-refused', message: `the rotary column engine sweeps a flat end mill only; tool "${tool.name}" is ${what}` }],
+      diagnostics: [{ severity: 'error', code: 'tool-refused', message: `the rotary column engine sweeps a flat end mill, a ball nose or a V-bit only; tool "${tool.name}" is ${what}` }],
     };
   }
   const param: ColumnParameterisation = rotary ? ROTARY : FLAT;
@@ -1642,7 +1722,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
         ? (() => {
             const aEnd = timeline.stateAt(mv.step).a;
             const aStart = timeline.stateAt(mv.step - 1).a;
-            return gougeAlong(grid, mv, gougeRadius, aStart ?? aEnd ?? 0, aEnd ?? aStart ?? 0);
+            return gougeAlong(grid, mv, gougeRadius, aStart ?? aEnd ?? 0, aEnd ?? aStart ?? 0, cutter);
           })()
         : gougeAlongFlat(grid, mv, gougeRadius, cutter);
       if (gouged) {
@@ -1701,6 +1781,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     count,
     stockTopZ: grid.initial,
     radius: grid.initial,
+    cutter,
     grid,
     stats,
     diagnostics,
@@ -1725,6 +1806,7 @@ function gougeAlong(
   toolRadius: number,
   a0: number,
   a1: number,
+  cutter: ColumnCutter,
 ): boolean {
   const { nu, nv, u0, du, dv, h } = grid;
   const xLo = Math.min(mv.from[0], mv.to[0]);
@@ -1762,11 +1844,13 @@ function gougeAlong(
         const arc = tipZ * Math.tan((phi * Math.PI) / 180);
         if (dx * dx + arc * arc > toolRadius * toolRadius + 1e-9) continue;
         // THE FLOOR AT THAT COLUMN IS THE CUT'S OWN, face and facet together: along the ray at φ
-        // the tool's face crosses at `ρ = Z_t / cos φ`, which is exactly the surface `applyMove`
-        // writes. Comparing the CENTRELINE height `Z_t` instead calls the facet the same pass just
-        // cut — a few thousandths of a millimetre beside the stroke — material the tool is inside,
-        // so every stroke's own retract read as a rapid through stock.
-        const floorHere = tipZ > 0 ? tipZ / Math.cos((phi * Math.PI) / 180) : 0;
+        // the tool's body crosses at the same surface `applyMove` writes (#763 — the flat's disc,
+        // the ball's sphere, the V's cone; a tip at or below the axis keeps the flat reading).
+        // Comparing the CENTRELINE height `Z_t` instead calls the facet the same pass just cut —
+        // a few thousandths of a millimetre beside the stroke — material the tool is inside, so
+        // every stroke's own retract read as a rapid through stock.
+        const floorHere = tipZ > 0 ? cutterFloorOnColumn(cutter, tipZ, (phi * Math.PI) / 180, dx) : 0;
+        if (floorHere === null) continue;
         // GOUGE_EPSILON, for the reason the flat check gives: the two paths' last bits differed
         // enough for a `<` to call a retract out of its own groove a gouge.
         if (floorHere < (h[j * nu + i] as number) - GOUGE_EPSILON) return true;

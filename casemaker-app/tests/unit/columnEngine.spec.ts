@@ -532,13 +532,18 @@ describe('a V-bit cone on the flat engine (#405)', () => {
     expect(out.diagnostics.some((d) => d.code === 'tool-refused')).toBe(false);
   });
 
-  it('REFUSES a V tool on a rotary job by name — a cone about a turntable axis is #221', () => {
+  // #763 — the cone's rotary body is modelled now (R-UI-12): the V sweeps. A bull nose's rounded
+  // corner about a turntable axis is still not a body the engine has, and stays refused by name.
+  it('sweeps a V tool on a rotary job now, and still refuses a bull nose by name (#763)', () => {
     const tl = fakeTimeline([move({ u0: 0, u1: 0, v0: 0, v1: 360, z: 5 })]);
-    const out = columnSweep(tl, vBit(), cyl(10, 30));
+    const swept = columnSweep(tl, vBit(), cyl(10, 30));
+    expect(swept.ok, swept.ok ? '' : JSON.stringify(swept.diagnostics)).toBe(true);
+    const bull = flatEndMill(3.175, { name: '3.175 bull 0.5', shape: 'bull', cornerRadius: 0.5, diameter: 3.175 });
+    const out = columnSweep(tl, bull, cyl(10, 30));
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.diagnostics[0]?.code).toBe('tool-refused');
-    expect(out.diagnostics[0]?.message).toMatch(/V-bit|cone/i);
+    expect(out.diagnostics[0]?.message).toMatch(/bull nose/i);
   });
 });
 

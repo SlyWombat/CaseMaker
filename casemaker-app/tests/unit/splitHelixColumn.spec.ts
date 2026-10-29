@@ -284,20 +284,17 @@ describe('#753 split-helix column, line-to-line (simulated; the verifier refuses
     );
   });
 
-  it('PIN the ball and V micro-finish: the rotary column engine sweeps a flat end mill only (R-UI-12)', () => {
-    const piece = pipeline(0, 5); // a pass above the axis, so the tool is the only refusal
+  // #763 — the ball and V micro-finishes SWEEP on the rotary engine now: a ball is a sphere cap at
+  // the tip and a V a cone, over the same columns as the flat's disc. (This was the R-UI-12 pin
+  // that refused both.)
+  it('the ball and V micro-finishes sweep on the rotary column engine (#763)', () => {
+    const piece = pipeline(0, 5); // a pass above the axis
     const ball = flatEndMill(3.175, { name: 'Ball nose 3.175 mm', shape: 'ball' });
     const ballOut = columnSweep(piece.timeline, ball, setup(), { resolution: RES });
-    if (ballOut.ok) throw new Error('the ball sweeps were not refused');
-    expect(ballOut.diagnostics[0]!.message).toBe(
-      'the rotary column engine sweeps a flat end mill only; tool "Ball nose 3.175 mm" is a ball nose, whose rounded tip about a turntable axis is not modelled',
-    );
+    expect(ballOut.ok, JSON.stringify(ballOut.ok ? [] : ballOut.diagnostics)).toBe(true);
     const v = flatEndMill(0.3, { name: '30° engraving bit', typeText: 'Engraving', shape: 'engraving', tipDiameter: 0.3, halfAngle: 15, angle: 30 });
     const vOut = columnSweep(piece.timeline, v, setup(), { resolution: RES });
-    if (vOut.ok) throw new Error('the V sweeps were not refused');
-    expect(vOut.diagnostics[0]!.message).toBe(
-      'the rotary column engine sweeps a flat end mill only; tool "30° engraving bit" is a V-bit, whose cone about a turntable axis is a different body',
-    );
+    expect(vOut.ok, JSON.stringify(vOut.ok ? [] : vOut.diagnostics)).toBe(true);
   });
 
   it('PIN the Y ≡ 0 rule: a true helicoid boundary with a flat end mill needs the cutter off the axis', () => {

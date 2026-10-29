@@ -392,6 +392,39 @@ describe('Name on a dowel (#240 slice 2, design §7 W)', () => {
     expect(text).toContain('unverified');
   });
 
+  // #763 — R-UI-12's second half: a 30° V's CONE is the rotary footprint now, so a wrapped V text
+  // sweeps on the column engine and matches its own oracle (the glyph's region grown by the cone's
+  // opening at each level).
+  it('#763 — a 30° V wrapped text sweeps and matches its oracle', () => {
+    const V30 = flatEndMill(3.175, {
+      name: '30° V 0.3',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      tipDiameter: 0.3,
+      diameter: 3.175,
+      angle: 30,
+      halfAngle: 15,
+      cornerRadius: null,
+    });
+    const base = dowel();
+    const job: EngraveJob = { ...base, name: 'V on a dowel', toolKey: 'v30', tool: V30 };
+    const g = generate(tl, job);
+    expect(g.ok, JSON.stringify(g.errors)).toBe(true);
+    expect(g.nc).not.toBeNull();
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc as string, toSetup(job, Z1), V30, Z1.id);
+      expect(load.ok, load.ok ? '' : JSON.stringify(load.diagnostics)).toBe(true);
+      if (!load.ok) return;
+      const report = session.oracle(g.predicted);
+      expect(report.ok, JSON.stringify(report.levels)).toBe(true);
+      // And the prediction was the V's own region, not a flat one.
+      expect(g.predicted.some((p) => p.vRegion !== undefined)).toBe(true);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('is the map’s frame: radius in the header, Y always 0, A from the surface arc', () => {
     const g = gen();
     const nc = g.nc ?? '';
@@ -625,8 +658,8 @@ describe('a cut class the wrap does not cut is refused by name', () => {
 
 // ---- The V-bit ------------------------------------------------------------------
 
-describe('a non-flat tool on a rotary job stays refused (as today)', () => {
-  it('posts, then the column engine refuses the cone by name', () => {
+describe('a cutter the rotary engine has no body for stays refused (#763)', () => {
+  it('a cone sweeps now; a bull nose is the refusal that remains', () => {
     const job = dowel();
     const vBit = flatEndMill(0.3, {
       name: '30° engraving bit',
@@ -640,15 +673,23 @@ describe('a non-flat tool on a rotary job stays refused (as today)', () => {
     expect(g.frame).toBe('rotary');
     expect(g.nc).not.toBeNull();
 
+    // #763 — the V's cone is a rotary body now: the same program loads.
     const session = createSimSession(tl);
-    const r = session.load(g.nc ?? '', toSetup(job, Z1), vBit, Z1.id);
+    const ok = session.load(g.nc ?? '', toSetup(job, Z1), vBit, Z1.id);
+    expect(ok.ok, ok.ok ? '' : JSON.stringify(ok.diagnostics)).toBe(true);
+    session.dispose();
+
+    // A bull nose's rounded corner about a turntable axis is still not modelled: refused by name.
+    const bull = flatEndMill(3.175, { name: '3.175 bull 0.5', shape: 'bull', cornerRadius: 0.5, diameter: 3.175 });
+    const refused = createSimSession(tl);
+    const r = refused.load(g.nc ?? '', toSetup(job, Z1), bull, Z1.id);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     const refusal = r.diagnostics.find((d) => d.code === 'tool-refused');
     expect(refusal).toBeDefined();
-    expect(refusal!.message).toContain('V-bit');
-    expect(refusal!.message).toContain('30° engraving bit');
-    session.dispose();
+    expect(refusal!.message).toContain('bull nose');
+    expect(refusal!.message).toContain('3.175 bull 0.5');
+    refused.dispose();
   });
 });
 

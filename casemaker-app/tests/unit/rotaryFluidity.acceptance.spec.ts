@@ -89,6 +89,38 @@ function flatTipZ(thetaDeg: number, x: number): number {
   return top;
 }
 
+/** The ball's radius (⌀3 ball nose). */
+const BALL_R = 1.5;
+
+/**
+ * #763 — the BALL's tip Z over (θ, x): the tip that keeps the sphere cap on or above the highest
+ * material under it. A stock point at disc offset (dx, dy) stands `wave·cos(off)` above the axis
+ * and the cap's surface there is `tip + R − √(R² − s²)`, so the tip is that height less the cap's
+ * rise. Always at or above the wave (the ball cannot reach a trough narrower than its own cap).
+ */
+function ballTipZ(thetaDeg: number, x: number): number {
+  let top = -Infinity;
+  const n = 8;
+  for (let i = -n; i <= n; i++) {
+    for (let j = -n; j <= n; j++) {
+      const dx = (i / n) * BALL_R;
+      const dy = (j / n) * BALL_R;
+      const s2 = dx * dx + dy * dy;
+      if (s2 > BALL_R * BALL_R + 1e-12) continue;
+      const rho = wave(thetaDeg, x + dx);
+      const off = Math.asin(Math.max(-1, Math.min(1, dy / rho)));
+      const height = wave(thetaDeg + off / DEG, x + dx) * Math.cos(off);
+      top = Math.max(top, height - (BALL_R - Math.sqrt(Math.max(0, BALL_R * BALL_R - s2))));
+    }
+  }
+  return top;
+}
+
+/** The tip the program asks for at (θ, x): the flat's disc lift, or the ball's cap lift. */
+function tipZ(tool: Tool, thetaDeg: number, x: number): number {
+  return tool.shape === 'ball' ? ballTipZ(thetaDeg, x) : flatTipZ(thetaDeg, x);
+}
+
 const SAFE = R + 5;
 
 /** The spiral finish: A turns continuously; X advances STEP_OVER per turn; Z follows the wave. */
@@ -97,11 +129,11 @@ function spiral(fromX: number, span: number, tool: Tool): ToolpathIR {
   const totalDeg = turns * 360;
   const steps = Math.ceil(totalDeg / CHORD_DEG);
   const moves: CamMove[] = [{ kind: 'rapid', x: fromX, y: 0, z: SAFE, a: 0 }];
-  moves.push({ kind: 'feed', x: fromX, y: 0, z: flatTipZ(0, fromX), f: 300, a: 0 });
+  moves.push({ kind: 'feed', x: fromX, y: 0, z: tipZ(tool, 0, fromX), f: 300, a: 0 });
   for (let s = 1; s <= steps; s++) {
     const a = (s / steps) * totalDeg;
     const x = fromX + (a / 360) * STEP_OVER;
-    moves.push({ kind: 'feed', x, y: 0, z: flatTipZ(a % 360, x), f: FEED, a });
+    moves.push({ kind: 'feed', x, y: 0, z: tipZ(tool, a % 360, x), f: FEED, a });
   }
   const last = moves[moves.length - 1]!;
   moves.push({ kind: 'rapid', x: last.x, y: 0, z: SAFE, a: last.a });
@@ -316,11 +348,39 @@ describe('#756 a 2 mm band of the spiral, simulated against the wave', () => {
     expect(measured().under).toBeLessThan(0.02);
   });
 
-  it('a ⌀3 BALL is refused by the rotary sweep today (R-UI-12)', () => {
+  // #763 R-UI-12 — the ⌀3 BALL sweeps on the rotary column engine now: its sphere cap is the
+  // footprint (a sphere of the ball's radius at the tip Z along the move, #758's rule) and the
+  // programme's own lift is the cap's. The swept wave must stay within that cap's band: never
+  // below the wave (no gouge), and no more material left than the cap itself must leave.
+  it('#763 — the ⌀3 ball spiral sweeps, and the wave is within the ball’s scallop band', () => {
     const { timeline } = pipeline(BALL3);
-    const out = columnSweep(timeline, BALL3, setup());
-    expect(out.ok).toBe(false);
-    const msg = out.ok ? '' : out.diagnostics.map((d) => d.message).join(' ');
-    expect(msg).toMatch(/flat end mill only/);
+    const out = columnSweep(timeline, BALL3, setup(), { resolution: { dx: 0.025, dThetaDeg: 0.25 } });
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const g = out.grid;
+    const at = (x: number, thetaDeg: number): number => {
+      const i = Math.round((x - g.u0) / g.du);
+      const j = ((Math.round(thetaDeg / g.dv) % g.nv) + g.nv) % g.nv;
+      return g.h[j * g.nu + i] as number;
+    };
+    let gouge = 0;
+    let excess = 0;
+    let lift = 0;
+    for (let x = BAND_FROM + 0.5; x <= BAND_FROM + BAND - 0.5; x += 0.1) {
+      for (let t = 0; t < 360; t += 3) {
+        const got = at(x, t);
+        const truth = wave(t, x);
+        const cap = ballTipZ(t, x) - truth;
+        lift = Math.max(lift, cap);
+        gouge = Math.max(gouge, truth - got); // material removed BELOW the wave
+        excess = Math.max(excess, got - truth - cap); // left above the cap's own lift
+      }
+    }
+    // The cap's lift is real — the wave's troughs are narrower than a ⌀3 ball — and the programme
+    // asks for exactly it. The simulation must not gouge the wave, nor leave more than the cap
+    // must, beyond the grid's own band (a 0.25° cell at r 15 is 0.065 mm; the chord tolerance is
+    // 0.002). The lift measured on this band is ~0.32 mm, the cap's own worst.
+    expect(gouge).toBeLessThanOrEqual(0.05);
+    expect(excess).toBeLessThanOrEqual(0.05);
+    expect(lift).toBeGreaterThan(0.2);
   });
 });

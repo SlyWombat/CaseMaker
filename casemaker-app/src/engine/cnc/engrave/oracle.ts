@@ -44,8 +44,10 @@ import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evalua
 import { CHUNK as SWEEP_CHUNK, FANOUT as SWEEP_FANOUT, SWEEP_TOLERANCES } from '@/workers/geometry/sweep';
 import {
   cutterReach,
+  rotaryFacetTerm,
   surfaceAboveTip,
   threadCutter,
+  type ColumnCutter,
   type ColumnGrid,
 } from '@/workers/geometry/columnEngine';
 
@@ -818,6 +820,12 @@ export interface RotaryOracleInput {
   radius: number;
   /** The cutter's radius at the tip, mm — `r_t` of the facet term. */
   toolRadius: number;
+  /**
+   * #763 — the cutter profile the run was swept with. When present the facet term is the CUTTER's
+   * (`rotaryFacetTerm`): a flat's wedge rise, a ball's sphere-cap edge, a V's cone edge. Absent
+   * keeps the flat-only term every pre-#763 caller had.
+   */
+  cutter?: ColumnCutter;
   /** The predictions, in MAP millimetres: x along the axis from the jaws, y the surface arc at R. */
   predicted: readonly OraclePredicted[];
 }
@@ -913,19 +921,35 @@ export function computeRotaryOracle(tl: ManifoldToplevel, input: RotaryOracleInp
   const roundSegments = segmentsForRadius(cellBand);
 
   for (const p of predicted) {
-    if (p.groove !== undefined || p.thread !== undefined || p.vRegion !== undefined) {
+    if (p.groove !== undefined || p.thread !== undefined) {
       throw new Error(
-        "oracle: a rotary prediction is a flat end mill's opened region in map millimetres; a groove, thread or V region has no rotary column form",
+        "oracle: a rotary prediction is a cutter's opened region in map millimetres; a groove or thread has no rotary column form",
       );
     }
   }
 
   const entries = predicted.filter((p) => p.depth > 0 && p.polygons.length > 0);
   const depths = [...new Set(entries.map((p) => p.depth))].sort((a, b) => a - b);
+  // #763 — the facet term is the CUTTER's when the run's profile is known: a flat's wedge rise,
+  // a ball's sphere-cap edge, a V's cone edge. `toolRadius` alone keeps the flat reading for every
+  // pre-#763 caller.
+  const facetAt = (depth: number): number =>
+    input.cutter !== undefined ? rotaryFacetTerm(input.cutter, radius - depth, depth) : facetTerm(radius - depth, toolRadius);
+  // #763 — the REACH allowance is not the cutter's edge rise for a curved cutter. A flat's pocket
+  // floor is level at `R − d`, and its edge rises by the facet term, so the level's cut set is
+  // that much deeper. A ball's or a V's cut has no level floor: the *region* at a level is where
+  // the curved groove is at least that deep (the cone's/ sphere's cross-section), and the floor at
+  // that region's own edge IS the level — its edge rise is carried by the BAND (`facetAt`), not by
+  // the reach, or a V's 0.5 mm flank would reach the stock's surface and call every untouched
+  // column "cut".
+  const reachAllowance = (depth: number): number =>
+    input.cutter !== undefined && (input.cutter.cornerRadius !== undefined || input.cutter.tanHalf !== null)
+      ? 0
+      : facetTerm(radius - depth, toolRadius);
   // The DEEPEST level has the smallest `Z_t` and so the largest facet term; the report's single
   // band carries the largest, exactly as the flat report carries the worst checkpoints' term.
   let maxFacet = 0;
-  for (const p of entries) maxFacet = Math.max(maxFacet, facetTerm(radius - p.depth, toolRadius));
+  for (const p of entries) maxFacet = Math.max(maxFacet, facetAt(p.depth));
   const band = cellBand + maxFacet;
 
   const levels: OracleLevel[] = [];
@@ -938,11 +962,17 @@ export function computeRotaryOracle(tl: ManifoldToplevel, input: RotaryOracleInp
     const z = -depth;
     // The highest radius a column cut to THIS level may read: the nominal floor plus the level's
     // own facet term, plus the slice lift so a floor exactly on the level counts as cut.
-    const reach = radius - depth + facetTerm(radius - depth, toolRadius) + ORACLE_SLICE_LIFT_MM;
+    const reach = radius - depth + reachAllowance(depth) + ORACLE_SLICE_LIFT_MM;
     const parts: CrossSectionInstance[] = [];
     for (const p of entries) {
       if (!(p.depth + 1e-9 >= depth)) continue;
-      parts.push(CS.ofPolygons(p.polygons));
+      // #763 — a V region opens wider as the level rises; the growth is the cone's radial run at
+      // this level, the same map-space dilation the flat oracle applies (#741's body cap too).
+      parts.push(
+        p.vRegion !== undefined && p.depth > depth + 1e-9
+          ? vRegionAt(tl, p.polygons, Math.min((p.depth - depth) * p.vRegion.tanHalf, p.vRegion.maxGrow ?? Infinity), roundSegments)
+          : CS.ofPolygons(p.polygons),
+      );
     }
     if (parts.length === 0) continue;
 
