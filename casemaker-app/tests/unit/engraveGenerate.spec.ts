@@ -5,6 +5,8 @@
 import { describe, it, expect } from 'vitest';
 import { jobVise } from '@/engine/cnc/fixture';
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { tl } from './helpers/manifoldExec';
@@ -2560,6 +2562,127 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(f!.severity).toBe('error');
     expect(f!.message).toMatch(/disconnected from the material the mount holds/);
   });
+
+  // #750 — A HOLDING TAB IS NEVER A LOOSE PIECE. The two bench fixtures are the same 145.2 mm
+  // hexagon cut out through with four 12 × 3 mm tabs: `fx-hexv` is the app's own counter-clockwise
+  // build, `fx-hex-svg-import` is the app's SVG importer reading the committed `hex-cw.svg` (drawn
+  // the other way). The imported one was refused with "a piece of the blank (38 mm²) disconnected"
+  // — 12 × 3.175, exactly one tab's footprint. The crossing point's direction was not the cause:
+  // the imported coordinates round the off-axis tab's long sides a hair inside the kerf, and the
+  // tab was subtracted from the removal on coincident edges.
+  const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const BENCH_JOBS = join(REPO_ROOT, 'docs', 'bench', '2026-10-28-z1-real-jobs', 'jobs');
+  /** The bench's own 3.175 mm single flute — the cutter the fixture jobs name by `inv:` key. */
+  const BENCH_FLAT = flatEndMill(3.175, {
+    name: 'Spiral \'O\' Single Flute Bit - 1/8" Shank 3.175mm * 25mm',
+    fluteLength: 25,
+    shoulderLength: 25,
+    centreCutting: true,
+  });
+
+  /** Parse a bench job fixture the way the CLI does, carrying the cutter it names. */
+  function benchJob(file: string): EngraveJob {
+    const parsed = parseEngraveJob(JSON.parse(readFileSync(join(BENCH_JOBS, file), 'utf8')));
+    if (!parsed.ok) throw new Error(`${file}: ${parsed.errors.join('; ')}`);
+    // The fixture names the bench's inventory cutter by key; a unit run has no service, so the job
+    // carries the snapshot `toolForJob` prefers (#305 design point 2).
+    parsed.job.tool = BENCH_FLAT;
+    return parsed.job;
+  }
+
+  for (const file of ['fx-hex-svg-import.json', 'fx-hexv.json'] as const) {
+    it(`${file}: four tabs keep the part on the blank, so no piece is loose (#750)`, () => {
+      const job = benchJob(file);
+      const g = generate(tl, job);
+      const loose = g.findings.filter((f) => f.code === 'loose-piece');
+      expect(loose, JSON.stringify(loose)).toEqual([]);
+      expect(g.ok, JSON.stringify(g.findings)).toBe(true);
+      // The fixtures really are the tabbed cut they describe: four asked for, four placed.
+      expect(g.through!.cutouts).toHaveLength(1);
+      expect(g.through!.cutouts[0]!.spans).toBe(4);
+      expect(g.through!.cutouts[0]!.unplaceable).toBe(0);
+    });
+  }
+
+  it('still refuses a piece a separate through cut really frees, tabs and all (#750)', () => {
+    // The tabbed cut-out's own tabs must not be cancelled against the slot's removal: a tab keeps
+    // material only the kerf it belongs to passed over. This passes on the pre-#750 analysis too —
+    // it is a guard that the per-contour difference did not weaken the check, not a regression
+    // the fix buys.
+    const job = cutoutJob(
+      {},
+      { shapes: [{ ...RECT, width: 100, height: 4, id: 'slit', through: true }] },
+    );
+    const g = generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const f = g.findings.find((x) => x.code === 'loose-piece');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.message).toMatch(/disconnected from the material the mount holds/);
+    // The cut-out's own four tabs were placed — the finding is about the slot's severed strip.
+    expect(g.findings.some((x) => x.code === 'tab-unplaceable')).toBe(false);
+  });
+
+  /**
+   * #750 BOUNCE — one vector cut-out whose outline is TWO 20 × 12 mm parts `gap` apart, cut
+   * OUTSIDE with one 4 mm tab each. Parts A and B are less than a diameter apart, so their kerfs
+   * overlap and each pass crosses the facing edge of the other. B's tab is on that facing edge:
+   * A's kerf removes every bit of material B's tab keeps beyond B's own edge, so B is free. A's
+   * tab is on its far edge, so A stays held. The tab placement is a property of the contour's
+   * winding and start vertex (see `placeTabs`), chosen here so each tab lands on the edge named.
+   */
+  function twoPartJob(gap: number): EngraveJob {
+    const aLeft = -(gap / 2 + 20);
+    const aRight = -gap / 2;
+    const bLeft = gap / 2;
+    const bRight = gap / 2 + 20;
+    const clockwiseFromTopRight = (left: number, right: number): [number, number][] => [
+      [right, 6],
+      [left, 6],
+      [left, -6],
+      [right, -6],
+    ];
+    const vector: EngraveVectorShape = {
+      id: 'two-parts',
+      kind: 'vector',
+      sourceName: 'spec',
+      contours: [clockwiseFromTopRight(aLeft, aRight), clockwiseFromTopRight(bLeft, bRight)],
+      fillRule: 'NonZero',
+      width: 40 + gap,
+      height: 12,
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      depth: 1,
+      enabled: true,
+    };
+    return cutoutJob(
+      {
+        name: 'Pair',
+        of: 'two-parts',
+        side: 'outside',
+        inset: 0,
+        tabs: { count: 1, width: 4, height: 1 },
+      },
+      { vectors: [vector] },
+    );
+  }
+
+  for (const gap of [3.5, 4.0, 4.5]) {
+    it(`refuses a part whose only tab the neighbouring contour's pass cuts away, ${gap} mm apart (#750)`, () => {
+      const g = generate(tl, twoPartJob(gap));
+      expect(g.ok).toBe(false);
+      expect(g.stage).toBe('findings');
+      const f = g.findings.find((x) => x.code === 'loose-piece');
+      expect(f, JSON.stringify(g.findings)).toBeDefined();
+      expect(f!.severity).toBe('error');
+      // What is free is B's 240 mm² face plus the sliver of its tab the neighbour's kerf spares:
+      // a tab may not be cancelled against a removal its own contour did not make.
+      const area = Number(/\((\d+) mm²\)/.exec(f!.message)?.[1]);
+      expect(area).toBeGreaterThan(240);
+      expect(area).toBeLessThan(260);
+    });
+  }
 
   it('refuses a cut-out whose inset leaves no path, instead of silently dropping it (#218)', () => {
     // A 100 mm inset on the 100 × 60 blank shrinks the profile past the cutter radius: the old

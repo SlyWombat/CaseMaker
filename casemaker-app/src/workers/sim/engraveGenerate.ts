@@ -122,7 +122,7 @@ import {
   placeTabs,
   profilePath,
   signedArea,
-  tabRectangles,
+  tabBridgeRectangles,
   type ProfileCut,
   type ProfileSpan,
 } from '@/engine/cnc/cam/profile';
@@ -1639,12 +1639,20 @@ export function engraveRegions(
   const cutoutCuts: CutRegion[] = [];
   const cutoutPredicted: OraclePredicted[] = [];
   const tabFindings: JobFinding[] = [];
-  // #218 — the bottom face's removal for the loose-piece analysis: each kerf less the material
-  // its placed tabs keep (the rectangles are wound opposite the kerf, so the positive fill rule
-  // subtracts them), and each cut-out that cut itself free. A cut-out with every requested tab
-  // unplaceable is free too, even though `released-onto-board` is not raised for it — the error
-  // is `tab-unplaceable`; either way the part's disconnection is expected, not a second finding.
-  const cutoutKerfs: Polygons[] = [];
+  // #218/#750 — the bottom face's removal for the loose-piece analysis: each CONTOUR's kerf,
+  // less the material that contour's own placed tabs keep, and each cut-out that cut itself free.
+  // The tabs are kept as BRIDGES (#750): the kerf's width plus a whisker either side, so the
+  // difference joins the part to the waste by area, not only along the kerf's own edges — an
+  // imported outline's off-axis edge is a rounding away from the band, and the tab it was meant
+  // to keep then reads as a loose 38 mm² piece. The difference is per CONTOUR, not per cut-out:
+  // two contours can run a diameter apart, and the neighbour's pass removes material across this
+  // tab's bridge. Subtracting all of a cut-out's tabs from all of its kerfs would punch that
+  // material back into the neighbour's band and hold a part that is really free (#750 bounce).
+  // Faces are combined by UNION after each keeps its own difference. A cut-out with every
+  // requested tab unplaceable is free too, even though `released-onto-board` is not raised for
+  // it — the error is `tab-unplaceable`; either way the part's disconnection is expected, not a
+  // second finding.
+  const cutoutFaces: { kerf: Polygons; tabs: Polygons }[] = [];
   const cutoutReleased: Polygons[] = [];
   // #711 — THE PIECES THE TAPE MUST HOLD. A released cut-out is a piece tape holds INSTEAD of
   // tabs, and its tape area is its footprint eroded by the job's tape inset (the strips stop
@@ -1717,8 +1725,12 @@ export function engraveRegions(
       }
       const kerf = kerfPolygons(path, radius, offset);
       const tabTop = c.thickness - c.tabs.height;
-      const kept = spans.flatMap((one) => tabRectangles(one, radius));
-      cutoutKerfs.push([...kerf, ...kept]);
+      for (let i = 0; i < path.length; i++) {
+        cutoutFaces.push({
+          kerf: kerfPolygons([path[i]!], radius, offset),
+          tabs: tabBridgeRectangles(spans[i] ?? [], radius),
+        });
+      }
       // The part a released cut-out frees is the area ENCLOSED by its centre path. `path` is CW
       // for an inside profile, so it is put back to a fillable winding first: a CW outer reads as
       // empty in the loose-piece cross-section and the part would be counted as the loose piece.
@@ -2138,7 +2150,7 @@ export function engraveRegions(
     tl,
     job.stock,
     regions.filter((r) => r.through === true).map((r) => r.polygons),
-    cutoutKerfs,
+    cutoutFaces,
     cutoutReleased,
   );
 
@@ -2166,10 +2178,19 @@ export function engraveRegions(
  * #218 — the LOOSE-PIECE check, done where the wasm lives.
  *
  * A through cut removes material from the bottom face: a through pocket or drill leaves a hole,
- * and a cut-out leaves its kerf less the rectangles its placed tabs keep. The blank is what is
- * left of the stock after those removals; `decompose()` splits it into its topologically
- * disconnected parts. One part is the blank its tape/glue holds. Any OTHER part with positive
- * area moves when the cutter touches it.
+ * and a cut-out leaves its kerf less the material its placed tabs keep (`cutoutFaces`). The blank
+ * is what is left of the stock after those removals; `decompose()` splits it into its topologically
+ * disconnected parts. One part is the blank its tape/glue holds. Any OTHER part with positive area
+ * moves when the cutter touches it.
+ *
+ * Each CONTOUR's tabs are SUBTRACTED from that contour's own kerf, explicitly, and the resulting
+ * faces are unioned (#750). Two contours can run close enough that one's pass removes material
+ * across the other's tab; cancelling the tab against a union of all removals would punch that
+ * material back out of the neighbour's band and hold a part that is really free. Winding is a
+ * property of the caller's contour, not of the material, so the kept region is normalised and
+ * filled on its own (a union of the bridges, overlapping ones included) before the difference.
+ * `tabBridgeRectangles` widens each bridge a whisker past the band, so the subtraction cannot be
+ * decided by two coincident edges.
  *
  * A cut-out the job deliberately released (no tabs placed) is expected to be one of those parts:
  * it is the piece the operator asked to cut out, and `released-onto-board` (or the error
@@ -2185,10 +2206,10 @@ function loosePieceFindings(
   tl: ManifoldToplevel,
   stock: { length: number; width: number },
   throughPolygons: readonly Polygons[],
-  cutoutKerfs: readonly Polygons[],
+  cutoutFaces: readonly { kerf: Polygons; tabs: Polygons }[],
   releasedParts: readonly Polygons[],
 ): JobFinding[] {
-  const removalPolygons = [...throughPolygons, ...cutoutKerfs].flat();
+  const removalPolygons = [...throughPolygons, ...cutoutFaces.map((face) => face.kerf)].flat();
   if (removalPolygons.length === 0) return [];
   const CS = tl.CrossSection;
   // Every wasm handle made here is deleted in the `finally`, decompose()'s children included.
@@ -2199,8 +2220,23 @@ function loosePieceFindings(
   };
   try {
     const stockCS = own(CS.square([stock.length, stock.width]));
-    const removalCS = own(CS.ofPolygons(removalPolygons));
-    const remaining = own(stockCS.subtract(removalCS));
+    // The through cuts first, then each contour's kerf less its own tabs. Kept apart rather than
+    // unioned into one polygon set, because a tab keeps material only the kerf it belongs to
+    // passed over: a neighbour's pass through the same place still removes it.
+    let removal: ReturnType<typeof CS.ofPolygons> | null =
+      throughPolygons.flat().length === 0 ? null : own(CS.ofPolygons(throughPolygons.flat()));
+    for (const face of cutoutFaces) {
+      const kerf = own(CS.ofPolygons(face.kerf));
+      // `enclosedPath` puts every bridge CCW so the default positive fill is their UNION: two
+      // bridges that overlap keep the overlap, rather than XOR-ing it out (#750).
+      const cut =
+        face.tabs.length === 0
+          ? kerf
+          : own(kerf.subtract(own(CS.ofPolygons(enclosedPath(face.tabs)))));
+      removal = removal === null ? cut : own(removal.add(cut));
+    }
+    if (removal === null) return [];
+    const remaining = own(stockCS.subtract(removal));
     const parts = remaining.decompose().map(own);
     const areas = parts.map((part) => part.area());
     if (areas.filter((area) => area > 1e-6).length <= 1) return [];

@@ -142,26 +142,46 @@ export function kerfPolygons(path: Polygons, toolRadius: number, offset: OffsetF
 }
 
 /**
- * The KEPT material of every tab on this contour, as a rectangle `width` long along the path and
- * `2 × toolRadius` across the kerf. The centre-path span is `width + 2r`, so the rectangle starts
- * one radius in from each span end. Used only for the oracle's `T + breakthrough` level: the
- * through region there is the kerf with these rectangles XORed out.
+ * How far a tab BRIDGE reaches past the kerf's inner and outer edges, mm (#750).
+ *
+ * The bridge must join the part and the waste by AREA. A rectangle that ends exactly on the
+ * band's edges leaves the decision to coincident edges: an axis-aligned edge rounds the same way
+ * on both sides, but an imported outline's off-axis edge rounds a hair away, and the loose-piece
+ * analysis then read the 145.2 mm SVG hexagon's tab as a free 38 mm² piece. A fraction of a
+ * millimetre crosses any such rounding and is far too small to matter to the cut. It must stay
+ * small in the other direction too: a tab may not reach a NEIGHBOURING contour's kerf, or the
+ * bridge would hold material that contour's own pass removes (the two-part bounce of #750).
  */
-export function tabRectangles(spans: readonly ProfileSpan[], toolRadius: number): Polygons {
+export const TAB_BRIDGE_OVERSHOOT_MM = 0.05;
+
+/**
+ * The material a tab keeps, as a BRIDGE for the loose-piece analysis (#750).
+ *
+ * `width` of material along the path, the kerf's own width, and `TAB_BRIDGE_OVERSHOOT_MM` either
+ * side of it. Only material the kerf never removed is added (the part beyond the inner edge and
+ * the waste beyond the outer one), so the removed band is unchanged; the tab joins both sides by
+ * AREA rather than by a shared edge.
+ */
+export function tabBridgeRectangles(spans: readonly ProfileSpan[], toolRadius: number): Polygons {
+  return tabBars(spans, toolRadius, toolRadius + TAB_BRIDGE_OVERSHOOT_MM);
+}
+
+/** One rectangle per span: `inset` in from each span end along the path, `halfWidth` either side. */
+function tabBars(spans: readonly ProfileSpan[], inset: number, halfWidth: number): Polygons {
   const rectangles: Polygons = [];
   for (const span of spans) {
     const dx = span.end[0] - span.start[0];
     const dy = span.end[1] - span.start[1];
     const length = Math.hypot(dx, dy);
-    if (!(length > 2 * toolRadius)) continue;
+    if (!(length > 2 * inset)) continue;
     const ux = dx / length;
     const uy = dy / length;
-    const px = -uy * toolRadius;
-    const py = ux * toolRadius;
-    const ax = span.start[0] + ux * toolRadius;
-    const ay = span.start[1] + uy * toolRadius;
-    const bx = span.end[0] - ux * toolRadius;
-    const by = span.end[1] - uy * toolRadius;
+    const px = -uy * halfWidth;
+    const py = ux * halfWidth;
+    const ax = span.start[0] + ux * inset;
+    const ay = span.start[1] + uy * inset;
+    const bx = span.end[0] - ux * inset;
+    const by = span.end[1] - uy * inset;
     rectangles.push([
       [ax + px, ay + py],
       [bx + px, by + py],

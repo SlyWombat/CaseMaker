@@ -13,7 +13,8 @@ import {
   placeTabs,
   profilePath,
   signedArea,
-  tabRectangles,
+  TAB_BRIDGE_OVERSHOOT_MM,
+  tabBridgeRectangles,
   type ProfileCut,
 } from '@/engine/cnc/cam/profile';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
@@ -124,14 +125,15 @@ describe('kerf and tab rectangles (#218)', () => {
     expect(kerf.filter((c) => signedArea(c) < 0).length).toBe(1);
   });
 
-  it('a tab rectangle is `width` long and one diameter across, wound to subtract', () => {
+  it('a tab bridge is `width` long and reaches a whisker past the kerf either side', () => {
     const span = { startArc: 0, endArc: 7.175, start: [0, 0] as [number, number], end: [7.175, 0] as [number, number] };
-    const [rectangle] = tabRectangles([span], R);
+    const [rectangle] = tabBridgeRectangles([span], R);
     expect(rectangle).toBeDefined();
     const b = bbox([rectangle!]);
     expect(b.x1 - b.x0).toBeCloseTo(7.175 - 2 * R, 6);
-    expect(b.y1 - b.y0).toBeCloseTo(2 * R, 6);
-    expect(signedArea(rectangle!)).toBeLessThan(0);
+    // The kerf is one diameter across; the bridge is that plus the overshoot on each side, so it
+    // MEETS the part and the waste by area instead of on a shared edge (#750).
+    expect(b.y1 - b.y0).toBeCloseTo(2 * R + 2 * TAB_BRIDGE_OVERSHOOT_MM, 6);
   });
 });
 
