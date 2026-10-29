@@ -3907,8 +3907,36 @@ function generateRestPair(
     if (!restOne.ok || restOne.nc === null || restOne.verify === null) break;
     const restRecord: PostedProgram = { ref: restRef, one: restOne, make: makeRest, span: restSpan };
     posted.push(restRecord);
-    const p2 = simulateProgram(tl, restJob, restOne.nc, restTool, calibration, shop, removal ?? undefined);
-    const p2Problem = simRefusal(p2);
+    let p2 = simulateProgram(tl, restJob, restOne.nc, restTool, calibration, shop, removal ?? undefined);
+    let p2Problem = simRefusal(p2);
+    // #765 — THE COLUMN ENGINE CANNOT SEED A REST PASS. A V-bit's program is swept by the column
+    // engine, which answers `prior-removal-column`; it is then checked FROM THE BLANK — its own
+    // cuts, the fixture, the stock and its rapids — exactly as the multi-program walk retries a
+    // dense program from the blank (#746). The rest GEOMETRY was measured against the first
+    // program's removal above, so this is the safety check, not the rest's plan, and the note says
+    // which of the two was done.
+    let sweptFromBlank = false;
+    if (
+      !p2.ok &&
+      removal !== null &&
+      vCone(restTool) !== null &&
+      p2.diagnostics.some((d) => d.code === 'prior-removal-column')
+    ) {
+      p2 = simulateProgram(tl, restJob, restOne.nc, restTool, calibration, shop);
+      p2Problem = simRefusal(p2);
+      sweptFromBlank = true;
+    }
+    if (sweptFromBlank) {
+      findings.push({
+        severity: 'info',
+        code: 'rest-swept-from-blank',
+        message:
+          `${restRef.toolKey} is a V-bit, and the column engine cannot start a program from the material an ` +
+          'earlier one left: its rest program was checked from the blank — its cuts, the fixture and the ' +
+          'stock were all checked, and the rest regions themselves were measured against the first ' +
+          "program's removal.",
+      });
+    }
     if (!p2.ok || p2Problem !== null) {
       findings.push({
         severity: 'error',

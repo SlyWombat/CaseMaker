@@ -320,6 +320,9 @@ export type JobFindingCode =
   // measured, but the first programme already removed everything it can open.
   | 'setup-rest-unavailable'
   | 'setup-rest-nothing'
+  // #765 — a V-bit rest was checked from the blank (the column engine cannot seed a rest pass).
+  // Info: the rest geometry WAS measured against the first program's removal.
+  | 'rest-swept-from-blank'
   // #649 — the fitted surface lifts the blank more than the nominal hop, so every rapid in this
   // program runs higher than usual. A warning: the program is safe (the hop was raised for it), but
   // the operator may prefer to level the top with G32 and keep the nominal clearance.

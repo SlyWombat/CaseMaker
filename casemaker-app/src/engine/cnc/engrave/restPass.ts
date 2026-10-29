@@ -166,12 +166,37 @@ export interface RestToolPick {
  * route says THIS sentence up front rather than measuring "0 mm² of the 0 mm²" and reporting
  * "nothing to clean up". The maintainer's answer (#486, 2026-10-17) is #221's V-carve.
  *
+ * #765 — A RAISED-TEXT REST IS THE CASE WHERE A V IS RIGHT. The flat rough leaves the narrowest
+ * gaps between the standing letters unopened (a sliver of the field the disc cannot enter); the
+ * cone's flank clears exactly that sliver, and how much of the letters it shaves is measured, not
+ * assumed (the pick's edge-loss tolerance, `RAISED_EDGE_LOSS_TOLERANCE_MM`). So a job whose
+ * cutaway leaves construction labels standing takes the V as its rest cutter; every other region
+ * job keeps #486's refusal.
+ *
  * A trace-only job has no regions and takes a V-bit as a normal trace tool, so it is not refused.
  */
 export function vBitRestRefusal(job: EngraveJob, rest: Tool): string | null {
   if (!isVTraceTool(rest)) return null;
   // The same question `recommendTool` asks, so a primitive pocket counts as a region here too.
-  return hasRegionItems(job) ? V_BIT_REST_SENTENCE : null;
+  if (!hasRegionItems(job)) return null;
+  if (hasRaisedTextCutaway(job)) return null;
+  return V_BIT_REST_SENTENCE;
+}
+
+/**
+ * #765 — does this job leave RAISED TEXT standing? The #739 shape, read structurally from the
+ * document rather than from a resolved PartPlan: an enabled cutaway whose islands include a
+ * construction label. The same test `toPartPlan` uses to build `raisedTexts`, so the rest rule
+ * and the measure cannot disagree about which jobs have raised text.
+ */
+export function hasRaisedTextCutaway(job: EngraveJob): boolean {
+  const construction = new Set(job.labels.filter((label) => label.construction === true).map((label) => label.id));
+  if (construction.size === 0) return false;
+  for (const item of [...(job.shapes ?? []), ...(job.combined ?? [])]) {
+    if (item.kind !== 'cutaway' || item.enabled === false || item.construction === true) continue;
+    if (item.islands.some((id) => construction.has(id))) return true;
+  }
+  return false;
 }
 
 /**
