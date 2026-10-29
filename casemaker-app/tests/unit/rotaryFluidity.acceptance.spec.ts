@@ -221,9 +221,9 @@ describe('#756 the program the test asks for — sizes and rates', () => {
     expect(minutes).toBeLessThan(85);
   });
 
-  // The design's `feed-at-radius` warning (`/Rotary.md`, the refusal table): when the surface speed
-  // falls short of F, or the A cap binds, say so. Not implemented; flips when it is.
-  it.fails('#759 — the app warns that the wave sees ~820 mm/min, not the 1200 asked', () => {
+  // #759 — the design's `feed-at-radius` warning (`/Rotary.md`, the refusal table): the firmware's
+  // perimeter scaling leaves the material below F, and the verifier now says so.
+  it('#759 — the app warns that the wave sees ~820 mm/min, not the 1200 asked', () => {
     if (!posted.ok) throw new Error(posted.errors.join('; '));
     const verified = verifyProgram(posted.text.split('\n').slice(0, 400).join('\n'), {
       setup: setup(),

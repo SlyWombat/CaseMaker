@@ -69,6 +69,8 @@ describe('the rotary dialect', () => {
 
   it('a clean wrapped program passes every check', () => {
     const r = report(['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G1 X30 A10 F500', 'G0 Z15']);
+    // #759 review — the ordinary perimeter shortfall is a run-sheet fact, not a finding: a plain
+    // wrapped cut at a below-cap A rate and no Z demand raises nothing at all.
     expect(r.findings).toEqual([]);
     expect(r.ok).toBe(true);
   });
@@ -205,5 +207,40 @@ describe('the rotary refusals — operator words, at the step', () => {
     expect(tooLong).toBeDefined();
     expect(tooLong!.message).toContain('⌀20 × 160 mm');
     expect(tooLong!.message).not.toMatch(CODE);
+  });
+});
+
+// #759 — feed-at-radius (/Rotary.md §1.2, §6.4): the firmware's perimeter scaling, then the A cap,
+// leaves the material slower than F; a warning, never a refusal, in the operator's numbers.
+describe('#759 feed-at-radius', () => {
+  it('warns with the speed the material really sees, and names the A ceiling when it binds', () => {
+    const body = ['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G1 X30 A10 F1200', 'G0 Z15'];
+    const f = finding(body, 'feed-at-radius');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('warning');
+    expect(f!.line).toBe(lineOf(body, 'G1 X30'));
+    expect(f!.message).toMatch(/turns A at \d+ °\/s, its 60 °\/s ceiling/);
+    expect(f!.message).toContain('the material sees about');
+    expect(f!.message).not.toMatch(CODE);
+  });
+
+  it('warns when a simultaneous path asks most of the Z axis, even with A below its cap', () => {
+    // r 9.5 at F600 asks 40 °/s (under the 60 cap), but the move descends 3.5 mm over 10° of A:
+    // the Z axis is asked for ~841 mm/min against its 600 — the demand this warning exists for.
+    const steep = ['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G1 X30 Z6 A10 F600', 'G0 Z15'];
+    const f = finding(steep, 'feed-at-radius');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('warning');
+    expect(f!.message).toContain('the material sees about');
+    expect(f!.message).toContain('not the 600 asked');
+    expect(f!.message).toMatch(/the Z axis alone is asked for \d+ mm\/min of its 600/);
+  });
+
+  it('says nothing on a plain wrapped program or one that does not turn A', () => {
+    // The dowel shape: a constant-Z wrap at F600, A at 40 °/s — under the cap, no Z demand.
+    expect(report(['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G1 X30 A360 F600', 'G0 Z15']).findings).toEqual([]);
+    // And with no A word there is no rotary feed for the firmware to scale.
+    const flat = ['G0 X20 Z15', 'G1 Z9.5 F100', 'G1 X30 F1200', 'G0 Z15'];
+    expect(report(flat).findings.some((f) => f.code === 'feed-at-radius')).toBe(false);
   });
 });

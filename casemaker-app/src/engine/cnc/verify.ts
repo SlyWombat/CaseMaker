@@ -45,8 +45,10 @@ import type { MountObstacle } from './mounts/bracket';
 import { cuttingDiameter, cuttingRadiusForSweep, traceRadiusAt, type Tool } from './tool';
 import {
   envelopeSentence,
+  feedAtRadiusSentence,
   freeEndSentence,
   jawsSentence,
+  type FeedAtRadiusFacts,
   offAxisSentence,
   tailstockSentence,
   throughCentreSentence,
@@ -301,6 +303,15 @@ const isG = (w: SourceWord, code: number): boolean => {
 };
 
 const fmt = (v: number): string => v.toFixed(3);
+
+/**
+ * #759 — `/Rotary.md` §6.4's feed-at-radius row, narrowed to what is WRONG for this cut: the
+ * firmware's +30 mm in the perimeter leaves every rotary cut short of F, so a threshold on the
+ * shortfall would fire on essentially every wrapped program and be noise (the maintainer's rule:
+ * a warning on 100 % of cases is not a warning). The shortfall is a FACT on the run sheet; the
+ * warning is the A cap binding, or a simultaneous path asking this share of the Z axis's ceiling.
+ */
+export const Z_DEMAND_SHARE = 0.8;
 const known3 = (p: Pos): p is [number, number, number] => p[0] !== null && p[1] !== null && p[2] !== null;
 
 /**
@@ -323,8 +334,8 @@ const known3 = (p: Pos): p is [number, number, number] => p[0] !== null && p[1] 
  */
 export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
   const findings: VerifyFinding[] = [];
-  const push = (code: string, line: number | null, message: string): void => {
-    findings.push({ severity: 'error', code, line, message });
+  const push = (code: string, line: number | null, message: string, severity: 'error' | 'warning' = 'error'): void => {
+    findings.push({ severity, code, line, message });
   };
 
   const parse: ParseResult = parseGcode(text);
@@ -422,6 +433,13 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
   }
 
   let cuttingMoves = 0;
+  /**
+   * #759 — the worst `feed-at-radius` fact in the program, pushed once after the loop
+   * (`/Rotary.md` §6.4): the firmware's perimeter scaling leaves the material slower than F, or
+   * the A cap binds, or a simultaneous path asks most of the Z axis's ceiling. A warning: the
+   * program is the one the operator asked for, and the sentence states the speed it really sees.
+   */
+  let feedAtRadius: { line: number; score: number; facts: FeedAtRadiusFacts } | null = null;
   let deepestZ = 0;
   const bboxMin: Vec3 = [Infinity, Infinity, Infinity];
   const bboxMax: Vec3 = [-Infinity, -Infinity, -Infinity];
@@ -644,6 +662,50 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         // ---- #240 slice 2 — the ROTARY frame's cutting refusals, design §3.9/§4 and /Rotary.md
         // §6.4. Sentences come from `rotary/wrap.ts` so the finding panel says the same words.
         if (rotary !== null) {
+          // #759 — feed-at-radius (`/Rotary.md` §1.2, §6.4). The firmware treats F as a surface
+          // speed over the perimeter `2π·r + 30` mm per turn and then caps A at delta_max_rate;
+          // at a rotary job's radii the material sees less than F, and a simultaneous path can ask
+          // most of the Z axis's 600 mm/min. The first/last moves of a pass are skipped by their
+          // own A delta (a plunge does not turn), so the rule reads the interpolating moves only.
+          if (
+            m.mode === 'cut' &&
+            m.feed !== null &&
+            m.a !== null &&
+            lastA !== null &&
+            Math.abs(m.a - lastA) > 1e-9 &&
+            known3(fromW) &&
+            known3(toW)
+          ) {
+            const radiusMm = Math.abs(toW[2]);
+            const perimeter = radiusMm > 1 ? 2 * Math.PI * radiusMm + 30 : 2 * Math.PI + 30;
+            const askedDegPerSec = (m.feed / 60 / perimeter) * 360;
+            const capDegPerSec = (ctx.machine.rotary?.maxRate ?? 3600) / 60;
+            const allowedDegPerSec = Math.min(askedDegPerSec, capDegPerSec);
+            const surfaceMmMin = allowedDegPerSec * (Math.PI / 180) * radiusMm * 60;
+            const dA = Math.abs(m.a - lastA);
+            const zDemandMmMin = (Math.abs(toW[2] - fromW[2]) / dA) * allowedDegPerSec * 60;
+            const capped = askedDegPerSec > capDegPerSec + 1e-9;
+            const zHeavy = zDemandMmMin > Z_DEMAND_SHARE * ctx.machine.rapidEstimate.zMmPerMin;
+            if (capped || zHeavy) {
+              const score = (m.feed - surfaceMmMin) / m.feed;
+              if (feedAtRadius === null || score > feedAtRadius.score) {
+                feedAtRadius = {
+                  line: m.line,
+                  score,
+                  facts: {
+                    radiusMm,
+                    feedMmMin: m.feed,
+                    askedDegPerSec,
+                    capDegPerSec,
+                    allowedDegPerSec,
+                    surfaceMmMin,
+                    zDemandMmMin: zHeavy ? zDemandMmMin : null,
+                    zCapMmMin: ctx.machine.rapidEstimate.zMmPerMin,
+                  },
+                };
+              }
+            }
+          }
           // "cuts through the centre": a cutting floor at or below the axis. The LOWEST end is
           // the honest reading, the same rule the flat tool-edge check takes.
           const zs = [fromW[2], toW[2]].filter((z): z is number => z !== null);
@@ -861,6 +923,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     if (toolNumbers.size > 1) {
       push('multi-tool', null, `the program uses ${toolNumbers.size} distinct tools (${[...toolNumbers].sort((a, b) => a - b).join(', ')}); V1 is single-tool`);
     }
+    if (feedAtRadius !== null) push('feed-at-radius', feedAtRadius.line, feedAtRadiusSentence(feedAtRadius.facts), 'warning');
   }
 
   const bbox = sawAnyPoint

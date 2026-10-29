@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
+import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { defaultEngraveJob, newEngraveLabelId } from '@/engine/cnc/engrave/defaults';
 import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
@@ -376,6 +377,19 @@ describe('Name on a dowel (#240 slice 2, design §7 W)', () => {
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(g.findings.filter((f) => f.severity === 'warning').map((f) => f.code)).toEqual(['item-detail-lost']);
     expect(g.nc).not.toBeNull();
+  });
+
+  it('states the material’s real surface speed on the run sheet, as a fact (#759)', () => {
+    const sheet = buildRunSheet(job, gen(), null);
+    const section = sheet.sections.find((s) => s.id === 'rotary');
+    expect(section?.title).toContain('The rotary feed');
+    const text = section!.steps.map((step) => step.text).join(' ');
+    // r 10 (the ⌀20 rod) and the job's own feed: the firmware's perimeter leaves the material
+    // below F, which is every wrapped job — the sheet states it once, the warning stays for the
+    // two cases that are wrong (the A cap, the Z demand).
+    expect(text).toMatch(/The material sees about \d+ mm\/min at r 10 mm/);
+    expect(text).toContain('the firmware reads F over 2π·r + 30 mm per turn');
+    expect(text).toContain('unverified');
   });
 
   it('is the map’s frame: radius in the header, Y always 0, A from the surface arc', () => {

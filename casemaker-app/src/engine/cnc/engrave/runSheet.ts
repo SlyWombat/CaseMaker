@@ -104,6 +104,7 @@ import { coverageDisclaimer, type SimCoverageInput, type SimRunOutcome } from '@
 // `rotaryFreeSpan`): the coverage sentence the sheet and the panel print quotes them, never a
 // second reading of the job.
 import { neckCarriedBy, neckJawClearanceSentence } from '@/engine/cnc/rotary/neck';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import type { EngraveJob, EngraveMargins, JobStockFinish, ViseParams } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -4218,6 +4219,39 @@ export function buildRunSheet(
           },
         ];
 
+  // #759 — THE ROTARY FEED, AS A FACT. The firmware reads F as a surface speed over `2π·r + 30`
+  // mm per turn and caps A at its own rate, so at a rotary job's radii the material sees less than
+  // F. That is every wrapped job, not a fault: it is stated here, with the radius it belongs to,
+  // and the warning is left to the two cases that ARE wrong for this cut (the A cap binding, or a
+  // simultaneous path asking most of the Z axis). The model is the firmware's, unverified.
+  const rotaryFeedSection =
+    ((): { id: string; title: string; steps: RunSheetStep[] }[] => {
+      const rotary = rotaryMapOf(job);
+      const feeds = generated.feeds;
+      if (rotary === null || feeds === null || !feeds.ok) return [];
+      const feedMmMin = feeds.params.feed;
+      const r = rotary.radius;
+      const perimeter = r > 1 ? 2 * Math.PI * r + 30 : 2 * Math.PI + 30;
+      const askedDegPerSec = (feedMmMin / 60 / perimeter) * 360;
+      const capDegPerSec = (machine.rotary?.maxRate ?? 3600) / 60;
+      const allowedDegPerSec = Math.min(askedDegPerSec, capDegPerSec);
+      const surfaceMmMin = Math.round(allowedDegPerSec * (Math.PI / 180) * r * 60);
+      const r1 = Math.round(r * 10) / 10;
+      return [
+        {
+          id: 'rotary',
+          title: 'The rotary feed',
+          steps: [
+            {
+              text:
+                `The material sees about ${surfaceMmMin} mm/min at r ${r1} mm — the firmware reads F over 2π·r + 30 mm per turn ` +
+                `(from the firmware's model, unverified). F is posted in mm/min; do not convert it yourself.`,
+            },
+          ],
+        },
+      ];
+    })();
+
   const sections: { id: string; title: string; steps: RunSheetStep[] }[] = [
     { id: 'need', title: 'What you need', steps: needSteps },
     ...(reachSteps ? [{ id: 'reach', title: 'What each cutter reaches', steps: reachSteps }] : []),
@@ -4225,6 +4259,7 @@ export function buildRunSheet(
       ? [{ id: 'rest', title: 'Two tools, one blank', steps: restPassSteps(options.restPass) }]
       : []),
     { id: 'mount', title: 'Mount the vise', steps: mountSteps },
+    ...rotaryFeedSection,
     { id: 'load', title: 'Load the blank', steps: loadSteps },
     ...(options.found
       ? [{ id: 'found', title: 'Found position', steps: foundSteps(options.found) }]

@@ -276,6 +276,50 @@ export function throughCentreSentence(z: number): string {
   return `cuts through the centre: the cutter tip reaches ${Math.abs(Math.round(z * 1000) / 1000)} mm past the axis, and ${foot} — use a shallower depth or a larger diameter`;
 }
 
+/** The facts behind the feed-at-radius warning (`/Rotary.md` §1.2, §6.4). */
+export interface FeedAtRadiusFacts {
+  /** The cut's radius from the axis, mm — the firmware's `r` at the move's target. */
+  radiusMm: number;
+  /** The commanded feed, mm/min. */
+  feedMmMin: number;
+  /** The A rate the firmware's perimeter scaling asks for, °/s (before the cap). */
+  askedDegPerSec: number;
+  /** The A axis's ceiling, °/s. */
+  capDegPerSec: number;
+  /** The A rate the axis really runs at, °/s (asked, capped). */
+  allowedDegPerSec: number;
+  /** The surface speed the material sees, mm/min. */
+  surfaceMmMin: number;
+  /** What the Z axis is asked for on a simultaneous path, mm/min; null when Z does not move. */
+  zDemandMmMin: number | null;
+  /** The Z axis's ceiling, mm/min. */
+  zCapMmMin: number;
+}
+
+/**
+ * "the firmware's feed scaling reads this cut at radius …" — the feed-at-radius warning
+ * (`/Rotary.md` §6.4). The firmware treats F as a surface speed over the perimeter `2π·r + 30`
+ * mm per turn and then caps A at its own rate, so at the radii a rotary job uses the material
+ * sees less than F; on a simultaneous path it also asks the Z axis for a share of its ceiling.
+ * A warning, in the operator's numbers — never a refusal.
+ */
+export function feedAtRadiusSentence(f: FeedAtRadiusFacts): string {
+  const whole = (n: number): number => Math.round(n);
+  const r = Math.round(f.radiusMm * 10) / 10;
+  const capped = f.askedDegPerSec > f.capDegPerSec + 1e-9;
+  const head =
+    `the firmware's rotary feed scaling reads this cut at radius ${r} mm: F ${whole(f.feedMmMin)} mm/min turns A at ` +
+    `${whole(f.allowedDegPerSec)} °/s` +
+    (capped ? `, its ${whole(f.capDegPerSec)} °/s ceiling` : '') +
+    `, and the material sees about ${whole(f.surfaceMmMin)} mm/min` +
+    (capped ? '' : `, not the ${whole(f.feedMmMin)} asked`);
+  const z =
+    f.zDemandMmMin !== null && f.zDemandMmMin > 0
+      ? `; the Z axis alone is asked for ${whole(f.zDemandMmMin)} mm/min of its ${whole(f.zCapMmMin)}`
+      : '';
+  return head + z;
+}
+
 /** "leaves the line over the axis" — work Y is not 0 (R1). */
 export function offAxisSentence(y: number): string {
   return `leaves the line over the axis (Y ${Math.round(y * 1000) / 1000} mm): a rotary program keeps the cutter over the axis, and every Y is 0`;
