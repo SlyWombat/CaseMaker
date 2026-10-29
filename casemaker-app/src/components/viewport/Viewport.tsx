@@ -72,10 +72,18 @@ const VIEW_UP: Record<ViewportCameraMode, [number, number, number]> = {
   side: [0, 0, 1],
 };
 
-/** How far back a perspective camera must sit to frame `diag` with margin. */
+/**
+ * How far back a perspective camera must sit to frame `diag` with margin.
+ *
+ * #761 — BOTH axes: the panel's viewport is often tall and narrow (the rail is ~344 px wide), so a
+ * horizontal field computed from the vertical FOV alone crops a wide picture — the Unroll map's
+ * 100 mm length is wider than the visible field. The tighter of the two half-angles decides the
+ * distance, so the whole of what is on screen fits whichever way the viewport is shaped.
+ */
 function framingDistance(camera: THREE.PerspectiveCamera, diag: number): number {
-  const fov = (camera.fov * Math.PI) / 180;
-  return ((diag / 2) / Math.tan(fov / 2)) * 1.15;
+  const vFov = (camera.fov * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  return (diag / 2 / Math.min(Math.tan(vFov / 2), Math.tan(hFov / 2))) * 1.15;
 }
 
 /** The boxes the simulation currently draws: its stock, plus one per fixture obstacle (#204). */
@@ -297,6 +305,41 @@ type OrbitControlsLike = {
  * Canvas, so they reach the camera through a window event: the stores hold no three objects, and
  * this keeps every piece of camera maths (presets, framing, zoom) in one file.
  */
+/**
+ * #761 — STOCK | UNROLL CHANGES WHAT IS ON SCREEN, and the new design's frame arrives a beat after
+ * the switch. The preset and AutoFrame controllers fire on their own events, so without this the
+ * camera stays where the OTHER view's bounds put it: the map's first picture is a corner of the
+ * rod's box, not the opened surface. Frame once per switch, on the first frame of the design now
+ * shown, keeping the view direction the user is in (Fit's rule).
+ */
+function DesignReframe() {
+  const design = useSimStore((s) => s.design);
+  const frameDesign = useSimStore((s) => s.frame?.design ?? null);
+  const cameraMode = useViewportStore((s) => s.cameraMode);
+  const { camera, controls } = useThree() as {
+    camera: THREE.PerspectiveCamera;
+    controls: { target: THREE.Vector3; update?: () => void } | null;
+  };
+  // The design already framed at mount: a load's first frame is AutoFrame's, not this effect's.
+  const framedFor = useRef(design);
+  useEffect(() => {
+    if (frameDesign === null || frameDesign !== design) return;
+    if (framedFor.current === design) return;
+    framedFor.current = design;
+    const bounds = activeSceneBoundsFromStores();
+    if (!bounds || !controls || !controls.target) return;
+    // The MODE's canonical direction, not wherever the camera happens to be: the frame can arrive
+    // before or after a preset click, and the switch must leave the chosen view framed either way.
+    camera.up.set(...VIEW_UP[cameraMode]);
+    const dir = new THREE.Vector3(...VIEW_DIRS[cameraMode]).normalize();
+    camera.position.copy(bounds.center.clone().add(dir.multiplyScalar(framingDistance(camera, bounds.diag))));
+    controls.target.copy(bounds.center);
+    camera.lookAt(bounds.center);
+    controls.update?.();
+  }, [design, frameDesign, cameraMode, camera, controls]);
+  return null;
+}
+
 function ViewportCameraController() {
   const { camera, controls } = useThree() as {
     camera: THREE.PerspectiveCamera;
@@ -422,6 +465,7 @@ export function Viewport() {
           />
           <CameraModeController />
           <AutoFrame />
+          <DesignReframe />
           <ViewportCameraController />
           {!simActive && !engraveActive && <GridFloor />}
           <SceneMeshes />

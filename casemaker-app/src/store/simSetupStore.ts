@@ -44,6 +44,7 @@ import {
 } from '@/engine/cnc/headerMatch';
 import { toolFromMkrRecord } from '@/engine/cnc/tool';
 import { rectProfile } from '@/engine/compiler/profile';
+import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
 import { useSettingsStore } from './settingsStore';
 import { shopDefault } from './shopDefaultsStore';
 import type { Setup, StartingTool } from '@/engine/cnc';
@@ -57,12 +58,23 @@ import type { Setup, StartingTool } from '@/engine/cnc';
 export type FieldSource = 'header' | 'user' | 'picked' | 'default';
 
 export interface SimStock {
-  /** X, mm. */
+  /** X, mm. For a rod, its LENGTH along the axis. */
   length: number;
-  /** Y, mm. */
+  /** Y, mm. For a rod, the box around it (width = thickness = diameter). */
   width: number;
   /** Z, mm. */
   thickness: number;
+  /**
+   * #761 — `'rod'` says ROUND stock in the rotary chuck, in the axis frame the CAM plans in:
+   * `length` runs along X, and the box's width and thickness are the diameter. ABSENT is the
+   * rectangle every non-rotary file gets — the same word the job schema uses (#240).
+   */
+  shape?: 'rod';
+  /**
+   * The rod's outer diameter, mm — present iff `shape` is `'rod'`. 0 means the file moves A but
+   * states no radius, so the operator must give it before Simulate can build the setup.
+   */
+  diameter?: number;
 }
 
 export interface SimHeaderDiagnostic {
@@ -79,7 +91,14 @@ export interface SimSetupState {
    */
   openedAt: number | null;
   stock: SimStock;
-  stockSource: { length: FieldSource; width: FieldSource; thickness: FieldSource };
+  stockSource: {
+    length: FieldSource;
+    width: FieldSource;
+    thickness: FieldSource;
+    /** #761 — present only while the stock is a rod; absent for every prism. */
+    shape?: FieldSource;
+    diameter?: FieldSource;
+  };
   /** A tool registry key (#305); null = "tool required". */
   toolKey: string | null;
   toolSource: FieldSource | null;
@@ -184,6 +203,12 @@ export const useSimSetupStore = create<SimSetupState>()((set, get) => ({
     set({ openedAt: Date.now() });
     const parsed = parseGcode(text);
     const fromHeader = setupFromHeader(parsed.header);
+    // #761 — a file that moves A is rotary work: the form offers a ROD in the chuck instead of the
+    // prism box. Our own post writes the radius (`;@CM|ROTARY|radius=`, kept by the parser); a
+    // vendor file states none, so the diameter starts at 0 and the form asks for it.
+    const usesRotary = parsed.summary.usesRotary;
+    const statedRadius = parsed.header?.cm?.rotary?.radius ?? null;
+    const headerRodDiameter = statedRadius !== null ? 2 * statedRadius : null;
 
     // What THIS file says, before the user's own edits are laid over it. With no header stock, the
     // blank is the shop's (#451), read here so a location that answered since this store loaded
@@ -234,12 +259,38 @@ export const useSimSetupStore = create<SimSetupState>()((set, get) => ({
       // brings the stock in — and the reverse. `reset()` is the only way back (#315). A `'picked'`
       // claim is NOT one of these: it belongs to the signature it was made for, and this open has
       // just worked out whether it still answers (#316).
-      const stock = { ...s.stock };
+      const stock: SimStock = { ...s.stock };
       const stockSource = { ...s.stockSource };
       for (const field of ['length', 'width', 'thickness'] as const) {
         if (s.stockSource[field] === 'user') continue;
         stock[field] = headerStock[field];
         stockSource[field] = headerSource[field];
+      }
+      // #761 — the SHAPE follows the file: a program with an A word is round stock in the chuck,
+      // and one without is the prism box. Only a user's own claim outranks it (the shape row is
+      // not editable today, so in practice the file decides). The rod's box is its diameter.
+      if (usesRotary && s.stockSource.shape !== 'user') {
+        stock.shape = 'rod';
+        stockSource.shape = 'header';
+        if (s.stockSource.diameter !== 'user') {
+          stock.diameter = headerRodDiameter ?? 0;
+          stockSource.diameter = headerRodDiameter !== null ? 'header' : 'default';
+          if (s.stockSource.width !== 'user') {
+            stock.width = stock.diameter;
+            stockSource.width = stockSource.diameter;
+          }
+          if (s.stockSource.thickness !== 'user') {
+            stock.thickness = stock.diameter;
+            stockSource.thickness = stockSource.diameter;
+          }
+        }
+      } else if (!usesRotary && s.stockSource.shape !== 'user') {
+        delete stock.shape;
+        delete stockSource.shape;
+        if (s.stockSource.diameter !== 'user') {
+          delete stock.diameter;
+          delete stockSource.diameter;
+        }
       }
       const keepTool = s.toolSource === 'user';
       const headerDiagnostics: SimHeaderDiagnostic[] = fromHeader.diagnostics.map((d) => ({
@@ -311,7 +362,16 @@ export const useSimSetupStore = create<SimSetupState>()((set, get) => ({
       for (const key of Object.keys(patch) as (keyof SimStock)[]) {
         if (patch[key] !== undefined) stockSource[key] = 'user';
       }
-      return { stock: { ...s.stock, ...patch }, stockSource };
+      const stock: SimStock = { ...s.stock, ...patch };
+      // #761 — a rod's box is its diameter: editing the diameter carries width and thickness with
+      // it, so the two representations of the same fact cannot disagree.
+      if (stock.shape === 'rod' && patch.diameter !== undefined) {
+        stock.width = patch.diameter;
+        stock.thickness = patch.diameter;
+        stockSource.width = 'user';
+        stockSource.thickness = 'user';
+      }
+      return { stock, stockSource };
     });
   },
   setTool(key) {
@@ -334,6 +394,29 @@ export const useSimSetupStore = create<SimSetupState>()((set, get) => ({
 }));
 
 /**
+ * #761 — the chuck facts a rod in the Simulate form is held by: the Holding step's own rule
+ * (`defaultRotaryChuck`), fed the shop's grip, so the stick-out is the rod's length less it and the
+ * tailstock is in. Shared by the setup builder and the panel's holding line, so the number the
+ * operator reads is the number the sweep uses.
+ */
+export function rodChuckFor(stock: SimStock): ReturnType<typeof defaultRotaryChuck> {
+  const diameter = stock.diameter ?? stock.width;
+  return defaultRotaryChuck(
+    {
+      stock: {
+        material: 'softwood',
+        shape: 'cylinder',
+        length: stock.length,
+        width: diameter,
+        thickness: diameter,
+        diameter,
+      },
+    },
+    shopDefault('rotary.gripMm').value,
+  );
+}
+
+/**
  * The `Setup` a load runs with (#196 §4). A pure function so the test can assert it without a
  * store. `startingTool` is a UI choice only because a program cannot know the machine's starting
  * tool: the Z1's `M6`-to-the-already-active-tool is a no-op, so the first `T1 M6` is only
@@ -341,6 +424,20 @@ export const useSimSetupStore = create<SimSetupState>()((set, get) => ({
  * value the `LED/ACRYLIC-Balloon.nc` session test uses.
  */
 export function buildSimSetup(stock: SimStock, startingTool: StartingTool = 'unknown'): Setup {
+  // #761 — a rotary file's stock is a rod in the chuck: a cylinder part and the Holding step's own
+  // chuck facts (the shop's grip, so the stick-out is the rod's length less the grip). The column
+  // engine and the exact sweeper both place a cylinder's work origin on the axis.
+  if (stock.shape === 'rod') {
+    const diameter = stock.diameter ?? stock.width;
+    if (!(diameter > 0)) throw new Error('a rod needs a diameter above 0 mm');
+    const chuck = rodChuckFor(stock);
+    return stubSetup(
+      { kind: 'cylinder', diameter, length: stock.length },
+      { kind: 'rotary-chuck', jawDiameter: chuck.gripDiameter ?? diameter, stickout: chuck.stickout },
+      { startingTool },
+      Z1,
+    );
+  }
   const outline = rectProfile(stock.length, stock.width);
   return stubSetup(
     { kind: 'prism', outline, thickness: stock.thickness },

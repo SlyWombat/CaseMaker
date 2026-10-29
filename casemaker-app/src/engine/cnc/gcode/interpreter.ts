@@ -68,6 +68,11 @@ class Interp {
    * foreign file carrying one is not an error the operator can act on.
    */
   cmToolKey: string | null = null;
+  /**
+   * The radius a `;@CM|ROTARY|radius=` line states (#761), or null. The FIRST valid one wins, and
+   * like the tool key it only prefills a form: the Simulate panel offers a rod of this diameter.
+   */
+  cmRotaryRadius: number | null = null;
 
   // ---- modal state -------------------------------------------------------
   private scale = 1;
@@ -87,7 +92,6 @@ class Interp {
 
   // ---- once-per-file noise guards ---------------------------------------
   private warnedNoFeed = false;
-  private warnedRotary = false;
 
   // ---- summary -----------------------------------------------------------
   lines = 0;
@@ -146,6 +150,10 @@ class Interp {
       if (cm.tag === 'TOOL' && this.cmToolKey === null) {
         const key = cm.fields['key'];
         if (key !== undefined && key !== '') this.cmToolKey = key;
+      }
+      if (cm.tag === 'ROTARY' && this.cmRotaryRadius === null) {
+        const r = Number(cm.fields['radius']);
+        if (Number.isFinite(r) && r > 0) this.cmRotaryRadius = r;
       }
       return;
     }
@@ -546,11 +554,9 @@ class Interp {
     }
     const aw = this.word(words, 'A');
     if (aw) {
+      // #761 — an A word is ordinary rotary work now (#239/#241/#716): the timeline's rotaryClass
+      // routes it, so there is no "tracked but not interpreted" warning to raise here.
       this.usesRotary = true;
-      if (!this.warnedRotary) {
-        this.warnedRotary = true;
-        this.diag('info', 'rotary-axis', line, 'an A word appears: the rotary axis is tracked but not interpreted, and V1 does not simulate rotary work');
-      }
       this.a = relative && this.a !== null ? this.a + aw.value : aw.value;
     }
 
@@ -840,10 +846,15 @@ export function parseGcode(source: string): ParseResult {
   const lines = splitLines(source);
   for (let i = 0; i < lines.length; i++) it.handleLine(lines[i] as string, i + 1);
   // A `;@CM|` line is header data too (#332), so a file carrying only ours still has a header.
+  const cm: MkrHeader['cm'] | undefined =
+    it.cmToolKey !== null || it.cmRotaryRadius !== null
+      ? {
+          ...(it.cmToolKey !== null ? { tool: { key: it.cmToolKey } } : {}),
+          ...(it.cmRotaryRadius !== null ? { rotary: { radius: it.cmRotaryRadius } } : {}),
+        }
+      : undefined;
   const header: MkrHeader | null =
-    it.headerRecords.length > 0 || it.cmToolKey !== null
-      ? { records: it.headerRecords, ...(it.cmToolKey !== null ? { cm: { tool: { key: it.cmToolKey } } } : {}) }
-      : null;
+    it.headerRecords.length > 0 || cm !== undefined ? { records: it.headerRecords, ...(cm ? { cm } : {}) } : null;
   return {
     events: it.events,
     diagnostics: it.diagnostics,

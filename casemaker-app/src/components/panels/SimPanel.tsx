@@ -1,6 +1,6 @@
 import { featureSim } from '@/platform/features';
 import { useState, type CSSProperties, type DragEvent, type JSX } from 'react';
-import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
+import { useSimSetupStore, buildSimSetup, rodChuckFor } from '@/store/simSetupStore';
 import { isSimSceneActive, useSimStore } from '@/store/simStore';
 import { resolveTool, Z1 } from '@/engine/cnc';
 import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
@@ -202,7 +202,12 @@ export function SimPanel() {
   const job = useEngraveJobStore((s) => s.job);
   const jobToolEntry = tools.find((e) => e.key === job.toolKey) ?? null;
   const loading = status === 'loading';
-  const canSimulate = gcodeText !== null && tool !== null && !loading;
+  // #761 — a file that moves A is a ROD in the rotary chuck: its diameter is prefilled from the
+  // file's own ROTARY record when it has one (0 = the form still needs it).
+  const rod = stock.shape === 'rod';
+  const rodDiameter = stock.diameter ?? 0;
+  const rodChuck = rod && rodDiameter > 0 ? rodChuckFor(stock) : null;
+  const canSimulate = gcodeText !== null && tool !== null && !loading && (!rod || rodDiameter > 0);
 
   /**
    * #506 — this panel presents only a session it started, for the program in its own form. The
@@ -513,10 +518,49 @@ export function SimPanel() {
 
       {/* 2 — stock */}
       <h3 style={SUBHEAD}>Stock</h3>
-      {stockRow('length', 'length X')}
-      {stockRow('width', 'width Y')}
-      {stockRow('thickness', 'thickness')}
-      <p style={MUTED}>Z = 0 at the stock’s top face; material at negative Z.</p>
+      {rod ? (
+        <>
+          {/* #761 — an A word means round stock in the chuck, not a box on the bed. The rod is the
+              axis frame: length along X, diameter across; the holding facts are the Holding step's. */}
+          <p style={MUTED} data-testid="sim-rotary-file">
+            This file moves A, so the stock is a rod in the rotary chuck.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ minWidth: 62, fontSize: 12 }}>diameter</span>
+            <input
+              type="number"
+              step="any"
+              min={0}
+              value={rodDiameter}
+              data-testid="sim-stock-diameter"
+              aria-label="Rod diameter"
+              title="The rod's outer diameter in mm — the box the CAM plans in. Prefilled from the file when it states a rotary radius."
+              style={FIELD}
+              onChange={(e) => setStock({ diameter: Number(e.target.value) })}
+            />
+            {stockSource.diameter === 'header' && <span style={TAG}>from file header</span>}
+          </div>
+          {stockRow('length', 'length X')}
+          {rodDiameter <= 0 && (
+            <p style={{ ...MUTED, color: '#e0a19b' }} data-testid="sim-rod-required">
+              Enter the rod’s diameter — this file moves A, and it states no radius.
+            </p>
+          )}
+          {rodChuck !== null && (
+            <p style={MUTED} data-testid="sim-rod-holding">
+              stick-out {rodChuck.stickout} mm · tailstock in — the Holding step’s own answer
+            </p>
+          )}
+          <p style={MUTED}>Z = 0 at the rotary axis; Z is the radius above it.</p>
+        </>
+      ) : (
+        <>
+          {stockRow('length', 'length X')}
+          {stockRow('width', 'width Y')}
+          {stockRow('thickness', 'thickness')}
+          <p style={MUTED}>Z = 0 at the stock’s top face; material at negative Z.</p>
+        </>
+      )}
 
       {/* 3 — tool */}
       <h3 style={SUBHEAD}>Tool</h3>

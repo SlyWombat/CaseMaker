@@ -294,11 +294,19 @@ describe('motion, units and modes', () => {
     expect(moves(r).map((m) => m.power)).toEqual([0.5, null]);
   });
 
-  it('tracks the A axis without interpreting it', () => {
+  it('tracks the A axis, and no longer calls it uninterpreted (#761)', () => {
     const r = parseGcode('G1 X1 A90 F100\n');
     expect(r.summary.usesRotary).toBe(true);
     expect(moves(r)[0]?.a).toBe(90);
-    expect(codes(r)).toContain('rotary-axis');
+    // #239/#241/#716 simulate rotary work; the old info diagnostic went with #761.
+    expect(codes(r)).not.toContain('rotary-axis');
+  });
+
+  it('keeps the file’s own ROTARY radius as a form hint (#761)', () => {
+    const r = parseGcode(';@CM|ROTARY|radius=10\nG1 X1 A90 F100\n');
+    expect(r.header?.cm?.rotary).toEqual({ radius: 10 });
+    // A malformed or non-positive radius is ignored rather than reported: the line is ours.
+    expect(parseGcode(';@CM|ROTARY|radius=-3\nG1 X1 A90 F100\n').header?.cm?.rotary).toBeUndefined();
   });
 
   it('G10 L2 is carried raw and NOT applied (the WCS lives in the controller)', () => {

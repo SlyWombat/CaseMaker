@@ -278,6 +278,11 @@ export interface MkrRecord {
  */
 export interface CmHeader {
   tool?: { key: string };
+  /**
+   * #761 — the file's own rotary record (`;@CM|ROTARY|radius=`), when our post wrote one. The
+   * Simulate form offers a rod of this diameter; like every header field it only PREFILLS a form.
+   */
+  rotary?: { radius: number };
 }
 
 export interface MkrHeader {
@@ -296,7 +301,11 @@ export interface ParseSummary {
   /** An `M321` appeared: this is a laser job and a mill simulation must refuse it. */
   laser: boolean;
   usesArcs: boolean;
-  /** An `A` word appeared. Tracked, not interpreted; V1 does not simulate rotary. */
+  /**
+   * An `A` word appeared. The timeline's `rotaryClass` decides which engine takes the program
+   * (#239: wrapped → the column engine, indexed → the exact sweeper); this flag just says the
+   * program moves the axis at all.
+   */
   usesRotary: boolean;
   /** Any `G20` appeared (converted to mm at ingest). */
   usesInches: boolean;

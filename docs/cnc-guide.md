@@ -359,7 +359,7 @@ by source (parser / runner / sweep) with errors first and true per-code counts.
 instead of guessing:
 
 - **A laser job** (`M321`): a mill simulation refuses it rather than drawing a cut.
-- **A rotary job** (an `A` axis move): V1 does not simulate rotary work.
+- **A rotary job** (an `A` axis move): the timeline's class routes it — a wrapped program to the column engine, an indexed one (A held per run) to the exact sweeper (#239/#241/#716).
 - **A 3D or dense job**: too many separate Z levels for the 2.5D sweep. When this happens the
   **tool path is still drawn** so you can inspect the file; the stock is not, because the
   sweep that would produce it was refused. A **Try again with a longer limit** button may
@@ -1319,7 +1319,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `no-arc-centre-mode` | error | `G90.1`/`G91.1` are the arc-centre-mode pair, and this firmware has no arc-centre mode: `I`/`J`/`K` are always incremental. The distance mode is left unchanged, not reinterpreted. | Use plain `G90`/`G91`; this is not our post's output. |
 | `unknown-g28-subcode` | error | `G28.<n>` carries a subcode, and the dialect records only plain `G28` (the clearance position, not home). Whether the firmware matches the plain code's prefix on it is unverified, so the position is left unchanged and the file is treated as foreign — the same shape as `G90.1`/`G91.1`. | Use plain `G28`; this is not our post's output. |
 | `atc-self-check` | warning | A bare `M490` is the ATC motor self-check, which this machine (no ATC) does not have. | Remove it. |
-| `rotary-axis` | info | An `A` word: the rotary axis is tracked but not interpreted. | V1 does not simulate rotary work. |
+| `rotary-axis` | — | Retired by #761: rotary work is simulated, so the parser no longer warns on an `A` word. | — |
 
 **Running the program** (runner):
 
