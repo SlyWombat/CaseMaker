@@ -19,7 +19,7 @@ import type { MountObstacle, MountObstacles } from '@/engine/cnc/mounts';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { UNMEASURED_FEEDS_TABLE, type FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
+import { buildRunSheet, FRAME_Z } from '@/engine/cnc/engrave/runSheet';
 import { defaultBoundaryMargin } from '@/engine/cnc/engrave/depthBounds';
 import { labelGlyphMeasure, traceSelfOverlaps, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
@@ -955,6 +955,63 @@ describe('the frame file (#244)', () => {
     expect(trace(18).z).toBe(20);
   });
 
+  it('raises the trace above the design height to clear a mount the WCS can reach over (#747)', () => {
+    // The design's 20 mm is the MINIMUM air clearance, not a ceiling. A MEASURED work origin may sit
+    // lower than the stub's -20, so the machine can reach higher; the trace is then raised to the
+    // height the clamps (and arms) need. Withholding is only for a top that cannot clear them.
+    const base = stubSetup(
+      { kind: 'prism', outline: rectProfile(100, 100), thickness: 12 },
+      { kind: 'tape-down', contact: rectProfile(100, 100) },
+      { startingTool: 1 },
+      Z1,
+    );
+    // The same blank with its work origin measured 30 mm below the machine's Z top: 30 mm of reach.
+    const setup: Setup = {
+      ...base,
+      wcs: { ...base.wcs, origin: [base.wcs.origin[0], base.wcs.origin[1], -30] },
+    };
+    const mount: MountObstacles = {
+      obstacles: [
+        { id: 'clamp', kind: 'clamp', label: 'the clamp', fix: 'move it', min: [0, 0], max: [10, 10], topZ: 22 },
+      ],
+      uncertainty: 0.1,
+      fixture: { boxes: [], source: 'default', uncertainty: 0.1 },
+    };
+    const h = frameTraceZ(setup, Z1, mount, 1);
+    if ('error' in h) throw new Error(h.error);
+    // 22 (clamp top) + 0.1 (fit) + 1 (clearance) — above FRAME_Z because the clamps need it.
+    expect(h.z).toBe(23.1);
+    expect(h.z).toBeGreaterThan(FRAME_Z);
+    expect(h.z + setup.wcs.origin[2]).toBeLessThanOrEqual(Z1.envelope.z.max);
+  });
+
+  it('withholds the trace only when the reachable top itself cannot clear the mount (#747)', () => {
+    // 30 mm of reach and a mount needing 31.1 mm: no trace height can clear it. The reason names the
+    // TOP the frame can reach, not the 20 mm design height it used to be capped at.
+    const base = stubSetup(
+      { kind: 'prism', outline: rectProfile(100, 100), thickness: 12 },
+      { kind: 'tape-down', contact: rectProfile(100, 100) },
+      { startingTool: 1 },
+      Z1,
+    );
+    const setup: Setup = {
+      ...base,
+      wcs: { ...base.wcs, origin: [base.wcs.origin[0], base.wcs.origin[1], -30] },
+    };
+    const mount: MountObstacles = {
+      obstacles: [
+        { id: 'clamp', kind: 'clamp', label: 'the clamp', fix: 'move it', min: [0, 0], max: [10, 10], topZ: 30 },
+      ],
+      uncertainty: 0.1,
+      fixture: { boxes: [], source: 'default', uncertainty: 0.1 },
+    };
+    const h = frameTraceZ(setup, Z1, mount, 1);
+    if (!('error' in h)) throw new Error('expected the trace to be withheld');
+    expect(h.error).toContain('30 mm above the work');
+    expect(h.error).toContain('31.1 mm');
+    expect(h.error).toContain('clamps or arms');
+  });
+
   it('withholds the trace when the mount stands above every reachable height (#747)', () => {
     const setup = stubSetup(
       { kind: 'prism', outline: rectProfile(100, 100), thickness: 12 },
@@ -973,9 +1030,10 @@ describe('the frame file (#244)', () => {
     expect('error' in h).toBe(true);
     if ('error' in h) {
       // The reason names both bounds: the highest place the file can go and the height the
-      // clamps need (top 30 + fit 0.1 + clearance 1).
+      // clamps or arms need (top 30 + fit 0.1 + clearance 1).
       expect(h.error).toContain('20 mm above the work');
       expect(h.error).toContain('31.1 mm');
+      expect(h.error).toContain('clamps or arms');
     }
   });
 

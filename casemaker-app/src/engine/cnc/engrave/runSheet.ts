@@ -803,11 +803,12 @@ export function formatDuration(seconds: number): string {
 /**
  * The height the frame file WANTS to trace at, mm above the top face (#244): #207 §6's 20 mm air
  * clearance, baked into the file instead of an offset the operator sets and must remember to
- * clear. It is a design height, not always the height in the file: `frameTraceZ` (in
- * `workers/sim/engraveGenerate.ts`) clamps it to the highest work Z this setup can reach inside the
- * machine's Z envelope and withholds the trace when the mount cannot be cleared (#747). The sheet
- * reads the height the worker actually used (`frameZ`), never this constant, so the printed number
- * and the G-code cannot disagree.
+ * clear. It is a MINIMUM, not always the height in the file: `frameTraceZ` (in
+ * `workers/sim/engraveGenerate.ts`) raises it to clear the clamps and arms wherever the setup's
+ * WCS reaches, clamps it to the highest work Z inside the machine's Z envelope, and withholds the
+ * trace only when even that top cannot clear the mount (#747, review 2026-10-28). The sheet reads
+ * the height the worker actually used (`frameZ`), never this constant, so the printed number and
+ * the G-code cannot disagree.
  */
 export const FRAME_Z: Mm = 20;
 
@@ -3663,7 +3664,8 @@ export function buildRunSheet(
   // #244 — the frame file replaces the manual "raise Z by 20 mm" offset. Its Z is baked in, so
   // there is nothing for the operator to set (or to forget to clear), and it is a separate file,
   // so it cannot be confused with the job. The height printed is the worker's own `frameZ`
-  // (#747): the design's `FRAME_Z` clamped to what the machine and any mount can reach.
+  // (#747): the design's `FRAME_Z`, raised to clear the mount and clamped to what the machine can
+  // reach.
   //
   // A null `frameNc` is not hypothetical (#273): a job program the verifier refuses comes back
   // with `nc` and `verify` populated but NO frame (the frame is derived after both gates), and

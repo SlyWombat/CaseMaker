@@ -105,6 +105,10 @@ import { findItem, itemName } from '@/engine/cnc/engrave/recommendTool';
 import { unionRemoval, restMachining, type RestRegion, type RestResult } from './engraveRest';
 import { createSimSession, type SimLoadOk, type SimLoadResult } from './session';
 import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
+// #747 review — the one sentence normaliser (`#724 W5`): a cause that already ends in a full stop
+// must not grow a second one. `engraveRunGate` imports types and `simGate` only, so it is safe in
+// the worker and the CLI.
+import { withPeriod } from '@/store/engraveRunGate';
 import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { validateVise } from '@/engine/cnc/fixture';
@@ -622,10 +626,11 @@ export interface EngraveGenerated {
    */
   frameVerify: VerifyReport | null;
   /**
-   * #747 — the WORK Z the frame traced at, in mm above the blank's top face. `frameTraceZ` clamps
-   * the design's 20 mm air clearance to what this setup can reach inside the machine's Z envelope
-   * (a thick blank's WCS origin, or a measured one, can be a float hair below the ceiling), so the
-   * sheet prints this number rather than the constant. Null when no frame file was produced.
+   * #747 — the WORK Z the frame traced at, in mm above the blank's top face. `frameTraceZ` raises
+   * the design's 20 mm air clearance to clear the clamps and arms wherever this setup's WCS
+   * reaches, then clamps it to what the machine's Z envelope allows (a thick blank's WCS origin,
+   * or a measured one, can be a float hair below the ceiling), so the sheet prints this number
+   * rather than the constant. Null when no frame file was produced.
    * Optional: a result stored before #747 reads as `FRAME_Z`, which is what it was traced at.
    */
   frameZ?: Mm | null;
@@ -2542,15 +2547,18 @@ function mountCtx(
  * do not cancel exactly in floating point for every thickness. On a 22.8 mm blank the WCS origin
  * lands on -19.999999999999996, so a trace at work Z 20 posts to machine Z 0.0000000000000036:
  * five femtometres above the envelope's top, refused by the verifier as five `outside-envelope`
- * errors that print as `0.000` (#747). The rule is therefore not "always 20": it is the lower of
- * the design's 20 mm air clearance and the highest WORK height whose POSTED form (the machine's
- * own axis precision, three decimals on the Z1) still lands inside the machine's Z envelope — with
- * a margin below the envelope top if the float does not agree.
+ * errors that print as `0.000` (#747). The reachable height is therefore not "always 20": it is
+ * the highest WORK height whose POSTED form (the machine's own axis precision, three decimals on
+ * the Z1) still lands inside the machine's Z envelope — with a margin below the envelope top if
+ * the float does not agree.
  *
- * AND IT MUST CLEAR THE MOUNT (#710's rule, the same `travelHeightOver` the job's own travel uses):
- * the frame's rapids are checked against the clamps by the same verifier, so a trace below the
- * clamp top is refused. The mount's fit and the fixture clearance are in the requirement, not
- * discovered by the verifier.
+ * THE DESIGN HEIGHT IS A MINIMUM, NOT THE ANSWER (review, 2026-10-28). `FRAME_Z` is the air
+ * clearance #207 §6 wants, but the mount may stand higher, and a MEASURED work origin may sit
+ * lower than the stub's, giving the machine more reach than 20 mm over the work. The trace is
+ * raised to whatever the mount requires (`travelHeightOver` — #710's rule, the same one the job's
+ * own travel uses; the frame's rapids are checked against the clamps and arms by the same
+ * verifier) whenever that height is reachable. Only when even the reachable TOP cannot clear the
+ * mount is the frame withheld — and the reason then names that top, not the design height.
  *
  * A frame that cannot meet both is WITHHELD, not guessed at: `error` says which bound failed. The
  * caller keeps the verified program; a frame is an aid, not a gate (#747).
@@ -2582,26 +2590,29 @@ export function frameTraceZ(
   // The reachable WORK Z is FLOORED to the posted precision: rounding up would post a height above
   // the ceiling by less than the last decimal.
   const reach = Math.floor((ceiling - origin) * scale) / scale;
-  let z = Math.min(FRAME_Z, Number.isFinite(reach) ? reach : FRAME_Z);
-  // The floor and the divide are floats too. Ask the machine's own comparison, in the machine
-  // frame the emulator will use, and step down one posted unit if the sum still lands above the top.
-  while (z > 0 && z + origin > ceiling) z = round(z - step);
-  if (!(z > 0)) {
-    return {
-      error:
-        `no height above the work is inside the ${machine.name}'s Z envelope — the work origin ` +
-        `sits at machine Z ${round(origin)}, and the envelope tops out at ${round(ceiling)}`,
-    };
-  }
+  const noHeight = {
+    error:
+      `no height above the work is inside the ${machine.name}'s Z envelope — the work origin ` +
+      `sits at machine Z ${round(origin)} mm, and the envelope tops out at ${round(ceiling)} mm`,
+  };
+  if (!(reach > 0)) return noHeight;
   // #710/#727 F2 — the same rule the job's own travel is raised by, so the frame's height and the
   // verifier's clamp check cannot disagree about what "clear" is. `travelHeightOver` is rounded to
-  // the post's precision already.
+  // the post's precision already. It is a MINIMUM: the design's 20 mm is the wanted air clearance,
+  // but a mount that stands higher raises the trace, up to whatever this setup's WCS can reach.
   const minZ = travelHeightOver(mount?.obstacles ?? [], clearanceMm + topLiftMm, mount?.uncertainty ?? 0);
+  const target = minZ === null ? FRAME_Z : Math.max(FRAME_Z, minZ);
+  let z = Math.min(target, reach);
+  // The floor and the divide are floats too. Ask the machine's own comparison, in the machine
+  // frame the emulator will use, and step down one posted unit if the sum still lands above the top.
+  // A step that also drops below the mount's requirement is a refusal below, never a low trace.
+  while (z + origin > ceiling) z = round(z - step);
+  if (!(z > 0)) return noHeight;
   if (minZ !== null && z < minZ) {
     return {
       error:
-        `its air trace would run below the mount: the trace can reach ${round(z)} mm above the ` +
-        `work, but the clamps need ${round(minZ)} mm`,
+        `its air trace would run below the mount: the trace can reach ${round(reach)} mm above ` +
+        `the work, but the clamps or arms need ${round(minZ)} mm`,
     };
   }
   return { z };
@@ -2620,8 +2631,8 @@ function frameProgram(
   topLiftMm = 0,
 ): { nc: string; verify: VerifyReport; z: Mm } | { error: string } {
   // #747 — the trace height is computed HERE, once, for the file, the sheet and the receipt. The
-  // design's `FRAME_Z` is the height wanted; this clamps it to what the setup's WCS can reach and
-  // refuses a height the mount would not clear.
+  // design's `FRAME_Z` is the minimum air clearance; `frameTraceZ` raises it to clear the mount
+  // wherever the setup's WCS can reach, and refuses only when even that top cannot.
   const height = frameTraceZ(setup, machine, mount, clearanceMm, topLiftMm);
   if ('error' in height) return height;
   const { z } = height;
@@ -5134,7 +5145,9 @@ function generateOneProgram(
     if (rotaryMap === null) {
       const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance, liftOverStock);
       if ('error' in frame) {
-        frameError = `The frame file could not be produced: ${frame.error}.`;
+        // `withPeriod` rather than `+ '.'` (review, 2026-10-28): a cause that already ends in a
+        // full stop used to print "..".
+        frameError = `The frame file could not be produced: ${withPeriod(frame.error)}`;
       } else {
         frameVerify = frame.verify;
         const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
