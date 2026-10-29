@@ -721,7 +721,14 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
         // on a cutting move is a change from an unstated angle, so it counts as `wrapped` too:
         // whether that cut held one face cannot be proven (see `TimelineSummary.rotaryClass`).
         if (m.a !== null && (state.a === null || m.a !== state.a)) wrappedCut = true;
-        if (cutBeforeA === null && m.a === null && state.a === null) cutBeforeA = { step: i, line: m.line };
+        // A cut that cannot reach the rod (its Z above the rod's top, e.g. a vendor file's opening
+        // `G01 Z30` at the spindle-on height) engages no face, so it is not "a cut on an unknown face".
+        const zHere = lowestKnownZ(toW[2], fromW[2]);
+        // The stock's top in the work frame: the rod's radius above the axis, or Z 0 (the top face)
+        // for a block program that happens to turn A.
+        const stockTop = setup.part.kind === 'cylinder' ? setup.part.diameter / 2 : 0;
+        const canEngage = zHere === null || zHere < stockTop + 1e-9;
+        if (cutBeforeA === null && m.a === null && state.a === null && canEngage) cutBeforeA = { step: i, line: m.line };
         cuttingMoves++;
         const z = lowestKnownZ(toW[2], fromW[2]);
         if (toW[2] === null || z === null) {

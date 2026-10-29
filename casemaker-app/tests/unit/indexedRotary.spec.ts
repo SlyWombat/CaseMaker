@@ -425,6 +425,9 @@ describe('#729 — the retroactive review: the chuck, an unstated A, and face ma
     const before = timeline.diagnostics.find((d) => d.code === 'rotary-cut-before-a');
     expect(before?.severity).toBe('error');
     expect(before?.line).toBe(3);
+    // A feed ABOVE the rod before A (a vendor file's opening `G01 Z30`) engages no face: not refused.
+    const air = buildTimeline(parseGcode(['S1000 M3', 'G01 Z30 F1500', 'G0 X15 Y0 Z15 A0', 'G1 Z9 F100', 'G0 Z15'].join('\n')), setup());
+    expect(air.diagnostics.some((d) => d.code === 'rotary-cut-before-a')).toBe(false);
     // A flat program that never states A is not touched by the rule.
     const flat = buildTimeline(parseGcode(['S1000 M3', 'G0 X15 Y0 Z15', 'G1 Z9 F100', 'G0 Z15'].join('\n')), setup());
     expect(flat.diagnostics.some((d) => d.code === 'rotary-cut-before-a')).toBe(false);
