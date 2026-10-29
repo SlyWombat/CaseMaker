@@ -277,6 +277,8 @@ export type JobFindingCode =
   // the profile cut-out work tracked in #218, so this is a warning, not an error.
   | 'target-object-not-cut'
   | 'target-mesh-missing'
+  | 'target-mesh-loading'
+  | 'target-mesh-unstored'
   // A GOAL object (#533): the embedded mesh IS the shape to make, so it is not warned as uncut.
   // `goal-object-oversize` is the sane-size check — the goal's footprint or depth exceeds the
   // blank it would be carved from, so no toolpath could reproduce it from this stock (an error).
