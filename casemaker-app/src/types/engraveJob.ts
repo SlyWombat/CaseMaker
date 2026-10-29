@@ -670,6 +670,13 @@ export interface EngraveSurfaceSettings {
   finishStepOverMm?: Mm;
   /** Heightfield sampling pitch (both axes), mm. Default: the shop's `sim.columnFlatPitchYMm`. */
   gridPitchMm?: Mm;
+  /**
+   * #764 — what is cleared AROUND an item goal, so the part is not left in a pit of stock. `'ring'`
+   * (the default when absent) cuts a band at least one cutter diameter wide around the part down
+   * to its base plane; `'whole'` clears the whole blank; `'none'` keeps the pre-#764 cut. Ignored
+   * for a mold (its rim is the stock top) and for a picture.
+   */
+  clearAround?: 'ring' | 'whole' | 'none';
   /** Roughing allowance left on the goal surface, mm. Default: the shop's `finish.stockToLeaveMm`. */
   stockToLeaveMm?: Mm;
   /**

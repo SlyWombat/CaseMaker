@@ -1922,8 +1922,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // and drop the block entirely once every key is gone, so a goal back on its defaults
         // serialises exactly as one that never carried the block.
         if (patch.surface) {
-          // #671 — the block carries booleans (the scallop/pencil choices) as well as millimetres.
-          const merged: Record<string, number | boolean> = { ...(target.surface ?? {}) };
+          // #671 — the block carries booleans (the scallop/pencil choices) as well as millimetres;
+          // #764 adds the clear-around CHOICE, a string.
+          const merged: Record<string, number | boolean | string> = { ...(target.surface ?? {}) };
           for (const [key, value] of Object.entries(patch.surface)) {
             if (value === undefined) delete merged[key];
             else merged[key] = value;

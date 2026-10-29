@@ -473,6 +473,30 @@ export function EngraveTargetObjectRow({
         </label>
       )}
 
+      {/* #764 — WHAT IS CLEARED AROUND AN ITEM GOAL. The goal is cut only inside its own footprint
+          otherwise, so the blank round it keeps its height and the part ends in a pit. The default
+          ring is one cutter diameter wide; a mold's rim is the stock top, so a mold has no choice. */}
+      {goal && target.format !== 'png' && target.goalMode !== 'mold' && (
+        <label style={ROW_INLINE}>
+          <span style={{ fontSize: 11, color: '#9aa4b0' }}>clear around</span>
+          <select
+            value={settings.clearAround ?? 'ring'}
+            data-testid={`engrave-target-clear-around-${index}`}
+            aria-label="Clear around the goal"
+            title="Cut the stock around the part down to the part's base plane, so the part is not left in a pit: a band one cutter diameter wide (the default), the whole blank, or nothing."
+            onChange={(e) =>
+              setSurface({
+                clearAround: e.target.value === 'ring' ? undefined : (e.target.value as 'whole' | 'none'),
+              })
+            }
+          >
+            <option value="ring">a ring around it</option>
+            <option value="whole">the whole blank</option>
+            <option value="none">nothing</option>
+          </select>
+        </label>
+      )}
+
       {/* #722 — a mesh's size on the blank; a picture keeps its own width field below. */}
       {target.format !== 'png' && (
         <MeshSizeControls target={target} index={index} onChange={onChange} stock={stock} />

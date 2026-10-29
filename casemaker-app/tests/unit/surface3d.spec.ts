@@ -320,8 +320,17 @@ describe('generateGoalProgram — the worker dispatches a pure goal job', () => 
     expect(program.surfaceCheck?.kind).toBe('surface');
     expect(program.surfaceCheck?.gridPitchMm).toBeCloseTo(DEFAULT_GRID_PITCH_MM);
     expect(program.surfaceCheck?.roughingLayers).toBeGreaterThan(0);
-    // The ramp's toolpath extent: the goal is placed centred at (50, 30) and measures 20 × 20 mm.
-    expect(program.surfaceCheck?.bbox).toEqual({ min: [40, 20], max: [60, 40] });
+    // #764 — the toolpath extent is the footprint (centred at (50, 30), 20 × 20 mm) GROWN by the
+    // default clear ring: one cutter diameter plus one finishing step-over (3.175 + 0.45 × 3.175
+    // mm), less one grid cell where the first raster column sits inside the edge.
+    const bbox = program.surfaceCheck!.bbox;
+    // The toolpath now reaches past the footprint on every side by at least the cutter's own
+    // diameter — the #764 clear band, whose default is one diameter plus a finishing step-over.
+    // (The raster's first sample sits inside the grid's edge by up to a step-over.)
+    expect(bbox.min[0]).toBeLessThan(40 - 3.175);
+    expect(bbox.min[1]).toBeLessThan(20 - 3.175);
+    expect(bbox.max[0]).toBeGreaterThan(60 + 3.175);
+    expect(bbox.max[1]).toBeGreaterThan(40 + 3.175);
     expect(program.programHash).toMatch(/^[0-9a-f]{8}$/);
     expect(program.toolKey).toBe(job.toolKey);
     // #726 W16 — the run's findings carry the DOCUMENT's, as the item pipeline's always have: the

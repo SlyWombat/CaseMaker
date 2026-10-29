@@ -138,6 +138,20 @@ export interface SampleGoalOpts {
   maxCells?: number | null;
   /** Work Z of the stock top, mm; absent → 0 (the flat frame's own top). */
   stockTopZ?: number;
+  /**
+   * #764 — CLEAR AROUND THE GOAL. A goal made as the item is cut only where the mesh's own
+   * footprint stands above the stock; the blank around it keeps its full height, so the part ends
+   * in a pit whose walls reach its crown and is never free. With a clear band, the sampled grid is
+   * extended past the footprint and every uncovered cell inside the band is cut down to the goal's
+   * BASE plane (`baseZ`) — roughing and finishing then include it like any other part of the
+   * surface. `ring` takes a band at least `widthMm` beyond the footprint, clipped to `stockRect`;
+   * `whole` takes the stock's own rectangle. Absent = the footprint only, the pre-#764 cut.
+   */
+  clear?: { kind: 'ring'; widthMm: number } | { kind: 'whole' } | null;
+  /** The stock's top-face rectangle in work XY, mm — what a clear band is clipped to. */
+  stockRect?: { xMin: number; xMax: number; yMin: number; yMax: number } | null;
+  /** Work Z of the goal's base plane, mm — the floor a cleared band is cut to. */
+  baseZ?: number | null;
 }
 
 /**
@@ -203,7 +217,31 @@ export function sampleGoalHeightfield(
     yMin = Math.min(yMin, wy);
     yMax = Math.max(yMax, wy);
   }
-  const grid = planGrid(xMin, xMax, yMin, yMax, requestedPitch, maxCells);
+  // #764 — THE CLEAR BAND. A ring wants the grid to reach past the footprint by its width; the
+  // whole-blank choice takes the stock's own rectangle; both are clipped to the stock.
+  const clear = opts.clear ?? null;
+  const stockRect = opts.stockRect ?? null;
+  let gxMin = xMin;
+  let gxMax = xMax;
+  let gyMin = yMin;
+  let gyMax = yMax;
+  let clearBand: string | null = null;
+  if (clear !== null && stockRect !== null) {
+    if (clear.kind === 'whole') {
+      gxMin = stockRect.xMin;
+      gxMax = stockRect.xMax;
+      gyMin = stockRect.yMin;
+      gyMax = stockRect.yMax;
+      clearBand = 'the whole blank';
+    } else if (clear.widthMm > 0) {
+      gxMin = Math.max(stockRect.xMin, xMin - clear.widthMm);
+      gxMax = Math.min(stockRect.xMax, xMax + clear.widthMm);
+      gyMin = Math.max(stockRect.yMin, yMin - clear.widthMm);
+      gyMax = Math.min(stockRect.yMax, yMax + clear.widthMm);
+      clearBand = `a ${Number(clear.widthMm.toFixed(3))} mm band around the part`;
+    }
+  }
+  const grid = planGrid(gxMin, gxMax, gyMin, gyMax, requestedPitch, maxCells);
   const { pitch, nx, ny, coarsened } = grid;
   const x0 = grid.x0;
   const y0 = grid.y0;
@@ -222,6 +260,27 @@ export function sampleGoalHeightfield(
     rasterTriangle(a, b, c, x0, y0, pitch, nx, ny, z, covered);
   }
 
+  // The band's cells become part of the surface at the goal's BASE plane — the CAM then roughs
+  // and finishes them like any other cell, so the part stands on a plateau instead of in a pit.
+  const baseZ = opts.baseZ ?? null;
+  if (clear !== null && clearBand !== null && baseZ !== null) {
+    if (clear.kind === 'whole') {
+      for (let k = 0; k < z.length; k++) {
+        if (covered[k] === 1) continue;
+        z[k] = baseZ;
+        covered[k] = 1;
+      }
+    } else {
+      const dist = distanceToCovered(nx, ny, covered, pitch);
+      const reach = clear.widthMm + pitch / 2 + 1e-9;
+      for (let k = 0; k < z.length; k++) {
+        if (covered[k] === 1 || (dist[k] as number) > reach) continue;
+        z[k] = baseZ;
+        covered[k] = 1;
+      }
+    }
+  }
+
   let minZ = topZ;
   let coveredCount = 0;
   for (let k = 0; k < z.length; k++) {
@@ -231,13 +290,44 @@ export function sampleGoalHeightfield(
     }
   }
 
-  const resolutionNote = coarsened
-    ? `sampled on a ${pitch.toFixed(4)} mm grid (coarsened from the requested ${requestedPitch} mm: ` +
-      `the footprint would need ${Math.ceil((xMax - xMin) / requestedPitch) * Math.ceil((yMax - yMin) / requestedPitch)} cells, ` +
-      `over the ${maxCells}-cell cap)`
-    : `sampled on a ${pitch} mm grid`;
+  const resolutionNote =
+    (coarsened
+      ? `sampled on a ${pitch.toFixed(4)} mm grid (coarsened from the requested ${requestedPitch} mm: ` +
+        `the footprint would need ${Math.ceil((gxMax - gxMin) / requestedPitch) * Math.ceil((gyMax - gyMin) / requestedPitch)} cells, ` +
+        `over the ${maxCells}-cell cap)`
+      : `sampled on a ${pitch} mm grid`) +
+    (clearBand === null || baseZ === null ? '' : `; cleared ${clearBand} to the part's base plane`);
 
   return { nx, ny, x0, y0, pitch, topZ, minZ, z, covered, coveredCount, resolutionNote };
+}
+
+/**
+ * #764 — each cell's distance to the nearest COVERED cell, mm. The same exact separable transform
+ * as {@link distanceField}, seeded the other way round (covered cells are the sources), so a ring
+ * cell's distance is to the goal's foot, not to the blank's edge.
+ */
+function distanceToCovered(nx: number, ny: number, covered: Uint8Array, pitch: number): Float32Array {
+  const INF = 1e12;
+  const n = Math.max(nx, ny);
+  const f = new Float64Array(n);
+  const d = new Float64Array(n);
+  const v = new Int32Array(n);
+  const zs = new Float64Array(n + 1);
+  const grid = new Float64Array(nx * ny);
+  for (let k = 0; k < grid.length; k++) grid[k] = covered[k] === 1 ? 0 : INF;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) f[i] = grid[j * nx + i]!;
+    edt1d(f, d, nx, v, zs);
+    for (let i = 0; i < nx; i++) grid[j * nx + i] = d[i]!;
+  }
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < ny; j++) f[j] = grid[j * nx + i]!;
+    edt1d(f, d, ny, v, zs);
+    for (let j = 0; j < ny; j++) grid[j * nx + i] = d[j]!;
+  }
+  const out = new Float32Array(nx * ny);
+  for (let k = 0; k < out.length; k++) out[k] = Math.sqrt(grid[k]!) * pitch;
+  return out;
 }
 
 /**

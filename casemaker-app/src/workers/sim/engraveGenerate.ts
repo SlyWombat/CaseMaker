@@ -75,6 +75,7 @@ import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor } from '@/engine/cnc/toolRegistry';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import {
   dedupeFindings,
   jobSetups,
@@ -4112,6 +4113,35 @@ export function generateGoalProgram(
   const stockToLeaveMm = settings.stockToLeaveMm ?? shop.finish?.stockToLeaveMm.value;
   const gridPitchMm = settings.gridPitchMm ?? shop.surfaceGrid?.pitchMm.value ?? null;
 
+  // #764 — THE ITEM IS CLEARED AROUND, down to its base plane. Cut only inside the goal's own
+  // footprint, the blank around the part keeps its full height and the part ends in a pit; the
+  // band is sampled as part of the surface, so the roughing and finishing passes that are written
+  // anyway include it. A MOLD is unchanged — its cavity's rim IS the stock top — and a PICTURE
+  // keeps the pre-#764 cut.
+  //
+  // THE WIDTH IS ONE CUTTER DIAMETER PLUS ONE FINISHING STEP-OVER. The diameter is what lets the
+  // ball reach the part's wall at all; the extra step-over is what leaves a FLOOR at the base
+  // plane between the two fillets the ball necessarily leaves against the part and against the
+  // stock outside the ring (each one radius wide on a tall wall). A band of exactly one diameter
+  // lets the two fillets meet, and the "cleared" floor then sits a radius above the base.
+  const clearAround = settings.clearAround ?? 'ring';
+  const ringStepOverMm = settings.finishStepOverMm ?? resolved.params.stepOver;
+  const ringWidthMm = (cuttingDiameter(tool) ?? 0) + (ringStepOverMm > 0 ? ringStepOverMm : 0);
+  const clear =
+    goal.format === 'png' || isMold(goal) || clearAround === 'none' || (clearAround === 'ring' && !(ringWidthMm > 0))
+      ? null
+      : clearAround === 'whole'
+        ? ({ kind: 'whole' } as const)
+        : ({ kind: 'ring', widthMm: ringWidthMm } as const);
+  const sampleClear =
+    clear === null
+      ? {}
+      : {
+          clear,
+          stockRect: { xMin: 0, xMax: job.stock.length, yMin: 0, yMax: job.stock.width },
+          baseZ: goal.position.z - placedSize(goal).z,
+        };
+
   const feeds: SurfaceFeeds = {
     feed: resolved.params.feed,
     plungeFeed: resolved.params.plungeFeed,
@@ -4146,7 +4176,7 @@ export function generateGoalProgram(
       air: job.cutOverride?.air ?? true,
       feeds,
       rapid: mill.rapidEstimate,
-      sample: { pitchMm },
+      sample: { pitchMm, ...sampleClear },
       opts: {
         stockToLeaveMm,
         scallop,
@@ -4295,12 +4325,21 @@ export function generateGoalProgram(
       scallop: surfaced.scallop === null ? null : surfaced.scallop.facts,
       pencil: surfaced.pencil === null ? null : surfaced.pencil.facts,
       // #721 — the run sheet and the row say a mold is a mold.
-      notes: isMold(goal)
-        ? [
-            ...surfaced.notes,
-            "Made as a mold: the part's shape is cut as a cavity from the stock's top face, turned over so a casting reads the right way round.",
-          ]
-        : surfaced.notes,
+      notes: [
+        ...surfaced.notes,
+        ...(isMold(goal)
+          ? [
+              "Made as a mold: the part's shape is cut as a cavity from the stock's top face, turned over so a casting reads the right way round.",
+            ]
+          : []),
+        ...(clear === null
+          ? []
+          : [
+              clear.kind === 'whole'
+                ? "Cleared the whole blank around the part down to its base plane, so the part is not left in a pit."
+                : `Cleared a ${Number(ringWidthMm.toFixed(3))} mm band around the part down to its base plane, so the part is not left in a pit.`,
+            ]),
+      ],
     } satisfies GoalSurfaceFacts,
   };
 }
