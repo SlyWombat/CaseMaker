@@ -26,8 +26,8 @@ The rest of this guide covers running the app from source.
 
 | Tool | Required version | Why |
 | --- | --- | --- |
-| Node.js | 20 or 22 | Vite 8 + Vitest 4 |
-| npm | bundled with Node | install / run scripts |
+| Node.js | 22.12+ (24 LTS recommended) | Vite 8 + Vitest 4 |
+| npm | bundled with Node 22.12+ | install / run scripts |
 | A modern browser | Chrome, Edge, Firefox, Safari | runtime (WebGL2 + WebAssembly) |
 | (optional) Rust toolchain | stable, ≥ 1.75 | required only to build the **desktop** app via Tauri |
 
