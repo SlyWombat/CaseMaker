@@ -22,6 +22,7 @@ import { buildTimeline, parseGcode, stubSetup, Z1, type Setup } from '@/engine/c
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { sweepTimeline, type SweepResult } from '@/workers/geometry/sweep';
+import { verifyProgram } from '@/engine/cnc/verify';
 import type { CutParams } from '@/engine/cnc/feeds';
 
 const RADIUS = 10;
@@ -76,8 +77,21 @@ function capVolume(capR: number, halfChord: number, depth: (y: number) => number
   }
   return v;
 }
-/** The jaw clearance every face pass now starts at: the ⌀10 cutter's radius. */
-const JAW_CLEAR = 5;
+/** The ⌀10 cutter's radius. */
+const WIDE_R = 5;
+/**
+ * The X every face pass now starts at: the cutter's radius plus the verifier's 3 mm jaw keep-out
+ * (#729 item 5 — the fixtures go through the verifier too). The rod's first JAW_CLEAR − WIDE_R mm are
+ * never reached; the next WIDE_R mm only by the cutter's rounded end.
+ */
+const JAW_CLEAR = WIDE_R + 3;
+/**
+ * And every pass ENDS with the cutter's edge at the rod's free end: the verifier refuses a cut that
+ * runs off it (#724 B3, `wrap-off-free-end`). The last WIDE_R mm are cut only by the rounded end.
+ */
+const END_X = LENGTH - WIDE_R;
+/** The full-section length a pass covers between its two rounded ends. */
+const FULL_SPAN = END_X - JAW_CLEAR;
 const STOCK_VOLUME = polygonArea(RADIUS, N_STOCK) * LENGTH;
 
 /** Relative comparison, because every oracle here is a volume in the hundreds of mm³. */
@@ -125,6 +139,17 @@ function runPipeline(spec: IndexedSpec) {
   expect(timeline.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   expect(timeline.summary.rotary).toBe(true);
   expect(timeline.summary.rotaryClass).toBe('indexed');
+
+  // #729 item 5 — VERIFY, as #241's own title says (generate → post → verify → sweep).
+  const verified = verifyProgram(posted.text, {
+    setup: stubSetup(STOCK, HOLD, { startingTool: 1 }, Z1),
+    machine: Z1,
+    tool: spec.tool,
+    depthLimit: () => 0,
+    minRapidZ: 1,
+    rotary: { radius: RADIUS, stickout: LENGTH, tailstock: false },
+  });
+  expect(verified.findings.filter((f) => f.severity === 'error').map((f) => `${f.line} ${f.code}`)).toEqual([]);
 
   const out = sweepTimeline(tl, timeline, spec.tool, setup());
   if (!out.ok) throw new Error(`the sweep refused the indexed program: ${JSON.stringify(out.diagnostics)}`);
@@ -187,8 +212,8 @@ describe('#241 fixture: TWO FLATS, 0° and 180°, 1 mm deep on ⌀20 (rotary-flo
     faces: [
       // #729 — clear of the jaws (X 0 is the jaw face): a pass from X −5 drove the cutter into the
       // chuck, which the sweep now refuses.
-      { a: 0, fromX: JAW_CLEAR, toX: LENGTH + 5, depth: 1 },
-      { a: 180, fromX: JAW_CLEAR, toX: LENGTH + 5, depth: 1 },
+      { a: 0, fromX: JAW_CLEAR, toX: END_X, depth: 1 },
+      { a: 180, fromX: JAW_CLEAR, toX: END_X, depth: 1 },
     ],
     tool: WIDE,
     params: PARAMS,
@@ -212,8 +237,8 @@ describe('#241 fixture: TWO FLATS, 0° and 180°, 1 mm deep on ⌀20 (rotary-flo
     // rectangle is exact and lies wholly inside the chord.
     const halfChord = Math.sqrt(RADIUS * RADIUS - (RADIUS - 1) ** 2);
     const perFace =
-      segmentArea(RADIUS, 1) * (LENGTH - JAW_CLEAR) +
-      capVolume(JAW_CLEAR, halfChord, (y) => Math.sqrt(RADIUS * RADIUS - y * y) - (RADIUS - 1));
+      segmentArea(RADIUS, 1) * FULL_SPAN +
+      2 * capVolume(WIDE_R, halfChord, (y) => Math.sqrt(RADIUS * RADIUS - y * y) - (RADIUS - 1));
     expectWithin(removedBy(sweep, runAt(timeline, 0)), perFace, 0.01, 'face 0');
     expectWithin(removedBy(sweep, runAt(timeline, 180)), perFace, 0.01, 'face 180');
     expectWithin(sweep.stats.removedVolume, 2 * perFace, 0.01, 'both faces');
@@ -235,7 +260,7 @@ describe('#241 fixture: HEX ALL ROUND, six faces, across flats 17.321 on ⌀20 (
   const spec: IndexedSpec = {
     radius: RADIUS,
     // #729 — every pass starts clear of the jaws (see the two-flats fixture).
-    faces: [0, 60, 120, 180, 240, 300].map((a) => ({ a, fromX: JAW_CLEAR, toX: LENGTH + 5, depth: DEPTH })),
+    faces: [0, 60, 120, 180, 240, 300].map((a) => ({ a, fromX: JAW_CLEAR, toX: END_X, depth: DEPTH })),
     tool: WIDE,
     params: { ...PARAMS, stepDown: DEPTH },
     rapid: Z1.rapidEstimate,
@@ -258,8 +283,8 @@ describe('#241 fixture: HEX ALL ROUND, six faces, across flats 17.321 on ⌀20 (
     // #729 — past the jaw clearance the section is the full ring; in the first JAW_CLEAR mm each
     // face removes only what the cutter's rounded end reaches of its segment (|y| ≤ R/2 per face).
     const ringArea = polygonArea(RADIUS, N_STOCK) - hexArea;
-    const facecap = capVolume(JAW_CLEAR, RADIUS / 2, (y) => Math.sqrt(RADIUS * RADIUS - y * y) - APOTHEM);
-    const ring = ringArea * (LENGTH - JAW_CLEAR) + 6 * facecap;
+    const facecap = capVolume(WIDE_R, RADIUS / 2, (y) => Math.sqrt(RADIUS * RADIUS - y * y) - APOTHEM);
+    const ring = ringArea * FULL_SPAN + 12 * facecap;
     expectWithin(sweep.stats.removedVolume, ring, 0.005, 'hex ring');
     // Each face's own removal is its share: one sixth, give or take where the neighbouring faces'
     // segments reach past the shared hexagon vertex.
@@ -268,7 +293,7 @@ describe('#241 fixture: HEX ALL ROUND, six faces, across flats 17.321 on ⌀20 (
     // n-gon within it, less what the six caps took there.
     expectWithin(
       sweep.stats.resultVolume,
-      hexArea * (LENGTH - JAW_CLEAR) + polygonArea(RADIUS, N_STOCK) * JAW_CLEAR - 6 * facecap,
+      hexArea * FULL_SPAN + polygonArea(RADIUS, N_STOCK) * (LENGTH - FULL_SPAN) - 12 * facecap,
       0.005,
       'hexagon solid',
     );

@@ -162,6 +162,15 @@ describe('the rotary refusals — operator words, at the step', () => {
     expect(finding(['G0 X20 Z15 A0', 'G0 A90'], 'rotary-rapid-engaged')).toBeUndefined();
   });
 
+  it('#729 item 5 — a straight drill through the axis is a cross-hole, not a crossing fault', () => {
+    // One X, one Y, one A: down through the centre and out the far side.
+    expect(finding(['G0 X40 Z15 A90', 'G1 Z-11 F100', 'G0 Z15'], 'axis-crossing')).toBeUndefined();
+    // Moving along X below the axis drags the cutter across the centre: still refused.
+    expect(finding(['G0 X40 Z15 A90', 'G1 Z-2 F100', 'G1 X50 F300', 'G0 Z15'], 'axis-crossing')).toBeDefined();
+    // So is turning A while below the axis.
+    expect(finding(['G0 X40 Z15 A90', 'G1 Z-2 F100', 'G1 A120 F300', 'G0 Z15'], 'axis-crossing')).toBeDefined();
+  });
+
   it('#729 — a rapid into the chuck: past the jaw face below the rod’s clearance', () => {
     // From above the rod down and back over the jaws: both ends could look clear, the line is not.
     const body = ['G0 X20 Z15 A0', 'G0 X-5 Z11'];

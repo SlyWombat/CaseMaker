@@ -647,7 +647,18 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
           // "cuts through the centre": a cutting floor at or below the axis. The LOWEST end is
           // the honest reading, the same rule the flat tool-edge check takes.
           const zs = [fromW[2], toW[2]].filter((z): z is number => z !== null);
-          if (zs.length > 0 && Math.min(...zs) <= 1e-6) {
+          // #729 item 5 — A STRAIGHT DRILL THROUGH IS NOT A CROSSING FAULT. A cross-hole (design §6)
+          // plunges along Z at one X, one Y and one A, through the axis and OUT THE FAR SIDE; no part
+          // of the rod is cut that the hole does not name. Anything else below the axis — a move
+          // along X, a turn, a Y offset, a plunge that stops inside — stays refused.
+          // A plunge that STOPS past the centre (an engraving or a blind cut run too deep) is still
+          // the fault this rule names; only one that exits the far side is a through-hole.
+          const throughHole =
+            fromW[0] !== null && toW[0] !== null && Math.abs(fromW[0] - toW[0]) < 1e-6 &&
+            fromW[1] !== null && toW[1] !== null && Math.abs(fromW[1] - toW[1]) < 1e-6 &&
+            (m.a === null || Math.abs(m.a - (lastA ?? 0)) < 1e-6) &&
+            zs.length > 0 && Math.min(...zs) <= -rotary.radius + 1e-6;
+          if (zs.length > 0 && Math.min(...zs) <= 1e-6 && !throughHole) {
             push('axis-crossing', m.line, throughCentreSentence(Math.min(...zs)));
           }
           // "runs into the jaws" / "runs into the tailstock's band": the cutter EDGE, at the
