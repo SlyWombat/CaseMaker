@@ -174,3 +174,32 @@ describe('#708 the per-face oracle (design §6 fixtures through the session)', (
     session.dispose();
   });
 });
+
+describe('#729 — a face the plan never named is an over-cut, and no plan is no pass', () => {
+  it('cutting face 180 when only face 0 is predicted fails, naming face 180', () => {
+    const { session } = load(flats());
+    const report = session.oracle([{ a: 0, depth: 1, polygons: faceCapsule(5) }]);
+    expect(report.ok).toBe(false);
+    const unplanned = report.levels.find((l) => l.a === 180);
+    expect(unplanned?.overCut).toBeGreaterThan(1);
+    expect(unplanned?.predictedArea).toBe(0);
+    expect(report.worst.overAt?.a).toBe(180);
+    session.dispose();
+  });
+
+  it('a prediction written as −180 or 540 names the same face as 180', () => {
+    const { session } = load(flats());
+    const report = session.oracle([
+      { a: 360, depth: 1, polygons: faceCapsule(5) },
+      { a: -180, depth: 1, polygons: faceCapsule(5) },
+    ]);
+    expect(report.ok, oracleSentence({ oracle: report })).toBe(true);
+    session.dispose();
+  });
+
+  it('an indexed program judged against no prediction at all is refused, not passed', () => {
+    const { session } = load(flats());
+    expect(() => session.oracle([])).toThrow(/no predicted face/);
+    session.dispose();
+  });
+});

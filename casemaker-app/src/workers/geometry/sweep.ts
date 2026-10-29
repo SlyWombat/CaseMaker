@@ -683,6 +683,10 @@ export function checkAirMoves(
   const gouges: Gouge[] = [];
   const nCap = segmentsForRadius(radius);
   const nMargin = segmentsForRadius(radius + proximityMm);
+  // #729 — the material's X span, for the index-turn rule below.
+  const materialBox = stock.boundingBox();
+  const materialXMin = materialBox.min[0];
+  const materialXMax = materialBox.max[0];
   // Rise to whatever is taller, the stock top or the fixture (#204): a jaw below the top needs
   // no extra height, but a box above it does, or the body would stop short of the collision.
   const zTop = Math.max(topZ, fixtureTop) + OVERSHOOT_MM;
@@ -965,7 +969,12 @@ export function checkAirMoves(
     // tested exactly above; the sector between them is neither, and the exact sweep has no body
     // for it. A correctly posted indexed job retracts to the safe height before every index
     // turn, so this is a refused FILE, not a refused design.
-    if (turn && vol <= 0 && zLo < topZ) {
+    // #729 — only where the tool is OVER the material: a lift-and-turn with the cutter wholly past
+    // the rod's free end sweeps nothing (the jaw side is the chuck's own check).
+    const turnOverMaterial =
+      Math.min(real.from[0], real.to[0]) - radius < materialXMax &&
+      Math.max(real.from[0], real.to[0]) + radius > materialXMin;
+    if (turn && vol <= 0 && zLo < topZ && turnOverMaterial) {
       diagnostics.push({
         severity: 'error',
         code: 'rotary-turn-in-stock',
@@ -1549,6 +1558,56 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         message: `the ${setup.workholding.kind} is not modelled as an obstacle yet: the cutter's proximity to ${labels.join(', ')} is NOT checked`,
       });
     }
+  }
+  // #729 — A ROUND STOCK IN THE CHUCK. The rod runs X 0 → its length with X 0 at the jaws' face
+  // (#714), so the chuck (jaws and body) is everything at X < 0. Neither is modelled as a solid
+  // yet, but that half-space is enough to refuse the dangerous cases: a cut or a rapid whose tool
+  // reaches past the jaw line (X − radius < 0) while below the rod's top (Z < the radius above the
+  // axis). Above the rod the tool is over the chuck at a height the rod itself clears.
+  // The tailstock is not modelled at all, and the sweep says so.
+  if (setup.part.kind === 'cylinder') {
+    const jawHits: { line: number; x: number; z: number; kind: string }[] = [];
+    const reaches = (x: number, z: number): boolean => x - radius < -1e-6 && z < topZ - 1e-6;
+    for (const m of timeline.airMoves) {
+      for (const p of [m.from, m.to]) {
+        if (reaches(p[0], p[2])) {
+          jawHits.push({ line: m.line, x: p[0], z: p[2], kind: m.kind === 'rapid' ? 'rapid' : 'spindle-off move' });
+          break;
+        }
+      }
+    }
+    for (const cp of timeline.checkpoints) {
+      for (let k = 0; k < cp.steps.length; k++) {
+        const x0 = cp.xy[4 * k] as number;
+        const x1 = cp.xy[4 * k + 2] as number;
+        const z = Math.min(cp.zs[2 * k] as number, cp.zs[2 * k + 1] as number);
+        const x = Math.min(x0, x1);
+        if (reaches(x, z)) {
+          jawHits.push({ line: timeline.events[cp.steps[k] as number]?.line ?? 0, x, z, kind: 'cut' });
+          break;
+        }
+      }
+    }
+    if (jawHits.length > 0) {
+      jawHits.sort((a, b) => a.line - b.line);
+      const first = jawHits[0]!;
+      diagnostics.push({
+        severity: 'error',
+        code: 'rotary-into-chuck',
+        message:
+          `a ${first.kind} reaches the chuck: at X ${first.x.toFixed(3)} mm the ⌀${(2 * radius).toFixed(3)} mm ` +
+          `cutter's edge is past the jaw face (X 0) while ${(topZ - first.z).toFixed(3)} mm below the rod's ` +
+          `top (line ${first.line}${jawHits.length > 1 ? `; ${jawHits.length} moves in all` : ''}). Keep every ` +
+          `move at or below the rod's top at least a cutter radius clear of the jaws.`,
+      });
+    }
+    diagnostics.push({
+      severity: 'info',
+      code: 'fixture-unchecked',
+      message:
+        "the rotary's tailstock is not modelled as an obstacle yet: the cutter's proximity to it is NOT checked " +
+        '(the chuck is checked only as the space beyond the jaw face)',
+    });
   }
   // Every check against it is done; the fixture is not part of the result, so release it now.
   disposeFixture();

@@ -28,7 +28,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { rotaryFits } from '@/engine/cnc/setups/plan';
+import { rotaryStockFits } from '@/engine/cnc/setups/plan';
 import { ROTARY_JAW_KEEP_OUT_MM, ROTARY_TAILSTOCK_BAND_MM, type RotaryMap } from '@/engine/cnc/rotary/wrap';
 import {
   ROTARY_NECK_LENGTH_MM,
@@ -1316,10 +1316,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     if (answers.vise.source === 'saved' || answers.sacrificial.under !== null) return;
     const round = job.stockEntry?.form === 'rod' || job.stock.shape === 'cylinder';
     if (!round) return;
-    const fits = rotaryFits(
-      { x: answers.stock.length, y: answers.stock.width, z: answers.stock.thickness },
-      rotaryEnvelope ?? { diameter: 80, length: 150 },
-    );
+    const fits = rotaryStockFits(answers.stock, true, rotaryEnvelope ?? { diameter: 80, length: 150 });
     if (!fits) return;
     onRotary(defaultRotaryChuck(job, shopGrip.value), answers);
     // eslint-disable-next-line react-hooks/exhaustive-deps

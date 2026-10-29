@@ -614,6 +614,12 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
   let sawRotary = false;
   /** #241 — a CUTTING move changed A (see `TimelineSummary.rotaryClass`). */
   let wrappedCut = false;
+  /**
+   * #729 — the first cut made while A had never been stated. On the machine A is wherever the last
+   * job left it, so if the program turns the rotary at all, that cut's face is unknown: the sweep
+   * and the oracle would read it as A 0. Refused at the end, once the program is known rotary.
+   */
+  let cutBeforeA: { step: number; line: number } | null = null;
 
   let state = initialState(setup);
   snapshots.push(state); // snapshot[0] is the state before step 0
@@ -715,6 +721,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
         // on a cutting move is a change from an unstated angle, so it counts as `wrapped` too:
         // whether that cut held one face cannot be proven (see `TimelineSummary.rotaryClass`).
         if (m.a !== null && (state.a === null || m.a !== state.a)) wrappedCut = true;
+        if (cutBeforeA === null && m.a === null && state.a === null) cutBeforeA = { step: i, line: m.line };
         cuttingMoves++;
         const z = lowestKnownZ(toW[2], fromW[2]);
         if (toW[2] === null || z === null) {
@@ -793,6 +800,19 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
     for (let k = snapIdx * SNAPSHOT_EVERY; k <= idx; k++) s = applyEvent(s, events[k] as GcodeEvent, setup);
     return s;
   };
+
+  // #729 — a rotary program that CUTS before it ever states A cuts an unknown face.
+  // (Assigned inside the event loop's closure, so TypeScript cannot see it change: widen it back.)
+  const firstUnangledCut = cutBeforeA as { step: number; line: number } | null;
+  if (sawRotary && firstUnangledCut !== null) {
+    diag(
+      'error',
+      'rotary-cut-before-a',
+      firstUnangledCut.step,
+      firstUnangledCut.line,
+      'this program turns the rotary, but it cuts before it ever states the A angle: on the machine A is wherever the last job left it, so the face this cut lands on is unknown. State A on a rapid before the first cut.',
+    );
+  }
 
   return {
     events,

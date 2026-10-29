@@ -40,6 +40,7 @@ import {
   computeRotaryOracle,
   gridSliceAt,
   oracleBand,
+  ORACLE_SLICE_LIFT_MM,
   removalSliceAt,
   type OracleBbox,
   type OracleLevel,
@@ -452,7 +453,26 @@ type ManifoldHandle = InstanceType<ManifoldToplevel['Manifold']>;
  * which is what "the program never turned to that face" should say. The merged report keeps the
  * flat one's shape, and `a` on every level and on the worst cut lets the sentence name the face.
  */
+/**
+ * #729 — a rotary index as a FACE key: in [0, 360), at the post's 3-decimal precision, so 0 and
+ * 360, −90 and 270, and 51.42857° against the posted A51.429 all name the same face.
+ */
+export function faceKey(a: number | null | undefined): number {
+  const r = Math.round(((((a ?? 0) % 360) + 360) % 360) * 1000) / 1000;
+  return r >= 360 || r === 0 ? 0 : r;
+}
+
+/** #729 — an unplanned face's removal is judged this far below the stock's top, mm. */
+const UNPLANNED_FACE_DEPTH_MM = 0.05;
+/** #729 — removal smaller than this on an unplanned face is noise, mm². */
+const UNPLANNED_FACE_FLOOR_MM2 = 0.01;
+
 function indexedFaceOracle(tl: ManifoldToplevel, l: { timeline: Timeline; sweep: SweepResult }, predicted: readonly OraclePredicted[]): OracleReport {
+  // #729 — no prediction at all is not a pass: the flat path cannot judge an unplanned program
+  // either. Every face the program cuts must be one the plan named.
+  if (predicted.length === 0) {
+    throw new Error('oracle: an indexed rotary program with no predicted face cannot be judged');
+  }
   const zTop = l.sweep.stockTopZ;
   const band = oracleBand(worstContours(l.timeline));
   // #749 — ONE COLUMN PER FOOTPRINT, THE DEEPEST. An indexed face cut in several depth passes
@@ -466,7 +486,7 @@ function indexedFaceOracle(tl: ManifoldToplevel, l: { timeline: Timeline; sweep:
   const picked = new Map<number, { unkeyed: number[]; deepest: Map<number, number> }>();
   l.timeline.checkpoints.forEach((cp, i) => {
     if (!l.sweep.perCheckpoint[i]) return;
-    const a = cp.a ?? 0;
+    const a = faceKey(cp.a);
     let entry = picked.get(a);
     if (entry === undefined) {
       entry = { unkeyed: [], deepest: new Map() };
@@ -488,7 +508,7 @@ function indexedFaceOracle(tl: ManifoldToplevel, l: { timeline: Timeline; sweep:
       indices.map((i) => l.sweep.perCheckpoint[i] as ManifoldHandle),
     );
   }
-  const angles = [...new Set([...solidsByFace.keys(), ...predicted.map((p) => p.a ?? 0)])].sort((x, y) => x - y);
+  const angles = [...new Set([...solidsByFace.keys(), ...predicted.map((p) => faceKey(p.a))])].sort((x, y) => x - y);
   const levels: OracleLevel[] = [];
   let ok = true;
   let areaFloor: number | undefined;
@@ -501,10 +521,36 @@ function indexedFaceOracle(tl: ManifoldToplevel, l: { timeline: Timeline; sweep:
     const turned = solids.map((s) => s.rotate([a, 0, 0]));
     const faceSolid: ManifoldHandle | null = turned.length === 0 ? null : turned.length === 1 ? (turned[0] as ManifoldHandle) : tl.Manifold.union(turned);
     try {
+      const facePredicted = predicted.filter((p) => faceKey(p.a) === a);
+      // #729 — a face the program CUT that no prediction names. `computeOracle` has no level to
+      // ask it at, so it would come back empty and pass; judge it at a shallow level below the
+      // face instead, and any removal there is cut the plan never asked for.
+      if (facePredicted.length === 0 && faceSolid !== null) {
+        const z = zTop - UNPLANNED_FACE_DEPTH_MM;
+        const slice = removalSliceAt(faceSolid)(z + ORACLE_SLICE_LIFT_MM);
+        if (slice !== null) {
+          try {
+            const area = slice.area();
+            if (area > UNPLANNED_FACE_FLOOR_MM2) {
+              const b = slice.bounds();
+              const bbox = { min: [b.min[0], b.min[1]] as [number, number], max: [b.max[0], b.max[1]] as [number, number] };
+              ok = false;
+              levels.push({ z, predictedArea: 0, simulatedArea: area, underCut: 0, overCut: area, a, underBbox: null, overBbox: bbox });
+              if (area > worstOver) {
+                worstOver = area;
+                worstOverAt = { z, bbox, a };
+              }
+            }
+          } finally {
+            slice.delete();
+          }
+        }
+        continue;
+      }
       const report = computeOracle(
         tl,
         faceSolid === null ? () => null : removalSliceAt(faceSolid),
-        predicted.filter((p) => (p.a ?? 0) === a),
+        facePredicted,
         band,
         undefined,
         zTop,

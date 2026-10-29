@@ -40,6 +40,24 @@ export function rotaryFits(
   return Math.hypot(dims[0]!, dims[1]!) <= envelope.diameter && dims[2]! <= envelope.length;
 }
 
+/**
+ * #729 — whether a job's stock fits the rotary, read the way the stock IS. A ROUND stock is a rod
+ * of its own diameter (the box's diagonal would refuse a ⌀60 rod as ⌀85 against ⌀80): in the axis
+ * frame `L × D × D` its diameter is the width, standing `D × D × L` its length is the thickness.
+ * Anything else is a block, judged by {@link rotaryFits}'s diagonal.
+ */
+export function rotaryStockFits(
+  stock: { length: number; width: number; thickness: number },
+  round: boolean,
+  envelope: { diameter: number; length: number },
+): boolean {
+  if (!round) return rotaryFits({ x: stock.length, y: stock.width, z: stock.thickness }, envelope);
+  const axisFrame = Math.abs(stock.width - stock.thickness) <= 1e-9;
+  const diameter = axisFrame ? stock.width : Math.max(stock.length, stock.width);
+  const length = axisFrame ? stock.length : stock.thickness;
+  return diameter <= envelope.diameter + 1e-9 && length <= envelope.length + 1e-9;
+}
+
 /** Group the removals into directions, greedily by volume. */
 export function groupByDirection(removals: Removal[], firstUp: Face): Map<Face, Removal[]> {
   const left = removals.filter((r) => r.opensTo.length > 0);

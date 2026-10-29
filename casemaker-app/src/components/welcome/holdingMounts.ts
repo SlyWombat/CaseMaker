@@ -32,7 +32,7 @@ import {
   seatDepth,
 } from '@/engine/cnc/fixture';
 import { ROD_VISE_MAX_LENGTH_MM } from '@/engine/cnc/stockStart';
-import { rotaryFits } from '@/engine/cnc/setups/plan';
+import { rotaryStockFits } from '@/engine/cnc/setups/plan';
 import type { SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { TAPE_DEFAULTS, defaultBracketHold, defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
 import {
@@ -386,7 +386,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       });
       continue;
     }
-    if (mount === 'rotary' && !rotaryFits({ x: stock.length, y: stock.width, z: stock.thickness }, envelope)) {
+    if (mount === 'rotary' && !rotaryStockFits(stock, args.round === true, envelope)) {
       out.push({
         ...base,
         hint: null,

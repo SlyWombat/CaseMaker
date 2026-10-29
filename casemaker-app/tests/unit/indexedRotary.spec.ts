@@ -12,6 +12,8 @@
 // same n-gon's area, and the ideal circle's number is quoted beside it. Each band is stated
 // where it is used; a wrong face, sign or depth is orders of magnitude outside all of them.
 
+import { faceKey } from '@/workers/sim/session';
+import { rotaryFits, rotaryStockFits } from '@/engine/cnc/setups/plan';
 import { describe, it, expect } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { generateIndexed, type IndexedSpec } from '@/engine/cnc/cam/indexed';
@@ -52,6 +54,30 @@ const segmentArea = (R: number, d: number): number => {
 /** Area of a regular n-gon inscribed in a circle of radius r — the mesh the stock really is. */
 const polygonArea = (r: number, n: number): number => (n / 2) * r * r * Math.sin((2 * Math.PI) / n);
 const N_STOCK = segmentsForRadius(RADIUS);
+
+/**
+ * #729 — a face pass can no longer start inside the jaws: it starts one cutter radius clear of the
+ * jaw face (X 0), so the first `capR` mm of the rod are cut only where the cutter's rounded end
+ * reaches. The material a face removes there, by numeric integration of the face's depth profile
+ * over the disc-covered part of the chord (|y| ≤ halfChord).
+ */
+function capVolume(capR: number, halfChord: number, depth: (y: number) => number, n = 600): number {
+  let v = 0;
+  const dx = capR / n;
+  for (let i = 0; i < n; i++) {
+    const x = (i + 0.5) * dx; // 0 … capR, the pass's centre at x = capR
+    const reach = Math.sqrt(Math.max(0, capR * capR - (x - capR) ** 2));
+    const half = Math.min(halfChord, reach);
+    const dy = (2 * half) / n;
+    for (let j = 0; j < n; j++) {
+      const y = -half + (j + 0.5) * dy;
+      v += Math.max(0, depth(y)) * dx * dy;
+    }
+  }
+  return v;
+}
+/** The jaw clearance every face pass now starts at: the ⌀10 cutter's radius. */
+const JAW_CLEAR = 5;
 const STOCK_VOLUME = polygonArea(RADIUS, N_STOCK) * LENGTH;
 
 /** Relative comparison, because every oracle here is a volume in the hundreds of mm³. */
@@ -159,8 +185,10 @@ describe('#241 fixture: TWO FLATS, 0° and 180°, 1 mm deep on ⌀20 (rotary-flo
   const spec: IndexedSpec = {
     radius: RADIUS,
     faces: [
-      { a: 0, fromX: -5, toX: LENGTH + 5, depth: 1 },
-      { a: 180, fromX: -5, toX: LENGTH + 5, depth: 1 },
+      // #729 — clear of the jaws (X 0 is the jaw face): a pass from X −5 drove the cutter into the
+      // chuck, which the sweep now refuses.
+      { a: 0, fromX: JAW_CLEAR, toX: LENGTH + 5, depth: 1 },
+      { a: 180, fromX: JAW_CLEAR, toX: LENGTH + 5, depth: 1 },
     ],
     tool: WIDE,
     params: PARAMS,
@@ -182,7 +210,10 @@ describe('#241 fixture: TWO FLATS, 0° and 180°, 1 mm deep on ⌀20 (rotary-flo
     // inscribed n-gon (chord error 0.005 mm over an 8.72 mm chord is 0.029 mm² against the
     // segment's 5.87 — about 0.5 %), which is the only approximation in the geometry: the pass's
     // rectangle is exact and lies wholly inside the chord.
-    const perFace = segmentArea(RADIUS, 1) * LENGTH;
+    const halfChord = Math.sqrt(RADIUS * RADIUS - (RADIUS - 1) ** 2);
+    const perFace =
+      segmentArea(RADIUS, 1) * (LENGTH - JAW_CLEAR) +
+      capVolume(JAW_CLEAR, halfChord, (y) => Math.sqrt(RADIUS * RADIUS - y * y) - (RADIUS - 1));
     expectWithin(removedBy(sweep, runAt(timeline, 0)), perFace, 0.01, 'face 0');
     expectWithin(removedBy(sweep, runAt(timeline, 180)), perFace, 0.01, 'face 180');
     expectWithin(sweep.stats.removedVolume, 2 * perFace, 0.01, 'both faces');
@@ -191,7 +222,9 @@ describe('#241 fixture: TWO FLATS, 0° and 180°, 1 mm deep on ⌀20 (rotary-flo
     expectWithin(sweep.stats.stockVolume, STOCK_VOLUME, 0.0001, 'stock');
     // Nothing else was touched: the flats cut two caps off the top, so the result's highest
     // point is the flat floor — a turned-down cylinder would sit lower at the sides.
-    expect(sweep.result.boundingBox().max[2]).toBeCloseTo(RADIUS - 1, 6);
+    // #729 — except within the jaw clearance, where the cutter's rounded end leaves the chord's
+    // corners at full height: the uncut rod there still reaches the radius.
+    expect(sweep.result.boundingBox().max[2]).toBeCloseTo(RADIUS, 3);
     dispose(sweep);
   });
 });
@@ -201,7 +234,8 @@ describe('#241 fixture: HEX ALL ROUND, six faces, across flats 17.321 on ⌀20 (
   const DEPTH = RADIUS - APOTHEM;
   const spec: IndexedSpec = {
     radius: RADIUS,
-    faces: [0, 60, 120, 180, 240, 300].map((a) => ({ a, fromX: -5, toX: LENGTH + 5, depth: DEPTH })),
+    // #729 — every pass starts clear of the jaws (see the two-flats fixture).
+    faces: [0, 60, 120, 180, 240, 300].map((a) => ({ a, fromX: JAW_CLEAR, toX: LENGTH + 5, depth: DEPTH })),
     tool: WIDE,
     params: { ...PARAMS, stepDown: DEPTH },
     rapid: Z1.rapidEstimate,
@@ -221,13 +255,17 @@ describe('#241 fixture: HEX ALL ROUND, six faces, across flats 17.321 on ⌀20 (
     // against the ideal circle's πR² − (3√3/2)R² = 54.35. The hexagon's corners cost a further
     // ~0.00002 mm² each (the n-gon cuts them by its chord error), below the 0.5 % band here.
     const hexArea = 2 * Math.sqrt(3) * APOTHEM * APOTHEM;
-    const ring = (polygonArea(RADIUS, N_STOCK) - hexArea) * LENGTH;
-    expectWithin(sweep.stats.removedVolume, ring, 0.005, 'hex ring');
-    // Each face's own removal is its share of the ring: one sixth, give or take where the
-    // neighbouring faces' segments reach past the shared hexagon vertex.
+    // #729 — past the jaw clearance the section is the full ring; in the first JAW_CLEAR mm each
+    // face removes only what the cutter's rounded end reaches of its segment (|y| ≤ R/2 per face).
+    const ringArea = polygonArea(RADIUS, N_STOCK) - hexArea;
+    const facecap = capVolume(JAW_CLEAR, RADIUS / 2, (y) => Math.sqrt(RADIUS * RADIUS - y * y) - APOTHEM);
+    const ring = ringArea * (LENGTH - JAW_CLEAR) + 6 * facecap;
+    expectWithin(sweep.stats.removedVolume, ring, 0.01, 'hex ring');
+    // Each face's own removal is its share: one sixth, give or take where the neighbouring faces'
+    // segments reach past the shared hexagon vertex.
     for (let k = 0; k < 6; k++) expectWithin(removedBy(sweep, runAt(timeline, k * 60)), ring / 6, 0.02, `face ${k}`);
-    // The remaining cross-section at every X is the hexagon: the result is the hexagon solid.
-    expectWithin(sweep.stats.resultVolume, hexArea * LENGTH, 0.005, 'hexagon solid');
+    // The remaining solid is the hexagon past the clearance, plus what the caps left near the jaws.
+    expectWithin(sweep.stats.resultVolume, sweep.stats.stockVolume - ring, 0.01, 'hexagon solid');
     dispose(sweep);
   });
 });
@@ -266,13 +304,13 @@ describe('#241 the air gate on an indexed job', () => {
     // A 90°. The two end positions cannot see that, so the move is refused by name.
     const src = [
       'S1000 M3',
-      'G0 X-5 Y0 Z15 A0',
+      'G0 X5 Y0 Z15 A0',
       'G1 Z9 F200',
       'G1 X35 F800',
       'G0 Z15',
       'G0 A180',
       'G1 Z9 F200',
-      'G1 X-5 F800',
+      'G1 X5 F800',
       'G0 Z15 A0',
       'G0 X15 Y0',
       'G0 Z9',
@@ -283,9 +321,23 @@ describe('#241 the air gate on an indexed job', () => {
     expect(timeline.summary.rotaryClass).toBe('indexed');
     const out = sweepTimeline(tl, timeline, WIDE, setup());
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
-    const turn = out.value.diagnostics.find((d) => d.code === 'rotary-turn-in-stock');
-    expect(turn?.severity).toBe('error');
-    expect(turn?.message).toMatch(/index turn/);
+    // #729 — the case this test names is LINE 12 (the turn with the tool down in the groove). Line
+    // 9's retract-while-turning starts in the groove too and is refused as well; pin each by line.
+    const turns = out.value.diagnostics.filter((d) => d.code === 'rotary-turn-in-stock');
+    expect(turns.find((d) => d.message.startsWith('line 12:'))?.severity).toBe('error');
+    expect(turns.find((d) => d.message.startsWith('line 12:'))?.message).toMatch(/index turn/);
+    expect(turns.some((d) => d.message.startsWith('line 9:'))).toBe(true);
+    dispose(out.value);
+  });
+
+  it('#729 — clears a lift-and-turn with the cutter wholly past the rod’s free end', () => {
+    // The rod is X 0 → 30; the ⌀10 cutter at X 36 is clear of it by 1 mm, so a turn at Z 9 sweeps
+    // nothing even though it is below the rod's top.
+    const src = ['S1000 M3', 'G0 X36 Y0 Z15 A0', 'G0 Z9', 'G0 A90', 'G0 Z15'].join('\n');
+    const timeline = buildTimeline(parseGcode(src), setup());
+    const out = sweepTimeline(tl, timeline, WIDE, setup());
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.some((d) => d.code === 'rotary-turn-in-stock')).toBe(false);
     dispose(out.value);
   });
 
@@ -297,5 +349,72 @@ describe('#241 the air gate on an indexed job', () => {
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
     expect(out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
     dispose(out.value);
+  });
+});
+
+describe('#729 — the retroactive review: the chuck, an unstated A, and face matching', () => {
+  it('refuses a rapid into the jaws: a pure-Z rapid at X −10 down to Z −5', () => {
+    const src = ['S1000 M3', 'G0 X15 Y0 Z15 A0', 'G0 X-10', 'G0 Z-5', 'G0 Z15'].join('\n');
+    const timeline = buildTimeline(parseGcode(src), setup());
+    const out = sweepTimeline(tl, timeline, WIDE, setup());
+    const diags = out.ok ? out.value.diagnostics : out.diagnostics;
+    const chuck = diags.find((d) => d.code === 'rotary-into-chuck');
+    expect(chuck?.severity).toBe('error');
+    expect(chuck?.message).toContain('at X -10.000 mm');
+    if (out.ok) dispose(out.value);
+  });
+
+  it('refuses a cut that reaches past the jaw face below the rod top, and says the tailstock is unchecked', () => {
+    // A ⌀10 pass starting at X 2: its edge is at X −3, inside the jaws, 1 mm below the top.
+    const src = ['S1000 M3', 'G0 X2 Y0 Z15 A0', 'G1 Z9 F100', 'G1 X20', 'G0 Z15'].join('\n');
+    const timeline = buildTimeline(parseGcode(src), setup());
+    const out = sweepTimeline(tl, timeline, WIDE, setup());
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.find((d) => d.code === 'rotary-into-chuck')?.message).toContain('a cut reaches the chuck');
+    expect(out.value.diagnostics.some((d) => d.code === 'fixture-unchecked' && /tailstock/.test(d.message))).toBe(true);
+    dispose(out.value);
+  });
+
+  it('a pass one cutter radius clear of the jaws is not refused', () => {
+    const src = ['S1000 M3', 'G0 X5 Y0 Z15 A0', 'G1 Z9 F100', 'G1 X20', 'G0 Z15'].join('\n');
+    const timeline = buildTimeline(parseGcode(src), setup());
+    const out = sweepTimeline(tl, timeline, WIDE, setup());
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.some((d) => d.code === 'rotary-into-chuck')).toBe(false);
+    dispose(out.value);
+  });
+
+  it('refuses a rotary program that cuts before it ever states A', () => {
+    const src = ['S1000 M3', 'G0 X15 Y0 Z15', 'G1 Z9 F100', 'G0 Z15', 'G0 A90', 'G1 Z9 F100', 'G0 Z15'].join('\n');
+    const timeline = buildTimeline(parseGcode(src), setup());
+    const before = timeline.diagnostics.find((d) => d.code === 'rotary-cut-before-a');
+    expect(before?.severity).toBe('error');
+    expect(before?.line).toBe(3);
+    // A flat program that never states A is not touched by the rule.
+    const flat = buildTimeline(parseGcode(['S1000 M3', 'G0 X15 Y0 Z15', 'G1 Z9 F100', 'G0 Z15'].join('\n')), setup());
+    expect(flat.diagnostics.some((d) => d.code === 'rotary-cut-before-a')).toBe(false);
+  });
+
+  it('names one face however the angle is written: 0/360, −90/270, and the post’s 3 decimals', () => {
+    expect(faceKey(360)).toBe(0);
+    expect(faceKey(0)).toBe(0);
+    expect(faceKey(-90)).toBe(270);
+    expect(faceKey(720 + 45)).toBe(45);
+    expect(faceKey(360 / 7)).toBe(faceKey(51.429));
+    expect(faceKey(null)).toBe(0);
+  });
+});
+
+describe('#729 — a round stock fits the rotary by its own diameter', () => {
+  const ENV = { diameter: 80, length: 150 };
+  it('a ⌀60 × 100 rod fits ⌀80 (its box diagonal, ⌀85, would not)', () => {
+    expect(rotaryStockFits({ length: 100, width: 60, thickness: 60 }, true, ENV)).toBe(true);
+    expect(rotaryFits({ x: 100, y: 60, z: 60 }, ENV)).toBe(false);
+    // Standing (D × D × L) reads the same.
+    expect(rotaryStockFits({ length: 60, width: 60, thickness: 100 }, true, ENV)).toBe(true);
+    // Too fat or too long is still refused; a block keeps the diagonal rule.
+    expect(rotaryStockFits({ length: 100, width: 82, thickness: 82 }, true, ENV)).toBe(false);
+    expect(rotaryStockFits({ length: 160, width: 60, thickness: 60 }, true, ENV)).toBe(false);
+    expect(rotaryStockFits({ length: 100, width: 60, thickness: 60 }, false, ENV)).toBe(false);
   });
 });
