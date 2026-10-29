@@ -455,15 +455,39 @@ type ManifoldHandle = InstanceType<ManifoldToplevel['Manifold']>;
 function indexedFaceOracle(tl: ManifoldToplevel, l: { timeline: Timeline; sweep: SweepResult }, predicted: readonly OraclePredicted[]): OracleReport {
   const zTop = l.sweep.stockTopZ;
   const band = oracleBand(worstContours(l.timeline));
-  const solidsByFace = new Map<number, ManifoldHandle[]>();
+  // #749 — ONE COLUMN PER FOOTPRINT, THE DEEPEST. An indexed face cut in several depth passes
+  // leaves the sweep with identical columns nested in Z, exactly as a through cut does; unioning
+  // every one here would rebuild the combinatorial pile the sweep and playback now avoid. Nested
+  // prisms with one XY contour union to the deepest alone, so the face's union is unchanged.
+  // `perCheckpointKey` is the sweep's label for that contour (and includes A); a solid it could
+  // not label is kept, never dropped.
+  const keys = l.sweep.perCheckpointKey;
+  const zAt = (i: number): number => l.timeline.checkpoints[i]?.z ?? Number.POSITIVE_INFINITY;
+  const picked = new Map<number, { unkeyed: number[]; deepest: Map<number, number> }>();
   l.timeline.checkpoints.forEach((cp, i) => {
-    const solid = l.sweep.perCheckpoint[i];
-    if (!solid) return;
+    if (!l.sweep.perCheckpoint[i]) return;
     const a = cp.a ?? 0;
-    const list = solidsByFace.get(a);
-    if (list === undefined) solidsByFace.set(a, [solid]);
-    else list.push(solid);
+    let entry = picked.get(a);
+    if (entry === undefined) {
+      entry = { unkeyed: [], deepest: new Map() };
+      picked.set(a, entry);
+    }
+    const key = keys[i] ?? null;
+    if (key === null) {
+      entry.unkeyed.push(i);
+      return;
+    }
+    const prev = entry.deepest.get(key);
+    if (prev === undefined || zAt(i) < zAt(prev)) entry.deepest.set(key, i);
   });
+  const solidsByFace = new Map<number, ManifoldHandle[]>();
+  for (const [a, entry] of picked) {
+    const indices = entry.unkeyed.concat([...entry.deepest.values()]).sort((x, y) => x - y);
+    solidsByFace.set(
+      a,
+      indices.map((i) => l.sweep.perCheckpoint[i] as ManifoldHandle),
+    );
+  }
   const angles = [...new Set([...solidsByFace.keys(), ...predicted.map((p) => p.a ?? 0)])].sort((x, y) => x - y);
   const levels: OracleLevel[] = [];
   let ok = true;

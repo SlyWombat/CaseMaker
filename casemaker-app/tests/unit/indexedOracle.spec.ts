@@ -88,6 +88,29 @@ describe('#708 the per-face oracle (design §6 fixtures through the session)', (
     session.dispose();
   });
 
+  it('a face cut in 100 depth passes is one footprint, and still matches its prediction (#749)', () => {
+    // The indexed shape of #749: one XY capsule at every step-down, 100 columns nested in Z.
+    // The oracle used to union every column, rebuilding the same combinatorial pile the sweep
+    // and playback now avoid; one per footprint is the exact union (nested prisms).
+    const spec: IndexedSpec = {
+      radius: RADIUS,
+      faces: [{ a: 0, fromX: -5, toX: LENGTH + 5, depth: 1 }],
+      tool: WIDE,
+      params: { ...PARAMS, stepDown: 0.01 },
+      rapid: Z1.rapidEstimate,
+    };
+    const { session, load: r } = load(spec);
+    expect(r.stats.engine).toBe('exact');
+    const report = session.oracle([{ a: 0, depth: 1, polygons: faceCapsule(5) }]);
+    expect(report.ok, oracleSentence({ oracle: report })).toBe(true);
+    expect(report.levels.map((l) => l.a)).toEqual([0]);
+    for (const level of report.levels) {
+      expect(level.underCut).toBe(0);
+      expect(level.overCut).toBe(0);
+    }
+    session.dispose();
+  }, 120_000);
+
   it('HEX ALL ROUND: six faces, each judged against its own prediction', () => {
     const apothem = RADIUS * Math.cos(Math.PI / 6);
     const depth = RADIUS - apothem;

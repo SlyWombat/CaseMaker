@@ -41,9 +41,11 @@ afterEach(() => vi.restoreAllMocks());
  * Which boundary the next run should crash at. The mocks below are hoisted with `vi.mock`, so
  * their state is hoisted too: one object both the test and the factories can reach.
  */
-const forced = vi.hoisted(() => ({ at: null as null | 'generate' | 'load' }));
+const forced = vi.hoisted(() => ({ at: null as null | 'generate' | 'load' | 'plain' }));
 
 const WASM_CRASH = 'memory access out of bounds';
+/** A plain JS bug, not a wasm fault: it must never be reported as "the geometry kernel". */
+const PLAIN_BUG = 'cannot read properties of undefined (reading "cuts")';
 
 vi.mock('../../src/workers/sim/engraveGenerate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/workers/sim/engraveGenerate')>();
@@ -51,6 +53,7 @@ vi.mock('../../src/workers/sim/engraveGenerate', async (importOriginal) => {
     ...actual,
     engraveGenerate: (...args: Parameters<typeof actual.engraveGenerate>) => {
       if (forced.at === 'generate') throw new WebAssembly.RuntimeError(WASM_CRASH);
+      if (forced.at === 'plain') throw new TypeError(PLAIN_BUG);
       return actual.engraveGenerate(...args);
     },
   };
@@ -172,6 +175,29 @@ describe('#749 a kernel crash answers --json with one receipt', () => {
       }),
     );
     expect(run.stderr.join('\n')).toContain(WASM_CRASH);
+    expect(receipt.outputs).toEqual([]);
+  });
+
+  it('a plain TypeError is reported as itself, with its stack — never as the kernel', async () => {
+    // The guard must not tell the operator the geometry kernel is at fault for a bug in this
+    // build. It also must not eat the one thing that locates the bug: the JS stack.
+    forced.at = 'plain';
+    const { run, receipt } = await crashRun('plain');
+
+    expect(run.code, 'a crashed run exits non-zero').toBe(1);
+    expect(receipt.ok).toBe(false);
+    expect(receipt.stage).toBe('cam');
+    expect(receipt.gate).toBe('generated');
+    expect(receipt.refusals.map((r) => r.code)).toEqual(['stage-error']);
+    const reason = receipt.refusals[0]!.reason;
+    expect(reason).toContain(`TypeError: ${PLAIN_BUG}`);
+    expect(reason).toContain('cam');
+    expect(reason).toContain('Nothing was written');
+    expect(reason, 'a plain TypeError is not a geometry-kernel fault').not.toContain('geometry kernel');
+    // The stack is printed for the operator; the receipt's message stays a sentence.
+    const stderr = run.stderr.join('\n');
+    expect(stderr).toContain(`TypeError: ${PLAIN_BUG}`);
+    expect(stderr).toMatch(/\n\s+at /);
     expect(receipt.outputs).toEqual([]);
   });
 

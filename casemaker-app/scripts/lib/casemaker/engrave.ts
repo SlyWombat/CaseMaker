@@ -264,7 +264,7 @@ function invalidJob(message: string): EngraveFailure {
 }
 
 /**
- * #749 — A CRASH IN THE GEOMETRY KERNEL IS A STOPPED RUN, NOT AN EXCEPTION.
+ * #749 — AN UNEXPECTED THROW IS A STOPPED RUN, NOT AN EMPTY STDOUT.
  *
  * The kernel (manifold-3d's wasm) throws `RuntimeError: memory access out of bounds` when a CSG
  * tree outgrows its 4 GiB heap. It is not a job-document problem and it is not recoverable here,
@@ -272,12 +272,21 @@ function invalidJob(message: string): EngraveFailure {
  * and an uncaught throw leaves stdout empty — no stage, no reason, nothing for a caller to read
  * (#749: `casemaker cut` on a through cut-out died after ~90 s with a 0-byte stdout).
  *
- * The receipt names the stage that was running, carries the kernel's own words, and says plainly
- * that nothing was written. `source` is the receipt's own vocabulary ('findings' where the
- * generator runs, 'simulation' where the sweep does); the refusal code is the same
- * `stage-error` the generator's own stops use, so a caller needs no new vocabulary.
+ * ONLY `WebAssembly.RuntimeError` earns the kernel sentence. Any other throw is a bug in this
+ * build, and saying "a fault in the geometry kernel" about a plain `TypeError` would send the
+ * operator to the wrong place and throw away the one thing that locates it: the stack. Those are
+ * reported as themselves, with the stack on the operator's channel (stderr), while the receipt
+ * still names the stage that was running and says plainly that nothing was written.
+ *
+ * `source` is the receipt's own vocabulary ('findings' where the generator runs, 'simulation'
+ * where the sweep does); the refusal code is the same `stage-error` the generator's own stops
+ * use, so a caller needs no new vocabulary.
  */
-function stageCrash(
+function isKernelCrash(error: unknown): boolean {
+  return typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError;
+}
+
+function unexpectedStop(
   stage: string,
   gate: Receipt['gate'],
   what: string,
@@ -286,16 +295,50 @@ function stageCrash(
   source: 'findings' | 'simulation',
 ): EngraveFailure {
   const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-  const message =
-    `the geometry kernel crashed while ${what} (the ${stage} stage): ${detail}. ` +
-    'Nothing was written. This is a fault in the geometry kernel, not a problem with the job.';
+  const message = isKernelCrash(error)
+    ? `the geometry kernel crashed while ${what} (the ${stage} stage): ${detail}. ` +
+      'Nothing was written. This is a fault in the geometry kernel, not a problem with the job.'
+    : `the cut stopped on an unexpected error while ${what} (the ${stage} stage): ${detail}. ` +
+      'Nothing was written. This is a fault in the command, not a problem with the job.';
   console.error(`casemaker cut: ${message}`);
+  // The kernel's own stack is wasm frames and says nothing; a JS throw's stack is the report.
+  if (!isKernelCrash(error) && error instanceof Error && error.stack !== undefined) {
+    console.error(error.stack);
+  }
   return {
     stage,
     gate,
     diagnostics: [diagnostic('stage-error', 'error', message, source, program)],
     refusals: [{ code: 'stage-error', reason: message }],
   };
+}
+
+/**
+ * Release a session after a crash without letting the release REPLACE the report. The wasm
+ * instance that just faulted may fault again on the way out (a corrupt handle, a half-freed
+ * mesh); the operator needs the original error and its receipt, not a teardown error.
+ */
+function disposeAfterCrash(session: { dispose(): void }): void {
+  try {
+    session.dispose();
+  } catch (e) {
+    console.error(
+      `casemaker cut: the simulation session could not be released after the crash: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`,
+    );
+  }
+}
+
+/**
+ * #749 — THE BODY'S RECEIPT WRITER, HANDED TO THE ENTRY POINT.
+ *
+ * The entry point's catch must answer a throw from ANY work the stages do not guard
+ * (`scanReach`, the `--preview` drawing, the rest pass, `readDesign`, the writers), and that
+ * receipt must carry the inputs and outputs the run had already recorded. Those live in the
+ * body's own state, so the body registers its `stop` here as soon as it can emit; the catch
+ * calls it with the error it caught.
+ */
+interface RunReceipt {
+  stop?: (failure: EngraveFailure) => number;
 }
 
 /**
@@ -308,15 +351,24 @@ function stageCrash(
  * code into `process.exitCode`.
  */
 export async function engraveJobMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {
+  const receipt: RunReceipt = {};
   try {
-    return await engraveJobBody(argv, options);
+    return await engraveJobBody(argv, options, receipt);
   } catch (e) {
     if (isCliExit(e)) return e.code;
-    throw e;
+    // #749 — ONE TOP-LEVEL CATCH OVER THE WHOLE BODY. The stages guard the kernel work they own
+    // (generator, sweep, removal union); everything else that calls Manifold/Clipper — the
+    // reachability scan, the preview drawing, the rest pass, the design reader, the writers —
+    // reaches this. The body registered its receipt writer before it read anything, so the one
+    // receipt still carries the inputs and outputs the run had by then.
+    if (receipt.stop !== undefined) {
+      return receipt.stop(unexpectedStop('cam', 'generated', 'preparing the cut', null, e, 'findings'));
+    }
+    throw e; // the output channel itself failed; there is nowhere to write a receipt
   }
 }
 
-async function engraveJobBody(argv: string[], options: CommandOptions): Promise<number> {
+async function engraveJobBody(argv: string[], options: CommandOptions, receipt: RunReceipt): Promise<number> {
   const out = commandOutput(options);
   // The run's receipt accumulates as the command works; NOTHING here prints a result line —
   // `out.emitReceipt` renders the whole block from this object at the end (#478).
@@ -395,6 +447,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     emit();
     return 1;
   }
+
+  // #749 — from here on, a throw anywhere in the body is answered by THIS writer, with all the
+  // state it closes over. Registered before the first input is read, so a receipt lists it.
+  receipt.stop = stop;
 
   let args: Args;
   try {
@@ -768,7 +824,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       if (isCliExit(e)) throw e;
       return {
         ok: false,
-        failure: stageCrash('cam', 'generated', 'generating the toolpath', job.name, e, 'findings'),
+        failure: unexpectedStop('cam', 'generated', 'generating the toolpath', job.name, e, 'findings'),
       };
     }
     if (!generated.ok || generated.nc === null) {
@@ -889,10 +945,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       });
     } catch (e) {
       if (isCliExit(e)) throw e;
-      session.dispose();
+      disposeAfterCrash(session);
       return {
         ok: false,
-        failure: stageCrash('simulated', 'simulated', `simulating ${sweeping}`, job.name, e, 'simulation'),
+        failure: unexpectedStop('simulated', 'simulated', `simulating ${sweeping}`, job.name, e, 'simulation'),
       };
     }
 
@@ -964,10 +1020,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       // #749 — the same boundary as the sweep above: a union of the programs' removal meshes is
       // kernel work, and a crash in it must still answer the one receipt.
       if (isCliExit(e)) throw e;
-      session.dispose();
+      disposeAfterCrash(session);
       return {
         ok: false,
-        failure: stageCrash('simulated', 'simulated', 'combining the programs’ removal', job.name, e, 'simulation'),
+        failure: unexpectedStop('simulated', 'simulated', 'combining the programs’ removal', job.name, e, 'simulation'),
       };
     }
     return {
@@ -1336,14 +1392,18 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     }
     const names = new Set<string>();
 
-    const design = (() => {
-      try {
-        const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-        return readDesign(tl, parsePrusaThreeMf(ab));
-      } catch (e) {
-        return fail(`${path}: ${(e as Error).message}`);
-      }
-    })();
+    let design: ReturnType<typeof readDesign>;
+    try {
+      const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      design = readDesign(tl, parsePrusaThreeMf(ab));
+    } catch (e) {
+      if (isCliExit(e)) throw e;
+      // #749 — a bad project file is still the usage stop it always was. But `readDesign` also
+      // runs Clipper/Manifold, and a KERNEL fault there is not a bad file: it answers the one
+      // receipt like every other kernel call.
+      if (isKernelCrash(e)) return stop(unexpectedStop('cam', 'generated', 'reading the design', null, e, 'findings'));
+      fail(`${path}: ${(e as Error).message}`);
+    }
 
     const patch = designJobFor(design, { direction });
     // The blank and the items are the design's; everything else (the vise, the margins, the sacrificial
