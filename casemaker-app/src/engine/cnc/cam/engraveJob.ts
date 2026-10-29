@@ -32,6 +32,7 @@ import type { CutParams } from '../feeds';
 import { cuttingForTrace, type Tool } from '../tool';
 import { vCarveLevels, vCarveRowStepover } from '../vCarveGeometry';
 import { vDepthLimit, vDepthRefusal } from '../vProfile';
+import { prismHeightRefusal, prismNumbers } from '../engrave/prism';
 import { boreMoves, borePasses, drillMoves, orderHolesNearest, peckDepths } from './drill';
 import {
   estimateCycleSeconds,
@@ -93,10 +94,11 @@ export interface VCarveRegion {
    */
   inlay?: { role: 'female' | 'male'; glueGapMm: number };
   /**
-   * #741 — a PRISM's region. The depth rule (`vDepthLimit`) refuses a V-cut deeper than the
-   * cutter's cone, but a prism's HEIGHT is the prism model's own number (#674): its tests set
-   * 2 mm against a 1.4875 mm cone by design, so the prism feature's model owns that bound. The
-   * marker is what lets the CAM's guard and the finding tell a prism from an ordinary V-carve.
+   * #741 — a PRISM's region. A prism's sides are the cone's own flank, so its HEIGHT is bounded
+   * by the cone exactly as an ordinary V-carve's depth is (#741 review: the marker no longer
+   * exempts it — a prism taller than the cone has its top cut by the bit's body). The marker is
+   * what lets the CAM's guard and the finding tell a prism from an ordinary V-carve and name the
+   * right sentence.
    */
   prism?: true;
 }
@@ -584,15 +586,26 @@ export function generateEngrave(
   const ringsFor = (label: EngraveRegion, extraRadius = 0): Polygons[] => {
     // #741 — THE DEPTH RULE, enforced here as well as in the findings, from the ONE owner
     // (`vDepthLimit` / `vDepthRefusal` in `vProfile.ts`): a V-carve or inlay deeper than the
-    // cutter's cone is not a V-cut, so no program is written for it. A PRISM is exempt — its
-    // height is the prism model's own bound (#674). The pipeline's findings gate normally stops
-    // this job before the CAM; this guard is what keeps a direct caller honest.
-    if (cone !== null && label.vCarve !== undefined && label.vCarve.prism === undefined) {
-      const limit = vDepthLimit(tool);
-      if (limit !== null && label.depth > limit.limitMm + 1e-9) {
-        throw new Error(
-          `generateEngrave: ${vDepthRefusal(label.name ?? label.text, label.depth, tool, limit)}`,
-        );
+    // cutter's cone is not a V-cut, so no program is written for it. A PRISM is bounded by the
+    // SAME cone, because its sides ARE the cone's flank (#741 review): a prism taller than the
+    // cone has its top cut by the bit's cylindrical body, so it is refused with the prism
+    // sentence from the one prism model (`prismNumbers`). The pipeline's findings gate normally
+    // stops this job before the CAM; this guard is what keeps a direct caller honest.
+    if (cone !== null && label.vCarve !== undefined) {
+      if (label.vCarve.prism !== undefined) {
+        const prism = prismNumbers(cone, label.depth, undefined);
+        if (!prism.ok && prism.code === 'prism-height') {
+          throw new Error(
+            `generateEngrave: ${prismHeightRefusal(label.name ?? label.text, prism.numbers, tool.name)}`,
+          );
+        }
+      } else {
+        const limit = vDepthLimit(tool);
+        if (limit !== null && label.depth > limit.limitMm + 1e-9) {
+          throw new Error(
+            `generateEngrave: ${vDepthRefusal(label.name ?? label.text, label.depth, tool, limit)}`,
+          );
+        }
       }
     }
     if (cone === null) {

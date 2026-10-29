@@ -27,8 +27,14 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { engraveRegions } from '@/workers/sim/engraveGenerate';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { vDepthLimit, vDepthRefusal } from '@/engine/cnc/vProfile';
+import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
+import { Z1 } from '@/engine/cnc/machine';
+import type { CutParams } from '@/engine/cnc/feeds';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
-import type { EngraveJob, EngraveRectShape } from '@/types/engraveJob';
+import type { EngraveJob, EngraveRectShape, EngraveTraceItem } from '@/types/engraveJob';
+
+/** The feeds the CAM guard test needs; it throws before any of them is read. */
+const CAM_PARAMS: CutParams = { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.2, stepOver: 0.2, peck: 1, air: false };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..', '..', '..');
@@ -113,6 +119,42 @@ function shallowJob(depth: number, tool: Tool): EngraveJob {
     cutOverride: { stepDown: 0.2, stepOver: 1.42875 },
   };
 }
+
+/** A job of one single-stroke trace at `depth` — no regions, so only the trace rule can speak. */
+function traceJob(depth: number, tool: Tool): EngraveJob {
+  const base = defaultEngraveJob();
+  const line: EngraveTraceItem = {
+    kind: 'line',
+    id: 't1',
+    position: { x: 0, y: 0 },
+    rotation: 0,
+    points: [
+      [10, 15],
+      [30, 15],
+    ],
+    closed: false,
+    depth,
+    enabled: true,
+  } as EngraveTraceItem;
+  return {
+    ...base,
+    stock: { ...base.stock, length: 40, width: 30 },
+    labels: [],
+    shapes: [],
+    toolKey: 'bench-cutter',
+    tool,
+    traces: [line],
+  };
+}
+
+/** A 1 mm flat with a 3 mm flute — the cutter the V rule must not judge (#741 review). */
+const FLAT_1MM: Tool = flatEndMill(1, {
+  id: null,
+  name: '1 mm flat',
+  typeText: 'Flat End',
+  fluteLength: 3,
+  cornerRadius: null,
+});
 
 describe('#741 the depth limit is the cutter’s own cone, not a table', () => {
   it('derives the 90° chamfer’s 1.5375 mm cone from its tip, diameter and angle', () => {
@@ -250,5 +292,106 @@ describe('#741 the bench’s over-deep V-carves are refused by name', () => {
     const region = gen.predicted.find((p) => p.vRegion !== undefined);
     expect(region).toBeDefined();
     expect(region!.vRegion!.maxGrow).toBeUndefined();
+  });
+});
+
+/**
+ * #741 REVIEW — THE V RULE IS FOR V-BITS. `vDepthLimit` derives the deepest V a cone can cut; a
+ * flat end mill has no V, and reading its stated flute as a V depth refused ordinary pockets
+ * ("…can only V-carve 3 mm deep…") that had always generated. The gate lives in the one owner, so
+ * every reader — findings, CAM guard, traces — is covered at once.
+ */
+describe('#741 review — a cutter with no cone is not judged as a V-carve', () => {
+  it('states no V depth limit for a flat cutter, whatever flute the record claims', () => {
+    expect(vDepthLimit(FLAT_1MM)).toBeNull();
+    // …and still derives one for the V-bits the rule is about.
+    expect(vDepthLimit(CHAMFER_90)).not.toBeNull();
+  });
+
+  it('generates the 4 mm pocket on a 1 mm flat with a 3 mm flute', () => {
+    const job = { ...shallowJob(4, FLAT_1MM), cutOverride: { stepDown: 0.4, stepOver: 0.4 } };
+    const gen = generate(job, FLAT_1MM);
+    const vCodes = gen.findings.filter((f) => f.code.startsWith('vcarve-')).map((f) => f.code);
+    expect(vCodes).toEqual([]);
+    expect(gen.ok, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
+    expect(gen.programs.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #741 REVIEW — A SINGLE-STROKE V TRACE DEEPER THAN THE CONE. A trace's depth is the design (the
+ * line is a decorative cut), so it is not refused at the cone where the bit's body merely rubs:
+ * that is a WARNING naming the cone height. Past a stated flute there is no cutting edge at all,
+ * so that is an error. `vCarveConeSim.spec.ts` sweeps a deep trace to pin the simulation's cap,
+ * so the warning must not stop a program.
+ */
+describe('#741 review — a V trace deeper than the cone, or the flute', () => {
+  it('warns above the cone and inside the stated flute, and still writes the program', () => {
+    const gen = generate(traceJob(1.55, CHAMFER_90), CHAMFER_90);
+    const warn = gen.findings.find((f) => f.code === 'vcarve-trace-beyond-cone');
+    expect(warn, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBeDefined();
+    expect(warn!.severity).toBe('warning');
+    expect(warn!.labelId).toBe('t1');
+    expect(warn!.message).toContain('1.55 mm');
+    expect(warn!.message).toContain('1.538 mm');
+    expect(warn!.message).toContain('C1-BIT-CHAMFER-90');
+    expect(warn!.message).not.toMatch(/vcarve|code|error/i);
+    expect(gen.findings.filter((f) => f.code === 'vcarve-trace-beyond-flute')).toEqual([]);
+    expect(gen.programs.length).toBeGreaterThan(0);
+  });
+
+  it('refuses past the stated flute — there is no cutting edge below it', () => {
+    const gen = generate(traceJob(1.7, CHAMFER_90), CHAMFER_90);
+    const err = gen.findings.find((f) => f.code === 'vcarve-trace-beyond-flute');
+    expect(err, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBeDefined();
+    expect(err!.severity).toBe('error');
+    expect(err!.message).toContain('1.7 mm');
+    expect(err!.message).toContain('1.6 mm');
+    expect(err!.message).toContain('1.538 mm');
+    expect(gen.programs).toEqual([]);
+  });
+
+  it('leaves a trace inside the cone alone', () => {
+    const gen = generate(traceJob(1, CHAMFER_90), CHAMFER_90);
+    expect(gen.findings.filter((f) => f.code.startsWith('vcarve-trace-'))).toEqual([]);
+    expect(gen.programs.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #741 REVIEW — THE CAM'S OWN GUARD. The pipeline's findings gate normally stops an over-deep
+ * V-carve before the CAM, so the guard was never exercised by a test. This calls the CAM directly
+ * with the region the plan would have handed it: it must throw the same sentence, not write a
+ * program whose V continues past the cone.
+ */
+describe('#741 review — the CAM’s own guard throws', () => {
+  it('refuses an over-deep V region handed to generateEngrave directly', () => {
+    const square: [number, number][][] = [
+      [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+        [0, 10],
+      ],
+    ];
+    const region: EngraveRegion = {
+      id: 's1',
+      text: '',
+      name: 'Star',
+      depth: 5.1,
+      polygons: square,
+      vCarve: {
+        plane: square,
+        floor: square,
+        surface: square,
+        planeDepth: 5.1,
+        planeRadius: 5.15,
+        floorInset: 0.05,
+        surfaceOutset: 0.05,
+      },
+    };
+    expect(() => generateEngrave(tl, [region], CHAMFER_90, CAM_PARAMS, Z1.rapidEstimate)).toThrow(
+      /can only V-carve 1\.538 mm deep/,
+    );
   });
 });

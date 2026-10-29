@@ -19,6 +19,8 @@ import { createEngravePreviewer } from '@/workers/sim/engravePreview';
 import { preview } from './helpers/engravePipeline';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { jobTool, toSetup, validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
+import type { CutParams } from '@/engine/cnc/feeds';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -56,6 +58,12 @@ const V_POINT: Tool = flatEndMill(3.175, {
   halfAngle: null,
 });
 
+/**
+ * #741 review — the fixture stands 1.4 mm, not the 2 mm it used to. Its cutter's cone is
+ * (3.175 − 0.2) / (2·tan 45°) = 1.4875 mm tall, so the old 2 mm prism was itself the defect the
+ * height rule now refuses (its top 0.5 mm would have been cut by the bit's body, not the flank).
+ * Every derived number below moved with the height; the ANGLE is unchanged.
+ */
 function rect(extra: Partial<EngraveRectShape> = {}): EngraveRectShape {
   return {
     id: 'plate',
@@ -63,7 +71,7 @@ function rect(extra: Partial<EngraveRectShape> = {}): EngraveRectShape {
     kind: 'rect',
     position: { x: 20, y: 15 },
     rotation: 0,
-    depth: 2,
+    depth: 1.4,
     enabled: true,
     width: 20,
     height: 10,
@@ -103,30 +111,52 @@ const polygonArea = (polygons: [number, number][][]): number => {
 
 describe('prismNumbers — one derivation, the base labelled', () => {
   it('derives the margin, the plane radius and the tip’s path from the height and the cone', () => {
-    const check = prismNumbers(CONE, 2, {});
+    const check = prismNumbers(CONE, 1.4, {});
     expect(check.ok).toBe(true);
     const n = check.numbers;
-    expect(n.heightMm).toBe(2);
+    expect(n.heightMm).toBe(1.4);
     expect(n.baseMm).toBe(DEFAULT_PRISM_BASE_MM);
     expect(n.baseSource).toBe('the CAM’s default');
-    // 90° V: tan = 1, so the slope is 2 mm wide either side and the margin 1 + 4.
-    expect(n.slopeWidthMm).toBeCloseTo(2, 9);
-    expect(n.marginMm).toBeCloseTo(5, 9);
-    expect(n.planeRadiusMm).toBeCloseTo(0.1 + 2, 9);
+    // 90° V: tan = 1, so the slope is 1.4 mm wide either side and the margin 1 + 2.8.
+    expect(n.slopeWidthMm).toBeCloseTo(1.4, 9);
+    expect(n.marginMm).toBeCloseTo(3.8, 9);
+    expect(n.planeRadiusMm).toBeCloseTo(0.1 + 1.4, 9);
     expect(n.tipPathWidthMm).toBeCloseTo(1 - 0.2, 9);
+    expect(n.coneHeightMm).toBeCloseTo(1.4875, 9);
   });
 
   it('takes a typed base and refuses a point tip and a base the tip cannot fit', () => {
-    expect(prismNumbers(CONE, 2, { baseMm: 3 }).numbers.baseMm).toBe(3);
-    const point = prismNumbers(CONE_POINT, 2, {});
+    expect(prismNumbers(CONE, 1.4, { baseMm: 3 }).numbers.baseMm).toBe(3);
+    const point = prismNumbers(CONE_POINT, 1.4, {});
     if (point.ok) throw new Error('a point tip cannot clear a base');
     expect(point.code).toBe('prism-tip');
-    const narrow = prismNumbers(CONE, 2, { baseMm: 0.15 });
+    const narrow = prismNumbers(CONE, 1.4, { baseMm: 0.15 });
     if (narrow.ok) throw new Error('a base narrower than the tip twice leaves no path');
     expect(narrow.code).toBe('prism-base');
-    const noCone = prismNumbers(null, 2, {});
+    const noCone = prismNumbers(null, 1.4, {});
     if (noCone.ok) throw new Error('no cone, no prism');
     expect(noCone.code).toBe('prism-needs-cone');
+  });
+
+  /**
+   * #741 review — THE HEIGHT STOPS AT THE CONE. A prism's sides ARE the cone's flank, so a prism
+   * taller than the cone's own height would have its top cut by the bit's cylindrical body: the
+   * same defect as an over-deep V-carve, hidden behind the old exemption. The refusal is the
+   * prism's own (`prism-height`), from the same `prismNumbers` the row, plan and sheet read.
+   */
+  it('refuses a height past the cone, at the exact boundary the geometry gives', () => {
+    const at = prismNumbers(CONE, 1.4875, {});
+    expect(at.ok).toBe(true);
+    expect(at.numbers.coneHeightMm).toBeCloseTo(1.4875, 9);
+    const past = prismNumbers(CONE, 1.4876, {});
+    if (past.ok) throw new Error('a prism taller than its cone must be refused');
+    expect(past.code).toBe('prism-height');
+    expect(past.numbers.heightMm).toBeCloseTo(1.4876, 9);
+    expect(past.numbers.coneHeightMm).toBeCloseTo(1.4875, 9);
+    // A record that states no body has no cone height to stop at (the degenerate-record rule).
+    const open = prismNumbers({ tipRadius: 0.1, halfAngleDeg: 45, tanHalf: 1 }, 9, {});
+    expect(open.ok).toBe(true);
+    expect(open.numbers.coneHeightMm).toBeNull();
   });
 });
 
@@ -139,9 +169,9 @@ describe('the plan — one derived ring in the shape’s place', () => {
     expect(engrave.id).toBe('plate');
     expect(engrave.name).toBe('Prism rect "plate" 20×10');
     expect(engrave.prism).toBeDefined();
-    expect(engrave.depth).toBe(2);
+    expect(engrave.depth).toBe(1.4);
 
-    const n = prismNumbers(CONE, 2, {}).numbers;
+    const n = prismNumbers(CONE, 1.4, {}).numbers;
     const cs = executeProfile(tl, engrave.profile);
     const ring = cs.toPolygons() as [number, number][][];
     cs.delete();
@@ -209,6 +239,51 @@ describe('findings — what a prism cannot be cut with, or on', () => {
   it('raises nothing for a prism with a tipped V and a real base', () => {
     expect(validateJob(prismJob()).filter((f) => f.code.startsWith('prism-'))).toEqual([]);
   });
+
+  it('refuses a prism taller than the cone, in its own sentence naming the height', () => {
+    const f = find(prismJob(rect({ depth: 2 })), 'prism-height');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.labelId).toBe('plate');
+    expect(f!.message).toContain('2 mm');
+    expect(f!.message).toContain('1.488 mm');
+    expect(f!.message).toContain(V_TIP.name);
+    // Its own sentence: the V-carve refusal would talk about a V that is no longer a V.
+    expect(f!.message).not.toContain('can only V-carve');
+    expect(f!.message).not.toMatch(/prism-height|error/i);
+  });
+
+  it('refuses it at the CAM too, not only in the findings', () => {
+    const square: [number, number][][] = [
+      [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+        [0, 10],
+      ],
+    ];
+    const region: EngraveRegion = {
+      id: 'plate',
+      text: '',
+      name: 'Prism rect "plate" 20×10',
+      depth: 2,
+      polygons: square,
+      vCarve: {
+        plane: square,
+        floor: square,
+        surface: square,
+        planeDepth: 2,
+        planeRadius: 2.1,
+        floorInset: 0.1,
+        surfaceOutset: 0.1,
+        prism: true,
+      },
+    };
+    const params: CutParams = { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.2, stepOver: 0.2, peck: 1, air: false };
+    expect(() => generateEngrave(tl, [region], V_TIP, params, Z1.rapidEstimate)).toThrow(
+      /cone is only 1\.488 mm tall/,
+    );
+  });
 });
 
 describe('the program and the oracle', () => {
@@ -218,7 +293,7 @@ describe('the program and the oracle', () => {
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
 
-    const n = prismNumbers(CONE, 2, {}).numbers;
+    const n = prismNumbers(CONE, 1.4, {}).numbers;
     // The removal is bounded by the mouth's prism: at least the base's floor (the tip clears it)
     // and at most the whole mouth times the height (the slopes are inside the mouth). The mouth
     // is the shape grown by the margin all round.
@@ -237,8 +312,8 @@ describe('the program and the oracle', () => {
         const volume = body.volume();
         body.delete();
         expect(floorArea).toBeGreaterThan(20);
-        expect(volume).toBeGreaterThan(floorArea * 2 * 0.8);
-        expect(volume).toBeLessThan(mouthArea * 2);
+        expect(volume).toBeGreaterThan(floorArea * n.heightMm * 0.8);
+        expect(volume).toBeLessThan(mouthArea * n.heightMm);
       }
     } finally {
       session.dispose();
@@ -249,7 +324,7 @@ describe('the program and the oracle', () => {
     const job = prismJob();
     const g = generate(tl, job);
     expect(g.ok).toBe(true);
-    const n = prismNumbers(CONE, 2, {}).numbers;
+    const n = prismNumbers(CONE, 1.4, {}).numbers;
     // The distance from a point to the shape's own outline (a 20×10 rect at 20,15).
     const toShape = (x: number, y: number): number =>
       Math.hypot(Math.max(0, Math.abs(x - 20) - 10), Math.max(0, Math.abs(y - 15) - 5));
@@ -293,10 +368,10 @@ describe('the program and the oracle', () => {
     const texts = buildRunSheet(job, g, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const step = texts.find((t) => t.includes('raised prism'));
     expect(step).toBeDefined();
-    expect(step).toContain('stands 2 mm');
+    expect(step).toContain('stands 1.4 mm');
     expect(step).toContain('1 mm flat base');
     expect(step).toContain('the CAM’s default');
-    expect(step).toContain('5 mm');
+    expect(step).toContain('3.8 mm');
   }, 60_000);
 });
 
@@ -308,7 +383,7 @@ describe('the picture — the ring is drawn as a V-carve', () => {
     expect(p).not.toBeNull();
     const floor = p!.floors.filter((f) => f.labelId === 'plate');
     expect(floor).toHaveLength(1);
-    expect(floor[0]!.depth).toBe(2);
+    expect(floor[0]!.depth).toBe(1.4);
   }, 120_000);
 });
 

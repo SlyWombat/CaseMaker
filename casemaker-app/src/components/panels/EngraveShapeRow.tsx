@@ -445,7 +445,14 @@ export function EngraveShapeRow({
                 `the untouched top face ${fmt(prism.numbers.marginMm)} mm out from the shape.`
               : prism.code === 'prism-needs-cone'
                 ? 'A prism’s sides are the V-bit’s flank: choose a V-bit.'
-                : prism.code === 'prism-tip'
+                : prism.code === 'prism-height'
+                  ? // #741 review — a prism's side is the cone's flank only up to the cone's own
+                    // height; above it the bit's body meets the wall instead.
+                    `The shape stands ${fmt(prism.numbers.heightMm)} mm high, but the bit’s cone is only ${fmt(
+                      prism.numbers.coneHeightMm ?? 0,
+                    )} mm tall, so a side higher than that is no longer the cone’s flank. Lower it to ` +
+                    `${fmt(prism.numbers.coneHeightMm ?? 0)} mm or use a bit with a taller cone.`
+                  : prism.code === 'prism-tip'
                   ? 'A point tip leaves the base as ridges: use a V-bit with a tip diameter.'
                   : `The base is narrower than the tip’s flat twice, so the tip has no path between the shape’s slope and the base’s outer bevel — widen it or use a smaller tip.`}
         </p>

@@ -516,7 +516,9 @@ shape: its mouth runs from the shape's outline out to the **margin**, derived as
 full height with its sides sloping at the bit's own angle, on a flat base, with the untouched top
 face beyond the margin. The base's flatness is the tip pad's overlap at the V-carve's own pitch, so
 a tip diameter is required (`prism-tip`), the base must beat twice the tip (`prism-base`), and the
-sides are a cone's flank (`prism-needs-cone`). The cut clears the base from its MIDDLE outward and
+sides are a cone's flank (`prism-needs-cone`). The height is bounded too: a side is the flank only
+up to the height where the flank meets the bit's body, so a taller prism is refused
+(`prism-height`). The cut clears the base from its MIDDLE outward and
 cuts the walls last, so the shape's flank is the final cut; the tip's path never comes nearer the
 shape than its own radius plus the slope's foot, so the shape cannot be undercut. The ring is cut by
 the SAME plane V-carve as any region — the difference from V-carve (variable depth) is that the
@@ -1495,7 +1497,10 @@ simulation does report about one is the sweep's own list, next:
 | `texture-crowded` | warning | The pattern wants more than the 4,000-stroke cap, so the program cuts the first 4,000 in generation order (#670). | Widen the pitch so the whole region is cut. |
 | `flute-tool` | error | A flute is cut as a trace, and the trace path takes a V-bit or a flat end mill; the job's cutter is one it refuses by name — a ball nose, a bull nose, a drill or a thread mill (#674). | Use a V-bit or a flat end mill; a ball flute would need a ball groove model this CAM does not have. |
 | `flute-short` | warning | The line is shorter than its two ramps, so the ramps overlap and the groove peaks below the stated depth (#674). | Shorten the ramp or lengthen the line. |
+| `vcarve-trace-beyond-cone` | warning | A single-stroke V trace is deeper than the cutter's cone — the height where its flank meets the bit's cylindrical body. The line is the design, so the trace is still planned, but above the cone the bit's body has no cutting edge and rubs the groove instead of cutting it (#741). The message names the trace, its deepest point, the cutter and the cone height (and the stated flute, where the record gives one). | Cut no deeper than the cone height the message names, or use a cutter whose cone reaches the trace's depth. |
+| `vcarve-trace-beyond-flute` | error | A single-stroke V trace goes deeper than the flute length the cutter's record states, so below that height there is no cutting edge at all; unlike the cone warning, no part of the requested depth can be cut (#741). | Cut no deeper than the stated flute, or use a cutter that reaches the trace's depth. |
 | `prism-needs-cone` | error | A prism's sides are a V-bit's flank, and the job's cutter has no cone (#674). | Use a V-bit. |
+| `prism-height` | error | A prism stands taller than its cutter's cone. Its sides are the cone's flank only up to the height where the flank meets the bit's cylindrical body, so above that the body would cut the wall instead of the flank — the same defect as a V-carve deeper than its cone (#741). The message names the prism, its height and the cone height. | Lower the shape's depth to the cone height the message names, or use a bit with a taller cone. |
 | `prism-tip` | error | A prism's base is cleared by the cutter's tip flat; a point tip leaves the base as ridges (#674). | Use a V-bit with a tip diameter. |
 | `prism-base` | error | The base is narrower than the tip's flat twice, so the tip has no path between the shape's slope and the base's outer bevel (#674). | Widen the base, or use a smaller tip. |
 | `prism-shape` | error | A prism sits on a rectangle, circle, slot or polygon, and only on a region that is nothing else: a border, frame or cutaway has holes, and a region cannot also be a texture, an inlay half, a variable-depth carve or a through cut (#674). | Draw the shape as its own region, or clear the other marker. |

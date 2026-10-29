@@ -3566,13 +3566,15 @@ describe('EngravePanel — flute and prism (#674)', () => {
     flute: {},
   };
 
+  // #741 review — 1.4 mm, inside the 1.4875 mm cone of this spec's 0.2 mm-tip 90° bit: a taller
+  // prism is now refused (`prism-height`), so the derived-numbers fixture moves below the cone.
   const PRISM: EngraveShape = {
     id: 'plate',
     name: 'plate',
     kind: 'rect',
     position: { x: 50, y: 30 },
     rotation: 0,
-    depth: 2,
+    depth: 1.4,
     enabled: true,
     width: 20,
     height: 10,
@@ -3631,15 +3633,25 @@ describe('EngravePanel — flute and prism (#674)', () => {
     expect(screen.getByTestId('engrave-shape-type-0').textContent).toBe('Prism');
     expect(screen.getByText('Prism rect "plate" 20×10')).toBeTruthy();
     const note = screen.getByTestId('engrave-shape-prism-note-0').textContent ?? '';
-    expect(note).toContain('stands 2 mm');
+    expect(note).toContain('stands 1.4 mm');
     expect(note).toContain('1 mm flat base');
     expect(note).toContain('the CAM’s default');
-    expect(note).toContain('5 mm out');
+    expect(note).toContain('3.8 mm out');
     // A prism is one plane region: no medial-axis ladder, no rest pair.
     expect(screen.queryByTestId('engrave-shape-vcarve-depth-0')).toBeNull();
 
     fireEvent.change(screen.getByTestId('engrave-shape-prism-base-0'), { target: { value: '3' } });
     expect(useEngraveJobStore.getState().job.shapes[0]!.prism).toEqual({ baseMm: 3 });
+  });
+
+  it('shows the height refusal on a prism taller than the cone (#741 review)', () => {
+    show({ shapes: [{ ...PRISM, depth: 2 }] });
+    expand('engrave-shape');
+    const note = screen.getByTestId('engrave-shape-prism-note-0').textContent ?? '';
+    expect(note).toContain('2 mm');
+    expect(note).toContain('1.488 mm');
+    // The refusal, not the derived-numbers sentence the row prints when the prism fits.
+    expect(note).not.toContain('its sides sloping');
   });
 
   it('turns a plain pocket into a prism and back from the row', () => {

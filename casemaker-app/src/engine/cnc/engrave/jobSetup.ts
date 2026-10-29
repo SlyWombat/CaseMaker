@@ -39,7 +39,7 @@ import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { inlayGlueGap, inlayMarked, inlayNumbers } from './inlay';
 import { textureNumbers, textureStrokes } from './texture';
 import { fluteNumbers, fluteOperationName } from './flute';
-import { prismNumbers } from './prism';
+import { prismHeightRefusal, prismNumbers } from './prism';
 import { reliefNumbers } from '@/engine/cnc/cam/relief';
 import { bracketSettings, defaultClampPlacements, validateBracketMount, type ClampPlacement, type StockSize } from '@/engine/cnc/mounts/bracket';
 import type { ShopDefaults } from '@/platform/defaultsClient';
@@ -143,6 +143,12 @@ export type JobFindingCode =
   // and the sentence come from one owner, `vDepthLimit` / `vDepthRefusal` in `vProfile.ts`, which
   // the CAM's own guard reads too.
   | 'vcarve-depth-beyond-cone'
+  // #741 review — A SINGLE-STROKE V TRACE PAST THE CONE (warning) OR PAST THE STATED FLUTE
+  // (error). A trace's depth is the design, so above the cone the bit's body rubs the groove but
+  // the trace is still planned; past the flute there is no cutting edge at all, so it is refused.
+  // Both sentences come from the same `vDepthLimit` owner in `vProfile.ts`.
+  | 'vcarve-trace-beyond-cone'
+  | 'vcarve-trace-beyond-flute'
   // A cutter Makera NAMES for metal, on a job cutting something that is not (#405). The line is a
   // property of the pair — the bit and the blank — so it cannot live on either side alone, and no
   // feed table can enforce it: a metal bit will happily cut PLA, badly, at numbers nobody measured.
@@ -210,13 +216,14 @@ export type JobFindingCode =
   | 'texture-empty'
   | 'texture-crowded'
   // Flutes and prisms (#674). `flute-tool` is the cutter the trace path refuses; `flute-short` a
-  // path whose two ramps overlap, so the groove never reaches the stated depth. A prism's four are
-  // the cone its sides need (`prism-needs-cone`), the tip flat its base is cleared by
-  // (`prism-tip`), a base narrower than that flat twice (`prism-base`), and a shape that cannot
-  // carry one (`prism-shape`).
+  // path whose two ramps overlap, so the groove never reaches the stated depth. A prism's five are
+  // the cone its sides need (`prism-needs-cone`), a height past what that cone's flank reaches
+  // (`prism-height`, #741 review), the tip flat its base is cleared by (`prism-tip`), a base
+  // narrower than that flat twice (`prism-base`), and a shape that cannot carry one (`prism-shape`).
   | 'flute-tool'
   | 'flute-short'
   | 'prism-needs-cone'
+  | 'prism-height'
   | 'prism-tip'
   | 'prism-base'
   | 'prism-shape'
@@ -1865,9 +1872,10 @@ export function validateJob(
     }
   }
 
-  // RAISED PRISMS (#674). The V's flank IS the shape's side, so a prism needs a cone; its base is
-  // cleared by the tip flat, so it needs a tipped V and a base wider than that flat twice. Each
-  // refusal is the reason the ring the plan derives would not cut what the document asks for.
+  // RAISED PRISMS (#674). The V's flank IS the shape's side, so a prism needs a cone, and a side
+  // can only stand as high as that cone's own flank reaches (#741 review); its base is cleared by
+  // the tip flat, so it needs a tipped V and a base wider than that flat twice. Each refusal is
+  // the reason the ring the plan derives would not cut what the document asks for.
   const prismTool = jobTool(job);
   const prismCone = prismTool === null ? null : vCone(prismTool);
   for (const item of job.shapes) {
@@ -1908,6 +1916,15 @@ export function validateJob(
             ? `${who} is a raised prism, and a prism's sides are a V-bit's flank: choose a V-bit first.`
             : `${who} is a raised prism, and a prism's sides are a V-bit's flank; "${prismTool.name}" ` +
               `is a ${prismTool.shape} cutter with no cone. Use a V-bit.`,
+      });
+      continue;
+    }
+    if (check.code === 'prism-height') {
+      findings.push({
+        severity: 'error',
+        code: 'prism-height',
+        labelId: item.id,
+        message: prismHeightRefusal(who, n, prismTool === null ? null : prismTool.name),
       });
       continue;
     }

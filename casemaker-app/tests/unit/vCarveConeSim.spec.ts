@@ -21,10 +21,13 @@
  * before this change, 938.5 mm³ from the formula): the regression is the difference between the
  * two, not a tolerance.
  *
- * A TRACE is the vehicle because #741's refusal covers V-CARVE and INLAY items, not engraving
- * traces: a trace deeper than the cone is still planned (the planned part is the user's design),
- * but the simulation must draw the cut the bit can actually make. The j11 fixtures themselves are
- * refused by the depth rule (`vCarveConeDepth.spec.ts`), so no program of theirs exists to sweep.
+ * A TRACE is the vehicle because a V-carve or inlay item deeper than the cone is REFUSED before
+ * the CAM (#741), while a trace deeper than the cone is only WARNED (`vcarve-trace-beyond-cone`)
+ * and still planned — the line is the user's design — so the simulation must draw the cut the bit
+ * can actually make. Past a STATED flute a trace is refused too (`vcarve-trace-beyond-flute`), so
+ * the cutter below states none: the bench's own record claims a 1.6 mm flute, which a 5.1 mm trace
+ * would now refuse. The j11 fixtures themselves are refused by the depth rule
+ * (`vCarveConeDepth.spec.ts`), so no program of theirs exists to sweep.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -41,7 +44,12 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTraceItem } from '@/types/engraveJob';
 
-/** The bench's chamfer: 90° included, 0.1 mm tip, 3.175 mm shank, 1.6 mm stated flute (#741). */
+/**
+ * The bench's chamfer: 90° included, 0.1 mm tip, 3.175 mm shank (#741). The record states NO flute
+ * length: a stated 1.6 mm flute would refuse this 5.1 mm trace outright (#741 review,
+ * `vcarve-trace-beyond-flute`), and this spec needs the trace to be planned so the sim can sweep
+ * it. The cone's own 1.5375 mm height is still stated, which is the bound this spec measures.
+ */
 const CHAMFER: Tool = flatEndMill(3.175, {
   id: null,
   name: 'C1-BIT-CHAMFER-90',
@@ -51,7 +59,7 @@ const CHAMFER: Tool = flatEndMill(3.175, {
   diameter: 3.175,
   angle: 90,
   halfAngle: 45,
-  fluteLength: 1.6,
+  fluteLength: null,
   cornerRadius: null,
 });
 
@@ -164,6 +172,13 @@ describe('a posted deep V trace sweeps the capped cone (#741)', () => {
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     if (g.nc === null) return;
+
+    // #741 review — past the cone a trace is WARNED, not refused (the line is the design), so the
+    // program above still exists and the operator is told the bit's body rubs the top of it.
+    const warn = g.findings.find((f) => f.code === 'vcarve-trace-beyond-cone');
+    expect(warn?.severity).toBe('warning');
+    expect(warn?.message).toContain('5.1 mm');
+    expect(warn?.message).toContain('1.538 mm');
 
     const session = createSimSession(tl);
     try {

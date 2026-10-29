@@ -28,7 +28,7 @@
  */
 
 import { pDifference, pOffset, type Profile } from '@/engine/compiler/profile';
-import type { VCone } from '@/engine/cnc/vProfile';
+import { coneHeight, type VCone } from '@/engine/cnc/vProfile';
 import type { PrismMark } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -40,14 +40,24 @@ export type PrismBaseSource = 'typed' | 'the CAM’s default';
 
 /**
  * Why a prism cannot be cut, as data the finding words. The values ARE the finding codes
- * (`prism-needs-cone`, `prism-tip`, `prism-base`), so the row, the finding and this check cannot
- * drift apart.
+ * (`prism-needs-cone`, `prism-height`, `prism-tip`, `prism-base`), so the row, the finding and
+ * this check cannot drift apart.
+ *
+ * #741 review — `prism-height`: a prism's sides ARE the cone's flank, so a prism taller than
+ * the cone's own height would have its top cut by the bit's cylindrical body, not the flank —
+ * the same defect as an over-deep V-carve. The bound is the cone the cutter states, derived
+ * here from the same {@link VCone} every other reader uses.
  */
-export type PrismRefusal = 'prism-needs-cone' | 'prism-tip' | 'prism-base';
+export type PrismRefusal = 'prism-needs-cone' | 'prism-height' | 'prism-tip' | 'prism-base';
 
 export interface PrismNumbers {
   /** The standing height: the shape's own depth, mm. */
   heightMm: Mm;
+  /**
+   * Where the flank meets the cutter's body, mm (#741 review) — the tallest side this cone can
+   * cut. `null` when the record states no body (the degenerate-record rule), so no height bound.
+   */
+  coneHeightMm: Mm | null;
   /** The flat base's width around the shape, mm. */
   baseMm: Mm;
   baseSource: PrismBaseSource;
@@ -76,8 +86,10 @@ export function prismNumbers(cone: VCone | null, heightMm: Mm, mark: PrismMark |
   const tanHalf = cone === null ? 0 : cone.tanHalf;
   const tipRadius = cone === null ? 0 : cone.tipRadius;
   const slopeWidthMm = heightMm * tanHalf;
+  const coneHeightMm = cone === null ? null : coneHeight(cone);
   const numbers: PrismNumbers = {
     heightMm,
+    coneHeightMm,
     baseMm,
     baseSource: typedOk ? 'typed' : 'the CAM’s default',
     marginMm: baseMm + 2 * slopeWidthMm,
@@ -86,9 +98,31 @@ export function prismNumbers(cone: VCone | null, heightMm: Mm, mark: PrismMark |
     slopeWidthMm,
   };
   if (cone === null) return { ok: false, code: 'prism-needs-cone', numbers };
+  // #741 review — the side is the cone's flank only up to the cone's own height; above it the
+  // cutter's cylindrical body would cut the wall (or rub it, if it has no edge there).
+  if (coneHeightMm !== null && heightMm > coneHeightMm + 1e-9) {
+    return { ok: false, code: 'prism-height', numbers };
+  }
   if (!(cone.tipRadius > 0)) return { ok: false, code: 'prism-tip', numbers };
   if (!(numbers.tipPathWidthMm > 0)) return { ok: false, code: 'prism-base', numbers };
   return { ok: true, numbers };
+}
+
+/**
+ * #741 review — WHY a prism is taller than its cutter's cone, in words the finding, the CAM's
+ * guard and the row can share. One sentence builder: the prism, its height, the cutter and the
+ * cone height, every number with its unit, and the way out. Only called for `prism-height`,
+ * where {@link PrismNumbers.coneHeightMm} is stated.
+ */
+export function prismHeightRefusal(itemName: string, numbers: PrismNumbers, toolName: string | null): string {
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+  const cone = numbers.coneHeightMm ?? 0;
+  return (
+    `${itemName} stands ${mm(numbers.heightMm)} mm high, but the cutter ` +
+    `"${toolName ?? 'the cutter'}"'s cone is only ${mm(cone)} mm tall, so a side higher than ` +
+    `that is no longer the cone's flank. Cut it no higher than ${mm(cone)} mm, or use a cutter ` +
+    `whose cone is at least ${mm(numbers.heightMm)} mm tall.`
+  );
 }
 
 /**

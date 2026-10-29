@@ -60,7 +60,7 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { vCone, vDepthLimit, vDepthRefusal, type VCone } from '@/engine/cnc/vProfile';
+import { vCone, vDepthLimit, vDepthRefusal, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
   coreOffsetRadius,
@@ -1094,9 +1094,17 @@ function intersectionArea(tl: ManifoldToplevel, a: Polygons, b: Polygons): numbe
  * own guard (`generateEngrave`) also reads, so the finding, the guard and the panel cannot name
  * two different heights.
  *
- * A STATED flute shorter than the cone binds instead, and is named. A PRISM is out of scope: its
- * height is the prism model's own (`#674`, whose tests set 2 mm against a 1.4875 mm cone by
- * design), so the prism feature's model owns that bound rather than this rule.
+ * A STATED flute shorter than the cone binds instead, and is named. A PRISM is judged by the
+ * prism model's own sentence (`prism-height` in `jobSetup.ts`, from `prismNumbers`), not by this
+ * one, so the panel names the shape's height and its cone rather than a V-carve's depth — that is
+ * why the prism's engrave entry is skipped here (#741 review; the marker no longer EXEMPTS it,
+ * it only routes it to the sentence that knows it is a raised shape).
+ *
+ * SINGLE-STROKE V TRACES (#741 review) are judged at their DEEPEST point — `depth` or any point
+ * of a flute's per-point `depths`. A trace's line is the design, so it is not silently capped:
+ * past the cone the bit's body rubs the groove and the job gets a WARNING
+ * (`vcarve-trace-beyond-cone`); past a stated flute there is no cutting edge at all, so it is
+ * REFUSED (`vcarve-trace-beyond-flute`). Both sentences come from the same owner.
  */
 function vCarveDepthFindings(plan: PartPlan, tool: Tool): JobFinding[] {
   const limit = vDepthLimit(tool);
@@ -1111,6 +1119,29 @@ function vCarveDepthFindings(plan: PartPlan, tool: Tool): JobFinding[] {
       labelId: item.id,
       message: vDepthRefusal(item.name, item.depth, tool, limit),
     });
+  }
+  for (const trace of plan.traces) {
+    let deepest = trace.depth;
+    for (const pathDepths of trace.depths ?? []) {
+      for (const d of pathDepths) if (d > deepest) deepest = d;
+    }
+    if (limit.statedFluteMm !== null && deepest > limit.statedFluteMm + 1e-9) {
+      findings.push({
+        severity: 'error',
+        code: 'vcarve-trace-beyond-flute',
+        labelId: trace.id,
+        message: vTraceDepthRefusal(trace.name, deepest, tool, limit),
+      });
+      continue;
+    }
+    if (limit.coneHeightMm !== null && deepest > limit.coneHeightMm + 1e-9) {
+      findings.push({
+        severity: 'warning',
+        code: 'vcarve-trace-beyond-cone',
+        labelId: trace.id,
+        message: vTraceDepthWarning(trace.name, deepest, tool, limit),
+      });
+    }
   }
   return findings;
 }

@@ -215,6 +215,11 @@ export interface VDepthLimit {
 }
 
 export function vDepthLimit(tool: Tool): VDepthLimit | null {
+  // #741 review — A CUTTER WITH NO CONE HAS NO V DEPTH. A flat end mill's stated flute is a
+  // cutting-length fact about a pocket, not a V-carve limit; reading it here refused ordinary
+  // jobs ("...can only V-carve 3 mm deep...") that had always generated. The gate is in the one
+  // owner so the findings, the CAM's guard and the trace rule are all covered at once.
+  if (!isVShape(tool)) return null;
   const cone = vConeGeometry(tool);
   const coneHeightMm = cone === null ? null : coneHeight(cone);
   const stated = tool.fluteLength !== null && Number.isFinite(tool.fluteLength) && tool.fluteLength > 0
@@ -257,6 +262,61 @@ export function vDepthRefusal(itemName: string, depthMm: number, tool: Tool, lim
     `${itemName} is ${mm(depthMm)} mm deep, but the cutter "${tool.name}" can only V-carve ` +
     `${mm(limit.limitMm)} mm deep: ${reason}. Cut no deeper than ${mm(limit.limitMm)} mm, or use a ` +
     `cutter that reaches ${mm(depthMm)} mm.`
+  );
+}
+
+/** The cone's angle and body as the trace sentences name them, or blanks when unstated. */
+function coneWords(tool: Tool): { angle: string; body: string | null } {
+  const cone = vConeGeometry(tool);
+  if (cone === null) return { angle: '', body: null };
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+  return {
+    angle: `${mm(cone.halfAngleDeg * 2)}° `,
+    body: cone.outerRadius === undefined ? null : `⌀${mm(cone.outerRadius * 2)} mm`,
+  };
+}
+
+/**
+ * #741 review — A SINGLE-STROKE V TRACE DEEPER THAN THE CONE, as a WARNING.
+ *
+ * A trace is not a region: its depth is the line the operator drew, so cutting it shallower
+ * would change the design. But above the cone's height the bit's flank has ended and the
+ * cylindrical body — which has no cutting edge — rubs the groove instead of cutting it. The
+ * trace is still planned; this sentence names the cone height so the operator can see what the
+ * top of the groove will be doing (and decide whether to lower it or choose a taller cone).
+ */
+export function vTraceDepthWarning(itemName: string, depthMm: number, tool: Tool, limit: VDepthLimit): string {
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+  const { angle, body } = coneWords(tool);
+  const coneH = limit.coneHeightMm ?? limit.limitMm;
+  return (
+    `${itemName} is a single-stroke trace ${mm(depthMm)} mm deep, but the cutter "${tool.name}"'s ` +
+    `${angle}cone reaches its ${body ?? 'body'} at ${mm(coneH)} mm; below that height the flank ` +
+    `cuts, and above it the bit's body — which has no cutting edge — rubs the groove rather than ` +
+    `cutting it${limit.statedFluteMm === null ? '' : ` (the record states a ${mm(limit.statedFluteMm)} mm flute)`}. ` +
+    `Cut no deeper than ${mm(coneH)} mm, or use a cutter whose cone reaches ${mm(depthMm)} mm.`
+  );
+}
+
+/**
+ * #741 review — A SINGLE-STROKE V TRACE DEEPER THAN A STATED FLUTE, as an ERROR.
+ *
+ * Past the flute length there is no cutting edge at all: the shank rubs the bottom of the groove
+ * however the line was drawn. Unlike the cone warning this is refused, because no part of the
+ * requested depth can be cut.
+ */
+export function vTraceDepthRefusal(itemName: string, depthMm: number, tool: Tool, limit: VDepthLimit): string {
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+  const { angle, body } = coneWords(tool);
+  const flute = limit.statedFluteMm ?? limit.limitMm;
+  const coneNote =
+    limit.coneHeightMm === null || body === null
+      ? ''
+      : ` (its ${angle}cone would reach the ${body} body at ${mm(limit.coneHeightMm)} mm)`;
+  return (
+    `${itemName} is a single-stroke trace ${mm(depthMm)} mm deep, but the cutter "${tool.name}"'s ` +
+    `flute is only ${mm(flute)} mm long${coneNote}, so below ${mm(flute)} mm there is no cutting ` +
+    `edge at all. Cut no deeper than ${mm(flute)} mm, or use a cutter that reaches ${mm(depthMm)} mm.`
   );
 }
 
