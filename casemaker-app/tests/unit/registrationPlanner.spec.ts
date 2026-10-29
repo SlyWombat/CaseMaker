@@ -390,6 +390,58 @@ function fakeZ1(opts: {
 const SHIFTED = { ...BLANK, xMin: 1.2, xMax: 39.3, yMin: 0.8, yMax: 77 };
 const yes = async () => true;
 
+describe('#585 the typed seat’s guarded deeper search', () => {
+  // The typed-seat path is a vise plan with NO measured jaw-top datum (#598): its seek is a narrow
+  // band around a guess. A stock a few millimetres lower must not stop the registration cold.
+  const typed = () => plan('vise', { stockThicknessMm: 3.81 });
+
+  it('offers ONE deeper search, finds a stock 3 mm below the band, and records the measured seat', async () => {
+    const asked: string[] = [];
+    const z1 = fakeZ1({ actual: SHIFTED, surface: SURFACE - 3 });
+    const r = await runRegistration(typed(), {
+      console: z1.console,
+      operator: async (step) => {
+        asked.push(step.kind);
+        return true;
+      },
+    });
+    if (!r.ok) throw new Error(r.reason);
+    // The operator was asked once, with the cap named.
+    expect(asked.filter((k) => k === 'search-lower')).toHaveLength(1);
+    expect(z1.lines.some((l) => /^G38\.3 Z-/.test(l))).toBe(true);
+    // The reading is used, and the record carries the seat it implies: top − thickness.
+    expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE - 3, 3);
+    const notes = r.outcome.notes.join(' ');
+    expect(notes).toContain('below the typed seat');
+    expect(notes).toContain('the measured seat is machine Z -62.982');
+  });
+
+  it('stops with the cap named when nothing is found down to it', async () => {
+    const z1 = fakeZ1({ actual: { ...BLANK, xMin: 1000, xMax: 1001, yMin: 1000, yMax: 1001 } });
+    const r = await runRegistration(typed(), { console: z1.console, operator: async () => true });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toContain('found nothing down to machine Z -61.982');
+      expect(r.reason).toContain('2 mm below the typed seat');
+    }
+  });
+
+  it('does not search when the operator declines the guarded step', async () => {
+    const asked: string[] = [];
+    const z1 = fakeZ1({ actual: SHIFTED, surface: SURFACE - 3 });
+    const r = await runRegistration(typed(), {
+      console: z1.console,
+      operator: async (step) => {
+        asked.push(step.kind);
+        return step.kind !== 'search-lower';
+      },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('deeper search was not confirmed');
+    expect(asked).toContain('search-lower');
+  });
+});
+
 describe('#599 the mount tap', () => {
   const TAP = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
   const JAW: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
@@ -875,13 +927,17 @@ describe('#430 the executor, on a fake machine', () => {
     expect(z1.alarmed()).toBe(false);
   });
 
-  it('a surface seek that finds nothing says how low the probe may be: the bottom of the band', async () => {
+  it('a typed-seat surface seek that finds nothing offers the deeper search and stops at its cap', async () => {
     const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    // #585 — the typed path now offers ONE guarded search lower; the operator confirms it and the
+    // stock is still absent, so the stop names the cap (2 mm below the typed seat), not the band.
+    const r = await runRegistration(plan('vise', { stockThicknessMm: 3.81 }), { console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toContain('as low as machine Z -56.572, 0.4 mm below the expected surface');
-    // #518 — the seek's miss did not alarm the machine, so the stop sends G90 alone.
-    expect(z1.lines.slice(-1)).toEqual(['G90']);
+    if (!r.ok) {
+      expect(r.reason).toContain('found nothing down to machine Z -61.982');
+      expect(r.reason).toContain('2 mm below the typed seat');
+    }
+    // #518 — a probe miss did not alarm the machine, so no `$X` follows it.
     expect(z1.lines).not.toContain('$X');
     expect(z1.mode()).toBe('G90');
   });

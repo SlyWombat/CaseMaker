@@ -84,7 +84,10 @@ export interface RegistrationConsole {
  */
 const PROBE_TIMING: Partial<ConsoleTiming> = { quietMs: 20_000 };
 
-export type OperatorStep = { kind: 'fit-probe' | 'fit-cutter' | 'confirm-mount'; text: string };
+export type OperatorStep = {
+  kind: 'fit-probe' | 'fit-cutter' | 'confirm-mount' | 'search-lower';
+  text: string;
+};
 
 /**
  * The sentence the operator confirms before anything moves sideways on the bracket (#427 review): the
@@ -409,9 +412,23 @@ interface SurfaceBand {
   expect: string;
 }
 
-/** A surface reading inside the band, or a stop that says where it landed. */
-function inBand(prb: Prb | null, band: SurfaceBand, which: string, maxZ: number = band.max): Prb {
+/**
+ * A surface reading inside the band, or a stop that says where it landed.
+ *
+ * #585 — `missOk` turns a genuine MISS (no touch, or the controller reports `touched: false`) into
+ * `null`, so the typed-seat path can offer its one guarded search lower instead of stopping cold. A
+ * TOUCH outside the band is still a stop: it is information (the stock stands where the probe met
+ * it), not a miss, and no deeper search can improve it.
+ */
+function inBand(
+  prb: Prb | null,
+  band: SurfaceBand,
+  which: string,
+  maxZ: number = band.max,
+  missOk = false,
+): Prb | null {
   if (prb === null || !prb.touched) {
+    if (missOk) return null;
     throw new Stop(`the ${which} surface touch found nothing down to machine Z ${band.min} — ${band.expect}`);
   }
   // #619 — a reading ABOVE the band is not a miss on the datum path: a normally mounted blank may
@@ -460,8 +477,10 @@ async function seekSurface(
     point?: { x: number; y: number };
     fromMachineZ?: number;
     ceilingMm: number;
+    /** #585 — return null on a genuine miss instead of stopping; the caller may offer a deeper search. */
+    missOk?: boolean;
   },
-): Promise<Prb> {
+): Promise<Prb | null> {
   const s = plan.settings;
   const point = opts.point ?? plan.surfacePoint;
   const fromMachineZ = opts.fromMachineZ ?? plan.seek.fromMachineZ;
@@ -472,13 +491,85 @@ async function seekSurface(
   await io.idle();
   io.at(band.at);
   await io.send('G91');
-  inBand(lastPrb(await io.send(`G38.3 Z-${f(travel)} F${f(s.surfaceFastFeed)}`)), band, 'fast', opts.ceilingMm);
+  const fast = inBand(
+    lastPrb(await io.send(`G38.3 Z-${f(travel)} F${f(s.surfaceFastFeed)}`)),
+    band,
+    'fast',
+    opts.ceilingMm,
+    opts.missOk === true,
+  );
+  if (fast === null) {
+    await io.send('G90');
+    return null;
+  }
   await io.send(`G0 Z${f(SURFACE_LIFT_MM)}`);
   await io.idle();
   io.at(`as low as ${f(s.surfaceSlowSeekMm - SURFACE_LIFT_MM)} mm below the fast touch's reading (the slow surface touch)`);
-  const slow = inBand(lastPrb(await io.send(`G38.3 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)), band, 'slow', opts.ceilingMm);
+  const slow = inBand(
+    lastPrb(await io.send(`G38.3 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)),
+    band,
+    'slow',
+    opts.ceilingMm,
+    opts.missOk === true,
+  );
   await io.send('G90');
   return slow;
+}
+
+/**
+ * #585 — HOW FAR BELOW A TYPED SEAT THE ONE GUARDED SEARCH MAY GO, mm.
+ *
+ * The typed seat is the expert path (#598): a machine Z the operator typed, not a measured jaw top.
+ * Its band is only ± `surfaceToleranceMm` around a guess, so a blank a few millimetres lower stops
+ * the registration before it has touched anything. Over the stock the probe can only meet the
+ * stock; this cap is the safety floor 2 mm BELOW the seat (through where the stock's body is), so a
+ * stock that is really there is met long before it, and a missing stock stops the probe before the
+ * bed. It is a depth, not a measurement: the measured seat the run records is `top − thickness`.
+ */
+export const SURFACE_RECOVERY_BELOW_SEAT_MM = 2;
+
+/**
+ * #585 — the typed-seat path's ONE guarded second search: from above the band, down to `cap`, at
+ * the slow surface feed, after the operator confirms it. A touch anywhere above the cap is the
+ * surface; a miss to the cap is a stop that names the cap.
+ *
+ * The fast pass re-crosses the band the first seek already searched (it should miss); it keeps a
+ * probe mounted high from crawling the whole descent at the touch feed. The slow pass crosses from
+ * the band's floor to the cap — the few millimetres where the stock can be.
+ */
+async function seekDeeper(
+  io: Session,
+  plan: RegistrationPlan,
+  band: Pick<SurfaceBand, 'min' | 'max'>,
+  cap: number,
+): Promise<Prb> {
+  const s = plan.settings;
+  const from = r3(Math.max(plan.seek.band.max, band.max) + s.parkAboveSurfaceMm);
+  await io.send(`G53 G0 Z${f(from)}`);
+  await io.send('G90');
+  await io.send(moveXY(plan, plan.surfacePoint.x, plan.surfacePoint.y));
+  await io.idle();
+  io.at(`as low as machine Z ${f(cap)} (the deeper surface search)`);
+  await io.send('G91');
+  const fast = lastPrb(
+    await io.send(`G38.3 Z-${f(r3(from - band.min))} F${f(s.surfaceFastFeed)}`, { missOk: true }),
+  );
+  let prb: Prb | null = fast !== null && fast.touched ? fast : null;
+  if (prb === null) {
+    prb = lastPrb(
+      await io.send(`G38.3 Z-${f(r3(band.min - cap))} F${f(s.surfaceSlowFeed)}`, { missOk: true }),
+    );
+  }
+  await io.send('G90');
+  if (prb === null || !prb.touched) {
+    throw new Stop(
+      `the deeper surface search found nothing down to machine Z ${f(cap)} (${f(SURFACE_RECOVERY_BELOW_SEAT_MM)} mm below the typed seat) — the stock is not in the vise, or the seat is further off than this search may go`,
+    );
+  }
+  if (prb.z < cap || prb.z > band.max) {
+    throw new Stop(`the deeper surface search read machine Z ${f(prb.z)}, outside ${f(cap)} to ${f(band.max)}`);
+  }
+  return prb;
 }
 
 /**
@@ -661,7 +752,14 @@ export async function runRegistration(
 
     // #449 — the slow travel is the shop's `registration.surfaceSlowSeekMm` (1.2 to 2 mm, more than the
     // lift); a plan whose settings break that never got this far (`settingsProblem`).
-    const slow = await seekSurface(
+    // #585 — the typed-seat path (no measured jaw-top datum) may find nothing in its narrow band;
+    // that is a provisional seat's expected failure, not necessarily a missing stock. The seek
+    // returns a miss instead of stopping and the operator is offered ONE guarded search lower. The
+    // datum path keeps its hard stop: its floor is the measured jaw top, so a miss there really is
+    // "the stock is not where the machine record says".
+    const typedSeat = plan.mountDatum === null && plan.mount === 'vise';
+    let recovered: { cap: number; note: string } | null = null;
+    let slow = await seekSurface(
       io,
       plan,
       {
@@ -671,8 +769,44 @@ export async function runRegistration(
       },
       // #633 — the datum path's OWN widening (#619): a blank mounted normally may stand prouder
       // than the ledge estimate, and this seek is the one that accepts it.
-      { ceilingMm: datumCeiling(plan) },
+      { ceilingMm: datumCeiling(plan), missOk: typedSeat },
     );
+    if (slow === null) {
+      const thickness = plan.stockThicknessMm;
+      if (thickness === undefined) {
+        throw new Stop(
+          'the surface touch found nothing in the typed seat’s band, and the plan does not carry the stock’s thickness to bound a deeper search — measure the jaw top instead of typing a seat',
+        );
+      }
+      const expectedSurface = r3(plan.seek.band.max - s.surfaceToleranceMm);
+      const seat = r3(expectedSurface - thickness);
+      const cap = r3(seat - SURFACE_RECOVERY_BELOW_SEAT_MM);
+      if (!(cap < plan.seek.band.min)) {
+        throw new Stop(
+          `the surface touch found nothing down to machine Z ${f(plan.seek.band.min)}, and the ${f(SURFACE_RECOVERY_BELOW_SEAT_MM)} mm search below the typed seat has no room below it — check the stock is in the vise`,
+        );
+      }
+      const confirmed = await deps.operator({
+        kind: 'search-lower',
+        text:
+          `The surface touch found nothing down to machine Z ${f(plan.seek.band.min)}. ` +
+          `Search lower, to machine Z ${f(cap)}? The probe is over the stock: if the stock is there it is met before the cap, and the cap is ${f(SURFACE_RECOVERY_BELOW_SEAT_MM)} mm below the typed seat.`,
+      });
+      if (!confirmed) {
+        throw new Stop('stopped: the surface is below the typed seat’s band, and the deeper search was not confirmed');
+      }
+      slow = await seekDeeper(io, plan, plan.seek.band, cap);
+      recovered = {
+        cap,
+        note:
+          `the surface was found ${f(r3(plan.seek.band.min - slow.z))} mm below the typed seat’s band — the measured top is used; ` +
+          `the measured seat is machine Z ${f(r3(slow.z - thickness))} (top ${f(slow.z)} − thickness ${f(thickness)}), so the typed seat was provisional`,
+      };
+    }
+    // #585 — the extent touches search the same floor the centre was found under. After a recovery
+    // that floor is the cap, not the typed seat's band: a blank found below the band is equally
+    // below it at its extents, and the plan's own floor would stop every one of them.
+    const seekBand = recovered === null ? plan.seek.band : { ...plan.seek.band, min: recovered.cap };
     // #519 item 1 — the surface touch, at the plan's own point.
     io.saw({
       source: 'surface',
@@ -715,6 +849,9 @@ export async function runRegistration(
     // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.
     const outcome = plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data);
     if (proudNote !== null) outcome.notes.push(proudNote);
+    // #585 — the typed seat's recovery is part of the record: the reading, where the probe found it,
+    // and the seat that measurement implies (top − thickness). The plan itself is never mutated.
+    if (recovered !== null) outcome.notes.push(recovered.note);
 
     // #475 — the cut extents, AFTER the scans (#591): the plan's touch points are where the cut's
     // extents are on the stock the job expects; the scans have just measured where the stock IS, so
@@ -741,9 +878,11 @@ export async function runRegistration(
       // jaw top less a tolerance (#598), not "tolerance below the expected surface".
       const toleranceFloor = Math.round((plan.seek.band.max - 2 * s.surfaceToleranceMm) * 1000) / 1000;
       const floorWords =
-        Math.abs(plan.seek.band.min - toleranceFloor) < 1e-6
-          ? `${f(s.surfaceToleranceMm)} mm below the expected surface`
-          : `the search floor above the ${plan.mount === 'vise' ? 'jaw top' : 'bracket seat'} less ${f(s.surfaceToleranceMm)} mm`;
+        recovered !== null
+          ? `the deeper search's cap, machine Z ${f(seekBand.min)}`
+          : Math.abs(plan.seek.band.min - toleranceFloor) < 1e-6
+            ? `${f(s.surfaceToleranceMm)} mm below the expected surface`
+            : `the search floor above the ${plan.mount === 'vise' ? 'jaw top' : 'bracket seat'} less ${f(s.surfaceToleranceMm)} mm`;
       const reseatWords =
         plan.mount === 'vise'
           ? 'loosen the vise, press it down on that side, re-clamp'
@@ -759,8 +898,8 @@ export async function runRegistration(
               io,
               plan,
               {
-                ...plan.seek.band,
-                at: `as low as machine Z ${plan.seek.band.min} (${floorWords}) for the surface touch at ${touch.at}`,
+                ...seekBand,
+                at: `as low as machine Z ${seekBand.min} (${floorWords}) for the surface touch at ${touch.at}`,
                 expect: `${touch.at} is more than ${s.surfaceToleranceMm} mm lower than the centre (${f(slow.z)}) — the blank is not sitting flat; ${reseatWords}, and run again`,
               },
               {
@@ -770,6 +909,9 @@ export async function runRegistration(
                 ceilingMm: datumCeiling(plan),
               },
             );
+        // #585 — an extent seek never opts into a miss (only the typed seat's centre does), so this
+        // cannot be null; a guard keeps the miss-aware signature honest without weakening the stop.
+        if (prb === null) throw new Stop(`the surface touch at ${touch.at} found nothing down to machine Z ${seekBand.min}`);
         spreadReadings.push({ z: prb.z, source: 'probe' });
         // #519 item 1 — every extent reading but the reused centre: that one reading is the surface
         // touch above, and one reading must not draw two dots.
@@ -889,6 +1031,8 @@ export async function retouchSurface(
       // wider ceiling does not apply here, or an unfaced top would pass and be written as Z0.
       { ceilingMm: max },
     );
+    // #585 — the re-touch does not opt into a miss; the guard keeps the signature honest.
+    if (surface === null) throw new Stop(`the re-touch found nothing down to machine Z ${min}`);
     // #519 item 1 — the re-touch is a reading on the faced top; mark it like the registration's own.
     io.saw({
       source: 'surface',
