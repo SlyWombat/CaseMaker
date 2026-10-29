@@ -56,12 +56,15 @@ const MEASUREMENT_BADGES: Record<string, { label: string; title: string }> = {
 type SourceFilter = string;
 
 /**
- * #680 — the two starter jobs, by the template ids the wizard's step 2 already uses. The labels are
- * the door's words (the mockup's "Name badge" / "Bare blank"), not the templates' long names.
+ * #680 — the starter jobs, by the ids the wizard's `chooseJob` understands. The labels are the
+ * door's words (the mockup's "Name badge" / "Bare blank" / "Name on a dowel"), not the templates'
+ * long names. #716 R-UI-15 — `dowel` is not a project template: the wizard seeds a ⌀20 × 100 rod
+ * in the rotary chuck and opens on Holding (see `chooseJob`).
  */
 const STARTERS = [
   { id: 'badge-blank', label: 'Name badge' },
   { id: 'blank', label: 'Bare blank' },
+  { id: 'dowel', label: 'Name on a dowel' },
 ] as const;
 
 function fmtMm(v: number): string {

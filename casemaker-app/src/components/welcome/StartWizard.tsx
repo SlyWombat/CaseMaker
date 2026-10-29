@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type JSX 
 import { createPortal } from 'react-dom';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { ensureSeedFontsLoaded } from '@/engine/fonts/registry';
+import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
+import { jobVise } from '@/engine/cnc/fixture';
+import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
 import { canDriveMachine } from '@/platform/capabilities';
 import { probeMachine } from '@/platform/machineProbe';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -345,6 +348,46 @@ export function StartWizard(): JSX.Element {
   }
 
   async function chooseJob(id: string): Promise<void> {
+    // #716 R-UI-15 — "Name on a dowel" is not a project template: the job opens on a ⌀20 × 100
+    // rod in the rotary chuck, and the wizard shows Holding so the operator sees what holds it.
+    // The chuck is the Holding step's OWN `defaultRotaryChuck` (the shop's grip, the jaw rule for
+    // the diameter), so the starter cannot invent numbers the step would not.
+    if (id === 'dowel') {
+      setSection('cnc-engrave');
+      const jobStore = useEngraveJobStore.getState();
+      jobStore.reset();
+      jobStore.setStock(
+        {
+          material: jobStore.job.stock.material,
+          shape: 'cylinder',
+          diameter: 20,
+          // The STANDING box (D × D × L); `setRotaryHolding` turns it into the axis frame and
+          // writes the workholding in the one undoable step, the Holding step's own write.
+          length: 20,
+          width: 20,
+          thickness: 100,
+        },
+        'computed',
+      );
+      const ready = useEngraveJobStore.getState();
+      const grip = readDefault(liveShopDefaults(), 'rotary.gripMm').value;
+      ready.setRotaryHolding(defaultRotaryChuck(ready.job, grip), jobVise(ready.job));
+      // #716 — the wizard's own empty-design rule (step 2): a starter seeds the stock and the
+      // mount, not items. Without this the demo lines would be cut into the rod.
+      const seeded = useEngraveJobStore.getState().job;
+      useEngraveJobStore.getState().replace({ ...seeded, labels: [], shapes: [] });
+      const project = blankProjectForStock(useEngraveJobStore.getState().job.stock);
+      if (project !== null) {
+        setProject(project);
+        clearHistory();
+      }
+      clearStockEntry();
+      setJobStarted(true);
+      setProjectCreatedHere(true);
+      enterHolding();
+      if (project !== null) await scheduleImmediate(project);
+      return;
+    }
     const template = findTemplateAcrossSources(id);
     if (template === undefined) return;
     const project = template.build();

@@ -312,7 +312,15 @@ export function RotaryMapDecorations({ map }: { map: RotaryMap }): JSX.Element {
       ))}
       {specs.map((spec) =>
         hidden.has(spec.id) ? null : (
-          <Html key={spec.id} position={[spec.at[0], spec.at[1], MAP_Z]} center>
+          <Html
+            key={spec.id}
+            position={[spec.at[0], spec.at[1], MAP_Z]}
+            center
+            // #348/#716 review — an annotation takes the BOTTOM of the stacking scale: without
+            // this drei's default z-index prints the map's words through dialogs and the wizard.
+            zIndexRange={[0, 0]}
+            style={{ pointerEvents: 'none' }}
+          >
             <span
               ref={refFor(spec.id)}
               style={spec.color === undefined ? LABEL : { ...LABEL, color: spec.color }}
