@@ -198,3 +198,16 @@ describe('session routing — INDEXED rotary (#241)', () => {
     s.dispose();
   });
 });
+
+describe('#729 — a wrapped job says what its simulation does not check', () => {
+  it('names the chuck and tailstock as unchecked on the column engine', () => {
+    const s = createSimSession(tl);
+    const r = s.load(WRAPPED, setup(), tool, null);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const d = r.diagnostics.find((x) => x.code === 'fixture-unchecked');
+    expect(d?.severity).toBe('info');
+    expect(d?.message).toMatch(/chuck and tailstock are not modelled/);
+    s.dispose();
+  });
+});

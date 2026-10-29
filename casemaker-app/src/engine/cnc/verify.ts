@@ -740,6 +740,30 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
               push('rotary-rapid-engaged', m.line, turningInCutSentence(zStart ?? (toW[2] ?? 0), rotary.radius));
             }
           }
+          // #729 — a RAPID INTO THE CHUCK. The jaw check above (`wrap-into-clamp`) judges cutting
+          // moves; a rapid past the jaw face (X 0) below the rod's clearance height drives the
+          // cutter into the jaws just the same. Judged along the whole straight move — both ends
+          // clear does not make the line clear — with the cutter's edge.
+          if (fromW[0] !== null && toW[0] !== null && fromW[2] !== null && toW[2] !== null) {
+            const edge = toolRadiusOf(ctx.tool, 0);
+            const clearZ = rotary.radius + ROTARY_CLEARANCE_MM;
+            const span = (p0: number, p1: number, limit: number): [number, number] | null => {
+              const d = p1 - p0;
+              if (Math.abs(d) < 1e-12) return p0 < limit - 1e-6 ? [0, 1] : null;
+              const t = (limit - 1e-6 - p0) / d;
+              return d > 0 ? (t > 0 ? [0, Math.min(1, t)] : null) : t < 1 ? [Math.max(0, t), 1] : null;
+            };
+            const sx = span(fromW[0], toW[0], edge);
+            const sz = span(fromW[2], toW[2], clearZ);
+            if (sx !== null && sz !== null && Math.max(sx[0], sz[0]) < Math.min(sx[1], sz[1]) + 1e-12) {
+              push(
+                'rapid-into-chuck',
+                m.line,
+                `a rapid moves the ⌀${fmt(2 * edge)} mm cutter past the jaw face (X 0) below Z ${fmt(clearZ)} ` +
+                  `(the rod's top plus the clearance): it would drive into the jaws. Move over the chuck only above that height.`,
+              );
+            }
+          }
         }
       }
       // #240 — every move that states A becomes the reference the next rapid's turn is read

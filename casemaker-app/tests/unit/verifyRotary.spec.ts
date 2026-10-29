@@ -19,7 +19,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
 
 const CODE =
-  /axis-crossing|rotary-y-off-axis|wrap-into-clamp|wrap-off-free-end|rotary-rapid-engaged|stock-exceeds-module|rotary-unsupported/;
+  /axis-crossing|rotary-y-off-axis|wrap-into-clamp|wrap-off-free-end|rotary-rapid-engaged|rapid-into-chuck|stock-exceeds-module|rotary-unsupported/;
 
 function cyl(diameter = 20, length = 100): Setup {
   return stubSetup(
@@ -160,6 +160,18 @@ describe('the rotary refusals — operator words, at the step', () => {
 
     // Clear of the stock by the 3 mm the rule asks, the same turn is fine.
     expect(finding(['G0 X20 Z15 A0', 'G0 A90'], 'rotary-rapid-engaged')).toBeUndefined();
+  });
+
+  it('#729 — a rapid into the chuck: past the jaw face below the rod’s clearance', () => {
+    // From above the rod down and back over the jaws: both ends could look clear, the line is not.
+    const body = ['G0 X20 Z15 A0', 'G0 X-5 Z11'];
+    const f = finding(body, 'rapid-into-chuck');
+    expect(f).toBeDefined();
+    expect(f!.line).toBe(lineOf(body, 'G0 X-5 Z11'));
+    expect(f!.message).toContain('past the jaw face (X 0) below Z 13');
+    expect(f!.message).not.toMatch(CODE);
+    // Over the chuck above the clearance height is fine.
+    expect(finding(['G0 X20 Z15 A0', 'G0 X-5 Z15'], 'rapid-into-chuck')).toBeUndefined();
   });
 
   it('a rapid that TRAVERSES along the axis in the cut is the same hazard', () => {
