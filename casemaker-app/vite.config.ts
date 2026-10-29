@@ -47,6 +47,24 @@ function analyticsTag(): Plugin {
   };
 }
 
+/**
+ * #704/#728 — which checkout this dev server serves, at `/__casemaker_checkout`. The e2e runner's
+ * global setup asks it before any test, so a run that reused a server started by ANOTHER worktree
+ * (two checkouts can hash to the same port) refuses instead of testing the wrong tree. Dev server
+ * only; a build has no such route.
+ */
+function checkoutTag(): Plugin {
+  return {
+    name: 'casemaker:checkout-tag',
+    configureServer(server) {
+      server.middlewares.use('/__casemaker_checkout', (_req, res) => {
+        res.setHeader('content-type', 'text/plain; charset=utf-8');
+        res.end(process.cwd());
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   // Issue #181 — the platform seam's single build-time switch. 'web' unless the build explicitly
   // asks for the desktop target, so the default `npm run build` and the electricrv.ca `npm run
@@ -58,7 +76,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: BASE,
-    plugins: [react(), wasm(), analyticsTag()],
+    plugins: [react(), wasm(), analyticsTag(), checkoutTag()],
     define: {
       __APP_VERSION__: JSON.stringify(APP_VERSION),
       __DEPLOY_TARGET__: JSON.stringify(DEPLOY_TARGET),

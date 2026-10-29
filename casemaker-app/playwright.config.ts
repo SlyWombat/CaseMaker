@@ -2,9 +2,11 @@ import { defineConfig, devices } from '@playwright/test';
 import { devServerPort } from './scripts/e2ePort';
 
 const isCI = !!process.env.CI;
-// #704 — the port belongs to THIS checkout (derived from its path), so two worktrees' runs cannot
-// attach to each other's dev server. An explicit CASEMAKER_PORT still wins; CI keeps 5173. The same
-// derivation is in vite.config.ts, so a hand-started server agrees. See `scripts/e2ePort.ts`.
+// #704 — the port belongs to THIS checkout (derived from its path), so two worktrees' runs rarely
+// meet on one dev server. An explicit CASEMAKER_PORT still wins; CI keeps 5173. A hand-started
+// `npm run dev` stays on Vite's 5173 (see `scripts/e2ePort.ts`). Because 100 derived ports can still
+// collide, `tests/e2e/globalSetup.ts` asks a reused server which checkout it serves and refuses a
+// stranger's (#728).
 const PORT = devServerPort();
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -74,6 +76,7 @@ export default defineConfig({
       },
     },
   ],
+  globalSetup: './tests/e2e/globalSetup.ts',
   webServer: {
     command: `npm run dev -- --port ${PORT} --strictPort`,
     url: BASE,
