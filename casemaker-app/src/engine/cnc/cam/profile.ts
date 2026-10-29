@@ -20,8 +20,11 @@
  * from its LOWEST Z and therefore over-removes; a ramped tab would be simulated as cut through.
  *
  * The span on the CENTRE path is `tabs.width + 2 × toolRadius`: the tab is `width` wide in
- * material, and the cutter centre must stop a radius short on each side. Tabs are placed on
- * one straight edge each, so no span contains a corner.
+ * material, and the cutter centre must stop a radius short on each side. A span is placed along
+ * one EDGE of the cut path — a straight run (including a traced side flattened into many short
+ * collinear segments) or a smooth arc (including a polygonised circle) — at equal arc-length
+ * intervals around the path (#736). It may cross the joints inside that edge, but never a corner,
+ * so a tab on a round cut-out is a curved bridge of stock, not a chord across the air.
  */
 
 import type { CutParams } from '../feeds';
@@ -60,16 +63,24 @@ export interface ProfileCut {
 export interface ProfileSpan {
   /** Arc length from the contour's first vertex to the span's start, mm. */
   startArc: number;
-  /** Arc length to the span's end, mm. */
+  /** Arc length to the span's end, mm. `startArc + width + 2 × toolRadius`; may exceed the
+   * perimeter when the span crosses the contour's first vertex. */
   endArc: number;
+  /** The first and last path point; `points[0]` and `points[points.length - 1]`. */
   start: [number, number];
   end: [number, number];
+  /**
+   * The centre path's own points from `start` to `end` inclusive, in order (#736). A straight span
+   * has two; a span on an arc (or across a traced side's short segments) has every intermediate
+   * vertex, so the kept material and the cutter's crossing follow the path instead of its chord.
+   */
+  points: [number, number][];
 }
 
 /** What tab placement did on one contour: spans placed and requested tabs it could not place. */
 export interface TabPlacement {
   spans: ProfileSpan[];
-  /** Tabs requested but not placed: no straight edge could hold one. */
+  /** Tabs requested but not placed: no edge (straight run or smooth arc) could hold one. */
   unplaceable: number;
 }
 
@@ -160,36 +171,132 @@ export const TAB_BRIDGE_OVERSHOOT_MM = 0.05;
  * `width` of material along the path, the kerf's own width, and `TAB_BRIDGE_OVERSHOOT_MM` either
  * side of it. Only material the kerf never removed is added (the part beyond the inner edge and
  * the waste beyond the outer one), so the removed band is unchanged; the tab joins both sides by
- * AREA rather than by a shared edge.
+ * AREA rather than by a shared edge. Following the span's own points (#736), the bridge curves
+ * with the path.
  */
 export function tabBridgeRectangles(spans: readonly ProfileSpan[], toolRadius: number): Polygons {
   return tabBars(spans, toolRadius, toolRadius + TAB_BRIDGE_OVERSHOOT_MM);
 }
 
-/** One rectangle per span: `inset` in from each span end along the path, `halfWidth` either side. */
-function tabBars(spans: readonly ProfileSpan[], inset: number, halfWidth: number): Polygons {
-  const rectangles: Polygons = [];
+/**
+ * One band per span: `inset` in from each span end along the path, `halfWidth` either side of it.
+ * The band is built from the span's points, never its chord (#736), and follows each vertex with a
+ * mitred offset. The two sides are wound back to front, so the result is CW (`signedArea < 0`) —
+ * the winding a positive-fill kerf subtraction wants for a kept region. The one owner of tab-band
+ * geometry: `tabBridgeRectangles` and the oracle's `tabKeptRegions` both read it; the kept region
+ * (the oracle's swept band) is this band at zero inset.
+ */
+export function tabBars(spans: readonly ProfileSpan[], inset: number, halfWidth: number): Polygons {
+  const bands: Polygons = [];
   for (const span of spans) {
-    const dx = span.end[0] - span.start[0];
-    const dy = span.end[1] - span.start[1];
-    const length = Math.hypot(dx, dy);
-    if (!(length > 2 * inset)) continue;
-    const ux = dx / length;
-    const uy = dy / length;
-    const px = -uy * halfWidth;
-    const py = ux * halfWidth;
-    const ax = span.start[0] + ux * inset;
-    const ay = span.start[1] + uy * inset;
-    const bx = span.end[0] - ux * inset;
-    const by = span.end[1] - uy * inset;
-    rectangles.push([
-      [ax + px, ay + py],
-      [bx + px, by + py],
-      [bx - px, by - py],
-      [ax - px, ay - py],
-    ]);
+    const path = trimPolyline(span.points, inset, inset);
+    if (path === null || path.length < 2 || !(halfWidth > 0)) continue;
+    const band = bandOf(path, halfWidth);
+    if (band !== null) bands.push(band);
   }
-  return rectangles;
+  return bands;
+}
+
+/** The part of a polyline between `fromStart` and `fromEnd` mm in from its ends; null if empty. */
+function trimPolyline(
+  points: readonly (readonly [number, number])[],
+  fromStart: number,
+  fromEnd: number,
+): [number, number][] | null {
+  if (points.length < 2) return null;
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]);
+  }
+  const from = Math.max(0, fromStart);
+  const to = total - fromEnd;
+  if (!(from < to) || !(total > 0)) return null;
+  const out: [number, number][] = [];
+  let at = 0;
+  let started = false;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const segStart = at;
+    const segEnd = at + length;
+    at = segEnd;
+    if (!(length > 0) || segEnd <= from + 1e-12) continue;
+    const atDistance = (d: number): [number, number] => [
+      a[0] + ((d - segStart) / length) * (b[0] - a[0]),
+      a[1] + ((d - segStart) / length) * (b[1] - a[1]),
+    ];
+    if (!started) {
+      out.push(atDistance(Math.max(from, segStart)));
+      started = true;
+    }
+    if (segEnd < to - 1e-12) {
+      out.push([b[0], b[1]]);
+    } else {
+      out.push(atDistance(to));
+      break;
+    }
+  }
+  return out.length >= 2 ? out : null;
+}
+
+/**
+ * The band `halfWidth` to either side of an open polyline, following its vertices. The left side
+ * is walked forward and the right side backward, giving a closed CW ring for a CCW-walked path.
+ * Mitres are capped at five half-widths so a hairpin vertex cannot throw the offset to infinity.
+ * Returns null for a degenerate ring.
+ */
+function bandOf(path: readonly (readonly [number, number])[], halfWidth: number): [number, number][] | null {
+  const dirs: [number, number][] = [];
+  for (let i = 1; i < path.length; i++) {
+    const dx = path[i]![0] - path[i - 1]![0];
+    const dy = path[i]![1] - path[i - 1]![1];
+    const length = Math.hypot(dx, dy);
+    if (!(length > 0)) return null;
+    dirs.push([dx / length, dy / length]);
+  }
+  const left: [number, number][] = [];
+  const right: [number, number][] = [];
+  for (let i = 0; i < path.length; i++) {
+    const p = path[i]!;
+    let nx: number;
+    let ny: number;
+    let reach = halfWidth;
+    if (i === 0) {
+      nx = -dirs[0]![1];
+      ny = dirs[0]![0];
+    } else if (i === path.length - 1) {
+      nx = -dirs[dirs.length - 1]![1];
+      ny = dirs[dirs.length - 1]![0];
+    } else {
+      const ax = -dirs[i - 1]![1];
+      const ay = dirs[i - 1]![0];
+      const bx = -dirs[i]![1];
+      const by = dirs[i]![0];
+      let mx = ax + bx;
+      let my = ay + by;
+      const length = Math.hypot(mx, my);
+      // A hairpin has no bisector; fall back to the incoming normal, capped like any mitre.
+      if (length < 1e-9) {
+        nx = ax;
+        ny = ay;
+        reach = Math.min(halfWidth, 5 * halfWidth);
+      } else {
+        mx /= length;
+        my /= length;
+        nx = mx;
+        ny = my;
+        // 1 / cos(half the joint's turn): how far out the two offset lines meet.
+        const cosHalf = mx * bx + my * by;
+        reach = Math.min(halfWidth / Math.max(cosHalf, 0.2), 5 * halfWidth);
+      }
+    }
+    left.push([p[0] + nx * reach, p[1] + ny * reach]);
+    right.push([p[0] - nx * reach, p[1] - ny * reach]);
+  }
+  const ring: [number, number][] = [...left, ...right.reverse()];
+  if (ring.length < 3 || Math.abs(signedArea(ring)) < 1e-9) return null;
+  return signedArea(ring) > 0 ? ring.reverse() : ring;
 }
 
 /** Signed area of a closed contour; positive is CCW. */
@@ -244,9 +351,123 @@ function pointAt(segments: readonly Segment[], perimeter: number, arc: number): 
   return segments[segments.length - 1]!.b;
 }
 
+/** A maximal run of the contour a tab may sit on, by arc length along the contour, mm. */
+interface Edge {
+  start: number;
+  end: number;
+}
+
+/** A turn sharper than this is a corner, and a tab span must not cross it. */
+const TAB_CORNER_RAD = (20 * Math.PI) / 180;
+/** Directions within this of each other form one straight (traced or flattened) edge. */
+const TAB_COLLINEAR_RAD = (0.5 * Math.PI) / 180;
+
 /**
- * Place `count` tabs at equal arc-length intervals, each on ONE straight edge so no span contains
- * a corner (#218 §2). A span is `width + 2 × toolRadius` long on the centre path.
+ * The edges a tab may sit on (#736): maximal straight runs (a 70 mm side traced as many short
+ * collinear segments is ONE edge) and maximal runs of smoothly jointed segments (a polygonised
+ * circle or a rounded corner is one arc edge). Sharp turns end an edge, so no span crosses a
+ * corner. The intervals are in arc length from the contour's first vertex and may run past the
+ * perimeter when the walk starts away from vertex 0; placement shifts them back onto the circle.
+ */
+function edgesOf(segments: readonly Segment[], perimeter: number): Edge[] {
+  const n = segments.length;
+  if (n === 0 || !(perimeter > 0)) return [];
+  const dirs = segments.map((segment) => unitDirection(segment.a, segment.b));
+  // Joint i is the vertex where segment i - 1 meets segment i.
+  const sharp = segments.map((_, i) => {
+    const u = dirs[(i - 1 + n) % n]!;
+    const v = dirs[i]!;
+    if (u === null || v === null) return false;
+    return Math.acos(Math.max(-1, Math.min(1, u[0] * v[0] + u[1] * v[1]))) > TAB_CORNER_RAD;
+  });
+  // `straight[i]`: segment i continues segment i - 1 in the same direction, within a tight
+  // tolerance, so the two belong to one straight edge.
+  const straight = segments.map((_, i) => {
+    const u = dirs[(i - 1 + n) % n]!;
+    const v = dirs[i]!;
+    return u !== null && v !== null && u[0] * v[0] + u[1] * v[1] > Math.cos(TAB_COLLINEAR_RAD);
+  });
+  // Start the walk at a corner when there is one, so no piece wraps; otherwise at a direction
+  // change, so no straight run wraps either. No direction change at all is one straight edge.
+  let start = 0;
+  const firstSharp = sharp.indexOf(true);
+  if (firstSharp >= 0) start = firstSharp;
+  else {
+    const bend = straight.findIndex((continues) => !continues);
+    if (bend >= 0) start = bend;
+    else return [{ start: 0, end: perimeter }];
+  }
+  const seq = Array.from({ length: n }, (_, k) => (start + k) % n);
+  // Arc length at each walked segment's start. The walk runs continuously across the seam.
+  const at = [segments[seq[0]!]!.start];
+  for (let k = 1; k < n; k++) at.push(at[k - 1]! + segments[seq[k - 1]!]!.length);
+  const edges: Edge[] = [];
+  let pieceFrom = 0;
+  for (let k = 0; k < n; k++) {
+    // Pieces end at the walk's end or at the joint AFTER walked segment k.
+    if (k !== n - 1 && !sharp[(seq[k]! + 1) % n]!) continue;
+    // Inside a piece, maximal runs of at least TWO collinear segments are straight edges. Every
+    // other segment belongs to an arc edge, and consecutive ones share an arc edge — this is what
+    // turns a polygonised circle's many short segments into one placeable edge.
+    const runOf = new Array<number>(n).fill(-1);
+    let runId = 0;
+    for (let p = pieceFrom; p <= k; ) {
+      let q = p;
+      while (q + 1 <= k && straight[seq[q + 1]!]!) q++;
+      if (q > p) {
+        for (let r = p; r <= q; r++) runOf[r] = runId;
+        runId++;
+      }
+      p = q + 1;
+    }
+    for (let p = pieceFrom; p <= k; ) {
+      const id = runOf[p]!;
+      let q = p;
+      while (q + 1 <= k && runOf[q + 1] === id) q++;
+      edges.push({ start: at[p]!, end: at[q]! + segments[seq[q]!]!.length });
+      p = q + 1;
+    }
+    pieceFrom = k + 1;
+  }
+  return edges;
+}
+
+/** The unit direction from `a` to `b`, or null for a zero-length step. */
+function unitDirection(a: readonly [number, number], b: readonly [number, number]): [number, number] | null {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const length = Math.hypot(dx, dy);
+  return length > 1e-12 ? [dx / length, dy / length] : null;
+}
+
+/**
+ * The copy of `target` (the target plus a whole number of perimeters) nearest the edge's middle.
+ * A tab must be placed on the edge's OWN arc interval: shifting an edge by a perimeter would move
+ * it to a different part of the contour. A target near arc 0 is instead compared with an edge
+ * that crosses the seam (its interval already runs past the perimeter) by adding a perimeter to
+ * the target. For a full-circle edge this only puts the target in the edge's range.
+ */
+function nearestTargetCopy(edge: Edge, target: number, perimeter: number): number {
+  const mid = (edge.start + edge.end) / 2;
+  return target + Math.round((mid - target) / perimeter) * perimeter;
+}
+
+/** Do two closed arc ranges on the circle overlap? Touching counts: one tab, not two. */
+function arcRangesOverlap(a0: number, a1: number, b0: number, b1: number, perimeter: number): boolean {
+  const within = (s: number, start: number, length: number): boolean => {
+    let d = (s - start) % perimeter;
+    if (d < 0) d += perimeter;
+    return d <= length + 1e-9;
+  };
+  return within(a0, b0, b1 - b0) || within(b0, a0, a1 - a0);
+}
+
+/**
+ * Place `count` tabs at equal arc-length intervals around the contour (#736). Each span is
+ * `width + 2 × toolRadius` long on the centre path and stays within ONE edge: a maximal straight
+ * run (a traced side's short collinear segments are one edge) or a smooth arc between corners
+ * (a polygonised circle is one edge). A span may cross the joints inside its edge — including
+ * the small joints of an arc — so a round cut-out can hold tabs; it never crosses a corner.
  *
  * A requested tab with no edge long enough is not placed and is counted in `unplaceable`; the
  * CAM reports it as `tab-unplaceable` rather than silently cutting the part free. Overlapping
@@ -263,62 +484,45 @@ export function placeTabs(
   if (count <= 0 || perimeter <= 0 || !(spanLength > 0) || segments.length === 0) {
     return { spans: [], unplaceable: count > 0 ? count : 0 };
   }
-  const candidates = segments.filter((s) => s.length >= spanLength - 1e-9);
-  if (candidates.length === 0) return { spans: [], unplaceable: count };
-
-  const chosen: { start: number; end: number }[] = [];
+  const edges = edgesOf(segments, perimeter);
+  const chosen: { startArc: number; endArc: number; distance: number }[] = [];
   let unplaceable = 0;
   for (let k = 0; k < count; k++) {
     // Mid-interval targets, so the first tab is not forced onto the contour's start vertex.
     const target = ((k + 0.5) / count) * perimeter;
-    let best: Segment | null = null;
-    let bestDistance = Infinity;
-    for (const segment of candidates) {
-      const centre = segment.start + segment.length / 2;
-      let distance = Math.abs(centre - target);
+    let best: { startArc: number; endArc: number; distance: number } | null = null;
+    for (const edge of edges) {
+      if (edge.end - edge.start < spanLength - 1e-9) continue;
+      const targetAt = nearestTargetCopy(edge, target, perimeter);
+      const start = Math.min(Math.max(targetAt - spanLength / 2, edge.start), edge.end - spanLength);
+      let startArc = start % perimeter;
+      if (startArc < 0) startArc += perimeter;
+      const endArc = startArc + spanLength;
+      if (chosen.some((c) => arcRangesOverlap(startArc, endArc, c.startArc, c.endArc, perimeter))) continue;
+      let distance = Math.abs(start + spanLength / 2 - target) % perimeter;
       distance = Math.min(distance, perimeter - distance);
-      if (distance < bestDistance - 1e-9) {
-        bestDistance = distance;
-        best = segment;
-      }
+      if (best === null || distance < best.distance - 1e-9) best = { startArc, endArc, distance };
     }
     if (best === null) {
       unplaceable++;
       continue;
     }
-    // Centre the span on the edge, so neither end can land on a corner.
-    const start = best.start + (best.length - spanLength) / 2;
-    const end = start + spanLength;
-    if (chosen.some((s) => rangesOverlap(start, end, s.start, s.end))) {
-      unplaceable++;
-      continue;
-    }
-    chosen.push({ start, end });
+    chosen.push(best);
   }
-  chosen.sort((a, b) => a.start - b.start);
+  chosen.sort((a, b) => a.startArc - b.startArc);
   return {
-    spans: chosen.map((s) => ({
-      startArc: s.start,
-      endArc: s.end,
-      start: pointAt(segments, perimeter, s.start),
-      end: pointAt(segments, perimeter, s.end),
-    })),
+    spans: chosen.map((chosenSpan) => {
+      const points = runAlong(segments, perimeter, chosenSpan.startArc, spanLength);
+      return {
+        startArc: chosenSpan.startArc,
+        endArc: chosenSpan.endArc,
+        start: points[0]!,
+        end: points[points.length - 1]!,
+        points,
+      };
+    }),
     unplaceable,
   };
-}
-
-/**
- * Do two circular arc ranges overlap? The ranges are CLOSED: two spans that touch, or that lie
- * exactly on top of one another, are one tab's worth of material, not two, so both count as an
- * overlap (the caller reports the second as unplaceable). The old exclusive test let an
- * identical placement through, cutting the same tab twice and reporting two tabs.
- */
-function rangesOverlap(a0: number, a1: number, b0: number, b1: number): boolean {
-  const inside = (s: number, lo: number, hi: number): boolean => {
-    if (hi < lo) return s >= lo || s <= hi;
-    return s >= lo && s <= hi;
-  };
-  return inside(a0, b0, b1) || inside(a1, b0, b1) || inside(b0, a0, a1) || inside(b1, a0, a1);
 }
 
 /** The points along the contour from arc `from`, travelling `length` mm (wrapping at the end). */
@@ -398,8 +602,8 @@ function contourMoves(
     }
     // The span that follows this cut interval: retract vertically to the tab top, cross, plunge
     // vertically back to the pass's Z. Constant Z, constant XY in the retract/plunge — see the
-    // module header for why a ramp is not permitted. A span is placed on ONE straight edge, so
-    // there is no intermediate vertex to visit.
+    // module header for why a ramp is not permitted. The cross follows the span's OWN path
+    // points (#736), so a tab on an arc is cut over the arc, not across its chord.
     const span = interval.after;
     // The retract is VERTICAL: reuse the last cut point's own XY rather than recomputing the
     // span's start. The two are the same point geometrically, but their floats need not be the
@@ -408,7 +612,10 @@ function contourMoves(
     // which the verifier rightly refuses (`rapid-too-low`).
     const at = moves[moves.length - 1]!;
     moves.push({ kind: 'rapid', x: at.x, y: at.y, z: tabTopZ });
-    moves.push({ kind: 'feed', x: span.end[0], y: span.end[1], z: tabTopZ, f: params.feed });
+    for (let i = 1; i < span.points.length; i++) {
+      const p = span.points[i]!;
+      moves.push({ kind: 'feed', x: p[0], y: p[1], z: tabTopZ, f: params.feed });
+    }
     moves.push({ kind: 'feed', x: span.end[0], y: span.end[1], z, f: params.plungeFeed });
   }
   const last = moves[moves.length - 1]!;

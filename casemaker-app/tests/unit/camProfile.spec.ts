@@ -1,5 +1,5 @@
-// The profile CAM (#218): the centre path's side and offset, tab placement on straight edges,
-// the kept rectangles and the retract/plunge move pattern. The offset is Manifold's real
+// The profile CAM (#218): the centre path's side and offset, tab placement on straight and curved
+// edges, the kept bands and the retract/plunge move pattern. The offset is Manifold's real
 // Clipper2 wrapper, but every reference number is computed by hand.
 
 import { describe, expect, it } from 'vitest';
@@ -7,6 +7,8 @@ import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
 import { zPasses } from '@/engine/cnc/cam/engraveJob';
 import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
+import { segmentsForRadius } from '@/engine/compiler/arcResolution';
+import { roundedDiamondPoints } from './fixtures/roundedDiamond';
 import {
   generateProfile,
   kerfPolygons,
@@ -14,6 +16,7 @@ import {
   profilePath,
   signedArea,
   TAB_BRIDGE_OVERSHOOT_MM,
+  tabBars,
   tabBridgeRectangles,
   type ProfileCut,
 } from '@/engine/cnc/cam/profile';
@@ -37,6 +40,31 @@ function rect(w: number, h: number): Polygons {
       [0, h],
     ],
   ];
+}
+
+/** A CCW regular polygon for a circle of `radius`, at the CAM's own chord resolution. */
+function circle(radius: number): Polygons {
+  const n = segmentsForRadius(radius);
+  const contour: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const a = (2 * Math.PI * i) / n;
+    contour.push([radius * Math.cos(a), radius * Math.sin(a)]);
+  }
+  return [contour];
+}
+
+/** The polyline length of a span's own points, mm — the span measured ALONG the cut path. */
+function spanAlong(span: { points: readonly (readonly [number, number])[] }): number {
+  let total = 0;
+  for (let i = 1; i < span.points.length; i++) {
+    total += Math.hypot(span.points[i]![0] - span.points[i - 1]![0], span.points[i]![1] - span.points[i - 1]![1]);
+  }
+  return total;
+}
+
+/** A band's vertices as polar coordinates about the origin. */
+function polar(contour: readonly (readonly [number, number])[]): { angle: number; radius: number }[] {
+  return contour.map(([x, y]) => ({ angle: Math.atan2(y, x), radius: Math.hypot(x, y) }));
 }
 
 function bbox(region: Polygons): { x0: number; y0: number; x1: number; y1: number } {
@@ -104,12 +132,70 @@ describe('placeTabs (#218)', () => {
     expect(placement.unplaceable).toBe(4);
   });
 
-  it('counts overlapping placements as unplaceable, not as extra tabs', () => {
-    // A 20 x 3 rectangle holds one 7.175 mm span per long edge; four requested tabs cannot all
-    // find a distinct place.
-    const placement = placeTabs(rect(20, 3)[0]!, 4, 4, R);
-    expect(placement.spans.length).toBeLessThan(4);
-    expect(placement.spans.length + placement.unplaceable).toBe(4);
+  it('places two tabs on each long side and reports the rest as unplaceable', () => {
+    // A 20 x 3 rectangle holds two 7.175 mm spans on each 20 mm side and none on a 3 mm side, so
+    // six requested tabs fit four; the two that do not fit are unplaceable, not extra tabs.
+    const placement = placeTabs(rect(20, 3)[0]!, 6, 4, R);
+    expect(placement.spans.length).toBe(4);
+    expect(placement.unplaceable).toBe(2);
+    expect(placement.spans.length + placement.unplaceable).toBe(6);
+  });
+
+  it('places four tabs on a polygonised circle, each following the arc (#736)', () => {
+    // A 60 mm round cut-out: every joint turns 2°, far below the 20° corner, so the whole outline
+    // is ONE smooth arc edge. None of its ~1 mm segments is 6.175 mm long; before #736 each was
+    // its own edge and all four tabs were `tab-unplaceable`.
+    const outline = circle(30);
+    const placement = placeTabs(outline[0]!, 4, 3, R);
+    expect(placement.unplaceable).toBe(0);
+    expect(placement.spans).toHaveLength(4);
+    for (const span of placement.spans) {
+      // The span is the tab width plus a radius at each end, measured along the PATH.
+      expect(spanAlong(span)).toBeCloseTo(3 + 2 * R, 6);
+      // It crosses the polygon's joints, so more than its two ends define it...
+      expect(span.points.length).toBeGreaterThan(2);
+      // ...and its ends are a chord, shorter than the path between them: it is not a straight
+      // rectangle across the circle.
+      const chord = Math.hypot(span.end[0] - span.start[0], span.end[1] - span.start[1]);
+      expect(chord).toBeLessThan(spanAlong(span) - 0.001);
+      // Every point is on the circle (interpolated ends lie on a chord, within the 0.005 mm
+      // chord tolerance of it).
+      for (const [x, y] of span.points) {
+        expect(Math.hypot(x, y)).toBeGreaterThan(29.99);
+        expect(Math.hypot(x, y)).toBeLessThanOrEqual(30 + 1e-9);
+      }
+    }
+  });
+
+  it('treats a traced straight side as one edge, however many collinear segments it holds (#736)', () => {
+    // j23's diamond sign: four 70 mm straight sides, each traced as 14 five-mm collinear pieces,
+    // joined by 4 mm fillets. A 6.175 mm span fits none of the pieces and none of the fillets'
+    // segments; it fits the 70 mm SIDE. Before collinear segments were merged into one edge, all
+    // four tabs refused.
+    const outline = roundedDiamondPoints();
+    let perimeter = 0;
+    for (let i = 0; i < outline.length; i++) {
+      const a = outline[i]!;
+      const b = outline[(i + 1) % outline.length]!;
+      perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+    }
+    const placement = placeTabs(outline, 4, 3, R);
+    expect(placement.unplaceable).toBe(0);
+    expect(placement.spans).toHaveLength(4);
+    for (const span of placement.spans) {
+      expect(spanAlong(span)).toBeCloseTo(3 + 2 * R, 6);
+      // The span is straight (every side piece is collinear) and crosses a traced joint.
+      const [ax, ay] = span.start;
+      const [bx, by] = span.end;
+      const length = Math.hypot(bx - ax, by - ay);
+      for (const [x, y] of span.points) {
+        expect(Math.abs((bx - ax) * (ay - y) - (ax - x) * (by - ay)) / length).toBeLessThan(1e-6);
+      }
+      expect(span.points.length).toBeGreaterThan(2);
+    }
+    // One tab in each quarter of the path: four different sides, not four tabs on one.
+    const quarters = new Set(placement.spans.map((span) => Math.floor(span.startArc / (perimeter / 4))));
+    expect(quarters.size).toBe(4);
   });
 });
 
@@ -126,7 +212,16 @@ describe('kerf and tab rectangles (#218)', () => {
   });
 
   it('a tab bridge is `width` long and reaches a whisker past the kerf either side', () => {
-    const span = { startArc: 0, endArc: 7.175, start: [0, 0] as [number, number], end: [7.175, 0] as [number, number] };
+    const span = {
+      startArc: 0,
+      endArc: 7.175,
+      start: [0, 0] as [number, number],
+      end: [7.175, 0] as [number, number],
+      points: [
+        [0, 0],
+        [7.175, 0],
+      ] as [number, number][],
+    };
     const [rectangle] = tabBridgeRectangles([span], R);
     expect(rectangle).toBeDefined();
     const b = bbox([rectangle!]);
@@ -134,6 +229,53 @@ describe('kerf and tab rectangles (#218)', () => {
     // The kerf is one diameter across; the bridge is that plus the overshoot on each side, so it
     // MEETS the part and the waste by area instead of on a shared edge (#750).
     expect(b.y1 - b.y0).toBeCloseTo(2 * R + 2 * TAB_BRIDGE_OVERSHOOT_MM, 6);
+  });
+});
+
+describe('tab bands follow the span (#736)', () => {
+  // A tight circle makes the chord and the arc measurably different: at 8 mm radius an 8 mm span
+  // along the path is 1 rad, so its chord sags 0.98 mm below the arc — a rectangle across the
+  // chord cannot pass as the arc's band.
+  const RC = 8;
+  const outline = circle(RC);
+
+  /** One 8 mm span, centred on the circle's vertex at angle π (the −X side). */
+  function arcSpan() {
+    const placement = placeTabs(outline[0]!, 1, 8 - 2 * R, R);
+    expect(placement.spans).toHaveLength(1);
+    return placement.spans[0]!;
+  }
+
+  it('the kept band follows the arc instead of chording it', () => {
+    // The oracle's own kept region: the swept band at zero inset, one radius either side.
+    const band = tabBars([arcSpan()], 0, R)[0];
+    expect(band).toBeDefined();
+    // More than a four-corner rectangle: it has a vertex at each intermediate path point.
+    expect(band!.length).toBeGreaterThan(4);
+    expect(signedArea(band!)).toBeLessThan(0);
+    // At the span's midpoint (the vertex at angle π) both sides are one radius off the path.
+    // A band built across the chord has no vertex at its midpoint at all — its ends are its only
+    // vertices.
+    const atMid = polar(band!).filter((p) => Math.abs(Math.abs(p.angle) - Math.PI) < 1e-6);
+    expect(atMid.some((p) => Math.abs(p.radius - (RC + R)) < 0.005)).toBe(true);
+    expect(atMid.some((p) => Math.abs(p.radius - (RC - R)) < 0.005)).toBe(true);
+  });
+
+  it('the bridge band reaches past BOTH kerf edges at the arc midpoint, so part and waste meet', () => {
+    const bridge = tabBridgeRectangles([arcSpan()], R)[0];
+    expect(bridge).toBeDefined();
+    expect(bridge!.length).toBeGreaterThan(4);
+    expect(signedArea(bridge!)).toBeLessThan(0);
+    const atMid = polar(bridge!).filter((p) => Math.abs(Math.abs(p.angle) - Math.PI) < 1e-6);
+    // The kerf spans [RC - R, RC + R]. A tab is the bridge between the part and the waste, so the
+    // widened band must reach past each side of that band.
+    expect(Math.min(...atMid.map((p) => p.radius))).toBeLessThan(RC - R);
+    expect(Math.max(...atMid.map((p) => p.radius))).toBeGreaterThan(RC + R);
+    // And it is the widened band, not the tab's own width: half-width r plus the 0.05 mm
+    // overshoot at the midpoint (#750).
+    const reach = R + TAB_BRIDGE_OVERSHOOT_MM;
+    expect(atMid.some((p) => Math.abs(p.radius - (RC - reach)) < 0.01)).toBe(true);
+    expect(atMid.some((p) => Math.abs(p.radius - (RC + reach)) < 0.01)).toBe(true);
   });
 });
 
@@ -191,6 +333,49 @@ describe('generateProfile (#218)', () => {
     // A pass lands exactly at the tab top (z = -5); with no tabs there is no RETRACT to that Z,
     // so no rapid at it. (The feed pass at -5 is the ordinary cut.)
     expect(ir.operations[0]!.moves.some((m) => m.kind === 'rapid' && m.z === tabTopZ)).toBe(false);
+  });
+
+  it('crosses an arc tab along the arc’s points, not across its chord (#736)', () => {
+    // A round cut-out holds four tabs on its one smooth edge. Each crossing must feed through the
+    // span's intermediate path points at the tab top: a single straight G1 from span start to
+    // span end would be a chord, and the material the simulation keeps would differ from the
+    // curved band the oracle predicts.
+    const round: ProfileCut = {
+      id: 'round',
+      name: 'Round',
+      path: circle(30),
+      depth: 6.3,
+      thickness: 6,
+      tabs: { count: 4, width: 3, height: 1 },
+    };
+    const { ir, tabs } = generateProfile([round], MILL, PARAMS, Z1.rapidEstimate);
+    expect(tabs[0]).toMatchObject({ spans: 4, unplaceable: 0 });
+    const moves = ir.operations[0]!.moves;
+    const tabTopZ = -(6 - 1);
+    const runs: { x: number; y: number }[][] = [];
+    for (let i = 0; i < moves.length; i++) {
+      const m = moves[i]!;
+      if (m.kind !== 'rapid' || m.z !== tabTopZ) continue;
+      const run: { x: number; y: number }[] = [];
+      for (let j = i + 1; j < moves.length; j++) {
+        const next = moves[j]!;
+        if (next.kind !== 'feed' || next.z !== tabTopZ) break;
+        run.push({ x: next.x, y: next.y });
+      }
+      runs.push(run);
+    }
+    // Two passes below the tab top (z = -6 and -6.3), four tabs each.
+    expect(runs).toHaveLength(2 * 4);
+    for (const run of runs) {
+      // More than one feed between the retract and the plunge: the crossing follows the arc.
+      expect(run.length).toBeGreaterThan(1);
+      for (const p of run) {
+        // Every crossing point is on the 30 mm path (an interpolated end lies on a chord, within
+        // the 0.005 mm chord tolerance of the circle).
+        expect(Math.hypot(p.x, p.y)).toBeGreaterThan(29.99);
+        expect(Math.hypot(p.x, p.y)).toBeLessThanOrEqual(30 + 1e-9);
+      }
+    }
   });
 });
 

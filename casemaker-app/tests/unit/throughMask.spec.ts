@@ -25,6 +25,10 @@ const SPAN = {
   endArc: 15,
   start: [15, 10] as [number, number],
   end: [25, 10] as [number, number],
+  points: [
+    [15, 10],
+    [25, 10],
+  ] as [number, number][],
 };
 
 describe('buildThroughMask (#218)', () => {
