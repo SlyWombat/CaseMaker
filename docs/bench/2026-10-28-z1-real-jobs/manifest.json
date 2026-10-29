@@ -1,11 +1,16 @@
 {
- "run": "2026-10-28",
- "main": "ce5fdbc3",
+ "run": "2026-10-29",
+ "main": "207e8a11",
+ "previous": {
+  "set1": "ce5fdbc3",
+  "set2": "9538601f"
+ },
+ "location": "the house location.json (29 owned cutters) with the synced Makera catalogue (129 cutters, 1328 feed rows); three house cutters carry an assumed Makera match: kz-engrave-30-0-3 -> 121011033830, kz-o-flute-2-12 -> 111011203812, kz-o-flute-m-2-8 -> 112111203808",
  "counts": {
-  "Matches the photo": 1,
-  "Partly": 2,
-  "Fails": 13,
-  "No photo to compare": 2
+  "Matches the photo": 4,
+  "Partly": 8,
+  "Fails": 2,
+  "No photo to compare": 4
  },
  "jobs": [
   {
@@ -16,8 +21,8 @@
     "title": "Makera Z1 Quick Start — Top Clamp",
     "credit": "Makera"
    },
-   "verdict": "Fails",
-   "sentence": "As Makera ships it, in aluminium, the job is refused: there are no feeds for the metal O-flute. On a plastic stand-in the app cuts the same part Makera’s own program cuts: the clamp, its slot, the two shoulders, the chamfered corners and three tabs.",
+   "verdict": "Matches the photo",
+   "sentence": "Matches: in aluminium, with Makera’s feeds, the app cuts the same part Makera’s own program cuts — the clamp, its 52 × 6.1 slot, the two shoulders, the chamfered corners and three tabs.",
    "issues": [
     732
    ],
@@ -26,20 +31,20 @@
     {
      "title": "Aluminium 6061, metal O-flute 3.175 mm — as Makera ships it",
      "job": "jobs/j01-topclamp-alu.json",
-     "result": "refused-or-timeout",
-     "refusal": "no cutting parameters for a 3.175 mm cutter in Aluminium 6061: the starting table has no row for Aluminium 6061, and Makera's catalogue's rows are matched by Makera's own cutter id — which this cutter does not carry, so no row of theirs can name it. Pick a material the starting table covers, or a cutter Makera sells.",
-     "predictedTime": null,
-     "removedMm3App": null,
-     "note": null
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "42 min 6 s",
+     "removedMm3App": 5144.3824746726095,
+     "note": "Matches Makera’s own part."
     },
     {
      "title": "Proxy: PLA blank, non-metal O-flute — the same geometry",
      "job": "jobs/j01-topclamp-pla-proxy.json",
      "result": "simulated",
      "refusal": null,
-     "predictedTime": "17 min 17 s",
-     "removedMm3App": 5144.365021628735,
-     "note": "Matches Makera’s own part. Plastic, because aluminium is refused."
+     "predictedTime": "5 min 0 s",
+     "removedMm3App": 5144.38187197427,
+     "note": null
     }
    ]
   },
@@ -52,7 +57,7 @@
     "credit": "Jean-Luc Aufranc / CNX Software"
    },
    "verdict": "Partly",
-   "sentence": "“CNX” comes out right. “Software” fuses into one shape: the gaps between its letters and the insides of the o, f and a are narrower than the 3.175 mm cutter, so they are never cut, and the app gives no warning.",
+   "sentence": "“CNX” comes out right. “Software” still fuses into one shape: the gaps between its letters and the insides of the o, f and a are narrower than the 3.175 mm cutter, and the app now warns (raised-text-fused) instead of staying silent.",
    "issues": [
     739
    ],
@@ -63,8 +68,8 @@
      "job": "jobs/j02-raised-cnx.json",
      "result": "simulated",
      "refusal": null,
-     "predictedTime": "16 min 53 s",
-     "removedMm3App": 6110.5959040788,
+     "predictedTime": "5 min 9 s",
+     "removedMm3App": 6110.598516277445,
      "note": null
     }
    ]
@@ -87,7 +92,7 @@
      "job": "jobs/j03-vise-text.json",
      "result": "simulated",
      "refusal": null,
-     "predictedTime": "2 min 18 s",
+     "predictedTime": "2 min 20 s",
      "removedMm3App": 124.10959585652745,
      "note": null
     }
@@ -101,8 +106,8 @@
     "title": "Makera Z1 desktop CNC review (CNX Software)",
     "credit": "Jean-Luc Aufranc / CNX Software"
    },
-   "verdict": "Fails",
-   "sentence": "In aluminium the job is refused (no feeds). A round blank cannot be described, so even the plastic stand-in is a square; on it “CNX” is right and the small “Software” partly fuses.",
+   "verdict": "Partly",
+   "sentence": "In aluminium it now generates, and “CNX” reads; the small “Software” still fuses where the 1 mm cutter cannot enter, which the app now warns about. The coin is cut from a square blank: a round blank still cannot be described.",
    "issues": [
     732,
     743,
@@ -113,10 +118,10 @@
     {
      "title": "Aluminium 6061, metal O-flute 1 mm",
      "job": "jobs/j04-coin-alu.json",
-     "result": "refused-or-timeout",
-     "refusal": "no cutting parameters for a 1 mm cutter in Aluminium 6061: the starting table has no row for Aluminium 6061, and Makera's catalogue's rows are matched by Makera's own cutter id — which this cutter does not carry, so no row of theirs can name it. Pick a material the starting table covers, or a cutter Makera sells.",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "8 min 51 s",
+     "removedMm3App": 166.6606403557289,
      "note": null
     },
     {
@@ -138,8 +143,8 @@
     "title": "Makera Z1 desktop CNC review (CNX Software)",
     "credit": "Jean-Luc Aufranc / CNX Software"
    },
-   "verdict": "Fails",
-   "sentence": "On the laminate the job is refused: no feeds for a flat cutter in that plastic, though the reviewer cut exactly this sign on a Z1. On PLA the lettering comes out right at 20 mm.",
+   "verdict": "Partly",
+   "sentence": "The lettering cuts cleanly through the 0.4 mm cap, as in the photo; the laminate is modelled yellow over black, where the photo’s sheet is red over white.",
    "issues": [
     732
    ],
@@ -148,10 +153,10 @@
     {
      "title": "Red-over-white laminate 190 × 80 × 1.6",
      "job": "jobs/j05-sign-laminate.json",
-     "result": "refused-or-timeout",
-     "refusal": "no cutting parameters for a 3.175 mm cutter in plastic (unspecified): the starting table has no row for plastic (unspecified), and Makera's catalogue's rows are matched by Makera's own cutter id — which this cutter does not carry, so no row of theirs can name it. Pick a material the starting table covers, or a cutter Makera sells.",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "1 min 13 s",
+     "removedMm3App": 605.6632878755772,
      "note": null
     },
     {
@@ -159,8 +164,8 @@
      "job": "jobs/j05-sign-pla-proxy.json",
      "result": "simulated",
      "refusal": null,
-     "predictedTime": "1 min 55 s",
-     "removedMm3App": 605.6608694868955,
+     "predictedTime": "1 min 13 s",
+     "removedMm3App": 605.6632878755772,
      "note": null
     }
    ]
@@ -174,7 +179,7 @@
     "credit": "Jean-Luc Aufranc / CNX Software"
    },
    "verdict": "Partly",
-   "sentence": "A recognisable wolf relief, but only 3.5 mm deep with the 1 mm ball: the 8 mm version with the 2 mm ball is refused by the app’s own simulation. The input is a similar free wolf model, not the reviewer’s file, and the photo’s square frame is not modelled.",
+   "sentence": "A recognisable wolf-head relief comes out with both ball noses now; the input is a similar free wolf model, not the reviewer’s file, and the photo’s square frame is not modelled.",
    "issues": [
     738
    ],
@@ -183,10 +188,10 @@
     {
      "title": "2 mm ball, relief 8 mm deep",
      "job": "jobs/j06-wolf-2mm-ball.json",
-     "result": "refused-or-timeout",
-     "refusal": "16 rapids pass through material still present at that point in the program (first at line 28229)",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "4 h 30 min",
+     "removedMm3App": 33438.509572631716,
      "note": null
     },
     {
@@ -208,8 +213,8 @@
     "title": "Photo to 3D CNC relief (Makera blog)",
     "credit": "Makera"
    },
-   "verdict": "Fails",
-   "sentence": "Fails: with either ball nose, the relief program the app writes is refused by its own simulation, so nothing is written. Only the cut-out runs.",
+   "verdict": "Partly",
+   "sentence": "The portrait relief now generates with both ball noses and reads as the picture; the source shows no finished part, so the comparison is with the input picture, and the portrait is a different one from the blog’s.",
    "issues": [
     738
    ],
@@ -218,19 +223,19 @@
     {
      "title": "2 mm ball",
      "job": "jobs/j07-photo-relief.json",
-     "result": "refused-or-timeout",
-     "refusal": "5 rapids pass through material still present at that point in the program (first at line 72655)",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "1 h 59 min",
+     "removedMm3App": 10126.58059917552,
      "note": null
     },
     {
      "title": "1 mm ball",
      "job": "jobs/j07-photo-relief-1mm-ball.json",
-     "result": "refused-or-timeout",
-     "refusal": "63 rapids pass through material still present at that point in the program (first at line 26169)",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "5 h 2 min",
+     "removedMm3App": 10085.650869255996,
      "note": null
     }
    ]
@@ -275,8 +280,8 @@
     "title": "V-carving depth of cut (Carbide 3D forum)",
     "credit": "Carbide 3D Community"
    },
-   "verdict": "Fails",
-   "sentence": "With the house’s 90° bit the job is refused: the app reads the bit’s missing tip as 3.175 mm wide. With the 30° engraver the plaque cuts, with finer lines than the photo’s.",
+   "verdict": "Partly",
+   "sentence": "Both V-bits now generate. The dandelion and “Ruth” sit where the photo has them, but the V lines are much finer than the photo’s inlay.",
    "issues": [
     740
    ],
@@ -285,10 +290,10 @@
     {
      "title": "90° chamfer bit (the house’s 90° V)",
      "job": "jobs/j10-plaque-90v.json",
-     "result": "refused-or-timeout",
-     "refusal": "Engrave text \"Ruth\" has nothing this cutter can reach: every stroke is thinner than a 3.175 mm 90° V-bit.",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "5 min 20 s",
+     "removedMm3App": 164.57533179121094,
      "note": null
     },
     {
@@ -296,7 +301,7 @@
      "job": "jobs/j10-plaque-30v.json",
      "result": "simulated",
      "refusal": null,
-     "predictedTime": "2 min 19 s",
+     "predictedTime": "1 min 40 s",
      "removedMm3App": 129.28229406789112,
      "note": null
     }
@@ -310,8 +315,8 @@
     "title": "VCarve inlays — details and discoveries",
     "credit": "Carbide 3D Community"
    },
-   "verdict": "Fails",
-   "sentence": "The female pocket cuts with the 30° engraver, but no male plug can be made for a ring or for lettering, so there is no inlay. The 90° bit refuses the lettering, and on the guide’s star recipe it carves vertical walls 5 mm deep with a cone only 1.6 mm tall.",
+   "verdict": "Partly",
+   "sentence": "The female pocket cuts, and the male plug now derives and generates (#742): its render shows the ring and “FF” standing in a cleared blank. The 90° bit and the guide’s 3.8 mm star are refused because the pocket is deeper than their cone. The lettering is a serif face, not the logo’s script.",
    "issues": [
     742,
     740,
@@ -324,27 +329,36 @@
      "job": "jobs/j11-inlay-female-30v.json",
      "result": "simulated",
      "refusal": null,
-     "predictedTime": "33 min 26 s",
-     "removedMm3App": 5088.7035480380655,
-     "note": "The male job is refused: “this job has no inlay region to make a male for”."
+     "predictedTime": "7 min 6 s",
+     "removedMm3App": 3164.2559867323384,
+     "note": null
+    },
+    {
+     "title": "Male plug from the same job, 30° engraver",
+     "job": "jobs/j11-inlay-female-30v-male.json",
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "1 h 28 min",
+     "removedMm3App": 18743.554966499145,
+     "note": "The male now derives (#742): the ring and “FF” stand in a cleared blank."
     },
     {
      "title": "Female, 90° chamfer bit",
      "job": "jobs/j11-inlay-female-90v.json",
      "result": "refused-or-timeout",
-     "refusal": "Engrave text \"FF\" has nothing this cutter can reach: every stroke is thinner than a 3.175 mm 90° V-bit.",
+     "refusal": "Engrave \"FF\" is 5.1 mm deep, but the cutter \"Chamfering Bit - 1/8\" Shank 90°\" can only V-carve 1.538 mm deep: its 90° cone reaches the ⌀3.175 mm body at 1.538 mm, and deeper than that the body cuts a vertical wall instead of a V. Cut no deeper than 1.538 mm, or use a cutter that reaches 5.1 mm.",
      "predictedTime": null,
      "removedMm3App": null,
-     "note": null
+     "note": "Refused by the correct cone rule (#741): a 3.175 mm 90° bit can only V-carve 1.54 mm deep, not 5.1 mm."
     },
     {
      "title": "The guide’s star recipe, male plug, 90° bit (3.8 mm)",
      "job": "jobs/j11-v1-star-male-90.json",
-     "result": "simulated",
-     "refusal": null,
-     "predictedTime": "45 min 0 s",
-     "removedMm3App": 13574.436942650796,
-     "note": "Generated, but a 3.175 mm 90° bit’s cone is 1.6 mm tall: the walls below that are cut by the body of the bit, vertical."
+     "result": "refused-or-timeout",
+     "refusal": "Pocket cutaway \"male plug\" (1 island) is 3.8 mm deep, but the cutter \"Chamfering Bit - 1/8\" Shank 90°\" can only V-carve 1.538 mm deep: its 90° cone reaches the ⌀3.175 mm body at 1.538 mm, and deeper than that the body cuts a vertical wall instead of a V. Cut no deeper than 1.538 mm, or use a cutter that reaches 3.8 mm.",
+     "predictedTime": null,
+     "removedMm3App": null,
+     "note": "Refused by the same cone rule: 3.8 mm deep needs a 2.4 mm cone, and the bit’s is 1.54 mm."
     }
    ]
   },
@@ -356,20 +370,20 @@
     "title": "My first attempt to CNC aluminum",
     "credit": "Pat Regan / patshead.com"
    },
-   "verdict": "Fails",
-   "sentence": "In aluminium the job is refused (no feeds). On PLA it cuts the photo’s layout: a 60 mm pocket 1.5 mm deep with the wrench left standing.",
+   "verdict": "Matches the photo",
+   "sentence": "Matches: in aluminium, a 60 mm pocket 1.5 mm deep with the wrench left standing, as in the photo.",
    "issues": [
     732
    ],
-   "modelled": "From the photo: a 60 mm round pocket 1.5 mm deep around a double-ended wrench, on 150 × 75 × 6.35 plate. The author stopped before the round profile, so it is not cut.",
+   "modelled": "From the photo: a 60 mm round pocket 1.5 mm deep around a double-ended wrench, on 150 × 75 × 6.35 plate. The author stopped before the round profile, so it is not cut. The 2 mm metal O-flute and the proxy’s 2 mm O-flute carry assumed Makera matches (112111203808 and 111011203812).",
    "runs": [
     {
      "title": "Aluminium 6061, metal O-flute 2 mm",
      "job": "jobs/j12-wrench-alu.json",
-     "result": "refused-or-timeout",
-     "refusal": "no cutting parameters for a 2 mm cutter in Aluminium 6061: the starting table has no row for Aluminium 6061, and Makera's catalogue's rows are matched by Makera's own cutter id — which this cutter does not carry, so no row of theirs can name it. Pick a material the starting table covers, or a cutter Makera sells.",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "53 min 57 s",
+     "removedMm3App": 3513.7477249774383,
      "note": null
     },
     {
@@ -377,7 +391,7 @@
      "job": "jobs/j12-wrench-pla-proxy.json",
      "result": "simulated",
      "refusal": null,
-     "predictedTime": "17 min 30 s",
+     "predictedTime": "9 min 32 s",
      "removedMm3App": 3513.7477249774383,
      "note": null
     }
@@ -391,8 +405,8 @@
     "title": "Nomad 3 tool tray starter project, remixed",
     "credit": "Carbide 3D Community"
    },
-   "verdict": "Fails",
-   "sentence": "Fails: the tray program the app writes is refused by its own simulation, so nothing is written. Only the second program, the six small holes, runs.",
+   "verdict": "Matches the photo",
+   "sentence": "Matches: all 23 bit pockets, the nine holes, the large pocket with its notch, the two 155 mm slots and the tabbed cut-out come out, as in the photo; bamboo is stated as PLA.",
    "issues": [
     738,
     735
@@ -402,10 +416,10 @@
     {
      "title": "3.175 mm flat: pockets, slots, large holes, cut-out",
      "job": "jobs/j13-tool-tray.json",
-     "result": "refused-or-timeout",
-     "refusal": "10 rapids pass through material still present at that point in the program (first at line 94432)",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "2 h 34 min",
+     "removedMm3App": 154975.80813303153,
      "note": null
     },
     {
@@ -427,8 +441,8 @@
     "title": "Engraving Dog Tags (Bantam Tools)",
     "credit": "Bantam Tools"
    },
-   "verdict": "Fails",
-   "sentence": "Refused, with a false reason: it says Makera’s catalogue never lists a V-bit in aluminium, but the catalogue has the row. There is no photo of a finished tag.",
+   "verdict": "No photo to compare",
+   "sentence": "Generates now: the tag’s name and number are V-engraved with the 60° metal engraver. The source shows no finished tag to compare.",
    "issues": [
     732
    ],
@@ -437,10 +451,10 @@
     {
      "title": "Aluminium 6061, 60° 0.1 mm engraver",
      "job": "jobs/j14-dog-tag-alu.json",
-     "result": "refused-or-timeout",
-     "refusal": "no cutting parameters for a 0.1 mm V-bit in Aluminium 6061: the starting table has a V-bit row for PLA, PETG and plastic only, and Makera's catalogue states a flat end mill's numbers, never a cone's. Pick PLA, PETG or plastic, or a flat end mill for this material.",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "10 min 7 s",
+     "removedMm3App": 13.093253120484293,
      "note": null
     }
    ]
@@ -453,30 +467,30 @@
     "title": "Darth Vader keychain (Easel gallery)",
     "credit": "Easel gallery author"
    },
-   "verdict": "Fails",
-   "sentence": "In acrylic both programs are refused (no feeds). On PLA the outline — helmet, text panel and ring — cuts; the engraving of the helmet and “WHO’S YOUR DADDY?” ran for 30 minutes without finishing.",
+   "verdict": "Partly",
+   "sentence": "Both acrylic programs now generate: the outline, ring, helmet engraving and “WHO’S YOUR DADDY?” text all cut. The helmet is OpenMoji’s artwork, not the Easel author’s file.",
    "issues": [
     732,
     734
    ],
-   "modelled": "The helmet artwork is OpenMoji’s “darth-vader” (CC BY-SA 4.0), not the Easel author’s file: helmet engraved 0.4 mm with the face plate left clear, three lines of text, a ring loop, cut out around helmet and text panel; 3 mm sheet.",
+   "modelled": "The helmet artwork is OpenMoji’s “darth-vader” (CC BY-SA 4.0), not the Easel author’s file: helmet engraved 0.4 mm with the face plate left clear, three lines of text, a ring loop, cut out around helmet and text panel; 3 mm sheet. The 30° 0.3 mm engraver carries an assumed Makera match (121011033830).",
    "runs": [
     {
      "title": "Acrylic, 3.175 mm O-flute: outline and ring",
      "job": "jobs/j15-vader-acrylic.json",
-     "result": "refused-or-timeout",
-     "refusal": "no cutting parameters for a 3.175 mm cutter in Acrylic: the starting table has no row for Acrylic, and Makera's catalogue's rows are matched by Makera's own cutter id — which this cutter does not carry, so no row of theirs can name it. Pick a material the starting table covers, or a cutter Makera sells.",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "2 min 30 s",
+     "removedMm3App": 2041.6020919802631,
      "note": null
     },
     {
      "title": "Acrylic, 30° 0.3 mm engraver: helmet and text",
      "job": "jobs/j15-vader-acrylic-b-engrave.json",
-     "result": "refused-or-timeout",
-     "refusal": "no cutting parameters for a 0.3 mm V-bit in Acrylic: the starting table has a V-bit row for PLA, PETG and plastic only, and Makera's catalogue states a flat end mill's numbers, never a cone's. Pick PLA, PETG or plastic, or a flat end mill for this material.",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "10 min 47 s",
+     "removedMm3App": 328.11207164801505,
      "note": null
     },
     {
@@ -484,17 +498,17 @@
      "job": "jobs/j15-vader-pla-proxy.json",
      "result": "simulated",
      "refusal": null,
-     "predictedTime": "7 min 13 s",
-     "removedMm3App": 2041.6320488656056,
+     "predictedTime": "2 min 30 s",
+     "removedMm3App": 2041.6020919802631,
      "note": null
     },
     {
      "title": "Proxy: PLA, helmet and text engraving",
      "job": "jobs/j15-vader-pla-proxy-b-engrave.json",
-     "result": "refused-or-timeout",
-     "refusal": "The command ran for 30 minutes with no result and was stopped.",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "9 min 59 s",
+     "removedMm3App": 328.11207164801505,
      "note": null
     }
    ]
@@ -513,12 +527,21 @@
    "modelled": "A 50 × 30 mm part with 4 mm corners from a 70 × 50 × 6 PLA blank.",
    "runs": [
     {
-     "title": "90° chamfer bit, then 3.175 mm O-flute (two programs)",
+     "title": "90° chamfer bit: 1 mm × 45° on the outside edge",
      "job": "jobs/j16-chamfer-a-bevel.json",
      "result": "simulated",
      "refusal": null,
-     "predictedTime": "20 s",
-     "removedMm3App": 153.12287128649038,
+     "predictedTime": "10 s",
+     "removedMm3App": 168.78039184819323,
+     "note": null
+    },
+    {
+     "title": "3.175 mm O-flute: the cut-out with two tabs",
+     "job": "jobs/j16-chamfer-b-cutout.json",
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "2 min 33 s",
+     "removedMm3App": 3077.0910777322024,
      "note": null
     }
    ]
@@ -531,8 +554,8 @@
     "title": "1590B enclosure, CNC Pro (Love My Switches)",
     "credit": "Love My Switches"
    },
-   "verdict": "Fails",
-   "sentence": "In aluminium refused (no feeds); on PLA the program the app writes is refused by its own simulation (rapids through stock). No photo of a finished lid.",
+   "verdict": "No photo to compare",
+   "sentence": "Generates now, in aluminium and on the PLA proxy: the three pot holes, the DC jack and the window are cut through the lid. No photo of a finished lid to compare.",
    "issues": [
     732,
     734
@@ -542,19 +565,19 @@
     {
      "title": "Aluminium 6061, metal O-flute",
      "job": "jobs/j17-faceplate-alu.json",
-     "result": "refused-or-timeout",
-     "refusal": "no cutting parameters for a 3.175 mm cutter in Aluminium 6061: the starting table has no row for Aluminium 6061, and Makera's catalogue's rows are matched by Makera's own cutter id — which this cutter does not carry, so no row of theirs can name it. Pick a material the starting table covers, or a cutter Makera sells.",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "13 min 48 s",
+     "removedMm3App": 1412.5952126608436,
      "note": null
     },
     {
      "title": "Proxy: PLA",
      "job": "jobs/j17-faceplate-pla-proxy.json",
-     "result": "refused-or-timeout",
-     "refusal": "7 rapids pass through material still present at that point in the program (first at line 976)",
-     "predictedTime": null,
-     "removedMm3App": null,
+     "result": "simulated",
+     "refusal": null,
+     "predictedTime": "3 min 3 s",
+     "removedMm3App": 1412.5952126608436,
      "note": null
     }
    ]
@@ -568,20 +591,20 @@
     "credit": "Makera"
    },
    "verdict": "No photo to compare",
-   "sentence": "On PLA the 2.6 mm pilots and the threads simulate. In aluminium the pilot bore is refused but the thread is still written, at feeds that are not Makera’s. No photo to compare.",
+   "sentence": "The PLA pilot bore and thread generate; in aluminium the thread mill generates with the app warning that its pilot is unproven (thread-pilot-unproven). No photo to compare.",
    "issues": [
     735
    ],
    "modelled": "Two M3 × 5 mm threads in a 40 × 30 × 8 block in the vise.",
    "runs": [
     {
-     "title": "Aluminium 6061: thread only (the pilot is refused)",
+     "title": "Aluminium 6061: thread only (its pilot unproven)",
      "job": "jobs/j18-thread-b-mill-alu.json",
      "result": "simulated",
      "refusal": null,
      "predictedTime": "45 s",
      "removedMm3App": 84.80131830426801,
-     "note": "Written although its pilot was refused (inconsistent)."
+     "note": "The app warns thread-pilot-unproven: the thread is posted without a proven pilot."
     },
     {
      "title": "Proxy: PLA, pilot bore then thread (two programs)",
@@ -596,12 +619,13 @@
   }
  ],
  "set2": {
-  "run": "2026-10-28",
-  "main": "9538601f",
-  "location": "house location with each owned cutter's Makera match confirmed (#732), catalogue.json beside it; rebuilt by tools/set2/bench_location.py",
+  "run": "2026-10-29",
+  "main": "207e8a11",
+  "location": "the house location.json with the Makera catalogue beside it; the three assumed Makera matches listed at the top level",
   "counts": {
-   "Partly": 4,
-   "Fails": 3
+   "Matches the photo": 1,
+   "Partly": 5,
+   "Fails": 1
   },
   "jobs": [
    {
@@ -614,7 +638,7 @@
      "credit": "Molodos (CC BY-NC-ND 4.0)"
     },
     "verdict": "Partly",
-    "sentence": "Cut as four one-cutter jobs, every feature of the maker's sample is there: the keyring hole, the four slanted slots with 3/2/1.5/1 mm walls, the six thin floors, the 2–5 mm holes, the engraved logo and the tabbed outline. The raised \"CNC\" comes out as pitted stubs, because the 1.5 mm cutter cannot get between letters 4 mm tall. As one three-cutter job, as drawn, it is refused.",
+    "sentence": "As one three-cutter job it now generates, and every feature of the sample is cut: the keyring hole, the four slanted slots with 3/2/1.5/1 mm walls, the thin floors, the 2–5 mm holes, the slots and the tabbed outline. The raised \"CNC\" comes out as pitted stubs where the 1.5 mm cutter cannot get between the letters, and in this model the CNC and logo panels are swapped compared with the maker's photo.",
     "modelled": "The maker's stated sizes (a 40 × 70 × 4 part from a 5 mm plate; walls 3/2/1.5/1; floors 0.2–1.2; holes 2/3/4/5), placed by measuring the annotated photo. The angled slide is a flat 2 mm pocket here (there is no sloped-floor operation).",
     "material": "Aluminium 6061",
     "stock": "86 × 56 × 5 mm, 2 mm board",
@@ -630,10 +654,30 @@
       "results": [
        {
         "job": "j19-accuracy-sample",
-        "exit": "exit=1 wall=17.4s",
-        "result": "refused",
-        "refusal": "depth-exceeds-stock: Imported vector \"rest of Pocket outline\" \"rest of Pocket outline\" 7.824×5.828 cuts 5.3 mm deep; only -0.3 mm of floor would remain on a 5 mm stock, below the 0.2 mm minimum.",
-        "programs": []
+        "exit": "exit=0 wall=4.5s",
+        "result": "generated",
+        "programs": [
+         {
+          "nc": "j19-accuracy-sample.nc",
+          "estimated": "25 min 54 s",
+          "removedMm3": 3741.748347570425
+         },
+         {
+          "nc": "j19-accuracy-sample-p2.nc",
+          "estimated": null,
+          "removedMm3": 2113.9460016203034
+         },
+         {
+          "nc": "j19-accuracy-sample-p3.nc",
+          "estimated": null,
+          "removedMm3": 230.25707316334962
+         },
+         {
+          "nc": "j19-accuracy-sample-p4.nc",
+          "estimated": null,
+          "removedMm3": 2818.064553899185
+         }
+        ]
        }
       ]
      },
@@ -642,9 +686,8 @@
       "results": [
        {
         "job": "j19-accuracy-sample-a",
-        "exit": "exit=0 wall=1.9s",
+        "exit": "exit=0 wall=1.3s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j19-accuracy-sample-a.nc",
@@ -655,9 +698,8 @@
        },
        {
         "job": "j19-accuracy-sample-b",
-        "exit": "exit=0 wall=3.2s",
+        "exit": "exit=0 wall=2.7s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j19-accuracy-sample-b.nc",
@@ -668,9 +710,8 @@
        },
        {
         "job": "j19-accuracy-sample-c",
-        "exit": "exit=0 wall=1.7s",
+        "exit": "exit=0 wall=1.5s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j19-accuracy-sample-c.nc",
@@ -681,14 +722,13 @@
        },
        {
         "job": "j19-accuracy-sample-z",
-        "exit": "exit=0 wall=12.7s",
+        "exit": "exit=0 wall=2.1s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j19-accuracy-sample-z.nc",
           "estimated": "25 min 36 s",
-          "removedMm3": 3531.979195535012
+          "removedMm3": 3531.9791959276154
          }
         ]
        }
@@ -705,8 +745,8 @@
      "title": "CutRocket — Personalize Spoon Rest",
      "credit": "CutRocket (licence not stated)"
     },
-    "verdict": "Fails",
-    "sentence": "No program. With its four tabs the job is refused because one tab is counted as a loose 38 mm² piece; without tabs, the frame file is refused because it would move outside the machine at Z 0.",
+    "verdict": "Partly",
+    "sentence": "With its four tabs the job now generates, and without tabs it generates too: the hexagon, recess, handle notch, raised M and tabbed cut-out all come out. The maker's file pockets a sculpted floor that cannot be read here, so ours is flat, and the photo's M is turned about 20° to the hexagon, where ours is square to the part.",
     "modelled": "Read from the maker's Carbide Create file: the 145 mm hexagon, the rest pocket and the handle notch. The file pockets with a 3D component (a sloped floor) that cannot be read here, so the rest is a flat 6 mm pocket around a raised serif M (the photo's letter).",
     "material": "PLA (the maker cut hardwood; this shop cuts printed plastics, not wood)",
     "stock": "152.4 × 152.4 × 21.3 mm, 3 mm board",
@@ -723,10 +763,15 @@
       "results": [
        {
         "job": "j20-spoon-rest",
-        "exit": "exit=1 wall=1.4s",
-        "result": "refused",
-        "refusal": "loose-piece: The through cuts leave a piece of the blank (38 mm²) disconnected from the material the mount holds. It can move under the cutter after being freed; leave a connecting bridge of material, move the cut away from the blank’s edges, or add holding tabs.",
-        "programs": []
+        "exit": "exit=0 wall=4.8s",
+        "result": "generated",
+        "programs": [
+         {
+          "nc": "j20-spoon-rest.nc",
+          "estimated": "1 h 8 min",
+          "removedMm3": 85297.50329482835
+         }
+        ]
        }
       ]
      },
@@ -735,10 +780,15 @@
       "results": [
        {
         "job": "j20-spoon-rest-notabs",
-        "exit": "exit=1 wall=1.7s",
-        "result": "refused",
-        "refusal": "the frame file has 5 verifier error(s)",
-        "programs": []
+        "exit": "exit=0 wall=7.7s",
+        "result": "generated",
+        "programs": [
+         {
+          "nc": "j20-spoon-rest-notabs.nc",
+          "estimated": "1 h 8 min",
+          "removedMm3": 85780.67271978082
+         }
+        ]
        }
       ]
      }
@@ -754,7 +804,7 @@
      "credit": "CutRocket (licence not stated)"
     },
     "verdict": "Fails",
-    "sentence": "No program. As one job it ran 15 minutes with no result. Split by cutter, the pocket, the cut-out and the chamfers are each blocked by a frame file outside the machine. The V-carved initial and name are judged as if they started at the top face, not the pocket floor. The house's 3.175 mm chamfer bit reaches 1.5 mm, not the 2–2.5 mm drawn, which is a correct refusal.",
+    "sentence": "No coaster. The as-drawn job and the pocket-only split abort the geometry kernel (RuntimeError: Aborted()); the V-carve split is refused because its vectors are 14 mm deep from the top and the 30° bit’s cone reaches 4.99 mm; the chamfers at 1.5 mm and the cut-out generate.",
     "modelled": "The first of the file's seven coasters: a ⌀93 pocket 10 mm deep, the initial and the script name V-carved 4 mm into its floor, 45° chamfers on the rim (2.5) and outside (2), cut out at ⌀107. The maker used a 1/4\" end mill and a 1/2\" chamfer bit; the house cutters are used here.",
     "material": "PLA (the maker cut hardwood)",
     "stock": "146 × 134 × 22.8 mm, 3 mm board",
@@ -762,7 +812,8 @@
     "cutters": "3.175 O-flute, 0.5 mm 30° engraver, 3.175 mm 90° chamfer",
     "issues": [
      747,
-     748
+     748,
+     751
     ],
     "jobFilesCommitted": false,
     "runs": [
@@ -771,8 +822,10 @@
       "results": [
        {
         "job": "j21-coaster-inlay",
-        "exit": "exit=124 wall=959.7s",
-        "result": "timeout"
+        "exit": "exit=1 wall=206.7s",
+        "result": "refused",
+        "refusal": "the geometry kernel crashed while generating the toolpath (the cam stage): RuntimeError: Aborted(). Build with -sASSERTIONS for more info.. Nothing was written. This is a fault in the geometry kernel, not a problem with the job.",
+        "programs": []
        }
       ]
      },
@@ -781,9 +834,9 @@
       "results": [
        {
         "job": "j21-coaster-inlay-a",
-        "exit": "exit=1 wall=88.9s",
+        "exit": "exit=1 wall=190.6s",
         "result": "refused",
-        "refusal": "the frame file has 5 verifier error(s)",
+        "refusal": "the geometry kernel crashed while simulating program 1 (inv:kz-o-flute-3-175-25) (the simulated stage): RuntimeError: Aborted(). Build with -sASSERTIONS for more info.. Nothing was written. This is a fault in the geometry kernel, not a problem with the job.",
         "programs": []
        }
       ]
@@ -793,9 +846,9 @@
       "results": [
        {
         "job": "j21-coaster-inlay-b",
-        "exit": "exit=1 wall=16.6s",
+        "exit": "exit=1 wall=7.8s",
         "result": "refused",
-        "refusal": "the frame file has 5 verifier error(s)",
+        "refusal": "Pocket outline (1 contour, 51.573×70.425mm) is 14 mm deep, but the cutter \"Single Flute Engraving Bit - 1/8\" Shank 30° * 0.5mm\" can only V-carve 4.992 mm deep: its 30° cone reaches the ⌀3.175 mm body at 4.992 mm, and deeper than that the body cuts a vertical wall instead of a V. Cut no deeper than 4.992 mm, or use a cutter that reaches 14 mm.",
         "programs": []
        }
       ]
@@ -805,10 +858,15 @@
       "results": [
        {
         "job": "j21-coaster-inlay-c-15",
-        "exit": "exit=1 wall=1.9s",
-        "result": "refused",
-        "refusal": "the frame file has 5 verifier error(s)",
-        "programs": []
+        "exit": "exit=0 wall=2.5s",
+        "result": "generated",
+        "programs": [
+         {
+          "nc": "j21-coaster-inlay-c-15.nc",
+          "estimated": "44 s",
+          "removedMm3": 1509.2658341245162
+         }
+        ]
        }
       ]
      },
@@ -817,10 +875,15 @@
       "results": [
        {
         "job": "j21-coaster-inlay-z",
-        "exit": "exit=1 wall=555.7s",
-        "result": "refused",
-        "refusal": "the frame file has 5 verifier error(s)",
-        "programs": []
+        "exit": "exit=0 wall=1581.1s",
+        "result": "generated",
+        "programs": [
+         {
+          "nc": "j21-coaster-inlay-z.nc",
+          "estimated": "29 min 32 s",
+          "removedMm3": 25067.11894579261
+         }
+        ]
        }
       ]
      }
@@ -836,7 +899,7 @@
      "credit": "MakeHaven (CC0 1.0)"
     },
     "verdict": "Partly",
-    "sentence": "The layout, depths and outline match the photo. The photo's compartments have rounded floors and its outer edge is rounded over; here the floors are flat and the walls square.",
+    "sentence": "The layout, compartment sizes and outline match the photo. The photo's compartment floors are softly rounded and its outer edge rounded over; here the pockets have rounded corners but flat floors and square-edged walls.",
     "modelled": "Estimated from the maker's photo: about 140 × 140 × 18, two square compartments over one wide one, 12 mm deep, 9 mm corner radii.",
     "material": "PLA (the maker cut beech)",
     "stock": "150 × 150 × 18 mm, 3 mm board",
@@ -850,14 +913,13 @@
       "results": [
        {
         "job": "j22-snack-tray",
-        "exit": "exit=0 wall=34.4s",
+        "exit": "exit=0 wall=8.9s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j22-snack-tray.nc",
           "estimated": "2 h 31 min",
-          "removedMm3": 179920.0599256458
+          "removedMm3": 179920.06945061515
          }
         ]
        }
@@ -875,7 +937,7 @@
      "credit": "Makerables author (CC BY-NC-ND 4.0)"
     },
     "verdict": "Partly",
-    "sentence": "Cut as two jobs, the lines and the diamond outline come out as in the photo. As one job it is refused: a V-bit cannot be followed by the flat cut-out. The outline can only be cut without tabs, because tabs are refused on its traced straight sides.",
+    "sentence": "Cut as two jobs, the lines and the diamond outline come out as in the photo when the outline is cut without tabs; the as-drawn one-job run and the cut-out with tabs are refused because 2 of the 4 tabs cannot be placed on the traced outline (#736).",
     "modelled": "The maker's own artwork PNG traced by the app's raster importer; the black lines milled 0.35 mm through a 0.2 mm yellow cap, the sign 110 mm across, cut out of 1.6 mm laminate. Cap thickness and size are assumed.",
     "material": "Plastic laminate (yellow over black)",
     "stock": "130 × 130 × 1.6 mm, taped, 3 mm board",
@@ -892,9 +954,9 @@
       "results": [
        {
         "job": "j23-shell-sign",
-        "exit": "exit=1 wall=2.3s",
+        "exit": "exit=1 wall=5.0s",
         "result": "refused",
-        "refusal": "setup-rest-unavailable: Setup 1 names inv:kz-engrave-30-0-5 first and then another cutter, but a V-bit is not a rest cutter here — on a region job it is the V-carve cutter itself, not a second program. The V-carve is the whole region job; remove the later cutter from the setup, or name a flat cutter first.",
+        "refusal": "Cut-out \"Cut out outside Pocket outline (1 contour, 110×110mm)\" asks for 4 holding tabs 3 mm wide, but 2 could not be placed: the cut path has no straight or smoothly curved edge with enough free length to hold them. The part would be released where those tabs were meant to hold it. Use a smaller tab width or count, or a larger outline.",
         "programs": []
        }
       ]
@@ -904,9 +966,8 @@
       "results": [
        {
         "job": "j23-shell-sign-a",
-        "exit": "exit=0 wall=2.1s",
+        "exit": "exit=0 wall=1.8s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j23-shell-sign-a.nc",
@@ -922,9 +983,9 @@
       "results": [
        {
         "job": "j23-shell-sign-z",
-        "exit": "exit=1 wall=1.3s",
+        "exit": "exit=1 wall=1.2s",
         "result": "refused",
-        "refusal": "tab-unplaceable: Cut-out \"Cut out outside Pocket outline (1 contour, 110×110mm)\" asks for 4 holding tabs 3 mm wide, but 4 could not be placed on a straight edge long enough; the part would be released where that tab was meant to hold it. Use a smaller tab width or count.",
+        "refusal": "Cut-out \"Cut out outside Pocket outline (1 contour, 110×110mm)\" asks for 4 holding tabs 3 mm wide, but 2 could not be placed: the cut path has no straight or smoothly curved edge with enough free length to hold them. The part would be released where those tabs were meant to hold it. Use a smaller tab width or count, or a larger outline.",
         "programs": []
        }
       ]
@@ -934,9 +995,8 @@
       "results": [
        {
         "job": "j23-shell-sign-z-notabs",
-        "exit": "exit=0 wall=4.7s",
+        "exit": "exit=0 wall=4.4s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j23-shell-sign-z-notabs.nc",
@@ -958,8 +1018,8 @@
      "title": "Makerables — Bicycle spoke wrench",
      "credit": "Makerables author (CC0 1.0)"
     },
-    "verdict": "Fails",
-    "sentence": "The recess, centre hole, four nipple notches and the gauge labels are cut, but the puck is never freed: the cut-out crashes the command with no result. As one job it is refused (the bore and cut-out are given to the big cutter, the notches to the small one).",
+    "verdict": "Matches the photo",
+    "sentence": "Matches: as one three-cutter job the puck is cut free with its centre bore, recess, four nipple notches and all four gauge labels (13G–16G) on the recess floor, as in the photo.",
     "modelled": "Estimated from the maker's photos: a ⌀44 × 10 puck, a ⌀34 recess 4 deep, a ⌀14 hole, notches for 13G/14G/15G/16G (3.9/3.4/3.2/3.0 mm, typical nipple flats), each size engraved on the recess floor.",
     "material": "Aluminium 6061",
     "stock": "60 × 60 × 10 mm, 2 mm board",
@@ -977,10 +1037,30 @@
       "results": [
        {
         "job": "j24-spoke-wrench",
-        "exit": "exit=1 wall=17.0s",
-        "result": "refused",
-        "refusal": "depth-exceeds-stock: Imported vector \"rest of Bore ⌀14\" \"rest of Bore ⌀14\" 14×14 cuts 10.3 mm deep; only -0.3 mm of floor would remain on a 10 mm stock, below the 1 mm minimum.",
-        "programs": []
+        "exit": "exit=0 wall=12.0s",
+        "result": "generated",
+        "programs": [
+         {
+          "nc": "j24-spoke-wrench.nc",
+          "estimated": "44 min 35 s",
+          "removedMm3": 4552.327711549502
+         },
+         {
+          "nc": "j24-spoke-wrench-p2.nc",
+          "estimated": null,
+          "removedMm3": 369.6644469470484
+         },
+         {
+          "nc": "j24-spoke-wrench-p3.nc",
+          "estimated": null,
+          "removedMm3": 360.47883614469873
+         },
+         {
+          "nc": "j24-spoke-wrench-p4.nc",
+          "estimated": null,
+          "removedMm3": 4653.766650686539
+         }
+        ]
        }
       ]
      },
@@ -989,9 +1069,8 @@
       "results": [
        {
         "job": "j24-spoke-wrench-a",
-        "exit": "exit=0 wall=3.4s",
+        "exit": "exit=0 wall=3.0s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j24-spoke-wrench-a.nc",
@@ -1002,9 +1081,8 @@
        },
        {
         "job": "j24-spoke-wrench-b",
-        "exit": "exit=0 wall=3.5s",
+        "exit": "exit=0 wall=1.5s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j24-spoke-wrench-b.nc",
@@ -1015,9 +1093,8 @@
        },
        {
         "job": "j24-spoke-wrench-c",
-        "exit": "exit=0 wall=2.3s",
+        "exit": "exit=0 wall=4.3s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j24-spoke-wrench-c.nc",
@@ -1033,8 +1110,15 @@
       "results": [
        {
         "job": "j24-spoke-wrench-z",
-        "exit": "exit=1 wall=99.8s",
-        "result": "crashed"
+        "exit": "exit=0 wall=7.2s",
+        "result": "generated",
+        "programs": [
+         {
+          "nc": "j24-spoke-wrench-z.nc",
+          "estimated": "35 min 2 s",
+          "removedMm3": 4705.012637003594
+         }
+        ]
        }
       ]
      }
@@ -1050,7 +1134,7 @@
      "credit": "Makerables author (CC0 1.0)"
     },
     "verdict": "Partly",
-    "sentence": "Cut as four one-cutter jobs, the bar, hanging hole, rotor slot and grooves come out and the bar is freed on tabs. The maker's fork has three slots and curved grooves; this model has one slot and straight grooves. As one job it is refused.",
+    "sentence": "As one three-cutter job, the bar, hanging hole, rotor slot and three grooves come out and the bar is freed on tabs. The maker's fork has three slots and curved grooves; this model has one slot and straight grooves.",
     "modelled": "Estimated from the maker's photo: about 155 × 22 × 4, a ⌀8 hanging hole, a 1.9 mm rotor slot at the fork end, three engraved grooves.",
     "material": "Aluminium 6061",
     "stock": "170 × 40 × 4 mm, 2 mm board",
@@ -1066,10 +1150,30 @@
       "results": [
        {
         "job": "j25-truing-wrench",
-        "exit": "exit=1 wall=4.1s",
-        "result": "refused",
-        "refusal": "depth-exceeds-stock: Imported vector \"rest of Pocket outline\" \"rest of Pocket outline\" 22×1.9 cuts 4.3 mm deep; only -0.3 mm of floor would remain on a 4 mm stock, below the 1 mm minimum.",
-        "programs": []
+        "exit": "exit=0 wall=1.9s",
+        "result": "generated",
+        "programs": [
+         {
+          "nc": "j25-truing-wrench.nc",
+          "estimated": "2 min 34 s",
+          "removedMm3": 200.89522523902997
+         },
+         {
+          "nc": "j25-truing-wrench-p2.nc",
+          "estimated": null,
+          "removedMm3": 165.1161121492005
+         },
+         {
+          "nc": "j25-truing-wrench-p3.nc",
+          "estimated": null,
+          "removedMm3": 25.652424822298272
+         },
+         {
+          "nc": "j25-truing-wrench-p4.nc",
+          "estimated": null,
+          "removedMm3": 4337.028605431889
+         }
+        ]
        }
       ]
      },
@@ -1078,9 +1182,8 @@
       "results": [
        {
         "job": "j25-truing-wrench-a",
-        "exit": "exit=0 wall=1.5s",
+        "exit": "exit=0 wall=1.4s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j25-truing-wrench-a.nc",
@@ -1091,9 +1194,8 @@
        },
        {
         "job": "j25-truing-wrench-b",
-        "exit": "exit=0 wall=2.0s",
+        "exit": "exit=0 wall=1.3s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j25-truing-wrench-b.nc",
@@ -1104,9 +1206,8 @@
        },
        {
         "job": "j25-truing-wrench-c",
-        "exit": "exit=0 wall=1.4s",
+        "exit": "exit=0 wall=1.2s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j25-truing-wrench-c.nc",
@@ -1117,14 +1218,13 @@
        },
        {
         "job": "j25-truing-wrench-z",
-        "exit": "exit=0 wall=6.6s",
+        "exit": "exit=0 wall=1.5s",
         "result": "generated",
-        "refusal": null,
         "programs": [
          {
           "nc": "j25-truing-wrench-z.nc",
           "estimated": "31 min 2 s",
-          "removedMm3": 4344.49127191168
+          "removedMm3": 4344.568480057089
          }
         ]
        }
@@ -1132,53 +1232,6 @@
      }
     ]
    }
-  ],
-  "notRun": [
-   {
-    "what": "Elephant animal puzzle (Makerables, CC0)",
-    "why": "a carved relief as well as puzzle pieces; its files need a Makerables login and the photo cannot be traced faithfully."
-   },
-   {
-    "what": "Nordic iceberg mould, Relief Morgan coin, Wild Spirit relief (Makerables)",
-    "why": "3D reliefs whose model files need a Makerables login."
-   },
-   {
-    "what": "Box hinges (CutRocket)",
-    "why": "a 3D carving stored as a Carbide Create 3D component, which cannot be read here."
-   },
-   {
-    "what": "Morakniv knife-handle template (CutRocket)",
-    "why": "the DXF is an open outline of the knife, not a closed region to pocket."
-   },
-   {
-    "what": "Nomad 3/883 wasteboard and Nomad 4 table cover (CutRocket)",
-    "why": "bigger than the Z1's bed, and the photos are renders."
-   },
-   {
-    "what": "A spur gear, a stencil, a clock face, a ruler, a Eurorack panel, a phone stand, a two-sided part, a rotary pawn",
-    "why": "no source was found with both a photo of the finished part and inputs that could be obtained."
-   }
-  ],
-  "fixtures": {
-   "746": [
-    "j19-accuracy-sample",
-    "j24-spoke-wrench",
-    "j25-truing-wrench"
-   ],
-   "747": [
-    "fx-frame-pocket"
-   ],
-   "748": [
-    "j24-spoke-wrench-c"
-   ],
-   "749": [
-    "j24-spoke-wrench-z"
-   ],
-   "750": [
-    "fx-hex-svg-import",
-    "fx-hexv"
-   ]
-  },
-  "note": "Wood jobs (j20 spoon rest, j21 coaster, j22 tray) are cut in PLA, as in set 1: this shop cuts printed plastics, not wood. Their refusals were the same in hardwood."
+  ]
  }
 }

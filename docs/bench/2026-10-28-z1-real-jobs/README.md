@@ -1,14 +1,27 @@
-# Z1 demo jobs, cut for real (2026-10-28)
+# Z1 demo jobs, cut for real (2026-10-28, re-run 2026-10-29)
 
-This run replaces `docs/bench/2026-10-27-z1-typical-jobs/` as the record of whether Case Maker can make the 18 typical jobs. That run counted "a program was written and passed its own simulation" as success, and most of its inputs were stand-ins that did not resemble the parts. In this run, each job models the part in the maker's photo or file. Every card was then compared by eye with that photo.
+This run replaces `docs/bench/2026-10-27-z1-typical-jobs/` as the record of whether Case Maker can make the 18 typical jobs and the seven jobs of the second set. The 2026-10-27 run counted "a program was written and passed its own simulation" as success, and most of its inputs were stand-ins that did not resemble the parts. In this run, each job models the part in the maker's photo or file. Every card was then compared by eye with that photo. The cards were first run on 2026-10-28; the **2026-10-29 re-run on main 207e8a11** is the current verdict, and the first-run tables below are kept as history.
 
-- Main **ce5fdbc3**, `casemaker cut <job> --json --location <house location>` (one cutter per job file: #733).
-- Location: a read-only copy of the desktop app's `location.json` (29 owned cutters, the house feed rows). No Makera catalogue is loaded on this path (#732).
+- Main **207e8a11** (re-run), `casemaker cut <job> --json --location <bench location>`.
+- Location: the desktop app's `location.json` (29 owned cutters) with the synced Makera catalogue (129 cutters, 1,328 feed rows). Three house cutters carry an assumed Makera match, named on their cards: `kz-engrave-30-0-3` → `121011033830` (j15), `kz-o-flute-2-12` → `111011203812` (j12 proxy), `kz-o-flute-m-2-8` → `112111203808` (j12 aluminium). No cutter the house does not own was needed.
 - No machine was used.
 - `manifest.json` holds each job's verdict, its sentence, the issues filed and every run's result.
-- The page: https://claude.ai/artifact/EZ2yRActt2oECe57cYGhGc
+- The page: https://claude.ai/artifact/EZ2yRActt2oECe57cYGhGc (first run).
 
-## Verdicts
+## Re-run 2026-10-29 (main 207e8a11)
+
+All 25 cards were run again after the fixes the first issue list asked for had landed: #732 (owned cutters carry their Makera ids, so aluminium, acrylic and laminate get Makera's feeds), #746 (one job, several cutters, the later one taking through work), #747 (the frame file kept inside the envelope), #748 (a cut on a pocket floor planned from that floor), #749 (a kernel crash now prints a receipt), #750 (a tab is not a loose part), #741 (a V-carve deeper than its cone is refused), #736 (tabs on traced straight sides), and the #734/#735/#737/#738 fixes.
+
+- 60 recorded runs, all completed: 33 in set 1 (the jobs and their proxies or alternative cutters) and 27 in set 2 (the one-job runs and the hand splits shown on the cards).
+- **Set 1:** 4 match the photo (j01, j03, j12, j13), 8 partly (j02, j04, j05, j06, j07, j10, j11, j15), 4 have no photo to compare (j14, j16, j17, j18), and 2 cannot be described (j08, j09; no job can be written, so they were not run).
+- **Set 2:** 1 matches (j24), 5 partly (j19, j20, j22, j23, j25), 1 fails (j21).
+- **Most of the first run's refusals are gone.** The remaining differences are mostly in the modelled parts — a stand-in artwork, a simplified fork, a flat pocket floor where the maker sculpted one — not in the app. Aluminium now generates on every job that has a metal cutter, three of the set-2 jobs that needed a hand split (j19, j24, j25) now run as one multi-cutter job each, and the male inlay plug now derives.
+- **j21 still produces no part.** The as-drawn job and the pocket-only split abort the geometry kernel (`RuntimeError: Aborted()`); the V-carve split is refused because its vectors are 14 mm deep from the top and the 30° bit reaches 4.99 mm; the chamfer split and the cut-out generate (the cut-out took 26 minutes to write). A new issue (#751) is filed; its fixture is `jobs/fx-dense-circle-pocket.json`, a synthetic 6,000-point circle pocket in the same blank (no coaster artwork).
+- **j23's as-drawn job is refused** because 2 of its 4 tabs cannot be placed on the traced outline (#736); the split jobs generate.
+
+The tables below are the first runs (2026-10-28); this section supersedes their verdicts.
+
+## Verdicts (first run, 2026-10-28)
 
 | Verdict | Jobs |
 |---|---|
@@ -47,7 +60,7 @@ Each issue names its job files in `jobs/`:
 - #734: j15-vader-pla-proxy-b-engrave, j17-faceplate-pla-proxy, j13-tool-tray (a false positive of the sweep floor, not a surfacing defect)
 - #735: j13-tool-tray-b-small-holes, j18-thread-a-bore-pla-proxy
 
-## Second set (2026-10-28, later the same day)
+## Second set (first run, 2026-10-28, later the same day)
 
 Seven more jobs, from sources that publish the finished part and something real to build from:
 - **CutRocket** (Carbide 3D's project site): the maker's own Carbide Create `.c2d` design file.
