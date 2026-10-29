@@ -107,6 +107,34 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
   // program order, so these are non-decreasing.
   const firstStep = timeline.checkpoints.map((cp) => cp.steps[0] ?? Number.POSITIVE_INFINITY);
 
+  // #749 — the sweep labels every solid with a FOOTPRINT id (same XY region and stock-frame A).
+  // Solids with one footprint are nested in Z, so within any batch their union is the deepest
+  // alone. Before this, warmup() re-unioned the same through-cut columns that had just exhausted
+  // the kernel in `sweepTimeline` — the CLI path was fixed but the app worker still crashed.
+  const keys = sweep.perCheckpointKey;
+  const zAt = (i: number): number => timeline.checkpoints[i]?.z ?? Number.POSITIVE_INFINITY;
+  /**
+   * The solids a cumulative union over `from`…`to` needs: one per footprint, the deepest, plus
+   * any solid the sweep could not label. An anchor handed in as `start` may already hold a
+   * shallower or deeper column of a footprint; either way adding the batch's deepest is exact
+   * (a nested union adds no material), and dropping the batch's shallower ones is exact too.
+   */
+  const solidPicks = (from: number, to: number): number[] => {
+    const deepest = new Map<number, number>();
+    const unkeyed: number[] = [];
+    for (let i = Math.max(0, from); i <= to && i < count; i++) {
+      if ((solids[i] ?? null) === null) continue;
+      const key = keys[i] ?? null;
+      if (key === null) {
+        unkeyed.push(i);
+        continue;
+      }
+      const prev = deepest.get(key);
+      if (prev === undefined || zAt(i) < zAt(prev)) deepest.set(key, i);
+    }
+    return unkeyed.concat([...deepest.values()]);
+  };
+
   const isAnchor = (k: number): boolean => k % ANCHOR_EVERY === ANCHOR_EVERY - 1;
 
   /**
@@ -118,10 +146,7 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
       const next = anchoredTo + ANCHOR_EVERY;
       const prev = anchoredTo >= 0 ? anchors.get(anchoredTo) ?? null : null;
       const parts: ManifoldInstance[] = prev ? [prev] : [];
-      for (let i = anchoredTo + 1; i <= next; i++) {
-        const s = solids[i] ?? null;
-        if (s) parts.push(s);
-      }
+      for (const i of solidPicks(anchoredTo + 1, next)) parts.push(solids[i] as ManifoldInstance);
       // Never alias: an anchor is deleted on dispose, a sweep solid is not ours to delete. And
       // materialise it: an anchor is reused by every seek past it (see the trap above).
       anchors.set(next, materialise(tl, unionOwned(parts)));
@@ -137,10 +162,7 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
     const start = anchors.has(a) ? (anchors.get(a) ?? null) : null;
     const from = anchors.has(a) ? a : -1;
     const parts: ManifoldInstance[] = start ? [start] : [];
-    for (let i = from + 1; i <= k; i++) {
-      const s = solids[i] ?? null;
-      if (s) parts.push(s);
-    }
+    for (const i of solidPicks(from + 1, k)) parts.push(solids[i] as ManifoldInstance);
     return unionOwned(parts);
   };
 

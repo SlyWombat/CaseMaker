@@ -326,6 +326,14 @@ export interface SweepResult {
   result: ManifoldInstance;
   /** One solid per timeline checkpoint, in order; null where the checkpoint removed nothing. Playback scrubs on these. */
   perCheckpoint: (ManifoldInstance | null)[];
+  /**
+   * #749 — the FOOTPRINT of each checkpoint's solid, as an integer shared by every checkpoint
+   * whose extruded column has the same XY region and stock-frame A; null where the checkpoint
+   * built no solid. Columns with one footprint are nested in Z (all rise to the stock top), so
+   * their union is the deepest alone. `removal` already unions one per footprint; playback reads
+   * this to build its cumulative unions without re-unioning hundred of coincident prisms.
+   */
+  perCheckpointKey: (number | null)[];
   /** One per rapid-through-stock diagnostic, up to `MAX_GOUGES`; caller-owned, delete each once. */
   gouges: Gouge[];
   radius: number;
@@ -1001,6 +1009,55 @@ export function holderGate(tool: Tool, deepestCutDepth: number | null): SweepDia
 }
 
 /**
+ * #749 — ONE FOOTPRINT, ONE COLUMN.
+ *
+ * Every checkpoint builds an extruded column from its own Z to the stock top. A through cut
+ * repeats the same XY contour at every step-down, so its columns are identical in XY and nested
+ * in Z — and `Manifold.union` of coincident prisms grows combinatorially. Measured on
+ * j24-spoke-wrench-z's 103 checkpoints: 8 columns cost 20 598 triangles, 32 cost 87 528, 64 cost
+ * 1 067 840, and 103 exhausted the wasm heap (`RuntimeError: memory access out of bounds`,
+ * 4.3 GB RSS, ~154 s). The reduction in `tests/unit/cncRepeatedFootprints.spec.ts` crashes the
+ * same way at 100 passes.
+ *
+ * The union of nested prisms with one footprint is EXACTLY the deepest prism: same XY, both
+ * reach the same top plane, so the lower one contains the higher. The sweep therefore unions
+ * only the deepest column per footprint, and playback does the same inside each anchor window.
+ *
+ * A footprint is the checkpoint's move list and its A — the only inputs `checkpointRegion` has
+ * besides the constant cutter radius. `null` and 0 are one footprint because the sweep builds
+ * them identically (no stock-frame turn). The hash only narrows the search; equality is decided
+ * by comparing the numbers, so a collision cannot merge two distinct contours.
+ */
+interface Footprint {
+  id: number;
+  a: number | null;
+  xy: readonly number[];
+}
+
+/** Two independent FNV-style hashes of the exact float64 bits, as the map key. */
+function footprintHash(xy: readonly number[], a: number | null): string {
+  const floats = new Float64Array(xy.length);
+  floats.set(xy);
+  const bits = new Uint32Array(floats.buffer);
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < bits.length; i++) {
+    const word = bits[i] as number;
+    h1 = Math.imul(h1 ^ word, 16777619) >>> 0;
+    h2 = Math.imul(h2 ^ word, 2246822519) >>> 0;
+  }
+  return `${a ?? 0}:${xy.length}:${h1.toString(36)}:${h2.toString(36)}`;
+}
+
+function sameFootprint(xy: readonly number[], a: number | null, f: Footprint): boolean {
+  if ((a ?? 0) !== (f.a ?? 0) || xy.length !== f.xy.length) return false;
+  for (let i = 0; i < xy.length; i++) {
+    if (xy[i] !== f.xy[i]) return false;
+  }
+  return true;
+}
+
+/**
  * Sweep a whole timeline against the setup's stock with the given tool.
  *
  * Refuses (rather than approximating) a non-flat tool, an unsupported stock, and an empty
@@ -1249,7 +1306,28 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   let contours = 0;
   let skipped = 0;
   const perCheckpoint: (ManifoldInstance | null)[] = [];
+  // #749 — one footprint id per checkpoint (null where it built no solid), and per SOLID the
+  // footprint and its Z, so the union can keep only the deepest column of each footprint.
+  const perCheckpointKey: (number | null)[] = [];
   const solids: ManifoldInstance[] = [];
+  const solidKey: number[] = [];
+  const solidZ: number[] = [];
+  const footprints = new Map<string, Footprint[]>();
+  let footprintCount = 0;
+  const footprintId = (cp: Checkpoint): number => {
+    const hash = footprintHash(cp.xy, cp.a);
+    let bucket = footprints.get(hash);
+    if (bucket === undefined) {
+      bucket = [];
+      footprints.set(hash, bucket);
+    }
+    for (const f of bucket) {
+      if (sameFootprint(cp.xy, cp.a, f)) return f.id;
+    }
+    const f: Footprint = { id: footprintCount++, a: cp.a, xy: cp.xy };
+    bucket.push(f);
+    return f.id;
+  };
   /**
    * Give up without leaking. `perCheckpoint` aliases `solids`, so deleting `solids` covers
    * both; `stock` is the only other handle alive at either call site.
@@ -1280,6 +1358,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     // feed at Z = +30 over a cylinder, and a stub prism has nothing there.
     if (cp.z >= topZ) {
       perCheckpoint.push(null);
+      perCheckpointKey.push(null);
       skipped++;
     } else if (cp.tool === 0) {
       // `T0` is the PROBE, and a probe is contact, not removal (#191 item 9; the maintainer's
@@ -1302,6 +1381,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         message: `checkpoint ${idx}${line ? ` (line ${line})` : ''}: a cutting move was made with T0 active — T0 is the PROBE, and a probe is contact, not removal. Our post never writes a probe cut, so this file is foreign or broken`,
       });
       perCheckpoint.push(null);
+      perCheckpointKey.push(null);
       skipped++;
     } else {
       const a = performance.now();
@@ -1310,6 +1390,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       msUnion += performance.now() - a;
       if (!region) {
         perCheckpoint.push(null);
+        perCheckpointKey.push(null);
         skipped++;
       } else {
         const b = performance.now();
@@ -1382,8 +1463,12 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         // #241 — into the STOCK frame, where playback and `stock − ∪ removal` live. A flat run
         // (a === null) and the a = 0 face are already there.
         const solid = cp.a === null || cp.a === 0 ? workSolid : intoStockFrame(tl, workSolid, cp.a);
+        const key = footprintId(cp);
         perCheckpoint.push(solid);
+        perCheckpointKey.push(key);
         solids.push(solid);
+        solidKey.push(key);
+        solidZ.push(cp.z);
         if (cp.nonConstantZ) {
           diagnostics.push({ severity: 'info', code: 'ramp-over-removed', checkpoint: idx, message: `checkpoint ${idx} has moves that change Z; swept at its lowest Z, which removes more than the machine would` });
         }
@@ -1475,7 +1560,18 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // delete each once. So none of them may alias another wasm handle: a lone checkpoint solid
   // is CLONED into `removal`, and an uncut `result` is a clone of the stock, not the stock.
   if (solids.length > 0) {
-    removal = solids.length === 1 ? (solids[0] as ManifoldInstance).translate([0, 0, 0]) : tl.Manifold.union(solids);
+    // #749 — one column per footprint, the deepest. Nested prisms with the same XY and top
+    // plane: the deeper one contains every shallower one, so dropping the shallower ones leaves
+    // the union unchanged. Without this a through cut at N passes unions N coincident columns
+    // and exhausts the wasm heap (see `Footprint`).
+    const deepest = new Map<number, number>();
+    for (let i = 0; i < solids.length; i++) {
+      const id = solidKey[i] as number;
+      const prev = deepest.get(id);
+      if (prev === undefined || (solidZ[i] as number) < (solidZ[prev] as number)) deepest.set(id, i);
+    }
+    const unionInputs = [...deepest.values()].map((i) => solids[i] as ManifoldInstance);
+    removal = unionInputs.length === 1 ? (unionInputs[0] as ManifoldInstance).translate([0, 0, 0]) : tl.Manifold.union(unionInputs);
     result = stock.subtract(removal);
   } else {
     result = stock.translate([0, 0, 0]);
@@ -1512,6 +1608,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       removal,
       result,
       perCheckpoint,
+      perCheckpointKey,
       gouges: air.gouges,
       radius,
       stats: {

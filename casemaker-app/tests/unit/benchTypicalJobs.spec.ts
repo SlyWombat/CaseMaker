@@ -207,6 +207,74 @@ const BENCH_CUTTERS = [
   },
 ];
 
+/**
+ * #749 — j24's cutter: the 3.175 mm single-flute METAL O-flute (Makera 112111313812), with the
+ * 12 mm flute the bench's box states. It is not in `BENCH_CUTTERS` because its job needs a
+ * catalogue row of its own (6061 Aluminium, 0.2 mm step-down) and a catalogue beside the location
+ * would change every other bench job's feeds tiers; `j24Location` writes both in their own dir.
+ */
+const J24_CUTTER_ID = '112111313812';
+const J24_CUTTER = {
+  id: 'kz-o-flute-m-3-175-12',
+  tool: {
+    number: null,
+    id: J24_CUTTER_ID,
+    name: 'Spiral \'O\' Single Flute Bit for Metal - 1/8" Shank 3.175mm * 12mm',
+    typeText: 'Flat End',
+    shape: 'flat',
+    handleDiameter: 3.175,
+    tipDiameter: 3.175,
+    diameter: 3.175,
+    cornerRadius: 0,
+    angle: null,
+    halfAngle: null,
+    fluteLength: 12,
+    shoulderLength: null,
+    stickout: null,
+    centreCutting: null,
+  },
+  origin: null,
+  quantity: 1,
+  codes: [],
+  addedAt: '2026-10-12T00:00:00.000Z',
+  notes: null,
+};
+
+/** A location carrying that cutter, with the vendor's row beside it (#749's j24 run). */
+function j24Location(): string {
+  const dir = join(SCRATCH, 'j24-catalogue');
+  mkdirSync(dir, { recursive: true });
+  const doc = JSON.parse(readFileSync(LOCATION_FIXTURE, 'utf8')) as { inventory: unknown[] };
+  doc.inventory.push(J24_CUTTER);
+  const path = join(dir, 'location.json');
+  writeFileSync(path, JSON.stringify(doc, null, 2) + '\n');
+  // `6061 Aluminum` is the vendor's own material name; the row is the one Makera's catalogue
+  // served for this cutter, and `feeds.ts` maps it to the job's `aluminium-6061`.
+  writeFileSync(
+    join(dir, 'catalogue.json'),
+    JSON.stringify(
+      {
+        kind: 'casemaker-catalogue',
+        schemaVersion: 1,
+        syncedAt: '2026-10-20T08:00:00.000Z',
+        tools: [
+          {
+            key: 'cat:fixture-j24-o-flute',
+            tool: J24_CUTTER.tool,
+            provenance: 'fixture row for #749',
+          },
+        ],
+        feeds: [
+          { cutterId: J24_CUTTER_ID, material: '6061 Aluminum', rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.2 },
+        ],
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  return path;
+}
+
 let locationPath: string | null = null;
 
 /** The committed fixture document with the bench's cutters appended, written once. */
@@ -226,7 +294,11 @@ interface Run {
 }
 
 /** Run `casemaker cut <job>` the way the CLI does, capturing its receipt and progress lines. */
-async function cut(jobFile: string, jobsDir: string = JOBS): Promise<Run> {
+async function cut(
+  jobFile: string,
+  jobsDir: string = JOBS,
+  location: string = benchLocation(),
+): Promise<Run> {
   const outDir = join(SCRATCH, jobFile.replace(/\.json$/, ''));
   mkdirSync(outDir, { recursive: true });
   let receipt: Receipt | null = null;
@@ -241,7 +313,7 @@ async function cut(jobFile: string, jobsDir: string = JOBS): Promise<Run> {
     },
   };
   const code = await engraveJobMain(
-    [asArg(join(jobsDir, jobFile)), '--out', outDir, '--location', asArg(benchLocation())],
+    [asArg(join(jobsDir, jobFile)), '--out', outDir, '--location', asArg(location)],
     options,
   );
   expect(receipt, 'the command must emit a receipt, even on a refusal').not.toBeNull();
@@ -419,5 +491,37 @@ describe('#739 raised text warns when its gaps are narrower than the cutter', ()
     expect(warning.message).toContain('13 mm');
     expect(allDiagnostics(receipt), '"CNX" at 7 mm survives the same cutter').not.toContain('"CNX"');
     expect(code, 'a warning must not refuse the job').toBe(0);
+  }, 150_000);
+});
+
+// #749 — A THROUGH CUT-OUT REPEATS ONE FOOTPRINT AT EVERY STEP-DOWN. j24 cuts a puck out of
+// 60×60×10 mm 6061 with the 3.175 mm metal O-flute: one closed contour at every pass, so the
+// sweep's columns are identical in XY and nested in Z. On the bench that exhausted the wasm heap
+// (`RuntimeError: memory access out of bounds`, 4.3 GB, ~100 s); the direct reduction's 64
+// columns cost 1 067 840 triangles. The sweep now unions one column per footprint, so the job
+// generates, verifies and simulates. The bench recorded no removal for it (it crashed); this is
+// the exact sweep's clipped volume for this job's own toolpath, identical over three CLI runs.
+describe('#749 the j24 through cut-out sweeps its 103 repeated footprints', () => {
+  it('generates the puck program and reports the exact removal inside the bench budget', async () => {
+    const started = Date.now();
+    const { code, receipt } = await cut('j24-spoke-wrench-z.json', REAL_JOBS, j24Location());
+    const elapsed = Date.now() - started;
+    expect(allDiagnostics(receipt), 'the kernel crash must not be reported as a stage error').not.toContain(
+      'stage-error',
+    );
+    expect(code, allDiagnostics(receipt)).toBe(0);
+    if (receipt.command !== 'engrave') throw new Error('expected the engrave receipt');
+    const program = receipt.details.programs[0]!;
+    expect(program.sim, 'the puck program must be swept').not.toBeNull();
+    expect(program.sim!.ok, allDiagnostics(receipt)).toBe(true);
+    expect(program.sim!.engine).toBe('exact');
+    expect(program.sim!.errorCount).toBe(0);
+    // One checkpoint per depth pass (the job's 0.2 mm step-down leaves 100) plus the plunge.
+    // The old union still returned at 16 passes; this is the count that used to crash.
+    expect(program.sim!.count).toBe(103);
+    // Exactly the material one column removes — not a sum over stacked duplicates, and not less.
+    // A dedupe that dropped a non-nested column would move this by hundreds of mm³.
+    expect(program.sim!.removedVolumeMm3).toBeCloseTo(4705.0126, 1);
+    expect(elapsed, `cut took ${elapsed} ms`).toBeLessThan(BUDGET_MS);
   }, 150_000);
 });
