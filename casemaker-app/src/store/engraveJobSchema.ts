@@ -884,6 +884,16 @@ const targetObjectSchema = z
       .number()
       .finite()
       .describe('Rotation in degrees counter-clockwise about Z through the mesh centre.'),
+    // #722 — optional like `role`: absent is 1 on every axis, so older documents round-trip.
+    scale: z
+      .object({
+        x: z.number().finite().positive().describe('Scale factor along X (1 = the file’s own size).'),
+        y: z.number().finite().positive().describe('Scale factor along Y (1 = the file’s own size).'),
+        z: z.number().finite().positive().describe('Scale factor along Z (1 = the file’s own size).'),
+      })
+      .strict()
+      .optional()
+      .describe('A mesh’s per-axis scale about its X/Y centre and its top; omit for the file’s own size. Ignored for a PNG relief.'),
     enabled: z.boolean().describe('False keeps the object in the document but out of the program.'),
     // #533 — the role decides whether the mesh is positioned against (reference) or made (goal).
     // Left OPTIONAL rather than defaulted: an absent key stays absent, so a document written before

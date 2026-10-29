@@ -5588,6 +5588,33 @@
               "description": "Rotation in degrees counter-clockwise about Z through the mesh centre.",
               "type": "number"
             },
+            "scale": {
+              "additionalProperties": false,
+              "description": "A mesh’s per-axis scale about its X/Y centre and its top; omit for the file’s own size. Ignored for a PNG relief.",
+              "properties": {
+                "x": {
+                  "description": "Scale factor along X (1 = the file’s own size).",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "y": {
+                  "description": "Scale factor along Y (1 = the file’s own size).",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "z": {
+                  "description": "Scale factor along Z (1 = the file’s own size).",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y",
+                "z"
+              ],
+              "type": "object"
+            },
             "sha256": {
               "description": "Lowercase SHA-256 of the mesh file's bytes (64 hex characters).",
               "pattern": "^[0-9a-f]{64}$",

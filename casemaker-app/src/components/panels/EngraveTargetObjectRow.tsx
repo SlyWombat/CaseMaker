@@ -1,8 +1,15 @@
-import type { CSSProperties, JSX } from 'react';
+import { useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { DEFAULT_PENCIL_CREASE_DEG, type GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
 import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/cam/relief';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import {
+  fitToStockScale,
+  isUniform,
+  placedSize,
+  scaleForAxisSize,
+  targetScale,
+} from '@/engine/cnc/engrave/targetScale';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
 import type { EngraveSurfaceSettings, EngraveTargetObject } from '@/types/engraveJob';
 
@@ -106,6 +113,142 @@ export interface EngraveTargetObjectRowProps {
   onCutterChange?: (key: string) => void;
   /** #672 — a PNG goal's relief facts; absent on a mesh or a reference. */
   relief?: ReliefRowFacts | null;
+  /**
+   * #722 — the blank a mesh is fitted to: its size and the job's edge margin, mm. Absent hides
+   * "Fit to the stock" (the row then still scales by hand).
+   */
+  stock?: { length: number; width: number; thickness: number; edgeMargin: number };
+}
+
+const AXIS_WORD = { x: 'width', y: 'length', z: 'height' } as const;
+
+/**
+ * #722 — a mesh's size on the blank: the placed width, length and height (mm), one percent, the
+ * aspect lock, and Fit to the stock. Every field writes the ONE `scale` the readers apply.
+ */
+function MeshSizeControls({
+  target,
+  index,
+  onChange,
+  stock,
+}: {
+  target: EngraveTargetObject;
+  index: number;
+  onChange: (patch: TargetObjectPatch) => void;
+  stock?: EngraveTargetObjectRowProps['stock'];
+}): JSX.Element {
+  const scale = targetScale(target);
+  const placed = placedSize(target);
+  const [locked, setLocked] = useState(() => isUniform(scale));
+  const uniform = isUniform(scale);
+  const fit = stock === undefined ? null : fitToStockScale(target.size, stock, stock.edgeMargin);
+
+  const axisField = (axis: 'x' | 'y' | 'z'): JSX.Element => (
+    <label style={FIELD_LABEL}>
+      <span>{AXIS_WORD[axis]}</span>
+      <input
+        type="number"
+        step="any"
+        min={0.001}
+        value={Number(placed[axis].toFixed(3))}
+        data-testid={`engrave-target-size-${axis}-${index}`}
+        aria-label={`Target object ${AXIS_WORD[axis]}`}
+        title={
+          locked
+            ? `The object's ${AXIS_WORD[axis]} on the blank, mm. The other two follow (aspect locked).`
+            : `The object's ${AXIS_WORD[axis]} on the blank, mm. Only this direction changes (aspect unlocked).`
+        }
+        style={NUM}
+        onChange={(e) => {
+          const next = scaleForAxisSize(scale, target.size, axis, Number(e.target.value), locked);
+          if (next !== null) onChange({ scale: next });
+        }}
+      />
+      <span>mm</span>
+    </label>
+  );
+
+  return (
+    <div data-testid={`engrave-target-size-${index}`}>
+      <div style={ROW_INLINE}>
+        {axisField('x')}
+        {axisField('y')}
+        {axisField('z')}
+      </div>
+      <div style={ROW_INLINE}>
+        <label style={FIELD_LABEL}>
+          <span>scale</span>
+          <input
+            type="number"
+            step="any"
+            min={0.1}
+            value={uniform ? Number((scale.x * 100).toFixed(3)) : ''}
+            placeholder={uniform ? undefined : 'mixed'}
+            data-testid={`engrave-target-scale-${index}`}
+            aria-label="Target object scale"
+            title="One scale for all three directions, % of the file's own size."
+            style={NUM}
+            onChange={(e) => {
+              const pct = Number(e.target.value);
+              if (!Number.isFinite(pct) || pct <= 0) return;
+              const f = pct / 100;
+              onChange({ scale: { x: f, y: f, z: f } });
+              setLocked(true);
+            }}
+          />
+          <span>%</span>
+        </label>
+        <label style={FIELD_LABEL} title="Locked, one size field scales all three directions; unlocked, it stretches only its own.">
+          <input
+            type="checkbox"
+            checked={locked}
+            data-testid={`engrave-target-aspect-${index}`}
+            aria-label="Keep the aspect"
+            onChange={(e) => setLocked(e.target.checked)}
+          />
+          <span>keep the aspect</span>
+        </label>
+        {fit !== null && (
+          <button
+            type="button"
+            data-testid={`engrave-target-fit-${index}`}
+            title="The largest same-in-every-direction size that fits inside the blank less its edge margin, no taller than the blank; centred on the blank with its top at the top face."
+            onClick={() => {
+              onChange({
+                scale: { x: fit, y: fit, z: fit },
+                position: { x: stock!.length / 2, y: stock!.width / 2, z: 0 },
+              });
+              setLocked(true);
+            }}
+          >
+            Fit to the stock
+          </button>
+        )}
+        {uniform && scale.x === 1 ? null : (
+          <button
+            type="button"
+            data-testid={`engrave-target-scale-reset-${index}`}
+            aria-label="Use the file's own size"
+            title="Back to the file's own size (100 %)."
+            onClick={() => {
+              onChange({ scale: null });
+              setLocked(true);
+            }}
+          >
+            ↺
+          </button>
+        )}
+      </div>
+      <p style={MUTED} data-testid={`engrave-target-size-note-${index}`}>
+        {`On the blank it is ${fmt(placed.x)} × ${fmt(placed.y)} × ${fmt(placed.z)} mm`}
+        {uniform
+          ? scale.x === 1
+            ? ' — the file’s own size.'
+            : ` — ${fmt(scale.x * 100)} % of the file’s ${fmt(target.size.x)} × ${fmt(target.size.y)} × ${fmt(target.size.z)} mm.`
+          : ` — stretched: ${fmt(scale.x * 100)} % × ${fmt(scale.y * 100)} % × ${fmt(scale.z * 100)} % of the file’s ${fmt(target.size.x)} × ${fmt(target.size.y)} × ${fmt(target.size.z)} mm.`}
+      </p>
+    </div>
+  );
 }
 
 /** The cutter's own sentence: one cutter cuts both passes, and its shape decides the finish. */
@@ -198,8 +341,10 @@ export function EngraveTargetObjectRow({
   surfaceFacts = null,
   relief = null,
   onCutterChange,
+  stock,
 }: EngraveTargetObjectRowProps): JSX.Element {
-  const size = target.size;
+  // #722 — the row states the PLACED size (the file's bbox times the scale).
+  const size = placedSize(target);
   const sizeText = `${Number(size.x.toFixed(2))}×${Number(size.y.toFixed(2))}×${Number(size.z.toFixed(2))} mm`;
   const goal = target.role === 'goal';
   const settings = target.surface ?? {};
@@ -292,6 +437,11 @@ export function EngraveTargetObjectRow({
           <span>°</span>
         </label>
       </div>
+
+      {/* #722 — a mesh's size on the blank; a picture keeps its own width field below. */}
+      {target.format !== 'png' && (
+        <MeshSizeControls target={target} index={index} onChange={onChange} stock={stock} />
+      )}
 
       {/* #535 — the goal operation's own numbers, behind the row's Technical fold. */}
       {goal && surface !== undefined && (

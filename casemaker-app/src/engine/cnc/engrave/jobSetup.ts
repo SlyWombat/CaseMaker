@@ -1,4 +1,5 @@
 import { rectProfile } from '@/engine/compiler/profile';
+import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { getTools, NO_TOOL_KEY, toolForJob } from '@/engine/cnc/toolRegistry';
 import {
@@ -886,9 +887,11 @@ export function validateGoalObject(
   const { length, width, thickness } = stock;
   // #672 — a PICTURE goal's depth is its relief map's, not `size.z`: the operator states
   // `relief.maxDepthMm` (or takes the labelled default), and the blank must hold it.
-  const depth = target.format === 'png' ? reliefNumbers(target.relief).maxDepthMm : target.size.z;
-  const hasVolume = target.size.x > 0 && target.size.y > 0 && depth > 0;
-  const fitsFootprint = target.size.x <= length && target.size.y <= width;
+  // #722 — a mesh's PLACED size (parsed bbox × scale), the size the heightfield samples.
+  const placed = placedSize(target);
+  const depth = target.format === 'png' ? reliefNumbers(target.relief).maxDepthMm : placed.z;
+  const hasVolume = placed.x > 0 && placed.y > 0 && depth > 0;
+  const fitsFootprint = placed.x <= length && placed.y <= width;
   const fitsDepth = depth <= thickness;
   if (!hasVolume) {
     findings.push({
@@ -896,7 +899,7 @@ export function validateGoalObject(
       code: 'goal-object-oversize',
       message:
         `The goal object "${target.name}" is flat in at least one direction ` +
-        `(${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(depth)} mm); a goal needs ` +
+        `(${fmt3(placed.x)}×${fmt3(placed.y)}×${fmt3(depth)} mm); a goal needs ` +
         `volume to drive a 3D cut toward.`,
     });
   } else if (!fitsFootprint || !fitsDepth) {
@@ -905,9 +908,9 @@ export function validateGoalObject(
       code: 'goal-object-oversize',
       message:
         `The goal object "${target.name}" is ` +
-        `${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(depth)} mm, larger than the ` +
+        `${fmt3(placed.x)}×${fmt3(placed.y)}×${fmt3(depth)} mm, larger than the ` +
         `${fmt3(length)}×${fmt3(width)}×${fmt3(thickness)} mm blank it would be carved from; ` +
-        `it cannot be reproduced from this stock. Use a larger blank or scale the goal.`,
+        `it cannot be reproduced from this stock. Use a larger blank, or scale the goal (Fit to the stock).`,
     });
   } else if (opts.mixed === true) {
     // #535 — the MIXED path's note: one job's program is the item work, so this goal is validated

@@ -2977,6 +2977,12 @@ export function EngravePanel(): JSX.Element {
           findings={findings.filter((f) => f.code === 'target-object-not-cut')}
           onChange={(patch) => updateTargetObject(patch)}
           onRemove={() => removeTargetObject()}
+          stock={{
+            length: job.stock.length,
+            width: job.stock.width,
+            thickness: job.stock.thickness,
+            edgeMargin: job.edgeMargin,
+          }}
           // #535 — a goal's operation owns its cutter and four numbers. The defaults are the
           // ones the engine falls back to: the feeds row's step-down/step-over, the shop's flat
           // grid pitch and finish allowance. The row only places them and words their source.

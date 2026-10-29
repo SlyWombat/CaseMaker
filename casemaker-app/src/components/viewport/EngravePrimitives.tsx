@@ -22,6 +22,7 @@ import * as THREE from 'three';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import { targetObjectMesh } from '@/engine/import/targetObject';
+import { targetScale } from '@/engine/cnc/engrave/targetScale';
 import type { EngravePrimitive, EngraveTargetObject } from '@/types/engraveJob';
 import { activateEngraveItem } from './engravePick';
 
@@ -177,6 +178,7 @@ function TargetObjectMesh({ target }: { target: EngraveTargetObject }) {
   }, [sha256, format, data]);
   useEffect(() => () => geom?.dispose(), [geom]);
   const selected = useViewportStore((s) => isEngraveItemSelected(s.selection, target.id));
+  const scale = targetScale(target);
   if (geom === null) return null;
 
   return (
@@ -184,6 +186,9 @@ function TargetObjectMesh({ target }: { target: EngraveTargetObject }) {
       geometry={geom}
       position={[target.position.x, target.position.y, target.position.z]}
       rotation={[0, 0, target.rotation * DEG]}
+      // #722 — the geometry's origin is the bbox centre in X/Y and its top in Z, the same anchor
+      // the heightfield scales about, so the drawn mesh and the cut agree.
+      scale={[scale.x, scale.y, scale.z]}
       name={`engrave-target-${target.id}`}
       userData={{ engraveTarget: target.id }}
       onClick={(e) => {

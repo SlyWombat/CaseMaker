@@ -198,6 +198,11 @@ export type TargetObjectPatch = Partial<Pick<EngraveTargetObject, 'name' | 'rota
   relief?: Partial<EngraveReliefSettings>;
   /** #672 — a picture's placed size in millimetres (the width field; the aspect is the row's). */
   size?: EngraveTargetObject['size'];
+  /**
+   * #722 — a mesh's per-axis scale. `null` removes the key (back to the file's own size), so a
+   * mesh at 100 % serialises exactly as one that never carried the field.
+   */
+  scale?: EngraveTargetObject['scale'] | null;
 };
 
 /**
@@ -1831,12 +1836,20 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       apply((job) => {
         const target = job.targetObject;
         if (!target) return job;
+        const { scale: scalePatch, ...rest } = patch;
         const next: EngraveTargetObject = {
           ...target,
-          ...patch,
+          ...rest,
           // Merge a partial position rather than replacing the whole object.
           position: patch.position ? { ...target.position, ...patch.position } : target.position,
         };
+        // #722 — `null` (or a scale of exactly 1 on every axis) drops the key: the file's own size.
+        if (scalePatch !== undefined) {
+          const unit =
+            scalePatch === null || (scalePatch.x === 1 && scalePatch.y === 1 && scalePatch.z === 1);
+          if (unit) delete next.scale;
+          else next.scale = scalePatch;
+        }
         // #535 — merge a partial `surface` (a key set to `undefined` is REMOVED, the row's reset),
         // and drop the block entirely once every key is gone, so a goal back on its defaults
         // serialises exactly as one that never carried the block.

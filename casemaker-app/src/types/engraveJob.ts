@@ -605,6 +605,13 @@ export interface EngraveTargetObject {
   position: { x: Mm; y: Mm; z: Mm };
   /** Degrees counter-clockwise about Z, through the mesh's bbox centre. */
   rotation: number;
+  /**
+   * #722 — a MESH's per-axis scale about its placement anchor (bbox centre in X/Y, top in Z).
+   * Absent means 1 on every axis, so a document written before this field round-trips unchanged.
+   * `size` stays the parsed bbox; the placed size is `size × scale` (`placedSize`). Ignored for a
+   * PNG relief, whose `size` is already its placed size.
+   */
+  scale?: { x: number; y: number; z: number };
   /** False hides the object in the viewport; a reference is never cut either way. */
   enabled: boolean;
   /**

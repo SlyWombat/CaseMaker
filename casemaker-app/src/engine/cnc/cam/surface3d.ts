@@ -37,6 +37,7 @@
 
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { targetObjectMesh } from '@/engine/import/targetObject';
+import { targetScale } from '@/engine/cnc/engrave/targetScale';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
 import { decodePng } from '@/engine/import/png';
 import { reliefDepthMm, reliefNumbers } from './relief';
@@ -153,7 +154,7 @@ export interface SampleGoalOpts {
  * order, no tolerance that depends on traversal.
  */
 export function sampleGoalHeightfield(
-  target: Pick<EngraveTargetObject, 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief'>,
+  target: Pick<EngraveTargetObject, 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief' | 'scale'>,
   opts: SampleGoalOpts = {},
 ): GoalHeightfield {
   // #672 — a PICTURE is its own heightfield: the same grid, the same frame, the same downstream.
@@ -173,13 +174,16 @@ export function sampleGoalHeightfield(
   const theta = (target.rotation * Math.PI) / 180;
   const cos = Math.cos(theta);
   const sin = Math.sin(theta);
+  // #722 — the scale applies about the same anchor as the placement (bbox centre in X/Y, the top
+  // in Z), BEFORE the turn, so a scaled object stays centred on `position` with its top there.
+  const scale = targetScale(target);
   const place = (px: number, py: number, pz: number): [number, number, number] => {
-    const lx = px - cx;
-    const ly = py - cy;
+    const lx = (px - cx) * scale.x;
+    const ly = (py - cy) * scale.y;
     return [
       target.position.x + (lx * cos - ly * sin),
       target.position.y + (lx * sin + ly * cos),
-      pz + (target.position.z - maxZLocal),
+      target.position.z + (pz - maxZLocal) * scale.z,
     ];
   };
 
@@ -726,7 +730,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
 export function generateSurface3dForGoal(args: {
   target: Pick<
     EngraveTargetObject,
-    'id' | 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief'
+    'id' | 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief' | 'scale'
   >;
   tool: Tool;
   toolNumber: number;
