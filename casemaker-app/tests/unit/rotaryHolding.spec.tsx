@@ -239,6 +239,30 @@ describe('#714 the rotary option and its four lines (station 3)', () => {
     expect(screen.getByTestId('engrave-setup-holding-caption').textContent).toContain('A turns it');
   });
 
+  it('#698 — the rotary fold keeps its stated fact, and offers no orientation control', () => {
+    seedLocation(rotaryMachine());
+    // A printed rod: the colour planes are what make its ends differ, so the fold has a fact to
+    // state. (The arrival conversion clears the stock ENTRY — the box is now the axis frame — but
+    // the colour plane belongs to the stock, so the fold stays.)
+    const base = rod();
+    openHolding({
+      ...base,
+      stock: { ...base.stock, colour: { kind: 'printed', capMm: 0.4, layerHeight: 0.2 } },
+    });
+
+    const fold = screen.getByTestId('engrave-setup-orientation') as HTMLDetailsElement;
+    expect(fold.querySelector('summary')!.textContent).toBe('Which end is in the jaws');
+    fireEvent.click(fold.querySelector('summary')!);
+    expect(fold.open).toBe(true);
+    // A round rod has no face or edge to square: the one landmark is its ends, and either will do.
+    expect(fold.textContent).toContain('Either end');
+    expect(fold.textContent).toContain('unless the ends differ');
+    // A10 — the fold states the fact; it is not a control.
+    expect(fold.querySelectorAll('select, input, button')).toHaveLength(0);
+    // The three rectangular-blank landmarks (face, fixed-jaw edge, near end) do not apply to a rod.
+    expect(screen.queryByTestId('engrave-setup-orientation-picture-fixed-jaw')).toBeNull();
+  });
+
   it('the grip edits the stick-out, the jaws and the tailstock write what they say', () => {
     seedLocation(rotaryMachine());
     openHolding(rod());

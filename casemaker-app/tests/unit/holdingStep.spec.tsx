@@ -600,23 +600,110 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     expect(screen.getByTestId('engrave-setup-holding-picture').getAttribute('data-mount')).toBe('ledge');
   });
 
-  it('asks the landmark orientation only when the stock has a face worth telling apart', () => {
+  it('#698 — the orientation fold draws the three landmarks as labelled pictures, in the top view’s frame', () => {
+    // The badge's blank in the vise's own frame (#383): 38.1 mm across the jaws in X, 76.2 mm
+    // along them in Y — so its long edge is the one drawn on the LEFT, against the fixed jaw.
     const printed = dj(
-      { length: 76.2, width: 38.1, thickness: 3.81 },
+      { length: 38.1, width: 76.2, thickness: 3.81 },
       { kind: 'made', shelfId: null, file: null, form: 'printed-blank', finish: 'printed', conductive: false },
     );
     seedLocation(machineWith(null));
     openHolding(printed);
-    expect(screen.getByTestId('engrave-setup-orientation').textContent).toContain('the printed face');
-    expect(screen.getByTestId('engrave-setup-orientation').textContent).toContain('the long edge');
-    expect(screen.getByTestId('engrave-setup-orientation').textContent).toContain('the left end');
 
-    cleanup();
-    act(() => {
-      useEngraveJobStore.setState({ job: dj({ length: 76.2, width: 38.1, thickness: 3.81 }) });
-      useStartWizardStore.getState().openWizard('holding');
-    });
-    render(<StartWizard />);
+    const fold = screen.getByTestId('engrave-setup-orientation') as HTMLDetailsElement;
+    expect(fold.open).toBe(false);
+    fireEvent.click(fold.querySelector('summary')!);
+    expect(fold.open).toBe(true);
+
+    const cards = [
+      { key: 'face-up', label: 'Face up', caption: /printed face is up/i },
+      { key: 'fixed-jaw', label: 'Against the fixed jaw', caption: /left edge.*fixed jaw/i },
+      { key: 'nearest', label: 'Nearest you', caption: /front edge.*closest to you/i },
+    ] as const;
+    for (const card of cards) {
+      const svg = screen.getByTestId(`engrave-setup-orientation-picture-${card.key}`);
+      expect(svg.getAttribute('role')).toBe('img');
+      expect(svg.getAttribute('aria-label')).toBeTruthy();
+      expect(svg.querySelectorAll('rect, line, path, circle').length).toBeGreaterThan(0);
+      expect(screen.getByTestId(`engrave-setup-orientation-label-${card.key}`).textContent).toBe(card.label);
+      expect(screen.getByTestId(`engrave-setup-orientation-caption-${card.key}`).textContent).toMatch(
+        card.caption,
+      );
+    }
+
+    // THE PICTURES FOLLOW THE TOP VIEW'S OWN CONVENTION: the fixed jaw is on the LEFT, X runs
+    // between the jaws, and the operator's front is the BOTTOM of the picture.
+    const fixed = screen.getByTestId('engrave-setup-orientation-picture-fixed-jaw');
+    const fixedJaw = fixed.querySelector('[data-role="fixed-jaw"]')!;
+    const fixedStock = fixed.querySelector('[data-role="stock"]')!;
+    const fixedMoving = fixed.querySelector('[data-role="moving-jaw"]')!;
+    const jawRight = Number(fixedJaw.getAttribute('x')) + Number(fixedJaw.getAttribute('width'));
+    const stockX = Number(fixedStock.getAttribute('x'));
+    const stockRight = stockX + Number(fixedStock.getAttribute('width'));
+    expect(jawRight).toBe(stockX);
+    expect(stockRight).toBe(Number(fixedMoving.getAttribute('x')));
+    const leftEdge = fixed.querySelector('[data-role="left-edge"]')!;
+    expect(Number(leftEdge.getAttribute('x1'))).toBe(stockX);
+    expect(Number(leftEdge.getAttribute('x2'))).toBe(stockX);
+
+    const near = screen.getByTestId('engrave-setup-orientation-picture-nearest');
+    const nearStock = near.querySelector('[data-role="stock"]')!;
+    const nearFixed = near.querySelector('[data-role="fixed-jaw"]')!;
+    const nearMoving = near.querySelector('[data-role="moving-jaw"]')!;
+    const nearX = Number(nearStock.getAttribute('x'));
+    const nearBottom = Number(nearStock.getAttribute('y')) + Number(nearStock.getAttribute('height'));
+    expect(Number(nearFixed.getAttribute('x')) + Number(nearFixed.getAttribute('width'))).toBe(nearX);
+    expect(nearX + Number(nearStock.getAttribute('width'))).toBe(Number(nearMoving.getAttribute('x')));
+    const frontEdge = near.querySelector('[data-role="front-edge"]')!;
+    expect(Number(frontEdge.getAttribute('y1'))).toBe(nearBottom);
+    expect(Number(frontEdge.getAttribute('y2'))).toBe(nearBottom);
+    // The operator stands BELOW the front edge: the near side is the bottom, never the left.
+    expect(Number(near.querySelector('[data-role="operator"]')!.getAttribute('cy'))).toBeGreaterThan(
+      nearBottom,
+    );
+
+    // The face-up picture is a side view: the printed layer is the top of the stock, with the
+    // cutter above it — the face the operator must turn up.
+    const face = screen.getByTestId('engrave-setup-orientation-picture-face-up');
+    const slab = face.querySelector('[data-role="stock-slab"]')!;
+    const layer = face.querySelector('[data-role="face-layer"]')!;
+    expect(Number(layer.getAttribute('y'))).toBe(Number(slab.getAttribute('y')));
+    expect(Number(layer.getAttribute('height'))).toBeLessThan(Number(slab.getAttribute('height')));
+    expect(face.querySelector('[data-role="face-up-arrow"]')).not.toBeNull();
+    expect(Number(face.querySelector('[data-role="cutter"]')!.getAttribute('y'))).toBeLessThan(
+      Number(slab.getAttribute('y')),
+    );
+
+    // Stated facts, not a control (A10): nothing to choose inside the fold, and no codes.
+    expect(fold.querySelectorAll('select, input, button')).toHaveLength(0);
+    expect(fold.textContent).not.toMatch(/left end/i);
+    expect(fold.textContent).not.toMatch(/vise-default|#\d/);
+  });
+
+  it('#698 — a finished face is named as finished; the fold still states the landmarks', () => {
+    const finished = dj(
+      { length: 38.1, width: 76.2, thickness: 3.81 },
+      { kind: 'made', shelfId: null, file: null, form: 'plate', finish: 'finished', conductive: false },
+    );
+    seedLocation(machineWith(null));
+    openHolding(finished);
+
+    const faceUp = screen.getByTestId('engrave-setup-orientation-caption-face-up').textContent ?? '';
+    expect(faceUp).toContain('finished face');
+    expect(faceUp).not.toContain('printed');
+    expect(screen.getByTestId('engrave-setup-orientation-picture-face-up').textContent).toContain(
+      'finished face',
+    );
+    // The three facts are still there, whatever the face is called.
+    expect(screen.getByTestId('engrave-setup-orientation-label-fixed-jaw').textContent).toBe(
+      'Against the fixed jaw',
+    );
+    expect(screen.getByTestId('engrave-setup-orientation-label-nearest').textContent).toBe('Nearest you');
+  });
+
+  it('#698 — the orientation fold is not shown for an undifferentiated blank', () => {
+    seedLocation(machineWith(null));
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
     expect(screen.queryByTestId('engrave-setup-orientation')).toBeNull();
   });
 

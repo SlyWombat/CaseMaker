@@ -124,3 +124,80 @@ test('a starter on the welcome door opens the wizard with its blank as the stock
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await expect(page.getByTestId('engrave-stock-line')).toContainText('38.1 × 76.2 × 3.81 mm');
 });
+
+// #698 — the orientation fold is the operator's bench instruction, not a job field: three labelled
+// pictures of the landmarks, drawn in the Holding step's own top-view frame (fixed jaw LEFT, the
+// operator's front BOTTOM), with the pictures really drawn and not overlapping on a phone.
+test('#698 — the orientation fold draws the three landmarks, on the desktop and at 390 px', async ({ cm, page }) => {
+  await cm.ready();
+
+  // The badge starter brings a printed blank — a face worth telling apart — and lands on Holding.
+  await page.getByTestId('welcome-starter-badge-blank').click();
+  await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+
+  const fold = page.getByTestId('engrave-setup-orientation');
+  await expect(fold).toBeVisible();
+  await expect(fold.locator('summary')).toHaveText('Which way round');
+  await fold.locator('summary').click();
+  await expect(fold).toHaveJSProperty('open', true);
+
+  const cards = [
+    { key: 'face-up', label: 'Face up', caption: /The printed face is up, where the cutter can reach it\./ },
+    { key: 'fixed-jaw', label: 'Against the fixed jaw', caption: /The left edge is flat against the fixed jaw/ },
+    { key: 'nearest', label: 'Nearest you', caption: /The front edge is closest to you/ },
+  ];
+  for (const card of cards) {
+    await expect(page.getByTestId(`engrave-setup-orientation-label-${card.key}`)).toHaveText(card.label);
+    await expect(page.getByTestId(`engrave-setup-orientation-caption-${card.key}`)).toHaveText(card.caption);
+    await expect(page.getByTestId(`engrave-setup-orientation-picture-${card.key}`)).toBeVisible();
+  }
+  // Stated facts, not a choice: nothing to operate inside the fold (A10).
+  await expect(fold.locator('select, input, button')).toHaveCount(0);
+
+  type Box = { key: string; left: number; top: number; right: number; bottom: number; w: number; h: number };
+  const boxes = async (): Promise<Box[]> =>
+    page.evaluate(() => {
+      const out: Box[] = [];
+      for (const key of ['face-up', 'fixed-jaw', 'nearest']) {
+        const el = document.querySelector<SVGSVGElement>(
+          `[data-testid="engrave-setup-orientation-picture-${key}"]`,
+        );
+        if (el === null) continue;
+        const r = el.getBoundingClientRect();
+        out.push({ key, left: r.left, top: r.top, right: r.right, bottom: r.bottom, w: r.width, h: r.height });
+      }
+      return out;
+    });
+  const assertDrawnNoOverlap = (found: Box[]): void => {
+    expect(found.map((b) => b.key)).toEqual(['face-up', 'fixed-jaw', 'nearest']);
+    for (const b of found) {
+      expect(b.w, `${b.key} width`).toBeGreaterThan(0);
+      expect(b.h, `${b.key} height`).toBeGreaterThan(0);
+    }
+    for (let i = 0; i < found.length; i += 1) {
+      for (let j = i + 1; j < found.length; j += 1) {
+        const a = found[i]!;
+        const b = found[j]!;
+        const overlap = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+        expect(overlap, `${a.key} overlaps ${b.key}`).toBe(false);
+      }
+    }
+  };
+
+  // Desktop: all three pictures draw, each with its own label, and none overlaps another.
+  await fold.scrollIntoViewIfNeeded();
+  assertDrawnNoOverlap(await boxes());
+  await page.screenshot({ path: 'test-results/698-orientation-desktop.png' });
+
+  // Phone width: the same three pictures still draw; still no overlap, no sideways page scroll.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(fold).toBeVisible();
+  await fold.scrollIntoViewIfNeeded();
+  assertDrawnNoOverlap(await boxes());
+  const width = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+  }));
+  expect(width.scroll, 'phone horizontal scroll').toBeLessThanOrEqual(width.client);
+  await page.screenshot({ path: 'test-results/698-orientation-phone.png' });
+});
