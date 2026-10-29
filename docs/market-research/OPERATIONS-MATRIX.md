@@ -81,9 +81,9 @@ pockets only), R-14 thread milling (superseded, shipped #445). None of the items
   which one did. UI: the Hole row's Technical fold states the peck with its provenance and takes the job's own
   (`EngraveDrillRow.tsx`); the run sheet names the source that bound.
 - **A-adjacent (engine gap, listed here because the module exists).** `cam/adaptive.ts` is tested but not imported by any
-  job path in `src/`. `MAKERA-VS-CASEMAKER.md` §G row "Ramping / adaptive entry" says "wired into the job (#442)";
-  my grep found no such import and the #442 commits I saw concern upload context and tool condition. Resolve before the
-  next update of that row.
+  job path in `src/`. Resolved 2026-10-29 (#666): `MAKERA-VS-CASEMAKER.md` §G's "Ramping / adaptive entry" row now reads
+  PARTIAL, engine module only — the "wired into the job (#442)" claim was wrong. Wiring it into metal pockets (#433's
+  intent) is open work, not a documentation fix.
 
 ### B. Offered by three or more platforms; neither engine nor UI has it
 
