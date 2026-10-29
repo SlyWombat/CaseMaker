@@ -24,6 +24,13 @@
  * holder rubbing through a 19 mm tray is this filter's absence. The material/broken/catalogue/
  * feeds gate is the same one `recommendTool` applies, so a pick here is one the generator accepts.
  *
+ * A FLAT PLAN KEEPS ITS REST CUTTER (#410). The clearance flat clears the bulk, and a finer flat
+ * that reaches more of the design — `finerThan`'s rule, over the candidates that pass the reach
+ * filter — is added as a REST PASS (no items: the generator measures what the first program left).
+ * #760's raised text is the case that most needs it: the letters are kept apart by the rest
+ * cutter's width, so the raised-gap measurement decides whether the pair is enough, whether a
+ * V-carve takes the cut-away instead, or whether the plan says plainly that nothing fits.
+ *
  * The result is a PLAN — one cutter per kind of work, with the item ids each owns (#472
  * `toolItems`), not a single key and a rest pass. The CLI turns it into the job's setup; the
  * panel's single recommendation uses `kindForJob` to ask the same question.
@@ -41,13 +48,23 @@ import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_FINISH_TIP_OPS, sampleGoalHeightfiel
 import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import { pureGoalObject } from './jobSetup';
+import { fmtMm } from '@/workers/sim/engraveGeometry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveJob } from '@/types/engraveJob';
-import type { Reachability } from './reachability';
+import type { CutterReach, Reachability } from './reachability';
 
 /** What an item asks of its cutter. One class per shape of work, not one per document list. */
 export type WorkKind = 'flat' | 'cone' | 'thread' | 'ball';
+
+/**
+ * #760 — the plain sentence the pick says when no cutter keeps a raised label's gaps: the measured
+ * gap itself, and the two measured ways out. One constant so the panel's reason, the CLI's plan
+ * note and the unassigned row all say the same thing about the same measurement.
+ */
+export function raisedGapSentence(gapMm: number): string {
+  return `no cutter fits the ${fmtMm(gapMm)} mm gaps; make the text larger or V-carve it`;
+}
 
 /** One item and the cutter class its own operation demands. Exported for the panel's kind test. */
 export interface KindedItem {
@@ -426,19 +443,107 @@ export function planCutters(
     }, null);
     const cutouts = (job.cutouts ?? []).filter((c) => usable(c) && flatWork.some((w) => w.id === c.id));
     const throughDepth = r3(job.stock.thickness + job.breakthrough);
-    // The detail bar (#201) is the reach table's own `qualifies`; this module adds the reaches the
-    // table does not measure (cut-outs, drills, bores). No reach table: detail is assumed OK.
-    const detail = (c: Candidate): boolean => reach === null || (reachByKey.get(c.entry.key)?.qualifies ?? true);
+    // The detail bar (#201) is the reach table's own `detailQualifies` — the AREA detail, since
+    // #760: the raised-text rule is separate, because a raised label is kept by a FINER cutter
+    // cutting the same cut-away afterwards, not by shrinking the clearance cutter.
+    // This module adds the reaches the table does not measure (cut-outs, drills, bores).
+    const detail = (c: Candidate): boolean => reach === null || (reachByKey.get(c.entry.key)?.detailQualifies ?? true);
     const drillIds = new Set((job.drills ?? []).filter(usable).map((d) => d.id));
     const cutoutIds = new Set(cutouts.map((k) => k.id));
     const boreIds = new Set(bores.map((b) => b.id));
     const reachesAll = (c: Candidate) => reaches(c, deepest(flatWork)) && (smallestBore === null || c.diameter < smallestBore - 1e-9);
     const profiles = (c: Candidate) => cutouts.length === 0 || reaches(c, throughDepth);
 
-    // 1 · ONE FLAT FOR EVERYTHING, when a flat keeps the detail.
+    // #760 — THE RAISED TEXT IS A GAP, MEASURED THE WAY `raised-text-fused` MEASURES IT. A cutter
+    // whose opening joins a label's letters is not a cutter that keeps that cut-away; the reach
+    // table says which candidates fuse which cut-away, at that cutter's own width.
+    const raisedRows = (c: Candidate) => reachByKey.get(c.entry.key)?.raised ?? [];
+    const raisedCutaways = new Map<string, CutterReach['raised'][number]>();
+    for (const cutter of reach?.cutters ?? []) {
+      for (const row of cutter.raised) {
+        const cur = raisedCutaways.get(row.cutawayId);
+        if (cur === undefined || row.gap < cur.gap) raisedCutaways.set(row.cutawayId, row);
+      }
+    }
+    const keepsRaised = (c: Candidate, cutawayId: string): boolean =>
+      !raisedRows(c).some((row) => row.cutawayId === cutawayId);
+    // #221/#762 — the cones the reach table qualifies as V-carves. Since #760 their `qualifies`
+    // includes the raised rule, so a V that joins the letters is not on this list.
+    const vConeCandidates =
+      reach === null
+        ? []
+        : candidates.filter(
+            (c) => vCone(c.tool) !== null && reachByKey.get(c.entry.key)?.vCarve === true && reachByKey.get(c.entry.key)?.qualifies !== false,
+          );
+
+    /** The finer cutter that cleans up after `main` (#410's rest pair), on the `finerThan` rule. */
+    const finerRest = (main: Candidate, work: KindedItem[]): Candidate | null => {
+      if (reach === null) return null;
+      const base = reach.totalShare.get(main.entry.key) ?? 0;
+      const better = flats.filter(
+        (c) =>
+          c.entry.key !== main.entry.key &&
+          c.diameter < main.diameter - 1e-9 &&
+          reaches(c, deepest(work)) &&
+          profiles(c) &&
+          (reach.totalShare.get(c.entry.key) ?? 0) > base + 1e-9,
+      );
+      return bestOf(better, smallerFirst);
+    };
+
+    /**
+     * Give `work` to `main`, and #760's two raised-text answers: a cut-away whose letters the
+     * finest flat (the rest cutter, when one is added) still joins goes to a V-carve when a cone
+     * keeps its gaps, and otherwise stays where it is with the plain sentence.
+     */
+    const placeFlatWork = (main: Candidate, work: KindedItem[], reason: string): void => {
+      const rest = finerRest(main, work);
+      // The rest pass re-cuts the main cutter's leftovers, so it is the LAST width the raised
+      // letters see — the one the finding must be judged at.
+      const finest = rest ?? main;
+      let remaining = work;
+      const movedToV = new Map<Candidate, KindedItem[]>();
+      for (const [cutawayId, row] of raisedCutaways) {
+        const item = work.find((w) => w.id === cutawayId);
+        if (item === undefined || keepsRaised(finest, cutawayId)) continue;
+        const cone = bestOf(
+          vConeCandidates.filter((c) => keepsRaised(c, cutawayId) && reaches(c, item.reachMm)),
+          deeperFirst,
+        );
+        if (cone !== null) {
+          movedToV.set(cone, [...(movedToV.get(cone) ?? []), item]);
+          remaining = remaining.filter((w) => w.id !== cutawayId);
+        } else {
+          // No flat and no cone keeps the letters. The cut still happens — the sentence says what
+          // the operator will see, and the two measured ways out.
+          notes.push(`${item.name}: raised text "${row.text}" — ${raisedGapSentence(row.gap)}`);
+        }
+      }
+      if (remaining.length > 0) {
+        add(main, remaining, reason);
+        if (rest !== null) {
+          const share = reach === null ? 0 : Math.round((reach.totalShare.get(rest.entry.key) ?? 0) * 100);
+          add(
+            rest,
+            [],
+            `rest — ${dia(rest.diameter)} reaches ${share} % of the design after ${main.entry.key}, so what it can open is worth a second program`,
+          );
+        }
+      }
+      for (const [cone, items] of movedToV) {
+        add(cone, items, `raised text is cut at the colour plane — the ${dia(cone.diameter)} cone keeps its letter gaps`);
+      }
+    };
+
+    // 1 · ONE FLAT FOR EVERYTHING, when a flat keeps the AREA detail; the raised text is placed
+    // by `placeFlatWork` on top of that.
     const all = bestOf(flats.filter((c) => reachesAll(c) && profiles(c) && detail(c)), deeperFirst);
     if (all !== null) {
-      add(all, flatWork, `flat work (${label(flatWork)}) — ${dia(all.diameter)} with ${all.reach === null ? 'an unstated' : `${r3(all.reach)} mm`} reach`);
+      placeFlatWork(
+        all,
+        flatWork,
+        `flat work (${label(flatWork)}) — ${dia(all.diameter)} with ${all.reach === null ? 'an unstated' : `${r3(all.reach)} mm`} reach`,
+      );
     } else {
       // 2 · TEXT AND REGIONS TAKE A CONE WHEN NO FLAT KEEPS THEM. The reach table's V-carve rows
       // are the engine's own statement that the design is correct at the colour plane with a
@@ -446,12 +551,6 @@ export function planCutters(
       // which lost whole characters of the text (#762's j10, j14).
       const regionWork = flatWork.filter((w) => !drillIds.has(w.id) && !cutoutIds.has(w.id));
       let restWork = flatWork;
-      const vConeCandidates =
-        reach === null
-          ? []
-          : candidates.filter(
-              (c) => vCone(c.tool) !== null && reachByKey.get(c.entry.key)?.vCarve === true && reachByKey.get(c.entry.key)?.qualifies !== false,
-            );
       const vCarve = regionWork.length > 0 ? bestOf(vConeCandidates, deeperFirst) : null;
       if (vCarve !== null) {
         add(vCarve, regionWork, `text and regions are cut at the colour plane — the ${dia(vCarve.diameter)} cone is the V-carve the design needs`);
@@ -476,7 +575,11 @@ export function planCutters(
         // most (a 6 mm mill cannot enter a 7.5 mm slot, let alone open it).
         const otherPick = bestOf(flats.filter((c) => reaches(c, deepest(otherWork)) && profiles(c)), smallerFirst);
         if (otherPick !== null) {
-          add(otherPick, otherWork, `flat work (${label(otherWork)}) — ${dia(otherPick.diameter)} with ${otherPick.reach === null ? 'an unstated' : `${r3(otherPick.reach)} mm`} reach`);
+          placeFlatWork(
+            otherPick,
+            otherWork,
+            `flat work (${label(otherWork)}) — ${dia(otherPick.diameter)} with ${otherPick.reach === null ? 'an unstated' : `${r3(otherPick.reach)} mm`} reach`,
+          );
         } else {
           for (const w of otherWork) unassigned.push({ id: w.id, name: w.name, reason: `no flat end mill reaches this cut for this material${whyNoShape(['flat'])}` });
         }

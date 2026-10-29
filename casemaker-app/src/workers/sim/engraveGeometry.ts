@@ -469,9 +469,10 @@ export interface RaisedTextMeasurement {
  * measured threshold, not a table of sizes.
  *
  * `radiusFor` is the cutter radius the CUTAWAY is cut with. It is handed in for the same reason
- * `measureLabels` takes one: a flat cutter has one radius for the job, while a V's plane radius
- * follows the cutaway's own depth (#221). The sentence names the cutter with `cutterPhrase`;
- * for a V-bit the number compared is that plane width, not the tip.
+ * `measureLabels` takes one: a flat cutter has one radius for the job, while a V's width follows
+ * the cutaway's own depth (#221). Since #760 a V is handed its TOP-FACE opening radius
+ * (`planeRadius + surfaceOutset`), because that is where the raised letters stand; the sentence
+ * names the cutter with `cutterPhrase` and quotes that width, never the tip.
  *
  * Every `CrossSection` this creates — the field, each glyph component, each opening, each kept
  * component and each overlap test — is deleted exactly once.
@@ -628,11 +629,12 @@ export function raisedTextFindings(
   const cone = tool === null ? null : vCone(tool);
   return measurements.map((m) => {
     const gap = fmtMm(m.gap);
+    // #760 — a cone is compared at its TOP-FACE opening, where the raised letters stand.
     const compared =
-      cone === null ? cutter : `the ${fmtMm(2 * m.cutterRadius)} mm width ${cutter} cuts at that depth`;
-    // A V's way out is a width at depth too, because that is the number the warning compared.
+      cone === null ? cutter : `the ${fmtMm(2 * m.cutterRadius)} mm width ${cutter} opens at the top face`;
+    // A V's way out is a width too, because that is the number the warning compared.
     const narrower =
-      cone === null ? `a cutter ${gap} mm or smaller` : `a cutter no wider than ${gap} mm at that depth`;
+      cone === null ? `a cutter ${gap} mm or smaller` : `a cutter no wider than ${gap} mm at the top face`;
     // The sentence says which measured thing happened, not a generic "it fails": two letters
     // bridged into one is a different picture from a counter filled in, and both are possible.
     const what =
@@ -718,8 +720,12 @@ export interface CutRegion {
   };
 }
 
-/** A number for a finding sentence, rounded to the micron so a float artefact never prints. */
-function fmtMm(v: number): string {
+/**
+ * A number for a finding sentence, rounded to the micron so a float artefact never prints.
+ * Exported since #760: the pick quotes the same raised-text gap the finding does, and one number
+ * must read the same way in both.
+ */
+export function fmtMm(v: number): string {
   return String(Math.round(v * 1000) / 1000);
 }
 

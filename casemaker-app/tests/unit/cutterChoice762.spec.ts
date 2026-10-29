@@ -82,6 +82,8 @@ function reachRow(key: string, shape: ToolShape, over: Partial<CutterReach> = {}
     bestRatio: 0,
     worstRatio: 0,
     qualifies: true,
+    detailQualifies: true,
+    raised: [],
     ...over,
   };
 }
@@ -176,7 +178,9 @@ describe('#762 the picker reads the item kind first', () => {
     const reach: Reachability = {
       ...NO_REACH,
       cutters: [
-        reachRow('flat-3', 'flat', { qualifies: false }),
+        // #760 — the flat loses the AREA detail (`detailQualifies`), which is the bar `planCutters`
+        // chooses the clearance cutter by; a raised-only failure would be a different flag.
+        reachRow('flat-3', 'flat', { qualifies: false, detailQualifies: false }),
         reachRow('engraver', 'engraving', { vCarve: true, qualifies: true }),
       ],
     };

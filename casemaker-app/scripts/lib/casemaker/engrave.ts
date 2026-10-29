@@ -121,7 +121,7 @@ import {
   type ReachRow,
 } from '../../../src/engine/cnc/engrave/reachability';
 import { MARGIN_DEFAULTS } from '../../../src/engine/cnc/engrave/depthBounds';
-import { engraveRegions, measureEngraving } from '../../../src/workers/sim/engraveGenerate';
+import { engraveRegions, measureEngraving, raisedTextMeasure } from '../../../src/workers/sim/engraveGenerate';
 import { cuttingDiameter } from '../../../src/engine/cnc/tool';
 import { feedsFor, type CutParams, type FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
 import { jobMachine } from '../../../src/engine/cnc/calibration';
@@ -567,10 +567,25 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * too, as the `not-for-material` caution `printReach` prints below.
    */
   function scanReach(job: EngraveJob): ReturnType<typeof reachabilityFor> {
-    return reachabilityFor(job, getTools(), catalogueRows, (key) => {
-      const entry = entryFor(key);
-      return entry === null ? [] : measureEngraving(tl, job, entry.tool);
-    });
+    // #760 — the raised-text measurement rides the same scan: a cutter that joins a raised
+    // label's letters is not one that "keeps every item intact", and the pick must see the gap
+    // the finding will quote. One `PartPlan` build serves every candidate.
+    const raised = raisedTextMeasure(tl, job);
+    return reachabilityFor(
+      job,
+      getTools(),
+      catalogueRows,
+      (key) => {
+        const entry = entryFor(key);
+        return entry === null ? [] : measureEngraving(tl, job, entry.tool);
+      },
+      undefined,
+      null,
+      (key) => {
+        const entry = entryFor(key);
+        return entry === null ? [] : raised(entry.tool);
+      },
+    );
   }
 
   /** The table as the operator reads it: one line per cutter, one column per item, in per cent. */
@@ -583,21 +598,33 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     for (const row of rows) {
       const cells = row.shares.map(pct).map((s) => s.padStart(6)).join('  ');
       const verdict =
-        row.excluded !== null ? row.excluded : row.qualifies ? 'keeps every item intact' : 'loses detail';
+        row.excluded !== null
+          ? row.excluded
+          : row.qualifies
+            ? 'keeps every item intact'
+            : row.joinsRaisedText
+              ? 'joins the raised text'
+              : 'loses detail';
       out.progress(
         `  ${row.key.padEnd(24)} ${`${row.diameter} mm`.padStart(9)}  ${cells}   ` +
           `${pct(row.total).padStart(5)} total   ${verdict}`,
       );
     }
     const pick = reach.recommendation.key;
-    const finer = pick === null ? null : finerThan(reach, pick);
-    if (pick !== null && finer !== null) {
+    const compromise = reach.recommendation.compromise;
+    const finer = pick === null || compromise ? null : finerThan(reach, pick);
+    if (pick !== null && compromise) {
+      // #760 — a compromise is not a clean answer, and "picks X (0% of the design)" for a 0.1 mm
+      // cone reads as one. The measured reasons are in the recommendation (`reason`, shown by the
+      // panel and the sheet) and in the plan's own note below; this line only names the closest.
+      out.progress(`  ! #211 has no clean cutter: the closest is ${pick}.`);
+    } else if (pick !== null && finer !== null) {
       out.progress(
         `  → #211 picks ${pick} (${pct(reach.totalShare.get(pick) ?? 0)} of the design); ${finer.key} reaches ` +
           `${pct(reach.totalShare.get(finer.key) ?? 0)}, so what is left is worth a second program (#410).`,
       );
     } else if (pick !== null) {
-      out.progress(`  → #211 picks ${pick}, and no smaller cutter reaches more: one program is enough.`);
+      out.progress(`  → #211 picks ${pick}, and no smaller cutter reaches more.`);
     }
     // #455 — a caution about the cutter the job NAMES, when it is not one the catalogue recommends.
     // Printed here rather than in each caller so a run that has rows cannot silently drop it.

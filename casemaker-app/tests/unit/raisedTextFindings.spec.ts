@@ -40,14 +40,15 @@ describe('#739 the raised-text sentence quotes the width it compared', () => {
     expect(finding.message).toContain('Use a cutter 1.08 mm or smaller, or text 42 mm or more.');
   });
 
-  it('a V-bit is named by its width at the cut-away depth, not its tip', () => {
-    // The measurement stores the plane radius it opened the field with; 2 × 1.2975 = 2.595 mm.
+  it('a V-bit is named by its top-face opening width, not its tip', () => {
+    // The measurement stores the TOP-FACE radius it opened the field with (#760); 2 × 1.2975 =
+    // 2.595 mm.
     const finding = raisedTextFindings([row({ cutterRadius: 1.2975 })], V_BIT)[0]!;
     expect(finding.message).toContain(
-      'narrower than the 2.595 mm width a 0.3 mm 30° V-bit cuts at that depth',
+      'narrower than the 2.595 mm width a 0.3 mm 30° V-bit opens at the top face',
     );
     expect(finding.message).toContain(
-      'Use a cutter no wider than 1.08 mm at that depth, or text 42 mm or more.',
+      'Use a cutter no wider than 1.08 mm at the top face, or text 42 mm or more.',
     );
   });
 });

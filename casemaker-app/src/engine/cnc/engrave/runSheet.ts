@@ -2244,7 +2244,13 @@ function reachabilitySteps(
     value:
       chosenKey === null
         ? undefined
-        : `${chosenKey} — ${reach.recommendation.reason}`,
+        : // #760 — the recommendation's reason is about the RECOMMENDED cutter. A plan that keeps
+          // a wider clearance cutter and a finer rest one (or a job that names its own) runs a
+          // different first cutter, and printing the other cutter's reason beside this key read as
+          // a claim about this one.
+          chosenKey === reach.recommendation.key
+          ? `${chosenKey} — ${reach.recommendation.reason}`
+          : `${chosenKey} — the run's first cutter; the table above measures every candidate.`,
   });
 
   // The regions NOTHING reaches: the one number no cutter choice can change, and the reason the

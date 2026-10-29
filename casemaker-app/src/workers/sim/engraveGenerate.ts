@@ -171,6 +171,7 @@ import {
   type LabelEngravability,
   type LabelRatioAt,
   type PerCharGlyph,
+  type RaisedTextMeasurement,
 } from './engraveGeometry';
 import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stackDepthLimit';
 import { rotaryJobFindings } from '@/engine/cnc/rotary/findings';
@@ -780,6 +781,61 @@ export function measureEngraving(tl: ManifoldToplevel, job: EngraveJob, tool: To
   const usable = cuttingForTrace(tool);
   if (!usable.ok || usable.tool.shape !== 'flat') return [];
   return measureLabels(tl, toPartPlan(job), usable.tool.radius, job.edgeMargin, perCharFor(job));
+}
+
+/**
+ * #760 — the raised-text measurement as a PER-CUTTER seam for the pick: one `PartPlan` build and
+ * one supporting-floor map, then one answer per candidate cutter the pick offers.
+ *
+ * The answer is `measureRaisedTexts`' own rows, so the pick and `raised-text-fused` cannot
+ * disagree about which labels a cutter joins or how narrow the gap is. A flat is measured at its
+ * own radius; a cone at the width its flank OPENS AT THE TOP FACE (`planeRadius + surfaceOutset`,
+ * the width the raised letters actually stand against).
+ *
+ * The early return keeps a job with no raised text at zero cost — the common case.
+ */
+export function raisedTextMeasure(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  plan: PartPlan = toPartPlan(job),
+): (tool: Tool) => RaisedTextMeasurement[] {
+  if (plan.raisedTexts.length === 0) return () => [];
+  const floors = supportingFloors(tl, plan);
+  const boundary = colourBoundaryFor(plan, job);
+  const engraveById = new Map(plan.engraves.map((e) => [e.id, e] as const));
+  // The scan asks about a hundred cutters, and most share their width with a dozen others: a flat
+  // row is a function of its radius (a V's, of the plane radii it cuts at), so each distinct
+  // measurement is made once. The rows carry their own `cutterRadius`, so the cache key is the
+  // radii themselves.
+  const cache = new Map<string, RaisedTextMeasurement[]>();
+  return (tool: Tool): RaisedTextMeasurement[] => {
+    const cone = vCone(tool);
+    let radiusFor: (cutawayId: string) => number | null;
+    if (cone !== null) {
+      radiusFor = (cutawayId) => {
+        const engrave = engraveById.get(cutawayId);
+        if (engrave === undefined) return null;
+        const plane = vCarvePlane(cone, engrave.depth, boundary, floors.get(cutawayId) ?? 0);
+        // #760 — THE RAISED LETTERS STAND AT FULL HEIGHT, so the width that decides whether they
+        // stay apart is the cone's opening at the TOP FACE, not its plane: the flank widens by
+        // `surfaceOutset` from the plane up to the surface. Reading the plane width here let a
+        // 90° chamfer with a 0.1 mm tip "keep" a 0.28 mm gap it would visibly weld over — the same
+        // fact `vcarve-surface-merge` states from the same `surfaceOutset`.
+        return plane.planeRadius + plane.surfaceOutset;
+      };
+    } else {
+      const usable = cuttingForTrace(tool);
+      if (!usable.ok || usable.tool.shape !== 'flat') return [];
+      const radius = usable.tool.radius;
+      radiusFor = () => radius;
+    }
+    const key = plan.raisedTexts.map((raised) => radiusFor(raised.id)?.toFixed(6) ?? '-').join(',');
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const rows = measureRaisedTexts(tl, job, plan.raisedTexts, radiusFor);
+    cache.set(key, rows);
+    return rows;
+  };
 }
 
 /** `perChar` for a job: one single-character glyph profile per character, in text order. */
@@ -1532,6 +1588,12 @@ export function engraveRegions(
   derivedCores?: readonly CoreCut[],
   /** #748 — the whole document's supporting floors, or omitted to compute this plan's own. */
   floors?: ReadonlyMap<string, number>,
+  /**
+   * #760 — the FINER flat that cuts this program's items afterwards (a rest pass), or null. The
+   * raised-text finding is judged at its width: the letters end up as the rest opening leaves
+   * them, so program 1's wider cutter is not the one to warn about when a finer one follows.
+   */
+  raisedCoFlat?: Tool | null,
 ): EngraveRegions {
   const plan = toPartPlan(
     job,
@@ -1737,13 +1799,32 @@ export function engraveRegions(
   // a flat cutter, the V's plane radius otherwise), and the measurement asks whether the opening
   // lets the letters stay apart. The radius is captured as a const so the callback and the
   // measurement below cannot resolve two different cutters.
+  //
+  // #760 — THE FINEST CUTTER WINS. A rest program after this one re-cuts what this opening leaves,
+  // and the raised letters end up at the smallest width that cuts them — so the finding must be
+  // judged there, not at program 1's cutter. `raisedCoFlat` is that later flat (the run's
+  // generator picks the finest one that will re-cut this program's items); when its radius is the
+  // smaller, both the measurement and the sentence use it.
   const flatRadius = measureRadius;
+  const coUsable = raisedCoFlat === null || raisedCoFlat === undefined ? null : cuttingForTrace(raisedCoFlat);
+  const coRadius = coUsable !== null && coUsable.ok && coUsable.tool.shape === 'flat' ? coUsable.tool.radius : null;
+  const finerCoRadius =
+    cone === null && coRadius !== null && flatRadius !== null && coRadius < flatRadius - 1e-9 ? coRadius : null;
   const raisedRadiusFor =
     flatRadius === null
       ? null
-      : (cutawayId: string): number => (cone === null ? flatRadius : planeRadiusFor(cutawayId));
+      : (cutawayId: string): number =>
+          finerCoRadius ??
+          (cone === null
+            ? flatRadius
+            : // #760 — the raised letters stand at full height: the width they are judged at is
+              // the cone's opening at the TOP FACE (`planeRadius + surfaceOutset`), the same
+              // number the pick's own `raisedTextMeasure` uses. The plane width alone would call a
+              // sharply-tipped V clean while its top openings merge.
+              planeRadiusFor(cutawayId) + (planeById.get(cutawayId)?.surfaceOutset ?? 0));
   const raisedMeasured =
     raisedRadiusFor === null ? [] : measureRaisedTexts(tl, job, plan.raisedTexts, raisedRadiusFor);
+  const raisedJudgeTool = finerCoRadius !== null ? raisedCoFlat! : tool;
 
   // #171/#345 — the cut regions a void check reads are built ONCE, below: the engrave openings,
   // the swept traces (#270) and — since #218 — each cut-out's kerf. A void-free job is the common
@@ -2072,7 +2153,7 @@ export function engraveRegions(
     // read the shank as the cutter.
     ...tipFindings,
     ...engFindings,
-    ...raisedTextFindings(raisedMeasured, tool),
+    ...raisedTextFindings(raisedMeasured, raisedJudgeTool),
     ...metalLineFindings(job, tool, catalogue),
     // #741 — a V-cut past the cutter's cone is not a V, so it is refused by name before the CAM.
     ...depthFindings,
@@ -3549,6 +3630,25 @@ function generateRestPair(
     ? { ...roughRef, itemIds: roughRef.itemIds.filter((id) => !unroughedIds.has(id)) }
     : roughRef;
   const roughJobKept = jobForSetup(job, roughRefKept, roughTool);
+  /**
+   * #760 — THE FINEST FLAT THAT RE-CUTS THIS PROGRAM'S ITEMS AFTERWARDS. Only a LATER REST PASS
+   * (a ref with no items of its own) cuts the earlier program's leftovers, so only those tools can
+   * change the width the raised letters finally see. The raised-text finding is judged at the
+   * finest of them: program 1's 3.175 mm cutter is not what leaves the letters joined when a
+   * 1.0 mm rest pass follows. `fromIndex` is a `restTools` index (exclusive).
+   */
+  const laterRestFlat = (fromIndex: number): Tool | null => {
+    let best: Tool | null = null;
+    for (let j = fromIndex; j < restTools.length; j++) {
+      const rest = restTools[j];
+      const ref = group[j + 1];
+      if (rest === null || rest === undefined || ref === undefined || ref.itemIds.length > 0) continue;
+      if (rest.shape !== 'flat') continue;
+      if (best === null || (cuttingDiameter(rest) ?? 0) < (cuttingDiameter(best) ?? 0)) best = rest;
+    }
+    return best;
+  };
+  const roughCoFlat = laterRestFlat(0);
   const makeRoughKept = (span: VacuumSpan): OneProgram =>
     generateOneProgram(
       tl,
@@ -3565,6 +3665,7 @@ function generateRestPair(
       false,
       undefined,
       floors,
+      roughCoFlat,
     );
   const keptOne = makeRoughKept(roughSpan);
   attempts.push(keptOne);
@@ -3652,6 +3753,8 @@ function generateRestPair(
           withNeck && r === restTools.length - 1,
           undefined,
           floors,
+          // #760 — a later rest pass re-cuts this program's leftovers at its own width.
+          laterRestFlat(r + 1),
         );
       const ownOne = makeOwn(ownSpan);
       attempts.push(ownOne);
@@ -3777,6 +3880,8 @@ function generateRestPair(
         withNeck && r === restTools.length - 1,
         undefined,
         floors,
+        // #760 — an even later rest pass re-cuts this one's leftovers.
+        laterRestFlat(r + 1),
       );
     const restOne = makeRest(restSpan);
     nextCursor += 1;
@@ -4661,6 +4766,11 @@ function generateOneProgram(
    * in; omitted (a direct caller), `engraveRegions` computes it from this job's own plan.
    */
   floors?: ReadonlyMap<string, number>,
+  /**
+   * #760 — the finer flat that re-cuts this program's items afterwards (a rest pass). Handed to
+   * `engraveRegions` so `raised-text-fused` is judged at the width the letters finally see.
+   */
+  raisedCoFlat?: Tool | null,
 ): OneProgram {
   // #347 — the JOB's machine, not the app's only one: the envelope, the spindle ceiling and the
   // frame below are read off the profile the document names. The POST is still `postZ1`'s dialect,
@@ -4677,6 +4787,7 @@ function generateOneProgram(
     catalogue,
     derivedCores,
     floors,
+    raisedCoFlat,
   );
   /**
    * #667 — WHAT THIS PROGRAM IS ASKED TO REMOVE. `predicted` is the design at its stated depths,

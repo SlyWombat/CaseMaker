@@ -70,7 +70,7 @@ import {
   type LabelRatioAt,
   type PerCharGlyph,
 } from './engraveGeometry';
-import { engraveRegions, type EngraveShopOpts } from './engraveGenerate';
+import { engraveRegions, raisedTextMeasure, type EngraveShopOpts } from './engraveGenerate';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 
@@ -721,6 +721,8 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // the user cannot choose. With the built-ins alone that is two cutters, so the "early stop
     // for long lists" rule (measure in ascending diameter, stop after the first failure that
     // follows a pass) does not apply yet: until the list is long, measure them all.
+    // #760 — one raised-text measurement, shared by every candidate the recommendation asks about.
+    const raisedText = raisedTextMeasure(tl, job, plan);
     const recommendation = recommendTool(
       job,
       tools,
@@ -739,6 +741,12 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       // #450 slice 3 — the same feeds table the run's `feedsFor` resolves against, so a cutter the
       // location's table covers is not excluded here for want of a compiled row (or the reverse).
       shop.feeds ?? undefined,
+      // #760 — and the same raised measurement `raised-text-fused` makes, so the recommendation
+      // never calls a cutter that joins the letters one that "keeps every item intact".
+      (key) => {
+        const entry = tools.find((e) => e.key === key);
+        return entry ? raisedText(entry.tool) : [];
+      },
     );
 
     return {

@@ -24,7 +24,7 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { isVTraceTool } from '@/engine/cnc/tool';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import { LOST_DETAIL_RATIO_FALLBACK, type LabelEngravability } from '@/workers/sim/engraveGeometry';
+import { LOST_DETAIL_RATIO_FALLBACK, type LabelEngravability, type RaisedTextMeasurement } from '@/workers/sim/engraveGeometry';
 import type { EngraveJob } from '@/types/engraveJob';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import {
@@ -103,8 +103,23 @@ export interface CutterReach {
   bestRatio: number;
   /** The smallest share of any single item, 0…1. 0 when it reaches nothing anywhere. */
   worstRatio: number;
-  /** True when every item survives at `LOST_DETAIL_RATIO_FALLBACK` with no character lost — #201's bar. */
+  /**
+   * True when every item survives at `LOST_DETAIL_RATIO_FALLBACK` with no character lost — #201's
+   * bar — AND (#760) no raised label fuses under this cutter's width.
+   */
   qualifies: boolean;
+  /**
+   * #760 — the same bar WITHOUT the raised-text rule: the area detail. It is what `planCutters`
+   * chooses the clearance cutter by, because the raised text is then handed to a finer rest
+   * cutter whose own `raised` rows say whether it keeps them.
+   */
+  detailQualifies: boolean;
+  /**
+   * #760 — the raised labels this cutter joins when it clears their cut-away, as measured by the
+   * same `measureRaisedTexts` the `raised-text-fused` finding quotes. Empty when it keeps every
+   * gap, and for a cutter that was never measured.
+   */
+  raised: RaisedTextMeasurement[];
 }
 
 /** The table, the recommendation, and the two-tool split it implies. */
@@ -176,6 +191,12 @@ export function reachabilityFor(
   measure: (key: string) => LabelEngravability[],
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   lostDetailWarnRatio: number | null = null,
+  /**
+   * #760 — the raised measurement for a candidate: `raisedTextMeasure(tl, job)`'s answer for the
+   * candidate's own tool. Handed through to `recommendTool`, so the table's `qualifies` column and
+   * the recommendation agree about a cutter that joins raised letters. Omitted: no raised rule.
+   */
+  measureRaised?: ((key: string) => RaisedTextMeasurement[]) | null,
 ): Reachability {
   const measured = new Map<string, LabelEngravability[]>();
   const recommendation = recommendTool(
@@ -189,6 +210,8 @@ export function reachabilityFor(
     },
     conditions,
     lostDetailWarnRatio,
+    undefined,
+    measureRaised,
   );
 
   const items = enabledItems(job);
@@ -238,6 +261,10 @@ export function reachabilityFor(
       bestRatio: vCarve || ratios.length === 0 ? 0 : Math.max(...ratios),
       worstRatio: vCarve || ratios.length === 0 ? 0 : Math.min(...ratios),
       qualifies: candidate.qualifies,
+      // #760 — the area bar without the raised rule, and the raised rows themselves, so the plan
+      // can keep the clearance cutter and hand the raised text to a finer rest one.
+      detailQualifies: candidate.detailOk ?? candidate.qualifies,
+      raised: candidate.raised ?? [],
     };
   });
 
@@ -312,6 +339,11 @@ export interface ReachTableRow {
   /** Share of the design's whole area, 0…1. */
   total: number;
   qualifies: boolean;
+  /**
+   * #760 — true when this cutter joins a raised label's letters. A table cell printed as "loses
+   * detail" would hide WHY the cutter is not the clean answer, so the verdict says this instead.
+   */
+  joinsRaisedText: boolean;
 }
 
 /**
@@ -359,6 +391,7 @@ export function reachTable(reach: Reachability): ReachTableRow[] {
     shares: cutter.excluded === null ? cutter.rows.map((r) => r.ratio) : cutter.rows.map(() => null),
     total: reach.totalShare.get(cutter.key) ?? 0,
     qualifies: cutter.qualifies,
+    joinsRaisedText: cutter.raised.length > 0,
   }));
 }
 

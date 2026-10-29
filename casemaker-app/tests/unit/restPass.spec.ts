@@ -104,6 +104,8 @@ function tableOf(rows: { key: string; diameter: number; share: number }[]): Reac
       bestRatio: r.share,
       worstRatio: r.share,
       qualifies: true,
+      detailQualifies: true,
+      raised: [],
     })),
     items: [],
     recommendation: {

@@ -5,6 +5,13 @@
  * losing detail.** A larger cutter is stiffer, clears faster and breaks less; the only reason
  * to go smaller is that the text needs it — which is exactly what #201 measures.
  *
+ * SINCE #760 A RAISED LABEL'S DETAIL IS ITS NARROWEST GAP. A cut-away may leave construction
+ * labels standing at full height; a cutter whose opening joins their letters cannot keep that
+ * item, however much of its area it reaches. The measurement comes in through `measureRaised` —
+ * `measureRaisedTexts`' own rows, the ones `raised-text-fused` quotes — so the pick cannot call a
+ * cutter clean while the program warns about it. With no `measureRaised` the rule is the pre-#760
+ * one, which is what a pure test and a job with no cut-away get.
+ *
  * TRACES AND REGIONS TAKE A V-BIT (#405, #221). A job whose enabled items are all TRACES (a `line`
  * or a `stroke-label` — a line the cutter follows, `#219`) may be cut by a V-bit, whose groove is a
  * function of depth and so is exactly a single-stroke line. Since #221 a region item may take one
@@ -72,9 +79,13 @@ import { vCone } from '@/engine/cnc/vProfile';
 import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { inlayMarked } from './inlay';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
-import { kindOnlyPick } from './cutterPlan';
+import { kindOnlyPick, raisedGapSentence } from './cutterPlan';
 import { pureGoalObject } from './jobSetup';
-import { lostDetailRatioFrom, type LabelEngravability } from '@/workers/sim/engraveGeometry';
+import {
+  lostDetailRatioFrom,
+  type LabelEngravability,
+  type RaisedTextMeasurement,
+} from '@/workers/sim/engraveGeometry';
 
 /**
  * Why a tool was dropped before measuring (#211: flat-ends only, and only cutters that exist;
@@ -138,6 +149,19 @@ export interface ToolCandidate {
    * `condition` and `catalogueNote`.
    */
   vCarve?: boolean;
+  /**
+   * #760 — `ratioOk` and the reach, WITHOUT the raised-text rule: the area detail the reach
+   * table's own bar (#201) judges. `qualifies` additionally requires that no raised label fuses.
+   * `planCutters` reads this to choose the CLEARANCE cutter — the raised text is then covered by
+   * a finer rest cutter (or a V-carve), not by shrinking the cutter that clears the bulk.
+   */
+  detailOk?: boolean;
+  /**
+   * #760 — the raised labels THIS cutter joins when it opens their cut-away (empty when it keeps
+   * every gap). The same measurement `raised-text-fused` states at generation, so the pick cannot
+   * believe a cutter that the program will warn about.
+   */
+  raised?: RaisedTextMeasurement[];
 }
 
 /**
@@ -288,6 +312,14 @@ export function itemName(item: EngraveAnyItem): string {
   }
 }
 
+/** The narrowest gap among a cutter's fused raised labels — the number its sentence quotes. */
+function narrowestGap(rows: readonly RaisedTextMeasurement[]): RaisedTextMeasurement | null {
+  return rows.reduce<RaisedTextMeasurement | null>(
+    (worst, row) => (worst === null || row.gap < worst.gap ? row : worst),
+    null,
+  );
+}
+
 /**
  * "Which items lose what", naming the worst item.
  *
@@ -299,6 +331,14 @@ export function itemName(item: EngraveAnyItem): string {
  * it when the signature gains a re-measure hook.
  */
 function compromiseReason(job: EngraveJob, pick: ToolCandidate): string {
+  // #760 — A JOINED RAISED LABEL IS ITS OWN SENTENCE, before the area one: the numbers that
+  // matter are the measured gap and the two ways out, not a percentage of an area the cutter
+  // did open. The pick still names a cutter (inform, don't refuse); the sentence says why the
+  // text will not read as drawn.
+  const fused = narrowestGap(pick.raised ?? []);
+  if (fused !== null) {
+    return `No cutter you have keeps every item intact, and ${raisedGapSentence(fused.gap)}.`;
+  }
   // #221 — a V-carve has no glyph ratio to lose; it is closest only because its reach or its
   // feeds kept it from qualifying outright, and the sentence has to say what it actually does.
   if (pick.vCarve) {
@@ -485,6 +525,14 @@ export function recommendTool(
    * compiled starting table, which is what a no-service build runs on.
    */
   table?: readonly FeedsEntry[],
+  /**
+   * #760 — the raised labels each candidate joins, measured at that candidate's own cutting width
+   * (`measuredRaisedFor` in the worker). A candidate that fuses one is not the pick: its letters
+   * run together exactly as `raised-text-fused` says they will. Omitted means the caller has no
+   * raised measurement (a job with no cut-away, a pure test), and every candidate is judged on the
+   * area bar alone — the pre-#760 answer.
+   */
+  measureRaised?: ((toolKey: string) => RaisedTextMeasurement[]) | null,
 ): ToolRecommendation {
   // The bar a cutter has to clear is #201's own (engraveGeometry's `LOST_DETAIL_RATIO_FALLBACK`
   // unless the caller sends the shop's `engrave.lostDetailWarnRatio`, #451). Passing it here rather
@@ -656,17 +704,25 @@ export function recommendTool(
     // `worst` stays null (there is no glyph-opening ratio to state for a cone), so the panel prints
     // the V-carve sentence instead of "not measured". Reach still gates it: a cutter whose shoulder
     // cannot clear the deepest cut is not a candidate, cone or not.
+    //
+    // #760 — and the raised labels are measured at the WIDTH ITS FLANK OPENS AT THE TOP FACE, the
+    // same number the finding states for a V. A cone that joins the letters is not the V-carve
+    // answer.
     if (vCarve) {
+      const raised = measureRaised?.(entry.key) ?? [];
       return {
         ...base,
-        qualifies: reachOk,
+        qualifies: reachOk && raised.length === 0,
+        detailOk: true,
         worst: null,
+        raised,
         catalogueNote: catalogueStanding.note,
         vCarve: true,
       };
     }
 
     const rows = measure(entry.key);
+    const raised = measureRaised?.(entry.key) ?? [];
     let worst: ToolCandidate['worst'] = null;
     let ratioOk = true;
     for (const row of rows) {
@@ -682,7 +738,14 @@ export function recommendTool(
       }
     }
 
-    return { ...base, qualifies: ratioOk && reachOk, worst, catalogueNote: catalogueStanding.note };
+    return {
+      ...base,
+      qualifies: ratioOk && reachOk && raised.length === 0,
+      detailOk: ratioOk,
+      worst,
+      raised,
+      catalogueNote: catalogueStanding.note,
+    };
   });
 
   const eligible = candidates.filter((c) => c.excluded === undefined);
@@ -707,8 +770,12 @@ export function recommendTool(
   // `deepestAny`) may stand as the smaller compromise; when none does, the honest answer is that
   // no cutter on the bench reaches this job.
   const reaching = eligible.filter((c) => c.reachOk);
-  if (reaching.length > 0) {
-    const pick = [...reaching].sort(bySmallest)[0]!;
+  // #760 — a cutter that keeps the raised gaps is a better compromise than a smaller one that
+  // joins the letters: the smallest cutter is only preferred while the text still reads.
+  const keeping = reaching.filter((c) => (c.raised ?? []).length === 0);
+  const pool = keeping.length > 0 ? keeping : reaching;
+  if (pool.length > 0) {
+    const pick = [...pool].sort(bySmallest)[0]!;
     return {
       key: pick.key,
       compromise: true,
