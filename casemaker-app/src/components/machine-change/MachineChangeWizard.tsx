@@ -278,7 +278,11 @@ function Wizard({
   // `bracketFit` turns false as soon as the new profile carries the anchor, so the headline and the
   // record would read "Bed unchanged" after a bracket-only Confirm. Read the result first.
   const shownBracket = confirmed?.result.bracket ?? (bracketFit ? bracketAnchor : null);
-  const takeWords = takeOffSteps(shownFrom, { wasteboard: plannedWasteboard === 'off' ? 'off' : null });
+  const takeWords = takeOffSteps(shownFrom, {
+    wasteboard: plannedWasteboard === 'off' ? 'off' : null,
+    surfaceOff: plannedSurface?.surfaceOff ?? null,
+    pullPins: target === 'bed',
+  });
   const fitWords =
     target === null
       ? null
@@ -293,7 +297,9 @@ function Wizard({
   // AFTER the power returns: a powered-off machine has no light.
   const powerOff = target !== null && changePowersOff(from, target);
   const bedNowWords =
-    plannedWasteboard === 'off'
+    plannedSurface?.surfaceOff
+      ? `${plannedSurface.surfaceOff} off`
+      : plannedWasteboard === 'off'
       ? 'wasteboard off'
       : plannedWasteboard === 'back'
         ? 'wasteboard under'
@@ -395,6 +401,14 @@ function Wizard({
       if (a.kind !== 'ok') {
         setFitNote(
           `The machine has not answered — ${a.detail}. Switch it on at its switch, wait for its screen, then press Done again.`,
+        );
+        return;
+      }
+      // #728 — the Z1 homes itself at power-up: an answer while it is still moving ("Home", or
+      // anything but Idle) is not yet the moment to put hands in again.
+      if (a.rest.state !== null && a.rest.state !== 'Idle') {
+        setFitNote(
+          `The machine answered, but it reads ${a.rest.state} — it is still homing. Wait until it reads Idle, then press Done again.`,
         );
         return;
       }
@@ -724,6 +738,11 @@ function Wizard({
                         data-testid={`machine-change-target-${m}`}
                         onClick={() => {
                           setTarget(m);
+                          // #728 — a new target is a new change: the light, Home and the power
+                          // cycle are read afresh, never carried over from the last choice.
+                          setHome(NOT_DONE);
+                          setLight(NOT_DONE);
+                          setPoweredOff(false);
                           setTakenOff(false);
                           setFitted(false);
                           setOffChecks([]);

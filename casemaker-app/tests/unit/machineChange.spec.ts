@@ -28,7 +28,7 @@ import {
   takeOffSteps,
   targetMountsFor,
 } from '@/platform/machineChange';
-import { MachineRecordSchema, type FixtureRecord, type MachineRecord } from '@/platform/locationClient';
+import { MachineRecordSchema, type BedProfile, type FixtureRecord, type MachineRecord } from '@/platform/locationClient';
 
 const NOW = '2026-10-26T09:20:00.000Z';
 const MACHINE_ID = 'machine-1a2b3c';
@@ -192,15 +192,17 @@ describe('#693 what is on the machine', () => {
       'lift it straight up',
       'on its shelf',
     ]);
-    // The fit is Makera's order: the pins, the three screws, the cable, power on, wait.
+    // The fit is Makera's order: the locating pins, onto them, the three screws, the cable — and
+    // #728 every hands-in line (the chuck key) BEFORE power-on, since the Z1 homes itself then.
     expect(fitSteps('rotary')?.items).toEqual([
       'the 4th-axis cable is never plugged in live',
+      'the two 4 × 11 mm locating pins',
       'onto the two pins',
       'the three M5 × 10 screws',
       'the 4th-axis cable, rear left',
+      'chuck key in the tray',
       'switch the machine on',
       'wait for it to answer',
-      'chuck key in the tray',
     ]);
     // #717 — Makera's vise page, in its own order. The wasteboard is NEVER put back under it: the
     // first thing Makera says is to remove it.
@@ -288,6 +290,33 @@ describe('#693 what is on the machine', () => {
     expect(change.surface.thickness).toBe(10);
     expect(change.surface.provenance.thickness).toBe('measured:2026-10-15T07:00:00.000Z');
     expect(change.surface.scars).toHaveLength(1);
+  });
+});
+
+describe('#728 a vacuum bed or fixture plate on the pins', () => {
+  it('comes off for the vise or the rotary, with its own take-off step; a bed job keeps it', () => {
+    const prof = machineRecord().bedProfiles![0]!;
+    for (const [kind, name] of [['vacuum-bed', 'vacuum bed'], ['fixture-plate', 'fixture plate']] as const) {
+      const surface = { ...bareBedSurface(), kind } as unknown as BedProfile['surface'];
+      const machine = machineRecord({ bedProfiles: [{ ...prof, surface }] });
+      for (const to of ['vise', 'rotary'] as const) {
+        const change = surfaceChangeFor(machine, to);
+        expect(change.surfaceOff).toBe(name);
+        expect(change.words).toBe(`${name} off`);
+        expect(change.surface.kind).toBe('bare-bed');
+      }
+      expect(surfaceChangeFor(machine, 'bed').surfaceOff).toBeUndefined();
+      expect(surfaceChangeFor(machine, 'bed').surface.kind).toBe(kind);
+      expect(takeOffSteps('bed', { surfaceOff: name })).toEqual({
+        title: `Take off the ${name}`,
+        items: [`the ${name}’s screws`, 'lift it straight up off the two pins', 'on its shelf'],
+      });
+    }
+  });
+
+  it('pulls the two locating pins with the vise on the way to a bed job', () => {
+    expect(takeOffSteps('vise', { pullPins: true })?.items.at(-1)).toBe('the two 4 × 11 mm locating pins out');
+    expect(takeOffSteps('vise')?.items).not.toContain('the two 4 × 11 mm locating pins out');
   });
 });
 

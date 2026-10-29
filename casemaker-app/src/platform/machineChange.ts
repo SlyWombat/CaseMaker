@@ -146,6 +146,10 @@ export interface MountStepOptions {
    * never went off. Absent reads as true: every other fit is a power-off one.
    */
   switchBackOn?: boolean;
+  /** #728 — a vacuum bed or fixture plate this change takes off the pins, or null. */
+  surfaceOff?: 'vacuum bed' | 'fixture plate' | null;
+  /** #728 — the change ends on the bare bed (to a bed job): the vise's locating pins come out. */
+  pullPins?: boolean;
 }
 
 /**
@@ -175,6 +179,8 @@ export function takeOffSteps(from: MachineMountKind, opts: MountStepOptions = {}
       // A record from before #717 can still show the vise over a wasteboard; if this change takes
       // the board off, it comes after the vise.
       if (opts.wasteboard === 'off') items.push('the wasteboard’s screws', 'the wasteboard on its shelf');
+      // #728 — going to a bed job, the two locating pins come out with it (the bed's own holes).
+      if (opts.pullPins === true) items.push('the two 4 × 11 mm locating pins out');
       return { title: 'Take off the vise', items };
     }
     case 'rotary':
@@ -192,6 +198,13 @@ export function takeOffSteps(from: MachineMountKind, opts: MountStepOptions = {}
     case 'bed':
       // #706 — nothing is on the pins, but a wasteboard can still be on the bed and must come off
       // before the rotary mounts. Without one, there is no take-off step at all.
+      // #728 — likewise a vacuum bed or a fixture plate, which shares the two pins.
+      if (opts.surfaceOff !== undefined && opts.surfaceOff !== null) {
+        return {
+          title: `Take off the ${opts.surfaceOff}`,
+          items: [`the ${opts.surfaceOff}’s screws`, 'lift it straight up off the two pins', 'on its shelf'],
+        };
+      }
       return opts.wasteboard === 'off'
         ? { title: 'Take off the wasteboard', items: ['the wasteboard’s screws', 'the wasteboard on its shelf'] }
         : null;
@@ -224,13 +237,16 @@ export function fitSteps(to: MachineMountKind, opts: MountStepOptions = {}): Ste
         items: [
           // #706 — Makera's order: the cable is last, never plugged in live, and the machine is
           // switched on again before the wait (the switch itself is step 2's line).
+          // #728 — Makera's 4th-axis page starts with the two locating pins; and every hands-in line
+          // (the chuck key) comes BEFORE power-on, since the Z1 homes itself when switched on.
           'the 4th-axis cable is never plugged in live',
+          'the two 4 × 11 mm locating pins',
           'onto the two pins',
           'the three M5 × 10 screws',
           'the 4th-axis cable, rear left',
+          'chuck key in the tray',
           'switch the machine on',
           'wait for it to answer',
-          'chuck key in the tray',
         ],
       };
     case 'bed': {
@@ -338,6 +354,12 @@ export interface SurfaceChange {
   words: string;
   /** What happened to the wasteboard, or null when it stayed. */
   wasteboard: 'off' | 'back' | null;
+  /**
+   * #728 — another SURFACE this change takes off: a vacuum bed or a fixture plate sits on the same
+   * two pins the vise and the rotary need (Makera's vacuum-bed page), so a change to either takes it
+   * off. Null when nothing else comes off. Absent on records written before this field.
+   */
+  surfaceOff?: 'vacuum bed' | 'fixture plate' | null;
 }
 
 /** The newest saved wasteboard surface other than the active profile's, mm-accurate and cloned. */
@@ -400,6 +422,12 @@ export function surfaceChangeFor(machine: MachineRecord, to: MachineMountKind): 
   }
   if (to !== 'bed' && surface !== null && surface.kind === 'wasteboard') {
     return { surface: bareBedSurface(), words: 'wasteboard off', wasteboard: 'off' };
+  }
+  // #728 — a vacuum bed or a fixture plate occupies the pins the vise and the rotary mount on, so
+  // either comes off for them, and the wizard says so (it used to be kept under the vise).
+  if (to !== 'bed' && surface !== null && (surface.kind === 'vacuum-bed' || surface.kind === 'fixture-plate')) {
+    const name = surface.kind === 'vacuum-bed' ? 'vacuum bed' : 'fixture plate';
+    return { surface: bareBedSurface(), words: `${name} off`, wasteboard: null, surfaceOff: name };
   }
   const kept = surface === null ? bareBedSurface() : (JSON.parse(JSON.stringify(surface)) as BedProfile['surface']);
   return { surface: kept, words: surfaceWords(kept), wasteboard: null };
@@ -566,7 +594,9 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
       ? ', wasteboard off'
       : surfaceChange.wasteboard === 'back'
         ? ', wasteboard back on'
-        : '';
+        : surfaceChange.surfaceOff
+          ? `, ${surfaceChange.surfaceOff} off`
+          : '';
   const historyWhat =
     `created from "${active.name}": ${changeWords}${wasteboardWords}${bracketWords}` +
     (args.jobName ? `, for ${args.jobName}` : '');

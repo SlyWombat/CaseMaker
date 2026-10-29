@@ -354,18 +354,19 @@ describe('#693 walking the change', () => {
     let at = -1;
     for (const word of [
       'the 4th-axis cable is never plugged in live',
+      'the two 4 × 11 mm locating pins',
       'onto the two pins',
       'the three M5 × 10 screws',
       'the 4th-axis cable, rear left',
+      'chuck key in the tray',
       'switch the machine on',
       'wait for it to answer',
-      'chuck key in the tray',
     ]) {
       const next = fitText.indexOf(word);
       expect(next, word).toBeGreaterThan(at);
       at = next;
     }
-    for (let i = 0; i < 7; i++) clickCheck(`machine-change-fit-${i}`);
+    for (let i = 0; i < 8; i++) clickCheck(`machine-change-fit-${i}`);
     expect((screen.getByTestId('machine-change-use-shipped') as HTMLButtonElement).disabled).toBe(true);
     // #725 W13 — WHY it is disabled is on the screen, in the rotary's own words (A10: not a hover
     // title), and no longer the vise's "jaw-top reading".
@@ -472,10 +473,11 @@ describe('#693 walking the change', () => {
   it('#706 — the rotary fit’s Done waits for the machine to answer after power-on', async () => {
     const state = seedLocation();
     let online = true;
+    let homing = false;
     const z1 = fakeMachine({
       status: () =>
         online
-          ? sent('?', IDLE)
+          ? sent('?', homing ? IDLE.replace('<Idle', '<Home') : IDLE)
           : { ok: false, reason: 'timeout', line: '?', detail: 'no reply within 6000 ms', text: '' },
     });
     openMachineChange({ target: 'rotary' });
@@ -495,7 +497,7 @@ describe('#693 walking the change', () => {
 
     // 4 · the fit — with the machine switched off for the cable, as Makera's guide requires.
     await screen.findByTestId('machine-change-fit');
-    for (let i = 0; i < 7; i++) clickCheck(`machine-change-fit-${i}`);
+    for (let i = 0; i < 8; i++) clickCheck(`machine-change-fit-${i}`);
     fireEvent.click(screen.getByTestId('machine-change-measure-now'));
     // #717 — the light comes on once the power is back, before Done.
     fireEvent.click(screen.getByTestId('machine-change-light-again'));
@@ -505,6 +507,20 @@ describe('#693 walking the change', () => {
 
     // Done asks the machine through the same status read step 2 uses. It is still off: no answer,
     // no advance, and the sentence says what to do at the machine's own switch.
+    online = false;
+    fireEvent.click(screen.getByTestId('machine-change-fit-done'));
+    await waitFor(() =>
+      expect(screen.getByTestId('machine-change-fit-note').textContent).toContain('has not answered'),
+    );
+    // #728 — an answer while it is still homing itself is not Done either: wait for Idle.
+    homing = true;
+    online = true;
+    fireEvent.click(screen.getByTestId('machine-change-fit-done'));
+    await waitFor(() =>
+      expect(screen.getByTestId('machine-change-fit-note').textContent).toContain('reads Home — it is still homing'),
+    );
+    expect(screen.getByTestId('machine-change-step-4').getAttribute('data-state')).toBe('current');
+    homing = false;
     online = false;
     fireEvent.click(screen.getByTestId('machine-change-fit-done'));
     await waitFor(() =>
