@@ -939,7 +939,10 @@ describe('recommendTool — the computed pick states its size and its material r
         tabs: { count: 0, width: 0, height: 0 },
       } as EngraveCutout;
       const job: EngraveJob = { ...jobWithLabel('l1', 'CASE', 1), cutouts: [cutout] };
-      const rec = recommendTool(job, [vBit(2), flat()], [], (_key) => [row('l1', 1)]);
+      // #762 — the cut-out reaches 12.3 mm through this 12 mm blank, so the flat must reach it
+      // too; the shared `flat()` stops at 12, and this case is about the SHAPE gate.
+      const longFlat: ToolLibraryEntry = { ...flat(), tool: { ...flat().tool, shoulderLength: 15 } };
+      const rec = recommendTool(job, [vBit(2), longFlat], [], (_key) => [row('l1', 1)]);
       expect(candidate(rec, 'inv:v-30').excluded).toBe('job-shape');
       expect(candidate(rec, 'inv:v-30').refusal).toContain('cut-out');
       expect(rec.key).toBe('inv:kz-flat-1');

@@ -72,6 +72,8 @@ import { vCone } from '@/engine/cnc/vProfile';
 import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { inlayMarked } from './inlay';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
+import { kindOnlyPick } from './cutterPlan';
+import { pureGoalObject } from './jobSetup';
 import { lostDetailRatioFrom, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 
 /**
@@ -491,11 +493,25 @@ export function recommendTool(
   const bar = lostDetailRatioFrom(lostDetailWarnRatio);
   // The deepest cut is over every enabled item — a shape or combined shape can be the deepest
   // thing in the job (#214/#215), and the reach test below must see it.
+  // #762 — THE DEEPEST CUT IS EVERY CUT, NOT ONLY THE REGIONS. A cut-out reaches through the
+  // stock (+ the breakthrough), a drill through its floor, a thread below its thread, a chamfer is
+  // as deep as its bevel and a goal as deep as the blank. Leaving them out let a 12 mm-flute
+  // cutter be recommended for an 18–22 mm through cut-out, and the holder rubbed (#762's j13,
+  // j20, j22). The items below stay the same; this is the reach each of them asks.
+  const throughDepth = job.stock.thickness + job.breakthrough;
   const deepest = cuttablePrimitives(job).reduce(
     (max, primitive) => Math.max(max, primitive.depth),
     ([...job.labels, ...job.shapes, ...(job.combined ?? [])] as EngraveAnyItem[])
       .filter((item) => item.enabled)
       .reduce((max, item) => Math.max(max, item.depth), 0),
+  );
+  const deepestAny = Math.max(
+    deepest,
+    (job.cutouts ?? []).some((c) => c.enabled) ? throughDepth : 0,
+    (job.drills ?? []).reduce((m, d) => (d.enabled ? Math.max(m, d.through ? throughDepth : d.depth) : m), 0),
+    (job.threads ?? []).reduce((m, t) => (t.enabled ? Math.max(m, t.depth) : m), 0),
+    (job.chamfers ?? []).reduce((m, c) => (c.enabled ? Math.max(m, c.width) : m), 0),
+    pureGoalObject(job) !== null ? job.stock.thickness : 0,
   );
   // #405/#221 — a job whose enabled items are all TRACES (its region lists are empty) may take a
   // V-bit as a trace tool; one that holds a region item may take it as a V-CARVE. The list is
@@ -525,7 +541,31 @@ export function recommendTool(
       ? 'the job has a variable-depth V-carve, which needs a V-bit’s flank'
       : inlayMarked(job).some(({ item }) => item.enabled)
         ? 'the job has an inlay half, and an inlay is cut by a V-bit’s flank'
-        : null;
+        : // #762 — a chamfer is a cone's flank too (`chamfer-needs-cone`), so the pick must not
+          // offer a flat just because its diameter and shares are larger.
+          (job.chamfers ?? []).some((chamfer) => chamfer.enabled)
+          ? 'the job has a chamfer, and a chamfer is cut by a cone’s flank'
+          : null;
+
+  // #455 — the caution the job's own (hand-picked) cutter must carry, independent of what the
+  // recommendation picked. Computed before the returns so every outcome carries it.
+  const selectedNote = handPickedNote(job, tools, catalogue);
+
+  // #762 — A GOAL OR A THREAD-ONLY JOB IS NOT A FLAT JOB. A ball and a thread mill are
+  // `not-flat` to the candidate map below, so by construction it could never name them; the
+  // per-item-kind picker answers instead (the same rule the CLI's multi-cutter plan uses).
+  const kindPick = kindOnlyPick(job, tools, catalogue, conditions, table);
+  if (kindPick !== null) {
+    return {
+      key: kindPick.key,
+      compromise: false,
+      reason: kindPick.reason,
+      conditionNote: conditions?.get(kindPick.key)?.note ?? null,
+      catalogueNote: null,
+      selectedNote,
+      candidates: [],
+    };
+  }
 
   const candidates: ToolCandidate[] = tools.map((entry) => {
     const tool = entry.tool;
@@ -535,7 +575,7 @@ export function recommendTool(
     const reach = reachOf(entry);
     const reachKnown = reach !== null;
     // An unknown reach cannot be shown to foul, so it stays OK (the note above carries it).
-    const reachOk = reach === null || deepest <= reach;
+    const reachOk = reach === null || deepestAny <= reach;
     const condition = conditions?.get(entry.key) ?? null;
     const base = { key: entry.key, diameter, worst: null, reachKnown, reachOk, condition } as const;
 
@@ -646,9 +686,6 @@ export function recommendTool(
   });
 
   const eligible = candidates.filter((c) => c.excluded === undefined);
-  // #455 — the caution the job's own (hand-picked) cutter must carry, independent of what the
-  // recommendation picked. Computed before the returns so every outcome carries it.
-  const selectedNote = handPickedNote(job, tools, catalogue);
 
   const qualifying = eligible.filter((c) => c.qualifies);
   if (qualifying.length > 0) {
@@ -664,14 +701,31 @@ export function recommendTool(
     };
   }
 
-  if (eligible.length > 0) {
-    const pick = [...eligible].sort(bySmallest)[0]!;
+  // #762 — A CUTTER THAT CANNOT REACH IS NOT A COMPROMISE. The smallest eligible cutter used to
+  // be offered whatever its flute: a 12 mm-flute bit for an 18–22 mm through cut-out, and the
+  // holder rubbed. Only cutters whose reach covers the job's deepest cut (cut-outs included, see
+  // `deepestAny`) may stand as the smaller compromise; when none does, the honest answer is that
+  // no cutter on the bench reaches this job.
+  const reaching = eligible.filter((c) => c.reachOk);
+  if (reaching.length > 0) {
+    const pick = [...reaching].sort(bySmallest)[0]!;
     return {
       key: pick.key,
       compromise: true,
       reason: compromiseReason(job, pick),
       conditionNote: pick.condition?.note ?? null,
       catalogueNote: pick.catalogueNote ?? null,
+      selectedNote,
+      candidates,
+    };
+  }
+  if (eligible.length > 0) {
+    return {
+      key: null,
+      compromise: false,
+      reason: `No cutter in the list reaches this job’s deepest cut (${deepestAny} mm, through cuts included): every candidate’s flute or shoulder stops short, and one that cannot reach would rub its holder on the blank.`,
+      conditionNote: null,
+      catalogueNote: null,
       selectedNote,
       candidates,
     };

@@ -32,6 +32,7 @@ import {
   type ReachRow,
 } from './reachability';
 import type { EngraveJob, EngraveVectorShape } from '@/types/engraveJob';
+import { blankDepthCeiling } from './depthBounds';
 import { hasRegionItems } from './recommendTool';
 import { isVTraceTool, type Tool } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
@@ -290,6 +291,14 @@ export function restJobFor(
   regions: readonly RestRegionInput[],
   toolKey: string,
 ): EngraveJob {
+  // #762 — A REST REGION CANNOT BE DEEPER THAN THE BLANK. The regions are measured off the first
+  // program's simulation, and a through feature's left-over region carries the through depth
+  // (`thickness + breakthrough`); copied verbatim it became a rest vector cutting 3.3 mm into a
+  // 3 mm blank — `depth-exceeds-stock`'s "−0.3 mm floor" on j17. The rest pass removes what the
+  // first cutter left ABOVE the blank's floor, so the depth is clamped to that floor: over a
+  // through feature the first program has already cleared the region and this cuts air, and over
+  // anything else the clamp can only stop the finer cutter at the material it can leave.
+  const floorAllowed = blankDepthCeiling(job);
   const vectors: EngraveVectorShape[] = regions.map((r, i) => {
     const { width, height } = size(r.polygons);
     // The descriptor's own item name, not the operation sentence wrapped around it, and sizes at
@@ -306,7 +315,7 @@ export function restJobFor(
       height: um(height),
       position: { x: 0, y: 0 },
       rotation: 0,
-      depth: r.depth,
+      depth: Math.min(r.depth, floorAllowed),
       enabled: true,
     };
   });
