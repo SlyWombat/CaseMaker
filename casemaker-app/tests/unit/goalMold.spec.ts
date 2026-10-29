@@ -272,3 +272,20 @@ describe('#721 — a mold needs a rim and a floor', () => {
     if (asItem.ok) expect('goalMode' in (asItem.job.targetObject ?? {})).toBe(false);
   });
 });
+
+describe('#721 review — placement', () => {
+  it('a mold whose cavity would break out of the blank side is refused, even when it is small enough', () => {
+    const STOCK = { length: 100, width: 60, thickness: 12 };
+    const t = goal(domeTris(R), { goalMode: 'mold', size: { x: 20, y: 20, z: 5 }, position: { x: 8, y: 30, z: 0 } });
+    const f = validateGoalObject(t, STOCK, { edgeMargin: 1, minFloor: 1 });
+    expect(f.map((x) => x.code)).toEqual(['goal-mold-rim']);
+    expect(f[0]!.message).toContain('from X -2 to 18 mm');
+    expect(validateGoalObject({ ...t, position: { x: 50, y: 30, z: 0 } }, STOCK, { edgeMargin: 1, minFloor: 1 })).toEqual([]);
+  });
+
+  it('a mold run says it is a mold in its facts', () => {
+    const j: EngraveJob = { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal(domeTris(R), { goalMode: 'mold', position: { x: 50, y: 30, z: 0 } }) };
+    const out = generateGoalProgram(j, j.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    expect(out.surface3d?.notes.some((n) => n.startsWith('Made as a mold'))).toBe(true);
+  });
+});

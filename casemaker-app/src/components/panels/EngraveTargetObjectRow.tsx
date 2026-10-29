@@ -358,6 +358,8 @@ export function EngraveTargetObjectRow({
   const size = placedSize(target);
   const sizeText = `${Number(size.x.toFixed(2))}×${Number(size.y.toFixed(2))}×${Number(size.z.toFixed(2))} mm`;
   const goal = target.role === 'goal';
+  // #721 — a mold's cavity opens at the stock top, so its Z is not a placement.
+  const moldGoal = goal && target.goalMode === 'mold' && target.format !== 'png';
   const settings = target.surface ?? {};
   const feedsWords = surface?.feeds?.typed === true ? 'typed here' : 'the feeds row';
 
@@ -374,9 +376,12 @@ export function EngraveTargetObjectRow({
         aria-label={`Target object ${axis.toUpperCase()}`}
         title={
           axis === 'z'
-            ? "Height of the object's TOP above the stock's top face, mm. Z0 is the top face; a negative value sinks it into the blank."
+            ? moldGoal
+              ? "A mold's cavity always opens at the stock's top face, so its height is not used."
+              : "Height of the object's TOP above the stock's top face, mm. Z0 is the top face; a negative value sinks it into the blank."
             : `Centre of the object's bounding box in ${axis.toUpperCase()}, mm from the stock's front-left corner.`
         }
+        disabled={axis === 'z' && moldGoal}
         style={NUM}
         onChange={(e) => {
           const v = Number(e.target.value);

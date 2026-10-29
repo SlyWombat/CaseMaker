@@ -4098,7 +4098,13 @@ export function generateGoalProgram(
       roughingLayers: surfaced.roughingLayers,
       scallop: surfaced.scallop === null ? null : surfaced.scallop.facts,
       pencil: surfaced.pencil === null ? null : surfaced.pencil.facts,
-      notes: surfaced.notes,
+      // #721 — the run sheet and the row say a mold is a mold.
+      notes: isMold(goal)
+        ? [
+            ...surfaced.notes,
+            "Made as a mold: the part's shape is cut as a cavity from the stock's top face, turned over so a casting reads the right way round.",
+          ]
+        : surfaced.notes,
     } satisfies GoalSurfaceFacts,
   };
 }

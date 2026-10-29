@@ -190,8 +190,11 @@ function TargetObjectMesh({ target }: { target: EngraveTargetObject }) {
   return (
     <mesh
       geometry={geom}
-      position={[target.position.x, target.position.y, mold ? target.position.z - height : target.position.z]}
-      rotation={[0, 0, target.rotation * DEG]}
+      // A mold's cavity always opens at the stock top (Z 0) — the cut ignores `position.z` for it —
+      // and its rows are mirrored in the WORK frame after the turn (moldHeightfield), which equals
+      // mirroring the part locally and turning it the other way: R(−θ)·M = M·R(θ).
+      position={[target.position.x, target.position.y, mold ? -height : target.position.z]}
+      rotation={[0, 0, (mold ? -1 : 1) * target.rotation * DEG]}
       // #722 — the geometry's origin is the bbox centre in X/Y and its top in Z, the same anchor
       // the heightfield scales about, so the drawn mesh and the cut agree.
       scale={mold ? [scale.x, -scale.y, -scale.z] : [scale.x, scale.y, scale.z]}

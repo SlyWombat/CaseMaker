@@ -948,6 +948,23 @@ export function validateGoalObject(
         `cavity needs a ${fmt3(rim)} mm rim of stock all round it (the edge margin) on the ` +
         `${fmt3(length)}×${fmt3(width)} mm blank. Scale the part down, or use a larger blank.`,
     });
+  } else if (
+    mold &&
+    (target.position.x - footprint.x / 2 < (opts.edgeMargin ?? 0) - 1e-9 ||
+      target.position.x + footprint.x / 2 > length - (opts.edgeMargin ?? 0) + 1e-9 ||
+      target.position.y - footprint.y / 2 < (opts.edgeMargin ?? 0) - 1e-9 ||
+      target.position.y + footprint.y / 2 > width - (opts.edgeMargin ?? 0) + 1e-9)
+  ) {
+    const rim = opts.edgeMargin ?? 0;
+    findings.push({
+      severity: 'error',
+      code: 'goal-mold-rim',
+      message:
+        `The mold of "${target.name}" sits from X ${fmt3(target.position.x - footprint.x / 2)} to ` +
+        `${fmt3(target.position.x + footprint.x / 2)} mm and Y ${fmt3(target.position.y - footprint.y / 2)} to ` +
+        `${fmt3(target.position.y + footprint.y / 2)} mm, so its cavity would break out of the blank's side: ` +
+        `it needs ${fmt3(rim)} mm of stock all round it. Move it inward, or use Fit to the stock.`,
+    });
   } else if (mold && depth > thickness - (opts.minFloor ?? 0) + 1e-9) {
     const floor = opts.minFloor ?? 0;
     findings.push({
