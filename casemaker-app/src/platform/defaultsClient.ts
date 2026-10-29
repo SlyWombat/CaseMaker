@@ -275,15 +275,18 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'thread.chordToleranceMm': { label: 'thread helix chord tolerance (chosen)', unit: 'mm', rule: z.number().min(0.001).max(0.1), fallback: 0.01 },
   'engrave.newThreadDepthMm': { label: 'new thread depth (chosen)', unit: 'mm', rule: z.number().min(0.05).max(20), fallback: 5 },
   // #431 — the laser point-to-origin's accuracy: ±1 mm, chosen, not measured.
-  // #433 — adaptive clearing for metal pockets. The engagement, step-down, helix and ramp are chosen; the
-  // feeds and the spindle speed are our own placeholders. None measured, none a vendor number.
+  // #433 — adaptive clearing for metal pockets. The engagement, step-down, helix and ramp are chosen;
+  // the feeds and the spindle speed are our own placeholders. None measured, none a vendor number.
+  // #666 wires the strategy into a metal job's shape pocket; on that route the CUT numbers below
+  // (`cutFeed`, `entryFeed`, `spindleRpm` and the step-down's shallower bound) come from the feeds
+  // row instead, and these keys describe the METHOD or stand in for a direct engine caller.
   'adaptive.engagementFraction': { label: 'adaptive engagement cap, in cutter diameters (chosen)', unit: 'x', rule: z.number().min(0.02).max(0.5), fallback: 0.1 },
   'adaptive.stepDownMm': { label: 'adaptive step-down (chosen)', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 1 },
   'adaptive.helixDiameterFraction': { label: 'helix entry diameter, in cutter diameters (chosen)', unit: 'x', rule: z.number().min(0.1).max(0.95), fallback: 0.5 },
   'adaptive.rampAngleDeg': { label: 'helix and ramp entry angle (chosen)', unit: 'deg', rule: z.number().min(0.5).max(30), fallback: 2 },
-  // #668 — the bore's helix angle. Its OWN key, not `adaptive.rampAngleDeg`: the bore runs today,
-  // adaptive clearing is not wired, and two features sharing a number would tie the bore's descent
-  // to a setting named for something else.
+  // #668 — the bore's helix angle. Its OWN key, not `adaptive.rampAngleDeg`: the bore's descent is
+  // a different cut from a pocket's entry (#666), and two features sharing a number would tie the
+  // bore to a setting named for something else.
   'bore.rampAngleDeg': { label: 'bore helix ramp angle (chosen)', unit: 'deg', rule: z.number().min(0.5).max(30), fallback: 2 },
   // ── #451 adaptive settings (begin) — the entry clearance and the planner's three refusal limits.
   // CHOSEN, not measured: `adaptive.ts` plans a pocket, and each of these is where it gives up rather
@@ -295,6 +298,8 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'adaptive.residualShare': { label: 'adaptive residual tolerance, as a share of the area to clear (chosen)', unit: 'x', rule: z.number().min(0).max(0.5), fallback: 0.005 },
   'adaptive.neckAreaMm2': { label: 'adaptive sub-grid neck area (chosen)', unit: 'mm²', rule: z.number().min(0).max(100), fallback: 0.05 },
   // ── #451 adaptive settings (end)
+  // The CUT numbers a direct engine caller gets; a metal JOB's route (#666) takes the feeds row's
+  // feed, plunge feed and spindle instead, so these are never what a job's file runs.
   'adaptive.cutFeed': { label: 'adaptive clearing feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(1200), fallback: 600 },
   'adaptive.entryFeed': { label: 'adaptive entry feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(1200), fallback: 200 },
   'adaptive.spindleRpm': { label: 'adaptive spindle speed (placeholder)', unit: 'rpm', rule: z.number().min(1000).max(30000), fallback: 12000 },

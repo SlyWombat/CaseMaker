@@ -164,6 +164,44 @@ export interface ToolpathIR {
    * is the region one — the traces appended after it are unchanged by the ordering.
    */
   ordering?: OrderingReport;
+  /**
+   * #666 — WHAT THE REGION CAM DID WITH ADAPTIVE CLEARING, one entry per metal POCKET the strategy
+   * was offered to: planned, or refused and cut with contour-parallel rings instead. Present only
+   * on an IR whose caller passed adaptive settings (a metal job's program); absent on every IR
+   * built before #666, so an existing job is byte-identical. `concatToolpathIR` keeps the FIRST
+   * IR's report, which is the region one — traces and cut-outs are not pockets.
+   *
+   * The worker turns each entry into a finding (`adaptive-clearing` info, `adaptive-fallback`
+   * warning); the plan's own notes and findings ride along so the sentence is written where the
+   * numbers are.
+   */
+  adaptive?: AdaptiveRegionReport[];
+}
+
+/**
+ * #666 — one metal pocket's adaptive outcome, as `cam/engraveJob.ts` reports it.
+ *
+ * `status: 'adaptive'` means the operation's moves ARE the plan's (helix/ramp entry, measured
+ * clearing steps, levels no deeper than the step-down). `status: 'rings'` means the planner refused
+ * it and the pocket kept `pocketLoops`, with the refusal's code and reason so the run can say why.
+ */
+export interface AdaptiveRegionReport {
+  /** The item the pocket belongs to. */
+  labelId: string;
+  /** The operation's descriptor — no `[T#]` prefix, no depth suffix. */
+  name: string;
+  status: 'adaptive' | 'rings';
+  /** On `'adaptive'`: the engagement cap the plan held, mm. */
+  capMm?: number;
+  /** On `'adaptive'`: how many depth levels the plan was replayed at, and the step each took, mm. */
+  levels?: number;
+  levelStepMm?: number;
+  /** On `'adaptive'`: the plan's own notes — the numbers and entry the operator is told about. */
+  notes?: string[];
+  /** On `'adaptive'`: the plan's side notes (a helix refused for a ramp), forwarded as findings. */
+  findings?: { code: string; severity: 'info' | 'warning'; message: string }[];
+  /** On `'rings'`: the planner's refusal code and why the pocket kept its rings. */
+  refusal?: { code: string; reason: string };
 }
 
 /**

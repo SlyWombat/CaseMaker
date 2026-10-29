@@ -355,7 +355,16 @@ export type JobFindingCode =
   | 'neck-too-short'
   | 'neck-too-narrow-for-cutter'
   | 'neck-jaw-clearance'
-  | 'neck-not-cut';
+  | 'neck-not-cut'
+  // #666 — THE ADAPTIVE-CLEARING STRATEGY a metal pocket is cut with (see `cam/adaptive.ts`).
+  // `adaptive-clearing` (info) states the plan the file was cut from — engagement, levels, entry,
+  // feed owner — in the plan's own words. `adaptive-fallback` (warning) says the planner declined a
+  // pocket and it was cut with contour-parallel rings instead: the job still cuts, exactly as every
+  // metal pocket did before #666. `adaptive-helix-refused` (info) is the planner's ramp-instead-of-
+  // helix note, carried onto the job so the panel shows it.
+  | 'adaptive-clearing'
+  | 'adaptive-fallback'
+  | 'adaptive-helix-refused';
 
 export interface JobFinding {
   /**

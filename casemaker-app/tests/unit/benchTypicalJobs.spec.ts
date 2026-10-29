@@ -786,6 +786,13 @@ describe('#746 a setup’s later cutters cut the items they own, as those items'
     expect(nc[3]).toContain('Cut out ');
     // The first cutter owns the bore (⌀14, through): 10 mm stock.
     expect(zWords(nc[0]!), 'the bore is posted through the 10 mm stock').toContain('-10.3');
+    // #666 — the recess is a SHAPE pocket in 6061 aluminium cut by a flat end mill, so the first
+    // cutter clears it ADAPTIVELY: the real job takes the route the unit fixture does, the run
+    // states the plan, and the program names the operation. (The notch and label cutters own
+    // vectors and text, not pockets, so they keep their rings.)
+    expect(text, 'the recess is cleared adaptively (#666)').toContain('adaptive-clearing');
+    expect(nc[0]).toContain('(adaptive)');
+    expect(text, 'the planner must not decline the recess').not.toContain('adaptive-fallback');
     // The 1.5 mm cutter owns four 4 mm notches. Its file must NOT carry the first cutter's through
     // depth — that was "rest of Bore ⌀14", refused at 10.3 mm — and its own floor is exactly 4 mm
     // (`Z-4` would also be a prefix of the engraver's `Z-4.25`; the exact word is not).

@@ -1546,7 +1546,13 @@ simulation does report about one is the sweep's own list, next:
 | `rpm-refused` | error | The requested spindle speed is so far above the ceiling it was refused. | Use a sane spindle speed. |
 | `catalogue-ignored` | warning | Makera's own table states a number this job cannot use — a `0` (Studio writes one into a column it never filled) or a speed past the ceiling — so that one field comes from the app's starting table instead of from Makera (#325). The job cuts; it does not fail. | Nothing. If every cut of this material reads this way, the vendor's row is not the one you want — set your own value for that field. |
 
-**Adaptive clearing of a metal pocket** (CAM — #433; the toolpath exists, no job panel offers it yet). Here
+**Adaptive clearing of a metal pocket** (CAM — #433, wired into the job by #666). A **shape pocket in
+metal** cut by a flat end mill is planned by this strategy: the cutter enters on a helix (or a ramp where
+the pocket is too narrow for one) and then walks the pocket at a capped engagement instead of following
+contour-parallel rings. It cuts the **rough** half when the shop's finish allowance splits the pocket; the
+finishing pass stays the ideal outline in rings, and so do wood, text engraving, a V-cut and a through
+cut-out. A refusal from the planner is **not a refusal of the job**: the pocket falls back to those rings
+(and the straight plunge they always used) and `adaptive-fallback` says why. Here
 *engagement* means the new material a move removes per mm of travel. On a straight cut it is the width
 of cut; into a corner or round a small bore it is more than the stepover would say. The cap is the
 location default `adaptive.engagementFraction` × the cutter's diameter. Entry moves (the helix or the ramp)
@@ -1554,6 +1560,8 @@ are bounded by `adaptive.rampAngleDeg` instead.
 
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
+| `adaptive-clearing` | info | The pocket is cut by the adaptive strategy. The message carries the plan's own numbers: the engagement cap, the levels, the helix or ramp, and which row supplied the feeds and the step-down. | Nothing. This is the cut. |
+| `adaptive-fallback` | warning | The pocket is a metal shape pocket, but the adaptive planner declined it — the message says why (a grid too fine for the pocket, a slot, no entry that fits, a setting out of range) — so it is cut with contour-parallel rings and a straight plunge, as it was before #666. | Nothing, if the metal cuts well as it did before; otherwise fix what the message names: a smaller cutter, a wider pocket, or the `adaptive.*` setting. |
 | `adaptive-not-flat` | error | Adaptive clearing needs a flat end mill. A ball, V, chamfer, drill or bull-nose cutter is refused by name. | Choose a flat end mill. |
 | `adaptive-bad-settings` | error | The pocket has no depth, or an adaptive setting is out of range. For example, a helix wider than the cutter would leave a core of material standing in the middle. | Fix the depth or the `adaptive.*` setting the message names. |
 | `adaptive-no-room` | error | No part of the pocket is wide enough for the cutter at all. | Use a smaller cutter, or widen the pocket. |

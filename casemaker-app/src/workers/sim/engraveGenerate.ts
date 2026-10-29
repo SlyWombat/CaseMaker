@@ -70,7 +70,7 @@ import {
   vCarveStepoverClampNote,
   type VCarvePlane,
 } from '@/engine/cnc/vCarveGeometry';
-import { MATERIAL_LABELS } from '@/engine/cnc/materials';
+import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor } from '@/engine/cnc/toolRegistry';
@@ -113,6 +113,10 @@ import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, makeClipperOffset, zPasses, type EngraveRegion, type FinishPassSpec, type VCarveRegion } from '@/engine/cnc/cam/engraveJob';
+// #433/#666 — the adaptive-clearing strategy a metal pocket is cut with. The METHOD settings are
+// the shop's `adaptive.*` defaults; the cut numbers are the resolved feeds row, merged inside
+// `generateEngrave` so the plan and the rings it replaces read one params object.
+import { adaptiveSettings, type AdaptiveSettings } from '@/engine/cnc/cam/adaptive';
 import type { FinishStockToLeave } from '@/engine/cnc/engrave/finishPass';
 import { generateFacing, type FacingCamSummary } from '@/engine/cnc/cam/facing';
 import { chooseFacingTool } from '@/engine/cnc/engrave/facingTool';
@@ -2167,6 +2171,19 @@ export function engraveRegions(
     ...tabFindings,
   ]);
 
+  // #666 — WHICH POCKETS THE ADAPTIVE PLANNER IS OFFERED. A SHAPE's pocket in a METAL job, cut by
+  // a flat end mill on the FLAT frame: the combination #433 built the strategy for. A text label
+  // keeps its straight-plunge engraving (Q9); a V-bit opens no such pocket; a rotary job's region
+  // is authored on its MAP and the planner has no anisotropic frame to erode in; a through region
+  // is a cut-out (the profile pass owns it), not a pocket with a floor; and a derived core has no
+  // item in the document. Whether a plan is possible — settings, grid size, an entry that fits —
+  // is the CAM's to decide: this says only whether to ask.
+  const metalPockets =
+    isMetalMaterial(job.stock.material) && radius !== null && rotaryMap === null;
+  const isShapeItem = (id: string): boolean => {
+    const item = itemById.get(id);
+    return item !== undefined && 'kind' in item;
+  };
   const regions: EngraveRegion[] = plan.engraves.map((e) => {
     const vCarve = vCarveById.get(e.id);
     return {
@@ -2178,6 +2195,7 @@ export function engraveRegions(
       ...(vCarve === undefined ? {} : { vCarve }),
       ...(e.inlay === undefined ? {} : { inlay: e.inlay }),
       ...(e.through === true ? { through: true as const } : {}),
+      ...(metalPockets && e.through !== true && isShapeItem(e.id) ? { adaptive: true as const } : {}),
     };
   });
 
@@ -5101,6 +5119,13 @@ function generateOneProgram(
     // and the run sheet's facts below take one number, not two resolutions. A job with no bore
     // never reads it.
     const boreRamp = readDefault(shop.defaults ?? null, 'bore.rampAngleDeg');
+    // #666 — the adaptive settings, resolved only when a region was actually offered to the
+    // planner, so a job with no metal pocket reads no `adaptive.*` key at all. The METHOD is the
+    // shop's; the cut numbers are this program's resolved feeds row, merged inside the CAM (see
+    // `generateEngrave`), so a plan and the rings it replaces cannot disagree about the row.
+    const adaptiveUse: AdaptiveSettings | null = regions.some((r) => r.adaptive === true)
+      ? adaptiveSettings(shop.defaults ?? null).settings
+      : null;
     try {
       // A job with no REGION item has nothing for the region CAM to open — and since #405 it must not
       // be handed an empty list either: a trace-only job can now reach this line with a CONE for a
@@ -5123,6 +5148,9 @@ function generateOneProgram(
             // to the floor's own radius (R10's anisotropic opening). The moves stay map-space
             // until `toRotaryIR` below turns them into A.
             rotaryMap === null ? null : { radius: rotaryMap.radius },
+            // #666 — the adaptive-clearing offer (see `EngraveRegion.adaptive`). Null when no
+            // region asked, which keeps a non-metal job's CAM byte-identical to before.
+            adaptiveUse,
           );
       // #287 — single-line traces (#219) are their own CAM: the cutter's centre follows the path,
       // so there is no region to open, no offset and no pocketing. They are appended AFTER the
@@ -5225,6 +5253,40 @@ function generateOneProgram(
       }
     } catch (e) {
       return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });
+    }
+
+    // #666 — WHAT THE ADAPTIVE PLANNER DID with each metal pocket this program cut. The plan's own
+    // notes carry the numbers, so the sentence is written where they are; the refusal sentence is
+    // the planner's, and it NEVER refuses the job — the pocket keeps its rings (which is how every
+    // metal pocket cut before #666). The fallback is a warning, not info: the operator asked for a
+    // metal pocket and should know that this one enters with a straight plunge instead.
+    for (const a of ir.adaptive ?? []) {
+      if (a.status === 'adaptive') {
+        findings.push({
+          severity: 'info',
+          code: 'adaptive-clearing',
+          labelId: a.labelId,
+          message: `"${a.name}" is cleared adaptively: ${(a.notes ?? []).join('; ')}.`,
+        });
+        for (const f of a.findings ?? []) {
+          // The planner's helix-refused note is its own sentence with its own code (`info`: the
+          // ramp is the planned fallback). Any other code would be a planner change this worker
+          // has not been taught to translate, so it stays in the report rather than being guessed.
+          if (f.code === 'adaptive-helix-refused') {
+            findings.push({ severity: f.severity, code: f.code, labelId: a.labelId, message: f.message });
+          }
+        }
+      } else {
+        findings.push({
+          severity: 'warning',
+          code: 'adaptive-fallback',
+          labelId: a.labelId,
+          message:
+            `"${a.name}" is cut with contour-parallel rings: adaptive clearing declined this pocket — ` +
+            `${a.refusal?.reason ?? 'no reason recorded'}. The pocket still cuts, with the straight ` +
+            'plunge the rings always used.',
+        });
+      }
     }
 
     // #668 — what the bores in THIS program cut, for the run sheet's pitch step. The cutter radius

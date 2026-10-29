@@ -13,9 +13,11 @@
  * harness (`tests/unit/helpers/manifoldExec.ts`).
  *
  * ASSUMPTIONS recorded so they are revisitable:
- *   - A STRAIGHT PLUNGE. The cutters in scope are centre-cutting end mills at shallow passes
- *     in wood. Ramped entry is a follow-up, and a non-constant-Z move is one the simulator
- *     handles conservatively (/Simulation.md §3.2).
+ *   - A STRAIGHT PLUNGE unless the pocket is METAL. Until #666 the cutters in scope were
+ *     centre-cutting end mills at shallow passes in wood, and ramped entry was a follow-up. Since
+ *     #666 a metal job's SHAPE pocket is planned by `cam/adaptive.ts` (engagement-capped clearing,
+ *     entered by a helix where one fits, else a ramp); engraving, wood, plastic, a V-cut and #250's
+ *     finishing pass keep the straight plunge (Q9: metal pockets only).
  *   - CONVENTIONAL milling (see `MILLING`), chosen for thin, tape-held work.
  *   - Every contour hops back to `hopZ` between loops. Linking adjacent rings without
  *     retracting is an optimisation, and it is OUT OF SCOPE here because a straight link can
@@ -38,6 +40,7 @@ import {
   estimateCycleSeconds,
   HOP_Z,
   SAFE_Z,
+  type AdaptiveRegionReport,
   type CamDepthPasses,
   type CamMove,
   type CamOperation,
@@ -47,6 +50,12 @@ import {
   toolNumberFor,
 } from './ir';
 import { pocketLoops, type OffsetFn, type Polygons } from './pocket';
+import {
+  planAdaptive,
+  type AdaptivePlan,
+  type AdaptiveProvenance,
+  type AdaptiveSettings,
+} from './adaptive';
 import { aroundScale, scalePolygonsAround } from '../rotary/wrap';
 import { tourNearest, twoOptOrder } from './tour';
 
@@ -189,6 +198,13 @@ export interface FinishPassSpec {
   through?: boolean;
   /** #668 — the blank's thickness, mm, on a through region (see `through`); unread by any other cut. */
   stockThickness?: number;
+  /**
+   * #666 — OFFER THIS REGION TO THE ADAPTIVE PLANNER when the caller hands adaptive settings. The
+   * region builder marks a SHAPE pocket of a METAL job (`isMetalMaterial`), never a text label: Q9
+   * keeps engraving's straight plunges. A V region, a drill (its own `drill` block), #250's
+   * finishing pass and a pocket the planner refuses keep `pocketLoops`' contour-parallel rings.
+   */
+  adaptive?: true;
 }
 
 /**
@@ -299,6 +315,18 @@ function firstCuttingPoint(rings: Polygons[]): [number, number] {
   return best;
 }
 
+/**
+ * #666 — where an adaptive plan first puts the cutter into material: the first feed's XY. The plan
+ * opens with a rapid to the entry at the hop height, so this is the helix's or ramp's own start —
+ * the point the label ordering must price the travel to, not the ring vertex the plan never visits.
+ */
+function firstFeedPoint(moves: readonly CamMove[]): [number, number] {
+  for (const move of moves) {
+    if (move.kind === 'feed') return [move.x, move.y];
+  }
+  return [0, 0];
+}
+
 /** One pass of one item: its rings and the Z levels it cuts them at (#250). */
 interface PreparedPass {
   rings: Polygons[];
@@ -329,6 +357,20 @@ interface Prepared {
    * rung, where a pass entry pairs every ring with every depth.
    */
   ladder?: PreparedPass[];
+  /**
+   * #666 — an ACCEPTED adaptive plan for this region's rough (or whole) cut. Present => the
+   * operation loop emits it BEFORE `passList`, which then holds only #250's finishing pass when
+   * this program writes one. `depth` is the plan's own depth (the pocket's minus the allowance)
+   * and `passKind` is what the operation is called: `rough` whenever an allowance is in play,
+   * even in a `rough-only` program whose finish another tool cuts.
+   */
+  adaptive?: { plan: AdaptivePlan; depth: number; passKind: 'rough' | undefined };
+  /**
+   * #666 — the planner REFUSED this pocket, which is then cut with contour-parallel rings exactly
+   * as before. The pair rides on `ToolpathIR.adaptive` as a `status: 'rings'` entry and becomes
+   * the worker's `adaptive-fallback` finding: the limitation is stated, the job is not refused.
+   */
+  adaptiveRefusal?: { code: string; reason: string };
 }
 
 /**
@@ -557,6 +599,19 @@ function entryTravel(
  * it becomes a move, so the IR stays the map's and `toRotaryIR` is a pure map → frame conversion.
  * The first erosion is therefore exactly the footprint the oracle's facet allowance describes.
  * Absent (a flat job), every number is exactly as before.
+ *
+ * #666 — `adaptive` hands a job's metal POCKET to `cam/adaptive.ts`. A region the caller marked
+ * `adaptive` (a shape pocket of a metal job — see `EngraveRegion.adaptive`) is cut by the planner
+ * instead of contour-parallel rings, as the ROUGHING half of #250's split when an allowance splits
+ * it (the region eroded by the allowance, the levels stopping that far above the floor, and the
+ * finishing pass still the ideal outline at full depth), or as the whole cut when it does not. The
+ * settings describe the METHOD (engagement, helix, ramp, grid limits); the cut numbers are this
+ * call's `params`, so the plan and the rings it replaces can never disagree about the feeds row —
+ * the step-down is the shallower of the two and the notes name whichever owner won. The strategy
+ * is for a FLAT-frame metal pocket: `rotary` regions are never marked, and a marked one falls
+ * through to the rings here. A REFUSAL IS NEVER A JOB REFUSAL: the pocket keeps its rings and
+ * `ToolpathIR.adaptive` states why. Absent (every pre-#666 caller, every non-metal job), every
+ * number is exactly as before.
  */
 export function generateEngrave(
   tl: ManifoldToplevel,
@@ -569,6 +624,7 @@ export function generateEngrave(
   finish: FinishPassSpec | null = null,
   boreRampAngleDeg: number | null = null,
   rotary: { radius: number } | null = null,
+  adaptive: AdaptiveSettings | null = null,
 ): ToolpathIR {
   const usable = cuttingForTrace(tool);
   if (!usable.ok) throw new Error(`generateEngrave: ${usable.reason}`);
@@ -686,6 +742,30 @@ export function generateEngrave(
   // the (setup, tool) split that decides how many programs a job has is #472's.
   const finishOn = finish !== null && finish.stockToLeaveMm > 0 && cone === null;
 
+  // #666 — THE ADAPTIVE PLAN'S CUT NUMBERS. The settings describe the METHOD (engagement, helix,
+  // ramp, refusal limits) and stay the shop's; the CUT belongs to the feeds row that this call was
+  // handed, so the feed, the plunge feed and the spindle speed are `params` and the step-down is
+  // the shallower of the row's and the shop's — a level is a bite, and neither owner may exceed the
+  // other's limit. The provenance names whichever step-down won, so the plan's levels sentence
+  // credits the value it was actually planned with rather than a key it never read.
+  const adaptiveCut: AdaptiveSettings | null =
+    adaptive === null
+      ? null
+      : {
+          ...adaptive,
+          stepDownMm: Math.min(adaptive.stepDownMm, params.stepDown),
+          cutFeed: params.feed,
+          entryFeed: params.plungeFeed,
+          spindleRpm: params.rpm,
+        };
+  const adaptiveProvenance: AdaptiveProvenance = {
+    stepDown:
+      adaptive !== null && adaptive.stepDownMm <= params.stepDown + 1e-12
+        ? `adaptive.stepDownMm ${adaptive.stepDownMm}`
+        : `the feeds row's ${params.stepDown} mm step-down`,
+    feeds: "the feeds row's feed, plunge feed and spindle speed",
+  };
+
   const prepared: Prepared[] = labels.map((label) => {
     if (label.drill) {
       const holes = orderHolesNearest(label.drill.holes);
@@ -797,17 +877,70 @@ export function generateEngrave(
       }
       return { label, passList: [], ladder, firstCut: firstCuttingPoint(ladder[0]!.rings) };
     }
+    // #666 — THE METAL POCKET'S ADAPTIVE CUT, planned before the rings so a refusal costs nothing.
+    // It replaces the ROUGH half of #250's split: the region eroded by the allowance, the levels
+    // stopping that far above the floor, exactly the material the finishing pass then takes off the
+    // wall and the floor. With no allowance it is the whole cut. A `finish-only` program has no
+    // roughing to do (another tool cut it, in its own program) and a pocket shallower than the
+    // allowance has no rough pass to replace, so neither plans anything — the rings below are the
+    // answer, unchanged. `rotary` is refused here because the planner has no around-axis frame: a
+    // rotary region's erosion is anisotropic (see the header) and an isotropic plan would cut the
+    // wall. The worker never marks one; this guard keeps a direct caller honest without a finding
+    // for a job that cannot exist.
+    const leave = finishOn && finish !== null ? finish.stockToLeaveMm : 0;
+    const roughDepth = label.depth - leave;
+    const wantAdaptive =
+      adaptiveCut !== null &&
+      label.adaptive === true &&
+      cone === null &&
+      rotary === null &&
+      roughDepth > 0 &&
+      (!finishOn || finish === null || finish.mode !== 'finish-only');
+    let adaptiveRefusal: { code: string; reason: string } | undefined;
+    if (wantAdaptive && adaptiveCut !== null) {
+      const region = leave > 0 ? offset(label.polygons, -leave) : label.polygons;
+      const planned = planAdaptive({
+        tool,
+        region,
+        depth: roughDepth,
+        settings: adaptiveCut,
+        provenance: adaptiveProvenance,
+      });
+      if (planned.ok) {
+        const plan = planned.plan;
+        const passList: PreparedPass[] = [];
+        if (finishOn && finish !== null && finish.mode !== 'rough-only') {
+          // #250's finishing pass is untouched by #666: the ideal outline at full depth, in
+          // contour-parallel rings — the strategy changes what removes the bulk, not the wall.
+          passList.push({ rings: ringsFor(label), passes: [-label.depth], stepMm: label.depth, passKind: 'finish' });
+        }
+        return {
+          label,
+          passList,
+          // The tool enters wherever the plan's first feed does, so the label ordering costs the
+          // travel to the helix or ramp, not to a ring vertex the adaptive op never visits.
+          firstCut: firstFeedPoint(plan.moves),
+          adaptive: { plan, depth: roughDepth, passKind: finishOn ? 'rough' : undefined },
+        };
+      }
+      // An engine limitation, stated where the numbers are and never turned into a refusal: the
+      // pocket falls back to the rings below, and the report carries the planner's own sentence.
+      adaptiveRefusal = { code: planned.code, reason: planned.reason };
+    }
     const onePass: PreparedPass = {
       rings: ringsFor(label),
       passes: zPasses(label.depth, params.stepDown),
       stepMm: params.stepDown,
     };
     if (!finishOn || finish === null) {
-      return { label, passList: [onePass], firstCut: firstCuttingPoint(onePass.rings) };
+      return {
+        label,
+        passList: [onePass],
+        firstCut: firstCuttingPoint(onePass.rings),
+        ...(adaptiveRefusal === undefined ? {} : { adaptiveRefusal }),
+      };
     }
-    const leave = finish.stockToLeaveMm;
     const passList: PreparedPass[] = [];
-    const roughDepth = label.depth - leave;
     if (finish.mode !== 'finish-only' && roughDepth > 0) {
       // The roughing region is eroded by the tool radius PLUS the wall allowance; its deepest pass
       // stops the same distance above the floor.
@@ -825,7 +958,12 @@ export function generateEngrave(
     // A cut shallower than the allowance has no roughing pass to make; keeping the one-pass cut is
     // better than writing an item with no operation at all (#250 review).
     if (passList.length === 0) passList.push(onePass);
-    return { label, passList, firstCut: firstCuttingPoint(passList[0]!.rings) };
+    return {
+      label,
+      passList,
+      firstCut: firstCuttingPoint(passList[0]!.rings),
+      ...(adaptiveRefusal === undefined ? {} : { adaptiveRefusal }),
+    };
   });
 
   const strategies: Record<'nearest', (items: readonly Prepared[]) => Prepared[]> = { nearest: orderNearest };
@@ -911,6 +1049,31 @@ export function generateEngrave(
       });
       continue;
     }
+    if (item.adaptive !== undefined) {
+      // #666 — THE ADAPTIVE OPERATION. Its moves carry their own helix or ramp entry, at-depth
+      // links and lifts, so there are no loops to place and nothing for the ordering report to
+      // price (that report measures ring-entry travel; the plan's own travel is inside its moves).
+      // The tool leaves at the plan's last rapid — the hop-height exit — and #250's finishing pass,
+      // when this program writes one, enters from there.
+      const moves = item.adaptive.plan.moves;
+      const last = moves[moves.length - 1];
+      if (last !== undefined) cursor = [last.x, last.y];
+      const kind = item.adaptive.passKind;
+      const suffix = kind === undefined ? ' (adaptive)' : ` (${kind}, adaptive)`;
+      operations.push({
+        number: operations.length + 1,
+        name: `[T${toolNumber}]${descriptor} ${item.label.depth.toFixed(1)}mm${suffix}`,
+        labelId: item.label.id,
+        depth: item.label.depth,
+        ...(kind === undefined ? {} : { passKind: kind }),
+        // #735 — the planner's LEVELS, not its helix chords: every chord changes Z, and counting
+        // them would report a pocket as hundreds of depth passes.
+        depthPasses: item.adaptive.plan.levels.length,
+        passStepMm: item.adaptive.depth / Math.max(1, item.adaptive.plan.levels.length),
+        moves,
+        estimatedSeconds: estimateCycleSeconds(moves, rapid),
+      });
+    }
     for (const pass of item.passList) {
       const loops = placeLoops(pass, 'proximity', cursor);
       const moves = buildMoves(loops, params);
@@ -946,6 +1109,32 @@ export function generateEngrave(
     }
   }
 
+  // #666 — WHAT THE REGION CAM DID WITH THE STRATEGY, one entry per pocket it was offered to, in
+  // cut order: planned, or refused and cut with rings. Collected here rather than in the prepare
+  // map so the report reads in the order the file cuts. The plan's notes and findings ride along —
+  // the worker's finding sentence is written from them, where the numbers are.
+  const adaptiveReport: AdaptiveRegionReport[] = [];
+  for (const item of ordered) {
+    if (item.label.adaptive !== true) continue;
+    if (item.adaptive === undefined && item.adaptiveRefusal === undefined) continue;
+    const name = item.label.name ?? `Engrave "${item.label.text}"`;
+    if (item.adaptive !== undefined) {
+      const plan = item.adaptive.plan;
+      adaptiveReport.push({
+        labelId: item.label.id,
+        name,
+        status: 'adaptive',
+        capMm: plan.capMm,
+        levels: plan.levels.length,
+        levelStepMm: plan.levels.length === 0 ? 0 : item.adaptive.depth / plan.levels.length,
+        notes: plan.notes,
+        ...(plan.findings.length === 0 ? {} : { findings: plan.findings }),
+      });
+    } else if (item.adaptiveRefusal !== undefined) {
+      adaptiveReport.push({ labelId: item.label.id, name, status: 'rings', refusal: item.adaptiveRefusal });
+    }
+  }
+
   return {
     // The MAP work frame: a rotary job's IR is authored on the unrolled surface and belongs to the
     // FLAT frame until `toRotaryIR` (rotary/wrap.ts) turns it into a rotary IR after the CAM
@@ -970,5 +1159,8 @@ export function generateEngrave(
             cutMm: regionCutMm,
           },
         }),
+    // #666 — present only when a caller handed adaptive settings AND a region was marked for it;
+    // every pre-#666 caller's IR is unchanged.
+    ...(adaptiveReport.length === 0 ? {} : { adaptive: adaptiveReport }),
   };
 }

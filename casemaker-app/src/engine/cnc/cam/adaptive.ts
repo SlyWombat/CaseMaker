@@ -1,7 +1,15 @@
 /**
- * Adaptive clearing for metal pockets, with helical and ramped entry (#433 phase 1, not yet wired to
- * a job). The maintainer's Q9: ramped and helical entry reopen for METAL POCKETS, delivered with
- * this; engraving keeps its straight plunges (`Makera-Parity.md` §14.4 R16).
+ * Adaptive clearing for metal pockets, with helical and ramped entry (#433 phase 1; wired into a
+ * metal job's pocket by #666). The maintainer's Q9: ramped and helical entry reopen for METAL
+ * POCKETS, delivered with this; engraving keeps its straight plunges (`Makera-Parity.md` §14.4 R16).
+ *
+ * WHERE A JOB USES IT (#666). `cam/engraveJob.ts` plans a metal job's SHAPE pocket with this module
+ * instead of contour-parallel rings — as the ROUGHING pass when #250's finish allowance splits the
+ * pocket, and as the whole cut when it does not. The job supplies the cutter, the depth and the
+ * feed numbers (its feeds row), so `AdaptiveInput.provenance` is how a plan's notes say where the
+ * cut numbers came from; with no provenance they are the shop's labelled placeholders, as phase 1
+ * wrote them. A refusal is never a job refusal: the pocket falls back to rings and the run states
+ * why (`adaptive-fallback`), which is the maintainer's "inform, don't refuse" rule.
  *
  * WHAT "ENGAGEMENT" MEANS HERE. The new material a move removes per mm of tool travel, in mm — the
  * effective radial width of cut. On a straight cut it IS the radial width (ae); around an inside arc
@@ -143,6 +151,22 @@ export interface AdaptiveInput {
   /** Positive mm below the top. */
   depth: number;
   settings: AdaptiveSettings;
+  /**
+   * #666 — where the CUT numbers came from, when a job supplies them rather than the shop's
+   * `adaptive.*` placeholders. The job route takes the feeds row's spindle, feed and plunge feed and
+   * the shallower of the row's step-down and `adaptive.stepDownMm`, so a plan's notes must name
+   * that owner rather than claim a key it did not read. Absent (a direct caller, phase 1's spec):
+   * the notes are the placeholder sentences this module has always written.
+   */
+  provenance?: AdaptiveProvenance;
+}
+
+/** #666 — the two places a plan's notes name where its cut numbers came from (see `AdaptiveInput`). */
+export interface AdaptiveProvenance {
+  /** The levels note's parenthetical, e.g. `the feeds row's 0.2 mm step-down`. */
+  stepDown: string;
+  /** The feeds note's subject, e.g. `the feeds row's feed, plunge feed and spindle speed`. */
+  feeds: string;
 }
 
 export type EntryPlan =
@@ -465,15 +489,20 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
 
   const { moves, roles } = replay(ops, levels, s, tanA);
   const sorted = [...stepEngagements].sort((a, b) => a - b);
+  const prov = input.provenance;
   const notes = [
     `engagement capped at ${fmt(cap)} mm (${s.engagementFraction} × the ${fmt(D)} mm cutter), planned at ${fmt(target)} mm and never above ${fmt(accept)} mm on the planner's ${fmt(h)} mm grid`,
-    `${levels.length} level(s) of ${fmt(levelStep)} mm (adaptive.stepDownMm ${s.stepDownMm})`,
+    prov === undefined
+      ? `${levels.length} level(s) of ${fmt(levelStep)} mm (adaptive.stepDownMm ${s.stepDownMm})`
+      : `${levels.length} level(s) of ${fmt(levelStep)} mm (${prov.stepDown})`,
     ...entries.map((e) =>
       e.kind === 'helix'
         ? `helix entry at (${fmt(e.centre[0])}, ${fmt(e.centre[1])}), ${fmt(2 * e.radius)} mm across at ${s.rampAngleDeg}°`
         : `ramp entry from (${fmt(e.a[0])}, ${fmt(e.a[1])}) to (${fmt(e.b[0])}, ${fmt(e.b[1])}) at ${s.rampAngleDeg}°, ${e.legs} leg(s) per level`,
     ),
-    `feeds ${s.cutFeed} / ${s.entryFeed} mm/min and ${s.spindleRpm} rpm are starting values (adaptive.cutFeed, adaptive.entryFeed, adaptive.spindleRpm)`,
+    prov === undefined
+      ? `feeds ${s.cutFeed} / ${s.entryFeed} mm/min and ${s.spindleRpm} rpm are starting values (adaptive.cutFeed, adaptive.entryFeed, adaptive.spindleRpm)`
+      : `feeds ${s.cutFeed} / ${s.entryFeed} mm/min and ${s.spindleRpm} rpm are ${prov.feeds}`,
   ];
   return {
     ok: true,

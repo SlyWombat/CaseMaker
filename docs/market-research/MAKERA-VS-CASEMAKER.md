@@ -53,7 +53,7 @@ moved these cells; the review's "Us" column should not be read for them:
 |---|---|---|
 | Jog / MDI / overrides "refused until the bridge" (R-10) | A guarded typed console shipped (#302); jog, overrides and pendant stay refused | C7–C11 |
 | Thread milling refused (R-14) | Shipped as a helical thread in an existing pilot (#445) | G8 |
-| Ramping refused (R-16) | Reopened for **metal pockets** only — adaptive clearing with helical/ramped entry (#433, Q9), engine module only so far (#666); bores helix (#668); engraving and pockets still plunge | G10 |
+| Ramping refused (R-16) | Lifted for **metal shape pockets** — adaptive clearing with a helix (or ramp) entry is the pocket's rough cut, wired into the job by #666 (#433, Q9); bores helix (#668). Wood, text, V-cuts, through cut-outs and the finishing pass still plunge | G10 |
 | Stock-to-leave "absent" (M3) | A finish pass with a shop-setting allowance (#250) | G11 |
 | Restart from a step "absent" (M2) | Generated and gated (#249); untested against a real stop (#284) | H7 |
 | G-code viewer "absent" (A5) | Read-only pane synced to the transport (#245) | G24 |
@@ -175,7 +175,7 @@ moved these cells; the review's "Us" column should not be read for them:
 | Rotary | type 11 Rotation Relief — Parity §2 | Designed (`/Rotary.md`), column engine parameterised (#239); nothing reaches the IR | ABSENT | **#545** |
 | Thread milling | types 9 and 12 — Parity §2 | Helical thread in an existing pilot, ISO 261 pitch, a thread model in the simulator (#445, #434) — supersedes R-14 | PARITY | — |
 | Facing | Not one of the 14 strategy types — Parity §2 | Raster skim to Z0, wood and metal only, never plastic (#432, #473, #474) | AHEAD | — |
-| Ramping / adaptive entry | `useRamping`, `rampingType`… fields — Parity §4 | Adaptive clearing with helical/ramped entry for metal pockets exists as an engine module only (`cam/adaptive.ts`, #433, Q9) — no job path posts it (corrected 2026-10-29, #666; it was recorded here as wired by #442, which it was not). A hole to size helixes down its wall (bore, #668); pockets and engraving keep straight plunges | PARTIAL | R-16 (engrave) |
+| Ramping / adaptive entry | `useRamping`, `rampingType`… fields — Parity §4 | A metal job's SHAPE pocket is cleared adaptively (`cam/adaptive.ts`, #433, Q9; wired into the job by #666) — a capped engagement on a measured material grid, entered by a helix (or a ramp), posted as the ROUGH half of #250's split when the allowance splits the pocket; the finishing pass stays contour-parallel rings. The run states the plan's engagement, entry and the feeds row it ran (`adaptive-clearing`); a planner refusal falls back to those rings and says why (`adaptive-fallback`) — a report, never a refusal of the job. Wood, text labels, V-cuts, through cut-outs and a finish-only rest program keep the straight plunge (Q9). A hole sizes its helix down the wall (bore, #668) | PARITY | — |
 | Stock-to-leave / finish pass | `radial_allowance`, `axial_allowance` fields — Parity §4 | A finish pass whose allowance is a shop setting (#250) | PARITY | — |
 | Rest machining | Guided Mode picks a Main Tool and a Clearance Tool — Workflow A.2 | Rest regions measured by the simulation, per-setup item → cutter assignment (#410, #436, #472) | PARITY | — |
 | Multi-setup / two-sided | One `Set Stock` per project — Workflow A.4 | Setups planned from the geometry, a remount page, features from setup 1 as references (#428, #429, #471) | AHEAD | — |
