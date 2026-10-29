@@ -340,7 +340,9 @@ export interface SimLoadOpts {
    */
   surface?: SurfaceFrame | null;
   /**
-   * The Z ramp, mm, past which the COLUMN engine reports a swept move as `ramp-over-removed` (#629).
+   * The Z ramp, mm, past which the COLUMN engine reports a swept move as `ramp-over-removed` (#629)
+   * — a PLAIN V-BIT only since #758; every other cutter follows Z along the move and no longer
+   * over-removes.
    * Passed straight through to the column engine, which has no job and so cannot derive it: the
    * caller sends half the job's smallest level step (the smallest gap between its distinct item
    * depths). Absent: the column engine's ramp check is off — a pre-#629 caller sees no new

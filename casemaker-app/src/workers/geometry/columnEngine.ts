@@ -495,12 +495,12 @@ export interface ColumnSweepOpts {
    */
   threads?: readonly SimThreadSpec[] | null;
   /**
-   * The Z ramp, mm, past which a swept XY move is reported as `ramp-over-removed` (#629). A move
-   * whose Z changes along its XY segment is swept at its deep end (`min(z0, z1)`), removing more
-   * than the machine would; the caller passes half the job's smallest level step — the size at which
-   * the deep-end sweep can cross a level — so a thread's ~0.01 mm per chord stays silent and only a
-   * ramp that can over-remove at a lower level is named. Absent: the check is off, so a pre-#629
-   * caller sees no new diagnostics.
+   * The Z ramp, mm, past which a swept XY move is reported as `ramp-over-removed` (#629). ONLY a
+   * plain V-bit is swept at its deep end (`min(z0, z1)`) now that #758 follows Z along the move for
+   * every other cutter — the V keeps the old rule because its oracle is a per-segment groove at one
+   * depth (#408/#674). For a V, the caller passes half the job's smallest level step, so a ramp
+   * that can over-remove at a lower level is named. Absent, zero, or any non-V cutter: the check is
+   * off and no finding is raised.
    */
   rampThresholdMm?: number | null;
 }
@@ -1477,13 +1477,14 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const threadSpecs = resolved.kind === 'thread-envelope' ? (opts?.threads ?? []) : [];
   const diagnostics: SweepDiagnostic[] =
     threadSpecs.length > 0 ? resolved.diagnostics.filter((d) => d.code !== 'thread-envelope') : [...resolved.diagnostics];
-  // #629 — a feed whose Z ramps along its XY segment is swept at its deep end (`flatMovesOf` takes
-  // `min(z0, z1)`), so the sim removes more than the machine would. The exact engine names that
-  // `ramp-over-removed`; the column path does the same when the ramp exceeds the caller's threshold
-  // (half the job's smallest level step), so a thread's ~0.01 mm per chord stays silent and only a
-  // ramp that can cross a level is named. One line per qualifying checkpoint, like the exact path.
+  // #629 — a feed whose Z ramps along its XY segment is swept at its deep end (`min(z0, z1)`), so
+  // the sim removes more than the machine would. #758 changed that for every cutter EXCEPT a plain
+  // V-bit: the flat and ball/bull finishes and the thread mill follow the tip along the move, so
+  // their picture no longer over-removes and this info would be false. A V's oracle is a
+  // per-segment groove at one depth, so its cut still takes the low end; this is the one cutter the
+  // warning still speaks for. One line per qualifying checkpoint, like the exact path.
   const rampThreshold = opts?.rampThresholdMm ?? null;
-  if (!rotary && rampThreshold !== null && rampThreshold > 0) {
+  if (!rotary && resolved.kind === 'v' && rampThreshold !== null && rampThreshold > 0) {
     for (let k = 0; k < timeline.checkpoints.length; k++) {
       const cp = timeline.checkpoints[k] as Checkpoint;
       let worst = 0;
