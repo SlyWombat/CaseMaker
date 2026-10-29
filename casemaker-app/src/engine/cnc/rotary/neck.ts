@@ -136,17 +136,35 @@ export interface RotaryNeckFacts extends RotaryNeckSpan {
 }
 
 /**
+ * The gap the default neck keeps inside its rod, mm. A neck has to be narrower than the part it
+ * holds — `neck-wider-than-part` refuses equality — so the default is capped just inside the rod.
+ */
+const ROTARY_NECK_DEFAULT_CLEARANCE_MM = 0.1;
+
+/**
  * The neck Case Maker offers first: off until the operator turns it on, with labelled defaults.
  *
  * The CHUCK side is the default because that is where the stock goes into the jaws: sawing a
  * tailstock-side neck frees only the scrap stub beyond it and leaves the part joined to the stock
  * in the chuck, so it does not part the part off. The tailstock side remains available for the
  * work that wants it; the panel states that consequence.
+ *
+ * The diameter is CAPPED to the rod: the ⌀7 mm default is meaningless on a ⌀7 mm or smaller rod,
+ * where it would refuse `neck-wider-than-part` the instant the box is ticked. The default keeps
+ * {@link ROTARY_NECK_DEFAULT_CLEARANCE_MM} inside the rod and is rounded to 0.1 mm, so it is
+ * always strictly narrower than the stock it is cut from.
  */
-export function defaultRotaryNeck(): RotaryNeck {
+export function defaultRotaryNeck(stockDiameterMm?: number | null): RotaryNeck {
+  const rod = stockDiameterMm ?? null;
+  const diameter =
+    rod === null || !Number.isFinite(rod)
+      ? ROTARY_NECK_DIAMETER_MM
+      : Math.round(
+          Math.min(ROTARY_NECK_DIAMETER_MM, Math.max(0, rod - ROTARY_NECK_DEFAULT_CLEARANCE_MM)) * 10,
+        ) / 10;
   return {
     end: 'chuck',
-    diameter: ROTARY_NECK_DIAMETER_MM,
+    diameter,
     length: ROTARY_NECK_LENGTH_MM,
   };
 }
@@ -439,6 +457,21 @@ export function neckNoProgramSentence(): string {
     'The neck for parting is set, but no program in this run cuts it: the program that would have ' +
     'left the neck was not posted. Turn the neck off, or keep a program that cuts it and leave that ' +
     'program last.'
+  );
+}
+
+/**
+ * "The jaw clearance beside the neck is not checked …" — the warning every neck carries. The map's
+ * jaw keep-out is Case Maker's own guess and the sweep models no jaw body, so nothing in the app
+ * can promise the cut clears the jaws; the operator air-cuts it first and keeps checking by eye
+ * until the rotary is measured on the machine. One sentence, so the panel, the finding and the run
+ * sheet cannot word the same limit three ways.
+ */
+export function neckJawClearanceSentence(): string {
+  return (
+    'The jaw clearance beside the neck is not checked: Case Maker keeps the neck clear of a jaw ' +
+    'keep-out band it assumes — its own guess — and does not model the jaws as a solid. Air-cut the ' +
+    'neck first, and do not trust that clearance until the rotary is measured on the machine.'
   );
 }
 

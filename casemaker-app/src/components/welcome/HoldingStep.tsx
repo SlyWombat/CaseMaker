@@ -31,11 +31,11 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, typ
 import { rotaryFits } from '@/engine/cnc/setups/plan';
 import { ROTARY_JAW_KEEP_OUT_MM, ROTARY_TAILSTOCK_BAND_MM, type RotaryMap } from '@/engine/cnc/rotary/wrap';
 import {
-  ROTARY_NECK_DIAMETER_MM,
   ROTARY_NECK_LENGTH_MM,
   ROTARY_NECK_MIN_LENGTH_MM,
   defaultRotaryNeck,
   neckEndLabel,
+  neckJawClearanceSentence,
   rotaryNeckMinDiameterMm,
   rotaryNeckSpan,
 } from '@/engine/cnc/rotary/neck';
@@ -1755,6 +1755,9 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     };
     const neckSpan = neck === undefined ? null : rotaryNeckSpan(neckMap, neck);
     const neckMin = neckSpan === null ? null : rotaryNeckMinDiameterMm(job.stock.material, neckSpan.effectiveMm);
+    // The default the toggle will write for THIS rod: the ⌀7 mm figure is capped to keep it inside
+    // a slim rod, and the note quotes what the operator will actually get.
+    const neckDefault = defaultRotaryNeck(rod.diameter);
     const axisDatum = profile?.datums.rotaryAxis ?? null;
     return (
       <div data-testid="engrave-setup-rotary-fields" style={BED_FIELDS}>
@@ -1818,7 +1821,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
               checked={neck !== undefined}
               onChange={(e) => {
                 if (e.target.checked) {
-                  write({ neck: defaultRotaryNeck() });
+                  write({ neck: defaultRotaryNeck(rod.diameter) });
                 } else {
                   // Absent is OFF (the document rule): the key goes, rather than a false flag a
                   // later reader would have to know to ignore.
@@ -1884,17 +1887,19 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
               {neckSpan === null || neckMin === null
                 ? 'The neck needs a length and a diameter above 0 mm.'
                 : `The program’s last operation cuts it down to ⌀${fmt(neck.diameter)} mm all the way round with the ` +
-                  `part’s own cutter, and you saw the part off at X ${fmt(neckSpan.sawAtMm)} mm — the neck runs ` +
+                  `part’s own cutter, and you saw ${neck.end === 'chuck' ? 'the part' : 'the scrap end'} off at ` +
+                  `X ${fmt(neckSpan.sawAtMm)} mm — the neck runs ` +
                   `X ${fmt(neckSpan.fromMm)}–${fmt(neckSpan.toMm)} mm on the ${neckEndLabel(neck.end)}. ` +
                   (neck.end === 'chuck'
                     ? 'The stock goes into the jaws at the chuck side, so the saw frees the whole part. '
                     : 'The stock goes into the jaws at the chuck side, so a neck here frees only the scrap ' +
                       'stub: the part stays joined to the stock in the chuck and is not parted off. ') +
-                  `Case Maker starts the neck at ⌀${ROTARY_NECK_DIAMETER_MM} mm and ${ROTARY_NECK_LENGTH_MM} mm long ` +
+                  `Case Maker starts the neck at ⌀${fmt(neckDefault.diameter)} mm and ${ROTARY_NECK_LENGTH_MM} mm long ` +
                   `(a saw needs at least ${ROTARY_NECK_MIN_LENGTH_MM} mm): those are labelled defaults, not ` +
                   `measurements. ` +
-                  `The saw frees the ${neck.end === 'chuck' ? 'whole part' : 'stub'}, which runs ` +
-                  `${fmt(neckSpan.carriedMm)} mm from the neck’s root at X ${fmt(neckSpan.fromMm)} mm to the free end; ` +
+                  `The check treats ${neck.end === 'chuck' ? 'the whole part beyond the neck' : 'the scrap stub beyond the neck'} ` +
+                  `as carried: it runs ${fmt(neckSpan.carriedMm)} mm from the neck’s root at X ${fmt(neckSpan.fromMm)} mm ` +
+                  `to the free end; ` +
                   (neckMap.tailstock
                     ? `the neck and the tailstock centre hold its ends, so the bending is shared and the check ` +
                       `counts half its length (${fmt(neckSpan.effectiveMm)} mm). `
@@ -1907,7 +1912,8 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
                   (neck.diameter < neckMin.diameterMm
                     ? ` This ⌀${fmt(neck.diameter)} mm neck is below that minimum — make it thicker, shorten ` +
                       'the part, or choose a stronger stock.'
-                    : '')}
+                    : '') +
+                  ` ${neckJawClearanceSentence()}`}
             </span>
           </FieldRow>
         )}

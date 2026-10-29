@@ -354,19 +354,35 @@ describe('#737 the neck for parting (station 3)', () => {
     expect(note).toContain('a rough check and the minimum is a guess until it is checked on the machine');
     expect(note).not.toContain('(#238)');
     expect(note).not.toContain('below that minimum');
+    // The jaw clearance is not checked: the warning says so and tells the operator to air-cut it
+    // first, until the rotary is measured on the machine.
+    expect(note).toContain('The jaw clearance beside the neck is not checked');
+    expect(note).toContain('does not model the jaws as a solid');
+    expect(note).toContain('Air-cut the neck first');
+    expect(note).toContain('until the rotary is measured on the machine');
+    // The panel calls the carried piece what the check treats it as, rather than saying the saw
+    // frees a "stub" measured from the root.
+    expect(note).toContain('The check treats the whole part beyond the neck as carried');
+    expect(note).not.toContain('The saw frees the');
 
     fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-end'), { target: { value: 'tailstock' } });
     held = job().workholding;
     if (held.kind === 'rotary-chuck') expect(held.rotary.neck).toEqual({ end: 'tailstock', diameter: 7, length: 5 });
     const tailNote = screen.getByTestId('engrave-setup-rotary-neck-note').textContent ?? '';
     expect(tailNote).toContain('X 70–75 mm on the tailstock side');
+    // A tailstock-side neck frees only the scrap end. The note must not say the part comes off —
+    // it says the opposite two sentences later.
+    expect(tailNote).toContain('you saw the scrap end off at X 72.5 mm');
+    expect(tailNote).not.toContain('you saw the part off');
     expect(tailNote).toContain('runs 15 mm from the neck’s root at X 70 mm to the free end');
+    expect(tailNote).toContain('The check treats the scrap stub beyond the neck as carried');
     expect(tailNote).toContain('the bending is shared and the check counts half its length (7.5 mm)');
     expect(tailNote).toContain(
       'The stock goes into the jaws at the chuck side, so a neck here frees only the scrap stub: ' +
         'the part stays joined to the stock in the chuck and is not parted off.',
     );
     expect(tailNote).toContain('The safe minimum is ⌀2.94 mm');
+    expect(tailNote).toContain('Air-cut the neck first');
 
     fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-diameter'), { target: { value: '6' } });
     fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-length'), { target: { value: '8' } });
@@ -409,5 +425,27 @@ describe('#737 the neck for parting (station 3)', () => {
     // operator to discover it at Generate.
     expect(note).toContain('This ⌀3 mm neck is below that minimum');
     expect(note).toContain('make it thicker, shorten the part, or choose a stronger stock');
+  });
+
+  it('caps the default diameter to a slim rod, so ticking the box does not refuse at once', () => {
+    seedLocation(rotaryMachine());
+    const base = rod();
+    openHolding({
+      ...base,
+      stock: { ...base.stock, length: 7, width: 7, thickness: 100, shape: 'cylinder', diameter: 7 },
+    });
+
+    fireEvent.click(screen.getByTestId('engrave-setup-rotary-neck'));
+
+    const held = job().workholding;
+    expect(held.kind).toBe('rotary-chuck');
+    if (held.kind === 'rotary-chuck') {
+      // ⌀7 mm on a ⌀7 mm rod is `neck-wider-than-part`; the default stays just inside the rod.
+      expect(held.rotary.neck).toEqual({ end: 'chuck', diameter: 6.9, length: 5 });
+    }
+    expect((screen.getByTestId('engrave-setup-rotary-neck-diameter') as HTMLInputElement).value).toBe('6.9');
+    expect(screen.getByTestId('engrave-setup-rotary-neck-note').textContent).toContain(
+      'Case Maker starts the neck at ⌀6.9 mm',
+    );
   });
 });

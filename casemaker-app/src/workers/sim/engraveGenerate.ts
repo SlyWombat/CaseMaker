@@ -166,6 +166,7 @@ import {
 import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stackDepthLimit';
 import { rotaryJobFindings } from '@/engine/cnc/rotary/findings';
 import {
+  ROTARY_NECK_EDGE_GRID_MM,
   ROTARY_NECK_ID,
   neckCutterTooWideSentence,
   neckNoProgramSentence,
@@ -4066,7 +4067,12 @@ function generateOneProgram(
     const neckCutter = cuttingForTrace(tool);
     if (neckCutter.ok && neckCutter.tool.shape === 'flat') {
       const cutterDiameter = neckCutter.tool.radius * 2;
-      if (neck.lengthMm <= cutterDiameter) {
+      // The CAM pulls the neck's region in by `ROTARY_NECK_EDGE_GRID_MM` at each end, so the floor
+      // it can leave is that much shorter than the nominal neck: judge the LENGTH THE CUT KEEPS,
+      // not the drawing's. A neck within half a trim of the cutter is cut away even when the
+      // nominal figure says it is just wider.
+      const floorLength = neck.lengthMm - 2 * ROTARY_NECK_EDGE_GRID_MM;
+      if (floorLength <= cutterDiameter) {
         findings.push({
           severity: 'error',
           code: 'neck-too-narrow-for-cutter',

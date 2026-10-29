@@ -318,13 +318,16 @@ export type JobFindingCode =
   // `neck-too-short` — less than a saw kerf plus clearance either side; `neck-too-narrow-for-cutter`
   // — the neck is no longer than the last cutter is wide, so the cut pockets the neck away instead
   // of leaving a floor; `neck-not-cut` — no posted program carries the neck (the run's cutter cannot
-  // leave a flat-bottomed band, or the program that would cut it was not posted).
+  // leave a flat-bottomed band, or the program that would cut it was not posted);
+  // `neck-jaw-clearance` (warning) — the jaws beside the neck are not modelled as a solid, so the
+  // operator must air-cut it first.
   | 'neck-thin'
   | 'neck-in-band'
   | 'neck-cuts-item'
   | 'neck-wider-than-part'
   | 'neck-too-short'
   | 'neck-too-narrow-for-cutter'
+  | 'neck-jaw-clearance'
   | 'neck-not-cut';
 
 export interface JobFinding {

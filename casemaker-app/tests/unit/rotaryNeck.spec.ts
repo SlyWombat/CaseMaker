@@ -158,6 +158,21 @@ describe('#737 — the neck setting and its geometry', () => {
     expect(ROTARY_NECK_MIN_LENGTH_MM).toBe(2.5);
   });
 
+  it('caps the default diameter to the rod, so a slim rod does not refuse on the tick', () => {
+    // ⌀7 mm on a ⌀7 mm rod is as wide as the part: `neck-wider-than-part` would refuse the
+    // instant the box was ticked. The default stays 0.1 mm inside the rod, rounded to the panel's
+    // 0.1 mm step.
+    expect(defaultRotaryNeck(20).diameter).toBe(7);
+    expect(defaultRotaryNeck(7).diameter).toBe(6.9);
+    expect(defaultRotaryNeck(6).diameter).toBe(5.9);
+    expect(defaultRotaryNeck(2).diameter).toBe(1.9);
+    const slim = dowel(defaultRotaryNeck(7), {
+      stock: { length: 100, width: 7, thickness: 7, material: 'pla', shape: 'cylinder', diameter: 7 },
+    });
+    const g = gen(slim);
+    expect(g.findings.some((f) => f.code === 'neck-wider-than-part')).toBe(false);
+  });
+
   it('places the neck at the free span’s ends, and its saw line at the neck’s middle', () => {
     const map = rotaryMapOf(dowel())!;
     expect(rotaryFreeSpan(map)).toEqual({ from: 3, to: 75, centre: 39 });
@@ -371,10 +386,26 @@ describe('#737 — the run sheet says where to saw', () => {
     const cut = sheet.sections.find((s) => s.id === 'cut');
     expect(cut).toBeDefined();
     const last = cut!.steps[cut!.steps.length - 1]!;
-    expect(last.text).toMatch(/^Saw the part off at X 72\.5 mm \(the neck\)/);
+    // A tailstock-side neck frees only the scrap end: the part stays joined to the stock in the
+    // chuck, so the line must not say the part comes off.
+    expect(last.text).toMatch(/^Saw the scrap end off at X 72\.5 mm \(the neck\)/);
+    expect(last.text).toContain('the part stays on the stock in the chuck');
+    expect(last.text).not.toMatch(/^Saw the part off/);
     expect(last.text).toContain('⌀4 mm');
     expect(last.text).toContain('5 mm long');
+    // The jaws are not modelled, so the step tells the operator to air-cut it first.
+    expect(last.text).toContain('Air-cut the neck first');
     expect(last.value).toBe('⌀4 × 5 mm neck');
+  });
+
+  it('still says the part comes off for a chuck-side neck', () => {
+    const job = dowel({ end: 'chuck', diameter: 7, length: 5 });
+    const g = gen(job);
+    expect(g.ok).toBe(true);
+    const cut = buildRunSheet(job, g, null).sections.find((s) => s.id === 'cut')!;
+    const last = cut.steps[cut.steps.length - 1]!;
+    expect(last.text).toMatch(/^Saw the part off at X 5\.5 mm \(the neck\)/);
+    expect(last.text).not.toContain('the part stays on the stock in the chuck');
   });
 
   it('puts the saw step in the last program’s own section, not program 1’s', () => {
@@ -530,6 +561,29 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
     expect(g.ok).toBe(true);
   });
 
+  it('warns that the jaw clearance beside the neck is not checked, and to air-cut it first', () => {
+    // The jaw keep-out is Case Maker's own guess and the sweep models no jaw body: nothing in the
+    // app can promise the cut clears the jaws. Every neck carries the warning, which stays until
+    // the rotary is measured on the machine.
+    const g = gen(dowel());
+    expect(g.ok).toBe(true);
+    const f = g.findings.find((x) => x.code === 'neck-jaw-clearance');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('warning');
+    expect(f!.labelId).toBe('rotary-neck');
+    expect(f!.message).toContain('The jaw clearance beside the neck is not checked');
+    expect(f!.message).toContain('a jaw keep-out band it assumes');
+    expect(f!.message).toContain('does not model the jaws as a solid');
+    expect(f!.message).toContain('Air-cut the neck first');
+    expect(f!.message).toContain('until the rotary is measured on the machine');
+    expect(f!.message).not.toContain('(#');
+    expect(f!.message).not.toContain('neck-jaw-clearance');
+
+    // No neck, no warning.
+    const off = gen(dowel(null));
+    expect(off.findings.some((x) => x.code === 'neck-jaw-clearance')).toBe(false);
+  });
+
   it('refuses a neck shorter than the saw can cut off cleanly', () => {
     const f = neckError(dowel({ end: 'tailstock', diameter: 4, length: 1 }), 'neck-too-short');
     expect(f.message).toContain('The neck for parting is too short');
@@ -628,6 +682,38 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
     expect(f!.message).toContain('use a narrower cutter for the last cut');
     expect(f!.message).toContain('turn the neck off');
     expect(f!.message).not.toContain('neck-too-narrow-for-cutter');
+  });
+
+  it('judges the cutter against the floor the CAM keeps, inside its 0.002 mm edge trim', () => {
+    // The neck's CAM region is pulled in by 0.001 mm at each end. A 6.002 mm neck therefore leaves
+    // a floor exactly as wide as a ⌀6 mm cutter — still cut away, though the nominal figure is
+    // wider than the cutter. The old comparison on the nominal length missed that band.
+    const pocket: EngraveShape = {
+      id: 'pocket-1',
+      name: 'pocket',
+      kind: 'rect',
+      position: { x: 40, y: Math.PI * 10 },
+      rotation: 0,
+      depth: 0.5,
+      enabled: true,
+      width: 12,
+      height: 8,
+      cornerRadius: 0,
+    };
+    const run = (length: number): EngraveGenerated => {
+      const job = dowel({ end: 'tailstock', diameter: 4, length }, { labels: [], shapes: [pocket] });
+      return engraveGenerate(tl, job, flatEndMill(6, { name: '6 mm flat' }), [], null);
+    };
+    const trimmed = run(6.002);
+    expect(trimmed.ok).toBe(false);
+    expect(trimmed.stage).toBe('findings');
+    const f = trimmed.findings.find((x) => x.code === 'neck-too-narrow-for-cutter');
+    expect(f).toBeDefined();
+    expect(f!.message).toContain('the neck is 6.002 mm long');
+    expect(f!.message).toContain('⌀6 mm wide');
+
+    // 6.003 keeps 6.001 mm of floor: wider than the cutter, so the width check does not fire.
+    expect(run(6.003).findings.some((x) => x.code === 'neck-too-narrow-for-cutter')).toBe(false);
   });
 
   it('refuses a run whose only neck-carrying rest program was dropped', () => {

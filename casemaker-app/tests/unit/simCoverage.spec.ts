@@ -239,11 +239,23 @@ describe('the neck for parting (#737)', () => {
     effectiveMm: 6.25,
   };
 
-  it('says the part stays on the neck, where the saw goes, and that the simulation stops there', () => {
+  it('says the scrap end stays on the neck when the neck is at the tailstock', () => {
     const s = text({ rotaryNeck: neck });
-    expect(s).toContain('The part stays on a ⌀4 mm neck at X 72.5 mm, to be sawn off');
+    expect(s).toContain('The scrap end stays on a ⌀4 mm neck at X 72.5 mm, to be sawn off');
+    expect(s).toContain('the part stays on the stock in the chuck');
     expect(s).toContain('the neck runs from X 70 mm to X 75 mm');
+    expect(s).toContain('the simulation ends with the part still on the stock');
+    expect(s).not.toContain('The part stays on a ⌀4 mm neck');
+  });
+
+  it('says the part stays on the neck when the neck is at the chuck', () => {
+    const s = text({
+      rotaryNeck: { ...neck, end: 'chuck', fromMm: 3, toMm: 8, sawAtMm: 5.5, depthMm: 8, carriedMm: 82, effectiveMm: 41 },
+    });
+    expect(s).toContain('The part stays on a ⌀4 mm neck at X 5.5 mm, to be sawn off');
+    expect(s).toContain('the neck runs from X 3 mm to X 8 mm');
     expect(s).toContain('the simulation ends with the part still on it');
+    expect(s).not.toContain('The scrap end stays');
   });
 
   it('says it for a run of several programs too, after their checks', () => {
@@ -258,8 +270,8 @@ describe('the neck for parting (#737)', () => {
       expectedPrograms: 2,
     });
     expect(s).toContain('Checked: all 2 programs in the run');
-    expect(s).toContain('The part stays on a ⌀4 mm neck at X 72.5 mm, to be sawn off');
-    expect(s).toContain('the simulation ends with the part still on it');
+    expect(s).toContain('The scrap end stays on a ⌀4 mm neck at X 72.5 mm, to be sawn off');
+    expect(s).toContain('the simulation ends with the part still on the stock');
   });
 
   it('says nothing about a saw when the job has no neck', () => {

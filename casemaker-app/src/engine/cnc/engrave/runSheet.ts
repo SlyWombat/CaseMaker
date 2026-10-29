@@ -102,7 +102,7 @@ import { coverageDisclaimer, type SimCoverageInput, type SimRunOutcome } from '@
 // #737 — the neck's facts are the ROTARY module's (the span, the saw line and the floor, from
 // `rotaryFreeSpan`): the coverage sentence the sheet and the panel print quotes them, never a
 // second reading of the job.
-import { neckCarriedBy } from '@/engine/cnc/rotary/neck';
+import { neckCarriedBy, neckJawClearanceSentence } from '@/engine/cnc/rotary/neck';
 import type { EngraveJob, EngraveMargins, JobStockFinish, ViseParams } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -2935,18 +2935,26 @@ function throughCutSteps(facts: RunSheetThroughFacts | null | undefined): RunShe
  * neck, and it is the LAST physical action of that file: the neck is cut to depth all the way
  * round, and the part is sawn through it after the program ends.
  *
- * The words are the issue's own — "Saw the part off at X … mm (the neck)" — with the neck's size
- * after them, every number carrying its unit. Empty for a program with no neck, so every
+ * Which end is freed decides the words: a CHUCK-side neck frees the part; a TAILSTOCK-side neck
+ * frees only the scrap end and leaves the part joined to the stock in the chuck. The step also
+ * says to air-cut the neck first — the jaws are not modelled, so the clearance beside them is not
+ * checked. Every number carries its unit, and every step is empty for a program with no neck, so a
  * pre-#737 sheet is unchanged.
  */
 function neckSawSteps(facts: RunSheetNeckFacts | null | undefined): RunSheetStep[] {
   if (facts === null || facts === undefined) return [];
+  const saw =
+    facts.end === 'chuck'
+      ? `Saw the part off at X ${fmtNum(facts.sawAtMm)} mm (the neck)`
+      : `Saw the scrap end off at X ${fmtNum(facts.sawAtMm)} mm (the neck); the part stays on the ` +
+        'stock in the chuck';
   return [
     {
       text:
-        `Saw the part off at X ${fmtNum(facts.sawAtMm)} mm (the neck) — ⌀${fmtNum(facts.diameterMm)} mm ` +
+        `${saw} — ⌀${fmtNum(facts.diameterMm)} mm ` +
         `and ${fmtNum(facts.lengthMm)} mm long, from X ${fmtNum(facts.fromMm)} mm to X ${fmtNum(facts.toMm)} mm, ` +
-        `and ${fmtNum(facts.depthMm)} mm deep. It is the program's last cut, made all the way round.`,
+        `and ${fmtNum(facts.depthMm)} mm deep. It is the program's last cut, made all the way round. ` +
+        neckJawClearanceSentence(),
       value: `⌀${fmtNum(facts.diameterMm)} × ${fmtNum(facts.lengthMm)} mm neck`,
     },
   ];

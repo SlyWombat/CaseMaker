@@ -138,17 +138,22 @@ function rotaryBandSentence(input: SimCoverageInput): string | null {
 /**
  * #737 — THE SAW IS NOT IN THE SIMULATION. The program ends with the part on its neck; the cut
  * that frees it happens at the bench. The facts say where the part is left and where the saw goes,
- * in the run's own numbers, so a green simulation is not read as a finished part. Null on every job
+ * in the run's own numbers, so a green simulation is not read as a finished part. Which end the
+ * neck is on decides what the saw frees: a CHUCK-side neck frees the part, a TAILSTOCK-side neck
+ * frees only the scrap end and leaves the part joined to the stock in the chuck. Null on every job
  * without a neck, so its sentences are unchanged.
  */
 function neckSentence(input: SimCoverageInput): string | null {
   const neck = input.rotaryNeck ?? null;
   if (neck === null) return null;
-  return (
-    `The part stays on a ⌀${rowSummary(neck.diameterMm)} neck at X ${rowSummary(neck.sawAtMm)}, ` +
-    `to be sawn off — the neck runs from X ${rowSummary(neck.fromMm)} to X ${rowSummary(neck.toMm)}, ` +
-    `and the simulation ends with the part still on it.`
-  );
+  const where =
+    `the neck runs from X ${rowSummary(neck.fromMm)} to X ${rowSummary(neck.toMm)}`;
+  return neck.end === 'chuck'
+    ? `The part stays on a ⌀${rowSummary(neck.diameterMm)} neck at X ${rowSummary(neck.sawAtMm)}, ` +
+        `to be sawn off — ${where}, and the simulation ends with the part still on it.`
+    : `The scrap end stays on a ⌀${rowSummary(neck.diameterMm)} neck at X ${rowSummary(neck.sawAtMm)}, ` +
+        `to be sawn off; the part stays on the stock in the chuck — ${where}, and the simulation ends ` +
+        'with the part still on the stock.';
 }
 
 /**
