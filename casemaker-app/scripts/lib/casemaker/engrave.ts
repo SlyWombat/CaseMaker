@@ -87,7 +87,7 @@ import {
 import type { Tool } from '../../../src/engine/cnc/tool';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
 import { Z1 } from '../../../src/engine/cnc/machine';
-import { jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
+import { jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
 import {
   buildRunSheet,
   runSheetFileName,
@@ -107,7 +107,7 @@ import {
   type ProgramSweepSummary,
 } from '../../../src/engine/cnc/engrave/programSweep';
 import { buildCouponPrograms, type CouponRecord, type CouponRecordRow, type CouponSpec } from '../../../src/engine/cnc/engrave/couponJob';
-import { entryFor, getTools } from '../../../src/engine/cnc/toolRegistry';
+import { entryFor, getTools, NO_TOOL_KEY } from '../../../src/engine/cnc/toolRegistry';
 import {
   finerThan,
   reachabilityFor,
@@ -1373,6 +1373,39 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     }
     outDir = args.out ?? dirname(path);
     mkdirSync(outDir, { recursive: true });
+    // #760 — A JOB THAT NAMES NO CUTTER IS GIVEN ONE, the way the design route chooses (#410): the
+    // first bit by the clearance rule (`roughPick`, or #211's single answer under `--rest none`),
+    // and a second, finer bit for what the first cannot reach (`restToolPick`), carried as the
+    // job's own multi-tool setup (#472: the later cutter is a rest pass). It used to stop at
+    // "the job has no usable cutter", so every saved job had to pin a bit by hand — which is how a
+    // demo set came to cut raised 14 mm text with a 3.175 mm cutter its own findings said joined
+    // the letters. A job that names its cutters keeps them; `--tool`/`--rest` override as before.
+    if (parsed.job.toolKey === NO_TOOL_KEY && parsed.job.setups === undefined) {
+      const job = parsed.job;
+      const reach = scanReach(job);
+      printReach(reach);
+      const restOff = args.rest === 'none';
+      const pick = roughPick(reach);
+      const first = args.tool ?? (restOff ? reach.recommendation.key : (pick.chosen?.key ?? reach.recommendation.key));
+      if (first === null) {
+        return stop(invalidJob(`${path} names no cutter, and none in the library can cut it: ${reach.recommendation.reason}`));
+      }
+      job.toolKey = first;
+      out.progress(
+        `  cutter 1   ${first} — ${args.tool !== undefined ? 'named on the command line (--tool)' : restOff ? reach.recommendation.reason : pick.reason}`,
+      );
+      if (!restOff) {
+        const rest = args.rest !== undefined ? { key: args.rest, reason: 'named on the command line (--rest)' } : (() => {
+          const choice = restToolPick(reach, first);
+          return choice.cutter === null ? null : { key: choice.cutter.key, reason: choice.reason };
+        })();
+        if (rest !== null && rest.key !== first) {
+          const setup = jobSetups(job)[0]!;
+          job.setups = [{ ...setup, tools: [first, rest.key] }];
+          out.progress(`  cutter 2   ${rest.key} — ${rest.reason}`);
+        }
+      }
+    }
     const result = await runJob(parsed.job, outDir, {
       writeJobDocument: false,
       note: `*Generated from \`${basename(path)}\` by \`casemaker engrave\`; the app’s \`RunSheetView\` renders the same \`buildRunSheet\` structure. No result is recorded here.*`,

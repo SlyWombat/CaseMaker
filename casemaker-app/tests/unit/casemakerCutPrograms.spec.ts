@@ -541,3 +541,40 @@ describe('#732 a broken catalogue answers --json on stdout', () => {
     expect(r.stderr).toContain('does not match its own schema');
   }, 120_000);
 });
+
+describe('#760 a job that names no cutter is given one, the way the design route picks', () => {
+  it('picks the first bit by the clearance rule and a finer rest bit, and posts both programs', async () => {
+    const base = defaultEngraveJob();
+    // One label at 24 mm: the fixture's two flats (2 mm and a 3.175 mm clone) can both cut it, so
+    // the pick is the rule's to make, not a refusal's.
+    const label = { ...base.labels[0]!, size: 24, depth: 0.5 };
+    const job: EngraveJob = { ...base, name: 'no cutter named', toolKey: '', labels: [label] };
+    const run = await cut(job, 'no-cutter-named');
+    expect(run.code, JSON.stringify(run.receipt?.diagnostics?.filter((d) => d.severity === 'error') ?? null)).toBe(0);
+    const firstLine = run.progress.find((l) => l.includes('cutter 1'));
+    const secondLine = run.progress.find((l) => l.includes('cutter 2'));
+    expect(firstLine, run.progress.join('\n')).toBeDefined();
+    expect([FIRST, SECOND].some((k) => firstLine!.includes(k))).toBe(true);
+    if (run.receipt!.command !== 'engrave') throw new Error('expected the engrave receipt');
+    const programs = run.receipt!.details.programs;
+    if (secondLine !== undefined) {
+      // A rest bit was picked: it is a different cutter, and it has a program of its own.
+      expect(programs).toHaveLength(2);
+      expect(readFileSync(join(run.outDir, programs[1]!.ncFile), 'utf8')).not.toBe(
+        readFileSync(join(run.outDir, programs[0]!.ncFile), 'utf8'),
+      );
+    } else {
+      expect(programs).toHaveLength(1);
+    }
+    // It used to stop here: "the job has no usable cutter".
+    expect(run.progress.join('\n')).not.toContain('no usable cutter');
+  });
+
+  it('keeps a job that names its cutter exactly as named', async () => {
+    const base = defaultEngraveJob();
+    const job: EngraveJob = { ...base, name: 'named', toolKey: FIRST, labels: [{ ...base.labels[0]!, size: 24, depth: 0.5 }] };
+    const run = await cut(job, 'cutter-named');
+    expect(run.code, JSON.stringify(run.receipt?.diagnostics?.filter((d) => d.severity === 'error') ?? null)).toBe(0);
+    expect(run.progress.some((l) => l.includes('cutter 1'))).toBe(false);
+  });
+});
