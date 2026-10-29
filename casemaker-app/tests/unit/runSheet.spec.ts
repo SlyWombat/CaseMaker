@@ -1626,6 +1626,13 @@ describe('the surface spread (#475)', () => {
     expect(all).toContain('M375.1');
     expect(all).toContain('G32 is never uploaded in a file');
     expect(all).toContain('G32 has been run from the console for this clamping');
+    // #631 — the paper states the G32 route's assumption AND the landing it does not check, and
+    // records the colour-line measurement the operator must take after the cut.
+    expect(all).toContain('G32 follows the top');
+    expect(all).toContain('no landing range is checked');
+    expect(steps.map((s) => s.record ?? '').join('\n')).toContain(
+      'colour-line depth at the centre and the edge after the cut',
+    );
     // #630 (amended) — the verdict says how far OUTSIDE the band the residual sits, and the paper
     // states the routes IN ORDER: the G32 route and its tick, then the accepted miss, then the
     // re-seat note as information only.

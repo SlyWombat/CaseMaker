@@ -1,11 +1,12 @@
 /**
  * #475 — Z0 on a bowed blank is a SPREAD, not a point.
  *
- * The maintainer's observation of 2026-10-17 settled what the blank is: on a printed two-colour
- * badge the colour line is a PLANE and the dome is extra top material on a flat back (see the
- * bench record and the issue's second comment). A single touch at the cut's centre therefore says
- * nothing about the floor at the cut's ends, and a floor placed from that one touch can sit above
- * the colour line at one end of a line and through the pocket's ceiling at the other.
+ * The maintainer's observation of 2026-10-17: on a printed two-colour badge the colour line is a
+ * PLANE (see the bench record and the issue's second comment). That plane may be bowed WITH the
+ * top — the clamp bows the whole blank and the film with it — or the top may be domed over a film
+ * that is still flat; the touches alone cannot tell which. A single touch at the cut's centre
+ * therefore says nothing about the floor at the cut's ends, and a floor placed from that one touch
+ * can sit above the colour line at one end and through the pocket's ceiling at the other.
  *
  * The rule here:
  *
@@ -19,7 +20,10 @@
  *      FOLLOWED — Z0 stays the LOWEST touch ({@link Z0_REFERENCE}) and the program is posted against
  *      the fitted surface per XY. A bow the tilt cannot explain — the RESIDUAL wider than the band —
  *      is a DOME (#631): the origin is still written (Z0 = lowest) but the plane re-post cannot
- *      follow it, so the machine levels the top itself (`G32`) and the program uploads FLAT.
+ *      follow it. `G32` follows the TOP, so it is the right route when the whole blank (film
+ *      included) is bowed with it; when only the top is domed over a flat film, the floor's depth
+ *      to the colour line varies by the dome's height and no landing range is checked. Either way
+ *      the program uploads FLAT; the operator's accepted route names the miss.
  *
  * WHY THE LOWEST TOUCH. The programmed floor depth `D` is measured from Z0. At a touch whose top
  * is `z` above the lowest one, the local floor is `D + z` deep. Referencing Z0 to the lowest touch
@@ -161,10 +165,11 @@ export interface SurfaceExtremum {
 
 /**
  * #501 — WHAT the measured top is, from the same fit and band the verdict uses:
- *   - `dome` — the residual outlasts the plane (wider than the band): the top is curved, and the
- *     colour line under it is a plane, so following the top would cut through it. #631 writes the
- *     origin anyway (Z0 = lowest) and leaves the levelling to the machine's own `G32` grid; the
- *     program uploads FLAT (no plane re-post).
+ *   - `dome` — the residual outlasts the plane (wider than the band): the top is curved. #631 writes
+ *     the origin anyway (Z0 = lowest) and leaves the levelling to the machine's own `G32` grid; the
+ *     program uploads FLAT (no plane re-post). G32 follows the TOP, which is the colour line only
+ *     when the whole blank (film included) is bowed; a top domed over a flat film leaves the
+ *     floor's depth to the colour line unverified (see {@link surfaceDomeAssumption}).
  *   - `tilt` — the plane holds, and its drop across the measured extents is wider than the band: the
  *     whole blank (colour plane included) is crooked, and following the top is right. #608 follows
  *     it by re-posting against the plane; the machine's own grid is offered as the alternative.
@@ -575,7 +580,34 @@ export function surfaceMarginWords(
 export function surfaceDomeGuidance(a: SurfaceSpreadAssessment): string {
   const accept = domeAcceptSentence(a);
   const accepted = accept === null ? '' : ` Or ${accept.charAt(0).toLowerCase()}${accept.slice(1)}.`;
-  return `G32 from the console levels the curved top and the program uploads FLAT.${accepted} ${surfaceDomeReseatNote()}`;
+  return `G32 from the console levels the curved top and the program uploads FLAT. ${surfaceDomeAssumption(a)}${accepted} ${surfaceDomeReseatNote()}`;
+}
+
+/**
+ * #631 — THE ASSUMPTION THE G32 ROUTE MAKES, in one sentence, shared by the registration step, the
+ * Cut step and the run sheet so the three cannot disagree.
+ *
+ * G32 follows the TOP. That keeps the programmed depth below the colour line only when the whole
+ * blank — the colour film included — is bowed by the clamp. If only the top is domed over a flat
+ * film, the floor's depth to the colour line varies by the dome's height, and no landing range is
+ * checked (`landing` is null on a dome): the colour line must be measured at the centre and the
+ * edge after the cut. The height named is the fitted residual (the bow a plane cannot explain), or
+ * the raw spread when fewer than three touches could not fit one; it measures the TOP, not the
+ * film under it. The 2026-10-29 review's open question — does the whole blank bow, or only the
+ * top? — is what the calipers after this cut are for.
+ */
+export function surfaceDomeAssumption(
+  a: Pick<SurfaceSpreadAssessment, 'fit' | 'spread'>,
+): string {
+  const fit = a.fit ?? null;
+  const spread = a.spread ?? 0;
+  const height = fit === null ? spread : fit.residual;
+  return (
+    `G32 follows the top: that keeps the programmed depth below the colour line only when the whole ` +
+    `blank — film included — is bowed with it. If only the top is domed over a flat film, the floor's ` +
+    `depth to the colour line varies by the dome's height (${num(height)} mm), and no landing range ` +
+    `is checked — measure the colour line at the centre and the edge after the cut.`
+  );
 }
 
 /** The third move on its own — the sheet prints its routes as its own steps. Information only. */
@@ -751,8 +783,8 @@ function levelRecommendation(
     `record, and ${after} after the job. G32 is never uploaded in a file.`;
   const sentence =
     verdict === 'dome'
-      ? `The top is a dome, not a tilt: the machine's own leveling follows a curved top and the program ` +
-        `uploads FLAT (no plane re-post). ${consoleWords}`
+      ? `The top is a dome, not a tilt: the same G32 grid that levels a tilted top follows this curved ` +
+        `one, and the program uploads FLAT (no plane re-post). ${consoleWords}`
       : `The top is tilted ${num(slopeDeg)}° (${surfaceTiltWords(tilt) ?? 'no measured drop'}): the program is ` +
         `posted against the fitted plane, so the cut follows the tilt. To level at the machine instead — ` +
         `G32 levels a dome the same way — ${consoleWords}`;

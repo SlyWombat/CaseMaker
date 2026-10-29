@@ -829,6 +829,9 @@ describe('#419 §3 the Cut surface', () => {
     // The dome route is shown with the recipe and the operator's tick; no tilt re-post section.
     expect(screen.getByTestId('engrave-cut-dome-g32')).toBeTruthy();
     expect(screen.getByTestId('engrave-cut-dome-g32-recipe').textContent).toContain('G32 R1 X');
+    // #631 — the route states what it assumes and the landing it does not check.
+    expect(screen.getByTestId('engrave-cut-dome-assumption').textContent).toContain('G32 follows the top');
+    expect(screen.getByTestId('engrave-cut-dome-assumption').textContent).toContain('no landing range is checked');
     expect(screen.queryByTestId('engrave-cut-repost')).toBeNull();
 
     // Upload is gated until the operator confirms G32 ran for this clamping.

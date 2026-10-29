@@ -66,7 +66,7 @@ import {
   withPeriod,
 } from '@/store/engraveRunGate';
 import { useManageModeStore } from '@/store/manageModeStore';
-import { domeAcceptSentence, surfaceTiltWords } from '@/engine/cnc/engrave/surfaceSpread';
+import { domeAcceptSentence, surfaceDomeAssumption, surfaceTiltWords } from '@/engine/cnc/engrave/surfaceSpread';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useStockStore } from '@/store/stockStore';
 import type { LaserLift } from '@/platform/machineLaser';
@@ -469,6 +469,7 @@ export function EngraveCutSurface({
         onG32: setG32Acked,
         onFloor: setFloorAccepted,
         recommendation: spreadAssessment?.recommendation?.sentence ?? null,
+        assumption: spreadAssessment === null ? null : surfaceDomeAssumption(spreadAssessment),
       }
     : null;
   /**

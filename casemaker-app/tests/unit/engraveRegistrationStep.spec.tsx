@@ -494,6 +494,9 @@ describe('#495 — the registration step', () => {
     expect(guidance.indexOf('lighter re-seat')).toBeGreaterThan(guidance.indexOf('write the origin anyway'));
     expect(guidance).toContain('chip');
     expect(guidance).toContain('uploads FLAT');
+    // #631 — the machine route names its assumption and the landing it does not check.
+    expect(guidance).toContain('G32 follows the top');
+    expect(guidance).toContain('no landing range is checked');
     expect(guidance).not.toMatch(/#\d/);
     // The dome block offers the machine-side route instead of a refusal.
     expect(screen.getByTestId('engrave-registration-dome').textContent).toContain('uploads FLAT');

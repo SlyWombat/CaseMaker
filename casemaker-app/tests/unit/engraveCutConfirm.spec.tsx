@@ -199,7 +199,7 @@ describe('#656 the one screen', () => {
     const onG32 = vi.fn();
     render(
       confirm({
-        dome: { accept: null, g32Acked: false, floorAccepted: false, onG32, onFloor: vi.fn(), recommendation: 'G32 R1 X1 Y1' },
+        dome: { accept: null, g32Acked: false, floorAccepted: false, onG32, onFloor: vi.fn(), recommendation: 'G32 R1 X1 Y1', assumption: null },
         domeBlocker: 'confirm how the dome is handled before uploading',
       }),
     );

@@ -340,6 +340,12 @@ describe('#630 — the verdict says the margin, and a dome names the next steps'
     expect(accept).toBeGreaterThan(g32);
     expect(reseat).toBeGreaterThan(accept);
     expect(g).toContain('uploads FLAT');
+    // #631 — the machine route states its ASSUMPTION and the landing it cannot check: G32 follows
+    // the top, so the colour line is the programmed depth only when the whole blank is bowed, and a
+    // top-only dome has no checked landing range.
+    expect(g).toContain('G32 follows the top');
+    expect(g).toContain('film included');
+    expect(g).toContain('no landing range is checked');
     // The accepted clause is the SAME sentence the Cut step's checkbox and the run sheet print
     // (its first letter lowercased because it follows "Or").
     expect(g.toLowerCase()).toContain(domeAcceptSentence(a)!.toLowerCase());

@@ -49,10 +49,12 @@ export interface DomeChoiceProps {
   onFloor: (on: boolean) => void;
   /** The recommendation sentence (the G32 recipe), or null. */
   recommendation: string | null;
+  /** #631 — what G32 assumes (follows the top) and the landing it does not check, or null. */
+  assumption: string | null;
 }
 
 /** The dome verdict's two routes: G32 at the console, or accepting the un-levelled floor. */
-export function DomeChoice({ accept, g32Acked, floorAccepted, onG32, onFloor, recommendation }: DomeChoiceProps): JSX.Element {
+export function DomeChoice({ accept, g32Acked, floorAccepted, onG32, onFloor, recommendation, assumption }: DomeChoiceProps): JSX.Element {
   return (
     <section style={BOX} data-testid="engrave-cut-dome-g32">
       <p style={{ fontSize: 12, color: '#f0d79b', margin: '0 0 6px' }}>
@@ -62,6 +64,11 @@ export function DomeChoice({ accept, g32Acked, floorAccepted, onG32, onFloor, re
       {recommendation !== null && (
         <p style={MUTED} data-testid="engrave-cut-dome-g32-recipe">
           {recommendation}
+        </p>
+      )}
+      {assumption !== null && (
+        <p style={MUTED} data-testid="engrave-cut-dome-assumption">
+          {assumption}
         </p>
       )}
       <label style={{ fontSize: 12, color: '#e6edf5' }}>

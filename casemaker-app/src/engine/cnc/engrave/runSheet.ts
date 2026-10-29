@@ -74,6 +74,7 @@ import { attributedDiagnostics, type ProgramSweepSummary } from '@/engine/cnc/en
 import {
   assessSurfaceSpread,
   domeAcceptSentence,
+  surfaceDomeAssumption,
   surfaceDomeReseatNote,
   surfaceMarginWords,
   surfaceSpreadPlan,
@@ -1731,6 +1732,13 @@ function surfaceSpreadSteps(
     if (a.recommendation !== null) {
       steps.push({ text: a.recommendation.sentence, bold: true });
     }
+    // #631 — the route's ASSUMPTION and its unchecked half, on the paper the operator keeps: G32
+    // follows the top, which is the colour line only when the whole blank is bowed with it; on a
+    // top-only dome no landing range is checked, so the colour line is measured after the cut.
+    steps.push({
+      text: surfaceDomeAssumption(a),
+      record: 'colour-line depth at the centre and the edge after the cut (the landing range is not checked on a dome)',
+    });
     steps.push({
       text:
         'Tick it once G32 has been run from the console for this clamping — the machine levels the ' +
