@@ -374,7 +374,46 @@ async function scanEdgeSideways(
   const what = scan.label ?? `the ${scan.edge} edge`;
   if (plan.mount === 'bracket') await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
   await io.send(moveXY(plan, t.x, t.y));
-  await io.send(`G53 G0 Z${f(setup.zMachine)}`);
+  // #643 — THE DESCENT AT THE LIMIT IS GUARDED. The limit stands its 5 mm OUTSIDE the expected
+  // edge, so a blank that sits that far toward the edge is UNDER this point: an unguarded G0 down
+  // to the touch depth would drive the stylus into it. Probe down instead, exactly as the Z-only
+  // scan probes at its own limit. A touch here means the blank reaches the limit — the edge is
+  // beyond the reach — and that case is recorded as the Z-only path records it, so the outcome
+  // says the same sentence ("not found within the scan's reach") rather than a false miss.
+  const descendFromZ = plan.mount === 'bracket' ? plan.seek.fromMachineZ : surfaceZ + s.parkAboveSurfaceMm;
+  // #643 review — the descent's START HEIGHT is stated ABSOLUTELY before the relative probe. The
+  // head is wherever the previous step left it (often the travel height), not necessarily the
+  // park the surface seek ended at: a relative descent from a higher Z would stop short of the
+  // scan's depth, and a "miss" there would run the sideways move above the stock.
+  await io.send(`G53 G0 Z${f(descendFromZ)}`);
+  const descentMm = r3(descendFromZ - setup.zMachine);
+  if (!(descentMm > 0)) {
+    throw new Stop(`the sideways touch on ${what} has nowhere to descend: machine Z ${f(setup.zMachine)} is not below the ${f(descendFromZ)} it starts at`);
+  }
+  await io.idle();
+  io.at(`down toward ${what}, as low as machine Z ${f(setup.zMachine)} (a guarded descent)`);
+  await io.send('G91');
+  const downReply = await io.send(`G38.3 Z-${f(descentMm)} F${f(s.touchFeed)}`, { missOk: true });
+  await io.send('G90');
+  const downPrb = lastPrb(downReply);
+  if (downPrb === null) throw new Stop(`the sideways descent on ${what} answered no probe reading`);
+  if (downPrb.touched) {
+    await io.send(`G53 G0 Z${f(surfaceZ + s.parkAboveSurfaceMm)}`);
+    const alongX = t.axis === 'x';
+    io.saw({
+      source: 'edge',
+      label: what,
+      x: alongX ? scan.limit : scan.along,
+      y: alongX ? scan.along : scan.limit,
+      z: downPrb.z,
+      touched: true,
+      kind: 'stock',
+    });
+    // A plain stock reading, NOT a side contact: `edgeFrom` then takes the branch the Z-only scan's
+    // limit touch takes, and the operator reads the same sentence for the same fact.
+    return { scan, touches: [{ at: scan.limit, prb: downPrb, kind: 'stock' }] };
+  }
+  // The descent found nothing and the machine is already at the touch depth: take the sideways move.
   await io.idle();
   io.at(`sideways toward ${what}, at machine Z ${f(setup.zMachine)}`);
   await io.send('G91');

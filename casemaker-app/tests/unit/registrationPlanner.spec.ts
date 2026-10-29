@@ -261,6 +261,12 @@ function fakeZ1(opts: {
    * radius outside the stock's edge it reaches (the ball's centre at the trigger), or a miss.
    */
   ballR?: number;
+  /**
+   * #643 review — the head is still at the TRAVEL height when a scan begins: the park did not take
+   * effect. Every XY move after a surface-height touch starts the next scan from the travel
+   * height, so a descent must establish its own start absolutely.
+   */
+  headAtTravelForScans?: boolean;
 }) {
   const inForce = opts.g54 ?? G54;
   const surface = opts.surface ?? SURFACE;
@@ -270,6 +276,12 @@ function fakeZ1(opts: {
   let tool: 'probe' | 'cutter' = 'probe';
   let alarmed = false;
   let lowest = Infinity;
+  /** #643 — a rapid into stock was commanded (a crash, recorded so a spec can fail on it). */
+  let plunged = false;
+  /** #643 review — a Z probe has touched at the surface (the head's next XY starts a scan). */
+  let sawSurfaceTouch = false;
+  /** #643 review — the machine Z the last sideways probe ran at. */
+  let sideProbeZ: number | null = null;
   let pending = 0;
   const lines: string[] = [];
   const xyMovesAtZ: number[] = [];
@@ -304,13 +316,22 @@ function fakeZ1(opts: {
       }
       if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
       let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
-      if (m) return (pos.z = Number(m[1])), reply('ok');
+      if (m) {
+        const target = Number(m[1]);
+        // #643 — a rapid straight down INTO the stock is a crash, not a move. The executor's scan
+        // descents must probe (G38.3) instead; this flag is what a spec asserts against.
+        const stockTop = zAt(pos.x - G54.x, pos.y - G54.y);
+        if (stockTop !== null && target < stockTop) plunged = true;
+        return (pos.z = target), reply('ok');
+      }
       // #427 — the bracket's moves are sent in machine coordinates.
       m = /^G53 G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
       if (m) {
         xyMovesAtZ.push(pos.z);
         pos.x = Number(m[1]) + (xyMovesAtZ.length > 1 ? (opts.landShift ?? 0) : 0);
         pos.y = Number(m[2]);
+        // #643 review — the head the scans find: at the travel height, not the park.
+        if (opts.headAtTravelForScans === true && sawSurfaceTouch) pos.z = -3;
         return reply('ok');
       }
       m = /^G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
@@ -324,6 +345,7 @@ function fakeZ1(opts: {
           pos.x += Number(m[1]);
           pos.y += Number(m[2]);
         }
+        if (opts.headAtTravelForScans === true && sawSurfaceTouch) pos.z = -3;
         return reply('ok');
       }
       m = /^G0 Z(-?[\d.]+)$/.exec(line);
@@ -343,6 +365,7 @@ function fakeZ1(opts: {
         if (hit !== null && hit >= target && hit <= pos.z) {
           pos.z = hit;
           lowest = Math.min(lowest, pos.z);
+          if (Math.abs(hit - surface) < 1e-6) sawSurfaceTouch = true;
           return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${hit.toFixed(3)}:1]\nok`);
         }
         pos.z = target;
@@ -359,12 +382,15 @@ function fakeZ1(opts: {
         const r = opts.ballR ?? 1.5;
         const startMachine = pos[axis];
         const endMachine = startMachine + travel;
+        sideProbeZ = pos.z;
         const lo = (axis === 'x' ? a.xMin : a.yMin) + (axis === 'x' ? inForce.x : inForce.y);
         const hi = (axis === 'x' ? a.xMax : a.yMax) + (axis === 'x' ? inForce.x : inForce.y);
         const contactLow = lo - r; // moving + toward the low edge, the centre stops one radius outside
         const contactHigh = hi + r;
+        // #643 review — a ball whose centre is at or above the stock's top cannot touch its wall.
         const hits =
-          travel > 0 ? startMachine < contactLow && endMachine >= contactLow : startMachine > contactHigh && endMachine <= contactHigh;
+          pos.z < surface &&
+          (travel > 0 ? startMachine < contactLow && endMachine >= contactLow : startMachine > contactHigh && endMachine <= contactHigh);
         pos[axis] = hits ? (travel > 0 ? contactLow : contactHigh) : endMachine;
         return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:${hits ? 1 : 0}]\nok`);
       }
@@ -377,6 +403,8 @@ function fakeZ1(opts: {
     lines,
     xyMovesAtZ,
     lowest: () => lowest,
+    plunged: () => plunged,
+    sideProbeZ: () => sideProbeZ,
     fitCutter: () => (tool = 'cutter'),
     mode: () => mode,
     alarmed: () => alarmed,
@@ -638,6 +666,46 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
     // The live reading (#519) is the sideways one, at the centre the probe reported.
     const live = seen.find((t) => t.source === 'edge' && (t.label ?? '').includes('front'));
     expect(live).toMatchObject({ kind: 'stock', touched: true });
+  });
+
+  it('#643 a blank that reaches the scan’s limit stops as "beyond the reach", never a plunge', async () => {
+    // The stock sits 6 mm toward the front edge, so the front scan's 5 mm outward limit is OVER it.
+    const reachesTheLimit = { ...BLANK, yMin: -6, yMax: 70.2 };
+    const z1 = fakeZ1({ actual: reachesTheLimit, tap: { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ }, ballR: 1.5, rim: 1.5 });
+    const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
+    // The descent at the limit PROBED; it never rapid-moved down into the stock.
+    expect(z1.plunged()).toBe(false);
+    if (!r.ok) throw new Error(r.reason);
+    // The case is the Z-only path's own: the edge is beyond the reach, in the same sentence.
+    const front = r.outcome.edges.find((e) => e.edge === 'front')!;
+    expect(front.foundAt).toBeNull();
+    expect(front.problem).toBe('the front edge was not found within the scan\'s reach');
+    // The sideways move itself was never sent — the guarded descent met the stock first — and the
+    // descent that did run is a probe feed, down to the scan's depth.
+    expect(z1.lines.filter((l) => /^G38\.3 Y/.test(l))).toHaveLength(0);
+    expect(z1.lines.some((l) => /^G38\.3 Z-[\d.]+ F[\d.]+$/.test(l))).toBe(true);
+  });
+
+  it('#643 review a scan begun from the travel height still probes at the scan Z', async () => {
+    // The head is at the TRAVEL height when each scan begins (the park did not take effect), so the
+    // descent must state where it starts before probing down; otherwise its miss leaves the ball
+    // above the stock and the sideways move sails over the edge as a false miss.
+    const z1 = fakeZ1({
+      actual: SHIFTED,
+      tap: { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ },
+      ballR: 1.5,
+      rim: 1.5,
+      headAtTravelForScans: true,
+    });
+    const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    // The sideways move ran at the scan's own depth (the surface less the ball's touch depth).
+    expect(z1.sideProbeZ()).not.toBeNull();
+    expect(z1.sideProbeZ()).toBeCloseTo(SURFACE - 1.5, 3);
+    // …so its reading is a real edge, not a miss from a ball above the stock.
+    const front = r.outcome.edges.find((e) => e.edge === 'front')!;
+    expect(front.problem).toBeNull();
+    expect(front.foundAt).not.toBeNull();
   });
 });
 
