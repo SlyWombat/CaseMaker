@@ -1,0 +1,8 @@
+G04 a file that uses step-and-repeat (#743 P-2 refusal fixture)*
+%FSLAX46Y46*%
+%MOMM*%
+%ADD10C,0.5*%
+%SRX2Y3I10J10*%
+D10*
+X0Y0D03*
+M02*
