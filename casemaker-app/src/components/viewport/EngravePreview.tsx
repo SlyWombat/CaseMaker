@@ -65,6 +65,8 @@ import { useRotaryViewStore } from '@/store/rotaryViewStore';
 import { RotaryMapDecorations } from './RotaryMapDecorations';
 import { ROTARY_MAP_NARROW_PX } from './rotaryMapView';
 import { wrapMapGeometry } from './rotaryStockView';
+import { RotaryGoalSurface } from './RotaryGoalSurface';
+import { rotaryGoalTarget } from './rotaryGoalPreview';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
 const STOCK_COLOR = '#c9a26b';
@@ -803,6 +805,10 @@ export function EngravePreview() {
   const designView = useRotaryViewStore((s) => s.design);
   const rotary = useMemo(() => rotaryMapOf(job), [job]);
   const wrapRadius = rotary !== null && designView === 'stock' ? rotary.radius : null;
+  // #723 R-3 — a goal on a rod is drawn from its radial field (both views), and the flat-framed
+  // mesh the primitives layer would draw at `position.z` is not this job's picture: on a rod the
+  // radius IS the height, and `position.z` is ignored.
+  const rotaryGoal = rotary !== null && rotaryGoalTarget(job) !== null;
   const machine = useMachineStore((s) => s.machine);
   const target = machine === null ? null : { host: machine.host, port: machine.port };
   const machineKey = machine === null ? null : `${machine.host}:${machine.port}`;
@@ -861,7 +867,17 @@ export function EngravePreview() {
               name="engrave-stock-cylinder"
             >
               <cylinderGeometry args={[rotary.radius, rotary.radius, rotary.stickout, 96]} />
-              <meshStandardMaterial color={STOCK_COLOR} metalness={0.05} roughness={0.75} />
+              {/* #723 R-3 — the relief's surface sits INSIDE the rod (r = R + z, z ≤ 0). With a
+                  goal drawn, the stock is GHOSTED so the part reads through it; without one it is
+                  the solid rod it has always been. */}
+              <meshStandardMaterial
+                color={STOCK_COLOR}
+                metalness={0.05}
+                roughness={0.75}
+                transparent={rotaryGoal}
+                opacity={rotaryGoal ? 0.22 : 1}
+                depthWrite={!rotaryGoal}
+              />
             </mesh>
           </>
         ) : (
@@ -879,6 +895,10 @@ export function EngravePreview() {
           <Sacrificial key={s.id} mesh={s.mesh} name={`engrave-${s.id}`} label={s.label} />
         ))}
 
+      {rotary !== null && (
+        <RotaryGoalSurface job={job} rotary={rotary} wrapRadius={wrapRadius} />
+      )}
+
       {floors.map((f) => (
         <Floor
           key={f.labelId}
@@ -892,7 +912,7 @@ export function EngravePreview() {
       {/* #435 — the 3D primitives and the reference object. They are drawn from the JOB, not from
           the worker's preview: a refused shape (a sphere, a side-opening primitive) has no floor,
           and drawing it anyway is how its row and its by-name refusal remain visible together. */}
-      {wrapRadius === null && <EngravePrimitives />}
+      {wrapRadius === null && !rotaryGoal && <EngravePrimitives />}
 
       {/* §5.7 — the design the cut does not reach. Drawn after the floors so the amber is never
           hidden by a floor at the same XY; the lost region is on the top face, which is above
