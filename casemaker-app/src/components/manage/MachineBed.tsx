@@ -114,17 +114,20 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const calibration = useSettingsStore((s) => s.machineCalibration);
   const registrations = useEngraveRegistrationStore((s) => s.records);
+  const tapBusy = useMountTapBusyFlag();
 
+  // #773 — a machine whose controller frame has never been read has no clearance Z to judge a tap
+  // by; the registration surface says so elsewhere and this row is simply not offered. The check is
+  // computed here and applied AFTER the hooks: returning before them called `useMountTapBusyFlag`
+  // and `useMountTap` conditionally, so a machine whose frame read changed under a mounted row would
+  // change its hook order (the rules-of-hooks finding this fixes).
+  const frameProblem = machineFrameProblemById(machine.profileId);
   const target = machine.address;
   const probe = probeFor(machine);
-  // #773 — a machine whose controller frame has never been read has no clearance Z to judge a tap
-  // by; the registration surface says so elsewhere and this row is simply not offered.
-  if (machineFrameProblemById(machine.profileId) !== null) return null;
   const profile = jobMachine({ machineId: machine.profileId ?? 'Z1' }, calibration);
   const viseAcc = accessoriesFor(machine).find((a) => a.kind === 'vise');
   const mountTap = mountTapFor(machine, Object.values(registrations), profile.toolChange.clearanceZ, mountNum(viseAcc?.unit.jawStartY) ?? -10);
 
-  const tapBusy = useMountTapBusyFlag();
   const api = useMountTap({
     target,
     settings: registrationSettings(defaults, probe).settings,
@@ -133,7 +136,7 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
     successNote: 'the jaw top is recorded',
   });
 
-  if (!canDriveMachine || target === null || mountTap === null) return null;
+  if (frameProblem !== null || !canDriveMachine || target === null || mountTap === null) return null;
 
   return (
     <span data-testid="manage-bed-tap-jaw">
