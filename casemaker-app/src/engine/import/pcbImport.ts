@@ -11,10 +11,12 @@
  * file whose role cannot be told is LISTED with its role `unknown` and a note — never guessed.
  * Solder mask, silkscreen and paste are listed as not used, one line each.
  *
- * ONE SIDE (Q10). Top copper is the v1 job. A set with ONLY bottom copper is mirrored about the
- * board's X centre — the whole board, copper, holes and outline, because it is milled from the
- * top with the board face down — and the summary says so. Both coppers together are refused
- * `pcb-two-sided`: a flip and registration on drilled holes is #429's work, not this slice's.
+ * ONE SIDE (Q10, amended 2026-10-30). Top copper is what v1 cuts. A set with ONLY bottom copper
+ * is mirrored about the board's X centre — the whole board, copper, holes and outline, because it
+ * is milled from the top with the board face down — and the summary says so. A set with BOTH is
+ * NOT refused: most hobby boards are two-layer, so the top copper, holes and outline import as
+ * normal and a WARNING states that the bottom copper's pieces are not milled. A jumper-wired
+ * top-only board is useful, and the person decides whether this one is.
  *
  * PLACEMENT (Q17). The board's outline box is centred on the blank; the file's own origin is not
  * used, because a board's coordinates are wherever the CAD package put them. With no outline file
@@ -82,10 +84,18 @@ export interface PcbImportOk {
   copperId: string;
   outlineId: string;
   mirrored: boolean;
+  /** Facts worth a finding row: what the board has that this cut does not make. */
+  warnings: PcbWarning[];
   notes: string[];
 }
 
-export type PcbImportRefusalCode = 'pcb-no-copper' | 'pcb-two-sided' | 'pcb-off-blank' | 'pcb-file-refused';
+export type PcbImportRefusalCode = 'pcb-no-copper' | 'pcb-off-blank' | 'pcb-file-refused';
+
+/** A fact the import states without refusing: the cut is still planned. */
+export interface PcbWarning {
+  code: 'pcb-bottom-not-cut';
+  message: string;
+}
 
 export type PcbImportResult = PcbImportOk | { ok: false; code: PcbImportRefusalCode; error: string };
 
@@ -233,21 +243,25 @@ export function planPcbImport(tl: ManifoldToplevel, files: readonly PcbSourceFil
 
   const tops = copperFiles.filter((f) => f.role === 'top-copper');
   const bottoms = copperFiles.filter((f) => f.role === 'bottom-copper');
-  if (tops.length > 0 && bottoms.length > 0) {
-    return {
-      ok: false,
-      code: 'pcb-two-sided',
-      error: 'The bottom copper is a second side; this version mills one side.',
-    };
-  }
   if (tops.length === 0 && bottoms.length === 0) {
     return { ok: false, code: 'pcb-no-copper', error: 'No copper file among these: pick the top copper (.gtl, F_Cu).' };
+  }
+  // A TWO-LAYER BOARD IS NOT REFUSED (the maintainer's note, 2026-10-30): the common case must
+  // still give the person a top-only board, and a warning names what the cut does not make.
+  const warnings: PcbWarning[] = [];
+  if (tops.length > 0 && bottoms.length > 0) {
+    const bottomCopper = mergeGerberShapes(tl, (bottoms[0] as { shapes: GerberShape[] }).shapes);
+    warnings.push({
+      code: 'pcb-bottom-not-cut',
+      message: `This board has copper on both sides; Case Maker cuts the top side only for now — the bottom copper's ${bottomCopper.pieces} piece${bottomCopper.pieces === 1 ? '' : 's'} of copper ${bottomCopper.pieces === 1 ? 'is' : 'are'} not milled.`,
+    });
   }
   if (tops.length > 1 || bottoms.length > 1) {
     return { ok: false, code: 'pcb-file-refused', error: 'More than one top copper file was picked; pick the board\'s one copper layer.' };
   }
   const copperFile = (tops[0] ?? bottoms[0]) as { name: string; shapes: GerberShape[]; role: PcbRole; sha256: string };
-  const mirrored = bottoms.length > 0;
+  // Only a BOTTOM-ONLY set is mirrored; a two-layer set is cut from the top as drawn.
+  const mirrored = tops.length === 0 && bottoms.length > 0;
   if (mirrored) notes.push('the set has only bottom copper, so the board is mirrored about its X centre and cut from the top.');
   if (drillsSeen.length > 1) notes.push(`${drillsSeen.length} drill files were read; their holes are merged.`);
 
@@ -293,7 +307,7 @@ export function planPcbImport(tl: ManifoldToplevel, files: readonly PcbSourceFil
     return {
       ok: false,
       code: 'pcb-off-blank',
-      error: `The board is ${round(boardWidth)} × ${round(boardHeight)} mm; the blank is ${round(opts.blank.length)} × ${round(opts.blank.width)} mm.`,
+      error: `The board is ${round(boardWidth)} × ${round(boardHeight)} mm; the blank is ${round(opts.blank.length)} × ${round(opts.blank.width)} mm. Use a larger blank.`,
     };
   }
 
@@ -398,6 +412,7 @@ export function planPcbImport(tl: ManifoldToplevel, files: readonly PcbSourceFil
     copperId,
     outlineId,
     mirrored,
+    warnings,
     notes,
   };
 }

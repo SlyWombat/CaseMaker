@@ -106,16 +106,26 @@ describe('the PCB import (#743 P-4)', () => {
     expect(copper?.position.x).toBeCloseTo(14 + (36 - 18.4375) - 2, 6);
   });
 
-  it('refuses a two-sided set, no copper, and a board bigger than the blank, by name', () => {
+  it('imports a two-layer board as its top side, with a warning saying the bottom is not cut', () => {
     const bottom = text('tiny-F_Cu.gbr').replace('Copper,L1,Top', 'Copper,L2,Bot');
-    const twoSided = planPcbImport(
+    const plan = planPcbImport(
       tl,
-      [source('tiny-F_Cu.gbr'), source('tiny-F_Cu_B.gbr', bottom), source('tiny-Edge_Cuts.gbr')],
+      [source('tiny-F_Cu.gbr'), source('tiny-F_Cu_B.gbr', bottom), source('tiny-Edge_Cuts.gbr'), source('tiny.drl')],
       opts,
     );
-    expect(twoSided.ok).toBe(false);
-    if (!twoSided.ok) expect(twoSided.code).toBe('pcb-two-sided');
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.mirrored).toBe(false);
+    const warning = plan.warnings.find((w) => w.code === 'pcb-bottom-not-cut');
+    expect(warning?.message).toMatch(/copper on both sides/);
+    expect(warning?.message).toMatch(/4 pieces of copper are not milled/);
+    // The top side's items are all there; the bottom file is still reported by role.
+    expect(plan.files.map((f) => f.role)).toEqual(['top-copper', 'bottom-copper', 'outline', 'drills']);
+    expect(plan.items.drills).toHaveLength(8);
+    expect(plan.items.vectors.some((v) => v.name === 'Copper — top')).toBe(true);
+  });
 
+  it('refuses no copper and a board bigger than the blank, and offers a larger blank', () => {
     const noCopper = planPcbImport(tl, [source('tiny-Edge_Cuts.gbr'), source('tiny.drl')], opts);
     expect(noCopper.ok).toBe(false);
     if (!noCopper.ok) expect(noCopper.code).toBe('pcb-no-copper');
@@ -126,6 +136,7 @@ describe('the PCB import (#743 P-4)', () => {
       expect(tinyBlank.code).toBe('pcb-off-blank');
       expect(tinyBlank.error).toMatch(/32 × 10 mm/);
       expect(tinyBlank.error).toMatch(/20 × 20 mm/);
+      expect(tinyBlank.error).toMatch(/Use a larger blank/);
     }
   });
 
