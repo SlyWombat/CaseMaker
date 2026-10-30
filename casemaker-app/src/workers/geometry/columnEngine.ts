@@ -1130,8 +1130,11 @@ export function meshRotary(grid: ColumnGrid, res: ColumnResolution): NodeMeshOut
   }
   for (let J = 0; J < nvD; J++) {
     const Jn = (J + 1) % nvD;
-    idx.push(cap0, Jn, J); // end at xMin, wound the other way
-    idx.push(cap1, nuD * nvD + J, nuD * nvD + Jn);
+    // OUTWARD, not inward: at xMin the face looks -X and at xMax +X. The first R-4 e2e drew both
+    // ends as triangular gaps because these two lines were wound the other way and the viewport
+    // culls back faces — the caps were there, facing the axis.
+    idx.push(cap0, J, Jn);
+    idx.push(cap1, nuD * nvD + Jn, nuD * nvD + J);
   }
 
   const indices = Uint32Array.from(idx);
@@ -1225,8 +1228,11 @@ export function meshRotaryMap(grid: ColumnGrid, res: ColumnResolution): NodeMesh
       }
     }
   }
+  // A skirt QUAD is (t0, t1, b1, b0) round its outside; the two triangles must cut the same
+  // diagonal. The old second triangle (t0, b0, b1) cut the other one and faced INWARD, so every
+  // skirt quad was a triangle plus a hole — the R-4 e2e's stock read as open-sided.
   const side = (t0: number, t1: number, b0: number, b1: number): void => {
-    idx.push(t0, t1, b0, t0, b0, b1);
+    idx.push(t0, t1, b0, t1, b1, b0);
   };
   for (let J = 0; J < nvD; J++) {
     side(idxOf(0, J), idxOf(0, J + 1), topCount + idxOf(0, J), topCount + idxOf(0, J + 1)); // axial −X
@@ -1331,8 +1337,11 @@ export function meshFlat(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutpu
       }
     }
   }
+  // A skirt QUAD is (t0, t1, b1, b0) round its outside; the two triangles must cut the same
+  // diagonal. The old second triangle (t0, b0, b1) cut the other one and faced INWARD, so every
+  // skirt quad was a triangle plus a hole — the R-4 e2e's stock read as open-sided.
   const side = (t0: number, t1: number, b0: number, b1: number): void => {
-    idx.push(t0, t1, b0, t0, b0, b1);
+    idx.push(t0, t1, b0, t1, b1, b0);
   };
   for (let J = 0; J < nvD; J++) {
     side(idxOf(0, J), idxOf(0, J + 1), topCount + idxOf(0, J), topCount + idxOf(0, J + 1)); // −X

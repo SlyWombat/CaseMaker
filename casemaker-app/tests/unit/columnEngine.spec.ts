@@ -699,3 +699,61 @@ describe('a milled thread on the flat engine (#445)', () => {
     expect(out.diagnostics[0]?.message).toMatch(/flat face/);
   });
 });
+
+// #723 R-4 — THE DISPLAY MESHES FACE OUT. The first rotation-relief e2e drew both ends of the rod
+// as triangular gaps and the Unroll's stock as open-sided: the caps and the skirts were wound
+// INTO the solid, so the viewport (which culls back faces) showed the axis-side of every closure.
+// The check is the mesh itself: a closed, star-shaped solid's outward normal points away from its
+// own centre at every triangle.
+describe('#723 the rotary meshes are wound outward', () => {
+  /** The worst inward-facing triangle's normal·(centroid − centre), divided by cells for scale. */
+  function inwardness(m: { positions: Float32Array; indices: Uint32Array }, centre: [number, number, number]): number {
+    let worst = Infinity;
+    for (let t = 0; t < m.indices.length; t += 3) {
+      const a = m.indices[t]!;
+      const b = m.indices[t + 1]!;
+      const c = m.indices[t + 2]!;
+      const p = (k: number): [number, number, number] => [m.positions[k * 3]!, m.positions[k * 3 + 1]!, m.positions[k * 3 + 2]!];
+      const [ax, ay, az] = p(a);
+      const [bx, by, bz] = p(b);
+      const [cx, cy, cz] = p(c);
+      const u = [bx - ax, by - ay, bz - az] as const;
+      const v = [cx - ax, cy - ay, cz - az] as const;
+      const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]] as const;
+      const g = [ax + bx + cx - 3 * centre[0], ay + by + cy - 3 * centre[1], az + bz + cz - 3 * centre[2]] as const;
+      const dot = n[0] * g[0] + n[1] * g[1] + n[2] * g[2];
+      if (!Number.isFinite(dot)) continue; // a degenerate triangle carries no face
+      worst = Math.min(worst, dot);
+    }
+    return worst;
+  }
+
+  it('the rod’s caps and side face away from the axis', () => {
+    const grid = ROTARY.buildGrid(cyl(10, 30), CUT, [], { dx: 0.5, dThetaDeg: 2 });
+    const m = meshRotary(grid, { dx: 0.5, dThetaDeg: 5 });
+    const xMid = (m.bbox.min[0] + m.bbox.max[0]) / 2;
+    expect(inwardness(m, [xMid, 0, 0])).toBeGreaterThan(-0.5);
+  });
+
+  it('the flat blank’s skirts and bottom face away from its centre (the same side() copy)', () => {
+    const grid = FLAT.buildGrid(prism(40, 40, 5), CUT, [], { dx: 0.5, dThetaDeg: 0.1 });
+    const m = meshFlat(grid, { dx: 1, dThetaDeg: 1 });
+    expect(Math.max(...Array.from(m.indices))).toBeLessThan(m.vertexCount);
+    const cx = (m.bbox.min[0] + m.bbox.max[0]) / 2;
+    const cy = (m.bbox.min[1] + m.bbox.max[1]) / 2;
+    const cz = (m.bbox.min[2] + m.bbox.max[2]) / 2;
+    expect(inwardness(m, [cx, cy, cz])).toBeGreaterThan(-0.5);
+  });
+
+  it('the unrolled solid’s skirts and bottom face away from its centre', () => {
+    const grid: ColumnGrid = {
+      kind: 'rotary', nu: 1, nv: 4, u0: 0.5, du: 1, v0: 0, dv: 90, initial: 10, base: 0,
+      h: Float32Array.from([10, 10, 5, 10]),
+    };
+    const m = meshRotaryMap(grid, { dx: 1, dThetaDeg: 90 });
+    const xMid = (m.bbox.min[0] + m.bbox.max[0]) / 2;
+    const yMid = (m.bbox.min[1] + m.bbox.max[1]) / 2;
+    // The solid spans −R … 0; its centre is halfway down.
+    expect(inwardness(m, [xMid, yMid, -5])).toBeGreaterThan(-0.5);
+  });
+});
