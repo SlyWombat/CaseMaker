@@ -71,10 +71,6 @@ import {
   type PerCharGlyph,
 } from './engraveGeometry';
 import { engraveRegions, raisedTextMeasure, type EngraveShopOpts } from './engraveGenerate';
-import { evaluatePlan, type CandidatePlan, type PlanEvaluation } from './planEvaluate';
-import { smartPick } from '@/engine/cnc/engrave/smartPick';
-import { explainSmartPick, type SmartPickWords } from '@/engine/cnc/engrave/smartPickWords';
-import { NO_TOOL_KEY } from '@/engine/cnc/toolRegistry';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 
@@ -225,15 +221,6 @@ export interface EngravePreviewVoid {
   rings: [number, number][][];
 }
 
-/** #766 — the measured pick's sentences and keys, as the panel reads them. */
-export interface EngravePreviewSmart {
-  /** The best-measured plan's first cutter (may be one that does not post yet). */
-  chosenKey: string | null;
-  /** The first cutter of the best plan that POSTS, or null when none does. */
-  runnableKey: string | null;
-  words: SmartPickWords;
-}
-
 /** Everything the panel and the viewport need for one job, as plain data + mesh buffers. */
 export interface EngravePreview {
   /** The stock with every enabled, error-free cut removed to its own depth (#288). Work frame. */
@@ -289,12 +276,6 @@ export interface EngravePreview {
   supportingFloors: Record<string, number>;
   /** #211's cutter recommendation, with the compromise message completed here (see below). */
   recommendation: ToolRecommendation;
-  /**
-   * #766 — the MEASURED pick, present when the job names no cutter: the search's chosen plan, its
-   * sentences, and the plan that posts. `recommendation.key` is already the search's runnable
-   * first cutter when this is present; this field carries the explanation the panel can show.
-   */
-  smart?: EngravePreviewSmart | null;
 }
 
 /** The preview worker, one per worker. Mirrors `SimSession`'s shape. */
@@ -768,30 +749,12 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       },
     );
 
-    // #766 — THE PANEL'S PICK IS THE SAME SEARCH THE CLI RUNS. The question is only open when the
-    // job names no cutter; a named cutter keeps the rule recommendation beside it. A search failure
-    // must never break the preview: the rule recommendation stands and `smart` is null.
-    let smart: EngravePreviewSmart | null = null;
-    let shown = recommendation;
-    if (job.toolKey === NO_TOOL_KEY) {
-      try {
-        const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
-          evaluatePlan(job, plan, { tl, tools, catalogue, shop, calibration: null }, { level });
-        const pick = smartPick(job, tools, catalogue, evaluate, { maxCandidates: 8, fullFinalists: 2 });
-        const words = explainSmartPick(pick, tools);
-        const runnableKey = pick.runnable?.plan.cutters[0]?.key ?? null;
-        smart = { chosenKey: pick.chosen.plan.cutters[0]?.key ?? null, runnableKey, words };
-        if (runnableKey !== null) {
-          shown = {
-            ...recommendation,
-            key: runnableKey,
-            reason: [words.verdict, words.runnerUp, words.buyThis].filter((l) => l !== null).join(' '),
-          };
-        }
-      } catch {
-        smart = null;
-      }
-    }
+    // #766 — THE MEASURED SEARCH IS DELIBERATELY NOT RUN HERE. Its per-candidate measures cost
+    // seconds in a cold process (the coin's search was 21.3 s of a 39.6 s CLI run), and this
+    // function runs on the panel's debounce and must draw immediately. The rule recommendation
+    // below is the quick answer; the measured pick is the CLI's no-cutter path and Generate's
+    // question today, and an explicit panel action when one is added (the same `smartPick`,
+    // `evaluatePlan` seam, called once and cached).
     return {
       stock: stockMesh,
       stages,
@@ -807,10 +770,9 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       colourBoundaryDepth,
       supportingFloors,
       recommendation: {
-        ...shown,
-        reason: completeCompromiseReason(tl, job, shown, tools, shop.lostDetailWarnRatio ?? null),
+        ...recommendation,
+        reason: completeCompromiseReason(tl, job, recommendation, tools, shop.lostDetailWarnRatio ?? null),
       },
-      smart,
     };
   };
 

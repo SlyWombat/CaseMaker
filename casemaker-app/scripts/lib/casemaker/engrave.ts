@@ -1419,7 +1419,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const searchTools = getTools();
         const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
           evaluatePlan(job, plan, { tl, tools: searchTools, catalogue: catalogueRows, shop, calibration: null }, { level });
+        const searchStart = Date.now();
         const pick = smartPick(job, searchTools, catalogueRows, evaluate);
+        const searchMs = Date.now() - searchStart;
         const words = explainSmartPick(pick, searchTools);
         out.progress(`  pick      ${words.verdict}`);
         words.cutters.forEach((line, i) => out.progress(`  cutter ${i + 1}   ${line}`));
@@ -1427,6 +1429,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         if (words.buyThis !== null) out.progress(`  buy       ${words.buyThis}`);
         for (const note of words.notes) out.progress(`  note      ${note}`);
         if (process.env.CM_PICK_DEBUG === '1') {
+          out.progress(`  debug     search ${searchMs} ms over ${pick.considered.length} plans`);
           for (const s of pick.considered) {
             out.progress(
               `  debug     ${s.plan.cutters.map((c) => c.key).join('+')} worst=${s.worstFidelity.toFixed(2)} stand=${s.raisedStandingMm2} joined=${s.raisedJoined} ok=${s.evaluation.ok} sec=${String(s.evaluation.seconds)} changes=${s.evaluation.toolChanges}`,
