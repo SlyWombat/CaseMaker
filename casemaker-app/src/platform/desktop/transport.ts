@@ -9,9 +9,9 @@
 // (`src-tauri/src/machine.rs`) is the same kind of dumb: it owns sockets, not the protocol.
 
 import { invoke } from '@tauri-apps/api/core';
-import type { MachineTransport, UdpDatagram } from './protocol';
+import type { MachineTransport, SerialPortSummary, UdpDatagram } from './protocol';
 
-/** The concrete transport: raw sockets via the desktop shell's Tauri commands. */
+/** The concrete transport: raw sockets and USB serial via the desktop shell's Tauri commands. */
 export const tauriTransport: MachineTransport = {
   // The Rust side stamps each datagram as it takes it off the socket, so the arrival time is a
   // fact about receipt and not about how long the reply took to cross the IPC boundary (#275).
@@ -30,5 +30,14 @@ export const tauriTransport: MachineTransport = {
   },
   async tcpClose(conn): Promise<void> {
     await invoke('machine_tcp_close', { conn });
+  },
+  // #775 — USB serial. These two commands exist only in the Windows desktop shell (the Rust side
+  // answers a plain refusal elsewhere); the HTTP transport deliberately has neither, which is how
+  // a LAN browser is kept from offering a port picker.
+  async serialList(): Promise<SerialPortSummary[]> {
+    return invoke<SerialPortSummary[]>('machine_serial_list');
+  },
+  async serialConnect(port, baud, timeoutMs): Promise<number> {
+    return invoke<number>('machine_serial_connect', { port, baud, timeout_ms: timeoutMs });
   },
 };

@@ -62,12 +62,28 @@ export interface UdpDatagram {
   text: string;
 }
 
+/** One serial port as the desktop shell lists it (#775). */
+export interface SerialPortSummary {
+  /** The system name, e.g. `COM4` — what `serialConnect` takes. */
+  portName: string;
+  /** The port's own descriptor (`USB-SERIAL CH340`), or empty when the system gave none. */
+  label: string;
+  /** True for a USB-attached port; the Z1's cable is one. */
+  usb: boolean;
+}
+
 /**
- * Five calls, no framing. Implemented today by Tauri commands over raw sockets; USB can be a second
- * implementation without anything above changing.
+ * Five calls, no framing. Implemented by Tauri commands over raw sockets; #775 adds USB serial as
+ * a SECOND connection kind through {@link MachineTransport.serialConnect}, returning ids in the
+ * same space as {@link tcpConnect} — `tcpWrite`/`tcpRead`/`tcpClose` serve either kind unchanged.
  *
  * `tcpRead` returns the bytes available within `timeoutMs` (an empty array on timeout) and rejects
- * if the peer closed the connection, so a caller can tell "nothing yet" from "gone".
+ * if the peer closed the connection, so a caller can tell "nothing yet" from "gone". A serial read
+ * answers exactly the same way.
+ *
+ * SERIAL IS OPTIONAL, and its absence is the web build's answer. The Tauri webview's transport
+ * implements it; the HTTP transport a LAN browser uses does not, so no browser can be offered a
+ * port picker that could not work (#775's desktop-only rule).
  */
 export interface MachineTransport {
   /** Every datagram that arrived in the window, in arrival order, each stamped when it was taken
@@ -77,6 +93,10 @@ export interface MachineTransport {
   tcpWrite(conn: number, data: Uint8Array): Promise<void>;
   tcpRead(conn: number, max: number, timeoutMs: number): Promise<Uint8Array>;
   tcpClose(conn: number): Promise<void>;
+  /** The serial ports this machine offers, when this transport has any (#775). */
+  serialList?(): Promise<SerialPortSummary[]>;
+  /** Open a serial port; the id works with `tcpWrite`/`tcpRead`/`tcpClose` (#775). */
+  serialConnect?(port: string, baud: number, timeoutMs: number): Promise<number>;
 }
 
 // ---------------------------------------------------------------------------

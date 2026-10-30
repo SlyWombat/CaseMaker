@@ -13,10 +13,13 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
 import {
   asVerifiedProgram,
+  checkSerial,
   DEFAULT_CONNECT_TIMEOUT_MS,
+  DEFAULT_SERIAL_BAUD,
   DESKTOP_ONLY_MARKER,
   discover,
   identify,
+  listSerialPorts,
   openConsoleSession,
   status,
   uploadVerifiedProgram,
@@ -25,6 +28,7 @@ import {
 } from '@/platform/desktop/machineBridge';
 import { quicklzCompress } from '@/platform/desktop/quicklz';
 import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
+import { DEFAULT_SERIAL_BAUD as SERIAL_MODULE_BAUD } from '@/platform/machineSerial';
 import {
   decodeText,
   encodeFrame,
@@ -127,9 +131,9 @@ describe('#449 the connect timeout is a shop default with a labelled fallback', 
 
   it('every connect site reads the one constant rather than restating a literal', () => {
     const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'platform', 'desktop', 'machineBridge.ts'), 'utf8');
-    // identify, status, readConfigValues, uploadVerifiedProgram, sendConsoleLine, openConsoleSession,
-    // and #772's two card commands (listSdFiles, deleteSdFile).
-    expect(src.match(/opts\.connectTimeoutMs \?\? DEFAULT_CONNECT_TIMEOUT_MS/g)).toHaveLength(8);
+    // identify, status, #775's serial check, readConfigValues, uploadVerifiedProgram,
+    // sendConsoleLine, openConsoleSession, and #772's two card commands (listSdFiles, deleteSdFile).
+    expect(src.match(/opts\.connectTimeoutMs \?\? DEFAULT_CONNECT_TIMEOUT_MS/g)).toHaveLength(9);
     expect(src).not.toMatch(/connectTimeoutMs \?\? \d/);
   });
 });
@@ -465,5 +469,105 @@ describe('#302 openConsoleSession — one connection, replies kept with their li
     expect(transport.writes).toEqual([]);
     const after = await live.send('?');
     expect(after.ok).toBe(true);
+  });
+});
+
+// #775 — the serial arm. The transport is injected here exactly as it is for TCP, which is the
+// claim the feature rests on: everything above `connect` is the same code, and the only serial
+// thing about it is which connect was called.
+describe('#775 machine bridge — USB serial is the same protocol over a second transport', () => {
+  /** Reads scripted per write, like ScriptedConsoleTransport: each ask gets its own reply, and a
+   *  drain ends on the empty read that follows rather than swallowing the next ask's frames. */
+  class FakeSerialTransport extends FakeTransport {
+    serialConns = 0;
+    serialOpened: Array<{ port: string; baud: number; timeoutMs: number }> = [];
+    ports = [
+      { portName: 'COM4', label: 'USB-SERIAL CH340', usb: true },
+      { portName: 'COM7', label: '', usb: false },
+    ];
+    script: Uint8Array[][] = [];
+    private pendingReads: Uint8Array[] = [];
+
+    override async tcpWrite(conn: number, data: Uint8Array): Promise<void> {
+      await super.tcpWrite(conn, data);
+      this.pendingReads = [...(this.script[this.writes.length - 1] ?? [])];
+    }
+
+    override async tcpRead(): Promise<Uint8Array> {
+      return this.pendingReads.shift() ?? EMPTY;
+    }
+
+    async serialList() {
+      return this.ports;
+    }
+
+    async serialConnect(port: string, baud: number, timeoutMs: number): Promise<number> {
+      this.serialConns += 1;
+      this.serialOpened.push({ port, baud, timeoutMs });
+      return 2;
+    }
+  }
+
+  it('the UI module and the bridge agree on the fallback baud', () => {
+    expect(SERIAL_MODULE_BAUD).toBe(DEFAULT_SERIAL_BAUD);
+  });
+
+  it('lists ports without touching a socket', async () => {
+    const transport = new FakeSerialTransport();
+    expect(await listSerialPorts({ transport })).toEqual(transport.ports);
+    expect(transport.connects).toBe(0);
+    expect(transport.serialConns).toBe(0);
+  });
+
+  it('a transport with no serial calls lists nothing — the LAN browser’s answer', async () => {
+    expect(await listSerialPorts({ transport: new FakeTransport() })).toEqual([]);
+  });
+
+  it('identify over serial sends the same M482.5/M482.4 frames as over TCP', async () => {
+    const transport = new FakeSerialTransport();
+    transport.script = [
+      [encodeFrame(0x81, utf8('STA param[5]:192.168.10.43'))],
+      [encodeFrame(0x81, utf8('STA param[4]:AA-BB-CC-DD-EE-FF'))],
+    ];
+
+    const identity = await identify({ serialPort: 'COM4' }, { transport });
+
+    expect(transport.serialOpened).toEqual([
+      { port: 'COM4', baud: DEFAULT_SERIAL_BAUD, timeoutMs: DEFAULT_CONNECT_TIMEOUT_MS },
+    ]);
+    expect(transport.connects).toBe(0);
+    expect(identity.host).toBe('COM4');
+    expect(identity.ip).toBe('192.168.10.43');
+    expect(identity.mac).toBe('aa:bb:cc:dd:ee:ff');
+    expect(decodeAll(transport.writes).map((f) => decodeText(f.data))).toEqual(['M482.5', 'M482.4']);
+    expect(transport.closed).toEqual([2]);
+  });
+
+  it('checkSerial asks identify and status on ONE connection', async () => {
+    const transport = new FakeSerialTransport();
+    transport.script = [
+      [encodeFrame(0x81, utf8('STA param[5]:192.168.10.43'))],
+      [encodeFrame(0x81, utf8('STA param[4]:AA-BB-CC-DD-EE-FF'))],
+      [encodeFrame(0x81, utf8('<Idle|MPos:0.000,0.000,0.000>'))],
+    ];
+
+    const check = await checkSerial({ serialPort: 'COM5', baud: 57_600 }, { transport });
+
+    expect(transport.serialOpened).toEqual([
+      { port: 'COM5', baud: 57_600, timeoutMs: DEFAULT_CONNECT_TIMEOUT_MS },
+    ]);
+    expect(transport.serialConns).toBe(1); // one open for both asks: a CDC port may reset on close
+    expect(transport.connects).toBe(0);
+    expect(check.port).toBe('COM5');
+    expect(check.baud).toBe(57_600);
+    expect(check.identity.ip).toBe('192.168.10.43');
+    expect(check.status?.text).toContain('Idle');
+    expect(transport.closed).toEqual([2]);
+  });
+
+  it('a serial target on a transport without serial calls is refused, not sent to DNS', async () => {
+    await expect(identify({ serialPort: 'COM4' }, { transport: new FakeTransport() })).rejects.toThrow(
+      /Serial connections are available only in the desktop app/,
+    );
   });
 });

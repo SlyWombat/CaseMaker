@@ -59,6 +59,8 @@ casemaker_setup.exe /S /PORT=9000 /HOST=192.168.10.16
 4. Confirm `%APPDATA%\casemaker\config.json` still carries the custom port and `host`; the saved project opens; the records are there; Add/Remove Programs shows the new version; and `netsh advfirewall firewall show rule name="Case Maker Discovery"` (elevated) still lists the discovery rule.
 5. Launch the app and connect to the Z1 on the LAN. A pass here is the release's upgrade evidence; a failure blocks the release.
 
+**USB serial (#775):** a controller on its USB cable, with no network at all, is reached from **Manage › Machines › USB serial** — pick the COM port and Connect. The link carries the same protocol as TCP 2222 (same framing, same commands), because serial is a second connection kind behind the same transport, not a second protocol. It is offered only in the desktop app window on Windows: the web build has no ports, and a LAN browser served by the desktop app is not offered the pane either. Discovery is a LAN broadcast, so a serial machine cannot be found — it is always chosen by hand. Nothing on the link announces the model, so the machine's envelope and limits stay unknown and it is not recorded as the network machine. Program uploads are still network-only; sending a job over the serial link is not wired into the Cut flow yet (bench check: #767).
+
 ### 3. CLI / sample-export script
 
 `scripts/export-sample.ts` (and the export-sample npm script) compiles a `.caseproj.json` to STL/3MF without launching a UI. Useful for batch jobs and CI.

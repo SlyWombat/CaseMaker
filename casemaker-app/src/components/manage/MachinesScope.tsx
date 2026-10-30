@@ -22,11 +22,18 @@
  * the machine's pane.
  */
 
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { MACHINE_FRAME_UNREAD, PRINTER_PROFILES, millModelById, type Mill } from '@/engine/cnc/machine';
 import { canDriveMachine } from '@/platform/capabilities';
 import { controllerState } from '@/platform/machineUpload';
 import { probeMachine } from '@/platform/machineProbe';
+import {
+  checkSerialPort,
+  listSerialPorts,
+  serialAvailable,
+  type SerialCheckResult,
+  type SerialPortChoice,
+} from '@/platform/machineSerial';
 import { machineDisplayName } from '@/platform/locationClient';
 import {
   MY_MACHINE_FILENAME,
@@ -79,6 +86,49 @@ export function MachinesScope() {
   const [address, setAddress] = useState('');
   const [transfer, setTransfer] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const importInput = useRef<HTMLInputElement | null>(null);
+
+  // #775 — USB serial. The section exists only where the page can actually open a port: the Tauri
+  // webview on Windows. A LAN browser served by the same build has the HTTP transport, which has no
+  // serial calls, so `serialAvailable` answers false and nothing is drawn (#354's rule: do not offer
+  // what cannot work).
+  const [serialHere, setSerialHere] = useState(false);
+  const [serialPorts, setSerialPorts] = useState<readonly SerialPortChoice[]>([]);
+  const [serialPort, setSerialPort] = useState('');
+  const [serialBusy, setSerialBusy] = useState(false);
+  const [serialResult, setSerialResult] = useState<SerialCheckResult | null>(null);
+
+  useEffect(() => {
+    if (!canDriveMachine) return;
+    let live = true;
+    void (async () => {
+      if (!(await serialAvailable())) return;
+      const ports = await listSerialPorts();
+      if (!live) return;
+      setSerialHere(true);
+      setSerialPorts(ports);
+      setSerialPort((current) => (current.length > 0 ? current : (ports[0]?.portName ?? '')));
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  async function refreshSerialPorts(): Promise<void> {
+    const ports = await listSerialPorts();
+    setSerialPorts(ports);
+    setSerialPort((current) =>
+      ports.some((p) => p.portName === current) ? current : (ports[0]?.portName ?? ''),
+    );
+  }
+
+  async function connectSerial(): Promise<void> {
+    setSerialBusy(true);
+    try {
+      setSerialResult(await checkSerialPort(serialPort));
+    } finally {
+      setSerialBusy(false);
+    }
+  }
 
   // `probeMachine` resolves every failure into one of its four outcomes, so there is nothing to
   // catch here — a thrown probe would be a bug in the probe, not an error to swallow.
@@ -393,6 +443,96 @@ export function MachinesScope() {
             {reason !== null && <p className="hint">{reason}</p>}
             {machineFileRow}
             {machineStatus}
+          </div>
+        )}
+
+        {/* #775 — USB serial: a machine on its cable, with no network at all. The same protocol
+            runs over this link as over TCP :2222, including the framing, but no job is sent over it
+            yet — the Cut flow is network-only, and the pane says so rather than leaving a reader to
+            assume. The model cannot be established: nothing on the link announces it. */}
+        {canDriveMachine && serialHere && (
+          <div className="mcard" data-testid="manage-serial">
+            <h4>
+              USB serial <span className="tag tag--muted">desktop only</span>
+            </h4>
+            <div className="sub">
+              A controller on its USB cable, with no network needed. Discovery is a LAN broadcast, so
+              a serial machine cannot be found — pick its port here.
+            </div>
+            <div className="btn-row">
+              <select
+                className="fld fld--text"
+                aria-label="Serial port"
+                data-testid="manage-serial-port"
+                value={serialPort}
+                onChange={(e) => setSerialPort(e.target.value)}
+              >
+                {serialPorts.length === 0 && <option value="">No serial ports found</option>}
+                {serialPorts.map((p) => (
+                  <option key={p.portName} value={p.portName}>
+                    {p.label.length > 0 ? `${p.label} (${p.portName})` : p.portName}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn--sm"
+                data-testid="manage-serial-refresh"
+                onClick={() => void refreshSerialPorts()}
+                title="List the serial ports again — plug the cable in, then press this"
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                data-testid="manage-serial-connect"
+                disabled={serialBusy || serialPort.trim().length === 0}
+                title="Open this port and ask the controller what it is"
+                onClick={() => void connectSerial()}
+              >
+                {serialBusy ? 'Connecting…' : 'Connect'}
+              </button>
+            </div>
+            {serialResult !== null && serialResult.kind === 'found' && (
+              <div data-testid="manage-serial-result">
+                <div className="two">
+                  <div className="kv">
+                    <Kv label="port">{serialResult.reach.portName}</Kv>
+                    <Kv label="ip">{serialResult.reach.ip ?? '— not reported'}</Kv>
+                    <Kv label="mac">{serialResult.reach.mac ?? '— not reported'}</Kv>
+                    <Kv label="status line">{serialResult.reach.status ?? '— did not answer'}</Kv>
+                    <Kv label="state">
+                      {serialResult.reach.statusLine === null
+                        ? '—'
+                        : controllerState(serialResult.reach.status)}
+                    </Kv>
+                  </div>
+                </div>
+                {serialResult.reach.notes.length > 0 && (
+                  <ul className="notes" data-testid="manage-serial-notes">
+                    {serialResult.reach.notes.map((n) => (
+                      <li key={n}>{n}</li>
+                    ))}
+                  </ul>
+                )}
+                <p className="hint" data-testid="manage-serial-upload-note">
+                  Programs are still sent to the machine over the network. Sending a job over USB
+                  serial is not wired into the Cut flow yet — the link itself carries the same
+                  protocol, and the bench check (#767) is what decides the transfer's behaviour.
+                </p>
+              </div>
+            )}
+            {serialResult !== null && serialResult.kind === 'error' && (
+              <p className="hint" data-testid="manage-serial-error">
+                The port did not answer: {serialResult.detail}
+              </p>
+            )}
+            {serialResult !== null && serialResult.kind === 'unavailable' && (
+              <p className="hint" data-testid="manage-serial-unavailable">
+                {serialResult.reason}
+              </p>
+            )}
           </div>
         )}
 

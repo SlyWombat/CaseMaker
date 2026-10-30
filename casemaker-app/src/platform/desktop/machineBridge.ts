@@ -41,6 +41,7 @@ import {
   type MachineTransport,
   type SdDeleteOutcome,
   type SdListOutcome,
+  type SerialPortSummary,
   type UploadOutcome,
 } from './protocol';
 import { tauriTransport } from './transport';
@@ -59,15 +60,43 @@ export type {
   SdDeleteOutcome,
   SdEntry,
   SdListOutcome,
+  SerialPortSummary,
   UploadOutcome,
 } from './protocol';
 
-/** Where to reach a machine: an IP (from discovery or typed) and, optionally, a non-default port. */
-export interface MachineTarget {
-  host: string;
-  /** The TCP command port. Defaults to 2222 (Z1-Bridge-Protocol.md §1). */
-  port?: number;
+/**
+ * Where to reach a machine: a TCP address, or — since #775 — a USB serial port.
+ *
+ * The same protocol layer runs over either; only the connect call differs. Discovery is still
+ * broadcast-only, so a serial machine is chosen by hand in Manage › Machines.
+ */
+export type MachineTarget =
+  | {
+      host: string;
+      /** The TCP command port. Defaults to 2222 (Z1-Bridge-Protocol.md §1). */
+      port?: number;
+    }
+  | {
+      /** The system's port name, e.g. `COM4` (from {@link listSerialPorts}). */
+      serialPort: string;
+      /** The baud the port is opened at. The Z1's USB CDC link ignores it; Windows does not. */
+      baud?: number;
+    };
+
+/** Whether a target is the serial arm. The union has no shared discriminant field on purpose:
+ *  every existing caller passes `{ host, port }` and must keep type-checking unchanged. */
+export function isSerialTarget(target: MachineTarget): target is { serialPort: string; baud?: number } {
+  return 'serialPort' in target && typeof target.serialPort === 'string';
 }
+
+/** The name to put in a message or an identity record: the IP, or the serial port. */
+export function targetLabel(target: MachineTarget): string {
+  return isSerialTarget(target) ? target.serialPort : target.host;
+}
+
+/** The serial baud used when a caller names none. `serialport`'s default is 9600; a USB CDC link
+ *  ignores the value, and 115200 is the conventional one for a controller's console. */
+export const DEFAULT_SERIAL_BAUD = 115_200;
 
 /**
  * The TCP connect timeout, ms — the labelled NO-SERVICE FALLBACK of the shop's
@@ -137,6 +166,50 @@ function transportOf(opts: BridgeOptions): MachineTransport {
   return opts.transport ?? defaultTransport();
 }
 
+/**
+ * Open the connection a target names, through whichever arm applies (#775).
+ *
+ * ONE place decides TCP vs serial, so every operation above (identify, status, config, console,
+ * upload) is the same code over either link. A serial target on a transport without serial — the
+ * LAN browser's HTTP transport — gets a sentence rather than a silent fallback to `host`, which
+ * would send `COM4` to DNS.
+ */
+async function connectMachine(
+  transport: MachineTransport,
+  target: MachineTarget,
+  timeoutMs: number,
+): Promise<number> {
+  if (isSerialTarget(target)) {
+    if (transport.serialConnect === undefined) {
+      throw new Error(
+        'Serial connections are available only in the desktop app started on the machine, not in a browser.',
+      );
+    }
+    return transport.serialConnect(target.serialPort, target.baud ?? DEFAULT_SERIAL_BAUD, timeoutMs);
+  }
+  return transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, timeoutMs);
+}
+
+/**
+ * Whether THIS page can list and open serial ports (#775). The bundle is the same in the Tauri
+ * webview and in a LAN browser it serves; only the former has the Tauri transport, so this is a
+ * runtime probe — the desktop-ONLY rule is about the link, not about the build.
+ */
+export function serialTransportAvailable(): boolean {
+  return defaultTransport().serialList !== undefined;
+}
+
+/**
+ * The serial ports this machine offers, for Manage › Machines (#775). An empty list on a page with
+ * no serial transport as well as on a machine with no ports — the caller reads
+ * {@link serialTransportAvailable} when the difference matters.
+ */
+export async function listSerialPorts(opts: BridgeOptions = {}): Promise<SerialPortSummary[]> {
+  const transport = transportOf(opts);
+  if (transport.serialList === undefined) return [];
+  return transport.serialList();
+}
+
 /** Listen for the machine's UDP broadcast for `opts.windowMs` (the protocol's fallback 3000 ms) and return it. */
 export async function discover(
   opts: BridgeOptions & { port?: number; windowMs?: number } = {},
@@ -154,9 +227,9 @@ export async function identify(
   opts: BridgeOptions & { windowMs?: number } = {},
 ): Promise<MachineIdentity> {
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
-    return await runIdentify(transport, conn, target.host, { windowMs: opts.windowMs });
+    return await runIdentify(transport, conn, targetLabel(target), { windowMs: opts.windowMs });
   } finally {
     await closeQuietly(transport, conn);
   }
@@ -168,7 +241,7 @@ export async function status(
   opts: BridgeOptions & { windowMs?: number } = {},
 ): Promise<MachineStatus> {
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     return await runStatus(transport, conn, { windowMs: opts.windowMs });
   } finally {
@@ -185,7 +258,7 @@ export async function listSdFiles(
   opts: BridgeOptions & { directory?: string; windowMs?: number } = {},
 ): Promise<SdListOutcome> {
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     return await runListSd(transport, conn, opts.directory ?? GCODE_DIR, { windowMs: opts.windowMs });
   } finally {
@@ -204,9 +277,48 @@ export async function deleteSdFile(
   opts: BridgeOptions & { windowMs?: number } = {},
 ): Promise<SdDeleteOutcome> {
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     return await runDeleteSd(transport, conn, path, { windowMs: opts.windowMs });
+  } finally {
+    await closeQuietly(transport, conn);
+  }
+}
+
+/** What one serial check established (#775). */
+export interface SerialCheck {
+  port: string;
+  baud: number;
+  identity: MachineIdentity;
+  /** Null when the status ask failed; the identity is still a fact. */
+  status: MachineStatus | null;
+}
+
+/**
+ * Ask a machine on a serial port to identify itself and say what it is doing (#775), on ONE
+ * connection.
+ *
+ * ONE CONNECTION IS THE POINT. Each bridge call normally opens and closes its own link, but a USB
+ * CDC port often resets or re-enumerates when its handle closes (DTR toggling is the classic
+ * cause), so two calls in a row would ask two different instances of the controller — or fail on
+ * the second. Identify and status share the link, exactly as they do on the bench's TCP console.
+ */
+export async function checkSerial(
+  target: { serialPort: string; baud?: number },
+  opts: BridgeOptions & { windowMs?: number; statusWindowMs?: number } = {},
+): Promise<SerialCheck> {
+  const transport = transportOf(opts);
+  const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  try {
+    const identity = await runIdentify(transport, conn, targetLabel(target), { windowMs: opts.windowMs });
+    let status: MachineStatus | null = null;
+    try {
+      status = await runStatus(transport, conn, { windowMs: opts.statusWindowMs });
+    } catch {
+      // A status request that failed does not unmake the identify answer; the caller shows both.
+      status = null;
+    }
+    return { port: target.serialPort, baud: target.baud ?? DEFAULT_SERIAL_BAUD, identity, status };
   } finally {
     await closeQuietly(transport, conn);
   }
@@ -249,7 +361,7 @@ export async function readConfigValues(
   opts: BridgeOptions & { source?: string; windowMs?: number } = {},
 ): Promise<ConfigReadOutcome[]> {
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     const out: ConfigReadOutcome[] = [];
     for (const key of keys) {
@@ -321,7 +433,7 @@ export async function uploadVerifiedProgram(
 
   const transport = transportOf(opts);
   const send = async (path: string, content: Uint8Array): Promise<UploadOutcome> => {
-    const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+    const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
     try {
       return await runUpload(transport, conn, path, content, {
         packetSize: opts.packetSize,
@@ -372,7 +484,7 @@ export async function sendConsoleLine(
   const problem = consoleProblem(line);
   if (problem !== null) return { ok: false, reason: 'refused', line, detail: problem, text: '' };
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     return await openConsole(transport, conn).send(line, opts);
   } finally {
@@ -402,7 +514,7 @@ export async function openConsoleSession(
   opts: BridgeOptions = {},
 ): Promise<LiveConsole> {
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   const session = openConsole(transport, conn);
   return {
     send: (line, sendOpts) => session.send(line, sendOpts),

@@ -68,6 +68,8 @@ keyring = { version = "~3.6", default-features = false, features = ["windows-nat
 # Cargo.lock), so the interfaces this module handles are the very ones the webview hands over.
 webview2-com = "0.39"
 windows-core = "0.62"
+# #775 — the USB serial transport (Windows-scoped: the installer is Windows-only).
+serialport = { version = "4", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "~3.6", default-features = false, features = ["apple-native"] }

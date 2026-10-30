@@ -227,6 +227,10 @@ pub fn run() {
             machine::machine_tcp_read,
             machine::machine_tcp_close,
             crash_log_tail,
+            // #775 — the USB serial transport: the same registry and the same three data calls as
+            // TCP, with a list of ports and an open call that returns a connection id.
+            machine::machine_serial_list,
+            machine::machine_serial_connect,
         ])
         .setup(move |app| {
             // ONE HOUSE, ONE PROCESS (#321). Taken BEFORE the server starts, because refusing here
