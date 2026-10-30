@@ -65,6 +65,8 @@ describe('#561 readStatusLine — coordinates, and the homed-rest invariant', ()
     expect(s.toolWaiting).toBe(1);
     // A running program waits for nothing: two values, no third.
     expect(readStatusLine('<Idle|T:1,-9.752>').toolWaiting).toBeNull();
+    // …and the firmware's `-1` sentinel for "nothing pending" is the same answer, not a raw -1.
+    expect(readStatusLine('<Idle|T:1,0.047,-1>').toolWaiting).toBeNull();
   });
 
   it('leaves absent fields null — a probe poll has no T and no P', () => {

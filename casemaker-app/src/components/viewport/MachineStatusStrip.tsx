@@ -23,7 +23,7 @@ import { rotaryAngleWords } from './rotaryWords';
 import { StripAccessories } from './StripAccessories';
 
 /**
- * #526/#647 — the live machine in one line under the viewport, whenever a machine is remembered;
+ * #526/#647 — the live machine in one band under the viewport, whenever a machine is remembered;
  * with none remembered, the same band names the absence and opens Manage › Machines (#689 review).
  *
  * THE DRO (design: `docs/design/status-strip-dro.md`, variant B). The strip answers the operator's
@@ -46,8 +46,14 @@ import { StripAccessories } from './StripAccessories';
  * NO DEFENSIVE QUALIFIERS (#646). The strip states the value; where a provenance fact belongs it is
  * in the hover (the T number and the probe's last M491), never a caveat on the value itself.
  *
- * FIXED-WIDTH CELLS, ONE ELASTIC. At 760 px nothing wraps: each cell is fixed or small, and the tool
- * name is the only cell that grows, so it is the one that ellipsises.
+ * WRAPS RATHER THAN CLIPS (#769 review). The band is a wrapping flex line. On a wide column every
+ * cell fits on one row; when the column is narrower than the row — at the 760 px column with a
+ * rotary module the measured content is 987 px — the cells break at their own boundaries onto a
+ * second row instead of the tail (progress and Stop) being clipped. Nothing is dropped: every field
+ * keeps its cell, and the e2e spec pins `scrollWidth <= clientWidth` and each kept cell's box inside
+ * the band's own at that width. Within a row the tool name stays the only elastic cell (it may
+ * ellipsise when it alone is wider than the band, #647's rule); the rates and the axis block never
+ * shrink.
  */
 
 /** `12.350` → `"12.350"`; null → `"—"`. */
@@ -404,9 +410,10 @@ export function MachineStatusStrip(): JSX.Element | null {
       data-testid="machine-status"
       style={{
         display: 'flex',
-        flexWrap: 'nowrap',
+        flexWrap: 'wrap',
         alignItems: 'center',
         gap: 10,
+        rowGap: 2,
         padding: '3px 10px',
         borderTop: '1px solid #2a2f36',
         fontSize: 11,

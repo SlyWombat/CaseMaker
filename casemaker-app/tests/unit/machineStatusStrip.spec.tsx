@@ -367,15 +367,20 @@ describe('#647 the DRO — vacuum and progress', () => {
 });
 
 describe('#647 the DRO — the layout contract', () => {
-  it('does not wrap: a nowrap row with ONE elastic cell (the tool name), everything else fixed', () => {
+  it('wraps rather than clips: a wrapping band with ONE elastic cell (the tool name), everything else fixed', () => {
     remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|P:12,40,75>');
     render(<MachineStatusStrip />);
     const strip = screen.getByTestId('machine-status');
-    expect(strip.style.flexWrap).toBe('nowrap');
+    // #769 review: at the 760 px column with a rotary module the row measured 987 px and clipped
+    // its tail, so the band breaks at cell boundaries onto a second line instead — no field hidden.
+    // jsdom does no layout, so the pin here is the wrap itself; the measured pin is the e2e spec
+    // (`scrollWidth <= clientWidth` and every kept cell's box inside the band at 760 px).
+    expect(strip.style.flexWrap).toBe('wrap');
     expect(strip.style.whiteSpace).toBe('nowrap');
     const tool = screen.getByTestId('machine-status-tool');
-    // The tool name is the only cell that may SHRINK, and it ellipsises rather than pushing the row
-    // onto a second line; the state cell is a fixed width like the others.
+    // The tool name is still the only cell that may SHRINK — the last resort when it alone is wider
+    // than the band, not what keeps the row inside its column (that is the wrap); the state cell is
+    // a fixed width like the others.
     expect(tool.style.flexShrink).toBe('1');
     expect(tool.style.textOverflow).toBe('ellipsis');
     expect(tool.style.overflow).toBe('hidden');

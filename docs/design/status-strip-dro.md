@@ -72,14 +72,19 @@ frame `T:0,-9.757,1` (2026-10-08-console.log). No recorded frame carries `A:` (0
 .scratch), so the ATC cell's absence is the corpus case and its presence is pinned against the firmware's write
 shape, marked synthetic.
 
-WIDTH, MEASURED (2026-10-29): the row still does not wrap, but it no longer fits the 760 px budget #647 verified.
-At a 1440 window the viewport column is exactly 760 px and a running strip measures 987 px of content — the tail
-(progress, Stop) clips; before #769 the same strip measured 862 px with a rotary module (790 px without one), i.e.
-it already clipped a little. The budget was consumed after #647 by the machine name/address (#689), the accessory
-icons (#648) and the rotary A cell (#658); #769 adds ~125 px (F + S, and the A's °/turns words). The strip must not
-wrap (the original decision stands), so a responsive rule — which cell yields first, and whether Stop pins to the
-right edge — is outstanding and needs a decision; at 1920 (1240 px column) everything is visible, which is the
-committed screenshot.
+WIDTH, MEASURED AND RESOLVED (2026-10-29, #769 review): the band WRAPS rather than clips. At a 1440 window the
+viewport column is exactly 760 px and a running strip with a rotary module measures 987 px of content, so one row
+clipped its tail — progress and Stop. Before #769 the same strip measured 862 px with a rotary module (790 px
+without one), i.e. it already clipped a little: the #647 budget was consumed after it by the machine name/address
+(#689), the accessory icons (#648) and the rotary A cell (#658), and #769 adds ~125 px (F + S, and the A's °/turns
+words). The row now breaks at cell boundaries onto a second line, so nothing is hidden at the column width: at
+760 px the first line reads `Makera Z1 · 192.0.2.10 · icons · Running  X Y Z A  F 600  S 11678` and the second
+`T1 · ⌀ 1 mm flat end · progress · 17 % · 49 s left · Stop`. Nothing is dropped; the tool name stays the one
+elastic cell, but it yields only within its own row. `tests/e2e/cutConfirm.spec.ts` is the pin: at the 760 px
+column with a module checked out it asserts the band's `clientWidth` is exactly 760, `scrollWidth <= clientWidth`,
+the band is two rows tall, every kept cell's box lies fully inside the band's, and the tool cell's text is not
+truncated. Screenshot: `docs/bench/img/2026-10-29-769-status-fields/20261029-224134-strip-760-rotary.png`; the
+1920 view (1240 px column) stays at `20261029-203351-strip-running.png`.
 
 ## Layout (mock: `docs/bench/img/2026-10-25-dro-mock/`)
 

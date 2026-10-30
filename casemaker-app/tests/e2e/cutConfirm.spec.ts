@@ -13,6 +13,8 @@
 //
 //   npx playwright test tests/e2e/cutConfirm.spec.ts
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
 
@@ -146,4 +148,155 @@ test('#769 — the strip shows the frame’s feed, spindle and tool, and dashes 
   await expect(page.getByTestId('machine-status-feed')).toHaveText('F—');
   await expect(page.getByTestId('machine-status-spindle')).toHaveText('S—');
   await expect(page.getByTestId('machine-status-tool')).toHaveText('no cutter');
+});
+
+// #769 review — THE 760 px COLUMN. At a 1440 window the viewport column is exactly 760 px, and the
+// running strip with a rotary module measured 987 px of content: its tail (progress, Stop) was
+// clipped. The band now WRAPS at cell boundaries instead; this test is the pin — no horizontal
+// overflow, and every kept field's box fully inside the band's own, so nothing can hide.
+//
+// The house answers from the committed fixture (the fake-house pattern of `bedDefects725.spec.ts`)
+// with a 4th-axis module checked out to the fixture's machine: the strip draws the A cell from the
+// accessory checkout (#658), not from the frame, so the module has to exist in the location doc.
+type LocationDoc = {
+  kind: string;
+  schemaVersion: number;
+  id: string;
+  name: string;
+  createdAt: string;
+  migratedFrom?: string | null;
+  machines: Array<Record<string, unknown>>;
+  accessories: Array<Record<string, unknown>>;
+  stock?: unknown;
+  inventory?: unknown;
+  defaults?: Record<string, unknown>;
+};
+
+const LOCATION_DOC = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../unit/fixtures/location-doc.json', import.meta.url)), 'utf8'),
+) as LocationDoc;
+
+const HEALTH = {
+  ok: true,
+  schemaVersion: 1,
+  hasCatalogue: false,
+  feedRows: 0,
+  materialSpecRows: 0,
+  catalogueSyncedAt: null,
+  lastSync: null,
+  problems: [],
+  warnings: [],
+};
+
+/** The fixture machine is `machine-1a2b3c` (profile Z1); the module is checked out to it. */
+const ROTARY_ON_MACHINE = {
+  id: 'fx-rotary-1',
+  kind: 'rotary-module',
+  product: 'makera-4th-axis',
+  variant: null,
+  constants: {},
+  unit: {},
+  provenance: {},
+  whereabouts: { kind: 'machine', machineId: 'machine-1a2b3c', since: '2026-10-25T00:00:00.000Z' },
+  history: [],
+};
+
+async function fakeHouseWithRotary(page: Page): Promise<void> {
+  const location = { ...LOCATION_DOC, accessories: [...LOCATION_DOC.accessories, ROTARY_ON_MACHINE] };
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace(/^.*\/api\/v1/, '');
+    const json = (body: unknown): Promise<void> =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { etag: '"e1"' },
+        body: JSON.stringify(body),
+      });
+    if (path === '/health') return json(HEALTH);
+    if (path === '/tools') return json([]);
+    if (path === '/inventory') return json(LOCATION_DOC.inventory ?? []);
+    if (path === '/stock') return json(LOCATION_DOC.stock ?? []);
+    if (path === '/defaults') return json(LOCATION_DOC.defaults ?? {});
+    if (path === '/location') return json(location);
+    return route.fulfill({ status: 404, body: '' });
+  });
+}
+
+/**
+ * No single recorded frame carries both a cut's F:/S:/T:/P: and a turned A, so this pairs the
+ * recorded cutting frame (`2026-10-12-cut-rowA.log`) with the A the rotary bench trail recorded
+ * (`2026-10-25-morning-status-trail.log` 12:55:18, WPos a = 49.9950). Every number is recorded; the
+ * pairing is marked synthetic.
+ */
+const ROTARY_CUT =
+  '<Run|MPos:-162.0500,-162.2000,-5.7381,49.9950,0.0000|WPos:18.4500,20.0000,50.8059,49.9950,0.0000|F:600.0,2000.0,100.0|S:11677.9,12000.0,100.0,1,37.6,24.9,0,0,0,0|T:1,0.000,1|L:0, 0, 0, 0.0,100.0|P:0,17,10|C:3,1,0,1|E:0,0,0,692,7610|OTA:0,0>';
+
+test('#769 review — at the 760 px column with a rotary module the DRO wraps and clips nothing', async ({
+  cm,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fakeHouseWithRotary(page);
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    window.__caseMaker!.engraveReset();
+  });
+  // Fit the cutter the way a person would, through the panel's own select (#516 item 5: a fresh
+  // job names none) — the tool cell then carries a real name, the band's elastic cell at the length
+  // the 987 px measurement had. The engrave panel lives in the right-hand column; the viewport
+  // column stays 1440 − 320 − 360 = 760 px.
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+  await page.getByTestId('engrave-tool').selectOption('flat-1.0');
+  await rememberMachine(page, ROTARY_CUT);
+
+  const strip = page.getByTestId('machine-status');
+  await expect(strip).toBeVisible();
+  // The rotary A cell exists only when the house has a module checked out — waiting for it also
+  // waits for the location to have loaded.
+  await expect(page.getByTestId('machine-status-axis-a')).toBeVisible();
+  await expect(page.getByTestId('machine-status-feed')).toHaveText('F600');
+  await expect(page.getByTestId('machine-status-spindle')).toHaveText('S11678');
+
+  // The measured column at a 1440 window is exactly 760 px — the review's width.
+  const metrics = await strip.evaluate((el) => ({
+    clientWidth: el.clientWidth,
+    scrollWidth: el.scrollWidth,
+    clientHeight: el.clientHeight,
+  }));
+  expect(metrics.clientWidth).toBe(760);
+  // THE PIN: no horizontal overflow, and the band is two rows (the one-line band is 30 px), not a
+  // clipped one-line row.
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
+  expect(metrics.clientHeight).toBeGreaterThan(40);
+
+  // Every kept field's box is fully inside the band's box: clipped fields are exactly what the
+  // wrap replaced, and they would put progress/Stop outside the right edge.
+  const band = await strip.boundingBox();
+  expect(band).not.toBeNull();
+  for (const id of [
+    'machine-status-feed',
+    'machine-status-spindle',
+    'machine-status-axis-a',
+    'machine-status-tool',
+    'machine-status-progress',
+    'machine-status-stop',
+  ]) {
+    const cell = await page.getByTestId(id).boundingBox();
+    expect(cell, id).not.toBeNull();
+    expect(cell!.x, id).toBeGreaterThanOrEqual(band!.x - 0.5);
+    expect(cell!.x + cell!.width, id).toBeLessThanOrEqual(band!.x + band!.width + 0.5);
+    expect(cell!.y, id).toBeGreaterThanOrEqual(band!.y - 0.5);
+    expect(cell!.y + cell!.height, id).toBeLessThanOrEqual(band!.y + band!.height + 0.5);
+  }
+  // The name is not truncated either: the tool cell's text fits inside its own box.
+  const tool = await page
+    .getByTestId('machine-status-tool')
+    .evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+  expect(tool.scrollWidth).toBeLessThanOrEqual(tool.clientWidth);
+  await expect(page.getByTestId('machine-status-tool')).toContainText('T1 ·');
+  // …and the A reads in the rotary read-out's words, from the recorded angle.
+  await expect(page.getByTestId('machine-status-work-a')).toHaveText('A 50° · 0 turns');
 });

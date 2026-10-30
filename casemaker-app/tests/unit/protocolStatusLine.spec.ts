@@ -71,8 +71,9 @@ describe('#769 readStatusLine — the F:, S:, T: and A: fields', () => {
     // S: value 1 is the vacuum mode and value 4/5 the temperatures (#659); the rate is the first 3.
     expect(s.spindle).toEqual({ actual: 0, set: 10000, override: 100 });
     expect(s.tool).toBe(1);
-    // The firmware writes -1 in the third slot when no change is pending (the field is `T:a,off,x`).
-    expect(s.toolWaiting).toBe(-1);
+    // The firmware writes -1 in the third slot when no change is pending (the field is
+    // `T:a,off,x`); the parser normalises the sentinel so callers see the documented null.
+    expect(s.toolWaiting).toBeNull();
     expect(s.atcState).toBeNull();
     expect(s.monitor.spindleTempC).toBe(19.4);
   });

@@ -521,6 +521,10 @@ export interface MachineStatusLine {
    * #655 — the tool number the controller is WAITING for: the `T:` field's third value
    * (`…|T:0,-9.757,1|…` while the state reads `Tool` after an `M6`, the machine stopped for the
    * operator's `M490.2`). Null whenever no change is pending.
+   *
+   * The firmware writes `-1` in that slot when nothing is pending — every idle frame in
+   * `docs/bench/traces/2026-10-24-run1-status-trail.log` reads `T:1,0.047,-1` — so the parser
+   * normalises a negative value to null here; callers never see the sentinel (#769 review).
    */
   toolWaiting: number | null;
   /**
@@ -675,8 +679,12 @@ export function readStatusLine(text: string): MachineStatusLine {
     feed: readRate(statusField(text, 'F')),
     spindle: readRate(statusField(text, 'S')),
     tool: tool.actual,
-    // The T field is `actual,offset,awaited` — the third value is not a rate's "override".
-    toolWaiting: tool.override,
+    // The T field is `actual,offset,awaited` — the third value is not a rate's "override" (that is
+    // only the positional name `readRate` gives slot 3). `-1` there is the firmware's "no change is
+    // pending" (#769 review), and the field's contract is null for that, so it is normalised —
+    // a negative number is never a tool. The recorded idle trail carries it throughout (e.g.
+    // `T:1,0.047,-1`).
+    toolWaiting: tool.override !== null && tool.override >= 0 ? tool.override : null,
     atcState: atc === null ? null : value(atc.split(','), 0),
     monitor: readMonitor(text),
     progress: readJobProgress(text),
