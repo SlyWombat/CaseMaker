@@ -222,7 +222,9 @@ export const locationRecordSchema = z
 /** Everything `casemaker location` reports beyond the receipt envelope. */
 export const locationDetailsSchema = z
   .object({
-    section: z.enum(['tools', 'stock', 'machines', 'accessories']).describe('Which section was asked for.'),
+    section: z
+      .enum(['tools', 'stock', 'machines', 'accessories', 'import-catalogue'])
+      .describe('Which section was asked for, or the catalogue import that ran.'),
     document: z
       .object({
         kind: z.enum(['location', 'house']).describe('Which document kind was read.'),
@@ -234,6 +236,22 @@ export const locationDetailsSchema = z
       .nullable()
       .describe('The document that was resolved, or null when neither location.json nor house.json was found.'),
     records: z.array(locationRecordSchema).describe('The section’s records, in the order it prints them.'),
+    catalogue: z
+      .object({
+        source: z.string().min(1).describe('The synced catalogue file that was read.'),
+        destination: z.string().min(1).describe('The house catalogue.json the file was written to.'),
+        tools: z.number().int().nonnegative().describe('Cutters the imported catalogue holds.'),
+        feeds: z.number().int().nonnegative().describe('Feed rows the imported catalogue holds.'),
+        syncedAt: z
+          .string()
+          .nullable()
+          .describe('The sync date the document states, or null when it states none.'),
+        replaced: z
+          .boolean()
+          .describe('Whether a catalogue was already there and this import replaced it.'),
+      })
+      .optional()
+      .describe('The catalogue an import wrote; absent for a section read (#560).'),
   })
   .describe('The location command’s own details.');
 
@@ -711,6 +729,21 @@ function exportLines(receipt: Extract<Receipt, { command: 'export' }>): string[]
 
 function locationLines(receipt: Extract<Receipt, { command: 'location' }>): string[] {
   const { details } = receipt;
+  if (details.section === 'import-catalogue') {
+    const catalogue = details.catalogue;
+    if (catalogue === undefined) return ['no catalogue was imported'];
+    const cutters = catalogue.tools;
+    const feeds = catalogue.feeds;
+    const lines = [
+      `catalogue ${catalogue.source} -> ${catalogue.destination}`,
+      `  ${cutters} cutter${cutters === 1 ? '' : 's'}, ${feeds} feed row${feeds === 1 ? '' : 's'}`,
+      catalogue.syncedAt === null
+        ? '  the file states no synced-at date'
+        : `  synced ${catalogue.syncedAt}`,
+    ];
+    if (catalogue.replaced) lines.push('  replaced the catalogue that was there');
+    return lines;
+  }
   const lines: string[] = [];
   if (details.document === null) {
     lines.push(

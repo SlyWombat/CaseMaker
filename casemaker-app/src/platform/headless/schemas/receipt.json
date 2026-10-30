@@ -953,6 +953,57 @@
         "details": {
           "description": "The location command’s own details.",
           "properties": {
+            "catalogue": {
+              "description": "The catalogue an import wrote; absent for a section read (#560).",
+              "properties": {
+                "destination": {
+                  "description": "The house catalogue.json the file was written to.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "feeds": {
+                  "description": "Feed rows the imported catalogue holds.",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "replaced": {
+                  "description": "Whether a catalogue was already there and this import replaced it.",
+                  "type": "boolean"
+                },
+                "source": {
+                  "description": "The synced catalogue file that was read.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "syncedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The sync date the document states, or null when it states none."
+                },
+                "tools": {
+                  "description": "Cutters the imported catalogue holds.",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "source",
+                "destination",
+                "tools",
+                "feeds",
+                "syncedAt",
+                "replaced"
+              ],
+              "type": "object"
+            },
             "document": {
               "anyOf": [
                 {
@@ -1028,12 +1079,13 @@
               "type": "array"
             },
             "section": {
-              "description": "Which section was asked for.",
+              "description": "Which section was asked for, or the catalogue import that ran.",
               "enum": [
                 "tools",
                 "stock",
                 "machines",
-                "accessories"
+                "accessories",
+                "import-catalogue"
               ],
               "type": "string"
             }

@@ -1,0 +1,98 @@
+{
+  "kind": "casemaker-catalogue",
+  "schemaVersion": 1,
+  "syncedAt": "2026-10-20T08:00:00.000Z",
+  "tools": [
+    {
+      "key": "cat:fixture-flat",
+      "provenance": "fixture — the catalogue import spec",
+      "contentHash": "fixture-flat",
+      "tool": {
+        "number": 1,
+        "id": "112111313812",
+        "name": "3.175*12mm Flat End(Metal)",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 3.175,
+        "diameter": 3.175,
+        "cornerRadius": 0,
+        "angle": 0,
+        "halfAngle": 0,
+        "fluteLength": 12,
+        "shoulderLength": 12,
+        "stickout": null,
+        "centreCutting": true
+      }
+    },
+    {
+      "key": "cat:fixture-ball",
+      "provenance": "fixture — the catalogue import spec",
+      "contentHash": "fixture-ball",
+      "tool": {
+        "number": 2,
+        "id": "112111313813",
+        "name": "3.175*12mm Ball End(Metal)",
+        "typeText": "Ball End",
+        "shape": "ball",
+        "handleDiameter": 3.175,
+        "tipDiameter": 3.175,
+        "diameter": 3.175,
+        "cornerRadius": 1.5875,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 12,
+        "shoulderLength": 12,
+        "stickout": null,
+        "centreCutting": true
+      }
+    }
+  ],
+  "feeds": [
+    {
+      "cutterId": "112111313812",
+      "material": "6061 Aluminum",
+      "rpm": 15000,
+      "feed": 900,
+      "plungeFeed": 240,
+      "stepDown": 0.5
+    },
+    {
+      "cutterId": "112111313812",
+      "material": "Hardwood",
+      "rpm": 18000,
+      "feed": 1800,
+      "plungeFeed": 600,
+      "stepDown": 1.2
+    },
+    {
+      "cutterId": "112111313813",
+      "material": "6061 Aluminum",
+      "rpm": 15000,
+      "feed": 700,
+      "plungeFeed": 200,
+      "stepDown": 0.4
+    }
+  ],
+  "materialSpecs": [
+    {
+      "id": "fixture-spec-plate",
+      "material": "6061 Aluminum",
+      "name": "6061 Aluminum Plate 100x100x5",
+      "shape": "R",
+      "length": 100,
+      "width": 100,
+      "height": 5,
+      "diameter": null,
+      "stockCode": "1000000000000001"
+    }
+  ],
+  "lastSync": {
+    "syncedAt": "2026-10-20T08:00:00.000Z",
+    "source": "fixture — Makera Studio library",
+    "total": 2,
+    "feedRows": 3,
+    "materialSpecRows": 1,
+    "notes": []
+  }
+}

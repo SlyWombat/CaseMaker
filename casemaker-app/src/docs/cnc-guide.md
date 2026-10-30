@@ -1854,7 +1854,8 @@ nothing else. It takes no value: `--json=true` is refused before anything runs.
 | `cut --coupon <spec.json> [--out <dir>]` | Sweeps a coupon spec into one program per value, with its preview and its fill-in record. |
 | `cut --from-3mf <design.3mf>` | Cuts a 3MF design instead of a job. `--turn ccw\|cw`, `--tool <key>`, `--rest <key\|none>`, `--overlap <mm>`, `--third-tool <pct>`, `--location <file>` adjust it. The 3MF reader takes geometry only — a texture is not an outline. |
 | `export <project.json> [--out <dir>]` | Compiles a project and writes one print-ready binary STL, with its `-PRINT-NOTES.txt` sidecar. |
-| `location tools\|stock\|machines` | Reads the machine's own document — the app's `location.json`, or a `house.json` — and prints one section. `--location <file>` names the document. |
+| `location tools\|stock\|machines\|accessories` | Reads the machine's own document — the app's `location.json`, or a `house.json` — and prints one section. `--location <file>` names the document. |
+| `location import-catalogue <catalogue.json>` | Imports a `catalogue.json` synced on a machine that has Makera Studio. The file is validated by the app's own reader and written as the `catalogue.json` beside the house's document (the data directory when `--location` names none), and the receipt states the file's `syncedAt` date. A headless house has no Studio to sync from; this is how its catalogue arrives. |
 | `readback feeds <record.json>` | Takes a filled coupon record and writes its measurements into the `feeds.ts` region. `--dry-run` prints and writes nothing. |
 | `readback run <record.json>` | Files a completed run in the `runHistory.ts` region. `--dry-run` prints and writes nothing. |
 | `machine status\|version\|hashes\|finished` | Reads the machine (§8.6, *The machine*). These four never move it. |

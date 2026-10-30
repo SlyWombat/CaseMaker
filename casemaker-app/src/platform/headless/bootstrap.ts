@@ -312,8 +312,13 @@ export interface LoadedCatalogue {
   syncedOn: string | null;
 }
 
-/** `catalogue.json` in the default data directory — beside `location.json` and `house.json`. */
-function defaultCataloguePath(): string | null {
+/**
+ * `catalogue.json` in the default data directory — beside `location.json` and `house.json`.
+ *
+ * Exported because #560's `casemaker location import-catalogue` writes the file this reads, and the
+ * destination must be resolved by the same rule rather than a second copy of `%APPDATA%`/`$XDG_…`.
+ */
+export function defaultCataloguePath(): string | null {
   const docs = defaultDocPaths();
   if (docs.length === 0) return null;
   return joinPath(dirnamePath(docs[0]!), CATALOGUE_FILE);
@@ -327,11 +332,8 @@ function defaultCataloguePath(): string | null {
  * beside THAT document, so a fixture and its catalogue travel together.
  *
  * Nothing on disk answers null: a headless run without Makera's numbers is the starting table,
- * which is a normal state. A file that IS there is held to the same rules the Rust reader applies
- * to it: `kind`, `schemaVersion`, and the two arrays through the very schemas the house client
- * validates its own responses with. The tools are validated for their keys and geometry, and each
- * feed row is joined to its cutter's geometry by `g_ID`, because a row by itself cannot say whether
- * the id it names still belongs to the cutter in hand.
+ * which is a normal state. A file that IS there is held to the rules {@link parseCatalogueDocument}
+ * states.
  */
 export function loadCatalogue(path?: string): LoadedCatalogue | null {
   const found = path ?? defaultCataloguePath();
@@ -345,11 +347,27 @@ export function loadCatalogue(path?: string): LoadedCatalogue | null {
   } catch (e) {
     throw new CatalogueDocumentError(`${found}: ${(e as Error).message}`);
   }
+  return parseCatalogueDocument(raw, found);
+}
+
+/**
+ * Parse and validate a catalogue document's TEXT — the one validator `loadCatalogue` uses, exposed
+ * separately so a caller that already holds the bytes can hold them to the same rules (#560).
+ *
+ * The rules are the Rust reader's and the app's: `kind`, `schemaVersion`, and the two arrays through
+ * the very schemas the house client validates its own responses with. The tools are validated for
+ * their keys and geometry, and each feed row is joined to its cutter's geometry by `g_ID`, because a
+ * row by itself cannot say whether the id it names still belongs to the cutter in hand.
+ *
+ * `path` is only the name errors and the result carry; nothing is read here. That is what lets an
+ * importer validate the exact bytes it is about to write, rather than the file a moment before.
+ */
+export function parseCatalogueDocument(raw: string, path: string): LoadedCatalogue {
   let json: unknown;
   try {
     json = JSON.parse(raw);
   } catch (e) {
-    throw new CatalogueDocumentError(`${found} is not readable JSON: ${(e as Error).message}`);
+    throw new CatalogueDocumentError(`${path} is not readable JSON: ${(e as Error).message}`);
   }
   const doc = json as {
     kind?: unknown;
@@ -361,29 +379,29 @@ export function loadCatalogue(path?: string): LoadedCatalogue | null {
   const kind = typeof doc.kind === 'string' ? doc.kind : '';
   if (kind !== CATALOGUE_KIND) {
     throw new CatalogueDocumentError(
-      `${found} says it is ${JSON.stringify(kind)}; this file must be ${JSON.stringify(CATALOGUE_KIND)}`,
+      `${path} says it is ${JSON.stringify(kind)}; this file must be ${JSON.stringify(CATALOGUE_KIND)}`,
     );
   }
   const version = typeof doc.schemaVersion === 'number' ? doc.schemaVersion : 0;
   if (version !== HOUSE_SCHEMA_VERSION) {
     throw new CatalogueDocumentError(
-      `${found} is version ${version}; this build reads version ${HOUSE_SCHEMA_VERSION}`,
+      `${path} is version ${version}; this build reads version ${HOUSE_SCHEMA_VERSION}`,
     );
   }
   const parsedTools = ToolLibrarySchema.safeParse(doc.tools ?? []);
   if (!parsedTools.success) {
     throw new CatalogueDocumentError(
-      `${found} does not match its own schema: "tools" is not a tool list:\n  ${parsedTools.error.message}`,
+      `${path} does not match its own schema: "tools" is not a tool list:\n  ${parsedTools.error.message}`,
     );
   }
   const parsedFeeds = FeedCatalogueSchema.safeParse(doc.feeds ?? []);
   if (!parsedFeeds.success) {
     throw new CatalogueDocumentError(
-      `${found} does not match its own schema: "feeds" is not a feed catalogue:\n  ${parsedFeeds.error.message}`,
+      `${path} does not match its own schema: "feeds" is not a feed catalogue:\n  ${parsedFeeds.error.message}`,
     );
   }
   return {
-    path: found,
+    path,
     tools: parsedTools.data,
     rows: withCatalogueGeometry(
       parsedFeeds.data,
