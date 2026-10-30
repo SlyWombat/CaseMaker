@@ -22,6 +22,8 @@
  */
 
 import { featureSim } from '@/platform/features';
+import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
+import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { create } from 'zustand';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
@@ -251,6 +253,18 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
       return null;
     }
     if (mine !== seq) return null;
+    // #785 — NO SEARCH BEHIND A REACH REFUSAL. A goal deeper than the chosen cutter's KNOWN reach
+    // (its own flute, else Makera's catalogue number) refuses at Generate, and the measured search
+    // must not simulate candidate after candidate for a part that cannot be cut that way. An
+    // UNRECORDED reach is only an info (the sweep's holder gate is the guard), so the search runs;
+    // the operator's top-band choice (`cutWithinReach`) also lets it run — the band is makeable.
+    const reachRefusal = jobReachFindings(job, jobTool(job), inputs.tools.map((e) => e.tool), inputs.tools).find(
+      (f) => f.severity === 'error',
+    );
+    if (reachRefusal !== undefined) {
+      if (mine === seq) set({ measuredStatus: 'idle', measuredError: reachRefusal.message });
+      return null;
+    }
     const cached = picks.get(key);
     if (cached !== undefined) {
       set({ measured: cached, measuredJob: jobFingerprintNow, measuredStatus: 'ready', measuredError: null });

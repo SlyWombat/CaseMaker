@@ -835,10 +835,18 @@ grid" — rather than the exact sweep's tolerance band. The exact 2.5D verifier 
 program, so the goal program's check is that material sweep: it is the program's check on the
 Cut screen, in place of a verifier report, and the program is a release source like any other —
 the package freezes it, its row and the run sheet print its numbers, and the Cut step's one
-press uploads it. Two findings guard it:
-`goal-object-oversize` refuses a goal that is flat or larger than the blank, and
-`goal-object-no-toolpath` is the info a *mixed* job (a goal beside ordinary items) gets — the item
-program cuts, the goal is validated and previewed, and no 3D cut is posted for it.
+press uploads it. Three findings guard it:
+`goal-object-oversize` refuses a goal that is flat, warns — naming the sides and amounts — when a
+goal extends past the blank (Generate cuts it clipped to the stock), and is an error only when
+nothing of the goal is over the blank at all; `goal-reach-short` refuses a goal deeper than the
+reach the chosen cutter is KNOWN to have (its own flute, or Makera's catalogue number for the same
+cutter), naming both numbers and offering the one-click top-band cut; `goal-cut-top-band` is the
+warning of that choice — the goal is cut as the stock's top band and the sentence says what is left
+in it; `goal-reach-unrecorded` is the info that stands in the refusal's place when no reach is
+recorded at all (an assumption stated, nothing blocked — the sweep's holder gate is the guard);
+and `goal-object-no-toolpath` is the info
+a *mixed* job (a goal beside ordinary items) gets — the item program cuts, the goal is validated
+and previewed, and no 3D cut is posted for it.
 
 **5. From which directions?** A 3-axis tool comes straight down. Material on the back, a side or
 the far end is reachable only after the part is turned — and turning it is a re-clamp and a
@@ -1477,7 +1485,10 @@ simulation does report about one is the sweep's own list, next:
 | `target-mesh-missing` | error (goal) · warning (reference) | The job names an imported mesh whose BYTES this browser no longer holds. The open job persists to localStorage, whose quota is small, so a mesh's bytes live in the app's IndexedDB store keyed by the file's SHA-256 and the document keeps only the hash, the size and the name; clearing site data, a different browser profile, or a mesh store write that failed leaves the job without them (#720). | Import the mesh file again — the SHA-256 will match and the job picks the bytes back up. |
 | `target-mesh-loading` | error (goal) · warning (reference) | The job names an imported mesh and this browser's mesh store has not answered yet: the bytes are being read back by their SHA-256 after a reload or an open (#728). It replaces `target-mesh-missing` until the store answers, at the same severity, so a goal cannot be generated before its shape is here. | Wait a moment; it becomes ready, or `target-mesh-missing` if the store does not hold the mesh. |
 | `target-mesh-unstored` | warning | The open job holds the mesh's bytes, but the browser refused to keep a copy in its mesh store (storage full, or a private window), so a reload would lose them (#728). | Save the job to a file — the file embeds the mesh — or free browser storage and import the mesh again. |
-| `goal-object-oversize` | error | A target object marked as the shape to MAKE (its role is "goal", not a reference) is larger than the blank — it does not fit the stock's bounding box, so it cannot be reproduced on this stock (#533). | Use a larger blank, or scale the goal down: the row's width, length and height fields (aspect kept unless you untick it), its percent, or **Fit to the stock**, which picks the largest same-in-every-direction size that fits the blank less its edge margin, as the object is turned, and centres it. |
+| `goal-object-oversize` | warning (error when nothing of the goal is over the blank) | A target object marked as the shape to MAKE (its role is "goal", not a reference) extends past the blank. The row names, per axis and side, exactly what lies outside (#533, #784). Generate cuts the goal clipped to the blank, so the part outside the stock is not cut; it is an error only when none of the goal is over the blank at all. | Move the goal inward, scale it down (the row's size fields, its percent, or **Fit to the stock**), or use a larger blank. |
+| `goal-reach-short` | error | A goal is deeper than the reach the chosen cutter is known to have — its own stated flute, or Makera's catalogue number for the same cutter — so the holder would enter the part before the tip reaches the bottom (#785). The sentence names the goal's depth and that reach (and the longest reach you own, when it is another cutter), and names the top-band cut's depth when one is safe. | Scale the goal to that reach or less, cut it from both sides (a flip, one setup per side — #723 part 2), choose a longer cutter, or press **Cut the top N mm only**: the goal is cut as the stock's top band (the reach less 1 mm clearance) and the result states what is left. |
+| `goal-cut-top-band` | warning | The one-click top-band cut is in effect: the goal is deeper than the chosen cutter's known reach, and you chose to cut the stock's top band the cutter reaches safely (#785). The sentence states how much of the goal is left in the stock. | Nothing — this is the cut you chose. Cut the other side as a second setup, scale the goal, or choose a longer cutter to remove the rest. |
+| `goal-reach-unrecorded` | info | The chosen cutter states no flute length and no Makera catalogue row supplies one, so the depth it can reach is unchecked (#785). It is a stated assumption, not a block: the sweep's holder gate (`holder-unproven`) judges the run. | Record the cutter's flute in Manage › Tools. |
 | `goal-mold-rim` | error | A goal mesh set to **Make a mold of it** leaves no rim of stock round its cavity: its turned footprint plus the job's edge margin on every side is wider or longer than the blank (#721). | Scale the part down (the row's size fields or **Fit to the stock**), or use a larger blank. |
 | `goal-mold-floor` | error | A mold's cavity is the part's height deep, and it must leave the job's minimum floor of stock under it; this part is deeper than the blank allows (#721). | Scale the part down, or use a thicker blank. |
 | `goal-mold-one-sided` | info | A mold is cut from the top only: the cavity is the part's top surface, turned over so the casting reads the right way round, and the casting's underside is the flat pour face. Undercuts and a shaped underside need a two-part mold — two setups (#721). | Nothing for a one-sided part. For a two-sided one, cut two molds and register them (manual rotation, #723). |

@@ -293,6 +293,13 @@ export type JobFindingCode =
   // generation (slice D, #534) is not built yet, so this job posts no cut for it — the goal's
   // counterpart to the reference's `target-object-not-cut`, answering "why is my goal not cut?".
   | 'goal-object-oversize'
+  // #785 — a goal deeper than the chosen cutter's known reach: the holder would enter the part.
+  // `goal-reach-unrecorded` is the INFO that stands in its place when no reach is recorded at all
+  // (a stated assumption, never a block), and `goal-cut-top-band` the WARNING of the operator's
+  // chosen depth-limited cut (the goal's top band; the rest is left in the stock).
+  | 'goal-reach-short'
+  | 'goal-reach-unrecorded'
+  | 'goal-cut-top-band'
   | 'goal-mold-rim'
   | 'goal-mold-floor'
   | 'goal-mold-one-sided'
@@ -384,6 +391,17 @@ export interface JobFinding {
   code: JobFindingCode;
   /** The item (label or shape) a finding points at, when it is about one item. */
   labelId?: string;
+  /**
+   * #785 — the GOAL target object a finding is about, when it is about one. The reach findings name
+   * it so the panel's one-click top-band option patches the goal the sentence is about.
+   */
+  targetId?: string;
+  /**
+   * #785 — on `goal-reach-short`, the safe top-band depth that the one-click option would cut (the
+   * cutter's reach less {@link GOAL_BAND_CLEARANCE_MM}, from `engrave/goalReach.ts`), mm. The
+   * panel's button names the number; absent when the band would be zero.
+   */
+  goalBandMm?: number;
   message: string;
 }
 

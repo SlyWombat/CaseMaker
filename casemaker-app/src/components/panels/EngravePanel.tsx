@@ -43,6 +43,7 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, withTargetBlobState, itemKindWord, itemRowName, jobSetups, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
 import { toolForJob } from '@/engine/cnc/toolRegistry';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import type { RestChoice } from '@/components/panels/RestCutterControl';
@@ -895,14 +896,22 @@ export function EngravePanel(): JSX.Element {
     ]);
   // #728 — the mesh's load state is the session's, not the job's: "Import it again" only once
   // this browser has answered that it does not hold the mesh.
-  const findings = withTargetBlobState(jobOnlyFindings, job, targetBlob);
+  //
+  // #305 — the snapshot the resolver reads, so the list here and the tool everything else uses
+  // can never come from two different places. Read before the findings because #785's reach check
+  // is the run's own rule and needs the chosen cutter and the registry it resolves in.
+  const tools = useToolRegistry();
+  const tool = jobTool(job);
+  const findings = dedupeFindings([
+    ...withTargetBlobState(jobOnlyFindings, job, targetBlob),
+    // #785 — the reach check joins the list at Generate's own sentence: a goal deeper than the
+    // chosen cutter's known reach blocks here, with the numbers and the one-click top-band option;
+    // an unrecorded reach is an info and blocks nothing.
+    ...jobReachFindings(job, tool, tools.map((e) => e.tool), tools),
+  ]);
   const jobFindings = findings.filter((f) => f.labelId === undefined);
   const findingsFor = (labelId: string): JobFinding[] => findings.filter((f) => f.labelId === labelId);
 
-  // #305 — the snapshot the resolver reads, so the list here and the tool everything else uses
-  // can never come from two different places.
-  const tools = useToolRegistry();
-  const tool = jobTool(job);
   const toolEntry = tools.find((e) => e.key === job.toolKey) ?? null;
   // #740 — the size the record STATES, for the thin-strokes sentence and the import dialog. A
   // pointed cutter with no tip has no width to claim: `cuttingDiameter` would print its shank.
@@ -1463,6 +1472,20 @@ export function EngravePanel(): JSX.Element {
     };
   })();
   const blocked = generateBlocker !== null;
+
+  /**
+   * #785 — THE ONE-CLICK TOP-BAND CHOICE, beside the refusal that names the shortfall. It sets the
+   * goal's `cutWithinReach`, so the run cuts the stock's top band the chosen cutter reaches safely
+   * and states what is left; when this refusal was the LAST error it presses Generate in the same
+   * click. The point of the option is to turn a dead end into the part the operator can have, not
+   * into a second thing to find — the operator still chose it.
+   */
+  const cutTopBand = (finding: JobFinding): void => {
+    updateTargetObject({ cutWithinReach: true });
+    if (errors.length === 1 && errors[0]?.code === 'goal-reach-short' && errors[0]?.targetId === finding.targetId) {
+      void generate();
+    }
+  };
 
   // #673 — THE INLAY HALF: the derived plug numbers (null when they do not derive) and the action
   // that saves the MALE blank as its own job. The action is offered only when the female's job has
@@ -3699,6 +3722,15 @@ export function EngravePanel(): JSX.Element {
                       override active
                     </span>
                   )}
+                  {/* #785 — the reach refusal's one-click choice: cut the stock's top band the
+                      chosen cutter reaches safely, and say what is left, instead of refusing. */}
+                  {f.code === 'goal-reach-short' && f.severity === 'error' && f.goalBandMm !== undefined && job.targetObject?.id === f.targetId && (
+                    <span style={{ flexShrink: 0, marginLeft: 'auto' }}>
+                      <button type="button" data-testid="engrave-goal-cut-top-band" onClick={() => cutTopBand(f)}>
+                        Cut the top {f.goalBandMm} mm only
+                      </button>
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -3758,6 +3790,15 @@ export function EngravePanel(): JSX.Element {
                 ▸ Fix
               </button>
               </>
+              )}
+              {/* #785 — the reach refusal's other press: cut what this cutter reaches. */}
+              {errors[0]?.code === 'goal-reach-short' && errors[0].goalBandMm !== undefined && job.targetObject?.id === errors[0].targetId && (
+                <>
+                  {' '}
+                  <button type="button" data-testid="engrave-generate-cut-top-band" onClick={() => cutTopBand(errors[0]!)}>
+                    Cut the top {errors[0].goalBandMm} mm only
+                  </button>
+                </>
               )}
             </span>
           )}

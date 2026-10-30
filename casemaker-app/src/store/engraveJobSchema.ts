@@ -941,6 +941,12 @@ const targetObjectSchema = z
       .enum(['item', 'mold'])
       .optional()
       .describe("What a goal mesh makes: 'item' (the part stands proud; the default when absent) or 'mold' (the part cut as a cavity to cast it in)."),
+    // #785 — the operator's choice to cut the top band the chosen cutter reaches, instead of
+    // refusing a goal deeper than its reach. Optional like `goalMode`: absent keeps the refusal.
+    cutWithinReach: z
+      .boolean()
+      .optional()
+      .describe('Cut only the top band the chosen cutter reaches when the goal is deeper than its reach; omit to refuse (the default).'),
     surface: surfaceSettingsSchema
       .optional()
       .describe('The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.'),

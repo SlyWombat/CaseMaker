@@ -5719,6 +5719,10 @@
       "additionalProperties": false,
       "description": "Reference mesh the primitives are positioned against; omit for none.",
       "properties": {
+        "cutWithinReach": {
+          "description": "Cut only the top band the chosen cutter reaches when the goal is deeper than its reach; omit to refuse (the default).",
+          "type": "boolean"
+        },
         "data": {
           "description": "Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.",
           "minLength": 1,
@@ -5950,6 +5954,10 @@
         "additionalProperties": false,
         "description": "An embedded mesh (STL/3MF, or a STEP the CAD kernel tessellated at import, #774): a reference the cutting volumes are positioned against, or a goal shape to make.",
         "properties": {
+          "cutWithinReach": {
+            "description": "Cut only the top band the chosen cutter reaches when the goal is deeper than its reach; omit to refuse (the default).",
+            "type": "boolean"
+          },
           "data": {
             "description": "Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.",
             "minLength": 1,

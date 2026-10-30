@@ -75,6 +75,7 @@ import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor } from '@/engine/cnc/toolRegistry';
+import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import {
@@ -4366,6 +4367,30 @@ export function generateGoalProgram(
     };
   }
 
+  // #785 — THE REACH CHECK, EARLY. Before the CAM or the measured search runs, the goal is judged
+  // against the CHOSEN cutter's known reach (its own flute, else Makera's catalogue number for the
+  // same cutter). A known reach shorter than the goal refuses by default; the operator's
+  // `cutWithinReach` choice turns the same shortfall into a stated top-band cut (the warning
+  // `goal-cut-top-band`, applied below by the sampler's floor). No reach recorded at all is an INFO,
+  // not a refusal — the sweep's holder gate is the real guard. The measured search must never
+  // simulate every candidate to find this out.
+  const ownedTools = [...(shop.tools ?? []).map((e) => e.tool), ...(tool === null ? [] : [tool])];
+  const reachFindings = goalReachFindings(goal, tool, ownedTools, shop.tools ?? []);
+  const reachBlocking = reachFindings.filter((f) => f.severity === 'error');
+  if (reachBlocking.length > 0) {
+    return {
+      ...base,
+      ok: false,
+      stage: 'findings',
+      findings: dedupeFindings([...reachFindings, ...goalFindings, ...documentFindings()]),
+      feeds: null,
+      cam: null,
+      nc: null,
+      verify: null,
+      errors: reachBlocking.map((f) => ({ stage: 'findings' as EngraveStage, message: f.message })),
+    };
+  }
+
   if (tool === null) return fail('feeds', 'the job has no usable cutter');
   const mill = jobMachine(job, calibration);
 
@@ -4436,6 +4461,21 @@ export function generateGoalProgram(
   const pencil = settings.pencil === true;
   const pencilCreaseDeg = settings.pencilCreaseDeg;
 
+  // #785 — THE OPERATOR'S TOP-BAND CHOICE, as a floor in work Z. `cutWithinReach` on the goal says
+  // "let me make the part I can have": the goal is cut only down to the stock top less the cutter's
+  // known reach less the clearance, so the holder never enters the work. The reach is the SAME
+  // number the refusal above reports (the chosen cutter's own flute, else Makera's catalogue row);
+  // a longer cutter later deepens the band with the same choice standing, which is why the band is
+  // derived here rather than stored on the job. Absent or zero band: no floor, the pre-#785 cut.
+  const cutterReach = tool === null ? null : knownReach(tool, shop.tools ?? []);
+  const goalDepth = placedSize(goal).z;
+  const bandMm =
+    cutterReach !== null && goalDepth > cutterReach.mm + 1e-9 && goal.cutWithinReach === true
+      ? Number((cutterReach.mm - GOAL_BAND_CLEARANCE_MM).toFixed(3))
+      : null;
+  const topBandMm = bandMm !== null && bandMm > 0 ? bandMm : null;
+  const depthLimitZ = topBandMm === null ? null : -topBandMm;
+
   type Surfaced = ReturnType<typeof generateSurface3dForGoal>;
   const surfaceAt = (pitchMm: number): Surfaced =>
     generateSurface3dForGoal({
@@ -4452,6 +4492,8 @@ export function generateGoalProgram(
         pitchMm,
         ...sampleClear,
         clip: { xMin: 0, xMax: job.stock.length, yMin: 0, yMax: job.stock.width },
+        // #785 — the top-band floor, when the operator chose to cut what the cutter reaches.
+        depthLimitZ,
       },
       opts: {
         stockToLeaveMm,
@@ -4587,7 +4629,7 @@ export function generateGoalProgram(
     ...base,
     ok: true,
     stage: 'done',
-    findings: dedupeFindings([...documentFindings(), ...moldFindings, ...gridFindings]),
+    findings: dedupeFindings([...documentFindings(), ...moldFindings, ...gridFindings, ...reachFindings]),
     feeds: resolved,
     cam,
     nc,
@@ -4620,6 +4662,12 @@ export function generateGoalProgram(
               clear.kind === 'whole'
                 ? "Cleared the whole blank around the part down to its base plane, so the part is not left in a pit."
                 : `Cleared a ${Number(ringWidthMm.toFixed(3))} mm band around the part down to its base plane, so the part is not left in a pit.`,
+            ]),
+        // #785 — the operator's top-band choice, on the sheet: the cut's floor and what it leaves.
+        ...(topBandMm === null
+          ? []
+          : [
+              `Cut only the stock's top ${Number(topBandMm.toFixed(3))} mm (this cutter's reach less ${GOAL_BAND_CLEARANCE_MM} mm clearance); the rest of the goal is left in the stock.`,
             ]),
       ],
     } satisfies GoalSurfaceFacts,

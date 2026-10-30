@@ -996,8 +996,11 @@ describe.skipIf(!existsSync(REAL_JOBS))('#766 slice E the demo set’s no-cutter
     // Was refused with "Setup 1 assigns an item that is not in it: g1" — the goal-item seam.
     { job: 'j07-photo-relief.json', chosen: 'inv:demo-ball-nose-2-30' },
     { job: 'j07-photo-relief-1mm-ball.json', chosen: 'inv:demo-ball-nose-2-30' },
-    // The mouse shell: the same seam, on an STL goal whose 26 mm stock needs the long ball.
-    { job: 'j27-mouse-shell-side1.json', chosen: 'inv:kz-ball-nose-1-4' },
+    // The mouse shell: the same seam, on an STL goal whose 26 mm stock needs the long ball. #785 —
+    // the 1 mm ball has a 4 mm flute and the goal is 17.255 mm deep, so it cannot reach it (the
+    // holder would enter the part); the 30 mm-flute ball is the candidate that both reaches and
+    // posts at full fidelity.
+    { job: 'j27-mouse-shell-side1.json', chosen: 'inv:demo-ball-nose-2-30' },
     // Was refused with the cutaway's missing reference — the plan's setup dropped it.
     { job: 'j11-inlay-female-30v-male.json', chosen: 'inv:kz-engrave-30-0-5' },
     // Was refused with "Characters lost to a 1 mm cutter" under the demo library; the bench

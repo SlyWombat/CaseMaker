@@ -32,6 +32,8 @@ import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { statedCuttingSize as stated } from '@/engine/cnc/tool';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { kindedWork, materialRefusal, planCutters, reachOf, type PlannedCutter } from './cutterPlan';
+import { goalNeedMm } from './goalReach';
+import { jobTargetObjects } from './jobSetup';
 
 export type { CandidatePlan, PinchFact } from '@/workers/sim/planEvaluate';
 
@@ -193,12 +195,29 @@ export function candidatePlans(
   // which the generator refuses at `cam` ("3D finishing would need … over the … budget", j06
   // wolf). Try the balls from largest down: each over-budget one is refused cheaply and the
   // largest that FITS posts, so a goal job can always generate.
+  //
+  // #785 — AND A BALL MUST REACH THE GOAL. A ball whose stated reach (shoulder, else flute) is
+  // shorter than the goal is deep would put the holder in the part no matter how well it measures;
+  // it is not a candidate, so the search chooses a longer ball instead of picking the largest and
+  // being refused at Generate. An UNSTATED reach is not a promise either way: such a ball stays a
+  // candidate, and the sweep's holder gate judges it (`holder-unproven`).
   const ballWork = work.filter((w) => w.kind === 'ball');
   if (ballWork.length > 0) {
     const ids = ballWork.map((w) => w.id);
+    const goalDepth = jobTargetObjects(job).reduce((deepest, target) => {
+      if ((target.role ?? 'reference') !== 'goal' || !target.enabled || target.format === 'png') return deepest;
+      const depth = goalNeedMm(target);
+      return Number.isFinite(depth) && depth > deepest ? depth : deepest;
+    }, 0);
+    const reachesGoal = (t: ToolLibraryEntry): boolean => {
+      if (!(goalDepth > 0)) return true;
+      const reach = reachOf(t);
+      return reach === null || goalDepth <= reach + 1e-9;
+    };
     const balls = tools
       .filter((t) => t.tool.shape === 'ball' || t.tool.shape === 'bull')
       .filter((t) => (stated(t.tool) ?? 0) > 0 && materialRefusal(job, t, catalogue, conditions, table ?? undefined, { ownedVouches: true }) === null)
+      .filter(reachesGoal)
       .sort((a, b) => byDiameter(b, a))
       .slice(0, 6);
     for (const ball of balls) add({ cutters: [{ key: ball.key, items: ids }], source: { [ball.key]: sourceOf(ball) } });

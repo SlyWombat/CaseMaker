@@ -658,6 +658,15 @@ export interface EngraveTargetObject {
    */
   goalMode?: 'item' | 'mold';
   /**
+   * #785 — CUT ONLY WHAT THE CUTTER REACHES. When the goal is deeper than the chosen cutter's
+   * known reach, Generate refuses by default (the holder would enter the part). Set this and the
+   * goal is cut as the stock's TOP BAND instead — the cutter's reach less a 1 mm clearance — and
+   * the result states how much of the goal is left in the stock. Absent (the default) keeps the
+   * refusal. The number is derived from the cutter at Generate, never stored: a longer cutter later
+   * cuts deeper with the same choice standing.
+   */
+  cutWithinReach?: boolean;
+  /**
    * #672 — a PNG goal's relief map: the depth the darkest (or, inverted, the lightest) tone is cut
    * to and which end of the greys sits at the top face. Absent = the engine's labelled defaults.
    */

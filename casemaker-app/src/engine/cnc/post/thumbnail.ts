@@ -450,9 +450,9 @@ function renderSimulation(mesh: ThumbnailMesh, longSide: number): RgbImage | nul
     for (let px = frame.x0; px < frame.x1; px++) {
       const value = z[py * frame.width + px]!;
       if (value === -Infinity) continue; // a through hole: the white page shows through
+      if (!Number.isFinite(value)) continue; // NaN has no shade; drawing it is not a picture
       const t = range > 1e-9 ? (top - value) / range : 0;
-      const step = Math.min(SIM_RAMP.length - 1, Math.round(Math.pow(t, 0.55) * (SIM_RAMP.length - 1)));
-      putPixel(image, px, py, SIM_RAMP[step]!);
+      putPixel(image, px, py, SIM_RAMP[rampStep(t)]!);
     }
   }
   strokeRect(image, frame.x0, frame.y0, frame.x1, frame.y1, STOCK_EDGE);
@@ -463,8 +463,7 @@ function renderHeightfield(
   stock: ThumbnailStock,
   field: ThumbnailHeightfield,
   longSide: number,
-): RgbImage | null {
-  const frame = frameFor(stock.length, stock.width, longSide);
+): RgbImage | null {  const frame = frameFor(stock.length, stock.width, longSide);
   const image = newImage(frame.width, frame.height);
   fillRect(image, frame.x0, frame.y0, frame.x1, frame.y1, STOCK_INK);
   const range = field.topZ - field.minZ;
@@ -481,8 +480,7 @@ function renderHeightfield(
       const at = j * field.nx + i;
       if (field.covered[at] !== 1) continue;
       const t = range > 1e-9 ? (field.topZ - field.z[at]!) / range : 0;
-      const step = Math.min(SIM_RAMP.length - 1, Math.round(Math.pow(t, 0.55) * (SIM_RAMP.length - 1)));
-      putPixel(image, px, py, SIM_RAMP[step]!);
+      putPixel(image, px, py, SIM_RAMP[rampStep(t)]!);
       painted = true;
     }
   }
@@ -492,6 +490,20 @@ function renderHeightfield(
 }
 
 /* ------------------------------------------------------------------ raster primitives */
+
+/**
+ * The shade index for a normalised height `t` (0 = the field's bottom, 1 = its top), CLAMPED into
+ * the ramp (#785). A covered heightfield cell can sit a hair above the field's own top by float
+ * noise, which makes `t` a hair negative — and `Math.pow` of a negative fraction is `NaN`, whose
+ * `SIM_RAMP[NaN]` is `undefined` and used to take the whole generation down at the thumbnail (the
+ * long-ball plan on the mouse shell was the first to reach it). A thumbnail is a picture; it must
+ * never be the thing that refuses a program.
+ */
+function rampStep(t: number): number {
+  if (!Number.isFinite(t)) return 0;
+  const clamped = Math.min(1, Math.max(0, t));
+  return Math.min(SIM_RAMP.length - 1, Math.round(Math.pow(clamped, 0.55) * (SIM_RAMP.length - 1)));
+}
 
 function newImage(width: number, height: number): RgbImage {
   const data = new Uint8Array(width * height * 3);

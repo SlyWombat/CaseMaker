@@ -192,7 +192,7 @@ export type PrimitivePatch = Partial<Omit<EngraveBoxPrimitive, 'kind' | 'positio
  * `undefined` is REMOVED, which is how the row's reset returns one number to the engine default.
  */
 export type TargetObjectPatch = Partial<
-  Pick<EngraveTargetObject, 'name' | 'rotation' | 'rotationX' | 'rotationY' | 'enabled' | 'goalMode'>
+  Pick<EngraveTargetObject, 'name' | 'rotation' | 'rotationX' | 'rotationY' | 'enabled' | 'goalMode' | 'cutWithinReach'>
 > & {
   /** A partial placement: the store merges it into the object's own X/Y/Z. */
   position?: Partial<EngraveTargetObject['position']>;
@@ -1939,6 +1939,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         };
         // #721 — 'item' is the default, so it is stored as an absent key, never `undefined` or 'item'.
         if ('goalMode' in patch && patch.goalMode !== 'mold') delete next.goalMode;
+        // #785 — the top-band choice is stored only when it is ON, so a goal that never chose it
+        // serialises without gaining a key (and turning it off returns the refusal).
+        if ('cutWithinReach' in patch && patch.cutWithinReach !== true) delete next.cutWithinReach;
         // #723 part 2 — a turn of 0 is stored as the absence of the field (the row's own choice),
         // so an object that was never turned serialises without gaining a key.
         if ('rotationX' in patch && patch.rotationX === undefined) delete next.rotationX;

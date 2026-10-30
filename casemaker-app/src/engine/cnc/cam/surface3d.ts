@@ -158,6 +158,14 @@ export interface SampleGoalOpts {
    * inside the blank samples exactly as before. Absent: no clip (every pre-#784 caller).
    */
   clip?: { xMin: number; xMax: number; yMin: number; yMax: number } | null;
+  /**
+   * #785 — THE CUT'S FLOOR, in work Z (mm). Every covered cell's top-Z is raised to at least this
+   * value, so the part is cut only down to it and the material below is left in the stock. Used by
+   * the operator's top-band choice: the floor is the stock top less (the cutter's reach less the
+   * clearance), so the holder never enters the work. The clear band (whose own `baseZ` may be
+   * deeper) is clamped too — the band is a cut like any other. Absent: no floor (every other cut).
+   */
+  depthLimitZ?: number | null;
 }
 
 /**
@@ -329,6 +337,17 @@ export function sampleGoalHeightfield(
         z[k] = baseZ;
         covered[k] = 1;
       }
+    }
+  }
+
+  // #785 — THE CUT'S FLOOR. Raise every covered cell to the floor, so a surface deeper than the
+  // cutter's safe reach is cut as a flat bottom at the floor and the rest is left in the stock.
+  // Applied AFTER the clear band: that band's base plane may be deeper than the floor, and it is a
+  // cut like any other — the holder must stay out of it too.
+  const depthLimitZ = opts.depthLimitZ ?? null;
+  if (depthLimitZ !== null) {
+    for (let k = 0; k < z.length; k++) {
+      if (covered[k] === 1 && (z[k] as number) < depthLimitZ) z[k] = depthLimitZ;
     }
   }
 

@@ -4229,3 +4229,61 @@ describe('#740 EngravePanel — an unstated tip is not a width', () => {
     expect(screen.getByTestId('engrave-thin-strokes').textContent).toContain('0.1 mm');
   });
 });
+
+// #785 — the reach refusal at Generate, and the one-click top-band cut: the refusal names the
+// numbers, and the button beside the sentence turns it into the cut the operator can have.
+describe('#785 EngravePanel — the one-click top-band cut', () => {
+  const CUTTER: Tool = flatEndMill(3.175, { name: '12 mm flute flat', fluteLength: 12 });
+
+  afterEach(() => {
+    act(() => setInventoryEntries([]));
+  });
+
+  it('a goal deeper than the cutter’s reach blocks with the numbers, and the button turns it into the band cut', () => {
+    act(() => setInventoryEntries([{ key: 'inv:flute-785', tool: CUTTER, provenance: 'EngravePanel #785 spec' }]));
+    const base = defaultEngraveJob();
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          stock: { ...base.stock, length: 50, width: 50, thickness: 150 },
+          toolKey: 'inv:flute-785',
+          tool: CUTTER,
+          // A second error (the label deeper than the blank) keeps this blocking after the reach
+          // one is chosen away, so the press here only sets the choice — Generate stays the press
+          // that cuts, exactly as it would belong to the operator.
+          labels: base.labels.map((l, i) => (i === 0 ? { ...l, depth: 151 } : l)),
+          targetObject: {
+            id: 'goal-785',
+            name: 'tall.stl',
+            format: 'stl',
+            sha256: 'a'.repeat(64),
+            data: 'AAAA',
+            size: { x: 10, y: 10, z: 112 },
+            position: { x: 25, y: 25, z: 0 },
+            rotation: 0,
+            enabled: true,
+            role: 'goal',
+          },
+        },
+      });
+    });
+    render(<EngravePanel />);
+
+    // The refusal is in the findings list, with the depth, the reach and the band's own depth.
+    const drawer = screen.getByTestId('engrave-findings');
+    fireEvent.click(drawer.querySelector('summary')!);
+    const refusal = drawer.querySelector('[data-code="goal-reach-short"]');
+    expect(refusal?.textContent).toContain('112 mm deep');
+    expect(refusal?.textContent).toContain('your longest reach is 12 mm');
+    const band = screen.getByTestId('engrave-goal-cut-top-band');
+    expect(band.textContent).toContain('Cut the top 11 mm only'); // 12 mm reach − 1 mm clearance
+
+    fireEvent.click(band);
+    expect(useEngraveJobStore.getState().job.targetObject?.cutWithinReach).toBe(true);
+    // The refusal is gone from the list and the stated band warning has taken its place.
+    expect(drawer.querySelector('[data-code="goal-reach-short"]')).toBeNull();
+    const warning = drawer.querySelector('[data-code="goal-cut-top-band"]');
+    expect(warning?.textContent).toContain("only the stock's top 11 mm is cut");
+  });
+});

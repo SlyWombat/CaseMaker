@@ -375,7 +375,11 @@ describe('the document keeps the picture and the numbers, never the field (#672)
   it('bounds the RESOLVED depth by the blank, not by size.z', () => {
     const job = { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: reliefTarget(rampPng(), { x: 20, y: 4 }, { maxDepthMm: 20 }) };
     const f = validateJob(job).find((x) => x.code === 'goal-object-oversize');
-    expect(f?.severity).toBe('error');
-    expect(f?.message).toContain('20 mm');
+    // #784 — a relief deeper than the blank is INFORMED (clipped), not refused: the check still
+    // reads the RESOLVED depth (20 mm), not size.z, and names how far it goes past the bottom.
+    expect(f?.severity).toBe('warning');
+    // The relief's 20 mm depth on this 12 mm blank is 8 mm past the bottom: the number proves the
+    // RESOLVED depth was read (a size.z-based check would see nothing past the blank).
+    expect(f?.message).toContain("8 mm below the stock's bottom face");
   });
 });
