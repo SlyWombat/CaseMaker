@@ -44,6 +44,10 @@ const PLATE_SVG =
 // so these get well past Playwright's 30 s default.
 test.setTimeout(240_000);
 
+/** #515 — how long a state the worker feeds may take to appear under load. These assertions wait
+ *  for the panel's own state; the number is a deadline inside the 240 s test budget, not a sleep. */
+const STATE_MS = 60_000;
+
 test('the default job generates, verifies, simulates and saves a .nc', async ({ cm, page }) => {
   await cm.ready();
   await openEngravePanel(page);
@@ -52,7 +56,7 @@ test('the default job generates, verifies, simulates and saves a .nc', async ({ 
 
   // The four rows tick, one by one, as the pipeline advances.
   await expect(page.getByTestId('engrave-run-toolpath')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  await expect(page.getByTestId('engrave-run-verified')).toHaveAttribute('data-state', 'tick');
+  await expect(page.getByTestId('engrave-run-verified')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
 
@@ -66,9 +70,9 @@ test('the default job generates, verifies, simulates and saves a .nc', async ({ 
   expect(state.canSave).toBe(false);
   await expect(page.getByTestId('engrave-save')).toBeDisabled();
   await acknowledgeClearance(page);
-  await expect(page.getByTestId('engrave-save')).toBeEnabled();
+  await expect(page.getByTestId('engrave-save')).toBeEnabled({ timeout: STATE_MS });
 
-  const downloadPromise = page.waitForEvent('download');
+  const downloadPromise = page.waitForEvent('download', { timeout: STATE_MS });
   await page.getByTestId('engrave-save').click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.nc$/);
@@ -94,7 +98,7 @@ test('editing the job after Generate makes the result stale and blocks Save', as
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   // #688 — the acknowledgement lives in Cut step 1 now; the Save path is still gated on it.
   await acknowledgeClearance(page);
-  await expect(page.getByTestId('engrave-save')).toBeEnabled();
+  await expect(page.getByTestId('engrave-save')).toBeEnabled({ timeout: STATE_MS });
 
   // Change a label's depth: the run no longer describes the job on screen. #411 folds a job's
   // rows, so the field is behind the chevron.
@@ -103,9 +107,9 @@ test('editing the job after Generate makes the result stale and blocks Save', as
   await depth.fill('1.8');
   await depth.blur();
 
-  await expect(page.getByTestId('engrave-save')).toBeDisabled();
+  await expect(page.getByTestId('engrave-save')).toBeDisabled({ timeout: STATE_MS });
   // #581 — the blocker names the input that moved: this edit changed the job.
-  await expect(page.getByTestId('engrave-save-blocked')).toContainText('the job changed since it was generated');
+  await expect(page.getByTestId('engrave-save-blocked')).toContainText('the job changed since it was generated', { timeout: STATE_MS });
 });
 
 test("the saved .nc, reloaded as a stranger's file, removes the same volume", async ({ cm, page }, testInfo) => {
