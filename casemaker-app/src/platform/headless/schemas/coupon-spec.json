@@ -1763,6 +1763,54 @@
                     ],
                     "type": "object"
                   },
+                  "pins": {
+                    "additionalProperties": false,
+                    "description": "The two locating pins a flipped stock sits on; omit for a mount-held setup.",
+                    "properties": {
+                      "at": {
+                        "description": "The two pins’ centres in the mounted work XY (origin at the stock’s front-left).",
+                        "prefixItems": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "x",
+                              "y"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "x",
+                              "y"
+                            ],
+                            "type": "object"
+                          }
+                        ],
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "at"
+                    ],
+                    "type": "object"
+                  },
                   "registration": {
                     "description": "The approved registration for this setup; omit for none.",
                     "properties": {
@@ -3402,6 +3450,54 @@
                   "right",
                   "front",
                   "back"
+                ],
+                "type": "object"
+              },
+              "pins": {
+                "additionalProperties": false,
+                "description": "The two locating pins a flipped stock sits on; omit for a mount-held setup.",
+                "properties": {
+                  "at": {
+                    "description": "The two pins’ centres in the mounted work XY (origin at the stock’s front-left).",
+                    "prefixItems": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "type": "object"
+                      }
+                    ],
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "at"
                 ],
                 "type": "object"
               },

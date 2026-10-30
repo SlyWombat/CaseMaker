@@ -20,7 +20,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import { expandEngraveRow } from '@/store/engraveRowStore';
 import type { PlanMountTap, RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { FACES, type Face, type Mount, type MountSpec, type Setup } from '@/engine/cnc/setups';
+import { FACES, type Face, type Mount, type MountSpec, type Setup, machineSize, setupPinReference } from '@/engine/cnc/setups';
 import type { SetupAuthoringFinding, SetupItemsReading } from '@/engine/cnc/setups';
 import { VISE_SEAT_MACHINE_Z } from '@/engine/cnc/fixture';
 import type { JobSetup, ViseParams } from '@/types/engraveJob';
@@ -130,6 +130,14 @@ function itemChip(
 export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
   const { index, setup, derived, reading, editable, findings } = props;
   const n = index + 1;
+  // #723 P2-2 — a flip's stated pins, in this setup's mounted XY (the derived setup carries the
+  // rotation and the stock's frame, so the size is the mounted one).
+  const mountedSize =
+    derived === undefined ? null : machineSize(derived.rotation, derived.stockBefore.bounds);
+  const pinRef =
+    setup.pins !== undefined && mountedSize !== null
+      ? setupPinReference(setup, { x: mountedSize.x, y: mountedSize.y }, index)
+      : null;
   const [open, setOpen] = useState(props.initiallyOpen === true);
   // The shipped Z1 vise carries a known provisional seat aim (#559); a custom/measured fixture
   // does not, so its field stays empty and the operator types the probe reading as before.
@@ -507,6 +515,18 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
                 <p style={MUTED} data-testid={`engrave-setup-remount-none-${n}`}>
                   No remount: setup 1 is mounted as supplied.
                 </p>
+              )}
+              {pinRef !== null && (
+                <>
+                  <p style={MUTED} data-testid={`engrave-setup-pins-${n}`}>
+                    Pins — <b>{pinRef.words}</b>
+                  </p>
+                  {pinRef.mirrorCheck !== null && (
+                    <p style={{ ...MUTED, color: WARN_COLOR }} data-testid={`engrave-setup-pins-warning-${n}`}>
+                      {pinRef.mirrorCheck}
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )}

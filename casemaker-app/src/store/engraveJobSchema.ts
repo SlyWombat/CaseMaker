@@ -1936,6 +1936,19 @@ const jobSetupSchema = z.object({
     })
     .optional()
     .describe('Instructions for remounting the stock; omit when the setup is never remounted.'),
+  // #723 P2-2 — the flip's stated reference: the two locating pins, in this setup's mounted work XY.
+  pins: z
+    .object({
+      at: z
+        .tuple([
+          z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
+          z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
+        ])
+        .describe('The two pins’ centres in the mounted work XY (origin at the stock’s front-left).'),
+    })
+    .strict()
+    .optional()
+    .describe('The two locating pins a flipped stock sits on; omit for a mount-held setup.'),
 });
 
 /** A v3 source record (#425 §6): the file's bytes, or its name and SHA-256 when it is too large. */

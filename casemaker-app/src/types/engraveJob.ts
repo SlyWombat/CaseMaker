@@ -1412,6 +1412,15 @@ export interface JobSetupRegistration {
 }
 
 /**
+ * #723 P2-2 — the two locating pins a flipped stock sits on, in the setup's mounted work XY.
+ * Exactly two: two points are the datum that fixes XY and rotation on a flip; the app checks they
+ * are not symmetric about the stock's centre (which a 180° spin would map onto itself).
+ */
+export interface JobSetupPins {
+  at: [{ x: number; y: number }, { x: number; y: number }];
+}
+
+/**
  * The directed step that takes the stock from the previous setup into this one (#419 J2, §5.4).
  *
  * The REMOUNT PAGE is #428's; this is only the record that page will read. `confirm` reuses
@@ -1475,6 +1484,17 @@ export interface JobSetup {
   registration?: JobSetupRegistration;
   /** The directed step into this setup. Absent on the first setup, or where none is needed. */
   remount?: JobSetupRemount;
+  /**
+   * #723 P2-2 — THE FLIP'S STATED REFERENCE: the two locating pins a turned stock sits on, in THIS
+   * setup's mounted work XY (origin at the stock's front-left corner as mounted, mm). A setup that
+   * states them is registered on the pins rather than on a cut feature or the mount's edge; the
+   * question the app can check is which pin is nearer a named edge, which is what tells the right
+   * mount from a stock spun 180° about Z. Pins symmetric about the stock's centre cannot tell that
+   * apart, and the app says so instead of asking a question with two right answers.
+   *
+   * OPTIONAL and not defaulted, so every setup written before this field keeps its exact shape.
+   */
+  pins?: JobSetupPins;
 }
 
 /**
