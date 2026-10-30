@@ -19,9 +19,6 @@ import type { EngraveJob } from '@/types/engraveJob';
 import { rotaryGoalPreviewField, rotaryGoalSurfaceGeometry, rotaryGoalTarget } from './rotaryGoalPreview';
 import { wrapMapGeometry } from './rotaryStockView';
 
-/** The part's surface colour — the target object's own, so the relief reads as the part. */
-const GOAL_COLOR = '#8fb4ff';
-
 export interface RotaryGoalSurfaceProps {
   job: EngraveJob;
   rotary: RotaryMap;
@@ -53,8 +50,12 @@ export function RotaryGoalSurface({ job, rotary, wrapRadius }: RotaryGoalSurface
   if (geometry === null) return null;
   return (
     <mesh geometry={geometry} name="engrave-rotary-goal" renderOrder={3}>
+      {/* #723 R-4 review — the vertex colours carry the depth (crest pale, trough deep blue); the
+          white base leaves them unmultiplied, and a little lift keeps the troughs legible under
+          the stock's shadow. */}
       <meshStandardMaterial
-        color={GOAL_COLOR}
+        vertexColors
+        color="#ffffff"
         emissive="#0a1a33"
         emissiveIntensity={0.35}
         metalness={0.1}

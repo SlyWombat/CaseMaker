@@ -33,6 +33,26 @@ export const ROTARY_GOAL_PREVIEW_MAX_CELLS = 40_000;
 export const ROTARY_GOAL_PREVIEW_PITCH_MM = 0.5;
 
 /**
+ * #723 R-4 review — THE RELIEF IS COLOURED BY DEPTH. A single colour (and flat lighting) drew a
+ * three-lobe shaft as one uniform band: the picture passed "pixels drawn" and a person could not
+ * read it. Each vertex takes the ramp below at its depth below the stock's surface (R − r), so the
+ * crests and troughs are legible in BOTH views — the wrapped copy keeps the colours, so the rod
+ * shows the same bands.
+ *
+ * The ramp is the relief's own: pale ice for the surface, deep blue for the deepest cut. It is
+ * deliberately NOT the depth legend's warm ramp (#ffe08a → #7a2e0e): the stock is a warm tan and
+ * the ghosted rod sits right behind the part, so a brown trough would read as stock.
+ */
+export const RELIEF_SHALLOW_COLOR = '#d6ecff';
+export const RELIEF_DEEP_COLOR = '#1e40af';
+
+/** Depth below the stock's surface (mm, ≥ 0) → the relief's colour. Out of range clamps. */
+export function reliefDepthColor(depth: number, maxDepth: number): THREE.Color {
+  const t = maxDepth > 0 ? Math.min(Math.max(depth / maxDepth, 0), 1) : 0;
+  return new THREE.Color(RELIEF_SHALLOW_COLOR).lerp(new THREE.Color(RELIEF_DEEP_COLOR), t);
+}
+
+/**
  * The goal a rotary job will cut, or null. An enabled `role: 'goal'` target with mesh bytes; a
  * picture is a flat relief (the generator refuses it on a rod by name), and a reference mesh is
  * not cut at all.
@@ -65,7 +85,15 @@ export function rotaryGoalSurfaceGeometry(field: GoalRadialField): THREE.BufferG
   const { nx, ny, pitch, x0, z, covered } = field;
   const at = (i: number, j: number): number => (j % ny) * nx + i;
   const positions: number[] = [];
+  const colours: number[] = [];
   const indices: number[] = [];
+  // The ramp's deep end: the deepest cut the field holds, so the picture uses its own part's
+  // range rather than a stock thickness that belongs to a flat job.
+  let minZ = 0;
+  for (let k = 0; k < z.length; k++) if (covered[k] === 1 && z[k]! < minZ) minZ = z[k]!;
+  const maxDepth = Math.max(1e-6, -minZ);
+  /** The colour of one vertex at the field's height there (z = r − R ≤ 0). */
+  const colourAt = (k: number): THREE.Color => reliefDepthColor(-z[k]!, maxDepth);
   let vertex = 0;
   for (let j = 0; j < ny; j++) {
     const y0 = j * pitch;
@@ -79,12 +107,17 @@ export function rotaryGoalSurfaceGeometry(field: GoalRadialField): THREE.BufferG
       const xA = x0 + i * pitch;
       const xB = x0 + (i + 1) * pitch;
       positions.push(xA, y0, z[a]!, xB, y0, z[b]!, xA, y1, z[c]!, xB, y1, z[d]!);
+      for (const k of [a, b, c, d]) {
+        const c3 = colourAt(k);
+        colours.push(c3.r, c3.g, c3.b);
+      }
       indices.push(vertex, vertex + 1, vertex + 2, vertex + 1, vertex + 3, vertex + 2);
       vertex += 4;
     }
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();

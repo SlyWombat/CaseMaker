@@ -3,7 +3,9 @@
 // against whatever the session happens to produce.
 
 import { describe, it, expect } from 'vitest';
+import * as THREE from 'three';
 import {
+  applyRemovedDepthColours,
   checkpointAtStep,
   cleanStockGeometry,
   geometryFromMesh,
@@ -16,7 +18,7 @@ import {
 } from '@/components/viewport/simGeometry';
 import type { CheckpointInfo, SimPath } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
-import { meshFlat, type ColumnGrid } from '@/workers/geometry/columnEngine';
+import { meshFlat, meshRotaryMap, type ColumnGrid } from '@/workers/geometry/columnEngine';
 
 /**
  * A five-vertex path: a rapid into the first known position (drawn as nothing — it has no
@@ -295,5 +297,43 @@ describe('cleanStockGeometry', () => {
     expect(minZ).toBeCloseTo(mesh.bbox.min[2]!, 6);
     expect(maxZ).toBeCloseTo(mesh.bbox.max[2]!, 6);
     cleaned.dispose();
+  });
+});
+
+
+// #723 R-4 review — A FINISHED RELIEF READS AS CUT. The unrolled stock is a heightfield, and from
+// the top camera every top face meets the light the same way, so depth was invisible: the result
+// said 1466 mm3 removed while the picture showed an uncut sheet. The stock's vertices now carry
+// the radius the cut took — white where nothing was removed, the deep colour at the frame's
+// deepest point.
+describe('#723 the stock’s removed depth is coloured', () => {
+  it('paints the cut columns and leaves the uncut stock white (the unrolled map)', () => {
+    // θ = 180° is cut to radius 5; the other columns stand at R = 10.
+    const grid: ColumnGrid = {
+      kind: 'rotary', nu: 1, nv: 4, u0: 0.5, du: 1, v0: 0, dv: 90, initial: 10, base: 0,
+      h: Float32Array.from([10, 10, 5, 10]),
+    };
+    const mesh = meshRotaryMap(grid, { dx: 1, dThetaDeg: 90 });
+    const geom = geometryFromMesh(mesh);
+    applyRemovedDepthColours(geom, { map: true, radius: 10, base: '#c9a26b' });
+    const colour = geom.getAttribute('color');
+    expect(colour).not.toBeNull();
+    // Vertex (I, J) is I·5 + J; the θ = 180° top vertex is (0, 2), the seam (0, 4) is uncut.
+    const at = (I: number, J: number): [number, number, number] => {
+      const v = I * 5 + J;
+      return [colour.getX(v), colour.getY(v), colour.getZ(v)];
+    };
+    const cut = at(0, 2);
+    const uncut = at(0, 4);
+    // Nothing removed: the material's own colour, exactly (baked in — vertex colours multiply the
+    // material, so the material is white while they are on).
+    const base = new THREE.Color('#c9a26b');
+    expect(uncut[0]).toBeCloseTo(base.r, 5);
+    expect(uncut[1]).toBeCloseTo(base.g, 5);
+    expect(uncut[2]).toBeCloseTo(base.b, 5);
+    // The cut vertex is pulled toward the deep colour: bluer than the stock and bluer than white.
+    expect(cut[2] - cut[0]).toBeGreaterThan(0.2);
+    expect(cut[2]).toBeLessThan(0.95);
+    geom.dispose();
   });
 });

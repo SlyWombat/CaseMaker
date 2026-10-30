@@ -27,6 +27,7 @@ import {
   FIXTURE_COLOR,
   geometryFromMesh,
   PATH_COLOR,
+  applyRemovedDepthColours,
   RAPID_COLOR,
   REMOVED_COLOR,
   SACRIFICIAL_COLOR,
@@ -153,6 +154,15 @@ export function SimMeshes() {
   // discriminator between the two stock shapes.
   const cleanStock = meshes?.removal === null;
   const stockGeom = useMeshGeometry(stockMesh, cleanStock ? cleanStockGeometry : geometryFromMesh);
+  // #723 R-4 review — A ROTARY STOCK IS COLOURED BY THE RADIUS THE CUT TOOK, so a heightfield
+  // reads as cut from a top camera (the unrolled view showed no removal at all). It is the same
+  // buffer with one attribute added; a flat program's mesh is untouched.
+  const rotaryStock = info !== null && info.summary?.rotary === true && stockRadius !== null;
+  useMemo(() => {
+    if (rotaryStock && stockGeom !== null) {
+      applyRemovedDepthColours(stockGeom, { map: mapView, radius: stockRadius, base: STOCK_COLOR });
+    }
+  }, [rotaryStock, stockGeom, mapView, stockRadius]);
   const removalGeom = useMeshGeometry(removalMesh);
   // #213 §4 — the sacrificial material as cut so far, on its OWN layer (`layers.sacrificial`).
   // Null when the job has none, so nothing is drawn; before the first frame lands the load's uncut
@@ -200,7 +210,15 @@ export function SimMeshes() {
       <group name="sim-turning" rotation={[turningRad, 0, 0]}>
         {stockGeom && (
           <mesh geometry={stockGeom} name="sim-stock">
-            <meshStandardMaterial color={STOCK_COLOR} flatShading metalness={0.05} roughness={0.75} />
+            <meshStandardMaterial
+              // The stock colour is baked into the vertices when the depth colours are on (vertex
+              // colours MULTIPLY the material's), so the material is white then.
+              color={rotaryStock ? '#ffffff' : STOCK_COLOR}
+              vertexColors={rotaryStock}
+              flatShading
+              metalness={0.05}
+              roughness={0.75}
+            />
           </mesh>
         )}
 

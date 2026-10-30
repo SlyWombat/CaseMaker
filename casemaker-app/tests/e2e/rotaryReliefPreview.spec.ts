@@ -139,32 +139,54 @@ async function openReliefJob(page: Page, job: EngraveJob, stem: string): Promise
 }
 
 /**
- * How many pixels of the viewport's canvas are the relief's own colour (`#8fb4ff`, lit): strongly
- * blue-dominant and bright. Reads the drawing buffer the viewport keeps for e2e; -1 means there
- * was no canvas to read (an assertion of its own).
+ * What the viewport's canvas shows of the relief, measured rather than eyeballed: how many pixels
+ * are the part's own colour (the depth ramp is blue-dominant, the stock tan, the background
+ * near-black), and — the #723 R-4 review's point — whether the colour VARIES along the screen's
+ * vertical axis, which in the Map view is the stock's arc. A three-lobe shaft is three crests
+ * across 62.8 mm around, so the row-mean brightness must rise and fall at least four times;
+ * "pixels differ from the background" once passed a picture a user could not read.
  */
-async function goalPixels(page: Page): Promise<number> {
+async function goalDrawState(page: Page): Promise<{ count: number; alternations: number; spread: number }> {
   return page.evaluate(() => {
     const host = document.querySelector('[data-testid="viewport-canvas"]');
     const canvas = host instanceof HTMLCanvasElement ? host : host?.querySelector('canvas') ?? null;
-    if (canvas === null) return -1;
+    if (canvas === null) return { count: -1, alternations: -1, spread: -1 };
     const off = document.createElement('canvas');
     off.width = canvas.width;
     off.height = canvas.height;
     const ctx = off.getContext('2d');
-    if (ctx === null) return -1;
+    if (ctx === null) return { count: -1, alternations: -1, spread: -1 };
     ctx.drawImage(canvas, 0, 0);
     const data = ctx.getImageData(0, 0, off.width, off.height).data;
-    let blue = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i]!;
-      const g = data[i + 1]!;
-      const b = data[i + 2]!;
-      // The relief's colour (#8fb4ff) is the only blue-dominant thing in the scene: the stock is
-      // tan, the fixtures grey, the background near-black. Threshold low enough for the lit face.
-      if (b >= 110 && b - r >= 12 && b >= g - 10) blue++;
+    let count = 0;
+    const rows = new Map<number, { sum: number; n: number }>();
+    for (let y = 0; y < off.height; y++) {
+      for (let x = 0; x < off.width; x++) {
+        const i = (y * off.width + x) * 4;
+        const r = data[i]!;
+        const g = data[i + 1]!;
+        const b = data[i + 2]!;
+        // The relief's ramp is the only blue-dominant thing in the scene (#d6ecff … #1e40af).
+        if (b >= 120 && b - r >= 10) {
+          count++;
+          const row = rows.get(y) ?? { sum: 0, n: 0 };
+          row.sum += (r + g + b) / 3;
+          row.n += 1;
+          rows.set(y, row);
+        }
+      }
     }
-    return blue;
+    // Rows the part really covers, in screen order, then the sign changes of their mean brightness.
+    const means = [...rows.entries()].filter(([, v]) => v.n >= 20).sort((a, b) => a[0] - b[0]).map(([, v]) => v.sum / v.n);
+    let alternations = 0;
+    let last = 0;
+    for (let i = 1; i < means.length; i++) {
+      const d = Math.sign((means[i] as number) - (means[i - 1] as number));
+      if (d !== 0 && last !== 0 && d !== last) alternations++;
+      if (d !== 0) last = d;
+    }
+    const spread = means.length === 0 ? 0 : Math.max(...means) - Math.min(...means);
+    return { count, alternations, spread };
   });
 }
 
@@ -177,6 +199,32 @@ async function assertGenerateEnabled(page: Page): Promise<void> {
     const text = (await blocker.count()) > 0 ? await blocker.textContent() : '(no blocker sentence)';
     throw new Error(`Generate is disabled: ${text}`);
   }
+}
+
+/** Each canvas row's mean brightness — a cheap fingerprint of what the stock looks like. */
+async function canvasRowMeans(page: Page): Promise<number[]> {
+  return page.evaluate(() => {
+    const host = document.querySelector('[data-testid="viewport-canvas"]');
+    const canvas = host instanceof HTMLCanvasElement ? host : host?.querySelector('canvas') ?? null;
+    if (canvas === null) return [];
+    const off = document.createElement('canvas');
+    off.width = canvas.width;
+    off.height = canvas.height;
+    const ctx = off.getContext('2d');
+    if (ctx === null) return [];
+    ctx.drawImage(canvas, 0, 0);
+    const data = ctx.getImageData(0, 0, off.width, off.height).data;
+    const means: number[] = [];
+    for (let y = 0; y < off.height; y++) {
+      let sum = 0;
+      for (let x = 0; x < off.width; x++) {
+        const i = (y * off.width + x) * 4;
+        sum += (data[i]! + data[i + 1]! + data[i + 2]!) / 3;
+      }
+      means.push(sum / off.width);
+    }
+    return means;
+  });
 }
 
 async function shoot(page: Page, name: string): Promise<void> {
@@ -192,17 +240,22 @@ test('the relief draws on the map and the rod, and cuts to the program the sheet
   // ── The Map view (the default): the field unrolled, x along, the arc around. ──
   await expect(page.getByTestId('rotary-view-map')).toHaveAttribute('aria-pressed', 'true');
   // The preview worker builds asynchronously; poll rather than trusting one read.
-  await expect.poll(() => goalPixels(page), { timeout: 60_000 }).toBeGreaterThan(200);
-  const mapPixels = await goalPixels(page);
+  await expect.poll(async () => (await goalDrawState(page)).count, { timeout: 60_000 }).toBeGreaterThan(200);
+  const map = await goalDrawState(page);
+  // THE LOBES MUST READ. Three crests around the map's arc are several brightness swings in the
+  // row-mean profile — a uniform band (the defect the manager saw) measures zero.
+  expect(map.alternations, 'the depth ramp varies around the stock (the lobes are legible)').toBeGreaterThanOrEqual(4);
+  expect(map.spread, 'crests and troughs differ in colour, not just in position').toBeGreaterThan(8);
   await shoot(page, 'lobed-shaft-map.png');
 
   // ── The Stock view: the SAME buffer wrapped onto the rod, so the lobes turn with it. ──
   await page.getByTestId('rotary-view-stock').click();
   await expect(page.getByTestId('rotary-view-stock')).toHaveAttribute('aria-pressed', 'true');
-  await expect.poll(() => goalPixels(page), { timeout: 30_000 }).toBeGreaterThan(200);
-  const stockPixels = await goalPixels(page);
-  expect(stockPixels, 'the relief is drawn on the rod').toBeGreaterThan(200);
-  expect(stockPixels, 'a different view of the part, not the map again').not.toBe(mapPixels);
+  await expect.poll(async () => (await goalDrawState(page)).count, { timeout: 30_000 }).toBeGreaterThan(200);
+  const stock = await goalDrawState(page);
+  expect(stock.count, 'the relief is drawn on the rod').toBeGreaterThan(200);
+  expect(stock.count, 'a different view of the part, not the map again').not.toBe(map.count);
+  expect(stock.spread, 'the wrapped copy keeps the depth colours').toBeGreaterThan(8);
   await shoot(page, 'lobed-shaft-stock.png');
 
   // ── Simulate: the app GENERATES the relief, and its own text goes through Simulate's door. ──
@@ -231,6 +284,13 @@ test('the relief draws on the map and the rod, and cuts to the program the sheet
   await page.getByTestId('sim-simulate').click();
   await expect(page.getByTestId('sim-result')).toBeVisible({ timeout: 300_000 });
   await expect(page.getByTestId('sim-backend')).toContainText(/column/i);
+  // #723 R-4 review — the two diagnostics that fired on EVERY rotary job are gone from the panel:
+  // the file states its starting tool (`;@CM|START|tool=empty`), and the chuck/tailstock fact is
+  // stated once in the coverage sentence instead of as a per-sweep info.
+  const panelText = (await page.getByTestId('sim-panel').textContent()) ?? '';
+  expect(panelText).not.toContain('starting tool was not stated');
+  expect(panelText).not.toContain('NOT checked');
+  expect(panelText).toContain('checked as keep-out bands');
 
   // Mid-program, turning: the stock is a rod and the cut is part-way.
   const max = Number(await page.getByTestId('sim-scrubber').getAttribute('max'));
@@ -242,6 +302,19 @@ test('the relief draws on the map and the rod, and cuts to the program the sheet
   await expect(page.getByTestId('sim-view-unroll')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('viewport-camera-top').click();
   await page.evaluate((step: number) => window.__caseMaker!.simSetStep(step), max);
+  // A FINISHED RELIEF MUST READ AS CUT. Measured directly: the SAME unrolled view at step 0
+  // (uncut) and at the last step, row by row. The cut takes the tan surface away across the part's
+  // width, so a row the cut reaches is measurably darker; a sheet that only carries the path
+  // overlay differs in a few thin rows, not across the band. This holds whatever ramp is used.
+  await page.evaluate(() => window.__caseMaker!.simSetStep(0));
+  await page.waitForTimeout(900);
+  const uncut = await canvasRowMeans(page);
+  await page.evaluate((step: number) => window.__caseMaker!.simSetStep(step), max);
+  await page.waitForTimeout(900);
+  const cut = await canvasRowMeans(page);
+  expect(uncut.length).toBe(cut.length);
+  const changed = uncut.filter((m, i) => Math.abs(m - (cut[i] as number)) > 3).length;
+  expect(changed, 'the cut changes the unrolled stock itself, not only the path overlay').toBeGreaterThan(20);
   await shoot(page, 'lobed-shaft-simulate-unroll.png');
   const state = await page.evaluate(() => window.__caseMaker!.getSimState());
   // 'ready' is the store's finished state (the panel draws its Result block on it); the sweep
@@ -262,8 +335,8 @@ test('a part wider than the rod is refused by name and STILL drawn beside the re
   await expect(refusal).toBeVisible({ timeout: 120_000 });
   await expect(refusal).toContainText(/reaches r 12 mm/);
   // ...and the design's rule holds: the field still samples, so the part is drawn.
-  await expect.poll(() => goalPixels(page), { timeout: 30_000 }).toBeGreaterThan(200);
-  const pixels = await goalPixels(page);
-  expect(pixels, 'a refused part is still drawn').toBeGreaterThan(200);
+  await expect.poll(async () => (await goalDrawState(page)).count, { timeout: 30_000 }).toBeGreaterThan(200);
+  const drawn = await goalDrawState(page);
+  expect(drawn.count, 'a refused part is still drawn').toBeGreaterThan(200);
   await shoot(page, 'oversize-refused-with-drawing.png');
 });

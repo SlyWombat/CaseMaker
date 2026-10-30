@@ -62,6 +62,55 @@ const PROBE_SHANK_LENGTH_MM = 8;
  * builds the case's meshes (`SceneMeshes.tsx`): a position attribute, an index, and vertex
  * normals. The caller owns the returned geometry and must `dispose()` it.
  */
+/**
+ * #723 R-4 review — A FINISHED RELIEF MUST READ AS CUT. From the top camera a heightfield is a
+ * flat sheet: every top face points at the same light, so depth is invisible and the unrolled
+ * stock looked uncut while the result said 1466 mm³ had gone. The stock's vertices are therefore
+ * coloured by how much radius the cut took — the MATERIAL's own colour where nothing was removed,
+ * fading to `SIM_CUT_COLOR` at the deepest point of THIS mesh's frame, so the crests and troughs
+ * read in both the turning rod and the unrolled map. The base colour is baked into the attribute
+ * (the material is white while these are on), because vertex colours MULTIPLY the material's.
+ *
+ * `map` chooses the frame: the map's height is the radius lost (z ≤ 0, the unrolled sheet), the
+ * stock's is the rod's own radius at (y, z) about the X axis. `radius` is the stock's (R); a
+ * vertex outside it (a skirt to the axis) takes the deepest colour.
+ */
+export const SIM_CUT_COLOR = '#1e40af';
+
+export function applyRemovedDepthColours(
+  geometry: THREE.BufferGeometry,
+  opts: { map: boolean; radius: number; base: string },
+): void {
+  const position = geometry.getAttribute('position');
+  const count = position.count;
+  const depths = new Float32Array(count);
+  // The ramp's scale is the CUT's depth, not the solid's height: the map's bottom face sits at
+  // the axis (depth = R) and would otherwise dilute every cut to half its colour. Vertices at or
+  // beyond the stock's own radius are the closure to the axis, not a cut surface.
+  let maxDepth = 1e-6;
+  for (let i = 0; i < count; i++) {
+    const y = position.getY(i);
+    const z = position.getZ(i);
+    const depth = opts.map
+      ? Math.max(0, -z)
+      : Math.max(0, opts.radius - Math.hypot(y, z));
+    depths[i] = depth;
+    if (depth > maxDepth && depth < opts.radius * 0.999) maxDepth = depth;
+  }
+  const deep = new THREE.Color(SIM_CUT_COLOR);
+  const colours = new Float32Array(count * 3);
+  const base = new THREE.Color(opts.base);
+  for (let i = 0; i < count; i++) {
+    const t = Math.min(1, depths[i]! / maxDepth);
+    const colour = base.clone().lerp(deep, t);
+    colours[i * 3] = colour.r;
+    colours[i * 3 + 1] = colour.g;
+    colours[i * 3 + 2] = colour.b;
+  }
+  const attribute = new THREE.BufferAttribute(colours, 3);
+  geometry.setAttribute('color', attribute);
+}
+
 export function geometryFromMesh(m: NodeMeshOutput): THREE.BufferGeometry {
   const geom = new THREE.BufferGeometry();
   geom.setAttribute('position', new THREE.BufferAttribute(m.positions, 3));
