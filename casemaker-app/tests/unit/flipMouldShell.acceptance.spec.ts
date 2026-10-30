@@ -284,7 +284,9 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
     if (grid > 0.05) {
       expect(stated).toBeDefined();
       expect(stated!.message).toContain('the finish passes are 0.05 mm apart');
-      expect(stated!.message).toContain('tip field');
+      // #785 — three caps can settle the grid: the finishing tip field, the heightfield's cell
+      // cap, and the app's stated move budget. The run says WHICH bound.
+      expect(stated!.message).toMatch(/tip field|move budget|cells settle the grid/);
     } else {
       expect(stated).toBeUndefined();
     }

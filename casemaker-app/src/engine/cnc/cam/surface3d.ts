@@ -131,6 +131,16 @@ export interface GoalHeightfield {
   resolutionNote: string;
 }
 
+/**
+ * #785 — THE GOAL PROGRAM'S STATED MOVE BUDGET. The CAM holds every move of the program at once,
+ * and a goal's cost is roughly (roughing levels + one finishing pass) × the covered cells — each
+ * move a JS object of some hundred bytes, so 12 000 000 moves is already hundreds of megabytes.
+ * `engraveGenerate` samples the goal first (cheap, and the same grid the CAM will cut), estimates
+ * the moves, settles on the coarser base pitch when that fits, and otherwise REFUSES BY NAME with
+ * the numbers and the fixes. A dead tab is never the outcome.
+ */
+export const GOAL_MOVE_BUDGET = 12_000_000;
+
 export interface SampleGoalOpts {
   /** The shop's `sim.columnFlatPitchYMm`; absent → {@link DEFAULT_GRID_PITCH_MM}. */
   pitchMm?: number | null;

@@ -300,6 +300,9 @@ export type JobFindingCode =
   | 'goal-reach-short'
   | 'goal-reach-unrecorded'
   | 'goal-cut-top-band'
+  // #785 — the goal's program would exceed the app's stated move budget: refused BY NAME with the
+  // numbers and the fixes (a coarser grid, a bigger step-down, or two setups), never by dying.
+  | 'goal-program-too-big'
   | 'goal-mold-rim'
   | 'goal-mold-floor'
   | 'goal-mold-one-sided'

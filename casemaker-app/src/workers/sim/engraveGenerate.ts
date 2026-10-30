@@ -152,6 +152,9 @@ import {
   DEFAULT_MAX_FINISH_TIP_OPS,
   DEFAULT_STOCK_TO_LEAVE_MM,
   generateSurface3dForGoal,
+  GOAL_MOVE_BUDGET,
+  sampleGoalHeightfield,
+  type SampleGoalOpts,
   isMold,
   steepestWallDeg,
   type GoalSurfaceFacts,
@@ -4477,6 +4480,65 @@ export function generateGoalProgram(
   const topBandMm = bandMm !== null && bandMm > 0 ? bandMm : null;
   const depthLimitZ = topBandMm === null ? null : -topBandMm;
 
+  // #784 — the blank's rectangle: an oversized goal is cut clipped to the stock, never as air
+  // cuts past its edge. A goal already inside the blank samples exactly as before.
+  const sampleAt = (pitchMm: number): SampleGoalOpts => ({
+    pitchMm,
+    ...sampleClear,
+    clip: { xMin: 0, xMax: job.stock.length, yMin: 0, yMax: job.stock.width },
+    // #785 — the top-band floor, when the operator chose to cut what the cutter reaches.
+    depthLimitZ,
+  });
+
+  // #785 — THE STATED MOVE BUDGET, BEFORE THE CAM BUILDS A SINGLE MOVE. The CAM holds the whole
+  // program at once, and a goal's cost is about (roughing levels + one finishing pass) × the
+  // covered cells. Sample first — cheap, and the same grid the CAM will cut — and settle on the
+  // coarser base pitch when that fits; if even that is over budget, refuse BY NAME with the
+  // numbers and the fixes. A dead tab is never the outcome.
+  const allowanceMm = stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM;
+  const movesAt = (pitchMm: number): { moves: number; depth: number; cells: number; pitch: number } => {
+    const hf = sampleGoalHeightfield(goal, sampleAt(pitchMm));
+    if (hf.coveredCount === 0) return { moves: 0, depth: 0, cells: 0, pitch: hf.pitch };
+    const levels = Math.max(1, Math.ceil((hf.topZ - hf.minZ + allowanceMm) / feeds.stepDown));
+    return { moves: hf.coveredCount * (levels + 1), depth: hf.topZ - hf.minZ, cells: hf.coveredCount, pitch: hf.pitch };
+  };
+  let cutPitchMm = refinedPitchMm;
+  let moveEstimate = movesAt(cutPitchMm);
+  let moveBudgetBound = false;
+  if (moveEstimate.moves > GOAL_MOVE_BUDGET && cutPitchMm !== basePitchMm) {
+    const coarser = movesAt(basePitchMm);
+    if (coarser.moves <= GOAL_MOVE_BUDGET) {
+      cutPitchMm = basePitchMm;
+      moveEstimate = coarser;
+      moveBudgetBound = true;
+    }
+  }
+  if (moveEstimate.moves > GOAL_MOVE_BUDGET) {
+    const scale = Math.sqrt(moveEstimate.moves / GOAL_MOVE_BUDGET);
+    const suggestedPitch = Math.max(moveEstimate.pitch + 0.01, Math.ceil(moveEstimate.pitch * scale * 100) / 100);
+    const finding: JobFinding = {
+      severity: 'error',
+      code: 'goal-program-too-big',
+      message:
+        `The goal would need about ${moveEstimate.moves.toLocaleString('en-US')} moves — ` +
+        `${Number(moveEstimate.depth.toFixed(3))} mm deep at a ${feeds.stepDown} mm step-down on ` +
+        `${moveEstimate.cells.toLocaleString('en-US')} cells at ${Number(moveEstimate.pitch.toFixed(4))} mm — and the ` +
+        `app's budget is ${GOAL_MOVE_BUDGET.toLocaleString('en-US')}. Coarsen the grid to about ${suggestedPitch} mm, ` +
+        `raise the step-down, or cut the goal in two setups.`,
+    };
+    return {
+      ...base,
+      ok: false,
+      stage: 'findings',
+      findings: dedupeFindings([finding, ...goalFindings, ...documentFindings()]),
+      feeds: null,
+      cam: null,
+      nc: null,
+      verify: null,
+      errors: [{ stage: 'findings' as EngraveStage, message: finding.message }],
+    };
+  }
+
   type Surfaced = ReturnType<typeof generateSurface3dForGoal>;
   const surfaceAt = (pitchMm: number): Surfaced =>
     generateSurface3dForGoal({
@@ -4487,15 +4549,7 @@ export function generateGoalProgram(
       air: job.cutOverride?.air ?? true,
       feeds,
       rapid: mill.rapidEstimate,
-      // #784 — the blank's rectangle: an oversized goal is cut clipped to the stock, never as air
-      // cuts past its edge. A goal already inside the blank samples exactly as before.
-      sample: {
-        pitchMm,
-        ...sampleClear,
-        clip: { xMin: 0, xMax: job.stock.length, yMin: 0, yMax: job.stock.width },
-        // #785 — the top-band floor, when the operator chose to cut what the cutter reaches.
-        depthLimitZ,
-      },
+      sample: sampleAt(pitchMm),
       opts: {
         stockToLeaveMm,
         scallop,
@@ -4515,7 +4569,7 @@ export function generateGoalProgram(
   let budgetBound = false;
   onProgress?.({ stage: 'sample', label: 'sampling the goal' });
   try {
-    surfaced = surfaceAt(refinedPitchMm);
+    surfaced = surfaceAt(cutPitchMm);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     // The finishing tip field's own cap (#540) is a cost limit, not a fault: settle at the grid
@@ -4544,9 +4598,11 @@ export function generateGoalProgram(
   const settledPitchMm = surfaced.heightfield.pitch;
   if (finishStepOverMm > 0 && settledPitchMm > finishStepOverMm + 1e-9) {
     const trim = (n: number): string => String(Number(n.toFixed(4)));
-    const why = budgetBound
-      ? `a ball at that spacing would ask the finishing tip field for more than its ${DEFAULT_MAX_FINISH_TIP_OPS.toLocaleString('en-US')} evaluations`
-      : `the heightfield's ${DEFAULT_MAX_CELLS.toLocaleString('en-US')} cells settle the grid there`;
+    const why = moveBudgetBound
+      ? `the program would exceed the app's ${GOAL_MOVE_BUDGET.toLocaleString('en-US')}-move budget at that spacing`
+      : budgetBound
+        ? `a ball at that spacing would ask the finishing tip field for more than its ${DEFAULT_MAX_FINISH_TIP_OPS.toLocaleString('en-US')} evaluations`
+        : `the heightfield's ${DEFAULT_MAX_CELLS.toLocaleString('en-US')} cells settle the grid there`;
     gridFindings.push({
       severity: 'warning',
       code: 'goal-finish-finer-than-grid',

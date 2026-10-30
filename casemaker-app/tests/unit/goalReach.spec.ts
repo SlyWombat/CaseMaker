@@ -263,6 +263,20 @@ describe('#785 — Generate', () => {
     expect(finish.at(-1)?.label).toMatch(/^finishing row \d+ of \d+$/);
   });
 
+  it('#785 a goal whose program would exceed the stated move budget is refused by name, with the numbers', () => {
+    const target = rampGoal({ surface: { gridPitchMm: 0.02 } }, 30);
+    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe('findings');
+    const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
+    expect(refusal?.severity).toBe('error');
+    expect(refusal?.message).toContain('moves');
+    expect(refusal?.message).toContain("the app's budget is 12,000,000");
+    expect(refusal?.message).toContain('Coarsen the grid to about');
+    expect(out.nc).toBeNull();
+    expect(out.programs).toEqual([]);
+  }, 120_000);
+
   it('a goal within reach generates with no reach finding at all', () => {
     const target = rampGoal({}, 8);
     const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {});
