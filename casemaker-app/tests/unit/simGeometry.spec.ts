@@ -18,7 +18,7 @@ import {
 } from '@/components/viewport/simGeometry';
 import type { CheckpointInfo, SimPath } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
-import { meshFlat, meshRotaryMap, type ColumnGrid } from '@/workers/geometry/columnEngine';
+import { meshFlat, meshRotary, meshRotaryMap, type ColumnGrid } from '@/workers/geometry/columnEngine';
 
 /**
  * A five-vertex path: a rapid into the first known position (drawn as nothing — it has no
@@ -334,6 +334,30 @@ describe('#723 the stock’s removed depth is coloured', () => {
     // The cut vertex is pulled toward the deep colour: bluer than the stock and bluer than white.
     expect(cut[2] - cut[0]).toBeGreaterThan(0.2);
     expect(cut[2]).toBeLessThan(0.95);
+    geom.dispose();
+  });
+
+  it('keeps the rod’s end-cap apexes the material colour — they are closure, not cut', () => {
+    // The ROD mesh's cap fans converge on the axis at each end. Measured by the radius they lost
+    // (R), they would read as a full-depth cut and paint the rod's whole end face blue; they are
+    // the solid's closure to the axis, so they keep the base colour while the cut surface does not.
+    const grid: ColumnGrid = {
+      kind: 'rotary', nu: 1, nv: 4, u0: 0.5, du: 1, v0: 0, dv: 90, initial: 10, base: 0,
+      h: Float32Array.from([10, 10, 5, 10]),
+    };
+    const mesh = meshRotary(grid, { dx: 1, dThetaDeg: 90 });
+    const geom = geometryFromMesh(mesh);
+    applyRemovedDepthColours(geom, { map: false, radius: 10, base: '#c9a26b' });
+    const colour = geom.getAttribute('color');
+    const base = new THREE.Color('#c9a26b');
+    for (const v of [mesh.vertexCount - 2, mesh.vertexCount - 1]) {
+      expect(colour.getX(v)).toBeCloseTo(base.r, 5);
+      expect(colour.getY(v)).toBeCloseTo(base.g, 5);
+      expect(colour.getZ(v)).toBeCloseTo(base.b, 5);
+    }
+    // The θ = 180° column (r = 5) IS the cut surface: pulled toward the deep colour.
+    const cut = [colour.getX(2), colour.getY(2), colour.getZ(2)];
+    expect(cut[2]! - cut[0]!).toBeGreaterThan(0.2);
     geom.dispose();
   });
 });

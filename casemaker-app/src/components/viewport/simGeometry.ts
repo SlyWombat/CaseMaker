@@ -73,7 +73,8 @@ const PROBE_SHANK_LENGTH_MM = 8;
  *
  * `map` chooses the frame: the map's height is the radius lost (z ≤ 0, the unrolled sheet), the
  * stock's is the rod's own radius at (y, z) about the X axis. `radius` is the stock's (R); a
- * vertex outside it (a skirt to the axis) takes the deepest colour.
+ * vertex at or past it is the solid's CLOSURE to the axis (a cut cannot lose more than R), which
+ * is not a cut surface and keeps the material's own colour.
  */
 export const SIM_CUT_COLOR = '#1e40af';
 
@@ -101,7 +102,11 @@ export function applyRemovedDepthColours(
   const colours = new Float32Array(count * 3);
   const base = new THREE.Color(opts.base);
   for (let i = 0; i < count; i++) {
-    const t = Math.min(1, depths[i]! / maxDepth);
+    // A vertex at (or past) the stock's own radius is the solid's CLOSURE, not a cut surface: the
+    // rod's end-cap fan converges on the axis (the map's bottom face lies on it). Coloured by the
+    // radius it lost, a fan apex would read as a full-depth cut and paint the rod's end face blue.
+    const closure = depths[i]! >= opts.radius * 0.999;
+    const t = closure ? 0 : Math.min(1, depths[i]! / maxDepth);
     const colour = base.clone().lerp(deep, t);
     colours[i * 3] = colour.r;
     colours[i * 3 + 1] = colour.g;

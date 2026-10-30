@@ -152,12 +152,20 @@ export function SimMeshes() {
   // exact sweeper's Manifold stock is already clean and its vertical faces (pocket walls) must be
   // kept. The column engine is the one that never emits a removal ghost, so that is the honest
   // discriminator between the two stock shapes.
-  const cleanStock = meshes?.removal === null;
+  //
+  // #723 R-4 review — NOT for a ROTARY stock. That cleanup is written for the FLAT box: it drops
+  // every triangle whose normal has no Z component (for a rod, its two end caps) and rebuilds the
+  // four sides as bbox planes (for a rod, a box 2R square with the cylinder inside it), which drew
+  // the turning view as a flat-sided wedge with a sliver along the bottom. The rotary meshes are
+  // already clean by construction: a curved heightfield surface, cap fans and skirt quads that
+  // follow the cut — so they are used exactly as the engine made them.
+  const rotary = info !== null && info.summary?.rotary === true;
+  const cleanStock = meshes?.removal === null && !rotary;
   const stockGeom = useMeshGeometry(stockMesh, cleanStock ? cleanStockGeometry : geometryFromMesh);
   // #723 R-4 review — A ROTARY STOCK IS COLOURED BY THE RADIUS THE CUT TOOK, so a heightfield
   // reads as cut from a top camera (the unrolled view showed no removal at all). It is the same
   // buffer with one attribute added; a flat program's mesh is untouched.
-  const rotaryStock = info !== null && info.summary?.rotary === true && stockRadius !== null;
+  const rotaryStock = rotary && stockRadius !== null;
   useMemo(() => {
     if (rotaryStock && stockGeom !== null) {
       applyRemovedDepthColours(stockGeom, { map: mapView, radius: stockRadius, base: STOCK_COLOR });

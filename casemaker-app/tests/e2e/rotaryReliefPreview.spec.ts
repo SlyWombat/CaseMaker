@@ -227,6 +227,124 @@ async function canvasRowMeans(page: Page): Promise<number[]> {
   });
 }
 
+/**
+ * The stock's silhouette, measured from the canvas: its pixel count, its extent across the rod
+ * in 16 bins along the silhouette's own (PCA) axis, and how completely the pixels fill their
+ * convex hull. For a lone, closed cylinder the silhouette is a convex band, so the hull fill is
+ * ~1 and the width varies only by perspective; a mesh whose ends are missing or whose sides are
+ * boxed in its bounding box leaves notches, a wall sliver and a square plate to see instead.
+ */
+async function stockSilhouette(page: Page): Promise<{
+  count: number;
+  widths: number[];
+  wMaxOverMin: number;
+  hullFill: number;
+}> {
+  return page.evaluate(() => {
+    const empty = { count: 0, widths: [] as number[], wMaxOverMin: 0, hullFill: 0 };
+    const host = document.querySelector('[data-testid="viewport-canvas"]');
+    const canvas = host instanceof HTMLCanvasElement ? host : host?.querySelector('canvas') ?? null;
+    if (canvas === null) return empty;
+    const off = document.createElement('canvas');
+    off.width = canvas.width;
+    off.height = canvas.height;
+    const ctx = off.getContext('2d');
+    if (ctx === null) return empty;
+    ctx.drawImage(canvas, 0, 0);
+    const W = off.width,
+      H = off.height;
+    const data = ctx.getImageData(0, 0, W, H).data;
+    const at = (x: number, y: number): [number, number, number] => {
+      const i = (y * W + x) * 4;
+      return [data[i]!, data[i + 1]!, data[i + 2]!];
+    };
+    // The viewport clears to black; anything meaningfully off it is the stock (the only body on
+    // screen while every other layer is switched off).
+    const bg = at(0, 0);
+    const pts: [number, number][] = [];
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const c = at(x, y);
+        if (Math.hypot(c[0] - bg[0], c[1] - bg[1], c[2] - bg[2]) > 28) pts.push([x, y]);
+      }
+    }
+    if (pts.length < 10) return { ...empty, count: pts.length };
+    // The silhouette's own axis: the rod is the one long thing in the frame.
+    let mx = 0,
+      my = 0;
+    for (const [x, y] of pts) {
+      mx += x;
+      my += y;
+    }
+    mx /= pts.length;
+    my /= pts.length;
+    let sxx = 0,
+      sxy = 0,
+      syy = 0;
+    for (const [x, y] of pts) {
+      const dx = x - mx,
+        dy = y - my;
+      sxx += dx * dx;
+      sxy += dx * dy;
+      syy += dy * dy;
+    }
+    const angle = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    const ux = Math.cos(angle),
+      uy = Math.sin(angle);
+    const vx = -uy,
+      vy = ux;
+    const us = pts.map(([x, y]) => (x - mx) * ux + (y - my) * uy);
+    const vs = pts.map(([x, y]) => (x - mx) * vx + (y - my) * vy);
+    const uMin = Math.min(...us),
+      uMax = Math.max(...us);
+    const N = 16;
+    const widths: number[] = [];
+    for (let b = 0; b < N; b++) {
+      const lo = uMin + ((uMax - uMin) * b) / N;
+      const hi = uMin + ((uMax - uMin) * (b + 1)) / N;
+      const vv: number[] = [];
+      for (let i = 0; i < pts.length; i++) if (us[i]! >= lo && us[i]! < hi) vv.push(vs[i]!);
+      if (vv.length === 0) {
+        widths.push(0);
+        continue;
+      }
+      vv.sort((a, b2) => a - b2);
+      const q = (f: number): number => vv[Math.min(vv.length - 1, Math.max(0, Math.floor(f * (vv.length - 1))))]!;
+      widths.push(Math.round((q(0.98) - q(0.02)) * 10) / 10);
+    }
+    // The convex hull (monotone chain), as the area the pixels must FILL if the outline is solid.
+    const hp = [...pts].sort((a, b2) => a[0] - b2[0] || a[1] - b2[1]);
+    const cross = (o: [number, number], a: [number, number], b2: [number, number]): number =>
+      (a[0] - o[0]) * (b2[1] - o[1]) - (a[1] - o[1]) * (b2[0] - o[0]);
+    const lower: [number, number][] = [];
+    for (const p of hp) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2]!, lower[lower.length - 1]!, p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    const upper: [number, number][] = [];
+    for (let i = hp.length - 1; i >= 0; i--) {
+      const p = hp[i]!;
+      while (upper.length >= 2 && cross(upper[upper.length - 2]!, upper[upper.length - 1]!, p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    const hull = lower.slice(0, -1).concat(upper.slice(0, -1));
+    let hullArea = 0;
+    for (let i = 0; i < hull.length; i++) {
+      const a = hull[i]!,
+        b2 = hull[(i + 1) % hull.length]!;
+      hullArea += a[0] * b2[1] - b2[0] * a[1];
+    }
+    hullArea = Math.abs(hullArea) / 2;
+    const positive = widths.filter((w) => w > 0);
+    return {
+      count: pts.length,
+      widths,
+      wMaxOverMin: Math.round((Math.max(...positive) / Math.max(1, Math.min(...positive))) * 100) / 100,
+      hullFill: Math.round((pts.length / Math.max(1, hullArea)) * 1000) / 1000,
+    };
+  });
+}
+
 async function shoot(page: Page, name: string): Promise<void> {
   fs.mkdirSync(OUT, { recursive: true });
   await page.waitForTimeout(900);
@@ -295,9 +413,43 @@ test('the relief draws on the map and the rod, and cuts to the program the sheet
   // Mid-program, turning: the stock is a rod and the cut is part-way.
   const max = Number(await page.getByTestId('sim-scrubber').getAttribute('max'));
   await page.evaluate((step: number) => window.__caseMaker!.simSetStep(step), Math.floor(max * 0.5));
+
+  // ── THE ROD MUST BE THE ROD (#723 R-4 review) ─────────────────────────────────────────────
+  // The first pictures drew the ⌀20 rod as a flat-sided wedge: both end caps gone, a sliver
+  // along the bottom and a square plate at each end. The FLAT stock's #552 cleanup ("drop every
+  // vertical triangle, rebuild the four sides as bbox walls") was being applied to the ROTARY
+  // mesh as well. With every other layer switched off the canvas holds the stock ALONE, so the
+  // silhouette itself is what is measured.
+  for (const key of ['removed', 'path', 'rapids', 'tool', 'fixture', 'sacrificial', 'touches'] as const) {
+    const box = page.getByTestId(`viewport-layer-${key}`);
+    if (await box.isChecked()) await box.uncheck();
+  }
+  await page.getByTestId('viewport-camera-perspective').click();
+  await page.waitForTimeout(400);
+  const rod = await stockSilhouette(page);
+  expect(rod.count, 'the rod is drawn').toBeGreaterThan(3000);
+  // Across the axis the silhouette is a band whose width changes only as perspective foreshortens
+  // it along X (1.21 under this fixed camera); the boxed rod's walls and plate corners took it to
+  // 1.39 — a wedge, not a rod.
+  expect(rod.wMaxOverMin, 'the rod is a band of near-constant width along X, not a wedge').toBeLessThan(1.3);
+  // And the outline is FILLED: pixel area over the convex hull's is 1.00 for a cylinder seen
+  // obliquely, 0.94 for the boxed mesh — its plate corners and wall sliver were background inside
+  // the rod's outline, the triangular gaps at the ends.
+  expect(rod.hullFill, 'the rod’s outline is solid — no gaps at the ends and no sliver').toBeGreaterThan(0.97);
+  // End-on, down the rod's axis, the silhouette is a DISC — the end cap the flat cleanup deleted.
+  // The boxed mesh put a square plate there instead (hull fill 0.86 against a disc's 1.02).
+  await page.getByTestId('viewport-camera-side').click();
+  await page.waitForTimeout(500);
+  const endOn = await stockSilhouette(page);
+  expect(endOn.hullFill, 'down the rod’s axis the silhouette is a filled disc, not a square plate').toBeGreaterThan(0.97);
+  // Back to the turning picture — the tool for context; the other layers stay off so the cut reads.
+  await page.getByTestId('viewport-camera-perspective').click();
+  await page.getByTestId('viewport-layer-tool').check();
   await shoot(page, 'lobed-shaft-simulate-turning.png');
 
-  // Unroll at the end: the same program opened flat, at the last step.
+  // Unroll at the end: the same program opened flat, at the last step. The PATH and RAPIDS layers
+  // are left off (the review's ask): their overlay buried the cut, and the blue depth band is what
+  // this picture exists to show.
   await page.getByTestId('sim-view-unroll').click();
   await expect(page.getByTestId('sim-view-unroll')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('viewport-camera-top').click();
