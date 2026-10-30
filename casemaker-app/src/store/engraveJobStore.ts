@@ -953,7 +953,7 @@ export interface EngraveJobState {
   setMetalLineOverride: (override: boolean) => void;
   setVise: (patch: Partial<ViseParams>) => void;
   /**
-   * #240 — hold the rod in the rotary module's three-jaw chuck, or return it to the vise, in ONE
+   * #240 — hold the rod in the rotary module's four-jaw self-centring chuck, or return it to the vise, in ONE
    * undoable write.
    *
    * The workholding and the stock box are one fact, so one action writes both and they cannot

@@ -6979,7 +6979,7 @@
               "properties": {
                 "kind": {
                   "const": "rotary-chuck",
-                  "description": "Held in the rotary module's three-jaw chuck.",
+                  "description": "Held in the rotary module's four-jaw self-centring chuck.",
                   "type": "string"
                 },
                 "rotary": {

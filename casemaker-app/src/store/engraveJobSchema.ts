@@ -1166,7 +1166,7 @@ const jobWorkholdingSchema = z.discriminatedUnion('kind', [
     vise: viseSchema.describe('The vise jaw measurements the job was set up with.'),
   }),
   z.object({
-    kind: z.literal('rotary-chuck').describe("Held in the rotary module's three-jaw chuck."),
+    kind: z.literal('rotary-chuck').describe("Held in the rotary module's four-jaw self-centring chuck."),
     rotary: rotaryChuckSchema.describe('The chuck facts the job was set up with.'),
   }),
   z.object({

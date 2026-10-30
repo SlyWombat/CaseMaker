@@ -172,8 +172,8 @@ with the base, then retighten. The figure is captioned *"Align to base here, the
 machine). For forward (standard) jaws: back the jaws all the way out, then insert No.1 to No.4 in order,
 turning the scroll (rear nut) 90° between jaws. For reverse jaws: insert No.4 to No.1. It warns that *"the
 rear nut will become very tight just before the jaws are almost completely loosened"*. That guide numbers
-**four** jaws. The Z1 page does not give the Z1 chuck's jaw count, so whether the Z1 chuck has three or
-four jaws is unconfirmed (see Corrections C12). The jaw-size rule (under ⌀20 standard; ⌀20–35 reverse
+**four** jaws. The Z1 page does not give the Z1 chuck's jaw count, so the Z1 chuck has four
+jaws on a self-centring scroll (maintainer, 2026-10-30; Corrections C15). The jaw-size rule (under ⌀20 standard; ⌀20–35 reverse
 inner; over ⌀35 reverse outer) comes from decompiled Makera Studio (`Rotary.md`), not from the wiki.
 
 **Tailstock.** It slides on the base rail. Loosen its screws, slide it up to the work, tighten, then use
@@ -372,7 +372,7 @@ official text above. "Inferred" means a bench look should confirm it first.
   - Makera's **"home first"** before power-off. The wizard's step 2 does home, so this is fine in the wizard; the run sheet should say it.
   - The **one-time headstock shipping adjustment** (slide the headstock left, align it to the base, 4 screws). This belongs on the first fit only.
 - **C14 · `docs/design/first-job-flow.md:236` and `first-job-flow-mockups.html:416`.** *"onto the pins · the 4th-axis cable · chuck key in the tray"* has **no power-off and no 3 × M5×10**, against Makera's *"Do not plug or unplug the 4th-axis cable while the machine is powered on"*. The code (#706) is right and the first-job doc is stale. Update it to the `rotary-flow.md:207-211` wording.
-- **C15 · Chuck jaw count.** The app calls it a **"three-jaw chuck"** in `holdingMounts.ts:20`, `engine/cnc/engrave/setupFlow.ts:90`, `store/engraveJobStore.ts:897` and the schema descriptions (`platform/headless/schemas/engrave-job.json:6433`). No Z1 text says three. The only Makera jaw guide (Carvera) numbers four jaws and turns the scroll 90° between them. Unconfirmed: count the jaws at the bench before keeping "three-jaw" in user-facing text.
+- **C15 · Chuck jaw count.** The app calls it a **"three-jaw chuck"** in `holdingMounts.ts:20`, `engine/cnc/engrave/setupFlow.ts:90`, `store/engraveJobStore.ts:897` and the schema descriptions (`platform/headless/schemas/engrave-job.json:6433`). No Z1 text says three. The only Makera jaw guide (Carvera) numbers four jaws and turns the scroll 90° between them. **Resolved 2026-10-30 (maintainer): four jaws, self-centring scroll.** The "three-jaw" wording is corrected throughout.
 
 **Bracket and wasteboard**
 

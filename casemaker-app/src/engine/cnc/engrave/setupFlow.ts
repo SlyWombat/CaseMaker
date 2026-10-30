@@ -89,7 +89,7 @@ export function materialOptionsFor(machine?: MillProfile): MaterialOption[] {
 }
 
 /**
- * What the part is held in (#240): the vise, or the rotary module's three-jaw chuck. The rotary
+ * What the part is held in (#240): the vise, or the rotary module's four-jaw self-centring chuck. The rotary
  * choice is the machine's active mount plus round stock; selecting it is one store write
  * (`setRotaryHolding`) that states both the workholding and the axis-frame stock box.
  */

@@ -620,7 +620,7 @@ lifts R-UI-9's refusal; nothing in the screens changes except the Run line.
 | | Question | Default taken | Why |
 |---|---|---|---|
 | Q1 | Should Tube be a form now (demand-driven features)? | **Yes**, in R-UI-1 | the maintainer named "dowel/rod/tube"; the shelf already stores tube; the wall rule is one comparison |
-| Q2 | Squared Block in a three-jaw chuck? | **Offered** when it fits by its diagonal; the run-out touches are the guard | Makera CAM's Square stock (l. 1005); a three-jaw centres round stock best, so the probe decides |
+| Q2 | Squared Block in the chuck? | **Offered** when it fits by its diagonal; the run-out touches measure it | Makera CAM's Square stock (l. 1005); the chuck is a four-jaw scroll (C15, maintainer 2026-10-30), so a square centres like a round; built in #777 |
 | Q3 | Grip length — Makera publishes no jaw depth | **15 mm**, Case Maker's default, a shop setting | needed for stick-out and the jaws' band; bench calipers it (§9 row 7) |
 | Q4 | Text reads along or around by default? | **Along** (like a pencil's lettering) | on ⌀20 the free length (72 mm usable) exceeds the circumference (62.8 mm); Vectric's "orientation of the job" is a question we answer with a default |
 | Q5 | Which end is the chuck, and is X 0 at the jaws? | **Chuck on the left, X 0 at the jaws' face** | the wiki's preset "at the centre of the right edge" read as the chuck's right face; confirmed when the module is fitted |

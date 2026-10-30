@@ -1100,10 +1100,10 @@ export interface ViseParams {
 }
 
 /**
- * What a job says about the rotary module's three-jaw chuck (#240, `/Rotary.md` §3.4).
+ * What a job says about the rotary module's four-jaw self-centring chuck (#240, `/Rotary.md` §3.4).
  *
- * The facts are Makera's, not readings of this machine: the module's wiki page states a three-jaw
- * chuck with REVERSE jaws fitted by default for larger work (standard jaws for small parts), a
+ * The facts are Makera's, not readings of this machine: the chuck has FOUR jaws on a
+ * scroll (self-centring; the maintainer's correction 2026-10-30, C15), with REVERSE jaws fitted by default for larger work (standard jaws for small parts), a
  * tailstock with an adjustment knob, and — for the jaw capacity — nothing at all. "Not stated" is
  * `null` rather than a guessed millimetre; `source` names the page. The machine's own rotary
  * numbers (envelope, steps/°, rate, acceleration, homing, unwind) stay in

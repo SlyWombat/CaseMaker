@@ -56,7 +56,7 @@ shorter probe does not read as a changed datum.
   { "id": "fx-bracket-thin", "kind": "bracket", "variant": "thin",
     "constants": { "armLength": 100, "armWidth": 15, "height": null }, "provenance": { "armLength": "vendor:config.anchor_length", "armWidth": "vendor:config.anchor_width" } },
   { "id": "fx-clamp-top-1", "kind": "top-clamp", "constants": { "length": 30, "width": 15, "noseReach": 8, "heightAbovePlate": 12 }, "provenance": { "*": "default" } },
-  { "id": "fx-rotary", "kind": "rotary-module", "constants": { "chuck": "3-jaw, reverse jaws" }, "unit": {} }
+  { "id": "fx-rotary", "kind": "rotary-module", "constants": { "chuck": "4-jaw self-centring, reverse jaws" }, "unit": {} }
 ],
 "bedProfiles": [
   { "id": "bp-2026-10-18-a", "name": "Vise on the pins, bare bed", "createdAt": "2026-10-18T13:00Z",

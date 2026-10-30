@@ -11,7 +11,7 @@ Reddit r/Makera, overclock3d, hackster and Bantam support pages were not fetchab
 - Work area 200 x 200 x 100 mm [S makera.com/pages/makera-z1 via search summary; makera.com/blogs/cnc-buying-guide/makera-z1-review]. 115 mm gantry clearance [S search summary only].
 - Spindle 150 W, 0-13,000 RPM closed-loop [S cnx]; one outlet says 15,000 (outlier). Carvera Air: 3k-13k, "do not run well under 6000" [S carvera-community gitbook].
 - Collet: 1/8" (3.175) standard; 4 mm, 6 mm, 1/4" optional [S wiki.makera.com/en/Z1/QuickStart; notebookcheck]. Bit collars, default ~12 mm exposed [S wiki].
-- 4th axis: Ø80 x 150 mm, belt drive, ~2.5 N·m, self-centring 3-jaw chuck (reverse jaws by default; standard jaws for small parts) + adjustable tailstock; MDF wasteboard removed; zero preset at centre of right edge [S cnx; wiki.makera.com/en/Z1/Accessories/4Axis; makera.com/blogs/cnc-buying-guide/makera-z1-vs-carvera-air]. Carvera Air rotary Ø92 x 200.
+- 4th axis: Ø80 x 150 mm, belt drive, ~2.5 N·m, self-centring 4-jaw chuck (corrected 2026-10-30: four jaws, C15) (reverse jaws by default; standard jaws for small parts) + adjustable tailstock; MDF wasteboard removed; zero preset at centre of right edge [S cnx; wiki.makera.com/en/Z1/Accessories/4Axis; makera.com/blogs/cnc-buying-guide/makera-z1-vs-carvera-air]. Carvera Air rotary Ø92 x 200.
 - Workholding: anchor system - thin L-bracket at Anchor 1 (lower-left, 2x M5 in semicircular slots), top clamps on upper-right; auto Z-probe and lower-left-corner origin [S wiki QuickStart]. Optional Low-Profile Vise (6x M5x20 on locating pins, slotted soft jaws for thin parts, lifts stock for through-cuts) [S wiki Low-Profile-Vise]; Vacuum Bed; double-sided tape ~0.2 mm thick, 20 mm x 10 m roll included [S makera.com/products/strong-fixation-transparent-double-sided-tape]; PCB rivets sold. Top clamps for stock < 20 mm; side clamps + thick bracket > 20 mm (Carvera wording) [S].
 - Box kit (cnx): wired probe, starter bit set, collets, clamp+screw set, locating pins, double-sided tape, sample materials.
 - Makera "Essential Milling Bit Set" 26 pcs, all 1/8" shank [S core-electronics.com.au/makera-common-milling-bits-26-pcs.html]: O-flute single-flute metal 3.175x12, 2x8, 1x3; O-flute non-metal 3.175x25, 3.175x42; single-flute engraving (metal) 0.1x60°, 0.2x30°, 0.3x30°; 2F ball nose metal 3.175/2/1, non-metal 3.175/2/1; TiN drills 1/2/2.5/3; TiN corn 0.6/1/2/3; thread mills M3 (d2.4, 9 mm) and M5 (d4, 15 mm); 90° chamfer x2.
@@ -65,7 +65,7 @@ Reddit r/Makera, overclock3d, hackster and Bantam support pages were not fetchab
 
 **8. Rotary sculpture (epoxy) on the 4th axis** (Z1) - rotary job
 - cnx URL above; also Makera demo https://www.makera.com/blogs/cnc-beginner-guide/makera-z1-4th-axis-demo-rotary-3d-carving-indexed-milling (epoxy block + indexed Gridfinity holder; no numbers).
-- Holding: 3-jaw chuck + tailstock [S]; stock must fit Ø80 x 150 [S spec].
+- Holding: 4-jaw chuck + tailstock [S]; stock must fit Ø80 x 150 [S spec].
 - Rough: 3.175 2F flat, 12k, 400-500 mm/min, plunge 100-150, 0.8-1 mm/pass, 35-40% stepover, 45-90 min [S].
 - Finish: ~1 mm ball, 13k, 250-300 mm/min, 0.08-0.12 stepover, rotary parallel, 5-8 h [S].
 - Rod/pen/tumbler *engraving*: no Z1 or Carvera example found. Pen-turner threads (community.inventables.com/t/pen-engraving/21726) are speculative (suggest an ~11° V-bit, no numbers). A tumbler won't fit Ø80 x 150 unless small [E].
@@ -125,5 +125,5 @@ Reddit r/Makera, overclock3d, hackster and Bantam support pages were not fetchab
 ## C. Patterns worth keeping
 - Z1 jobs consistently run 12-13k RPM (spindle top end) with small single-flute or 2-flute 1/8"-shank cutters; metals use 0.05-0.2 mm DOC and 200-500 mm/min; plastics/wood 1 mm DOC at ~1000 mm/min [S across Makera tables + cnx].
 - Fine work is slow: 1 mm ball finishing runs 5-10 h on the Z1 [S cnx].
-- Holding by job: plate/sheet = anchor bracket + top clamps; small or thick part = low-profile vise; thin sheet/PCB/2-colour = vacuum bed or tape; round = 3-jaw chuck + tailstock [S].
+- Holding by job: plate/sheet = anchor bracket + top clamps; small or thick part = low-profile vise; thin sheet/PCB/2-colour = vacuum bed or tape; round = 4-jaw chuck + tailstock [S].
 - PCB isolation depths 0.05-0.15 mm; 0.2 x 30° engraving + 0.8 corn is Makera's pairing [S].
