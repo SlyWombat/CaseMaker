@@ -24,6 +24,7 @@ import { resetCameraPaneStore, useCameraPaneStore } from '@/store/cameraPaneStor
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { rotaryAngleWords } from '@/components/viewport/rotaryWords';
 import type { ReleaseRecord } from '@/store/engraveReleaseStore';
 import type { MachineObservation } from '@/platform/machineProbe';
 
@@ -149,7 +150,9 @@ describe('#647 the DRO — coordinates', () => {
       >,
     });
     render(<MachineStatusStrip />);
-    expect(screen.getByTestId('machine-status-work-a').textContent).toBe('10.000');
+    // #769 — the A reads in the rotary read-out's words, degrees within the turn plus the turns.
+    expect(screen.getByTestId('machine-status-work-a').textContent).toBe(rotaryAngleWords(10));
+    expect(screen.getByTestId('machine-status-work-a').textContent).toBe('A 10° · 0 turns');
     expect(screen.getByTestId('machine-status-machine-a').textContent).toBe('10.000');
   });
 });
@@ -230,8 +233,9 @@ describe('#647 the DRO — the tool slot', () => {
     // #687 — the strip draws the one display form, not the registry record's raw label/name.
     const name = toolDisplayName(jobTool(useEngraveJobStore.getState().job)!);
     const slot = screen.getByTestId('machine-status-tool');
-    expect(slot.textContent).toBe(name);
-    expect(slot.textContent).toBe('⌀ 1 mm flat end');
+    // #769 — the cell names the cutter AND says the frame's own active tool number.
+    expect(slot.textContent).toBe(`T1 · ${name}`);
+    expect(slot.textContent).toBe('T1 · ⌀ 1 mm flat end');
     expect(slot.getAttribute('title')).toContain('T1');
     expect(slot.getAttribute('title')).toContain('M491 -72.529');
   });
@@ -242,8 +246,97 @@ describe('#647 the DRO — the tool slot', () => {
     useRegistrationTouchesStore.getState().setStep('as low as machine Z -57.2 (the surface seek)');
     render(<MachineStatusStrip />);
     expect(screen.getByTestId('machine-status-state').textContent).toBe('Probing');
-    expect(screen.getByTestId('machine-status-tool').textContent).toBe('Makera Wired Probe V2');
+    expect(screen.getByTestId('machine-status-tool').textContent).toBe('T6 · Makera Wired Probe V2');
     expect(screen.getByTestId('machine-status-step').textContent).toContain('the surface seek');
+  });
+
+  it('#769 does not state T:0 as the active tool — it is the firmware’s ‘nothing fitted’', () => {
+    // 2026-10-08-console.log: stopped at an M6 waiting for the cutter (T:0 = none, waiting for 1).
+    remember(
+      '<Tool|MPos:-10.0900,-12.8300,-3.0000,0.0000,0.0000|WPos:138.3100,111.9700,71.8750,0.0000,0.0000|F:0.0,2000.0,100.0|S:0.0,10000.0,100.0,0,24.8,23.7,0,0,0,0|T:0,-9.757,1|L:0, 0, 0, 0.0,100.0|C:3,1,0,0|E:0,0,0,692,7610|OTA:0,0>',
+    );
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-tool').textContent).toBe('⌀ 1 mm flat end');
+    expect(screen.getByTestId('machine-status-tool').textContent).not.toContain('T0');
+  });
+});
+
+// #769 — WHAT IT IS DOING, from the frame's own F: and S: fields, pinned against recorded frames
+// from docs/bench/traces. The maintainer's rule: an absent/unreadable field prints "—", never breaks
+// the strip, and an Offline machine never shows its last figures as if they were live.
+describe('#769 the DRO — feed, spindle and the ATC state', () => {
+  it('shows the live feed and spindle from a recorded cutting frame', () => {
+    // docs/bench/traces/2026-10-12-cut-rowA.log — mid-cut: F 600 of 2000, spindle 11 677.9 of 12 000.
+    remember(
+      '<Run|MPos:-162.0500,-162.2000,-5.7381,0.0000,0.0000|WPos:18.4500,20.0000,50.8059,0.0000,0.0000|F:600.0,2000.0,100.0|S:11677.9,12000.0,100.0,1,37.6,24.9,0,0,0,0|T:1,0.000,1|L:0, 0, 0, 0.0,100.0|P:0,17,10|C:3,1,0,1|E:0,0,0,692,7610|OTA:0,0>',
+    );
+    render(<MachineStatusStrip />);
+
+    expect(screen.getByTestId('machine-status-feed').textContent).toBe('F600');
+    expect(screen.getByTestId('machine-status-spindle').textContent).toBe('S11678');
+    // The set figure and the unit are in the hover; the override at 100 % is not news (#646).
+    expect(screen.getByTestId('machine-status-feed').getAttribute('title')).toBe('Feed 600 of 2000 mm/min · override 100 %');
+    expect(screen.getByTestId('machine-status-spindle').getAttribute('title')).toBe(
+      'Spindle 11678 of 12000 rpm · override 100 %',
+    );
+    expect(screen.queryByTestId('machine-status-feed-override')).toBeNull();
+    expect(screen.queryByTestId('machine-status-spindle-override')).toBeNull();
+  });
+
+  it('shows a resting machine as zero, not as a dash — the frame did say zero', () => {
+    // docs/bench/traces/2026-10-24-run1-status-trail.log 15:17:58 — Idle at the home rest.
+    remember(
+      '<Idle|MPos:-1.0000,-1.0000,-1.0000,0.0000,0.0000|WPos:180.2000,198.1250,57.1727,0.0000,0.0000|F:0.0,2000.0,100.0|S:0.0,10000.0,100.0,0,19.4,20.5,0,0,0,0|T:1,0.050,-1|L:0, 0, 0, 0.0,100.0|C:3,1,0,1|E:0,0,0,702,7610|OTA:0,0>',
+    );
+    render(<MachineStatusStrip />);
+
+    expect(screen.getByTestId('machine-status-feed').textContent).toBe('F0');
+    expect(screen.getByTestId('machine-status-spindle').textContent).toBe('S0');
+    expect(screen.getByTestId('machine-status-tool').textContent).toBe('T1 · ⌀ 1 mm flat end');
+  });
+
+  it('shows a feed reduced by the override beside the value', () => {
+    // No recorded frame carries a non-100 override (every corpus F:/S: is 100.0), so this line is
+    // SYNTHETIC: step-down to 50 % is the capability the cell adds, and it is marked as such here.
+    remember('<Run|MPos:0,0,0|WPos:0,0,0|F:250,500,50|S:6000,12000,80|T:1>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-feed').textContent).toContain('F250');
+    expect(screen.getByTestId('machine-status-feed-override').textContent).toBe('· 50 %');
+    expect(screen.getByTestId('machine-status-spindle').textContent).toContain('S6000');
+    expect(screen.getByTestId('machine-status-spindle-override').textContent).toBe('· 80 %');
+  });
+
+  it('prints dashes for a frame without F: or S: — absent is not zero', () => {
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-feed').textContent).toBe('F—');
+    expect(screen.getByTestId('machine-status-spindle').textContent).toBe('S—');
+    expect(screen.getByTestId('machine-status-feed').getAttribute('title')).toContain('no reading');
+  });
+
+  it('prints dashes, not the last figures, once the machine has gone Offline', () => {
+    remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|F:1501.1,2000.0,100.0|S:8000.0,10000.0,100.0|T:1>');
+    useMachineStore.getState().noteHeartbeat(false);
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-feed').textContent).toBe('F—');
+    expect(screen.getByTestId('machine-status-spindle').textContent).toBe('S—');
+  });
+
+  it('shows the frame’s A: as the ATC state, and only where a machine sends one', () => {
+    // No frame in the corpus carries A: (0 of 5 689 across docs/ and .scratch; the Z1 has the ATC bit
+    // clear, and the firmware writes the field only when it is set), so the recorded-frame case is
+    // the ABSENT cell. The ATC machine's line below is SYNTHETIC, shaped from the firmware's
+    // `|A:%d` write (Kernel::get_query_string) — the parser is pinned against that shape.
+    remember(
+      '<Run|MPos:-162.0500,-162.2000,-5.7381,0.0000,0.0000|WPos:18.4500,20.0000,50.8059,0.0000,0.0000|F:600.0,2000.0,100.0|S:11677.9,12000.0,100.0,1,37.6,24.9,0,0,0,0|T:1,0.000,1|L:0, 0, 0, 0.0,100.0|P:0,17,10|C:3,1,0,1|E:0,0,0,692,7610|OTA:0,0>',
+    );
+    render(<MachineStatusStrip />);
+    expect(screen.queryByTestId('machine-status-atc')).toBeNull();
+    cleanup();
+
+    remember('<Idle|MPos:0,0,0|WPos:0,0,0|A:3>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-atc').textContent).toBe('ATC3');
   });
 });
 

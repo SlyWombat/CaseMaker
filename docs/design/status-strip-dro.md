@@ -42,8 +42,44 @@ or a T number, and an empty "X — Y — Z — (work)" slot.
    card switches have (only on an Idle machine with no job; an alarm refuses; the reason shown when disabled).
    The 'vacuum off' text leaves the strip. The matrix row "Accessory-mode panel" (#289) is the long form of this.
 
-Not now: feed/spindle overrides (refused, R-10), jog, per-axis click-to-type (gSender/MASSO; worth it once a jog
-exists), the status-monitor fields (limits, cover, temperatures, RSSI — the matrix's next absent row).
+Not now: feed/spindle override CONTROLS (refused, R-10 — a reduced override's READOUT landed in #769, below), jog,
+per-axis click-to-type (gSender/MASSO; worth it once a jog exists), the status-monitor fields (limits, cover,
+temperatures, RSSI — the matrix's next absent row; the temperatures and the halt reason landed behind the state
+element in #659).
+
+## The rest of the frame on the DRO (#769)
+
+The frame carries more than position and progress, and the operator asked for all of it in one line. After the
+axes and before the tool slot, the strip reads:
+
+- **`F:` — the feed.** The actual mm/min (one decimal at most) as the value; the program's set figure and the full
+  override in the hover; a non-100 % override rides beside the value (`F 250 · 50 %`), because a reduced feed is
+  news. A 100 % override is not printed (#646: state the value).
+- **`S:` — the spindle.** The actual rpm, rounded to a whole number as rpm is read; set figure, override, and the
+  same non-100 % rule in the hover. The `S:` temperatures stay in the #659 popover, not in this cell.
+- **`T:` — the tool.** The tool slot now states the frame's own active tool number with the name it already had:
+  `T1 · ⌀ 1 mm flat end`. `T:0` is the firmware's "nothing fitted" (a manual change parks at 0), so 0 is never
+  printed as a tool; the raw value stays in the hover as provenance.
+- **`A:` — the ATC state, when a machine sends one.** Not a fourth-axis position: the firmware writes `|A:%d` only
+  when the ATC bit is set (`Kernel::get_query_string`), and the Z1 has that bit clear. The cell therefore appears
+  only on a machine that sends the field, raw, never dressed as an angle. The fourth axis is the A value of
+  WPos/MPos and reads in the rotary read-out's words (`A 154.5° · 3 turns`), as before (#658).
+
+Absent or unreadable fields print "—" and never break the strip; an Offline machine's last F/S are not live, so
+they print "—" with the axes (#652). Pinned against recorded frames in `docs/bench/traces`: the idle rest
+(2026-10-24-run1-status-trail.log), a cut at feed 600 / 11 677.9 rpm (2026-10-12-cut-rowA.log) and the waiting
+frame `T:0,-9.757,1` (2026-10-08-console.log). No recorded frame carries `A:` (0 of 5 689 across docs/ and
+.scratch), so the ATC cell's absence is the corpus case and its presence is pinned against the firmware's write
+shape, marked synthetic.
+
+WIDTH, MEASURED (2026-10-29): the row still does not wrap, but it no longer fits the 760 px budget #647 verified.
+At a 1440 window the viewport column is exactly 760 px and a running strip measures 987 px of content — the tail
+(progress, Stop) clips; before #769 the same strip measured 862 px with a rotary module (790 px without one), i.e.
+it already clipped a little. The budget was consumed after #647 by the machine name/address (#689), the accessory
+icons (#648) and the rotary A cell (#658); #769 adds ~125 px (F + S, and the A's °/turns words). The strip must not
+wrap (the original decision stands), so a responsive rule — which cell yields first, and whether Stop pins to the
+right edge — is outstanding and needs a decision; at 1920 (1240 px column) everything is visible, which is the
+committed screenshot.
 
 ## Layout (mock: `docs/bench/img/2026-10-25-dro-mock/`)
 
@@ -62,9 +98,9 @@ fixed-width.
 
 ## Data already in hand
 
-`protocol.ts` parses the state word, MPos, WPos and `P:`; `machineStore` holds the heartbeat; the frozen package
-knows the cutter; the location knows the checked-out probe; the registration executor knows when it owns the
-machine. Nothing new is read from the machine.
+`protocol.ts` parses the state word, MPos, WPos, `P:`, `F:`, `S:`, `T:` and `A:` (#526/#659/#769); `machineStore`
+holds the heartbeat; the frozen package knows the cutter; the location knows the checked-out probe; the
+registration executor knows when it owns the machine. Nothing new is read from the machine.
 
 ## Bench check
 

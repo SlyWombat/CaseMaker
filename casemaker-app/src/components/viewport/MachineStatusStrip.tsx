@@ -16,9 +16,10 @@ import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { useStripAccessoryStore } from '@/store/stripAccessoryStore';
 import { useCameraPaneStore } from '@/store/cameraPaneStore';
 import { useMachineCamera } from '@/hooks/useMachineCamera';
-import { readStatusLine, type JobProgress, type StatusPosition } from '@/platform/desktop/protocol';
+import { readStatusLine, type JobProgress, type StatusPosition, type StatusRate } from '@/platform/desktop/protocol';
 import { alarmLine } from '@/platform/machineUpload';
 import { stateColour, stateWord } from './machineWords';
+import { rotaryAngleWords } from './rotaryWords';
 import { StripAccessories } from './StripAccessories';
 
 /**
@@ -28,9 +29,19 @@ import { StripAccessories } from './StripAccessories';
  * THE DRO (design: `docs/design/status-strip-dro.md`, variant B). The strip answers the operator's
  * questions left to right: is it running (the state dot and word, which is also the connection) →
  * where is it (the WORK value large, the MACHINE value small and muted beneath it, per axis) → what
- * is in it (the cutter or probe by NAME) → what is on (`vacuum off`) → how far along (a bar and the
- * remaining time from the `P:` field). Everything comes from the same heartbeat line the viewport
- * and the touches read, parsed by `protocol.ts`: nothing new is read from the machine.
+ * is it doing (the `F:` feed and `S:` spindle, with an override only when it is not 100 %) → what
+ * is in it (the cutter or probe by NAME, with the frame's own `T:` number, #769) → how far along (a
+ * bar and the remaining time from the `P:` field). Everything comes from the same heartbeat line
+ * the viewport and the touches read, parsed by `protocol.ts`: nothing new is read from the machine.
+ *
+ * A IS THE ROTARY READ-OUT'S (#769): when a rotary module is checked out, the A axis reads as the
+ * angle within the turn plus the turns, the same words the simulation's transport row uses — the
+ * machine's A is an unwound degree count, and "1 234.5" does not say where on the stock the cut is.
+ * The frame's separate `A:` field is NOT that axis (it is the ATC state; see `protocol.ts`), and it
+ * is shown only when a machine actually sends it.
+ *
+ * DASHES, NEVER A GUESS (#769, the maintainer's rule): a frame that is absent, unreadable or
+ * Offline leaves the rate/axis cells printing "—" — never a stale live-looking number.
  *
  * NO DEFENSIVE QUALIFIERS (#646). The strip states the value; where a provenance fact belongs it is
  * in the hover (the T number and the probe's last M491), never a caveat on the value itself.
@@ -42,6 +53,33 @@ import { StripAccessories } from './StripAccessories';
 /** `12.350` → `"12.350"`; null → `"—"`. */
 function fmt3(n: number | null): string {
   return n === null ? '—' : n.toFixed(3);
+}
+
+/** `1690.7` → `"1690.7"`, `2000` → `"2000"` — one decimal at most; null → `"—"`. */
+function fmt1(n: number | null): string {
+  return n === null ? '—' : String(Number(n.toFixed(1)));
+}
+
+/** `11004.3` → `"11004"` — rpm reads as a whole number; null → `"—"`. */
+function fmtRpm(n: number | null): string {
+  return n === null ? '—' : String(Math.round(n));
+}
+
+/**
+ * The hover's sentence for an `F:`/`S:` cell: the live figure, what the program asked for, and the
+ * override — all three numbers the field carries, with the unit. An absent or unreadable rate says
+ * so rather than repeating the dash the cell already prints.
+ */
+function rateTitle(
+  name: string,
+  unit: string,
+  rate: StatusRate | null,
+  fmt: (n: number | null) => string,
+): string {
+  if (rate === null || rate.actual === null) return `${name} — no reading in the status frame`;
+  const set = rate.set === null ? '' : ` of ${fmt(rate.set)}`;
+  const override = rate.override === null ? '' : ` · override ${fmt(rate.override)} %`;
+  return `${name} ${fmt(rate.actual)}${set} ${unit}${override}`;
 }
 
 /** `75` → `"1:15"`, `12` → `"12 s"`. */
@@ -81,6 +119,77 @@ function AxisCell({ axis, work, machine }: { axis: string; work: number | null; 
   );
 }
 
+/**
+ * #769 — ONE RATE CELL: the live figure, and the override percent only when it is not 100.
+ *
+ * `F:` and `S:` each carry three numbers (`actual,set,override`). The strip has one line, so the
+ * live figure is what it states; the set figure and the full override belong in the hover, and an
+ * override at 100 % is not news (#646: state the value, no qualifiers). A non-100 override IS
+ * news, so it rides beside the value in its own muted span.
+ */
+function RateCell({
+  label,
+  testId,
+  value,
+  override,
+  title,
+}: {
+  label: string;
+  testId: string;
+  value: string;
+  override: number | null;
+  title: string;
+}): JSX.Element {
+  return (
+    <span
+      data-testid={testId}
+      title={title}
+      style={{ display: 'inline-flex', gap: 4, alignItems: 'baseline', flex: 'none', whiteSpace: 'nowrap' }}
+    >
+      <span style={{ color: '#8a97a5', fontSize: 11 }}>{label}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: '#e8eef4' }}>{value}</span>
+      {override !== null && override !== 100 && (
+        <span
+          data-testid={`${testId}-override`}
+          style={{ color: '#a8b4c0', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}
+        >
+          · {fmt1(override)} %
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * #769 — THE A AXIS IN THE ROTARY READ-OUT'S WORDS: the angle within the turn plus the number of
+ * turns (`A 154.5° · 0 turns`), the same sentence the simulation's transport row prints. The
+ * machine's A is an unwound degree count, and "1 234.5" says nothing about where on the stock the
+ * cut is; the plain degree count stays beneath as the machine value, like every other axis.
+ */
+function RotaryAxisCell({ work, machine }: { work: number | null; machine: number | null }): JSX.Element {
+  return (
+    <span
+      data-testid="machine-status-axis-a"
+      style={{ display: 'inline-flex', alignItems: 'baseline', whiteSpace: 'nowrap' }}
+    >
+      <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.05 }}>
+        <span
+          data-testid="machine-status-work-a"
+          style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: '#e8eef4' }}
+        >
+          {work === null ? 'A —' : rotaryAngleWords(work)}
+        </span>
+        <span
+          data-testid="machine-status-machine-a"
+          style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: '#7a8794' }}
+        >
+          {fmt3(machine)}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 /** The three (or four) axis cells, in the mock's order. */
 function Axes({
   work,
@@ -97,8 +206,9 @@ function Axes({
       <AxisCell axis="Y" work={work?.y ?? null} machine={machine?.y ?? null} />
       <AxisCell axis="Z" work={work?.z ?? null} machine={machine?.z ?? null} />
       {/* #658 — A only when a rotary module is checked out: the Z1's own frame always carries a
-          fourth value (0.0000 on a machine with no module), so the frame is not the signal. */}
-      {hasRotary && <AxisCell axis="A" work={work?.a ?? null} machine={machine?.a ?? null} />}
+          fourth value (0.0000 on a machine with no module), so the frame is not the signal.
+          #769 — and it reads in ° and turns, the rotary read-out's own words. */}
+      {hasRotary && <RotaryAxisCell work={work?.a ?? null} machine={machine?.a ?? null} />}
     </span>
   );
 }
@@ -254,6 +364,10 @@ export function MachineStatusStrip(): JSX.Element | null {
       ? (lastM491 as { z: number }).z
       : null;
   const toolName = registrationActive ? (probeNameFor(record) ?? 'probe') : cutter;
+  // #769 — T:0 is the firmware's "nothing in the spindle" (a manual change parks at 0 until the next
+  // program or probe claims a slot), so 0 is not a tool number the strip states. The raw value stays
+  // in the hover as provenance; the visible number is only ever a tool the machine claims to hold.
+  const activeTool = toolNumber !== null && toolNumber > 0 ? toolNumber : null;
   const toolTitle = [
     jobCutter?.name ?? null,
     toolNumber !== null ? `T${toolNumber}` : null,
@@ -261,6 +375,26 @@ export function MachineStatusStrip(): JSX.Element | null {
   ]
     .filter((part): part is string => part !== null)
     .join(' · ');
+  // #769 — the tool cell names the cutter AND says the machine's own T number. The name is the
+  // elastic part; the number leads and stays fixed, so a long name ellipsises and the slot does not.
+  const toolText =
+    toolName === null
+      ? activeTool !== null
+        ? `T${activeTool}`
+        : 'no cutter'
+      : activeTool !== null
+        ? `T${activeTool} · ${toolName}`
+        : toolName;
+
+  // #769 — WHAT IT IS DOING, from the frame's own `F:` and `S:` fields. A machine that is Offline has
+  // stopped answering, so its last rates are no more live than its last coordinates: they print "—"
+  // with the axes (#652's rule; the DRO never shows a stale live-looking number).
+  const live = heartbeat?.reachable !== false;
+  const feed = live ? line?.feed ?? null : null;
+  const spindle = live ? line?.spindle ?? null : null;
+  // #769 — the frame's separate `A:` field is the ATC state, not the fourth axis (protocol.ts cites
+  // the firmware): shown raw, and only on a machine that actually sends it. The Z1 has no ATC.
+  const atcState = live ? line?.atcState ?? null : null;
 
   const percent = progress?.percent ?? null;
   const remaining = remainingSeconds(progress);
@@ -454,6 +588,38 @@ export function MachineStatusStrip(): JSX.Element | null {
         machine={heartbeat?.reachable === false ? null : line?.mpos ?? null}
         hasRotary={hasRotary}
       />
+      {/* #769 — WHAT IT IS DOING: the frame's live feed and spindle. The actual figure is the cell's
+          value; the program's set figure and the full override are in the hover (rateTitle), and a
+          non-100 % override rides beside the value — a reduced feed IS news. */}
+      <RateCell
+        label="F"
+        testId="machine-status-feed"
+        value={fmt1(feed?.actual ?? null)}
+        override={feed?.override ?? null}
+        title={rateTitle('Feed', 'mm/min', feed, fmt1)}
+      />
+      <RateCell
+        label="S"
+        testId="machine-status-spindle"
+        value={fmtRpm(spindle?.actual ?? null)}
+        override={spindle?.override ?? null}
+        title={rateTitle('Spindle', 'rpm', spindle, fmtRpm)}
+      />
+      {/* #769 — the frame's `A:` field, when the machine sends one: the ATC state, never an angle.
+          Absent on the Z1 (the firmware writes it only with the ATC bit set), so the cell is absent
+          too rather than printing a permanent dash for a reading the machine cannot give. */}
+      {atcState !== null && (
+        <span
+          data-testid="machine-status-atc"
+          title="The controller's automatic tool changer state (the frame's A: field)"
+          style={{ display: 'inline-flex', gap: 4, alignItems: 'baseline', flex: 'none', whiteSpace: 'nowrap' }}
+        >
+          <span style={{ color: '#8a97a5', fontSize: 11 }}>ATC</span>
+          <span style={{ fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: '#e8eef4' }}>
+            {atcState}
+          </span>
+        </span>
+      )}
       {/* The registration's current step is the operator's "what is it doing now" while the probe
           is in: it sits where the program name would, after the coordinates. */}
       {registrationActive && registrationStep !== null && (
@@ -466,7 +632,7 @@ export function MachineStatusStrip(): JSX.Element | null {
         title={toolTitle}
         style={{ flex: '0 1 auto', minWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 600, color: '#e8eef4' }}
       >
-        {toolName ?? (toolNumber !== null ? `T${toolNumber}` : 'no cutter')}
+        {toolText}
       </span>
       {percent !== null && (
         <span data-testid="machine-status-progress" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flex: 'none' }}>

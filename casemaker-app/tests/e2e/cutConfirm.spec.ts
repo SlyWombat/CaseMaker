@@ -20,8 +20,8 @@ import { test, expect } from './fixtures/caseMaker';
 const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
 
 /** Put a machine on screen without one — the observation a probe would have written. */
-async function rememberMachine(page: Page): Promise<void> {
-  await page.evaluate((line) => {
+async function rememberMachine(page: Page, line: string = STATUS): Promise<void> {
+  await page.evaluate((text) => {
     window.__caseMaker!.setMachine(
       {
         name: 'QA Z1',
@@ -30,14 +30,14 @@ async function rememberMachine(page: Page): Promise<void> {
         busy: false,
         ip: null,
         mac: null,
-        status: line,
+        status: text,
         profileId: 'Z1',
         observedAt: '2026-10-25T00:00:00.000Z',
         notes: [],
       },
-      line,
+      text,
     );
-  }, STATUS);
+  }, line);
 }
 
 test('#656 — the one screen names the frozen program and cutter, and ONE statement arms the press', async ({
@@ -114,4 +114,36 @@ test('#659 — the strip’s state element opens its popover, and Escape closes 
 
   await page.keyboard.press('Escape');
   await expect(monitor).toHaveCount(0);
+});
+
+// #769 — THE REST OF THE FRAME ON THE DRO. The line is a recorded cutting frame from the bench
+// (docs/bench/traces/2026-10-12-cut-rowA.log), so this proves the real bytes reach the strip.
+test('#769 — the strip shows the frame’s feed, spindle and tool, and dashes for what is absent', async ({
+  cm,
+  page,
+}) => {
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+  });
+  await rememberMachine(
+    page,
+    '<Run|MPos:-162.0500,-162.2000,-5.7381,0.0000,0.0000|WPos:18.4500,20.0000,50.8059,0.0000,0.0000|F:600.0,2000.0,100.0|S:11677.9,12000.0,100.0,1,37.6,24.9,0,0,0,0|T:1,0.000,1|L:0, 0, 0, 0.0,100.0|P:0,17,10|C:3,1,0,1|E:0,0,0,692,7610|OTA:0,0>',
+  );
+
+  await expect(page.getByTestId('machine-status')).toBeVisible();
+  await expect(page.getByTestId('machine-status-feed')).toHaveText('F600');
+  await expect(page.getByTestId('machine-status-spindle')).toHaveText('S11678');
+  // The frame's `T:1` always reaches the slot; the name joins it only when the tool catalogue in
+  // this page knows tool 1. This page has no catalogue, so the bare number is the right answer —
+  // the joined `T1 · ⌀ 1 mm flat end` form is pinned in the unit strip test instead.
+  await expect(page.getByTestId('machine-status-tool')).toHaveText(/^T1(?: · .+)?$/);
+  // No recorded frame carries A: (the Z1 has no ATC), so the cell is absent, not a dash.
+  await expect(page.getByTestId('machine-status-atc')).toHaveCount(0);
+
+  // …and a line with none of them prints dashes: the strip never breaks on an absent field.
+  await rememberMachine(page, '<Idle|MPos:-1,-1,-1|WPos:0,0,0>');
+  await expect(page.getByTestId('machine-status-feed')).toHaveText('F—');
+  await expect(page.getByTestId('machine-status-spindle')).toHaveText('S—');
+  await expect(page.getByTestId('machine-status-tool')).toHaveText('no cutter');
 });

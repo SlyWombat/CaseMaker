@@ -523,6 +523,19 @@ export interface MachineStatusLine {
    * operator's `M490.2`). Null whenever no change is pending.
    */
   toolWaiting: number | null;
+  /**
+   * #769 — the `A:` field, where the frame carries one: the controller's ATC state, an integer.
+   *
+   * This is NOT a fourth-axis position, and the firmware says so itself: in
+   * `Kernel::get_query_string` (`MakeraInc/CarveraFirmware`, the same source #659 cites) `A:` is
+   * written only inside `if (THEKERNEL->factory_set->FuncSetting & (1<<2)) //ATC` — as `|A:%d`
+   * (the ATC state) or `|A:%d,%d` (two ATC pin states). The 4th axis is the `a` in `wpos`/`mpos`,
+   * which the frame always carries. The Z1 has the ATC bit clear (`isATC=0`), so it never emits
+   * this field: none of the frames recorded under `docs/bench/traces` or `.scratch` carries one.
+   * It is still parsed where present because an ATC machine can be connected, and the value is
+   * surfaced raw — never dressed as an angle.
+   */
+  atcState: number | null;
   /** #659 — the readings the frame carries beyond position, rates and progress. */
   monitor: StatusMonitor;
   progress: JobProgress;
@@ -545,9 +558,10 @@ export interface MachineStatusLine {
  * WHAT IS DELIBERATELY NOT READ. `C:` carries the machine model, a factory bitfield and the
  * inch/absolute mode (the bitfield's bits are not documented); `L:` is the LASER's mode/power, not
  * limits; `E:` in our captures does not match the upstream endstop list; `W:` is the wireless
- * probe's voltage (this machine has none); `A:` is the tool changer's state (this machine changes
- * tools by hand); `OTA:` is not built by the firmware source at all. None of them is shown — a
- * field nobody can explain is not an operator reading.
+ * probe's voltage (this machine has none); `OTA:` is not built by the firmware source at all.
+ * (`A:` was on this list until #769 read it — see {@link MachineStatusLine.atcState}; it is the
+ * ATC state, which is a different thing from the fourth axis.) None of these is shown — a field
+ * nobody can explain is not an operator reading.
  */
 export interface StatusMonitor {
   /** Spindle temperature, °C (`S:` value 5), or null when the frame does not carry it. */
@@ -650,6 +664,10 @@ function readRate(field: string | null): StatusRate {
  */
 export function readStatusLine(text: string): MachineStatusLine {
   const tool = readRate(statusField(text, 'T'));
+  // #769 — `A:` is the ATC state (see `MachineStatusLine.atcState`), one integer, or two pin
+  // states in the other firmware branch. Its first value is the reading; an unreadable one is
+  // null, never 0 — the frame did not say 0, it said something this parser cannot read.
+  const atc = statusField(text, 'A');
   return {
     state: readJobProgress(text).state,
     wpos: readPosition(statusField(text, 'WPos')),
@@ -659,6 +677,7 @@ export function readStatusLine(text: string): MachineStatusLine {
     tool: tool.actual,
     // The T field is `actual,offset,awaited` — the third value is not a rate's "override".
     toolWaiting: tool.override,
+    atcState: atc === null ? null : value(atc.split(','), 0),
     monitor: readMonitor(text),
     progress: readJobProgress(text),
   };
