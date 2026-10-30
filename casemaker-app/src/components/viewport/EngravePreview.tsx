@@ -882,7 +882,18 @@ export function EngravePreview() {
           </>
         ) : (
           <mesh geometry={stockGeom} name="engrave-stock">
-            <meshStandardMaterial color={STOCK_COLOR} flatShading metalness={0.05} roughness={0.75} />
+            {/* #723 R-3 — the MAP view's stock surface is the same story as the Stock view's
+                cylinder: a goal's relief lies BELOW it (z = r − R ≤ 0), and an opaque sheet
+                would hide exactly the surface being previewed. Ghosted while a goal is drawn. */}
+            <meshStandardMaterial
+              color={STOCK_COLOR}
+              flatShading
+              metalness={0.05}
+              roughness={0.75}
+              transparent={rotaryGoal}
+              opacity={rotaryGoal ? 0.22 : 1}
+              depthWrite={!rotaryGoal}
+            />
           </mesh>
         )}
 
