@@ -25,6 +25,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { useSimStore, type SimLayers, type SimState } from '@/store/simStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveRunStore, gateViewFor, saveBlocker, runErrorCodes } from '@/store/engraveRunStore';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { useRunRecordStore } from '@/store/runRecordStore';
@@ -143,6 +144,20 @@ export interface CaseMakerTestApi {
    * the first Generate recommended any other way. Null until a package is frozen.
    */
   getFrozenProgram(): { filename: string; toolKey: string; cutterName: string } | null;
+  /**
+   * #723 R-4 e2e — THE PROGRAM TEXT the run produced, exactly the bytes Save would write. A rotary
+   * job's Save is refused by the bench line (#545/#240: simulate-only), so an e2e that wants to
+   * carry the relief program into Simulate has no other door; this is the run store's own field.
+   * Testing surface only: no app code calls it.
+   */
+  engraveProgramText(): string | null;
+  /**
+   * #723 R-4 e2e — the engrave PREVIEW's own state, so a spec can tell "the picture has not been
+   * built yet" from "the picture is wrong". Testing surface only.
+   */
+  engravePreviewState(): { status: string; error: string | null };
+  /** #723 R-4 e2e — the open job's target object as the stores hold it (bytes included?). */
+  engraveTargetState(): { role: string | null; enabled: boolean; format: string; hasData: boolean } | null;
   getEngraveRunState(): {
     phase: string;
     stale: boolean;
@@ -431,6 +446,18 @@ export function installCaseMakerTestApi(): void {
       return result.ok
         ? { ok: true, reason: null, ncFile: result.run.ncFile }
         : { ok: false, reason: result.reason, ncFile: null };
+    },
+    engraveProgramText() {
+      return useEngraveRunStore.getState().generated?.nc ?? null;
+    },
+    engravePreviewState() {
+      const p = useEngravePreviewStore.getState();
+      return { status: p.status, error: p.error };
+    },
+    engraveTargetState() {
+      const t = useEngraveJobStore.getState().job.targetObject;
+      if (t === undefined) return null;
+      return { role: t.role ?? null, enabled: t.enabled, format: t.format, hasData: t.data !== undefined };
     },
     getEngraveRunState() {
       const r = useEngraveRunStore.getState();
