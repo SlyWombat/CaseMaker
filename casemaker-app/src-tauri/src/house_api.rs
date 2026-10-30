@@ -104,6 +104,10 @@ pub fn routes(store: Arc<HouseStore>) -> Router {
         // parameter a request can supply: this endpoint must never be a way to read an arbitrary
         // file off the machine it runs on.
         .route("/api/v1/catalogue/sync", post(sync_catalogue))
+        // #560. The receiving half: a `catalogue.json` synced on a machine that has Studio, POSTed
+        // as the raw file. There is deliberately NO export counterpart — vendor data never leaves
+        // through this API (#212), so the file moves by the operator's own hand.
+        .route("/api/v1/catalogue/import", post(import_catalogue))
         .route("/api/v1/*rest", any(api_not_found))
         .with_state(store)
 }
@@ -734,6 +738,22 @@ async fn sync_catalogue(State(store): State<Arc<HouseStore>>) -> Response<Body> 
             Ok(bytes) => json_body(StatusCode::OK, bytes),
             Err(e) => error_response(HouseError::Io(format!(
                 "the sync worked but its report could not be serialized: {e}"
+            ))),
+        },
+        Err(e) => error_response(e),
+    }
+}
+
+/// Import a `catalogue.json` synced on a machine that has Makera Studio (#560). The body is the
+/// RAW file, not a JSON envelope, so what lands on disk is byte-identical to what left the other
+/// machine; `house.rs` parses it so a refusal can name the kind or version it found. The answer is
+/// a receipt; there is no export counterpart on purpose (#212).
+async fn import_catalogue(State(store): State<Arc<HouseStore>>, body: axum::body::Bytes) -> Response<Body> {
+    match store.import_catalogue(&body).await {
+        Ok(receipt) => match serde_json::to_vec(&receipt) {
+            Ok(bytes) => json_body(StatusCode::OK, bytes),
+            Err(e) => error_response(HouseError::Io(format!(
+                "the catalogue imported but its receipt could not be serialized: {e}"
             ))),
         },
         Err(e) => error_response(e),
@@ -1657,6 +1677,73 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// #560 — the receiving half of a catalogue migration: a file synced on a Studio machine,
+    /// POSTed as raw bytes. There is no export counterpart (vendor data never leaves the API), so
+    /// this is how a headless house is given a catalogue without stopping it.
+    #[tokio::test]
+    async fn a_catalogue_posted_to_the_house_is_imported_and_served() {
+        use crate::catalogue::{CatalogueEntry, CatalogueExtras};
+        let (dir, app) = app_under_test();
+        let entry = CatalogueEntry {
+            key: "cat:cutter-1".to_string(),
+            tool: Tool {
+                name: "3.175 mm flat end".to_string(),
+                type_text: "Flat End".to_string(),
+                shape: ToolShape::Flat,
+                diameter: Some(3.175),
+                tip_diameter: Some(3.175),
+                ..Tool::default()
+            },
+            provenance: "Makera catalogue 112111313812".to_string(),
+            content_hash: "0f0f0f0f0f0f0f0f".to_string(),
+            extras: CatalogueExtras {
+                cutter_id: "cutter-1".to_string(),
+                category_id: 1,
+                category_name: "Flat End".to_string(),
+                ..Default::default()
+            },
+        };
+        let body = serde_json::to_vec(&serde_json::json!({
+            "kind": "casemaker-catalogue",
+            "schemaVersion": HOUSE_SCHEMA_VERSION,
+            "syncedAt": "2026-10-18T12:00:00.000Z",
+            "tools": [entry],
+        }))
+        .unwrap();
+
+        let post = |bytes: Vec<u8>| {
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/catalogue/import")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(bytes))
+                .unwrap()
+        };
+
+        let res = app.clone().oneshot(post(body.clone())).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let receipt = json_of(res).await;
+        assert_eq!(receipt["tools"], serde_json::json!(1));
+        assert_eq!(receipt["syncedAt"], serde_json::json!("2026-10-18T12:00:00.000Z"));
+        assert_eq!(
+            std::fs::read(dir.path().join(crate::house::CATALOGUE_FILE)).unwrap(),
+            body,
+            "the posted bytes are what landed"
+        );
+
+        let tools = json_of(app.clone().oneshot(get("/api/v1/tools")).await.unwrap()).await;
+        assert_eq!(tools.as_array().unwrap().len(), 1);
+        assert_eq!(tools[0]["key"], serde_json::json!("cat:cutter-1"));
+
+        // A foreign kind is refused by name, with 400, and the catalogue is untouched.
+        let mut foreign: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        foreign["kind"] = serde_json::json!("casemaker-location");
+        let res = app.clone().oneshot(post(serde_json::to_vec(&foreign).unwrap())).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let tools = json_of(app.clone().oneshot(get("/api/v1/tools")).await.unwrap()).await;
+        assert_eq!(tools.as_array().unwrap().len(), 1);
     }
 
     /// A router whose sync reads a Makera library built by the test. The path is a constructor

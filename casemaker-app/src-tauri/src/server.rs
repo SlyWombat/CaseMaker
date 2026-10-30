@@ -975,6 +975,7 @@ mod tests {
         ("PUT", "/api/v1/defaults/rest.overlapMm", r#"{"value":1,"source":"seeded"}"#),
         ("DELETE", "/api/v1/defaults/rest.overlapMm", "{}"),
         ("POST", "/api/v1/catalogue/sync", "{}"),
+        ("POST", "/api/v1/catalogue/import", r#"{"kind":"casemaker-catalogue"}"#),
     ];
 
     /// #375 — the guard's PLACEMENT, over the real router.

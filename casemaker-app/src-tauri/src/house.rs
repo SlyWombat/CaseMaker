@@ -593,6 +593,24 @@ pub struct Health {
     pub warnings: Vec<String>,
 }
 
+/// What `POST /api/v1/catalogue/import` wrote (#560): the counts a person checks at a glance, the
+/// date the SOURCE sync carried, and how many cutters this replaced. Not a `SyncReport`: nothing
+/// was read from a vendor database and no row was diffed — the file arrived as one document.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogueImport {
+    pub tools: usize,
+    #[serde(default)]
+    pub feed_rows: usize,
+    #[serde(default)]
+    pub material_spec_rows: usize,
+    /// The source file's own `syncedAt`, verbatim — provenance, never a freshness claim.
+    pub synced_at: Option<String>,
+    /// How many cutters the catalogue held before this import replaced it.
+    #[serde(default)]
+    pub previous_tools: usize,
+}
+
 /// The build string a report written before #566 carries: the field is absent, and the honest
 /// answer is that it does not know rather than a version nobody built.
 fn unknown_build() -> String {
@@ -1875,6 +1893,73 @@ impl HouseStore {
         let inner = self.inner.read().await;
         serde_json::to_vec_pretty(&inner.location)
             .map_err(|e| HouseError::Io(format!("could not serialize the location: {e}")))
+    }
+
+    /// Import a `catalogue.json` synced on a machine that has Makera Studio (#560).
+    ///
+    /// THE RECEIVING HALF ONLY. `catalogue.json` is vendor data and nothing vendor-derived leaves
+    /// this service through `/api/v1/export` (#212, `/Fabrication.md` §3) — so this endpoint cannot
+    /// be paired with an export endpoint, and is not. The file moves by the operator's own hand
+    /// from the machine that synced it; what this removes is the rest of the old workaround:
+    /// stopping the house, finding its data directory and writing the file onto its disk. A remote
+    /// house with no Studio install can be given the file over the wire while it runs.
+    ///
+    /// BYTE-IDENTICAL ON DISK. The posted bytes are written exactly as they arrived, after the
+    /// parse and the per-entry validation — so the file the second machine keeps is the file the
+    /// first one produced, and a later sync diffs against the same rows rather than a
+    /// re-serialization of them. The store is then updated from the same parse, so what is served
+    /// and what is on disk cannot disagree.
+    ///
+    /// REFUSED, and nothing is touched: another kind or schema version, a row that cannot be
+    /// served, and an EMPTY cutter list while the catalogue already holds rows — the sync's own
+    /// rule, because an empty read is a read that went wrong and replacing a good list with it is
+    /// the one way this operation can lose something.
+    pub async fn import_catalogue(&self, bytes: &[u8]) -> Result<CatalogueImport, HouseError> {
+        let value: serde_json::Value = serde_json::from_slice(bytes)
+            .map_err(|e| HouseError::BadEntry(format!("not a Case Maker catalogue file: {e}")))?;
+        let kind = value.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+        if kind != CATALOGUE_KIND {
+            return Err(HouseError::BadEntry(format!(
+                "the file says it is {kind:?}; a catalogue must be {CATALOGUE_KIND:?}"
+            )));
+        }
+        let found = value.get("schemaVersion").and_then(|v| v.as_u64());
+        if found != Some(u64::from(HOUSE_SCHEMA_VERSION)) {
+            return Err(HouseError::BadEntry(format!(
+                "the catalogue file is version {}; this build reads version {HOUSE_SCHEMA_VERSION}",
+                found.map_or_else(|| "missing".to_string(), |v| v.to_string())
+            )));
+        }
+        let doc: CatalogueDoc = serde_json::from_value(value)
+            .map_err(|e| HouseError::BadEntry(format!("not a Case Maker catalogue file: {e}")))?;
+
+        let mut inner = self.inner.write().await;
+        if doc.tools.is_empty() && !inner.catalogue.tools.is_empty() {
+            return Err(HouseError::Refused(format!(
+                "the file holds no cutters, and the catalogue already has {} — refusing to replace \
+                 a good list with an empty one",
+                inner.catalogue.tools.len()
+            )));
+        }
+        for entry in &doc.tools {
+            entry.validate().map_err(|e| match e {
+                HouseError::BadEntry(why) => {
+                    HouseError::BadEntry(format!("{}: {why}", entry.key))
+                }
+                other => other,
+            })?;
+        }
+        let receipt = CatalogueImport {
+            tools: doc.tools.len(),
+            feed_rows: doc.feeds.len(),
+            material_spec_rows: doc.material_specs.len(),
+            synced_at: doc.synced_at.clone(),
+            previous_tools: inner.catalogue.tools.len(),
+        };
+        write_atomic(&self.dir.join(CATALOGUE_FILE), bytes)?;
+        inner.catalogue = doc;
+        inner.catalogue_problem = None;
+        Ok(receipt)
     }
 
     /// Import Makera's catalogue from Studio's own library, replacing the `cat:` tier wholesale
@@ -4663,5 +4748,76 @@ mod tests {
         let mut doc = HouseDoc::default();
         doc.inventory = vec![a, b];
         assert!(matches!(store.import(&serde_json::to_vec(&doc).unwrap()).await, Err(HouseError::BadEntry(_))));
+    }
+
+    // #560 — a catalogue synced on a machine with Studio arrives as one document. The store's
+    // promises: the bytes on disk are the bytes posted, what is served updates without a restart,
+    // and every refusal leaves the previous catalogue exactly as it was.
+    #[tokio::test]
+    async fn an_imported_catalogue_is_written_byte_identical_and_served() {
+        let (dir, store) = store();
+        let doc = crate::catalogue::CatalogueDoc {
+            synced_at: Some("2026-10-18T12:00:00.000Z".to_string()),
+            tools: vec![a_catalogue_entry("cutter-1")],
+            ..Default::default()
+        };
+        let bytes = serde_json::to_vec_pretty(&doc).unwrap();
+
+        let receipt = store.import_catalogue(&bytes).await.unwrap();
+
+        assert_eq!(receipt.tools, 1);
+        assert_eq!(receipt.previous_tools, 0);
+        assert_eq!(receipt.synced_at.as_deref(), Some("2026-10-18T12:00:00.000Z"));
+        // Byte-identical: the file is the one the other machine produced, not a re-serialization.
+        assert_eq!(fs::read(dir.path().join(CATALOGUE_FILE)).unwrap(), bytes);
+        // And the running store serves it without a restart.
+        let health = store.health().await;
+        assert!(health.has_catalogue);
+        assert_eq!(health.catalogue_synced_at.as_deref(), Some("2026-10-18T12:00:00.000Z"));
+        let (tools, _) = store.tools().await.unwrap();
+        let rows: serde_json::Value = serde_json::from_slice(&tools).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!(rows[0]["key"], "cat:cutter-1");
+    }
+
+    #[tokio::test]
+    async fn a_catalogue_import_refuses_a_foreign_kind_version_or_row_and_writes_nothing() {
+        let (dir, store) = store();
+        let path = dir.path().join(CATALOGUE_FILE);
+        let good = serde_json::to_vec_pretty(&crate::catalogue::CatalogueDoc {
+            tools: vec![a_catalogue_entry("cutter-1")],
+            ..Default::default()
+        })
+        .unwrap();
+
+        let mut foreign: serde_json::Value = serde_json::from_slice(&good).unwrap();
+        foreign["kind"] = serde_json::json!("casemaker-house");
+        assert!(matches!(
+            store.import_catalogue(&serde_json::to_vec(&foreign).unwrap()).await,
+            Err(HouseError::BadEntry(_))
+        ));
+
+        let mut newer: serde_json::Value = serde_json::from_slice(&good).unwrap();
+        newer["schemaVersion"] = serde_json::json!(99);
+        let err = store.import_catalogue(&serde_json::to_vec(&newer).unwrap()).await.unwrap_err();
+        assert!(err.to_string().contains("version 99"), "{err}");
+
+        // A key that is not `cat:<its own cutterId>` is a row this service must not serve.
+        let mut bad_row: serde_json::Value = serde_json::from_slice(&good).unwrap();
+        bad_row["tools"][0]["key"] = serde_json::json!("user:abc");
+        assert!(matches!(
+            store.import_catalogue(&serde_json::to_vec(&bad_row).unwrap()).await,
+            Err(HouseError::BadEntry(_))
+        ));
+
+        assert!(!path.exists(), "a refused import must write nothing");
+
+        store.import_catalogue(&good).await.unwrap();
+        assert_eq!(fs::read(&path).unwrap(), good);
+
+        // The sync's empty rule, one entry point over: a good list is not replaced by nothing.
+        let empty = serde_json::to_vec_pretty(&crate::catalogue::CatalogueDoc::default()).unwrap();
+        assert!(matches!(store.import_catalogue(&empty).await, Err(HouseError::Refused(_))));
+        assert_eq!(fs::read(&path).unwrap(), good);
     }
 }
