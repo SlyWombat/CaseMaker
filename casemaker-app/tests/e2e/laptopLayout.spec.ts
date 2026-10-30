@@ -158,14 +158,20 @@ test('the panel is a drawer only where the column would starve the canvas (#355)
   for (const width of [1440, 1280, 1024]) {
     await page.setViewportSize({ width, height: 800 });
     await openEngrave(page);
-    const l = await readLayout(page);
-    expect(l.panelClass, `panel at ${width}px`).toContain('context-panel--rail');
-    expect(l.closesInPanel.length, `closes at ${width}px`).toBeLessThanOrEqual(1);
-    expect(l.toolbarRight, `toolbar right edge at ${width}px`).toBeLessThanOrEqual(l.panelLeft);
-    // Resized DOWN to here: the canvas's intrinsic width used to floor the column, so this is the
-    // step that catches the pane refusing to shrink.
-    expect(l.mainW, `app-main width at ${width}px`).toBeLessThanOrEqual(l.innerW);
-    expect(l.panelRight, `panel right edge at ${width}px`).toBeLessThanOrEqual(l.innerW);
+    // #400 — the class is synchronous with the media query (#462), but the shell's own geometry
+    // (the canvas's ResizeObserver repaint, the grid's re-flow) can still land a task later under
+    // load. Retry the whole read+assert block until the layout agrees with the width; a fixed
+    // delay would be a bet on how long that takes on a given machine.
+    await expect(async () => {
+      const l = await readLayout(page);
+      expect(l.panelClass, `panel at ${width}px`).toContain('context-panel--rail');
+      expect(l.closesInPanel.length, `closes at ${width}px`).toBeLessThanOrEqual(1);
+      expect(l.toolbarRight, `toolbar right edge at ${width}px`).toBeLessThanOrEqual(l.panelLeft);
+      // Resized DOWN to here: the canvas's intrinsic width used to floor the column, so this is the
+      // step that catches the pane refusing to shrink.
+      expect(l.mainW, `app-main width at ${width}px`).toBeLessThanOrEqual(l.innerW);
+      expect(l.panelRight, `panel right edge at ${width}px`).toBeLessThanOrEqual(l.innerW);
+    }).toPass({ timeout: 10_000 });
   }
 
   // Below it the overlay is back, and a drawer carries the handle tab that closes it.
@@ -174,12 +180,14 @@ test('the panel is a drawer only where the column would starve the canvas (#355)
     // The 1024 -> 1023 step is the one that CHANGES modes; this is where a measurement taken a
     // task too early used to read `--rail` and fail (#400).
     await waitForPanelMode(page);
-    const l = await readLayout(page);
-    expect(l.panelClass, `panel at ${width}px`).toContain('context-panel--drawer');
-    expect(l.handle, `handle at ${width}px`).toBe(true);
-    // The drawer's own × is gone: the handle is the only control that closes the drawer, and the
-    // content keeps its own ×, so the panel body never shows two.
-    const inBody = l.closesInPanel.filter((a) => a !== 'Close context panel');
-    expect(inBody.length, `closes inside the panel body at ${width}px`).toBeLessThanOrEqual(1);
+    await expect(async () => {
+      const l = await readLayout(page);
+      expect(l.panelClass, `panel at ${width}px`).toContain('context-panel--drawer');
+      expect(l.handle, `handle at ${width}px`).toBe(true);
+      // The drawer's own × is gone: the handle is the only control that closes the drawer, and the
+      // content keeps its own ×, so the panel body never shows two.
+      const inBody = l.closesInPanel.filter((a) => a !== 'Close context panel');
+      expect(inBody.length, `closes inside the panel body at ${width}px`).toBeLessThanOrEqual(1);
+    }).toPass({ timeout: 10_000 });
   }
 });
