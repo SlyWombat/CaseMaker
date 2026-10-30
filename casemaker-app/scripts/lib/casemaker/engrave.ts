@@ -1425,6 +1425,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const words = explainSmartPick(pick, searchTools);
         out.progress(`  pick      ${words.verdict}`);
         words.cutters.forEach((line, i) => out.progress(`  cutter ${i + 1}   ${line}`));
+        if (words.fallback !== null) out.progress(`  rule       ${words.fallback}`);
         if (words.runnerUp !== null) out.progress(`  also      ${words.runnerUp}`);
         if (words.buyThis !== null) out.progress(`  buy       ${words.buyThis}`);
         for (const note of words.notes) out.progress(`  note      ${note}`);

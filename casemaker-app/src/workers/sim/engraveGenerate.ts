@@ -4938,7 +4938,14 @@ export function engraveGenerate(
   });
 
   const restPass = restLink === null ? null : assembleRestFacts(restLink, posted);
-  const first = attempts[0]!;
+  // #768 — THE TOP-LEVEL FIELDS ARE THE FIRST POSTED PROGRAM, not the first ATTEMPT. The settle
+  // walk above REGENERATES the programs whose vacuum span moved (a rest program the generator
+  // dropped as empty leaves fewer files, so program 1 is re-made as the run's first/last word);
+  // `posted[0].one` is the settled text, while `attempts[0]` is the pre-settle one. Reading the
+  // attempt left `generated.nc` a few characters off `generated.programs[0].nc`, and the command
+  // line — which sweeps the program the top-level nc names — stopped with "the generator did not
+  // list the program this run swept" on every job whose empty rest was dropped (j21-a).
+  const first = posted[0]?.one ?? attempts[0]!;
   const stopped = attempts.find((one) => !one.ok);
   // #737 review item 1 — the neck is carried by a PROGRAM, not by the job. A run that drops its
   // last rest program (`setup-rest-nothing`) posts nothing that cuts the neck, and the per-program

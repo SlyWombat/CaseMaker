@@ -13,7 +13,7 @@
 import { statedCuttingSize } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EvaluatedItem, PinchFact } from '@/workers/sim/planEvaluate';
-import type { ScoredPlan, SmartPick } from './smartPick';
+import { planKey, type ScoredPlan, type SmartPick } from './smartPick';
 
 const dia = (entry: ToolLibraryEntry | undefined): string => {
   const d = entry === undefined ? null : statedCuttingSize(entry.tool);
@@ -108,7 +108,21 @@ export interface SmartPickWords {
   cutters: string[];
   runnerUp: string | null;
   buyThis: string | null;
+  /**
+   * #766 fix — THE STRUCTURAL GUARD'S SENTENCE. The rule's kind plan is always a candidate, and
+   * when it is the ONLY plan that posts the search hands it over and says so, rather than letting
+   * an operator wonder why the measured answer is the rule's.
+   */
+  fallback: string | null;
   notes: string[];
+}
+
+/** The rule plan being the only one that posts; otherwise null. */
+export function ruleFallbackLine(pick: SmartPick): string | null {
+  if (pick.runnable === null || pick.rule === null) return null;
+  if (planKey(pick.rule.plan) !== planKey(pick.chosen.plan)) return null;
+  if (pick.runnerUp !== null || pick.considered.length <= 1) return null;
+  return `the measured search found no better posting plan; using the rule's plan (${pick.rule.plan.cutters.map((c) => c.key).join(' + ')})`;
 }
 
 export function explainSmartPick(pick: SmartPick, tools: readonly ToolLibraryEntry[]): SmartPickWords {
@@ -122,6 +136,7 @@ export function explainSmartPick(pick: SmartPick, tools: readonly ToolLibraryEnt
     cutters: cutterLines(pick, tools),
     runnerUp: runnerUpLine(pick),
     buyThis: buyThisLine(pick, tools),
+    fallback: ruleFallbackLine(pick),
     notes: pick.notes,
   };
 }

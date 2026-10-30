@@ -156,7 +156,13 @@ export function kindedWork(job: EngraveJob): KindedItem[] {
   }
   for (const vector of job.vectors ?? []) {
     if (!usable(vector)) continue;
-    push(vector.id, vector.name ?? vector.id, 'flat', vector.depth, 'an imported outline is a flat region');
+    // #766 fix — an imported outline follows the SAME depth rule as a shape: a
+    // `vCarveDepth: 'variable'` (or inlay) vector's depth follows the cutter's flank at every
+    // point, so it is CONE work. It used to be classified flat, and the search handed the V-carve
+    // a flat end mill the generator then refused — j21-b's coaster inlay, and the same class in
+    // j14's text. `EngraveVectorShape` extends `EngraveShapeBase`, so the marker is the shape's.
+    const cone = isCone(vector);
+    push(vector.id, vector.name ?? vector.id, cone ? 'cone' : 'flat', vector.depth, cone ? 'a V-carve / inlay is a cone' : 'an imported outline is a flat region');
   }
   for (const trace of job.traces ?? []) {
     if (!usable(trace)) continue;

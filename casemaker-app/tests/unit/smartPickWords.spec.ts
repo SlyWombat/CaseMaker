@@ -83,7 +83,7 @@ const COIN = plan([['inv:flat-2', ['clear']], ['inv:corn-0-6', []]]);
 
 /** A SmartPick for the word tests: by default the chosen plan posts and is the best measured one. */
 function pickOf(over: Partial<SmartPick> & { chosen: ScoredPlan }): SmartPick {
-  return { runnable: over.chosen, bestMeasured: over.chosen, runnerUp: null, buyThis: null, considered: [over.chosen], notes: [], ...over };
+  return { rule: null, runnable: over.chosen, bestMeasured: over.chosen, runnerUp: null, buyThis: null, considered: [over.chosen], notes: [], ...over };
 }
 
 describe('#766 C the words say what the measurement says', () => {

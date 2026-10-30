@@ -43,7 +43,7 @@ import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { Tool } from '@/engine/cnc/tool';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { vCone } from '@/engine/cnc/vProfile';
-import { jobSetups, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { jobSetups, pureGoalObject, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
 import { kindedWork } from '@/engine/cnc/engrave/cutterPlan';
 import { toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -203,6 +203,12 @@ export function applyCutterPlan(job: EngraveJob, plan: CandidatePlan): EngraveJo
   const first = plan.cutters[0];
   if (first === undefined) return applied;
   applied.toolKey = first.key;
+  // #766 fix — A PURE GOAL JOB GETS NO SETUP. Its derived setup is empty BY DESIGN (#535): the
+  // goal mesh is the setup's one program, and `pureGoalObject` only recognises the job while it
+  // states NO setups. Writing one made the generator validate the goal as an ordinary item that
+  // the setup does not list ("Setup 1 assigns an item that is not in it: g1") and refused every
+  // plan, so wolf, photo-relief and mouse-shell jobs that #762 generated stopped generating.
+  if (pureGoalObject(job) !== null) return applied;
   // EVERY plan is written through the setup path — one cutter included. The legacy single-tool
   // document validates its `toolKey` against the built-in registry (`jobTool`), which by design
   // does not hold the location's `inv:` cutters; the setup path resolves each cutter from the

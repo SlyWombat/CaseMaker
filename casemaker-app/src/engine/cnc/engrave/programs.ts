@@ -83,6 +83,28 @@ export function setupPrograms(job: EngraveJob): JobProgramRef[] {
   });
 }
 
+/** What the reference walk needs of any item a program can name. */
+interface ReferenceItem {
+  id: string;
+  kind?: string;
+  around?: string;
+  outer?: string;
+  islands?: readonly string[];
+  of?: string;
+}
+
+/** The items one item names: a frame's `around`, a cutaway's outer and islands, a cut-out's/chamfer's `of`. */
+function referencesOf(item: ReferenceItem): string[] {
+  const out: string[] = [];
+  if (item.kind === 'frame' && typeof item.around === 'string') out.push(item.around);
+  if (item.kind === 'cutaway') {
+    if (typeof item.outer === 'string') out.push(item.outer);
+    for (const island of item.islands ?? []) out.push(island);
+  }
+  if (typeof item.of === 'string') out.push(item.of);
+  return out;
+}
+
 /**
  * The job as ONE setup sees it: only that setup's items, and that setup's cutter.
  *
@@ -125,6 +147,35 @@ export function jobForSetup(job: EngraveJob, ref: JobProgramRef, tool?: Tool | n
     else if (c.kind === 'cutaway') {
       referenced.add(c.outer);
       for (const island of c.islands) referenced.add(island);
+    }
+  }
+  // #766 fix — THE REFERENCES ARE TRANSITIVE. A cutaway that arrives as a CONSTRUCTION COPY
+  // (another program owns it; this one only names it) keeps its OWN references with it: an inlay's
+  // male plug is a cutaway whose islands name further cutaways and rings, and dropping the outer
+  // ring made the copy a broken reference — "Cutaway 'male plug' references '…-ring-outer', which
+  // is not in the job" — which refused every plan of j11's male plug under the search.
+  const byId = new Map<string, ReferenceItem>();
+  const all: readonly ReferenceItem[] = [
+    ...job.labels,
+    ...job.shapes,
+    ...(job.combined ?? []),
+    ...(job.vectors ?? []),
+    ...(job.cutouts ?? []),
+    ...(job.chamfers ?? []),
+  ];
+  for (const item of all) byId.set(item.id, item);
+  const queue = [...referenced];
+  const seen = new Set<string>();
+  while (queue.length > 0) {
+    const id = queue.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const item = byId.get(id);
+    if (item === undefined) continue; // a missing reference is reported, not invented
+    for (const next of referencesOf(item)) {
+      if (next === 'stock-inset' || referenced.has(next)) continue;
+      referenced.add(next);
+      queue.push(next);
     }
   }
   const referenceOnly = <T extends { id: string }>(list: readonly T[] | undefined): T[] =>

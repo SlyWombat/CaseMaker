@@ -85,6 +85,13 @@ export interface SmartPickOptions {
 
 /** The search's answer: the plan to run, what was close, and what to buy. */
 export interface SmartPick {
+  /**
+   * The QUICK RULE's plan (#211/#760/#762 — `planCutters`' kind plan), which is the first candidate
+   * the search scores. The panel's provisional answer is a view of this plan, so this is what its
+   * measured answer is compared against when the two differ (slice C's difference sentence) — and
+   * what slice C's fallback sentence says is used when it is the only plan that posts.
+   */
+  rule: ScoredPlan | null;
   /** The plan to run — a POSTING plan (slice A's `full.ok`), the best of those by the objective. */
   chosen: ScoredPlan;
   /** `chosen` when it posts; null when no plan the search tried posts (the CLI then stops, saying why). */
@@ -110,6 +117,23 @@ const byDiameter = (a: ToolLibraryEntry, b: ToolLibraryEntry): number =>
 /** The canonical identity of a plan, for dedupe and for the evaluator's cache. */
 export function planKey(plan: CandidatePlan): string {
   return plan.cutters.map((c) => `${c.key}[${[...c.items].sort().join(',')}]`).join('|');
+}
+
+/**
+ * The QUICK RULE's plan: what `planCutters` (#211/#760/#762) assigns, with its rest pair, before
+ * any simulation. `candidatePlans` tries it first and `smartPick` keeps its verdict as `rule` — the
+ * plan the panel's provisional answer stands for, and what the measured answer is compared with.
+ */
+export function rulePlanOf(
+  job: EngraveJob,
+  tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[],
+  conditions?: ReadonlyMap<string, ConditionSummary> | null,
+  table?: readonly FeedsEntry[] | null,
+): CandidatePlan | null {
+  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined);
+  if (base.cutters.length === 0) return null;
+  return planFrom(base.cutters, tools);
 }
 
 /** A plan from `planCutters`' output, with each cutter's source recorded. */
@@ -149,6 +173,25 @@ export function candidatePlans(
   if (basePlan.cutters.length > 0) add(basePlan);
 
   const work = kindedWork(job);
+
+  // #766 fix — A GOAL'S BALL IS CHOSEN BY THE FINISH BUDGET, AND THE BUDGET MAY NOT BE SAMPLABLE
+  // HERE. `planCutters` refuses a ball whose finish tip field would exceed the cap (#540) — but
+  // only when it can sample the goal heightfield; a job whose goal mesh is attached later (the
+  // CLI's store, the panel's worker) samples as null and the rule then names the LARGEST ball,
+  // which the generator refuses at `cam` ("3D finishing would need … over the … budget", j06
+  // wolf). Try the balls from largest down: each over-budget one is refused cheaply and the
+  // largest that FITS posts, so a goal job can always generate.
+  const ballWork = work.filter((w) => w.kind === 'ball');
+  if (ballWork.length > 0) {
+    const ids = ballWork.map((w) => w.id);
+    const balls = tools
+      .filter((t) => t.tool.shape === 'ball' || t.tool.shape === 'bull')
+      .filter((t) => (stated(t.tool) ?? 0) > 0 && materialRefusal(job, t, catalogue, conditions, table ?? undefined, { ownedVouches: true }) === null)
+      .sort((a, b) => byDiameter(b, a))
+      .slice(0, 6);
+    for (const ball of balls) add({ cutters: [{ key: ball.key, items: ids }], source: { [ball.key]: sourceOf(ball) } });
+  }
+
   const flatWork = work.filter((w) => w.kind === 'flat');
   if (flatWork.length === 0) return out;
 
@@ -245,6 +288,23 @@ export function candidatePlans(
         add(withOthers([{ key: clearance.key, items: flatItems }, { key: cone.key, items: [] }]));
       }
     }
+  }
+  // #766 fix — A V CARVES TEXT TOO. On a job whose flat work is ALL text, a small flat can lose
+  // whole characters (an ERROR, so no flat plan posts at all) while a V's flank keeps them: j14's
+  // dog tag read cleanly with #762's 60° engraver, and the search could not propose it because its
+  // only cones were raised-text rests. The evaluator measures whether the V holds; the ranking
+  // still prefers a flat that cuts the text faster, so this only wins where it is the only thing
+  // that cuts at all. Cones with an unstated reach are tried: the generator says when one is too
+  // shallow, and refusing them here is what hid #762's answer.
+  const labelIds = new Set(job.labels.filter((l) => l.enabled && l.construction !== true).map((l) => l.id));
+  const allText = flatWork.length > 0 && flatWork.every((w) => labelIds.has(w.id));
+  if (allText) {
+    const textCones = tools
+      .filter((t) => vCone(t.tool) !== null)
+      .filter((t) => gate(t))
+      .sort(byDiameter)
+      .slice(0, 2);
+    for (const cone of textCones) add(withOthers([{ key: cone.key, items: flatItems }]));
   }
   return out;
 }
@@ -344,6 +404,7 @@ export function smartPick(
   const fullFinalists = Math.max(1, opts.fullFinalists ?? 3);
   const margin = opts.buyThisMargin ?? 0.02;
   const notes: string[] = [];
+  const rulePlan = rulePlanOf(job, tools, catalogue, conditions, table);
   const plans = candidatePlans(job, tools, catalogue, conditions, table).slice(0, maxCandidates);
   if (plans.length === 0) {
     throw new Error('the search found no candidate cutter plan for this job');
@@ -419,7 +480,8 @@ export function smartPick(
       `A catalogue cutter would measure better than your own: ${planKey(buyThis.plan)} (worst item fidelity ${round6(buyThis.worstFidelity)} against ${round6(bestOwnedPosting?.worstFidelity ?? 0)}).`,
     );
   }
-  return { chosen, runnable, bestMeasured, runnerUp, buyThis, considered: all, notes };
+  const rule = rulePlan === null ? null : (verdicts.get(planKey(rulePlan)) ?? null);
+  return { rule, chosen, runnable, bestMeasured, runnerUp, buyThis, considered: all, notes };
 }
 
 function sameCutters(a: CandidatePlan, b: CandidatePlan): boolean {

@@ -6,7 +6,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { candidatePlans, planKey, smartPick, sourceOf, type Evaluate } from '@/engine/cnc/engrave/smartPick';
+import { candidatePlans, planKey, rulePlanOf, smartPick, sourceOf, type Evaluate } from '@/engine/cnc/engrave/smartPick';
+import { explainSmartPick } from '@/engine/cnc/engrave/smartPickWords';
 import type { CandidatePlan, PlanEvaluation } from '@/workers/sim/planEvaluate';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { Tool, ToolShape } from '@/engine/cnc/tool';
@@ -207,6 +208,27 @@ describe('#766 B the chosen plan is the best measured one', () => {
     };
     const pick = smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over));
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'inv:corn-0-6']);
+  });
+
+  it('the rule’s kind plan is always a candidate, and is used with a sentence when it is the only one that posts', () => {
+    // The structural guard (#766 fix): the measured search can never do WORSE than #762's rule.
+    const entries = tools([FLAT_2, FLAT_1, FLAT_06, V_01]);
+    const rule = rulePlanOf(coinJob(), entries, [])!;
+    const base = fakeEvaluator({});
+    // Every other plan is refused at its full evaluation; the rule's plan posts.
+    const evaluate: Evaluate = (plan, level) => {
+      const verdictForPlan = base(plan, level);
+      if (planKey(plan) === planKey(rule)) return verdictForPlan;
+      return { ...verdictForPlan, ok: false, refusal: 'refused for the test' };
+    };
+    const pick = smartPick(coinJob(), entries, [], evaluate);
+    expect(pick.rule).not.toBeNull();
+    expect(pick.runnable).not.toBeNull();
+    expect(planKey(pick.chosen.plan)).toBe(planKey(rule));
+    expect(pick.runnerUp).toBeNull();
+    // And the explanation says why the measured answer is the rule's.
+    const words = explainSmartPick(pick, tools([FLAT_2, FLAT_1, FLAT_06, V_01]));
+    expect(words.fallback).toContain("the measured search found no better posting plan; using the rule's plan");
   });
 
   it('names the plan canonically, for dedupe and the evaluator’s cache', () => {
