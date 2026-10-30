@@ -154,13 +154,22 @@ describe('#722 — every reader applies the one scale', () => {
     expect(tall.minZ).toBeCloseTo(-8, 4); // 20 × 0.4
   });
 
-  it('the job size check reads the placed size: oversize at 100 %, fits once fitted', () => {
+  it('the job size check reads the placed size: a goal past the blank is a per-side warning, fits once fitted', () => {
+    // #784 — a goal larger than the blank is INFORMED, not refused: it names what lies outside
+    // per side, and Generate cuts it clipped. The error is reserved for nothing being inside.
     const big = validateGoalObject(goal(), STOCK);
-    expect(big.map((f) => f.code)).toContain('goal-object-oversize');
-    expect(big.find((f) => f.code === 'goal-object-oversize')!.message).toContain('200×100×40 mm');
+    const outside = big.find((f) => f.code === 'goal-object-oversize');
+    expect(outside?.severity).toBe('warning');
+    expect(outside?.message).toContain('past the left edge');
+    expect(outside?.message).toContain('past the right edge');
+    expect(outside?.message).toContain('clipped to the blank');
     const f = fitToStockScale({ x: 200, y: 100, z: 40 }, STOCK, 1)!;
     const fitted = validateGoalObject(goal({ scale: { x: f, y: f, z: f } }), STOCK);
     expect(fitted.map((x) => x.code)).not.toContain('goal-object-oversize');
+    // Nothing of the goal over the blank is still an ERROR.
+    const far = validateGoalObject(goal({ position: { x: 500, y: 500, z: 0 } }), STOCK);
+    expect(far.find((x) => x.code === 'goal-object-oversize')?.severity).toBe('error');
+    expect(far.find((x) => x.code === 'goal-object-oversize')?.message).toContain('entirely outside the blank');
   });
 });
 

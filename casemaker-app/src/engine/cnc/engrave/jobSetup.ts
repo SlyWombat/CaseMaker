@@ -946,8 +946,6 @@ export function validateGoalObject(
   const depth = target.format === 'png' ? reliefNumbers(target.relief).maxDepthMm : placed.z;
   const hasVolume = placed.x > 0 && placed.y > 0 && depth > 0;
   const footprint = { x: placed.x, y: placed.y };
-  const fitsFootprint = footprint.x <= length + 1e-9 && footprint.y <= width + 1e-9;
-  const fitsDepth = depth <= thickness;
   if (!hasVolume) {
     findings.push({
       severity: 'error',
@@ -956,16 +954,6 @@ export function validateGoalObject(
         `The goal object "${target.name}" is flat in at least one direction ` +
         `(${fmt3(placed.x)}×${fmt3(placed.y)}×${fmt3(depth)} mm); a goal needs ` +
         `volume to drive a 3D cut toward.`,
-    });
-  } else if (!fitsFootprint || !fitsDepth) {
-    findings.push({
-      severity: 'error',
-      code: 'goal-object-oversize',
-      message:
-        `The goal object "${target.name}" is ` +
-        `${fmt3(placed.x)}×${fmt3(placed.y)}×${fmt3(depth)} mm, larger than the ` +
-        `${fmt3(length)}×${fmt3(width)}×${fmt3(thickness)} mm blank it would be carved from; ` +
-        `it cannot be reproduced from this stock. Use a larger blank, or scale the goal (Fit to the stock).`,
     });
   } else if (mold && (footprint.x + 2 * (opts.edgeMargin ?? 0) > length + 1e-9 || footprint.y + 2 * (opts.edgeMargin ?? 0) > width + 1e-9)) {
     const rim = opts.edgeMargin ?? 0;
@@ -1004,7 +992,54 @@ export function validateGoalObject(
         `${fmt3(floor)} mm minimum floor under it in the ${fmt3(thickness)} mm blank — at most ` +
         `${fmt3(Math.max(0, thickness - floor))} mm deep here. Scale the part down, or use a thicker blank.`,
     });
-  } else if (opts.mixed === true) {
+  } else if (!mold) {
+    // #784 — A GOAL LARGER THAN THE BLANK IS INFORMED, NOT REFUSED. What lies outside is named
+    // per axis and side; Generate cuts the goal CLIPPED to the blank (the sampler intersects its
+    // grid with the stock). It is an error only when nothing of the goal is over the blank at all
+    // — then there is genuinely nothing to cut.
+    const gxMin = target.position.x - footprint.x / 2;
+    const gxMax = target.position.x + footprint.x / 2;
+    const gyMin = target.position.y - footprint.y / 2;
+    const gyMax = target.position.y + footprint.y / 2;
+    const gTop = target.position.z;
+    const gBase = target.position.z - depth;
+    const sides: string[] = [];
+    const outside = (amount: number, words: string): void => {
+      if (amount > 1e-6) sides.push(`${fmt3(amount)} mm ${words}`);
+    };
+    outside(-gxMin, 'past the left edge');
+    outside(gxMax - length, 'past the right edge');
+    outside(-gyMin, 'past the front edge');
+    outside(gyMax - width, 'past the back edge');
+    outside(gTop, "above the stock's top face");
+    outside(-thickness - gBase, "below the stock's bottom face");
+    const overlapX = Math.min(gxMax, length) - Math.max(gxMin, 0);
+    const overlapY = Math.min(gyMax, width) - Math.max(gyMin, 0);
+    const overlapZ = Math.min(gTop, 0) - Math.max(gBase, -thickness);
+    const list = (items: string[]): string =>
+      items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+    if (overlapX <= 1e-6 || overlapY <= 1e-6 || overlapZ <= 1e-6) {
+      findings.push({
+        severity: 'error',
+        code: 'goal-object-oversize',
+        message:
+          `The goal object "${target.name}" lies entirely outside the blank` +
+          (sides.length === 0 ? '' : `: ${list(sides)}`) +
+          `. Nothing of it is inside the ${fmt3(length)}×${fmt3(width)}×${fmt3(thickness)} mm stock, so there ` +
+          `is nothing to cut. Move it over the blank, scale it down, or use a larger stock.`,
+      });
+    } else if (sides.length > 0) {
+      findings.push({
+        severity: 'warning',
+        code: 'goal-object-oversize',
+        message:
+          `The goal object "${target.name}" extends beyond the blank: ${list(sides)}. Generate cuts it ` +
+          `clipped to the blank, so the part outside the stock is not cut; move it inward or use a larger ` +
+          `stock to keep it whole.`,
+      });
+    }
+  }
+  if (opts.mixed === true && !findings.some((f) => f.severity === 'error')) {
     // #535 — the MIXED path's note: one job's program is the item work, so this goal is validated
     // and previewed but not cut. A pure goal job is surfaced instead and gets no note.
     findings.push({

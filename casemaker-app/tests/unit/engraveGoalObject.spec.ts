@@ -31,7 +31,7 @@ const baseTarget: EngraveTargetObject = {
   sha256: 'a'.repeat(64),
   data: 'AAAA',
   size: { x: 40, y: 30, z: 6 },
-  position: { x: 0, y: 0, z: 0 },
+  position: { x: 50, y: 30, z: 0 },
   rotation: 0,
   enabled: true,
 };
@@ -152,12 +152,13 @@ describe('3D goal object (#533, slice C)', () => {
     expect(found).not.toContain('goal-object-no-toolpath');
   });
 
-  it('a goal larger than the blank is refused as oversize, not warned as uncut', () => {
-    // Footprint over-wide (120 > 100 mm X): cannot be carved from a 100 × 60 × 12 mm blank.
+  it('#784 a goal larger than the blank is informed as clipped, still not warned as uncut', () => {
+    // Footprint over-wide (120 > 100 mm X): cut clipped to the blank, with a per-side warning.
     const found = codes(jobWithTarget({ ...baseTarget, role: 'goal', size: { x: 120, y: 30, z: 6 } }));
     expect(found).toContain('goal-object-oversize');
-    expect(found).not.toContain('goal-object-no-toolpath');
     expect(found).not.toContain('target-object-not-cut');
+    // The mixed-path note is about the PROGRAM, not the size: a size warning does not suppress it.
+    expect(found).toContain('goal-object-no-toolpath');
   });
 
   it('a goal deeper than the stock thickness is refused as oversize', () => {

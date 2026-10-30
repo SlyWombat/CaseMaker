@@ -4446,7 +4446,13 @@ export function generateGoalProgram(
       air: job.cutOverride?.air ?? true,
       feeds,
       rapid: mill.rapidEstimate,
-      sample: { pitchMm, ...sampleClear },
+      // #784 — the blank's rectangle: an oversized goal is cut clipped to the stock, never as air
+      // cuts past its edge. A goal already inside the blank samples exactly as before.
+      sample: {
+        pitchMm,
+        ...sampleClear,
+        clip: { xMin: 0, xMax: job.stock.length, yMin: 0, yMax: job.stock.width },
+      },
       opts: {
         stockToLeaveMm,
         scallop,

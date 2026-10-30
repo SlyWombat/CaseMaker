@@ -247,7 +247,7 @@ describe('#721 — generate → simulate → match', () => {
 describe('#721 — a mold needs a rim and a floor', () => {
   const STOCK = { length: 30, width: 30, thickness: 8 };
   it('refuses a cavity with no rim of stock round it', () => {
-    const t = goal(domeTris(R), { goalMode: 'mold', size: { x: 29, y: 29, z: 5 } });
+    const t = goal(domeTris(R), { goalMode: 'mold', size: { x: 29, y: 29, z: 5 }, position: { x: 15, y: 15, z: 0 } });
     const f = validateGoalObject(t, STOCK, { edgeMargin: 1, minFloor: 1 });
     expect(f.map((x) => x.code)).toEqual(['goal-mold-rim']);
     expect(f[0]!.message).toContain('1 mm rim');

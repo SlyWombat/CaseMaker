@@ -152,6 +152,12 @@ export interface SampleGoalOpts {
   stockRect?: { xMin: number; xMax: number; yMin: number; yMax: number } | null;
   /** Work Z of the goal's base plane, mm — the floor a cleared band is cut to. */
   baseZ?: number | null;
+  /**
+   * #784 — the blank's top-face rectangle. The grid is intersected with it: a goal larger than
+   * the stock is cut only where the stock exists ("clipped to the blank"), and a goal already
+   * inside the blank samples exactly as before. Absent: no clip (every pre-#784 caller).
+   */
+  clip?: { xMin: number; xMax: number; yMin: number; yMax: number } | null;
 }
 
 /**
@@ -256,6 +262,34 @@ export function sampleGoalHeightfield(
       gyMin = Math.max(stockRect.yMin, yMin - clear.widthMm);
       gyMax = Math.min(stockRect.yMax, yMax + clear.widthMm);
       clearBand = `a ${Number(clear.widthMm.toFixed(3))} mm band around the part`;
+    }
+  }
+  // #784 — CLIPPED TO THE BLANK. The goal is cut only where the stock exists: intersect the grid
+  // with the blank's rectangle. A goal already inside the blank is unchanged; one that overhangs
+  // is cut up to the edge, and the job's warning says which sides lost what. A goal with nothing
+  // over the blank is refused before sampling; a degenerate grid here is still a valid empty field.
+  const clip = opts.clip ?? null;
+  if (clip !== null) {
+    gxMin = Math.max(gxMin, clip.xMin);
+    gxMax = Math.min(gxMax, clip.xMax);
+    gyMin = Math.max(gyMin, clip.yMin);
+    gyMax = Math.min(gyMax, clip.yMax);
+    if (!(gxMax > gxMin) || !(gyMax > gyMin)) {
+      const z = new Float32Array(1);
+      z[0] = topZ;
+      return {
+        nx: 1,
+        ny: 1,
+        x0: clip.xMin,
+        y0: clip.yMin,
+        pitch: requestedPitch,
+        topZ,
+        minZ: topZ,
+        z,
+        covered: new Uint8Array(1),
+        coveredCount: 0,
+        resolutionNote: 'the goal lies outside the blank, so nothing was sampled',
+      };
     }
   }
   const grid = planGrid(gxMin, gxMax, gyMin, gyMax, requestedPitch, maxCells);

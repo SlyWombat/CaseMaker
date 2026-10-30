@@ -457,23 +457,25 @@ describe('generateSurface3dIR — roughing never breaches the goal', () => {
 describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539)', () => {
   // The pure-goal dispatch runs before the item pipeline's validateJob, so it must gate on the same
   // goal-object-oversize/zero-volume check itself rather than sampling and posting an unmakeable goal.
-  it('returns a blocking goal-object-oversize finding for a goal larger than the stock', () => {
+  it('#784 cuts a goal larger than the stock CLIPPED to the blank and says what lies outside', () => {
     const job: EngraveJob = {
       ...defaultEngraveJob(),
       labels: [],
       shapes: [],
-      // Default stock is 100 x 60 x 12 mm; a 200 mm-wide goal cannot be carved from it.
+      // Default stock is 100 x 60 x 12 mm; a 200 mm-wide goal overhangs both X edges by 50 mm.
       targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 }, size: { x: 200, y: 30, z: 5 } }),
     };
     const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
-    expect(out.ok).toBe(false);
-    expect(out.stage).toBe('findings');
-    expect(out.findings.some((f) => f.severity === 'error' && f.code === 'goal-object-oversize')).toBe(true);
-    expect(out.errors.length).toBeGreaterThan(0);
-    // It refused rather than posting a program.
-    expect(out.nc).toBeNull();
-    expect(out.cam).toBeNull();
-    expect(out.programs).toEqual([]);
+    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
+    const warn = out.findings.find((f) => f.code === 'goal-object-oversize');
+    expect(warn?.severity).toBe('warning');
+    expect(warn?.message).toContain('past the left edge');
+    expect(warn?.message).toContain('past the right edge');
+    expect(out.nc).not.toBeNull();
+    // The program cuts the stock's own X span, not 50 mm of air either side of it.
+    const xs = [...(out.nc ?? '').matchAll(/X(-?\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]));
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(-0.001);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(100.001);
   });
 
   it('returns a blocking finding for a zero-volume (flat) goal', () => {
