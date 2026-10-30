@@ -271,3 +271,18 @@ Third-party libraries
 
 opentype.js (MIT) - https://github.com/opentypejs/opentype.js - parses the fonts
 above and any user-supplied TTF/OTF.
+
+OpenCascade Technology via occt-import-js (LGPL-2.1)
+----------------------------------------------------
+occt-import-js - https://github.com/kovacsv/occt-import-js
+OpenCascade Technology - https://dev.opencascade.org
+Reads STEP files at import (#774): the tessellation shown and stored is the
+library's. The package is used as published and unmodified. In the web build its
+WebAssembly module is served as its own asset and fetched only when a STEP is
+opened, so a compatible build can replace it; the desktop build is made from
+this same open source, so relinking it with a replaced module is available to
+anyone. The library's full licence texts ship unmodified with the package
+(node_modules/occt-import-js/dist/license.occt-import-js.txt and
+license.occt.txt), and the source is the package itself plus OpenCascade's own
+releases. The application around it is Apache-2.0 and its source is public
+(https://github.com/SlyWombat/CaseMaker).
