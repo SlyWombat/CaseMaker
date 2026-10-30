@@ -42,6 +42,8 @@ import { MachineConsole } from './MachineConsole';
 import { MachineFiles } from './MachineFiles';
 import { MachineVacuum } from './MachineVacuum';
 import { MachineLight } from './MachineLight';
+import { MachineAccessory } from './MachineAccessory';
+import { ACCESSORIES, AIR_SENTENCE } from '@/platform/machineAccessory';
 import { MachineUnlock } from './MachineUnlock';
 import { MachineStop } from './MachineStop';
 import { MachineLaserOptions } from './MachineLaserOptions';
@@ -343,6 +345,23 @@ export function MachinesScope() {
               host={machine.host}
               port={machine.port}
             />
+            {/* #289 — the machine's other accessory modes, the same shape and the same reset rule:
+                spindle fan (M811/M812), power fan (M801/M802), external output (M851/M852), the
+                wireless-probe charge (M841/M842) — all from configZ1.default's switch instances. */}
+            {ACCESSORIES.map((spec) => (
+              <MachineAccessory
+                key={`${spec.id}:${machine.host}:${machine.port}@${machine.observedAt}`}
+                host={machine.host}
+                port={machine.port}
+                id={spec.id}
+              />
+            ))}
+            {/* #289 — air is NOT offered: the Z1's switch.air is commented out, M7/M9 answer `ok`
+                and blow nothing, and its blowing mode (M331.1) is not driven here. The panel states
+                the fact rather than drawing a switch that does nothing. */}
+            <p className="hint" data-testid="manage-accessory-no-air">
+              {AIR_SENTENCE}
+            </p>
             {/* #644 — clear the alarm lock ($X), offered only against a machine that reports Alarm. */}
             <MachineUnlock host={machine.host} port={machine.port} />
             {/* #424 — Stop: `abort` for a running program, labelled as not the emergency stop. */}
