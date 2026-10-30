@@ -1,6 +1,6 @@
 # Operations matrix — CAM operation types across the category, and what Case Maker posts and offers
 
-Status as of 2026-10-26, Case Maker `main` a95de5fd (GitHub issue #663). Companion to
+Status as of 2026-10-30, Case Maker `main` 34ee1e86 (GitHub issue #663). Companion to
 `MAKERA-VS-CASEMAKER.md` (§G "CAM & output") and `/Makera-Parity.md` §2 (the 14 Studio strategy types).
 
 The maintainer's words: "operation palettes we need to track and make sure that we offer the same
@@ -36,7 +36,7 @@ Manufacture (personal tier), **ES** Easel, **BT** Bantam Tools Desktop CNC (Bant
 | Advanced V-carve (variable depth / flat-bottom) | Advanced VCarve [CC2]†; Pro "advanced engraving" [CC1] | strategies under Precision V-Carving, flat-bottom not stated [VC1] | not established | not established | not established | not established | — | not established | not established | YES: the medial-axis depth map cut as a ladder of level sets (`vCarveDepth: 'variable'`, `vCarveLevels` in `cam/engraveJob.ts`), and the flat bottom — the core `offset(design, −coreOffsetRadius)` — pocketed by the setup's flat end mill in its own program after the V-carve (#665, #677) | YES: “V-carve (variable depth)” in the operation picker and the depth-mode select on a shape's row (`EngraveShapeRow.tsx`, #665) |
 | Engrave text (outline font) | Basic engraving; Advanced engraving (Pro) [CC1] | Quick Engrave; Production Plate Engraving [VC1] | not established | not established | Conversational CAM text [BT1]† | not established | Fill/Line on text (no separate op name read) [LB1] | text subsystem (Parity §8) [MK1] | not established | YES: `EngraveLabel` outline fonts, bold/condensed, per-label depth (`workers/sim/engraveGenerate.ts`, `partPlan.ts`) | YES: "Label" (`EngraveLabelRow.tsx`) |
 | Single-line trace / stroke-font text | not established | not established | not established | not established | not established | Trace [KM1] | Line [LB1] | not established | Vector: Path [SM1]† | YES: `line` and `stroke-label` traces, flat or V bit (`cam/trace.ts`) | YES: "Line", "Single-line text" (`EngraveTraceRow.tsx`) |
-| Drill / peck drill | Drilling, styles full depth / peck [CC3]† | Drilling Toolpath [VC1]; peck option† | Drill [FU10]† | Convert Circles to Drill Holes; pecking drill [ES2]† | holes (helical) [BT1]† | Drill (pecks) [KM1] | — | 2D Drilling (2), 3D Drilling (10) [MK1] | not established | YES: `drill`, `drill-array`, through; pecks from shop settings, no canned cycles (`cam/drill.ts`, `cam/drillBit.ts`) | YES: "Hole", "Hole array" (`EngraveDrillRow.tsx`); no per-item peck control found |
+| Drill / peck drill | Drilling, styles full depth / peck [CC3]† | Drilling Toolpath [VC1]; peck option† | Drill [FU10]† | Convert Circles to Drill Holes; pecking drill [ES2]† | holes (helical) [BT1]† | Drill (pecks) [KM1] | — | 2D Drilling (2), 3D Drilling (10) [MK1] | not established | YES: `drill`, `drill-array`, through; pecks from shop settings, no canned cycles (`cam/drill.ts`, `cam/drillBit.ts`) | YES: "Hole", "Hole array" (`EngraveDrillRow.tsx`); the row's Technical fold states the peck and its source and takes the job's own `peckMm` (#675) |
 | Bore (helical hole to size) | not established | not established | Bore [FU5] | not established | holes use a helical path [BT1]† | not established | — | not established | not established | YES: `bore` mode on a hole — helical ramp at the wall, the core cleared LEVEL BY LEVEL (spiral to the cutter's radius plus a hub lap at each Z), a full-depth final lap; pitch = the feeds row's step-down or the shop's `bore.rampAngleDeg` (`cam/drill.ts` `boreMoves`/`boreLevels`, #668) | YES: “Bore to size” in the operation picker, hole ⌀ and helix pitch in the row (`EngraveDrillRow.tsx`, #668) |
 | Thread mill | not established | Thread Milling Toolpath [VC1] | Thread [FU7]† | not established | not established | not established | — | 2D Thread mill (9), 3D (12) [MK1] | not established | PARTIAL: internal ISO-metric helical thread in an existing pilot, one hole per item (`cam/threadMill.ts`) | YES: `EngraveThreadRow.tsx` |
 | Chamfer (edge) | not established | not established | 2D Chamfer [FU6]† | not established | not established | not established | — | 2D Chamfer (13), 3D Chamfer (14) [MK1] | not established | YES: one flat bevel along a rim, the cone's flank held at `tipRadius` from the edge at `width / tan(halfAngle)` down; a part's edge (outside) or a pocket's rim (inside); reach bounded by the cone's LC (`cam/chamfer.ts`, #669) | YES: “Chamfer the edge” in the operation picker, with the rim, the side, the width and the derived depth (`EngraveChamferRow.tsx`, #669) |
@@ -55,10 +55,13 @@ Manufacture (personal tier), **ES** Easel, **BT** Bantam Tools Desktop CNC (Bant
 
 ## 2. Case Maker gaps
 
-Tracking: umbrella **#676** (the matrix to 90 % YES in both Case Maker columns — 21 of the 23 non-refused rows), with the
-per-row issues: #535/#536 surface a mesh (unlocks 3D roughing and parallel finishing), #667 rest pass, #664 open paths,
-#668 bore (landed), #669 chamfer, #665 advanced V-carve, #671 scallop/pencil, #673 inlay, #672 image relief, #670 texture,
-#674 fluting/prism (landed), #675 per-hole peck; rotary wrap stays #545.
+Tracking: umbrella **#676** (the matrix to 90 % YES in both Case Maker columns — 21 of the 23 non-refused rows). Every
+per-row slice named there has landed on `main` and is an ancestor of `34ee1e86` (#535 surface a mesh, #664 open paths,
+#665/#677 advanced V-carve, #667 rest pass, #668 bore, #669 chamfer, #670 texture, #671 scallop/pencil, #672 image relief,
+#673 inlay, #674 fluting/prism, #675 per-hole peck, #678 stroke-only closed imports); #536 (3D engagement feeds) remains
+bench-gated, and rotary wrap stays #545 — the rotary row is the only outright NO in both Case Maker columns; Slot and
+Thread mill remain PARTIAL engine slices. What §2 A/B records below is therefore closed except B1 and B2's
+filled-open-path note.
 
 Refusals checked first (`MAKERA-VS-CASEMAKER.md` §G, `/Makera-Parity.md` §14.4): laser modules (decision 4),
 R-7 toolpath template library, R-12 Gerber, R-13 STEP, R-15 nesting/tiling, R-16 ramping (reopened for metal
@@ -93,20 +96,26 @@ pockets only), R-14 thread milling (superseded, shipped #445). None of the items
 - **B2. Open-path profile / trace from imported vectors. — CLOSED by #664.** The SVG and DXF importers now return a
   file's open paths and polylines as `OutlineImport.paths` (stroke-only open subpaths, `<polyline>`/`<line>`, open
   `LWPOLYLINE`s, unclosed `LINE`/`ARC` chains), and the dialog accepts a lines-only drawing; accepting adds one
-  Engrave (line) row per path at the drawing's own scale and position, cut by the trace engine. A FILLED open path
-  still does not import (SVG closes it to fill; the importer names it rather than guessing), and a stroke-only CLOSED
-  shape remains a line-drawing case that is out of this slice.
-- **B3. Variable-depth V-carve incl. flat-bottom (advanced V-carve).** CC (Advanced VCarve), VC, MK (type 5, hypothesis).
-  Case Maker has the constant-floor V region only. Demand: #609 guilloché / rosette roadmap
-  (`docs/design`, 90-degree-bit groove geometry), #268 (Makera §G "Next" for V-carve).
-- **B4. Greyscale image relief.** VC (PhotoVCarve), LB (Image), LU (Relief), MK (Trace Image; Laser Image) — four. The
-  goal-mesh route (A1) is the nearest engine path; there is no image-to-heightfield step. Demand: none in the repo.
-- **B5. Scallop and pencil 3D finishing.** Only Fusion established; below the three-platform bar, kept here because it
-  extends A1 once surfacing is in the UI. Demand: none.
+  Engrave (line) row per path at the drawing's own scale and position, cut by the trace engine. A stroke-only CLOSED
+  ring imports as a CLOSED line (the cut is the ring), landed #678. A FILLED open path still does not import (SVG
+  closes it to fill; the importer names it rather than guessing) — recorded here as a possible gap, not a closed row;
+  the ruling (a deliberate refusal, or a slice) is the maintainer's.
+- **B3. Variable-depth V-carve incl. flat-bottom (advanced V-carve). — LANDED by #665/#677.** CC (Advanced VCarve), VC,
+  MK (type 5, hypothesis). The constant-floor V region grew the variable-depth medial-axis ladder (`vCarveDepth:
+  'variable'`) and the flat-bottom core, pocketed by the setup's flat end mill in its own program. Both Case Maker
+  columns YES (see the row). Demand: #609 guilloché / rosette roadmap (`docs/design`, 90-degree-bit groove geometry),
+  #268 (Makera §G "Next" for V-carve).
+- **B4. Greyscale image relief. — LANDED by #672.** VC (PhotoVCarve), LB (Image), LU (Relief), MK (Trace Image; Laser
+  Image) — four. A PNG goal's luminance becomes the top-Z heightfield through one stated map and runs the goal
+  pipeline (`cam/relief.ts`, `import/png.ts`); the Surface picker takes a PNG. Both columns YES (see the row).
+- **B5. Scallop and pencil 3D finishing. — LANDED by #671.** Only Fusion established; below the three-platform bar,
+  kept here because it extends A1. Offset-contour scallop and crease-following pencil passes now run after the parallel
+  finish on the same gouge-safe tip field. Both columns YES (see the row).
 
 Below the three-platform threshold (watch, do not file yet): edge chamfer (FU, MK — 2; MK §G marks it ABSENT), texture
-(CC, VC — 2), inlay (CC, VC — 2), fluting/prism/moulding (VC — 1), bore (FU — 1). Many `not established` cells could move
-a row above the line; re-count after the next source pass.
+(CC, VC — 2), inlay (CC, VC — 2), fluting/prism/moulding (VC — 1), bore (FU — 1). All five have since landed in both
+Case Maker columns (#669, #670, #673, #674, #668), so nothing here is due an issue; many `not established` cells could
+still move a row above the line, so re-count after the next source pass.
 
 ## 3. Sources
 
@@ -150,8 +159,9 @@ Case Maker evidence (read in this pass): `casemaker-app/src/types/engraveJob.ts`
 
 ## How to keep this current
 
-- **Dated cells.** Each Case Maker cell is true of `main` 085b7bc8. Re-verify CM-E and CM-UI when an `engrave`/`fabrication`
-  issue closes; a UI slice usually lands after its engine slice (A1 is the live example).
+- **Dated cells.** Each Case Maker cell is true of `main` 34ee1e86, checked 2026-10-30: every landing commit a row names
+  is an ancestor of it (`git merge-base --is-ancestor`), and every code path a recently updated cell cites exists. Re-verify
+  CM-E and CM-UI when an `engrave`/`fabrication` issue closes; a UI slice usually lands after its engine slice.
 - **Closed is not shipped; open is not absent.** Check `git log --grep '#NNN'` and the last issue comment before changing a cell.
 - **`not established` is a to-do, not an absence.** Turn each into a name plus a URL, or into `—` only when the vendor's own list
   excludes it. Re-count Gap B after every pass; a row crossing three platforms becomes an issue.
