@@ -3198,6 +3198,12 @@ export function EngravePanel(): JSX.Element {
           <p style={MUTED} data-testid="engrave-pick-verdict">
             {measuredNow.words.verdict}
           </p>
+          {/* #766 fix — the structural guard: the rule's plan was the only one that posts. */}
+          {measuredNow.words.fallback !== null && (
+            <p style={MUTED} data-testid="engrave-pick-fallback">
+              {measuredNow.words.fallback}
+            </p>
+          )}
           {measuredNow.words.cutters.map((line, i) => (
             <p key={i} style={MUTED} data-testid={`engrave-pick-cutter-${i + 1}`}>
               {line}

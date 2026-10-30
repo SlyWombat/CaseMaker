@@ -89,6 +89,7 @@ function measuredFor(job: ReturnType<typeof defaultEngraveJob>): EngravePickSumm
     words: {
       plan: '⌀3.175 + ⌀0.3 V rest',
       verdict: 'Chosen by simulation: 97 % fidelity on the worst item, 1 tool change, about 311 s.',
+      fallback: null,
       cutters: ['⌀3.175 mm (flat-3.175) cuts one item and its worst item is clear at 97 % fidelity.'],
       runnerUp: null,
       buyThis: null,

@@ -42,6 +42,7 @@ function summaryFor(
     words: {
       plan: '⌀1',
       verdict: `Chosen by simulation for ${job.labels[0]!.text}.`,
+      fallback: null,
       cutters: [],
       runnerUp: null,
       buyThis: null,

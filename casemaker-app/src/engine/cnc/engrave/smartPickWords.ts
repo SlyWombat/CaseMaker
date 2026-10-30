@@ -154,26 +154,26 @@ export interface SmartPickWords {
   /** The chosen plan's own name: '⌀3.175 + ⌀0.3 V rest'. */
   plan: string;
   verdict: string;
-  cutters: string[];
-  runnerUp: string | null;
-  buyThis: string | null;
   /**
    * #766 fix — THE STRUCTURAL GUARD'S SENTENCE. The rule's kind plan is always a candidate, and
    * when it is the ONLY plan that posts the search hands it over and says so, rather than letting
    * an operator wonder why the measured answer is the rule's.
    */
   fallback: string | null;
+  cutters: string[];
+  runnerUp: string | null;
+  buyThis: string | null;
   /** What the quick rule's plan would do differently, or null when it is the chosen plan. */
   difference: string | null;
   notes: string[];
 }
 
 /** The rule plan being the only one that posts; otherwise null. */
-export function ruleFallbackLine(pick: SmartPick): string | null {
+export function ruleFallbackLine(pick: SmartPick, tools: readonly ToolLibraryEntry[]): string | null {
   if (pick.runnable === null || pick.rule === null) return null;
   if (planKey(pick.rule.plan) !== planKey(pick.chosen.plan)) return null;
   if (pick.runnerUp !== null || pick.considered.length <= 1) return null;
-  return `the measured search found no better posting plan; using the rule's plan (${pick.rule.plan.cutters.map((c) => c.key).join(' + ')})`;
+  return `the measured search found no better posting plan; using the rule's plan, ${planLabel(pick.rule.plan, tools)}`;
 }
 
 export function explainSmartPick(pick: SmartPick, tools: readonly ToolLibraryEntry[]): SmartPickWords {
@@ -185,10 +185,10 @@ export function explainSmartPick(pick: SmartPick, tools: readonly ToolLibraryEnt
   return {
     plan: planLabel(chosen.plan, tools),
     verdict,
+    fallback: ruleFallbackLine(pick, tools),
     cutters: cutterLines(pick, tools),
     runnerUp: runnerUpLine(pick),
     buyThis: buyThisLine(pick, tools),
-    fallback: ruleFallbackLine(pick),
     difference: ruleDifferenceLine(pick, tools),
     notes: pick.notes,
   };

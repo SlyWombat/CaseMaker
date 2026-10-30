@@ -210,7 +210,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'inv:corn-0-6']);
   });
 
-  it('the rule’s kind plan is always a candidate, and is used with a sentence when it is the only one that posts', () => {
+  it('the rule’s kind plan is always a candidate, and is used with a sentence when it is the only one that posts', async () => {
     // The structural guard (#766 fix): the measured search can never do WORSE than #762's rule.
     const entries = tools([FLAT_2, FLAT_1, FLAT_06, V_01]);
     const rule = rulePlanOf(coinJob(), entries, [])!;
@@ -221,7 +221,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       if (planKey(plan) === planKey(rule)) return verdictForPlan;
       return { ...verdictForPlan, ok: false, refusal: 'refused for the test' };
     };
-    const pick = smartPick(coinJob(), entries, [], evaluate);
+    const pick = await smartPick(coinJob(), entries, [], evaluate);
     expect(pick.rule).not.toBeNull();
     expect(pick.runnable).not.toBeNull();
     expect(planKey(pick.chosen.plan)).toBe(planKey(rule));

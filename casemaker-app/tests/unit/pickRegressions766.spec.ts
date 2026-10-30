@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { kindedWork } from '@/engine/cnc/engrave/cutterPlan';
 import { candidatePlans } from '@/engine/cnc/engrave/smartPick';
-import { applyCutterPlan } from '@/workers/sim/planEvaluate';
+import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
 import { jobForSetup } from '@/engine/cnc/engrave/programs';
 import { jobSetups, pureGoalObject, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
@@ -69,7 +69,7 @@ describe('#766 regressions — jobs that generated under #762 must still generat
     const job = load('j06-wolf-1mm-ball.json');
     expect(pureGoalObject(job)).not.toBeNull();
 
-    const applied = applyCutterPlan(job, { cutters: [{ key: 'inv:ball-2.5', items: ['g1'] }], source: { 'inv:ball-2.5': 'owned' } });
+    const applied = applyCutterPlanToJob(job, { cutters: [{ key: 'inv:ball-2.5', items: ['g1'] }] });
     expect(applied.toolKey).toBe('inv:ball-2.5');
     expect(applied.setups).toBeUndefined();
     expect(pureGoalObject(applied)).not.toBeNull();

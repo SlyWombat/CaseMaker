@@ -203,7 +203,6 @@ export function candidatePlans(
       .slice(0, 6);
     for (const ball of balls) add({ cutters: [{ key: ball.key, items: ids }], source: { [ball.key]: sourceOf(ball) } });
   }
-
   const flatWork = work.filter((w) => w.kind === 'flat');
   if (flatWork.length === 0) return out;
 
