@@ -104,7 +104,15 @@ describe('engraveGenerate (#206)', () => {
     expect(g.nc).not.toBeNull();
     expect(g.nc!.length).toBeGreaterThan(0);
     expect(g.nc!.startsWith(';@MKR|BEGIN')).toBe(true);
-    expect(g.nc!.trimEnd().endsWith('M02')).toBe(true);
+    // #771 — the posted file carries Studio's thumbnail after the program's last motion word:
+    // `M02`, the two markers and one base64 line. The motion ending is still M02.
+    const tail = g.nc!.trimEnd().split('\n').slice(-4);
+    expect(tail).toEqual([
+      'M02',
+      ';(thumbnail_image_begin)',
+      expect.stringMatching(/^;iVBORw0KGgo/),
+      ';(thumbnail_image_end)',
+    ]);
     expect(g.verify).not.toBeNull();
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(g.cam).not.toBeNull();

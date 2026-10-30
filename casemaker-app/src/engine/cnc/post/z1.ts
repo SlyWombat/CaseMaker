@@ -47,6 +47,7 @@ import { estimateIRCycleSeconds } from '../cam/ir';
 import type { MillProfile } from '../machine';
 import { surfaceLift, type SurfaceFrame } from '../engrave/surfacePlane';
 import { formatFixed, sanitizeMkrValue } from './format';
+import { thumbnailBlock } from './thumbnail';
 
 /**
  * The context the post cannot get from the IR alone (#173).
@@ -112,6 +113,16 @@ export type VacuumSpan = 'whole' | 'first' | 'middle' | 'last' | 'none';
 export interface PostOptions {
   /** Defaults to `'whole'` — a standalone file, as every file this app wrote before #419 was. */
   vacuum?: VacuumSpan;
+  /**
+   * #771 — the part's thumbnail, as PNG bytes, to write after the file's `M02` in Studio's
+   * comment block (`;(thumbnail_image_begin)`, one `;`-prefixed base64 line,
+   * `;(thumbnail_image_end)`). Absent or null writes no block; a PNG over the cap (20,000 bytes)
+   * or one that is not a PNG is also silently omitted — the picture must never make the program
+   * refuse, and a file with no picture says nothing false. The FLAT dialect is the only one with
+   * evidence for this block, so the rotary emitter ignores the option; see `thumbnail.ts` for
+   * the `Z1/TopClamp.nc` bytes this format was read from.
+   */
+  thumbnail?: Uint8Array | null;
 }
 
 /**
@@ -567,5 +578,15 @@ export function postZ1(
   if (vacuumOff) body.push('M332');
   body.push('M05', 'G28', 'M02');
 
-  return { ok: true, text: [...header, '', ...body].join('\n') + '\n' };
+  // #771 — Studio's thumbnail comes AFTER the program's `M02` (not before it), so it is appended
+  // to the assembled text and never enters `body`: the motion lines above are byte-identical with
+  // and without it. `thumbnailBlock` owns the format, the cap and the PNG check; a null answer
+  // writes no block (a picture must never fail the program), and the block's three comment lines
+  // are inert to the parser, the timeline and the verifier.
+  let text = [...header, '', ...body].join('\n') + '\n';
+  if (opts.thumbnail !== undefined && opts.thumbnail !== null) {
+    const block = thumbnailBlock(opts.thumbnail);
+    if (block !== null) text += block;
+  }
+  return { ok: true, text };
 }

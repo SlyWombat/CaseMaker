@@ -18,8 +18,8 @@
   "outputs": [
     {
       "path": "<out>/single-barrel.nc",
-      "sha256": "6d30031efaecd1f9c68ee29976b26b6fffa33bad384c40e648f13fe74d56dbf3",
-      "bytes": 7456
+      "sha256": "669660f905d3e0f7666dd9e2b567ce00d8533257e93450ccc0031efffa4f719a",
+      "bytes": 11674
     },
     {
       "path": "<out>/single-barrel-frame.nc",
@@ -28,7 +28,7 @@
     },
     {
       "path": "<out>/single-barrel-run-sheet.md",
-      "sha256": "2d4ea0fb1439ac5d974298a298e5e4484bf7b114a7fb3b44b27d911ec890d0ce",
+      "sha256": "a099238e03c800cd487be3c77ae0189627d4642b050653fa4ca1726762d7118b",
       "bytes": 18026
     }
   ],
@@ -101,7 +101,7 @@
         "stage": "done",
         "ok": true,
         "ncFile": "single-barrel.nc",
-        "ncLines": 441,
+        "ncLines": 444,
         "frameFile": "single-barrel-frame.nc",
         "cam": {
           "operations": 2,
@@ -121,7 +121,7 @@
         },
         "sheet": {
           "file": "single-barrel-run-sheet.md",
-          "ncHash": "6d30031e",
+          "ncHash": "669660f9",
           "estimatedTime": "2 min 0 s"
         },
         "previews": [],

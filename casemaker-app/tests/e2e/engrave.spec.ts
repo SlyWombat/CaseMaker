@@ -77,7 +77,13 @@ test('the default job generates, verifies, simulates and saves a .nc', async ({ 
   expect(path).not.toBeNull();
   const nc = readFileSync(path!, 'utf8');
   expect(nc.startsWith(';@MKR|BEGIN')).toBe(true);
-  expect(nc.trimEnd().endsWith('M02')).toBe(true);
+  // #771 — the saved file ends with Studio's thumbnail block: `M02`, the two markers and the
+  // one-line base64 PNG. The last MOTION word is still M02.
+  const tail = nc.trimEnd().split('\n').slice(-4);
+  expect(tail[0]).toBe('M02');
+  expect(tail[1]).toBe(';(thumbnail_image_begin)');
+  expect(tail[2]!.startsWith(';iVBORw0KGgo')).toBe(true);
+  expect(tail[3]).toBe(';(thumbnail_image_end)');
 });
 
 test('editing the job after Generate makes the result stale and blocks Save', async ({ cm, page }) => {

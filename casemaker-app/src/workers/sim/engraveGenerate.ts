@@ -154,6 +154,7 @@ import {
   type SurfaceFeeds,
 } from '@/engine/cnc/cam/surface3d';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
+import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
 import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
@@ -3726,6 +3727,11 @@ function generateRestPair(
     });
     return { attempts, posted, link: null, cursor: nextCursor };
   }
+  // #771 — program 1 has now been swept, so its file can carry the top view of the material it
+  // leaves instead of the plan's design preview. The seed is left out of the picture by design:
+  // `result` is this stock after this program's own cuts, which is what the operator will see on
+  // the bed after running this file.
+  keptOne.nc = withSimulationTopView(keptOne.nc, p1.meshes.result);
 
   // (A V-bit first never reaches here: the clearance branch above owns every cone, so #486's
   // refusal is stated there — where a later cutter with no items of its own is the one asking for
@@ -3818,6 +3824,10 @@ function generateRestPair(
           });
           break;
         }
+        // #771 — this cutter owns items and has just been swept; its program can carry the
+        // result's top view. (Only a later rest pass triggered this sweep, so it is a pair, not
+        // every owning cutter in every run.)
+        ownOne.nc = withSimulationTopView(ownOne.nc, ownSim.meshes.result);
         if (ownSim.meshes.removal !== null) {
           removalMeshes = [...removalMeshes, ownSim.meshes.removal];
           removal = unionRemoval(tl, removalMeshes);
@@ -3968,6 +3978,10 @@ function generateRestPair(
       });
       break;
     }
+    // #771 — this program's own sweep is the picture: replace the design preview with the top
+    // view of the result. A from-blank retry is still this program's own cut on the blank, so its
+    // result is the honest one to draw (the rest plan was measured against p1 above).
+    restOne.nc = withSimulationTopView(restOne.nc, p2.meshes.result);
     // What neither program touches: the same measurement on the union of both removals, at zero
     // overlap, so `restArea` is design material left standing and not the seam band.
     removalMeshes = [...removalMeshes, ...(p2.meshes.removal === null ? [] : [p2.meshes.removal])];
@@ -4016,6 +4030,27 @@ function generateRestPair(
     link,
     cursor: nextCursor,
   };
+}
+
+/**
+ * #771 — REPLACE THE DESIGN PREVIEW WITH THE SWEEP'S OWN RESULT.
+ *
+ * `generateOneProgram` posts a design-preview block from the plan's `cuts`; a rest pair is the
+ * one generation path that then SWEEPS the program it just posted. Once the sweep has a result
+ * mesh, that mesh's top view is the truthful picture of what the file leaves, so the block is
+ * stripped and replaced (the motion text around it is untouched). A sweep with nothing visible —
+ * no triangles, an empty mesh — leaves the design preview in place rather than deleting a true
+ * picture for a blank one.
+ *
+ * The block is appended AFTER `M02` by `appendThumbnail`; the program's `verify` report was taken
+ * on the design-preview text and is still valid because the block is comments. A vacuum re-post
+ * (`PostedProgram.make`, the vacuum settle) builds the program again and therefore carries the
+ * design preview, not this view: the fallback is the plan, which is still true.
+ */
+function withSimulationTopView(nc: string, mesh: NodeMeshOutput): string {
+  const png = simulationTopViewPng(mesh);
+  if (png === null) return nc;
+  return appendThumbnail(nc, png) ?? nc;
 }
 
 /**
@@ -4281,7 +4316,13 @@ export function generateGoalProgram(
   };
   let nc: string;
   try {
-    const posted = postZ1(surfaced.ir, ctx, mill, { vacuum: 'whole' });
+    // #771 — the goal's design preview is its own sampled heightfield, drawn in the blank's
+    // frame. It is the same grid the toolpath was generated over (no second sampling), and the
+    // post writes it as the same after-M02 comment block as an engrave program.
+    const posted = postZ1(surfaced.ir, ctx, mill, {
+      vacuum: 'whole',
+      thumbnail: heightfieldTopViewPng(job.stock, surfaced.heightfield),
+    });
     if (!posted.ok) return fail('post', posted.errors.join('; '), resolved);
     nc = posted.text;
   } catch (e) {
@@ -4882,7 +4923,7 @@ function generateOneProgram(
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, profiles, throughMask, chamfers, cores, floors: floorById, predicted, findings, releasedPieces, neck } = engraveRegions(
+  const { plan, regions, profiles, throughMask, cuts, chamfers, cores, floors: floorById, predicted, findings, releasedPieces, neck } = engraveRegions(
     tl,
     job,
     tool,
@@ -5635,12 +5676,22 @@ function generateOneProgram(
   // depth under the tilted top. The CAM's IR is untouched otherwise; the shift happens here, at the
   // one seam where the document frame meets the file's Z.
   const postIr = surfaceFrame !== null ? applySurfaceLift(ir, surfaceFrame.plane, surfaceFrame.z0) : ir;
+  // #771 — THE DESIGN PREVIEW INSIDE THE FILE. `cuts` is the same opened-region list the 3D
+  // preview and the CLI's plan-view SVG draw, so the picture cannot disagree with the program
+  // about where a cut is; this is the fallback for every program that has no simulated result at
+  // post time (all of them except a rest pair's, whose sweeps happen later and replace this block
+  // with their own top view). The flat frame is the only one with Studio evidence for the block,
+  // and a job with no cuts has no picture to draw: both post no block rather than a false one.
+  const thumbnailPng = rotaryMap === null ? planViewPng(job.stock, cuts) : null;
   let nc: string;
   try {
     // #624 — hand the post the fitted frame so its air-cut check judges the lifted feeds against
     // the local top `lift(x, y)` rather than the flat work Z0.
+    // #771 — the thumbnail rides in `PostOptions`, not the IR: it is a comment block after `M02`
+    // and must never move a motion byte.
     const posted = postZ1(postIr, { ...ctx, surface: surfaceFrame }, mill, {
       vacuum: facing.nc !== null ? spanAfterFacing(span) : span,
+      thumbnail: thumbnailPng,
     });
     if (!posted.ok) return stop('post', { feeds, message: posted.errors.join('; '), facing });
     nc = posted.text;
