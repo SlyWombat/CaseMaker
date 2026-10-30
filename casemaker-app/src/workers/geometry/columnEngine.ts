@@ -42,6 +42,7 @@ import { aabbOfProfile } from '@/engine/compiler/profile';
 import type { Setup } from '@/engine/cnc/setup';
 import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/engine/cnc/tool';
 import type { NodeMeshOutput } from './meshOutput';
+import { applyCarriedField, type CarriedField } from './carriedField';
 import type { SweepDiagnostic, SweepStats } from './sweep';
 import { MAX_AIR_CHECKS, MAX_GOUGES, holderGate } from './sweep';
 // Type-only (erased): the CAM module is not pulled into the worker graph (§4's plain-data rule).
@@ -568,6 +569,12 @@ export interface ColumnSweepOpts {
    * a cut may go; this only lets the sweep draw the cut the program actually makes.
    */
   breakthroughMm?: number | null;
+  /**
+   * #723 P2-2b — the carried stock from the other side of a flip, as a field plus the affine maps
+   * into this program's work frame (`carriedField.ts`). Each column's material becomes
+   * [floor, top]; a flat-only option (a rotary grid ignores it).
+   */
+  carried?: CarriedField | null;
   /**
    * The ROTARY grid's θ pitch, degrees: the shop's `sim.rotaryPitchDeg`, read by the caller (#451).
    * Absent: {@link COLUMN_ROTARY_PITCH_FALLBACK_DEG}. Ignored by a flat job (its second axis is
@@ -1731,6 +1738,11 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   // bottom, which is every job that does not cut through and every pre-#218 caller.
   const breakthrough = typeof opts?.breakthroughMm === 'number' && Number.isFinite(opts.breakthroughMm) && opts.breakthroughMm > 0 ? opts.breakthroughMm : 0;
   if (!rotary && breakthrough > 0) grid = { ...grid, floor: grid.base - breakthrough };
+  // #723 P2-2b — the carried stock, as the other side left it: every column gets its floor, its
+  // top stays this setup's own. Ignored for a rotary grid (a rod is not a flip; the caller never
+  // sends one there), and applied AFTER the breakthrough spread so the floor lands on the grid the
+  // sweep actually uses.
+  if (!rotary && opts?.carried != null) applyCarriedField(grid, opts.carried);
   const stats = zeroStats();
   stats.resolution = { dx: grid.du, dThetaDeg: grid.dv };
   // The cutter's own notes first: the drill's point and where its angle came from, the thread mill's
