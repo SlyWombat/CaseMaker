@@ -171,7 +171,7 @@ in-flight work is named as such, never counted):
 | Live stream | `ws://<host>:82/ws_video`, text `start_stream`, JPEG frames, reconnect after 2 s — RE 04 | A camera pane in the app: the live frame, its age and the server's path, with the harness's reconnect-on-drop behind it (cadf14ba, #530 closed; `tools/z1/camera.mjs`, commit 394583a0) | PARITY | — |
 | Time-lapse | Recorded on the module per job, replayed over `vpreview` — RE 04 | The harness replays `vpreview` (394583a0); monitoring and time-lapse are refused for the app | REFUSED | R-17 |
 | Camera metrology | None — a monitoring feed, no crosshair, no origin overlay (Parity §9) | Target spec and milled fiducial job built (#189 half; `engine/cnc/camera/`); capture, stitch and tie-point open; the camera is frame-mounted | PARTIAL | **#286** |
-| "Camera ToHome" | A control that moves to a camera-home pose — RE 04 | None | ABSENT | — |
+| "Camera ToHome" | A control that moves to a camera-home pose — RE 04 | One fixed move to the machine's own clearance pose (`coordinate.clearance_x/y/z`, resolved through its saved calibration where one exists), beside the camera pane and offered only on an idle machine with no job — a fixed move, not a jog (R-10 stands). 0f6d4fc4, #770; `platform/machineCameraHome.ts` | PARITY | — |
 
 ## F. Library data
 

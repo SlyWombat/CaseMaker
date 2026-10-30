@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CameraPanel } from '@/components/panels/CameraPanel';
 import { resetCameraPaneStore, useCameraPaneStore } from '@/store/cameraPaneStore';
+import { setMachineConsoleLoader } from '@/platform/machineConsole';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import type { MachineObservation } from '@/platform/machineProbe';
 
@@ -203,5 +204,80 @@ describe('#530 the camera pane', () => {
     openPane('GRBL');
     expect(screen.getByTestId('camera-empty').textContent).toBe('This machine has no camera.');
     expect(FakeSocket.all).toHaveLength(0);
+  });
+});
+
+describe('#770 camera to home', () => {
+  afterEach(() => setMachineConsoleLoader(null));
+
+  function rememberStatus(status: string, busy: boolean): void {
+    const observation: MachineObservation = {
+      name: 'QA Z1',
+      host: '192.0.2.10',
+      port: 2222,
+      busy,
+      ip: null,
+      mac: null,
+      status,
+      profileId: 'Z1',
+      observedAt: '2026-10-25T09:00:00.000Z',
+      notes: [],
+    };
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation, calibration: null });
+  }
+
+  function fakeConsole(sent: string[], status: string): void {
+    setMachineConsoleLoader(async () => ({
+      async open() {
+        return {
+          async send(line: string) {
+            sent.push(line);
+            return line === '?'
+              ? { ok: true as const, line, text: status, frames: 1, elapsedMs: 20 }
+              : { ok: true as const, line, text: 'ok', frames: 1, elapsedMs: 10 };
+          },
+          async close() {},
+        };
+      },
+    }));
+  }
+
+  it('offers the move on an idle machine, sends the clearance pose, and reports where it went', async () => {
+    const sent: string[] = [];
+    fakeConsole(sent, '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128>');
+    openPane('Z1');
+
+    const button = screen.getByTestId('camera-home') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    // The pose states the machine's own config keys and numbers — the provenance line.
+    expect(screen.getByTestId('camera-home-pose').textContent).toContain('coordinate.clearance_x/y/z');
+    expect(screen.getByTestId('camera-home-pose').textContent).toContain('X -11.6, Y -14.6, Z -3');
+    expect(screen.queryByTestId('camera-home-refused')).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(sent).toEqual(['?', 'G53 G0 Z-3', 'G53 G0 X-11.6 Y-14.6']);
+    expect(screen.getByTestId('camera-home-note').textContent).toContain("camera's viewing pose");
+  });
+
+  it('is disabled on a running machine and says why', () => {
+    rememberStatus('<Run|MPos:1.0000,2.0000,-1.0000|Bf:14,128|P:389,40,88>', true);
+    useCameraPaneStore.getState().openPane();
+    render(<CameraPanel />);
+
+    const button = screen.getByTestId('camera-home') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.getByTestId('camera-home-refused').textContent).toContain('Run');
+    expect(screen.getByTestId('camera-home-refused').textContent).toContain('40%');
+  });
+
+  it('is absent with no machine at all', () => {
+    resetMachineStore();
+    useCameraPaneStore.getState().openPane();
+    render(<CameraPanel />);
+    // The pane is reachable through the machine only; without one there is no button to press.
+    expect(screen.getByTestId('camera-empty').textContent).toBe('No machine is connected.');
+    expect(screen.queryByTestId('camera-home')).toBeNull();
   });
 });

@@ -31,6 +31,18 @@ import {
 import { useMachineCamera } from '@/hooks/useMachineCamera';
 import { useCameraPaneStore } from '@/store/cameraPaneStore';
 import { useMachineStore } from '@/store/machineStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { Z1 } from '@/engine/cnc/machine';
+import { resolvedMachineById } from '@/engine/cnc/calibration';
+import { readStatusLine } from '@/platform/desktop/protocol';
+import {
+  cameraHomeLines,
+  cameraHomeWords,
+  runCameraHome,
+  type CameraHomeBasis,
+  type CameraHomeOutcome,
+  type CameraHomePose,
+} from '@/platform/machineCameraHome';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: 0 };
 const BUTTON: CSSProperties = { font: 'inherit', fontSize: 11, padding: '3px 10px' };
@@ -45,6 +57,23 @@ interface ShownFrame {
 
 /** How long a saved frame's temporary URL lives — long enough for the download to start. */
 const SAVE_URL_MS = 1000;
+
+/** What a press did, in one sentence; the refusals are the modules' own words. */
+function homeWords(r: CameraHomeOutcome, pose: CameraHomePose): string {
+  switch (r.kind) {
+    case 'moved':
+      return `The head is at the camera's viewing pose (machine X ${pose.x}, Y ${pose.y}, Z ${pose.z}).`;
+    case 'busy':
+      return `The move was not sent: ${r.detail}`;
+    case 'failed':
+      return `The move was not completed: ${r.detail}`;
+    case 'refused':
+    case 'timeout':
+    case 'error':
+    case 'unavailable':
+      return `Nothing was sent: ${r.detail}`;
+  }
+}
 
 function stateWords(state: CameraState, detail: string | null, paused: boolean): string {
   if (paused) return 'paused';
@@ -64,6 +93,7 @@ export function CameraPanel(): JSX.Element | null {
   const open = useCameraPaneStore((s) => s.open);
   const close = useCameraPaneStore((s) => s.close);
   const machine = useMachineStore((s) => s.machine);
+  const calibration = useSettingsStore((s) => s.machineCalibration ?? null);
   const camera = useMachineCamera();
   const [paused, setPaused] = useState(false);
   const [frame, setFrame] = useState<ShownFrame | null>(null);
@@ -72,6 +102,9 @@ export function CameraPanel(): JSX.Element | null {
   const [detail, setDetail] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const shownUrl = useRef<string | null>(null);
+  // #770 — the camera-home press: its guard's sentence and whether a move is on its way.
+  const [homeBusy, setHomeBusy] = useState(false);
+  const [homeNote, setHomeNote] = useState<string | null>(null);
 
   // A frame from the previous opening is still a fact about the bed, with an age; the first frame
   // after resume replaces it. Nothing here clears the picture on pause or on close.
@@ -136,6 +169,45 @@ export function CameraPanel(): JSX.Element | null {
   const stale = !paused && cameraStale(lastFrameAt, now);
   const host = camera?.host ?? machine?.host ?? null;
   const header = machine?.name ?? 'Camera';
+
+  // #770 — the camera-home pose and whether a press is allowed NOW. The pose is the machine's own
+  // clearance frame (`coordinate.clearance_x/y/z`), resolved through the machine's saved calibration
+  // where one exists; `runCameraHome` re-checks Idle at the connection, so this is the button's
+  // hint, not the safety rule.
+  const profile =
+    (machine === null ? undefined : resolvedMachineById(machine.profileId ?? Z1.id, calibration)) ?? Z1;
+  const pose: CameraHomePose = {
+    x: profile.toolChange.clearanceXY[0],
+    y: profile.toolChange.clearanceXY[1],
+    z: profile.toolChange.clearanceZ,
+  };
+  const basis: CameraHomeBasis =
+    machine?.profileId === null || machine === null ? 'unknown-machine' : calibration !== null ? 'calibration' : 'profile';
+  const poseWords = cameraHomeWords(pose, basis, machine?.name ?? profile.name);
+  const statusLine =
+    machine === null ? null : (machine.statusLine ?? (machine.status === null ? null : readStatusLine(machine.status)));
+  const stateWord = statusLine?.state ?? null;
+  const percent = statusLine?.progress.percent ?? null;
+  const idleNoJob = stateWord !== null && stateWord.toLowerCase() === 'idle' && (percent === null || percent >= 100);
+  const homeRefusal =
+    machine === null
+      ? 'No machine is connected.'
+      : idleNoJob
+        ? null
+        : stateWord === null
+          ? 'The machine’s state is not known.'
+          : stateWord.toLowerCase() === 'alarm'
+            ? 'The controller is in an alarm — clear it at the machine first.'
+            : `The machine reports ${stateWord}${percent !== null && percent < 100 ? ` (a program ${percent}% through)` : ''} — the move is only sent to an idle machine with no job.`;
+
+  async function sendHome(): Promise<void> {
+    if (homeBusy || machine === null || homeRefusal !== null) return;
+    setHomeBusy(true);
+    setHomeNote(null);
+    const r = await runCameraHome({ host: machine.host, port: machine.port }, cameraHomeLines(pose));
+    setHomeNote(homeWords(r, pose));
+    setHomeBusy(false);
+  }
 
   function saveFrame(): void {
     if (frame === null || host === null) return;
@@ -230,6 +302,33 @@ export function CameraPanel(): JSX.Element | null {
             >
               Save frame
             </button>
+            {/* #770 — one fixed move to the machine's own clearance pose, the view the camera has
+                of the bed; allowed only on an idle machine with no job, and never a jog (R-10). */}
+            <button
+              type="button"
+              data-testid="camera-home"
+              style={BUTTON}
+              disabled={homeBusy || homeRefusal !== null}
+              title={homeRefusal ?? poseWords}
+              onClick={() => void sendHome()}
+            >
+              {homeBusy ? 'Moving…' : 'Camera to home'}
+            </button>
+          </div>
+          <div style={{ padding: '0 10px 8px' }}>
+            <p data-testid="camera-home-pose" style={MUTED}>
+              {poseWords}
+            </p>
+            {homeNote !== null && (
+              <p data-testid="camera-home-note" style={{ ...MUTED, color: '#c8d3de' }}>
+                {homeNote}
+              </p>
+            )}
+            {homeRefusal !== null && (
+              <p data-testid="camera-home-refused" style={{ ...MUTED, color: STALE }}>
+                {homeRefusal}
+              </p>
+            )}
           </div>
         </>
       )}
