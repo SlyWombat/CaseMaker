@@ -931,8 +931,20 @@ function ballRise(ball: boolean, radius: number, d: number): number {
   return radius - Math.sqrt(radius * radius - d * d);
 }
 
-/** The gouge-safe tip field: the tool dropped onto the heightfield until it just touches. */
-function finishTipField(hf: GoalHeightfield, tool: SurfaceTool, maxOps: number): Float32Array {
+/**
+ * The gouge-safe tip field: the tool dropped onto the heightfield until it just touches.
+ *
+ * #723 — `wrapRows` reads the field's ROW axis as a cylinder's circumference (the rotary map):
+ * the stencil wraps modulo `ny` instead of treating the off-grid neighbours as uncut stock, so a
+ * pass on the first (or last) row is not lifted to the stock's surface by the seam. The COLUMN
+ * axis keeps the flat rule — beyond the sampled X range the stock really does continue.
+ */
+export function finishTipField(
+  hf: GoalHeightfield,
+  tool: SurfaceTool,
+  maxOps: number,
+  opts: { wrapRows?: boolean } = {},
+): Float32Array {
   const { nx, ny, z, covered, pitch, topZ } = hf;
   const tip = new Float32Array(nx * ny);
   tip.fill(topZ);
@@ -968,13 +980,22 @@ function finishTipField(hf: GoalHeightfield, tool: SurfaceTool, maxOps: number):
       let best = -Infinity;
       for (const s of stencil) {
         const ii = i + s.di;
-        const jj = j + s.dj;
-        if (ii < 0 || ii >= nx || jj < 0 || jj >= ny) {
-          // Off the grid is uncut stock at the top face — the tool rides on it.
+        const rawJ = j + s.dj;
+        if (ii < 0 || ii >= nx) {
+          // Off the grid in X is uncut stock at the top face — the tool rides on it.
           best = Math.max(best, topZ - s.rise);
           continue;
         }
-        best = Math.max(best, (z[jj * nx + ii] as number) - s.rise);
+        if (opts.wrapRows === true) {
+          const jj = ((rawJ % ny) + ny) % ny;
+          best = Math.max(best, (z[jj * nx + ii] as number) - s.rise);
+          continue;
+        }
+        if (rawJ < 0 || rawJ >= ny) {
+          best = Math.max(best, topZ - s.rise);
+          continue;
+        }
+        best = Math.max(best, (z[rawJ * nx + ii] as number) - s.rise);
       }
       tip[idx] = best;
     }
@@ -1114,7 +1135,7 @@ function roughingMoves(
  * scan lines spaced by the finishing step-over, sampled along each line at `alongStep` so the dexel
  * sim of the result tracks the goal within the step-over and the grid pitch.
  */
-function finishingMoves(
+export function finishingMoves(
   hf: GoalHeightfield,
   tip: Float32Array,
   feeds: SurfaceFeeds,

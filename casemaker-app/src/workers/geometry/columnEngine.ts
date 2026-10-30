@@ -714,15 +714,22 @@ export const ROTARY: ColumnParameterisation = {
     // A move with no X/A travel is a plunge: the tip is at one point and passes through every Z
     // on the segment, so the deepest end is the floor, not the end a foot parameter would pick.
     const planar = m.u0 !== m.u1 || m.v0 !== m.v1;
-    const rt = toolRadius;
+    // #763/#723 — A BALL'S OR A V'S BODY IS NOT `radius` WIDE. `radius` is the FLAT part of the
+    // tip — 0 for a ball and for a V — and the body's widest radius is `outerRadius` (a ball's
+    // hemisphere radius, a V's shank). The footprint windows below must use that BODY REACH: with
+    // `radius` alone a ball cut only the columns exactly under its tip, so the scallops between
+    // passes stood at the previous pass's floor (found by #723 R-2: a ⌀2 ball at a 0.4 mm
+    // step-over left the rough's allowance standing between every pair of passes). A flat is
+    // unchanged — its `outerRadius` is absent, so `reach` is its own radius.
+    const reach = cutter.outerRadius ?? cutter.radius;
     const { nu, nv, u0, du, dv, h } = grid;
     const xLo = Math.min(m.u0, m.u1);
     const xHi = Math.max(m.u0, m.u1);
     const aLo = Math.min(m.v0, m.v1);
     const aHi = Math.max(m.v0, m.v1);
     let written = 0;
-    const iLo = Math.max(0, Math.floor((xLo - rt - u0) / du));
-    const iHi = Math.min(nu - 1, Math.ceil((xHi + rt - u0) / du));
+    const iLo = Math.max(0, Math.floor((xLo - reach - u0) / du));
+    const iHi = Math.min(nu - 1, Math.ceil((xHi + reach - u0) / du));
     // #240 slice 2 — THE FOOTPRINT IS SWEPT ALONG THE MOVE'S OWN SEGMENT. §4.2's half-strip
     // `|y| ≤ r_t, z ≥ Z_t` is, on the near side at angle φ, the WEDGE `|dx| ≤ r_t` by
     // `|Z_t·tan φ| ≤ r_eff` (the cross-section plane's `y` is `Z_t·tan φ`), and the material it
@@ -734,7 +741,7 @@ export const ROTARY: ColumnParameterisation = {
     // oracle reports exactly that as an over-cut outside the opened region. This is FLAT's #405
     // rule read in the rotary frame: the cut must use the segment the gouge check reads.
     const perDeg = zt * DEG; // mm of arc at Z_t per degree of A — the linearised foot search only
-    const phiMax = (Math.atan2(rt, zt) * 180) / Math.PI; // §4.2's atan(r_t/Z_t)
+    const phiMax = (Math.atan2(reach, zt) * 180) / Math.PI; // §4.2's atan(body reach/Z_t)
     const dxs = m.u1 - m.u0;
     const das = (m.v1 - m.v0) * perDeg;
     const len2 = dxs * dxs + das * das;
@@ -746,7 +753,7 @@ export const ROTARY: ColumnParameterisation = {
       for (let i = iLo; i <= iHi; i++) {
         const x = u0 + i * du;
         const dx = x < xLo ? xLo - x : x > xHi ? x - xHi : 0;
-        if (dx > rt) continue;
+        if (dx > reach) continue;
         let jLo = Math.floor((aLo - 90) / dv);
         let jHi = Math.ceil((aHi + 90) / dv);
         if (jHi - jLo >= nv) {

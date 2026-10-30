@@ -93,11 +93,12 @@ findings built on it (later slice) say, in the operator's words:
 ### The CAM
 
 - **Roughing in A sweeps at stepped radii.** For each radial layer `L` from the stock's surface
-  down to `minRadius + allowance`, the stock turns through a full A sweep while X advances one
-  roughing step-over per turn; at each move the tip rides at `L` but is clamped UP to the field's
-  gouge-safe tip + allowance, so a layer never reaches the part higher than the allowance. This is
-  the flat roughing's clamp (the same `floorAt` rule) with the raster's scan direction around the
-  stock instead of across it.
+  down to `minRadius + allowance`, the stock turns through a full A sweep; at each move the tip
+  rides at `L` but is clamped UP to the field's gouge-safe tip + allowance, so a layer never
+  reaches the part higher than the allowance. This is the flat roughing's clamp (the same
+  `floorAt` rule) with the raster's scan direction around the stock instead of across it. R-2's
+  first implementation steps X between full turns (a raster of A sweeps); the X-advances-per-turn
+  spiral is the later option, and both are "A sweeps at stepped radii".
 - **A ball finish as an A-spiral or an X-raster on the radial field.** The X-raster follows the
   flat goal's parallel finish in map space (passes along X at a stepped A, spaced by the finishing
   step-over); the A-spiral advances X one step-over per turn with Z following the field. The raster
@@ -108,6 +109,13 @@ findings built on it (later slice) say, in the operator's words:
   of the stock (the rotary clearance rule) exactly as the wrapped text and pocket programs do.
 - The finishing tip must stay above the axis: `z_tip = r_goal ≥ minRadius > 0` is R8's condition at
   the CAM's level, and the sweep's own axis rule is the second check.
+- **The map's two axes are not both open.** X ends at the sampled mesh's extent (beyond it the rod
+  continues — uncut stock, the flat field's rule), but the around axis is a circle: the tip
+  field's ROWS wrap (`finishTipField`'s `wrapRows`), or the pass on the seam rides on the stock's
+  surface and leaves the allowance standing in one hairline column (found in R-2's first sweep).
+- The rotary column engine's footprint windows use the cutter's BODY REACH (`outerRadius`), not its
+  flat tip `radius`: with the tip radius alone a ball cut only the columns exactly under its tip,
+  and the scallops between passes stood at the previous pass's floor (R-2's cone sweep found it).
 - Feeds are the job's ordinary 2.5D feeds (the flat goal's labelled placeholder, #536), and the
   rotary feed-at-radius warning (#759) applies to the A moves as it does to any rotary program.
 

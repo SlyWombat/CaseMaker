@@ -266,3 +266,225 @@ export function sampleGoalRadialField(
 
   return { nx, ny, x0, y0: 0, pitch, radius, minRadius, maxRadius, z, covered, coveredCount, resolutionNote };
 }
+
+// ── R-2: the CAM over the field ────────────────────────────────────────────────────────────────
+
+import type { Tool } from '@/engine/cnc/tool';
+import { cuttingDiameter } from '@/engine/cnc/tool';
+import {
+  DEFAULT_MAX_FINISH_TIP_OPS,
+  DEFAULT_STOCK_TO_LEAVE_MM,
+  finishTipField,
+  finishingMoves,
+  type GoalHeightfield,
+  type SurfaceFeeds,
+  type SurfaceTool,
+} from './surface3d';
+import {
+  estimateCycleSeconds,
+  HOP_Z,
+  SAFE_Z,
+  type CamMove,
+  type CamOperation,
+  type RapidEstimate,
+  type ToolpathIR,
+} from './ir';
+import { throughCentreSentence, toRotaryIR } from '@/engine/cnc/rotary/wrap';
+
+/**
+ * The radial field as the flat goal pipeline's heightfield: same grid, same sentinel (0 = the
+ * stock's surface), same height convention (negative into the stock). The finish reuses the flat
+ * pass's gouge-safe tip drop through this view — one model, not a second one.
+ */
+export function radialFieldAsHeightfield(field: GoalRadialField): GoalHeightfield {
+  return {
+    nx: field.nx,
+    ny: field.ny,
+    x0: field.x0,
+    y0: field.y0,
+    pitch: field.pitch,
+    topZ: 0,
+    minZ: field.minRadius - field.radius,
+    z: field.z,
+    covered: field.covered,
+    coveredCount: field.coveredCount,
+    resolutionNote: field.resolutionNote,
+  };
+}
+
+export interface RotaryReliefArgs {
+  field: GoalRadialField;
+  tool: Tool;
+  toolNumber: number;
+  spindleRpm: number;
+  air: boolean;
+  feeds: SurfaceFeeds;
+  rapid: RapidEstimate;
+  /** Roughing allowance, mm; absent → {@link DEFAULT_STOCK_TO_LEAVE_MM}. */
+  stockToLeaveMm?: number;
+  /** The finishing tip field's budget; absent → {@link DEFAULT_MAX_FINISH_TIP_OPS}. */
+  maxFinishTipOps?: number;
+}
+
+export interface RotaryReliefResult {
+  /** The rotary-frame IR (through `toRotaryIR`). */
+  ir: ToolpathIR;
+  roughing: CamOperation;
+  finishing: CamOperation;
+  roughingLayers: number;
+  /** The design radius the program was wrapped at, mm. */
+  radius: number;
+}
+
+/**
+ * #723 R-2 — THE ROTARY RELIEF CAM: A-sweep roughing at stepped radii, then the ball finish over
+ * the radial field, wrapped into the rotary frame.
+ *
+ * ROUGHING. For each radial layer from the stock's surface down to `minRadius + allowance`, the
+ * stock turns through a full A sweep at each map X, the tip riding at the layer but clamped UP to
+ * the goal's own radius plus the allowance there — the flat roughing's clamp rule with the scan
+ * around the stock instead of across it. A sweep stops and retracts where the clamp reaches the
+ * stock's surface (nothing to remove) and resumes in the next run. This first implementation
+ * STEPS X between full turns (a raster of A sweeps); the design's X-advances-per-turn spiral is a
+ * later option, and both are the same "A sweeps at stepped radii".
+ *
+ * FINISHING. The flat goal's parallel finish, verbatim, over the radial field's map view: one tip
+ * field (the gouge-safe ball drop) and raster passes along X at the finishing step-over. The map's
+ * Y is the arc around the rod, so a raster row IS one A angle and the pass along X is a feed at a
+ * held A.
+ *
+ * R8. A tip at or below the axis has no floor: the field's `minRadius <= 0` is refused with the
+ * design's own "cuts through the centre" words before any move is written, and the sweep's axis
+ * rule is the second check.
+ */
+export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResult {
+  const { field, tool, feeds, rapid } = args;
+  if (!(field.minRadius > 0)) {
+    throw new Error(
+      `a rotary relief whose surface reaches the axis cannot be cut: ${throughCentreSentence(field.minRadius)}`,
+    );
+  }
+  const allowance = args.stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM;
+  const diameter = cuttingDiameter(tool) ?? 0;
+  if (!(diameter > 0)) throw new Error(`the rotary relief's cutter ${tool.name} states no cutting diameter`);
+  const toolRadius = diameter / 2;
+  const surfaceTool: SurfaceTool = { radius: toolRadius, ball: tool.shape === 'ball' || tool.shape === 'bull' };
+  const hf = radialFieldAsHeightfield(field);
+
+  // Roughing: the A sweeps at stepped radii.
+  const rough = aSweepRoughing(field, feeds, allowance);
+  const roughing: CamOperation = {
+    number: 1,
+    name: `[T${args.toolNumber}] rotary 3D rough — ${allowance} mm to leave`,
+    labelId: '',
+    depth: Math.max(0, 0 - hf.minZ),
+    passKind: 'rough',
+    moves: rough.moves,
+    estimatedSeconds: estimateCycleSeconds(rough.moves, rapid, field.radius),
+  };
+
+  // Finishing: the flat goal's parallel finish over the map view.
+  // The map's around axis is a circle: the tip field's rows WRAP, or the pass on the seam rides
+  // on the stock's surface and leaves the allowance standing in one hairline column.
+  const tip = finishTipField(hf, surfaceTool, args.maxFinishTipOps ?? DEFAULT_MAX_FINISH_TIP_OPS, {
+    wrapRows: true,
+  });
+  const finish = finishingMoves(hf, tip, feeds, hf.pitch, SAFE_Z, HOP_Z);
+  const finishing: CamOperation = {
+    number: 2,
+    name: `[T${args.toolNumber}] rotary 3D finish`,
+    labelId: '',
+    depth: Math.max(0, 0 - hf.minZ),
+    passKind: 'finish',
+    moves: finish,
+    estimatedSeconds: estimateCycleSeconds(finish, rapid, field.radius),
+  };
+
+  const mapIr: ToolpathIR = {
+    frame: 'flat',
+    tool,
+    toolNumber: args.toolNumber,
+    spindleRpm: args.spindleRpm,
+    air: args.air,
+    safeZ: SAFE_Z,
+    hopZ: HOP_Z,
+    operations: [roughing, finishing],
+  };
+  const ir = toRotaryIR(mapIr, field.radius, rapid);
+  // The result carries the WRAPPED operations (A on every move), not the map-space ones they were
+  // made from: a caller reading `roughing`/`finishing` is reading the program that will post.
+  return {
+    ir,
+    roughing: ir.operations[0]!,
+    finishing: ir.operations[1]!,
+    roughingLayers: rough.layers,
+    radius: field.radius,
+  };
+}
+
+/**
+ * The A-sweep roughing. Each layer is a set of full turns, one per map X (stepped by the roughing
+ * step-over); at each cell the tip is `max(layer, goal + allowance)`, and a sweep retracts where
+ * that clamp reaches the stock's surface — there is nothing there to remove.
+ */
+function aSweepRoughing(
+  field: GoalRadialField,
+  feeds: SurfaceFeeds,
+  allowance: number,
+): { moves: CamMove[]; layers: number } {
+  const moves: CamMove[] = [];
+  const { nx, ny, pitch, x0, z, covered } = field;
+  const minZ = field.minRadius - field.radius;
+  if (!(feeds.stepDown > 0)) {
+    throw new Error(`a rotary relief's roughing needs a positive step-down; the feeds gave ${feeds.stepDown} mm`);
+  }
+  const levels: number[] = [];
+  const deepest = minZ + allowance;
+  for (let L = -feeds.stepDown; L > deepest + 1e-9; L -= feeds.stepDown) levels.push(L);
+  levels.push(Math.min(deepest, -1e-6));
+  // The map X columns this layer sweeps: a raster of full turns.
+  const stride = Math.max(1, Math.round(feeds.roughStepOver / pitch));
+  const cols: number[] = [];
+  for (let i = 0; i < nx; i += stride) cols.push(i);
+  if (cols.length === 0 || cols[cols.length - 1] !== nx - 1) cols.push(nx - 1);
+
+  const retract = (x: number, y: number): void => {
+    moves.push({ kind: 'rapid', x, y, z: HOP_Z });
+  };
+
+  for (const L of levels) {
+    for (const i of cols) {
+      const x = x0 + i * pitch;
+      let open = false;
+      let prevY = 0;
+      for (let j = 0; j <= ny; j++) {
+        // One full turn: after ny cells the seam cell closes the loop.
+        const jj = j % ny;
+        const idx = jj * nx + i;
+        const y = j * pitch;
+        const clamp = covered[idx] === 1 ? (z[idx] as number) + allowance : 0;
+        const tip = Math.max(L, clamp);
+        const cut = tip < -1e-9;
+        if (cut) {
+          if (!open) {
+            moves.push({ kind: 'rapid', x, y, z: HOP_Z });
+            moves.push({ kind: 'feed', x, y, z: tip, f: feeds.plungeFeed });
+            open = true;
+          } else {
+            moves.push({ kind: 'feed', x, y, z: tip, f: feeds.feed });
+          }
+          prevY = y;
+        } else if (open) {
+          retract(x, prevY);
+          open = false;
+        }
+      }
+      if (open) retract(x, prevY);
+    }
+  }
+  if (moves.length > 0) {
+    const last = moves[moves.length - 1]!;
+    moves.push({ kind: 'rapid', x: last.x, y: last.y, z: SAFE_Z });
+  }
+  return { moves, layers: levels.length };
+}
