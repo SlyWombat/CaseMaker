@@ -903,6 +903,12 @@ const targetObjectSchema = z
       .finite()
       .optional()
       .describe('Turn in degrees about the mesh centre’s Y axis (applied after Z); omit for 0.'),
+    // #723 P2-1b — which saved setup cuts this goal; absent means the job's first setup.
+    setupId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('The id of the setup that cuts this goal; omit to cut it in the first setup.'),
     // #722 — optional like `role`: absent is 1 on every axis, so older documents round-trip.
     scale: z
       .object({
@@ -2328,9 +2334,68 @@ const engraveJobV3Schema = engraveJobV2Schema
     targetObject: targetObjectSchema
       .optional()
       .describe('Reference mesh the primitives are positioned against; omit for none.'),
+    // #723 P2-1b — the multi-goal form: one target per side, each naming its setup. OPTIONAL and
+    // not defaulted, like every list above, so a one-goal document keeps `targetObject` alone.
+    targetObjects: z
+      .array(targetObjectSchema)
+      .optional()
+      .describe('The targets of a job cut from several sides, one per setup; omit for the single `targetObject` form.'),
   })
   .passthrough()
   .superRefine((job, ctx) => {
+    // #723 P2-1b — THE MULTI-GOAL FORM. One form or the other, never both; unique ids; and every
+    // goal's setup link must name a setup the job really has, at most one goal per setup, with at
+    // most one goal left to the first setup (an unassigned goal means "the first side").
+    if (job.targetObjects !== undefined) {
+      if (job.targetObject !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['targetObjects'],
+          message: 'a job states its targets as `targetObject` or `targetObjects`, not both',
+        });
+      }
+      const setupIds = new Set((job.setups ?? []).map((s) => s.id));
+      const ids = new Set<string>();
+      const claimed = new Set<string>();
+      let unassignedGoals = 0;
+      job.targetObjects.forEach((target, i) => {
+        if (ids.has(target.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['targetObjects', i, 'id'],
+            message: `two targets are called "${target.id}"`,
+          });
+        }
+        ids.add(target.id);
+        const goal = (target.role ?? 'reference') === 'goal' && target.enabled;
+        if (target.setupId === undefined) {
+          if (goal) unassignedGoals += 1;
+          return;
+        }
+        if (!setupIds.has(target.setupId)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['targetObjects', i, 'setupId'],
+            message: `names setup "${target.setupId}", which this job does not have`,
+          });
+        } else if (claimed.has(target.setupId)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['targetObjects', i, 'setupId'],
+            message: `two targets name setup "${target.setupId}"`,
+          });
+        } else {
+          claimed.add(target.setupId);
+        }
+      });
+      if (unassignedGoals > 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['targetObjects'],
+          message: 'more than one goal names no setup; each side after the first says which setup cuts it',
+        });
+      }
+    }
     // #713 — a tube is round stock with a bore, so the job must state how thick its side is: the
     // wall caps every later cut depth and cannot be read from the box. Its own sentence, naming the
     // stock field; a rod states none, and every document written before #713 has no such entry.

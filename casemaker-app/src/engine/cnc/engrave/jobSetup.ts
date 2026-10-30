@@ -1069,7 +1069,12 @@ export function pureGoalObject(job: EngraveJob): EngraveTargetObject | null {
   const t = job.targetObject;
   if (t === undefined || (t.role ?? 'reference') !== 'goal' || !t.enabled) return null;
   if (job.setups !== undefined) return null;
-  const hasItems =
+  return jobHasItems(job) ? null : t;
+}
+
+/** #723 P2-1b — whether the document holds any item work (the mixed-job test for a goal job). */
+export function jobHasItems(job: EngraveJob): boolean {
+  return (
     job.labels.length > 0 ||
     job.shapes.length > 0 ||
     (job.cutouts?.length ?? 0) > 0 ||
@@ -1080,8 +1085,52 @@ export function pureGoalObject(job: EngraveJob): EngraveTargetObject | null {
     (job.keepOuts?.length ?? 0) > 0 ||
     (job.drills?.length ?? 0) > 0 ||
     (job.threads?.length ?? 0) > 0 ||
-    (job.primitives?.length ?? 0) > 0;
-  return hasItems ? null : t;
+    (job.primitives?.length ?? 0) > 0
+  );
+}
+
+/**
+ * #723 P2-1b — every target object the document names, in order. The singular `targetObject` is
+ * the one-goal form and reads as a one-entry list, so a job written before `targetObjects` existed
+ * is indistinguishable from one that names its single goal in the list.
+ */
+export function jobTargetObjects(job: EngraveJob): EngraveTargetObject[] {
+  if (job.targetObjects !== undefined) return job.targetObjects;
+  return job.targetObject === undefined ? [] : [job.targetObject];
+}
+
+/** One side of a multi-setup goal job: the enabled goal and the setup that cuts it. */
+export interface GoalSide {
+  setup: JobSetup;
+  /** 0-based, the setup's index in `jobSetups(job)`. */
+  setupIndex: number;
+  goal: EngraveTargetObject;
+}
+
+/**
+ * #723 P2-1b — the goal jobs' SIDES, in setup order. One goal per setup: a goal that names
+ * `setupId` takes that side; a goal that names none takes the FIRST setup (today's single-side
+ * behaviour, and the schema refuses a second unassigned goal). Reference objects and disabled
+ * targets are not sides and are skipped. A job with no saved setups (`job.setups === undefined`)
+ * has no multi-side reading at all — that is the legacy single-goal path's.
+ */
+export function goalSides(job: EngraveJob): GoalSide[] {
+  if (job.setups === undefined) return [];
+  const goals = jobTargetObjects(job).filter((t) => (t.role ?? 'reference') === 'goal' && t.enabled);
+  if (goals.length === 0) return [];
+  const setups = jobSetups(job);
+  const bySetup = new Map<string, EngraveTargetObject>();
+  for (const goal of goals) {
+    const setup = goal.setupId === undefined ? setups[0] : setups.find((s) => s.id === goal.setupId);
+    // The schema refuses an unknown `setupId`; a document that reached here by other means simply
+    // does not cut that goal rather than silently moving it to another side.
+    if (setup === undefined || bySetup.has(setup.id)) continue;
+    bySetup.set(setup.id, goal);
+  }
+  return setups.flatMap((setup, setupIndex) => {
+    const goal = bySetup.get(setup.id);
+    return goal === undefined ? [] : [{ setup, setupIndex, goal }];
+  });
 }
 
 export function validateJob(

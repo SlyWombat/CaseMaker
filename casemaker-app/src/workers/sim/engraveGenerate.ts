@@ -79,12 +79,15 @@ import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan }
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import {
   dedupeFindings,
+  goalSides,
+  jobHasItems,
   jobSetups,
   pureGoalObject,
   setupProgramFindings,
   toSetup,
   validateGoalObject,
   validateJob,
+  type GoalSide,
   type JobFinding,
 } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
@@ -4618,6 +4621,44 @@ export function generateGoalProgram(
 }
 
 /**
+ * #723 P2-1b — a goal job cut from several sides: ONE program per side, in setup order. Each side
+ * is surfaced by the single-goal path unchanged (same cutter, feeds, document findings and its own
+ * `validateGoalObject`), then adapted into the job's program list with that setup's index and id.
+ * The top-level fields describe the first program, exactly as every multi-program result does.
+ * A side that fails stops the run and is returned with the programs generated before it.
+ */
+function generateGoalPrograms(
+  job: EngraveJob,
+  sides: readonly GoalSide[],
+  tool: Tool | null,
+  catalogue: readonly FeedCatalogueRow[],
+  calibration: MachineCalibration | null,
+  shop: EngraveShopOpts,
+): EngraveGenerated {
+  // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
+  // path already builds the program with it — so each side's program is that program with the
+  // side's setup on it, never a field-by-field copy that could drop the check.
+  const sideProgram = (one: EngraveGenerated, side: GoalSide): EngraveProgram | null => {
+    const program = one.ok && one.nc !== null ? one.programs[0] : undefined;
+    if (program === undefined) return null;
+    return { ...program, setupIndex: side.setupIndex + 1, setupId: side.setup.id, toolKey: job.toolKey };
+  };
+
+  const firstSide = sides[0]!;
+  const first = generateGoalProgram(job, firstSide.goal, tool, catalogue, calibration, shop);
+  const firstProgram = sideProgram(first, firstSide);
+  if (firstProgram === null) return { ...first, programs: [] };
+  const programs: EngraveProgram[] = [firstProgram];
+  for (const side of sides.slice(1)) {
+    const one = generateGoalProgram(job, side.goal, tool, catalogue, calibration, shop);
+    const program = sideProgram(one, side);
+    if (program === null) return { ...one, programs };
+    programs.push(program);
+  }
+  return { ...first, programs };
+}
+
+/**
  * The XY extent of a program's positioned moves, for the console's laser frame (#535). The
  * verifier's report normally carries this bbox; a surface program has no report, and its check
  * carries the same fact so the frame is still the program's own outline.
@@ -4737,6 +4778,39 @@ export function engraveGenerate(
   // surfaced by `cam/surface3d` (raster roughing + ball finishing over the goal's heightfield),
   // dispatched here BEFORE the item pipeline, which has nothing to cut. A goal mixed with item work
   // stays on the path below (the items cut; the goal keeps its `goal-object-no-toolpath` info).
+  //
+  // #723 P2-1b — A GOAL JOB WITH SETUPS is the multi-side form: one goal object per side, each
+  // naming the setup that cuts it, and one program per side in setup order. The goals are sampled
+  // in their own side's work frame (the operator authors each side's surface as it will be seen
+  // with that face up); the setup's orientation is the MOUNT's and the registration's, and P2-2b
+  // uses it to carry the remaining stock between sweeps.
+  if (job.setups !== undefined && !jobHasItems(job)) {
+    const sides = goalSides(job);
+    if (sides.length > 0) {
+      const rotary = rotaryMapOf(job);
+      if (rotary !== null) {
+        // A relief on a rod is ONE indexed program: its frame is the chuck's, not a hand flip.
+        return {
+          ...emptyGoalResult(),
+          ok: false,
+          stage: 'findings',
+          findings: [],
+          feeds: null,
+          cam: null,
+          nc: null,
+          verify: null,
+          errors: [
+            {
+              stage: 'findings',
+              message:
+                'a goal on a rod is one rotary relief program, so it does not take manual-rotation setups: cut it in a job of its own',
+            },
+          ],
+        };
+      }
+      return { ...generateGoalPrograms(job, sides, tool, catalogue, calibration, shop), surface: null };
+    }
+  }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
   if (goal !== null) {
     // #723 R-3 — A ROTARY GOAL IS THE RELIEF: a goal on a rod in the chuck is turned from the

@@ -5743,6 +5743,11 @@
               ],
               "type": "object"
             },
+            "setupId": {
+              "description": "The id of the setup that cuts this goal; omit to cut it in the first setup.",
+              "minLength": 1,
+              "type": "string"
+            },
             "sha256": {
               "description": "Lowercase SHA-256 of the mesh file's bytes (64 hex characters).",
               "pattern": "^[0-9a-f]{64}$",
@@ -5838,6 +5843,239 @@
             "enabled"
           ],
           "type": "object"
+        },
+        "targetObjects": {
+          "description": "The targets of a job cut from several sides, one per setup; omit for the single `targetObject` form.",
+          "items": {
+            "additionalProperties": false,
+            "description": "An embedded mesh (STL/3MF): a reference the cutting volumes are positioned against, or a goal shape to make.",
+            "properties": {
+              "data": {
+                "description": "Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "enabled": {
+                "description": "False keeps the object in the document but out of the program.",
+                "type": "boolean"
+              },
+              "format": {
+                "description": "File format of the reference object: a mesh ('stl'/'3mf'), or a 'png' picture whose luminance is the goal heightfield (#672).",
+                "enum": [
+                  "stl",
+                  "3mf",
+                  "png"
+                ],
+                "type": "string"
+              },
+              "goalMode": {
+                "description": "What a goal mesh makes: 'item' (the part stands proud; the default when absent) or 'mold' (the part cut as a cavity to cast it in).",
+                "enum": [
+                  "item",
+                  "mold"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "description": "Unique id for the reference object.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "name": {
+                "description": "File name the reference object was imported from.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "position": {
+                "additionalProperties": false,
+                "description": "Where the reference mesh is placed: X/Y centre and TOP height in the work frame.",
+                "properties": {
+                  "x": {
+                    "description": "X of the mesh bounding-box centre, in the work frame.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y of the mesh bounding-box centre, in the work frame.",
+                    "type": "number"
+                  },
+                  "z": {
+                    "description": "Z of the mesh's TOP in the work frame.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "z"
+                ],
+                "type": "object"
+              },
+              "relief": {
+                "additionalProperties": false,
+                "description": "A PNG goal’s relief map: its depth and direction (#672); omit for defaults.",
+                "properties": {
+                  "invert": {
+                    "description": "True puts black at the top face; omit (or false) for white at the top face.",
+                    "type": "boolean"
+                  },
+                  "maxDepthMm": {
+                    "description": "The deepest relief cut below the image’s top face, in millimetres; omit for the CAM’s 1.5 mm.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 20,
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "role": {
+                "description": "What the mesh is to the job: 'reference' (positioned against, not cut; the default when absent) or 'goal' (the shape to make).",
+                "enum": [
+                  "reference",
+                  "goal"
+                ],
+                "type": "string"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about Z through the mesh centre.",
+                "type": "number"
+              },
+              "rotationX": {
+                "description": "Turn in degrees about the mesh centre’s X axis (applied after Z and Y); omit for 0.",
+                "type": "number"
+              },
+              "rotationY": {
+                "description": "Turn in degrees about the mesh centre’s Y axis (applied after Z); omit for 0.",
+                "type": "number"
+              },
+              "scale": {
+                "additionalProperties": false,
+                "description": "A mesh’s per-axis scale about its X/Y centre and its top; omit for the file’s own size. Ignored for a PNG relief.",
+                "properties": {
+                  "x": {
+                    "description": "Scale factor along X (1 = the file’s own size).",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Scale factor along Y (1 = the file’s own size).",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "z": {
+                    "description": "Scale factor along Z (1 = the file’s own size).",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "z"
+                ],
+                "type": "object"
+              },
+              "setupId": {
+                "description": "The id of the setup that cuts this goal; omit to cut it in the first setup.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "Lowercase SHA-256 of the mesh file's bytes (64 hex characters).",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "size": {
+                "additionalProperties": false,
+                "description": "Parsed mesh bounding-box size in millimetres.",
+                "properties": {
+                  "x": {
+                    "description": "Mesh bounding-box size along X, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Mesh bounding-box size along Y, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "z": {
+                    "description": "Mesh bounding-box size along Z, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "z"
+                ],
+                "type": "object"
+              },
+              "surface": {
+                "additionalProperties": false,
+                "description": "The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.",
+                "properties": {
+                  "finishStepOverMm": {
+                    "description": "Finishing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 20,
+                    "type": "number"
+                  },
+                  "gridPitchMm": {
+                    "description": "Heightfield sampling pitch on both axes, in millimetres; omit for the shop’s flat-grid Y pitch.",
+                    "maximum": 2,
+                    "minimum": 0.02,
+                    "type": "number"
+                  },
+                  "pencil": {
+                    "description": "Add a pencil pass along the concave creases after the scallop; omit for off.",
+                    "type": "boolean"
+                  },
+                  "pencilCreaseDeg": {
+                    "description": "The crease angle the pencil pass follows, in degrees; omit for the CAM’s 20°.",
+                    "maximum": 80,
+                    "minimum": 1,
+                    "type": "number"
+                  },
+                  "roughStepDownMm": {
+                    "description": "Roughing step-down per Z layer, in millimetres; omit for the feeds row’s.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 20,
+                    "type": "number"
+                  },
+                  "roughStepOverMm": {
+                    "description": "Roughing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 20,
+                    "type": "number"
+                  },
+                  "scallop": {
+                    "description": "Add a scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface; omit for off.",
+                    "type": "boolean"
+                  },
+                  "stockToLeaveMm": {
+                    "description": "Roughing allowance left on the goal surface, in millimetres; omit for the shop’s finish stock-to-leave.",
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "format",
+              "sha256",
+              "size",
+              "position",
+              "rotation",
+              "enabled"
+            ],
+            "type": "object"
+          },
+          "type": "array"
         },
         "threads": {
           "description": "Milled metric threads; omit for none.",

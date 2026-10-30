@@ -627,6 +627,14 @@ export interface EngraveTargetObject {
   /** False hides the object in the viewport; a reference is never cut either way. */
   enabled: boolean;
   /**
+   * #723 part 2 — the saved setup this goal is cut in, when the job has more than one side. A goal
+   * with no `setupId` is cut in the job's FIRST setup (every job written before this field existed),
+   * and a job with no `setups[]` reads the goal on its implicit single setup as it always has.
+   * The id names a `JobSetup` in `EngraveJob.setups`; the schema refuses one the job does not have,
+   * and two goals naming the same setup.
+   */
+  setupId?: string;
+  /**
    * What the mesh IS to the job (#533). Absent means `'reference'` — the only role before this
    * slice — so old documents keep today's behaviour. `'goal'` marks the mesh as the shape to make.
    */
@@ -1745,6 +1753,14 @@ export interface EngraveJob {
    * #218's cut-out work.
    */
   targetObject?: EngraveTargetObject;
+  /**
+   * #723 part 2 — the MULTI-GOAL form: one target object per side of a job cut from several sides
+   * by hand. Each goal names its setup (`EngraveTargetObject.setupId`); the CAM generates one goal
+   * program per side, in setup order. `targetObject` stays the one-object form and reads as a
+   * one-entry list (`jobTargetObjects`), so every existing document is byte-identical; the schema
+   * refuses a document that carries both forms. Absent here = the single form.
+   */
+  targetObjects?: EngraveTargetObject[];
   /**
    * The key of the cutter this job is written for — a builtin (`flat-1.0`), or a later registry
    * tier's key (`cat:`, `user:`, `inv:`). A PLAIN STRING, so no saved job has ever needed
