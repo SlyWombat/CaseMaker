@@ -8,6 +8,7 @@ import { FloatersBanner } from './FloatersBanner';
 import { WelcomeOverlay } from '../welcome/WelcomeOverlay';
 import { StartWizard } from '../welcome/StartWizard';
 import { MachineChangeWizard } from '../machine-change';
+import { BedWizard } from '../bed-wizard';
 import { ContextPanel } from './ContextPanel';
 import { useContextPanelWidth } from './useContextPanelWidth';
 import { PanelResizeHandle } from './PanelResizeHandle';
@@ -106,6 +107,9 @@ export function AppShell() {
         {/* #693 — the change-the-machine wizard, mounted here so it outlives whatever surface opened
             it (Manage's pane is replaced, not covered). It renders itself null while closed. */}
         <MachineChangeWizard />
+        {/* #512 — the first-run bed wizard, mounted for the same reason and by the same rule. It
+            only ever writes the location: no step in it sends the machine a command. */}
+        <BedWizard />
       </main>
       <StatusBar />
       {/* #530 — the machine's camera, opened from the Cut step or the strip's popover and mounted

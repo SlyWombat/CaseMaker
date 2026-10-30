@@ -18,7 +18,7 @@
  *     not pretend a probe has run.
  */
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import type { BedProfile, FixtureRecord, MachineRecord } from '@/platform/locationClient';
 import { formatDay, mm } from './display';
 import { BedScene } from '@/components/viewport/BedScene';
@@ -42,6 +42,7 @@ import type { BedDatumKey } from '@/platform/bedProfiles';
 import { surfaceUnmeasuredCount } from '@/engine/cnc/bedScene';
 import { newId } from '@/utils/id';
 import { openMachineChange } from '@/components/machine-change';
+import { openBedWizard } from '@/store/bedWizardStore';
 
 /** The calipers list the unmeasured count links to (#444). */
 const CALIPERS_LIST_URL = 'https://github.com/SlyWombat/CaseMaker/issues/444';
@@ -181,11 +182,28 @@ export function MachineBed({ machine }: { machine: MachineRecord }) {
     setNote(res === 'ok' ? ok : 'the bed was not saved — see the card note');
   };
 
+  // #512 — the first-run entry: the wizard describes the bed before any registration has. It only
+  // writes the location (no machine moves), so it is offered on a build that cannot drive one too.
+  const wizardButton = (label: string): JSX.Element => (
+    <button
+      type="button"
+      className="btn btn--sm"
+      data-testid="manage-bed-wizard"
+      title="Describe the bed step by step — surface, fixtures, how stock is held. It never moves the machine."
+      onClick={() => openBedWizard(machine.id)}
+    >
+      {label}
+    </button>
+  );
+
   if (machine.bedProfiles === undefined) {
     return (
       <>
         <span>bed</span>
-        <b data-testid="manage-bed">— not described (described by the first registration)</b>
+        <b data-testid="manage-bed">
+          — not described (described by the first registration){' '}
+          {wizardButton('Set up the bed…')}
+        </b>
       </>
     );
   }
@@ -194,7 +212,9 @@ export function MachineBed({ machine }: { machine: MachineRecord }) {
     return (
       <>
         <span>bed</span>
-        <b data-testid="manage-bed">— no active profile</b>
+        <b data-testid="manage-bed">
+          — no active profile {wizardButton('Set up the bed…')}
+        </b>
       </>
     );
   }
@@ -252,6 +272,7 @@ export function MachineBed({ machine }: { machine: MachineRecord }) {
               ))}
             </select>
           </label>
+          {wizardButton('Set up the bed…')}
           <button
             type="button"
             className="btn btn--sm"

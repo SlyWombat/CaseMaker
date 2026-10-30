@@ -1,0 +1,261 @@
+/*
+ * #512 — the first-run bed wizard. The same dialog layer and palette as the change-the-machine
+ * wizard (#693): one modal at `--cm-z-modal-raised`, numbered steps, and rows that read at a
+ * glance. Its own class prefix (`bw-`) so the two wizards can change independently.
+ */
+
+.bw-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--cm-z-modal-raised);
+  background: rgba(8, 11, 15, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.bw-modal {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--cm-color-surface-container);
+  color: var(--cm-color-on-surface);
+  border: var(--cm-border-1);
+  border-radius: var(--cm-radius-lg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  font-family: var(--cm-font-body);
+  font-size: 0.8125rem;
+}
+
+.bw-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 3px 12px;
+  padding: 14px 18px 10px;
+  border-bottom: var(--cm-border-1);
+}
+
+.bw-eyebrow {
+  font: 500 0.6875rem/1 var(--cm-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cm-color-on-surface-muted);
+}
+
+.bw-head h3 {
+  margin: 0;
+  font: 600 1rem/1.3 var(--cm-font-display);
+  color: var(--cm-color-on-surface);
+}
+
+.bw-close {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: start;
+  background: none;
+  border: 0;
+  color: var(--cm-color-on-surface-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.bw-close:hover {
+  color: var(--cm-color-on-surface);
+}
+
+.bw-body {
+  overflow-y: auto;
+  padding: 4px 18px 10px;
+}
+
+.bw-no-moves {
+  margin: 8px 0 2px;
+  padding: 7px 10px;
+  border: 1px dashed var(--cm-color-outline);
+  border-radius: var(--cm-radius-sm);
+  color: var(--cm-color-on-surface-muted);
+  font-size: 0.75rem;
+}
+
+.bw-step {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--cm-color-outline-variant);
+}
+
+.bw-step:last-child {
+  border-bottom: 0;
+}
+
+.bw-step[data-state='later'] {
+  opacity: 0.55;
+}
+
+.bw-marker {
+  width: 28px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--cm-color-outline);
+  border-radius: 11px;
+  font: 500 0.6875rem/1 var(--cm-font-mono);
+  color: var(--cm-color-on-surface-muted);
+}
+
+.bw-step[data-state='current'] .bw-marker {
+  border-color: var(--cm-color-primary);
+  color: var(--cm-color-primary);
+}
+
+.bw-step[data-state='done'] .bw-marker {
+  border-color: var(--cm-color-secondary);
+  color: var(--cm-color-secondary);
+}
+
+.bw-text {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.bw-meta {
+  color: var(--cm-color-on-surface-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.bw-hint {
+  color: var(--cm-color-on-surface-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.bw-note {
+  margin: 2px 0;
+  color: var(--cm-color-error);
+  font-size: 0.75rem;
+}
+
+.bw-mono {
+  font-family: var(--cm-font-mono);
+}
+
+.bw-measure {
+  margin: 2px 0;
+  padding: 5px 8px;
+  border-left: 2px solid var(--cm-color-outline);
+  color: var(--cm-color-on-surface-muted);
+  font-size: 0.72rem;
+}
+
+.bw-radios {
+  display: grid;
+  gap: 4px;
+}
+
+.bw-radio {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--cm-radius-sm);
+  cursor: pointer;
+}
+
+.bw-radio[data-selected='true'] {
+  border-color: var(--cm-color-primary);
+}
+
+.bw-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: end;
+}
+
+.bw-field {
+  display: grid;
+  gap: 2px;
+  font-size: 0.72rem;
+  color: var(--cm-color-on-surface-muted);
+}
+
+.bw-field .fld {
+  min-width: 90px;
+}
+
+.bw-list {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bw-list li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 4px 8px;
+  border: 1px solid var(--cm-color-outline-variant);
+  border-radius: var(--cm-radius-sm);
+}
+
+.bw-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bw-btn {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  border: 1px solid var(--cm-color-outline);
+  border-radius: var(--cm-radius-sm);
+  background: transparent;
+  color: var(--cm-color-on-surface);
+  cursor: pointer;
+}
+
+.bw-btn:hover:not(:disabled) {
+  border-color: var(--cm-color-primary);
+}
+
+.bw-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.bw-btn--primary {
+  border-color: var(--cm-color-primary);
+  color: var(--cm-color-primary);
+}
+
+.bw-conflict {
+  margin: 3px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--cm-color-warning, var(--cm-color-outline));
+  border-radius: var(--cm-radius-sm);
+  display: grid;
+  gap: 5px;
+  font-size: 0.75rem;
+}
+
+.bw-foot {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 10px 18px 14px;
+  border-top: var(--cm-border-1);
+}
