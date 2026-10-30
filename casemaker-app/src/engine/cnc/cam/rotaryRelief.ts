@@ -117,6 +117,10 @@ export function sampleGoalRadialField(
   const covered = new Uint8Array(nx * ny);
   let minR = Infinity;
   let maxR = -Infinity;
+  // The part's closest approach to the axis: a mesh that tapers to the axis has a VERTEX there,
+  // and between two sampled rays the hit radii would read a cell-width above zero — the vertex is
+  // the honest number the axis finding (R8) is about.
+  let minVertexR = Infinity;
 
   // The mesh's vertices in the rod's Cartesian frame: X along the axis, (Y, Z) the section.
   const nVerts = mesh.positions.length / 3;
@@ -130,6 +134,8 @@ export function sampleGoalRadialField(
     world[v * 3 + 1] = ly;
     world[v * 3 + 2] = lz;
     phi[v] = Math.atan2(ly, lz);
+    const vr = Math.hypot(ly, lz);
+    if (vr < minVertexR) minVertexR = vr;
   }
 
   // The triangles in the rod's frame, flat: nine numbers each. The raster walks each triangle's
@@ -180,7 +186,10 @@ export function sampleGoalRadialField(
     const v = (dy * qy + dz * qz) * inv;
     if (v < -EPS || u + v > 1 + EPS) return 0;
     const r = (e2x * qx + e2y * qy + e2z * qz) * inv;
-    return r > EPS && r <= rBound ? r : 0;
+    // A hit AT the axis (r = 0) is a real surface point — a mesh that tapers to it reaches the
+    // axis, which the CAM refuses (R8); dropping it would leave the apex cells 'uncovered' and
+    // read as the stock's surface instead.
+    return r >= -EPS && r <= rBound ? Math.max(0, r) : 0;
   };
   /** The farthest hit over every triangle, or 0. */
   const rayHitAll = (ox: number, ang: number): number => {
@@ -255,7 +264,7 @@ export function sampleGoalRadialField(
 
   let coveredCount = 0;
   for (let k = 0; k < covered.length; k++) if (covered[k] === 1) coveredCount++;
-  const minRadius = coveredCount === 0 ? radius : minR;
+  const minRadius = coveredCount === 0 ? radius : Math.min(minR, minVertexR);
   const maxRadius = coveredCount === 0 ? radius : maxR;
   const resolutionNote =
     (coarsened

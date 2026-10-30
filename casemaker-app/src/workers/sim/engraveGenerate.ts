@@ -194,6 +194,8 @@ import {
   type RotaryNeckFacts,
 } from '@/engine/cnc/rotary/neck';
 import { rotaryMapOf, toRotaryIR } from '@/engine/cnc/rotary/wrap';
+import { rotaryFreeSpan, freeEndSentence, jawsSentence, tailstockSentence, throughCentreSentence } from '@/engine/cnc/rotary/wrap';
+import { generateRotaryReliefIR, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
@@ -4080,6 +4082,200 @@ function emptyGoalResult(): Omit<EngraveGenerated, 'ok' | 'stage' | 'findings' |
 }
 
 /**
+ * #723 R-3 — A ROTARY GOAL, GENERATED: the goal mesh becomes the radial field (`sampleGoalRadialField`),
+ * the field becomes the relief program (`generateRotaryReliefIR`: A-sweep roughing, the ball
+ * finish), and the program posts in the rotary frame. Its findings are the three the design names —
+ * the part does not fit the rod, it reaches the axis (R8), or it sits outside the free span — plus
+ * the cutter-class check (a flat or ball; a V finishes nothing here). The run gate is #545's: a
+ * rotary program is authored, generated, simulated and saved, and its RUN waits for the module's
+ * measurement; this function never decides that, the run gate does.
+ */
+export function generateRotaryGoalProgram(
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  rotary: NonNullable<ReturnType<typeof rotaryMapOf>>,
+  tool: Tool | null,
+  catalogue: readonly FeedCatalogueRow[],
+  calibration: MachineCalibration | null,
+  shop: EngraveShopOpts,
+): EngraveGenerated {
+  const base = emptyGoalResult();
+  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null): EngraveGenerated => ({
+    ...base,
+    ok: false,
+    stage,
+    findings: [],
+    feeds,
+    cam: null,
+    nc: null,
+    verify: null,
+    errors: [{ stage, message }],
+  });
+  const documentFindings = (): JobFinding[] =>
+    dedupeFindings([
+      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults }),
+      ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
+    ]);
+  if (goal.format === 'png') {
+    return fail('findings', 'a picture is a flat relief: a rotary relief needs a mesh — use an STL or 3MF');
+  }
+  if (tool === null) return fail('feeds', 'the job has no usable cutter');
+  const shape = tool.shape;
+  if (shape !== 'flat' && shape !== 'ball' && shape !== 'bull') {
+    return fail(
+      'findings',
+      `"${tool.name}" cannot finish a rotary relief: the relief's finish is a flat or ball nose, and a ${shape} is neither`,
+    );
+  }
+  const mill = jobMachine(job, calibration);
+  const isRound = shape === 'ball' || shape === 'bull';
+  const feedTool = isRound ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)` }) : tool;
+  const resolved = feedsFor(catalogue, job.stock.material, feedTool, mill, job.cutOverride, shop.feeds ?? undefined);
+  if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
+  const settings = goal.surface ?? {};
+  const stockToLeaveMm = settings.stockToLeaveMm ?? shop.finish?.stockToLeaveMm.value ?? undefined;
+  const pitchMm = settings.gridPitchMm ?? shop.surfaceGrid?.pitchMm.value ?? null;
+  let field: ReturnType<typeof sampleGoalRadialField>;
+  try {
+    field = sampleGoalRadialField(goal, rotary.radius, { pitchMm });
+  } catch (e) {
+    return fail('cam', e instanceof Error ? e.message : String(e));
+  }
+  const findings: JobFinding[] = [];
+  if (field.maxRadius > rotary.radius + 1e-6) {
+    findings.push({
+      severity: 'error',
+      code: 'goal-rotary-oversize',
+      message:
+        `The goal "${goal.name}" reaches r ${Number(field.maxRadius.toFixed(3))} mm, and the stock it would be turned ` +
+        `from is ⌀${Number((2 * rotary.radius).toFixed(3))} mm: it cannot be reproduced from this rod. Use a larger ` +
+        'diameter, or scale the goal down.',
+    });
+  }
+  if (!(field.minRadius > 0)) {
+    findings.push({
+      severity: 'error',
+      code: 'axis-crossing',
+      message: `The goal "${goal.name}" ${throughCentreSentence(field.minRadius)}`,
+    });
+  }
+  const span = rotaryFreeSpan(rotary);
+  if (field.x0 < span.from) {
+    findings.push({
+      severity: 'error',
+      code: 'wrap-into-clamp',
+      message: `The goal "${goal.name}" ${jawsSentence(field.x0)}`,
+      labelId: goal.id,
+    });
+  }
+  const xEnd = field.x0 + (field.nx - 1) * field.pitch;
+  if (xEnd > span.to) {
+    const sentence = rotary.tailstock ? tailstockSentence(xEnd, rotary.stickout) : freeEndSentence(xEnd, rotary.stickout);
+    findings.push({
+      severity: 'error',
+      code: 'wrap-off-free-end',
+      message: `The goal "${goal.name}" ${sentence}`,
+      labelId: goal.id,
+    });
+  }
+  const allFindings = dedupeFindings([...findings, ...documentFindings()]);
+  if (findings.some((f) => f.severity === 'error')) {
+    return { ...fail('findings', findings[0]!.message), findings: allFindings };
+  }
+  const feeds: SurfaceFeeds = {
+    feed: resolved.params.feed,
+    plungeFeed: resolved.params.plungeFeed,
+    stepDown: settings.roughStepDownMm ?? resolved.params.stepDown,
+    roughStepOver: settings.roughStepOverMm ?? resolved.params.stepOver,
+    finishStepOver: settings.finishStepOverMm ?? resolved.params.stepOver,
+  };
+  let relief: ReturnType<typeof generateRotaryReliefIR>;
+  try {
+    relief = generateRotaryReliefIR({
+      field,
+      tool,
+      toolNumber: toolNumberFor(tool),
+      spindleRpm: resolved.params.rpm,
+      air: job.cutOverride?.air ?? true,
+      feeds,
+      rapid: mill.rapidEstimate,
+      ...(stockToLeaveMm === undefined ? {} : { stockToLeaveMm }),
+    });
+  } catch (e) {
+    return fail('cam', e instanceof Error ? e.message : String(e), resolved);
+  }
+  const diameter = 2 * rotary.radius;
+  const ctx: PostContext = {
+    jobName: job.name,
+    stock: { length: job.stock.length, width: diameter, thickness: diameter },
+    materialName: job.stock.material,
+    zDatum: 'rotary-axis',
+    origin: 'topFrontLeft',
+    camVersion: CAM_VERSION,
+    toolKey: job.toolKey,
+  };
+  let nc: string;
+  try {
+    const posted = postZ1(relief.ir, ctx, mill, { vacuum: 'whole' });
+    if (!posted.ok) return fail('post', posted.errors.join('; '), resolved);
+    nc = posted.text;
+  } catch (e) {
+    return fail('post', e instanceof Error ? e.message : String(e), resolved);
+  }
+  const allowance = stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM;
+  const surfaceCheck: SurfaceProgramCheck = {
+    kind: 'surface',
+    gridPitchMm: field.pitch,
+    roughingLayers: relief.roughingLayers,
+    passes: relief.ir.operations.map((op) => op.name),
+    resolutionNote: field.resolutionNote,
+    bbox: pathBbox(relief.ir),
+  };
+  const cam = summarize(relief.ir);
+  const program: EngraveProgram = {
+    kind: 'engrave',
+    setupIndex: 1,
+    setupId: jobSetups(job)[0]!.id,
+    toolKey: job.toolKey,
+    nc,
+    frame: relief.ir.frame,
+    verify: null,
+    surfaceCheck,
+    frameNc: null,
+    frameVerify: null,
+    programHash: programHash(nc),
+    cam,
+  };
+  return {
+    ...base,
+    ok: true,
+    stage: 'done',
+    findings: allFindings,
+    feeds: resolved,
+    cam,
+    nc,
+    verify: null,
+    programs: [program],
+    surface3d: {
+      resolutionNote: field.resolutionNote,
+      gridPitchMm: field.pitch,
+      gridCells: field.nx * field.ny,
+      stepDownMm: feeds.stepDown,
+      roughStepOverMm: feeds.roughStepOver,
+      finishStepOverMm: feeds.finishStepOver,
+      stockToLeaveMm: allowance,
+      roughingLayers: relief.roughingLayers,
+      scallop: null,
+      pencil: null,
+      notes: [
+        'The relief is cut on the rotary: the stock turns under the cutter and the tip follows the plan\'s radial heightfield.',
+        'Relief on the rotary is checked and simulated here; the machine does not run it until the module is measured.',
+      ],
+    } satisfies GoalSurfaceFacts,
+  };
+}
+
+/**
  * 3D SURFACING FROM A GOAL MESH (#534, slice D) — the generate worker's dispatch to `cam/surface3d`.
  *
  * It samples the goal to a top-Z heightfield and emits a raster-roughing + ball-finishing toolpath
@@ -4527,6 +4723,12 @@ export function engraveGenerate(
   // stays on the path below (the items cut; the goal keeps its `goal-object-no-toolpath` info).
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
   if (goal !== null) {
+    // #723 R-3 — A ROTARY GOAL IS THE RELIEF: a goal on a rod in the chuck is turned from the
+    // radial heightfield (`cam/rotaryRelief`), not surfaced flat over an (x, y) grid.
+    const rotary = rotaryMapOf(job);
+    if (rotary !== null) {
+      return { ...generateRotaryGoalProgram(job, goal, rotary, tool, catalogue, calibration, shop), surface: null };
+    }
     // #623 — the surface-3D goal path posts flat (it never lifts feeds), so its package claims no
     // surface: the caller judges it in the work frame, which is the frame it was posted in.
     return { ...generateGoalProgram(job, goal, tool, catalogue, calibration, shop), surface: null };

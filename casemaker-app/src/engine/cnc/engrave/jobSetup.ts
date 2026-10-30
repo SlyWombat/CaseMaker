@@ -337,6 +337,8 @@ export type JobFindingCode =
   // the tailstock out, where the map ends and there is no stock (#724). Codes are data: the
   // operator sentence never carries one.
   | 'axis-crossing'
+  // #723 — a rotary GOAL's own envelope check: the part is wider than the rod it would be turned from.
+  | 'goal-rotary-oversize'
   | 'rotary-unsupported'
   | 'wrap-into-clamp'
   | 'wrap-off-free-end'
