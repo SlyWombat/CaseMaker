@@ -5951,7 +5951,7 @@
           "description": "The targets of a job cut from several sides, one per setup; omit for the single `targetObject` form.",
           "items": {
             "additionalProperties": false,
-            "description": "An embedded mesh (STL/3MF): a reference the cutting volumes are positioned against, or a goal shape to make.",
+            "description": "An embedded mesh (STL/3MF, or a STEP the CAD kernel tessellated at import, #774): a reference the cutting volumes are positioned against, or a goal shape to make.",
             "properties": {
               "data": {
                 "description": "Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.",

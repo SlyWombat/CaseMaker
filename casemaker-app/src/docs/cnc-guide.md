@@ -657,9 +657,11 @@ doors are open today:
   held standing on its end and cut on that ⌀ end). A rod longer than the vise's grip (20 mm) is
   the rotary's, and the form says so instead of offering it. A **tube** is refused by name — its
   hole leaves no face a job can cut. A piece made here can be put on the shelf in the same step.
-- **Load** — an STL or 3MF used as the stock. A prism (identical slices) cuts as a block of that
-  outline; a PrusaSlicer 3MF with negative volumes is recognised and offered as **stock +
-  design** in one step (#410, #437).
+- **Load** — an STL, 3MF or STEP used as the stock. A prism (identical slices) cuts as a block of
+  that outline; a PrusaSlicer 3MF with negative volumes is recognised and offered as **stock +
+  design** in one step (#410, #437). A STEP/STP is a B-rep, not a mesh: the OpenCascade WASM
+  kernel tessellates it at import (#774), and the questions above read the triangles it produces —
+  the kernel is fetched the first time a STEP is picked, never for an STL job.
 
 Every entry states its **finish** — rough, finished, printed or not known — because that is what
 the facing question reads (below). A purchased **two-colour engraving laminate** states its
@@ -786,7 +788,9 @@ alone. The two named refusals and the merge warning are in §8.1.
 
 **3D surfacing from a goal mesh (#534, #535, #671).** A **design target object** can be marked
 with role **goal** — "this is the shape to *make*", as opposed to a reference to position other
-work against. A job whose only work is a goal mesh generates a two-operation surfacing program: a
+work against. A goal may be picked as STL, 3MF, STEP/STP or — a picture relief — PNG; a STEP is
+tessellated to a mesh at import by the OpenCascade WASM kernel (#774), so the surfacing below
+reads the same heightfield every mesh goal gives. A job whose only work is a goal mesh generates a two-operation surfacing program: a
 **raster roughing** in step-down layers that clears the stock above the goal (leaving the
 roughing allowance), then a **ball-nose finishing** raster that follows the goal's top-Z
 heightfield gouge-safely. A goal with undercuts is sampled to its topmost surface — the honest
@@ -1469,7 +1473,7 @@ simulation does report about one is the sweep's own list, next:
 | `primitive-not-vertical` | error | A 3D primitive opens along X or Y instead of Z, so it is a side-opening undercut. The 2.5D region CAM only cuts down from the top face, so the primitive is refused by name rather than silently turned into a top pocket (#435). | Set its axis to Z, or cut it with the 3D engine (#222). |
 | `primitive-cone-needs-cam` | error | A cone primitive has a sloped wall. The region CAM only cuts walls parallel to the cutter axis, so cutting it would silently approximate the cone as a cylinder. It is refused by name (#435). | Use the V-carve/chamfer work (#221) or the 3D engine (#222), or change the shape. |
 | `primitive-sphere-needs-3d` | error | A sphere primitive (a dimple) has a curved floor, which a flat-floor region cannot represent. A sphere is a dexel job, so it is refused by name rather than approximated as a circle pocket (#435). | Cut it with the 3D engine when it lands (#222), or use a cylinder or box for now. |
-| `target-object-not-cut` | warning | The job carries a target object — an imported STL or 3MF that the cut-aways are positioned against. It is a REFERENCE and is never removed from the stock: no program cuts around it, and the simulation draws no material taken away for it (#435). | Nothing if you only need the reference. Cutting the stock out around the object is the profile cut-out work (#218). |
+| `target-object-not-cut` | warning | The job carries a target object — an imported STL, 3MF or STEP that the cut-aways are positioned against. It is a REFERENCE and is never removed from the stock: no program cuts around it, and the simulation draws no material taken away for it (#435). | Nothing if you only need the reference. Cutting the stock out around the object is the profile cut-out work (#218). |
 | `target-mesh-missing` | error (goal) · warning (reference) | The job names an imported mesh whose BYTES this browser no longer holds. The open job persists to localStorage, whose quota is small, so a mesh's bytes live in the app's IndexedDB store keyed by the file's SHA-256 and the document keeps only the hash, the size and the name; clearing site data, a different browser profile, or a mesh store write that failed leaves the job without them (#720). | Import the mesh file again — the SHA-256 will match and the job picks the bytes back up. |
 | `target-mesh-loading` | error (goal) · warning (reference) | The job names an imported mesh and this browser's mesh store has not answered yet: the bytes are being read back by their SHA-256 after a reload or an open (#728). It replaces `target-mesh-missing` until the store answers, at the same severity, so a goal cannot be generated before its shape is here. | Wait a moment; it becomes ready, or `target-mesh-missing` if the store does not hold the mesh. |
 | `target-mesh-unstored` | warning | The open job holds the mesh's bytes, but the browser refused to keep a copy in its mesh store (storage full, or a private window), so a reload would lose them (#728). | Save the job to a file — the file embeds the mesh — or free browser storage and import the mesh again. |
