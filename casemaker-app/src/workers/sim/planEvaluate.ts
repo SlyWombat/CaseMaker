@@ -43,8 +43,13 @@ import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { Tool } from '@/engine/cnc/tool';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { vCone } from '@/engine/cnc/vProfile';
-import { jobSetups, pureGoalObject, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
+import {
+  applyCutterPlanToJob,
+  measureFingerprint,
+  type CutterPlanLike,
+} from '@/engine/cnc/engrave/measuredPick';
 import { kindedWork } from '@/engine/cnc/engrave/cutterPlan';
 import { toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -194,34 +199,13 @@ export function clearPlanEvaluations(): void {
 }
 
 /**
- * Write a candidate plan into a clone of the job the way the CLI does (#760/#762): the first
- * cutter is the job's tool, and one setup carries the cut order (`tools`) and which items each
- * owns (`toolItems`). One cutter is still one program.
+ * Write a candidate plan into a clone of the job the way the CLI does (#760/#762). The body lives
+ * in `engine/cnc/engrave/measuredPick` so the Design panel's write-back and the evaluator's applied
+ * job are one function — the app, the CLI and the evaluator must judge the same program.
  */
 export function applyCutterPlan(job: EngraveJob, plan: CandidatePlan): EngraveJob {
-  const applied: EngraveJob = structuredClone(job);
-  const first = plan.cutters[0];
-  if (first === undefined) return applied;
-  applied.toolKey = first.key;
-  // #766 fix — A PURE GOAL JOB GETS NO SETUP. Its derived setup is empty BY DESIGN (#535): the
-  // goal mesh is the setup's one program, and `pureGoalObject` only recognises the job while it
-  // states NO setups. Writing one made the generator validate the goal as an ordinary item that
-  // the setup does not list ("Setup 1 assigns an item that is not in it: g1") and refused every
-  // plan, so wolf, photo-relief and mouse-shell jobs that #762 generated stopped generating.
-  if (pureGoalObject(job) !== null) return applied;
-  // EVERY plan is written through the setup path — one cutter included. The legacy single-tool
-  // document validates its `toolKey` against the built-in registry (`jobTool`), which by design
-  // does not hold the location's `inv:` cutters; the setup path resolves each cutter from the
-  // caller's own list (the same seam the CLI and the sim worker use).
-  const setup = jobSetups(applied)[0]!;
-  applied.setups = [
-    {
-      ...setup,
-      tools: plan.cutters.map((c) => c.key),
-      toolItems: Object.fromEntries(plan.cutters.map((c) => [c.key, [...c.items]])),
-    },
-  ];
-  return applied;
+  const planLike: CutterPlanLike = plan;
+  return applyCutterPlanToJob(job, planLike);
 }
 
 /** The tool for a plan key, or null. */
@@ -274,9 +258,15 @@ export function evaluatePlan(
   return verdict;
 }
 
-/** The job's PartPlan and the cutaways that leave raised text, built once per job content. */
+/**
+ * The job's PartPlan and the cutaways that leave raised text, built once per job content.
+ *
+ * Keyed on `measureFingerprint`, not on the whole job (#766 D): a cutter write-back, a rename or a
+ * setup change cannot alter a part, and re-building it would also have discarded every cutter's
+ * measured rows beside it.
+ */
 function partOf(job: EngraveJob): { part: PartPlan; raisedOf: Map<string, PartPlan['raisedTexts']> } {
-  const key = jobFingerprint(job);
+  const key = measureFingerprint(job);
   const hit = partCache.get(key);
   if (hit !== undefined) return hit;
   const part = toPartPlan(job);
@@ -292,8 +282,11 @@ function partOf(job: EngraveJob): { part: PartPlan; raisedOf: Map<string, PartPl
 }
 
 /**
- * The per-cutter measures, cached on (job, cutter). The SAME measures answer any plan using the
- * cutter, which is what makes a candidate sweep affordable.
+ * The per-cutter measures, cached on (measured job content, cutter). The SAME measures answer any
+ * plan using the cutter, which is what makes a candidate sweep affordable — and, because the job
+ * side is `measureFingerprint`, the cache SURVIVES every edit a measure cannot see (#766 D): the
+ * panel's write-back of the answer itself (toolKey, setups, `sources.tool`), a rename, the facing
+ * choice. An edit to the geometry one cutter is measured against still re-measures it.
  */
 function measuresFor(
   job: EngraveJob,
@@ -301,7 +294,7 @@ function measuresFor(
   tool: Tool,
   ctx: EvalContext,
 ): CutterMeasures {
-  const key = `${jobFingerprint(job)}\u0000${JSON.stringify(tool)}`;
+  const key = `${measureFingerprint(job)}\u0000${JSON.stringify(tool)}`;
   const hit = cutterCache.get(key);
   if (hit !== undefined) return hit;
   const engravability = measureEngraving(ctx.tl, job, tool);

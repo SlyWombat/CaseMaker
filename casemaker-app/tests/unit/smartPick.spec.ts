@@ -125,7 +125,7 @@ describe('#766 B the search generates the plans worth trying', () => {
 });
 
 describe('#766 B the chosen plan is the best measured one', () => {
-  it('the coin: the V rest measures best, and the 0.6 corn is the runner-up', () => {
+  it('the coin: the V rest measures best, and the 0.6 corn is the runner-up', async () => {
     const scores = {
       'inv:flat-2': 0.19,
       'inv:flat-2+inv:flat-1': 0.6,
@@ -137,7 +137,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       'inv:corn-0-6+inv:flat-1': 0.2,
       'inv:flat-2+inv:flat-1+inv:corn-0-6': 0.8,
     };
-    const pick = smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06, V_01]), [], fakeEvaluator(scores));
+    const pick = await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06, V_01]), [], fakeEvaluator(scores));
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'inv:engraver-0-3']);
     expect(pick.chosen.worstFidelity).toBe(1);
     expect(pick.runnable).toBe(pick.chosen);
@@ -146,19 +146,19 @@ describe('#766 B the chosen plan is the best measured one', () => {
     expect(pick.buyThis).toBeNull();
   });
 
-  it('at equal fidelity the plan with fewer tool changes wins, then the shorter run', () => {
+  it('at equal fidelity the plan with fewer tool changes wins, then the shorter run', async () => {
     const scores = { 'inv:flat-2': 0.9, 'inv:flat-2+inv:flat-1': 0.9, 'inv:flat-2+inv:corn-0-6': 0.9 };
     const over = {
       'inv:flat-2+inv:flat-1': { toolChanges: 1, seconds: 90 } as Partial<PlanEvaluation>,
       'inv:flat-2+inv:corn-0-6': { toolChanges: 1, seconds: 120 } as Partial<PlanEvaluation>,
     };
-    const pick = smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over));
+    const pick = await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over));
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2']);
   });
 
-  it('an owned plan within the buy margin stands, and a catalogue plan that truly measures better is chosen', () => {
+  it('an owned plan within the buy margin stands, and a catalogue plan that truly measures better is chosen', async () => {
     // Within the margin: the owned 0.6 stands.
-    const near = smartPick(
+    const near = await smartPick(
       coinJob(),
       tools([FLAT_2, FLAT_06, FLAT_06_CAT]),
       [],
@@ -169,7 +169,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
     expect(near.buyThis).toBeNull();
 
     // Beyond it: the catalogue plan is chosen AND named as the buy.
-    const clear = smartPick(
+    const clear = await smartPick(
       coinJob(),
       tools([FLAT_2, FLAT_1, FLAT_06_CAT]),
       [],
@@ -180,8 +180,8 @@ describe('#766 B the chosen plan is the best measured one', () => {
     expect(clear.buyThis?.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'cat:corn-0-6']);
   });
 
-  it('a refused plan with the best measured fidelity is still the answer, with the refusal stated', () => {
-    const pick = smartPick(
+  it('a refused plan with the best measured fidelity is still the answer, with the refusal stated', async () => {
+    const pick = await smartPick(
       coinJob(),
       tools([FLAT_2, FLAT_1, FLAT_06, V_01]),
       [],
@@ -198,7 +198,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
     expect(pick.notes.join(' ')).toContain('a V-bit is not a rest cutter here');
   });
 
-  it('a much faster two-cutter plan beats a 4½-hour one-cutter plan (the j02 time guard)', () => {
+  it('a much faster two-cutter plan beats a 4½-hour one-cutter plan (the j02 time guard)', async () => {
     // Taken literally, "fewest tool changes before shortest time" picked the single 0.6 corn at
     // 16 790 s over a 167 s two-cutter plan; a change is counted at its stated allowance instead.
     const scores = { 'inv:corn-0-6': 1, 'inv:flat-2+inv:corn-0-6': 1, 'inv:flat-2': 0.1, 'inv:flat-2+inv:flat-1': 0.1, 'inv:flat-1+inv:corn-0-6': 0.5, 'inv:flat-1': 0.5 };
@@ -206,7 +206,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       'inv:corn-0-6': { seconds: 16790, toolChanges: 0 },
       'inv:flat-2+inv:corn-0-6': { seconds: 167, toolChanges: 1 },
     };
-    const pick = smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over));
+    const pick = await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over));
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'inv:corn-0-6']);
   });
 

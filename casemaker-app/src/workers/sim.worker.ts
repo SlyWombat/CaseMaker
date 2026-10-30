@@ -25,6 +25,8 @@ import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type EngraveShopOpts } from './sim/engraveGenerate';
+import { evaluatePlan } from './sim/planEvaluate';
+import { runSmartPick, type EngravePickSummary } from './sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import { readDesign } from '@/engine/import/design3mf';
 import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
@@ -45,6 +47,18 @@ async function getPreviewer(): Promise<EngravePreviewer> {
   previewer ??= createEngravePreviewer(await getToplevel());
   return previewer;
 }
+
+/**
+ * #766 D — THE NEWEST EDIT'S GENERATION, shared by the preview and the background measured pick.
+ *
+ * The panel numbers every job edit (`engravePreviewStore`'s `seq`) and sends the same number with
+ * the preview it asks for and with the search. A search compares this against the generation it
+ * started under: a newer edit — whose preview request is served between the search's plan
+ * evaluations — makes `latestEditGen` larger and the search stops at its next step. Only the
+ * PREVIEW request advances it on an edit; the search does not move it, so a search cannot cancel
+ * itself.
+ */
+let latestEditGen = Number.NEGATIVE_INFINITY;
 
 function buffersOf(meshes: (NodeMeshOutput | null | undefined)[]): Transferable[] {
   const out: Transferable[] = [];
@@ -127,6 +141,9 @@ const api = {
     shop?: EngraveShopOpts,
     residuals?: ProbeResiduals,
   ): Promise<EngravePreview | null> {
+    // #766 D — an edit's generation, seen before the build: a measured search running in this
+    // worker stops at its next step (see `latestEditGen`).
+    if (gen > latestEditGen) latestEditGen = gen;
     // Issue #180 — the preview typesets labels through the synchronous `resolveFont`, and the
     // bundled faces are static assets now, so load the keys this job's enabled labels need
     // first. A shapes-only job (or one with every label disabled/empty) passes `[]`.
@@ -148,6 +165,37 @@ const api = {
         ...p.fixture.map((f) => f.mesh),
         ...p.sacrificial.map((s) => s.mesh),
       ]),
+    );
+  },
+  /**
+   * #766 D — THE MEASURED PICK, behind the panel's provisional answer. Runs slice B's search with
+   * slice A's evaluator in this worker, yielding to the message queue between plans so a newer
+   * edit's `engravePreview` is served (and cancels this run) instead of waiting behind it.
+   *
+   * `gen` is the caller's edit generation, the SAME number its preview requests carry: when a
+   * newer preview request arrives, `latestEditGen` moves past it and the search returns null at
+   * its next step. A null answer means "the caller owns a newer request (or the job has nothing to
+   * measure)"; it is not an error.
+   *
+   * `tools`, `catalogue`, `conditions` and `shop` are the caller's snapshots for the reasons
+   * `engravePreview` documents — this realm cannot see the app's stores, and the plan must be
+   * measured against exactly the cutters, feed rows and shop numbers the panel shows.
+   */
+  async engraveSmartPick(
+    job: EngraveJob,
+    tools: readonly ToolLibraryEntry[],
+    catalogue: readonly FeedCatalogueRow[],
+    gen: number,
+    conditions: ReadonlyMap<string, ConditionSummary>,
+    shop: EngraveShopOpts,
+  ): Promise<EngravePickSummary | null> {
+    await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
+    const tl = await getToplevel();
+    const ctx = { tl, tools, catalogue, shop, calibration: null, conditions, table: shop.feeds ?? null };
+    return runSmartPick(
+      { job, tools, catalogue, conditions, shop, table: shop.feeds ?? null },
+      (plan, level) => evaluatePlan(job, plan, ctx, { level }),
+      () => latestEditGen > gen,
     );
   },
   /**

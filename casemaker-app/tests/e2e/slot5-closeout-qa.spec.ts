@@ -96,8 +96,12 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   await expect(page.getByTestId('engrave-tool')).toBeVisible();
   // #211 acceptance 1: a fresh job opens with a selected tool AND a recommendation sentence.
   await expect(page.getByTestId('engrave-tool')).not.toHaveValue('');
-  await page.waitForTimeout(4000);
-  const recFresh = await page.getByTestId('engrave-recommendation').innerText().catch(() => '');
+  // #766 D — the #211 answer is the panel's PROVISIONAL one: it is drawn at once and the measured
+  // plan replaces it once the background search lands, so the rule's sentence is read in its
+  // provisional window (from the preview landing until the search completes — seconds, not the
+  // fixed sleep this read used to be).
+  await expect(page.getByTestId('engrave-pick-provisional')).toBeVisible({ timeout: 60_000 });
+  const recFresh = await page.getByTestId('engrave-recommendation').innerText();
   console.log('DIAG #211 fresh selection=%j rec=%j', await page.getByTestId('engrave-tool').inputValue(), recFresh);
   // #687/#699 — the line is the cutter's display name and a lowercase `recommended` tag, then the
   // reason. The intent is unchanged: a fresh job shows a recommendation sentence of its own.
@@ -120,11 +124,20 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   // as the pair this step selects. The 1.0 mm flat is the pair the recommendation still names
   // for this blank — the dev bench has no house catalogue, so these two are its only cutters,
   // and the metal-line refusal does not touch the non-metal one.
+  // #766 D — the panel's current answer is the rule's provisional box while the measured search
+  // runs and the measured plan's box once it lands; these reads take whichever is on screen, so
+  // the comparison below is about the ANSWER moving, not about which of the two stated it.
+  const answerText = async (): Promise<string> => {
+    if ((await page.getByTestId('engrave-pick-measured').count()) > 0) {
+      return page.getByTestId('engrave-pick-measured').innerText();
+    }
+    return page.getByTestId('engrave-recommendation').innerText().catch(() => '(none)');
+  };
   await page.getByTestId('engrave-tool').selectOption('flat-1.0');
   const selBefore = await page.getByTestId('engrave-tool').inputValue();
-  // The recommendation is the qualifying pick before the edit…
+  // The recommendation is the qualifying pick before the edit (in its provisional window)…
   await expect(page.getByTestId('engrave-recommendation')).toContainText('Largest cutter');
-  const recBefore = await page.getByTestId('engrave-recommendation').innerText().catch(() => '(none)');
+  const recBefore = await answerText();
   // #411 — the cap-height field is in the row's body, which a job's rows arrive folded.
   await page.getByTestId('engrave-label-expand-0').click();
   await page.getByTestId('engrave-label-size-0').fill('4');
@@ -132,7 +145,7 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   // sentence while the picker keeps the user's selection.
   await expect(page.getByTestId('engrave-recommendation')).toContainText('No cutter you have can cut', { timeout: 30_000 });
   const selAfter = await page.getByTestId('engrave-tool').inputValue();
-  const recAfter = await page.getByTestId('engrave-recommendation').innerText().catch(() => '(none)');
+  const recAfter = await answerText();
   console.log('DIAG #211 selBefore=%j selAfter=%j\n  recBefore=%j\n  recAfter=%j', selBefore, selAfter, recBefore, recAfter);
   expect(selAfter).toBe(selBefore);
   expect(recAfter).not.toBe(recBefore);
@@ -146,7 +159,7 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   await page.screenshot({ path: shot(testInfo, 'slot5-engrave-top.png') });
 
   // The Tool reason (#211) and the Vise / Cutting sections live below the fold.
-  const reason = await page.getByTestId('engrave-recommendation').innerText().catch(() => '(none)');
+  const reason = await answerText();
   console.log('DIAG recommendation=%j', reason);
   await page.getByTestId('context-panel').evaluate((el) => {
     el.scrollTop = el.scrollHeight;

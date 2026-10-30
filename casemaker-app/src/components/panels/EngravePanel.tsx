@@ -837,6 +837,8 @@ export function EngravePanel(): JSX.Element {
   const updateVector = useEngraveJobStore((s) => s.updateVector);
   const removeVector = useEngraveJobStore((s) => s.removeVector);
   const setTool = useEngraveJobStore((s) => s.setTool);
+  // #766 D — the measured plan's write-back. The rule's single-cutter answer still uses setTool.
+  const applyCutterPlan = useEngraveJobStore((s) => s.applyCutterPlan);
   const setVise = useEngraveJobStore((s) => s.setVise);
   const setMetalLineOverride = useEngraveJobStore((s) => s.setMetalLineOverride);
   // #572 — the double-confirm state for the cutter/material override affordance.
@@ -906,6 +908,13 @@ export function EngravePanel(): JSX.Element {
   const preview = useEngravePreviewStore((s) => s.preview);
   const previewStatus = useEngravePreviewStore((s) => s.status);
   const previewError = useEngravePreviewStore((s) => s.error);
+  // #766 D — the measured pick behind the #211 rule answer. While it is measuring (or has no
+  // answer), the rule's recommendation is drawn as the PROVISIONAL one; once it lands, the
+  // measured plan and its explanation replace it.
+  const measuredPick = useEngravePreviewStore((s) => s.measured);
+  const measuredStatus = useEngravePreviewStore((s) => s.measuredStatus);
+  const measuredError = useEngravePreviewStore((s) => s.measuredError);
+  const measuredNow = measuredStatus === 'ready' ? measuredPick : null;
 
   // The first preview. Later edits reach the store through its own subscription to the job
   // store, so the panel never has to ask after this.
@@ -1640,17 +1649,30 @@ export function EngravePanel(): JSX.Element {
   // has a pick and the operator has not chosen a cutter, the job follows it (source 'computed');
   // a user-chosen or measured tool is left alone, so the recommender cannot silently replace a
   // decision the operator made.
+  //
+  // #766 D — ONCE THE SEARCH ANSWERS, THE MEASURED PLAN IS THE CURRENT ANSWER, so that is what the
+  // job follows. It is written whole (`applyCutterPlan`): a rest pair is a SETUP, and `setTool`
+  // could only name the clearance cutter and leave the rest of the plan out.
+  const measuredApplied =
+    measuredNow !== null &&
+    job.toolKey === measuredNow.cutters[0]?.key &&
+    (job.setups?.[0]?.tools ?? []).length === measuredNow.cutters.length &&
+    (job.setups?.[0]?.tools ?? []).every((k, i) => k === measuredNow.cutters[i]?.key);
   useEffect(() => {
-    const key = rec?.key ?? null;
-    if (key === null) return;
     const source = job.sources?.tool;
     if (source === 'user' || source === 'measured') return;
     // #516 item 5 — the first recommendation lands on the first edit or Generate, not on load: a
     // clean (just-opened or just-saved) tool-less document keeps its empty key, so opening a saved
     // job does not immediately dirty it.
     if (job.toolKey === '' && !useEngraveJobFileStore.getState().dirty) return;
+    if (measuredNow !== null) {
+      if (!measuredApplied) applyCutterPlan(measuredNow.cutters, 'computed');
+      return;
+    }
+    const key = rec?.key ?? null;
+    if (key === null) return;
     if (job.toolKey !== key) setTool(key, 'computed');
-  }, [rec?.key, job.sources?.tool, job.toolKey, setTool]);
+  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, applyCutterPlan, setTool]);
 
   // ---- the run (#206) ----------------------------------------------------------------------
 
@@ -1997,10 +2019,19 @@ export function EngravePanel(): JSX.Element {
     // #516 item 5 — the first Generate recommends the cutter for a tool-less job, so one press both
     // picks the tool and builds the program (the sacrificial swatch reads the sim scene it loads).
     // A tool the operator chose or measured is left alone.
+    //
+    // #766 D — AND IT IS THE MEASURED PICK IT APPLIES. Generate re-runs the search only when no
+    // measured answer exists for exactly this job (`measureNow` joins a run already in flight);
+    // the #211 rule's answer is the fallback when the search cannot answer at all.
     const source = job.sources?.tool;
     if (job.toolKey === '' && source !== 'user' && source !== 'measured') {
-      const key = rec?.key ?? (await awaitPreviewRecommendationKey());
-      if (key) setTool(key, 'computed');
+      const pick = await useEngravePreviewStore.getState().measureNow(job);
+      if (pick !== null) {
+        applyCutterPlan(pick.cutters, 'computed');
+      } else {
+        const key = rec?.key ?? (await awaitPreviewRecommendationKey());
+        if (key) setTool(key, 'computed');
+      }
     }
     await run.generate();
   }
@@ -3140,7 +3171,56 @@ export function EngravePanel(): JSX.Element {
           Strokes thinner than {fmt(diameter)} mm cannot be cut — the cutter opens them away entirely.
         </p>
       )}
-      {rec && (
+      {/* #766 D — THE MEASURED ANSWER, once the search has one for this exact job. It replaces
+          the rule's provisional answer (the box below) and says what the rule's plan would have
+          done when the two differ. */}
+      {measuredNow !== null && (
+        <div
+          data-testid="engrave-pick-measured"
+          style={{ margin: '6px 0', border: '1px solid #3a4a5a', background: '#16202a', borderRadius: 4, padding: 6 }}
+        >
+          <p style={{ ...MUTED, color: '#c8d3de', margin: 0 }}>
+            <b>measured: {measuredNow.words.plan}</b>{' '}
+            <span style={{ ...TAG, marginLeft: 0 }} data-testid="engrave-pick-measured-tag">
+              measured
+            </span>
+            {measuredNow.words.difference !== null ? ` — ${measuredNow.words.difference}` : ''}{' '}
+            {!measuredApplied && (
+              <button
+                type="button"
+                data-testid="engrave-use-measured"
+                onClick={() => applyCutterPlan(measuredNow.cutters, 'computed')}
+              >
+                Use the recommendation
+              </button>
+            )}
+          </p>
+          <p style={MUTED} data-testid="engrave-pick-verdict">
+            {measuredNow.words.verdict}
+          </p>
+          {measuredNow.words.cutters.map((line, i) => (
+            <p key={i} style={MUTED} data-testid={`engrave-pick-cutter-${i + 1}`}>
+              {line}
+            </p>
+          ))}
+          {measuredNow.words.runnerUp !== null && (
+            <p style={MUTED} data-testid="engrave-pick-runner-up">
+              {measuredNow.words.runnerUp}
+            </p>
+          )}
+          {measuredNow.words.buyThis !== null && (
+            <p style={MUTED} data-testid="engrave-pick-buy-this">
+              {measuredNow.words.buyThis}
+            </p>
+          )}
+          {measuredNow.words.notes.map((note, i) => (
+            <p key={`n${i}`} style={MUTED} data-testid={`engrave-pick-note-${i + 1}`}>
+              {note}
+            </p>
+          ))}
+        </div>
+      )}
+      {measuredNow === null && rec && (
         <div
           data-testid="engrave-recommendation"
           style={{ margin: '6px 0', border: '1px solid #3a4a5a', background: '#16202a', borderRadius: 4, padding: 6 }}
@@ -3152,6 +3232,12 @@ export function EngravePanel(): JSX.Element {
                 <span style={{ ...TAG, marginLeft: 0 }} data-testid="engrave-tool-recommended-tag">
                   recommended
                 </span>
+                {/* #766 D — this is the QUICK rule's answer while the measured search runs. */}
+                {measuredStatus === 'measuring' && (
+                  <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-pick-provisional">
+                    provisional — measuring…
+                  </span>
+                )}
                 {recPickDisplay.metal && (
                   <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-recommendation-metal">
                     metal
@@ -3281,6 +3367,13 @@ export function EngravePanel(): JSX.Element {
       {!rec && previewStatus === 'loading' && (
         <p style={MUTED} data-testid="engrave-recommendation-pending">
           Measuring which cutter keeps every item intact…
+        </p>
+      )}
+      {/* #766 D — a search that failed leaves the rule's provisional answer standing, and says so
+          rather than showing a 'measuring…' label forever. */}
+      {measuredNow === null && measuredStatus === 'error' && (
+        <p style={MUTED} data-testid="engrave-pick-error">
+          The measured search failed{measuredError === null ? '' : ` (${measuredError})`}; the rule’s answer above stands.
         </p>
       )}
 

@@ -1420,7 +1420,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
           evaluatePlan(job, plan, { tl, tools: searchTools, catalogue: catalogueRows, shop, calibration: null }, { level });
         const searchStart = Date.now();
-        const pick = smartPick(job, searchTools, catalogueRows, evaluate);
+        // #766 D — `smartPick` is async: the evaluator may be (the Design panel's worker one
+        // yields between plans so an edit can cancel the run); the CLI's is synchronous.
+        const pick = await smartPick(job, searchTools, catalogueRows, evaluate);
         const searchMs = Date.now() - searchStart;
         const words = explainSmartPick(pick, searchTools);
         out.progress(`  pick      ${words.verdict}`);

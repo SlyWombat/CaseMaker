@@ -79,11 +79,11 @@ function coin(): EngraveJob {
 const shop: EngraveShopOpts = { tools: TOOLS };
 
 describe('#765/#766 the coin’s raised "Software"', () => {
-  it('the search chooses a posting plan that separates the word better than a ⌀1 rest', { timeout: 240_000 }, () => {
+  it('the search chooses a posting plan that separates the word better than a ⌀1 rest', { timeout: 240_000 }, async () => {
     const job = coin();
     const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
       evaluatePlan(job, plan, { tl, tools: TOOLS, catalogue: [], shop, calibration: null }, { level });
-    const pick = smartPick(job, TOOLS, [], evaluate, { maxCandidates: 8, fullFinalists: 2 });
+    const pick = await smartPick(job, TOOLS, [], evaluate, { maxCandidates: 8, fullFinalists: 2 });
 
     expect(pick.runnable, 'a posting plan is handed over').not.toBeNull();
     const run = pick.runnable!;

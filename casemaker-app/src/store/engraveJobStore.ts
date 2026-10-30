@@ -21,6 +21,7 @@ import { cylinderFrameOf, rodDimsOf, rotaryBoxForRod, standingBoxForRod } from '
 import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
+import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { applyHoldAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { scaleJobAboutCentre } from '@/engine/cnc/engrave/scaleJob';
@@ -935,6 +936,17 @@ export interface EngraveJobState {
   removeLabel: (id: string) => void;
   /** Set the cutter and stamp its source (#254). Defaults to `'user'`. */
   setTool: (key: string, source?: FieldSource) => void;
+  /**
+   * #766 D — write a measured CUT PLAN — clearance plus rest pair, in cut order — into the job.
+   *
+   * One setup carries the plan (`tools` and `toolItems`), exactly as the CLI's engrave path and
+   * `planEvaluate`'s applied job do, so the panel's 'Use the recommendation', Generate and the
+   * evaluator all judge the same program. A single-cutter plan writes the setup too: applying a
+   * one-cutter answer over an earlier rest pair must REMOVE the rest, not leave it in the job.
+   * The first cutter becomes the job's `toolKey` and the source defaults to `'computed'` — the
+   * software chose it, and a later preview must be free to correct it (a `'user'` cutter is not).
+   */
+  applyCutterPlan: (cutters: readonly { key: string; items: readonly string[] }[], source?: FieldSource) => void;
   /** #572 — record (or clear) the double-confirmed cutter/material override. */
   setMetalLineOverride: (override: boolean) => void;
   setVise: (patch: Partial<ViseParams>) => void;
@@ -1649,6 +1661,20 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         tool: resolveTool(key),
         sources: { ...(job.sources ?? {}), tool: source },
       })),
+
+    // #766 D — see the interface note. The plan itself is written by the same function the
+    // evaluator applies (engine/cnc/engrave/measuredPick), so the app and the search cannot
+    // disagree about what "this plan" means in the document.
+    applyCutterPlan: (cutters, source = 'computed') =>
+      apply((job) => {
+        if (cutters.length === 0) return job;
+        const next = applyCutterPlanToJob(job, { cutters });
+        return {
+          ...next,
+          tool: resolveTool(cutters[0]!.key),
+          sources: { ...(job.sources ?? {}), tool: source },
+        };
+      }),
 
     setMetalLineOverride: (override) => apply((job) => ({ ...job, metalLineOverride: override })),
 

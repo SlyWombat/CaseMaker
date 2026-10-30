@@ -12,15 +12,33 @@
 
 import { statedCuttingSize } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { vCone } from '@/engine/cnc/vProfile';
 import type { EvaluatedItem, PinchFact } from '@/workers/sim/planEvaluate';
-import { planKey, type ScoredPlan, type SmartPick } from './smartPick';
+import { planKey, type CandidatePlan, type ScoredPlan, type SmartPick } from './smartPick';
 
 const dia = (entry: ToolLibraryEntry | undefined): string => {
   const d = entry === undefined ? null : statedCuttingSize(entry.tool);
   return d === null ? 'the cutter' : `⌀${Number(d.toFixed(3))} mm`;
 };
 
+/** One cutter of a plan in the operator's words: `⌀3.175`, or `⌀0.3 V rest` for a rest cutter. */
+function cutterWord(cutter: { key: string; items: readonly string[] }, tools: readonly ToolLibraryEntry[]): string {
+  const entry = tools.find((t) => t.key === cutter.key);
+  const d = entry === undefined ? null : statedCuttingSize(entry.tool);
+  const size = d === null ? 'the cutter' : `⌀${Number(d.toFixed(3))}`;
+  if (cutter.items.length > 0) return size;
+  return `${size} ${entry !== undefined && vCone(entry.tool) !== null ? 'V ' : ''}rest`;
+}
+
+/** A whole plan in the operator's words — the measured answer's own name (#766 D). */
+export function planLabel(plan: Pick<CandidatePlan, 'cutters'>, tools: readonly ToolLibraryEntry[]): string {
+  return plan.cutters.map((cutter) => cutterWord(cutter, tools)).join(' + ');
+}
+
 const pct = (v: number): string => `${Math.round(Math.max(0, Math.min(1, v)) * 100)} %`;
+
+/** An item name as a sentence names it: a label already carries its quotes, an id does not. */
+const quoted = (name: string): string => (name.startsWith('"') && name.endsWith('"') ? name : `"${name}"`);
 
 /** The pinches that still join, as "S–o", "t–w". */
 export function joinedPinchWords(item: EvaluatedItem): string[] {
@@ -102,8 +120,39 @@ export function buyThisLine(pick: SmartPick, tools: readonly ToolLibraryEntry[])
   return `Buy ${keys}: with it the plan measures ${gain} on its worst item.${why}`;
 }
 
+/**
+ * #766 D — WHY THE MEASURED ANSWER IS NOT THE QUICK RULE'S, in one clause — or null when the two
+ * plans agree. The subject is the RULE's plan and what it would do to the job, because the rule's
+ * answer is what the panel showed while the search ran (the provisional label): "the quick rule's
+ * ⌀1 rest would leave "Software" joined at 7 pinches". The panel prefixes it with the measured
+ * plan, so the whole line reads `measured: ⌀3.175 + ⌀0.3 V rest — the quick rule's …`.
+ */
+export function ruleDifferenceLine(pick: SmartPick, tools: readonly ToolLibraryEntry[]): string | null {
+  const rule = pick.rule;
+  if (rule === null || planKey(rule.plan) === planKey(pick.chosen.plan)) return null;
+  const culprit = rule.plan.cutters[rule.plan.cutters.length - 1];
+  if (culprit === undefined) return null;
+  const word = cutterWord(culprit, tools);
+  const joined = rule.evaluation.items.flatMap((item) =>
+    item.pinches.filter((pinch) => !pinch.separated).map((pinch) => ({ item, pinch })),
+  );
+  if (joined.length > 0) {
+    // A label's item name is already the quoted text (`"Software"`); a cutaway's is its id. Quote
+    // the latter, leave the former as the sentence's own subject.
+    const names = [...new Set(joined.map((j) => quoted(j.item.name)))];
+    return `the quick rule's ${word} would leave ${names.join(' and ')} joined at ${joined.length} pinch${joined.length === 1 ? '' : 'es'}`;
+  }
+  if (rule.worstFidelity < 1 - 1e-9) {
+    const worst = rule.worstItem;
+    return `the quick rule's ${word} would measure ${pct(rule.worstFidelity)} on ${worst === null ? 'its worst item' : quoted(worst.name)}`;
+  }
+  return `the quick rule's ${word} measures the same; the search chose on tool changes and time`;
+}
+
 /** The whole explanation, in order: the verdict, one line per cutter, the alternative, the buy. */
 export interface SmartPickWords {
+  /** The chosen plan's own name: '⌀3.175 + ⌀0.3 V rest'. */
+  plan: string;
   verdict: string;
   cutters: string[];
   runnerUp: string | null;
@@ -114,6 +163,8 @@ export interface SmartPickWords {
    * an operator wonder why the measured answer is the rule's.
    */
   fallback: string | null;
+  /** What the quick rule's plan would do differently, or null when it is the chosen plan. */
+  difference: string | null;
   notes: string[];
 }
 
@@ -132,11 +183,13 @@ export function explainSmartPick(pick: SmartPick, tools: readonly ToolLibraryEnt
     ? `No plan the search tried posts; the best-measured one (${pct(chosen.worstFidelity)} on the worst item) is refused: ${chosen.evaluation.refusal ?? 'the generator refuses it'}.`
     : `Chosen by simulation: ${pct(chosen.worstFidelity)} fidelity on the worst item, ${chosen.evaluation.toolChanges} tool change${chosen.evaluation.toolChanges === 1 ? '' : 's'}${seconds === null ? '' : `, about ${Math.round(seconds)} s`}.`;
   return {
+    plan: planLabel(chosen.plan, tools),
     verdict,
     cutters: cutterLines(pick, tools),
     runnerUp: runnerUpLine(pick),
     buyThis: buyThisLine(pick, tools),
     fallback: ruleFallbackLine(pick),
+    difference: ruleDifferenceLine(pick, tools),
     notes: pick.notes,
   };
 }

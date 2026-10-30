@@ -35,8 +35,19 @@ import { kindedWork, materialRefusal, planCutters, reachOf, type PlannedCutter }
 
 export type { CandidatePlan, PinchFact } from '@/workers/sim/planEvaluate';
 
-/** The evaluator, bound by the caller to slice A (workers/sim/planEvaluate). */
-export type Evaluate = (plan: CandidatePlan, level: 'coarse' | 'full') => PlanEvaluation;
+/**
+ * The evaluator, bound by the caller to slice A (workers/sim/planEvaluate).
+ *
+ * MAY BE ASYNC (#766 D). The Design panel runs this search in the sim worker BETWEEN edits, and a
+ * synchronous search would block the preview that shares that worker for its whole run. An async
+ * evaluator lets the worker yield to its message queue between plans — so a newer edit's preview
+ * request is served, and can cancel the search — while the CLI and the unit tests pass a plain
+ * synchronous one.
+ */
+export type Evaluate = (plan: CandidatePlan, level: 'coarse' | 'full') => PlanEvaluation | Promise<PlanEvaluation>;
+
+/** The evaluator as the loops below consume it: always a promise, whichever form the caller bound. */
+type AwaitableEvaluate = (plan: CandidatePlan, level: 'coarse' | 'full') => Promise<PlanEvaluation>;
 
 /** Where a plan's cutters come from. `inv:` keys are the shop's own; catalogue entries are bought. */
 export function sourceOf(entry: ToolLibraryEntry): 'owned' | 'catalogue' {
@@ -89,7 +100,8 @@ export interface SmartPick {
    * The QUICK RULE's plan (#211/#760/#762 — `planCutters`' kind plan), which is the first candidate
    * the search scores. The panel's provisional answer is a view of this plan, so this is what its
    * measured answer is compared against when the two differ (slice C's difference sentence) — and
-   * what slice C's fallback sentence says is used when it is the only plan that posts.
+   * what slice C's fallback sentence says is used when it is the only plan that posts. Null when
+   * the rule assigns no cutter at all.
    */
   rule: ScoredPlan | null;
   /** The plan to run — a POSTING plan (slice A's `full.ok`), the best of those by the objective. */
@@ -391,7 +403,7 @@ function byObjective(a: ScoredPlan, b: ScoredPlan): number {
  * Run the search. `evaluate` is slice A's `evaluatePlan` bound to a context; every call is the
  * same job and plan shape the evaluator caches, so finalists are cheap the second time.
  */
-export function smartPick(
+export async function smartPick(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
@@ -399,7 +411,8 @@ export function smartPick(
   opts: SmartPickOptions = {},
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[] | null,
-): SmartPick {
+): Promise<SmartPick> {
+  const evaluateAsync: AwaitableEvaluate = async (plan, level) => evaluate(plan, level);
   const maxCandidates = opts.maxCandidates ?? 16;
   const fullFinalists = Math.max(1, opts.fullFinalists ?? 3);
   const margin = opts.buyThisMargin ?? 0.02;
@@ -412,12 +425,12 @@ export function smartPick(
   // COARSE FIRST — measure-only: every candidate is scored cheaply, and the top few are promoted
   // to a FULL evaluation, which is the level that says whether a plan actually posts.
   const verdicts = new Map<string, ScoredPlan>();
-  for (const plan of plans) verdicts.set(planKey(plan), toScored(plan, evaluate(plan, 'coarse')));
+  for (const plan of plans) verdicts.set(planKey(plan), toScored(plan, await evaluateAsync(plan, 'coarse')));
   // COARSE ok IS NOT POSTING: it says the plan is structurally evaluable. Only a full verdict's
   // `ok` is the generator's fact (slice A's seam), so the posting pool is drawn from this set.
   const fullDone = new Set<string>();
-  const full = (plan: CandidatePlan): ScoredPlan => {
-    const scoredFull = toScored(plan, evaluate(plan, 'full'));
+  const full = async (plan: CandidatePlan): Promise<ScoredPlan> => {
+    const scoredFull = toScored(plan, await evaluateAsync(plan, 'full'));
     verdicts.set(planKey(plan), scoredFull);
     fullDone.add(planKey(plan));
     return scoredFull;
@@ -442,7 +455,7 @@ export function smartPick(
     .slice(0, fullFinalists)
     .map((k) => byShape.get(k)!);
   for (const s of shapeFallbacks) if (!fullDone.has(planKey(s.plan))) fullList.push(s);
-  for (const finalist of fullList) if (!fullDone.has(planKey(finalist.plan))) full(finalist.plan);
+  for (const finalist of fullList) if (!fullDone.has(planKey(finalist.plan))) await full(finalist.plan);
 
   // POSTING FIRST. A plan slice A's generator refuses is not a candidate to hand over, however
   // well its geometry measures; promote further plans until at least one posts.
@@ -450,7 +463,7 @@ export function smartPick(
   if (!postsSoFar()) {
     for (const candidate of ordered()) {
       const key = planKey(candidate.plan);
-      if (!fullDone.has(key)) full(candidate.plan);
+      if (!fullDone.has(key)) await full(candidate.plan);
       if (verdicts.get(key)!.evaluation.ok) break;
     }
   }

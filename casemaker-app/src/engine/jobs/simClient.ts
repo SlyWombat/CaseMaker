@@ -18,6 +18,7 @@ import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
 import type { SimDesign } from '@/workers/sim/session';
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import type { EngravePickSummary } from '@/workers/sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -284,6 +285,22 @@ export const engravePreview = (
   residuals?: ProbeResiduals,
 ): Promise<EngravePreview | null> =>
   getSimApi().engravePreview(job, tools, catalogue, gen, margins, conditions, shop, residuals);
+
+/**
+ * #766 D — the measured cutter pick, in the background. Same `gen` as the preview: the worker
+ * stops the search at its next plan evaluation once a newer preview request has arrived. `null`
+ * means the run was superseded (or the job has nothing to measure) — the caller owns a newer
+ * answer, or leaves the rule's provisional one standing.
+ */
+export const engraveSmartPick = (
+  job: EngraveJob,
+  tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[],
+  gen: number,
+  conditions: ReadonlyMap<string, ConditionSummary>,
+  shop: EngraveShopOpts,
+): Promise<EngravePickSummary | null> =>
+  getSimApi().engraveSmartPick(job, tools, catalogue, gen, conditions, shop);
 
 /**
  * Generate → verify, headless, in the sim worker (#206). Returns the exact `.nc` text and the

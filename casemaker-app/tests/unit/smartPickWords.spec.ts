@@ -4,7 +4,15 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { buyThisLine, cutterLines, explainSmartPick, joinedPinchWords, runnerUpLine } from '@/engine/cnc/engrave/smartPickWords';
+import {
+  buyThisLine,
+  cutterLines,
+  explainSmartPick,
+  joinedPinchWords,
+  planLabel,
+  ruleDifferenceLine,
+  runnerUpLine,
+} from '@/engine/cnc/engrave/smartPickWords';
 import type { ScoredPlan, SmartPick } from '@/engine/cnc/engrave/smartPick';
 import type { CandidatePlan, EvaluatedItem, PinchFact, PlanEvaluation } from '@/workers/sim/planEvaluate';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -34,7 +42,13 @@ function entry(key: string, shape: ToolShape, tip: number): ToolLibraryEntry {
   };
 }
 
-const TOOLS = [entry('inv:flat-2', 'flat', 2), entry('inv:corn-0-6', 'flat', 0.6), entry('cat:corn-0-6', 'flat', 0.6), entry('inv:engraver-0-1', 'engraving', 0.1)];
+const TOOLS = [
+  entry('inv:flat-2', 'flat', 2),
+  entry('inv:flat-1', 'flat', 1),
+  entry('inv:corn-0-6', 'flat', 0.6),
+  entry('cat:corn-0-6', 'flat', 0.6),
+  entry('inv:engraver-0-1', 'engraving', 0.1),
+];
 
 function pinch(over: Partial<PinchFact> = {}): PinchFact {
   return { between: ['S', 'o'], gapMm: 0.278, separated: false, edgeLossMm: 0, areaMm2: 0.12, ...over };
@@ -157,5 +171,33 @@ describe('#766 C the words say what the measurement says', () => {
     const pending = explainSmartPick(pickOf({ chosen: refused, runnable: null }), TOOLS);
     expect(pending.verdict).toContain('No plan the search tried posts');
     expect(pending.verdict).toContain('a V-bit is not a rest cutter here');
+  });
+
+  it('#766 D — the measured plan is named plainly, and a differing rule answer says what it would do', () => {
+    const measured = scored(plan([['inv:flat-2', ['clear']], ['inv:engraver-0-1', []]]), evaluation([item({ fidelity: 1 })]));
+    // The quick rule's plan used the ⌀1 rest this job does NOT choose.
+    const rule = scored(
+      plan([['inv:flat-2', ['clear']], ['inv:flat-1', []]]),
+      evaluation([
+        item({
+          fidelity: 0.86,
+          pinches: [
+            pinch({ between: ['S', 'o'], separated: false }),
+            pinch({ between: ['t', 'w'], separated: false }),
+            pinch({ between: ['f', 't'], separated: false }),
+          ],
+        }),
+      ]),
+    );
+    const words = explainSmartPick(pickOf({ chosen: measured, rule, considered: [rule, measured] }), TOOLS);
+    // The plan's own name, and the difference sentence in the manager's shape.
+    expect(planLabel(measured.plan, TOOLS)).toContain('⌀2');
+    expect(words.difference).toBe('the quick rule\'s ⌀1 rest would leave "Software" joined at 3 pinches');
+    // The same rule plan as the chosen one is no difference at all.
+    const same = explainSmartPick(pickOf({ chosen: measured, rule: measured }), TOOLS);
+    expect(same.difference).toBeNull();
+    // A rule plan that leaves no pinch joined but loses fidelity still says what it loses.
+    const lossy = scored(plan([['inv:flat-2', ['clear']]]), evaluation([item({ fidelity: 0.8, pinches: [] })]));
+    expect(ruleDifferenceLine(pickOf({ chosen: measured, rule: lossy }), TOOLS)).toContain('would measure 80 % on "Software"');
   });
 });
