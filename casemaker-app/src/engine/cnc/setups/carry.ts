@@ -69,6 +69,51 @@ export function carryPointBetweenSetups(from: CarrySetup, to: CarrySetup): (p: V
 }
 
 /**
+ * One prior-removal mesh and the setup whose work frame it is in (1-based `setupIndex`, the
+ * program's own field — the same numbering the frozen programs carry).
+ */
+export interface SeedMesh {
+  mesh: NodeMeshOutput;
+  setupIndex: number;
+}
+
+export type CarrySeedsResult =
+  | { ok: true; meshes: NodeMeshOutput[] }
+  | { ok: false; message: string };
+
+/**
+ * The seed a program in `targetIndex` starts from: every earlier program's remaining solid,
+ * carried into the target's work frame. A mesh already in the target's frame is passed THROUGH
+ * (the sweeper reads it; it does not mutate it), so a same-setup rest pass costs nothing. A
+ * cross-setup carry needs both frames; a setup the planner could not orient has none, and the
+ * result says so by name rather than seeding the wrong way round.
+ */
+export function carrySeedsForSetup(
+  seeds: readonly SeedMesh[],
+  targetIndex: number,
+  frames: readonly (CarrySetup | null)[],
+): CarrySeedsResult {
+  const meshes: NodeMeshOutput[] = [];
+  for (const seed of seeds) {
+    if (seed.setupIndex === targetIndex) {
+      meshes.push(seed.mesh);
+      continue;
+    }
+    const from = frames[seed.setupIndex - 1] ?? null;
+    const to = frames[targetIndex - 1] ?? null;
+    if (from === null || to === null) {
+      const missing = from === null ? seed.setupIndex : targetIndex;
+      return {
+        ok: false,
+        message: `setup ${missing} has no work-frame rotation (its stock face cannot be mounted), so the remaining stock cannot be carried into setup ${targetIndex}`,
+      };
+    }
+    meshes.push(carryRemovalBetweenSetups(seed.mesh, from, to));
+  }
+  return { ok: true, meshes };
+}
+
+/**
  * The same solid, in `to`'s job frame. Positions are transformed, the triangulation is untouched,
  * and the bbox is recomputed. A same-setup carry is still a fresh mesh (the caller may hand it to
  * another worker), so no caller can mutate the seed it passed in.

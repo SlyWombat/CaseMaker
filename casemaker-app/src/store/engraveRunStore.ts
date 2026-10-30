@@ -21,8 +21,10 @@ import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveGenerated, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { SimDiagnostic } from '@/workers/sim/session';
+import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SimStatus } from './simStore';
-import { clampPlacementsFor, jobMount, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { clampPlacementsFor, jobMount, jobSetups, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { carrySeedsForSetup, orient, type CarrySetup } from '@/engine/cnc/setups';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import { useLocationStore } from './locationStore';
@@ -426,6 +428,21 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // the setup, the machine and the package's frame and floor, and the oracle while the first
     // engraving program is still the session's live one.
     const setup = toSetup(job, jobMachine(job, calibration), mount?.fixture, bed);
+    // #723 P2-2b-ii — each program's own setup work frame, for carrying the remaining stock
+    // between sides. A saved setup's rotation is the planner's own (`orient`), over the stock's
+    // bounds; a setup the mount cannot hold has no frame, and the carry then refuses by name
+    // rather than seeding a flipped side the wrong way round.
+    const stockSize = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
+    const stockBounds = {
+      min: [0, 0, 0] as [number, number, number],
+      max: [stockSize.x, stockSize.y, stockSize.z] as [number, number, number],
+    };
+    const carryFrames: (CarrySetup | null)[] = jobSetups(job).map((s) => {
+      const o = orient(s.orientation.top, s.mount, stockSize);
+      return o.ok ? { rotation: o.matrix, bounds: stockBounds } : null;
+    });
+    /** The setup each cumulative prior-removal mesh came from, aligned with the walk's list. */
+    const seedSources: number[] = [];
     const firstEngravingIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
     // #445 §4 — the thread facts belong to the first engraving program, the one
     // `generated.threads` describes; a facing pass or a later program states none.
@@ -436,7 +453,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const oracleBox: { report: OracleReport | null } = { report: null };
     let outcome: ProgramSweepOutcome;
     try {
-      outcome = await sweepPrograms<SweepProgram>({
+      outcome = await sweepPrograms<SweepProgram & { setupIndex: number }>({
         programs: generated.programs,
         // The sim store applies the shop's `drill.pointAngleDeg` when a program states no point,
         // so this realm's fallback is null (the command line reads the shop itself).
@@ -445,6 +462,29 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
         load: async ({ program, index, cutter, drillPoint, priorRemoval }) => {
           try {
+            // #723 P2-2b-ii — CARRY THE SIDES. The walk hands us the earlier programs' remaining
+            // solids in the frame of the program that cut them; a program in a later setup starts
+            // from them in ITS frame. A same-setup rest pass passes the mesh straight through.
+            const priorList: readonly NodeMeshOutput[] = priorRemoval ?? [];
+            const seeds = carrySeedsForSetup(
+              priorList.map((mesh, k) => ({ mesh, setupIndex: seedSources[k] ?? program.setupIndex })),
+              program.setupIndex,
+              carryFrames,
+            );
+            if (!seeds.ok) {
+              return {
+                ok: false as const,
+                pathOnly: false,
+                diagnostics: [
+                  {
+                    source: 'sweep' as const,
+                    severity: 'error' as const,
+                    code: 'sim-error',
+                    message: `${programLabel(generated.programs, index)}: ${seeds.message}`,
+                  },
+                ],
+              };
+            }
             const result = await useSimStore.getState().loadProgram(
               program.nc,
               // #725 B7 — the wasteboard is the setup's under-board for a bed job: a through cut
@@ -467,9 +507,15 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               // #734 — the floor the CAM posted a through move against.
               job.breakthrough,
               // #744 — the cumulative stock the earlier programs left.
-              priorRemoval,
+              // #723 P2-2b-ii — carried into THIS program's setup frame.
+              seeds.meshes.length === 0 ? null : seeds.meshes,
             );
-            if (result !== null) return result;
+            if (result !== null) {
+              // Keep the frame bookkeeping aligned with the walk's own list: only a load that
+              // actually produced a removal mesh is appended there.
+              if (result.ok && result.meshes.removal !== null) seedSources.push(program.setupIndex);
+              return result;
+            }
             const sim = useSimStore.getState();
             // null means this load no longer owns the session: a newer run/panel load stopped it
             // (the walk stops quietly), or the worker failed (block, naming this program).

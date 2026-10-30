@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { carryPointBetweenSetups, carryRemovalBetweenSetups, type CarrySetup } from '@/engine/cnc/setups';
+import { carryPointBetweenSetups, carryRemovalBetweenSetups, carrySeedsForSetup, type CarrySetup } from '@/engine/cnc/setups';
 import type { Mat } from '@/engine/cnc/setups/orient';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 
@@ -89,5 +89,44 @@ describe('#723 P2-2b — the carried-stock transform', () => {
     expect(out.bbox.min[1]).toBeCloseTo(30, 6);
     expect(out.bbox.max[2]).toBeCloseTo(-18, 6);
     expect(out.bbox.min[2]).toBeCloseTo(-21, 6);
+  });
+});
+
+describe('#723 P2-2b-ii — the seed a later program starts from', () => {
+  const frames = [TOP, FLIP];
+
+  it('an empty list is an empty seed', () => {
+    const out = carrySeedsForSetup([], 2, frames);
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.meshes).toEqual([]);
+  });
+
+  it('a mesh already in the target frame is passed THROUGH, not copied', () => {
+    const m = mesh([[10, 10, -5], [20, 10, -5], [20, 20, -8]]);
+    const out = carrySeedsForSetup([{ mesh: m, setupIndex: 2 }], 2, frames);
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.meshes[0]).toBe(m);
+  });
+
+  it('a mesh from the other side is carried into the target frame', () => {
+    const m = mesh([[40, 25, 0], [40, 25, -26], [10, 10, -5]]);
+    const out = carrySeedsForSetup([{ mesh: m, setupIndex: 1 }], 2, frames);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const map = carryPointBetweenSetups(TOP, FLIP);
+    const want = map([40, 25, 0] as [number, number, number]);
+    expect(out.meshes[0]!.positions[0]).toBeCloseTo(want[0], 6);
+    expect(out.meshes[0]!.positions[1]).toBeCloseTo(want[1], 6);
+    expect(out.meshes[0]!.positions[2]).toBeCloseTo(want[2], 6);
+  });
+
+  it('a setup with no work-frame rotation refuses by name instead of seeding untransformed', () => {
+    const m = mesh([[10, 10, -5], [20, 10, -5], [20, 20, -8]]);
+    const out = carrySeedsForSetup([{ mesh: m, setupIndex: 1 }], 2, [TOP, null]);
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.message).toContain('setup 2 has no work-frame rotation');
+      expect(out.message).toContain('carried into setup 2');
+    }
   });
 });
