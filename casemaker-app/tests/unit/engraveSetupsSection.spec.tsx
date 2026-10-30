@@ -100,6 +100,10 @@ const DATUM_LOCATION = {
       product: 'Makera Wired Probe V2',
       variant: 'wired-touch',
       unit: { tipDiameterMm: 2.0, rimOffsetMm: 0.7, rimOffsetUncertaintyMm: 0.25 },
+      provenance: {},
+      // The schema's own defaults (#595's writes append a history line, as the app's parsed records
+      // always can): a hand-built fixture that omits them is not a record the app can hold.
+      history: [],
       whereabouts: { kind: 'machine', machineId: 'machine-1a2b3c', since: '2026-10-23T00:00:00.000Z' },
     },
     {
@@ -107,6 +111,8 @@ const DATUM_LOCATION = {
       kind: 'vise',
       constants: { jawBarWidth: 10, jawLength: 100 },
       unit: { jawStartY: -10 },
+      provenance: {},
+      history: [],
       whereabouts: { kind: 'machine', machineId: 'machine-1a2b3c', since: '2026-10-23T00:00:00.000Z' },
     },
   ],
