@@ -496,11 +496,11 @@ is still a guess.
 
 ## CI
 
-Three workflows in `.github/workflows/`:
+GitHub only reads workflows from the repository root's `.github/workflows/`, and only the Windows installer lives there (#290). That is why it is the only one that has ever run.
 
-- `ci.yml` — lint + typecheck + Vitest + production build, matrix Node 20/22 on ubuntu-latest. Triggered on every PR + push to main.
-- `playwright.yml` — E2E suite with chromium + SwiftShader for deterministic WebGL. Uploads HTML report on failure.
-- `windows-installer.yml` — runs on `windows-latest`, installs Rust, checks `icon.ico` carries all eight Windows sizes (`npm run icons`; it never regenerates the set), builds the Tauri NSIS bundle (#403 — NSIS only), and uploads the installer as an artifact.
+- `windows-installer.yml` (root) — on a `v*` tag or a manual dispatch: `windows-latest`, Rust, checks `icon.ico` carries all eight Windows sizes (`npm run icons`; it never regenerates the set), builds the **x64** NSIS bundle (#403 — NSIS only), signs the setup `.exe` when the maintainer's `WINDOWS_CERT_PFX_BASE64`/`WINDOWS_CERT_PASSWORD` secrets exist, and attaches it to the GitHub Release. Without the secrets a tag build **fails** rather than publishing an unsigned installer; a manual run still produces an unsigned test artifact. Secrets are the maintainer's and are never created by the repo.
+- `ci.yml` — lint + typecheck + Vitest + production build, matrix Node 20/22 on ubuntu-latest. **Has never run**: it is still under `casemaker-app/.github/workflows/`, where GitHub does not look. Moving it would start Actions minutes on every push — a separate decision.
+- `playwright.yml` — E2E suite with chromium + SwiftShader. Same location and status: never run.
 
 ## Performance notes
 

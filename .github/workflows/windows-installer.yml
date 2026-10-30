@@ -1,0 +1,142 @@
+# The Windows installer: built on a version tag, signed when the maintainer's certificate exists,
+# and attached to the GitHub Release (#290).
+#
+# WHY THIS FILE IS AT THE REPO ROOT. GitHub only reads `.github/workflows/` at the repository root.
+# This workflow used to live in `casemaker-app/.github/workflows/`, where it never ran. The other
+# two workflows (`ci.yml`, `playwright.yml`) are still there and still have never run: moving them
+# would start Actions minutes on every push, which is the maintainer's call, not this issue's.
+#
+# TRIGGERS. A `v*` tag is a release; a manual dispatch is a test build. Pushes to main do not run
+# this workflow — a release artifact is what it exists for, and minutes are the maintainer's.
+#
+# SIGNING. The certificate and its password are the maintainer's secrets and are never created by
+# this repository. The signing step is clearly marked and SKIPPED when `WINDOWS_CERT_PFX_BASE64` is
+# not configured (a fork, or before the maintainer adds it). A tag build without it FAILS rather
+# than silently attaching an unsigned installer (#290's acceptance); a manual run still produces an
+# unsigned artifact attached to the run. A wrong password or an expired certificate makes signtool
+# fail the job by name.
+#
+# WHAT IS SIGNED. The setup `.exe` — the file a user downloads and the one SmartScreen judges. The
+# app executable INSIDE it is not signed by this step; Tauri's `bundle.windows.signCommand` is the
+# hook for signing it before bundling, and is a follow-up only if the maintainer wants it.
+name: Windows installer
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# `gh release create/upload` needs a token allowed to write releases.
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: casemaker-app
+    env:
+      # The maintainer's signing material. Both are empty when the secrets do not exist, which is
+      # how the steps below tell "not configured" from "configured and wrong".
+      WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: casemaker-app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            casemaker-app/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('casemaker-app/src-tauri/Cargo.toml', 'casemaker-app/src-tauri/Cargo.lock') }}
+
+      - name: Install npm deps
+        run: npm ci
+
+      # NOT `npx tauri icon`: re-running that in this repo is not a no-op (it resamples every
+      # checked-in PNG differently and drops android/ios trees in), and it would write a 6-size
+      # icon.ico over the 8-size one — silently bringing back the 20/40 gap. The icons are
+      # committed; this only guarantees the .ico still carries all eight sizes before we build.
+      - name: Check the Windows icon carries every size
+        run: npm run icons
+
+      # x64 explicitly. The project ships x64 (deployment.md); the ARM64 option is not wired up,
+      # and the artifact path below follows the target triple.
+      - name: Build SPA + Tauri Windows bundle (x64 NSIS)
+        run: npm run tauri:build -- --target x86_64-pc-windows-msvc
+
+      # --- SIGNING — the maintainer's secrets, skipped when absent. -----------------------------
+      - name: Sign the installer (skipped when WINDOWS_CERT_PFX_BASE64 is not configured)
+        if: env.WINDOWS_CERT_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfx = Join-Path $env:RUNNER_TEMP 'casemaker-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if ($null -eq $signtool) { throw 'signtool.exe was not found in the Windows SDK' }
+            $installer = Get-ChildItem 'src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe' |
+              Select-Object -First 1
+            if ($null -eq $installer) { throw 'no NSIS installer was produced' }
+            & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com `
+              /f $pfx /p $env:WINDOWS_CERT_PASSWORD $installer.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "signtool sign failed with exit code $LASTEXITCODE (a wrong password or an expired certificate is the usual cause)"
+            }
+            & $signtool.FullName verify /pa /v $installer.FullName
+            if ($LASTEXITCODE -ne 0) { throw "signtool verify failed with exit code $LASTEXITCODE" }
+          } finally {
+            Remove-Item $pfx -ErrorAction SilentlyContinue
+          }
+
+      - name: Upload NSIS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: case-maker-windows-nsis
+          path: casemaker-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      # #290's acceptance: never SILENTLY attach an unsigned installer to a release.
+      - name: Refuse an unsigned installer for a release
+        if: startsWith(github.ref, 'refs/tags/') && env.WINDOWS_CERT_PFX_BASE64 == ''
+        shell: pwsh
+        run: |
+          throw 'WINDOWS_CERT_PFX_BASE64 is not configured, so this release would carry an unsigned installer. Add the maintainer''s signing secrets, or run the workflow manually to build an unsigned test artifact.'
+
+      - name: Attach the installer to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $installer = Get-ChildItem 'src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe' |
+            Select-Object -First 1
+          if ($null -eq $installer) { throw 'no NSIS installer was produced' }
+          # The release is created by whoever tags, or by this job when nobody did.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "Case Maker $tag" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw "gh release create $tag failed with exit code $LASTEXITCODE" }
+          }
+          gh release upload $tag $installer.FullName --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload $tag failed with exit code $LASTEXITCODE" }
