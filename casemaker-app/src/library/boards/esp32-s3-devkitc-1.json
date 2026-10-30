@@ -21,16 +21,14 @@
       "kind": "usb-c",
       "position": { "x": 5, "y": -1, "z": 1.6 },
       "size": { "x": 9, "y": 7.5, "z": 3.2 },
-      "facing": "-y",
-      "cutoutMargin": 0.5
+      "facing": "-y"
     },
     {
       "id": "usb-c-native",
       "kind": "usb-c",
       "position": { "x": 16, "y": -1, "z": 1.6 },
       "size": { "x": 9, "y": 7.5, "z": 3.2 },
-      "facing": "-y",
-      "cutoutMargin": 0.5
+      "facing": "-y"
     },
     {
       "id": "header-left",

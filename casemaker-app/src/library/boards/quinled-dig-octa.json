@@ -22,8 +22,7 @@
       "kind": "usb-c",
       "position": { "x": -2, "y": 50, "z": 1.6 },
       "size": { "x": 9, "y": 9, "z": 3.2 },
-      "facing": "-x",
-      "cutoutMargin": 0.5
+      "facing": "-x"
     },
     {
       "id": "led-output-1",

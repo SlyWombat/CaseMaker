@@ -21,8 +21,7 @@
       "kind": "usb-c",
       "position": { "x": 48, "y": 10.6, "z": 1.6 },
       "size": { "x": 5.5, "y": 9, "z": 3.2 },
-      "facing": "+x",
-      "cutoutMargin": 0.5
+      "facing": "+x"
     },
     {
       "id": "header-bottom",

@@ -49,8 +49,7 @@
         "y": 9,
         "z": 3.5
       },
-      "facing": "-x",
-      "cutoutMargin": 0.5
+      "facing": "-x"
     },
     {
       "id": "usb-a-host",

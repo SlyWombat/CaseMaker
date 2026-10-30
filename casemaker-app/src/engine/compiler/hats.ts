@@ -10,6 +10,7 @@ import { type BuildOp } from './buildPlan';
 import { buildAxisAlignedCutout } from './roundCutout';
 import { computeStackedHatHeight, HOST_HAT_CLEARANCE } from './caseShell';
 import { transformPlacementPorts } from './hatOrientation';
+import { defaultMarginFor } from './portFactory';
 
 const OVERSHOOT = 1;
 
@@ -146,7 +147,7 @@ export function autoPortsForHat(profile: HatProfile, hatPlacementId: string): Po
       position: { x: c.position.x, y: c.position.y, z: c.position.z },
       size: { x: c.size.x, y: c.size.y, z: c.size.z },
       facing: c.facing!,
-      cutoutMargin: c.cutoutMargin ?? 0.5,
+      cutoutMargin: c.cutoutMargin ?? defaultMarginFor(c.kind),
       locked: false,
       enabled: true,
       cutoutShape: c.cutoutShape,

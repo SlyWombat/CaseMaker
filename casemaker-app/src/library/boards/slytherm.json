@@ -34,8 +34,7 @@
       "kind": "usb-c",
       "position": { "x": 0, "y": 31.6, "z": 8.8 },
       "size": { "x": 7, "y": 9, "z": 3.2 },
-      "facing": "-x",
-      "cutoutMargin": 0.5
+      "facing": "-x"
     }
   ],
   "defaultStandoffHeight": 0,

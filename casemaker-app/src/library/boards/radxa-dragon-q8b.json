@@ -73,8 +73,7 @@
         "y": 13.9,
         "z": 8.94
       },
-      "facing": "-y",
-      "cutoutMargin": 0.5
+      "facing": "-y"
     },
     {
       "id": "hdmi",
@@ -177,8 +176,7 @@
         "y": 7.35,
         "z": 3.16
       },
-      "facing": "+y",
-      "cutoutMargin": 0.5
+      "facing": "+y"
     },
     {
       "id": "usbc-dp-2",
@@ -193,8 +191,7 @@
         "y": 7.35,
         "z": 3.16
       },
-      "facing": "+y",
-      "cutoutMargin": 0.5
+      "facing": "+y"
     },
     {
       "id": "gpio",
