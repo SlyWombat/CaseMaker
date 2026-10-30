@@ -86,6 +86,13 @@ export interface PostContext {
    * AND a correct cut whenever `lift > depth`. Absent (a flat post), the top is Z0 as before.
    */
   surface?: SurfaceFrame | null;
+  /**
+   * #723 R-4 — the tool the machine is on when the program starts, as the FILE states it
+   * (`;@CM|START|tool=`). Absent means `'empty'`: every program this post writes opens with its
+   * own `T<n> M6`, so nothing is established before that line — and a reader that would otherwise
+   * have to guess (the emulator reports `tool-change-ambiguous`) learns the answer here instead.
+   */
+  startingTool?: number | 'empty' | 'unknown';
 }
 
 export type PostResult = { ok: true; text: string } | { ok: false; errors: string[] };
@@ -140,6 +147,12 @@ export const CAM_NAME = 'Case Maker';
 export const FINAL_RETRACT_Z = 15;
 
 /** One `;@MKR|` record: the tag, then `key=value` fields joined by `|`. */
+/** `;@CM|START|tool=`'s value: a number, or the word; absent is `empty` (see {@link PostContext}). */
+function startWord(startingTool: number | 'empty' | 'unknown' | undefined): string {
+  if (startingTool === undefined) return 'empty';
+  return typeof startingTool === 'number' ? String(startingTool) : startingTool;
+}
+
 function mkr(tag: string, ...fields: string[]): string {
   return fields.length === 0 ? `;@MKR|${tag}` : `;@MKR|${tag}|${fields.join('|')}`;
 }
@@ -252,6 +265,7 @@ function postRotary(
     // written until the bench reads a Studio-generated rotary file.
     `;@CM|TOOL|key=${sanitizeMkrValue(ctx.toolKey)}`,
     `;@CM|ROTARY|radius=${axis(r)}`,
+    `;@CM|START|tool=${startWord(ctx.startingTool)}`,
     cycleEstimateNote(machine),
   ];
 
@@ -476,6 +490,9 @@ export function postZ1(
     // Studio ignores a comment it does not know, so this cannot break the machine's own reader;
     // the `MKR` line above is left exactly as Studio writes it and the key never goes into it.
     `;@CM|TOOL|key=${sanitizeMkrValue(ctx.toolKey)}`,
+    // #723 R-4 — the starting tool, stated where a reader finds it: the program's own first
+    // `T<n> M6` changes TO a cutter, and nothing about the machine's prior tool is assumed.
+    `;@CM|START|tool=${startWord(ctx.startingTool)}`,
     mkr('TIME', `seconds=${Math.round(estimateIRCycleSeconds(ir, rapid))}`),
     // #242/#281: the machine's screen shows the figure above as the job time, so say what it assumes
     // AND on what numbers. A `;` comment (not a `;@MKR` record), so the header reader ignores it but

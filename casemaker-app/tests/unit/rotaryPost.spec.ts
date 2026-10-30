@@ -213,6 +213,8 @@ describe.skipIf(!existsSync(VENDOR))('the rotary dialect against the vendor stru
     expect(posted.text).not.toContain(';@MKR');
     expect(posted.text).toContain(';@CM|TOOL|key=flat-1.0');
     expect(posted.text).toContain(';@CM|ROTARY|radius=10');
+    // #723 R-4 — and the starting tool, so a reader need not call the first change ambiguous.
+    expect(posted.text).toContain(';@CM|START|tool=empty');
   });
 
   it('emits the axis-frame safe height, and A only when it changes (modal)', () => {

@@ -73,6 +73,11 @@ class Interp {
    * like the tool key it only prefills a form: the Simulate panel offers a rod of this diameter.
    */
   cmRotaryRadius: number | null = null;
+  /**
+   * The starting tool a `;@CM|START|tool=` line states (#723 R-4), or null: a number, or `'empty'`
+   * / `'unknown'`. The FIRST valid one wins, like the two above.
+   */
+  cmStartTool: number | 'empty' | 'unknown' | null = null;
 
   // ---- modal state -------------------------------------------------------
   private scale = 1;
@@ -154,6 +159,11 @@ class Interp {
       if (cm.tag === 'ROTARY' && this.cmRotaryRadius === null) {
         const r = Number(cm.fields['radius']);
         if (Number.isFinite(r) && r > 0) this.cmRotaryRadius = r;
+      }
+      if (cm.tag === 'START' && this.cmStartTool === null) {
+        const v = (cm.fields['tool'] ?? '').trim();
+        if (v === 'empty' || v === 'unknown') this.cmStartTool = v;
+        else if (/^\d+$/.test(v)) this.cmStartTool = Number(v);
       }
       return;
     }
@@ -847,10 +857,11 @@ export function parseGcode(source: string): ParseResult {
   for (let i = 0; i < lines.length; i++) it.handleLine(lines[i] as string, i + 1);
   // A `;@CM|` line is header data too (#332), so a file carrying only ours still has a header.
   const cm: MkrHeader['cm'] | undefined =
-    it.cmToolKey !== null || it.cmRotaryRadius !== null
+    it.cmToolKey !== null || it.cmRotaryRadius !== null || it.cmStartTool !== null
       ? {
           ...(it.cmToolKey !== null ? { tool: { key: it.cmToolKey } } : {}),
           ...(it.cmRotaryRadius !== null ? { rotary: { radius: it.cmRotaryRadius } } : {}),
+          ...(it.cmStartTool !== null ? { start: { tool: it.cmStartTool } } : {}),
         }
       : undefined;
   const header: MkrHeader | null =

@@ -280,6 +280,25 @@ describe('tool changes and pauses (the emulator stops where the machine stops)',
     expect(unknown.diagnostics.map((d) => d.code)).toContain('tool-change-ambiguous');
   });
 
+  it('a file that STATES its starting tool answers the setup’s unknown (#723 R-4)', () => {
+    // `;@CM|START|tool=empty` is our post's record: nothing is established before the program's
+    // own first change, so `T1 M6` is a real change — a pause, and no "ambiguous" report. The
+    // record is used ONLY where the setup is unknown; a setup that states a tool keeps its word.
+    const stated = run(';@CM|START|tool=empty\nT1M6\n', { startingTool: 'unknown' });
+    expect(stated.pauses).toHaveLength(1);
+    expect(stated.diagnostics.map((d) => d.code)).not.toContain('tool-change-ambiguous');
+    expect(stated.stateAt(1).tool).toBe(1);
+    // A stated tool number classifies the first change against it.
+    const isOne = run(';@CM|START|tool=1\nT1M6\n', { startingTool: 'unknown' });
+    expect(isOne.pauses).toHaveLength(0);
+    expect(isOne.diagnostics.map((d) => d.code)).toContain('tool-change-noop');
+    // A setup that states a tool outranks the file's own record.
+    expect(run(';@CM|START|tool=1\nT1M6\n', { startingTool: 2 }).pauses).toHaveLength(1);
+    // A file stating nothing changes nothing: still ambiguous, still treated as a change.
+    const silent = run('T1M6\n', { startingTool: 'unknown' });
+    expect(silent.diagnostics.map((d) => d.code)).toContain('tool-change-ambiguous');
+  });
+
   it('M490.1 and M600 are pauses; M490.2 (the resume) is not', () => {
     const tl = run('M490.1\nM490.2\nM600\n');
     expect(tl.pauses.map((p) => p.kind)).toEqual(['M490.1', 'M600']);

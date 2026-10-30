@@ -26,7 +26,7 @@
 
 import type { GcodeEvent, HomeEvent, MoveEvent, ParseResult, Pos, ProbeEvent, TloCalibrateEvent, ToolChangeEvent } from '../gcode/types';
 import { insideEnvelope, type MillProfile } from '../machine';
-import type { Setup } from '../setup';
+import type { Setup, StartingTool } from '../setup';
 
 export type ToolState = number | 'unknown';
 
@@ -621,7 +621,22 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
    */
   let cutBeforeA: { step: number; line: number } | null = null;
 
-  let state = initialState(setup);
+  // #723 R-4 — A FILE THAT STATES ITS STARTING TOOL ANSWERS THE QUESTION THE SETUP LEAVES OPEN.
+  // `;@CM|START|tool=` is our post's record (`empty` = the program's own first change establishes
+  // the tool). It is used only where the SETUP says `unknown`: a caller that knows the machine's
+  // tool (the job's own run states 1) keeps its answer, and a file that states nothing changes
+  // nothing — its first `M6` is still reported as ambiguous rather than guessed.
+  const fileStart = parse.header?.cm?.start?.tool;
+  const startingTool: StartingTool =
+    setup.startingTool !== 'unknown'
+      ? setup.startingTool
+      : fileStart === 'empty'
+        ? -1
+        : typeof fileStart === 'number'
+          ? fileStart
+          : 'unknown';
+  const runSetup: Setup = startingTool === setup.startingTool ? setup : { ...setup, startingTool };
+  let state = initialState(runSetup);
   snapshots.push(state); // snapshot[0] is the state before step 0
 
   let toolpath: number | null = null;

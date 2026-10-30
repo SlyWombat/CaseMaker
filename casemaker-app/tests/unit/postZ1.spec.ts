@@ -97,6 +97,18 @@ describe('postZ1 (#173)', () => {
     expect(sanitizeMkrValue('A|B\nC')).toBe('A B C');
   });
 
+  it('states the starting tool in a ;@CM record, defaulting to empty (#723 R-4)', () => {
+    // Absent: `empty` — the program's own first `T M6` establishes the tool, and nothing about the
+    // machine's prior tool is assumed (the emulator reports `tool-change-ambiguous` otherwise).
+    const dflt = postZ1(TWO_OP, CTX, Z1);
+    if (!dflt.ok) throw new Error(dflt.errors.join('; '));
+    expect(dflt.text).toContain(';@CM|START|tool=empty');
+    // A caller that knows the machine's tool states it, and the record carries the number.
+    const stated = postZ1(TWO_OP, { ...CTX, startingTool: 2 }, Z1);
+    if (!stated.ok) throw new Error(stated.errors.join('; '));
+    expect(stated.text).toContain(';@CM|START|tool=2');
+  });
+
   it('posts a two-operation hand-built IR to a stable .nc', () => {
     const res = postZ1(TWO_OP, CTX, Z1);
     expect(res.ok).toBe(true);
@@ -112,6 +124,7 @@ describe('postZ1 (#173)', () => {
       ;@MKR|UNIT|value=MM
       ;@MKR|TOOL|number=1|id=0|name=1 mm flat end|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=0|flutelength=0|diameter=1|tipdiameter=1|cornerradius=0|angle=0|halfAngle=0
       ;@CM|TOOL|key=flat-1.0
+      ;@CM|START|tool=empty
       ;@MKR|TIME|seconds=4
       ; cycle estimate: cutting + rapids through the trapezoid, timed on Makera Z1's rapid model (1200 mm/min XY, 600 mm/min Z, 150 mm/s² accel, config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time
       ;@MKR|TOOLPATH|number=1|tool_number=1|name=[T1]Engrave "A" 1.0mm
@@ -306,7 +319,9 @@ describe('postZ1 (#173)', () => {
       ';@MKR|TOOLPATH_START|toolpath_number=1',
       ';@MKR|TOOLPATH_START|toolpath_number=2',
     ]);
-    expect(res.text).not.toContain('empty');
+    // The skipped operation's NAME is nowhere in the file. (`empty` itself appears once, in the
+    // `;@CM|START|tool=empty` record #723 R-4 added, which is not the operation.)
+    expect(res.text).not.toContain('name=empty');
   });
 
   it('refuses IRs it cannot post, with a reason each time', () => {

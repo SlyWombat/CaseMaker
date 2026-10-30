@@ -283,6 +283,13 @@ export interface CmHeader {
    * Simulate form offers a rod of this diameter; like every header field it only PREFILLS a form.
    */
   rotary?: { radius: number };
+  /**
+   * #723 R-4 — the tool the machine is on when the program starts, as `;@CM|START|tool=` states
+   * it: a number, or the words `empty` (nothing established — the program's own first `T M6`
+   * changes to a cutter) and `unknown`. A file that states it lets the emulator classify its
+   * first tool change instead of reporting `tool-change-ambiguous`.
+   */
+  start?: { tool: number | 'empty' | 'unknown' };
 }
 
 export interface MkrHeader {
