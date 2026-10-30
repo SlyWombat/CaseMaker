@@ -65,6 +65,8 @@ export interface SmartPickRequest {
   conditions?: ReadonlyMap<string, ConditionSummary> | null;
   shop: EngraveShopOpts;
   table?: readonly FeedsEntry[] | null;
+  /** #785 — the search's progress: the level being measured and the candidate about to be tried. */
+  onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void;
 }
 
 /** Slice A's evaluator, as the worker binds it (one job, one context). */
@@ -103,7 +105,7 @@ export async function runSmartPick(
   };
   let pick;
   try {
-    pick = await smartPick(job, tools, catalogue, guarded, {}, conditions, table);
+    pick = await smartPick(job, tools, catalogue, guarded, { onProgress: request.onProgress }, conditions, table);
   } catch (e) {
     if (e instanceof SupersededError) return null;
     throw e;

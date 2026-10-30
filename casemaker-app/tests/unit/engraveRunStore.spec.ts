@@ -1238,3 +1238,48 @@ describe('#642 the run watches every input it stamps', () => {
     });
   });
 });
+
+// #785 — Generate says what it is doing, and Cancel stops it and puts the panel back.
+describe('#785 progress and Cancel', () => {
+  beforeEach(() => {
+    useEngraveRunStore.getState().reset();
+    setEngraveRunClientLoader(null);
+    useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: 'flat-1.0' });
+  });
+  afterEach(() => setEngraveRunClientLoader(null));
+
+  it('reports stage words while it works, and Cancel terminates the client and restores the phase', async () => {
+    let release: (g: EngraveGenerated) => void = () => {};
+    const held = new Promise<EngraveGenerated>((resolve) => {
+      release = resolve;
+    });
+    let cancels = 0;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async (_job, _tool, _catalogue, _cal, _margins, _shop, onProgress) => {
+        onProgress?.({ stage: 'sample', label: 'sampling the goal' });
+        onProgress?.({ stage: 'rough', label: 'roughing level 1 of 4', done: 1, total: 4 });
+        return held;
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+      cancelGenerate: () => {
+        cancels += 1;
+      },
+    }));
+
+    const running = useEngraveRunStore.getState().generate();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useEngraveRunStore.getState().phase).toBe('generating');
+    expect(useEngraveRunStore.getState().progress?.label).toBe('roughing level 1 of 4');
+
+    useEngraveRunStore.getState().cancelGenerate();
+    expect(cancels).toBe(1);
+    expect(useEngraveRunStore.getState().phase).toBe('idle');
+    expect(useEngraveRunStore.getState().progress).toBeNull();
+
+    // The orphaned run's result arrives late and must not write any state.
+    release(clean());
+    await running;
+    expect(useEngraveRunStore.getState().phase).toBe('idle');
+    expect(useEngraveRunStore.getState().generated).toBeNull();
+  });
+});

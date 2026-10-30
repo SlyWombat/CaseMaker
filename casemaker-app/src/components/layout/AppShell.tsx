@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { StatusBar } from './StatusBar';
 import { Toolbar } from './Toolbar';
 import { PlacementBanner } from './PlacementBanner';
+import { CrashRecoveryBanner } from './CrashRecoveryBanner';
 import { FloatersBanner } from './FloatersBanner';
 import { WelcomeOverlay } from '../welcome/WelcomeOverlay';
 import { StartWizard } from '../welcome/StartWizard';
@@ -24,6 +25,7 @@ import { useStartWizardStore } from '@/store/startWizardStore';
 import { sweepUnusedMeshBlobs } from '@/store/meshBlobSweep';
 import { startRecentJobTracking } from '@/store/recentJobsStore';
 import { useManageModeStore } from '@/store/manageModeStore';
+import { useFlightRecorderStore } from '@/store/flightRecorderStore';
 
 function useUndoRedoShortcuts(): void {
   useEffect(() => {
@@ -55,6 +57,9 @@ export function AppShell() {
     startRecentJobTracking();
     // #728 — and drop the stored meshes neither the open job nor a recent one refers to.
     void sweepUnusedMeshBlobs();
+    // #787 — start the flight recorder once per load. A previous session's marker still standing
+    // means it died uncleanly, and the store holds what it left for the banner below.
+    void useFlightRecorderStore.getState().init();
   }, []);
   const welcomeMode = useProjectStore((s) => s.welcomeMode);
   // #280 — the wizard mounts HERE, not inside the welcome overlay: its step 2 creates the project,
@@ -85,6 +90,8 @@ export function AppShell() {
         className="app-main"
         style={{ '--context-panel-width': `${contextPanelWidth}px` } as CSSProperties}
       >
+        {/* #787 — the previous session's crash, if it left one. Renders itself null otherwise. */}
+        <CrashRecoveryBanner />
         {/* Welcome mode owns the full main area — the board-picker catalog
             needs the width; sidebar/context panels are project UI anyway. */}
         {manageOpen ? (

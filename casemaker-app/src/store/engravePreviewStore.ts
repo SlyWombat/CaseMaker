@@ -23,6 +23,7 @@
 
 import { featureSim } from '@/platform/features';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
+import { noteProgress as noteFlightProgress, noteStage, noteWorkEnd, noteWorkStart } from '@/platform/flightRecorder';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { create } from 'zustand';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
@@ -74,6 +75,8 @@ export type EngravePreviewClient = {
     gen: number,
     conditions: ReadonlyMap<string, ConditionSummary>,
     shop: EngraveShopOpts,
+    /** #785 — the search's candidate counts (the real client's is proxied by Comlink). */
+    onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void,
   ) => Promise<EngravePickSummary | null>;
 };
 
@@ -113,6 +116,11 @@ export interface EngravePreviewState {
   measuredJob: string | null;
   measuredStatus: EngravePickStatus;
   measuredError: string | null;
+  /**
+   * #785 — the search's own count while it runs ("measuring candidates 3 of 12"), else null. The
+   * panel shows it in the provisional tag; the recorder gets the same events as flight crumbs.
+   */
+  measuredProgress: { level: 'coarse' | 'full'; done: number; total: number } | null;
   /**
    * §5.7 — where the viewport's design ↔ as-cut slider sits: 0 is the uncut design, `max` is the
    * as-cut preview, `null` means as cut. This is VIEW state, not a job setting: it is read by the
@@ -240,7 +248,7 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
    */
   async function runPick(job: EngraveJob, mine: number, jobFingerprintNow: string): Promise<EngravePickSummary | null> {
     if (!canMeasure(job)) {
-      if (mine === seq) set({ measuredStatus: 'idle' });
+      if (mine === seq) set({ measuredStatus: 'idle', measuredProgress: null });
       return null;
     }
     let inputs: PreviewInputs;
@@ -249,7 +257,7 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
       inputs = previewInputs(job);
       key = smartPickKeyFor(job, inputs);
     } catch (e) {
-      if (mine === seq) set({ measuredStatus: 'error', measuredError: e instanceof Error ? e.message : String(e) });
+      if (mine === seq) set({ measuredStatus: 'error', measuredError: e instanceof Error ? e.message : String(e), measuredProgress: null });
       return null;
     }
     if (mine !== seq) return null;
@@ -262,12 +270,12 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
       (f) => f.severity === 'error',
     );
     if (reachRefusal !== undefined) {
-      if (mine === seq) set({ measuredStatus: 'idle', measuredError: reachRefusal.message });
+      if (mine === seq) set({ measuredStatus: 'idle', measuredError: reachRefusal.message, measuredProgress: null });
       return null;
     }
     const cached = picks.get(key);
     if (cached !== undefined) {
-      set({ measured: cached, measuredJob: jobFingerprintNow, measuredStatus: 'ready', measuredError: null });
+      set({ measured: cached, measuredJob: jobFingerprintNow, measuredStatus: 'ready', measuredError: null, measuredProgress: null });
       return cached;
     }
     if (inflight !== null && inflight.key === key) return inflight.promise;
@@ -276,22 +284,45 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
         const client = await clientLoader();
         if (client.engraveSmartPick === undefined) {
           // A preview-only client (a test, or a build without the search): leave the rule answer.
-          if (mine === seq) set({ measuredStatus: 'idle' });
+          if (mine === seq) set({ measuredStatus: 'idle', measuredProgress: null });
           return null;
         }
-        const summary = await client.engraveSmartPick(job, inputs.tools, inputs.catalogue, mine, inputs.conditions, inputs.shop);
+        // #787 — the search is heavy work: its start and each candidate go to the flight recorder
+        // as well as to the panel, the same events feeding both.
+        noteWorkStart('smart-pick');
+        noteStage('smart-pick', 'candidates', 'measuring candidate plans');
+        const summary = await client.engraveSmartPick(
+          job,
+          inputs.tools,
+          inputs.catalogue,
+          mine,
+          inputs.conditions,
+          inputs.shop,
+          (progress) => {
+            if (mine === seq) set({ measuredProgress: progress });
+            noteFlightProgress(
+              'smart-pick',
+              'candidates',
+              progress.done,
+              progress.total,
+              `measuring ${progress.level} candidates ${progress.done} of ${progress.total}`,
+            );
+          },
+        );
+        noteWorkEnd('smart-pick', 'done');
         if (summary === null) {
           // Superseded inside the worker; a newer request owns the state (or the rule stands).
-          if (mine === seq) set({ measuredStatus: 'idle' });
+          if (mine === seq) set({ measuredStatus: 'idle', measuredProgress: null });
           return null;
         }
         picks.set(summary.jobKey, summary);
         if (mine === seq && summary.jobKey === key) {
-          set({ measured: summary, measuredJob: jobFingerprintNow, measuredStatus: 'ready', measuredError: null });
+          set({ measured: summary, measuredJob: jobFingerprintNow, measuredStatus: 'ready', measuredError: null, measuredProgress: null });
         }
         return summary;
       } catch (e) {
-        if (mine === seq) set({ measuredStatus: 'error', measuredError: e instanceof Error ? e.message : String(e) });
+        noteWorkEnd('smart-pick', 'failed');
+        if (mine === seq) set({ measuredStatus: 'error', measuredError: e instanceof Error ? e.message : String(e), measuredProgress: null });
         return null;
       } finally {
         if (inflight !== null && inflight.key === key) inflight = null;
@@ -310,6 +341,7 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
     measuredJob: null,
     measuredStatus: 'idle',
     measuredError: null,
+    measuredProgress: null,
     scrubStage: null,
     setScrubStage(stage) {
       set({ scrubStage: stage });
@@ -332,6 +364,7 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
               measuredJob: null,
               measuredStatus: measurable ? ('measuring' as const) : ('idle' as const),
               measuredError: null,
+              measuredProgress: null,
             }),
       });
       if (timer !== null) clearTimeout(timer);

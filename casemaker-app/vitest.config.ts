@@ -13,6 +13,7 @@ export default defineConfig({
     __FEATURE_SIM__: 'true',
     __BUILD_TARGET__: JSON.stringify('web'),
     __APP_VERSION__: JSON.stringify('0.0.0-test'),
+    __BUILD_COMMIT__: JSON.stringify('testcommit'),
     __DEPLOY_TARGET__: JSON.stringify(''),
     __DONATE_URL__: JSON.stringify(''),
   },

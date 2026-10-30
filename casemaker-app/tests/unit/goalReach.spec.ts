@@ -19,6 +19,7 @@ const backing = new Map<string, string>();
 
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, longestKnownReach, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import type { EngraveProgress } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -241,6 +242,26 @@ describe('#785 — Generate', () => {
     expect(note?.severity).toBe('info');
     expect(out.findings.some((f) => f.code === 'goal-reach-short')).toBe(false);
   }, 120_000);
+
+  it('#785 the goal CAM reports its stages, and the level and row counts reach the end', () => {
+    const target = rampGoal({}, 8);
+    const events: EngraveProgress[] = [];
+    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {}, (p) => events.push(p));
+    expect(out.ok).toBe(true);
+    const stages = events.map((e) => e.stage);
+    // `prepare` is the top-level `engraveGenerate`'s first event; the goal program itself starts
+    // at the sampling it owns.
+    for (const stage of ['sample', 'rough', 'finish', 'post', 'done'] as const) {
+      expect(stages, `the run must report ${stage}`).toContain(stage);
+    }
+    const rough = events.filter((e) => e.stage === 'rough');
+    expect(rough.length).toBeGreaterThan(1);
+    expect(rough.at(-1)?.done).toBe(rough.at(-1)?.total);
+    expect(rough.at(-1)?.label).toMatch(/^roughing level \d+ of \d+$/);
+    const finish = events.filter((e) => e.stage === 'finish');
+    expect(finish.at(-1)?.done).toBe(finish.at(-1)?.total);
+    expect(finish.at(-1)?.label).toMatch(/^finishing row \d+ of \d+$/);
+  });
 
   it('a goal within reach generates with no reach finding at all', () => {
     const target = rampGoal({}, 8);

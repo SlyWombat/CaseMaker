@@ -3,6 +3,9 @@
 // Injected by vite.config.ts via `define:` — bare semver from package.json.
 declare const __APP_VERSION__: string;
 
+// #787 — the short commit the build was made from (`null` when the build had no git checkout).
+declare const __BUILD_COMMIT__: string | null;
+
 // Issue #72 — production-only Donate button.
 //   __DEPLOY_TARGET__ = "electricrv" on the cPanel deploy, "" elsewhere.
 //   __DONATE_URL__    = Stripe Payment Link URL on production, "" elsewhere.

@@ -94,6 +94,12 @@ export interface SmartPickOptions {
    * plan is named as 'buy this' instead.
    */
   buyThisMargin?: number;
+  /**
+   * #785 — progress out of the search: the level being measured, and the candidate about to be
+   * evaluated. Called before the work is done, so the panel can say "measuring candidates 3 of 12"
+   * and the flight recorder has a crumb even if the tab dies in the next evaluation.
+   */
+  onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void;
 }
 
 /** The search's answer: the plan to run, what was close, and what to buy. */
@@ -430,7 +436,6 @@ export async function smartPick(
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[] | null,
 ): Promise<SmartPick> {
-  const evaluateAsync: AwaitableEvaluate = async (plan, level) => evaluate(plan, level);
   const maxCandidates = opts.maxCandidates ?? 16;
   const fullFinalists = Math.max(1, opts.fullFinalists ?? 3);
   const margin = opts.buyThisMargin ?? 0.02;
@@ -440,6 +445,16 @@ export async function smartPick(
   if (plans.length === 0) {
     throw new Error('the search found no candidate cutter plan for this job');
   }
+  // #785 — the search's own progress. `total` is the level's candidate list; the counts are
+  // reported BEFORE each evaluation, because that call is the seconds-long work.
+  let coarseDone = 0;
+  let fullDoneCount = 0;
+  let fullTotal = 0;
+  const evaluateAsync: AwaitableEvaluate = async (plan, level) => {
+    if (level === 'coarse') opts.onProgress?.({ level, done: ++coarseDone, total: plans.length });
+    else opts.onProgress?.({ level, done: ++fullDoneCount, total: Math.max(fullTotal, fullDoneCount) });
+    return evaluate(plan, level);
+  };
   // COARSE FIRST — measure-only: every candidate is scored cheaply, and the top few are promoted
   // to a FULL evaluation, which is the level that says whether a plan actually posts.
   const verdicts = new Map<string, ScoredPlan>();
@@ -473,6 +488,7 @@ export async function smartPick(
     .slice(0, fullFinalists)
     .map((k) => byShape.get(k)!);
   for (const s of shapeFallbacks) if (!fullDone.has(planKey(s.plan))) fullList.push(s);
+  fullTotal = fullList.filter((s) => !fullDone.has(planKey(s.plan))).length;
   for (const finalist of fullList) if (!fullDone.has(planKey(finalist.plan))) await full(finalist.plan);
 
   // POSTING FIRST. A plan slice A's generator refuses is not a candidate to hand over, however

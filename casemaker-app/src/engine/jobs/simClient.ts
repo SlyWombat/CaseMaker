@@ -17,7 +17,7 @@ import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
 import type { SimDesign } from '@/workers/sim/session';
-import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import type { EngraveProgress, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { EngravePickSummary } from '@/workers/sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
@@ -299,8 +299,18 @@ export const engraveSmartPick = (
   gen: number,
   conditions: ReadonlyMap<string, ConditionSummary>,
   shop: EngraveShopOpts,
+  /** #785 — the search's candidate counts; its own argument for the Comlink.proxy rule. */
+  onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void,
 ): Promise<EngravePickSummary | null> =>
-  getSimApi().engraveSmartPick(job, tools, catalogue, gen, conditions, shop);
+  getSimApi().engraveSmartPick(
+    job,
+    tools,
+    catalogue,
+    gen,
+    conditions,
+    shop,
+    onProgress === undefined ? undefined : Comlink.proxy(onProgress),
+  );
 
 /**
  * Generate → verify, headless, in the sim worker (#206). Returns the exact `.nc` text and the
@@ -333,8 +343,30 @@ export const engraveGenerate = (
   calibration: MachineCalibration | null,
   margins: EngraveMargins,
   shop?: EngraveShopOpts,
+  /**
+   * #785 — stage progress ("roughing level 41 of 112") for the panel and the flight recorder.
+   * Its OWN argument and wrapped in `Comlink.proxy`, for the reason `simLoad`'s comment states:
+   * a function nested inside a plain object is not recognised as callable and cannot be cloned.
+   */
+  onProgress?: (progress: EngraveProgress) => void,
 ): Promise<EngraveGenerated> =>
-  getSimApi().engraveGenerate(job, tool, catalogue, calibration, margins, shop);
+  getSimApi().engraveGenerate(
+    job,
+    tool,
+    catalogue,
+    calibration,
+    margins,
+    shop,
+    onProgress === undefined ? undefined : Comlink.proxy(onProgress),
+  );
+
+/**
+ * #785 — CANCEL a Generate. The sim worker is the one place a wasm call can run for minutes
+ * without yielding, so the only reliable stop is to TERMINATE it: the run's pending promise never
+ * resolves into state (the store has already orphaned it), and the next call recreates the worker.
+ * The same seam `loadSim`'s budget uses.
+ */
+export const cancelGenerate = (): void => terminateSim();
 
 /**
  * The volumetric oracle (#206 §3) over the program CURRENTLY loaded in the worker's session.

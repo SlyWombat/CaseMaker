@@ -4323,6 +4323,7 @@ export function generateGoalProgram(
   catalogue: readonly FeedCatalogueRow[],
   calibration: MachineCalibration | null,
   shop: EngraveShopOpts,
+  onProgress?: EngraveProgressFn,
 ): EngraveGenerated {
   const base = emptyGoalResult();
   const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null): EngraveGenerated => ({
@@ -4500,10 +4501,19 @@ export function generateGoalProgram(
         scallop,
         pencil,
         ...(pencilCreaseDeg === undefined ? {} : { pencilCreaseDeg }),
+        // #785 — the CAM's own layer/scan-line counts, as Generate's progress words.
+        onProgress: (p) =>
+          onProgress?.({
+            stage: p.pass,
+            label: `${p.pass === 'rough' ? 'roughing level' : 'finishing row'} ${p.done} of ${p.total}`,
+            done: p.done,
+            total: p.total,
+          }),
       },
     });
   let surfaced: Surfaced;
   let budgetBound = false;
+  onProgress?.({ stage: 'sample', label: 'sampling the goal' });
   try {
     surfaced = surfaceAt(refinedPitchMm);
   } catch (e) {
@@ -4578,6 +4588,7 @@ export function generateGoalProgram(
     toolKey: job.toolKey,
   };
   let nc: string;
+  onProgress?.({ stage: 'post', label: 'posting the program' });
   try {
     // #771 — the goal's design preview is its own sampled heightfield, drawn in the blank's
     // frame. It is the same grid the toolpath was generated over (no second sampling), and the
@@ -4625,6 +4636,7 @@ export function generateGoalProgram(
     cam,
   };
 
+  onProgress?.({ stage: 'done', label: 'done' });
   return {
     ...base,
     ok: true,
@@ -4688,6 +4700,7 @@ function generateGoalPrograms(
   catalogue: readonly FeedCatalogueRow[],
   calibration: MachineCalibration | null,
   shop: EngraveShopOpts,
+  onProgress?: EngraveProgressFn,
 ): EngraveGenerated {
   // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
   // path already builds the program with it — so each side's program is that program with the
@@ -4699,12 +4712,12 @@ function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = generateGoalProgram(job, firstSide.goal, tool, catalogue, calibration, shop);
+  const first = generateGoalProgram(job, firstSide.goal, tool, catalogue, calibration, shop, onProgress);
   const firstProgram = sideProgram(first, firstSide);
   if (firstProgram === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [firstProgram];
   for (const side of sides.slice(1)) {
-    const one = generateGoalProgram(job, side.goal, tool, catalogue, calibration, shop);
+    const one = generateGoalProgram(job, side.goal, tool, catalogue, calibration, shop, onProgress);
     const program = sideProgram(one, side);
     if (program === null) return { ...one, programs };
     programs.push(program);
@@ -4775,6 +4788,19 @@ function pathBbox(ir: ToolpathIR): { min: [number, number]; max: [number, number
  * until #419 §3's multi-program upload lands. A job with no `setups[]` is exactly one program and
  * takes the pre-#419 path unchanged, so its bytes do not move.
  */
+/**
+ * #785 — ONE progress report out of a Generate run: the stage, words for the panel, and a count
+ * when the stage has one ("roughing level 41 of 112", "finishing row 12 of 64"). The stages are the
+ * work the run really does; a stage that fails or is refused simply gets no later event.
+ */
+export interface EngraveProgress {
+  stage: 'prepare' | 'items' | 'sample' | 'rough' | 'finish' | 'post' | 'verify' | 'done';
+  label: string;
+  done?: number;
+  total?: number;
+}
+export type EngraveProgressFn = (progress: EngraveProgress) => void;
+
 export function engraveGenerate(
   tl: ManifoldToplevel,
   job: EngraveJob,
@@ -4783,7 +4809,9 @@ export function engraveGenerate(
   calibration: MachineCalibration | null = null,
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
+  onProgress?: EngraveProgressFn,
 ): EngraveGenerated {
+  onProgress?.({ stage: 'prepare', label: 'reading the job' });
   // #473 — A MATERIAL `facingRefusal` REFUSES IS REFUSED OUTRIGHT, BEFORE ANY PROGRAM IS POSTED.
   //
   // #474 settled that facing is offered for wood and metal only: a flat cutter smears a plastic
@@ -4862,7 +4890,7 @@ export function engraveGenerate(
           ],
         };
       }
-      return { ...generateGoalPrograms(job, sides, tool, catalogue, calibration, shop), surface: null };
+      return { ...generateGoalPrograms(job, sides, tool, catalogue, calibration, shop, onProgress), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
@@ -4875,7 +4903,7 @@ export function engraveGenerate(
     }
     // #623 — the surface-3D goal path posts flat (it never lifts feeds), so its package claims no
     // surface: the caller judges it in the work frame, which is the frame it was posted in.
-    return { ...generateGoalProgram(job, goal, tool, catalogue, calibration, shop), surface: null };
+    return { ...generateGoalProgram(job, goal, tool, catalogue, calibration, shop, onProgress), surface: null };
   }
 
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.
@@ -4895,6 +4923,7 @@ export function engraveGenerate(
   // setup's program. One plan, one map, handed to every program so every file judges the label
   // from the floor the run cuts under it.
   const documentFloors = supportingFloors(tl, toPartPlan(job));
+  onProgress?.({ stage: 'items', label: 'cutting the items' });
   if (job.setups === undefined) {
     const one = generateOneProgram(
       tl,

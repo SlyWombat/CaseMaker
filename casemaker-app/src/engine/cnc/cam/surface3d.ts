@@ -664,6 +664,12 @@ export interface SurfaceOpts {
   pencilCreaseDeg?: number;
   /** #671 — the scallop contour cap; absent → {@link DEFAULT_MAX_SCALLOP_CONTOURS}. */
   maxScallopContours?: number;
+  /**
+   * #785 — PROGRESS OUT OF THE LONG LOOPS, so Generate can say "roughing level 41 of 112" instead
+   * of "working". Called once per roughing Z layer and once per finishing scan line, at the start
+   * of the work that line will do; the CAM's output is byte-for-byte unchanged.
+   */
+  onProgress?: (p: { pass: 'rough' | 'finish'; done: number; total: number }) => void;
 }
 
 export interface Surface3dArgs {
@@ -777,12 +783,16 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     );
   }
 
-  const rough = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ);
+  const rough = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ, (done, total) =>
+    opts.onProgress?.({ pass: 'rough', done, total }),
+  );
   const roughMoves = rough.moves;
   // #671 — ONE tip field, four passes: the finishing raster, the scallop contours and the pencil
   // paths all ride the same gouge-safe drop, so no pass can promise a depth another one refuses.
   const tip = finishTipField(hf, tool, maxFinishTipOps);
-  const finishMoves = finishingMoves(hf, tip, feeds, alongStep, safeZ, hopZ);
+  const finishMoves = finishingMoves(hf, tip, feeds, alongStep, safeZ, hopZ, (done, total) =>
+    opts.onProgress?.({ pass: 'finish', done, total }),
+  );
 
   const depth = Math.max(0, hf.topZ - hf.minZ);
   const roughing: CamOperation = {
@@ -1126,6 +1136,7 @@ function roughingMoves(
   alongStep: number,
   safeZ: number,
   hopZ: number,
+  onLayer?: (done: number, total: number) => void,
 ): { moves: CamMove[]; layers: number } {
   const moves: CamMove[] = [];
   if (hf.coveredCount === 0) return { moves, layers: 0 };
@@ -1157,7 +1168,9 @@ function roughingMoves(
     moves.push({ kind: 'rapid', x: last.x, y: last.y, z });
   };
 
-  for (const L of levels) {
+  for (const [index, L] of levels.entries()) {
+    // #785 — the level about to be cut, reported BEFORE it (the caller's "doing k of n").
+    onLayer?.(index + 1, levels.length);
     let flip = false;
     for (const j of rows) {
       const y = y0 + j * pitch;
@@ -1212,13 +1225,16 @@ export function finishingMoves(
   alongStep: number,
   safeZ: number,
   hopZ: number,
+  /** #785 — called once per scan line, before it is cut (`done` counts from 1). */
+  onRow?: (done: number, total: number) => void,
 ): CamMove[] {
   const moves: CamMove[] = [];
   if (hf.coveredCount === 0) return moves;
   const { pitch, x0, y0 } = hf;
   const rows = rasterRows(hf, feeds.finishStepOver);
   let flip = false;
-  for (const j of rows) {
+  for (const [index, j] of rows.entries()) {
+    onRow?.(index + 1, rows.length);
     const y = y0 + j * pitch;
     for (const [iS, iE] of coveredRuns(hf, j)) {
       const cols = alongColumns(hf, iS, iE, alongStep);

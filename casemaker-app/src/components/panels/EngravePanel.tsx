@@ -824,6 +824,7 @@ export function EngravePanel(): JSX.Element {
   // measured plan and its explanation replace it.
   const measuredPick = useEngravePreviewStore((s) => s.measured);
   const measuredStatus = useEngravePreviewStore((s) => s.measuredStatus);
+  const measuredProgress = useEngravePreviewStore((s) => s.measuredProgress);
   const measuredError = useEngravePreviewStore((s) => s.measuredError);
   const measuredNow = measuredStatus === 'ready' ? measuredPick : null;
 
@@ -3197,7 +3198,10 @@ export function EngravePanel(): JSX.Element {
                 {/* #766 D — this is the QUICK rule's answer while the measured search runs. */}
                 {measuredStatus === 'measuring' && (
                   <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-pick-provisional">
-                    provisional — measuring…
+                    {/* #785 — the search's own count, so "measuring" has a number. */}
+                    provisional — {measuredProgress === null
+                      ? 'measuring…'
+                      : `measuring candidates ${measuredProgress.done} of ${measuredProgress.total}…`}
                   </span>
                 )}
                 {recPickDisplay.metal && (
@@ -3764,6 +3768,20 @@ export function EngravePanel(): JSX.Element {
           >
             {running ? 'Working…' : 'Generate'}
           </button>
+          {running && (
+            // #785 — WHAT it is doing, with a number when the stage has one, and a way to stop.
+            // Cancel terminates the worker (the store orphans the run first), and the panel
+            // returns to the phase it was in before the press.
+            <span
+              data-testid="engrave-generate-progress"
+              style={{ display: 'flex', alignItems: 'center', gap: 8, flexBasis: '100%', fontSize: 12, color: '#c8d3de' }}
+            >
+              <span>{run.progress === null ? 'Working…' : `${run.progress.label}…`}</span>
+              <button type="button" data-testid="engrave-generate-cancel" onClick={() => run.cancelGenerate()}>
+                Cancel
+              </button>
+            </span>
+          )}
           {generateBlocker !== null && (
             <span
               data-testid="engrave-generate-blocker"

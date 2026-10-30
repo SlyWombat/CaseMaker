@@ -24,7 +24,7 @@ import { createSimSession, type SimDesign, type SimFrame, type SimLoadOpts, type
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
-import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type EngraveShopOpts } from './sim/engraveGenerate';
+import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
 import { evaluatePlan } from './sim/planEvaluate';
 import { runSmartPick, type EngravePickSummary } from './sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -188,12 +188,14 @@ const api = {
     gen: number,
     conditions: ReadonlyMap<string, ConditionSummary>,
     shop: EngraveShopOpts,
+    // #785 — the search's candidate counts, its own argument for the Comlink.proxy rule.
+    onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void,
   ): Promise<EngravePickSummary | null> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     const tl = await getToplevel();
     const ctx = { tl, tools, catalogue, shop, calibration: null, conditions, table: shop.feeds ?? null };
     return runSmartPick(
-      { job, tools, catalogue, conditions, shop, table: shop.feeds ?? null },
+      { job, tools, catalogue, conditions, shop, table: shop.feeds ?? null, onProgress },
       (plan, level) => evaluatePlan(job, plan, ctx, { level }),
       () => latestEditGen > gen,
     );
@@ -223,9 +225,12 @@ const api = {
     calibration: MachineCalibration | null,
     margins: EngraveMargins,
     shop?: EngraveShopOpts,
+    // #785 — stage progress for the panel and the flight recorder. Its OWN argument, because
+    // Comlink only turns a top-level function into a proxy (the same rule `simLoad`'s states).
+    onProgress?: (progress: EngraveProgress) => void,
   ): Promise<EngraveGenerated> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    return runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop);
+    return runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, onProgress);
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The

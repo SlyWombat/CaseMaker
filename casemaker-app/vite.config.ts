@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import wasm from 'vite-plugin-wasm';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 // Default port 5173 (Vite's standard). Port 8000 was the historical default
 // but conflicts with kernel-reserved ports on some WSL2 / Hyper-V hosts;
@@ -13,6 +14,17 @@ const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'ut
   version: string;
 };
 const APP_VERSION = pkg.version;
+
+// #787 — the short commit the build was made from, so a crash report names the code that crashed.
+// Absent (a source tarball, a shallow clone) is honest: the report says null rather than guessing.
+function buildCommit(): string | null {
+  try {
+    return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: __dirname, encoding: 'utf8' }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+const BUILD_COMMIT = buildCommit();
 
 // Issue #82 — DEPLOY_BASE controls the public URL prefix the bundle uses for
 // `<script src=...>` and `import()` chunk URLs. cPanel deploy script sets it
@@ -79,6 +91,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), wasm(), analyticsTag(), checkoutTag()],
     define: {
       __APP_VERSION__: JSON.stringify(APP_VERSION),
+      __BUILD_COMMIT__: JSON.stringify(BUILD_COMMIT),
       __DEPLOY_TARGET__: JSON.stringify(DEPLOY_TARGET),
       __DONATE_URL__: JSON.stringify(DONATE_URL),
       __FEATURE_SIM__: JSON.stringify(FEATURE_SIM),

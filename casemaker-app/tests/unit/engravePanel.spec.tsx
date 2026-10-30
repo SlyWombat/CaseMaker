@@ -10,7 +10,7 @@ import { EngravePanel } from '@/components/panels/EngravePanel';
 import { savedTimeText } from '@/components/panels/engraveJobFileBarText';
 import { OPERATION_OPTIONS, OPERATION_TYPES } from '@/components/panels/operationTypes';
 import { useEngraveJobStore, undoEngraveRemoval, resetEngraveRemovalUndo, REMOVAL_UNDO_MS } from '@/store/engraveJobStore';
-import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { setEngraveRunClientLoader, useEngraveRunStore } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { resetEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngravePackageStore } from '@/store/engravePackageStore';
@@ -4285,5 +4285,33 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     expect(drawer.querySelector('[data-code="goal-reach-short"]')).toBeNull();
     const warning = drawer.querySelector('[data-code="goal-cut-top-band"]');
     expect(warning?.textContent).toContain("only the stock's top 11 mm is cut");
+  });
+
+  it('#785 Generate says its stage while it works, and Cancel puts the panel back', async () => {
+    let release: (g: import('@/workers/sim/engraveGenerate').EngraveGenerated) => void = () => {};
+    const held = new Promise<import('@/workers/sim/engraveGenerate').EngraveGenerated>((resolve) => {
+      release = resolve;
+    });
+    let cancels = 0;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async (_job, _tool, _catalogue, _cal, _margins, _shop, onProgress) => {
+        onProgress?.({ stage: 'rough', label: 'roughing level 41 of 112', done: 41, total: 112 });
+        return held;
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+      cancelGenerate: () => {
+        cancels += 1;
+      },
+    }));
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-generate'));
+    await waitFor(() =>
+      expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('roughing level 41 of 112'),
+    );
+    fireEvent.click(screen.getByTestId('engrave-generate-cancel'));
+    expect(cancels).toBe(1);
+    await waitFor(() => expect(screen.queryByTestId('engrave-generate-progress')).toBeNull());
+    release({ ok: false, stage: 'findings', findings: [], feeds: null, cam: null, nc: null, verify: null, errors: [] } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated);
+    setEngraveRunClientLoader(null);
   });
 });

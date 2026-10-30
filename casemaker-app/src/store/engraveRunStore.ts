@@ -16,9 +16,17 @@
 
 import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
-import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins, EngraveTargetObject } from '@/types/engraveJob';
 import type { Tool } from '@/engine/cnc/tool';
-import type { EngraveGenerated, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import type { EngraveGenerated, EngraveProgress, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import {
+  noteFinding,
+  noteProgress as noteFlightProgress,
+  noteStage,
+  noteWorkEnd,
+  noteWorkStart,
+  type WorkFacts,
+} from '@/platform/flightRecorder';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -110,9 +118,68 @@ export type EngraveRunClient = {
     margins: EngraveMargins,
     /** The engrave pipeline's shop defaults (#451) — see `run` for why they are read here. */
     shop?: EngraveShopOpts,
+    /** #785 — stage progress for the panel and the flight recorder. */
+    onProgress?: (progress: EngraveProgress) => void,
   ) => Promise<EngraveGenerated>;
   simOracle: (predicted: OraclePredicted[]) => Promise<OracleReport>;
+  /**
+   * #785 — stop the run's worker; the store has already orphaned the run (see `cancelGenerate`).
+   * OPTIONAL so a fake client (a test, a preview-only build) need not implement a stop it has no
+   * worker for; the real sim client's is `terminateSim`.
+   */
+  cancelGenerate?: () => void;
 };
+
+/**
+ * #785 — THE JOB FACTS A CRASH REPORT QUOTES: the stock, the item count and the goal mesh's bytes
+ * and triangle count (from a binary STL's own 84-byte header, when the bytes are embedded). The
+ * job document rides along with its mesh bytes REMOVED — the meshes are named by hash; the bytes
+ * are included only if the operator later chooses to.
+ */
+function goalMeshFacts(target: EngraveTargetObject): NonNullable<WorkFacts['meshes']>[number] & { triangles: number | null } {
+  const bytes = typeof target.data === 'string' ? Math.floor((target.data.length * 3) / 4) : 0;
+  let triangles: number | null = null;
+  if (target.format === 'stl' && typeof target.data === 'string' && bytes >= 84) {
+    try {
+      // 112 base64 chars decode to the first 84 bytes: the header and the triangle count.
+      const head = atob(target.data.slice(0, 112));
+      const view = new DataView(Uint8Array.from(head, (c) => c.charCodeAt(0)).buffer);
+      const count = view.getUint32(80, true);
+      // A binary STL's length is exactly 84 + 50n; anything else is ASCII or not an STL.
+      if (84 + 50 * count === bytes) triangles = count;
+    } catch {
+      triangles = null;
+    }
+  }
+  return { name: target.name, sha256: target.sha256, format: target.format, bytes, triangles };
+}
+
+function generateFacts(job: EngraveJob): WorkFacts {
+  const goals = [job.targetObject, ...(job.targetObjects ?? [])].filter(
+    (t): t is EngraveTargetObject => t !== undefined && (t.role ?? 'reference') === 'goal' && t.enabled,
+  );
+  const meshes = goals.map(goalMeshFacts);
+  const stripped: Record<string, unknown> = { ...job };
+  delete stripped.targetObject;
+  delete stripped.targetObjects;
+  return {
+    jobName: job.name,
+    jobFingerprint: jobFingerprint(job),
+    stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
+    items: job.labels.length + job.shapes.length,
+    ...(meshes.length === 0
+      ? {}
+      : {
+          goalBytes: meshes.reduce((sum, m) => sum + m.bytes, 0),
+          ...(meshes.some((m) => m.triangles !== null) ? { goalTriangles: meshes.reduce((sum, m) => sum + (m.triangles ?? 0), 0) } : {}),
+        }),
+    meshes: meshes.map(({ triangles: _triangles, ...m }) => m),
+    job: {
+      ...stripped,
+      ...(goals.length === 0 ? {} : { targets: goals.map(({ data: _data, ...t }) => t) }),
+    },
+  };
+}
 
 const loadClient = async (): Promise<EngraveRunClient> => {
   if (!featureSim) throw new Error('the run is not enabled in this build');
@@ -198,8 +265,16 @@ export interface EngraveRunState {
   previousVerdict: boolean | null;
   /** A thrown failure from any stage that is not already a finding (generate, load, oracle). */
   error: string | null;
+  /** #785 — the current stage's words while a run works ("roughing level 41 of 112"), else null. */
+  progress: EngraveProgress | null;
   /** Run the whole pipeline for the job as it is NOW. `surface` (#608) re-posts against a tilt. */
   generate: (surface?: SurfacePostFit | null) => Promise<void>;
+  /**
+   * #785 — CANCEL a run in flight. The worker is terminated (the only reliable stop for a wasm
+   * call), the in-flight result is orphaned, and the panel returns to the phase it was in before
+   * the run — the last generated result is still on screen, marked as before.
+   */
+  cancelGenerate: () => void;
   setAcknowledged: (v: boolean) => void;
   /**
    * #490 — record a diagnostic that did not come from a sim stage: the panel's error boundary
@@ -212,6 +287,12 @@ export interface EngraveRunState {
 }
 
 let seq = 0;
+/** #785 — the loaded client (so Cancel can terminate the worker without a second import). */
+let activeClient: EngraveRunClient | null = null;
+/** #785 — the phase the panel was in before this run, restored on Cancel. */
+let phaseBeforeRun: EngraveRunPhase = 'idle';
+/** #785 — the last stage the recorder heard, so a stage change is a stage crumb, not progress. */
+let lastStage: string | null = null;
 
 export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
   const empty = {
@@ -229,6 +310,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     changedSinceLast: [] as EngraveInputKey[],
     previousVerdict: null as boolean | null,
     error: null as string | null,
+    progress: null as EngraveProgress | null,
   };
 
   async function run(surface: SurfacePostFit | null = null): Promise<void> {
@@ -238,6 +320,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // The verdict is the comparison point; the inputs are what the new run's stamp is diffed
     // against, so a disagreement can name the input that moved.
     const before = get();
+    phaseBeforeRun = before.phase;
+    lastStage = null;
+    // #787 — the heavy work starts: its facts go to the flight recorder, and the marker says what
+    // was running if this tab dies before the next crumb.
+    noteWorkStart('generate', generateFacts(job));
     const previousVerdict = before.oracle === null ? null : before.oracle.ok;
     const previousInputs = before.inputs;
     set({ ...empty, phase: 'generating', generated: get().generated });
@@ -373,9 +460,24 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     let generated: EngraveGenerated;
     try {
       client = await clientLoader();
-      generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop);
+      activeClient = client;
+      // #785 — every stage report is BOTH the panel's progress and a flight-recorder crumb: one
+      // event stream, two readers. A stage change is a crumb of its own (the marker moves with it);
+      // a count inside a stage is progress.
+      const onProgress = (progress: EngraveProgress): void => {
+        if (mine === seq) set({ progress });
+        if (lastStage !== progress.stage) {
+          lastStage = progress.stage;
+          noteStage('generate', progress.stage, progress.label);
+        } else if (progress.done !== undefined && progress.total !== undefined) {
+          noteFlightProgress('generate', progress.stage, progress.done, progress.total, progress.label);
+        }
+      };
+      generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress);
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
+      noteWorkEnd('generate', 'failed');
+      activeClient = null;
       return;
     }
     if (mine !== seq) return;
@@ -406,21 +508,29 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         staleSince: Date.now(),
         staleReason: changedJob ? 'job' : changedMachine ? 'machine' : 'margins',
       });
+      noteWorkEnd('generate', 'done');
+      activeClient = null;
       return;
     }
 
-    set({ generated });
+    set({ generated, progress: null });
+    // #787 — every finding the run raised, small enough for the report to carry.
+    for (const f of generated.findings) noteFinding(f);
     if (!generated.ok || generated.nc === null) {
       set({ phase: 'blocked' });
+      noteWorkEnd('generate', 'refused');
+      activeClient = null;
       return;
     }
 
     if (!tool) {
       set({ phase: 'blocked', error: 'the job has no usable cutter' });
+      noteWorkEnd('generate', 'refused');
+      activeClient = null;
       return;
     }
 
-    set({ phase: 'simulating' });
+    set({ phase: 'simulating', progress: null });
 
     // #744 — ONE SWEEP PER PROGRAM, IN CUT ORDER, ON THE STOCK THE EARLIER ONES LEFT. The walk is
     // the command line's own (`engine/cnc/engrave/programSweep.ts`, #733 item 4 extracted, so the
@@ -557,6 +667,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       });
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
+      noteWorkEnd('generate', 'failed');
+      activeClient = null;
       return;
     }
     if (mine !== seq) return;
@@ -602,6 +714,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         simGridPitchMm: firstSwept?.gridPitchMm ?? null,
         error: sim.status === 'error' ? sim.error : null,
       });
+      noteWorkEnd('generate', 'refused');
+      activeClient = null;
       return;
     }
 
@@ -639,6 +753,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
     }
+    noteWorkEnd('generate', 'done');
+    activeClient = null;
   }
 
   return {
@@ -658,7 +774,29 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     changedSinceLast: [],
     previousVerdict: null,
     error: null,
+    progress: null,
     generate: run,
+    cancelGenerate: () => {
+      const phase = get().phase;
+      if (phase !== 'generating' && phase !== 'simulating' && phase !== 'checking') return;
+      // Orphan the in-flight run FIRST, so its late result (if any) can never write state...
+      seq += 1;
+      // ...then kill the worker. A synchronous wasm call cannot hear a message; termination is the
+      // one stop that works, and the next call recreates the worker.
+      activeClient?.cancelGenerate?.();
+      activeClient = null;
+      noteWorkEnd('generate', 'cancelled');
+      set({
+        ...empty,
+        generated: get().generated,
+        // Back to what the panel showed before the press — not a blank slate the operator has to
+        // reconstruct. A phase that was itself a run state reads as idle.
+        phase:
+          phaseBeforeRun === 'generating' || phaseBeforeRun === 'simulating' || phaseBeforeRun === 'checking'
+            ? 'idle'
+            : phaseBeforeRun,
+      });
+    },
     setAcknowledged: (v) => set({ acknowledged: v }),
     reportDiagnostic: (diagnostic) =>
       set((state) => ({ simDiagnostics: [...state.simDiagnostics, diagnostic] })),
