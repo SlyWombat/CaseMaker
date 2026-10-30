@@ -16,6 +16,11 @@ pub struct AppConfig {
     /// precedence over `bind_to_all`. Empty string / None = use the existing
     /// 127.0.0.1 / 0.0.0.0 behaviour.
     ///
+    /// #399 — `--host` is a PER-RUN override and does not write this field. A one-off diagnostic
+    /// `--host` that persisted could not be seen or cleared in the app (no screen shows the host),
+    /// so the field is set by the installer's `/HOST=` or a hand edit and is the address every
+    /// later launch binds.
+    ///
     /// There is deliberately no `listen_addr` on this struct. `server.rs::start` is the one place
     /// that turns these three fields into a socket address, because it also VALIDATES `host` as an
     /// IP literal and falls back to `bind_to_all`/loopback with a warning when it is not one. A

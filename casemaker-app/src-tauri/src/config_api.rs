@@ -47,9 +47,9 @@
 // answered" — the user would get a transport failure where there is a reason. `import_house` takes
 // the raw body for the same reason. The body is deliberately narrow — `port` and `bind_to_all`, both
 // required, and nothing else — and it MERGES into what the file holds rather than replacing it, so
-// `host` (a `--host` / installer concern with no control on any screen) survives a save from the
-// dialog. A body naming a field this endpoint does not own is REFUSED rather than ignored: a client
-// that sent `host` would otherwise be told its write succeeded.
+// `host` (set by the installer's `/HOST=` or a hand edit; `--host` is per-run since #399 and never
+// writes it) survives a save from the dialog. A body naming a field this endpoint does not own is
+// REFUSED rather than ignored: a client that sent `host` would otherwise be told its write succeeded.
 
 use crate::config::{self, AppConfig};
 use crate::house_api::json_error;
@@ -362,10 +362,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_write_merges_into_the_file_and_keeps_the_host_it_does_not_own() {
-        // `host` is set by `--host` or the installer's `/HOST=`, never by this dialog, and it has no
-        // field here. A save from the dialog has to leave it alone: an explicit listen address is
-        // how a user said which interface to serve on, and dropping it would silently move the app
-        // back to loopback at the next launch.
+        // `host` is set by the installer's `/HOST=` or a hand edit (`--host` is a per-run override
+        // since #399 and never writes the field), never by this dialog, and it has no field here. A
+        // save from the dialog has to leave it alone: an explicit listen address is how a user said
+        // which interface to serve on, and dropping it would silently move the app back to loopback
+        // at the next launch.
         let (dir, app) = app_under_test();
         let path = dir.path().join("config.json");
         config::save_to(

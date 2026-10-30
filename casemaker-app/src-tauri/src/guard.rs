@@ -378,9 +378,9 @@ fn content_type_of(headers: &HeaderMap) -> Option<String> {
 
 /// The name the settings file says the app serves under, if any.
 ///
-/// Read per request rather than captured at startup: `host` is written by `--host` and by the
-/// installer, and the sentence a refused write gets should name what the file says NOW. It is a
-/// small file and only writes reach this.
+/// Read per request rather than captured at startup: `host` is written by the installer's `/HOST=`
+/// or a hand edit (`--host` is per-run since #399), and the sentence a refused write gets should
+/// name what the file says NOW. It is a small file and only writes reach this.
 fn configured_host(guard: &Guard) -> Option<String> {
     config::load_from(&guard.config_path)
         .and_then(|cfg| cfg.host)

@@ -38,9 +38,10 @@ pub struct ServerHandle {
 /// Why a `host` setting cannot be used, if it cannot (#401). `None` means it can.
 ///
 /// One rule with two readers, because it decides two different things: `bind_addr_for` warns with
-/// this and binds the default, and `lib.rs` refuses to SAVE a `--host` that answers `Some` here —
-/// `--host` is persisted (#399), and a saved host is the address of every later launch, so a
-/// refused value written once is a refusal on every launch after it.
+/// this and binds the default for any value that reached it — from the file, or from `--host` —
+/// and `lib.rs` refuses to SERVE a `--host` that answers `Some` here for the run (`host_for_run`).
+/// Since #399 the flag is never written back, so a refused one cannot become every later launch's
+/// address; the rule still governs a value the FILE holds, which `bind_addr_for` refuses at bind.
 ///
 /// An IPv6 literal is a real address this shell cannot serve. It BINDS — the OS does that happily —
 /// but the window's origin is built from the same address, and there it is a URLPattern, where
@@ -52,8 +53,8 @@ pub struct ServerHandle {
 /// escaped (`[\:\:1]`) and the URL must not have them (`[::1]`) — so `window_capability` would have
 /// to take a pattern as well as the origin.
 ///
-/// A host that is not an address at all is NOT refused here. That is the older route: it is saved,
-/// and `bind_addr_for` warns about it at bind time.
+/// A host that is not an address at all is NOT refused here. It is used for the run, and — when it
+/// is the file's value — saved as it was; `bind_addr_for` warns about it at bind time.
 pub fn host_refusal(host: &str) -> Option<&'static str> {
     match host.parse::<IpAddr>() {
         Ok(IpAddr::V6(_)) => Some("IPv6 is not supported"),
@@ -637,9 +638,9 @@ mod tests {
         assert_eq!(bind_addr_for(None, false), loopback);
     }
 
-    /// The predicate `lib.rs` asks before it SAVES a `--host` (#399): it refuses the address the
-    /// shell cannot serve and nothing else. A value that is not an address is still saved — that is
-    /// the older behaviour, and moving it is not this change.
+    /// The predicate `lib.rs` asks before it SERVES a `--host` for the run (#399/#401): it refuses
+    /// the address the shell cannot serve and nothing else. A value that is not an address is still
+    /// used for the run, and a value the FILE holds is still saved — the older behaviour.
     #[test]
     fn host_refusal_names_only_the_address_the_shell_cannot_serve() {
         for refused in ["::1", "::", "fe80::1", "2001:db8::5"] {

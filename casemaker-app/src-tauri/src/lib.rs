@@ -43,11 +43,12 @@ struct CliArgs {
     #[arg(long)]
     port: Option<u16>,
 
-    /// Override the listen host (e.g. 192.168.10.16). Wins over --bind-all.
+    /// Use this address for THIS run only; it is not saved. Later runs serve on the host in
+    /// config.json (the installer's /HOST, or a hand edit), or loopback. Wins over --bind-all.
     #[arg(long)]
     host: Option<String>,
 
-    /// Print effective config and exit.
+    /// Print the config file this run would write, then exit.
     #[arg(long, default_value_t = false)]
     print_config: bool,
 }
@@ -93,11 +94,12 @@ fn window_capability(origin: &str) -> Result<String, serde_json::Error> {
 /// 127.0.0.1, where this run had nothing listening (#402).
 ///
 /// #401 settled V6 by REFUSING it rather than by spelling it: `server.rs`'s `bind_addr_for` never
-/// binds an IPv6 address, whether it arrived as `--host` (refused before it is saved, `host_to_save`
-/// below) or out of a `config.json` that already holds one (refused at the bind). So no V6 address
-/// reaches this function from `run()` any more. The two V6 arms stay as this function's total answer
-/// to an `IpAddr` — a match has to answer for every arm, and answering "loopback" cannot hand Tauri
-/// the unbracketed address it panics on. `server.rs`'s `host_refusal` carries the whole reasoning.
+/// binds an IPv6 address, whether it arrived as `--host` (refused for the run by `host_for_run`
+/// below, and never written back since #399) or out of a `config.json` that already holds one
+/// (refused at the bind). So no V6 address reaches this function from `run()` any more. The two V6
+/// arms stay as this function's total answer to an `IpAddr` — a match has to answer for every arm,
+/// and answering "loopback" cannot hand Tauri the unbracketed address it panics on. `server.rs`'s
+/// `host_refusal` carries the whole reasoning.
 fn webview_host(bind_addr: IpAddr) -> String {
     match bind_addr {
         IpAddr::V4(v4) if v4.is_unspecified() || v4 == Ipv4Addr::LOCALHOST => {
@@ -108,18 +110,56 @@ fn webview_host(bind_addr: IpAddr) -> String {
     }
 }
 
-/// The `--host` value that may be SAVED — `Ok` for a host the shell can serve, `Err` with the reason
-/// for one it refuses (#401).
+/// The `--host` value this run may SERVE on — `Ok` for a host the shell can serve, `Err` with the
+/// reason for one it refuses (#401).
 ///
-/// Extracted so the saving decision can be asserted on its own rather than only by reading a
-/// `config.json` after `run()` (the same reason `webview_host` above exists). What #401 needs is not
-/// that an IPv6 host is refused — `server.rs` falls back whether or not this exists — but that the
-/// refusal is never WRITTEN DOWN, because a saved host is the address of every launch after it.
-fn host_to_save(host: &str) -> Result<&str, &'static str> {
+/// It only decides THIS RUN (#399): the value is never written back, so a one-off diagnostic
+/// `--host` cannot become every later launch's bind address. The refusal is still asked here so the
+/// run falls to the saved host or loopback with one clear warning, rather than handing the server
+/// an address it would discard at bind anyway. Extracted so the decision can be asserted on its own
+/// rather than only by starting a process.
+fn host_for_run(host: &str) -> Result<&str, &'static str> {
     match server::host_refusal(host) {
         Some(why) => Err(why),
         None => Ok(host),
     }
+}
+
+/// Apply this run's CLI overrides to the settings read from disk (#399).
+///
+/// `--port` and `--bind-all` are SETTINGS the dialog shows and writes back, so their overrides are
+/// persisted with the rest of the file — `--port`'s help says so. `--host` is not: no screen shows
+/// or clears the host, so a persisted one could neither be seen nor undone in the app, which is the
+/// #399 footgun (one diagnostic launch bound every later one). It is this run's listen address only,
+/// and the host in the file stands for later runs when the flag is absent or refused.
+///
+/// Returns the settings to save and the host to serve on.
+fn settings_for_run(
+    mut saved: config::AppConfig,
+    args: &CliArgs,
+) -> (config::AppConfig, Option<String>) {
+    if args.bind_all {
+        saved.bind_to_all = true;
+    }
+    if let Some(p) = args.port {
+        if config::valid_port(p) {
+            saved.port = p;
+        }
+    }
+    let run_host = match args.host.as_deref() {
+        Some(h) => match host_for_run(h) {
+            Ok(host) => Some(host.to_string()),
+            Err(why) => {
+                log::warn!(
+                    "{why}: ignoring --host {h} for this run; the saved host (or loopback) is used instead"
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    let run_host = run_host.or_else(|| saved.host.clone());
+    (saved, run_host)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -127,31 +167,7 @@ pub fn run() {
     let _ = env_logger::try_init();
     let args = CliArgs::parse();
 
-    let mut cfg = config::load_config();
-    if args.bind_all {
-        cfg.bind_to_all = true;
-    }
-    if let Some(p) = args.port {
-        if config::valid_port(p) {
-            cfg.port = p;
-        }
-    }
-    if let Some(h) = args.host.clone() {
-        // #401 — a host the shell refuses is not SAVED. `--host` is persisted (#399), and a saved
-        // host is the address every later launch binds, so writing a refused one turns one bad
-        // launch into a bad install: an IPv6 literal in `config.json` was a startup panic with no
-        // argument at all, and only hand-editing the file could undo it.
-        //
-        // The refusal is `server.rs`'s (`host_refusal`), not a second opinion here: the address the
-        // server binds and the origin the window is loaded from are built from this one value, and
-        // that file owns the rule. This only asks it before the value is written down.
-        match host_to_save(&h) {
-            Ok(host) => cfg.host = Some(host.to_string()),
-            Err(why) => log::warn!(
-                "{why}: not saving --host {h}; the saved host (or loopback) is used instead"
-            ),
-        }
-    }
+    let (cfg, run_host) = settings_for_run(config::load_config(), &args);
     if args.print_config {
         println!(
             "{{\"port\":{},\"bind_to_all\":{},\"host\":{}}}",
@@ -167,7 +183,7 @@ pub fn run() {
     let server_cfg = server::ServerConfig {
         requested_port: cfg.port,
         bind_to_all: cfg.bind_to_all,
-        host: cfg.host.clone(),
+        host: run_host,
     };
 
     tauri::Builder::default()
@@ -328,8 +344,8 @@ mod tests {
     /// #401 refused V6 before it can become `bind_addr`, so `run()` no longer asks this function
     /// about an IPv6 address. The arms are still asserted because they are what the function answers
     /// with if one ever arrives: loopback, never an unbracketed address, which is the pattern Tauri
-    /// panics on. The refusal itself is `server::host_refusal` — and `host_to_save` is what stops a
-    /// refused `--host` from being written down in the first place.
+    /// panics on. The refusal itself is `server::host_refusal` — and `host_for_run` is what stops a
+    /// refused `--host` from reaching the server for the run.
     #[test]
     fn webview_host_still_answers_for_a_v6_address_it_is_no_longer_given() {
         assert_eq!(webview_host("::1".parse().unwrap()), "127.0.0.1");
@@ -337,19 +353,80 @@ mod tests {
         assert_eq!(webview_host("2001:db8::5".parse().unwrap()), "2001:db8::5");
     }
 
-    /// #399 is what made the old panic permanent: `--host` is written to `config.json`, so a
-    /// refused value has to be refused *before* it is saved — otherwise the next bare launch reads
-    /// it back and the user's recovery is hand-editing the file. What may still be saved is every
-    /// other host, including one that is not an address at all: that one is warned about at bind
-    /// time, which is where it was already handled.
-    #[test]
-    fn a_refused_host_is_never_saved() {
-        assert_eq!(host_to_save("192.168.10.16"), Ok("192.168.10.16"));
-        assert_eq!(host_to_save("127.0.0.2"), Ok("127.0.0.2"));
-        assert_eq!(host_to_save("bogus"), Ok("bogus"));
+    fn args(host: Option<&str>, port: Option<u16>, bind_all: bool) -> CliArgs {
+        CliArgs {
+            host: host.map(str::to_string),
+            port,
+            bind_all,
+            print_config: false,
+        }
+    }
 
-        assert!(host_to_save("::1").is_err());
-        assert!(host_to_save("fe80::1").is_err());
-        assert!(host_to_save("2001:db8::5").is_err());
+    /// #399 — the decision this issue asks for: a one-off `--host` is this run's listen address and
+    /// is NOT written back. The saved host (installer /HOST, or a hand edit) is what later runs use,
+    /// because no screen shows or clears the field, so a persisted diagnostic value could not be
+    /// undone in the app.
+    #[test]
+    fn a_one_off_host_is_served_but_not_persisted() {
+        let saved = config::AppConfig {
+            port: 8000,
+            bind_to_all: false,
+            host: Some("192.168.10.5".to_string()),
+        };
+        let (to_save, run_host) =
+            settings_for_run(saved.clone(), &args(Some("192.168.10.16"), None, false));
+
+        assert_eq!(run_host.as_deref(), Some("192.168.10.16"), "the run uses the flag");
+        assert_eq!(to_save.host.as_deref(), Some("192.168.10.5"), "the file keeps its host");
+        assert_eq!(to_save.port, saved.port);
+    }
+
+    /// With no flag, the file's host is what the run serves on — the unchanged path.
+    #[test]
+    fn without_the_flag_the_saved_host_is_served() {
+        let saved = config::AppConfig {
+            port: 8000,
+            bind_to_all: false,
+            host: Some("192.168.10.5".to_string()),
+        };
+        let (_, run_host) = settings_for_run(saved, &args(None, None, false));
+        assert_eq!(run_host.as_deref(), Some("192.168.10.5"));
+    }
+
+    /// #401 still holds, and #399 makes its hazard smaller: a refused host is not served and not
+    /// written. Anything that is not an IPv6 literal — including a string that is not an address at
+    /// all — is still used for the run, where the bind warns about it as it always did.
+    #[test]
+    fn a_refused_host_is_neither_served_nor_saved() {
+        let saved = config::AppConfig::default();
+        for refused in ["::1", "fe80::1", "2001:db8::5"] {
+            let (to_save, run_host) = settings_for_run(saved.clone(), &args(Some(refused), None, false));
+            assert_eq!(run_host, None, "{refused} must not be served");
+            assert_eq!(to_save.host, None, "{refused} must not be written");
+        }
+        for kept in ["192.168.10.16", "127.0.0.2", "bogus"] {
+            let (_, run_host) = settings_for_run(saved.clone(), &args(Some(kept), None, false));
+            assert_eq!(run_host.as_deref(), Some(kept));
+        }
+    }
+
+    /// `--port` and `--bind-all` stay persisted settings — the dialog shows and writes both — and
+    /// `--port`'s help says so.
+    #[test]
+    fn the_dialog_settings_still_persist() {
+        let (to_save, run_host) = settings_for_run(
+            config::AppConfig::default(),
+            &args(None, Some(5399), true),
+        );
+        assert_eq!(to_save.port, 5399);
+        assert!(to_save.bind_to_all);
+        assert_eq!(run_host, None);
+
+        // An invalid port is ignored for the run and the file, as before.
+        let (to_save, _) = settings_for_run(
+            config::AppConfig::default(),
+            &args(None, Some(80), false),
+        );
+        assert_eq!(to_save.port, config::DEFAULT_PORT);
     }
 }
