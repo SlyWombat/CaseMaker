@@ -1349,6 +1349,7 @@ export function parseSdListingLine(line: string): SdEntry | null {
   const [rawName, rawSize, rawStamp] = fields as [string, string, string];
   if (rawName.startsWith('.') || !/^\d+$/.test(rawSize) || !/^\d+$/.test(rawStamp)) return null;
   const directory = rawName.endsWith('/');
+  // eslint-disable-next-line no-control-regex -- the controller pads a name's spaces with 0x01; that control character IS what is replaced (the same reasoned disable as locationClient's)
   const name = (directory ? rawName.slice(0, -1) : rawName).replace(/\u0001/g, ' ');
   if (name.length === 0) return null;
   return {

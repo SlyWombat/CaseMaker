@@ -9,7 +9,8 @@
 
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MachineFiles, fileSizeWords, fileStampWords } from '@/components/manage/MachineFiles';
+import { MachineFiles } from '@/components/manage/MachineFiles';
+import { fileSizeWords, fileStampWords } from '@/components/manage/machineFileWords';
 import {
   recordUploadedFile,
   setMachineFilesLoader,
