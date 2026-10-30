@@ -25,8 +25,8 @@
 ; "Software\Case Maker" (DWORD value "FirewallPort") so that uninstall can
 ; remove exactly that rule without parsing locale-sensitive netsh output.
 ; Adding a rule needs elevation; if netsh fails the hook logs it and
-; continues (a per-machine Tauri install runs elevated, the default
-; current-user install does not).
+; continues. The shipped installer is perMachine (`bundle.windows.nsis.installMode`), so it runs
+; elevated and the rules land; a build switched back to currentUser would log the failure instead.
 
 !include "FileFunc.nsh"
 
@@ -188,10 +188,10 @@
   ; remove a rule the user added on purpose, and these named rules are all this app listens for, so
   ; it is not done here.
   ;
-  ; An add needs elevation, and the default Tauri install mode is `currentUser` (see
-  ; `bundle.windows.nsis.installMode`), so on a stock install netsh reports a failure and this
-  ; continues — the same caveat the HTTP rule carries. The rule really lands only when the installer
-  ; runs elevated (a per-machine install).
+  ; An add needs elevation. The shipped installer is perMachine (see
+  ; `bundle.windows.nsis.installMode`), so it runs elevated and this succeeds; netsh still reports
+  ; failures rather than aborting, so a currentUser build would log one and continue — the same
+  ; caveat the HTTP rule carries.
   DetailPrint "Case Maker: adding inbound firewall rule UDP 3333 (Case Maker Discovery)"
   nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Case Maker Discovery"'
   Pop $4

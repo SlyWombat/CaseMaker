@@ -34,7 +34,30 @@ The `casemaker_setup.exe` NSIS installer wraps the SPA in a Tauri shell with an 
 - ≥ 4 GB RAM.
 - ~150 MB disk for the install.
 
-**LAN exposure:** the bundled HTTP server listens on `127.0.0.1` by default. The installer accepts `/HOST=<ip>` and `/PORT=<port>` to bind to a LAN address and open the Windows Firewall on the chosen port (see `src-tauri/installer-hooks.nsh`). The server CLI also takes `--host`, `--port`, and `--bind-all` for run-time overrides.
+**Install scope:** the installer is per-machine (`bundle.windows.nsis.installMode`), so it shows one UAC prompt and installs under `Program Files` for all users. That elevation is also what lets it add firewall rules. The bundle is NSIS only — there is no `.msi`, because the msi target runs none of the installer hooks and would silently skip the settings and firewall work.
+
+**Settings:** a first install writes `%APPDATA%\casemaker\config.json` with port 8000 on loopback. The **App settings › App server** panel is the normal way to change the port or allow LAN access; the installer switches are for unattended deployment:
+
+```cmd
+rem wizard, switches applied at install
+casemaker_setup.exe /PORT=9000 /HOST=192.168.10.16
+rem silent
+casemaker_setup.exe /S /PORT=9000 /HOST=192.168.10.16
+```
+
+`/PORT` must be 1024–65535 (anything else logs and falls back to 8000). `/HOST` opens an inbound TCP rule for the chosen port; without it the server stays on loopback and no TCP rule is added. A switch rewrites the whole file, so pass **both** to pin both — `/PORT` alone resets `host` to null.
+
+**Upgrades keep the settings.** The install hook runs on every install, upgrades included, but it writes `config.json` only when the file is absent (a first install) or when `/PORT`/`/HOST` was passed. An ordinary upgrade over an existing install leaves the file byte-for-byte alone, so a custom port and `host` survive.
+
+**Firewall rules:** every install adds an inbound UDP 3333 rule named **Case Maker Discovery** — the Z1 broadcasts its discovery datagram to that port and the app binds it, so without the rule discovery looks like “no machine found”. The rule is deleted before it is added, so reinstalls replace it rather than stack it. Uninstall removes it, and removes the TCP rule recorded by `/HOST`; the uninstaller step of an *upgrade* deliberately leaves both alone, because the install that follows re-adds them.
+
+**Upgrade-in-place check (each release).** The template's rule is that production install data must survive upgrades, and an upgrade is only proven by running one:
+
+1. On a clean Windows machine, install the **previous** release over the top of nothing; accept the UAC prompt.
+2. Set a non-default port (App settings, or `/PORT=`), allow LAN if that is the deployment, and save a project plus any machine/bench records.
+3. Install the **new** release over it with no switches.
+4. Confirm `%APPDATA%\casemaker\config.json` still carries the custom port and `host`; the saved project opens; the records are there; Add/Remove Programs shows the new version; and `netsh advfirewall firewall show rule name="Case Maker Discovery"` (elevated) still lists the discovery rule.
+5. Launch the app and connect to the Z1 on the LAN. A pass here is the release's upgrade evidence; a failure blocks the release.
 
 ### 3. CLI / sample-export script
 

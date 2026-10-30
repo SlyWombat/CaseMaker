@@ -500,7 +500,7 @@ Three workflows in `.github/workflows/`:
 
 - `ci.yml` — lint + typecheck + Vitest + production build, matrix Node 20/22 on ubuntu-latest. Triggered on every PR + push to main.
 - `playwright.yml` — E2E suite with chromium + SwiftShader for deterministic WebGL. Uploads HTML report on failure.
-- `windows-installer.yml` — runs on `windows-latest`, installs Rust, generates platform icons, builds Tauri MSI + NSIS bundles, uploads as artifacts.
+- `windows-installer.yml` — runs on `windows-latest`, installs Rust, checks `icon.ico` carries all eight Windows sizes (`npm run icons`; it never regenerates the set), builds the Tauri NSIS bundle (#403 — NSIS only), and uploads the installer as an artifact.
 
 ## Performance notes
 
