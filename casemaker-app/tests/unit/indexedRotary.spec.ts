@@ -363,14 +363,16 @@ describe('#241 the air gate on an indexed job', () => {
 
   it('#729 — clears a lift-and-turn with the cutter wholly past the rod’s free end', () => {
     // The rod is X 0 → 30; the ⌀10 cutter at X 36 is clear of it by 1 mm, so a turn at Z 9 sweeps
-    // nothing of the ROD even though it is below the rod's top. That is where a tailstock sits, which
-    // is not modelled — the sweep's `fixture-unchecked` names the tailstock (asserted below).
+    // nothing of the ROD even though it is below the rod's top. That is where a tailstock sits, and
+    // #723 R-4 review moved the fact out of the diagnostics: a `fixture-unchecked` info on every
+    // rotary job could not discriminate, so the RESULT states it once (the coverage bands) and the
+    // sweep raises no such info at all.
     const src = ['S1000 M3', 'G0 X36 Y0 Z15 A0', 'G0 Z9', 'G0 A90', 'G0 Z15'].join('\n');
     const timeline = buildTimeline(parseGcode(src), setup());
     const out = sweepTimeline(tl, timeline, WIDE, setup());
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
     expect(out.value.diagnostics.some((d) => d.code === 'rotary-turn-in-stock')).toBe(false);
-    expect(out.value.diagnostics.some((d) => d.code === 'fixture-unchecked' && /tailstock/.test(d.message))).toBe(true);
+    expect(out.value.diagnostics.some((d) => d.code === 'fixture-unchecked')).toBe(false);
     dispose(out.value);
   });
 
@@ -398,14 +400,16 @@ describe('#729 — the retroactive review: the chuck, an unstated A, and face ma
     if (out.ok) dispose(out.value);
   });
 
-  it('refuses a cut that reaches past the jaw face below the rod top, and says the tailstock is unchecked', () => {
+  it('refuses a cut that reaches past the jaw face below the rod top, with no per-job fixture info', () => {
     // A ⌀10 pass starting at X 2: its edge is at X −3, inside the jaws, 1 mm below the top.
     const src = ['S1000 M3', 'G0 X2 Y0 Z15 A0', 'G1 Z9 F100', 'G1 X20', 'G0 Z15'].join('\n');
     const timeline = buildTimeline(parseGcode(src), setup());
     const out = sweepTimeline(tl, timeline, WIDE, setup());
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
     expect(out.value.diagnostics.find((d) => d.code === 'rotary-into-chuck')?.message).toContain('line 3: a cut reaches the chuck');
-    expect(out.value.diagnostics.some((d) => d.code === 'fixture-unchecked' && /tailstock/.test(d.message))).toBe(true);
+    // #723 R-4 review: the jaws' own refusal stays; the "tailstock unchecked" INFO left the
+    // diagnostics for the result's coverage sentence, so nothing fires on every rotary job.
+    expect(out.value.diagnostics.some((d) => d.code === 'fixture-unchecked')).toBe(false);
     dispose(out.value);
   });
 

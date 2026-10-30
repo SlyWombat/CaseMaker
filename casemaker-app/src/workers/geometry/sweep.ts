@@ -1618,16 +1618,11 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
           `radius clear of the jaw face, and move over the chuck only above the jaws.`,
       });
     }
-    diagnostics.push({
-      severity: 'info',
-      code: 'fixture-unchecked',
-      message:
-        "the rotary's tailstock and the chuck body above its jaws are not modelled as obstacles yet: the " +
-        "cutter's proximity to them is NOT checked (the jaws are checked only as the space beyond the jaw face" +
-        (jawReach > topZ + 1e-9
-          ? ')'
-          : ", up to the rod's top — no jaw size is recorded, so jaws standing taller than the rod are not checked)"),
-    });
+    // #723 R-4 review — the jaws' half-space check above stays; the INFO that raced with it does
+    // not. It fired on every cylinder job (a warning that cannot discriminate), and the result now
+    // states the fact once, in the coverage sentence (#724 W7's bands: "checked as keep-out bands
+    // … the sweep models neither as a solid"). `fixture-unchecked` remains for its discriminating
+    // case — a workholding with obstacles that NO fixture was given for.
   }
   // Every check against it is done; the fixture is not part of the result, so release it now.
   disposeFixture();

@@ -227,15 +227,17 @@ describe('session routing — INDEXED rotary (#241)', () => {
   });
 });
 
-describe('#729 — a wrapped job says what its simulation does not check', () => {
-  it('names the chuck and tailstock as unchecked on the column engine', () => {
+describe('#729/#723 — a wrapped job states its workholding once, not per sweep', () => {
+  it('raises no fixture-unchecked info on the column engine; the result carries the fact', () => {
+    // #723 R-4 review — the chuck and tailstock are the map's keep-out bands, and a diagnostic on
+    // every wrapped job was a warning that could not discriminate. The panel's coverage sentence
+    // states it once ("checked as keep-out bands … the sweep models neither as a solid"); the
+    // session's own diagnostics say nothing about it.
     const s = createSimSession(tl);
     const r = s.load(WRAPPED, setup(), tool, null);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    const d = r.diagnostics.find((x) => x.code === 'fixture-unchecked');
-    expect(d?.severity).toBe('info');
-    expect(d?.message).toMatch(/chuck and tailstock are not modelled/);
+    expect(r.diagnostics.some((x) => x.code === 'fixture-unchecked')).toBe(false);
     s.dispose();
   });
 });

@@ -9,7 +9,7 @@ import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { oracleSentence, useEngraveRunStore } from '@/store/engraveRunStore';
 import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
-import { rotaryBandFacts, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { rotaryBandFacts, rotaryMapOf, type RotaryMap } from '@/engine/cnc/rotary/wrap';
 import { neckCarriedBy } from '@/engine/cnc/rotary/neck';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import type { StartingTool } from '@/engine/cnc';
@@ -253,9 +253,24 @@ export function SimPanel() {
   // needed it, i.e. only for an obstacle above the stock top (#314). The physics caveat stays a
   // constant; this half changes per run.
   const outcome: SimRunOutcome = status === 'ready' ? 'swept' : pathOnly ? 'path-only' : 'refused';
+  // #723 R-4 — a ROD opened here has the rotary's own workholding facts: the map's two keep-out
+  // bands, stated once in the result ("checked as keep-out bands … the sweep models neither as a
+  // solid") instead of an info on every sweep. The form's own numbers build the map.
+  const rodMap: RotaryMap | null =
+    rodChuck === null
+      ? null
+      : {
+          radius: rodDiameter / 2,
+          circumference: Math.PI * rodDiameter,
+          stickout: rodChuck.stickout,
+          grip: Math.max(0, stock.length - rodChuck.stickout),
+          length: stock.length,
+          tailstock: rodChuck.tailstock,
+        };
   const coverage = coverageDisclaimer({
     outcome,
     fixtureLabels: (meshes?.fixture ?? []).map((f) => f.label),
+    rotaryBands: rodMap === null ? null : rotaryBandFacts(rodMap),
     fixtureSource: info?.fixtureSource,
     sacrificialModelled: meshes?.sacrificial != null,
     // #691 — the shank caveat names the cutter the way every other surface names it. `tool.name`

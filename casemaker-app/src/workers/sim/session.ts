@@ -761,19 +761,11 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         solid.delete();
       }
       diagnostics.push(...col.diagnostics.map(tagSweep));
-      // #729 — a WRAPPED rotary job sweeps on the column engine, which models no chuck and no
-      // tailstock: say so, as the exact sweep does for what it cannot check. (The verifier's
-      // jaw and tailstock rules still judge the file.)
-      if (rotaryClass === 'wrapped') {
-        diagnostics.push({
-          source: 'sweep',
-          severity: 'info',
-          code: 'fixture-unchecked',
-          message:
-            "the rotary's chuck and tailstock are not modelled in this wrapped job's simulation: the cutter's " +
-            'proximity to them is NOT checked here (the file check still refuses cuts into the jaws and the tailstock band)',
-        });
-      }
+      // #723 R-4 review — NO DIAGNOSTIC FOR THE ROTARY'S WORKHOLDING. The chuck, the jaws and the
+      // tailstock are the map's keep-out bands, and a `fixture-unchecked` info on every wrapped job
+      // was a warning that could not discriminate (it fired on every rotary cut). The result
+      // states the fact once instead (`simCoverage`'s band sentence: the jaws and tailstock are
+      // checked as bands, and neither is modelled as a solid); the verifier still judges them.
       live = { kind: 'column', column: col, timeline: surfaceTimeline, setup: setupArg, tool };
       return {
         ok: true,
