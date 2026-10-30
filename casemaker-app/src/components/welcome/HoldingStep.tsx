@@ -328,7 +328,7 @@ export function HoldingPicture({
     <div style={{ display: 'grid', gap: 6 }}>
       <svg
         viewBox="0 0 240 150"
-        style={{ width: '100%', maxWidth: '100%', display: 'block', border: '1px solid #2a2f36', background: '#10151b' }}
+        style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', display: 'block', border: '1px solid #2a2f36', background: '#10151b' }}
         role="img"
         aria-label={`Top view of the ${mechanism === 'rotary' ? 'rotary' : 'vise'}`}
         data-testid="engrave-setup-holding-picture"
@@ -377,8 +377,11 @@ export function HoldingPicture({
             <text x="120" y="142" textAnchor="middle" {...SVG_TEXT}>
               X runs between the jaws
             </text>
-            <path d="M232 100 V60" stroke="#d1d5db" strokeWidth="1" />
-            <text x="236" y="80" {...SVG_TEXT} transform="rotate(90 236 80)">
+            {/* The Y axis, inside the picture: an arrow up the page (+Y runs away from the operator) and
+                its letter above it — drawn at the edge, the label once sat past the viewBox and only a
+                bare line showed. */}
+            <path d="M222 108 V64" stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
+            <text x="222" y="56" textAnchor="middle" {...SVG_TEXT} data-testid="engrave-setup-holding-y-label">
               Y
             </text>
           </>
@@ -1068,11 +1071,13 @@ function HoldingSideView({
         : proudMm >= 0
           ? `${fmt(proudMm)} mm proud of the jaws`
           : `still ${fmt(-proudMm)} mm below the jaw tops`;
+  /** The drawn stock's top in the side view's units — the proud dimension ends here. */
+  const sideTop = mount === 'block' ? 2 : 10;
   return (
     <div style={{ display: 'grid', gap: 3 }}>
       <svg
         viewBox="0 0 240 70"
-        style={{ width: '100%', maxWidth: '100%', display: 'block', border: '1px solid #2a2f36', background: '#10151b' }}
+        style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', display: 'block', border: '1px solid #2a2f36', background: '#10151b' }}
         role="img"
         aria-label="Side view: how the stock sits in the mount"
         data-testid="engrave-setup-holding-side"
@@ -1095,13 +1100,32 @@ function HoldingSideView({
             )}
             <rect
               x="94"
-              y={mount === 'block' ? 2 : 10}
+              y={sideTop}
               width="52"
               height={mount === 'block' ? 42 : 20}
               fill="#1e3a4a"
               stroke="#6aa6c9"
             />
-            <path d="M212 26 V10" stroke="#d1d5db" strokeWidth="1" />
+            {/* The proud height as a dimension: a witness line off the stock's top, the span from the
+                jaw top up to it with end ticks — the number is the caption under the picture. */}
+            <path
+              data-testid="engrave-setup-holding-side-proud"
+              d={`M146 ${sideTop} H216 M212 26 V${sideTop} M208 26 H216 M208 ${sideTop} H216`}
+              stroke="#d1d5db"
+              strokeWidth="1"
+              fill="none"
+            />
+            {proudMm !== null && (
+              <text
+                x="204"
+                y={(26 + sideTop) / 2 + 3}
+                textAnchor="end"
+                {...SVG_MUTED}
+                data-testid="engrave-setup-holding-side-proud-label"
+              >
+                {fmt(Math.abs(proudMm))} mm
+              </text>
+            )}
             <text x="120" y="66" textAnchor="middle" {...SVG_MUTED}>
               jaws
             </text>
