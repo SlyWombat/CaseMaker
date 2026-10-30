@@ -37,7 +37,7 @@
 
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { targetObjectMesh } from '@/engine/import/targetObject';
-import { placedSize, targetScale } from '@/engine/cnc/engrave/targetScale';
+import { applyMat, placedSize, rotatedExtents, rotationMatrix, targetScale, targetTurns } from '@/engine/cnc/engrave/targetScale';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
 import { decodePng } from '@/engine/import/png';
 import { reliefDepthMm, reliefNumbers } from './relief';
@@ -168,7 +168,10 @@ export interface SampleGoalOpts {
  * order, no tolerance that depends on traversal.
  */
 export function sampleGoalHeightfield(
-  target: Pick<EngraveTargetObject, 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief' | 'scale'>,
+  target: Pick<
+    EngraveTargetObject,
+    'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'rotationX' | 'rotationY' | 'size' | 'relief' | 'scale'
+  >,
   opts: SampleGoalOpts = {},
 ): GoalHeightfield {
   // #672 — a PICTURE is its own heightfield: the same grid, the same frame, the same downstream.
@@ -178,40 +181,54 @@ export function sampleGoalHeightfield(
   const requestedPitch = positive(opts.pitchMm) ? (opts.pitchMm as number) : DEFAULT_GRID_PITCH_MM;
   const maxCells = positive(opts.maxCells) ? (opts.maxCells as number) : DEFAULT_MAX_CELLS;
 
-  // The placed mesh's XY footprint, from the LOCAL bbox's four XY corners rotated about the bbox
-  // centre (a rotated rectangle), so the grid is sized for the object as it sits on the stock.
-  const [cx, cy] = [
-    (mesh.bbox.min[0] + mesh.bbox.max[0]) / 2,
-    (mesh.bbox.min[1] + mesh.bbox.max[1]) / 2,
-  ];
-  const maxZLocal = mesh.bbox.max[2];
-  const theta = (target.rotation * Math.PI) / 180;
-  const cos = Math.cos(theta);
-  const sin = Math.sin(theta);
+  // The placed mesh's XY footprint, from the LOCAL bbox's four XY corners turned about its centre
+  // (a rotated rectangle), so the grid is sized for the object as it sits on the stock.
+  const cx = (mesh.bbox.min[0] + mesh.bbox.max[0]) / 2;
+  const cy = (mesh.bbox.min[1] + mesh.bbox.max[1]) / 2;
+  const cz = (mesh.bbox.min[2] + mesh.bbox.max[2]) / 2;
   // #722 — the scale applies about the same anchor as the placement (bbox centre in X/Y, the top
   // in Z), BEFORE the turn, so a scaled object stays centred on `position` with its top there.
   const scale = targetScale(target);
+  // #723 part 2 — the three turns are about the mesh's bbox CENTRE, Z first then Y then X (the
+  // matrix is `rotationMatrix`'s, the same one the viewport's Euler prop applies). The placed
+  // anchor is the TURNED bbox's centre in X/Y with its top at `position.z`; for a Z-only or
+  // unturned object this reduces exactly to the original contract.
+  const turns = targetTurns(target);
+  const m = rotationMatrix(turns);
+  const size = {
+    x: (mesh.bbox.max[0] - mesh.bbox.min[0]) * scale.x,
+    y: (mesh.bbox.max[1] - mesh.bbox.min[1]) * scale.y,
+    z: (mesh.bbox.max[2] - mesh.bbox.min[2]) * scale.z,
+  };
+  const ez = rotatedExtents(size, turns).z;
   const place = (px: number, py: number, pz: number): [number, number, number] => {
-    const lx = (px - cx) * scale.x;
-    const ly = (py - cy) * scale.y;
-    return [
-      target.position.x + (lx * cos - ly * sin),
-      target.position.y + (lx * sin + ly * cos),
-      target.position.z + (pz - maxZLocal) * scale.z,
-    ];
+    // Scaled about the bbox centre, then turned, then placed with the turned bbox's centre in X/Y
+    // at `position` and its top at `position.z`.
+    const q = applyMat(m, {
+      x: (px - cx) * scale.x,
+      y: (py - cy) * scale.y,
+      z: (pz - cz) * scale.z,
+    });
+    return [target.position.x + q.x, target.position.y + q.y, target.position.z - ez / 2 + q.z];
   };
 
   let xMin = Infinity;
   let xMax = -Infinity;
   let yMin = Infinity;
   let yMax = -Infinity;
-  for (const [bx, by] of [
-    [mesh.bbox.min[0], mesh.bbox.min[1]],
-    [mesh.bbox.max[0], mesh.bbox.min[1]],
-    [mesh.bbox.max[0], mesh.bbox.max[1]],
-    [mesh.bbox.min[0], mesh.bbox.max[1]],
+  // #723 part 2 — all EIGHT corners: an X or Y turn mixes Z into the work footprint, so the four
+  // XY corners of the unrotated box no longer bound it (the pre-#723 loop passed z = 0).
+  for (const [bx, by, bz] of [
+    [mesh.bbox.min[0], mesh.bbox.min[1], mesh.bbox.min[2]],
+    [mesh.bbox.max[0], mesh.bbox.min[1], mesh.bbox.min[2]],
+    [mesh.bbox.max[0], mesh.bbox.max[1], mesh.bbox.min[2]],
+    [mesh.bbox.min[0], mesh.bbox.max[1], mesh.bbox.min[2]],
+    [mesh.bbox.min[0], mesh.bbox.min[1], mesh.bbox.max[2]],
+    [mesh.bbox.max[0], mesh.bbox.min[1], mesh.bbox.max[2]],
+    [mesh.bbox.max[0], mesh.bbox.max[1], mesh.bbox.max[2]],
+    [mesh.bbox.min[0], mesh.bbox.max[1], mesh.bbox.max[2]],
   ] as const) {
-    const [wx, wy] = place(bx, by, 0);
+    const [wx, wy] = place(bx, by, bz);
     xMin = Math.min(xMin, wx);
     xMax = Math.max(xMax, wx);
     yMin = Math.min(yMin, wy);

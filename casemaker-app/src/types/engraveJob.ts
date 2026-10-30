@@ -606,6 +606,18 @@ export interface EngraveTargetObject {
   /** Degrees counter-clockwise about Z, through the mesh's bbox centre. */
   rotation: number;
   /**
+   * #723 part 2 — the mesh's TURN in the stock about X and Y, in degrees, about its bbox centre.
+   * The three turns are applied Z first, then Y, then X (the matrix is Rx·Ry·Rz, the same as
+   * three.js's Euler order "XYZ" and therefore the viewport's `rotation` prop), and the placed
+   * anchor stays the rotated bbox's centre in X/Y with its top at `position.z`.
+   *
+   * OPTIONAL and absent is 0, so every document written before these fields existed round-trips
+   * byte-for-byte and cuts the same program. Used by the flat goal path (item and mold); the rotary
+   * relief reads `position.y` as the seam and does not read a turn (part 1's contract).
+   */
+  rotationX?: number;
+  rotationY?: number;
+  /**
    * #722 — a MESH's per-axis scale about its placement anchor (bbox centre in X/Y, top in Z).
    * Absent means 1 on every axis, so a document written before this field round-trips unchanged.
    * `size` stays the parsed bbox; the placed size is `size × scale` (`placedSize`). Ignored for a

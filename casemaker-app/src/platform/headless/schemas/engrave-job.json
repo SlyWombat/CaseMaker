@@ -5705,6 +5705,14 @@
           "description": "Rotation in degrees counter-clockwise about Z through the mesh centre.",
           "type": "number"
         },
+        "rotationX": {
+          "description": "Turn in degrees about the mesh centre’s X axis (applied after Z and Y); omit for 0.",
+          "type": "number"
+        },
+        "rotationY": {
+          "description": "Turn in degrees about the mesh centre’s Y axis (applied after Z); omit for 0.",
+          "type": "number"
+        },
         "scale": {
           "additionalProperties": false,
           "description": "A mesh’s per-axis scale about its X/Y centre and its top; omit for the file’s own size. Ignored for a PNG relief.",

@@ -1,5 +1,5 @@
 import { profileReachFrom, rectProfile } from '@/engine/compiler/profile';
-import { placedSize, turnedFootprint } from '@/engine/cnc/engrave/targetScale';
+import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { getTools, NO_TOOL_KEY, toolForJob } from '@/engine/cnc/toolRegistry';
 import {
@@ -940,11 +940,12 @@ export function validateGoalObject(
   // #672 — a PICTURE goal's depth is its relief map's, not `size.z`: the operator states
   // `relief.maxDepthMm` (or takes the labelled default), and the blank must hold it.
   // #722 — a mesh's PLACED size (parsed bbox × scale), the size the heightfield samples.
+  // #723 part 2 — and it is the TURNED size: `placedSize` grows the extents by the mesh's X/Y/Z
+  // turns, so the footprint is exactly what the stock sees (no second turn applied here).
   const placed = placedSize(target);
   const depth = target.format === 'png' ? reliefNumbers(target.relief).maxDepthMm : placed.z;
   const hasVolume = placed.x > 0 && placed.y > 0 && depth > 0;
-  // The TURNED footprint: a goal rotated on the blank occupies its axis-aligned extents.
-  const footprint = turnedFootprint(placed.x, placed.y, target.rotation);
+  const footprint = { x: placed.x, y: placed.y };
   const fitsFootprint = footprint.x <= length + 1e-9 && footprint.y <= width + 1e-9;
   const fitsDepth = depth <= thickness;
   if (!hasVolume) {

@@ -132,7 +132,7 @@ the Run line says so. The sentence stays #545's (the module is unmeasured) until
 numbers; after #238 the relief's own sentence ("checked and simulated here; the machine does not
 run it") applies until R-5's bench check, exactly as `rotary-flow.md` §3.9 states.
 
-## Part 2 — a part cut from several sides by hand (sketch; its own slices)
+## Part 2 — a part cut from several sides by hand
 
 The operator orients the mesh in the stock — rotation about X, Y and Z, not only Z — and chooses
 which sides to cut. Each side is a setup: the existing multi-setup model (#419/#579) with its own
@@ -141,12 +141,82 @@ stock is turned over). The stock's remaining shape is carried between setups by 
 (the prior-removal seam the exact sweeper already takes, #410/#744), so side 2's preview starts
 from what side 1 left. A two-part mold is the same flow with two parts and a flip line.
 
-What part 2 must design that part 1 does not: the orientation controls and their anchors; the
-sides list and how a side becomes a setup; what each setup's registration touches (the flip's pin
-holes, the datum edges); and how the simulation carries a rotated stock's remaining shape into the
-next setup's frame. None of it is built here.
+### The orientation (P2-1a, landed)
 
-## Slices
+The mesh's placement is now three turns about its **bbox centre**, applied **Z first, then Y, then
+X**, followed by the anchor every reader already used: the turned bbox's centre in X/Y at
+`position.x/y`, and its top at `position.z`. `rotation` keeps its Z meaning; `rotationX` and
+`rotationY` are optional and absent is 0, so every old document round-trips without gaining a key.
+
+One matrix owns the turn (`rotationMatrix`, `engine/cnc/engrave/targetScale.ts`). It is exactly
+three.js's Euler order `"XYZ"`, which is the viewport's default `rotation` prop, and a unit test
+compares it cell for cell with three's own `Matrix4.makeRotationFromEuler`; the sampler, the
+placed-size/fit checks, the goal-object size findings and the drawn mesh therefore cannot drift.
+A turn of 180 about X puts a part's underside up — the operator's "turn it over" — and a quarter
+turn about X or Y presents a side, which is what a manual side setup cuts. Two consequences are
+pinned in `tests/unit/targetOrientation.spec.ts`: the footprint now bounds **all eight** bbox
+corners (an X/Y turn mixes Z into the work XY), and after a 180 turn the top-Z field sees only the
+part's new top — the boss that went underneath is invisible to a heightfield, which is why the
+carried stock in P2-2b is the solid, not this field.
+
+The turns are NOT read by the rotary relief (part 1: `position.y` is the rod's seam) or by a PNG
+relief. That is the same contract as `rotation` has had there; a rod goal that states them is
+unchanged until a rotary orientation slice, which is noted below.
+
+### The sides list (P2-1b)
+
+A side of the part is a **job setup**, and a setup already carries everything a side means: which
+stock face is up (`orientation`), the mount (#419/#579), its own registration and its directed
+remount step (`RemountStep`: the turn about X or Y, `faceDown`, the reference face, the landmark
+question and the mirror check). Part 2 connects the GOAL to that model:
+
+- A goal job may carry **one goal object per side**. The document gains `targetObjects[]`; the
+  singular `targetObject` stays the one-goal form and reads as a one-entry list, so every existing
+  job parses and cuts exactly as it does. Each goal object names the setup that cuts it
+  (`setupId`); a goal with no setup is cut in the job's first setup, which is today's behaviour.
+- Generation runs the surface-3D CAM **once per setup that names a goal**, against the target's
+  heightfield as seen from that setup's up face. Today's dispatch (`job.setups === undefined` only)
+  is widened: a job with setups and goals is no longer silently the mixed path.
+- A **flip** side is a setup whose `orientation.top` is the opposite face, with the existing
+  remount step's turn (180 about X or Y) and its confirmation. The CAM for that setup samples the
+  same mesh in the stock frame — the CAM's coordinates are the STOCK's, not the machine's — so the
+  "flip transform" is the setup's orientation carried through the goal sampling; the physical
+  registration below supplies the machine offset. This is what makes the #754 acceptance's two
+  meshes (outside on side 1, inside form on side 2) one job with two sides.
+
+### What each setup's registration touches (P2-2a)
+
+The side's registration is the existing one, with the flip's references made explicit:
+
+- Mount-setups keep their mount datum (the bracket's corner, the vise's fixed jaw), exactly as
+  §5.4's table states.
+- A **pin flip** (the #754 part) touches **nothing new**: the two locating pins are features of the
+  stock/mount, and the registration is two bore finds (the 3D probe) or two wall finds (the stepped
+  scan). The pins lie on the flip line and at unequal distances from the part's centre, so a blank
+  spun 180 about Z cannot sit on them; the remount's landmark question is the one that distinguishes
+  the two spacings, and it is `RemountStep.confirm`'s, already checked by `checkRemountAnswer`.
+- A feature cut in an earlier setup (a hole or slot, #429) stays the better reference when the
+  mount's own datum is not repeatable; `referenceRegistrationFor` already finds those connected
+  removals.
+
+The registration writes the same datum as any setup (XY and rotation, plus a Z touch on the new up
+face); what part 2 adds is only that the flip's reference is **stated on the setup** rather than
+inferred, and that the run sheet names the pins in the operator's words.
+
+### The carried stock (P2-2b)
+
+Between setups the simulation carries the **remaining solid as meshes**, not a heightfield: after
+setup 1's sweeps, the exact sweeper's `priorRemoval` meshes are transformed by the next setup's
+orientation (the same rotation matrix; a flip's line is the pin line, and the translation is the
+registration's job at the machine, not the preview's) and seeded into setup 2's sweep
+(`SimLoadOpts.priorRemoval`, #410/#744). The preview draws the union, and side 2's cut is judged
+against what side 1 actually left. The pure-flip case in the acceptance test shows why the
+heightfield will not do: after a 180 turn the old part top is underneath, and a top-Z column cannot
+see it (see P2-1a's test). The column engine is still used per setup where the carried solid is
+2.5D from that side; a carried void below the new top forces the exact path, and the session says
+so rather than showing a shape it does not have.
+
+### Slices
 
 | # | Slice | Contents | Depends on |
 |---|---|---|---|
@@ -154,8 +224,11 @@ next setup's frame. None of it is built here.
 | R-2 | The rotary relief CAM | A-sweep roughing, the X-raster ball finish (+ the A-spiral option), `toRotaryIR` | R-1, R-UI-12 (#763) |
 | R-3 | The job wiring | the rotary goal dispatch, the findings above, the run sheet facts, the panel/preview | R-2 |
 | R-4 | The acceptance | an analytic solid of revolution + the corpus relief; swept on the column engine against the closed form; Simulate screenshots | R-3 |
-| P2-1 | Mesh orientation | rotation about X/Y/Z with its anchors, per-side setups | part 2 design review |
-| P2-2 | The flip and the carried stock | pin references, prior-removal between setups, side 2's preview | P2-1 |
+| P2-1a | **Mesh orientation** | `rotationX`/`rotationY` with the shared `rotationMatrix`, placed extents, the goal size/fit checks, the viewport, the panel's controls, unit tests — **landed** | part 2 design review |
+| P2-1b | The sides list | `targetObjects[]` with a `setupId` per goal, one goal program per setup, flip setups from the existing orientation/remount model, tests | P2-1a |
+| P2-2a | The flip reference | the pins stated as the flip's datum (remount words/confirm, registration plan, run sheet), acceptance fixtures | P2-1b |
+| P2-2b | The carried stock | `priorRemoval` meshes transformed by the next setup's orientation, seeded per setup, the preview union; the #754 one-job check un-todoed | P2-1b, P2-2a |
+| P2-3 | The UI and the acceptance | the sides list in the panel/wizard, the flip preview and confirmation, an e2e walk; docs | P2-2b |
 
 ## Open questions
 
@@ -163,6 +236,10 @@ next setup's frame. None of it is built here.
   rod and reads `position.y` as the seam offset; the row's fields were written for a flat blank,
   and part 2's orientation design may want a different anchor set. The field's contract is one
   function, so a change is one place.
+- **The rotary and a stated turn.** A rod goal that states `rotationX`/`rotationY` (or its existing
+  Z `rotation`) is unchanged: the rotary sampler reads `position.y` as the seam and ignores the
+  turns. A later slice may read the turn as the seam's counterpart (a relief wound round the rod)
+  or refuse the fields by name; until then the panel's turn fields are the flat path's.
 - **The finish default.** The X-raster is proposed as the default and the A-spiral as the option;
   the fluidity suite (#756) is the A-spiral's evidence, and R-4 will measure both on the same part.
 - **The roughing's X step-over per turn.** It is the flat feeds row's step-over, labelled like

@@ -22,7 +22,7 @@ import * as THREE from 'three';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import { targetObjectMesh } from '@/engine/import/targetObject';
-import { placedSize, targetScale } from '@/engine/cnc/engrave/targetScale';
+import { applyMat, placedSize, rotationMatrix, targetScale, targetTurns } from '@/engine/cnc/engrave/targetScale';
 import { isMold } from '@/engine/cnc/cam/surface3d';
 import type { EngravePrimitive, EngraveTargetObject } from '@/types/engraveJob';
 import { activateEngraveItem } from './engravePick';
@@ -180,45 +180,51 @@ function TargetObjectMesh({ target }: { target: EngraveTargetObject }) {
   useEffect(() => () => geom?.dispose(), [geom]);
   const selected = useViewportStore((s) => isEngraveItemSelected(s.selection, target.id));
   const scale = targetScale(target);
-  // #721 — a MOLD draws the part as its cavity: turned over about X (y and z negated about the
-  // geometry's origin, which is the bbox centre and TOP) and dropped so its base sits at the stock
-  // top and its top is the cavity floor — the same transform the heightfield's mold applies.
+  // #721 — a MOLD draws the part as its cavity: the heightfield turns the sampled part over about
+  // its X axis at the stock top, which in the placed frame is the same as composing its turn with
+  // Rx(π) and anchoring the turned bbox's own centre; #723 part 2 generalises that to X/Y turns.
   const mold = isMold(target) && (target.role ?? 'reference') === 'goal';
-  const height = placedSize(target).z;
+  // #723 part 2 — the mesh's turns, Z then Y then X, the same matrix the sampler uses
+  // (`rotationMatrix`, three's Euler "XYZ"); a mold composes Rx(π) with them.
+  const turns = targetTurns(target);
+  const ext = placedSize(target);
+  const turnsOf = { x: turns.x + (mold ? 180 : 0), y: turns.y, z: turns.z };
+  // The geometry's origin is the bbox centre in X/Y and its TOP in Z, while the turn is about the
+  // bbox CENTRE: the half-height offset is what carries the drawn mesh from one anchor to the other.
+  const anchor = applyMat(rotationMatrix(turnsOf), { x: 0, y: 0, z: (target.size.z * scale.z) / 2 });
+  const base = mold
+    ? { x: target.position.x, y: target.position.y, z: -ext.z / 2 }
+    : { x: target.position.x, y: target.position.y, z: target.position.z - ext.z / 2 };
   if (geom === null) return null;
 
   return (
-    <mesh
-      geometry={geom}
-      // A mold's cavity always opens at the stock top (Z 0) — the cut ignores `position.z` for it —
-      // and its rows are mirrored in the WORK frame after the turn (moldHeightfield), which equals
-      // mirroring the part locally and turning it the other way: R(−θ)·M = M·R(θ).
-      position={[target.position.x, target.position.y, mold ? -height : target.position.z]}
-      rotation={[0, 0, (mold ? -1 : 1) * target.rotation * DEG]}
-      // #722 — the geometry's origin is the bbox centre in X/Y and its top in Z, the same anchor
-      // the heightfield scales about, so the drawn mesh and the cut agree.
-      scale={mold ? [scale.x, -scale.y, -scale.z] : [scale.x, scale.y, scale.z]}
-      name={`engrave-target-${target.id}`}
-      userData={{ engraveTarget: target.id }}
-      onClick={(e) => {
-        const { activeTool } = useViewportStore.getState();
-        if (activeTool !== 'select') return;
-        if (!activateEngraveItem(e.object)) return;
-        e.stopPropagation();
-      }}
-    >
-      <meshStandardMaterial
-        color={TARGET_COLOR}
-        emissive={selected ? SELECTED_GLOW : '#000000'}
-        emissiveIntensity={selected ? 0.6 : 0}
-        transparent
-        opacity={TARGET_OPACITY}
-        depthWrite={false}
-        metalness={0.1}
-        roughness={0.7}
-        side={THREE.DoubleSide}
-      />
-    </mesh>
+    <group position={[base.x + anchor.x, base.y + anchor.y, base.z + anchor.z]}>
+      <group rotation={[turnsOf.x * DEG, turnsOf.y * DEG, turnsOf.z * DEG]} scale={[scale.x, scale.y, scale.z]}>
+        <mesh
+          geometry={geom}
+          name={`engrave-target-${target.id}`}
+          userData={{ engraveTarget: target.id }}
+          onClick={(e) => {
+            const { activeTool } = useViewportStore.getState();
+            if (activeTool !== 'select') return;
+            if (!activateEngraveItem(e.object)) return;
+            e.stopPropagation();
+          }}
+        >
+          <meshStandardMaterial
+            color={TARGET_COLOR}
+            emissive={selected ? SELECTED_GLOW : '#000000'}
+            emissiveIntensity={selected ? 0.6 : 0}
+            transparent
+            opacity={TARGET_OPACITY}
+            depthWrite={false}
+            metalness={0.1}
+            roughness={0.7}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      </group>
+    </group>
   );
 }
 

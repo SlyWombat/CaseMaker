@@ -9,6 +9,7 @@ import {
   placedSize,
   scaleForAxisSize,
   targetScale,
+  targetTurns,
 } from '@/engine/cnc/engrave/targetScale';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
 import type { EngraveSurfaceSettings, EngraveTargetObject } from '@/types/engraveJob';
@@ -146,7 +147,7 @@ function MeshSizeControls({
   const locked = lock.id === target.id ? lock.locked : uniform;
   const setLocked = (next: boolean): void => setLock({ id: target.id, locked: next });
   const fit =
-    stock === undefined ? null : fitToStockScale(target.size, stock, stock.edgeMargin, target.rotation);
+    stock === undefined ? null : fitToStockScale(target.size, stock, stock.edgeMargin, targetTurns(target));
 
   const axisField = (axis: 'x' | 'y' | 'z'): JSX.Element => (
     <label style={FIELD_LABEL}>
@@ -454,6 +455,31 @@ export function EngraveTargetObjectRow({
           />
           <span>°</span>
         </label>
+        {/* #723 part 2 — turns about X and Y: how the operator orients a part for a side that is
+            not reached from the top. Applied after Z, before Y and X; absent is 0. */}
+        {(['x', 'y'] as const).map((axis) => (
+          <label key={axis} style={FIELD_LABEL}>
+            <span>rot {axis.toUpperCase()}</span>
+            <input
+              type="number"
+              step="any"
+              value={axis === 'x' ? (target.rotationX ?? 0) : (target.rotationY ?? 0)}
+              data-testid={`engrave-target-rotation-${axis}-${index}`}
+              aria-label={`Target object rotation about ${axis.toUpperCase()}`}
+              title={`Degrees about the object's ${axis.toUpperCase()} axis through its bbox centre, applied after Z (absent = 0). Turn a part 180 about X to cut its other side.`}
+              style={NUM}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (!Number.isFinite(v)) return;
+                // 0 is written as the absence of the field, so an untouched document round-trips
+                // without gaining a key.
+                if (axis === 'x') onChange({ rotationX: v === 0 ? undefined : v });
+                else onChange({ rotationY: v === 0 ? undefined : v });
+              }}
+            />
+            <span>°</span>
+          </label>
+        ))}
       </div>
 
       {/* #721 — what the goal makes: the part, or a mold to cast it in. A picture is a relief only. */}

@@ -892,6 +892,17 @@ const targetObjectSchema = z
       .number()
       .finite()
       .describe('Rotation in degrees counter-clockwise about Z through the mesh centre.'),
+    // #723 part 2 — optional turns about X and Y; absent is 0, so older documents round-trip.
+    rotationX: z
+      .number()
+      .finite()
+      .optional()
+      .describe('Turn in degrees about the mesh centre’s X axis (applied after Z and Y); omit for 0.'),
+    rotationY: z
+      .number()
+      .finite()
+      .optional()
+      .describe('Turn in degrees about the mesh centre’s Y axis (applied after Z); omit for 0.'),
     // #722 — optional like `role`: absent is 1 on every axis, so older documents round-trip.
     scale: z
       .object({

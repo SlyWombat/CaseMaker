@@ -792,6 +792,13 @@ roughing allowance), then a **ball-nose finishing** raster that follows the goal
 heightfield gouge-safely. A goal with undercuts is sampled to its topmost surface — the honest
 3-axis answer — and the run sheet says so.
 
+The row's three turn fields — **rot** (about Z) and, since #723, **rot X** and **rot Y** — turn
+the mesh about its bounding-box centre before it is placed; the order is Z, then Y, then X, and a
+turn of 180 about X is how a part's other side is put face up for a later setup. The placed
+object's size, the blank-fit check and the drawn mesh all read the same turn, so the heightfield
+cut and the picture agree. The fields are absent by default, and a job that states none round-trips
+and cuts exactly as before; the rotary relief does not read them (its seam is the Y position).
+
 Two more finishing passes can be switched on in the goal's Technical fold, and they run in this
 order after the parallel finish (#671):
 

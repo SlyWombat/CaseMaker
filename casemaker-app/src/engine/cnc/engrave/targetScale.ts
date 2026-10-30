@@ -22,35 +22,108 @@ export function targetScale(target: Pick<EngraveTargetObject, 'format' | 'scale'
   return target.scale;
 }
 
-/** The size the object occupies on the blank, mm: the parsed bbox times the scale. */
+/** #723 part 2 — the mesh's three turns, in degrees, about its bbox centre (absent = 0). */
+export interface TargetTurns {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export function targetTurns(
+  target: Pick<EngraveTargetObject, 'rotation' | 'rotationX' | 'rotationY'>,
+): TargetTurns {
+  return { x: target.rotationX ?? 0, y: target.rotationY ?? 0, z: target.rotation };
+}
+
+/** A 3×3 rotation, row-major. */
+export type Mat3 = readonly [
+  number, number, number,
+  number, number, number,
+  number, number, number,
+];
+
+const DEG = Math.PI / 180;
+
+/**
+ * The matrix for the three turns, `Rx(x)·Ry(y)·Rz(z)`: Z is applied to the point first, then Y,
+ * then X. This is exactly three.js's Euler order `"XYZ"` (`Matrix4.makeRotationFromEuler`), which
+ * is the viewport's default `rotation` prop order, so the drawn mesh and the sampled heightfield
+ * read the same turn (pinned against three's own matrix in the unit tests).
+ */
+export function rotationMatrix(turns: TargetTurns): Mat3 {
+  const rx = turns.x * DEG;
+  const ry = turns.y * DEG;
+  const rz = turns.z * DEG;
+  const cx = Math.cos(rx), sx = Math.sin(rx);
+  const cy = Math.cos(ry), sy = Math.sin(ry);
+  const cz = Math.cos(rz), sz = Math.sin(rz);
+  return [
+    cy * cz, -cy * sz, sy,
+    sx * sy * cz + cx * sz, -sx * sy * sz + cx * cz, -sx * cy,
+    -cx * sy * cz + sx * sz, cx * sy * sz + sx * cz, cx * cy,
+  ];
+}
+
+export function applyMat(m: Mat3, v: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+  return {
+    x: m[0] * v.x + m[1] * v.y + m[2] * v.z,
+    y: m[3] * v.x + m[4] * v.y + m[5] * v.z,
+    z: m[6] * v.x + m[7] * v.y + m[8] * v.z,
+  };
+}
+
+/** The axis-aligned extents of a box `size` turned by `turns` about its centre, mm. */
+export function rotatedExtents(
+  size: { x: number; y: number; z: number },
+  turns: TargetTurns,
+): { x: number; y: number; z: number } {
+  const m = rotationMatrix(turns);
+  return {
+    x: Math.abs(m[0]) * size.x + Math.abs(m[1]) * size.y + Math.abs(m[2]) * size.z,
+    y: Math.abs(m[3]) * size.x + Math.abs(m[4]) * size.y + Math.abs(m[5]) * size.z,
+    z: Math.abs(m[6]) * size.x + Math.abs(m[7]) * size.y + Math.abs(m[8]) * size.z,
+  };
+}
+
+/**
+ * The size the object occupies on the blank, mm: the parsed bbox times the scale, TURNED — the
+ * axis-aligned extents the placed object actually covers (#723 part 2). For a Z-only or unturned
+ * object this is `size × scale` exactly as before.
+ */
 export function placedSize(
-  target: Pick<EngraveTargetObject, 'format' | 'scale' | 'size'>,
+  target: Pick<
+    EngraveTargetObject,
+    'format' | 'scale' | 'size' | 'rotation' | 'rotationX' | 'rotationY'
+  >,
 ): { x: number; y: number; z: number } {
   const s = targetScale(target);
-  return { x: target.size.x * s.x, y: target.size.y * s.y, z: target.size.z * s.z };
+  return rotatedExtents(
+    { x: target.size.x * s.x, y: target.size.y * s.y, z: target.size.z * s.z },
+    targetTurns(target),
+  );
 }
 
 /**
  * The work-frame footprint of a box `w × h` turned `rotationDeg` about its centre, mm: the
- * axis-aligned extents the heightfield grid and the stock actually see.
+ * axis-aligned extents the heightfield grid and the stock actually see. Kept for callers that
+ * speak only the Z turn; `rotatedExtents` is the general form.
  */
 export function turnedFootprint(w: number, h: number, rotationDeg: number): { x: number; y: number } {
-  const t = (rotationDeg * Math.PI) / 180;
-  const c = Math.abs(Math.cos(t));
-  const s = Math.abs(Math.sin(t));
-  return { x: w * c + h * s, y: w * s + h * c };
+  const e = rotatedExtents({ x: w, y: h, z: 1 }, { x: 0, y: 0, z: rotationDeg });
+  return { x: e.x, y: e.y };
 }
 
 /**
- * The largest UNIFORM scale that fits the stock (#722 "Fit to the stock"): the TURNED footprint
+ * The largest UNIFORM scale that fits the stock (#722 "Fit to the stock"): the TURNED extents
  * inside the stock less the edge margin on every side, and the height no more than the stock's
- * thickness. Null when the stock leaves no room (margins eat the blank).
+ * thickness. Null when the stock leaves no room (margins eat the blank). `turns` accepts the Z
+ * degrees alone (the pre-#723 callers) or all three turns.
  */
 export function fitToStockScale(
   size: { x: number; y: number; z: number },
   stock: { length: number; width: number; thickness: number },
   edgeMarginMm: number,
-  rotationDeg = 0,
+  turns: number | TargetTurns = 0,
 ): number | null {
   const room = {
     x: stock.length - 2 * edgeMarginMm,
@@ -59,9 +132,9 @@ export function fitToStockScale(
   };
   if (!(room.x > 0 && room.y > 0 && room.z > 0)) return null;
   if (!(size.x > 0 && size.y > 0 && size.z > 0)) return null;
-  // The footprint scales linearly with a uniform scale, so the 1× turned extents set the limit.
-  const turned = turnedFootprint(size.x, size.y, rotationDeg);
-  return Math.min(room.x / turned.x, room.y / turned.y, room.z / size.z);
+  // The extents scale linearly with a uniform scale, so the 1× turned extents set the limit.
+  const turned = rotatedExtents(size, typeof turns === 'number' ? { x: 0, y: 0, z: turns } : turns);
+  return Math.min(room.x / turned.x, room.y / turned.y, room.z / turned.z);
 }
 
 /**
