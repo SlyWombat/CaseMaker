@@ -303,3 +303,33 @@ describe('#672 the relief map', () => {
     expect(screen.queryByTestId('engrave-target-relief-0')).toBeNull();
   });
 });
+
+// #764 — the CLEAR-AROUND choice: what is cut around an item goal so it is not left in a pit. The
+// default is the ring, stored as an ABSENT key (so an untouched goal serialises as before); the
+// other two write their word, and choosing the ring again removes the key.
+describe('#764 the clear-around choice', () => {
+  it('sends ring / whole / nothing, with the default ring as an absent key', () => {
+    const { onChange } = row();
+    fireEvent.click(screen.getByTestId('engrave-target-expand-0'));
+    const select = screen.getByTestId('engrave-target-clear-around-0') as HTMLSelectElement;
+    expect(select.value).toBe('ring');
+    fireEvent.change(select, { target: { value: 'whole' } });
+    expect(onChange).toHaveBeenLastCalledWith({ surface: { clearAround: 'whole' } });
+    fireEvent.change(select, { target: { value: 'none' } });
+    expect(onChange).toHaveBeenLastCalledWith({ surface: { clearAround: 'none' } });
+    fireEvent.change(select, { target: { value: 'ring' } });
+    expect(onChange).toHaveBeenLastCalledWith({ surface: { clearAround: undefined } });
+  });
+
+  it('shows a stored choice', () => {
+    row({ target: { surface: { clearAround: 'whole' } } });
+    fireEvent.click(screen.getByTestId('engrave-target-expand-0'));
+    expect((screen.getByTestId('engrave-target-clear-around-0') as HTMLSelectElement).value).toBe('whole');
+  });
+
+  it('is not offered for a mold — its rim is the stock top', () => {
+    row({ target: { goalMode: 'mold' } });
+    fireEvent.click(screen.getByTestId('engrave-target-expand-0'));
+    expect(screen.queryByTestId('engrave-target-clear-around-0')).toBeNull();
+  });
+});
