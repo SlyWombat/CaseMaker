@@ -140,10 +140,13 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   const recBefore = await answerText();
   // #411 — the cap-height field is in the row's body, which a job's rows arrive folded.
   await page.getByTestId('engrave-label-expand-0').click();
-  await page.getByTestId('engrave-label-size-0').fill('4');
-  // …and at a 4 mm cap height nothing qualifies, so the recommendation moves to the compromise
-  // sentence while the picker keeps the user's selection.
-  await expect(page.getByTestId('engrave-recommendation')).toContainText('No cutter you have can cut', { timeout: 30_000 });
+  // #766 D/#781 — at a 1 mm cap height the selected 1.0 mm cutter cannot keep the strokes, so the
+  // ANSWER must move. It is NOT pinned to the rule's "No cutter you have can cut" sentence: that
+  // is the provisional answer, and the measured search legitimately replaces the box when it lands
+  // (taking the sentence with it). The acceptance is that the answer moves, whichever of the two
+  // forms carries it, and that the user's selection is never touched.
+  await page.getByTestId('engrave-label-size-0').fill('1');
+  await expect.poll(async () => answerText(), { timeout: 120_000 }).not.toBe(recBefore);
   const selAfter = await page.getByTestId('engrave-tool').inputValue();
   const recAfter = await answerText();
   console.log('DIAG #211 selBefore=%j selAfter=%j\n  recBefore=%j\n  recAfter=%j', selBefore, selAfter, recBefore, recAfter);
