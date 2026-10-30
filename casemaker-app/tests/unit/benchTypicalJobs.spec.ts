@@ -11,7 +11,7 @@
 // relief jobs' rapids-through-stock refusal was a surfacing CAM defect, and the tool tray was the
 // #734 item-1 false positive. Their two ball-nose cutters are added to the same location document.
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -926,4 +926,103 @@ describe('#747 the frame is traced inside the envelope, and never gates a verifi
     expect(sheet).toContain('itself passed verification, so it can still be cut');
     expect(sheet).not.toContain('Do not run this file');
   }, 150_000);
+});
+
+// #766 slice E — THE DEMO SET. The 2026-10-29 demo re-run (`results8`) ran the fifty recordings
+// in `docs/bench/2026-10-28-z1-real-jobs` with each job's cutter REMOVED, so the app chooses as a
+// demo visitor would. Nine stopped posting under the measured search that had posted under the
+// rules before it; the fix (19f18d40) makes the measured search never do worse than the rule, and
+// the rows below pin what it chooses now.
+//
+// THE WOLF PAIR IS NOT HERE. Its 24 MB mesh bytes are not committed with the corpus document (the
+// demo run used a scratch copy that carried them), so the committed job cannot generate at all.
+// The goal-item seam its refusal named is covered by the photo-relief rows (a PNG relief) and the
+// mouse shell (a 1.2 MB STL); the two coaster rows that complete the nine exist only in the demo
+// scratch set. Every row here records the cutter the search chose and the fidelity it measured, so
+// a choice that drifts — a different cutter, a lower score, a refusal — turns the gate red.
+
+/**
+ * The bench location plus ONE cutter: a ball whose flute reaches j27's 26 mm stock. The demo
+ * library holds such a cutter; every ball in the bench fixture is 12 mm or shorter, and the reach
+ * filter then leaves the 26 mm job with no candidate plan at all — a library limit, not the
+ * search behaviour this suite pins. The catalogue is the bench one in the same directory.
+ */
+const DEMO_LONG_BALL = {
+  id: 'demo-ball-nose-2-30',
+  tool: {
+    number: null,
+    id: null,
+    name: 'Two Flute Ball Nose Bit - 1/8" Shank 2mm * 30mm',
+    typeText: 'Ball Nose',
+    shape: 'ball',
+    handleDiameter: 3.175,
+    tipDiameter: 2,
+    diameter: 3.175,
+    cornerRadius: 1,
+    angle: null,
+    halfAngle: null,
+    fluteLength: 30,
+    shoulderLength: null,
+    stickout: null,
+    centreCutting: null,
+  },
+  origin: null,
+  quantity: 1,
+  codes: [],
+  addedAt: '2026-10-29T00:00:00.000Z',
+  notes: null,
+};
+
+let demoLocationPath: string | null = null;
+
+/** The bench location with `DEMO_LONG_BALL` appended, written once beside the bench catalogue. */
+function demoSetLocation(): string {
+  if (demoLocationPath !== null) return demoLocationPath;
+  const doc = JSON.parse(readFileSync(benchLocation(), 'utf8')) as { inventory: unknown[] };
+  doc.inventory.push(DEMO_LONG_BALL);
+  demoLocationPath = join(SCRATCH, 'location-demo-set.json');
+  writeFileSync(demoLocationPath, JSON.stringify(doc));
+  return demoLocationPath;
+}
+
+describe.skipIf(!existsSync(REAL_JOBS))('#766 slice E the demo set’s no-cutter jobs are given a plan that posts', () => {
+  /**
+   * The five committed demo documents the 2026-10-29 run refused, and the cutter the fixed search
+   * chooses for each on 2026-10-30. The choice is LIBRARY-DEPENDENT by design — it is the bench
+   * location's cutter set, not the demo's 134 — so what is pinned is that this library's best
+   * measured plan is this cutter, with its worst item at full fidelity.
+   */
+  const CHOICES_ON_2026_10_30 = [
+    // Was refused with "Setup 1 assigns an item that is not in it: g1" — the goal-item seam.
+    { job: 'j07-photo-relief.json', chosen: 'inv:demo-ball-nose-2-30' },
+    { job: 'j07-photo-relief-1mm-ball.json', chosen: 'inv:demo-ball-nose-2-30' },
+    // The mouse shell: the same seam, on an STL goal whose 26 mm stock needs the long ball.
+    { job: 'j27-mouse-shell-side1.json', chosen: 'inv:kz-ball-nose-1-4' },
+    // Was refused with the cutaway's missing reference — the plan's setup dropped it.
+    { job: 'j11-inlay-female-30v-male.json', chosen: 'inv:kz-engrave-30-0-5' },
+    // Was refused with "Characters lost to a 1 mm cutter" under the demo library; the bench
+    // location's finest metal engraver holds the tag's "555-0100" instead.
+    { job: 'j14-dog-tag-alu.json', chosen: 'inv:kz-engrave-m-30-0-2' },
+  ] as const;
+
+  for (const { job, chosen } of CHOICES_ON_2026_10_30) {
+    it(`${job} posts, with ${chosen}`, async () => {
+      const { code, receipt, progress } = await cut(pickedVariant(job, REAL_JOBS), SCRATCH, demoSetLocation());
+      const lines = progress.join('\n');
+      expect(code, allDiagnostics(receipt)).toBe(0);
+      expect(lines, 'the pick is measured and explained').toContain('Chosen by simulation');
+      // The CHOSEN cutter, not the runner-up the "also" line names: the cutter line says "cuts".
+      expect(lines, `the search must choose ${chosen} for this library`).toContain(`(${chosen}) cuts`);
+      expect(lines).toContain('100 % fidelity on the worst item');
+    }, 600_000);
+  }
+
+  it('j16 chamfer bevel — a job the search posted on 2026-10-29 keeps posting, with the cutter it chose', async () => {
+    const { code, receipt, progress } = await cut(pickedVariant('j16-chamfer-a-bevel.json', REAL_JOBS), SCRATCH, demoSetLocation());
+    expect(code, allDiagnostics(receipt)).toBe(0);
+    const lines = progress.join('\n');
+    expect(lines, 'the pick is measured and explained').toContain('Chosen by simulation');
+    expect(lines).toContain('(inv:kz-engrave-30-0-5) cuts');
+    expect(lines).toContain('100 % fidelity on the worst item');
+  }, 240_000);
 });
