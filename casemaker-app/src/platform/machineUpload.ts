@@ -28,7 +28,7 @@
 
 import { programUploadProblem, type ProgramCheck } from '@/engine/cnc/uploadGate';
 import { loadMachineBridge } from './capabilities';
-import { liveShopDefaults, machineTiming } from './defaultsClient';
+import { liveShopDefaults, machineTiming, readUploadCompression } from './defaultsClient';
 
 /** Where to reach the machine. Always both: an observation carries the port it was reached on. */
 export interface MachineUploadTarget {
@@ -45,7 +45,16 @@ export interface MachineUploadTarget {
  * silently wrong field.
  */
 export type UploadAttempt =
-  | { ok: true; bytes: number; packets: number; alreadyPresent: boolean }
+  | {
+      ok: true;
+      bytes: number;
+      packets: number;
+      alreadyPresent: boolean;
+      /** #562 — the bytes went as a QuickLZ `.bin`. */
+      compressed?: boolean;
+      /** #562 — a compressed attempt was refused and the plain file went instead, in words. */
+      fallback?: string;
+    }
   | { ok: false; reason: 'refused' | 'timeout' | 'error'; detail: string };
 
 /**
@@ -153,7 +162,17 @@ export interface MachineUploadClient {
  * telling the operator less than it knows.
  */
 export type MachineUploadResult =
-  | { kind: 'uploaded'; filename: string; bytes: number; packets: number; alreadyPresent: boolean; status: string }
+  | {
+      kind: 'uploaded';
+      filename: string;
+      bytes: number;
+      packets: number;
+      alreadyPresent: boolean;
+      status: string;
+      /** #562 — see {@link UploadAttempt}. */
+      compressed?: boolean;
+      fallback?: string;
+    }
   | { kind: 'refused'; filename: string; detail: string }
   // The machine was asked just before the transfer and was not idle (#296). `status` is its line,
   // verbatim, so the panel can show what the controller said and refresh its stored observation.
@@ -196,6 +215,9 @@ async function loadRealClient(): Promise<MachineUploadClient> {
       return bridge.uploadVerifiedProgram(target, verified, {
         inactivityMs: t.uploadInactivityMs,
         connectTimeoutMs: t.connectTimeoutMs,
+        // #562 — the location's mode, read at each call like the timings; `plain` when it is absent
+        // or this build has no location. Opt-in until the bench confirms the Z1 reads a `.bin`.
+        compress: readUploadCompression(liveShopDefaults()).value,
       });
     },
   };
@@ -307,6 +329,8 @@ export async function uploadProgram(
       alreadyPresent: attempt.alreadyPresent,
       // The idle line that let the transfer start, so the caller can refresh what it remembers.
       status: reading.text,
+      ...(attempt.compressed === undefined ? {} : { compressed: attempt.compressed }),
+      ...(attempt.fallback === undefined ? {} : { fallback: attempt.fallback }),
     };
   }
   // The transport's own three reasons are ours too, so the mapping is the reason itself rather

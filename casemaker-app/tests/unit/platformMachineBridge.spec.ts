@@ -20,8 +20,10 @@ import {
   openConsoleSession,
   status,
   uploadVerifiedProgram,
+  QUICKLZ_UPLOAD_THRESHOLD,
   type VerifiedProgram,
 } from '@/platform/desktop/machineBridge';
+import { quicklzCompress } from '@/platform/desktop/quicklz';
 import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import {
   decodeText,
@@ -29,10 +31,13 @@ import {
   FrameDecoder,
   PTYPE_CTRL_MULTI,
   PTYPE_CTRL_SINGLE,
+  PTYPE_FILE_CANCEL,
   PTYPE_FILE_DATA,
+  PTYPE_FILE_MD5,
   PTYPE_FILE_END,
   PTYPE_FILE_START,
   PTYPE_FILE_VIEW,
+  md5Hex,
   STATUS_POLL_BYTE,
   u32be,
   utf8,
@@ -215,6 +220,109 @@ describe('#255 machine bridge — actions', () => {
     const start = decodeAll(transport.writes).find((f) => f.type === PTYPE_FILE_START);
     expect(start).toBeDefined();
     expect(decodeText(start!.data)).toBe('upload /sd/gcodes/badge.nc\n');
+  });
+
+  // #562 — compressed uploads, opt-in. Studio's form (RE 05): over 4 KB the payload is QuickLZ and
+  // the destination gains `.bin`; the MD5 step hashes what the machine stores (the compressed bytes),
+  // and a controller that refuses the compressed file gets the plain one instead.
+  describe('#562 compressed uploads', () => {
+    /** A program big enough to compress: repeated G-code, which is what a real `.nc` is. */
+    const BIG = new TextEncoder().encode('G1 X10.000 Y10.000 F600\nG1 Z-0.200\n'.repeat(220));
+
+    function uploadedContent(writes: Uint8Array[]): { paths: string[]; md5s: string[]; payload: Uint8Array } {
+      const frames = decodeAll(writes);
+      const paths: string[] = [];
+      const md5s: string[] = [];
+      const chunks: number[] = [];
+      for (const f of frames) {
+        if (f.type === PTYPE_FILE_START) paths.push(decodeText(f.data).trim());
+        else if (f.type === PTYPE_FILE_MD5) md5s.push(decodeText(f.data));
+        else if (f.type === PTYPE_FILE_DATA) chunks.push(...f.data.subarray(4));
+      }
+      return { paths, md5s, payload: new Uint8Array(chunks) };
+    }
+
+    it('sends the compressed bytes to `<name>.bin` and an MD5 of those bytes when the location asks', async () => {
+      expect(BIG.length).toBeGreaterThan(QUICKLZ_UPLOAD_THRESHOLD);
+      const packed = quicklzCompress(BIG);
+      expect(packed).not.toBeNull();
+
+      const transport = new FakeTransport();
+      transport.queueRead(
+        encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+        encodeFrame(PTYPE_FILE_DATA, u32be(1)),
+        encodeFrame(PTYPE_FILE_END, EMPTY),
+      );
+      const program = asVerifiedProgram('badge.nc', BIG, verifyCheck(okReport))!;
+      const outcome = await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, {
+        transport,
+        packetSize: 4096,
+        compress: 'quicklz',
+      });
+
+      expect(outcome).toEqual({ ok: true, bytes: packed!.length, packets: 1, alreadyPresent: false, compressed: true });
+      const sent = uploadedContent(transport.writes);
+      expect(sent.paths).toEqual(['upload /sd/gcodes/badge.nc.bin']);
+      // The digest is of what the machine STORES — the compressed stream, not the original program.
+      expect(sent.md5s[0]).toBe(md5Hex(packed!));
+      expect(sent.payload).toEqual(packed!);
+    });
+
+    it('leaves a small program plain even when compression is asked for', async () => {
+      const transport = new FakeTransport();
+      transport.queueRead(encodeFrame(PTYPE_FILE_VIEW, EMPTY), encodeFrame(PTYPE_FILE_DATA, u32be(1)), encodeFrame(PTYPE_FILE_END, EMPTY));
+      const program = asVerifiedProgram('badge.nc', CONTENT, verifyCheck(okReport))!;
+      const outcome = await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, { transport, packetSize: 8, compress: 'quicklz' });
+      expect(outcome.ok).toBe(true);
+      const sent = uploadedContent(transport.writes);
+      expect(sent.paths).toEqual(['upload /sd/gcodes/badge.nc']);
+      expect(sent.md5s[0]).toBe(md5Hex(CONTENT));
+    });
+
+    it('falls back to the plain file when the controller refuses the compressed one, and says so', async () => {
+      const transport = new FakeTransport();
+      // First attempt: the machine asks for data, then cancels mid-transfer — a refusal.
+      transport.queueRead(
+        encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+        encodeFrame(PTYPE_FILE_DATA, u32be(1)),
+        encodeFrame(PTYPE_FILE_CANCEL, utf8('Error: unknown file type')),
+        // Second attempt (plain): an ordinary accepted transfer.
+        encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+        encodeFrame(PTYPE_FILE_DATA, u32be(1)),
+        encodeFrame(PTYPE_FILE_END, EMPTY),
+      );
+      const program = asVerifiedProgram('badge.nc', BIG, verifyCheck(okReport))!;
+      const outcome = await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, {
+        transport,
+        packetSize: 4096,
+        compress: 'quicklz',
+      });
+
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) throw new Error('expected the plain retry to be accepted');
+      expect(outcome.compressed).toBeUndefined();
+      expect(outcome.fallback).toContain('compressed upload');
+      expect(outcome.fallback).toContain('unknown file type');
+      const sent = uploadedContent(transport.writes);
+      // Two uploads: the refused `.bin`, then the plain program — with ITS OWN digest.
+      expect(sent.paths).toEqual(['upload /sd/gcodes/badge.nc.bin', 'upload /sd/gcodes/badge.nc']);
+      expect(sent.md5s[1]).toBe(md5Hex(BIG));
+    });
+
+    it('does not compress unless the location asks', async () => {
+      const transport = new FakeTransport();
+      transport.queueRead(
+        encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+        encodeFrame(PTYPE_FILE_DATA, u32be(1)),
+        encodeFrame(PTYPE_FILE_DATA, u32be(2)),
+        encodeFrame(PTYPE_FILE_END, EMPTY),
+      );
+      const program = asVerifiedProgram('badge.nc', BIG, verifyCheck(okReport))!;
+      await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, { transport, packetSize: 4096 });
+      const sent = uploadedContent(transport.writes);
+      expect(sent.paths).toEqual(['upload /sd/gcodes/badge.nc']);
+      expect(sent.payload).toEqual(BIG);
+    });
   });
 
   it('honours a caller-chosen directory instead of the default', async () => {

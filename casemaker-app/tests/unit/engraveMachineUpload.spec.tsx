@@ -288,6 +288,22 @@ describe('#255 EngraveMachineUpload — the sentence for each outcome', () => {
     expect(sentence).toContain('no data was sent');
     expect(sentence).not.toContain('packets');
   });
+
+  // #562 — a compressed upload is a different file on the card, so the sentence names it; a
+  // fallback says why the plain file went after all.
+  it('names the compressed file it sent, and the fallback when one happened', () => {
+    const compressed = describeUpload(
+      { kind: 'uploaded', filename: 'job.nc', bytes: 900, packets: 2, alreadyPresent: false, status: '<Idle>', compressed: true },
+      'The Z1',
+    );
+    expect(compressed).toContain('compressed as job.nc.bin');
+    const fellBack = describeUpload(
+      { kind: 'uploaded', filename: 'job.nc', bytes: 41, packets: 2, alreadyPresent: false, status: '<Idle>', fallback: 'the compressed upload (job.nc.bin) was refused — unknown file type' },
+      'The Z1',
+    );
+    expect(fellBack).toContain('received job.nc');
+    expect(fellBack).toContain('unknown file type');
+  });
 });
 
 describe('#491 EngraveMachineUpload — the cutter line', () => {

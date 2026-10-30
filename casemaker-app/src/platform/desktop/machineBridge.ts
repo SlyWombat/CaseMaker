@@ -18,6 +18,7 @@
 // asks the same question before it reaches for this module and the two answers must not drift.
 
 import { programUploadProblem, type ProgramCheck } from '@/engine/cnc/uploadGate';
+import { quicklzCompress } from './quicklz';
 import {
   COMMAND_TCP_PORT,
   DISCOVERY_UDP_PORT,
@@ -280,10 +281,26 @@ export async function readConfigValues(
  * The program lands at `<directory>/<filename>`, defaulting to the machine's own job directory.
  * See {@link GCODE_DIR} for why that is measured rather than assumed.
  */
+/**
+ * #562 — the size above which Studio compresses an upload (RE 05: `size > 0x1000`, and the config's
+ * type is `lz`). Below it, or with compression switched off, the plain file goes as it always has.
+ */
+export const QUICKLZ_UPLOAD_THRESHOLD = 4096;
+
 export async function uploadVerifiedProgram(
   target: MachineTarget,
   program: VerifiedProgram,
-  opts: BridgeOptions & { packetSize?: number; inactivityMs?: number; directory?: string } = {},
+  opts: BridgeOptions & {
+    packetSize?: number;
+    inactivityMs?: number;
+    directory?: string;
+    /**
+     * #562 — `quicklz` compresses a program over {@link QUICKLZ_UPLOAD_THRESHOLD} and uploads it as
+     * `<name>.bin`; `plain` (the default) never does. The caller reads the location's
+     * `machine.uploadCompression`, which is opt-in until the bench confirms the Z1 decompresses it.
+     */
+    compress?: 'plain' | 'quicklz';
+  } = {},
 ): Promise<UploadOutcome> {
   // The null guards are for a caller that reached us from plain JS: the type says `VerifiedProgram`
   // and cannot be, but `program.check` is read below and a crash here would be an unhandled
@@ -303,15 +320,36 @@ export async function uploadVerifiedProgram(
   const destination = uploadPath(opts.directory ?? GCODE_DIR, program.filename);
 
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
-  try {
-    return await runUpload(transport, conn, destination, program.content, {
-      packetSize: opts.packetSize,
-      inactivityMs: opts.inactivityMs,
-    });
-  } finally {
-    await closeQuietly(transport, conn);
-  }
+  const send = async (path: string, content: Uint8Array): Promise<UploadOutcome> => {
+    const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+    try {
+      return await runUpload(transport, conn, path, content, {
+        packetSize: opts.packetSize,
+        inactivityMs: opts.inactivityMs,
+      });
+    } finally {
+      await closeQuietly(transport, conn);
+    }
+  };
+
+  // #562 — COMPRESSED, WHEN THE LOCATION ASKS FOR IT. Studio's form (RE 05): over 4 KB the payload
+  // is QuickLZ level 1 and the destination gains a `.bin` suffix. The MD5 step inside `runUpload`
+  // hashes the SAME bytes the machine stores — the compressed stream for this attempt — so the
+  // machine's "I already hold this file" check compares like with like.
+  const wanted = opts.compress === 'quicklz' && program.content.length > QUICKLZ_UPLOAD_THRESHOLD;
+  const packed = wanted ? quicklzCompress(program.content) : null;
+  if (packed === null) return send(destination, program.content);
+
+  const first = await send(`${destination}.bin`, packed);
+  if (first.ok) return { ...first, compressed: true };
+  // NOT EVERY CONTROLLER SPEAKS IT, and a refused `.bin` must not cost the operator the upload:
+  // the same program goes plain, and the answer says which was accepted. Only a REFUSAL retries —
+  // a timeout or a socket error is a fact about the connection, and doubling the wait would not
+  // change what the controller can read.
+  if (first.reason !== 'refused') return first;
+  const note = `the compressed upload (${program.filename}.bin) was refused — ${first.detail}`;
+  const plain = await send(destination, program.content);
+  return plain.ok ? { ...plain, fallback: note } : { ...plain, detail: `${plain.detail} (${note})` };
 }
 
 /**

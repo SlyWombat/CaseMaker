@@ -565,6 +565,31 @@ export interface ReadDefault {
 }
 
 /**
+ * #562 — THE UPLOAD COMPRESSION MODE, a STRING default beside the numeric registry.
+ *
+ * `KNOWN_DEFAULTS` and `readDefault` are numbers by construction (`ReadDefault.value: number`,
+ * `KnownDefault.rule: z.ZodType<number>`, mirrored by `defaults.rs`'s `known_rule`), and the
+ * compression choice is a word, not a number. The location's section is OPEN to a well-formed
+ * string value on both sides (`ShopDefaultSchema` and the Rust `ShopDefault` accept one and keep it
+ * as an unknown-to-`known_rule` key), so the mode is read here with its own two values and a
+ * labelled fallback: `plain` unless the location says `quicklz`.
+ *
+ * OPT-IN BY DESIGN (#562). Studio compresses an upload over 4 KB into `QuickLZ` and gives it a
+ * `.bin` suffix (RE 05); the Z1's own decompression of that stream is not yet confirmed on the
+ * bench, so no location is switched until it is, and a build with no location uploads plain.
+ */
+export const UPLOAD_COMPRESSION_KEY = 'machine.uploadCompression';
+export type UploadCompression = 'plain' | 'quicklz';
+
+export function readUploadCompression(map: ShopDefaults | null): { value: UploadCompression; source: DefaultSource | 'fallback' } {
+  const stored = map?.[UPLOAD_COMPRESSION_KEY];
+  if (stored !== undefined && (stored.value === 'plain' || stored.value === 'quicklz')) {
+    return { value: stored.value, source: stored.source };
+  }
+  return { value: 'plain', source: 'fallback' };
+}
+
+/**
  * The number a consumer uses for `key`: the location's, or — only when there is no location, or its
  * entry does not hold a number within the key's rule — the registry's labelled fallback.
  */

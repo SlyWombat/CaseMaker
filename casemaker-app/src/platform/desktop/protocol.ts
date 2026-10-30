@@ -775,7 +775,16 @@ export async function runStatus(
 // ---------------------------------------------------------------------------
 
 export type UploadOutcome =
-  | { ok: true; bytes: number; packets: number; alreadyPresent: boolean }
+  | {
+      ok: true;
+      bytes: number;
+      packets: number;
+      alreadyPresent: boolean;
+      /** #562 — the bytes went as a QuickLZ `.bin` rather than the plain file. */
+      compressed?: boolean;
+      /** #562 — a compressed attempt was refused and the plain file was sent instead, in words. */
+      fallback?: string;
+    }
   | { ok: false; reason: 'refused' | 'timeout' | 'error'; detail: string };
 
 export interface UploadOptions {

@@ -12,7 +12,7 @@ import {
   wasteboardFindings,
   type Wasteboard,
 } from '@/engine/cnc/wasteboard';
-import { ShopDefaultsSchema, readDefault } from '@/platform/defaultsClient';
+import { ShopDefaultsSchema, readDefault, readUploadCompression } from '@/platform/defaultsClient';
 import { LocationDocSchema } from '@/platform/locationClient';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -99,5 +99,22 @@ describe('the shop defaults (location.json `defaults`)', () => {
     ]) {
       expect(ShopDefaultsSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
+  });
+});
+
+// #562 — the upload compression mode is a STRING default in the location's own section, opt-in:
+// absent (or malformed) reads `plain`, so no machine is sent a `.bin` until a location says so.
+describe('#562 the upload compression default', () => {
+  it('is plain when absent, and answers the location’s own word when it holds one', () => {
+    expect(readUploadCompression(null)).toEqual({ value: 'plain', source: 'fallback' });
+    const off = ShopDefaultsSchema.parse({ 'machine.uploadCompression': { value: 'plain', source: 'chosen', setAt: '2026-10-30T00:00:00.000Z' } });
+    expect(readUploadCompression(off)).toEqual({ value: 'plain', source: 'chosen' });
+    const on = ShopDefaultsSchema.parse({ 'machine.uploadCompression': { value: 'quicklz', source: 'chosen', setAt: '2026-10-30T00:00:00.000Z' } });
+    expect(readUploadCompression(on)).toEqual({ value: 'quicklz', source: 'chosen' });
+  });
+
+  it('refuses a value the app does not know rather than passing it to the machine', () => {
+    const odd = ShopDefaultsSchema.parse({ 'machine.uploadCompression': { value: 'lz4', source: 'chosen', setAt: '2026-10-30T00:00:00.000Z' } });
+    expect(readUploadCompression(odd)).toEqual({ value: 'plain', source: 'fallback' });
   });
 });

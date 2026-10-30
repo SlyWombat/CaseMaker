@@ -8,10 +8,15 @@ import type { MachineUploadResult } from '@/platform/machineUpload';
  */
 export function describeUpload(result: MachineUploadResult, label: string): string {
   switch (result.kind) {
-    case 'uploaded':
-      return result.alreadyPresent
-        ? `${label} already had ${result.filename} — the same file, byte for byte, so no data was sent.`
-        : `${label} received ${result.filename} — ${result.bytes} bytes in ${result.packets} packets.`;
+    case 'uploaded': {
+      // #562 — a compressed upload is a different FILE on the card (`<name>.bin`), so the sentence
+      // names it; a fallback is why the plain one went after all.
+      const as = result.compressed === true ? ` compressed as ${result.filename}.bin` : '';
+      const base = result.alreadyPresent
+        ? `${label} already had ${result.filename}${as} — the same bytes, so no data was sent.`
+        : `${label} received ${result.filename}${as} — ${result.bytes} bytes in ${result.packets} packets.`;
+      return result.fallback === undefined ? base : `${base} (${result.fallback})`;
+    }
     case 'refused':
       return `${label} declined ${result.filename}: ${result.detail}`;
     case 'busy':
