@@ -32,7 +32,8 @@ import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SimStatus } from './simStore';
 import { clampPlacementsFor, jobMount, jobSetups, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
-import { carrySeedsForSetup, orient, type CarrySetup } from '@/engine/cnc/setups';
+import { carrySeedsForSetup, carriedMaps, orient, type CarrySetup } from '@/engine/cnc/setups';
+import type { CarriedField, FlatField } from '@/workers/geometry/carriedField';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import { useLocationStore } from './locationStore';
@@ -570,6 +571,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     });
     /** The setup each cumulative prior-removal mesh came from, aligned with the walk's list. */
     const seedSources: number[] = [];
+    /** #723 P2-2b — the last FLAT field a column-swept program left, for the next setup's floor. */
+    let lastFlat: { setupIndex: number; field: FlatField } | null = null;
     const firstEngravingIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
     // #743 P-5 — A BOARD IS JUDGED BY ITS COPPER'S TOPOLOGY, on the WHOLE run's swept stock. The
     // volumetric comparison is program 1's own; a board's isolation, holes and outline are three
@@ -605,6 +608,18 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               program.setupIndex,
               carryFrames,
             );
+            // #723 P2-2b — the CARRIED FIELD. A column-swept program (a ball finish is one) takes
+            // the other side's remaining stock as each column's floor; the maps come from the two
+            // setups' frames. A side setup declines the carry and simulates from its own stock.
+            let carried: CarriedField | null = null;
+            if (lastFlat !== null && lastFlat.setupIndex !== program.setupIndex) {
+              const from = carryFrames[lastFlat.setupIndex - 1] ?? null;
+              const to = carryFrames[program.setupIndex - 1] ?? null;
+              if (from !== null && to !== null) {
+                const maps = carriedMaps(from, to);
+                if (maps.ok) carried = { ...lastFlat.field, ...maps.maps };
+              }
+            }
             if (!seeds.ok) {
               return {
                 ok: false as const,
@@ -643,11 +658,14 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               // #744 — the cumulative stock the earlier programs left.
               // #723 P2-2b-ii — carried into THIS program's setup frame.
               seeds.meshes.length === 0 ? null : seeds.meshes,
+              carried,
             );
             if (result !== null) {
               // Keep the frame bookkeeping aligned with the walk's own list: only a load that
               // actually produced a removal mesh is appended there.
               if (result.ok && result.meshes.removal !== null) seedSources.push(program.setupIndex);
+              // A column sweep hands back its final top field; the next setup starts from it.
+              if (result.ok && result.flatField != null) lastFlat = { setupIndex: program.setupIndex, field: result.flatField };
               return result;
             }
             const sim = useSimStore.getState();

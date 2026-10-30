@@ -18,8 +18,8 @@
  */
 import type { ColumnGrid } from './columnEngine';
 
-/** The carried field as plain data: it crosses a worker boundary, so no functions and no classes. */
-export interface CarriedField {
+/** The other side's final top field, in ITS work frame — what a column load hands back. */
+export interface FlatField {
   /** The source grid: column (0,0)'s centre, its pitches, and `top[j*nu + i]` (source work Z). */
   u0: number;
   v0: number;
@@ -30,6 +30,10 @@ export interface CarriedField {
   top: Float32Array;
   /** The source stock's bottom-face work Z: a top at or below it is a cut-through column. */
   base: number;
+}
+
+/** The carried field as plain data: it crosses a worker boundary, so no functions and no classes. */
+export interface CarriedField extends FlatField {
   /** target (x, y) → source (x₁, y₁), as above. */
   map: readonly [number, number, number, number, number, number];
   /** target floor Z = `z[0] * sourceTop + z[1]`. */

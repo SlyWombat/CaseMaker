@@ -26,6 +26,7 @@ import type { Tool } from '@/engine/cnc/tool';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
 import type { SimDesign, SimDiagnostic, SimFrame, SimLoadOk, SimLoadResult, SimPath } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 // Type-only: erased at build time, so it does not pull the worker client into the graph.
 import type { SimLoadPhase } from '@/engine/jobs/simClient';
@@ -235,6 +236,12 @@ export interface SimState {
      * `null` means this load no longer owned the session (a newer load superseded it).
      */
     priorRemoval?: NodeMeshOutput | readonly NodeMeshOutput[] | null,
+    /**
+     * #723 P2-2b — the other side's remaining stock as a field, for a column-swept program (a
+     * ball/bull finish is one): each column's floor, with the maps into this program's frame.
+     * Takes the place of `priorRemoval` where the column engine runs.
+     */
+    carried?: CarriedField | null,
   ): Promise<SimLoadResult | null>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
@@ -377,6 +384,8 @@ interface LoadArgs {
    * load for the same reason `surface` is: a retry judges the same stock the program was cut on.
    */
   priorRemoval: NodeMeshOutput[] | null;
+  /** #723 P2-2b — the carried field for a column-swept later side, or null. */
+  carried: CarriedField | null;
 }
 let lastLoad: LoadArgs | null = null;
 
@@ -414,6 +423,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         rampThresholdMm: args.rampThresholdMm,
         breakthroughMm: args.breakthroughMm,
         priorRemoval: args.priorRemoval,
+        carried: args.carried,
       });
       if (mine !== loadSeq) return null; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -464,7 +474,7 @@ export const useSimStore = create<SimState>()((set, get) => {
     ...EMPTY,
     speed: startingSpeed(),
     budgetMs: startingBudgetMs(),
-    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null, breakthroughMm = null, priorRemoval = null) {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null, breakthroughMm = null, priorRemoval = null, carried = null) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
@@ -500,6 +510,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         rampThresholdMm,
         breakthroughMm,
         priorRemoval: priorRemoval === null ? null : Array.isArray(priorRemoval) ? [...priorRemoval] : [priorRemoval as NodeMeshOutput],
+        carried,
       };
       return run(lastLoad, fresh ? startingBudgetMs() : get().budgetMs);
     },

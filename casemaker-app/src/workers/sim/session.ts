@@ -55,6 +55,7 @@ import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
 import { boxSolid, isDenseForExactSweep, sweepTimeline, unliftTimeline, type SweepDiagnostic, type SweepOpts, type SweepResult, type SweepStats } from '../geometry/sweep';
 import { columnSweep, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
+import type { CarriedField, FlatField } from '../geometry/carriedField';
 import { unionRemoval } from './engraveRest';
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
@@ -134,6 +135,13 @@ export interface SimLoadOk {
   fixtureSource?: FixtureEnvelope['source'];
   /** Every box was grown by this much before any check (#203, decision 28), mm. */
   fixtureUncertainty?: Mm;
+  /**
+   * #723 P2-2b — the FLAT grid's final TOP field when the column engine swept this program, as
+   * plain data. The run store keeps it and hands it to the next setup as the carried floor; a
+   * rotary or exact sweep returns none. Copied across the worker boundary (never transferred): the
+   * session keeps the same grid live for playback.
+   */
+  flatField?: FlatField | null;
 }
 
 export interface SimLoadRefused {
@@ -283,6 +291,13 @@ export interface SimLoadOpts {
    * against the wrong stock is a picture of a cut that will not happen.
    */
   priorRemoval?: NodeMeshOutput | readonly NodeMeshOutput[];
+  /**
+   * #723 P2-2b — the other side's remaining stock as a FIELD (the column engine's carried floor),
+   * with the maps into this program's work frame. A column-swept program (a ball/bull finish, a
+   * V/drill/thread, a wrapped rotary) starts from it instead of being refused
+   * `prior-removal-column`; an exact-swept program uses `priorRemoval`'s meshes and ignores this.
+   */
+  carried?: CarriedField | null;
   /**
    * The shop's `drill.pointAngleDeg` as the app read it from the location, for a drill whose record
    * states no point angle (#382). Absent: the registry's labelled fallback (source `fallback`).
@@ -729,9 +744,9 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const rotaryClass = timeline.summary.rotaryClass;
     if (rotaryClass === 'wrapped' || sweepsOnColumn(tool) || denseFlatRoutesToColumn(surfaceTimeline, tool, routingOpts)) {
       // A rest pass is measured against the material a previous program left, and only the exact
-      // sweeper can start from it. Silently sweeping the blank instead would draw a cut nobody is
-      // going to make, so the pair is refused by name (#410).
-      if (hasPrior) {
+      // sweeper can start from it — UNLESS the seed is the carried FIELD (#723 P2-2b), which the
+      // column engine reads directly as each column's floor. Without one, the pair is refused.
+      if (hasPrior && opts?.carried == null) {
         return refuse(
           'prior-removal-column',
           timeline.summary.rotary
@@ -742,7 +757,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       // #628 — the column engine sweeps the UN-LIFTED (surface-frame) program on the flat stock,
       // exactly as the exact engine does since #625. See the load's comment for why the seat + grid
       // lift this replaces could not be exact.
-      const col = columnSweep(surfaceTimeline, tool, setupArg, routingOpts);
+      const col = columnSweep(surfaceTimeline, tool, setupArg, { ...routingOpts, carried: opts?.carried ?? null });
       if (!col.ok) {
         // Same contract as a refused exact sweep (#194): keep the runner's work, draw the path,
         // show no material. A rotary refusal owns no wasm handle.
@@ -794,6 +809,20 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         // material, so `frameAt` regenerates the stock surface instead (§4.4). A gouge is still
         // reported as a diagnostic; only its drawn solid is pending.
         meshes: { stock: col.stock, result: col.result, removal: null, sacrificial: null, gouges: [], fixture },
+        ...(col.grid.kind === 'flat'
+          ? {
+              flatField: {
+                u0: col.grid.u0,
+                v0: col.grid.v0,
+                du: col.grid.du,
+                dv: col.grid.dv,
+                nu: col.grid.nu,
+                nv: col.grid.nv,
+                top: col.grid.h,
+                base: col.grid.base,
+              } satisfies FlatField,
+            }
+          : {}),
         ...(setupArg.fixture ? { fixtureSource: setupArg.fixture.source, fixtureUncertainty: setupArg.fixture.uncertainty } : {}),
       };
     }

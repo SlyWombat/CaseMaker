@@ -23,6 +23,7 @@ import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle'
 import type { PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
@@ -150,6 +151,11 @@ export interface SimLoadOpts {
    * them for the later programs' seeds.
    */
   priorRemoval?: NodeMeshOutput | readonly NodeMeshOutput[] | null;
+  /**
+   * #723 P2-2b — the other side's remaining stock as a field, with the maps into this program's
+   * work frame. Taken by a column-swept program; an exact-swept one uses `priorRemoval`.
+   */
+  carried?: CarriedField | null;
 }
 
 /** The two stages of a load (#224). */
@@ -214,6 +220,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             rampThresholdMm: opts?.rampThresholdMm ?? null,
             breakthroughMm: opts?.breakthroughMm ?? null,
             priorRemoval: opts?.priorRemoval ?? undefined,
+            carried: opts?.carried ?? undefined,
           },
           opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
         )
