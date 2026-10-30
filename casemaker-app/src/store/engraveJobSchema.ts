@@ -369,6 +369,10 @@ const combinedShapeSchema = z.discriminatedUnion('kind', [
       .nonnegative()
       .describe('Clearance between the referenced outline and the frame, in millimetres.'),
     width: z.number().finite().positive().describe('Frame width in millimetres.'),
+    isolation: z
+      .boolean()
+      .optional()
+      .describe('True when this band must separate every piece of the copper it follows (#743): a band the cut cannot open is an error, not a warning.'),
   }),
   shapeBaseSchema.extend({
     kind: z
@@ -1958,7 +1962,7 @@ export const jobSourceSchema = z
       .string()
       .regex(/^[0-9a-f]{64}$/, 'a lowercase SHA-256 (64 hex characters)')
       .describe("Lowercase SHA-256 of the source file's bytes (64 hex characters)."),
-    kind: z.enum(['svg', 'dxf', 'image', '3mf', 'font']).describe('What kind of file the source is.'),
+    kind: z.enum(['svg', 'dxf', 'image', '3mf', 'font', 'gerber', 'excellon']).describe('What kind of file the source is.'),
     name: z.string().min(1).describe('File name the source was imported from.'),
     embedded: z
       .object({

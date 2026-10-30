@@ -875,6 +875,12 @@ export interface EngraveFrameShape extends EngraveShapeBase {
   gap: Mm;
   /** Ring wall thickness, mm. */
   width: Mm;
+  /**
+   * #743 P-4/D5 — this band exists to SEPARATE copper: every piece the design keeps must come out
+   * apart. Two pieces the cut cannot separate are `isolation-short`, an error (a short is a broken
+   * board), where a thinned letter would only be cosmetic. Absent on every other frame.
+   */
+  isolation?: boolean;
 }
 
 /**
@@ -1566,7 +1572,7 @@ export interface FrozenPackage {
 export interface JobSource {
   /** Lowercase SHA-256 of the raw bytes; the record's identity, so identical files dedupe. */
   sha256: string;
-  kind: 'svg' | 'dxf' | 'image' | '3mf' | 'font';
+  kind: 'svg' | 'dxf' | 'image' | '3mf' | 'font' | 'gerber' | 'excellon';
   /** The file's own name (a 3MF's Title for a design), for a person. */
   name: string;
   /** The raw bytes, base64, when embedded. `null` for a file over the 4 MiB cap. */
