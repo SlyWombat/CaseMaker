@@ -71,7 +71,7 @@ import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type MachineUpdate } from '@/store/locationStore';
-import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
+import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
 import {
   viseFrameFromRegistration,
   withBracketSeatDatum,
@@ -465,6 +465,17 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         }
         // #601 — the probe's last M491 length and M119 rest ride on the checked-out probe accessory.
         await recordProbeReading(machineAt(target), r.probe);
+        // #595 — a mount tap's reading rides on the mount checked out to the machine as well: the
+        // vise's jaw top or the bracket's arm top, in the unit's own record (the one `mountDatumFor`
+        // prefers). The bed datum above is the machine's copy of the same reading.
+        if (r.mountTap !== null) {
+          await recordMountReading(
+            machineAt(target),
+            plan.mountTap?.reference === 'bracket-seat' ? 'bracket' : 'vise',
+            r.mountTap,
+            plan.probe?.id ?? null,
+          );
+        }
       } catch (e) {
         writeNotes.push(
           `the measurement was taken, but the record was not saved: ${e instanceof Error ? e.message : String(e)}. Run the registration again to write it.`,

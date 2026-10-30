@@ -17,7 +17,7 @@ import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type
 import { withBracketSeatDatum, withViseJawTopDatum } from '@/platform/bedProfiles';
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
-import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
+import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
 
 /**
  * #637 — ONE TAP AT A TIME, ACROSS HOSTS. The hook is used by the Setups row and by the machine
@@ -168,6 +168,16 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         const record = machineAt(inputs.target);
         if (record !== null) {
           const now = new Date().toISOString();
+          // #595 — the tap's reading lands on the mount's OWN record as well: the unit's record is
+          // the one the planner prefers (`mountDatumFor`), and a measurement that happened must not
+          // depend on the bed write below succeeding. A bracket tap reads the arm's TOP; the bed
+          // datum is the seat one height down.
+          await recordMountReading(
+            record,
+            tap.reference === 'bracket-seat' ? 'bracket' : 'vise',
+            { z: r.z, at: r.at },
+            inputs.probeId,
+          );
           // #613 — a no-profile machine gets its first bed here; the datum then lands as designed.
           // #650 — the bed and the datum are an update folded onto the record the service holds; a
           // stale guard re-applies them to the re-read record rather than re-sending this window's

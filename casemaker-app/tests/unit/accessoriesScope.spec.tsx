@@ -314,3 +314,95 @@ describe('#601 — the detail rail edits the label and retires', () => {
     expect(calls[1]!.path).toBe('/location/accessories/fx-probe-3d');
   });
 });
+
+describe('#595 — the records the detail rail states', () => {
+  it('names the probe’s last M491 and its M119 rest, dated', () => {
+    const probe: FixtureRecord = {
+      ...WIRED_PROBE,
+      unit: {
+        ...WIRED_PROBE.unit,
+        lastM491: { z: -76.063, at: '2026-10-24T08:00:00.000Z' },
+        lastM119Rest: '0',
+      },
+    };
+    seed({ accessories: [VISE, probe, PROBE_3D] });
+    render(<AccessoriesScope />);
+
+    fireEvent.click(screen.getByTestId('manage-accessories-pick-fx-probe-1'));
+    expect(screen.getByTestId('manage-acc-measured').textContent).toContain('M491 -76.063');
+    const readings = screen.getByTestId('manage-acc-probe-readings').textContent!;
+    expect(readings).toContain('last M491 -76.063 mm on 2026-10-24');
+    expect(readings).toContain('M119 rest Probe: 0');
+  });
+
+  it('shows a mount’s own tapped jaw top with the probe and the day', () => {
+    const vise: FixtureRecord = {
+      ...VISE,
+      unit: {
+        ...VISE.unit,
+        jawTopZ: {
+          value: -56.82,
+          measuredAt: '2026-10-23T06:00:00.000Z',
+          by: 'fx-probe-1',
+          at: [12.5, -3],
+          machineId: MACHINE_ID,
+        },
+      },
+      provenance: { ...VISE.provenance, jawTopZ: 'probed:2026-10-23T06:00:00.000Z' },
+    };
+    seed({ accessories: [vise, WIRED_PROBE, PROBE_3D] });
+    render(<AccessoriesScope />);
+
+    // The list's measured cell names the reading, not a count.
+    expect(screen.getByTestId('manage-accessories-row-fx-vise-1').textContent).toContain('jaw top -56.82');
+
+    fireEvent.click(screen.getByTestId('manage-accessories-pick-fx-vise-1'));
+    const line = screen.getByTestId('manage-acc-reading-jawTopZ').textContent!;
+    expect(line).toContain('jaw top -56.82 mm');
+    expect(line).toContain('probed with Makera Wired Probe V2');
+    expect(line).toContain('2026-10-23');
+  });
+
+  it('reads the machine’s own bed record for a mount with no tapped reading of its own', () => {
+    const bracket: FixtureRecord = {
+      id: 'fx-bracket-1',
+      kind: 'bracket',
+      product: 'Angle bracket',
+      variant: null,
+      constants: {},
+      unit: {},
+      provenance: {},
+      whereabouts: { kind: 'machine', machineId: MACHINE_ID, since: '2026-10-24T00:00:00.000Z' },
+      history: [],
+    };
+    const machine = {
+      id: MACHINE_ID,
+      profileId: 'Z1',
+      name: 'Makera_Z1_000000',
+      updatedAt: '2026-10-15T09:00:00.000Z',
+      activeBedProfileId: 'bp-1',
+      bedProfiles: [
+        {
+          id: 'bp-1',
+          datums: {
+            surfaceTopZ: null,
+            viseJawTopZ: null,
+            bracketSeatZ: { value: -70.2, measuredAt: '2026-10-23T06:00:00.000Z', by: 'fx-probe-1', at: [0, 50] },
+            rotaryAxis: null,
+          },
+        },
+      ],
+    };
+    seed({
+      accessories: [VISE, WIRED_PROBE, PROBE_3D, bracket],
+      machines: [machine] as unknown as LocationView['machines'],
+    });
+    render(<AccessoriesScope />);
+
+    fireEvent.click(screen.getByTestId('manage-accessories-pick-fx-bracket-1'));
+    expect(screen.getByText('On the Z1')).toBeTruthy();
+    const datum = screen.getByTestId('manage-acc-machine-datum').textContent!;
+    expect(datum).toContain('bracket seat -70.2 mm');
+    expect(datum).toContain('with Makera Wired Probe V2');
+  });
+});

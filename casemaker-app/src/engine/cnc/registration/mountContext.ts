@@ -29,6 +29,49 @@ export function mountNum(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+/** #595 — the mount kinds whose tap records a reading on the unit, and the `unit` key it lands on. */
+export type TappableMountKind = 'vise' | 'bracket';
+
+export const MOUNT_TAP_UNIT_KEY: Record<TappableMountKind, string> = {
+  vise: 'jawTopZ',
+  bracket: 'bracketTopZ',
+};
+
+/** The words the record's history line and the Manage rail use for each tapped surface. */
+export const MOUNT_TAP_WORD: Record<TappableMountKind, string> = {
+  vise: 'jaw top',
+  bracket: 'bracket top',
+};
+
+/**
+ * #595 — one tapped reading on the mount's OWN record: a machine-frame Z with the date, the probe
+ * that took it and the XY it touched. It mirrors the bed profile's `MeasuredDatum` and adds
+ * `machineId`: a jaw top is the jaw top on the machine it was tapped on, so a unit checked out to a
+ * different machine cannot anchor that machine's plan from this reading.
+ */
+export interface MountUnitReading {
+  value: number;
+  measuredAt: string;
+  by: string;
+  at: [number, number] | null;
+  machineId: string;
+}
+
+/** Read a mount's unit entry when it has the shape a tap writes; anything else is not a reading. */
+export function mountUnitReading(v: unknown): MountUnitReading | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
+  const r = v as Record<string, unknown>;
+  const value = mountNum(r.value);
+  if (value === null || typeof r.measuredAt !== 'string' || typeof r.by !== 'string' || typeof r.machineId !== 'string') {
+    return null;
+  }
+  const at =
+    Array.isArray(r.at) && r.at.length === 2 && mountNum(r.at[0]) !== null && mountNum(r.at[1]) !== null
+      ? ([mountNum(r.at[0])!, mountNum(r.at[1])!] as [number, number])
+      : null;
+  return { value, measuredAt: r.measuredAt, by: r.by, at, machineId: r.machineId };
+}
+
 /**
  * #598 — the probe checked out to `machine`, or null when there is none. #525 — a probe whose tip
  * has never been measured comes back with `tip: null` rather than null: the caller can then say
@@ -97,9 +140,65 @@ export async function recordProbeReading(
   });
 }
 
-/** #598 — the active bed profile's measured jaw-top datum, or null when it has none. */
+/**
+ * #595 — write a mount tap's reading onto the MOUNT checked out to `machine`: the vise's `jawTopZ`
+ * or the bracket's `bracketTopZ`, as a {@link MountUnitReading} with provenance `probed:<date>` and
+ * a history line. The bed profile's datum still lands through its own update; this is the unit's
+ * own record — the one that travels with the accessory and the one `mountDatumFor` prefers. No-op
+ * with no machine or no accessory of that kind checked out.
+ */
+export async function recordMountReading(
+  machine: MachineRecord | null,
+  kind: TappableMountKind,
+  reading: { z: number; at: { x: number; y: number } },
+  probeId: string | null,
+): Promise<void> {
+  if (machine === null) return;
+  const acc = accessoriesFor(machine).find((a) => a.kind === kind);
+  if (acc === undefined) return;
+  const now = new Date().toISOString();
+  const key = MOUNT_TAP_UNIT_KEY[kind];
+  const by = probeId ?? 'wired-probe';
+  const value: MountUnitReading = {
+    value: reading.z,
+    measuredAt: now,
+    by,
+    at: [reading.at.x, reading.at.y],
+    machineId: machine.id,
+  };
+  const instrument = probeId === null ? 'the wired probe' : accessoryNameFor(probeId);
+  await useLocationStore.getState().saveAccessory({
+    ...acc,
+    unit: { ...acc.unit, [key]: value },
+    provenance: { ...acc.provenance, [key]: `probed:${now}` },
+    history: [...acc.history, { at: now, what: `${MOUNT_TAP_WORD[kind]} ${reading.z} mm tapped with ${instrument}` }],
+  });
+}
+
+/**
+ * #595 — the checked-out VISE's own tapped jaw top, when it may anchor `machine`'s plan: the
+ * reading must be from THIS machine and, like the bed datum (#611), from the probe checked out now.
+ */
+function viseUnitDatum(machine: MachineRecord): MountDatum | null {
+  const acc = accessoriesFor(machine).find((a) => a.kind === 'vise');
+  if (acc === undefined) return null;
+  const reading = mountUnitReading(acc.unit[MOUNT_TAP_UNIT_KEY.vise]);
+  if (reading === null || reading.machineId !== machine.id) return null;
+  const checkedOut = probeFor(machine)?.id ?? null;
+  if (checkedOut !== null && reading.by !== checkedOut) return null;
+  return { jawTopZ: reading.value, measuredAt: reading.measuredAt, by: reading.by };
+}
+
+/**
+ * #598/#595 — the jaw-top datum: the checked-out vise's own tapped record first, else the active
+ * bed profile's datum (the machine's copy, for a house whose tap predates the unit record), or null
+ * when neither may anchor this plan.
+ */
 export function mountDatumFor(machine: MachineRecord | null): MountDatum | null {
-  if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
+  if (machine === null) return null;
+  const unit = viseUnitDatum(machine);
+  if (unit !== null) return unit;
+  if (machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
   const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
   const datum = profile?.datums.viseJawTopZ ?? null;
   if (datum === null) return null;
@@ -118,7 +217,19 @@ export function mountDatumFor(machine: MachineRecord | null): MountDatum | null 
  * offer the tap with the current probe. Null when the datum matches or is absent.
  */
 export function mountDatumMismatch(machine: MachineRecord | null): string | null {
-  if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
+  if (machine === null) return null;
+  // A unit reading that matches the checked-out probe is the datum the plan uses; there is no
+  // mismatch to report even if the older bed copy names another probe.
+  if (viseUnitDatum(machine) !== null) return null;
+  const acc = accessoriesFor(machine).find((a) => a.kind === 'vise');
+  const unit = acc === undefined ? null : mountUnitReading(acc.unit[MOUNT_TAP_UNIT_KEY.vise]);
+  // A reading from another machine is not this machine's datum: say nothing about its probe unless
+  // it is the probe checked out now (the same guard the bed datum gets).
+  if (unit !== null && unit.machineId === machine.id) {
+    const checkedOut = probeFor(machine)?.id ?? null;
+    if (checkedOut !== null && unit.by !== checkedOut) return unit.by;
+  }
+  if (machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
   const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
   const datum = profile?.datums.viseJawTopZ ?? null;
   if (datum === null) return null;

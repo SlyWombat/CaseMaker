@@ -23,8 +23,9 @@
  */
 
 import { useState } from 'react';
-import type { FixtureRecord } from '@/platform/locationClient';
+import type { FixtureRecord, MachineRecord } from '@/platform/locationClient';
 import { useLocationStore } from '@/store/locationStore';
+import { accessoryNameFor, mountUnitReading, MOUNT_TAP_UNIT_KEY, MOUNT_TAP_WORD } from '@/engine/cnc/registration/mountContext';
 import { newId } from '@/utils/id';
 import { formatDay, mm } from './display';
 
@@ -65,7 +66,7 @@ function whereaboutsLine(
   return `in the ${name} since ${formatDay(record.whereabouts.since) ?? record.whereabouts.since}`;
 }
 
-/** The probe's measured line — `tip ⌀ 2.0 · rim 0.70 ± 0.25` — or null when nothing is measured. */
+/** The probe's measured line — `tip ⌀ 2.0 · rim 0.70 ± 0.25 · M491 −76.06 · rest 0`. */
 function probeLine(record: FixtureRecord): string | null {
   const tip = record.unit['tipDiameterMm'];
   const rim = record.unit['rimOffsetMm'];
@@ -73,15 +74,93 @@ function probeLine(record: FixtureRecord): string | null {
   const bits: string[] = [];
   if (typeof tip === 'number') bits.push(`tip ⌀ ${mm(tip)}`);
   if (typeof rim === 'number') bits.push(`rim ${mm(rim)}${typeof unc === 'number' ? ` ± ${mm(unc)}` : ''}`);
+  const m491 = record.unit['lastM491'];
+  if (typeof m491 === 'object' && m491 !== null) {
+    const z = (m491 as Record<string, unknown>).z;
+    if (typeof z === 'number') bits.push(`M491 ${mm(z)}`);
+  }
+  const rest = record.unit['lastM119Rest'];
+  if (typeof rest === 'string' && rest.trim() !== '') bits.push(`rest ${rest}`);
+  else if (typeof rest === 'number') bits.push(`rest ${rest}`);
   return bits.length === 0 ? null : bits.join(' · ');
 }
 
-/** The measured cell: the probe's line, or a count of the measured numbers a mount carries. */
+/** #595 — the probe's last registration reading in words, dated: M491's length and the M119 rest. */
+function probeReadingsLine(record: FixtureRecord): string | null {
+  const m491 = record.unit['lastM491'];
+  const stamp =
+    typeof m491 === 'object' && m491 !== null && typeof (m491 as Record<string, unknown>).at === 'string'
+      ? ((m491 as Record<string, unknown>).at as string)
+      : null;
+  const z = typeof m491 === 'object' && m491 !== null ? (m491 as Record<string, unknown>).z : null;
+  const rest = record.unit['lastM119Rest'];
+  const hasRest = (typeof rest === 'string' && rest.trim() !== '') || typeof rest === 'number';
+  if (typeof z !== 'number' && !hasRest) return null;
+  const length =
+    typeof z === 'number'
+      ? `last M491 ${mm(z)} mm${stamp === null ? '' : ` on ${formatDay(stamp) ?? stamp}`}`
+      : 'no M491 reading yet';
+  const restWords = hasRest ? `M119 rest Probe: ${String(rest)}` : 'no M119 rest reading yet';
+  return `${length} · ${restWords}`;
+}
+
+/** #595 — a mount's own tapped reading, in words: `jaw top −56.82 mm, probed with … on …`. */
+function mountReadingLine(record: FixtureRecord, key: string): string | null {
+  const reading = mountUnitReading(record.unit[key]);
+  if (reading === null) return null;
+  const kind = (Object.keys(MOUNT_TAP_UNIT_KEY) as (keyof typeof MOUNT_TAP_UNIT_KEY)[]).find(
+    (k) => MOUNT_TAP_UNIT_KEY[k] === key,
+  );
+  const word = kind === undefined ? key : MOUNT_TAP_WORD[kind];
+  return `${word} ${mm(reading.value)} mm, probed with ${accessoryNameFor(reading.by)} on ${formatDay(reading.measuredAt) ?? reading.measuredAt}`;
+}
+
+/** The measured cell: the probe's line, a mount's own tapped reading, or a count of its numbers. */
 function measuredLine(record: FixtureRecord): string {
   if (record.kind === 'probe') return probeLine(record) ?? 'no readings yet';
+  for (const key of Object.values(MOUNT_TAP_UNIT_KEY)) {
+    const line = mountReadingLine(record, key);
+    if (line !== null) return line.split(', probed with')[0] ?? line;
+  }
   let n = 0;
   for (const value of Object.values(record.unit)) if (typeof value === 'number') n += 1;
   return n === 0 ? 'no readings yet' : `${n} measured`;
+}
+
+/**
+ * #595 — the machine's own copy of a mount datum, from the active bed profile of the machine the
+ * accessory is checked out to: the vise's jaw top, the bracket's seat, the rotary's axis. The unit
+ * record is where a tap writes; this is the read-through for a mount whose record has no reading of
+ * its own (never tapped here, or the bracket/rotary surfaces #607 still owns).
+ */
+function machineMountDatum(
+  record: FixtureRecord,
+  machines: readonly MachineRecord[],
+): { word: string; value: number; measuredAt: string; by: string; machineName: string } | null {
+  if (record.whereabouts.kind !== 'machine') return null;
+  const machineId = record.whereabouts.machineId;
+  const spec =
+    record.kind === 'vise'
+      ? ({ key: 'viseJawTopZ', word: 'jaw top' } as const)
+      : record.kind === 'bracket'
+        ? ({ key: 'bracketSeatZ', word: 'bracket seat' } as const)
+        : record.kind === 'rotary-module'
+          ? ({ key: 'rotaryAxis', word: 'rotary axis' } as const)
+          : null;
+  if (spec === null) return null;
+  if (mountUnitReading(record.unit[MOUNT_TAP_UNIT_KEY.vise]) !== null && spec.key === 'viseJawTopZ') return null;
+  const machine = machines.find((m) => m.id === machineId);
+  if (machine === undefined || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
+  const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
+  const datum = profile?.datums[spec.key] ?? null;
+  if (datum === null) return null;
+  return {
+    word: spec.word,
+    value: datum.value,
+    measuredAt: datum.measuredAt,
+    by: datum.by,
+    machineName: machineShortName(machines, machine.id),
+  };
 }
 
 /** The accessory's display name: its product, or the kind word when nobody named it. */
@@ -498,7 +577,7 @@ function AccessoryDetail({
   onSaved,
 }: {
   item: FixtureRecord;
-  machines: readonly { id: string; profileId: string | null; name: string | null }[];
+  machines: readonly MachineRecord[];
   onClose: () => void;
   onSaved: (id: string) => void;
 }) {
@@ -507,6 +586,10 @@ function AccessoryDetail({
   const [product, setProduct] = useState(item.product ?? '');
   const [variant, setVariant] = useState(item.variant ?? '');
   const [checkoutTo, setCheckoutTo] = useState(machines[0]?.id ?? '');
+  // #595 — the probe's last registration reading (M491 + rest), and the machine's own bed datum for
+  // a mount that has no tapped reading of its own yet.
+  const probeReadings = item.kind === 'probe' ? probeReadingsLine(item) : null;
+  const machineDatum = item.kind === 'probe' ? null : machineMountDatum(item, machines);
 
   const productChanged = product !== (item.product ?? '');
   const variantChanged = variant !== (item.variant ?? '');
@@ -600,11 +683,26 @@ function AccessoryDetail({
 
       <div className="panel-subhead">Measured record</div>
       {item.kind === 'probe' ? (
-        <p className="hint" data-testid="manage-acc-measured">
-          {probeLine(item) ?? 'no readings for the tip or the rim yet'}
-        </p>
+        <>
+          <p className="hint" data-testid="manage-acc-measured">
+            {probeLine(item) ?? 'no readings for the tip or the rim yet'}
+          </p>
+          {probeReadings !== null && (
+            <p className="hint" data-testid="manage-acc-probe-readings">
+              {probeReadings}
+            </p>
+          )}
+        </>
       ) : (
         <ul className="hint" data-testid="manage-acc-measured">
+          {Object.values(MOUNT_TAP_UNIT_KEY).map((key) => {
+            const line = mountReadingLine(item, key);
+            return line === null ? null : (
+              <li key={key} data-testid={`manage-acc-reading-${key}`}>
+                {line} <span className="dim">({item.provenance[key] ?? 'no provenance'})</span>
+              </li>
+            );
+          })}
           {Object.entries(item.unit)
             .filter(([, v]) => typeof v === 'number')
             .map(([key, v]) => (
@@ -613,8 +711,22 @@ function AccessoryDetail({
                 <span className="dim">({item.provenance[key] ?? 'no provenance'})</span>
               </li>
             ))}
-          {Object.entries(item.unit).every(([, v]) => typeof v !== 'number') && <li>no reading yet</li>}
+          {Object.entries(item.unit).every(([, v]) => typeof v !== 'number') &&
+            Object.values(MOUNT_TAP_UNIT_KEY).every((key) => mountReadingLine(item, key) === null) && (
+              <li>no reading yet</li>
+            )}
         </ul>
+      )}
+
+      {machineDatum !== null && (
+        <>
+          <div className="panel-subhead">On the {machineDatum.machineName}</div>
+          <p className="hint" data-testid="manage-acc-machine-datum">
+            {machineDatum.word} {mm(machineDatum.value)} mm — the bed profile’s record, measured{' '}
+            {formatDay(machineDatum.measuredAt) ?? machineDatum.measuredAt} with{' '}
+            {accessoryNameFor(machineDatum.by)}.
+          </p>
+        </>
       )}
 
       <div className="panel-subhead">Where</div>
