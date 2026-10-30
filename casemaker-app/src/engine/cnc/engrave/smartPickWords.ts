@@ -65,10 +65,25 @@ function raisedWords(item: EvaluatedItem): string {
 }
 
 /**
+ * #766 review — THE SCRIPTING VARIANT. The panel and every operator-facing sentence name a cutter
+ * by its display form only (the acceptance grammar forbids internal ids, §6). A CLI is a different
+ * reader: a script has to be able to tell WHICH inventory row was chosen, so the CLI asks for the
+ * registry key beside the display name. One function, one switch — the two surfaces cannot drift.
+ */
+export interface SmartPickWordOptions {
+  /** Include each cutter's registry key (`inv:…`, `cat:…`) beside its display form. Default false. */
+  cutterKeys?: boolean;
+}
+
+/**
  * One sentence per cutter of the chosen plan. `items` names come from the evaluation, so a rest
  * cutter says what IT changes (the pinches), not what the clearance cutter already did.
  */
-export function cutterLines(pick: SmartPick, tools: readonly ToolLibraryEntry[]): string[] {
+export function cutterLines(
+  pick: SmartPick,
+  tools: readonly ToolLibraryEntry[],
+  cutterKeys = false,
+): string[] {
   const byId = new Map(pick.chosen.evaluation.items.map((i) => [i.id, i] as const));
   return pick.chosen.plan.cutters.map((cutter, index) => {
     const entry = tools.find((t) => t.key === cutter.key);
@@ -80,23 +95,30 @@ export function cutterLines(pick: SmartPick, tools: readonly ToolLibraryEntry[])
       const what = index === 0 ? 'cuts first' : 'rest — re-cuts what the earlier cutter left';
       // #766 review/§6 — the operator's words, never the tool KEY: `flat-1.0` and `cat:…` are the
       // registry's names for a row, and the acceptance grammar forbids them in visible text.
-      return `${dia(entry)} ${what}${words.length === 0 ? '' : `; ${words.join('; ')}`}.`;
+      return `${dia(entry)}${cutterKeys ? ` (${cutter.key})` : ''} ${what}${words.length === 0 ? '' : `; ${words.join('; ')}`}.`;
     }
     const worst = pick.chosen.worstItem;
     const detail =
       worst === null || worst.fidelity >= 1
         ? 'keeps every item it owns at full fidelity'
         : `its worst item is ${worst.name} at ${pct(worst.fidelity)} fidelity${worst.charsLost > 0 ? `, ${worst.charsLost} character${worst.charsLost === 1 ? '' : 's'} lost` : ''}`;
-    return `${dia(entry)} cuts ${cutter.items.length === 1 ? 'one item' : `${cutter.items.length} items`} and ${detail}.`;
+    return `${dia(entry)}${cutterKeys ? ` (${cutter.key})` : ''} cuts ${cutter.items.length === 1 ? 'one item' : `${cutter.items.length} items`} and ${detail}.`;
   });
 }
 
 /** What the runner-up would lose, in measured words — the 'here is why not that cutter' line. */
-export function runnerUpLine(pick: SmartPick, tools: readonly ToolLibraryEntry[]): string | null {
+export function runnerUpLine(
+  pick: SmartPick,
+  tools: readonly ToolLibraryEntry[],
+  cutterKeys = false,
+): string | null {
   const runner = pick.runnerUp;
   if (runner === null) return null;
   // The plan's own name in the operator's words (#766 review/§6): a key list is an internal id.
-  const name = (p: ScoredPlan): string => planLabel(p.plan, tools);
+  // The CLI asks for the keys, because a script reading the runner-up has the same need as one
+  // reading the chosen plan.
+  const name = (p: ScoredPlan): string =>
+    cutterKeys ? p.plan.cutters.map((c) => c.key).join(' + ') : planLabel(p.plan, tools);
   const joined = runner.evaluation.items.flatMap((item) => joinedPinchWords(item).map((w) => `${w} (${item.name})`));
   if (joined.length > 0) {
     return `The next-best plan (${name(runner)}) leaves ${joined.length} pinch${joined.length === 1 ? '' : 'es'} joined — ${joined.slice(0, 3).join(', ')}${joined.length > 3 ? ` and ${joined.length - 3} more` : ''} — so it measures ${pct(runner.worstFidelity)} where the chosen plan measures ${pct(pick.chosen.worstFidelity)}.`;
@@ -109,12 +131,18 @@ export function runnerUpLine(pick: SmartPick, tools: readonly ToolLibraryEntry[]
 }
 
 /** The 'buy this' line, when a catalogue cutter genuinely measures better than the shop's own. */
-export function buyThisLine(pick: SmartPick, tools: readonly ToolLibraryEntry[]): string | null {
+export function buyThisLine(
+  pick: SmartPick,
+  tools: readonly ToolLibraryEntry[],
+  cutterKeys = false,
+): string | null {
   const buy = pick.buyThis;
   if (buy === null) return null;
   const catalogue = buy.plan.cutters.filter((c) => buy.plan.source[c.key] === 'catalogue');
-  // A purchase is a cutter, not a plan role: the diameter and nothing else (never its key).
-  const keys = catalogue.map((c) => dia(tools.find((t) => t.key === c.key))).join(', ');
+  // A purchase is a cutter, not a plan role: the diameter, and the key only for a script.
+  const keys = catalogue
+    .map((c) => `${dia(tools.find((t) => t.key === c.key))}${cutterKeys ? ` (${c.key})` : ''}`)
+    .join(', ');
   const joined = buy.evaluation.items.flatMap((item) => joinedPinchWords(item).map((w) => `${w} (${item.name})`));
   const gain = `${pct(buy.worstFidelity)} against ${pct(pick.chosen.worstFidelity)}`;
   const why =
@@ -180,7 +208,12 @@ export function ruleFallbackLine(pick: SmartPick, tools: readonly ToolLibraryEnt
   return `the measured search found no better posting plan; using the rule's plan, ${planLabel(pick.rule.plan, tools)}`;
 }
 
-export function explainSmartPick(pick: SmartPick, tools: readonly ToolLibraryEntry[]): SmartPickWords {
+export function explainSmartPick(
+  pick: SmartPick,
+  tools: readonly ToolLibraryEntry[],
+  opts: SmartPickWordOptions = {},
+): SmartPickWords {
+  const cutterKeys = opts.cutterKeys === true;
   const chosen = pick.chosen;
   const seconds = chosen.evaluation.seconds;
   const verdict = pick.runnable === null
@@ -190,9 +223,9 @@ export function explainSmartPick(pick: SmartPick, tools: readonly ToolLibraryEnt
     plan: planLabel(chosen.plan, tools),
     verdict,
     fallback: ruleFallbackLine(pick, tools),
-    cutters: cutterLines(pick, tools),
-    runnerUp: runnerUpLine(pick, tools),
-    buyThis: buyThisLine(pick, tools),
+    cutters: cutterLines(pick, tools, cutterKeys),
+    runnerUp: runnerUpLine(pick, tools, cutterKeys),
+    buyThis: buyThisLine(pick, tools, cutterKeys),
     difference: ruleDifferenceLine(pick, tools),
     notes: pick.notes,
   };

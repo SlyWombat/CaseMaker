@@ -1424,7 +1424,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // yields between plans so an edit can cancel the run); the CLI's is synchronous.
         const pick = await smartPick(job, searchTools, catalogueRows, evaluate);
         const searchMs = Date.now() - searchStart;
-        const words = explainSmartPick(pick, searchTools);
+        const words = explainSmartPick(pick, searchTools, { cutterKeys: true });
         out.progress(`  pick      ${words.verdict}`);
         words.cutters.forEach((line, i) => out.progress(`  cutter ${i + 1}   ${line}`));
         if (words.fallback !== null) out.progress(`  rule       ${words.fallback}`);

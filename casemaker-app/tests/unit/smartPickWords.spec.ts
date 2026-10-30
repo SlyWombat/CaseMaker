@@ -173,6 +173,20 @@ describe('#766 C the words say what the measurement says', () => {
     expect(pending.verdict).toContain('a V-bit is not a rest cutter here');
   });
 
+  it('#766 review — the CLI asks for the registry keys; the panel never sees them', () => {
+    const measured = scored(plan([['inv:flat-2', ['clear']], ['inv:engraver-0-1', []]]), evaluation([item({ fidelity: 1 })]));
+    const pick = pickOf({ chosen: measured });
+
+    // The panel's own words: display form only (the §6 acceptance grammar forbids internal ids).
+    const panel = explainSmartPick(pick, TOOLS);
+    expect(panel.cutters.join(' ')).not.toMatch(/inv:/);
+
+    // A script has to tell which row was chosen, so the CLI asks for the key beside it.
+    const cli = explainSmartPick(pick, TOOLS, { cutterKeys: true });
+    expect(cli.cutters[0]).toContain('(inv:flat-2) cuts');
+    expect(cli.cutters[1]).toContain('(inv:engraver-0-1)');
+  });
+
   it('#766 D — the measured plan is named plainly, and a differing rule answer says what it would do', () => {
     const measured = scored(plan([['inv:flat-2', ['clear']], ['inv:engraver-0-1', []]]), evaluation([item({ fidelity: 1 })]));
     // The quick rule's plan used the ⌀1 rest this job does NOT choose.
