@@ -1653,11 +1653,21 @@ export function EngravePanel(): JSX.Element {
   // #766 D — ONCE THE SEARCH ANSWERS, THE MEASURED PLAN IS THE CURRENT ANSWER, so that is what the
   // job follows. It is written whole (`applyCutterPlan`): a rest pair is a SETUP, and `setTool`
   // could only name the clearance cutter and leave the rest of the plan out.
+  //
+  // "APPLIED" IS THE WHOLE WRITE, not just the cutter list: `applyCutterPlanToJob` writes the
+  // setup's `toolItems` too, so an answer whose cutters match but whose assignment differs would
+  // otherwise be re-applied on every render — and each write marks a generated job stale. Comparing
+  // both is also the "equal answer writes nothing" rule.
+  const measuredSetup = job.setups?.[0];
   const measuredApplied =
     measuredNow !== null &&
     job.toolKey === measuredNow.cutters[0]?.key &&
-    (job.setups?.[0]?.tools ?? []).length === measuredNow.cutters.length &&
-    (job.setups?.[0]?.tools ?? []).every((k, i) => k === measuredNow.cutters[i]?.key);
+    (measuredSetup?.tools ?? []).length === measuredNow.cutters.length &&
+    (measuredSetup?.tools ?? []).every((k, i) => k === measuredNow.cutters[i]?.key) &&
+    measuredNow.cutters.every((c) => {
+      const owned = measuredSetup?.toolItems?.[c.key] ?? [];
+      return owned.length === c.items.length && owned.every((id, i) => id === c.items[i]);
+    });
   useEffect(() => {
     const source = job.sources?.tool;
     if (source === 'user' || source === 'measured') return;
@@ -1665,6 +1675,19 @@ export function EngravePanel(): JSX.Element {
     // clean (just-opened or just-saved) tool-less document keeps its empty key, so opening a saved
     // job does not immediately dirty it.
     if (job.toolKey === '' && !useEngraveJobFileStore.getState().dirty) return;
+    // #766 REGRESSION — A GENERATED JOB IS NEVER EDITED BY A BACKGROUND ANSWER. The measured
+    // search runs behind the panel and can answer AFTER Generate; writing its plan then made the
+    // job's own program stale the instant it was made — the Cut surface's first blocking row said
+    // "The job changed since it was generated" with nothing the operator did. While a run exists
+    // and still matches the job (or is still in flight) the answer is OFFERED — "Use the
+    // recommendation" is drawn while `measuredApplied` is false — and applying it is a press, whose
+    // stale row is then the operator's own edit. With no current result the old behaviour stands:
+    // the answer follows the design as it is edited.
+    const runNow = useEngraveRunStore.getState();
+    const runHoldsThisJob = runNow.generated !== null && runNow.staleSince === null;
+    if (runHoldsThisJob || runNow.phase === 'generating' || runNow.phase === 'simulating' || runNow.phase === 'checking') {
+      return;
+    }
     if (measuredNow !== null) {
       if (!measuredApplied) applyCutterPlan(measuredNow.cutters, 'computed');
       return;

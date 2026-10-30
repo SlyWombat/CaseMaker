@@ -142,7 +142,7 @@ describe('#766 C the words say what the measurement says', () => {
       evaluation([item({ fidelity: 0.6, pinches: [pinch({ between: ['t', 'w'] }), pinch({ between: ['S', 'o'] })] })]),
     );
     const pick = pickOf({ chosen, runnerUp: runner, considered: [chosen, runner] });
-    const line = runnerUpLine(pick);
+    const line = runnerUpLine(pick, TOOLS);
     expect(line).toContain('leaves 2 pinches joined');
     expect(line).toContain('S–o ("Software")');
     expect(line).toContain('60 % where the chosen plan measures 100 %');
@@ -156,7 +156,7 @@ describe('#766 C the words say what the measurement says', () => {
     );
     const pick = pickOf({ chosen, buyThis: buy, considered: [chosen, buy] });
     const line = buyThisLine(pick, TOOLS);
-    expect(line).toContain('Buy ⌀0.6 mm (cat:corn-0-6)');
+    expect(line).toContain('Buy ⌀0.6 mm');
     expect(line).toContain('90 % against 60 %');
     expect(line).toContain('still leaves 1 pinch joined');
   });

@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { resetEngraveRows } from '@/store/engraveRowStore';
 import { resetShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -22,6 +23,7 @@ import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
 import type { ToolCandidate } from '@/engine/cnc/engrave/recommendTool';
 import { resetRegistry } from '@/engine/cnc/toolRegistry';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
+import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { EngravePickSummary } from '@/workers/sim/smartPickRun';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 
@@ -90,7 +92,7 @@ function measuredFor(job: ReturnType<typeof defaultEngraveJob>): EngravePickSumm
       plan: '⌀3.175 + ⌀0.3 V rest',
       verdict: 'Chosen by simulation: 97 % fidelity on the worst item, 1 tool change, about 311 s.',
       fallback: null,
-      cutters: ['⌀3.175 mm (flat-3.175) cuts one item and its worst item is clear at 97 % fidelity.'],
+      cutters: ['⌀3.175 mm cuts one item and its worst item is clear at 97 % fidelity.'],
       runnerUp: null,
       buyThis: null,
       difference: 'the quick rule\'s ⌀1 rest would leave "Software" joined at 7 pinches',
@@ -120,6 +122,7 @@ beforeEach(() => {
     useEngraveJobStore.setState({ job: handChosenJob() });
   });
   useEngravePreviewStore.getState().dispose();
+  useEngraveRunStore.setState({ generated: null, staleSince: null, phase: 'idle', inputs: null });
 });
 
 afterEach(() => {
@@ -173,6 +176,83 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     // 'Use the recommendation' applies the CURRENT (measured) answer; this job's cutter is the
     // operator's own, so nothing was applied for them.
     expect(screen.getByTestId('engrave-use-measured')).toBeTruthy();
+  });
+
+  // #766 regression — the panel's measured answer must never edit a job it was not asked to edit.
+  /** The smallest generated result the panel's run rows tolerate; only its EXISTENCE matters here. */
+  function freshGenerated(): EngraveGenerated {
+    return {
+      ok: true,
+      stage: 'done',
+      findings: [],
+      feeds: null,
+      threads: null,
+      cam: null,
+      nc: '<gcode>',
+      verify: null,
+      frameNc: null,
+      programs: [],
+      facingNc: null,
+      facingCam: null,
+      surface3d: null,
+    } as unknown as EngraveGenerated;
+  }
+
+  /** A job the software owns the cutter for — the state the auto-apply path runs in. */
+  function computedJob(): ReturnType<typeof defaultEngraveJob> {
+    const job = defaultEngraveJob();
+    job.toolKey = 'flat-1.0';
+    job.sources = { ...(job.sources ?? {}), tool: 'computed' };
+    return job;
+  }
+
+  it('offers a measured answer that lands after Generate — it never rewrites a generated job', () => {
+    const job = computedJob();
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    act(() => {
+      useEngraveRunStore.setState({ generated: freshGenerated(), staleSince: null, phase: 'ready' });
+    });
+    const measured = measuredFor(job);
+    useEngravePreviewStore.setState({
+      preview: previewWith(),
+      status: 'ready',
+      measured,
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+
+    render(<EngravePanel />);
+
+    // OFFERED, not applied: the generated program still describes the job, and a background answer
+    // that silently changed it would make every fresh Generate stale the instant it finished.
+    const after = useEngraveJobStore.getState().job;
+    expect(after.toolKey).toBe('flat-1.0');
+    expect(after.setups?.[0]?.tools ?? []).not.toContain('flat-3.175');
+    expect(screen.getByTestId('engrave-use-measured')).toBeTruthy();
+  });
+
+  it('still follows the measured answer while the design has no generated result', () => {
+    const job = computedJob();
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    const measured = measuredFor(job);
+    useEngravePreviewStore.setState({
+      preview: previewWith(),
+      status: 'ready',
+      measured,
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+
+    render(<EngravePanel />);
+
+    // No run exists, so the answer is the current design's: the whole plan is written.
+    const after = useEngraveJobStore.getState().job;
+    expect(after.toolKey).toBe('flat-3.175');
+    expect(after.setups?.[0]?.tools ?? []).toEqual(['flat-3.175', 'engraver-0.3']);
   });
 
   it('leaves the rule answer standing, labelled, when the search fails', () => {
