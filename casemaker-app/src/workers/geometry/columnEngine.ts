@@ -530,6 +530,12 @@ export interface ColumnSweepOpts {
   /** Override the §4.4 sim-resolution estimate (a spec and the probe set this). */
   resolution?: ColumnResolution;
   /**
+   * #776 TEST SEAM. True drives every move through the per-column path the pure-A span sweep
+   * replaced, so a spec can compare the two grids cell for cell — the removed volume must be
+   * identical, not merely close. Never set by the app.
+   */
+  noSpanSweep?: boolean;
+  /**
    * The shop's `drill.pointAngleDeg`, read by the caller, for a drill that states no angle (#382).
    * Absent: the registry's labelled fallback, reported with source `fallback`.
    */
@@ -861,6 +867,119 @@ export const ROTARY: ColumnParameterisation = {
     return { removed, stock };
   },
 };
+
+/**
+ * #776 — THE PURE-A SPAN SWEEP. A move with `u0 === u1` does not change the cutter's axial offset
+ * `dx`, so on the rotary grid its floor and its reach depend only on the COLUMN'S ANGLE, never on
+ * its X index: every candidate is one floor value over a contiguous i-span. `applyMove` evaluates
+ * that same floor per column, three candidates deep, with a `cos`/`tan` each — which is the hours
+ * a cut-resolution relief took.
+ *
+ * EXACT, NOT APPROXIMATE. Every floor is computed by the same expressions `cutterFloorOnColumn`'s
+ * flat branch uses (`zt / Math.cos(phiRad)`), the candidate set is the same three points, and the
+ * span boundaries are confirmed against the same inequality the per-column path tests
+ * (`dx² + dy² ≤ r²`) so a rounding edge cannot add or drop a column. Writing each candidate's
+ * span in turn takes the same `min` the per-column loop folds by hand, so the resulting grid is
+ * bit-identical — the `noSpanSweep` seam in the specs proves it against the path it replaced.
+ *
+ * ONLY A FLAT END MILL takes this path. A ball or a V's floor varies with `dx` inside the
+ * footprint, so their footprint is not a constant-floor span; `columnSweep` falls back to
+ * `applyMove` for those. A clamped dip (Z at or below the axis) also falls back: that branch has
+ * its own interval reading and no floor to span.
+ *
+ * Returns null when the caller must use `applyMove` instead.
+ */
+export function applyRotaryPureAFlat(grid: ColumnGrid, m: CutMove, cutter: ColumnCutter): MoveResult | null {
+  const zt = m.z > 0 ? m.z : 0;
+  // The clamped-dip branch and the crossing refusal stay with `applyMove`.
+  if (!(zt > 0)) return null;
+  const dxs = m.u1 - m.u0;
+  if (dxs !== 0 || m.v0 === m.v1) return null;
+  if (cutter.tanHalf !== null || cutter.cornerRadius !== undefined || cutter.toothRootRadius !== undefined) return null;
+
+  const { nu, nv, u0, du, dv, h } = grid;
+  const x0 = m.u0;
+  const r = cutter.radius;
+  const r2 = r * r;
+  const reach = cutter.outerRadius ?? cutter.radius;
+  const perDeg = zt * DEG;
+  const phiMax = (Math.atan2(reach, zt) * 180) / Math.PI;
+  const aLo = Math.min(m.v0, m.v1);
+  const aHi = Math.max(m.v0, m.v1);
+  const das = (m.v1 - m.v0) * perDeg;
+  const len2 = dxs * dxs + das * das;
+  const za0 = m.z0 ?? m.z;
+  const za1 = m.z1 ?? m.z;
+  const zAt = (t: number): number => za0 + (za1 - za0) * t;
+
+  const iLo = Math.max(0, Math.floor((x0 - reach - u0) / du));
+  const iHi = Math.min(nu - 1, Math.ceil((x0 + reach - u0) / du));
+  const fullTurn = aHi - aLo >= 360;
+  let jLo = 0;
+  let jHi = nv - 1;
+  if (!fullTurn) {
+    jLo = Math.floor((aLo - phiMax) / dv);
+    jHi = Math.ceil((aHi + phiMax) / dv);
+    if (jHi - jLo >= nv) {
+      jLo = 0;
+      jHi = nv - 1;
+    }
+  }
+
+  let written = 0;
+  for (let jj = jLo; jj <= jHi; jj++) {
+    const j = ((jj % nv) + nv) % nv;
+    const theta = j * dv;
+    const kLo = Math.floor((aLo - theta - phiMax) / 360);
+    const kHi = Math.ceil((aHi - theta + phiMax) / 360);
+    for (let k = kLo; k <= kHi; k++) {
+      const th = theta + k * 360;
+      // The same parameter `applyMove` computes; dxs = 0, so it is the column's angle alone.
+      const tRaw = ((th - m.v0) * perDeg * das) / len2;
+      const t = tRaw < 0 ? 0 : tRaw > 1 ? 1 : tRaw;
+      for (let c = 0; c < 3; c++) {
+        const tc = c === 0 ? t : c === 1 ? 0 : 1;
+        // A foot clamped to an end duplicates that end candidate exactly (same φ, z, dx).
+        if (c === 0 && (tRaw <= 0 || tRaw >= 1)) continue;
+        const phi = th - (m.v0 + tc * (m.v1 - m.v0));
+        if (phi <= -90 || phi >= 90) continue;
+        const ztc = zAt(tc) > 0 ? zAt(tc) : 0;
+        if (!(ztc > 0)) continue;
+        const phiRad = phi * DEG;
+        const cos = Math.cos(phiRad);
+        if (!(cos > 1e-9)) continue;
+        const dy = ztc * Math.tan(phiRad);
+        const w2 = r2 - dy * dy;
+        if (w2 < 0) continue;
+        const floor = ztc / cos;
+        const w = Math.sqrt(w2);
+
+        // The span, then its edges confirmed with the per-column test (rounding may move an edge
+        // by one column either way; the grid must match the per-column path exactly).
+        let iA = Math.max(iLo, Math.ceil((x0 - w - u0) / du));
+        let iB = Math.min(iHi, Math.floor((x0 + w - u0) / du));
+        const cut = (i: number): boolean => {
+          const dxi = u0 + i * du - x0;
+          return dxi * dxi + dy * dy <= r2;
+        };
+        while (iA <= iB && !cut(iA)) iA++;
+        while (iA <= iB && !cut(iB)) iB--;
+        while (iA > iLo && cut(iA - 1)) iA--;
+        while (iB < iHi && cut(iB + 1)) iB++;
+        if (iA > iB) continue;
+        const base = j * nu;
+        for (let i = iA; i <= iB; i++) {
+          const idx = base + i;
+          if (floor < (h[idx] as number)) {
+            h[idx] = floor;
+            written++;
+          }
+        }
+      }
+    }
+  }
+  return { written, crossed: null, clamped: null };
+}
 
 /** Euclidean distance from (px, py) to the segment (ax, ay)–(bx, by). */
 export function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
@@ -1668,9 +1787,14 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   let clampedMoves = 0;
   let clampedWorst = 0;
 
+  // #776 — the span sweep is exact for a rotary flat end mill's pure-A moves (see
+  // `applyRotaryPureAFlat`); every other move, and the test seam that disables it, takes the
+  // per-column path. The seam exists so a spec can prove the two grids are identical.
+  const spanSweep = rotary && resolved.kind === 'flat' && opts?.noSpanSweep !== true;
+
   for (let k = 0; k < count; k++) {
     for (const m of perCheckpoint[k] as CutMove[]) {
-      const r = param.applyMove(grid, m, cutter);
+      const r = (spanSweep ? applyRotaryPureAFlat(grid, m, cutter) : null) ?? param.applyMove(grid, m, cutter);
       ops += r.written;
       if (r.crossed) {
         stats.ms.total = performance.now() - t0;

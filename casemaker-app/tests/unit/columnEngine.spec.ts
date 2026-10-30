@@ -7,7 +7,7 @@
  * removes the annulus `[z, R]` wherever the tool reaches, i.e. `π (R² − z²) · 2 r_t`.
  */
 import { describe, expect, it } from 'vitest';
-import { ROTARY, FLAT, columnSweep, closestAngularOffset, cutterReach, meshRotary, meshRotaryMap, meshFlat, surfaceAboveTip, threadCutter, type ColumnCutter, type ColumnGrid, type CutMove } from '@/workers/geometry/columnEngine';
+import { ROTARY, FLAT, applyRotaryPureAFlat, columnSweep, closestAngularOffset, cutterReach, meshRotary, meshRotaryMap, meshFlat, surfaceAboveTip, threadCutter, type ColumnCutter, type ColumnGrid, type CutMove } from '@/workers/geometry/columnEngine';
 import { stubSetup, type Setup } from '@/engine/cnc/setup';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { rectProfile } from '@/engine/compiler/profile';
@@ -755,5 +755,61 @@ describe('#723 the rotary meshes are wound outward', () => {
     const yMid = (m.bbox.min[1] + m.bbox.max[1]) / 2;
     // The solid spans −R … 0; its centre is halfway down.
     expect(inwardness(m, [xMid, yMid, -5])).toBeGreaterThan(-0.5);
+  });
+});
+
+// #776 — the pure-A span sweep's contract: for a flat end mill on the rotary grid it is the
+// per-column `applyMove`, cell for cell. Bit equality (Object.is), not "close": the span path
+// exists to make a cut-resolution relief seconds instead of hours, and the volume it reports is
+// the removal the per-column union always reported.
+describe('#776 — the pure-A span sweep is the per-column sweep, exactly', () => {
+  /** A grid at the relief's own sim-resolution pitches over a ⌀20 rod. */
+  function openGrid(): ColumnGrid {
+    const g = ROTARY.buildGrid(cyl(10, 20), CUT, [], { dx: 0.2, dThetaDeg: 0.5 });
+    return { ...g, h: new Float32Array(g.h.length).fill(g.initial) };
+  }
+
+  const MOVES: CutMove[] = [
+    move({ u0: 0, u1: 0, v0: 10, v1: 30, z: 7 }),
+    move({ u0: 3, u1: 3, v0: 350, v1: 370, z: 6.5 }), // across the seam
+    move({ u0: -2, u1: -2, v0: 0, v1: 180, z: 8, z0: 8, z1: 6 }), // long span, ramping
+    move({ u0: 5, u1: 5, v0: 45, v1: 46, z: 9, z0: 9, z1: 9.4 }), // short span, ramping up
+    move({ u0: 1, u1: 1, v0: 100, v1: 460, z: 7.2 }), // more than a full turn
+    move({ u0: 0, u1: 0, v0: 0, v1: 0, z: 5 }), // a plunge: not the span path
+    move({ u0: 0, u1: 0.5, v0: 10, v1: 10, z: 5 }), // pure X: not the span path
+    move({ u0: 0, u1: 0, v0: 10, v1: 20, z: -1 }), // clamped dip: the per-column path
+  ];
+
+  it('writes the same floors into the same columns as applyMove', () => {
+    let compared = 0;
+    for (const m of MOVES) {
+      const a = openGrid();
+      const b = openGrid();
+      const legacy = ROTARY.applyMove(a, m, CUT);
+      const fast = applyRotaryPureAFlat(b, m, CUT);
+      if (fast === null) continue; // delegates; the sweep falls back to `applyMove`
+      compared++;
+      expect(fast.crossed).toEqual(legacy.crossed);
+      expect(fast.clamped).toEqual(legacy.clamped);
+      let diff = -1;
+      for (let i = 0; i < a.h.length; i++) {
+        if (!Object.is(a.h[i], b.h[i])) {
+          diff = i;
+          break;
+        }
+      }
+      expect(diff, `move u0=${m.u0} v0=${m.v0}→${m.v1} z=${m.z} z0=${m.z0} z1=${m.z1}`).toBe(-1);
+    }
+    expect(compared).toBe(5);
+  });
+
+  it('actually lowers a band of columns, so the equality above is not two empty grids', () => {
+    const g = openGrid();
+    const fast = applyRotaryPureAFlat(g, MOVES[2]!, CUT);
+    expect(fast).not.toBeNull();
+    expect(fast!.written).toBeGreaterThan(0);
+    let lowered = 0;
+    for (let i = 0; i < g.h.length; i++) if ((g.h[i] as number) < g.initial) lowered++;
+    expect(lowered).toBeGreaterThan(1000);
   });
 });
