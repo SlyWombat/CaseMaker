@@ -7,6 +7,7 @@ G01 Y0 Z23
 M3 S12000
 ;@CM|TOOL|key=flat-3.175x12-metal
 ;@CM|ROTARY|radius=10
+;@CM|START|tool=empty
 ; cycle estimate: cutting + rapids through the trapezoid, timed on Makera Z1's rapid model (1200 mm/min XY, 600 mm/min Z, 150 mm/s² accel, config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time
 G0 X5 Z13 A180
 G1 Z0 F500

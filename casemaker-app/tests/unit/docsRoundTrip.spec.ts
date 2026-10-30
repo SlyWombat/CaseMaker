@@ -20,7 +20,7 @@
 // format — so the bytes compared here are the bytes `receiptJson` prints.
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -113,6 +113,19 @@ function readFixture(name: string): string {
   return text;
 }
 
+/**
+ * A fixture change is a deliberate act. `CM_EXPORT_RECEIPTS=1` rewrites the committed receipt from
+ * this spec's own call (clock `NOW`, the same token map) — for the case the test below describes;
+ * a normal run still byte-compares, and the canonicality check above still runs first.
+ */
+function expectReceiptFixture(name: string, fresh: string, committed: string): void {
+  if (process.env.CM_EXPORT_RECEIPTS === '1') {
+    writeFileSync(join(REPO, 'docs', 'bench', name), fresh);
+    return;
+  }
+  expect(fresh, `${name} has drifted — regenerate it deliberately, or say why it moved`).toBe(committed);
+}
+
 describe('#484 the committed receipts round-trip', () => {
   it('casemaker engrave rewrites docs/bench/single-barrel.receipt.json', async () => {
     const committed = readFixture('single-barrel.receipt.json');
@@ -132,7 +145,7 @@ describe('#484 the committed receipts round-trip', () => {
     // A diff here has to be explained (#484): either the run legitimately changed and the fixture
     // is regenerated from this spec's own call (clock `NOW`, the same token map), or something
     // moved that the receipt now reports and a reviewer has to see.
-    expect(fresh, 'a difference from the committed fixture must be regenerated deliberately').toBe(committed);
+    expectReceiptFixture('single-barrel.receipt.json', fresh, committed);
   });
 
   it('casemaker export rewrites docs/bench/bench-sample.receipt.json', async () => {
@@ -150,6 +163,6 @@ describe('#484 the committed receipts round-trip', () => {
     const fresh = receiptJson(
       parseReceipt(replacePaths(receipt, { [project]: '<project>', [location]: '<location>', [outDir]: '<out>' })),
     );
-    expect(fresh, 'a difference from the committed fixture must be regenerated deliberately').toBe(committed);
+    expectReceiptFixture('bench-sample.receipt.json', fresh, committed);
   });
 });
