@@ -1814,6 +1814,43 @@
                         ],
                         "description": "Bracket origin when the plan found one, or null."
                       },
+                      "corner": {
+                        "description": "Present when the plan measures a corner with two lines per edge; absent on every other plan.",
+                        "properties": {
+                          "id": {
+                            "description": "The corner this plan measures.",
+                            "enum": [
+                              "front-left",
+                              "front-right",
+                              "back-left",
+                              "back-right"
+                            ],
+                            "type": "string"
+                          },
+                          "xEdge": {
+                            "description": "The X edge that meets at the corner.",
+                            "enum": [
+                              "left",
+                              "right"
+                            ],
+                            "type": "string"
+                          },
+                          "yEdge": {
+                            "description": "The Y edge that meets at the corner.",
+                            "enum": [
+                              "front",
+                              "back"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "xEdge",
+                          "yEdge"
+                        ],
+                        "type": "object"
+                      },
                       "disc": {
                         "description": "Present when the plan registers a disc on its rim; absent for a rectangular blank.",
                         "properties": {
@@ -3418,6 +3455,43 @@
                       }
                     ],
                     "description": "Bracket origin when the plan found one, or null."
+                  },
+                  "corner": {
+                    "description": "Present when the plan measures a corner with two lines per edge; absent on every other plan.",
+                    "properties": {
+                      "id": {
+                        "description": "The corner this plan measures.",
+                        "enum": [
+                          "front-left",
+                          "front-right",
+                          "back-left",
+                          "back-right"
+                        ],
+                        "type": "string"
+                      },
+                      "xEdge": {
+                        "description": "The X edge that meets at the corner.",
+                        "enum": [
+                          "left",
+                          "right"
+                        ],
+                        "type": "string"
+                      },
+                      "yEdge": {
+                        "description": "The Y edge that meets at the corner.",
+                        "enum": [
+                          "front",
+                          "back"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "xEdge",
+                      "yEdge"
+                    ],
+                    "type": "object"
                   },
                   "disc": {
                     "description": "Present when the plan registers a disc on its rim; absent for a rectangular blank.",
