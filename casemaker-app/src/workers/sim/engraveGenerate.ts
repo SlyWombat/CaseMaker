@@ -4166,13 +4166,17 @@ export function generateRotaryGoalProgram(
   }
   const findings: JobFinding[] = [];
   if (field.maxRadius > rotary.radius + 1e-6) {
+    // #786 slice 2 — INFORMED, NOT REFUSED. A surface outside the rod has no material to cut, so
+    // the relief is already clipped to the rod (`rayHit` drops every hit past its radius) and the
+    // program posts; the sentence states how much of the goal that leaves uncut.
     findings.push({
-      severity: 'error',
+      severity: 'warning',
       code: 'goal-rotary-oversize',
       message:
-        `The goal "${goal.name}" reaches r ${Number(field.maxRadius.toFixed(3))} mm, and the stock it would be turned ` +
-        `from is ⌀${Number((2 * rotary.radius).toFixed(3))} mm: it cannot be reproduced from this rod. Use a larger ` +
-        'diameter, or scale the goal down.',
+        `The goal "${goal.name}" reaches r ${Number(field.maxRadius.toFixed(3))} mm, and the stock it is turned from ` +
+        `is ⌀${Number((2 * rotary.radius).toFixed(3))} mm: Generate cuts the relief only where the rod's surface is, ` +
+        `so the outermost ${Number((field.maxRadius - rotary.radius).toFixed(3))} mm of the goal is not reproduced. ` +
+        'Use a larger diameter, or scale the goal down.',
     });
   }
   if (!(field.minRadius > 0)) {

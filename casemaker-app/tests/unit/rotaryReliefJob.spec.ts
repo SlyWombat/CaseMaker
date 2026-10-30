@@ -102,11 +102,14 @@ describe('#723 R-3 — a goal on a rod generates the relief program', () => {
     expect(out.surface3d?.resolutionNote).toContain('rod');
   });
 
-  it('refuses a part wider than the rod, by name', () => {
+  it('#786 slice 2 — a part wider than the rod is cut clipped to the rod, and says what is lost', () => {
     const wide = goal(() => 12);
     const out = engraveGenerate(tl, rotaryJob(wide), BALL, [], null, undefined, {});
-    expect(out.ok).toBe(false);
-    expect(out.findings.some((f) => f.code === 'goal-rotary-oversize')).toBe(true);
+    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
+    const short = out.findings.find((f) => f.code === 'goal-rotary-oversize');
+    expect(short?.severity).toBe('warning');
+    expect(short?.message).toContain('is not reproduced');
+    expect(out.programs).toHaveLength(1);
   });
 
   it('refuses a part that reaches the axis with the design’s sentence', () => {

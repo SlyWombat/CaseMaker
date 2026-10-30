@@ -976,44 +976,51 @@ export function validateGoalObject(
         `(${fmt3(placed.x)}×${fmt3(placed.y)}×${fmt3(depth)} mm); a goal needs ` +
         `volume to drive a 3D cut toward.`,
     });
-  } else if (mold && (footprint.x + 2 * (opts.edgeMargin ?? 0) > length + 1e-9 || footprint.y + 2 * (opts.edgeMargin ?? 0) > width + 1e-9)) {
+  } else if (mold) {
+    // #721 + #786 slice 2 — A MOLD'S RIM AND FLOOR ARE INFORMED, NOT REFUSED. The cavity is cut
+    // only where the blank exists (the sampler clips it, #784), so a part that reaches past an
+    // edge loses the wall there and a deep part leaves a thinner floor — both are outcomes with
+    // numbers, and both are stated; the sweep's fixture checks still catch real contact.
     const rim = opts.edgeMargin ?? 0;
-    findings.push({
-      severity: 'error',
-      code: 'goal-mold-rim',
-      message:
-        `The mold of "${target.name}" is ${fmt3(footprint.x)}×${fmt3(footprint.y)} mm across, and a ` +
-        `cavity needs a ${fmt3(rim)} mm rim of stock all round it (the edge margin) on the ` +
-        `${fmt3(length)}×${fmt3(width)} mm blank. Scale the part down, or use a larger blank.`,
-    });
-  } else if (
-    mold &&
-    (target.position.x - footprint.x / 2 < (opts.edgeMargin ?? 0) - 1e-9 ||
-      target.position.x + footprint.x / 2 > length - (opts.edgeMargin ?? 0) + 1e-9 ||
-      target.position.y - footprint.y / 2 < (opts.edgeMargin ?? 0) - 1e-9 ||
-      target.position.y + footprint.y / 2 > width - (opts.edgeMargin ?? 0) + 1e-9)
-  ) {
-    const rim = opts.edgeMargin ?? 0;
-    findings.push({
-      severity: 'error',
-      code: 'goal-mold-rim',
-      message:
-        `The mold of "${target.name}" sits from X ${fmt3(target.position.x - footprint.x / 2)} to ` +
-        `${fmt3(target.position.x + footprint.x / 2)} mm and Y ${fmt3(target.position.y - footprint.y / 2)} to ` +
-        `${fmt3(target.position.y + footprint.y / 2)} mm, so its cavity would break out of the blank's side: ` +
-        `it needs ${fmt3(rim)} mm of stock all round it. Move it inward, or use Fit to the stock.`,
-    });
-  } else if (mold && depth > thickness - (opts.minFloor ?? 0) + 1e-9) {
+    const gxMin = target.position.x - footprint.x / 2;
+    const gxMax = target.position.x + footprint.x / 2;
+    const gyMin = target.position.y - footprint.y / 2;
+    const gyMax = target.position.y + footprint.y / 2;
+    const rims = [
+      { side: 'left', mm: gxMin },
+      { side: 'right', mm: length - gxMax },
+      { side: 'front', mm: gyMin },
+      { side: 'back', mm: width - gyMax },
+    ].filter((r) => r.mm < rim - 1e-9);
+    if (rims.length > 0) {
+      const list = rims
+        .map((r) => (r.mm < 0 ? `no rim on the ${r.side} (it breaks out by ${fmt3(-r.mm)} mm)` : `${fmt3(r.mm)} mm on the ${r.side}`))
+        .join(', ');
+      findings.push({
+        severity: 'warning',
+        code: 'goal-mold-rim',
+        message:
+          `The mold of "${target.name}" sits from X ${fmt3(gxMin)} to ${fmt3(gxMax)} mm and Y ${fmt3(gyMin)} to ` +
+          `${fmt3(gyMax)} mm on the ${fmt3(length)}×${fmt3(width)} mm blank, where a cavity wants a ${fmt3(rim)} mm ` +
+          `rim of stock all round it: ${list}. Generate cuts the cavity clipped to the blank, so the casting has no ` +
+          `wall on those sides. Move the part inward, scale it down, or use a larger blank.`,
+      });
+    }
     const floor = opts.minFloor ?? 0;
-    findings.push({
-      severity: 'error',
-      code: 'goal-mold-floor',
-      message:
-        `The mold of "${target.name}" is ${fmt3(depth)} mm deep, and a cavity must leave the ` +
-        `${fmt3(floor)} mm minimum floor under it in the ${fmt3(thickness)} mm blank — at most ` +
-        `${fmt3(Math.max(0, thickness - floor))} mm deep here. Scale the part down, or use a thicker blank.`,
-    });
-  } else if (!mold) {
+    const floorLeft = thickness - depth + target.position.z;
+    if (floorLeft < floor - 1e-9) {
+      findings.push({
+        severity: 'warning',
+        code: 'goal-mold-floor',
+        message:
+          `The mold of "${target.name}" is ${fmt3(depth)} mm deep in the ${fmt3(thickness)} mm blank, ` +
+          (floorLeft > 0
+            ? `leaving ${fmt3(floorLeft)} mm of stock under the cavity where the job asks for at least ${fmt3(floor)} mm. `
+            : `so the cavity breaks through the blank's bottom by ${fmt3(-floorLeft)} mm. `) +
+          `Generate cuts it as it is. Scale the part down, use a thicker blank, or put a sacrificial board under it.`,
+      });
+    }
+  } else {
     // #784 — A GOAL LARGER THAN THE BLANK IS INFORMED, NOT REFUSED. What lies outside is named
     // per axis and side; Generate cuts the goal CLIPPED to the blank (the sampler intersects its
     // grid with the stock). It is an error only when nothing of the goal is over the blank at all

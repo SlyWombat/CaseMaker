@@ -246,20 +246,29 @@ describe('#721 — generate → simulate → match', () => {
 
 describe('#721 — a mold needs a rim and a floor', () => {
   const STOCK = { length: 30, width: 30, thickness: 8 };
-  it('refuses a cavity with no rim of stock round it', () => {
+  it('#786 slice 2 — a cavity with no rim is INFORMED, with the shortfall per side', () => {
     const t = goal(domeTris(R), { goalMode: 'mold', size: { x: 29, y: 29, z: 5 }, position: { x: 15, y: 15, z: 0 } });
     const f = validateGoalObject(t, STOCK, { edgeMargin: 1, minFloor: 1 });
     expect(f.map((x) => x.code)).toEqual(['goal-mold-rim']);
-    expect(f[0]!.message).toContain('1 mm rim');
+    expect(f[0]!.severity).toBe('warning');
+    expect(f[0]!.message).toContain('a cavity wants a 1 mm rim of stock all round it');
+    expect(f[0]!.message).toContain('0.5 mm on the left');
+    expect(f[0]!.message).toContain('cuts the cavity clipped to the blank');
     // The same part as an ITEM fits: the rim is a mold's rule only.
     expect(validateGoalObject({ ...t, goalMode: undefined }, STOCK, { edgeMargin: 1, minFloor: 1 })).toEqual([]);
   });
 
-  it('refuses a cavity that leaves less than the minimum floor under it', () => {
+  it('#786 slice 2 — a cavity leaving less than the minimum floor is INFORMED with the floor it leaves', () => {
     const t = goal(domeTris(R), { goalMode: 'mold', size: { x: 10, y: 10, z: 7.5 } });
     const f = validateGoalObject(t, STOCK, { edgeMargin: 1, minFloor: 1 });
     expect(f.map((x) => x.code)).toEqual(['goal-mold-floor']);
-    expect(f[0]!.message).toContain('at most 7 mm deep here');
+    expect(f[0]!.severity).toBe('warning');
+    expect(f[0]!.message).toContain('leaving 0.5 mm of stock under the cavity');
+    expect(f[0]!.message).toContain('at least 1 mm');
+    // A cavity that breaks through names the breakthrough instead.
+    const through = goal(domeTris(R), { goalMode: 'mold', size: { x: 10, y: 10, z: 8.5 } });
+    const tf = validateGoalObject(through, STOCK, { edgeMargin: 1, minFloor: 1 });
+    expect(tf[0]!.message).toContain("breaks through the blank's bottom by 0.5 mm");
   });
 
   it('round-trips the choice; an item stays without the key', () => {
@@ -274,13 +283,19 @@ describe('#721 — a mold needs a rim and a floor', () => {
 });
 
 describe('#721 review — placement', () => {
-  it('a mold whose cavity would break out of the blank side is refused, even when it is small enough', () => {
+  it('#786 slice 2 — a mold that would break out of the blank side is INFORMED and still cut', () => {
     const STOCK = { length: 100, width: 60, thickness: 12 };
     const t = goal(domeTris(R), { goalMode: 'mold', size: { x: 20, y: 20, z: 5 }, position: { x: 8, y: 30, z: 0 } });
     const f = validateGoalObject(t, STOCK, { edgeMargin: 1, minFloor: 1 });
     expect(f.map((x) => x.code)).toEqual(['goal-mold-rim']);
-    expect(f[0]!.message).toContain('from X -2 to 18 mm');
+    expect(f[0]!.severity).toBe('warning');
+    expect(f[0]!.message).toContain('no rim on the left (it breaks out by 2 mm)');
     expect(validateGoalObject({ ...t, position: { x: 50, y: 30, z: 0 } }, STOCK, { edgeMargin: 1, minFloor: 1 })).toEqual([]);
+    // And Generate proceeds: the cavity is cut clipped to the blank, saying what broke out.
+    const j = { ...defaultEngraveJob(), labels: [], shapes: [], stock: { ...defaultEngraveJob().stock, ...STOCK }, targetObject: t };
+    const out = generateGoalProgram(j, t, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
+    expect(out.findings.some((x) => x.code === 'goal-mold-rim' && x.severity === 'warning')).toBe(true);
   });
 
   it('a mold run says it is a mold in its facts', () => {
