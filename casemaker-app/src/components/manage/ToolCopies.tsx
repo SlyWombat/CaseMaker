@@ -22,7 +22,7 @@ import {
 } from '@/engine/cnc/toolCondition';
 import type { InventoryItem } from '@/platform/houseClient';
 import { CASE_SWATCH } from '@/engine/cnc/caseColour';
-import { MACHINES } from '@/engine/cnc/machine';
+import { MILL_MODELS } from '@/engine/cnc/machine';
 import { machineDisplayName, type MachineRecord } from '@/platform/locationClient';
 import { useHouseStore } from '@/store/houseStore';
 import { useLocationStore } from '@/store/locationStore';
@@ -49,7 +49,7 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
   const machineName = (id: string) => {
     const m = machines.find((x) => x.id === id);
     if (m === undefined) return `${id} (not in this location)`;
-    const profile = m.profileId != null ? MACHINES[m.profileId] : undefined;
+    const profile = m.profileId != null ? MILL_MODELS[m.profileId] : undefined;
     return machineDisplayName(m, profile) ?? m.profileId ?? m.id;
   };
   const patch = (i: number, p: Partial<ToolCopy>) => setCopies((cs) => cs.map((c, j) => (j === i ? { ...c, ...p } : c)));

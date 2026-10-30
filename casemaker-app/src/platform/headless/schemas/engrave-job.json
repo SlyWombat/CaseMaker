@@ -1477,9 +1477,11 @@
     },
     "machineId": {
       "default": "Z1",
-      "description": "The mill the job is cut on; the build keeps the one machine it models.",
+      "description": "The mill the job is cut on. A machine whose controller frame has not been read refuses the job when it loads.",
       "enum": [
-        "Z1"
+        "Z1",
+        "CA1",
+        "C1"
       ],
       "type": "string"
     },
@@ -1488,7 +1490,7 @@
       "properties": {
         "boundaryMargin": {
           "description": "Extra clearance kept from the stock's boundary, in millimetres.",
-          "maximum": 100,
+          "maximum": 140,
           "minimum": 0,
           "type": "number"
         },
@@ -1503,7 +1505,7 @@
         },
         "zTolerance": {
           "description": "Tolerance on the Z floor, in millimetres.",
-          "maximum": 100,
+          "maximum": 140,
           "minimum": 0,
           "type": "number"
         }
@@ -5252,14 +5254,14 @@
           "properties": {
             "capMm": {
               "description": "Thickness of the top colour layer, measured from the engraved face, in millimetres.",
-              "maximum": 100,
+              "maximum": 140,
               "minimum": 0,
               "type": "number"
             },
             "firstLayerHeight": {
               "description": "First-layer height in millimetres; printed blanks only, and needs layerHeight.",
               "exclusiveMinimum": 0,
-              "maximum": 100,
+              "maximum": 140,
               "type": "number"
             },
             "kind": {
@@ -5273,7 +5275,7 @@
             "layerHeight": {
               "description": "Print layer height in millimetres; printed blanks only, omit when unknown.",
               "exclusiveMinimum": 0,
-              "maximum": 100,
+              "maximum": 140,
               "type": "number"
             }
           },
@@ -5286,7 +5288,7 @@
         "diameter": {
           "description": "Outer diameter of round stock in millimetres; present exactly when shape is \"cylinder\" or \"disc\".",
           "exclusiveMinimum": 0,
-          "maximum": 200,
+          "maximum": 240,
           "type": "number"
         },
         "fibre": {
@@ -5320,13 +5322,13 @@
                 },
                 "xMm": {
                   "description": "Measured bow along X, in millimetres, over the clamped piece.",
-                  "maximum": 100,
+                  "maximum": 140,
                   "minimum": 0,
                   "type": "number"
                 },
                 "yMm": {
                   "description": "Measured bow along Y, in millimetres, over the clamped piece.",
-                  "maximum": 100,
+                  "maximum": 140,
                   "minimum": 0,
                   "type": "number"
                 }
@@ -5376,9 +5378,9 @@
           "description": "Bow measured on the clamped piece; omit when the surface has not been measured."
         },
         "length": {
-          "description": "Stock length along X, in millimetres (the machine limit is 200).",
+          "description": "Stock length along X, in millimetres (bounded by the job's own machine's X travel).",
           "exclusiveMinimum": 0,
-          "maximum": 200,
+          "maximum": 320,
           "type": "number"
         },
         "material": {
@@ -5423,9 +5425,9 @@
           "description": "The plan shape of round stock (#743): \"cylinder\" for a rod or a tube, \"disc\" for a round blank milled flat; omit for a rectangular blank."
         },
         "thickness": {
-          "description": "Stock thickness along Z, in millimetres (the machine limit is 100).",
+          "description": "Stock thickness along Z, in millimetres (bounded by the job's own machine's Z travel).",
           "exclusiveMinimum": 0,
-          "maximum": 100,
+          "maximum": 140,
           "type": "number"
         },
         "wall": {
@@ -5434,9 +5436,9 @@
           "type": "number"
         },
         "width": {
-          "description": "Stock width along Y, in millimetres (the machine limit is 200).",
+          "description": "Stock width along Y, in millimetres (bounded by the job's own machine's Y travel).",
           "exclusiveMinimum": 0,
-          "maximum": 200,
+          "maximum": 240,
           "type": "number"
         }
       },

@@ -416,8 +416,11 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
   // `toSetup` builds one for every rotary job.
   if (rotary !== null && ctx.setup.part.kind === 'cylinder') {
     const stock = ctx.setup.part;
-    if (stock.diameter > ROTARY_MAX_DIAMETER_MM || stock.length > ROTARY_MAX_LENGTH_MM) {
-      push('stock-exceeds-module', null, envelopeSentence(stock.diameter, stock.length));
+    // #773 — the MODULE's envelope is the machine's, not the Z1's: the Carvera Air's is ⌀92 × 200.
+    // The published Z1 figures stand in only for a profile that states no rotary block.
+    const module = ctx.machine.rotary?.envelope ?? { diameter: ROTARY_MAX_DIAMETER_MM, length: ROTARY_MAX_LENGTH_MM };
+    if (stock.diameter > module.diameter || stock.length > module.length) {
+      push('stock-exceeds-module', null, envelopeSentence(stock.diameter, stock.length, module));
     }
   }
 

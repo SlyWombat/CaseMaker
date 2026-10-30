@@ -23,7 +23,7 @@
  */
 
 import { useRef, useState, type ReactNode } from 'react';
-import { MACHINES, PRINTER_PROFILES, type MillProfile } from '@/engine/cnc/machine';
+import { MACHINE_FRAME_UNREAD, PRINTER_PROFILES, millModelById, type Mill } from '@/engine/cnc/machine';
 import { canDriveMachine } from '@/platform/capabilities';
 import { controllerState } from '@/platform/machineUpload';
 import { probeMachine } from '@/platform/machineProbe';
@@ -129,7 +129,11 @@ export function MachinesScope() {
     }
   };
 
-  const profile = machine?.profileId != null ? MACHINES[machine.profileId] : undefined;
+  // #773 — a machine record may name a MODEL whose controller frame has never been read (the
+  // Carvera). The card still names it and shows its vendor row; everything positional is absent,
+  // with the sentence saying what one connection supplies.
+  const model = millModelById(machine?.profileId ?? null);
+  const profile = model !== undefined && model.frameState === 'read' ? model : undefined;
   const record = useMachineRecord(machine);
   const typed = address.trim().length > 0;
 
@@ -245,7 +249,7 @@ export function MachinesScope() {
         {machine !== null ? (
           <div className="mcard" data-testid="manage-machine-card">
             <h4>
-              {machineDisplayName(record, profile) ?? machine.name ?? 'A controller'}{' '}
+              {machineDisplayName(record, model) ?? machine.name ?? 'A controller'}{' '}
               <span className="tag tag--owned">found</span>
               <span className="badge">
                 profile: {machine.profileId ?? 'unknown'}
@@ -276,7 +280,7 @@ export function MachinesScope() {
                 <Kv label="ip">{machine.ip ?? '— as broadcast'}</Kv>
                 <Kv label="mac">{machine.mac ?? '— as broadcast'}</Kv>
               </div>
-              <ProfileKv profile={profile} />
+              <ProfileKv model={model} />
             </div>
             {machine.notes.length > 0 && (
               <ul className="notes" data-testid="manage-machine-notes">
@@ -388,7 +392,7 @@ export function MachinesScope() {
 
       <aside className="context-panel" data-testid="manage-machine-detail">
         <div className="panel-head">
-          <h3>{machine === null ? 'No machine' : `${machineDisplayName(record, profile) ?? machine.host} · last check`}</h3>
+          <h3>{machine === null ? 'No machine' : `${machineDisplayName(record, model) ?? machine.host} · last check`}</h3>
         </div>
         <p className="hint">
           {machine === null
@@ -497,8 +501,8 @@ export function MachinesScope() {
 }
 
 /** The profile half of the card: the standing numbers, each with where it came from. */
-function ProfileKv({ profile }: { profile: MillProfile | undefined }) {
-  if (profile === undefined) {
+function ProfileKv({ model }: { model: Mill | undefined }) {
+  if (model === undefined) {
     return (
       <div className="kv">
         <Kv label="profile">
@@ -511,6 +515,33 @@ function ProfileKv({ profile }: { profile: MillProfile | undefined }) {
       </div>
     );
   }
+  // #773 — a vendor row with no frame: the envelope and limits are the row's, and every position
+  // the app drives to stays absent until the machine is connected once.
+  if (model.frameState === 'unread') {
+    const row = model.envelope;
+    return (
+      <div className="kv" data-testid="manage-profile-unread">
+        <Kv label="profile">
+          {model.name} — id “{model.id}”, vendor row only
+        </Kv>
+        <Kv label="work envelope">
+          X {row.x.min} → {row.x.max} · Y {row.y.min} → {row.y.max} · Z {row.z.min} → {row.z.max} mm
+        </Kv>
+        <Kv label="limits">
+          {model.maxCutFeed} mm/min cut feed · {model.maxRpm} RPM ·{' '}
+          {model.hasATC ? `${model.toolSlots}-slot tool changer` : 'manual tool change'}
+        </Kv>
+        <Kv label="frame">
+          <span data-testid="manage-profile-frame-unread">{MACHINE_FRAME_UNREAD}</span>{' '}
+          <span className="dim">
+            — anchors, toolrack, clearance and soft endstops are the controller’s, and none has
+            been read from a {model.name}.
+          </span>
+        </Kv>
+      </div>
+    );
+  }
+  const profile = model;
   const { x, y, z } = profile.envelope;
   return (
     <div className="kv">

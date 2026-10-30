@@ -350,7 +350,17 @@ export function turningInCutSentence(z: number, radius: number): string {
   return `turns the stock while the cutter is in it: the cutter is ${inside > 0 ? `${inside} mm inside the stock` : 'not clear of the stock'} at Z ${Math.round(z * 1000) / 1000} mm, and a turn or a traverse needs ${ROTARY_CLEARANCE_MM} mm of clearance above the surface (Z ${Math.round((radius + ROTARY_CLEARANCE_MM) * 1000) / 1000} mm)`;
 }
 
-/** "does not fit the rotary's ⌀80 × 150 mm" — the module's envelope. */
-export function envelopeSentence(diameter: number, length: number): string {
-  return `does not fit the rotary's ⌀${ROTARY_MAX_DIAMETER_MM} × ${ROTARY_MAX_LENGTH_MM} mm: this stock is ⌀${Math.round(diameter * 1000) / 1000} × ${Math.round(length * 1000) / 1000} mm`;
+/**
+ * "does not fit the rotary's ⌀80 × 150 mm" — the module's envelope, the machine's own when the
+ * caller has it (#773: the Carvera Air's module is ⌀92 × 200, the Carvera's ⌀92 × 240).
+ */
+export function envelopeSentence(
+  diameter: number,
+  length: number,
+  envelope: { diameter: number; length: number } = {
+    diameter: ROTARY_MAX_DIAMETER_MM,
+    length: ROTARY_MAX_LENGTH_MM,
+  },
+): string {
+  return `does not fit the rotary's ⌀${envelope.diameter} × ${envelope.length} mm: this stock is ⌀${Math.round(diameter * 1000) / 1000} × ${Math.round(length * 1000) / 1000} mm`;
 }

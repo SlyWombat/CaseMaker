@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
-import { MACHINES } from '@/engine/cnc/machine';
+import { MILL_MODELS } from '@/engine/cnc/machine';
 import { formatStamp } from '@/components/manage/display';
 import { stateColour, stateWord } from '@/components/viewport/machineWords';
 import { canDriveMachine } from '@/platform/capabilities';
@@ -88,7 +88,7 @@ function displayName(
   broadcastName: string | null,
 ): string | null {
   const id = record?.profileId ?? profileId;
-  const profile = id === null ? undefined : MACHINES[id];
+  const profile = id === null ? undefined : MILL_MODELS[id];
   const base = profile?.name ?? record?.name ?? broadcastName ?? null;
   const nickname = record?.nickname ?? null;
   if (base === null) return nickname;

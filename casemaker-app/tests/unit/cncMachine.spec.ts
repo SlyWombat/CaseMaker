@@ -3,15 +3,24 @@
 // deliberate, and pin the one internal consistency check available without the machine.
 
 import { describe, it, expect } from 'vitest';
+import { jobMachine } from '@/engine/cnc/calibration';
 import {
   Z1,
   MACHINES,
+  MILL_MODELS,
+  CARVERA,
+  CARVERA_AIR,
+  MACHINE_FRAME_UNREAD,
   ALL_MACHINES,
   PRINTER_PROFILES,
   ASSUMED_NOZZLE,
   clampToMachine,
   insideEnvelope,
+  machineFrameProblem,
+  machineFrameProblemById,
   machineSchema,
+  millModelById,
+  millModelSchema,
   millProfileSchema,
   printerProfileSchema,
   CLAMP_REFUSE_FRACTION_FALLBACK,
@@ -19,8 +28,11 @@ import {
 } from '@/engine/cnc/machine';
 
 describe('the Z1 profile', () => {
-  it('is the only supported machine (#183: Z1 only, no Carvera, no plugin API)', () => {
-    expect(Object.keys(MACHINES)).toEqual(['Z1']);
+  it('is one of the framed mills — the Z1 and the Carvera Air carry a frame (#773)', () => {
+    // #183 scoped the file to the Z1; #773 adds the Carvera Air (framed) and the Carvera (a row
+    // with no frame, deliberately NOT in `MACHINES`). What a job may be written for is exactly
+    // the framed pair: no id lookup here can hand back a machine whose positions are unknown.
+    expect(Object.keys(MACHINES)).toEqual(['Z1', 'CA1']);
   });
 
   it('carries the database row: 200 x 200 x 100, 1200 mm/min, 13 000 RPM, no ATC', () => {
@@ -241,7 +253,8 @@ describe('one machine abstraction, two processes (#184, #228)', () => {
   it('discriminates mills and printers by `process`, and both are a Machine', () => {
     const machines: Machine[] = [Z1, ...PRINTER_PROFILES];
     expect(machines.every((m) => m.process === 'mill' || m.process === 'fdm')).toBe(true);
-    expect(ALL_MACHINES).toHaveLength(1 + PRINTER_PROFILES.length);
+    // #773 — three mills (Z1, Carvera Air, Carvera) beside the printer presets.
+    expect(ALL_MACHINES).toHaveLength(3 + PRINTER_PROFILES.length);
     // The mill's spindle facts hang off the mill subtype only: a printer has no maxRpm.
     expect('maxRpm' in PRINTER_PROFILES[0]!).toBe(false);
   });
@@ -299,11 +312,13 @@ describe('profile schemas (#184 work item 1)', () => {
     }
   });
 
-  it('refuses a mill missing the sourced soft endstops, or claiming an ATC', () => {
+  it('refuses a mill missing the sourced soft endstops, or stating a half tool change', () => {
     const noEndstop = Object.fromEntries(Object.entries(Z1).filter(([k]) => k !== 'softEndstop'));
     expect(millProfileSchema.safeParse(noEndstop).success).toBe(false);
-    // hasATC is a literal false on the type (#183, Z1-only): a profile with an ATC is not one.
+    // #773 — hasATC and toolSlots are one fact: a changer with no slots names no tool it can
+    // hold, and a manual machine that lists slots claims a change it cannot make.
     expect(millProfileSchema.safeParse({ ...Z1, hasATC: true }).success).toBe(false);
+    expect(millProfileSchema.safeParse({ ...Z1, toolSlots: 6 }).success).toBe(false);
   });
 
   it('refuses a mill whose rapid model is missing, non-positive, or unsourced (#281)', () => {
@@ -328,5 +343,107 @@ describe('profile schemas (#184 work item 1)', () => {
     expect(millProfileSchema.safeParse({ ...Z1, rotary: noSources }).success).toBe(false);
     const blank = { ...Z1.rotary, sources: { ...Z1.rotary?.sources, maxRate: '' } };
     expect(millProfileSchema.safeParse({ ...Z1, rotary: blank }).success).toBe(false);
+  });
+});
+
+// #773 — THE CARVERA FAMILY BESIDE THE Z1. The Air is a framed profile: the vendor's database row
+// plus Makera's own shipped controller settings. The Carvera is the SAME KIND of vendor row with
+// NO frame — nothing positional has ever been read from one — and it is deliberately not a
+// `MillProfile`, so no caller can be handed one and quietly use the Z1's positions.
+describe('#773 the Carvera Air is framed, and the Carvera is a row with no frame', () => {
+  it('the Air carries the database row and the Carvera Controller’s shipped settings', () => {
+    expect(CARVERA_AIR).toMatchObject({
+      id: 'CA1',
+      name: 'Makera Carvera Air',
+      frameState: 'read',
+      maxCutFeed: 3000,
+      maxRpm: 13000,
+      hasATC: false,
+      toolSlots: 0,
+      // The shipped user-settings file states rates but not steps: null, never the Z1's.
+      axisSteps: null,
+    });
+    expect(CARVERA_AIR.envelope).toEqual({
+      x: { min: -300, max: 0 },
+      y: { min: -200, max: 0 },
+      z: { min: -130, max: 0 },
+    });
+    expect(CARVERA_AIR.rapidEstimate).toMatchObject({ xyMmPerMin: 3000, zMmPerMin: 2000, accelMmPerS2: 150 });
+    expect(CARVERA_AIR.softEndstop).toMatchObject({ enabled: true, xMin: -302, yMin: -212, zMin: -121 });
+    expect(CARVERA_AIR.rotary).toMatchObject({ envelope: { diameter: 92, length: 200 }, maxRate: 2400, acceleration: 360 });
+    // The accessory words this app emits are the Z1's; a Carvera's vacuum is M801/M802, so the
+    // flags are false rather than speaking a dialect this app does not model.
+    expect(CARVERA_AIR.capabilities).toEqual({ rotary: true, laser: false, air: false, vacuum: false, antistatic: false });
+    for (const value of Object.values(CARVERA_AIR.sources)) expect(value.length).toBeGreaterThan(20);
+    expect(CARVERA_AIR.sources.maxCutFeed).toContain('t_MachineType');
+    expect(CARVERA_AIR.sources.sensorOffsetFromAnchor1).toContain('CARVERA_AIR');
+  });
+
+  it('the Air’s positions come from its frame and the firmware’s own model constants', () => {
+    // anchor1 (-287.51, -202.11); anchor2 = anchor1 + (88.5, 45); the manual probe parks at
+    // anchor1 + (280, 196) for this model (ATCHandler.cpp's CARVERA_AIR arm); the change position
+    // adds the same (132, 0) on top of the toolrack offset every model does.
+    expect(CARVERA_AIR.anchor1).toEqual([-287.51, -202.11]);
+    const near = (got: readonly number[], want: readonly number[]): void => {
+      expect(got).toHaveLength(want.length);
+      got.forEach((v, i) => expect(v).toBeCloseTo(want[i]!, 6));
+    };
+    near(CARVERA_AIR.anchor2, [-199.01, -157.11]);
+    near(CARVERA_AIR.toolChange.sensor, [-7.51, -6.11]);
+    near(CARVERA_AIR.toolChange.changePosition, [-29.51, -6.11]);
+    expect(CARVERA_AIR.toolChange.sensorZ).toBe(-108);
+    expect(CARVERA_AIR.toolChange.probeRetract).toBe(2); // the Z1's is 1
+  });
+
+  it('the Carvera is a vendor row with no frame, and the sentence names the fix', () => {
+    expect(CARVERA).toMatchObject({
+      id: 'C1',
+      name: 'Makera Carvera',
+      frameState: 'unread',
+      maxCutFeed: 3000,
+      maxRpm: 15000,
+      hasATC: true,
+      toolSlots: 6,
+      rotaryEnvelope: { diameter: 92, length: 240 },
+    });
+    expect(CARVERA.envelope).toEqual({
+      x: { min: -320, max: 0 },
+      y: { min: -240, max: 0 },
+      z: { min: -140, max: 0 },
+    });
+    // NOT a framed profile: no id lookup a job path uses may answer with one.
+    expect(MACHINES.C1).toBeUndefined();
+    expect(Object.keys(MACHINES)).toEqual(['Z1', 'CA1']);
+    expect(Object.keys(MILL_MODELS)).toEqual(['Z1', 'CA1', 'C1']);
+    expect(millModelById('C1')).toBe(CARVERA);
+    expect(millModelById('CA1')).toBe(CARVERA_AIR);
+    expect(millModelById('nope')).toBeUndefined();
+    expect(machineFrameProblem(CARVERA)).toBe(MACHINE_FRAME_UNREAD);
+    expect(machineFrameProblem(CARVERA_AIR)).toBeNull();
+    expect(machineFrameProblemById('C1')).toBe(MACHINE_FRAME_UNREAD);
+    expect(machineFrameProblemById('CA1')).toBeNull();
+    expect(machineFrameProblemById('nope')).toBeNull();
+    expect(MACHINE_FRAME_UNREAD).toBe(
+      "This Carvera's frame has not been read from the machine yet; connect it once.",
+    );
+  });
+
+  it('jobMachine refuses an unframed machine rather than answering with the Z1', () => {
+    // A parsed job cannot name one — the schema refuses it — so this is the guard behind that
+    // refusal. An id this build does not know keeps the documented Z1 fallback.
+    expect(() => jobMachine({ machineId: 'C1' })).toThrow(MACHINE_FRAME_UNREAD);
+    expect(jobMachine({ machineId: 'CA1' })).toBe(CARVERA_AIR);
+    expect(jobMachine({ machineId: 'nope' })).toBe(Z1);
+  });
+
+  it('every model parses through its own schema, and the mixed kind does not', () => {
+    expect(machineSchema.parse(Z1)).toEqual(Z1);
+    expect(machineSchema.parse(CARVERA_AIR)).toEqual(CARVERA_AIR);
+    expect(machineSchema.parse(CARVERA)).toEqual(CARVERA);
+    expect(millProfileSchema.safeParse(CARVERA).success).toBe(false);
+    expect(millModelSchema.safeParse(CARVERA_AIR).success).toBe(false);
+    // The half tool change is refused on the row too.
+    expect(millModelSchema.safeParse({ ...CARVERA, toolSlots: 0 }).success).toBe(false);
+    expect(millModelSchema.safeParse({ ...CARVERA, hasATC: false }).success).toBe(false);
   });
 });

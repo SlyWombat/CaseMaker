@@ -431,3 +431,29 @@ describe('#386 item 3 — a frame that arrived with no line in flight', () => {
     }
   });
 });
+
+// #773 — A MACHINE WHOSE FRAME HAS NOT BEEN READ. The card still names the model and shows its
+// vendor row; every position the app drives to stays absent, and the sentence says what one
+// connection supplies. The profile detail must not fall back to the Z1's numbers.
+describe('#773 a Carvera record with no frame read', () => {
+  const CARVERA_RECORD = { ...Z1_RECORD, name: 'Carvera', profileId: 'C1' };
+
+  it('names the model and refuses the frame by name, instead of drawing the Z1’s positions', () => {
+    useMachineStore.setState({
+      machine: CARVERA_RECORD,
+      outcome: 'found',
+      reason: null,
+      checkedAt: '2026-10-09T06:00:00.000Z',
+    });
+    render(<MachinesScope />);
+    expect(screen.getByTestId('manage-profile-unread')).toBeDefined();
+    expect(screen.getByTestId('manage-profile-frame-unread').textContent).toBe(
+      "This Carvera's frame has not been read from the machine yet; connect it once.",
+    );
+    // The vendor row is the card's: the profile section names the model and its envelope.
+    expect(screen.getByTestId('manage-profile-unread').textContent).toContain('Makera Carvera');
+    expect(screen.getByTestId('manage-profile-unread').textContent).toContain('Y -240 → 0');
+    // The tool-length probe table is a framed profile's; there is none to read here.
+    expect(screen.queryByText('Tool-length probe')).toBeNull();
+  });
+});

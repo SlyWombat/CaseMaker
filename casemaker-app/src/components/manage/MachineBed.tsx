@@ -30,6 +30,7 @@ import { canDriveMachine } from '@/platform/capabilities';
 import { mountNum, mountTapFor, probeFor, accessoryNameFor } from '@/engine/cnc/registration/mountContext';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { machineFrameProblemById } from '@/engine/cnc/machine';
 import { useMountTap, useMountTapBusyFlag } from '@/hooks/useMountTap';
 import {
   BED_DATUM_KEYS,
@@ -116,6 +117,9 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
 
   const target = machine.address;
   const probe = probeFor(machine);
+  // #773 — a machine whose controller frame has never been read has no clearance Z to judge a tap
+  // by; the registration surface says so elsewhere and this row is simply not offered.
+  if (machineFrameProblemById(machine.profileId) !== null) return null;
   const profile = jobMachine({ machineId: machine.profileId ?? 'Z1' }, calibration);
   const viseAcc = accessoriesFor(machine).find((a) => a.kind === 'vise');
   const mountTap = mountTapFor(machine, Object.values(registrations), profile.toolChange.clearanceZ, mountNum(viseAcc?.unit.jawStartY) ?? -10);

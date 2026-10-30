@@ -12,7 +12,7 @@
  */
 
 import type { JSX } from 'react';
-import { MACHINES } from '@/engine/cnc/machine';
+import { MILL_MODELS } from '@/engine/cnc/machine';
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
 import { houseBaseUrl } from '@/platform/houseBaseUrl';
 import { HOUSE_SCHEMA_VERSION } from '@/platform/houseClient';
@@ -42,7 +42,7 @@ export function ManageRail() {
   const tools = useToolRegistry();
   const accessories = useLocationStore((s) => s.location?.accessories?.length ?? 0);
 
-  const profile = machine?.profileId != null ? MACHINES[machine.profileId] : undefined;
+  const profile = machine?.profileId != null ? MILL_MODELS[machine.profileId] : undefined;
   const record = useMachineRecord(machine);
   const machineLabel =
     machine === null

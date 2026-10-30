@@ -1,5 +1,5 @@
 import { useEffect, type JSX } from 'react';
-import { MACHINES } from '@/engine/cnc/machine';
+import { MILL_MODELS } from '@/engine/cnc/machine';
 import { canDriveMachine } from '@/platform/capabilities';
 import { startHeartbeat, stopHeartbeat } from '@/platform/machineHeartbeat';
 import { machineDisplayName } from '@/platform/locationClient';
@@ -51,7 +51,7 @@ export function MachinePin(): JSX.Element {
   const notice = useMachineNoticeStore((s) => s.notice);
   const dismiss = useMachineNoticeStore((s) => s.dismiss);
 
-  const profile = machine?.profileId != null ? MACHINES[machine.profileId] : undefined;
+  const profile = machine?.profileId != null ? MILL_MODELS[machine.profileId] : undefined;
   const record = useMachineRecord(machine);
   const name = machineDisplayName(record, profile) ?? machine?.name ?? 'A controller';
 

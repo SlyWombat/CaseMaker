@@ -36,6 +36,7 @@ import {
   MACHINES,
   Z1,
   deriveCoordinateFrame,
+  machineFrameProblemById,
   type CoordinateFrame,
   type MillProfile,
   type SoftEndstop,
@@ -328,20 +329,28 @@ export function resolvedMachineById(
  * post, the verifier, the simulation, the run sheet — so "which machine is this job for" has one
  * answer in one place.
  *
- * **It always answers.** An id this build does not know comes back as the Z1, which is a fallback
- * and is named as one: there is exactly ONE mill in `MACHINES` today, so it is the only machine a
- * job can be cut on, and the job schema coerces an unknown id to it on load (`.catch`, so a
- * document written by a later build still opens). What must change when a SECOND mill lands is this
- * line, not the callers: an unknown id then has to refuse generation the way an unknown tool key
- * does, because the Z1's envelope and spindle ceiling would be exactly the numbers that are wrong
- * for it. `resolvedMachineById` above is the reader for a caller that can say "no machine" —
- * `undefined` stays `undefined` there, and this function is the one place that decides a job cannot
- * do without a profile.
+ * **A KNOWN machine, or the documented fallback.** The three models this build knows all answer
+ * themselves, and a model whose controller frame has never been read REFUSES by name (#773) — a
+ * parsed job can never carry one, because the job schema refuses it when the document loads, so
+ * the throw here is the guard behind that refusal rather than a message a document path sees.
+ *
+ * An id this build does not know still comes back as the Z1, which is a fallback and is named as
+ * one: the job schema coerces an unknown id to it on load (`.catch`, so a document written by a
+ * later build still opens). That is a decision about ids a LATER build adds; the ids this one knows
+ * never land here by accident. `resolvedMachineById` above is the reader for a caller that can say
+ * "no machine" — `undefined` stays `undefined` there, and this function is the one place that
+ * decides a job cannot do without a profile.
  */
 export function jobMachine(
   job: { machineId: string },
   calibration?: MachineCalibration | null,
 ): MillProfile {
+  // #773 — a machine whose controller frame has never been read must not be answered with the
+  // Z1's: its positions are exactly the numbers that would be wrong for a Carvera. A parsed job
+  // can never name one (`engraveJobSchema` refuses it by name when it loads), so this throw is the
+  // guard behind that refusal, not a message any document path normally sees.
+  const frameProblem = machineFrameProblemById(job.machineId);
+  if (frameProblem !== null) throw new Error(frameProblem);
   return resolvedMachineById(job.machineId, calibration) ?? Z1;
 }
 

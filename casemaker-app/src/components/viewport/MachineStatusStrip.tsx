@@ -7,7 +7,7 @@ import { useManageModeStore } from '@/store/manageModeStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { accessoriesFor, machineRecordByProfile } from '@/store/locationStore';
-import { MACHINES } from '@/engine/cnc/machine';
+import { MILL_MODELS } from '@/engine/cnc/machine';
 import { machineDisplayName } from '@/platform/locationClient';
 import { probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
@@ -357,7 +357,7 @@ export function MachineStatusStrip(): JSX.Element | null {
   // #689 — the strip is the ONE home for the connection: the machine's name and address lead it, so
   // Cut never repeats a Machines card. The record's nickname wins; the profile name is next.
   const machineName =
-    machineDisplayName(record, machine.profileId === null ? undefined : MACHINES[machine.profileId]) ??
+    machineDisplayName(record, machine.profileId === null ? undefined : MILL_MODELS[machine.profileId]) ??
     machine.name ??
     machine.host;
   // #658 — the rotary AXIS exists only when a rotary module is checked out to this machine. Not

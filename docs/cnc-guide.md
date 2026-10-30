@@ -12,8 +12,12 @@ Two things to hold on to before you read on:
   after it — each of those a separate press of yours, with the machine named before anything is
   written. The **web** build cannot reach a machine at all: it ends at the file, which you
   upload with **Makera Studio**. The **work origin is set by hand** either way.
-- **Case Maker supports the Z1 only.** Carvera and Carvera Air are different machines; the
-  app does not model them.
+- **Case Maker supports the Z1 and the Carvera Air.** Both carry Makera's own controller
+  configuration — the Z1's from this repository's firmware defaults and the bench's own reads,
+  the Air's from the Controller Makera publishes — so a job can be written for either. The
+  **Carvera** is known as a vendor row only: no Carvera's controller configuration has ever been
+  read, so a job naming it refuses by name ("this Carvera's frame has not been read from the
+  machine yet; connect it once") rather than borrowing the Z1's positions.
 - **On the public site the CNC side is a beta switch.** [electricrv.ca/casemaker](https://electricrv.ca/casemaker)
   hides the Cut and Simulate sections, the cutting-job door, Manage and this guide
   unless the address carries `?BETA=yes`:
@@ -107,7 +111,10 @@ not a wiki page):
 
 Every limit a screen acts on — the work envelope, the spindle ceiling, the safe Z the rapids and
 the laser lift read, the rapid model — comes from that machine **profile**, never from a number
-hard-coded in a screen (#448). The vise and every other accessory are the same story: their
+hard-coded in a screen (#448). The profiles are the Z1, the **Carvera Air** (300 × 200 × 130 mm,
+13 000 RPM, no changer, ⌀92 × 200 mm rotary module) and the **Carvera** (320 × 240 × 140 mm,
+15 000 RPM, a six-slot changer, ⌀92 × 240 mm) — the last as a vendor row with no frame, as the
+opening note says (#773). The vise and every other accessory are the same story: their
 geometry lives on the machine's **fixture records** and bed **datums**, each with a source and a
 "measured when" (#451). The one exception to "nothing is hard-coded" is stated wherever it stands:
 a few PROVISIONAL numbers (the vise body's floor depth, the finishing step-over for 3D) are still
@@ -1374,6 +1381,7 @@ simulation does report about one is the sweep's own list, next:
 | `stock-unsupported` | error | The stock model is a rectangular (prism) block or, for an indexed rotary job, a cylinder; the setup's part is neither. | Use a rectangular blank, or a round one for rotary work. |
 | `stock-invalid` | error | Stock thickness is not positive. | Type a real thickness. |
 | `machine-unknown` | error | The simulation was asked for a machine id it has no profile for; the message lists the ids it knows. Nothing is swept, because a frame it cannot find is a frame it would have to guess. | Pick the machine in the Start wizard, or re-run the machine check. |
+| `machine-frame-unread` | error | The simulation was asked for a machine the app knows as a vendor row but whose controller frame has never been read (the Carvera, #773). Its anchors, toolrack, clearance and soft endstops are the machine's own, and none has been read, so nothing is swept. | Connect the machine once: the configuration read fills its frame. |
 | `prior-removal-invalid` | error | A rest pass was told what material a previous program left (#410), and that material is not a closed solid — so the sweep has no starting material to subtract from. | Simulate the first program and pass ITS result. |
 | `prior-removal-column` | error | A rest pass was asked for on a job the COLUMN engine sweeps — a rotary job, a V-bit (whose cutting width changes with depth), a drill or a thread mill (#382). Only the exact 2.5D sweep can start from the material a previous program left, so the pair is refused by name rather than swept from the blank (#410). | Measure the rest with a flat cutter, or cut the second program as a program of its own. |
 | `air-moves-unchecked` | warning | More air moves than the app checks; some were not verified. | Split a very long job. |
@@ -1471,6 +1479,7 @@ simulation does report about one is the sweep's own list, next:
 | `trace-self-overlap` | warning | Two strokes of a single-line trace come closer than the cutter is wide, so the cut fills in (#219). For a V-bit the width is the groove the cone opens AT THAT TRACE'S DEPTH — `tip + 2·d·tan(halfAngle)` — not the tip (#405). | Space the lines apart, or use a smaller cutter. |
 | `vcarve-above-colour-plane` | error | An item's depth is shallower than the blank's film, so the floor would sit inside the coloured layer and the design would never reach the plane where it is correct. | Cut at least as deep as the film, or use single-colour stock. |
 | `vcarve-groove-too-narrow` | error | The groove the cone opens at the colour plane is narrower than the machine's minimum X/Y step (its steps-per-mm record), so the pocket cannot be positioned reliably. The message gives both widths in µm. | Cut deeper (a wider groove at the plane) or widen the stroke. |
+| `machine-steps-unread` | warning | The machine's controller configuration has never been read, so its steps per millimetre — the width a V groove must clear at the colour plane — are unknown. The check cannot be made either way, and this says so rather than passing. | Connect the machine once: the configuration read that fills the frame (#279) also supplies the steps. |
 | `vcarve-surface-merge` | warning | Two strokes of one item, or two items, come closer than `2 × f·tan(halfAngle)` at the top face, so their surface openings merge even though their colour-plane designs do not. The colour line at the plane is still correct; the wall between them is not. | Space the strokes or items apart, or accept the merged wall. |
 | `vcarve-stepover-clamped` | warning | A note, not a fault: the feeds row's step-over asks for a pitch wider than the floor allows. The floor is cleared by the tip disc alone, so the CAM runs the smaller of the requested pitch and the tip radius; a wider pitch would leave a ridge of the top colour down every stroke narrower than two passes apart. The message states both numbers. | Nothing: the cut is correct. The request still governs a cutter whose tip radius is wider than it, or an override under the radius. |
 | `vcarve-depth-beyond-cone` | error | A V-carve or inlay item is deeper than its cutter's cone. A V-bit's flank is a cone only up to the height where it meets the cutter's cylindrical body — `(diameter − tip) / (2·tan(halfAngle))`, e.g. 1.5375 mm for a 3.175 mm 90° chamfer and 4.9916 mm for a 30° × 0.5 mm engraver. Deeper than that the body cuts a vertical wall, so the pocket is no longer a V and an inlay's plug cannot seat in it (#741). The message names the item, its depth, the cutter, the cone height (and the stated flute, where a short one binds first) and the deepest cut the bit can make. | Cut no deeper than the height the message names, or use a cutter whose cone reaches the item's depth. |

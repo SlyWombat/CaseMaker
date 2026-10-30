@@ -129,6 +129,10 @@ export type JobFindingCode =
   // two walls. Both are errors and both name the way out.
   | 'vcarve-above-colour-plane'
   | 'vcarve-groove-too-narrow'
+  // A machine whose controller configuration has never been read has no steps-per-mm to judge a
+  // groove against (#773): the check cannot be made, and the warning says which machine and what
+  // one connection supplies. The Carvera Air's shipped user settings carry rates but not steps.
+  | 'machine-steps-unread'
   // The design check from the brief: two surface openings that overlap merge at the top face and
   // leave a ridge of the top colour below. A warning — the merged look is the operator's to
   // accept — raised with the geometry in hand (engraveGenerate's `vCarveFindings`).

@@ -10,8 +10,12 @@
  *     macro is machine config — clearance, safe height, the tool-length sensor — not
  *     anything the program file contains.
  *
- * Scope is the Z1 ONLY. Carvera and Carvera Air are rows in Makera's own database, so the
- * SHAPE is known, but they are not supported machines and must not be added here (#183).
+ * Scope was the Z1 ONLY until #773. Carvera and Carvera Air are rows in Makera's own database,
+ * and #773 brings them in as far as the evidence goes: the Carvera Air is a full profile (its
+ * shipped controller settings are Makera's own open-source Controller's), while the Carvera is a
+ * {@link MillModel} — the vendor's row with NO frame, because no Carvera controller configuration
+ * has ever been read. What #183 guarded against (a second machine's numbers silently borrowed from
+ * the Z1) is what the `frameState` discriminator now makes impossible to compile past.
  *
  * PROVENANCE. Every number carries where it came from. Three sources, in order of trust:
  *   - `t_MachineType` in Makera's library database: the Z1's own row.
@@ -133,14 +137,18 @@ export interface RotaryProfile {
   parent: 'y';
   /** The stock envelope the module accepts, mm (`t_MachineType`). */
   envelope: { diameter: Mm; length: Mm };
-  /** Steps per degree of A. Shipped 88.888889 = 32 000 steps per turn. */
-  stepsPerDegree: number;
+  /**
+   * Steps per degree of A. Shipped 88.888889 = 32 000 steps per turn on the Z1. `null` where the
+   * machine's controller configuration has never been read (#773) — the Carvera family's shipped
+   * user settings file carries the A rate and acceleration but not this figure.
+   */
+  stepsPerDegree: number | null;
   /** Max A rate, °/min. Shipped 3600 = 60 °/s = 10 rpm. */
   maxRate: number;
   /** A acceleration, °/s². Shipped 360. */
   acceleration: number;
-  /** Direction the shipped config homes A (`delta_homing_direction`). */
-  homing: 'home_to_min';
+  /** Direction the shipped config homes A (`delta_homing_direction`); `null` when unread. */
+  homing: 'home_to_min' | null;
   /** The firmware's rotary unwind, the code the vendor's own files end with. */
   unwind: 'G92.4 A S';
   /**
@@ -153,16 +161,28 @@ export interface RotaryProfile {
 /**
  * One step of the controller's axes, as steps per millimetre (#221). Part of the MACHINE RECORD:
  * a cutter's narrowest useful groove is judged against `1 / xyPerMm`, never against a setting.
+ *
+ * `null` is a machine whose controller configuration has never been read (#773): the Carvera Air's
+ * shipped user settings file carries rates but not `*_steps_per_mm`, and nothing else we hold does.
+ * A reader that needs the step says so rather than assuming the Z1's.
  */
-export interface AxisSteps {
-  xyPerMm: number;
-  zPerMm: number;
-  source: string;
-}
+export type AxisSteps =
+  | {
+      xyPerMm: number;
+      zPerMm: number;
+      source: string;
+    }
+  | null;
 
 export interface MillProfile extends MachineIdentity {
-  /** A mill. The only process with a spindle and a tool change (#183: Z1-only). */
+  /** A mill. The only process with a spindle and a tool change. */
   process: 'mill';
+  /**
+   * The controller frame this profile carries has been established (#773): the vendor's shipped
+   * defaults, or a machine's own read of them (never mixed). A model whose frame keys we have never
+   * seen is a {@link MillModel}, not a MillProfile, and nothing that needs a position may use it.
+   */
+  frameState: 'read';
   /**
    * The materials this profile says the machine is set up to cut (#347), in the order the setup
    * flow lists the ones only this list can offer.
@@ -216,11 +236,12 @@ export interface MillProfile extends MachineIdentity {
   axisSteps: AxisSteps;
   maxRpm: number;
   /**
-   * The Z1's tool-change derivation constants, mm (#448) — promoted from bare module constants so
-   * a profile carries them as data. They are MODEL constants, not a calibration's: a machine's own
-   * read of the frame must not move the sensor or the change position it was never a measurement of.
+   * The model's tool-change derivation constants, mm (#448) — promoted from bare module constants
+   * so a profile carries them as data. They are MODEL constants, not a calibration's: a machine's
+   * own read of the frame must not move the sensor or the change position it was never a
+   * measurement of. One pair per axis since #773: the Air's sensor is 280 on X and 196 on Y.
    */
-  sensorOffsetFromAnchor1: number;
+  sensorOffsetFromAnchor1: Vec2;
   changePositionExtraX: number;
   /**
    * Provenance for the model's limits and the two derivation constants above (#448). One string per
@@ -233,9 +254,13 @@ export interface MillProfile extends MachineIdentity {
     sensorOffsetFromAnchor1: string;
     changePositionExtraX: string;
   };
-  /** `isATC=0`: a manual tool change, which is what makes `M490.1`/`M490.2` the tool-change path. */
-  hasATC: false;
-  toolSlots: 0;
+  /**
+   * Whether the machine has the automatic tool changer fitted, and how many slots it holds
+   * (`t_MachineType.isATC` / `ATC_Number`). The Z1 is `false`/`0` — a manual tool change, which is
+   * what makes `M490.1`/`M490.2` its path — while the Carvera's changer holds six (#773).
+   */
+  hasATC: boolean;
+  toolSlots: number;
   /**
    * #530 — the machine's own camera, when it serves one: the ESP32 module on the Z1 pushes JPEGs
    * over its own WebSocket. Absent on a machine with no camera, and then the camera panel is not
@@ -415,11 +440,11 @@ export interface CoordinateFrame {
  */
 export interface FrameDerivationOffsets {
   /**
-   * How far past `anchor1`, on each axis, the Z1's tool-length sensor sits, mm
-   * (`ATCHandler.cpp:266`, hard-coded for this model — the same number on X and Y, which is why
-   * it is one number and not a `Vec2`).
+   * How far past `anchor1`, on each axis, the machine's tool-length sensor sits, mm
+   * (`ATCHandler.cpp:266`, hard-coded per model: 181 on both axes for the Z1, 280 and 196 for the
+   * Carvera Air). One pair per axis, because the models do not share a single number (#773).
    */
-  sensorOffsetFromAnchor1: number;
+  sensorOffsetFromAnchor1: Vec2;
   /**
    * The +X the manual change macro adds on top of `toolrack_offset_x`, mm (`ATCHandler.cpp:134`).
    * A fixed reach from the tool rack's own corner, not a clearance figure.
@@ -429,7 +454,18 @@ export interface FrameDerivationOffsets {
 
 /** The Z1's {@link FrameDerivationOffsets}: the two `ATCHandler.cpp` model constants. */
 export const Z1_DERIVATION_OFFSETS: FrameDerivationOffsets = {
-  sensorOffsetFromAnchor1: 181,
+  sensorOffsetFromAnchor1: [181, 181],
+  changePositionExtraX: 132,
+};
+
+/**
+ * The Carvera Air's {@link FrameDerivationOffsets} (#773), from the same `ATCHandler.cpp` and its
+ * own model branch: the manual tool change parks the head at `anchor1 + (280, 196)` to probe the
+ * tool (`ATCHandler.cpp`, the `CARVERA_AIR == MachineModel` arm), and the change position adds the
+ * same `132` on X every model does (`ATCHandler.cpp:134`).
+ */
+export const CA1_DERIVATION_OFFSETS: FrameDerivationOffsets = {
+  sensorOffsetFromAnchor1: [280, 196],
   changePositionExtraX: 132,
 };
 
@@ -463,7 +499,7 @@ export function deriveCoordinateFrame(frame: CoordinateFrame, offsets: FrameDeri
   const [tx, ty] = frame.toolrackOffset;
   return {
     anchor2: [ax + c2x, ay + c2y],
-    sensor: [ax + offsets.sensorOffsetFromAnchor1, ay + offsets.sensorOffsetFromAnchor1],
+    sensor: [ax + offsets.sensorOffsetFromAnchor1[0], ay + offsets.sensorOffsetFromAnchor1[1]],
     changePosition: [ax + tx + offsets.changePositionExtraX, ay + ty],
   };
 }
@@ -526,6 +562,19 @@ export const Z1_FRAME: CoordinateFrame = {
 const Z1_DATUMS = deriveCoordinateFrame(Z1_FRAME, Z1_DERIVATION_OFFSETS);
 
 /**
+ * The materials every Makera mill's profile carries (#347, #773): Makera's own `t_MaterialList`,
+ * in this app's words, one entry per vendor row this app can name EXACTLY. The library table has
+ * no machine column — the vendor list is the firm's materials, not a per-model one — so the same
+ * list rides on the Z1 and both Carveras. See the Z1's `materials` field for what is left out and
+ * why.
+ */
+const MAKERA_MATERIALS: StockMaterial[] = [
+  'softwood', 'hardwood', 'abs', 'acrylic',
+  'petg', 'pet', 'asa', 'hips', 'pa', 'pa-cf', 'pa-gf', 'pc', 'pp', 'tpu', 'pva',
+  'aluminium-6061', 'aluminium-7075', 'brass', 'copper',
+];
+
+/**
  * The Makera Z1.
  *
  * `t_MachineType`: 200 x 200 x 100, 1200 mm/min, 13 000 RPM, isATC = 0, rotary ⌀80 x 150.
@@ -564,6 +613,7 @@ export const Z1: MillProfile = {
   id: 'Z1',
   name: 'Makera Z1',
   process: 'mill',
+  frameState: 'read',
   // Makera's own `t_MaterialList`, in this app's words (#347): the wood the Z1 ships cutting, the
   // two plastics and the four metals this app can NAME EXACTLY. The other vendor rows — `Bakelite`,
   // `Carbon Fiber`, `Epoxy Tooling`, `Synthetic Stone`, `Delrin`, `Polycarbonate`, `PCB` — are left
@@ -574,11 +624,7 @@ export const Z1: MillProfile = {
   // exception (#456): they are PrusaSlicer's filament words, the catalogue has no row of its own
   // for any of them, and the #455 mapping answers each from the ABS and acrylic rows — so the
   // material select must be able to show a job imported as one.
-  materials: [
-    'softwood', 'hardwood', 'abs', 'acrylic',
-    'petg', 'pet', 'asa', 'hips', 'pa', 'pa-cf', 'pa-gf', 'pc', 'pp', 'tpu', 'pva',
-    'aluminium-6061', 'aluminium-7075', 'brass', 'copper',
-  ],
+  materials: MAKERA_MATERIALS,
   envelope: { x: { min: -200, max: 0 }, y: { min: -200, max: 0 }, z: { min: -100, max: 0 } },
   maxCutFeed: 1200,
   // The cycle estimate's rapid model (#281), from the controller's own config (`config-get sd`,
@@ -702,16 +748,268 @@ export const Z1: MillProfile = {
   },
 };
 
-/** The only supported MILL machine. A second one is configuration here, not a refactor elsewhere. */
-export const MACHINES: Readonly<Record<string, MillProfile>> = { Z1 };
+/**
+ * The Carvera Air's shipped coordinate frame (#773), from Makera's own Carvera Controller
+ * (`github.com/MakeraInc/CarveraController`, `src/config.txt`, commit
+ * `3914c912452f83fbd5b5d90c730cb78795198438`). That file is the Carvera Air model's shipped
+ * user-settings document — its own `wifi.machine_name CARVERA_AIR_Lab_2` names the model, and its
+ * `worksize_x/y` (300 × 200) agree with the library database's CA1 row digit for digit, which is
+ * the consistency check the anchors do not have. The firmware's `ATCHandler.cpp` carries the same
+ * model's toolrack defaults (`-108` / `126` / `196`, lines 1579–1583), and its rotation offsets
+ * (41.5 / 82.5 / 23 here, 30 / 82.5 / 23 as the firmware default) are the controller file's
+ * newer values.
+ *
+ * NOT THIS Z1's EXPORT: Studio's `ControllerConfig.txt` on this machine carries the Z1's own
+ * numbers (anchor1 −190.89 / −193.83, clearance_z −3.0, rotation −7.5 / 69 / 17) — the values this
+ * file already records as THIS machine's reads — so it was not used for a Carvera. A stock Air's
+ * own `/sd/config.txt` may have been calibrated away from these shipped defaults; that read is
+ * #279's override, and it is not held here.
+ */
+export const CA1_FRAME: CoordinateFrame = {
+  anchor1: [-287.51, -202.11], // CarveraController src/config.txt @ 3914c912
+  anchor2Offset: [88.5, 45.0], // the same file; identical on the Z1, the frame shape is the family's
+  toolrackOffset: [126.0, 196.0], // the same file; the firmware's CA1 defaults agree (ATCHandler.cpp:1579-1583)
+  clearanceXY: [-5.0, -21.0], // the same file
+  clearanceZ: -3.0, // the same file
+  toolrackZ: -108, // the same file; the firmware's CA1 default agrees
+};
+
+/** The shipped Air frame's derived positions — `deriveCoordinateFrame` is the only thing that makes them. */
+const CA1_DATUMS = deriveCoordinateFrame(CA1_FRAME, CA1_DERIVATION_OFFSETS);
+
+/**
+ * The Makera Carvera Air (#773): the second FRAMED mill.
+ *
+ * `t_MachineType` (read 2026-10-29, the CA1 row): 300 × 200 × 130, rotary ⌀92 × 200, no ATC,
+ * 3000 mm/min, 13 000 RPM. The shipped frame and motion settings are the Carvera Controller's
+ * `src/config.txt` at 3914c912: the rates and acceleration, the probe feeds, safe Z and the soft
+ * endstops.
+ *
+ * WHAT IS NULL, RATHER THAN COPIED FROM THE Z1: the axes' steps-per-mm and the rotary's
+ * steps-per-degree and homing direction. The user-settings file states none of them, and nothing
+ * else we hold does; a controller read against a real Air is what fills them.
+ *
+ * WHAT IS FALSE, AND IS NOT SILENCE: this app's accessory words are the Z1's (`M331`/`M332` and
+ * their sub-codes). The Carvera's vacuum is `M801`/`M802` — a different machine's controls, which
+ * this app does not drive — so `vacuum`, `air` and `antistatic` are false here because the post
+ * must not speak them at a Carvera, not because the machine lacks them. `rotary` is true: the
+ * library row states the module's envelope. `laser` is false: no source states one is fitted.
+ *
+ * The dialect is the shared Makera firmware's (MakeraZ1Firmware @ 8ae81f3 carries the
+ * `CARVERA_AIR` branches beside the Z1's), read off that firmware's parser and its own G-code
+ * vocabulary — a family figure, NOT verified on a Carvera Air.
+ */
+export const CARVERA_AIR: MillProfile = {
+  id: 'CA1',
+  name: 'Makera Carvera Air',
+  process: 'mill',
+  frameState: 'read',
+  materials: MAKERA_MATERIALS,
+  envelope: { x: { min: -300, max: 0 }, y: { min: -200, max: 0 }, z: { min: -130, max: 0 } },
+  maxCutFeed: 3000,
+  // CarveraController src/config.txt @ 3914c912: alpha/beta_max_rate 3000, gamma_max_rate 2000,
+  // acceleration 150. Shipped settings, not a stopwatch — the estimate's own label says so.
+  rapidEstimate: {
+    xyMmPerMin: 3000,
+    zMmPerMin: 2000,
+    accelMmPerS2: 150,
+    source: 'CarveraController src/config.txt @ 3914c912 — shipped settings, not measured',
+  },
+  axisSteps: null,
+  maxRpm: 13000,
+  sensorOffsetFromAnchor1: CA1_DERIVATION_OFFSETS.sensorOffsetFromAnchor1,
+  changePositionExtraX: CA1_DERIVATION_OFFSETS.changePositionExtraX,
+  sources: {
+    maxCutFeed:
+      'makera_library.db t_MachineType, Carvera Air (CA1) row, read 2026-10-29 (vendor figure, not measured)',
+    maxRpm:
+      'makera_library.db t_MachineType, Carvera Air (CA1) row, read 2026-10-29 (vendor figure, not measured)',
+    sensorOffsetFromAnchor1:
+      'MakeraZ1Firmware ATCHandler.cpp, the CARVERA_AIR manual-change arm (anchor1 + 280 on X, + 196 on Y), commit 8ae81f3 — the firmware’s own model constant',
+    changePositionExtraX:
+      'MakeraZ1Firmware ATCHandler.cpp:134 (+132 on X for every model), commit 8ae81f3',
+  },
+  // t_MachineType CA1: isATC 0, ATC_Number 0.
+  hasATC: false,
+  toolSlots: 0,
+  // CarveraController src/config.txt @ 3914c912: soft_endstop.enable true, x_min -302, y_min
+  // -212, z_min -121 — the same 2/12/9 mm past the envelope the Z1's machine reads hold.
+  softEndstop: {
+    enabled: true,
+    xMin: -302.0,
+    yMin: -212.0,
+    zMin: -121.0,
+    source: 'CarveraController src/config.txt @ 3914c912 — shipped settings, not measured',
+  },
+  capabilities: { rotary: true, laser: false, air: false, vacuum: false, antistatic: false },
+  dialect: { acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 },
+  anchor1: CA1_FRAME.anchor1,
+  anchor2: CA1_DATUMS.anchor2,
+  toolChange: {
+    clearanceZ: CA1_FRAME.clearanceZ,
+    clearanceXY: CA1_FRAME.clearanceXY,
+    changePosition: CA1_DATUMS.changePosition,
+    safeZ: -20.0, // atc.safe_z_mm
+    sensor: CA1_DATUMS.sensor,
+    sensorZ: CA1_FRAME.toolrackZ,
+    probeFastFeed: 500, // atc.probe.fast_rate_mm_m
+    probeSlowFeed: 100, // atc.probe.slow_rate_mm_m
+    probeRetract: 2, // atc.probe.retract_mm (the Z1's is 1)
+    sources: {
+      safeZ: 'CarveraController src/config.txt @ 3914c912 (atc.safe_z_mm -20.0) — shipped settings',
+      probeFastFeed: 'CarveraController src/config.txt @ 3914c912 (atc.probe.fast_rate_mm_m 500)',
+      probeSlowFeed: 'CarveraController src/config.txt @ 3914c912 (atc.probe.slow_rate_mm_m 100)',
+      probeRetract: 'CarveraController src/config.txt @ 3914c912 (atc.probe.retract_mm 2)',
+    },
+  },
+  holder: null,
+  // The rotary module's envelope is the library row's; the A rate and acceleration are the
+  // controller file's shipped settings; the steps and homing are unread (see the profile note).
+  rotary: {
+    axis: 'A',
+    parent: 'y',
+    envelope: { diameter: 92, length: 200 },
+    stepsPerDegree: null,
+    maxRate: 2400,
+    acceleration: 360,
+    homing: null,
+    unwind: 'G92.4 A S',
+    sources: {
+      envelope:
+        'Makera’s own figure (t_MachineType CA1 row: range_A_Diameter 92, range_A_Length 200 — the library database, read 2026-10-29) — not measured',
+      stepsPerDegree:
+        'not read from a Carvera Air: its shipped user-settings file states no steps per degree, and no other source we hold does',
+      maxRate: 'CarveraController src/config.txt @ 3914c912 (delta_max_rate 2400) — shipped settings',
+      acceleration: 'CarveraController src/config.txt @ 3914c912 (delta_acceleration 360) — shipped settings',
+      homing: 'not read from a Carvera Air: its shipped user-settings file states no homing direction',
+      unwind:
+        'the shared Makera firmware (MakeraZ1Firmware Robot.cpp:667, G92.4) @ 8ae81f3 — not verified on a Carvera Air',
+    },
+  },
+};
+
+/**
+ * A mill MODEL whose controller frame has never been read (#773): the vendor's own database row,
+ * and nothing that needs a position.
+ *
+ * Deliberately not a {@link MillProfile}. Every position the app drives to — the tool-change park,
+ * the length probe, `G28`'s clearance, the soft endstops — comes from a controller configuration,
+ * and inventing one is how a head is driven into a fixture. A location may hold this model (a shop
+ * can own a Carvera), the picker may name it, and anything that needs a frame answers
+ * {@link MACHINE_FRAME_UNREAD} instead.
+ */
+export interface MillModel extends MachineIdentity {
+  process: 'mill';
+  frameState: 'unread';
+  materials: StockMaterial[];
+  envelope: { x: AxisRange; y: AxisRange; z: AxisRange };
+  maxCutFeed: number;
+  maxRpm: number;
+  hasATC: boolean;
+  toolSlots: number;
+  /** The rotary module's stock envelope, from the same row; absent when the row names none. */
+  rotaryEnvelope?: { diameter: number; length: number };
+  sources: {
+    envelope: string;
+    maxCutFeed: string;
+    maxRpm: string;
+    atc: string;
+    rotaryEnvelope: string;
+  };
+}
+
+/** A mill: a framed {@link MillProfile}, or a {@link MillModel} with no frame yet. */
+export type Mill = MillProfile | MillModel;
+
+/**
+ * The refusal every frame-dependent path gives a machine whose controller frame has not been read
+ * (#773). It names the fix — one connection, which runs the same `config-get sd` read the Z1's
+ * #279 calibration runs — rather than a generic "unsupported".
+ */
+export const MACHINE_FRAME_UNREAD =
+  "This Carvera's frame has not been read from the machine yet; connect it once.";
+
+/** The refusal for a model with no frame, or null when the model carries one. */
+export function machineFrameProblem(model: Mill): string | null {
+  return model.frameState === 'unread' ? MACHINE_FRAME_UNREAD : null;
+}
+
+/** A mill model by id — framed or not — or undefined for an id this build does not know. */
+export function millModelById(id: string | null | undefined): Mill | undefined {
+  return id == null ? undefined : MILL_MODELS[id];
+}
+
+/** The frame refusal for an id: null for a framed or UNKNOWN id, the sentence for an unread one. */
+export function machineFrameProblemById(id: string | null | undefined): string | null {
+  const model = millModelById(id);
+  return model === undefined ? null : machineFrameProblem(model);
+}
+
+/**
+ * The Makera Carvera (#773) — the vendor's row, and nothing else.
+ *
+ * `t_MachineType` (read 2026-10-29, the Carvera/C1 row): 320 × 240 × 140, rotary ⌀92 × 240, ATC
+ * with 6 tools, 3000 mm/min, 15 000 RPM.
+ *
+ * NO FRAME, ON PURPOSE. No `coordinate.*` group has ever been read from a Carvera, and the other
+ * numbers within reach are not it: Studio's `ControllerConfig.txt` on this machine is the Z1's own
+ * export, and the open-source Controller's `CNC.py` fallbacks (anchor1 −360.158, worksize
+ * 340 × 240, `travel_x 340`) are a program default that contradicts the library row and is not a
+ * machine read. So this is a {@link MillModel}: anything that needs a position refuses by name
+ * until the #279 config read runs against a connected Carvera.
+ */
+export const CARVERA: MillModel = {
+  id: 'C1',
+  name: 'Makera Carvera',
+  process: 'mill',
+  frameState: 'unread',
+  materials: MAKERA_MATERIALS,
+  envelope: { x: { min: -320, max: 0 }, y: { min: -240, max: 0 }, z: { min: -140, max: 0 } },
+  maxCutFeed: 3000,
+  maxRpm: 15000,
+  hasATC: true,
+  toolSlots: 6,
+  rotaryEnvelope: { diameter: 92, length: 240 },
+  sources: {
+    envelope:
+      'makera_library.db t_MachineType, Carvera (C1) row: range 320 × 240 × 140, read 2026-10-29 (vendor figure, not measured)',
+    maxCutFeed:
+      'makera_library.db t_MachineType, Carvera (C1) row (maxFeedRate 3000), read 2026-10-29',
+    maxRpm: 'makera_library.db t_MachineType, Carvera (C1) row (maxRPM 15000), read 2026-10-29',
+    atc: 'makera_library.db t_MachineType, Carvera (C1) row (isATC 1, ATC_Number 6), read 2026-10-29',
+    rotaryEnvelope:
+      'makera_library.db t_MachineType, Carvera (C1) row (range_A_Diameter 92, range_A_Length 240), read 2026-10-29',
+  },
+};
+
+/**
+ * The mills whose controller frame is established: the only machines a job may be written for.
+ * The Z1 and the Carvera Air are FRAMED; a {@link MillModel} is not in here, so no id lookup that
+ * returns a `MillProfile` can ever hand back a machine whose positions are unknown.
+ */
+export const MACHINES: Readonly<Record<string, MillProfile>> = {
+  [Z1.id]: Z1,
+  [CARVERA_AIR.id]: CARVERA_AIR,
+};
+
+/**
+ * Every mill model the app knows, framed or not: what the machine picker, the location's machine
+ * records and the job schema read when they only need to say WHICH machine is meant.
+ */
+export const MILL_MODELS: Readonly<Record<string, Mill>> = {
+  [Z1.id]: Z1,
+  [CARVERA_AIR.id]: CARVERA_AIR,
+  [CARVERA.id]: CARVERA,
+};
 
 /**
  * The smallest X/Y move the controller can make, mm: one step of the axes (#221). Read from the
  * MACHINE RECORD's `axisSteps`, so a second machine (or a real read of this one) changes the V
  * groove bound by changing one field, and no shop setting can move it.
  */
-export function minimumXyStepMm(machine: MillProfile): number {
-  return 1 / machine.axisSteps.xyPerMm;
+export function minimumXyStepMm(machine: MillProfile): number | null {
+  const steps = machine.axisSteps;
+  return steps === null ? null : 1 / steps.xyPerMm;
 }
 
 /**
@@ -740,12 +1038,13 @@ export const PRINTER_PROFILES: readonly PrinterProfile[] = [
 /**
  * A machine of either process. The union is what makes the discriminant useful: a caller that
  * only needs the identity can take a `Machine`, and a caller that needs a spindle ceiling takes
- * a `MillProfile` and is told at compile time it is a mill.
+ * a `Mill` and is told at compile time it is a mill — with a `MillProfile` still needed by
+ * anything that reads a POSITION (#773).
  */
-export type Machine = MillProfile | PrinterProfile;
+export type Machine = Mill | PrinterProfile;
 
-/** Every machine we know, of any process (#184). */
-export const ALL_MACHINES: readonly Machine[] = [Z1, ...PRINTER_PROFILES];
+/** Every machine we know, of any process (#184), framed or not. */
+export const ALL_MACHINES: readonly Machine[] = [Z1, CARVERA_AIR, CARVERA, ...PRINTER_PROFILES];
 
 export interface ClampDiagnostic {
   severity: 'error' | 'warning';
@@ -830,9 +1129,9 @@ export function insideEnvelope(machine: MillProfile, p: [number | null, number |
 // outside the code (a project, an import, a second machine) an unvalidated shape would silently
 // lose fields. Same pattern as `toolLibrary.ts`: validate rather than trust.
 //
-// `hasATC: z.literal(false)` and `toolSlots: z.literal(0)` are deliberate, not laziness: the
-// type itself promises a manual-change mill (#183, Z1-only), so a profile with an ATC is not a
-// profile this schema accepts. A machine that has one adds a subtype, not a looser literal.
+// `hasATC`/`toolSlots` were literal `false`/`0` while the Z1 was the only mill (#183); #773 brings
+// in the Carvera, whose changer holds six tools, so they are the numbers the profile states. The
+// schema still refuses a HALF-statement: `hasATC` true with no slots, or slots on a manual machine.
 
 const finite = z.number().finite();
 const vec2 = z.tuple([finite, finite]);
@@ -859,10 +1158,10 @@ const rotarySchema = z.object({
   axis: z.literal('A'),
   parent: z.literal('y'),
   envelope: z.object({ diameter: finite.positive(), length: finite.positive() }),
-  stepsPerDegree: finite.positive(),
+  stepsPerDegree: finite.positive().nullable(),
   maxRate: finite.positive(),
   acceleration: finite.positive(),
-  homing: z.literal('home_to_min'),
+  homing: z.literal('home_to_min').nullable(),
   unwind: z.literal('G92.4 A S'),
   sources: z.object({
     envelope: z.string().min(1),
@@ -878,6 +1177,7 @@ export const millProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   process: z.literal('mill'),
+  frameState: z.literal('read'),
   // #347 — the profile's own material claim, parsed against the ONE vocabulary
   // (`engine/cnc/materials.ts`), so a profile's parse output is a `MillProfile` rather than a shape
   // with a `string[]` where the materials go. A word this build does not know fails the parse and is
@@ -900,14 +1200,17 @@ export const millProfileSchema = z.object({
     source: z.string().min(1),
   }),
   // #221 — the axes' own step resolution. Positive like every other motion number; a zero would
-  // claim infinitely fine steps, which is a claim about hardware this field cannot make.
-  axisSteps: z.object({
-    xyPerMm: finite.positive(),
-    zPerMm: finite.positive(),
-    source: z.string().min(1),
-  }),
+  // claim infinitely fine steps, which is a claim about hardware this field cannot make. `null`
+  // where the controller's configuration has never been read (#773), which a reader must handle.
+  axisSteps: z
+    .object({
+      xyPerMm: finite.positive(),
+      zPerMm: finite.positive(),
+      source: z.string().min(1),
+    })
+    .nullable(),
   maxRpm: finite.positive(),
-  sensorOffsetFromAnchor1: finite,
+  sensorOffsetFromAnchor1: vec2,
   changePositionExtraX: finite,
   // #448 — a profile that states a limit or a derivation constant without its provenance does
   // not parse, for the same reason a rotary field without a source does not.
@@ -917,8 +1220,8 @@ export const millProfileSchema = z.object({
     sensorOffsetFromAnchor1: z.string().min(1),
     changePositionExtraX: z.string().min(1),
   }),
-  hasATC: z.literal(false),
-  toolSlots: z.literal(0),
+  hasATC: z.boolean(),
+  toolSlots: z.number().int().nonnegative(),
   softEndstop: softEndstopSchema,
   capabilities: z.object({ rotary: z.boolean(), laser: z.boolean(), air: z.boolean(), vacuum: z.boolean(), antistatic: z.boolean() }),
   dialect: z.object({
@@ -959,6 +1262,54 @@ export const millProfileSchema = z.object({
       source: z.string().min(1),
     })
     .optional(),
+}).superRefine((profile, ctx) => {
+  // #773 — the two fields are one fact. A changer with no slots names no tool it can hold, and a
+  // manual machine that lists slots would be read as one it can change into.
+  if (profile.hasATC && profile.toolSlots <= 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['toolSlots'], message: 'a machine with a tool changer states its slot count' });
+  }
+  if (!profile.hasATC && profile.toolSlots !== 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['toolSlots'], message: 'a manual tool change lists no slots' });
+  }
+});
+
+/**
+ * A mill model with no controller frame yet (#773): the vendor row, and none of the positions.
+ * The `frameState` value is the whole point — a profile-shaped object cannot be mistaken for a
+ * model that carries a frame, and vice versa.
+ */
+export const millModelSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  process: z.literal('mill'),
+  frameState: z.literal('unread'),
+  materials: z.array(z.enum(STOCK_MATERIALS)),
+  envelope: z.object({
+    x: z.object({ min: finite, max: finite }),
+    y: z.object({ min: finite, max: finite }),
+    z: z.object({ min: finite, max: finite }),
+  }),
+  maxCutFeed: finite.positive(),
+  maxRpm: finite.positive(),
+  hasATC: z.boolean(),
+  toolSlots: z.number().int().nonnegative(),
+  rotaryEnvelope: z.object({ diameter: finite.positive(), length: finite.positive() }).optional(),
+  sources: z.object({
+    envelope: z.string().min(1),
+    maxCutFeed: z.string().min(1),
+    maxRpm: z.string().min(1),
+    atc: z.string().min(1),
+    rotaryEnvelope: z.string().min(1),
+  }),
+}).superRefine((model, ctx) => {
+  // The pair is one fact on a row too (#773): a 6-slot changer is a changer, and a manual machine
+  // lists no slots.
+  if (model.hasATC && model.toolSlots <= 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['toolSlots'], message: 'a machine with a tool changer states its slot count' });
+  }
+  if (!model.hasATC && model.toolSlots !== 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['toolSlots'], message: 'a manual tool change lists no slots' });
+  }
 });
 
 export const printerProfileSchema = z.object({
@@ -969,5 +1320,9 @@ export const printerProfileSchema = z.object({
   nozzle: finite.positive(),
 });
 
-/** Any machine, discriminated on `process`. */
-export const machineSchema = z.discriminatedUnion('process', [millProfileSchema, printerProfileSchema]);
+/**
+ * Any machine. A plain union rather than `discriminatedUnion('process')` since #773: two arms are
+ * mills, and the discriminant that separates them is `frameState` — a framed profile parses first,
+ * and its required positions are what a model without a frame fails.
+ */
+export const machineSchema = z.union([millProfileSchema, millModelSchema, printerProfileSchema]);

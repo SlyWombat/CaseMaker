@@ -37,7 +37,7 @@ import { engravedFaceWorkZ, partToWork } from '@/engine/cnc/frames';
 import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { validateVise } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
-import { Z1 } from '@/engine/cnc/machine';
+import { MACHINE_FRAME_UNREAD, Z1 } from '@/engine/cnc/machine';
 
 const KEY = 'casemaker.engraveJob.v3';
 
@@ -293,13 +293,16 @@ describe('EngraveJob schema (#200)', () => {
     expect(parsed.errors.some((e) => e.includes('labels[0].depth'))).toBe(true);
   });
 
-  it('uses the Z1 envelope read from the machine profile, not a retyped 200/200/100', () => {
+  it('bounds the stock by the job’s OWN machine’s envelope, read from the profile', () => {
+    // #773 — the fields carry the widest machine's bound (so a Carvera Air document can be
+    // written), and the machine the job names supplies the bound that matters: 201 mm is one past
+    // the Z1's own X travel, and the sentence says so with the machine's name and number.
     const job = defaultEngraveJob();
     job.stock.length = Z1.envelope.x.max - Z1.envelope.x.min + 1;
     const parsed = parseEngraveJob(job);
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.errors.some((e) => e.includes('stock.length'))).toBe(true);
+    expect(parsed.errors.join(' ')).toContain("201 mm long is more than the Makera Z1's 200 mm X travel");
   });
 
   it('carries the job’s machine and a profile-declared material through a round trip (#347)', () => {
@@ -1658,3 +1661,38 @@ describe('JobSetup (#419 J2)', () => {
   });
 });
 
+
+// #773 — A JOB NAMES ITS OWN MACHINE. The document's machine decides the stock bound (the fields
+// carry the widest machine's, since they cannot see `machineId`), and a model whose controller
+// frame has never been read refuses the document BY NAME — the Z1's positions are exactly the
+// numbers that would be wrong for a Carvera, so it is never coerced to them.
+describe('#773 a job names its own machine', () => {
+  const withPatch = (patch: Record<string, unknown>): unknown => {
+    const job = JSON.parse(JSON.stringify(defaultEngraveJob())) as Record<string, unknown>;
+    return { ...job, ...patch };
+  };
+  const stockOf = (patch: { length?: number; width?: number; thickness?: number }): Record<string, unknown> => ({
+    ...(defaultEngraveJob().stock as unknown as Record<string, unknown>),
+    ...patch,
+  });
+
+  it('takes a Carvera Air job, with stock the Z1 could not hold', () => {
+    const parsed = parseEngraveJob(withPatch({ machineId: 'CA1', stock: stockOf({ length: 250, width: 150 }) }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.job.machineId).toBe('CA1');
+  });
+
+  it('refuses stock beyond the job’s OWN machine, even inside the wider field bound', () => {
+    const parsed = parseEngraveJob(withPatch({ machineId: 'Z1', stock: stockOf({ length: 250 }) }));
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.errors.join(' ')).toContain("250 mm long is more than the Makera Z1's 200 mm X travel");
+    }
+  });
+
+  it('refuses a Carvera job by name: its frame has not been read', () => {
+    const parsed = parseEngraveJob(withPatch({ machineId: 'C1' }));
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.errors).toEqual([MACHINE_FRAME_UNREAD]);
+  });
+});

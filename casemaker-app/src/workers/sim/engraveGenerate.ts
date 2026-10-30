@@ -1370,14 +1370,30 @@ function vCarveFindings(
       });
     }
 
-    const narrow = vCarveGrooveRefusal(plane, minimumXyStepMm(machine));
-    if (narrow !== null) {
+    // #773 — a machine whose controller configuration has never been read has no step to judge
+    // the groove against. The check cannot be made, and the finding says so instead of passing
+    // silently: the Carvera Air's shipped user settings state rates but not steps-per-mm.
+    const stepMm = minimumXyStepMm(machine);
+    if (stepMm === null) {
       findings.push({
-        severity: 'error',
-        code: 'vcarve-groove-too-narrow',
+        severity: 'warning',
+        code: 'machine-steps-unread',
         labelId: item.id,
-        message: `${item.name}: ${narrow}.`,
+        message:
+          `${item.name}: this machine's step resolution has not been read from it, so the V ` +
+          `groove's width cannot be checked against it; connect the machine once to read its ` +
+          'configuration.',
       });
+    } else {
+      const narrow = vCarveGrooveRefusal(plane, stepMm);
+      if (narrow !== null) {
+        findings.push({
+          severity: 'error',
+          code: 'vcarve-groove-too-narrow',
+          labelId: item.id,
+          message: `${item.name}: ${narrow}.`,
+        });
+      }
     }
   }
 

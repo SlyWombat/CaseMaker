@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { verifyProgram, type VerifyContext } from '@/engine/cnc/verify';
 import { stubSetup, type Setup } from '@/engine/cnc/setup';
 import { flatEndMill } from '@/engine/cnc/tool';
-import { Z1 } from '@/engine/cnc/machine';
+import { CARVERA_AIR, Z1 } from '@/engine/cnc/machine';
 
 const CODE =
   /axis-crossing|rotary-y-off-axis|wrap-into-clamp|wrap-off-free-end|rotary-rapid-engaged|rapid-into-chuck|stock-exceeds-module|rotary-unsupported/;
@@ -207,6 +207,24 @@ describe('the rotary refusals — operator words, at the step', () => {
     expect(tooLong).toBeDefined();
     expect(tooLong!.message).toContain('⌀20 × 160 mm');
     expect(tooLong!.message).not.toMatch(CODE);
+  });
+
+  it('the module’s envelope is the MACHINE’s: the Carvera Air holds what the Z1 refuses (#773)', () => {
+    const body = ['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G1 X30 F500'];
+    const over = { setup: cyl(90, 100), rotary: { radius: 45, stickout: 85, tailstock: true } };
+    // ⌀90 does not fit the Z1's ⌀80 × 150 module...
+    expect(finding(body, 'stock-exceeds-module', over)).toBeDefined();
+    // ...and does fit the Air's ⌀92 × 200 one, so nothing is refused about the module.
+    expect(finding(body, 'stock-exceeds-module', { ...over, machine: CARVERA_AIR })).toBeUndefined();
+    // The sentence names the Air's own figures when something really is too big.
+    const tooFat = finding(body, 'stock-exceeds-module', {
+      ...over,
+      setup: cyl(95, 100),
+      machine: CARVERA_AIR,
+      rotary: { radius: 47.5, stickout: 85, tailstock: true },
+    });
+    expect(tooFat).toBeDefined();
+    expect(tooFat!.message).toContain("does not fit the rotary's ⌀92 × 200 mm");
   });
 });
 

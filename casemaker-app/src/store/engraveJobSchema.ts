@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { MACHINES, Z1 } from '@/engine/cnc/machine';
+import { MACHINE_FRAME_UNREAD, MILL_MODELS, Z1, machineFrameProblem, type AxisRange } from '@/engine/cnc/machine';
 import { STOCK_MATERIALS } from '@/engine/cnc/materials';
 import { ToolSchema } from '@/engine/cnc/toolLibrary';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
 import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
-import { FACING_DEPTH_MAX_MM } from '@/engine/cnc/stockStart';
+import { FACING_DEPTH_MAX_MM, boxProblem } from '@/engine/cnc/stockStart';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import { FACES, type Face } from '@/engine/cnc/setups/types';
 import { MAX_LINE_POINTS, type EngraveJob } from '@/types/engraveJob';
@@ -31,31 +31,39 @@ import { newId } from '@/utils/id';
  */
 
 /**
- * The stock bounds ARE the Z1 work envelope, read rather than retyped (200 × 200 × 100). The
- * envelope runs negative in machine coordinates, so the usable size is max − min per axis.
+ * The FIELD-level stock bound, over every mill the app knows (#773): the widest machine's travel,
+ * so a Carvera Air's 300 mm blank is not refused by a Z1-sized field. The envelope runs negative
+ * in machine coordinates, so the usable size is max - min per axis.
  *
- * The Z1 is the only MILL this app models (#347), so these are every job's bounds today. When a
- * second machine lands they become ITS bounds and the job's own `machineId` picks which — the
- * schema cannot express a per-machine bound while there is one machine, and pretending otherwise
- * would be a limit no document has.
+ * The bound that MATTERS is the job's own machine's, and the stock fields cannot see `machineId`:
+ * `parseEngraveJob` checks the parsed stock against `MILL_MODELS[job.machineId]` after the branch
+ * parses, with the same sentence `boxProblem` gives the stock step. The field bound stays as the
+ * widest machine's so a document can be written for any machine this build models; it is never
+ * the only check.
  */
+const millTravel = (r: AxisRange): number => r.max - r.min;
 const STOCK_LIMITS = {
-  length: Z1.envelope.x.max - Z1.envelope.x.min,
-  width: Z1.envelope.y.max - Z1.envelope.y.min,
-  thickness: Z1.envelope.z.max - Z1.envelope.z.min,
+  length: Math.max(...Object.values(MILL_MODELS).map((m) => millTravel(m.envelope.x))),
+  width: Math.max(...Object.values(MILL_MODELS).map((m) => millTravel(m.envelope.y))),
+  thickness: Math.max(...Object.values(MILL_MODELS).map((m) => millTravel(m.envelope.z))),
 } as const;
 
 /**
- * The ids the job may name (#347). Read off `MACHINES` rather than retyped, so a second mill is an
- * entry there and nothing here — and `.catch(Z1.id)` rather than a plain enum, because a document
- * is the user's own file and must still LOAD: a job naming a machine a later build added comes back
- * as the one this build has, which the panel and the run sheet then state plainly. (The alternative
- * — failing the parse — would throw away a whole job over a field that has a correct answer.)
+ * The ids the job may name (#347, #773). Read off `MILL_MODELS` rather than retyped, so a machine
+ * is an entry there and nothing here — and `.catch(Z1.id)` rather than a plain enum, because a
+ * document is the user's own file and must still LOAD: a job naming a machine a later build added
+ * comes back as the one this build has, which the panel and the run sheet then state plainly.
+ *
+ * A model whose FRAME has never been read is in the enum and is refused by name after the branch
+ * parses (`parseEngraveJob`), never coerced to the Z1's frame: the Z1's positions are exactly the
+ * numbers that would be wrong for a Carvera.
  */
 const machineIdSchema = z
-  .enum(Object.keys(MACHINES) as [string, ...string[]])
+  .enum(Object.keys(MILL_MODELS) as [string, ...string[]])
   .catch(Z1.id)
-  .describe('The mill the job is cut on; the build keeps the one machine it models.');
+  .describe(
+    'The mill the job is cut on. A machine whose controller frame has not been read refuses the job when it loads.',
+  );
 
 /** The largest a label's cap height may be, mm. A blank this size is 12 mm thick; 100 mm is a guard, not a physical limit. */
 const MAX_LABEL_SIZE = 100;
@@ -1345,19 +1353,19 @@ const stockObjectSchema = z
       .finite()
       .positive()
       .max(STOCK_LIMITS.length)
-      .describe('Stock length along X, in millimetres (the machine limit is 200).'),
+      .describe("Stock length along X, in millimetres (bounded by the job's own machine's X travel)."),
     width: z
       .number()
       .finite()
       .positive()
       .max(STOCK_LIMITS.width)
-      .describe('Stock width along Y, in millimetres (the machine limit is 200).'),
+      .describe("Stock width along Y, in millimetres (bounded by the job's own machine's Y travel)."),
     thickness: z
       .number()
       .finite()
       .positive()
       .max(STOCK_LIMITS.thickness)
-      .describe('Stock thickness along Z, in millimetres (the machine limit is 100).'),
+      .describe("Stock thickness along Z, in millimetres (bounded by the job's own machine's Z travel)."),
     material: z
       .enum(STOCK_MATERIALS)
       .describe('Stock material; selects the feeds/speeds table the job starts from.'),
@@ -2095,8 +2103,8 @@ const engraveJobV1Schema = z.object({
   schemaVersion: z.literal(1).describe('Document schema version.'),
   name: z.string().describe('Human-readable job name.'),
   // #347 — on the BASE version, not v2, because that is where every job gets it: the field is
-  // DEFAULTED to the one mill this build models (`machineIdSchema`'s `.catch`), so a v1 job and a v2
-  // job written before the field existed both load carrying `'Z1'`. Unlike the optional keys below
+  // DEFAULTED to the Z1 (`machineIdSchema`'s `.catch`), so a v1 job and a v2 job written before the
+  // field existed both load carrying `'Z1'` — the machine the app shipped with. Unlike the optional keys below
   // it is never absent, because a job has a machine whether or not anyone wrote one down.
   machineId: machineIdSchema,
   stock: stockSchema.describe('The blank being cut.'),
@@ -2425,7 +2433,21 @@ export function parseEngraveJob(json: unknown): ParseEngraveJobResult {
   const branch =
     rawVersion === 1 ? engraveJobV1Schema : rawVersion === 2 ? engraveJobV2Schema : engraveJobV3Schema;
   const result = branch.safeParse(json);
-  if (result.success) return { ok: true, job: migrateParsedJob(result.data) };
+  if (result.success) {
+    // #773 — the job's own machine, checked once the document has parsed: a machine whose controller
+    // frame has never been read cannot be written for (the Z1's positions would be the wrong ones),
+    // and the stock is measured against THAT machine's travel, not the widest machine's bound the
+    // fields carry. The sentence is the stock step's own (`boxProblem`), so the load and the form
+    // agree.
+    const model = MILL_MODELS[result.data.machineId];
+    if (model !== undefined) {
+      if (machineFrameProblem(model) !== null) return { ok: false, errors: [MACHINE_FRAME_UNREAD] };
+      const stock = result.data.stock;
+      const travel = boxProblem({ length: stock.length, width: stock.width, thickness: stock.thickness }, model);
+      if (travel !== null) return { ok: false, errors: [`stock: ${travel}`] };
+    }
+    return { ok: true, job: migrateParsedJob(result.data) };
+  }
   return {
     ok: false,
     errors: result.error.issues.flatMap(formatIssue),

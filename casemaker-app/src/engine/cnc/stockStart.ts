@@ -304,8 +304,14 @@ export function formProblem(form: string): string | null {
   return `"${form}" is not a stock form a job can start from`;
 }
 
+/**
+ * The machine facts the size checks read: a name and a work envelope. A framed profile and an
+ * unframed vendor row (#773) both satisfy it — the checks never touch a position.
+ */
+export type SizedMachine = Pick<MillProfile, 'name' | 'envelope'>;
+
 /** The machine's travel on each axis, mm. */
-function travel(machine: MillProfile): StockBox {
+function travel(machine: SizedMachine): StockBox {
   const e = machine.envelope;
   return {
     length: Number((e.x.max - e.x.min).toFixed(3)),
@@ -318,7 +324,7 @@ function travel(machine: MillProfile): StockBox {
  * Why a box will not go on this machine, naming the axis, or null (§5.1 validation). A dimension that
  * is not a positive number is named first: it is the one a typed draft gets wrong.
  */
-export function boxProblem(box: StockBox, machine: MillProfile): string | null {
+export function boxProblem(box: StockBox, machine: SizedMachine): string | null {
   const names = { length: 'length', width: 'width', thickness: 'thickness' } as const;
   for (const key of ['length', 'width', 'thickness'] as const) {
     const v = box[key];
