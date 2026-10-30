@@ -1,0 +1,9 @@
+M48
+; a routed slot: refused by name (#743 P-3)
+METRIC,TZ
+T1C0.800
+%
+T1
+X5.0Y5.0
+X5.0Y5.0G85X10.0Y5.0
+M30
