@@ -11,9 +11,12 @@
  * digit format is REFUSED rather than guessed: the same digits are 15.0000 mm under `TZ` and
  * 0.0015 mm under `LZ`, so a guess would be a hole in the wrong place.
  *
- * Slots are refused by name, as the design decides (Q9): `G85` (slot mode) and routed slots
- * (`M15`/`M16`) are not read here. Incremental coordinates (`G91`) are refused too — every file
- * this app has met is absolute.
+ * SLOTS ARE KEPT, NOT REFUSED (the maintainer's note, 2026-10-30). KiCad and EasyEDA write oval
+ * connector holes as `G85` slots, and some fabs' files route with `M15`/`M16`; refusing the whole
+ * file for one oval hole would lose the board. A slot is read as what it is — two endpoints and
+ * the tool's width — and reported beside the round holes, so the caller can cut it or say it was
+ * skipped. A routed polyline becomes one slot PER SEGMENT, which is what the machine would do.
+ * Incremental coordinates (`G91`) are still refused: every file this app has met is absolute.
  */
 
 export interface ExcellonHole {
@@ -25,9 +28,19 @@ export interface ExcellonHole {
   tool: number;
 }
 
+/** A milled oval: the two endpoints of the tool's centre path, and the tool's width. */
+export interface ExcellonSlot {
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+  /** The tool's diameter, mm — the slot's width. */
+  width: number;
+  tool: number;
+}
+
 export interface ExcellonReadOk {
   ok: true;
   holes: ExcellonHole[];
+  slots: ExcellonSlot[];
   notes: string[];
   /** The file's own unit, for the import summary. */
   units: 'mm' | 'inch';
@@ -66,6 +79,9 @@ function parse(text: string): ExcellonRead {
   let sawHeader = false;
   let inHeader = false;
   const holes: ExcellonHole[] = [];
+  const slots: ExcellonSlot[] = [];
+  /** Inside an `M15`…`M16` routed slot, the point the tool went down at and where it is now. */
+  let routing: { tool: number; lastX: number; lastY: number } | null = null;
 
   const scale = (): number => (units === 'inch' ? 25.4 : 1);
 
@@ -142,8 +158,43 @@ function parse(text: string): ExcellonRead {
       if (token === 'G90') continue;
       if (token === 'G05' || token === 'G81') continue;
       if (token === 'G91') refuse(lineNo, 'the file uses incremental coordinates (G91), which this import does not read');
-      if (token.includes('G85')) refuse(lineNo, 'the file routes slots (G85), which this import does not read');
-      if (token === 'M15' || token === 'M16') refuse(lineNo, 'the file routes a slot (M15/M16), which this import does not read');
+      if (token === 'M15') {
+        if (tool === null) refuse(lineNo, 'a slot is routed before any tool is selected');
+        if (x === null || y === null) refuse(lineNo, 'a routed slot starts before any point is stated');
+        routing = { tool, lastX: x, lastY: y };
+        continue;
+      }
+      if (token === 'M16') {
+        routing = null;
+        continue;
+      }
+      // A G85 slot: `X…Y…G85X…Y…` — the first pair is where the tool is, the second where the
+      // slot ends; the tool's diameter is its width.
+      if (token.includes('G85')) {
+        if (tool === null) refuse(lineNo, 'a slot is milled before any tool is selected');
+        const [start, end] = token.split('G85');
+        const readPair = (part: string | undefined, line: number): { x: number; y: number } => {
+          let px = x;
+          let py = y;
+          for (const m of (part ?? '').matchAll(/([XY])([-+]?[\d.]+)/g)) {
+            const v = coordinate(m[2] as string, line);
+            if (m[1] === 'X') px = v;
+            else py = v;
+          }
+          if (px === null || py === null) refuse(line, 'a G85 slot has a missing coordinate');
+          return { x: px, y: py };
+        };
+        const a = readPair(start, lineNo);
+        const b = readPair(end, lineNo);
+        x = a.x;
+        y = a.y;
+        const width = tools.get(tool);
+        if (width === undefined) refuse(lineNo, `tool T${tool} has no diameter`);
+        if (a.x !== b.x || a.y !== b.y) slots.push({ from: a, to: b, width, tool });
+        x = b.x;
+        y = b.y;
+        continue;
+      }
       if (token.startsWith('R')) refuse(lineNo, 'the file uses a repeat (R), which this import does not read');
       // A drill hit: X and Y (either may be omitted, keeping the last one).
       if (/^[XY]/.test(token)) {
@@ -160,7 +211,16 @@ function parse(text: string): ExcellonRead {
         if (x === null || y === null) refuse(lineNo, 'a hole has only one coordinate; the first drill needs both');
         const diameter = tools.get(tool);
         if (diameter === undefined) refuse(lineNo, `tool T${tool} has no diameter`);
-        holes.push({ x, y, diameter, tool });
+        if (routing !== null) {
+          // A moved point while the tool is DOWN is a routed slot segment, not another hole.
+          if (routing.lastX !== x || routing.lastY !== y) {
+            slots.push({ from: { x: routing.lastX, y: routing.lastY }, to: { x, y }, width: diameter, tool: routing.tool });
+          }
+          routing.lastX = x;
+          routing.lastY = y;
+        } else {
+          holes.push({ x, y, diameter, tool });
+        }
         continue;
       }
       refuse(lineNo, `“${token}” is not a command this import reads`);
@@ -170,6 +230,12 @@ function parse(text: string): ExcellonRead {
   if (!sawHeader) return { ok: false, error: 'the file has no M48 header, so its unit and tools cannot be read' };
   if (units === null) return { ok: false, error: 'the file states no unit (METRIC or INCH), so its sizes cannot be read' };
   if (tools.size === 0) return { ok: false, error: 'the file defines no tools, so no hole has a size' };
-  if (holes.length === 0) return { ok: false, error: 'the file drills no holes' };
-  return { ok: true, holes, notes, units };
+  if (holes.length === 0 && slots.length === 0) return { ok: false, error: 'the file drills no holes' };
+  if (slots.length > 0) {
+    const widths = [...new Set(slots.map((slot) => `${slot.width} mm`))].join(', ');
+    notes.push(
+      `${slots.length} slot${slots.length === 1 ? '' : 's'} read at ${widths} wide: kept apart from the round holes, so a cutter that cannot mill them does not hide the rest of the file.`,
+    );
+  }
+  return { ok: true, holes, slots, notes, units };
 }

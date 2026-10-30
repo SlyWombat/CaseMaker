@@ -2,8 +2,9 @@
  * Excellon drill import (#743 P-3).
  *
  * `tiny.drl` is six ⌀0.8 holes and two ⌀1.0 holes, and `tiny-inch.drl` is the same eight holes in
- * inches — the two must give identical points and sizes. `slot.drl` routes a slot with `G85`, which
- * the design refuses by name in v1 (Q9).
+ * inches — the two must give identical points and sizes. `slot.drl` mills a `G85` slot; the
+ * maintainer's note of 2026-10-30 changes the design's Q9 there: a slot is KEPT beside the round
+ * holes (two endpoints and the tool's width), so one oval connector hole cannot lose the file.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -60,12 +61,37 @@ describe('Excellon drills (#743 P-3)', () => {
     expect(parsed.holes[0]).toMatchObject({ x: 5, y: 2.5 });
   });
 
-  it('refuses a routed slot by name, at its line', () => {
+  it('reads a G85 slot as a slot, beside the round holes, and says so', () => {
     const parsed = readExcellon(read('slot.drl'));
-    expect(parsed.ok).toBe(false);
-    if (parsed.ok) return;
-    expect(parsed.error).toMatch(/line 8/i);
-    expect(parsed.error).toMatch(/slots/i);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.holes).toHaveLength(1); // the hit at (5,5) on the line before
+    expect(parsed.slots).toEqual([{ from: { x: 5, y: 5 }, to: { x: 10, y: 5 }, width: 0.8, tool: 1 }]);
+    expect(parsed.notes.join(' ')).toMatch(/1 slot/);
+  });
+
+  it('reads an M15/M16 routed slot as one slot per segment', () => {
+    const text = [
+      'M48',
+      'METRIC,TZ',
+      'T1C0.8',
+      '%',
+      'T1',
+      'X5.0Y5.0',
+      'M15',
+      'X10.0Y5.0',
+      'X10.0Y10.0',
+      'M16',
+      'M30',
+    ].join('\n');
+    const parsed = readExcellon(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.holes).toHaveLength(1);
+    expect(parsed.slots).toEqual([
+      { from: { x: 5, y: 5 }, to: { x: 10, y: 5 }, width: 0.8, tool: 1 },
+      { from: { x: 10, y: 5 }, to: { x: 10, y: 10 }, width: 0.8, tool: 1 },
+    ]);
   });
 
   it('refuses a decimal-less coordinate with no digit format rather than guessing', () => {
@@ -75,7 +101,7 @@ describe('Excellon drills (#743 P-3)', () => {
     if (!parsed.ok) expect(parsed.error).toMatch(/digit format/i);
   });
 
-  it('refuses a file with no header, no unit, or no holes', () => {
+  it('refuses a file with no header, no unit, or no drills at all', () => {
     expect(readExcellon('X5.0Y5.0\nM30\n').ok).toBe(false);
     const noUnit = readExcellon(['M48', 'T1C0.8', '%', 'T1', 'X5.0Y5.0', 'M30'].join('\n'));
     expect(noUnit.ok).toBe(false);
