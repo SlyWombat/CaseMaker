@@ -6,6 +6,8 @@ export * from './plan';
 export * from './remount';
 /** #723 P2-2 — a flip's stated pin reference. */
 export * from './flip';
+/** #723 P2-2b — carrying the remaining stock between two setups' work frames. */
+export * from './carry';
 export * from './registration';
 export * from './settings';
 /** #471 — the job document's cuts as the planner's removals. */
