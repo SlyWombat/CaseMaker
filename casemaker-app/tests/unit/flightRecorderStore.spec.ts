@@ -17,6 +17,7 @@ import {
   __resetFlightRecorderStoreForTests,
   setCrashProbeIO,
   setCrashSaveIO,
+  setCrashSendIO,
   useFlightRecorderStore,
 } from '@/store/flightRecorderStore';
 import { setMeshBlobIO } from '@/platform/meshBlobs';
@@ -142,6 +143,36 @@ describe('#787 — the crash-recovery store', () => {
     const report = JSON.parse(savedText) as { meshes?: { name: string; data: string }[] };
     expect(report.meshes).toHaveLength(1);
     expect(report.meshes?.[0]).toMatchObject({ name: 'panther.stl', data: 'QUJD' });
+  });
+
+  it('Send posts the SAME report to the house, and says where it went', async () => {
+    primeCrash();
+    setCrashProbeIO(async () => ({ kind: 'present' }));
+    const sent: unknown[] = [];
+    setCrashSendIO(async (report) => {
+      sent.push(report);
+      return { kind: 'ok', path: 'crash-reports/crash-1-0.json' };
+    });
+    await useFlightRecorderStore.getState().init();
+    expect(useFlightRecorderStore.getState().houseOk).toBe(true);
+    expect(sent).toHaveLength(0); // nothing leaves on the probe
+    await useFlightRecorderStore.getState().sendReport(false);
+    expect(sent).toHaveLength(1);
+    const report = sent[0] as { kind: string; stopped: { label: string } };
+    expect(report.kind).toBe('casemaker-crash-report');
+    expect(report.stopped.label).toBe('roughing level 41 of 112');
+    expect(useFlightRecorderStore.getState().sent).toBe('crash-reports/crash-1-0.json');
+  });
+
+  it('a refused send keeps the service\u2019s own words and does not mark the report sent', async () => {
+    primeCrash();
+    setCrashProbeIO(async () => ({ kind: 'present' }));
+    setCrashSendIO(async () => ({ kind: 'refused', status: 400, message: 'the body is not a Case Maker crash report' }));
+    await useFlightRecorderStore.getState().init();
+    await useFlightRecorderStore.getState().sendReport(false);
+    const state = useFlightRecorderStore.getState();
+    expect(state.sent).toBeNull();
+    expect(state.sendError).toContain('the body is not a Case Maker crash report');
   });
 
   it('nothing is written on load — only a press writes', async () => {

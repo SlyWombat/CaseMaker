@@ -98,6 +98,16 @@ pub fn routes(store: Arc<HouseStore>) -> Router {
         .route("/api/v1/defaults/:key", put(put_default).delete(reset_default))
         .route("/api/v1/export", get(export_house))
         .route("/api/v1/import", post(import_house))
+        // #787. One crash report, as the app wrote it, stored under the house's `crash-reports/`.
+        // POST with no guard: a report is a new note, not a document a client read first — and the
+        // service chooses the file's name, so two reports never overwrite one another. The body
+        // limit is the report's own bound (`MAX_CRASH_REPORT_BYTES`), raised from axum's 2 MB
+        // default so a report that includes a job's meshes fits.
+        .route(
+            "/api/v1/crash-reports",
+            post(create_crash_report)
+                .layer(axum::extract::DefaultBodyLimit::max(crate::house::MAX_CRASH_REPORT_BYTES)),
+        )
         // #308. POST and nothing else: a sync reads Makera Studio's own database and replaces the
         // `cat:` tier, so it is not something a GET may do by accident — but it takes NO body. The
         // path to the vendor file is the process's own (see `HouseStore::studio_db`), not a
@@ -725,6 +735,22 @@ async fn import_house(State(store): State<Arc<HouseStore>>, body: axum::body::By
     // can name the version or the kind it found, which axum's own 422 would not.
     match store.import(&body).await {
         Ok(()) => empty(StatusCode::NO_CONTENT),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Store one crash report (#787). The RAW body, like `import`: `house.rs` judges it (its kind, its
+/// size) and the service, not the request, names the file. 201 with `{"path": "crash-reports/…"}`
+/// so the caller can say where it went.
+async fn create_crash_report(
+    State(store): State<Arc<HouseStore>>,
+    body: axum::body::Bytes,
+) -> Response<Body> {
+    match store.save_crash_report(&body) {
+        Ok(path) => json_body(
+            StatusCode::CREATED,
+            serde_json::json!({ "path": path }).to_string().into_bytes(),
+        ),
         Err(e) => error_response(e),
     }
 }
@@ -2092,5 +2118,35 @@ mod tests {
             before_digest,
             "the vendor database was modified by a sync"
         );
+    }
+
+    #[tokio::test]
+    async fn a_crash_report_is_posted_and_lands_under_crash_reports() {
+        let (dir, app) = app_under_test();
+        let body = serde_json::json!({
+            "kind": "casemaker-crash-report",
+            "version": 1,
+            "stopped": { "work": "generate", "label": "roughing level 41 of 112" },
+            "crumbs": [],
+        });
+        let res = app
+            .clone()
+            .oneshot(post_json("/api/v1/crash-reports", &body))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let answer = json_of(res).await;
+        let path = answer.get("path").and_then(|p| p.as_str()).unwrap().to_string();
+        assert!(path.starts_with("crash-reports/"), "{path}");
+        let stored = std::fs::read(dir.path().join(&path)).unwrap();
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&stored).unwrap(), body);
+
+        // A body that is not the app's report is refused, and the directory gains nothing.
+        let bad = app
+            .clone()
+            .oneshot(post_json("/api/v1/crash-reports", &serde_json::json!({ "kind": "nope" })))
+            .await
+            .unwrap();
+        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
     }
 }

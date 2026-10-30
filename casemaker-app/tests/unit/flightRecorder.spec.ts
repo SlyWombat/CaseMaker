@@ -207,6 +207,18 @@ describe('#787 — the report', () => {
     expect(report.app.desktop).toBe(true);
   });
 
+  it('carries the desktop crash log when one is supplied, and omits it otherwise', () => {
+    const withLog = buildCrashReport(previous(), {
+      appVersion: '2.1.0',
+      commit: null,
+      desktop: true,
+      desktopLog: ['{"at":1,"kind":"frame-render-process-exited","reason":"out-of-memory"}'],
+    });
+    expect(withLog.desktopLog).toHaveLength(1);
+    expect(withLog.desktopLog?.[0]).toContain('out-of-memory');
+    expect(buildCrashReport(previous(), { appVersion: '2.1.0', commit: null, desktop: false }).desktopLog).toBeUndefined();
+  });
+
   it('names its file from the time it stopped', () => {
     const name = crashReportFileName(new Date(2026, 9, 30, 17, 2).getTime());
     expect(name).toBe('casemaker-crash-2026-10-30-1702.json');

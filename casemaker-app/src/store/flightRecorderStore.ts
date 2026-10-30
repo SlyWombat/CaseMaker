@@ -24,7 +24,8 @@ import {
   type PreviousSession,
 } from '@/platform/flightRecorder';
 import { BUILD_TARGET } from '@/platform/capabilities';
-import { probeHouse } from '@/platform/houseClient';
+import { readDesktopCrashLog } from '@/platform/desktop/crashLog';
+import { houseSendCrashReport, probeHouse, type CrashSend } from '@/platform/houseClient';
 import { getMeshBlob } from '@/platform/meshBlobs';
 import { saveText } from '@/engine/exportTrigger';
 
@@ -39,6 +40,24 @@ let saveIO: CrashSaveIO = FILE_SAVE;
 /** Spec seam: replace the file save (the app never calls this). `null` restores the real one. */
 export function setCrashSaveIO(io: CrashSaveIO | null): void {
   saveIO = io ?? FILE_SAVE;
+}
+
+/** The desktop crash log — injectable so a spec does not reach the Tauri IPC. */
+type CrashLogIO = () => Promise<string[]>;
+const REAL_LOG: CrashLogIO = () => readDesktopCrashLog();
+let logIO: CrashLogIO = REAL_LOG;
+/** Spec seam: replace the desktop-log read. `null` restores the real one. */
+export function setCrashLogIO(fn: CrashLogIO | null): void {
+  logIO = fn ?? REAL_LOG;
+}
+
+/** Where a report is sent. Injectable so a spec does not make a network request. */
+type CrashSendIO = (report: unknown) => Promise<CrashSend>;
+const REAL_SEND: CrashSendIO = (report) => houseSendCrashReport(report);
+let sendIO: CrashSendIO = REAL_SEND;
+/** Spec seam: replace the house send. `null` restores the real one. */
+export function setCrashSendIO(fn: CrashSendIO | null): void {
+  sendIO = fn ?? REAL_SEND;
 }
 
 /** The house probe, injectable so a spec does not make a network request. */
@@ -64,11 +83,33 @@ export interface FlightRecorderStoreState {
   /** The file the last Save wrote, or null. */
   saved: string | null;
   saving: boolean;
+  /** Where the last Send stored the report on the house, or null. */
+  sent: string | null;
+  sending: boolean;
+  /** Why the last Send failed, in the service's own words where it gave one. */
+  sendError: string | null;
   error: string | null;
   init: () => Promise<void>;
   dismiss: () => void;
   /** Build and save the report. `includeMeshes` adds the job's mesh bytes (the operator's choice). */
   saveReport: (includeMeshes: boolean) => Promise<void>;
+  /**
+   * Build and SEND the report to the house service. Only ever called from the banner's Send, and
+   * the button exists only where a house answered — nothing leaves the machine on its own.
+   */
+  sendReport: (includeMeshes: boolean) => Promise<void>;
+}
+
+/** The service's refusal in one sentence, whichever failure shape it arrived as. */
+function sendFailureWords(answer: Exclude<CrashSend, { kind: 'ok' }>): string {
+  switch (answer.kind) {
+    case 'absent':
+      return `no house service answered (${answer.reason})`;
+    case 'refused':
+      return `the house service refused it: ${answer.message}`;
+    case 'error':
+      return `the send failed: ${answer.detail}`;
+  }
 }
 
 /** The report for the previous session, with the meshes only when asked. */
@@ -87,11 +128,15 @@ export async function crashReportFor(
     );
     meshes = loaded.filter((m): m is { name: string; sha256: string; format: string; data: string } => m !== null);
   }
+  // #787 — on the desktop, WebView2's own ProcessFailed records ride along: the page's recorder
+  // knows what it was doing, and this says why the renderer died when it did.
+  const desktopLog = BUILD_TARGET === 'desktop' ? await logIO() : [];
   return buildCrashReport(previous, {
     appVersion: typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'unknown',
     commit: typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : null,
     desktop: BUILD_TARGET === 'desktop',
     includeJob: facts,
+    desktopLog,
     ...(meshes === undefined ? {} : { meshes }),
   });
 }
@@ -104,6 +149,9 @@ export const useFlightRecorderStore = create<FlightRecorderStoreState>()((set, g
   started: false,
   saved: null,
   saving: false,
+  sent: null,
+  sending: false,
+  sendError: null,
   error: null,
 
   init: async () => {
@@ -141,6 +189,20 @@ export const useFlightRecorderStore = create<FlightRecorderStoreState>()((set, g
       set({ saving: false, error: e instanceof Error ? e.message : String(e) });
     }
   },
+
+  sendReport: async (includeMeshes) => {
+    const previous = get().previous;
+    if (previous === null || get().sending) return;
+    set({ sending: true, sendError: null });
+    try {
+      const report = await crashReportFor(previous, includeMeshes);
+      const answer = await sendIO(report);
+      if (answer.kind === 'ok') set({ sending: false, sent: answer.path });
+      else set({ sending: false, sendError: sendFailureWords(answer) });
+    } catch (e) {
+      set({ sending: false, sendError: e instanceof Error ? e.message : String(e) });
+    }
+  },
 }));
 
 /** Forget the store between specs (the recorder's own state has its own reset). */
@@ -154,6 +216,9 @@ export function __resetFlightRecorderStoreForTests(): void {
     started: false,
     saved: null,
     saving: false,
+    sent: null,
+    sending: false,
+    sendError: null,
     error: null,
   });
 }

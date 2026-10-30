@@ -451,6 +451,12 @@ export interface CrashReport {
   stopped: { at: string | null; work: WorkScope | null; stage: string | null; label: string | null; heapMb: number | null };
   crumbs: Crumb[];
   job: WorkFacts | null;
+  /**
+   * #787 — the desktop crash log's last lines: WebView2's own `ProcessFailed` records, which say
+   * WHY a renderer died when the page's recorder cannot. Absent on the web, and absent when the
+   * desktop shell logged nothing.
+   */
+  desktopLog?: string[];
   /** The mesh bytes, only when the user chose to include them. */
   meshes?: { name: string; sha256: string; format: string; data: string }[];
 }
@@ -467,6 +473,7 @@ export function buildCrashReport(
     desktop: boolean;
     includeJob?: WorkFacts | null;
     meshes?: { name: string; sha256: string; format: string; data: string }[];
+    desktopLog?: string[];
     now?: number;
   },
 ): CrashReport {
@@ -487,6 +494,7 @@ export function buildCrashReport(
     },
     crumbs: previous.crumbs,
     job,
+    ...(opts.desktopLog === undefined || opts.desktopLog.length === 0 ? {} : { desktopLog: opts.desktopLog }),
     ...(opts.meshes === undefined || opts.meshes.length === 0 ? {} : { meshes: opts.meshes }),
   };
 }

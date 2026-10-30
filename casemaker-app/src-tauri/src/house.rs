@@ -976,6 +976,11 @@ struct Inner {
     catalogue_problem: Option<String>,
 }
 
+/// #787 — the biggest crash report the service will store, bytes. A report is JSON: the last few
+/// hundred breadcrumbs, the environment, the job's facts and (only when the operator included them)
+/// the job's meshes. 8 MiB leaves room for a real model and is still a bound.
+pub const MAX_CRASH_REPORT_BYTES: usize = 8 * 1024 * 1024;
+
 /// The house's data, in memory and on disk. One per process, held in the router's state.
 pub struct HouseStore {
     dir: PathBuf,
@@ -2177,6 +2182,38 @@ impl HouseStore {
     }
 
     /// Refuse to write over a document that could not be read.
+    /// Store one crash report under `crash-reports/`, returning its path relative to the house
+    /// directory (#787). The NAME is the service's — the epoch millis plus this process's write
+    /// counter — never the caller's: a request may not choose a path, and two reports filed in the
+    /// same millisecond must not overwrite one another. The body must be the app's own report kind
+    /// and fit [`MAX_CRASH_REPORT_BYTES`]; a file that fails either rule is refused before the disk
+    /// is touched. No index, no ETag, no listing endpoint: a report is a note to a person, read
+    /// from the house directory by whoever is diagnosing the crash.
+    pub fn save_crash_report(&self, bytes: &[u8]) -> Result<String, HouseError> {
+        if bytes.len() > MAX_CRASH_REPORT_BYTES {
+            return Err(HouseError::BadEntry(format!(
+                "a crash report is limited to {MAX_CRASH_REPORT_BYTES} bytes; this one is {}",
+                bytes.len()
+            )));
+        }
+        let value: serde_json::Value = serde_json::from_slice(bytes)
+            .map_err(|e| HouseError::BadEntry(format!("the crash report is not JSON: {e}")))?;
+        if value.get("kind").and_then(|k| k.as_str()) != Some("casemaker-crash-report") {
+            return Err(HouseError::BadEntry(
+                "the body is not a Case Maker crash report (kind: casemaker-crash-report)".to_string(),
+            ));
+        }
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let seq = WRITE_SEQ.fetch_add(1, Ordering::Relaxed);
+        let name = format!("crash-{millis}-{seq}.json");
+        let path = self.dir.join("crash-reports").join(&name);
+        write_atomic(&path, bytes)?;
+        Ok(format!("crash-reports/{name}"))
+    }
+
     fn writable(problem: &Option<String>) -> Result<(), HouseError> {
         match problem {
             Some(p) => Err(HouseError::Refused(format!(
@@ -2266,6 +2303,22 @@ mod tests {
                 ..Default::default()
             },
         }
+    }
+
+    #[tokio::test]
+    async fn a_crash_report_is_stored_under_a_name_the_service_chooses() {
+        let (dir, store) = store();
+        let body = br#"{"kind":"casemaker-crash-report","version":1,"crumbs":[]}"#;
+        let path = store.save_crash_report(body).unwrap();
+        assert!(path.starts_with("crash-reports/crash-"), "{path}");
+        assert!(path.ends_with(".json"), "{path}");
+        assert_eq!(std::fs::read(dir.path().join(&path)).unwrap(), body);
+        // Two reports are two files: the name is the service's, so one can never overwrite another.
+        let second = store.save_crash_report(body).unwrap();
+        assert_ne!(path, second);
+        // Not a report, not stored: the kind is checked before the disk is touched.
+        assert!(matches!(store.save_crash_report(br#"{"kind":"other"}"#), Err(HouseError::BadEntry(_))));
+        assert!(matches!(store.save_crash_report(b"not json"), Err(HouseError::BadEntry(_))));
     }
 
     #[tokio::test]

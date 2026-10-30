@@ -64,6 +64,10 @@ chrono = "0.4.45"
 # refuses to save a token rather than fall back to keyring's in-memory mock, which forgets it.
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "~3.6", default-features = false, features = ["windows-native"] }
+# #787 — the WebView2 ProcessFailed listener. The versions tauri 2.12 itself resolves (see
+# Cargo.lock), so the interfaces this module handles are the very ones the webview hands over.
+webview2-com = "0.39"
+windows-core = "0.62"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "~3.6", default-features = false, features = ["apple-native"] }

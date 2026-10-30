@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { CrashRecoveryBanner, crashBannerSentence } from '@/components/layout/CrashRecoveryBanner';
-import { __resetFlightRecorderStoreForTests, setCrashSaveIO, useFlightRecorderStore } from '@/store/flightRecorderStore';
+import { __resetFlightRecorderStoreForTests, setCrashSaveIO, setCrashSendIO, useFlightRecorderStore } from '@/store/flightRecorderStore';
 import type { CrashMoment, PreviousSession } from '@/platform/flightRecorder';
 import { setMeshBlobIO } from '@/platform/meshBlobs';
 
@@ -48,8 +48,8 @@ const MOMENT: CrashMoment = {
   lastCrumbAt: new Date(2026, 9, 30, 17, 2).getTime(),
 };
 
-function prime(): void {
-  useFlightRecorderStore.setState({ previous: PREVIOUS, moment: MOMENT, started: true });
+function prime(houseOk = false): void {
+  useFlightRecorderStore.setState({ previous: PREVIOUS, moment: MOMENT, started: true, houseOk });
 }
 
 describe('#787 — the crash banner', () => {
@@ -88,7 +88,21 @@ describe('#787 — the crash banner', () => {
     expect(report.meshes).toHaveLength(1);
     expect(report.meshes?.[0]).toMatchObject({ name: 'panther.stl', data: 'QUJD' });
     await waitFor(() => expect(screen.getByTestId('crash-saved')).toBeTruthy());
-    // There is no send control until the house half exists: nothing leaves the machine.
+    // No house answered: there is no send control at all, so nothing can leave the machine.
     expect(screen.queryByTestId('crash-send')).toBeNull();
+  });
+
+  it('offers Send only where a house answered, and sends only on its press', async () => {
+    prime(true);
+    const sent: unknown[] = [];
+    setCrashSendIO(async (report) => {
+      sent.push(report);
+      return { kind: 'ok', path: 'crash-reports/crash-2-0.json' };
+    });
+    render(<CrashRecoveryBanner />);
+    expect(sent).toHaveLength(0);
+    fireEvent.click(screen.getByTestId('crash-send'));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    await waitFor(() => expect(screen.getByTestId('crash-sent').textContent).toContain('crash-reports/crash-2-0.json'));
   });
 });

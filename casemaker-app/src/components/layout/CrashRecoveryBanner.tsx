@@ -48,8 +48,13 @@ export function CrashRecoveryBanner() {
   const dismissed = useFlightRecorderStore((s) => s.dismissed);
   const saving = useFlightRecorderStore((s) => s.saving);
   const saved = useFlightRecorderStore((s) => s.saved);
+  const houseOk = useFlightRecorderStore((s) => s.houseOk);
+  const sending = useFlightRecorderStore((s) => s.sending);
+  const sent = useFlightRecorderStore((s) => s.sent);
+  const sendError = useFlightRecorderStore((s) => s.sendError);
   const error = useFlightRecorderStore((s) => s.error);
   const saveReport = useFlightRecorderStore((s) => s.saveReport);
+  const sendReport = useFlightRecorderStore((s) => s.sendReport);
   const dismiss = useFlightRecorderStore((s) => s.dismiss);
   const [includeMeshes, setIncludeMeshes] = useState(false);
 
@@ -89,6 +94,13 @@ export function CrashRecoveryBanner() {
       <button type="button" data-testid="crash-save" disabled={saving} onClick={() => void saveReport(includeMeshes)}>
         {saving ? 'Saving…' : 'Save report'}
       </button>
+      {/* #787 — the send half exists only where a house service answered. A web build never sees
+          this button, and nothing is sent except on the press. */}
+      {houseOk && (
+        <button type="button" data-testid="crash-send" disabled={sending} onClick={() => void sendReport(includeMeshes)}>
+          {sending ? 'Sending…' : 'Send to the house'}
+        </button>
+      )}
       <button type="button" data-testid="crash-dismiss" onClick={dismiss}>
         Dismiss
       </button>
@@ -100,6 +112,16 @@ export function CrashRecoveryBanner() {
       {error !== null && (
         <span data-testid="crash-error" style={{ color: '#f0b4ad' }}>
           The report was not saved: {error}
+        </span>
+      )}
+      {sent !== null && (
+        <span data-testid="crash-sent" style={{ color: '#b8d8a8' }}>
+          Sent to the house: {sent}
+        </span>
+      )}
+      {sendError !== null && (
+        <span data-testid="crash-send-error" style={{ color: '#f0b4ad' }}>
+          The report was not sent — {sendError}
         </span>
       )}
     </div>

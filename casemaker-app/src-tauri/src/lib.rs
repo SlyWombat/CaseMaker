@@ -13,6 +13,7 @@ mod camera_api;
 mod catalogue;
 mod config;
 mod config_api;
+mod crash_log;
 mod defaults;
 mod etag;
 mod feeds;
@@ -74,6 +75,23 @@ const CAPABILITY_FILE: &str = include_str!("../capabilities/default.json");
 /// The URL is a URLPattern (Tauri's remote matching), so the path is left open the way the old
 /// entry left it; the host and port are exact. The window is built after this runs, so it never
 /// exists without its grant.
+/// #787 — where the desktop crash log lives: the app's log directory, else its data directory,
+/// else the temp directory. One file (`crash.log`), appended by `crash_log::attach`.
+fn crash_log_path(app: &tauri::AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_log_dir()
+        .or_else(|_| app.path().app_data_dir())
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("crash.log")
+}
+
+/// #787 — the tail of the desktop crash log, for the crash report the page offers to save or send.
+/// Empty when no WebView2 process has failed on this machine (or the log cannot be read).
+#[tauri::command]
+fn crash_log_tail(app: tauri::AppHandle) -> Vec<String> {
+    crash_log::tail(&crash_log_path(&app))
+}
+
 fn window_capability(origin: &str) -> Result<String, serde_json::Error> {
     let mut document: serde_json::Value = serde_json::from_str(CAPABILITY_FILE)?;
     document["identifier"] = serde_json::Value::from("embedded-server");
@@ -208,6 +226,7 @@ pub fn run() {
             machine::machine_tcp_write,
             machine::machine_tcp_read,
             machine::machine_tcp_close,
+            crash_log_tail,
         ])
         .setup(move |app| {
             // ONE HOUSE, ONE PROCESS (#321). Taken BEFORE the server starts, because refusing here
@@ -300,12 +319,17 @@ pub fn run() {
             }
 
             let url = WebviewUrl::External(window_url.parse()?);
-            let _window = WebviewWindowBuilder::new(app, "main", url)
+            let window = WebviewWindowBuilder::new(app, "main", url)
                 .title("Case Maker")
                 .inner_size(1400.0, 900.0)
                 .min_inner_size(1024.0, 700.0)
                 .resizable(true)
                 .build()?;
+            // #787 — listen for WebView2 process failures (a renderer killed for memory never
+            // reaches the page's own recorder). Best-effort: the recorder's marker still earns
+            // the next load's banner; this is the detail that says WHY.
+            let crash_log_path = crash_log_path(app.handle());
+            let _ = window.with_webview(move |wv| crash_log::attach(&wv, crash_log_path));
             app.manage(server_handle);
             // Held in managed state so the lock outlives `setup` — see `HouseLock`'s own note on
             // why this is a lock on the directory and not a pid file.

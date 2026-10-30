@@ -878,6 +878,30 @@ export async function houseRemoveItem(
 }
 
 /**
+ * #787 — send one crash report to the house service. The app's own report document is the body;
+ * the service chooses the file's name under `crash-reports/` and answers where it went. A report
+ * leaves the machine only on the operator's press (the banner's Send), never on its own.
+ */
+export type CrashSend = { kind: 'ok'; path: string } | HouseFailure;
+
+export async function houseSendCrashReport(
+  report: unknown,
+  opts?: HouseRequestOptions,
+): Promise<CrashSend> {
+  return ask(async (client) => {
+    const answer = await client.call('POST', '/crash-reports', report, opts);
+    if (answer.kind !== 'ok') return answer;
+    try {
+      const parsed = JSON.parse(answer.text) as { path?: unknown };
+      return { kind: 'ok', path: typeof parsed.path === 'string' ? parsed.path : 'crash-reports/' } as const;
+    } catch {
+      // A 201 with no readable path still means the service stored it; name the directory.
+      return { kind: 'ok', path: 'crash-reports/' } as const;
+    }
+  });
+}
+
+/**
  * Import Makera's catalogue from Studio's own library (#308). Takes NO body: the path to the vendor
  * file is the service's own, and an endpoint that read a path from a request would be a way to read
  * any file on the machine it runs on. The report is the answer.
