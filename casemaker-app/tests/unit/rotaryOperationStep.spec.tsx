@@ -3,7 +3,8 @@
 // one field, Relief tagged simulate only, and the face group stated but NOT authorable.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { OperationStep, operationCreateBlocked, type OperationChoice } from '@/components/welcome/OperationStep';
+import { OperationStep, type OperationChoice } from '@/components/welcome/OperationStep';
+import { operationCreateBlocked } from '@/components/welcome/operationCreate';
 import { ROTARY_FACE_REASON, ROTARY_OPERATION_GROUPS } from '@/components/welcome/rotaryOperations';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveJob } from '@/types/engraveJob';

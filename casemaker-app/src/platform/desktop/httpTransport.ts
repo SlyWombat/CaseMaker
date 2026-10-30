@@ -23,7 +23,9 @@ async function machinePost<T>(path: string, body: unknown): Promise<T> {
   } catch (e) {
     // A network-level failure (server gone, origin unreachable) — give the protocol layer a message
     // in the same shape as a returned error, not a bare TypeError.
-    throw new Error(`could not reach the machine service at ${path}: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`could not reach the machine service at ${path}: ${e instanceof Error ? e.message : String(e)}`, {
+      cause: e,
+    });
   }
   if (res.status === 204) return undefined as T; // write / close answer with no body
   const json = (await res.json().catch(() => null)) as unknown;

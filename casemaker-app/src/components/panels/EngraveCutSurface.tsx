@@ -153,6 +153,7 @@ function Step({
   // a step that turns current, including after a machine reconnect, opens itself).
   const [manual, setManual] = useState<boolean | null>(null);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the override is keyed to the step's current-ness; `current` is a boolean, so tagging the override would restore it when the step becomes current again after a round trip, which this reset must not do
     setManual(null);
   }, [current]);
   const open = manual ?? current;
@@ -321,16 +322,25 @@ export function EngraveCutSurface({
   // in a file).
   const spreadAssessment = spreadMeasurement?.assessment ?? null;
   const domeStanding = spreadAssessment?.verdict === 'dome';
-  const [g32Acked, setG32Acked] = useState(false);
+  // A fresh measurement is a fresh clamping: neither tick carries over from the last one. The
+  // ticks are TAGGED with the assessment they were made on rather than reset in an effect
+  // (react-hooks/set-state-in-effect): a different assessment reads as unticked, exactly as the
+  // reset did, and the assessment is one object per measurement so identity is the right key.
+  const [ticks, setTicks] = useState<{ forAssessment: typeof spreadAssessment; g32: boolean; floor: boolean }>({
+    forAssessment: null,
+    g32: false,
+    floor: false,
+  });
+  const ticksApply = ticks.forAssessment === spreadAssessment;
+  const g32Acked = ticksApply && ticks.g32;
   // #631 (c) — the operator may skip G32 and accept the un-levelled floor instead: the dome verdict's
   // alternative route, a deliberate decision recorded beside the G32 tick. The consequence (the
   // centre miss) is stated in the label, never hidden.
-  const [floorAccepted, setFloorAccepted] = useState(false);
-  // A fresh measurement is a fresh clamping: neither tick carries over from the last one.
-  useEffect(() => {
-    setG32Acked(false);
-    setFloorAccepted(false);
-  }, [spreadAssessment]);
+  const floorAccepted = ticksApply && ticks.floor;
+  const setG32Acked = (on: boolean): void =>
+    setTicks((t) => ({ forAssessment: spreadAssessment, g32: on, floor: t.forAssessment === spreadAssessment ? t.floor : false }));
+  const setFloorAccepted = (on: boolean): void =>
+    setTicks((t) => ({ forAssessment: spreadAssessment, g32: t.forAssessment === spreadAssessment ? t.g32 : false, floor: on }));
   const domeG32Blocker =
     domeStanding && !g32Acked && !floorAccepted
       ? 'confirm how the dome is handled before uploading — run G32 from the console for this clamping and tick the box, or write the origin anyway and accept the un-levelled floor'
@@ -370,6 +380,7 @@ export function EngraveCutSurface({
     if (firstRegistration === null || chainReposted.current) return;
     if (registrationSurface === null || surfaceGate === null) return;
     chainReposted.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the one-shot post-registration re-post is guarded by `chainReposted`; the busy state it starts is the re-post's own, launched exactly once per clamping
     repost();
     // `repost` is re-created each render; the ref makes this a one-shot per clamping.
     // eslint-disable-next-line react-hooks/exhaustive-deps

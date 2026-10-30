@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
-import { savedTimeText } from '@/components/panels/EngraveJobFileBar';
+import { savedTimeText } from '@/components/panels/engraveJobFileBarText';
 import { OPERATION_OPTIONS, OPERATION_TYPES } from '@/components/panels/operationTypes';
 import { useEngraveJobStore, undoEngraveRemoval, resetEngraveRemovalUndo, REMOVAL_UNDO_MS } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';

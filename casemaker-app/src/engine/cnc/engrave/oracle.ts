@@ -979,7 +979,7 @@ export function computeRotaryOracle(tl: ManifoldToplevel, input: RotaryOracleInp
     let region: CrossSectionInstance | null = null;
     let inner: CrossSectionInstance | null = null;
     let outer: CrossSectionInstance | null = null;
-    let predictedArea = 0;
+    let predictedArea: number;
     let simulatedCells = 0;
     let underCells = 0;
     let overCells = 0;

@@ -23,7 +23,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { EngravePanel, findingFix } from '@/components/panels/EngravePanel';
+import { EngravePanel } from '@/components/panels/EngravePanel';
+import { findingFix } from '@/components/panels/findingFix';
 import { StartWizard } from '@/components/welcome/StartWizard';
 import { MachineChangeWizard } from '@/components/machine-change';
 import { bedUnderFacts } from '@/platform/bedProfiles';
@@ -684,12 +685,10 @@ describe('#730 — the bed facts follow the job’s machine', () => {
     // The job runs on the second machine, whose bed is BARE; the house's first carries a
     // wasteboard. Reading machines[0] drew "Under it wasteboard" for a job that will be cut on a
     // bare bed — the step and Generate judging different beds.
-    seedJobAndOpen: {
-      act(() => {
-        useEngraveJobStore.setState({ job: tapedJob({ machineId: 'Z1-b' }) });
-        useStartWizardStore.getState().openWizard('holding');
-      });
-    }
+    act(() => {
+      useEngraveJobStore.setState({ job: tapedJob({ machineId: 'Z1-b' }) });
+      useStartWizardStore.getState().openWizard('holding');
+    });
     render(
       <>
         <StartWizard />

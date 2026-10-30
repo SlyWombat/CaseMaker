@@ -55,11 +55,6 @@ function dia(d: number): string {
   return `${Number(d.toFixed(3))}`;
 }
 
-/** The chip on the operation's one line: `rest ⌀1 mm`, or `core ⌀1 mm` for a #677 clearance. */
-export function restChipLabel(option: RestCutterOption, coreClearance = false): string {
-  return `${coreClearance ? 'core' : 'rest'} ⌀${dia(option.diameter)} mm`;
-}
-
 export function RestCutterControl({
   rest,
   testidPrefix,

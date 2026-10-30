@@ -112,6 +112,7 @@ export function CameraPanel(): JSX.Element | null {
   // …but a picture from ANOTHER machine is not this machine's bed, and the labels would say it was.
   // When the machine behind the pane changes, the frame goes with the URL that made it.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the frame belongs to the URL that produced it; this reset must also revoke that URL's object URL, and deriving the frame instead would leave a revoked URL on screen when a pane returns to an earlier camera address
     setFrame(null);
     if (shownUrl.current !== null) {
       URL.revokeObjectURL(shownUrl.current);

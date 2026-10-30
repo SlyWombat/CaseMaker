@@ -36,7 +36,8 @@ import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
 import { currentMount, mechanismOf, rodViseProblem } from './holdingMounts';
-import { OperationStep, operationCreateBlocked, type OperationChoice } from './OperationStep';
+import { OperationStep, type OperationChoice } from './OperationStep';
+import { operationCreateBlocked } from './operationCreate';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
 
 /**
@@ -274,6 +275,66 @@ export function StartWizard(): JSX.Element {
   const [operationChoice, setOperationChoice] = useState<OperationChoice | null>(null);
   const onOperationChoice = useCallback((choice: OperationChoice | null) => setOperationChoice(choice), []);
 
+  // Declared before the opening-starter effect that calls it: a function declaration hoists, but
+  // the hooks lint (react-hooks/immutability) needs the binding textual before its use so the
+  // compiler can track it.
+  async function chooseJob(id: string): Promise<void> {
+    // #716 R-UI-15 — "Name on a dowel" is not a project template: the job opens on a ⌀20 × 100
+    // rod in the rotary chuck, and the wizard shows Holding so the operator sees what holds it.
+    // The chuck is the Holding step's OWN `defaultRotaryChuck` (the shop's grip, the jaw rule for
+    // the diameter), so the starter cannot invent numbers the step would not.
+    if (id === 'dowel') {
+      setSection('cnc-engrave');
+      const jobStore = useEngraveJobStore.getState();
+      jobStore.reset();
+      jobStore.setStock(
+        {
+          material: jobStore.job.stock.material,
+          shape: 'cylinder',
+          diameter: 20,
+          // The STANDING box (D × D × L); `setRotaryHolding` turns it into the axis frame and
+          // writes the workholding in the one undoable step, the Holding step's own write.
+          length: 20,
+          width: 20,
+          thickness: 100,
+        },
+        'computed',
+      );
+      const ready = useEngraveJobStore.getState();
+      const grip = readDefault(liveShopDefaults(), 'rotary.gripMm').value;
+      ready.setRotaryHolding(defaultRotaryChuck(ready.job, grip), jobVise(ready.job));
+      // #716 — the wizard's own empty-design rule (step 2): a starter seeds the stock and the
+      // mount, not items. Without this the demo lines would be cut into the rod.
+      const seeded = useEngraveJobStore.getState().job;
+      useEngraveJobStore.getState().replace({ ...seeded, labels: [], shapes: [] });
+      const project = blankProjectForStock(useEngraveJobStore.getState().job.stock);
+      if (project !== null) {
+        setProject(project);
+        clearHistory();
+      }
+      clearStockEntry();
+      setJobStarted(true);
+      setProjectCreatedHere(true);
+      enterHolding();
+      if (project !== null) await scheduleImmediate(project);
+      return;
+    }
+    const template = findTemplateAcrossSources(id);
+    if (template === undefined) return;
+    const project = template.build();
+    setProject(project); // also flips welcomeMode off
+    clearHistory();
+    setSection('cnc-engrave');
+    await seedStockFromProject(project);
+    // A template's blank is the stock now, so a shelf entry or file an earlier start named is no
+    // longer where it came from.
+    clearStockEntry();
+    setJobStarted(true);
+    setProjectCreatedHere(true);
+    enterHolding();
+    await scheduleImmediate(project);
+  }
+
   useEffect(() => {
     if (starter === null || starterRan.current) return;
     starterRan.current = true;
@@ -346,64 +407,6 @@ export function StartWizard(): JSX.Element {
     useEngraveJobStore.getState().setBedHold(hold, next.vise, next.sacrificial);
     setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
   }
-
-  async function chooseJob(id: string): Promise<void> {
-    // #716 R-UI-15 — "Name on a dowel" is not a project template: the job opens on a ⌀20 × 100
-    // rod in the rotary chuck, and the wizard shows Holding so the operator sees what holds it.
-    // The chuck is the Holding step's OWN `defaultRotaryChuck` (the shop's grip, the jaw rule for
-    // the diameter), so the starter cannot invent numbers the step would not.
-    if (id === 'dowel') {
-      setSection('cnc-engrave');
-      const jobStore = useEngraveJobStore.getState();
-      jobStore.reset();
-      jobStore.setStock(
-        {
-          material: jobStore.job.stock.material,
-          shape: 'cylinder',
-          diameter: 20,
-          // The STANDING box (D × D × L); `setRotaryHolding` turns it into the axis frame and
-          // writes the workholding in the one undoable step, the Holding step's own write.
-          length: 20,
-          width: 20,
-          thickness: 100,
-        },
-        'computed',
-      );
-      const ready = useEngraveJobStore.getState();
-      const grip = readDefault(liveShopDefaults(), 'rotary.gripMm').value;
-      ready.setRotaryHolding(defaultRotaryChuck(ready.job, grip), jobVise(ready.job));
-      // #716 — the wizard's own empty-design rule (step 2): a starter seeds the stock and the
-      // mount, not items. Without this the demo lines would be cut into the rod.
-      const seeded = useEngraveJobStore.getState().job;
-      useEngraveJobStore.getState().replace({ ...seeded, labels: [], shapes: [] });
-      const project = blankProjectForStock(useEngraveJobStore.getState().job.stock);
-      if (project !== null) {
-        setProject(project);
-        clearHistory();
-      }
-      clearStockEntry();
-      setJobStarted(true);
-      setProjectCreatedHere(true);
-      enterHolding();
-      if (project !== null) await scheduleImmediate(project);
-      return;
-    }
-    const template = findTemplateAcrossSources(id);
-    if (template === undefined) return;
-    const project = template.build();
-    setProject(project); // also flips welcomeMode off
-    clearHistory();
-    setSection('cnc-engrave');
-    await seedStockFromProject(project);
-    // A template's blank is the stock now, so a shelf entry or file an earlier start named is no
-    // longer where it came from.
-    clearStockEntry();
-    setJobStarted(true);
-    setProjectCreatedHere(true);
-    enterHolding();
-    await scheduleImmediate(project);
-  }
-
   /**
    * Step 2, new job (#418): start from the settled stock with an empty design.
    *

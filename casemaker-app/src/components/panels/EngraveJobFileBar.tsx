@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
+import { savedTimeText } from './engraveJobFileBarText';
 
 /**
  * The ONE file bar (#686, design §1): the job's name, when it was last saved, the dirty marker,
@@ -37,14 +38,6 @@ const MENU_ITEM: CSSProperties = {
   cursor: 'pointer',
 };
 
-/** The last-saved time as the mockup prints it (`saved 09:14`), or the unsaved line. */
-export function savedTimeText(savedAt: number | null): string {
-  if (savedAt === null) return 'Not saved yet';
-  const d = new Date(savedAt);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `saved ${hh}:${mm}`;
-}
 
 export interface EngraveJobFileBarProps {
   /**
