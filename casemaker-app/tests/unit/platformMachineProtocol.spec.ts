@@ -28,6 +28,12 @@ import {
   readConfigKey,
   runMd5Sum,
   runReadFile,
+  runListSd,
+  sdTextRefusal,
+  runDeleteSd,
+  parseSdListing,
+  parseSdListingLine,
+  encodeSdPath,
   runStatus,
   runUpload,
   u32be,
@@ -1175,5 +1181,108 @@ describe('#449 the transport windows are shop defaults, with labelled fallbacks'
     if (outcome.ok) return;
     expect(outcome.reason).toBe('timeout');
     expect(outcome.detail).toContain(`${UPLOAD_INACTIVITY_MS} ms`);
+  });
+});
+
+// #772 — THE CARD'S FILE LIST AND DELETE. The command words are Makera's Carvera Controller's own
+// (`ls -e -s`, `rm <file> -e`, commit 3914c912452f83fbd5b5d90c730cb78795198438), its path encoding
+// (space → 0x01, `? * ! ~` → 0x02..0x05) and its answer types (LOAD_INFO 0x83, LOAD_FINISH 0x84,
+// LOAD_ERROR 0x85). These tests say the app speaks them and reads the listing format it documents
+// (`name size YYYYMMDDHHMMSS`, a trailing `/` for a directory, 0x01 for a space).
+describe('#772 the card’s files — the Controller’s own words', () => {
+  const INFO = (text: string): Uint8Array => encodeFrame(0x83, utf8(text));
+  const FINISH = encodeFrame(0x84, EMPTY);
+  const ERROR = encodeFrame(0x85, EMPTY);
+
+  it('parses the listing format, ignoring everything that is not an entry', () => {
+    expect(parseSdListingLine('badge.nc 1024 20261029120304')).toEqual({
+      name: 'badge.nc',
+      size: 1024,
+      modified: '20261029120304',
+      directory: false,
+    });
+    // A trailing slash marks a directory and is not part of its name.
+    expect(parseSdListingLine('sub/ 0 20260101000000')).toMatchObject({ name: 'sub', directory: true });
+    // 0x01 is a space in the name — the Controller's own encoding.
+    expect(parseSdListingLine('my\u0001part.nc 5 20260101000000')).toMatchObject({ name: 'my part.nc' });
+    // Not entries: a dotfile, the controller's progress text, a wrong field count, a non-number.
+    expect(parseSdListingLine('.hidden 1 20260101000000')).toBeNull();
+    expect(parseSdListingLine('Info: upload success: /sd/gcodes/a.nc')).toBeNull();
+    expect(parseSdListingLine('two 2')).toBeNull();
+    expect(parseSdListingLine('name size 20260101000000')).toBeNull();
+    expect(parseSdListing(['a.nc 1 20260101000000', 'junk']).map((e) => e.name)).toEqual(['a.nc']);
+  });
+
+  it('lists the job directory with `ls -e -s`, ending at LOAD_FINISH', async () => {
+    const transport = new ScriptedTransport();
+    transport.script = [[INFO('<Working>badge.nc 1024 20261029120304\npart\u0001one.nc 5 20260101000000\n'), FINISH]];
+    const listing = await runListSd(transport, 1, '/sd/gcodes', { windowMs: 10 });
+    expect(listing.ok).toBe(true);
+    if (!listing.ok) return;
+    // The line and its frame, exactly as the Controller sends them.
+    expect(decodeText(transport.writes[0]!)).toContain('ls -e -s /sd/gcodes');
+    const frame = decodeAll(transport.writes)[0]!;
+    expect(frame.type).toBe(PTYPE_CTRL_MULTI);
+    // The progress segment is stripped, and the 0x01 name is shown as a space.
+    expect(listing.entries.map((e) => e.name)).toEqual(['badge.nc', 'part one.nc']);
+  });
+
+  it('escapes a path the way the Controller does', () => {
+    expect(encodeSdPath('/sd/my jobs?')).toBe('/sd/my\u0001jobs\u0002');
+    expect(encodeSdPath('C:\\sd\\a.nc')).toBe('C:/sd/a.nc');
+    expect(encodeSdPath('/sd/*!~.nc')).toBe('/sd/\u0003\u0004\u0005.nc');
+  });
+
+  it('sends a delete as `rm <file> -e`, and answers its LOAD_FINISH', async () => {
+    const transport = new ScriptedTransport();
+    transport.script = [[FINISH]];
+    const result = await runDeleteSd(transport, 1, '/sd/gcodes/part one.nc', { windowMs: 10 });
+    expect(result.ok).toBe(true);
+    expect(decodeText(transport.writes[0]!)).toContain('rm /sd/gcodes/part\u0001one.nc -e');
+  });
+
+  it('reports a LOAD_ERROR answer as a refusal, not a success', async () => {
+    const transport = new ScriptedTransport();
+    transport.script = [[INFO('rm: cannot remove: No such file\n'), ERROR]];
+    const result = await runDeleteSd(transport, 1, '/sd/gcodes/gone.nc', { windowMs: 10 });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('refused');
+    expect(result.detail).toContain('No such file');
+  });
+
+  it('refuses a path before writing anything: a parent hop, a relative name', async () => {
+    for (const path of ['/sd/../etc', 'relative.nc', '/sd/\u0007bell']) {
+      const transport = new ScriptedTransport();
+      const result = await runDeleteSd(transport, 1, path, { windowMs: 10 });
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.reason).toBe('bad-path');
+      expect(transport.writes).toEqual([]);
+    }
+  });
+
+  it('a failure that arrives as plain text is a refusal, not a deleted file', async () => {
+    const transport = new ScriptedTransport();
+    // Older firmware answers without LOAD_ERROR: the shell's own line is the answer. Reporting
+    // that as a success would tell the person a file was deleted that is still there.
+    transport.script = [[INFO('rm: cannot remove \'/sd/gcodes/job.nc\': No such file\n'), FINISH]];
+    const result = await runDeleteSd(transport, 1, '/sd/gcodes/job.nc', { windowMs: 10 });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('refused');
+    expect(result.detail).toContain('cannot remove');
+    // A NAME may contain the word; only a line STARTING with the error does.
+    expect(sdTextRefusal('error-log.nc 12 20260101000000')).toBeNull();
+    expect(sdTextRefusal('Error: failed to open file')).toContain('Error');
+  });
+
+  it('times out when nothing answers', async () => {
+    const transport = new ScriptedTransport();
+    transport.script = [[]];
+    const result = await runListSd(transport, 1, '/sd/gcodes', { windowMs: 5 });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('timeout');
   });
 });

@@ -39,6 +39,7 @@ import { useLocationStore, useMachineRecord } from '@/store/locationStore';
 import { LocationCard, LocationProblemCard } from './LocationCard';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { MachineConsole } from './MachineConsole';
+import { MachineFiles } from './MachineFiles';
 import { MachineVacuum } from './MachineVacuum';
 import { MachineLight } from './MachineLight';
 import { MachineUnlock } from './MachineUnlock';
@@ -352,6 +353,10 @@ export function MachinesScope() {
                 `canDriveMachine` rule and draws nothing without it, so a web build sees the card it
                 has always seen (#354's rule: do not offer what cannot work). */}
             <MachineConsole host={machine.host} port={machine.port} />
+            {/* #772 — the card's files: what is on the SD card, and deleting a file this app put
+                there. Same `canDriveMachine` rule as the console, and the seam owns the delete
+                rules (only this app's uploads, never while a job runs). */}
+            <MachineFiles host={machine.host} port={machine.port} busy={machine.busy === true} />
           </div>
         ) : (
           <div className="mcard" data-testid="manage-machine-none">

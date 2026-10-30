@@ -33,6 +33,7 @@ import { useCameraPaneStore } from '@/store/cameraPaneStore';
 import { useMachineCamera } from '@/hooks/useMachineCamera';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 import { releaseCheck, type ReleaseSource } from '@/engine/cnc/engrave/release';
+import { recordUploadedFile } from '@/platform/machineFiles';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const BOX: CSSProperties = { marginTop: 6, padding: 8, border: '1px solid #3a4552', borderRadius: 4, background: '#1b2027' };
@@ -178,6 +179,8 @@ export function EngraveCutConfirm({
       setPressing(false);
       return;
     }
+    // #772 — the ledger the card's Files view deletes from.
+    recordUploadedFile(machine.host, outcome.filename);
     const hash = programHash(source.nc);
     const key = runKey({ host: machine.host, port: machine.port }, hash);
     // The statement covered the cutter and the at-machine confirmation; record it now.

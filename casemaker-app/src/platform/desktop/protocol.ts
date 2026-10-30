@@ -33,6 +33,11 @@ export const PTYPE_FILE_DATA = 0xb3;
 export const PTYPE_FILE_END = 0xb4;
 export const PTYPE_FILE_CANCEL = 0xb5;
 export const PTYPE_FILE_RETRY = 0xb6;
+// The load/search answers the Controller uses for its own file browser (#772): the listing lines,
+// the end of the answer, and its refusal (Controller.py lines 85-87 and the dispatch around 1300).
+export const PTYPE_LOAD_INFO = 0x83;
+export const PTYPE_LOAD_FINISH = 0x84;
+export const PTYPE_LOAD_ERROR = 0x85;
 
 /** The `?` status poll, as a single-byte control payload. */
 export const STATUS_POLL_BYTE = 0x3f;
@@ -1258,6 +1263,228 @@ export async function readConfigKey(
     return { ok: false, reason: 'not-in-config', detail: `unrecognised reply: ${text.trim()}`, text };
   }
   return { ok: true, value: (match[1] ?? '').trim(), text };
+}
+
+// ---------------------------------------------------------------------------
+// The card's file list and delete (#772 — the Controller's own words)
+// ---------------------------------------------------------------------------
+//
+// THE WORDS ARE NOT OURS. They are Makera's Carvera Controller's, the open-source Python app that
+// drives a controller of the same firmware family (github.com/MakeraInc/CarveraController, commit
+// 3914c912452f83fbd5b5d90c730cb78795198438):
+//
+//   - list:   `ls -e -s <dir>`   (src/Controller.py `lsCommand`, around line 669)
+//   - delete: `rm <file> -e`     (src/Controller.py `rmCommand`, around line 681)
+//
+// with a space in the path sent as byte 0x01 and `? * ! ~` as 0x02..0x05 (`escape`, line 666),
+// backslashes normalised to `/`. Replies ride LOAD_INFO frames (0x83) — one or several lines each,
+// with `<...>` progress segments stripped — and LOAD_FINISH (0x84) ends the answer while LOAD_ERROR
+// (0x85) refuses it. A listing line is `name size YYYYMMDDHHMMSS`, split on whitespace, the name
+// with 0x01 back to a space, and a trailing `/` marking a directory (src/makera.py `fillRemoteDir`,
+// around line 3642).
+//
+// ON THE MACHINE CHANNEL, NOT THE OPERATOR CONSOLE: the console's gate deliberately refuses `rm`/
+// `mv` (`engine/cnc/consoleGate.ts`), so these are their own commands with their own reply types.
+
+/**
+ * A path the two commands accept: absolute, plain characters and spaces, and the four characters
+ * the Controller escapes (`? * ! ~`). Those are LEGAL in a file name, not shell syntax, here: they
+ * leave this app as 0x02..0x05, exactly as Makera's own client sends them, so the machine's shell
+ * sees a literal name. `..` is refused separately — the one thing escaping cannot make safe.
+ */
+const SD_PATH = /^\/[A-Za-z0-9._/ ?*!~-]*$/;
+
+/** Why a path is not one of these commands' (or null), with the rule in the sentence. */
+export function sdPathProblem(path: string, opts: { directory?: boolean } = {}): string | null {
+  if (!SD_PATH.test(path)) {
+    return `refusing to send ${JSON.stringify(path)}: a path is absolute and made of A-Z a-z 0-9 . _ - / spaces and ? * ! ~`;
+  }
+  if (path.split('/').includes('..')) return `refusing to send ${JSON.stringify(path)}: a path may not climb to its parent`;
+  if (opts.directory === true && path.length > 1 && path.endsWith('/')) {
+    return `refusing to send ${JSON.stringify(path)}: a directory is named without its trailing slash`;
+  }
+  return null;
+}
+
+/** The Controller's own path encoding for `ls`/`rm` (Controller.py `escape`). */
+export function encodeSdPath(path: string): string {
+  return path
+    .replace(/\\/g, '/')
+    .replace(/ /g, '\u0001')
+    .replace(/\?/g, '\u0002')
+    .replace(/\*/g, '\u0003')
+    .replace(/!/g, '\u0004')
+    .replace(/~/g, '\u0005');
+}
+
+/** One entry of a card listing. */
+export interface SdEntry {
+  /** The name as the listing states it, with its 0x01 space bytes turned back into spaces. */
+  name: string;
+  /** The size in bytes, as the listing's own number. */
+  size: number;
+  /** The listing's `YYYYMMDDHHMMSS` stamp, or null when the third field is not one. */
+  modified: string | null;
+  /** A trailing `/` on the name: a directory, which this view lists and does not delete. */
+  directory: boolean;
+}
+
+/**
+ * One listing line as an entry, or null for every line that is not one — mirrors
+ * `makera.py fillRemoteDir`: exactly three whitespace-separated fields, the first not starting
+ * with `.`, the other two all digits. A dotfile, a progress line or a blank is not an entry.
+ */
+export function parseSdListingLine(line: string): SdEntry | null {
+  const fields = line.trim().split(/\s+/);
+  if (fields.length !== 3) return null;
+  const [rawName, rawSize, rawStamp] = fields as [string, string, string];
+  if (rawName.startsWith('.') || !/^\d+$/.test(rawSize) || !/^\d+$/.test(rawStamp)) return null;
+  const directory = rawName.endsWith('/');
+  const name = (directory ? rawName.slice(0, -1) : rawName).replace(/\u0001/g, ' ');
+  if (name.length === 0) return null;
+  return {
+    name,
+    size: Number(rawSize),
+    modified: /^\d{14}$/.test(rawStamp) ? rawStamp : null,
+    directory,
+  };
+}
+
+/** Every entry the listing's lines contain, in the controller's order. */
+export function parseSdListing(lines: readonly string[]): SdEntry[] {
+  return lines.map(parseSdListingLine).filter((e): e is SdEntry => e !== null);
+}
+
+/** How long one card command waits for its answer, ms — the labelled NO-SERVICE FALLBACK (#449). */
+export const SD_WINDOW_MS = 4000;
+
+export interface SdCommandOptions {
+  /** How long the first answer may take, and the quiet gap that ends it, ms. */
+  windowMs?: number;
+}
+
+/**
+ * The first line of an answer that reads as the shell's own failure, or null. A delete that the
+ * machine refused may arrive as LOAD_ERROR — or, on older firmware, as a plain text line, and a
+ * delete reported as a success when the machine said `rm: cannot remove` is the one wrong answer
+ * this view cannot tolerate. The test is per LINE and anchored at its start, so a FILE NAME that
+ * happens to contain "error" cannot trip it: a listing line starts with the name, and an error
+ * line starts with the word.
+ */
+export function sdTextRefusal(text: string): string | null {
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    if (/^(?:error\s*:|error\s+|rm:|info:.*\bfail)/i.test(trimmed)) return trimmed;
+  }
+  return null;
+}
+
+export interface SdAnswer {
+  /** The answer's lines, `<...>` segments stripped and blanks dropped. */
+  lines: string[];
+  /** The answer's text as it arrived, so an unexpected format can be shown rather than lost. */
+  text: string;
+  frames: number;
+  /** LOAD_ERROR arrived: the controller refused the command. */
+  refused: boolean;
+  /** LOAD_FINISH arrived before the window closed. */
+  finished: boolean;
+}
+
+/** Write one console-shaped command and read its LOAD_* answer. */
+async function runSdCommand(
+  transport: MachineTransport,
+  conn: number,
+  command: string,
+  opts: SdCommandOptions,
+): Promise<SdAnswer> {
+  const windowMs = opts.windowMs ?? SD_WINDOW_MS;
+  const channel = new FrameChannel(transport, conn);
+  await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_MULTI, utf8(command)));
+  const parts: string[] = [];
+  let frames = 0;
+  let refused = false;
+  let finished = false;
+  for (;;) {
+    const next = await channel.next(windowMs);
+    if (next === null) break;
+    frames++;
+    if (next.type === PTYPE_LOAD_FINISH) {
+      finished = true;
+      break;
+    }
+    if (next.type === PTYPE_LOAD_ERROR) {
+      refused = true;
+      finished = true;
+      break;
+    }
+    if (next.type >= 0x80) parts.push(decodeText(next.data).replace(/<.*?>/g, ''));
+  }
+  const text = parts.join('');
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return { lines, text, frames, refused, finished };
+}
+
+export type SdListOutcome =
+  | { ok: true; entries: SdEntry[]; text: string }
+  | { ok: false; reason: 'bad-path' | 'refused' | 'timeout'; detail: string; text: string };
+
+/** List a directory on the machine's card with the Controller's own `ls -e -s`. */
+export async function runListSd(
+  transport: MachineTransport,
+  conn: number,
+  directory: string = GCODE_DIR,
+  opts: SdCommandOptions = {},
+): Promise<SdListOutcome> {
+  const problem = sdPathProblem(directory, { directory: true });
+  if (problem !== null) return { ok: false, reason: 'bad-path', detail: problem, text: '' };
+  const answer = await runSdCommand(transport, conn, `ls -e -s ${encodeSdPath(directory)}`, opts);
+  const textual = sdTextRefusal(answer.text);
+  if (answer.refused || textual !== null) {
+    return { ok: false, reason: 'refused', detail: textual ?? (answer.text.trim() || 'the controller refused the listing'), text: answer.text };
+  }
+  if (answer.frames === 0) {
+    return {
+      ok: false,
+      reason: 'timeout',
+      detail: `no answer to \`ls\` within ${opts.windowMs ?? SD_WINDOW_MS} ms`,
+      text: '',
+    };
+  }
+  return { ok: true, entries: parseSdListing(answer.lines), text: answer.text };
+}
+
+export type SdDeleteOutcome =
+  | { ok: true; text: string }
+  | { ok: false; reason: 'bad-path' | 'refused' | 'timeout'; detail: string; text: string };
+
+/** Delete one file from the machine's card with the Controller's own `rm <file> -e`. */
+export async function runDeleteSd(
+  transport: MachineTransport,
+  conn: number,
+  path: string,
+  opts: SdCommandOptions = {},
+): Promise<SdDeleteOutcome> {
+  const problem = sdPathProblem(path);
+  if (problem !== null) return { ok: false, reason: 'bad-path', detail: problem, text: '' };
+  const answer = await runSdCommand(transport, conn, `rm ${encodeSdPath(path)} -e`, opts);
+  const textual = sdTextRefusal(answer.text);
+  if (answer.refused || textual !== null) {
+    return { ok: false, reason: 'refused', detail: textual ?? (answer.text.trim() || 'the controller refused the delete'), text: answer.text };
+  }
+  if (answer.frames === 0) {
+    return {
+      ok: false,
+      reason: 'timeout',
+      detail: `no answer to \`rm\` within ${opts.windowMs ?? SD_WINDOW_MS} ms`,
+      text: '',
+    };
+  }
+  return { ok: true, text: answer.text };
 }
 
 // ---------------------------------------------------------------------------

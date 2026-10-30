@@ -15,6 +15,7 @@ import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 import { withPeriod } from '@/store/engraveRunGate';
+import { recordUploadedFile } from '@/platform/machineFiles';
 
 /**
  * #255 — send the verified program to the machine, from beside Save in the engrave panel.
@@ -225,6 +226,8 @@ export function EngraveMachineUpload({
     // The run panel is drawn from the machine's store entry (#423): an upload that went through is
     // what prepares it, with the program's hash for the once-per-program confirmation.
     if (outcome.kind === 'uploaded') {
+      // #772 — the Ledger the card's Files view deletes from.
+      recordUploadedFile(machine.host, outcome.filename);
       // #469 (review R20) — the app's own upload OWNS the vacuum, whatever the text says. The span
       // is the post's decision (#419 decision 4) and this file is the whole of what was uploaded:
       // a file that carries its own `M331`/`M332` says so in words, while an `air: false` job

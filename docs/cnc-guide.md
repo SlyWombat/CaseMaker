@@ -170,6 +170,15 @@ not wire the `!` and `~` realtime bytes. **The physical stop is the stop**: the 
 and no jog, so anything that moves needs a person standing at the machine (chapter 8.4, and
 `/Fabrication.md` §8).
 
+**The card's files (#772).** Under the same machine card, collapsed beside the console, **Files on
+the card** reads the SD card's job directory with the controller's own `ls -e -s` and lists each
+entry's name, size and date. It deletes only a file **Case Maker uploaded** — the app keeps a
+per-browser record of what it has put there — and never while a job is running; a file uploaded
+somewhere else is listed read-only, to be removed at the machine or in Makera Studio. A delete is
+two presses, the second under the file's own name, and nothing else on the card is touched. The
+command words are Makera's Carvera Controller's (`rm <file> -e`), sent over the machine channel
+rather than typed into the console, whose gate refuses `rm` on purpose.
+
 **A macro keeps talking after its line is answered.** `M491` runs the tool-length probe for about
 fifteen seconds, so its tail — including `ERROR: Probe dead or not set, please charge or set first!`
 — arrives long after the reply to `M491` was closed and shown. The panel does not hand that tail to

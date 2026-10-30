@@ -73,6 +73,7 @@ import { finishedProgramsFor } from './locationStore';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { firstRegistrationFor } from './engraveRegistrationStore';
 import { facingRegistrationBlocker } from './engraveRunGate';
+import { recordUploadedFile } from '@/platform/machineFiles';
 
 export type ReleasePhase =
   /** Planned, nothing sent: the upload button is the next press. */
@@ -588,6 +589,9 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
           result = { kind: 'error', filename: f.filename, detail: e instanceof Error ? e.message : String(e) };
         }
         if (result.kind === 'uploaded') {
+          // #772 — the card's Files view deletes only what this app put there; the ledger is how it
+          // knows. Recording after the machine accepted the file, before the state flips.
+          recordUploadedFile(target.host, f.filename);
           files[i] = {
             ...f,
             upload: result.alreadyPresent ? 'present' : 'uploaded',

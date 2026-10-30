@@ -25,7 +25,9 @@ import {
   consoleProblem,
   openConsole,
   readConfigKey,
+  runDeleteSd,
   runDiscovery,
+  runListSd,
   runIdentify,
   runStatus,
   runUpload,
@@ -36,6 +38,8 @@ import {
   type MachineIdentity,
   type MachineStatus,
   type MachineTransport,
+  type SdDeleteOutcome,
+  type SdListOutcome,
   type UploadOutcome,
 } from './protocol';
 import { tauriTransport } from './transport';
@@ -51,6 +55,9 @@ export type {
   MachineIdentity,
   MachineStatus,
   MachineTransport,
+  SdDeleteOutcome,
+  SdEntry,
+  SdListOutcome,
   UploadOutcome,
 } from './protocol';
 
@@ -163,6 +170,42 @@ export async function status(
   const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     return await runStatus(transport, conn, { windowMs: opts.windowMs });
+  } finally {
+    await closeQuietly(transport, conn);
+  }
+}
+
+/**
+ * List a directory on the machine's card (#772) — the controller's own `ls -e -s`, over the
+ * machine channel. One connection, one command, closed again.
+ */
+export async function listSdFiles(
+  target: MachineTarget,
+  opts: BridgeOptions & { directory?: string; windowMs?: number } = {},
+): Promise<SdListOutcome> {
+  const transport = transportOf(opts);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  try {
+    return await runListSd(transport, conn, opts.directory ?? GCODE_DIR, { windowMs: opts.windowMs });
+  } finally {
+    await closeQuietly(transport, conn);
+  }
+}
+
+/**
+ * Delete one file from the machine's card (#772) — the controller's own `rm <file> -e`. The
+ * caller's rule about WHICH files may be deleted lives above this seam; this sends what it is
+ * given.
+ */
+export async function deleteSdFile(
+  target: MachineTarget,
+  path: string,
+  opts: BridgeOptions & { windowMs?: number } = {},
+): Promise<SdDeleteOutcome> {
+  const transport = transportOf(opts);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  try {
+    return await runDeleteSd(transport, conn, path, { windowMs: opts.windowMs });
   } finally {
     await closeQuietly(transport, conn);
   }

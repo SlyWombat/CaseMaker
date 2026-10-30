@@ -122,7 +122,9 @@ describe('#449 the connect timeout is a shop default with a labelled fallback', 
 
   it('every connect site reads the one constant rather than restating a literal', () => {
     const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'platform', 'desktop', 'machineBridge.ts'), 'utf8');
-    expect(src.match(/opts\.connectTimeoutMs \?\? DEFAULT_CONNECT_TIMEOUT_MS/g)).toHaveLength(6);
+    // identify, status, readConfigValues, uploadVerifiedProgram, sendConsoleLine, openConsoleSession,
+    // and #772's two card commands (listSdFiles, deleteSdFile).
+    expect(src.match(/opts\.connectTimeoutMs \?\? DEFAULT_CONNECT_TIMEOUT_MS/g)).toHaveLength(8);
     expect(src).not.toMatch(/connectTimeoutMs \?\? \d/);
   });
 });
