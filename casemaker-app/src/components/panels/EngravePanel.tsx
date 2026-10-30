@@ -1334,9 +1334,9 @@ export function EngravePanel(): JSX.Element {
     }
   }
   /**
-   * #435 — read a picked STL/3MF (or, #672, a PNG relief) as the target object. The parser, the
-   * size guard, the hash and
-   * the base64 embedding are all `readTargetObjectFile`'s; this only places the result: centred in
+   * #435 — read a picked STL/3MF/STEP (or, #672, a PNG relief) as the target object. The parser,
+   * the STEP kernel (#774), the size guard, the hash and the base64 embedding are all
+   * `readTargetObjectFile`'s; this only places the result: centred in
    * X/Y with its TOP on the stock's top face (Z0), which is where a reference part sits when it is
    * being used to lay out pockets.
    */
@@ -2993,7 +2993,7 @@ export function EngravePanel(): JSX.Element {
         data-testid="engrave-target-import"
         disabled={targetImporting}
         style={{ marginTop: 4 }}
-        title="Read an STL or 3MF part as a reference object. The file is parsed once, embedded in the job and shown in the viewport; it is never cut."
+        title="Read an STL, 3MF or STEP part as a reference object. The file is parsed once, embedded in the job and shown in the viewport; it is never cut."
         onClick={() => targetInputRef.current?.click()}
       >
         {targetImporting ? 'Reading the object…' : target === null ? 'Import a target object…' : 'Replace the target object…'}
@@ -3001,7 +3001,7 @@ export function EngravePanel(): JSX.Element {
       <input
         ref={targetInputRef}
         type="file"
-        accept=".stl,.3mf,model/stl,model/3mf"
+        accept=".stl,.3mf,.step,.stp,model/stl,model/3mf,model/step"
         style={{ display: 'none' }}
         data-testid="engrave-target-input"
         onChange={(e) => {
@@ -3023,7 +3023,7 @@ export function EngravePanel(): JSX.Element {
       <input
         ref={goalInputRef}
         type="file"
-        accept=".stl,.3mf,.png,model/stl,model/3mf,image/png"
+        accept=".stl,.3mf,.step,.stp,.png,model/stl,model/3mf,model/step,image/png"
         style={{ display: 'none' }}
         data-testid="engrave-surface-input"
         onChange={(e) => {

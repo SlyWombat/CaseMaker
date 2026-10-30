@@ -1,6 +1,7 @@
 /**
- * An STL or 3MF used AS THE STOCK (#418, §5.1's "Load" door) — what the mesh is, or why it cannot be
- * the stock a job cuts.
+ * An STL, 3MF or STEP used AS THE STOCK (#418, §5.1's "Load" door) — what the mesh is, or why it
+ * cannot be the stock a job cuts. A STEP is tessellated by the CAD kernel before it gets here
+ * (#774), so every question below reads the same triangle mesh an STL gives.
  *
  * Three questions, in the order a wrong answer would hurt:
  *
@@ -375,9 +376,10 @@ export type StockFileRead =
   | { kind: 'refused'; name: string; reason: string };
 
 /**
- * Read a picked `.stl` / `.3mf` as stock. Never throws: every failure is a sentence the person who
- * picked the file is told. A 3MF is first asked whether it is a PrusaSlicer project with negative
- * volumes — that one is a design, not just a blank — and otherwise read as one mesh.
+ * Read a picked `.stl` / `.3mf` / `.step` as stock. Never throws: every failure is a sentence the
+ * person who picked the file is told. A 3MF is first asked whether it is a PrusaSlicer project with
+ * negative volumes — that one is a design, not just a blank — and otherwise read as one mesh. A
+ * STEP (#774) is tessellated by the CAD kernel at the door and read out of the resulting mesh.
  */
 export async function readStockFile(file: File): Promise<StockFileRead> {
   const name = file.name;
@@ -387,7 +389,8 @@ export async function readStockFile(file: File): Promise<StockFileRead> {
   const lower = name.toLowerCase();
   const isStl = lower.endsWith('.stl');
   const is3mf = lower.endsWith('.3mf');
-  if (!isStl && !is3mf) return { kind: 'refused', name, reason: `${name} is not an .stl or .3mf file` };
+  const isStep = lower.endsWith('.step') || lower.endsWith('.stp');
+  if (!isStl && !is3mf && !isStep) return { kind: 'refused', name, reason: `${name} is not an .stl, .3mf or .step file` };
   try {
     const bytes = await file.arrayBuffer();
     const sha256 = await sha256Hex(bytes);
@@ -404,7 +407,19 @@ export async function readStockFile(file: File): Promise<StockFileRead> {
       const why = plain3mfProblem(bytes);
       if (why !== null) return { kind: 'refused', name, reason: why };
     }
-    const mesh = isStl ? parseStl(bytes) : parse3MF(bytes);
+    let mesh: ParsedMesh;
+    if (isStep) {
+      // Lazy, like the goal door: a job whose stock is an STL never downloads the kernel. The
+      // stock keeps a SIZE, so the mesh alone is enough — no STL is written for it.
+      const { stepToMesh } = await import('./stepMesh');
+      try {
+        mesh = (await stepToMesh(bytes)).mesh;
+      } catch (e) {
+        return { kind: 'refused', name, reason: `${name} could not be read as STEP: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    } else {
+      mesh = isStl ? parseStl(bytes) : parse3MF(bytes);
+    }
     const read = meshAsStock(mesh);
     if (!read.ok) return { kind: 'refused', name, reason: read.reason };
     return {

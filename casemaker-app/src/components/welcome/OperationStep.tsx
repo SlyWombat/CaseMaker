@@ -283,7 +283,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
               <span>Mesh</span>
               <input
                 type="file"
-                accept=".stl,.3mf,.png,model/stl,model/3mf,image/png"
+                accept=".stl,.3mf,.step,.stp,.png,model/stl,model/3mf,model/step,image/png"
                 data-testid="start-wizard-op-surface-file"
                 aria-label="Mesh to surface"
                 onChange={(e) => {

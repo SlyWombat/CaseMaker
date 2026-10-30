@@ -18,8 +18,9 @@ evidence; every Case Maker cell cites the issue or file it was verified against.
 | | **113** | |
 
 **Milestone.** The remaining parity work is tracked in the milestone *Parity with Makera Studio*
-(#17); the two decisions it waits on are #774 (STEP import, today R-12) and #775 (USB/serial
-transport, decision 10).
+(#17); #774 (STEP import) is decided and built — a STEP is tessellated through the OpenCascade
+WASM kernel at import (#774), so R-13 is lifted for STEP; the remaining decision is #775 (USB/serial
+transport, decision 10), and Gerber stays refused as R-12.
 
 **Three biggest gaps.** (1) **Pause/resume and the full status monitor AT THE BENCH** — the software
 is on `main` for both: the run panel sends the firmware's own suspend/resume at the next poll
@@ -205,7 +206,7 @@ in-flight work is named as such, never counted):
 | Stock-to-leave / finish pass | `radial_allowance`, `axial_allowance` fields — Parity §4 | A finish pass whose allowance is a shop setting (#250) | PARITY | — |
 | Rest machining | Guided Mode picks a Main Tool and a Clearance Tool — Workflow A.2 | Rest regions measured by the simulation, per-setup item → cutter assignment (#410, #436, #472) | PARITY | — |
 | Multi-setup / two-sided | One `Set Stock` per project — Workflow A.4 | Setups planned from the geometry, a remount page, features from setup 1 as references (#428, #429, #471) | AHEAD | — |
-| Import | STEP/STP/STL/OBJ, DXF/SVG, JPG/PNG/BMP, Gerber — RE 06 | SVG/DXF (#217), image trace (#252), STL/3MF as stock or goal (#418, #533), PrusaSlicer 3MF design (#410); STEP and Gerber refused | PARTIAL | R-12, R-13 |
+| Import | STEP/STP/STL/OBJ, DXF/SVG, JPG/PNG/BMP, Gerber — RE 06 | SVG/DXF (#217), image trace (#252), STL/3MF/STEP as stock or goal (#418, #533, #774 — a STEP is tessellated through the OpenCascade WASM kernel at import), PrusaSlicer 3MF design (#410); Gerber refused | PARTIAL | R-12 |
 | Text & fonts | The text subsystem logs `ERROR::FREETYPE: Failed to load font` — Parity §8 | Real glyph outlines with a multi-font registry (#169), per-label fonts and depths (#170) | AHEAD | — |
 | Parametric part | None — Studio takes a mesh and cuts it | The whole app: the CAM reads the compiler's own profiles and depths (Parity §9) | AHEAD | — |
 | Output dialect | `;@MKR\|` header, linear-only `G1`, `T1 M6`, `M7`, `S M3`, `M9 M05 G28 M02`, base64 thumbnail, no `G54`/`G10` — Parity §6 | `G90 G21`, the same header plus `;@CM\|TOOL\|key=`, a machine-frame lift after `M6` (#384), `M331`…`M332`, `M05 G28 M02`; linear-only; no probing or origin command in the file (decision 26) (`cnc/post/z1.ts`) | PARITY | — |

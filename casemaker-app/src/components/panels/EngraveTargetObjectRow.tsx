@@ -359,6 +359,10 @@ export function EngraveTargetObjectRow({
   const size = placedSize(target);
   const sizeText = `${Number(size.x.toFixed(2))}×${Number(size.y.toFixed(2))}×${Number(size.z.toFixed(2))} mm`;
   const goal = target.role === 'goal';
+  // #774 — a STEP target is stored as the mesh the CAD kernel tessellated it into. The name is the
+  // file the operator picked (and may be edited later), so what is EMBEDDED is still `format`; the
+  // sentence says both truths rather than calling a .step file an STL.
+  const convertedFromStep = /\.(step|stp)$/i.test(target.name);
   // #721 — a mold's cavity opens at the stock top, so its Z is not a placement.
   const moldGoal = goal && target.goalMode === 'mold' && target.format !== 'png';
   const settings = target.surface ?? {};
@@ -426,7 +430,10 @@ export function EngraveTargetObjectRow({
       </label>
 
       <p style={MUTED}>
-        Imported {target.format.toUpperCase()} — embedded in the job ({target.sha256.slice(0, 12)}…).
+        {convertedFromStep
+          ? 'Imported STEP — read by the CAD kernel and embedded in the job as a mesh'
+          : `Imported ${target.format.toUpperCase()} — embedded in the job`}{' '}
+        ({target.sha256.slice(0, 12)}…).
         {goal
           ? target.goalMode === 'mold' && target.format !== 'png'
             ? ` The object is the goal, made as a MOLD: its shape is cut as a cavity to cast it in, ${fmt(size.z)} mm deep. Its size is ${sizeText}.`

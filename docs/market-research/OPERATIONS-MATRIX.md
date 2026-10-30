@@ -64,7 +64,7 @@ Thread mill remain PARTIAL engine slices. What §2 A/B records below is therefor
 filled-open-path note.
 
 Refusals checked first (`MAKERA-VS-CASEMAKER.md` §G, `/Makera-Parity.md` §14.4): laser modules (decision 4),
-R-7 toolpath template library, R-12 Gerber, R-13 STEP, R-15 nesting/tiling, R-16 ramping (reopened for metal
+R-7 toolpath template library, R-12 Gerber, R-15 nesting/tiling, R-16 ramping (reopened for metal
 pockets only), R-14 thread milling (superseded, shipped #445). None of the items below are refused ones.
 
 ### A. The engine posts it; the UI cannot reach it
@@ -167,6 +167,6 @@ Case Maker evidence (read in this pass): `casemaker-app/src/types/engraveJob.ts`
   excludes it. Re-count Gap B after every pass; a row crossing three platforms becomes an issue.
 - **Dagger cells.** Re-open the cited page (use a browser if the fetcher gets 403) and drop the dagger once the name is confirmed.
 - **Check refusals before proposing.** Read `MAKERA-VS-CASEMAKER.md` §G and `/Makera-Parity.md` §14.4 first; laser, templates,
-  Gerber, STEP, nesting stay refused.
+  Gerber, nesting stay refused (STEP was lifted by #774).
 - **Engine vs UI.** Grep the importers before saying "wired": `adaptive.ts` was documented as wired and was not (until #666).
 - **Add a row only with a source.** A new row needs one URL per platform it claims, or `not established`.

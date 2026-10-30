@@ -38,7 +38,7 @@ with a paid tier (`(Pro)`, `(Plus)`, `(M+)`, `(Starter)`, `(sub)`). No vendor wa
 | Import SVG | ? | Y (#217) | Y 10 · N 8 |
 | Import DXF | ? | Y (#217, #294, #453) | Y 9 · N 7 · ? 2 · tier 1 |
 | Import STL / 3D mesh | Y | Y — STL/3MF as stock or as the goal (#418, #533); PrusaSlicer 3MF design (#410) | Y 8 · N 10 · tier 2 |
-| Import STEP / CAD | N | R-13 | Y 2 · N 16 |
+| Import STEP / CAD | Y — STEP/STP tessellated through the OpenCascade WASM kernel at import (#774) | — | Y 2 · N 16 |
 | Import Gerber / PCB | N | R-12 | Y 2 · P 1 · N 15 · tier 1 |
 | Image trace (raster→vector) | N | Y (#252) | Y 7 · P 1 · N 10 |
 | Stock/blank definition | P | Y — stock shelf with layers/finish/flatness (#413), vendor sizes (#446), laminates (#492) | Y 11 · P 4 · N 2 · ? 1 |
@@ -121,7 +121,7 @@ fewer than half the field does, "behind" means an `N`/`P` where more than half h
 | Group | Ahead of the field | At parity | Behind | Refused (reason) |
 |---|---|---|---|---|
 | **A** Platform | browser (5/18), open source (4/18), no account | Windows, free, offline | macOS (8/18), Linux (5/18) — deferred #322/#323 | paid tier R-20; account R-19 |
-| **B** Design | parametric (1/18), mesh as goal/stock | text, SVG/DXF, trace, stock | 2D editor (7/18) is placed items only | STEP R-13 (B-rep kernel), Gerber R-12 (a different product) |
+| **B** Design | parametric (1/18), mesh as goal/stock | text, SVG/DXF, trace, stock | 2D editor (7/18) is placed items only | Gerber R-12 (a different product) |
 | **C** CAM | V-carve at the colour plane, thread milling (3/18), finish pass, feeds with measured provenance | pocket, contour, drill, tabs, tool/material libraries | chamfer op (4/18), rotary (6/18), 3D relief UI (8/18), one machine profile | laser (dec. 4), nesting R-15, templates R-7, scripting R-11, engrave ramping R-16 |
 | **D** Simulation | collision (3/18), time estimate (6/18), oracle (0/18) | previews, before/after, removal sim | — | — |
 | **E** Control | probe records, mount datum, `G38.3` no-alarm touches, Z-only edge finding | origin, tool length, tool-change prompts, fixtures | pause/resume (11/18), 3D probe/auto-level (7/18), setup wizard (13/18) partial | jog, overrides, pendant R-10; machine facts owned by no wizard R-1 |

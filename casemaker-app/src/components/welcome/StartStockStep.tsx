@@ -763,7 +763,7 @@ export function StartStockStep({
         data-state={dragOver ? 'over' : reading ? 'reading' : 'idle'}
         role="button"
         tabIndex={0}
-        aria-label="Load an STL or 3MF as the stock"
+        aria-label="Load an STL, 3MF or STEP as the stock"
         onClick={() => fileInput.current?.click()}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -783,11 +783,11 @@ export function StartStockStep({
         }}
         style={dragOver ? DROP_OVER : DROP}
       >
-        Load an STL or 3MF as the stock…
+        Load an STL, 3MF or STEP as the stock…
         <input
           ref={fileInput}
           type="file"
-          accept=".stl,.3mf"
+          accept=".stl,.3mf,.step,.stp"
           hidden
           data-testid="start-wizard-load-file"
           aria-label="Stock file"

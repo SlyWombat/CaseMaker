@@ -964,7 +964,7 @@ const targetObjectSchema = z
       .describe('A PNG goal’s relief map: its depth and direction (#672); omit for defaults.'),
   })
   .strict()
-  .describe('An embedded mesh (STL/3MF): a reference the cutting volumes are positioned against, or a goal shape to make.');
+  .describe('An embedded mesh (STL/3MF, or a STEP the CAD kernel tessellated at import, #774): a reference the cutting volumes are positioned against, or a goal shape to make.');
 
 
 const keepOutSchema = z

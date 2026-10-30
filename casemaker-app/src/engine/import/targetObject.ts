@@ -11,9 +11,10 @@
  * 12 MB model is an ordinary goal now; nothing is decimated, because the heightfield is sampled at
  * the job's grid pitch whatever the mesh's triangle count.
  *
- * Pure parsing lives in `stlParser.ts` / `threeMfParser.ts`; only `readTargetObjectFile` touches
- * the browser's `File` and `crypto.subtle`, and it never throws — every failure is a sentence the
- * person who picked the file is told.
+ * Pure parsing lives in `stlParser.ts` / `threeMfParser.ts`; the STEP kernel (#774) is a lazy
+ * import of `stepMesh.ts`. Only `readTargetObjectFile` touches the browser's `File` and
+ * `crypto.subtle`, and it never throws — every failure is a sentence the person who picked the
+ * file is told.
  */
 
 import type { EngraveTargetObject } from '@/types/engraveJob';
@@ -37,10 +38,19 @@ export type TargetObjectRead =
     }
   | { ok: false; error: string };
 
-function formatOf(name: string): TargetObjectFormat | null {
+/**
+ * The file's SOURCE kind. `step` is not a stored format: a STEP is tessellated at the door
+ * (#774) and stored as the binary STL `formatOf` maps everything mesh-shaped to, so the rest of
+ * the app keeps reading one mesh format.
+ */
+type SourceFormat = TargetObjectFormat | 'step';
+
+function formatOf(name: string): SourceFormat | null {
   const lower = name.toLowerCase();
   if (lower.endsWith('.stl')) return 'stl';
   if (lower.endsWith('.3mf')) return '3mf';
+  // #774 — a STEP/STP is a B-rep; the CAD kernel turns it into a mesh before anything else sees it.
+  if (lower.endsWith('.step') || lower.endsWith('.stp')) return 'step';
   // #672 — a picture is a goal: its luminance is the heightfield the goal pipeline surfaces.
   if (lower.endsWith('.png')) return 'png';
   return null;
@@ -60,9 +70,9 @@ export interface ImageFit {
 const NATURAL_MM_PER_PX = 25.4 / 96;
 
 /**
- * Read a picked `.stl` / `.3mf` as a reference object. `id` is supplied by the caller (the store's
- * `newTargetObjectId`), so this module stays free of the store and the id convention lives in one
- * place.
+ * Read a picked `.stl` / `.3mf` / `.step` as a reference object. `id` is supplied by the caller
+ * (the store's `newTargetObjectId`), so this module stays free of the store and the id convention
+ * lives in one place.
  */
 export async function readTargetObjectFile(
   file: File,
@@ -71,7 +81,7 @@ export async function readTargetObjectFile(
 ): Promise<TargetObjectRead> {
   const format = formatOf(file.name);
   if (format === null) {
-    return { ok: false, error: `${file.name} is not an STL, 3MF or PNG file.` };
+    return { ok: false, error: `${file.name} is not an STL, 3MF, STEP or PNG file.` };
   }
   if (file.size === 0) return { ok: false, error: `${file.name} is empty.` };
 
@@ -111,12 +121,26 @@ export async function readTargetObjectFile(
     };
   }
 
+  // #774 — a STEP is converted ONCE, here: the kernel tessellates the B-rep and the job stores
+  // the binary STL, so the id/hash/embed contract below is the one every mesh already has. The
+  // file's own name is kept, so the row still says which file was picked.
+  let stored: ArrayBuffer = bytes;
   let mesh: ParsedMesh;
   try {
-    mesh = format === '3mf' ? parse3MF(bytes) : parseStl(bytes);
+    if (format === 'step') {
+      const { stepToStl } = await import('./stepMesh');
+      const converted = await stepToStl(bytes);
+      stored = converted.stl;
+      mesh = converted.mesh;
+    } else {
+      mesh = format === '3mf' ? parse3MF(bytes) : parseStl(bytes);
+    }
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
-    return { ok: false, error: `${file.name} could not be parsed: ${why}` };
+    return {
+      ok: false,
+      error: format === 'step' ? `${file.name} could not be read as STEP: ${why}` : `${file.name} could not be parsed: ${why}`,
+    };
   }
   if (mesh.triangleCount === 0 || mesh.indices.length === 0) {
     return { ok: false, error: `${file.name} holds no triangles, so it has no shape to show.` };
@@ -137,7 +161,7 @@ export async function readTargetObjectFile(
     // in meshStock → designImport → platform/features, which is browser-only (__FEATURE_SIM__,
     // window). This reader runs only in the browser file picker, where that chain is fine.
     const { sha256Hex } = await import('./meshStock');
-    sha256 = await sha256Hex(bytes);
+    sha256 = await sha256Hex(stored);
   } catch {
     return { ok: false, error: `${file.name} could not be hashed.` };
   }
@@ -146,9 +170,11 @@ export async function readTargetObjectFile(
     ok: true,
     id,
     name: file.name,
-    format,
+    // A STEP was converted to the mesh above; what is EMBEDDED — and what the hash identifies — is
+    // that mesh's binary STL, so the document says so.
+    format: format === 'step' ? 'stl' : format,
     sha256,
-    data: arrayBufferToBase64(bytes),
+    data: arrayBufferToBase64(stored),
     size,
   };
 }
