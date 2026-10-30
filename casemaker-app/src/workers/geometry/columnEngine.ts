@@ -421,6 +421,13 @@ export interface ColumnGrid {
    * bottom face. Rotary never sets it: a radius column cannot go below the axis either way.
    */
   readonly floor?: number;
+  /**
+   * #723 P2-2b — a PER-COLUMN lower bound, `f[j*nu + i]`: the material in a column is the
+   * interval [f, h] rather than [base, h]. A carried flip seeds it from the other side's remaining
+   * solid, so the wall between the two sides is `h − f` and `h == f` is a measured break-through.
+   * Absent (every pre-#723 caller): the global `floor`/`base` rule above, unchanged.
+   */
+  readonly columnFloor?: Float32Array;
   /** Remaining value: `h[j*nu + i]`. Rotary: remaining radius from the axis. Flat: remaining top Z. */
   readonly h: Float32Array;
 }
@@ -1154,8 +1161,15 @@ export const FLAT: ColumnParameterisation = {
         }
         if (!covered) continue;
         const idx = j * nu + i;
-        if (floor < (h[idx] as number)) {
-          h[idx] = floor;
+        // #723 P2-2b — a carried column stops at its own floor: the cutter may not remove material
+        // that is not there, and `next == columnFloor` is how a column reads as cut through.
+        const colFloor =
+          grid.columnFloor === undefined
+            ? bottom
+            : Math.max(bottom, grid.columnFloor[idx] as number);
+        const next = floor < colFloor ? colFloor : floor;
+        if (next < (h[idx] as number)) {
+          h[idx] = next;
           written++;
         }
       }
@@ -1170,22 +1184,45 @@ export const FLAT: ColumnParameterisation = {
   volume(grid) {
     const { initial, base, du, dv } = grid;
     const cellArea = du * dv;
+    if (grid.columnFloor === undefined) {
+      // THE PRE-#723 FORMULAS, VERBATIM. Every job without a carried floor must produce the same
+      // numbers to the last bit — the committed receipts compare them — so this path is not the
+      // interval arithmetic specialised; it is the original code.
+      let removed = 0;
+      let sacrificialRemoved = 0;
+      for (let k = 0; k < grid.h.length; k++) {
+        const top = Math.min(initial, grid.h[k] as number);
+        if (top < base) {
+          // Through the blank's bottom (#218): the part's own volume is gone to `base`, and the
+          // rest is board material the breakthrough took. The exact sweeper splits these the same
+          // way (`removedFromPart` / `removedFromSacrificial`).
+          removed += (initial - base) * cellArea;
+          sacrificialRemoved += (base - top) * cellArea;
+        } else {
+          removed += (initial - top) * cellArea;
+        }
+      }
+      const stock = (initial - base) * du * grid.nu * dv * grid.nv;
+      return { removed, stock, sacrificialRemoved };
+    }
+    // #723 P2-2b — a carried flip: the material is [floor_k, h_k]. The stock is what THIS program
+    // starts from, and `removed` is the interval it took; a column whose top reaches its floor has
+    // lost all of it (a break-through), and one 0.05 mm short leaves a 0.05 mm wall.
     let removed = 0;
     let sacrificialRemoved = 0;
+    let stock = 0;
     for (let k = 0; k < grid.h.length; k++) {
+      const fl = Math.max(base, grid.columnFloor[k] as number);
+      const start = initial > fl ? initial - fl : 0;
+      stock += start;
       const top = Math.min(initial, grid.h[k] as number);
-      if (top < base) {
-        // Through the blank's bottom (#218): the part's own volume is gone to `base`, and the
-        // rest is board material the breakthrough took. The exact sweeper splits these the same
-        // way (`removedFromPart` / `removedFromSacrificial`).
-        removed += (initial - base) * cellArea;
-        sacrificialRemoved += (base - top) * cellArea;
-      } else {
-        removed += (initial - top) * cellArea;
-      }
+      const remain = top > fl ? top - fl : 0;
+      removed += start - remain;
+      // A carried column whose material starts above the blank's bottom never reaches it, so a
+      // breakthrough below `base` cannot take board material from it.
+      if (top < base && fl <= base) sacrificialRemoved += base - top;
     }
-    const stock = (initial - base) * du * grid.nu * dv * grid.nv;
-    return { removed, stock, sacrificialRemoved };
+    return { removed: removed * cellArea, stock: stock * cellArea, sacrificialRemoved: sacrificialRemoved * cellArea };
   },
 };
 
@@ -1417,16 +1454,21 @@ export function meshFlat(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutpu
   const positions = new Float32Array(vertexCount * 3);
   /** Each display column's top Z; below `base` is a through column (#218). */
   const tops = new Float32Array(topCount);
+  /** #723 P2-2b — each display column's floor: the carried stock's underside, or the blank's. */
+  const floors = new Float32Array(topCount);
   const put = (v: number, x: number, y: number, z: number): void => {
     positions[v * 3] = x;
     positions[v * 3 + 1] = y;
     positions[v * 3 + 2] = z;
   };
-  const sample = (x: number, y: number): number => {
+  const cellAt = (x: number, y: number): number => {
     const i = Math.min(grid.nu - 1, Math.max(0, Math.round((x - grid.u0) / grid.du)));
     const j = Math.min(grid.nv - 1, Math.max(0, Math.round((y - grid.v0) / grid.dv)));
-    return grid.h[j * grid.nu + i] as number;
+    return j * grid.nu + i;
   };
+  const sample = (x: number, y: number): number => grid.h[cellAt(x, y)] as number;
+  const floorAt = (x: number, y: number): number =>
+    grid.columnFloor === undefined ? grid.base : Math.max(grid.base, grid.columnFloor[cellAt(x, y)] as number);
   const idxOf = (I: number, J: number): number => I * ny + J;
   for (let I = 0; I <= nuD; I++) {
     const x = xMin + (I / nuD) * L;
@@ -1435,18 +1477,24 @@ export function meshFlat(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutpu
       // The real floor, not a clamp to the blank's bottom: a through cut's top is below `base`
       // and the kerf is exactly that hole (#218).
       const top = Math.min(grid.initial, sample(x, y));
+      const fl = floorAt(x, y);
       tops[idxOf(I, J)] = top;
+      floors[idxOf(I, J)] = fl;
       put(idxOf(I, J), x, y, top);
-      // Where material remains the bottom is the blank's bottom; where it is through there is no
-      // material, so the bottom vertex falls on the top and the quads around it are omitted below.
-      put(topCount + idxOf(I, J), x, y, top < grid.base ? top : grid.base);
+      // Where material remains the underside is its floor (the blank's bottom, or the carried
+      // stock's); where the column is cut through there is no material, so the bottom vertex
+      // falls on the top and the quads around it are omitted below.
+      put(topCount + idxOf(I, J), x, y, top <= fl ? top : fl);
     }
   }
   const idx: number[] = [];
   const quad = (a: number, b: number, c: number, d: number): void => {
     idx.push(a, b, c, a, c, d);
   };
-  const through = (I: number, J: number): boolean => (tops[idxOf(I, J)] as number) < grid.base;
+  const through = (I: number, J: number): boolean => {
+    const k = idxOf(I, J);
+    return (tops[k] as number) <= (floors[k] as number);
+  };
   for (let I = 0; I < nuD; I++) {
     for (let J = 0; J < nvD; J++) {
       quad(idxOf(I, J), idxOf(I + 1, J), idxOf(I + 1, J + 1), idxOf(I, J + 1)); // top, +Z
