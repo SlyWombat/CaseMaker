@@ -65,6 +65,9 @@ export const STOCK_MATERIALS = [
   // #492 — unspecified bought plastic (the engraving laminate). Deliberately NOT in
   // PRINTED_BLANK_MATERIALS below: a laminate is purchased, not printed.
   'plastic',
+  // #743 P-1 — the copper-clad board. A COMPOSITE, not a plastic: the antistatic rule follows
+  // `isPlasticMaterial`, and glass-fibre board must not switch a static-removal device on.
+  'pcb',
   'aluminium-6061',
   'aluminium-7075',
   'brass',
@@ -96,6 +99,8 @@ export const MATERIAL_LABELS: Readonly<Record<StockMaterial, string>> = {
   pva: 'PVA',
   acrylic: 'Acrylic',
   plastic: 'plastic (unspecified)',
+  // #743 P-1 — Makera's word, plus what the board is.
+  pcb: 'PCB (copper-clad FR-4)',
   'aluminium-6061': 'Aluminium 6061',
   'aluminium-7075': 'Aluminium 7075',
   brass: 'Brass',
@@ -134,19 +139,38 @@ export function isWoodMaterial(material: StockMaterial): boolean {
 }
 
 /**
+ * #743 P-1 — the composite boards: a copper-clad PCB is a laminate, not a plastic, a wood or a
+ * metal. Listed rather than derived, for the reason {@link isMetalMaterial} gives.
+ */
+export const COMPOSITE_MATERIALS = ['pcb'] as const satisfies readonly StockMaterial[];
+
+/** Is this stock a composite board (a PCB)? See {@link COMPOSITE_MATERIALS}. */
+export function isCompositeMaterial(material: StockMaterial): boolean {
+  return COMPOSITE_MATERIALS.some((composite) => composite === material);
+}
+
+/**
+ * Does this stock CONDUCT — the safety-relevant fact the shelf records? A metal does, and so does
+ * a copper-clad PCB: its top face is the copper the isolation opens (#743 P-1). Not to be confused
+ * with {@link isMetalMaterial}, which also decides which cutters may face the blank.
+ */
+export function isConductiveMaterial(material: StockMaterial): boolean {
+  return isMetalMaterial(material) || material === 'pcb';
+}
+
+/**
  * Is this stock a plastic — everything {@link STOCK_MATERIALS} can name that is neither a wood nor a
- * metal? The complement of the two poles the facing rule states (#474: facing is for wood and metal
- * only), so the answer is derived from those two lists rather than a third list that would have to be
- * kept in step with them.
+ * metal nor a composite? The complement of the three poles the rules below state, so the answer is
+ * derived from those lists rather than a fourth list that would have to be kept in step with them.
  *
  * It exists because ONE rule needs it: the antistatic (static-removal) accessory is switched on for
  * plastic jobs only (#564) — cutting a plastic builds static charge on the swarf; a wood or a metal
  * does not, and must not get the accessory words. A material added to {@link STOCK_MATERIALS} later
- * therefore reads as plastic by default unless someone deliberately says it is a wood or a metal,
- * which is the safe direction for a rule that switches a device on.
+ * therefore reads as plastic by default unless someone deliberately says it is a wood, a metal or a
+ * composite, which is the safe direction for a rule that switches a device on.
  */
 export function isPlasticMaterial(material: StockMaterial): boolean {
-  return !isWoodMaterial(material) && !isMetalMaterial(material);
+  return !isWoodMaterial(material) && !isMetalMaterial(material) && !isCompositeMaterial(material);
 }
 
 /**

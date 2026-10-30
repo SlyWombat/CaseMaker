@@ -414,6 +414,9 @@ export const WEAR_CLASS: Readonly<Record<StockMaterial, WearClass>> = {
   'aluminium-7075': 'aluminium',
   brass: 'brass',
   copper: 'copper',
+  // #743 P-1 — FR-4 is glass-fibre board: its wear belongs with the fibre-filled class, and
+  // Makera's own PCB rows already state the numbers this weights.
+  pcb: 'abrasive',
 };
 
 /** The shop's words for a fibre flag, for the runtime line. */

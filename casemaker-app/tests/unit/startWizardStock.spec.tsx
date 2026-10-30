@@ -482,12 +482,12 @@ describe('the material-first start (#418)', () => {
     const select = screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement;
     expect(select.value).toBe('pla');
     const groups = Array.from(select.querySelectorAll('optgroup'));
-    expect(groups.map((g) => g.label)).toEqual(['Plastics', 'Woods', 'Metals']);
+    expect(groups.map((g) => g.label)).toEqual(['Plastics', 'Woods', 'Metals', 'Circuit board']);
     const plastics = Array.from(groups[0]!.querySelectorAll('option')).map((o) => o.value);
     expect(plastics[plastics.length - 1]).toBe('plastic'); // "plastic (unspecified)" is last
     expect(plastics).not.toContain('softwood');
     expect(screen.getByTestId('start-wizard-stock-material-hint').textContent).toContain(
-      "Plastics · Woods · Metals, this house's first",
+      "Plastics · Woods · Metals · Circuit board, this house's first",
     );
   });
 

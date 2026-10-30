@@ -691,9 +691,10 @@ export const FeedCatalogueSchema = z.array(
  * by EXACT name and nothing else — a name that is not a key here is REFUSED, the row is not used,
  * rather than guessed at by substring. So a future `Hardwood (Oak)` cannot silently become
  * `hardwood`, an `Aluminum 6061` in the vendor's own other order is not read as our `6061 Aluminum`,
- * and `Bakelite`, `Carbon Fiber`, `Epoxy Tooling`, `Synthetic Stone`, `Delrin`, `Polycarbonate` and
- * `PCB` — which this app has no material for, and therefore no starting row and no gate for — can
- * never be answered as something else.
+ * and `Bakelite`, `Carbon Fiber`, `Epoxy Tooling`, `Synthetic Stone`, `Delrin` and `Polycarbonate`
+ * — which this app has no material for, and therefore no starting row and no gate for — can never
+ * be answered as something else. `PCB` was in that list until #743 P-1 gave it a material of its
+ * own, so Makera's own rows for a copper-clad board can answer a PCB job.
  *
  * The metals are where the exactness earns its keep (#347): `6061 Aluminum` and `7075 Aluminum` map
  * to TWO different materials, so a 7075 row can never answer a 6061 job. One `aluminium` key would
@@ -708,6 +709,8 @@ export const CATALOGUE_MATERIALS: Readonly<Record<string, StockMaterial>> = {
   '7075 Aluminum': 'aluminium-7075',
   Brass: 'brass',
   Copper: 'copper',
+  // #743 P-1 — the vendor's own word for a copper-clad board.
+  PCB: 'pcb',
 };
 
 /**

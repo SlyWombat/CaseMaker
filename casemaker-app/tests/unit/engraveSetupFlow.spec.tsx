@@ -220,6 +220,8 @@ describe('the material list the job may be cut in (#347)', () => {
       'abs', 'acrylic',
       'pet', 'asa', 'hips', 'pa', 'pa-cf', 'pa-gf', 'pc', 'pp', 'tpu', 'pva',
       'aluminium-6061', 'aluminium-7075', 'brass', 'copper',
+      // #743 P-1 — Makera's PCB row, in the profile's own order.
+      'pcb',
     ]);
     // Every one of them has a word to show; offering a value the app cannot label would render a
     // blank `<option>`.

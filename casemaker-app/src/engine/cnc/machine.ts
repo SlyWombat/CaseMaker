@@ -572,6 +572,8 @@ const MAKERA_MATERIALS: StockMaterial[] = [
   'softwood', 'hardwood', 'abs', 'acrylic',
   'petg', 'pet', 'asa', 'hips', 'pa', 'pa-cf', 'pa-gf', 'pc', 'pp', 'tpu', 'pva',
   'aluminium-6061', 'aluminium-7075', 'brass', 'copper',
+  // #743 P-1 — Makera's `PCB` row, now that this app has the material for it.
+  'pcb',
 ];
 
 /**

@@ -6,12 +6,14 @@ import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
 import type { MillProfile } from '@/engine/cnc/machine';
 import {
   MATERIAL_LABELS,
+  isCompositeMaterial,
   isMetalMaterial,
   isPlasticMaterial,
   isPrintedBlankMaterial,
   isWoodMaterial,
 } from '@/engine/cnc/materials';
 import {
+  PCB_COPPER_MM,
   ROD_VISE_MAX_LENGTH_MM,
   STOCK_SIZE_FIELDS,
   boxForForm,
@@ -133,7 +135,8 @@ const FINISH_OPTIONS: readonly { value: JobStockFinish; label: string }[] = [
   { value: 'unknown', label: 'not known' },
 ];
 const FINISH_HINT = 'plastic is cut as it is; wood and metal are faced first';
-const MATERIAL_HINT = "Plastics · Woods · Metals, this house's first";
+// #743 P-1 — the circuit board is its own family, so the hint names four.
+const MATERIAL_HINT = "Plastics · Woods · Metals · Circuit board, this house's first";
 
 interface FormDef {
   id: JobStockForm;
@@ -287,6 +290,8 @@ function groupMaterials(options: readonly { value: StockMaterial; label: string 
     { label: 'Plastics', options: plastics },
     { label: 'Woods', options: options.filter((o) => isWoodMaterial(o.value)) },
     { label: 'Metals', options: options.filter((o) => isMetalMaterial(o.value)) },
+    // #743 P-1 — the copper-clad board, which is none of the three above.
+    { label: 'Circuit board', options: options.filter((o) => isCompositeMaterial(o.value)) },
   ];
   return groups.filter((g) => g.options.length > 0);
 }
@@ -376,6 +381,10 @@ export function StartStockStep({
   const [dims, setDims] = useState<DimState>(() => dimsFromSeed(seed));
   const [seedDims] = useState<DimState>(() => dimsFromSeed(seed));
   const [finish, setFinish] = useState<JobStockFinish>(seed?.finish ?? 'rough');
+  // #743 P-1 — a PCB blank states its copper. 0.035 mm is 1 oz, Case Maker's default; the field is
+  // on the screen so the number is read rather than hidden in this file.
+  const [copper, setCopper] = useState(String(PCB_COPPER_MM));
+  const [copperTouched, setCopperTouched] = useState(false);
   const [shelfId, setShelfId] = useState<string | null>(null);
   const [save, setSave] = useState(false);
   const [fileRead, setFileRead] = useState<{ read: StockFileRead; file: File } | null>(null);
@@ -457,7 +466,20 @@ export function StartStockStep({
     if (sizeProblem !== null) return { pending: null, problem: sizeProblem, notes: [] };
     const box = boxForForm(form, size);
     if (box === null) return { pending: null, problem: null, notes: [] };
-    const made = { ...box, form, material, finish, wall: size.wall ?? undefined };
+    const copperMm = material === 'pcb' ? Number(copper) : undefined;
+    if (material === 'pcb' && !(Number.isFinite(copperMm) && (copperMm as number) > 0)) {
+      return { pending: null, problem: 'the copper thickness needs a number in mm, above 0', notes: [] };
+    }
+    const made = {
+      ...box,
+      form,
+      material,
+      finish,
+      wall: size.wall ?? undefined,
+      ...(copperMm !== undefined
+        ? { copperMm, copperSource: copperTouched ? ('user' as const) : ('assumed' as const) }
+        : {}),
+    };
     // A tick that cannot be honoured (no shelf in this instance) is not on screen at all.
     const id = save && canKeep ? newId : null;
     const r = stockFromMade(made, machine, id);
@@ -474,7 +496,7 @@ export function StartStockStep({
       notes: r.choice.notes,
       sentence,
     };
-  }, [shelfId, shelf, machine, fileRead, dims, form, material, finish, save, canKeep, newId]);
+  }, [shelfId, shelf, machine, fileRead, dims, form, material, finish, save, canKeep, newId, copper, copperTouched]);
 
   // Tell the wizard. Keyed on the pending answer's identity: `outcome` is a fresh object on every
   // input change, which is exactly when the wizard should hear about it.
@@ -607,6 +629,32 @@ export function StartStockStep({
           </label>
         ))}
       </div>
+      {/* #743 P-1 — a PCB's copper: the cap every depth rule reads (D2). */}
+      {material === 'pcb' && (
+        <label style={{ ...MUTED, display: 'flex', gap: 4, alignItems: 'center', marginTop: 6 }}>
+          Copper
+          <input
+            type="number"
+            min={0}
+            step="any"
+            style={NUM}
+            data-testid="start-wizard-stock-copper"
+            aria-label="Copper thickness"
+            value={copper}
+            onChange={(e) => {
+              setCopperTouched(true);
+              setCopper(e.target.value);
+            }}
+          />
+          mm on the top face (1 oz)
+        </label>
+      )}
+      {material === 'pcb' && (
+        <p style={MUTED} data-testid="start-wizard-stock-copper-source">
+          {copperTouched ? 'As you stated it.' : 'Case Maker’s default — check the blank’s label.'}{' '}
+          The copper is the stock’s colour cap, so the depth rules read it as one.
+        </p>
+      )}
       {/* #713 — the round form's derived line: the circumference of its surface, the map's height. */}
       {around !== null && (
         <p style={MUTED} data-testid="start-wizard-stock-around">

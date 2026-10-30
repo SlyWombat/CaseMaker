@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { MATERIAL_LABELS, STOCK_MATERIALS, isMetalMaterial } from '@/engine/cnc/materials';
+import { MATERIAL_LABELS, STOCK_MATERIALS, isConductiveMaterial } from '@/engine/cnc/materials';
 import type { StockMaterial } from '@/types/engraveJob';
 import {
   SIZE_FIELDS,
@@ -524,8 +524,9 @@ function StockEditor({
             data-testid="manage-stock-material"
             onChange={(e) => {
               const material = e.target.value as StockMaterial;
-              // Conductive follows the material when it is picked (metals yes); still editable below.
-              patch({ material, conductive: isMetalMaterial(material) });
+              // Conductive follows the material when it is picked (metals and a copper-clad PCB yes);
+              // still editable below.
+              patch({ material, conductive: isConductiveMaterial(material) });
             }}
           >
             {STOCK_MATERIALS.map((m) => (

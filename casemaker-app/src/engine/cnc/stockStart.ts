@@ -32,7 +32,7 @@ import type { StockItem } from '@/platform/stockClient';
 import { isShippedDemoLabelSet } from './engrave/blankLabelSeed';
 import { VISE_FLOOR_DEPTH } from './fixture';
 import type { MillProfile } from './machine';
-import { isMetalMaterial, isWoodMaterial, MATERIAL_LABELS } from './materials';
+import { isConductiveMaterial, isMetalMaterial, isWoodMaterial, MATERIAL_LABELS } from './materials';
 import { ROTARY_MAX_DIAMETER_MM, ROTARY_MAX_LENGTH_MM } from './rotary/wrap';
 import type { EngraveFacing, EngraveJob, FieldSource, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 
@@ -242,6 +242,13 @@ export function rotaryEnvelopeProblem(size: StockSize, machine: MillProfile): st
  * and the form says so under its picture; since #697 can write the chuck, it is NOT a block.
  */
 export const ROD_VISE_MAX_LENGTH_MM: number = VISE_FLOOR_DEPTH;
+
+/**
+ * #743 P-1 — the copper thickness Case Maker assumes for a copper-clad blank, mm: 1 oz copper on the
+ * board's top face. A DEFAULT, shown as one — the stock step's copper field is the operator's to
+ * correct from the blank's own label.
+ */
+export const PCB_COPPER_MM = 0.035;
 
 /**
  * Why a rod's length is past the vise's grip, or null. The length is its height standing on end.
@@ -464,6 +471,10 @@ export interface MadeStock extends StockBox {
   finish: JobStockFinish;
   /** A tube's wall, mm (#713) — absent for every other form. */
   wall?: number;
+  /** #743 P-1 — a PCB's copper thickness, mm. Absent for every other material. */
+  copperMm?: number;
+  /** Where the copper number came from (#743 P-1): typed by the operator, or Case Maker's default. */
+  copperSource?: FieldSource;
 }
 
 /** A typed piece's own numbers as {@link StockSize}: a round form's diameter and length, not its box. */
@@ -484,6 +495,21 @@ export function stockFromMade(made: MadeStock, machine: MillProfile, shelfId: st
   // square `D × D × T` box. A rectangular form states the round facts as absent so a later edit
   // cannot inherit them.
   const round = roundStockOf(made.form, made.length, made.wall);
+  // #743 P-1 — A PCB IS A LAMINATE (D2): its copper is the stock's colour CAP, so every depth rule
+  // that already reads a cap answers "does the isolation go through the copper?" unchanged.
+  const copperMm = made.material === 'pcb' ? (made.copperMm ?? PCB_COPPER_MM) : null;
+  const copperSource = made.copperSource ?? 'assumed';
+  const colour = copperMm !== null ? ({ kind: 'laminate', capMm: copperMm } as const) : undefined;
+  const notes: string[] = [];
+  if (colour !== undefined) {
+    notes.push(
+      `Its copper is ${mm(colour.capMm)} mm on the top face` +
+        (copperSource === 'assumed'
+          ? ' — Case Maker\'s 1 oz default, not a measurement; check the blank\'s label and correct it here.'
+          : ', as you stated it.') +
+        ' The job treats it as a laminate: no printed layers, no filament, and its depth rules read the cap.',
+    );
+  }
   return {
     ok: true,
     choice: {
@@ -493,6 +519,7 @@ export function stockFromMade(made: MadeStock, machine: MillProfile, shelfId: st
         thickness: made.thickness,
         material: made.material,
         ...round,
+        ...(colour !== undefined ? { colour } : {}),
       },
       entry: {
         kind: 'made',
@@ -500,11 +527,10 @@ export function stockFromMade(made: MadeStock, machine: MillProfile, shelfId: st
         file: null,
         form: made.form,
         finish: made.finish,
-        conductive: isMetalMaterial(made.material),
+        conductive: isConductiveMaterial(made.material),
       },
-      // The size fields are on the screen and the shelf tick is beside them; repeating them as a
-      // sentence was the prose #683 removes (A8).
-      notes: [],
+      ...(colour !== undefined ? { colourSource: copperSource } : {}),
+      notes,
     },
   };
 }
@@ -533,12 +559,14 @@ export function shelfItemFromMade(made: MadeStock, id: string, now: string): Sto
     form: made.form,
     size,
     layers: [],
-    capMm: null,
-    capSource: null,
+    // #743 P-1 — a PCB's copper cap goes on the shelf with the piece, assumed rather than measured:
+    // nothing has been calipered, and `capSource` says so.
+    capMm: made.material === 'pcb' ? (made.copperMm ?? PCB_COPPER_MM) : null,
+    capSource: made.material === 'pcb' ? 'assumed' : null,
     finish: made.finish,
     flatness: 'unknown',
     domeHeight: null,
-    conductive: isMetalMaterial(made.material),
+    conductive: isConductiveMaterial(made.material),
     quantity: 1,
     reservations: [],
     consumed: [],

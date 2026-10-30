@@ -1,0 +1,11 @@
+{
+  "kind": "casemaker-catalogue",
+  "schemaVersion": 1,
+  "syncedAt": "2026-10-30T00:00:00.000Z",
+  "tools": [],
+  "feeds": [
+    { "cutterId": "pcb-engrave-0-1-60", "material": "PCB", "rpm": 12000, "feed": 500, "plungeFeed": 200, "stepDown": 0.1 },
+    { "cutterId": "pcb-corn-0-8", "material": "PCB", "rpm": 12000, "feed": 500, "plungeFeed": 200, "stepDown": 0.2 },
+    { "cutterId": "pcb-drill-1-0", "material": "PCB", "rpm": 12000, "feed": 300, "plungeFeed": 100, "stepDown": 1.6 }
+  ]
+}

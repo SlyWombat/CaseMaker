@@ -12,6 +12,7 @@ import {
   MATERIAL_LABELS,
   PRINTED_BLANK_MATERIALS,
   STOCK_MATERIALS,
+  isCompositeMaterial,
   isPlasticMaterial,
 } from '@/engine/cnc/materials';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -77,12 +78,14 @@ describe('the plastic class (#564)', () => {
     }
   });
 
-  it('partitions the whole vocabulary: every stock material is exactly one of wood, metal or plastic', () => {
+  it('partitions the whole vocabulary: every stock material is exactly one of wood, metal, composite or plastic', () => {
     for (const material of STOCK_MATERIALS) {
       const plastic = isPlasticMaterial(material);
       const wood = material === 'softwood' || material === 'hardwood' || material === 'mdf';
       const metal = ['aluminium-6061', 'aluminium-7075', 'brass', 'copper'].includes(material);
-      expect(Number(plastic) + Number(wood) + Number(metal), material).toBe(1);
+      // #743 P-1 — the copper-clad board is the fourth pole: none of the other three answers it.
+      const composite = isCompositeMaterial(material);
+      expect(Number(plastic) + Number(wood) + Number(metal) + Number(composite), material).toBe(1);
     }
   });
 });
