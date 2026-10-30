@@ -56,6 +56,21 @@ export interface ExpectedStock {
 
 export type Edge = 'left' | 'right' | 'front' | 'back';
 
+/**
+ * #525 — the corner a CORNER-FINDING plan measures: two sideways lines on each of the two edges
+ * that meet there. The measure is the corner's position AND the stock's rotation (the angle the
+ * edges really make), so this is Studio's "Set Origin with 3D Probe" corner mode.
+ */
+export type CornerId = 'front-left' | 'front-right' | 'back-left' | 'back-right';
+
+/** The two edges that meet at a corner, in this module's own names. */
+export function cornerEdges(id: CornerId): { xEdge: 'left' | 'right'; yEdge: 'front' | 'back' } {
+  return {
+    xEdge: id === 'front-right' || id === 'back-right' ? 'right' : 'left',
+    yEdge: id === 'back-left' || id === 'back-right' ? 'back' : 'front',
+  };
+}
+
 export interface EdgeScan {
   edge: Edge;
   along: number;
@@ -188,6 +203,14 @@ export interface PlanInput {
    */
   disc?: { diameterMm: number };
   /**
+   * #525 — THE CORNER ROUTINE (Studio's "Set Origin with 3D Probe" corner mode). When set, the plan
+   * takes TWO sideways lines on each of the two edges that meet at this corner: their intersection
+   * is the corner's position and the angle they make is the stock's rotation. Only the 3D probe can
+   * do it (a sideways touch is how an edge is found), and only where both edges are free to touch
+   * — the tape mount; a vise's jaws block the X edges and the bracket fixes the origin itself.
+   */
+  corner?: CornerId;
+  /**
    * REQUIRED, and the CALLER's to supply: where the job expects the stock's top, in MACHINE Z, and what
    * that is from — the stock's thickness on the mount's known top (the vise's jaw top − proud, the
    * wasteboard + thickness). **Not G54 Z**: G54 Z is the CUTTER's zero (#387 — `G10 L2` writes it with
@@ -274,6 +297,12 @@ export interface RegistrationPlan {
   stock: ExpectedStock;
   /** #743 D-2 — the disc this plan registers on its rim: its stated diameter. Absent for a rectangle. */
   disc?: { diameterMm: number };
+  /**
+   * #525 — the corner this plan measures: two sideways lines per edge on the two named edges. The
+   * outcome intersects their lines for the origin and reads the stock's rotation from the same
+   * points. Absent on every other plan.
+   */
+  corner?: { id: CornerId; xEdge: 'left' | 'right'; yEdge: 'front' | 'back' };
   /** #619 — the stock's thickness, mm, for the datum path's upper surface bound. */
   stockThicknessMm?: number;
   surfacePoint: { x: number; y: number };
@@ -380,6 +409,33 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
         `it has no measured tip values, and a probe correction cannot be assumed. Measure its tip on a known-width ` +
         `feature and record it in Manage › Accessories, then plan again`,
     };
+  }
+  // #525 — THE CORNER ROUTINE's own preconditions, refused before any scan is built:
+  //  - a DISC has no corner (it registers on its rim);
+  //  - only the 3D probe finds an edge sideways; a wired/Z-only probe steps over one edge at a time;
+  //  - both edges must be free to touch: the TAPE mount, because a vise's jaws stand where the side
+  //    approach travels and the bracket fixes X and Y from its own anchor.
+  const corner = input.corner;
+  if (corner !== undefined) {
+    if (input.disc !== undefined) {
+      return { ok: false, reason: 'a disc has no corner to find — it registers on its rim, with the four centre-line scans' };
+    }
+    if (mount !== 'tape') {
+      return {
+        ok: false,
+        reason:
+          mount === 'vise'
+            ? 'a corner cannot be found on the vise: its jaws stand where the sideways approach to the left and right edges travels. Register on tape, where all four edges are free, or use the wired probe'
+            : 'the bracket fixes X and Y from its own anchor — its confirming touches are not an origin, so there is no corner to find. Register on tape',
+      };
+    }
+    if (probeInstrumentOf(probe) !== 'xyz') {
+      return {
+        ok: false,
+        reason:
+          'the corner routine needs the 3D probe: it finds each edge with one sideways touch, while the wired probe steps over an edge at a time and cannot see the angle between two edges',
+      };
+    }
   }
   // #598 — with a measured vise datum the seek is a SEARCH down to `jawTopZ − tolerance` (over a proud
   // stock the probe can only meet the stock), not a band around the estimate; the ceiling is the
@@ -570,9 +626,26 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       notes.push(
         `the disc is registered on its rim: left, right, front and back scans through its centre-lines; the centre is the midpoint of each opposite pair and the touched span is checked against the stated ⌀${r3(input.disc!.diameterMm)} mm`,
       );
+    } else if (corner !== undefined) {
+      // #525 — CORNER MODE: two sideways lines on each of the two edges that meet at the corner, at
+      // the ends of each edge's usable span — the longest baseline, clear of the rounded corners.
+      const { xEdge, yEdge } = cornerEdges(corner);
+      const ysC = span(stock.yMin, stock.yMax, xEdge);
+      if (typeof ysC === 'string') return { ok: false, reason: ysC };
+      const xsC = span(stock.xMin, stock.xMax, yEdge);
+      if (typeof xsC === 'string') return { ok: false, reason: xsC };
+      scans.push(
+        scanFor(xEdge, ysC.lo, stock, s),
+        scanFor(xEdge, ysC.hi, stock, s),
+        scanFor(yEdge, xsC.lo, stock, s),
+        scanFor(yEdge, xsC.hi, stock, s),
+      );
+      notes.push(
+        `corner mode: two sideways lines on the ${xEdge} edge (at Y ${r3(ysC.lo)} and ${r3(ysC.hi)}) and two on the ${yEdge} edge (at X ${r3(xsC.lo)} and ${r3(xsC.hi)}) — their intersection is the corner and the angle they make is the stock's rotation`,
+      );
     } else if (mount === 'tape') scans.push(scanFor('left', ys.lo, stock, s), scanFor('left', ys.hi, stock, s));
     else scans.push({ ...scanFor('left', midY, stock, s), ...(jawAboveStock ? { aboveIsEdge: true } : {}) });
-    if (!disc) scans.push(scanFor('front', midX, stock, s));
+    if (!disc && corner === undefined) scans.push(scanFor('front', midX, stock, s));
   }
 
   if (mountDatum !== null) {
@@ -592,6 +665,8 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       stock,
       // #743 — present only on a disc, so a rectangular plan's record is unchanged.
       ...(input.disc !== undefined ? { disc: input.disc } : {}),
+      // #525 — present only on a corner plan, so every other plan's record is unchanged.
+      ...(corner !== undefined ? { corner: { id: corner, ...cornerEdges(corner) } } : {}),
       stockThicknessMm: input.stockThicknessMm,
       surfacePoint,
       seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },

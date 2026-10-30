@@ -58,6 +58,28 @@ export interface RunData {
   scans: ScanRecord[];
 }
 
+/**
+ * #525 — what a CORNER plan measured, beside the edges it was read from: the corner's position,
+ * the angle the two edges really make, and whether that out-of-square is larger than the scan can
+ * resolve. The last is a FACT, never a refusal: the origin is the measured corner and the rotation
+ * the measured angle either way (the maintainer's inform-don't-refuse rule).
+ */
+export interface CornerOutcome {
+  /** The measured corner, WORK XY. */
+  x: number;
+  y: number;
+  /** The angle between the two measured edges, degrees — 90 when square. */
+  angleDeg: number;
+  /** |90 − angle|, degrees. */
+  outOfSquareDeg: number;
+  /** The shorter of the two baselines the angle was read over, mm. */
+  baselineMm: number;
+  /** True when the out-of-square is larger than `atan(fineStep / baseline)` — the scan's resolution. */
+  beyondResolution: boolean;
+  /** The resolution the comparison used, degrees. */
+  resolutionDeg: number;
+}
+
 export interface EdgeFinding {
   edge: Edge;
   along: number;
@@ -81,6 +103,8 @@ export interface RegistrationOutcome {
    * difference of more than 1 % is a QUESTION (`question`), answered by resizing the job to the
    * measured diameter or by cutting as is. Below 1 % the measurement is stated and the job is kept.
    */
+  /** #525 — the corner a corner plan measured; absent on every other plan. */
+  corner?: CornerOutcome;
   disc?: {
     statedMm: number;
     spanXMm: number | null;
@@ -230,6 +254,76 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
     }
   }
 
+  // #525 — THE CORNER: two found lines per edge, intersected for the origin and angled for the
+  // stock's rotation. The x edge's pair gives the rotation with the same formula the left-edge pair
+  // uses; the angle BETWEEN the two lines is out-of-square, which is stated — never refused — even
+  // when it is larger than the scan can resolve.
+  let cornerOffset: { x: number; y: number } | null = null;
+  let corner: CornerOutcome | undefined;
+  if (plan.corner !== undefined) {
+    const { id: _id, xEdge, yEdge } = plan.corner;
+    const withFound = data.scans.map((rec, i) => ({ rec, found: edges[i]! }));
+    const lines = (edge: Edge) => withFound.filter((x) => x.rec.scan.edge === edge && x.found.foundAt !== null);
+    const pointOf = ({ rec, found }: { rec: ScanRecord; found: EdgeFinding }): { x: number; y: number } =>
+      rec.scan.edge === 'left' || rec.scan.edge === 'right'
+        ? { x: found.foundAt!, y: rec.scan.along }
+        : { x: rec.scan.along, y: found.foundAt! };
+    const xLines = lines(xEdge);
+    const yLines = lines(yEdge);
+    if (xLines.length < 2 || yLines.length < 2) {
+      problems.push(
+        `the corner needs two found lines on the ${xEdge} edge and two on the ${yEdge} edge — ${xLines.length} and ${yLines.length} were found`,
+      );
+    } else {
+      const [a1, a2] = [pointOf(xLines[0]!), pointOf(xLines[xLines.length - 1]!)];
+      const [b1, b2] = [pointOf(yLines[0]!), pointOf(yLines[yLines.length - 1]!)];
+      const d1 = { x: a2.x - a1.x, y: a2.y - a1.y };
+      const d2 = { x: b2.x - b1.x, y: b2.y - b1.y };
+      const denom = d1.x * d2.y - d1.y * d2.x;
+      if (Math.abs(denom) < 1e-9 || Math.hypot(d1.x, d1.y) < 1e-9 || Math.hypot(d2.x, d2.y) < 1e-9) {
+        problems.push(`the two measured edges are parallel — the ${xEdge} and ${yEdge} lines could not be intersected for a corner`);
+      } else {
+        const t = ((b1.x - a1.x) * d2.y - (b1.y - a1.y) * d2.x) / denom;
+        const x = a1.x + t * d1.x;
+        const y = a1.y + t * d1.y;
+        const expected = {
+          x: xEdge === 'left' ? plan.stock.xMin : plan.stock.xMax,
+          y: yEdge === 'front' ? plan.stock.yMin : plan.stock.yMax,
+        };
+        cornerOffset = { x: r3(x - expected.x), y: r3(y - expected.y) };
+        // The rotation, from the x edge's two points — the existing convention (`atan(ΔfoundAt /
+        // Δalong)`), so everything downstream reads this plan's rotation the way it reads any other's.
+        if (Math.abs(d1.y) > 1e-9) {
+          const slope = d1.x / d1.y;
+          rotationDeg = r3((Math.atan(slope) * 180) / Math.PI);
+          rotationShiftMm = r3(Math.abs(slope) * (plan.stock.yMax - plan.stock.yMin));
+        }
+        // The angle between the LINES (not rays): fold into [0, 90].
+        const angleOf = (d: { x: number; y: number }) => Math.abs((Math.atan2(d.y, d.x) * 180) / Math.PI);
+        let between = Math.abs(angleOf(d1) - angleOf(d2));
+        if (between > 90) between = 180 - between;
+        const outOfSquareDeg = r3(Math.abs(90 - between));
+        const baselineMm = Math.min(Math.hypot(d1.x, d1.y), Math.hypot(d2.x, d2.y));
+        const resolutionDeg = r3((Math.atan(s.fineStepMm / Math.max(1e-6, baselineMm)) * 180) / Math.PI);
+        const beyondResolution = outOfSquareDeg > resolutionDeg;
+        corner = {
+          x: r3(x),
+          y: r3(y),
+          angleDeg: r3(between),
+          outOfSquareDeg,
+          baselineMm: r3(baselineMm),
+          beyondResolution,
+          resolutionDeg,
+        };
+        notes.push(
+          beyondResolution
+            ? `the corner is ${outOfSquareDeg}° out of square — the two edges meet at ${r3(between)}° over the ${r3(baselineMm)} mm baseline, more than the ${resolutionDeg}° the ${s.fineStepMm} mm scan can resolve. The origin is the measured corner and the rotation the measured angle; the job is not refused.`
+            : `the corner is ${outOfSquareDeg}° out of square over the ${r3(baselineMm)} mm baseline — within the ${resolutionDeg}° the ${s.fineStepMm} mm scan can resolve, so it reads as square.`,
+        );
+      }
+    }
+  }
+
   // The frame the touches were sent in: the G54 in force, read back from the surface touch — or, on the
   // bracket, the bracket's origin, because every move there is sent in machine XY from it (#427).
   const onBracket = plan.mount === 'bracket' && plan.bracketOrigin !== null;
@@ -316,7 +410,9 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
     }
   }
 
-  let offset = { x: r3(mean(dxs)), y: r3(mean(dys)) };
+  // #525 — a corner plan's origin is the INTERSECTION of its two measured edges, not the mean of the
+  // two edges' distances: the mean is right only while the corner is square.
+  let offset = cornerOffset ?? { x: r3(mean(dxs)), y: r3(mean(dys)) };
   let correctedG54 = { x: r3(g54InForce.x + offset.x), y: r3(g54InForce.y + offset.y) };
   // #427 — on the bracket every move is sent in machine XY from the bracket's origin, so the surface touch
   // must have landed exactly there: anything else means the move did not go where it was sent (or ran in
@@ -373,6 +469,7 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
       y: r3((plan.stock.yMin + plan.stock.yMax) / 2 + offset.y),
     },
     ...(disc !== undefined ? { disc } : {}),
+    ...(corner !== undefined ? { corner } : {}),
     rotationDeg,
     rotationShiftMm,
     xyChecked,

@@ -698,6 +698,35 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
     expect(z1.lines.some((l) => /^G38\.3 Z-[\d.]+ F[\d.]+$/.test(l))).toBe(true);
   });
 
+  it('CORNER MODE on tape: four sideways lines find the corner, square, against the fake Z1', async () => {
+    // Studio's "Set Origin with 3D Probe" corner mode: two lines on each edge that meets at the
+    // corner. The fake Z1 answers each sideways G38.3 with a contact one ball radius outside its
+    // edge, so the whole executor seam is what runs here.
+    const instrumentSettings = registrationSettings(null, PROBE_3D).settings;
+    const planned = planRegistration(
+      input('tape', { probe: PROBE_3D, stockThicknessMm: 12, corner: 'front-left' }),
+      instrumentSettings,
+    );
+    if (!planned.ok) throw new Error(planned.reason);
+    const z1 = fakeZ1({ actual: SHIFTED, ballR: 1.5, rim: 1.5 });
+    const r = await runRegistration(planned.plan, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+
+    // Two lines per edge, and each axis takes two.
+    const sideLines = z1.lines.filter((l) => /^G38\.3 [XY]-?[\d.]+ F/.test(l));
+    expect(sideLines).toHaveLength(4);
+    expect(sideLines.filter((l) => l.startsWith('G38.3 X'))).toHaveLength(2);
+    expect(sideLines.filter((l) => l.startsWith('G38.3 Y'))).toHaveLength(2);
+
+    // The corner is the intersection of the two edges, on the stock that sits 1.2 / 0.8 off.
+    expect(r.outcome.problems).toEqual([]);
+    expect(r.outcome.corner).toBeDefined();
+    expect(r.outcome.offset.x).toBeCloseTo(1.2, 3);
+    expect(r.outcome.offset.y).toBeCloseTo(0.8, 3);
+    expect(r.outcome.corner!.outOfSquareDeg).toBeLessThanOrEqual(0.5);
+    expect(r.outcome.corner!.beyondResolution).toBe(false);
+  });
+
   it('#643 review a scan begun from the travel height still probes at the scan Z', async () => {
     // The head is at the TRAVEL height when each scan begins (the park did not take effect), so the
     // descent must state where it starts before probing down; otherwise its miss leaves the ball

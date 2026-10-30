@@ -1780,6 +1780,17 @@ const registrationPlanSchema = z.object({
     })
     .optional()
     .describe('Present when the plan registers a disc on its rim; absent for a rectangular blank.'),
+  // #525 — a CORNER plan (Studio's "Set Origin with 3D Probe" corner mode): the two edges that
+  // meet at the corner, each measured with two sideways lines. OPTIONAL, so every other plan keeps
+  // its exact shape — and a saved corner plan keeps the marker its outcome intersects on.
+  corner: z
+    .object({
+      id: z.enum(['front-left', 'front-right', 'back-left', 'back-right']).describe('The corner this plan measures.'),
+      xEdge: z.enum(['left', 'right']).describe('The X edge that meets at the corner.'),
+      yEdge: z.enum(['front', 'back']).describe('The Y edge that meets at the corner.'),
+    })
+    .optional()
+    .describe('Present when the plan measures a corner with two lines per edge; absent on every other plan.'),
   surfacePoint: positionSchema.describe('Work-coordinate point where the surface is probed.'),
   seek: z
     .object({

@@ -22,7 +22,7 @@ import {
   sideTouchFor,
   sideTouchSetup,
 } from '@/engine/cnc/registration/probe3d';
-import { edgeFrom, type ScanRecord } from '@/engine/cnc/registration/outcome';
+import { computeOutcome, edgeFrom, type ScanRecord, type RunData } from '@/engine/cnc/registration/outcome';
 
 const BLANK: ExpectedStock = { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 };
 const SURFACE = -56.172;
@@ -233,5 +233,117 @@ describe('#525 — the edge a sideways reading yields', () => {
     );
     expect(found.foundAt).toBeNull();
     expect(found.problem).toContain('the sideways touch on the left edge found nothing');
+  });
+});
+
+// #525 (the second half) — CORNER FINDING: Studio's "Set Origin with 3D Probe" corner mode takes
+// two sideways lines on each of the two edges that meet at a corner. Their intersection is the
+// corner; the angle they make is the stock's rotation, and an out-of-square beyond the scan's
+// resolution is STATED, never refused.
+describe('#525 — corner finding: the plan', () => {
+  const cornerPlan = (corner: 'front-left' | 'front-right' | 'back-left' | 'back-right' = 'front-left', over: Partial<PlanInput> = {}) => {
+    const r = planRegistration(input({ mount: 'tape', probe: PROBE_3D, stockThicknessMm: 12, corner, ...over }), S);
+    if (!r.ok) throw new Error(r.reason);
+    return r.plan;
+  };
+
+  it('takes two lines on each edge that meets at the corner, at the ends of their usable spans', () => {
+    const p = cornerPlan('front-left');
+    expect(p.corner).toEqual({ id: 'front-left', xEdge: 'left', yEdge: 'front' });
+    expect(p.scans).toHaveLength(4);
+    expect(p.scans.filter((s) => s.edge === 'left').map((s) => s.along)).toEqual([5, 71.2]);
+    expect(p.scans.filter((s) => s.edge === 'front').map((s) => s.along)).toEqual([5, 33.1]);
+    expect(p.notes.join(' ')).toContain('corner mode');
+  });
+
+  it('names the corner’s own edges on every corner', () => {
+    expect(cornerPlan('front-right').corner).toEqual({ id: 'front-right', xEdge: 'right', yEdge: 'front' });
+    expect(cornerPlan('back-left').corner).toEqual({ id: 'back-left', xEdge: 'left', yEdge: 'back' });
+    expect(cornerPlan('back-right').corner).toEqual({ id: 'back-right', xEdge: 'right', yEdge: 'back' });
+  });
+
+  it('refuses a corner the mount cannot give: the vise’s jaws, the bracket’s own origin', () => {
+    const vise = planRegistration(input({ probe: PROBE_3D, corner: 'front-left' }), S);
+    expect(vise.ok).toBe(false);
+    if (!vise.ok) expect(vise.reason).toContain('jaws');
+    const bracket = planRegistration(
+      input({ mount: 'bracket', probe: PROBE_3D, bracketOrigin: { x: -181.55, y: -184.8, from: 'anchor1', offsetMeasured: true }, mountObstacles: [], corner: 'front-left' }),
+      S,
+    );
+    expect(bracket.ok).toBe(false);
+    if (!bracket.ok) expect(bracket.reason).toContain('bracket fixes X and Y');
+  });
+
+  it('refuses without the 3D probe — the wired probe cannot see the angle between two edges', () => {
+    const r = planRegistration(input({ mount: 'tape', probe: null, stockThicknessMm: 12, corner: 'front-left' }), S);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('needs the 3D probe');
+  });
+
+  it('refuses a disc — it has no corner to find', () => {
+    const r = planRegistration(input({ mount: 'tape', probe: PROBE_3D, stockThicknessMm: 12, disc: { diameterMm: 30 }, corner: 'front-left' }), S);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('disc has no corner');
+  });
+});
+
+describe('#525 — corner finding: the measured corner', () => {
+  const plan = (() => {
+    const r = planRegistration(input({ mount: 'tape', probe: PROBE_3D, stockThicknessMm: 12, corner: 'front-left' }), S);
+    if (!r.ok) throw new Error(r.reason);
+    return r.plan;
+  })();
+
+  /** A side reading whose corrected edge lands at `foundAt` on the scan's own axis. */
+  const scanAt = (edge: 'left' | 'front', along: number, foundAt: number): ScanRecord => {
+    const rec = plan.scans.find((s) => s.edge === edge && s.along === along)!;
+    // foundAt = at − outward × offset, so at = foundAt + outward × offset.
+    const at = foundAt + rec.outward * 1.5;
+    const prb = { x: rec.edge === 'left' ? at : along, y: rec.edge === 'left' ? along : at, z: SURFACE, touched: true };
+    return { scan: rec, touches: [{ at, prb, kind: 'stock', sideContact: true, edgeOffsetMm: 1.5 }] };
+  };
+  const run = (scans: ScanRecord[]): RunData => ({
+    probeRefZ: SURFACE,
+    // sentFrom = surface − surfacePoint; a surface reading at the expected point keeps it zero.
+    surface: { x: plan.surfacePoint.x, y: plan.surfacePoint.y, z: SURFACE, touched: true },
+    scans,
+  });
+
+  it('intersects the two edges for the corner, and reads zero out-of-square when they are square', () => {
+    const scans = [scanAt('left', 5, 1.2), scanAt('left', 71.2, 1.2), scanAt('front', 5, 0.8), scanAt('front', 33.1, 0.8)];
+    const o = computeOutcome(plan, run(scans));
+    expect(o.problems).toEqual([]);
+    expect(o.corner).toMatchObject({ x: 1.2, y: 0.8, angleDeg: 90, outOfSquareDeg: 0, beyondResolution: false });
+    // The origin is the corner: the offset from the expected corner, on both axes.
+    expect(o.offset).toEqual({ x: 1.2, y: 0.8 });
+    expect(o.notes.join(' ')).toContain('reads as square');
+  });
+
+  it('states an out-of-square beyond the scan’s resolution and never refuses it', () => {
+    // The left edge leans 1° (Δx over the 66.2 mm baseline); the front edge leans the other way, so
+    // the edges meet at about 92° — about twice what the 0.5 mm scan resolves over 28 mm.
+    const lean = Math.tan((1 * Math.PI) / 180);
+    const scans = [
+      scanAt('left', 5, 1.2 - (66.2 / 2) * lean),
+      scanAt('left', 71.2, 1.2 + (66.2 / 2) * lean),
+      scanAt('front', 5, 0.8 + (28.1 / 2) * lean),
+      scanAt('front', 33.1, 0.8 - (28.1 / 2) * lean),
+    ];
+    const o = computeOutcome(plan, run(scans));
+    expect(o.problems).toEqual([]);
+    expect(o.corner).toBeDefined();
+    expect(o.corner!.outOfSquareDeg).toBeCloseTo(2, 0);
+    expect(o.corner!.beyondResolution).toBe(true);
+    expect(o.notes.join(' ')).toContain('out of square');
+    expect(o.notes.join(' ')).toContain('the job is not refused');
+    // The origin stays the measured intersection, not the mean of the edges' distances.
+    expect(o.offset.x).not.toBeCloseTo(1.2, 6);
+  });
+
+  it('a missing second line is a problem that names the edge', () => {
+    const scans = [scanAt('left', 5, 1.2), scanAt('front', 5, 0.8), scanAt('front', 33.1, 0.8)];
+    const o = computeOutcome(plan, run(scans));
+    expect(o.corner).toBeUndefined();
+    expect(o.problems.join(' ')).toContain('two found lines on the left edge');
   });
 });
