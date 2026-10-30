@@ -114,6 +114,67 @@ export function carrySeedsForSetup(
 }
 
 /**
+ * The affine maps a carried FIELD needs, from `from`'s work frame to `to`'s:
+ *   source (x₁, y₁) = (map[0]·x + map[1]·y + map[2],  map[3]·x + map[4]·y + map[5])
+ *   target floor Z  = z[0]·(source top) + z[1]
+ * where (x, y) is a TARGET work point. Derived from the same point map the mesh carry uses, so a
+ * mesh and a field can never disagree about the frames.
+ *
+ * REFUSED when the XY map depends on the height — a stock turned to a SIDE (90°), whose columns
+ * in the target are not a re-indexing of the source's. That class is the stated limitation; a
+ * map that is only right at one height would carry the stock wrongly and silently.
+ */
+export interface CarriedMaps {
+  map: [number, number, number, number, number, number];
+  z: [number, number];
+}
+
+export type CarriedMapsResult = { ok: true; maps: CarriedMaps } | { ok: false; message: string };
+
+export function carriedMaps(from: CarrySetup, to: CarrySetup): CarriedMapsResult {
+  const point = carryPointBetweenSetups(from, to);
+  const sourceToTarget = (x: number, y: number, z: number): Vec => point([x, y, z]);
+  const p00 = sourceToTarget(0, 0, 0);
+  const p10 = sourceToTarget(1, 0, 0);
+  const p01 = sourceToTarget(0, 1, 0);
+  const p00z = sourceToTarget(0, 0, 1);
+  if (Math.abs(p00z[0] - p00[0]) > 1e-9 || Math.abs(p00z[1] - p00[1]) > 1e-9) {
+    return {
+      ok: false,
+      message:
+        'this side is simulated from the stock as mounted; the material the earlier sides removed is not carried into a side setup, so its walls are not checked against them',
+    };
+  }
+  // source → target XY: target = A·source + c.
+  const a = p10[0] - p00[0];
+  const b = p01[0] - p00[0];
+  const c0 = p00[0];
+  const d = p10[1] - p00[1];
+  const e = p01[1] - p00[1];
+  const f0 = p00[1];
+  const det = a * e - b * d;
+  if (!(Math.abs(det) > 1e-12)) {
+    return { ok: false, message: 'the two setups’ frames are not related by a turn this field can invert' };
+  }
+  // The field samples TARGET → SOURCE, so the inverse of the map above.
+  const ia = e / det;
+  const ib = -b / det;
+  const id = -d / det;
+  const ie = a / det;
+  const map: [number, number, number, number, number, number] = [
+    ia,
+    ib,
+    -(ia * c0 + ib * f0),
+    id,
+    ie,
+    -(id * c0 + ie * f0),
+  ];
+  // target Z is affine in the source Z: probe two heights.
+  const g = p00z[2] - p00[2];
+  return { ok: true, maps: { map, z: [g, p00[2]] } };
+}
+
+/**
  * The same solid, in `to`'s job frame. Positions are transformed, the triangulation is untouched,
  * and the bbox is recomputed. A same-setup carry is still a fresh mesh (the caller may hand it to
  * another worker), so no caller can mutate the seed it passed in.

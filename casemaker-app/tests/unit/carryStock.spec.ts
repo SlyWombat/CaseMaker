@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { carryPointBetweenSetups, carryRemovalBetweenSetups, carrySeedsForSetup, type CarrySetup } from '@/engine/cnc/setups';
+import { carryPointBetweenSetups, carryRemovalBetweenSetups, carrySeedsForSetup, carriedMaps, type CarrySetup } from '@/engine/cnc/setups';
 import type { Mat } from '@/engine/cnc/setups/orient';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 
@@ -127,6 +127,48 @@ describe('#723 P2-2b-ii — the seed a later program starts from', () => {
     if (!out.ok) {
       expect(out.message).toContain('setup 2 has no work-frame rotation');
       expect(out.message).toContain('carried into setup 2');
+    }
+  });
+});
+
+describe('#723 P2-2b-ii-2b — the field maps between two setups', () => {
+  const RY90: Mat = [
+    [0, 0, 1],
+    [0, 1, 0],
+    [-1, 0, 0],
+  ];
+
+  it('a same-frame carry maps each point to itself, with no flip in Z', () => {
+    const out = carriedMaps(TOP, TOP);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    [1, 0, 0, 0, 1, 0].forEach((want, i) => expect(out.maps.map[i]).toBeCloseTo(want, 12));
+    expect(out.maps.z[0]).toBeCloseTo(1, 12);
+    expect(out.maps.z[1]).toBeCloseTo(0, 12);
+  });
+
+  it('the flip maps the target back with y mirrored and the floor from −top − T', () => {
+    const out = carriedMaps(TOP, FLIP);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    // Target (x, y) reads source (x, 50 − y); a source top at z maps to the target floor −z − 26.
+    expect(out.maps.map[0]).toBeCloseTo(1, 12);
+    expect(out.maps.map[1]).toBeCloseTo(0, 12);
+    expect(out.maps.map[2]).toBeCloseTo(0, 12);
+    expect(out.maps.map[3]).toBeCloseTo(0, 12);
+    expect(out.maps.map[4]).toBeCloseTo(-1, 12);
+    expect(out.maps.map[5]).toBeCloseTo(50, 12);
+    expect(out.maps.z[0]).toBeCloseTo(-1, 12);
+    expect(out.maps.z[1]).toBeCloseTo(-26, 12);
+  });
+
+  it('a 90° side setup declines the CARRY with the coverage sentence, not the job', () => {
+    const side: CarrySetup = { rotation: RY90, bounds: BOUNDS };
+    const out = carriedMaps(TOP, side);
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.message).toContain('simulated from the stock as mounted');
+      expect(out.message).toContain('not carried into a side setup');
     }
   });
 });
