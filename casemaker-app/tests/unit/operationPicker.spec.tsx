@@ -244,7 +244,7 @@ describe('#685 — step 4, what are you cutting', () => {
     // A file that is not a mesh is refused with its sentence, and Create still waits.
     fireEvent.change(input, { target: { files: [new File(['hello'], 'notes.txt')] } });
     expect((await screen.findByTestId('start-wizard-op-surface-error', undefined, WAIT)).textContent).toBe(
-      'notes.txt is not an STL, 3MF or PNG file.',
+      'notes.txt is not an STL, 3MF, STEP or PNG file.',
     );
     expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(true);
 
