@@ -29,6 +29,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { buildTimeline, parseGcode, stubSetup, Z1, type Setup } from '@/engine/cnc';
 import { verifyProgram } from '@/engine/cnc/verify';
+import { sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { columnSweep } from '@/workers/geometry/columnEngine';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
@@ -261,5 +262,49 @@ describe('#723 R-4 acceptance — the relief is cut to its closed form', () => {
       }
     }
     expect(untouched, 'the uncovered half of the rod is left standing').toBe(true);
+  });
+
+  it('a goal reaching past the rod is clipped to it, warns, and posts no cut above the rod (#808)', () => {
+    // r(θ) = 8 + 4·cos(3θ): the crests reach 12 mm on a ⌀20 rod, so the outermost 2 mm of the
+    // part has no material. #786 slice 2 demoted this to a warning; before #808 the field kept the
+    // reach above the surface, the finishing tip rode at z ≈ +2 and the post refused the air cut.
+    const LENGTH = 20;
+    const rOf = (a: number): number => 8 + 4 * Math.cos(3 * a);
+    const target = goal(ringedSide((a) => rOf(a), LENGTH, 20, 144), LENGTH, 12);
+    // The STATED size fits the blank (the mesh is what is wider) — the e2e's own rule.
+    target.size = { x: LENGTH, y: 18, z: 18 };
+    const job = rotaryJob(target);
+    const flat = flatEndMill(1, { name: '1 mm flat end', fluteLength: 12, shoulderLength: 20 });
+
+    const out = engraveGenerate(tl, job, flat, [], null, undefined, {});
+    expect(out.errors.filter((e) => /above the stock/i.test(e.message)), 'no air-cut refusal').toEqual([]);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const warning = out.findings.find((f) => f.code === 'goal-rotary-oversize');
+    expect(warning?.severity).toBe('warning');
+    expect(warning?.message).toMatch(/reaches r 12/);
+    expect(warning?.message).toMatch(/outermost 2 mm/);
+    const program = out.programs[0]!;
+    expect(program.nc).toBeTruthy();
+
+    // THE POSTED PROGRAM: every CUTTING move is at or below the rod's surface. The rotary frame's
+    // Z is the radius above the axis, so no G1 after the spindle starts may command Z above 10;
+    // the preamble's own G01 positioning (before `M3`) is not a cut.
+    const lines = program.nc.split(/\r?\n/);
+    const spindleOn = lines.findIndex((line) => /^\s*M3\b/.test(line));
+    expect(spindleOn, 'the program starts its spindle').toBeGreaterThan(0);
+    const cutting = lines
+      .slice(spindleOn)
+      .map((line) => (/^\s*G0?1\b/.test(line) ? /Z([-+]?[0-9.]+)/.exec(line) : null))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => Number(m[1]));
+    expect(cutting.length, 'the program has cutting moves').toBeGreaterThan(100);
+    const highest = cutting.reduce((m, z) => Math.max(m, z), -Infinity);
+    expect(highest, 'no cutting move above the rod').toBeLessThanOrEqual(R + 1e-6);
+
+    // THE FIELD ITSELF: height at or below the surface everywhere, true reach still reported.
+    const field = sampleGoalRadialField(target, R, {});
+    expect(field.maxRadius).toBeGreaterThan(R);
+    for (let k = 0; k < field.z.length; k++) expect(field.z[k]).toBeLessThanOrEqual(1e-9);
   });
 });

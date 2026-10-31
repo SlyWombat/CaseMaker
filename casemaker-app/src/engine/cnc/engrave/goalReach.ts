@@ -26,8 +26,8 @@ import { vendorId } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { JobFinding } from './jobSetup';
-import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { jobTargetObjects } from './jobSetup';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { placedSize } from './targetScale';
 
 /**

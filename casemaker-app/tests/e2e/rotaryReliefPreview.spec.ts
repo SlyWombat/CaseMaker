@@ -357,8 +357,20 @@ test('the relief draws on the map and the rod, and cuts to the program the sheet
 
   // ── The Map view (the default): the field unrolled, x along, the arc around. ──
   await expect(page.getByTestId('rotary-view-map')).toHaveAttribute('aria-pressed', 'true');
-  // The preview worker builds asynchronously; poll rather than trusting one read.
-  await expect.poll(async () => (await goalDrawState(page)).count, { timeout: 60_000 }).toBeGreaterThan(200);
+  // #808 — THE DEPTH RAMP IS A FRAME OR TWO BEHIND THE SHEET. Polling `count` alone once passed
+  // with the sheet drawn but the ramp not yet applied, and the lobe measure below then read a
+  // flat band (about 1 run in 3: 3.9 s, alternations 2). Poll the DISCRIMINATING measure — the
+  // lobes' swings and the colour spread — until the rendered picture reads, within a deadline;
+  // no sleep, and a picture that never renders still fails at the deadline.
+  await expect
+    .poll(
+      async () => {
+        const s = await goalDrawState(page);
+        return s.count > 200 && s.alternations >= 4 && s.spread > 8;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
   const map = await goalDrawState(page);
   // THE LOBES MUST READ. Three crests around the map's arc are several brightness swings in the
   // row-mean profile — a uniform band (the defect the manager saw) measures zero.
@@ -369,7 +381,16 @@ test('the relief draws on the map and the rod, and cuts to the program the sheet
   // ── The Stock view: the SAME buffer wrapped onto the rod, so the lobes turn with it. ──
   await page.getByTestId('rotary-view-stock').click();
   await expect(page.getByTestId('rotary-view-stock')).toHaveAttribute('aria-pressed', 'true');
-  await expect.poll(async () => (await goalDrawState(page)).count, { timeout: 30_000 }).toBeGreaterThan(200);
+  // The same race on the rod view: wait for the ramp's colours, not only the sheet's pixels.
+  await expect
+    .poll(
+      async () => {
+        const s = await goalDrawState(page);
+        return s.count > 200 && s.spread > 8;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
   const stock = await goalDrawState(page);
   expect(stock.count, 'the relief is drawn on the rod').toBeGreaterThan(200);
   expect(stock.count, 'a different view of the part, not the map again').not.toBe(map.count);
@@ -475,20 +496,34 @@ test('the relief draws on the map and the rod, and cuts to the program the sheet
   expect(state.removedVolume).toBeGreaterThan(0);
 });
 
-test('a part wider than the rod is refused by name and STILL drawn beside the refusal', async ({ cm, page }) => {
+test('a part wider than the rod is clipped to it, warned on the run sheet, and STILL drawn', async ({ cm, page }) => {
   await cm.ready();
   await openReliefJob(page, reliefJob('Oversize lobes', 12), 'oversize-lobes');
 
-  // The generator refuses the part: its lobes reach 12 mm on a ⌀20 rod.
+  // #808 — the lobes reach 12 mm on a ⌀20 rod. #786 slice 2 demoted the oversize refusal to a
+  // warning that cuts what fits, so Generate now POSTS: the part's crests are cut flat at the
+  // rod's surface, and no cutting move rides above it (the post would refuse if one did).
   await assertGenerateEnabled(page);
   await page.getByTestId('engrave-generate').click();
-  // The generator's own refusal sentence, where the Generate step shows it.
-  const refusal = page.getByText(/cannot be reproduced from this rod/i);
-  await expect(refusal).toBeVisible({ timeout: 120_000 });
-  await expect(refusal).toContainText(/reaches r 12 mm/);
-  // ...and the design's rule holds: the field still samples, so the part is drawn.
+  await page.waitForFunction(() => window.__caseMaker!.engraveProgramText() !== null, undefined, { timeout: 300_000 });
+
+  // The design's rule holds: the field still samples, so the clipped part is drawn.
   await expect.poll(async () => (await goalDrawState(page)).count, { timeout: 30_000 }).toBeGreaterThan(200);
   const drawn = await goalDrawState(page);
-  expect(drawn.count, 'a refused part is still drawn').toBeGreaterThan(200);
-  await shoot(page, 'oversize-refused-with-drawing.png');
+  expect(drawn.count, 'a clipped part is still drawn').toBeGreaterThan(200);
+
+  // The warning's home is the job's findings, which the run sheet prints: it states how much of
+  // the goal the rod cannot carry. (The sheet itself is not offered before registration is
+  // planned, so the Cut surface's own findings list is where this reads — the same rows the sheet
+  // prints, and the tally already counts them.)
+  await page.getByTestId('cnc-mode-cut').click();
+  await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
+  // Step 1's body folds away once the step is done; its summary opens it, then the findings fold.
+  await page.getByTestId('engrave-cut-step-1-summary').click();
+  await page.getByTestId('engrave-cut-details').locator('summary').click();
+  const warning = page.locator('[data-testid$="-goal-rotary-oversize"]');
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText(/reaches r 12 mm/i);
+  await expect(warning).toContainText(/outermost 2 mm of the goal is not reproduced/i);
+  await shoot(page, 'oversize-clipped-with-warning.png');
 });

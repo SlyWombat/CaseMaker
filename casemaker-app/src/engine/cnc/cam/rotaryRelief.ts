@@ -203,7 +203,11 @@ export function sampleGoalRadialField(
   const record = (idx: number, r: number): void => {
     if (r <= 0) return;
     if (covered[idx] === 0 || r > (z[idx] as number) + radius) {
-      z[idx] = r - radius;
+      // #808 — CLIPPED TO THE ROD. A hit past the rod's surface has no material to cut there, so
+      // the field holds it AT the surface (z = 0) rather than above it: a tip planned from a
+      // positive height would sit in the air and the post would refuse the program. The TRUE reach
+      // is still what `maxRadius` reports, which the oversize warning names.
+      z[idx] = Math.min(0, r - radius);
       covered[idx] = 1;
       if (r < minR) minR = r;
       if (r > maxR) maxR = r;

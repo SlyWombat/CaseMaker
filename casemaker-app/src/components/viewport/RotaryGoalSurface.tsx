@@ -11,7 +11,7 @@
  * an opaque cylinder would hide exactly the thing the picture is for.
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
 import type { RotaryMap } from '@/engine/cnc/rotary/wrap';
@@ -28,11 +28,19 @@ export interface RotaryGoalSurfaceProps {
 
 export function RotaryGoalSurface({ job, rotary, wrapRadius }: RotaryGoalSurfaceProps) {
   const target = rotaryGoalTarget(job);
+  // #808 — THE BYTES ARRIVE AFTER THE HASH. `rotaryGoalTarget` is null while `target.data` is
+  // undefined (#720 keeps the bytes in a blob store and re-attaches them asynchronously), and its
+  // deps below are the hash, the placement and the radius — none of which changes when the bytes
+  // arrive. Without this flag the memo kept its cached null and the goal never drew on the map:
+  // the #723 R-4 e2e's 1-in-3 flat sheet (the target was loaded and the preview `ready`; the
+  // surface had simply never been sampled).
+  const hasTarget = target !== null;
   const field = useMemo(
     () => (target === null ? null : rotaryGoalPreviewField(target, rotary.radius)),
     // The mesh and its placement, not the whole job: a label edit must not resample a large mesh.
+    // `hasTarget` is the bytes' arrival, which the other keys cannot see (#808).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [target?.sha256, target?.position, target?.scale, rotary.radius],
+    [hasTarget, target?.sha256, target?.position, target?.scale, rotary.radius],
   );
   const mapGeom = useMemo(() => (field === null ? null : rotaryGoalSurfaceGeometry(field)), [field]);
   const geometry = useMemo(
@@ -40,16 +48,28 @@ export function RotaryGoalSurface({ job, rotary, wrapRadius }: RotaryGoalSurface
     [mapGeom, wrapRadius],
   );
 
-  // The map geometry is ours to dispose; a wrapped copy is a second buffer with its own lifetime.
-  useEffect(() => () => void mapGeom?.dispose(), [mapGeom]);
+  // #808 — DISPOSE REPLACED BUFFERS, NEVER THE LIVE ONE IN A CLEANUP. React StrictMode runs a
+  // mount's cleanup immediately after its setup, so disposing from an effect keyed to the live
+  // geometry deleted the buffer the mesh was still drawing with: the relief vanished from the map
+  // and the parts of the picture were gone until something re-rendered the tree (switching
+  // Stock | Map brought it back). Each buffer is freed when a NEW one replaces it; the last one is
+  // released with the canvas context, which lives as long as the app does.
+  const previousMap = useRef<THREE.BufferGeometry | null>(null);
   useEffect(() => {
-    const wrapped = geometry !== mapGeom ? geometry : null;
-    return () => void wrapped?.dispose();
+    const previous = previousMap.current;
+    previousMap.current = mapGeom;
+    if (previous !== null && previous !== mapGeom) previous.dispose();
+  }, [mapGeom]);
+  const previousGeometry = useRef<THREE.BufferGeometry | null>(null);
+  useEffect(() => {
+    const previous = previousGeometry.current;
+    previousGeometry.current = geometry;
+    if (previous !== null && previous !== mapGeom && previous !== geometry) previous.dispose();
   }, [geometry, mapGeom]);
 
   if (geometry === null) return null;
   return (
-    <mesh geometry={geometry} name="engrave-rotary-goal" renderOrder={3}>
+    <mesh geometry={geometry} name="engrave-rotary-goal" renderOrder={3} dispose={null}>
       {/* #723 R-4 review — the vertex colours carry the depth (crest pale, trough deep blue); the
           white base leaves them unmultiplied, and a little lift keeps the troughs legible under
           the stock's shadow. */}

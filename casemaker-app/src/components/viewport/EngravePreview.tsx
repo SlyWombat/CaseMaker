@@ -66,7 +66,6 @@ import { RotaryMapDecorations } from './RotaryMapDecorations';
 import { ROTARY_MAP_NARROW_PX } from './rotaryMapView';
 import { wrapMapGeometry } from './rotaryStockView';
 import { RotaryGoalSurface } from './RotaryGoalSurface';
-import { rotaryGoalTarget } from './rotaryGoalPreview';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
 const STOCK_COLOR = '#c9a26b';
@@ -808,7 +807,14 @@ export function EngravePreview() {
   // #723 R-3 — a goal on a rod is drawn from its radial field (both views), and the flat-framed
   // mesh the primitives layer would draw at `position.z` is not this job's picture: on a rod the
   // radius IS the height, and `position.z` is ignored.
-  const rotaryGoal = rotary !== null && rotaryGoalTarget(job) !== null;
+  //
+  // #808 — GHOSTING FOLLOWS THE JOB, NOT THE BYTES. `rotaryGoalTarget` is null until #720's blob
+  // store re-attaches the mesh, and a sheet ghosted from that answer stayed OPAQUE on the render
+  // before it — hiding the part once it arrived behind an opaque sheet's depth (the #723 R-4
+  // e2e's 1-in-3 blank map: the goal mesh was in the scene, visible, and never drew a pixel).
+  // The job stating a goal is what the ghosting is for, and that is known without the bytes.
+  const statedGoal = job.targetObject !== undefined && job.targetObject.enabled && (job.targetObject.role ?? 'reference') === 'goal';
+  const rotaryGoal = rotary !== null && statedGoal;
   const machine = useMachineStore((s) => s.machine);
   const target = machine === null ? null : { host: machine.host, port: machine.port };
   const machineKey = machine === null ? null : `${machine.host}:${machine.port}`;
