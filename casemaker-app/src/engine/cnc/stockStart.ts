@@ -251,6 +251,16 @@ export const ROD_VISE_MAX_LENGTH_MM: number = VISE_FLOOR_DEPTH;
 export const PCB_COPPER_MM = 0.035;
 
 /**
+ * #743 P-4b review — A BOARD ON A NON-PCB BLANK IS NOT REFUSED. A practice cut in PLA is
+ * legitimate, so the import states the fact and offers the fix; it never blocks. `null` when the
+ * stock is the board's own material.
+ */
+export function pcbStockNotice(material: StockMaterial): string | null {
+  if (material === 'pcb') return null;
+  return `This job's stock is ${MATERIAL_LABELS[material]}; a circuit board is cut from copper-clad PCB.`;
+}
+
+/**
  * Why a rod's length is past the vise's grip, or null. The length is its height standing on end.
  *
  * This is the sentence under the form's picture, not a refusal (#713): a long rod is held in the

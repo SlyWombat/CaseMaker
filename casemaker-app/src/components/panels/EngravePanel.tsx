@@ -1342,9 +1342,13 @@ export function EngravePanel(): JSX.Element {
   const pcbInputRef = useRef<HTMLInputElement>(null);
   const [pcbBusy, setPcbBusy] = useState(false);
   const [pcbMessage, setPcbMessage] = useState<string | null>(null);
+  // #743 P-4b review — the board-on-a-non-PCB-blank fact, with its one-click fix. The import is
+  // NEVER refused for it: a practice cut in PLA is a legitimate thing to do.
+  const [pcbStockFix, setPcbStockFix] = useState<string | null>(null);
 
   async function readPcb(files: File[]): Promise<void> {
     setPcbMessage(null);
+    setPcbStockFix(null);
     setPcbBusy(true);
     try {
       const out = await useEngraveJobStore.getState().importPcbFiles(files);
@@ -1352,6 +1356,7 @@ export function EngravePanel(): JSX.Element {
         setPcbMessage(out.reason);
         return;
       }
+      setPcbStockFix(out.stockNotice);
       const lines = [
         `Imported ${out.fileCount} file${out.fileCount === 1 ? '' : 's'} as the board: ${out.itemCount} items — copper, isolation, holes, outline and the board cut-out.`,
       ];
@@ -3032,14 +3037,14 @@ export function EngravePanel(): JSX.Element {
         </p>
       )}
             {/* #743 P-4b — the board's Gerber set, beside the reference object: one entry of the
-                same Add menu. It needs PCB stock (the import says so when the job is not), and it
-                writes the items in one undo step. */}
+                same Add menu. It writes the items in one undo step. A non-PCB blank is STATED with
+                a one-click fix, not refused — a practice cut on the blank in hand is legitimate. */}
             <button
               type="button"
               data-testid="engrave-add-pcb"
               disabled={pcbBusy}
               style={{ marginTop: 4 }}
-              title="Read a board's Gerber and drill files (several, a folder's worth, or one .zip) as the job’s items: the copper kept, the band isolating it, the holes, the outline and the board cut-out. The job must be cut from PCB stock."
+              title="Read a board's Gerber and drill files (several, a folder's worth, or one .zip) as the job’s items: the copper kept, the band isolating it, the holes, the outline and the board cut-out. A board is cut from copper-clad PCB; on another blank the import says so and offers PCB stock, and can still be a practice cut."
               onClick={() => pcbInputRef.current?.click()}
             >
               {pcbBusy ? 'Reading the board…' : 'Circuit board from Gerber files…'}
@@ -3060,6 +3065,21 @@ export function EngravePanel(): JSX.Element {
             {pcbMessage && (
               <p style={MUTED} data-testid="engrave-pcb-message">
                 {pcbMessage}
+              </p>
+            )}
+            {pcbStockFix !== null && job.stock.material !== 'pcb' && (
+              <p style={MUTED} data-testid="engrave-pcb-stock-notice">
+                {pcbStockFix}{' '}
+                <button
+                  type="button"
+                  data-testid="engrave-pcb-use-stock"
+                  onClick={() => {
+                    useEngraveJobStore.getState().usePcbStock();
+                    setPcbStockFix(null);
+                  }}
+                >
+                  Use PCB stock
+                </button>
               </p>
             )}
           </>

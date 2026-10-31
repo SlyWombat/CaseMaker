@@ -15,7 +15,7 @@ import { tl } from './helpers/manifoldExec';
 import { planPcbJobImport } from '@/engine/import/pcbJobImport';
 
 const FIXTURES = join(process.cwd(), 'tests/unit/fixtures/pcb');
-const bytes = (name: string): Uint8Array => new Uint8Array(readFileSync(join(FIXTURES, name)));
+const bytes = (name: string): Uint8Array<ArrayBuffer> => Uint8Array.from(readFileSync(join(FIXTURES, name)));
 const file = (name: string): File => new File([bytes(name)], name);
 
 const OPTS = {
@@ -55,7 +55,7 @@ describe('the PCB import door (#743 P-4b)', () => {
       'board.drl': bytes('tiny.drl'),
       'README.md': strToU8('# board\n'),
     });
-    const out = await planPcbJobImport(tl, [new File([zip], 'board.zip')], OPTS);
+    const out = await planPcbJobImport(tl, [new File([new Uint8Array(zip)], 'board.zip')], OPTS);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.skipped).toEqual(['README.md']);
@@ -69,7 +69,11 @@ describe('the PCB import door (#743 P-4b)', () => {
     expect(noCopper.ok).toBe(false);
     if (!noCopper.ok) expect(noCopper.error).toMatch(/No copper file/);
 
-    const emptyZip = await planPcbJobImport(tl, [new File([zipSync({ 'README.md': strToU8('x') })], 'x.zip')], OPTS);
+    const emptyZip = await planPcbJobImport(
+      tl,
+      [new File([new Uint8Array(zipSync({ 'README.md': strToU8('x') }))], 'x.zip')],
+      OPTS,
+    );
     expect(emptyZip.ok).toBe(false);
     if (!emptyZip.ok) expect(emptyZip.error).toMatch(/holds no Gerber or drill files/);
   });

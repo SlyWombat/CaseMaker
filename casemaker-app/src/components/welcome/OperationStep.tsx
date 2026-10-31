@@ -89,6 +89,8 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   // for it — the files ARE the design, and Create finishes without adding a placeholder).
   const [pcbReading, setPcbReading] = useState(false);
   const [pcbSummary, setPcbSummary] = useState<string | null>(null);
+  // #743 P-4b review — the board-on-a-non-PCB-blank fact and its one-click fix; never a refusal.
+  const [pcbStockFix, setPcbStockFix] = useState<string | null>(null);
 
   const surfaceChoice: OperationChoice = {
     type: 'surface',
@@ -132,6 +134,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
 
   async function readPcbSet(files: File[]): Promise<void> {
     setPcbSummary(null);
+    setPcbStockFix(null);
     setPcbReading(true);
     try {
       const out = await useEngraveJobStore.getState().importPcbFiles(files);
@@ -140,6 +143,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
           ? `The board is in: ${out.itemCount} items from ${out.fileCount} files${out.warnings.length > 0 ? ` — ${out.warnings.map((w) => w.message).join(' ')}` : ''}`
           : out.reason,
       );
+      if (out.ok) setPcbStockFix(out.stockNotice);
     } finally {
       setPcbReading(false);
     }
@@ -359,7 +363,8 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
           <div style={FIELD_HEADING}>Circuit board from Gerber files</div>
           <p style={MUTED}>
             A board's copper, holes and outline as ordinary items: the copper kept, the band
-            isolating it, the holes and the board cut-out. The job must be cut from PCB stock.
+            isolating it, the holes and the board cut-out. A board is cut from copper-clad PCB; on
+            another blank the import says so and offers PCB stock, and can still be a practice cut.
           </p>
           <div style={FIELDS}>
             <label style={FIELD_LABEL}>
@@ -381,6 +386,21 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
             {pcbSummary !== null && !pcbReading && (
               <span style={MUTED} data-testid="start-wizard-op-pcb-summary">
                 {pcbSummary}
+              </span>
+            )}
+            {pcbStockFix !== null && !pcbReading && job.stock.material !== 'pcb' && (
+              <span style={MUTED} data-testid="start-wizard-op-pcb-stock-notice">
+                {pcbStockFix}{' '}
+                <button
+                  type="button"
+                  data-testid="start-wizard-op-pcb-use-stock"
+                  onClick={() => {
+                    useEngraveJobStore.getState().usePcbStock();
+                    setPcbStockFix(null);
+                  }}
+                >
+                  Use PCB stock
+                </button>
               </span>
             )}
           </div>

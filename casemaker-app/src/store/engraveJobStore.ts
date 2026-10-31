@@ -101,11 +101,19 @@ import type {
 } from '@/types/engraveJob';
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import { withSource } from '@/engine/cnc/engrave/jobSources';
-import { MATERIAL_LABELS } from '@/engine/cnc/materials';
+import { PCB_COPPER_MM, pcbStockNotice } from '@/engine/cnc/stockStart';
 
 /** What {@link EngraveJobState.importPcbFiles} reports to the door that asked for the import. */
 export type PcbImportOutcome =
-  | { ok: true; fileCount: number; itemCount: number; notes: string[]; warnings: PcbWarning[] }
+  | {
+      ok: true;
+      fileCount: number;
+      itemCount: number;
+      notes: string[];
+      warnings: PcbWarning[];
+      /** The board-on-a-non-PCB-blank fact (#743 P-4b review): stated, with a one-click fix. */
+      stockNotice: string | null;
+    }
   | { ok: false; reason: string };
 import type { PcbWarning } from '@/engine/import/pcbImport';
 import { parseEngraveJob, type ParseEngraveJobResult } from './engraveJobSchema';
@@ -1166,6 +1174,14 @@ export interface EngraveJobState {
    * stock). The manifold toplevel is loaded lazily on the first import, in the browser only.
    */
   importPcbFiles: (files: readonly File[]) => Promise<PcbImportOutcome>;
+  /**
+   * #743 P-4b review — the import's one-click fix for a board laid on a non-PCB blank: restate the
+   * stock's material as PCB with copper's own cap, and CLEARS the filament's fibre: a PCB is not the
+   * printed blank the previous material described. Dimensions are untouched — the board is already
+   * on this blank. `0.035 mm` is Case Maker's 1 oz default, so the cap's provenance is `assumed`,
+   * not the operator's assertion.
+   */
+  usePcbStock: () => void;
   /** Merge a hand edit into one vector (#217). A partial `position` is merged, not replaced. */
   updateVector: (id: string, patch: VectorPatch) => void;
   removeVector: (id: string) => void;
@@ -2447,14 +2463,16 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       return shape.id;
     },
 
+    usePcbStock: () =>
+      get().setStock(
+        { material: 'pcb', colour: { kind: 'laminate', capMm: PCB_COPPER_MM }, fibre: undefined },
+        { material: 'user', colour: 'assumed' },
+      ),
+
     importPcbFiles: async (files) => {
       const job = get().job;
-      if (job.stock.material !== 'pcb') {
-        return {
-          ok: false,
-          reason: `This job's stock is ${MATERIAL_LABELS[job.stock.material]}; a circuit board is cut from PCB stock — choose PCB in the stock row first.`,
-        };
-      }
+      // A practice cut on the blank in hand is legitimate: the notice is stated, never a refusal.
+      const stockNotice = pcbStockNotice(job.stock.material);
       let tl;
       try {
         const [{ getToplevel }, { planPcbJobImport }] = await Promise.all([
@@ -2491,6 +2509,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           itemCount: plan.items.vectors.length + plan.items.frames.length + plan.items.drills.length + plan.items.cutouts.length,
           notes,
           warnings: plan.warnings,
+          stockNotice,
         };
       } catch (e) {
         return { ok: false, reason: `the board could not be read: ${e instanceof Error ? e.message : String(e)}` };
