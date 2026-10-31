@@ -158,11 +158,19 @@ describe('#423 the run panel, in the real tree', () => {
     // every finish; it is the file (or its absence) that switches the vacuum.
     expect(sent).toEqual(['?', 'play /sd/gcodes/job.nc', '?', '$H']);
     expect(screen.queryByTestId('engrave-run-home')).toBeNull();
-    // #806 — THE DONE CARD: the run and its clock in one title, the end's own lines under it,
-    // the offcut question only when there is one, and ONE primary action.
+    // #806 / #819 — THE DONE CARD: the run and its clock in one title, ONE line for the machine's
+    // end state, the offcut question only when there is one, and ONE primary action. The run end's
+    // bookkeeping and a second Start are not in it.
     expect(screen.getByTestId('engrave-run-end').dataset.kind).toBe('finished');
     expect(screen.getByTestId('engrave-run-done-title').textContent).toMatch(/^Finished( · .+)?$/);
     expect(screen.queryByTestId('engrave-run-offcut')).toBeNull();
+    const card = screen.getByTestId('engrave-run-end');
+    expect(card.querySelectorAll('p')).toHaveLength(2); // the title and the one line
+    expect(card.querySelectorAll('button')).toHaveLength(1); // Cut another
+    expect(screen.getByTestId('engrave-run-outcome').textContent).toContain('vacuum');
+    expect(screen.getByTestId('engrave-run-outcome').textContent).toMatch(/homed\.$/);
+    expect(screen.queryByTestId('engrave-run-start')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-vacuum')).toBeNull();
     fireEvent.click(screen.getByTestId('engrave-run-another'));
     expect(useCncModeStore.getState().mode).toBe('design');
     // #797 — the at-machine statement is Cut step 1's ONE statement now; this panel asks nothing

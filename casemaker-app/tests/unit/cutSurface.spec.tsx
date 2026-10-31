@@ -26,7 +26,7 @@ import { frozenReleaseSources } from '@/engine/cnc/engrave/release';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import { ROTARY_UNMEASURED_REFUSAL } from '@/store/engraveRunGate';
-import { resetMachineRunStore } from '@/store/machineRunStore';
+import { machineKey, resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
 import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
@@ -1103,5 +1103,48 @@ describe('#656 from the cutter prompt to the cut', () => {
     expect(screen.queryByTestId('engrave-cut-confirm')).toBeNull();
     expect((screen.getByTestId('engrave-cut-expert') as HTMLDetailsElement).open).toBe(true);
     expect(screen.getByTestId('engrave-cut-run')).toBeTruthy();
+  });
+});
+
+// #819 — THE ENDED RUN OWNS THE SCREEN, AND ONLY WHEN IT IS THIS JOB'S.
+describe('#819 the finished screen', () => {
+  it('a finished run gives the Cut screen to its Done card — one line and one action — and a foreign run does not', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    const ended = (jobId: string | undefined) => ({
+      running: false,
+      filename: 'job.nc',
+      programHash: P1.programHash,
+      progress: null,
+      lines: [],
+      outcome: { kind: 'finished', last: { line: 10, percent: 100, elapsedS: 12 }, homed: true, vacuumOff: true },
+      stopAsked: false,
+      paused: false,
+      toolWaiting: null,
+      context: jobId === undefined ? { nc: NC1 } : { nc: NC1, jobId },
+      end: { kind: 'finished', lines: ['bookkeeping the card must not draw'], offcut: null, stockQuestion: null },
+      pendingStock: null,
+    });
+
+    // This job's run: the steps give way to the card and its one action.
+    useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended(job.id) } as never });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    expect(screen.queryByTestId('engrave-cut-step-1')).toBeNull();
+    expect(screen.queryByTestId('engrave-cut-go')).toBeNull();
+    expect(screen.getByTestId('engrave-run-end').dataset.kind).toBe('finished');
+    expect(screen.getByTestId('engrave-run-done-title').textContent).toMatch(/^Finished · /);
+    expect(screen.getByTestId('engrave-run-outcome').textContent).toBe('Vacuum off; homed.');
+    expect(screen.queryByText('bookkeeping the card must not draw')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-start')).toBeNull();
+    expect(screen.getByTestId('engrave-run-another')).toBeTruthy();
+
+    // Another job's run on the same machine: this job's steps stay — with the press step 3 owns —
+    // so the other job's end cannot take this screen. (The machine's own run panel still draws that
+    // entry inside step 3, as it always has: the entry belongs to the machine, not to the job.)
+    cleanup();
+    useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended('another-job') } as never });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-go')).toBeTruthy();
   });
 });

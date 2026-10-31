@@ -402,7 +402,12 @@ export function MachineStatusStrip(): JSX.Element | null {
   // the firmware): shown raw, and only on a machine that actually sends it. The Z1 has no ATC.
   const atcState = live ? line?.atcState ?? null : null;
 
-  const percent = progress?.percent ?? null;
+  // #819 — a finished program leaves its last `P:` on the machine's line (100 %, state Idle), and
+  // the cell kept drawing that bar and its "0 s left" under a Done card that already said Finished.
+  // The bar and the remaining time are about a program IN PROGRESS, so an idle machine at 100 %
+  // shows neither. An Idle below 100 % is a program paused mid-job (the 3–4 s `Idle` at `M05`),
+  // and its bar stays. The Stop is already the strip's while the machine is not idle.
+  const percent = state === 'Idle' && (progress?.percent ?? 0) >= 100 ? null : progress?.percent ?? null;
   const remaining = remainingSeconds(progress);
 
   return (

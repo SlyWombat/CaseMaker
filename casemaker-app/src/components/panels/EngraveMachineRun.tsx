@@ -20,7 +20,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { attachConsole } from '@/platform/machineConsole';
-import { describeRun, programOwnsVacuum, runSettings } from '@/platform/machineRun';
+import { describeEndLine, programOwnsVacuum, runSettings } from '@/platform/machineRun';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { runKey, useRunConfirmStore } from '@/store/runConfirmStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -147,7 +147,10 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
                   : 'This program runs without the vacuum; the machine homes when it finishes.';
   return (
     <div data-testid="engrave-run" data-file={entry.filename}>
-      {!controlled && (
+      {/* #819 — once a run has ENDED there is nothing left to start from here: the card's action is
+          the next step, and a second Start beside it would be a second primary. A fresh upload
+          resets the entry (end null), so the button returns for the next program. */}
+      {!controlled && entry.end === null && (
         <button
           type="button"
           data-testid="engrave-run-start"
@@ -161,7 +164,7 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
           {running ? 'Running…' : `Run ${entry.filename}`}
         </button>
       )}
-      {!controlled && (
+      {!controlled && entry.end === null && (
         <p style={MUTED} data-testid="engrave-run-vacuum">
           {vacuumLine}
         </p>
@@ -218,11 +221,6 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
         </>
       )}
 
-      {outcome !== null && !running && (
-        <p style={MUTED} data-testid="engrave-run-outcome" data-state={outcome.kind}>
-          {describeRun(outcome)}
-        </p>
-      )}
       {!running && outcome?.kind === 'aborted' && outcome.stop.kind === 'stopped' && (
         <button type="button" data-testid="engrave-run-home" onClick={() => void home()}>
           Home ($H)
@@ -244,9 +242,11 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
           </button>
         </div>
       )}
-      {/* #414 / #806 — THE DONE CARD. One card when the run ends: what happened and how long
-          ("Finished · 2 min 14 s"), the end's own lines (the finished-program record, the shelf,
-          the runtime), the offcut question only when there is one, and the ONE primary action. */}
+      {/* #414 / #806 / #819 — THE DONE CARD. One card when the run ends: what happened and how
+          long ("Finished · 2 min 14 s"), ONE line for the machine's end state, the offcut
+          question only when there is one, and the ONE primary action. The run end's bookkeeping
+          (the finished-program record, the shelf, the cutter runtime) stays in the records, not
+          in this card. */}
       {!running && entry.end !== null && (
         <div data-testid="engrave-run-end" data-kind={entry.end.kind} style={BOX}>
           <p
@@ -256,11 +256,12 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
             {entry.end.kind === 'finished' ? 'Finished' : entry.end.kind === 'stopped' ? 'Stopped' : 'Nothing was cut'}
             {entry.end.kind === 'finished' && elapsedS !== null ? ` · ${formatDuration(elapsedS)}` : ''}
           </p>
-          {entry.end.lines.map((l, i) => (
-            <p key={i} style={MUTED}>
-              {l}
+          {/* #819 — ONE LINE: the machine's end state, never the run end's bookkeeping. */}
+          {outcome !== null && (
+            <p style={MUTED} data-testid="engrave-run-outcome" data-state={outcome.kind}>
+              {describeEndLine(outcome)}
             </p>
-          ))}
+          )}
           {entry.end.offcut?.state === 'asked' && (
             <div data-testid="engrave-run-offcut">
               <p style={MUTED}>{entry.end.offcut.text}</p>

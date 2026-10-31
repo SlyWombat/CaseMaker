@@ -364,6 +364,23 @@ describe('#647 the DRO — vacuum and progress', () => {
     render(<MachineStatusStrip />);
     expect(screen.queryByTestId('machine-status-progress')).toBeNull();
   });
+
+  // #819 — a finished program leaves P:100 on the machine's last line; the strip must not keep
+  // drawing the bar and its Stop under a Done card that says Finished.
+  it('drops the bar and the Stop when an idle machine still carries a finished P:100', () => {
+    remember('<Idle|MPos:0,0,0|WPos:0,0,0|P:2540,100,756>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').getAttribute('data-state')).toBe('Idle');
+    expect(screen.queryByTestId('machine-status-progress')).toBeNull();
+    expect(screen.queryByTestId('machine-status-stop')).toBeNull();
+  });
+
+  it('offers the bar and the Stop while the program runs', () => {
+    remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|P:12,40,75>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-progress')).toBeTruthy();
+    expect(screen.getByTestId('machine-status-stop')).toBeTruthy();
+  });
 });
 
 describe('#647 the DRO — the layout contract', () => {

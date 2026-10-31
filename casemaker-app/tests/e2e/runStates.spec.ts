@@ -2,7 +2,9 @@
 // `/api/v1/machine/tcp/*` in the page (tests/e2e/fixtures/fakeConsole.ts), so the run panel plays a
 // real program and reaches running, paused and finished. REAL screenshots are committed under
 // `docs/bench/img/2026-10-31-run-states/` — the record #801 (Pause/Resume/Stop and the one
-// caption, no panel progress line) and #806 (the Done card) asked for.
+// caption, no panel progress line), #806 (the Done card) and #819 (THE FINISHED SCREEN: the strip
+// reads the machine, the steps and both run buttons are gone, and the card is one line plus one
+// action) asked for.
 //
 // The program is prepared through the test surface (`machineRunPrepare`, the store seam the
 // upload's last step uses) rather than uploaded: the fake answers the console, and the upload's
@@ -125,6 +127,21 @@ test('#801/#806 — the run panel running, paused, and its Done card, on a fake 
   const done = runPanel.getByTestId('engrave-run-end');
   await expect(done).toHaveAttribute('data-kind', 'finished', { timeout: 60_000 });
   await expect(runPanel.getByTestId('engrave-run-done-title')).toContainText(/^Finished · /);
+
+  // #819 — THE FINISHED SCREEN. The strip speaks for the MACHINE: it settles on the fake's own last
+  // answer (Idle), with no Stop and no finished program's bar. Both run buttons and the three steps
+  // are gone, so step 2's "no saved setup" cannot sit under a Done card. The card is its title, ONE
+  // line (the machine's end state) and ONE action.
+  const stripState = page.getByTestId('machine-status-state');
+  await expect.poll(() => stripState.getAttribute('data-state'), { timeout: 30_000 }).toBe('Idle');
+  await expect(page.getByTestId('machine-status-stop')).toHaveCount(0);
+  await expect(page.getByTestId('machine-status-progress')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-cut-go')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-run-start')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-cut-step-1')).toHaveCount(0);
+  await expect(runPanel.getByTestId('engrave-run-outcome')).toHaveText('Vacuum off; homed.');
+  await expect(done.locator('p')).toHaveCount(2); // the title and the one line
+  await expect(done.locator('button')).toHaveCount(1); // Cut another
   await expect(runPanel.getByTestId('engrave-run-another')).toBeVisible();
   await shoot(page, 'done.png');
 

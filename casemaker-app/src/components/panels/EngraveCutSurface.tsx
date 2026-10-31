@@ -54,7 +54,7 @@ import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor, useLocationStore } from '@/store/locationStore';
-import type { RunContext } from '@/store/machineRunStore';
+import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
 import { useEngraveRegistrationStore, useFirstRegistration, useSurfaceSpread } from '@/store/engraveRegistrationStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
@@ -288,6 +288,22 @@ export function EngraveCutSurface({
    * rather than pretend a fixed clearance checked a top nobody measured.
    */
   const firstRegistration = useFirstRegistration(job.id, target);
+  // #819 — THE RUN'S END IS THE SCREEN. When this machine's run has ended (finished or stopped),
+  // the three steps were about getting a program onto the machine, and that is done: the card
+  // owns the state, and the steps' two run buttons and the register card fold away with them.
+  // A refused run (`nothing` was cut) keeps the steps — its card says why, and the operator needs
+  // the press to try again.
+  const machineRun = useMachineRunStore((s) => (target === null ? null : s.runs[machineKey(target)] ?? null));
+  // The machine holds ONE entry, so a run that belongs to ANOTHER job (its context names that job)
+  // must not take this job's screen: job B's Cut would otherwise open on job A's Done card. An entry
+  // with no job id was prepared outside the job flow (an upload with no job, the e2e seam), and has
+  // no other job to belong to.
+  const runOver =
+    machineRun !== null &&
+    !machineRun.running &&
+    machineRun.end !== null &&
+    machineRun.end.kind !== 'nothing' &&
+    (machineRun.context?.jobId === undefined || machineRun.context.jobId === job.id);
   // #689 — the clearance acknowledgement lives in step 1 now, not under Generate. It is the run
   // gate's own flag; the warning codes that need it come from the Generate (re-post included) and
   // the sweep, so both are subscribed to and the step re-renders when they arrive.
@@ -742,6 +758,15 @@ export function EngraveCutSurface({
       onDone: () => void useLocationStore.getState().refresh(),
     });
   };
+
+  // #819 — the ended run's screen: the Done card and its one action, nothing else.
+  if (runOver && target !== null) {
+    return (
+      <div data-testid="engrave-cut-surface">
+        <EngraveMachineRun target={target} onProgramLine={onProgramLine} />
+      </div>
+    );
+  }
 
   return (
     <div data-testid="engrave-cut-surface">

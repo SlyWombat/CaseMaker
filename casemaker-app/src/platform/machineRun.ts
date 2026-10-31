@@ -540,6 +540,23 @@ export function describeRun(o: RunOutcome): string {
   }
 }
 
+/**
+ * #819 — THE DONE CARD'S ONE LINE.
+ *
+ * The card's title already states what happened and how long ("Finished · 12 s"), so a finish's
+ * line carries only the machine's END STATE — the vacuum and home sentence `describeRun` appends
+ * to it. Every other outcome is one sentence already (there is no clock to repeat), so the card
+ * shows it whole. The bookkeeping the run end records (the finished-program record, the shelf,
+ * the cutter runtime) is NOT drawn here: #806's card is what happened, its clock and the one next
+ * action, and those facts live in the run's own records.
+ */
+export function describeEndLine(o: RunOutcome): string {
+  if (o.kind === 'finished') {
+    return `${finishedVacuum(o)}${o.homed ? 'homed' : 'the home ($H) was not confirmed — home it'}.`;
+  }
+  return describeRun(o);
+}
+
 /** The run tunables from the shop's defaults (`run.*`) — the labelled fallbacks only with no service. */
 export function runSettings(defaults: ShopDefaults | null): RunSettings {
   return {
