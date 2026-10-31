@@ -26,6 +26,7 @@ import { vendorId } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { JobFinding } from './jobSetup';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { jobTargetObjects } from './jobSetup';
 import { placedSize } from './targetScale';
 
@@ -219,6 +220,12 @@ export function jobReachFindings(
   owned: readonly Tool[],
   entries: readonly ToolLibraryEntry[],
 ): JobFinding[] {
+  // A ROTARY RELIEF IS NOT JUDGED BY THE FLAT FRAME'S REACH. On a rod the goal's local Z is
+  // RADIAL, not "below the stock top" toward the bed, so this check's premise does not hold; the
+  // relief's own checks (the axis crossing, the free span, the rod's radius and the sweep) judge
+  // it. Without this, a 12 mm-flute cutter on an 18 mm-deep relief was refused before the rotary
+  // path — the #723 R-4 e2e caught it.
+  if (rotaryMapOf(job) !== null) return [];
   const out: JobFinding[] = [];
   for (const goal of jobTargetObjects(job)) out.push(...goalReachFindings(goal, chosen, owned, entries));
   return out;

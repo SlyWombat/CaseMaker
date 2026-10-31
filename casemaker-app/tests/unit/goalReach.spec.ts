@@ -17,7 +17,7 @@ const backing = new Map<string, string>();
   },
 } as Storage;
 
-import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, longestKnownReach, knownReach } from '@/engine/cnc/engrave/goalReach';
+import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, jobReachFindings, longestKnownReach, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import type { EngraveProgress } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -199,6 +199,19 @@ describe('#785 — the findings', () => {
 
   it('the band clearance is the 1 mm the sentence and the sampler share', () => {
     expect(GOAL_BAND_CLEARANCE_MM).toBe(1);
+  });
+});
+
+describe('#785 — a rotary relief keeps its own judges', () => {
+  it('a rod job posts no reach finding, whatever the goal’s local Z extent', () => {
+    const base = defaultEngraveJob();
+    const rotary: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, length: 100, width: 20, thickness: 20, shape: 'cylinder', diameter: 20 },
+      workholding: { kind: 'rotary-chuck', rotary: { stickout: 60, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } },
+      targetObject: goal(18),
+    };
+    expect(jobReachFindings(rotary, flat({ fluteLength: 12 }), [flat({ fluteLength: 12 })], [])).toEqual([]);
   });
 });
 
