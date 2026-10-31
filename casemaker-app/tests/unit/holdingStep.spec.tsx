@@ -911,3 +911,5 @@ describe('#783 the hold choice', () => {
     expect(moved.itemsHold).toEqual({ x: 'width', y: 'thickness', z: 'length' });
     expect(moved.labels[0]!.position.x).toBeCloseTo(20, 6);
     expect(moved.labels[0]!.position.y).toBeCloseTo(6, 6);
+  });
+});
