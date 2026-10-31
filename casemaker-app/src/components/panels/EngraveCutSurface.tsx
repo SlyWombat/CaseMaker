@@ -5,15 +5,17 @@
  * the job may become a run; this surface shows the run that was approved — the package line, ONE
  * `RunPlan` (its phase table and machine strip), and the controls that play it.
  *
- * FREEZE ON GREEN. With the gate clear and no package yet, the surface freezes the job around the
- * programs the Green Generate produced, takes its blank, and shows what the shelf said. That is the
- * "moment a person approves a job" the package store describes. It happens once per Generate (a
- * ref, not state, so a re-render cannot double-freeze) and never with a red gate.
+ * FREEZING FOLLOWS GENERATE (#796). With the check clear and a verifiable Generate that still
+ * describes this design, the surface freezes the job around its programs, takes its blank and
+ * shows what the shelf said — the "moment a person approves a job" the package store describes.
+ * It happens once per Generate (a ref, not state, so a re-render cannot double-freeze), never with
+ * a red check, and never for a Generate the job has outrun (`staleSince`). A package that no longer
+ * matches the design is replaced by the NEXT Generate, so the surface carries no freeze press.
  *
- * A STALE PACKAGE KEEPS ITS BLANK (decision 2). The surface says so in the hub's own words and
- * offers ONE explicit re-freeze press, enabled only when the only blocking row is `package-stale`
- * and the Generate itself is current. If the Generate is stale too, the operator must Generate
- * again first; the package and its reservation stay untouched either way.
+ * A STALE PROGRAM KEEPS ITS BLANK (decision 2). The program card says, in the hub's own words,
+ * that the program is older than the design and offers ONE action: Generate — the same action the
+ * Design footer carries. The package and its reservation stay untouched until a new program is
+ * generated and frozen.
  *
  * THE RUN IS FED FROM THE PACKAGE. `frozenReleaseSources` reads the texts, order and FNV keys from
  * `pkg.programs`; the live Generate contributes only verifier reports, matched by hash, because the
@@ -217,12 +219,14 @@ export interface EngraveCutSurfaceProps {
   releaseBlocker: string | null;
   onProgramLine?: (line: number | null) => void;
   onLiveStatus?: (live: { busy: boolean; status: string }) => void;
-}
-
-/** "14:02" from the package's ISO timestamp, the hub's own reading. */
-function clockOf(iso: string): string {
-  const match = /T(\d{2}:\d{2})/.exec(iso);
-  return match?.[1] ?? iso;
+  /**
+   * #796 — THE ONE WAY A PROGRAM IS MADE. A stale program's card presses the same Generate the
+   * Design footer offers; freezing follows the generate, so this surface no longer carries a
+   * separate re-freeze press.
+   */
+  onGenerate: () => void;
+  /** The Design footer's own blocker sentence for Generate, when there is one (#803: no dead button). */
+  generateBlocker: string | null;
 }
 
 /** The map from the live Generate: each program's FNV key to the report that gated that text. */
@@ -255,6 +259,8 @@ export function EngraveCutSurface({
   releaseBlocker,
   onProgramLine,
   onLiveStatus,
+  onGenerate,
+  generateBlocker,
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
   const openManage = useManageModeStore((s) => s.openManage);
@@ -269,7 +275,6 @@ export function EngraveCutSurface({
   /** #726 W20 — whether step 1's detail fold is open; null = follow the gate (open while blocked). */
   const [detailsOpen, setDetailsOpen] = useState<boolean | null>(null);
   const [freezeError, setFreezeError] = useState<string | null>(null);
-  const [refreezing, setRefreezing] = useState(false);
   /** The Generate a freeze was attempted for; a re-render must not freeze the same one twice. */
   const attempted = useRef<EngraveGenerated | null>(null);
 
@@ -528,9 +533,13 @@ export function EngraveCutSurface({
     setOverrides({});
   }
 
-  // FREEZE ON GREEN, once. No package + a clear gate + a verifiable Generate is approval.
+  // #796 — FREEZING FOLLOWS GENERATE. A clear check over a verifiable Generate that still
+  // describes this design freezes once; a STALE package is replaced by the same rule on the next
+  // Generate, which is why there is no separate re-freeze press any more. `staleSince` keeps a
+  // Generate that the job has outrun from freezing: that program describes an older design.
   useEffect(() => {
-    if (!green || pkg !== null || !generatedReady || generated === null) return;
+    if (!green || !generatedReady || generated === null || staleSince !== null) return;
+    if (pkg !== null && packageCurrent) return;
     if (attempted.current === generated) return;
     attempted.current = generated;
     void freeze(job, generated.programs).then((result) => {
@@ -540,7 +549,7 @@ export function EngraveCutSurface({
         setFreezeError(result.reason);
       }
     });
-  }, [green, pkg, generatedReady, generated, job, freeze]);
+  }, [green, pkg, packageCurrent, generatedReady, generated, job, staleSince, freeze]);
 
   const finishedHashes = useMemo(() => {
     // #425 §6 — the machine's finished list and the DOCUMENT's run log both answer "not new". The
@@ -559,24 +568,10 @@ export function EngraveCutSurface({
     [job, pkg, finishedHashes, defaults, overrides],
   );
 
-  // Q-2: a re-freeze is a separate press, never automatic. It is offered only when the package is
-  // the ONLY thing in the way — a stale Generate needs a new Generate first, not a new freeze.
+  // #796 — a stale program has ONE action: Generate. There is no re-freeze press; the generate
+  // that replaces the program freezes it (see the freeze effect above).
   const errors = report.rows.filter((row) => row.severity === 'error');
   const onlyPackageStale = errors.length > 0 && errors.every((row) => row.code === 'package-stale');
-  const canRefreeze = onlyPackageStale && staleSince === null && generatedReady;
-
-  const refreeze = (): void => {
-    if (generated === null || !canRefreeze) return;
-    setRefreezing(true);
-    void freeze(job, generated.programs).then((result) => {
-      setRefreezing(false);
-      if (result.ok) {
-        setFreezeError(null);
-      } else {
-        setFreezeError(result.reason);
-      }
-    });
-  };
 
   const toggle = (feature: FeatureKind, on: boolean): void => {
     const key = feature === 'air-run' ? 'airRun' : feature === 'auto-level' ? 'autoLevel' : feature;
@@ -602,50 +597,50 @@ export function EngraveCutSurface({
     };
   })();
 
-  // #689 — THE FOUR-LINE FLOW: ✓ 1 Checked · ✓ 2 Frozen · ● 3 Register the blank · ○ 4 Run.
-  // `checked` is the gate PLUS the clearance acknowledgement that now lives in step 1. A stale
-  // package is step 2's business, not a reason to hold step 1 open: with the gate clear otherwise,
-  // step 1 is done and step 2 is the one that opens for the re-freeze press. #695 — a frozen
-  // mount the machine no longer holds is step 1's business: its sentence and action live there,
-  // so step 1 stays open until the machine is right; step 2 reads the same fact as stale.
+  // #796 — THREE STEPS, NOT FOUR: ✓ 1 Fit and clamp · ● 2 Register · ○ 3 Start cut.
+  // `checked` is the check PLUS the clearance acknowledgement; `frozen` is the program that
+  // matches this design. They were steps 1 and 2; they are ONE readiness line now, because the
+  // operator does one thing (press Generate) and reads one fact (the program is this design's).
+  // #695 — a frozen mount the machine no longer holds is step 1's business: its sentence and
+  // action live there, so step 1 stays open until the machine is right.
   const checked = (green || onlyPackageStale) && (!ackRequired || acknowledged) && !mountMismatch;
   const frozen = packageCurrent && !mountMismatch;
+  const fitDone = checked && frozen;
   const registrationPlan = job.setups?.[0]?.registration?.plan ?? null;
   // A registration is a measurement on THIS machine; with no machine connected, a record for this
   // job still says the blank was registered in this session.
   const registered = firstRegistration !== null || (target === null && anyRegistration !== null);
-  const registeredDone = frozen && registered;
+  const registeredDone = fitDone && registered;
   const ran =
     registeredDone &&
     pkg !== null &&
     pkg.programs.length > 0 &&
     pkg.programs.every((program) => finishedHashes.includes(program.hash));
-  const currentStep = !checked ? 1 : !frozen ? 2 : !registeredDone ? 3 : !ran ? 4 : 0;
+  const currentStep = !fitDone ? 1 : !registeredDone ? 2 : !ran ? 3 : 0;
 
-  // #689 review — STEP 4 STAYS VISIBLE, BUT THE TWO GATES STEP 4 USED TO REQUIRE ARE BLOCKERS
-  // AGAIN, ahead of the run gate on every control. Before #689 step 4 rendered only when the
-  // pre-flight was green and the package current; now that it always renders with a frozen plan,
-  // `saveBlocker` covers neither the report's first blocking finding nor the package's staleness,
-  // so a stale package could upload its old programs and a blocking finding would no longer gate
-  // the press. Step 1 owns the report (its first finding, in the owner's own words); step 2 owns
-  // the package. The package-stale row is step 2's own business, so it never leads the step-1
-  // sentence — the freeze sentence does.
+  // #689 review — THE START-CUT STEP STAYS VISIBLE, BUT WHAT IT USED TO REQUIRE IS A BLOCKER on
+  // every control. Since #689 the step renders even when the check is red or the program is stale;
+  // `saveBlocker` covers neither, so an old program could be uploaded and a blocking finding would
+  // no longer gate the press. Step 1 owns both facts now: the report's first finding (in the
+  // owner's own words) and the program that is this design's. The `package-stale` row is the
+  // program card's own business, so it never leads the step-1 sentence.
   const step1Blocking =
     report.rows.find((row) => row.severity === 'error' && row.code !== 'package-stale') ?? null;
   const step1Blocker =
     step1Blocking?.message ?? (!green && !onlyPackageStale ? 'Clear step 1 first.' : null);
-  const step2Blocker = frozen
+  // #796 — one name for "the program that is this design's": the Start cut screen and the one
+  // press both read it, and it is a program now, not a frozen package.
+  const programBlocker = frozen
     ? null
     : pkg === null
-      ? 'Freeze the job in step 2 before running it.'
+      ? 'Generate the program in step 1 before starting it.'
       : mountMismatch
         ? `The machine no longer holds ${jobMountWords(frozenMount)} — use Change the machine… in step 1.`
-        : 'Freeze the job again in step 2 — it changed since it was frozen.';
+        : 'The program is older than the design — press Generate in step 1.';
 
-  const programCount = generated?.programs.length ?? pkg?.programs.length ?? 0;
   const noteCount = report.rows.filter((row) => row.severity === 'info').length;
-  // #747 review — A WARNING IS NOT FOLDED AWAY. A green gate with a withheld frame carries its
-  // `no-frame` warning in the closed details fold, where nobody would look; step 1's one line
+  // #747 review — A WARNING IS NOT FOLDED AWAY. A green check with a withheld frame carries its
+  // `no-frame` warning in the closed details fold, where nobody would look; the readiness line
   // counts it, so the operator knows to open the fold and read it.
   const warningCount = report.warningCount;
   const warningWords = warningCount > 0 ? `${warningCount} warning${warningCount === 1 ? '' : 's'}` : null;
@@ -656,31 +651,33 @@ export function EngraveCutSurface({
   // (#688); the setup-inclusive total stays in the plan's own fold, where the phase table names it.
   const cutEstimate =
     generated?.cam == null ? null : `about ${formatDuration(generated.cam.estimatedSeconds)}`;
-  const step1Meta: string[] = [];
-  if (programCount > 0) step1Meta.push(`${programCount} program${programCount === 1 ? '' : 's'}`);
-  if (cutEstimate !== null) step1Meta.push(cutEstimate);
-  if (warningWords !== null) step1Meta.push(warningWords);
-  if (noteCount > 0) step1Meta.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
-  if (ackRequired) step1Meta.push(acknowledged ? 'clearance acknowledged' : 'clearance not acknowledged');
-  const step1Summary = checked
-    ? step1Meta.join(' · ') || 'clear'
+
+  // #796 — THE ONE READINESS LINE. Checked and Frozen were two steps whose summaries said the
+  // same thing twice ("1 program · about 13 min 25 s" and "12:46 · the programs match the
+  // design"); they are one line now: the program is checked, it is this design's, and it takes
+  // this long. Warnings, notes and the clearance state still ride it.
+  const readiness: string[] = [];
+  if (checked) readiness.push('Program checked');
+  if (frozen) readiness.push('matches the design');
+  if (cutEstimate !== null) readiness.push(cutEstimate);
+  if (warningWords !== null) readiness.push(warningWords);
+  if (noteCount > 0) readiness.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
+  if (ackRequired) readiness.push(acknowledged ? 'clearance acknowledged' : 'clearance not acknowledged');
+  const readinessWords = readiness.join(' · ');
+  const step1Summary = fitDone
+    ? readinessWords || 'clear'
     : mountMismatch
       ? `the machine no longer holds ${jobMountWords(frozenMount)}`
-      : report.errorCount > 0
-        ? `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}` +
-          (warningWords === null ? '' : ` · ${warningWords}`)
-        : ackRequired
-          ? 'clearance not acknowledged'
-          : 'clear';
+      : onlyPackageStale
+        ? 'the program is older than the design'
+        : report.errorCount > 0
+          ? `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}` +
+            (warningWords === null ? '' : ` · ${warningWords}`)
+          : ackRequired
+            ? 'clearance not acknowledged'
+            : 'clear';
 
-  const step2Summary =
-    pkg === null
-      ? 'not frozen yet'
-      : frozen
-        ? `${clockOf(pkg.frozenAt)} · the programs match the design`
-        : 'stale — freeze again';
-
-  const step3Summary = ((): string => {
+  const step2Summary = ((): string => {
     if (registrationPlan === null) return '';
     const order = ['left', 'front', 'right', 'back'] as const;
     const edges = order.filter((edge) => registrationPlan.scans.some((scan) => scan.edge === edge));
@@ -694,22 +691,22 @@ export function EngraveCutSurface({
     return `${list}, then the top face · ${touchWords}`;
   })();
 
-  // #724 W5 — THE RUN STEP CARRIES THE ROTARY BENCH SENTENCE. With no machine connected the
-  // one-screen block never renders, and step 4 said only "No machine is connected" — nothing
-  // about why the frozen rotary program cannot go. The step quotes the SAME refusal the gates
-  // hand it (Save, Upload and the release share it), so the words cannot drift.
+  // #724 W5 — THE START-CUT STEP CARRIES THE ROTARY BENCH SENTENCE. With no machine connected the
+  // one-screen block never renders, and the step said only "No machine is connected" — nothing
+  // about why the rotary program cannot go. The step quotes the SAME refusal the run gates hand it
+  // (Save, Upload and the release share it), so the words cannot drift.
   const rotaryGate =
     [uploadBlocker, releaseBlocker].find(
       (b) => b === ROTARY_UNMEASURED_REFUSAL || b === ROTARY_NO_MODULE_REFUSAL,
     ) ?? null;
-  const step4Meta: string[] = [];
-  if (plan !== null && rotaryGate !== null) step4Meta.push('the rotary’s bench check first');
-  if (releaseSources.length > 1) step4Meta.push(`${releaseSources.length} programs`);
-  if (plan?.features.find((feature) => feature.feature === 'vacuum')?.on === true) step4Meta.push('vacuum on');
+  const step3Meta: string[] = [];
+  if (plan !== null && rotaryGate !== null) step3Meta.push('the rotary’s bench check first');
+  if (releaseSources.length > 1) step3Meta.push(`${releaseSources.length} programs`);
+  if (plan?.features.find((feature) => feature.feature === 'vacuum')?.on === true) step3Meta.push('vacuum on');
   const cutter = jobTool(job);
-  if (cutter !== null && releaseSources.length <= 1) step4Meta.push(`fit the ${toolDisplayName(cutter)}`);
-  if (cutEstimate !== null) step4Meta.push(cutEstimate);
-  const step4Summary = step4Meta.join(' · ');
+  if (cutter !== null && releaseSources.length <= 1) step3Meta.push(`fit the ${toolDisplayName(cutter)}`);
+  if (cutEstimate !== null) step3Meta.push(cutEstimate);
+  const step3Summary = step3Meta.join(' · ');
 
   const missingReportIndex =
     missingReport === null ? -1 : (pkg?.programs.findIndex((program) => program.hash === missingReport.hash) ?? -1);
@@ -725,13 +722,13 @@ export function EngraveCutSurface({
       ...(targetMount === undefined ? {} : { target: targetMount }),
       forJob: {
         name: job.name,
-        holding: `frozen for ${jobMountWords(frozenMount)}`,
+        holding: `made for ${jobMountWords(frozenMount)}`,
         frozen: true,
         frozenMount,
       },
       // The wizard's `refreeze` is its copy of `!profileHolds(newProfile, frozenMount)`. This
       // screen reads the record again rather than keeping a second copy: the refresh re-renders
-      // step 1's sentence and step 2's stale state from the new active profile.
+      // step 1's sentence and its program card from the new active profile.
       onDone: () => void useLocationStore.getState().refresh(),
     });
   };
@@ -740,13 +737,13 @@ export function EngraveCutSurface({
     <div data-testid="engrave-cut-surface">
       {/* #524/#689 — the Cut surface as a four-line checklist: Checked → Frozen → Register the
           blank → Run. Each line is one sentence; only the step the operator is on has a body. */}
-      <Step number={1} title="Checked" done={checked} current={currentStep === 1} summary={step1Summary}>
+      <Step number={1} title="Fit and clamp" done={fitDone} current={currentStep === 1} summary={step1Summary}>
         {/* #695 — the frozen job's mount is gone from the machine. One sentence, one action; the
             same check the wizard makes (`profileHolds`) decides whether this is here at all. */}
         {mountMismatch && (
           <div style={BOX} data-testid="engrave-cut-mount">
             <p style={WARN} data-testid="engrave-cut-mount-sentence">
-              This job was frozen for {jobMountWords(frozenMount)}, and the machine now has{' '}
+              This job was made for {jobMountWords(frozenMount)}, and the machine now has{' '}
               {machineNowWords ?? 'a different mount'}.
             </p>
             <button
@@ -776,6 +773,56 @@ export function EngraveCutSurface({
             </label>
           </div>
         )}
+        {/* #796 — THE PROGRAM, AS ONE CARD WITH ONE ACTION. Checked and Frozen were two steps;
+            the readiness line says the first half, and a program older than the design says the
+            second HERE — press Generate (the same button Design's footer carries) and the freeze
+            follows it. A program that matches the design needs no card; only the blank's hold is
+            stated. */}
+        <section
+          style={{ ...BOX, marginTop: 6 }}
+          data-testid="engrave-package"
+          data-state={pkg === null ? 'none' : packageCurrent && !mountMismatch ? 'current' : 'stale'}
+          data-key={pkg?.hash}
+        >
+          {pkg !== null && !packageCurrent && !mountMismatch && (
+            <p style={WARN} data-testid="engrave-package-state">
+              The program is older than the design —{' '}
+              {staleness?.reason ?? 'the job changed since it was generated.'}
+            </p>
+          )}
+          {pkg !== null && !packageCurrent && !mountMismatch && (
+            <button
+              type="button"
+              data-testid="engrave-package-generate"
+              disabled={generateBlocker !== null}
+              style={{ width: '100%', padding: 7, marginTop: 6 }}
+              onClick={onGenerate}
+            >
+              Generate
+            </button>
+          )}
+          {pkg !== null && !packageCurrent && !mountMismatch && generateBlocker !== null && (
+            <p style={MUTED} data-testid="engrave-package-generate-blocker">
+              {generateBlocker}
+            </p>
+          )}
+          {reservation !== null && (
+            <div style={MUTED} data-testid="engrave-package-reservation">
+              {reservation.line}
+              {reservation.detail !== null && (
+                <details style={{ marginTop: 2 }}>
+                  <summary style={{ cursor: 'pointer' }}>shelf details</summary>
+                  <span>{reservation.detail}</span>
+                </details>
+              )}
+            </div>
+          )}
+          {freezeError !== null && (
+            <p style={WARN} data-testid="engrave-package-freeze-error">
+              Nothing was made — {freezeError}.
+            </p>
+          )}
+        </section>
         {/* #726 W20 — STEP 1 IS ONE LINE; the gate's rows are its DETAIL (§3.7: "▸ details").
             It opens by itself while something blocks, and stays where the operator left it after. */}
         <details
@@ -802,92 +849,24 @@ export function EngraveCutSurface({
         </details>
       </Step>
 
-      <Step number={2} title="Frozen" done={frozen} current={currentStep === 2} summary={step2Summary}>
-        <section
-          style={BOX}
-          data-testid="engrave-package"
-          data-state={pkg === null ? 'none' : frozen ? 'current' : 'stale'}
-          data-key={pkg?.hash}
-        >
-          {pkg === null ? (
-            <p style={{ fontSize: 12, color: '#e6edf5', margin: 0 }}>
-              Once the check is clear, this step freezes the plan and holds its blank.
-            </p>
-          ) : !packageCurrent ? (
-            <p style={WARN} data-testid="engrave-package-state">
-              The frozen plan from {clockOf(pkg.frozenAt)} is out of date —{' '}
-              {staleness?.reason ?? 'the job changed since it was frozen.'}
-            </p>
-          ) : mountMismatch ? (
-            // #695 — the job itself still matches the package; the MACHINE no longer holds the
-            // mount it was frozen for. The fix is step 1's action, not a re-freeze.
-            <p style={WARN} data-testid="engrave-package-state">
-              The frozen plan from {clockOf(pkg.frozenAt)} is out of date — the machine no longer holds{' '}
-              {jobMountWords(frozenMount)} this job was frozen for. Change the machine in step 1.
-            </p>
-          ) : null}
-          {reservation !== null && (
-            <div style={MUTED} data-testid="engrave-package-reservation">
-              {reservation.line}
-              {reservation.detail !== null && (
-                <details style={{ marginTop: 2 }}>
-                  <summary style={{ cursor: 'pointer' }}>shelf details</summary>
-                  <span>{reservation.detail}</span>
-                </details>
-              )}
-            </div>
-          )}
-          {pkg !== null && !packageCurrent && (
-            <>
-              {!canRefreeze && (
-                <p style={MUTED} data-testid="engrave-package-refreeze-why">
-                  {staleSince !== null || !generatedReady
-                    ? 'Generate the job again first — this session’s program no longer matches it.'
-                    : 'Clear the blocking findings in step 1 first.'}
-                </p>
-              )}
-              <button
-                type="button"
-                data-testid="engrave-package-refreeze"
-                disabled={!canRefreeze || refreezing}
-                title={
-                  canRefreeze
-                    ? 'Freeze the current job around its current programs. The existing hold moves to the new package; it is not doubled.'
-                    : undefined
-                }
-                style={{ width: '100%', padding: 7, marginTop: 6 }}
-                onClick={refreeze}
-              >
-                {refreezing ? 'Freezing…' : 'Freeze this job again…'}
-              </button>
-            </>
-          )}
-          {freezeError !== null && (
-            <p style={WARN} data-testid="engrave-package-freeze-error">
-              Nothing was frozen — {freezeError}.
-            </p>
-          )}
-        </section>
-      </Step>
-
       <Step
-        number={3}
-        title="Register the blank"
+        number={2}
+        title="Register"
         done={registeredDone}
-        current={currentStep === 3}
-        summary={step3Summary}
+        current={currentStep === 2}
+        summary={step2Summary}
       >
         <EngraveRegistrationStep job={job} target={target} />
-        {/* #608 — once the registration measured a tilt, the frozen (flat) package must be re-posted
-            against it before anything is uploaded. A re-post re-runs the whole pipeline with the
-            fitted plane and re-freezes; a flat fit never shows this block, and a package that already
-            follows the tilt shows only the "re-posted" line. */}
+        {/* #608 / #796 — once the registration measured a tilt, the program made for a flat blank
+            must be RE-MADE for the measured tilt before anything is uploaded. A re-make re-runs
+            the whole pipeline with the fitted plane and freezes it; a flat fit never shows this
+            block, and a program that already follows the tilt shows only the "re-made" line. */}
         {registrationSurface !== null && (
           <section style={BOX} data-testid="engrave-cut-repost">
             {surfaceGate !== null ? (
               <>
                 <p style={{ fontSize: 12, color: '#f0d79b', margin: '0 0 6px' }}>
-                  The blank is tilted{tiltWords !== null ? ` (${tiltWords})` : ''} — the frozen program is still flat.
+                  The blank is tilted{tiltWords !== null ? ` (${tiltWords})` : ''} — the program was made for a flat blank.
                 </p>
                 <p style={WARN} data-testid="engrave-cut-repost-gate">{surfaceGate}.</p>
                 <button
@@ -897,22 +876,22 @@ export function EngraveCutSurface({
                   style={{ width: '100%', padding: 7, marginTop: 6 }}
                   onClick={repost}
                 >
-                  {reposting ? 'Re-posting…' : 'Re-post against the measured tilt…'}
+                  {reposting ? 'Re-making…' : 'Re-make for the measured tilt…'}
                 </button>
               </>
             ) : (
               <p style={{ fontSize: 12, color: OK, margin: 0 }} data-testid="engrave-cut-repost-done">
-                Re-posted against the measured tilt{tiltWords !== null ? ` (${tiltWords})` : ''}.
+                Re-made for the measured tilt{tiltWords !== null ? ` (${tiltWords})` : ''}.
               </p>
             )}
           </section>
         )}
       </Step>
 
-      <Step number={4} title="Run" done={ran} current={currentStep === 4} summary={step4Summary}>
+      <Step number={3} title="Start cut" done={ran} current={currentStep === 3} summary={step3Summary}>
         {plan === null ? (
           <p style={MUTED} data-testid="engrave-cut-not-ready">
-            Freeze the plan in step 2 before running it.
+            Generate the program in step 1 before starting it.
           </p>
         ) : (
           <>
@@ -970,7 +949,7 @@ export function EngraveCutSurface({
                   filename={releaseFileName(job.name, 1, 1, false)}
                   oracle={runOracle}
                   blocker={
-                    step1Blocker ?? step2Blocker ?? ackBlocker ?? uploadBlocker ?? missingReportBlocker ?? surfaceGate
+                    step1Blocker ?? programBlocker ?? ackBlocker ?? uploadBlocker ?? missingReportBlocker ?? surfaceGate
                   }
                   dome={domeProps}
                   domeBlocker={domeG32Blocker}
@@ -1041,7 +1020,7 @@ export function EngraveCutSurface({
                       runPlan={plan}
                       blocker={
                         step1Blocker ??
-                        step2Blocker ??
+                        programBlocker ??
                         ackBlocker ??
                         releaseBlocker ??
                         missingReportBlocker ??
@@ -1054,7 +1033,7 @@ export function EngraveCutSurface({
                     <EngraveMachineUpload
                       blocker={
                         step1Blocker ??
-                        step2Blocker ??
+                        programBlocker ??
                         ackBlocker ??
                         uploadBlocker ??
                         missingReportBlocker ??

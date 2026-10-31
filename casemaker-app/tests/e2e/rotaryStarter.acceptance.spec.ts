@@ -96,22 +96,22 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   await page.waitForTimeout(800);
   await page.screenshot({ path: path.join(OUT, 'unroll.png') });
 
-  // — 5. CUT (item 2): lines 1–2 tick, line 3 is the registration step, line 4 carries the run
-  // refusal in the gate's own sentence and offers no run — its only button connects a machine.
+  // — 5. CUT (item 2): #796's THREE lines — 1 Fit and clamp ticks, 2 Register is the registration
+  // step, 3 Start cut carries the run refusal in its own sentence and offers no run — its only
+  // button connects a machine.
   await page.getByTestId('cnc-mode-cut').click();
-  await expect(page.getByTestId('engrave-cut-step-1-title')).toContainText('✓ 1');
-  await expect(page.getByTestId('engrave-cut-step-2-title')).toContainText('✓ 2');
-  await expect(page.getByTestId('engrave-cut-step-3-title')).toContainText('3 Register the blank');
-  await expect(page.getByTestId('engrave-cut-step-4-title')).toContainText('4 Run');
-  // Line 4 opens to state the refusal; its summary already names the bench check.
-  await expect(page.getByTestId('engrave-cut-step-4-summary')).toContainText("the rotary’s bench check first");
-  await page.getByTestId('engrave-cut-step-4-summary').click();
+  await expect(page.getByTestId('engrave-cut-step-1-title')).toContainText('✓ 1 Fit and clamp');
+  await expect(page.getByTestId('engrave-cut-step-2-title')).toContainText('2 Register');
+  await expect(page.getByTestId('engrave-cut-step-3-title')).toContainText('3 Start cut');
+  // Line 3 opens to state the refusal; its summary already names the bench check.
+  await expect(page.getByTestId('engrave-cut-step-3-summary')).toContainText("the rotary’s bench check first");
+  await page.getByTestId('engrave-cut-step-3-summary').click();
   const bench = page.getByTestId('engrave-cut-rotary-bench');
   await expect(bench).toBeVisible();
   await expect(bench).toHaveText(BENCH);
-  const step4Buttons = page.locator('[data-testid="engrave-cut-step-4"] button');
-  await expect(step4Buttons).toHaveCount(1);
-  await expect(step4Buttons.first()).toHaveAttribute('data-testid', 'engrave-cut-open-machines');
+  const step3Buttons = page.locator('[data-testid="engrave-cut-step-3"] button');
+  await expect(step3Buttons).toHaveCount(1);
+  await expect(step3Buttons.first()).toHaveAttribute('data-testid', 'engrave-cut-open-machines');
   await page.screenshot({ path: path.join(OUT, 'cut.png') });
 
   // The same gate sentence blocks Save on the Design side, and item 6 holds there too: the words

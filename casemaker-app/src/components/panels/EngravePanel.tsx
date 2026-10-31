@@ -4372,6 +4372,9 @@ export function EngravePanel(): JSX.Element {
               releaseBlocker={releaseBlockerText}
               onProgramLine={followProgramLine}
               onLiveStatus={noteLiveStatus}
+              // #796 — the stale-program card's one action is the same Generate the footer carries.
+              onGenerate={() => void generate()}
+              generateBlocker={generateBlocker?.sentence ?? null}
             />
           </>
         )

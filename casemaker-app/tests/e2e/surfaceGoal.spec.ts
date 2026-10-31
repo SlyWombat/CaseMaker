@@ -166,10 +166,10 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   await rememberMachine(page);
   await page.getByTestId('cnc-mode-cut').click();
   await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
-  // #689 — the clearance tick is step 1's; the one screen sits in the Run line.
+  // #689 — the clearance tick is step 1's; #796 — the one screen sits in the Start cut line.
   const ack = page.getByTestId('engrave-ack');
   if ((await ack.count()) > 0) await ack.check();
-  await page.getByTestId('engrave-cut-step-4-summary').click();
+  await page.getByTestId('engrave-cut-step-3-summary').click();
   await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('engrave-cut-confirm-oracle')).toContainText(
     'No 2.5D check for a surface program — checked on the',

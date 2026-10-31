@@ -13,7 +13,8 @@
 //
 //   npx playwright test tests/e2e/cutConfirm.spec.ts
 
-import { readFileSync } from 'node:fs';
+import fs, { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
@@ -73,6 +74,16 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   await expect(details).toHaveAttribute('open');
   await ack.check();
   await expect(details).not.toHaveAttribute('open');
+  // #796 — THE THREE-STEP CUT, in the state the operator sees after a real Generate: step 1's
+  // one readiness line replaces the old Checked and Frozen steps. Screenshot committed under
+  // docs/bench/img/2026-10-31-cut-three-steps/.
+  await expect(page.getByTestId('engrave-cut-step-1-summary')).toContainText('Program checked');
+  await expect(page.getByTestId('engrave-cut-step-1-summary')).toContainText('matches the design');
+  await expect(page.getByTestId('engrave-cut-step-2-title')).toContainText('2 Register');
+  await expect(page.getByTestId('engrave-cut-step-3-title')).toContainText('3 Start cut');
+  const out = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img', '2026-10-31-cut-three-steps');
+  fs.mkdirSync(out, { recursive: true });
+  await page.screenshot({ path: path.join(out, 'cut-three-steps.png') });
   // The tick completes step 1, so its body folds with it; the operator's own look at the gate rows
   // is two clicks — the step, then its details — and both are theirs to make.
   await page.getByTestId('engrave-cut-step-1-summary').click();
@@ -80,7 +91,7 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   await expect(details).toHaveAttribute('open');
   await details.locator('summary').first().click();
   await expect(details).not.toHaveAttribute('open');
-  await page.getByTestId('engrave-cut-step-4-summary').click();
+  await page.getByTestId('engrave-cut-step-3-summary').click();
   await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
 
   const frozen = await page.evaluate(() => window.__caseMaker!.getFrozenProgram());

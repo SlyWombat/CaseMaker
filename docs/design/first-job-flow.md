@@ -205,20 +205,23 @@ files) are offered on the same card.
 ### 3.7 Cut (the mode, after `cnc-panel-redesign.md` §4 — the ONE cut flow)
 
 ```
- [ Design ] [  Cut  ]                     Zoomba · 192.168.10.43 · Online · Idle · homed · T1 · vacuum off
- ✓ 1 Checked     1 program · 2 min 16 s · 1 note                                 ▸ details
- ✓ 2 Frozen      09:16 · the programs match the design                            
- ● 3 Register the blank    left edge, then the top face · 4 touches
+ ‹ Design [ Design ] [ Cut ]               Zoomba · 192.168.10.43 · Online · Idle · homed · T1 · vacuum off
+ ✓ 1 Fit and clamp   Program checked · matches the design · 2 min 16 s · 1 note   ▸ details
+ ● 2 Register        left edge, then the top face · 4 touches
      [ I am at the machine, probe fitted ]   [ Start ]
- ○ 4 Run         vacuum on · fit the 1 mm flat end · 2 min 16 s                  ▸ the plan
- ← Back to design
+ ○ 3 Start cut       vacuum on · fit the 1 mm flat end · 2 min 16 s               ▸ the plan
 ```
 
-- The seven steps of `cut-this-blank-wizard.md` ARE these four lines (its 1 Machine = the strip; 2 Blank
-  and cutter = Checked; 3–5 = Frozen; 6 = Register; 7 = Run). The full-page "Cut this blank" wizard and its
-  inline Machines card are removed; machine connection has one home, the strip (Manage › Machines keeps
-  the full card for the house).
+- The seven steps of `cut-this-blank-wizard.md` ARE these three lines (its 1 Machine = the strip; 2 Blank
+  and cutter, and 3–5 the program, = Fit and clamp; 6 = Register; 7 = Start cut). The full-page "Cut this
+  blank" wizard and its inline Machines card are removed; machine connection has one home, the strip
+  (Manage › Machines keeps the full card for the house).
 - A step's body is one sentence and one action; the next thing to do is always the only open step.
+- CHECKED AND FROZEN ARE ONE LINE (#796). The operator does one thing (press Generate) and reads one fact:
+  the program is checked and it is this design's. A program older than the design is ONE card with ONE
+  button, Generate; freezing follows the generate, so there is no separate freeze step or press.
+- Leaving Cut is the `‹ Design` text link beside the switch (#795), never a button at the foot of the
+  page, and the clearance statement is the first line of step 1's body.
 
 ### 3.8 Changing the machine (a wizard of its own)
 

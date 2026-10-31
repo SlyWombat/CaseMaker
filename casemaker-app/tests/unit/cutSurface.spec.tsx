@@ -263,7 +263,13 @@ interface Props {
   /** #724 W5 — the gates' own sentence, as EngravePanel hands it down. */
   uploadBlocker?: string | null;
   releaseBlocker?: string | null;
+  /** #796 — the panel's Generate action and its blocker sentence. */
+  onGenerate?: () => void;
+  generateBlocker?: string | null;
 }
+
+/** #796 — the card's one action; the tests assert it was pressed rather than freezing here. */
+const generateSpy = vi.fn();
 
 /**
  * The panel's own wiring, minus the editor: `EngravePanel` reads the job (and its package block)
@@ -285,6 +291,8 @@ function Harness(props: Props) {
       runContext={{}}
       uploadBlocker={props.uploadBlocker ?? null}
       releaseBlocker={props.releaseBlocker ?? null}
+      onGenerate={props.onGenerate ?? generateSpy}
+      generateBlocker={props.generateBlocker ?? null}
     />
   );
 }
@@ -300,6 +308,7 @@ let shelfItems: StockItem[];
 let uploads: { filename: string; content: string }[];
 
 beforeEach(() => {
+  generateSpy.mockClear();
   uploads = [];
   shelfItems = [shelfItem()];
   resetRunConfirmStore();
@@ -365,17 +374,17 @@ describe('#419 §3 the Cut surface', () => {
     expect(pkg.programs).toHaveLength(1);
     expect(useEngravePackageStore.getState().packages).toHaveLength(1);
 
-    // #689 — the step line carries the package's facts once; the box no longer repeats them.
-    const step2 = screen.getByTestId('engrave-cut-step-2-summary').textContent ?? '';
-    expect(step2).toMatch(/\d{2}:\d{2} · the programs match the design/);
+    // #796 — CHECKED AND FROZEN ARE ONE READINESS LINE: the program is checked, it is this
+    // design's, and it carries the program's own estimate. There is no Package line repeating it.
+    const step1 = screen.getByTestId('engrave-cut-step-1-summary').textContent ?? '';
+    expect(step1).toContain('Program checked');
+    expect(step1).toContain('matches the design');
     const line = screen.getByTestId('engrave-package').textContent ?? '';
     expect(line).not.toContain('The package');
     expect(line).not.toContain('1 program · 1 setup');
     expect(screen.queryByTestId('engrave-package-state')).toBeNull();
     // #550 — the package key lives on the element as data, not in the rendered sentence.
     expect(screen.getByTestId('engrave-package').getAttribute('data-key')).toBe(pkg.hash);
-    // The step-1 line holds the program count and the one freezer's time.
-    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('1 program');
     // The job's stock is not a shelf entry: nothing was taken, and the line says so in operator terms.
     expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('no blank needs to be held');
   });
@@ -393,8 +402,8 @@ describe('#419 §3 the Cut surface', () => {
     });
 
     // The collapsed line says what the step will say, so it is visible with the step folded.
-    const step4 = screen.getByTestId('engrave-cut-step-4-summary').textContent ?? '';
-    expect(step4).toContain('the rotary’s bench check first');
+    const step3 = screen.getByTestId('engrave-cut-step-3-summary').textContent ?? '';
+    expect(step3).toContain('the rotary’s bench check first');
     // …and the body quotes the gates' own sentence, with ONE period.
     const line = screen.getByTestId('engrave-cut-rotary-bench').textContent ?? '';
     expect(line).toBe(ROTARY_UNMEASURED_REFUSAL);
@@ -406,7 +415,7 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.queryByTestId('engrave-cut-rotary-bench')).toBeNull();
   });
 
-  it('#703 — steps 1 and 4 print the program’s estimate, not the plan’s setup-inclusive total', () => {
+  it('#703 — steps 1 and 3 print the program’s estimate, not the plan’s setup-inclusive total', () => {
     const job = defaultEngraveJob();
     const pkg = frozen(job, [P1]);
     // The program's cycle estimate — the number the Generate row and the simulator show — is 86 s:
@@ -419,9 +428,9 @@ describe('#419 §3 the Cut surface', () => {
     draw({ job, report: reportOf(), pkg, generated: made });
 
     const step1 = screen.getByTestId('engrave-cut-step-1-summary').textContent ?? '';
-    const step4 = screen.getByTestId('engrave-cut-step-4-summary').textContent ?? '';
+    const step3 = screen.getByTestId('engrave-cut-step-3-summary').textContent ?? '';
     expect(step1).toContain('about 1 min 26 s');
-    expect(step4).toContain('about 1 min 26 s');
+    expect(step3).toContain('about 1 min 26 s');
 
     // The fold still says the plan's setup-inclusive total, and the two step lines never print it:
     // one cut has one time (audit B15).
@@ -429,7 +438,7 @@ describe('#419 §3 the Cut surface', () => {
     const totalTime = total.replace(/^Total (at least )?/, '').replace(/ — .*$/, '').trim();
     expect(totalTime).not.toBe('1 min 26 s');
     expect(step1).not.toContain(totalTime);
-    expect(step4).not.toContain(totalTime);
+    expect(step3).not.toContain(totalTime);
   });
 
   it('#726 P16 — a step number and its title stay on one line', () => {
@@ -437,10 +446,10 @@ describe('#419 §3 the Cut surface', () => {
     const pkg = frozen(job, [P1]);
     draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
 
-    // The summary beside the label wraps; the label itself never does — "4 / Run" across two
+    // The summary beside the label wraps; the label itself never does — "3 / Start cut" across two
     // lines read as two steps.
-    const title = screen.getByTestId('engrave-cut-step-4-title');
-    expect(title.textContent).toContain('4 Run');
+    const title = screen.getByTestId('engrave-cut-step-3-title');
+    expect(title.textContent).toContain('3 Start cut');
     expect(title.style.whiteSpace).toBe('nowrap');
     expect(title.style.flexShrink).toBe('0');
     // #720 moved the mesh bytes out of the document: the Cut surface states no 4 MB cap, and
@@ -524,7 +533,7 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-cut-step-1').contains(ackBox)).toBe(true);
     expect(ackBox.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // Run is blocked with its ONE sentence, and the step-4 statement does not stand in for it.
+    // Run is blocked with its ONE sentence, and the Start cut statement does not stand in for it.
     const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
     expect(go.disabled).toBe(true);
     expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the clearance check in Cut, step 1');
@@ -551,7 +560,7 @@ describe('#419 §3 the Cut surface', () => {
     expect(saveBlocker(gateView())).toBeNull();
   });
 
-  it('#689 review — a stale package disables the one-screen press and the upload until step 2 is frozen again', () => {
+  it('#796 — a program older than the design disables the one-screen press and the upload until Generate', () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);
     // The job moved after the freeze: the old program is still in the package and still uploadable.
@@ -570,7 +579,7 @@ describe('#419 §3 the Cut surface', () => {
       generated: generated([P1]),
     });
 
-    const sentence = 'Freeze the job again in step 2 — it changed since it was frozen.';
+    const sentence = 'The program is older than the design — press Generate in step 1.';
     // The statement is ticked so only the stale package can hold the press.
     fireEvent.click(screen.getByTestId('engrave-cut-statement'));
     const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
@@ -671,7 +680,7 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.queryByTestId('engrave-cut-plan')).toBeNull();
   });
 
-  it('keeps a stale package and its blank, and re-freezes only on an explicit press', async () => {
+  it('keeps a stale program and its blank, and replaces it only through Generate', async () => {
     const job = shelfJob();
     const pkg = frozen(job, [P1]);
     useStockStore.setState({
@@ -684,31 +693,36 @@ describe('#419 §3 the Cut surface', () => {
       labels: job.labels.map((label, i) => (i === 0 ? { ...label, depth: label.depth + 0.1 } : label)),
     };
     const staleRow = row('error', 'package-stale', 'the job changed since it was frozen: label depth changed');
-    draw({ job: edited, report: reportOf([staleRow]), pkg, generated: generated([P1]) });
+    const view = draw({ job: edited, report: reportOf([staleRow]), pkg, generated: generated([P1]) });
 
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('stale'));
-    // #689 — the stale sentence names the reason; the reservation line is the ONE place the hold is
-    // stated, so the box no longer says "its blank stays held" a second time.
+    // #796 — ONE CARD, ONE ACTION: the stale sentence names the reason and the button is Generate;
+    // the reservation line is the ONE place the hold is stated.
     const staleState = screen.getByTestId('engrave-package-state').textContent ?? '';
-    expect(staleState).toContain('is out of date');
+    expect(staleState).toContain('older than the design');
     expect(staleState).not.toContain('Its blank stays held');
     expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('held for you');
 
-    const refreeze = screen.getByTestId('engrave-package-refreeze') as HTMLButtonElement;
-    expect(refreeze.disabled).toBe(false);
+    const regenerate = screen.getByTestId('engrave-package-generate') as HTMLButtonElement;
+    expect(regenerate.textContent).toBe('Generate');
+    expect(regenerate.disabled).toBe(false);
     // Nothing moved on staleness alone.
     expect(storedPackage(job).hash).toBe(pkg.hash);
     expect(
       useStockStore.getState().items[0]!.reservations.filter((r) => r.jobId === job.id),
     ).toHaveLength(1);
 
-    fireEvent.click(refreeze);
+    fireEvent.click(regenerate);
+    expect(generateSpy).toHaveBeenCalledTimes(1);
+
+    // The Generate the card pressed comes back clear, and FREEZING FOLLOWS IT: the stale package
+    // is replaced and the blank's hold moves once, not twice.
+    view.show({ job: edited, report: reportOf(), pkg, generated: generated([P1]) });
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
 
     const after = storedPackage(job);
     expect(after.hash).not.toBe(pkg.hash);
     expect(useEngravePackageStore.getState().packages).toHaveLength(1);
-    // A re-freeze MOVES the hold: one reservation for this job, not two.
     const holds = useStockStore.getState().items[0]!.reservations.filter((r) => r.jobId === job.id);
     expect(holds).toHaveLength(1);
     expect(holds[0]!.quantity).toBe(1);
@@ -794,19 +808,19 @@ describe('#419 §3 the Cut surface', () => {
 
     // A red gate folds the Register step (it is not the current step yet).
     const view = draw({ job, report: red, pkg, generated: gen, canDrive: true });
-    expect(screen.getByTestId('engrave-cut-step-3')).toHaveProperty('open', false);
+    expect(screen.getByTestId('engrave-cut-step-2')).toHaveProperty('open', false);
 
     // The gate clears: step ③ becomes the step the operator is on and opens itself, so its Start is
     // visible rather than stranded inside a folded <details>.
     view.show({ job, report: reportOf(), pkg, generated: gen, canDrive: true });
-    expect(screen.getByTestId('engrave-cut-step-3')).toHaveProperty('open', true);
+    expect(screen.getByTestId('engrave-cut-step-2')).toHaveProperty('open', true);
     expect(screen.getByTestId('engrave-registration-start')).toBeTruthy();
 
     // A machine reconnect (the target goes away, then comes back) must not fold it again.
     view.show({ job, report: reportOf(), pkg, generated: gen, canDrive: false });
     expect(screen.queryByTestId('engrave-registration-start')).toBeNull(); // no machine to start from
     view.show({ job, report: reportOf(), pkg, generated: gen, canDrive: true });
-    expect(screen.getByTestId('engrave-cut-step-3')).toHaveProperty('open', true);
+    expect(screen.getByTestId('engrave-cut-step-2')).toHaveProperty('open', true);
     expect(screen.getByTestId('engrave-registration-start')).toBeTruthy();
   });
 
@@ -928,7 +942,7 @@ describe('#419 §3 the Cut surface', () => {
     expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('#695 — a frozen mount the machine no longer holds: step 1 offers the change, step 2 is stale', () => {
+  it('#695 — a frozen mount the machine no longer holds: step 1 offers the change and its card names the machine', () => {
     const job = defaultEngraveJob();
     const pkg = frozen(job, [P1]);
     // The package was frozen for the job's vise setup; the machine's active bed holds the rotary.
@@ -940,7 +954,7 @@ describe('#419 §3 the Cut surface', () => {
       'the machine no longer holds the vise',
     );
     const sentence = screen.getByTestId('engrave-cut-mount-sentence').textContent ?? '';
-    expect(sentence).toContain('frozen for the vise');
+    expect(sentence).toContain('made for the vise');
     expect(sentence).toContain('the rotary on the pins');
 
     fireEvent.click(screen.getByTestId('engrave-cut-change-machine'));
@@ -949,26 +963,25 @@ describe('#419 §3 the Cut surface', () => {
     expect(request.target).toBe('vise');
     expect(request.forJob).toEqual({
       name: job.name,
-      holding: 'frozen for the vise',
+      holding: 'made for the vise',
       frozen: true,
       frozenMount: 'vise',
     });
 
-    // The package is not current: step 2 says stale and names the MACHINE, and it offers no
-    // re-freeze press — the job did not change, the machine did.
-    expect(screen.getByTestId('engrave-cut-step-2-summary').textContent).toContain('stale — freeze again');
+    // The PROGRAM is fine; the MACHINE is wrong. Step 1 says so, and its card offers no Generate —
+    // regenerating would not change the mount.
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('no longer holds the vise');
     const box = screen.getByTestId('engrave-package');
     expect(box.dataset.state).toBe('stale');
-    expect(box.textContent).toContain('the machine no longer holds the vise');
-    expect(screen.queryByTestId('engrave-package-refreeze')).toBeNull();
+    expect(screen.queryByTestId('engrave-package-generate')).toBeNull();
 
     // The wizard writes the vise back (the refresh re-renders from the record): both lines clear.
     act(() => {
       useLocationStore.setState({ location: locationWith('vise') });
     });
     expect(screen.queryByTestId('engrave-cut-mount')).toBeNull();
-    expect(screen.getByTestId('engrave-cut-step-2-summary').textContent).toContain(
-      'the programs match the design',
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain(
+      'matches the design',
     );
     expect(screen.getByTestId('engrave-package').dataset.state).toBe('current');
   });
@@ -1000,7 +1013,7 @@ describe('#419 §3 the Cut surface', () => {
     draw({ job, report: reportOf(), pkg, generated: generated([rotaryProgram]) });
 
     const sentence = screen.getByTestId('engrave-cut-mount-sentence').textContent ?? '';
-    expect(sentence).toContain('frozen for the rotary');
+    expect(sentence).toContain('made for the rotary');
     expect(sentence).toContain('the vise on the pins');
 
     // The one action asks the wizard for the rotary, and the request says what the job is frozen for.
@@ -1009,7 +1022,7 @@ describe('#419 §3 the Cut surface', () => {
     expect(request.target).toBe('rotary');
     expect(request.forJob).toEqual({
       name: job.name,
-      holding: 'frozen for the rotary',
+      holding: 'made for the rotary',
       frozen: true,
       frozenMount: 'rotary',
     });
