@@ -40,6 +40,9 @@ import {
 import { FASTENERS } from '@/engine/compiler/fasteners';
 import { PCB_DRILL_SLACK_MM } from '@/engine/import/pcbCutters';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
+import { orient } from '@/engine/cnc/setups/orient';
+import { carryPointBetweenSetups } from '@/engine/cnc/setups/carry';
+import type { Box } from '@/engine/cnc/setups/types';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { inlayGlueGap, inlayMarked, inlayNumbers } from './inlay';
 import { textureNumbers, textureStrokes } from './texture';
@@ -1300,17 +1303,49 @@ export function goalSides(job: EngraveJob): GoalSide[] {
  * nothing, which is honest, where a guessed outline could refuse a sound board.
  */
 function boardOutlineOf(
+  job: EngraveJob,
   cutouts: readonly EngraveCutout[],
   byId: ReadonlyMap<string, EngraveAnyItem>,
-): [number, number][][] | null {
+): { rings: [number, number][][]; setupIndex: number } | null {
   for (const cutout of cutouts) {
     if (cutout.side !== 'outside' || cutout.of === 'stock-inset') continue;
     const target = byId.get(cutout.of);
     if (target === undefined || !target.enabled) continue;
     const rings = placedOutlineRings(target);
-    if (rings !== null && rings.length > 0) return rings;
+    if (rings !== null && rings.length > 0) return { rings, setupIndex: setupIndexOfItem(job, cutout.id) ?? 1 };
   }
   return null;
+}
+
+/** The setup (1-based) a job item is cut in, or null when a saved list exists and names neither. */
+function setupIndexOfItem(job: EngraveJob, itemId: string): number | null {
+  if (job.setups === undefined) return 1;
+  const at = job.setups.findIndex((setup) => setup.itemIds.includes(itemId));
+  return at < 0 ? null : at + 1;
+}
+
+/**
+ * A point from setup `from`'s work frame in setup `to`'s (#743 P-8): the SAME transform the run
+ * uses to carry the remaining stock between sides (`carryPointBetweenSetups`), so a check and the
+ * cut cannot disagree about which way the stock was turned. Null when either setup cannot be
+ * oriented — the caller then says nothing rather than compare two frames.
+ */
+function workFrameMap(job: EngraveJob, from: number, to: number): ((p: [number, number]) => [number, number]) | null {
+  if (from === to) return (p) => p;
+  const setups = jobSetups(job);
+  const a = setups[from - 1];
+  const b = setups[to - 1];
+  if (a === undefined || b === undefined) return null;
+  const size = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
+  const oa = orient(a.orientation.top, a.mount, size);
+  const ob = orient(b.orientation.top, b.mount, size);
+  if (!oa.ok || !ob.ok) return null;
+  const bounds: Box = { min: [0, 0, 0], max: [size.x, size.y, size.z] };
+  const move = carryPointBetweenSetups({ rotation: oa.matrix, bounds }, { rotation: ob.matrix, bounds });
+  return ([x, y]) => {
+    const q = move([x, y, 0]);
+    return [q[0], q[1]];
+  };
 }
 
 /** One item's own closed outline, placed (rotated about its origin, then translated), or null. */
@@ -1897,7 +1932,7 @@ export function validateJob(
   // rather than guessed.
   if (enabledDrills.length > 0) {
     const owned = options.tools ?? getTools();
-    const board = boardOutlineOf(enabledCutouts, allById);
+    const board = boardOutlineOf(job, enabledCutouts, allById);
     const outside = new Map<string, { who: string; count: number }>();
     const bySize = new Map<string, { size: number; ids: string[]; labelId: string }>();
     for (const drill of enabledDrills) {
@@ -1908,9 +1943,19 @@ export function validateJob(
         else entry.ids.push(drill.id);
       }
       if (board !== null) {
+        // #743 P-8 — A TWO-SIDED BOARD'S OUTLINE IS IN ANOTHER SETUP'S FRAME. The drills are cut
+        // in setup 1 and the cut-out follows the bottom face in setup 2, so each hole is read in
+        // the outline's frame through the side carry — otherwise every hole would read off-board.
+        const drillSetup = setupIndexOfItem(job, drill.id);
+        if (drillSetup === null) continue;
+        const map = workFrameMap(job, drillSetup, board.setupIndex);
+        if (map === null) continue;
         const who = drillOperationName(drill);
         let off = 0;
-        for (const [hx, hy] of drillHoles(drill)) if (!pointInPolygons(board, hx, hy)) off += 1;
+        for (const [hx, hy] of drillHoles(drill)) {
+          const [x, y] = map([hx, hy]);
+          if (!pointInPolygons(board.rings, x, y)) off += 1;
+        }
         if (off > 0) outside.set(drill.id, { who, count: off });
       }
     }

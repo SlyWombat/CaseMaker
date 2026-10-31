@@ -104,7 +104,14 @@ import type {
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import { withSource } from '@/engine/cnc/engrave/jobSources';
 import { PCB_COPPER_MM, pcbStockNotice } from '@/engine/cnc/stockStart';
-import { pcbCutterPlan, pcbHoleAssignment, withPcbCutters } from '@/engine/import/pcbCutters';
+import { pcbHoleAssignment, withPcbCutters } from '@/engine/import/pcbCutters';
+import { pcbSetupPlan } from '@/engine/import/pcbSetups';
+import { pcbAlignmentOffer, withAlignmentHoles, type PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
+import { registrationSettings } from '@/engine/cnc/registration';
+import { probeFor } from '@/engine/cnc/registration/mountContext';
+import { useMachineStore } from './machineStore';
+import { machineAt } from './locationStore';
+import type { MountSpec } from '@/engine/cnc/setups/types';
 
 /** What {@link EngraveJobState.importPcbFiles} reports to the door that asked for the import. */
 export type PcbImportOutcome =
@@ -112,6 +119,8 @@ export type PcbImportOutcome =
       ok: true;
       fileCount: number;
       itemCount: number;
+      /** The set had copper on both faces, so the job is two setups (#743 P-8). */
+      twoSided: boolean;
       notes: string[];
       warnings: PcbWarning[];
       /** The board-on-a-non-PCB-blank fact (#743 P-4b review): stated, with a one-click fix. */
@@ -123,6 +132,12 @@ export type PcbImportOutcome =
        * the tape itself.
        */
       holdingNotice: string | null;
+      /**
+       * #743 P-8 — the board's holes are too small for the fitted probe. Stated with the numbers,
+       * and carrying the two alignment holes a press adds; null when a board hole is probeable or
+       * the board has no second side.
+       */
+      alignment: PcbAlignmentOffer | null;
     }
   | { ok: false; reason: string };
 import type { PcbWarning } from '@/engine/import/pcbImport';
@@ -974,7 +989,7 @@ export interface EngraveJobState {
    * The first cutter becomes the job's `toolKey` and the source defaults to `'computed'` — the
    * software chose it, and a later preview must be free to correct it (a `'user'` cutter is not).
    */
-  applyCutterPlan: (cutters: readonly { key: string; items: readonly string[] }[], source?: FieldSource) => void;
+  applyCutterPlan: (cutters: readonly { key: string; items: readonly string[] }[], source?: FieldSource, setupIndex?: number) => void;
   /** #572 — record (or clear) the double-confirmed cutter/material override. */
   setMetalLineOverride: (override: boolean) => void;
   setVise: (patch: Partial<ViseParams>) => void;
@@ -1199,6 +1214,13 @@ export interface EngraveJobState {
    * Holding step.
    */
   usePcbHolding: () => void;
+  /**
+   * #743 P-8 — the import's one-click double-sided practice: two through alignment holes of a
+   * probeable ⌀ in the blank beside the board, on the turn's fixed line, drilled with setup 1 and
+   * registered on in setup 2. The offer computes the holes; this writes them as ordinary drills
+   * and assigns them to the first setup's drills.
+   */
+  addPcbAlignmentHoles: (holes: readonly { x: number; y: number }[], diameterMm: number) => void;
   /** Merge a hand edit into one vector (#217). A partial `position` is merged, not replaced. */
   updateVector: (id: string, patch: VectorPatch) => void;
   removeVector: (id: string) => void;
@@ -1726,10 +1748,13 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     // #766 D — see the interface note. The plan itself is written by the same function the
     // evaluator applies (engine/cnc/engrave/measuredPick), so the app and the search cannot
     // disagree about what "this plan" means in the document.
-    applyCutterPlan: (cutters, source = 'computed') =>
+    applyCutterPlan: (cutters, source = 'computed', setupIndex = 0) =>
       apply((job) => {
         if (cutters.length === 0) return job;
-        const next = applyCutterPlanToJob(job, { cutters });
+        const next = applyCutterPlanToJob(job, { cutters, setupIndex });
+        // A later setup's plan is not the JOB's cutter: the job's tool is the first program's,
+        // and a fix on the bottom face must not claim otherwise (#743 P-8).
+        if (setupIndex !== 0) return next;
         return {
           ...next,
           tool: resolveTool(cutters[0]!.key),
@@ -2494,6 +2519,10 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         sacrificial: { ...job.sacrificial, under: defaultSacrificialUnder(), source: 'default' },
       })),
 
+    /** #743 P-8 — the two alignment holes the offer computed, as ordinary drills of setup 1. */
+    addPcbAlignmentHoles: (holes, diameterMm) =>
+      apply((job) => withAlignmentHoles(job, holes, diameterMm, getTools(), feedCatalogueRows())),
+
     importPcbFiles: async (files) => {
       const job = get().job;
       // A practice cut on the blank in hand is legitimate: the notice is stated, never a refusal.
@@ -2506,9 +2535,16 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         ]);
         tl = await getToplevel();
         const tabs = tabSettings(useShopDefaultsStore.getState().defaults).settings;
+        // #743 P-8 — the holding the board is laid out for. A fresh board is taped (D8); on the
+        // operator's job, their holding decides the second setup's flip (`orient`'s turn for the
+        // bottom face up), so the geometry and the run cannot disagree about which way it turned.
+        const fresh = designReplacesItems(job);
+        const heldKind = fresh ? 'tape' : job.workholding.kind;
+        const mount: MountSpec = { kind: heldKind === 'vise' || heldKind === 'bracket' ? heldKind : 'tape' };
         const planned = await planPcbJobImport(tl, files, {
           blank: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
           tabs: { count: tabs.count, width: tabs.widthMm, height: tabs.heightMm },
+          mount,
         });
         if (!planned.ok) return { ok: false, reason: planned.error };
         const plan = planned.plan;
@@ -2518,21 +2554,18 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // the library as it stands.
         const holes = pcbHoleAssignment(plan.items.drills, getTools());
         const drills = plan.items.drills.map((d) => ({ ...d, mode: holes.modes.get(d.id) ?? d.mode }));
-        const cutters = pcbCutterPlan(
-          { frames: plan.items.frames, drills, cutouts: plan.items.cutouts },
-          getTools(),
-          job.stock.thickness + job.breakthrough,
-          feedCatalogueRows(),
-        );
-        const boardItemIds = [
-          ...plan.items.frames.map((f) => f.id),
-          ...drills.map((d) => d.id),
-          ...plan.items.cutouts.map((c) => c.id),
-        ];
+        const cutters = pcbSetupPlan(plan, getTools(), job.stock.thickness + job.breakthrough, feedCatalogueRows());
+        const sideItems = (i: number) => cutters.sides[i]!.items;
+        const boardItemIds = [0, 1]
+          .filter((i) => cutters.sides[i] !== undefined)
+          .flatMap((i) => [
+            ...sideItems(i).frames.map((f) => f.id),
+            ...sideItems(i).drills.map((d) => d.id),
+            ...sideItems(i).cutouts.map((c) => c.id),
+          ]);
         // #743 P-6 — A BOARD IS TAPED TO THE BED (design §3.2, D8). On a document that still holds
         // only the shipped demo work, the import states that holding itself; on a job the operator
         // has set up, the holding is theirs and the fact is offered as a one-click fix instead.
-        const fresh = designReplacesItems(job);
         const holdingNotice =
           fresh || job.workholding.kind === 'tape'
             ? null
@@ -2552,10 +2585,10 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             // (CASE / MAKER / first chips), those are REPLACED — the same rule a design import
             // applies (`designReplacesItems`). A job a person has worked on keeps its items.
             ...(designReplacesItems(current) ? { labels: [] } : {}),
-            vectors: [...(current.vectors ?? []), ...plan.items.vectors],
-            combined: [...(current.combined ?? []), ...plan.items.frames],
+            vectors: [...(current.vectors ?? []), ...plan.items.vectors, ...(plan.second?.items.vectors ?? [])],
+            combined: [...(current.combined ?? []), ...plan.items.frames, ...(plan.second?.items.frames ?? [])],
             drills: [...(current.drills ?? []), ...drills],
-            cutouts: [...(current.cutouts ?? []), ...plan.items.cutouts],
+            cutouts: [...(current.cutouts ?? []), ...plan.items.cutouts, ...(plan.second?.items.cutouts ?? [])],
             ...(fresh
               ? {
                   workholding: { kind: 'tape' as const, tape: defaultTapeHold() },
@@ -2564,15 +2597,30 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
               : {}),
             ...(sources === undefined ? {} : { sourceFiles: sources }),
           };
-          if (cutters.tools.length === 0) return merged;
-          // The cutter plan is written as ordinary setups[0] tools/toolItems (#472/#746), so the
-          // board arrives with its programs assigned; a role no owned cutter fills is stated in
-          // the notes and its items stay unassigned for the job's own check to name.
+          // #743 P-8 — a board on a still-demo document IS these setups: the top, and the flipped
+          // bottom when it has one. Each side's cutter plan is written as ordinary `tools`/
+          // `toolItems` (#472/#746); a role no owned cutter fills is stated in the notes and its
+          // items stay unassigned for the job's own check to name.
+          if (designReplacesItems(current)) {
+            return {
+              ...merged,
+              ...(cutters.toolKey === null ? {} : { toolKey: cutters.toolKey }),
+              setups: cutters.sides.map((side) => side.setup),
+            };
+          }
+          if (cutters.sides[0]!.cutter.tools.length === 0) return merged;
+          // A job the operator has worked on keeps its setups: the board's items join the first
+          // setup through the cutter plan, and a second face joins the list as its own setup.
           const setups = jobSetups(merged);
           const first = setups[0]!;
-          const written = withPcbCutters(first, cutters, boardItemIds);
+          const written = withPcbCutters(first, cutters.sides[0]!.cutter, boardItemIds);
+          const extra = cutters.sides.slice(1).map((side) => side.setup);
           // The job's own cutter is the first program's, so `jobTool` resolves everywhere.
-          return { ...merged, toolKey: cutters.tools[0]!, setups: [written, ...setups.slice(1)] };
+          return {
+            ...merged,
+            ...(cutters.toolKey === null ? {} : { toolKey: cutters.toolKey }),
+            setups: [written, ...setups.slice(1), ...extra],
+          };
         });
         const notes = [
           ...planned.skipped.map((n) => `${n} is not a Gerber or drill file and was not used.`),
@@ -2580,14 +2628,47 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           // `cutters.notes` already carries §3.4's hole notes (its own `pcbHoleAssignment` call).
           ...cutters.notes,
         ];
+        // #743 P-8 — CAN THE PROBE READ THIS BOARD'S HOLES? Most boards' holes are smaller than
+        // the fitted probe, and then the second side can only be placed by eye. The offer is
+        // stated with the numbers the probe needs, and carries the alignment holes a press adds.
+        const alignment = plan.twoSided
+          ? (() => {
+              const machine = useMachineStore.getState().machine;
+              const probe = machine === null ? null : probeFor(machineAt({ host: machine.host, port: machine.port }));
+              const settings = registrationSettings(useShopDefaultsStore.getState().defaults, probe).settings;
+              return pcbAlignmentOffer({
+                blank: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
+                board: plan.board,
+                mount,
+                probe: {
+                  tipDiameterMm: settings.tipDiameterMm,
+                  tipRadiusMm: settings.tipRadiusMm,
+                  fineStepMm: settings.fineStepMm,
+                  cornerClearanceMm: settings.cornerClearanceMm,
+                  edgeMarginMm: settings.edgeMarginMm,
+                  scanInsideMm: settings.scanInsideMm,
+                },
+                largestBoardHoleMm: plan.items.drills.reduce((m, d) => Math.max(m, d.diameter ?? 0), 0),
+              });
+            })()
+          : null;
         return {
           ok: true,
           fileCount: plan.files.length,
-          itemCount: plan.items.vectors.length + plan.items.frames.length + plan.items.drills.length + plan.items.cutouts.length,
+          twoSided: plan.twoSided,
+          itemCount:
+            plan.items.vectors.length +
+            plan.items.frames.length +
+            plan.items.drills.length +
+            plan.items.cutouts.length +
+            (plan.second === null
+              ? 0
+              : plan.second.items.vectors.length + plan.second.items.frames.length + plan.second.items.cutouts.length),
           notes,
           warnings: plan.warnings,
           stockNotice,
           holdingNotice,
+          alignment,
         };
       } catch (e) {
         return { ok: false, reason: `the board could not be read: ${e instanceof Error ? e.message : String(e)}` };

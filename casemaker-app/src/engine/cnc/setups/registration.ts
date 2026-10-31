@@ -189,7 +189,39 @@ export function referenceRegistrationFor(
       ...(input.cutCentre ? { cutCentre: input.cutCentre } : {}),
       openings,
       blind,
+      // #743 P-8 — the turn is judged across the WORK this setup cuts, not the whole blank: the
+      // error a turn leaves is proportional to the distance from where the correction is taken,
+      // and beyond this setup's own items nothing is cut.
+      spanMm: workSpan(setup),
     },
     settings,
   );
+}
+
+/**
+ * The extent this setup's own cuts span in its mounted work XY, mm — the largest of the two
+ * axes. Null when the setup states no own item with a box (the planner then uses the stock).
+ */
+function workSpan(setup: Setup): number | undefined {
+  const own = new Set(setup.itemIds);
+  const items = setup.stockAfter.cuts.filter((c) => own.has(c.id) && !c.facing);
+  if (items.length === 0) return undefined;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  const bounds = setup.stockBefore.bounds;
+  for (const item of items) {
+    for (const x of [item.box.min[0], item.box.max[0]]) {
+      for (const y of [item.box.min[1], item.box.max[1]]) {
+        const p = toMachine(setup.rotation, bounds, [x, y, item.box.max[2]]);
+        minX = Math.min(minX, p[0]);
+        maxX = Math.max(maxX, p[0]);
+        minY = Math.min(minY, p[1]);
+        maxY = Math.max(maxY, p[1]);
+      }
+    }
+  }
+  if (!(maxX > minX || maxY > minY)) return undefined;
+  return Math.max(maxX - minX, maxY - minY);
 }

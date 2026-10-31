@@ -20,13 +20,14 @@ import { basename, extname } from 'node:path';
 import type { ManifoldToplevel } from '../../../src/workers/geometry/evaluateOp';
 import { PCB_COPPER_MM } from '../../../src/engine/cnc/stockStart';
 import { defaultEngraveJob, newEngraveCutoutId, newEngraveDrillId, newEngraveShapeId } from '../../../src/engine/cnc/engrave/defaults';
-import { defaultTapeHold, jobSetups } from '../../../src/engine/cnc/engrave/jobSetup';
+import { defaultTapeHold } from '../../../src/engine/cnc/engrave/jobSetup';
 import { embedSource } from '../../../src/engine/cnc/engrave/jobSources';
 import { viseForNewJob } from '../../../src/engine/cnc/fixture';
 import { getTools } from '../../../src/engine/cnc/toolRegistry';
 import type { ToolLibraryEntry } from '../../../src/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
-import { pcbCutterPlan, pcbHoleAssignment } from '../../../src/engine/import/pcbCutters';
+import { pcbHoleAssignment } from '../../../src/engine/import/pcbCutters';
+import { pcbSetupPlan } from '../../../src/engine/import/pcbSetups';
 import { planPcbImport, type PcbImportOk, type PcbSourceFile, type PcbWarning } from '../../../src/engine/import/pcbImport';
 import { readPcbArchive } from '../../../src/engine/import/pcbArchive';
 import { defaultSacrificialUnder, noneSacrificial } from '../../../src/engine/cnc/sacrificial';
@@ -115,7 +116,7 @@ export async function buildPcbJob(
     }
     sourceFiles.push({ name: file.name, bytes: file.bytes });
   }
-  const plan = planPcbImport(tl, sourceFiles, { blank: opts.blank, tabs: opts.tabs, idFor });
+  const plan = planPcbImport(tl, sourceFiles, { blank: opts.blank, tabs: opts.tabs, mount: { kind: 'tape' }, idFor });
   if (!plan.ok) return { ok: false, error: plan.error };
 
   // One content-addressed record per file the set used. A duplicate basename (two folders in one
@@ -159,10 +160,10 @@ export async function buildPcbJob(
     // The demo lines are laid out for a 100 × 60 plank; leaving them would cut CASE and MAKER
     // into the board. The design route drops them for the same reason (#410).
     labels: [],
-    vectors: plan.items.vectors,
-    combined: plan.items.frames,
+    vectors: [...plan.items.vectors, ...(plan.second?.items.vectors ?? [])],
+    combined: [...plan.items.frames, ...(plan.second?.items.frames ?? [])],
     drills,
-    cutouts: plan.items.cutouts,
+    cutouts: [...plan.items.cutouts, ...(plan.second?.items.cutouts ?? [])],
     sourceFiles: sources,
     sources: {
       ...base.sources,
@@ -183,37 +184,24 @@ export async function buildPcbJob(
       source: 'default',
     },
   };
-  // §3.4 — the setup's cutters, written as ordinary `setups[].tools`/`toolItems` (#472/#746): the
-  // board arrives with all three programs assigned, and a role no owned cutter fills is stated.
-  // Read off the ASSEMBLED job, so the setup's item list is the board's own (the demo lines are
-  // gone by now).
-  const cutters = pcbCutterPlan(
-    { frames: plan.items.frames, drills, cutouts: plan.items.cutouts },
+  // §3.4 — each setup's cutters, written as ordinary `setups[].tools`/`toolItems` (#472/#746): the
+  // board arrives with all its programs assigned, and a role no owned cutter fills is stated. A
+  // two-layer board yields setup 1 (top) and setup 2 (bottom, flipped) (#743 P-8).
+  const cutters = pcbSetupPlan(
+    plan,
     opts.tools ?? getTools(),
     job.stock.thickness + job.breakthrough,
     opts.catalogue ?? [],
   );
-  const setup = jobSetups(job)[0]!;
   const withCutters: EngraveJob =
-    cutters.tools.length === 0
+    cutters.sides.length === 0
       ? job
       : {
           ...job,
           // The job's own cutter is the first program's (the setup's chain starts with it), so the
           // document resolves a cutter everywhere `jobTool` is read.
-          toolKey: cutters.tools[0]!,
-          setups: [
-            {
-              ...setup,
-              tools: [...cutters.tools],
-              toolItems: Object.fromEntries(
-                cutters.tools.map((key) => [
-                  key,
-                  [...cutters.assignment].filter(([, owns]) => owns === key).map(([id]) => id),
-                ]),
-              ),
-            },
-          ],
+          ...(cutters.toolKey === null ? {} : { toolKey: cutters.toolKey }),
+          setups: cutters.sides.map((side) => side.setup),
         };
   return {
     ok: true,

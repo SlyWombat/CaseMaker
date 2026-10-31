@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { oracleSentence } from '@/store/engraveRunGate';
+import { combineCopperSides } from '@/engine/cnc/engrave/pcbTopology';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 
 const report = (copper: NonNullable<OracleReport['copper']>): OracleReport => ({
@@ -33,5 +34,28 @@ describe('a board’s oracle sentence (#743 P-5)', () => {
     expect(text).toContain('1 piece');
     expect(text).toContain('1 short');
     expect(text).toContain('0.452 mm² of copper left in the isolation');
+  });
+
+  // #743 P-8 — a two-sided board is one verdict PER FACE, and the sentence names the face that
+  // failed while still telling the operator what the other face did.
+  it('states both faces when the board was cut on two, naming the one that failed', () => {
+    const top = { face: 'top' as const, ok: true, designPieces: 2, pieces: 2, matched: 2, shorts: 0, bandLeftMm2: 0 };
+    const bottom = { face: 'bottom' as const, ok: false, designPieces: 2, pieces: 1, matched: 2, shorts: 1, bandLeftMm2: 0.452 };
+    const both = combineCopperSides([top, bottom]);
+    expect(both.ok).toBe(false);
+    expect(both.designPieces).toBe(4);
+    const text = oracleSentence({ oracle: { ...report(both), ok: false, copper: both } });
+    expect(text).toContain('does not match the design on the bottom face');
+    expect(text).toContain('the top face: 2 pieces, 2 of 2 still there, no short');
+    expect(text).toContain('the bottom face: 1 piece, 2 of 2 still there, 1 short, 0.452 mm² of copper left in the isolation');
+  });
+
+  it('says both faces came out as designed when both did', () => {
+    const top = { face: 'top' as const, ok: true, designPieces: 2, pieces: 2, matched: 2, shorts: 0, bandLeftMm2: 0 };
+    const bottom = { face: 'bottom' as const, ok: true, designPieces: 1, pieces: 1, matched: 1, shorts: 0, bandLeftMm2: 0 };
+    const both = combineCopperSides([top, bottom]);
+    expect(oracleSentence({ oracle: { ...report(both), copper: both } })).toBe(
+      'The copper came out as designed on both faces — the top face: 2 pieces, 2 of 2 still there, no short; the bottom face: 1 piece, 1 of 1 still there, no short.',
+    );
   });
 });

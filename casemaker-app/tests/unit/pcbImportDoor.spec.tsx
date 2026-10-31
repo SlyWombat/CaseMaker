@@ -16,6 +16,13 @@ vi.mock('@/engine/import/pcbJobImport', () => ({
     ok: true as const,
     plan: {
       files: [{ name: 'practice-F_Cu.gbr', kind: 'gerber' }],
+      board: { left: 0, top: 0, width: 1, height: 1 },
+      mount: { kind: 'tape' },
+      mirrored: false,
+      twoSided: false,
+      second: null,
+      copperId: 'vec-copper',
+      outlineId: 'vec-outline',
       items: { vectors: [], frames: [], drills: [], cutouts: [] },
       notes: [],
       warnings: [],

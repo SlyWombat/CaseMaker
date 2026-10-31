@@ -107,7 +107,9 @@ import type { CopperTopologyReport } from '@/engine/cnc/engrave/pcbTopology';
 // second reading of the job.
 import { neckCarriedBy, neckJawClearanceSentence } from '@/engine/cnc/rotary/neck';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
-import type { EngraveJob, EngraveMargins, JobStockFinish, ViseParams } from '@/types/engraveJob';
+import { orient } from '@/engine/cnc/setups/orient';
+import { turnWords } from '@/engine/cnc/setups/remount';
+import type { EngraveFrameShape, EngraveJob, EngraveMargins, JobStockFinish, ViseParams } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
 /**
@@ -3348,10 +3350,19 @@ function pcbBoardSteps(job: EngraveJob, tool: Tool | null): RunSheetStep[] | nul
   const colour = job.stock.colour;
   if (colour === undefined || colour.kind !== 'laminate') return null;
   const frames = (job.combined ?? []).filter(
-    (item) => item.kind === 'frame' && item.isolation === true && item.enabled,
+    (item): item is EngraveFrameShape => item.kind === 'frame' && item.isolation === true && item.enabled,
   );
   const frame = frames[0];
   if (frame === undefined) return null;
+  // #743 P-8 — one isolation frame per setup on a two-sided board. The side each setup cuts is
+  // its orientation's up face, and the setup's own items say which frame it owns.
+  const setups = jobSetups(job);
+  const frameBySetup = new Map<number, EngraveFrameShape>();
+  setups.forEach((setup, i) => {
+    const owned = frames.find((f) => setup.itemIds.includes(f.id));
+    if (owned !== undefined) frameBySetup.set(i + 1, owned);
+  });
+  const twoSided = frameBySetup.size > 1;
 
   const steps: RunSheetStep[] = [];
   const under = job.sacrificial.under;
@@ -3365,9 +3376,11 @@ function pcbBoardSteps(job: EngraveJob, tool: Tool | null): RunSheetStep[] | nul
           ? 'held in the rotary chuck'
           : 'held in the vise';
   steps.push({
-    text:
-      `The board: PCB ${fmtNum(length)} × ${fmtNum(width)} × ${fmtNum(thickness)} mm, ` +
-      `copper ${fmtNum(colour.capMm)} mm on the top face, copper side up.`,
+    text: twoSided
+      ? `The board: PCB ${fmtNum(length)} × ${fmtNum(width)} × ${fmtNum(thickness)} mm, ` +
+        `copper ${fmtNum(colour.capMm)} mm on both faces.`
+      : `The board: PCB ${fmtNum(length)} × ${fmtNum(width)} × ${fmtNum(thickness)} mm, ` +
+        `copper ${fmtNum(colour.capMm)} mm on the top face, copper side up.`,
     value: `${holding}${under === null ? '' : ` over a ${fmtNum(under.thickness)} mm board`}`,
     bold: true,
   });
@@ -3391,15 +3404,55 @@ function pcbBoardSteps(job: EngraveJob, tool: Tool | null): RunSheetStep[] | nul
   // The programs, in the order the setup cuts them (§3.3): isolation, holes, then the cut-out —
   // the board is freed last, and only by its tabs.
   const cone = tool === null ? null : vCone(tool);
-  const cutWidth = cone === null ? null : 2 * (cone.tipRadius + frame.depth * cone.tanHalf);
   const sizes = [...new Set((job.drills ?? []).filter((d) => d.enabled).map((d) => d.diameter).filter((d): d is number => d !== undefined && d > 0))].sort((a, b) => a - b);
   const holeCount = (job.drills ?? []).filter((d) => d.enabled).length;
   const cutout = (job.cutouts ?? []).find((c) => c.enabled);
-  const parts = [
-    `1 Isolate the copper${cutWidth === null ? '' : ` · ${fmtNum(cutWidth)} mm wide`} · ${fmtNum(frame.depth)} mm deep`,
+  const holesPart =
     holeCount === 0
       ? null
-      : `2 ${holeCount} hole${holeCount === 1 ? '' : 's'}${sizes.length === 0 ? '' : ` (${sizes.map((d) => `⌀${fmtNum(d)} mm`).join(', ')})`}`,
+      : `${holeCount} hole${holeCount === 1 ? '' : 's'}${sizes.length === 0 ? '' : ` (${sizes.map((d) => `⌀${fmtNum(d)} mm`).join(', ')})`}`;
+  const isolatePart = (f: EngraveFrameShape, side: string): string => {
+    const w = cone === null ? null : 2 * (cone.tipRadius + f.depth * cone.tanHalf);
+    return `Isolate the ${side}copper${w === null ? '' : ` · ${fmtNum(w)} mm wide`} · ${fmtNum(f.depth)} mm deep`;
+  };
+  if (twoSided) {
+    // #743 P-8 — setup 1 cuts the top and drills; the board is turned over and setup 2 cuts the
+    // bottom and frees the board. The turn is the setups engine's own landmark words.
+    const sideOf = (index: number): string => (setups[index]?.orientation.top === 'bottom' ? 'bottom ' : 'top ');
+    const first = frameBySetup.get(1) ?? frame;
+    const second = frameBySetup.get(2) ?? frame;
+    const size = { x: length, y: width, z: thickness };
+    const from = setups[0] === undefined ? null : orient(setups[0].orientation.top, setups[0].mount, size);
+    const to = setups[1] === undefined ? null : orient(setups[1].orientation.top, setups[1].mount, size);
+    if (from !== null && from.ok && to !== null && to.ok && setups[1] !== undefined) {
+      const words = turnWords(from.matrix, to.matrix, setups[1].mount);
+      if (words.length > 0) {
+        steps.push({
+          text: `Between the setups, lift the cutter clear and turn the board over: ${words.join(' ')}`,
+          value: 'the board is turned over',
+          bold: true,
+        });
+      }
+    }
+    const one = isolatePart(first, sideOf(0));
+    const three = isolatePart(second, sideOf(1));
+    const parts = [
+      `setup 1 — 1 ${one}`,
+      holesPart === null ? null : `2 ${holesPart}`,
+      `setup 2 — 3 ${three}`,
+      cutout === undefined ? null : `4 Cut out the board${cutout.tabs.count > 0 ? ` · ${cutout.tabs.count} tabs` : ''}`,
+    ].filter((part): part is string => part !== null);
+    steps.push({ text: `The programs, in cut order: ${parts.join(' · ')}.` });
+    steps.push({
+      text:
+        'Setup 2 is registered on the drilled holes: they read as misses through the face now up, so the ' +
+        'program follows the board where it actually landed.',
+    });
+    return steps;
+  }
+  const parts = [
+    `1 ${isolatePart(frame, '')}`,
+    holesPart === null ? null : `2 ${holesPart}`,
     cutout === undefined ? null : `3 Cut out the board${cutout.tabs.count > 0 ? ` · ${cutout.tabs.count} tabs` : ''}`,
   ].filter((part): part is string => part !== null);
   steps.push({ text: `The programs, in cut order: ${parts.join(' · ')}.` });

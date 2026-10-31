@@ -20,6 +20,7 @@
 import { useLayoutEffect, useState, type CSSProperties, type JSX } from 'react';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
+import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
 import { readGoalObjectFile } from '@/engine/import/targetObject';
 import { FontPicker } from '@/components/panels/FontPicker';
 import { OperationPicker } from '@/components/panels/OperationPicker';
@@ -106,6 +107,8 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   const selectedSide = savedSides.some((s) => s.id === sideId) ? sideId : (savedSides[0]?.id ?? null);
   const goalForSide = (id: string): EngraveTargetObject | null =>
     sideGoals.find((g) => sideSetupIdOf(job, g) === id) ?? null;
+  // #743 P-8 — a two-sided board whose holes the fitted probe cannot read, with its one-click offer.
+  const [pcbAlignment, setPcbAlignment] = useState<PcbAlignmentOffer | null>(null);
 
   const surfaceChoice: OperationChoice = {
     type: 'surface',
@@ -152,17 +155,19 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
     setPcbSummary(null);
     setPcbStockFix(null);
     setPcbHoldingFix(null);
+    setPcbAlignment(null);
     setPcbReading(true);
     try {
       const out = await useEngraveJobStore.getState().importPcbFiles(files);
       setPcbSummary(
         out.ok
-          ? `The board is in: ${out.itemCount} items from ${out.fileCount} files${out.warnings.length > 0 ? ` — ${out.warnings.map((w) => w.message).join(' ')}` : ''}`
+          ? `The board is in: ${out.itemCount} items from ${out.fileCount} files${out.twoSided ? ', cut on both faces' : ''}${out.warnings.length > 0 ? ` — ${out.warnings.map((w) => w.message).join(' ')}` : ''}`
           : out.reason,
       );
       if (out.ok) {
         setPcbStockFix(out.stockNotice);
         setPcbHoldingFix(out.holdingNotice);
+        setPcbAlignment(out.alignment);
       }
     } finally {
       setPcbReading(false);
@@ -453,6 +458,25 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
                 >
                   Tape it to the bed
                 </button>
+              </span>
+            )}
+            {pcbAlignment !== null && !pcbReading && (
+              <span style={MUTED} data-testid="start-wizard-op-pcb-alignment-notice">
+                {pcbAlignment.message}{' '}
+                {pcbAlignment.holes.length > 0 && (
+                  <button
+                    type="button"
+                    data-testid="start-wizard-op-pcb-add-alignment"
+                    onClick={() => {
+                      useEngraveJobStore
+                        .getState()
+                        .addPcbAlignmentHoles(pcbAlignment.holes, pcbAlignment.diameterMm);
+                      setPcbAlignment(null);
+                    }}
+                  >
+                    Add two {pcbAlignment.diameterMm} mm alignment holes
+                  </button>
+                )}
               </span>
             )}
             {pcbStockFix !== null && !pcbReading && job.stock.material !== 'pcb' && (

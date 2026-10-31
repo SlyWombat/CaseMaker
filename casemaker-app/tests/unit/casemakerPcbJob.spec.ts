@@ -213,3 +213,64 @@ describe('the board’s cutters are assigned at import (#743 §3.4)', () => {
     ]);
   });
 });
+
+/**
+ * #743 P-8 — A TWO-LAYER SET IS TWO SETUPS. Setup 1 cuts the top and drills; setup 2 turns the
+ * stock over (its orientation says the bottom is up), isolates the bottom and frees the board.
+ * The document carries both through the app's own schema unchanged.
+ */
+describe('a two-layer set at the CLI door (#743 P-8)', () => {
+  const engraver: ToolLibraryEntry = {
+    key: 'inv:engrave-60',
+    provenance: 'test',
+    tool: flatEndMill(3.175, {
+      id: 'pcb-engrave-0-1-60',
+      shape: 'engraving',
+      tipDiameter: 0.1,
+      diameter: 3.175,
+      halfAngle: 30,
+      angle: 60,
+      fluteLength: 12,
+    }),
+  };
+  const corn: ToolLibraryEntry = {
+    key: 'inv:corn-0-8',
+    provenance: 'test',
+    tool: flatEndMill(0.8, { id: 'pcb-corn-0-8', fluteLength: 20 }),
+  };
+  const bits = [tool('inv:d08', 'drill', 0.8), tool('inv:d10', 'drill', 1.0)].map((t, i) => ({
+    ...t,
+    tool: { ...t.tool, id: i === 0 ? 'pcb-drill-0-8' : 'pcb-drill-1-0', fluteLength: 12 },
+  }));
+  const tools = [engraver, ...bits, corn];
+
+  it('writes both setups, with the cut-out on the flipped side, and round-trips through the schema', async () => {
+    const out = await buildPcbJob(
+      tl,
+      [file('tiny-F_Cu.gbr'), file('tiny-B_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')],
+      { blank: BLANK, tabs: TABS, tools },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const job = out.job;
+    expect(job.setups).toHaveLength(2);
+    const [top, bottom] = job.setups!;
+    expect(top!.orientation.top).toBe('top');
+    expect(top!.tools).toEqual(['inv:engrave-60', 'inv:d08', 'inv:d10']);
+    expect(bottom!.orientation.top).toBe('bottom');
+    expect(bottom!.mount.kind).toBe('tape');
+    expect(bottom!.tools).toEqual(['inv:engrave-60', 'inv:corn-0-8']);
+    // The board is freed last, from the second side.
+    expect(job.cutouts).toHaveLength(1);
+    expect(top!.itemIds).not.toContain(job.cutouts![0]!.id);
+    expect(bottom!.itemIds).toContain(job.cutouts![0]!.id);
+    // Both copper faces and both outlines are in the document, one per work frame.
+    expect(job.vectors?.map((v) => v.name)).toEqual([
+      'Copper — top',
+      'Board outline',
+      'Copper — bottom',
+      'Board outline — bottom face',
+    ]);
+    expect(jobDocumentProblem(job)).toBeNull();
+  });
+});

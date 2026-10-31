@@ -106,7 +106,7 @@ describe('the PCB import (#743 P-4)', () => {
     expect(copper?.position.x).toBeCloseTo(14 + (36 - 18.4375) - 2, 6);
   });
 
-  it('imports a two-layer board as its top side, with a warning saying the bottom is not cut', () => {
+  it('cuts a two-layer board on both faces: the second setup gets the mirrored bottom and the cut-out', () => {
     const bottom = text('tiny-F_Cu.gbr').replace('Copper,L1,Top', 'Copper,L2,Bot');
     const plan = planPcbImport(
       tl,
@@ -116,13 +116,40 @@ describe('the PCB import (#743 P-4)', () => {
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
     expect(plan.mirrored).toBe(false);
-    const warning = plan.warnings.find((w) => w.code === 'pcb-bottom-not-cut');
-    expect(warning?.message).toMatch(/copper on both sides/);
-    expect(warning?.message).toMatch(/4 pieces of copper are not milled/);
-    // The top side's items are all there; the bottom file is still reported by role.
+    expect(plan.twoSided).toBe(true);
+    // The files are still reported by role; nothing is left unmade, so no warning is raised.
     expect(plan.files.map((f) => f.role)).toEqual(['top-copper', 'bottom-copper', 'outline', 'drills']);
+    expect(plan.warnings).toEqual([]);
+    expect(plan.notes.join(' ')).toContain('setup 2 turns the board over');
+
+    // Setup 1: the top copper and the holes; the cut-out is NOT here.
     expect(plan.items.drills).toHaveLength(8);
     expect(plan.items.vectors.some((v) => v.name === 'Copper — top')).toBe(true);
+    expect(plan.items.frames[0]?.name).toBe('Isolate the top copper');
+    expect(plan.items.cutouts).toEqual([]);
+
+    // Setup 2: its own copper, outline, isolation and the cut-out, in its own work frame. The
+    // second side's mount is tape, and its orientation is the engine's tape flip (a half turn
+    // about machine Y): the board's left edge is at the right.
+    const second = plan.second;
+    expect(second).not.toBeNull();
+    expect(second!.mount.kind).toBe('tape');
+    expect(second!.orientation).toMatchObject({ top: 'bottom', bottom: 'top', left: 'right', right: 'left' });
+    expect(second!.items.vectors.map((v) => v.name)).toEqual(['Copper — bottom', 'Board outline — bottom face']);
+    expect(second!.items.frames[0]).toMatchObject({
+      kind: 'frame',
+      around: second!.copperId,
+      isolation: true,
+      width: 0.4,
+      depth: 0.1,
+    });
+    expect(second!.items.cutouts[0]).toMatchObject({ kind: 'cutout', of: second!.outlineId, side: 'outside' });
+    // A file point (5,5) sits at blank (17,18) on the top face; turned over, its work X is
+    // 60 − 17 = 43 and its Y stays 18. The outline stays the board's 32 × 10.
+    const outline = second!.items.vectors.find((v) => v.id === second!.outlineId)!;
+    expect(outline.width).toBeCloseTo(32, 6);
+    expect(outline.height).toBeCloseTo(10, 6);
+    expect(outline.position.x).toBeCloseTo(60 - (14 + 16), 6);
   });
 
   it('refuses no copper and a board bigger than the blank, and offers a larger blank', () => {

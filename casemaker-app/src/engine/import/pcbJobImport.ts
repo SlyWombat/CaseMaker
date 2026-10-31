@@ -12,6 +12,7 @@
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { embedSource, type EmbeddedSource } from '@/engine/cnc/engrave/jobSources';
 import { newEngraveCutoutId, newEngraveDrillId, newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
+import type { MountSpec } from '@/engine/cnc/setups/types';
 import { newId } from '@/utils/id';
 import { readPcbArchive } from './pcbArchive';
 import { planPcbImport, type PcbImportOk, type PcbSourceFile } from './pcbImport';
@@ -30,6 +31,8 @@ export type PcbJobImportResult = PcbJobImportOk | { ok: false; error: string };
 export interface PcbJobImportOpts {
   blank: { length: number; width: number; thickness: number };
   tabs: { count: number; width: number; height: number };
+  /** The holding the board is laid out for, which decides the second setup's flip (#743 P-8). */
+  mount?: MountSpec;
 }
 
 /** Ids by item kind: the document's own prefixes, as every other import mints them. */
@@ -72,7 +75,12 @@ export async function planPcbJobImport(
     }
     sourceFiles.push({ name: file.name, bytes });
   }
-  const plan = planPcbImport(tl, sourceFiles, { blank: opts.blank, tabs: opts.tabs, idFor });
+  const plan = planPcbImport(tl, sourceFiles, {
+    blank: opts.blank,
+    tabs: opts.tabs,
+    ...(opts.mount === undefined ? {} : { mount: opts.mount }),
+    idFor,
+  });
   if (!plan.ok) return { ok: false, error: plan.error };
 
   // The report is keyed by the file NAME the planner read; the archive's entries keep their own

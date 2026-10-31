@@ -11,12 +11,15 @@
  * file whose role cannot be told is LISTED with its role `unknown` and a note — never guessed.
  * Solder mask, silkscreen and paste are listed as not used, one line each.
  *
- * ONE SIDE (Q10, amended 2026-10-30). Top copper is what v1 cuts. A set with ONLY bottom copper
- * is mirrored about the board's X centre — the whole board, copper, holes and outline, because it
- * is milled from the top with the board face down — and the summary says so. A set with BOTH is
- * NOT refused: most hobby boards are two-layer, so the top copper, holes and outline import as
- * normal and a WARNING states that the bottom copper's pieces are not milled. A jumper-wired
- * top-only board is useful, and the person decides whether this one is.
+ * ONE SIDE, OR TWO (#743 P-8). A set with ONLY bottom copper is mirrored about the board's X
+ * centre — the whole board, copper, holes and outline, because it is milled from the top with the
+ * board face down — and the summary says so. A set with copper on BOTH faces becomes a TWO-SETUP
+ * board: setup 1 cuts the top copper and drills the holes, and setup 2 turns the stock over
+ * (`orient('bottom', mount)`, the #723 flip the rest of the app uses), registers on the drilled
+ * holes, isolates the bottom copper and cuts the board out. Everything the second side cuts is
+ * built in that setup's own work frame — the flip mirrors the copper, so the bottom design is
+ * reflected exactly as the operator will see it with that face up. The cut-out belongs to setup 2
+ * because a board held only by its tabs should not wait through another side.
  *
  * PLACEMENT (Q17). The board's outline box is centred on the blank; the file's own origin is not
  * used, because a board's coordinates are wherever the CAD package put them. With no outline file
@@ -35,6 +38,8 @@
  */
 
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
+import { orient, toMachine } from '@/engine/cnc/setups/orient';
+import type { Box, MountSpec, Orientation } from '@/engine/cnc/setups/types';
 import { mergeGerberShapes, readGerber, type GerberPoint, type GerberShape } from './gerber';
 import { readExcellon, type ExcellonHole, type ExcellonSlot } from './excellon';
 import { sha256HexBytes } from './sha256';
@@ -75,16 +80,43 @@ export interface PcbItems {
   cutouts: EngraveCutout[];
 }
 
+/** One face's items, as its setup cuts them (#743 P-8). A second side drills nothing. */
+export interface PcbSideItems {
+  vectors: EngraveVectorShape[];
+  frames: EngraveFrameShape[];
+  cutouts: EngraveCutout[];
+}
+
+/**
+ * The board's SECOND face (#743 P-8), already in that setup's work frame: the stock is turned
+ * over the way `orient` says for the mount, so the copper is mirrored exactly as the operator
+ * sees it with that face up. The setup's orientation and mount ride along, because the document
+ * and the run both read them.
+ */
+export interface PcbSecondSide {
+  orientation: Orientation;
+  mount: MountSpec;
+  items: PcbSideItems;
+  copperId: string;
+  outlineId: string;
+}
+
 export interface PcbImportOk {
   ok: true;
   files: PcbFileReport[];
   /** The board's box on the blank, mm from the blank's front-left corner. */
   board: { left: number; top: number; width: number; height: number };
+  /** The holding the board is laid out for — setup 1's mount, and the second side's unless it says otherwise. */
+  mount: MountSpec;
   items: PcbItems;
   /** The copper and the outline vector ids, for a caller that wants to name them. */
   copperId: string;
   outlineId: string;
   mirrored: boolean;
+  /** Copper on both faces: setup 2 cuts the bottom and the cut-out (#743 P-8). */
+  twoSided: boolean;
+  /** The second setup's own items and frame; null for a single-sided board. */
+  second: PcbSecondSide | null;
   /** Facts worth a finding row: what the board has that this cut does not make. */
   warnings: PcbWarning[];
   notes: string[];
@@ -92,9 +124,14 @@ export interface PcbImportOk {
 
 export type PcbImportRefusalCode = 'pcb-no-copper' | 'pcb-off-blank' | 'pcb-file-refused';
 
-/** A fact the import states without refusing: the cut is still planned. */
+/**
+ * A fact the import states without refusing: the cut is still planned. No fact is raised today —
+ * a two-layer set is cut on both sides, so the import leaves nothing unmade — and the list stays
+ * so a future one has a stated home.
+ */
 export interface PcbWarning {
-  code: 'pcb-bottom-not-cut';
+  /** The fact's stable code. */
+  code: string;
   message: string;
 }
 
@@ -105,6 +142,11 @@ export interface PcbImportOpts {
   blank: { length: number; width: number; thickness: number };
   /** The shop's holding tabs for the cut-out. */
   tabs: { count: number; width: number; height: number };
+  /**
+   * How the board is held (#743 P-8), which decides the second setup's flip: `orient`'s turn for
+   * the bottom face up. Absent, the PCB's own holding — tape (design D8).
+   */
+  mount?: MountSpec;
   /** The caller's id source (the store's `newId`), so this module stays free of the store. */
   idFor: (what: string) => string;
 }
@@ -247,21 +289,16 @@ export function planPcbImport(tl: ManifoldToplevel, files: readonly PcbSourceFil
   if (tops.length === 0 && bottoms.length === 0) {
     return { ok: false, code: 'pcb-no-copper', error: 'No copper file among these: pick the top copper (.gtl, F_Cu).' };
   }
-  // A TWO-LAYER BOARD IS NOT REFUSED (the maintainer's note, 2026-10-30): the common case must
-  // still give the person a top-only board, and a warning names what the cut does not make.
+  // A TWO-LAYER BOARD IS CUT ON BOTH SIDES (#743 P-8): setup 1 cuts the top, and setup 2 turns
+  // the stock over and cuts the bottom in its own work frame. Nothing is left out, so no warning.
+  const twoSided = tops.length > 0 && bottoms.length > 0;
   const warnings: PcbWarning[] = [];
-  if (tops.length > 0 && bottoms.length > 0) {
-    const bottomCopper = mergeGerberShapes(tl, (bottoms[0] as { shapes: GerberShape[] }).shapes);
-    warnings.push({
-      code: 'pcb-bottom-not-cut',
-      message: `This board has copper on both sides; Case Maker cuts the top side only for now — the bottom copper's ${bottomCopper.pieces} piece${bottomCopper.pieces === 1 ? '' : 's'} of copper ${bottomCopper.pieces === 1 ? 'is' : 'are'} not milled.`,
-    });
-  }
   if (tops.length > 1 || bottoms.length > 1) {
     return { ok: false, code: 'pcb-file-refused', error: 'More than one top copper file was picked; pick the board\'s one copper layer.' };
   }
   const copperFile = (tops[0] ?? bottoms[0]) as { name: string; shapes: GerberShape[]; role: PcbRole; sha256: string };
-  // Only a BOTTOM-ONLY set is mirrored; a two-layer set is cut from the top as drawn.
+  // Only a BOTTOM-ONLY set is mirrored; a two-layer set is cut top-up first, then flipped for the
+  // bottom (its own turn, applied to the second side below).
   const mirrored = tops.length === 0 && bottoms.length > 0;
   if (mirrored) notes.push('the set has only bottom copper, so the board is mirrored about its X centre and cut from the top.');
   if (drillsSeen.length > 1) notes.push(`${drillsSeen.length} drill files were read; their holes are merged.`);
@@ -362,7 +399,7 @@ export function planPcbImport(tl: ManifoldToplevel, files: readonly PcbSourceFil
   const frame: EngraveFrameShape = {
     kind: 'frame',
     id: opts.idFor('pcb-isolation'),
-    name: 'Isolate the copper',
+    name: twoSided ? 'Isolate the top copper' : 'Isolate the copper',
     around: copperId,
     gap: 0,
     width: PCB_ISOLATION_WIDTH_MM,
@@ -398,6 +435,33 @@ export function planPcbImport(tl: ManifoldToplevel, files: readonly PcbSourceFil
     inset: 0,
     tabs: { ...opts.tabs },
   };
+  // #743 P-8 — THE SECOND FACE. The stock is turned over the way `orient` says for the mount, and
+  // the bottom copper, the outline and the cut-out are built in that setup's own work frame. The
+  // cut-out rides here rather than on setup 1: a board held only by its tabs should not wait
+  // through another side before it is freed.
+  const second =
+    twoSided && bottoms[0] !== undefined
+      ? secondSideOf({
+          mount: opts.mount ?? { kind: 'tape' },
+          blank: opts.blank,
+          tabs: opts.tabs,
+          placePoint: toJob,
+          copper: {
+            contours: mergeGerberShapes(tl, bottoms[0].shapes).contours,
+            name: bottoms[0].name,
+            sha256: bottoms[0].sha256,
+          },
+          board: boardContours,
+          outlineName: outlineFiles[0]?.name ?? 'around the copper',
+          outlineSha: outlineFiles[0]?.sha256 ?? null,
+          idFor: opts.idFor,
+        })
+      : null;
+  if (second !== null) {
+    notes.push(
+      'The board has copper on both faces: setup 1 isolates the top and drills the holes, and setup 2 turns the board over, registers on the drilled holes, isolates the bottom and cuts the board out.',
+    );
+  }
   if (slots.length > 0) {
     const widths = [...new Set(slots.map((s) => `${round(s.width)} mm`))].join(', ');
     const where = slots
@@ -414,12 +478,132 @@ export function planPcbImport(tl: ManifoldToplevel, files: readonly PcbSourceFil
     ok: true,
     files: reports,
     board: { left, top, width: boardWidth, height: boardHeight },
-    items: { vectors: [copperItem, outlineItem], frames: [frame], drills: drillItems, cutouts: [cutout] },
+    mount: opts.mount ?? { kind: 'tape' },
+    items: {
+      vectors: [copperItem, outlineItem],
+      frames: [frame],
+      drills: drillItems,
+      // A two-sided board's cut-out is setup 2's, beside its isolation: it frees the board last.
+      cutouts: second === null ? [cutout] : [],
+    },
     copperId,
     outlineId,
     mirrored,
+    twoSided: second !== null,
+    second,
     warnings,
     notes,
+  };
+}
+
+/**
+ * The board's second face, in its setup's work frame (#743 P-8).
+ *
+ * THE FRAME IS `orient`'s. A bottom-up tape or bracket mount is a half turn about machine Y and a
+ * vise a half turn about X (`setups/orient.ts`), so the map is the engine's own and the same one
+ * the run's stock carry and the registration's reference openings use — never a second opinion
+ * about which way the board was turned. On that face the design is MIRRORED, which is what the
+ * operator sees, so each ring's points are reversed to keep the outer/hole winding CrossSection
+ * reads.
+ *
+ * The cut-out follows the board's boundary (the outline, or the fallback rectangle) mapped the
+ * same way, and its outline vector is its own item: a cut-out names an outline, and that name must
+ * resolve inside the setup that cuts it.
+ */
+interface SecondSideArgs {
+  mount: MountSpec;
+  blank: { length: number; width: number; thickness: number };
+  tabs: { count: number; width: number; height: number };
+  /** A file-frame point placed on the blank in the FIRST setup's work frame. */
+  placePoint: (p: Point) => Point;
+  copper: { contours: Point[][]; name: string; sha256: string };
+  /** The board's boundary in the FILE frame (the outline, or the fallback rectangle). */
+  board: readonly Point[][];
+  outlineName: string;
+  outlineSha: string | null;
+  idFor: (what: string) => string;
+}
+
+function secondSideOf(args: SecondSideArgs): PcbSecondSide {
+  const { length, width, thickness } = args.blank;
+  const o = orient('bottom', args.mount, { x: length, y: width, z: thickness });
+  if (!o.ok) throw new Error(`a board's second face cannot be mounted: ${o.reason}`);
+  const bounds: Box = { min: [0, 0, 0], max: [length, width, thickness] };
+  // File frame → the first setup's work frame → this setup's work frame, for a point on the
+  // bottom face (stock Z 0, the face that is now up).
+  const toWork = (p: Point): Point => {
+    const [sx, sy] = args.placePoint(p);
+    const q = toMachine(o.matrix, bounds, [sx, sy, 0]);
+    return [q[0], q[1]];
+  };
+  const rings = (contours: readonly Point[][]): Point[][] =>
+    contours.map((ring) => ring.map(toWork).reverse());
+
+  const copperPlaced = place(rings(args.copper.contours), (p) => p);
+  const copperId = args.idFor('pcb-copper');
+  const copperItem: EngraveVectorShape = {
+    kind: 'vector',
+    id: copperId,
+    name: 'Copper — bottom',
+    sourceName: args.copper.name,
+    contours: copperPlaced.contours,
+    fillRule: 'NonZero',
+    width: copperPlaced.width,
+    height: copperPlaced.height,
+    position: copperPlaced.position,
+    rotation: 0,
+    depth: PCB_ISOLATION_DEPTH_MM,
+    enabled: true,
+    construction: true,
+    importedFrom: { name: args.copper.name, sha256: args.copper.sha256 },
+  };
+  const outlinePlaced = place(rings(args.board), (p) => p);
+  const outlineId = args.idFor('pcb-outline');
+  const outlineItem: EngraveVectorShape = {
+    kind: 'vector',
+    id: outlineId,
+    name: 'Board outline — bottom face',
+    sourceName: args.outlineName,
+    contours: outlinePlaced.contours,
+    fillRule: 'NonZero',
+    width: outlinePlaced.width,
+    height: outlinePlaced.height,
+    position: outlinePlaced.position,
+    rotation: 0,
+    depth: thickness,
+    enabled: true,
+    construction: true,
+    ...(args.outlineSha === null ? {} : { importedFrom: { name: args.outlineName, sha256: args.outlineSha } }),
+  };
+  const frame: EngraveFrameShape = {
+    kind: 'frame',
+    id: args.idFor('pcb-isolation'),
+    name: 'Isolate the bottom copper',
+    around: copperId,
+    gap: 0,
+    width: PCB_ISOLATION_WIDTH_MM,
+    depth: PCB_ISOLATION_DEPTH_MM,
+    isolation: true,
+    position: { x: 0, y: 0 },
+    rotation: 0,
+    enabled: true,
+  };
+  const cutout: EngraveCutout = {
+    kind: 'cutout',
+    id: args.idFor('pcb-cutout'),
+    name: 'Cut out the board',
+    enabled: true,
+    of: outlineId,
+    side: 'outside',
+    inset: 0,
+    tabs: { ...args.tabs },
+  };
+  return {
+    orientation: o.orientation,
+    mount: args.mount,
+    items: { vectors: [copperItem, outlineItem], frames: [frame], cutouts: [cutout] },
+    copperId,
+    outlineId,
   };
 }
 

@@ -40,7 +40,12 @@ import { useLocationStore } from './locationStore';
 import { isVShape } from '@/engine/cnc/vProfile';
 import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { pcbCopperTopologyInput, type PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
+import {
+  combineCopperSides,
+  pcbCopperTopologyInputs,
+  type CopperSideReport,
+  type PcbCopperTopologyInput,
+} from '@/engine/cnc/engrave/pcbTopology';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { getTools, entryFor } from '@/engine/cnc/toolRegistry';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
@@ -576,11 +581,16 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const firstEngravingIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
     // #743 P-5 — A BOARD IS JUDGED BY ITS COPPER'S TOPOLOGY, on the WHOLE run's swept stock. The
     // volumetric comparison is program 1's own; a board's isolation, holes and outline are three
-    // programs, and a short is only visible after all of them have cut. So a PCB runs the topology
-    // check on the LAST program's session (which holds the cumulative removal) and asks no
-    // volumetric question at all.
-    const pcbTopology = pcbCopperTopologyInput(job);
-    const lastProgramIndex = generated.programs.length - 1;
+    // programs, and a short is only visible after all of them have cut.
+    //
+    // #743 P-8 — ONE CHECK PER FACE. A two-sided board's isolation frames live in different setups
+    // and different work frames, so each side is read on the LAST program of ITS setup (the sweep
+    // then holds every cut that side took), against that side's own copper. The run report carries
+    // the per-face verdicts and the sum, so the gate and the sheet state both.
+    const pcbSides = pcbCopperTopologyInputs(job);
+    const lastIndexOfSetup = new Map<number, number>();
+    generated.programs.forEach((program, index) => lastIndexOfSetup.set(program.setupIndex, index));
+    const copperSides: CopperSideReport[] = [];
     // #445 §4 — the thread facts belong to the first engraving program, the one
     // `generated.threads` describes; a facing pass or a later program states none.
     const threadsFor = (index: number) =>
@@ -703,9 +713,15 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // THE PREDICTION IS THE FIRST ENGRAVING PROGRAM'S. The oracle compares it against the
           // sweep of THAT program, so it runs while that program is still the session's live one —
           // the walk awaits this hook before loading the next.
-          if (pcbTopology !== null) {
-            // #743 P-5 — the board's own check, on the run's last swept stock (see above).
-            if (index === lastProgramIndex) oracleBox.report = await client.simOracle([], pcbTopology);
+          if (pcbSides.length > 0) {
+            // #743 P-5 — the board's own check, on the sweep that has finished drawing this side.
+            const side = pcbSides.find((s) => lastIndexOfSetup.get(s.setupIndex) === index);
+            if (side === undefined) return;
+            const report = await client.simOracle([], side.input);
+            if (report.copper === undefined) return;
+            copperSides.push({ face: side.faceUp, ...report.copper });
+            const copper = combineCopperSides(copperSides);
+            oracleBox.report = { ...report, copper, ok: report.ok && copper.ok };
             return;
           }
           if (index === firstEngravingIndex) oracleBox.report = await client.simOracle(generated.predicted);

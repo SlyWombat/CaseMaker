@@ -25,7 +25,7 @@
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
-import { sweptCuts } from '@/engine/cnc/engrave/partPlan';
+import { drillHoles, sweptCuts } from '@/engine/cnc/engrave/partPlan';
 import type { Removal } from './types';
 
 /**
@@ -72,24 +72,58 @@ function connectedById(job: EngraveJob): Set<string> {
  * from its floor to the top face. `volume` is the swept footprint times the depth — a relative
  * weight for the greedy direction grouping, not a claim about the material actually removed.
  */
+/**
+ * A drill's OWN footprint, when the item states its hole's size (#743 P-4b's imported drills).
+ *
+ * `sweptCuts` sizes a drill by the job's own cutter. That is right for a one-tool job — whose tool
+ * IS the drill — and wrong once a setup has several cutters: a 0.8 mm hole cut in setup 1 while
+ * the job's first tool is a 0.1 mm engraver reads as a 0.1 mm opening, so the registration on the
+ * drilled holes (#429) sees a slot too small to probe. The item's stated diameter IS the hole, so
+ * that is the footprint the planner, the reference openings and the probe plan read.
+ */
+function holeFootprints(job: EngraveJob): Map<string, { minX: number; maxX: number; minY: number; maxY: number }> {
+  const out = new Map<string, { minX: number; maxX: number; minY: number; maxY: number }>();
+  for (const drill of job.drills ?? []) {
+    const d = drill.diameter;
+    if (d === undefined || !(d > 0)) continue;
+    const r = d / 2;
+    const points = drillHoles(drill);
+    if (points.length === 0) continue;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const [x, y] of points) {
+      minX = Math.min(minX, x - r);
+      maxX = Math.max(maxX, x + r);
+      minY = Math.min(minY, y - r);
+      maxY = Math.max(maxY, y + r);
+    }
+    out.set(drill.id, { minX, maxX, minY, maxY });
+  }
+  return out;
+}
+
 export function removalsFrom(job: EngraveJob): Removal[] {
   const { length, width, thickness } = job.stock;
   const through = throughById(job);
   const connected = connectedById(job);
+  const holes = holeFootprints(job);
   const removals: Removal[] = [];
 
   for (const cut of sweptCuts(job)) {
     const isThrough = through.get(cut.id) === true;
     const depth = Math.max(0, isThrough ? thickness : cut.depth);
     const floor = Math.max(0, thickness - depth);
-    const area = Math.max(0, cut.box.maxX - cut.box.minX) * Math.max(0, cut.box.maxY - cut.box.minY);
+    const box = holes.get(cut.id) ?? cut.box;
+    const area = Math.max(0, box.maxX - box.minX) * Math.max(0, box.maxY - box.minY);
     removals.push({
       id: cut.id,
       name: cut.name.trim() === '' ? cut.id : cut.name,
       volume: area * (thickness - floor),
       box: {
-        min: [cut.box.minX, cut.box.minY, isThrough ? 0 : floor],
-        max: [cut.box.maxX, cut.box.maxY, thickness],
+        min: [box.minX, box.minY, isThrough ? 0 : floor],
+        max: [box.maxX, box.maxY, thickness],
       },
       opensTo: isThrough ? ['top', 'bottom'] : ['top'],
       ...(connected.has(cut.id) ? { connected: true } : {}),

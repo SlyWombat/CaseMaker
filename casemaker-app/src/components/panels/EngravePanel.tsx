@@ -101,6 +101,7 @@ import {
   measuredTopSpreadMm,
   stockSizeWords,
 } from '@/engine/cnc/stockStart';
+import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { groupRejections, isActionableRejection, shouldGroupCatalogueRows } from './recommendationRejections';
@@ -1361,11 +1362,15 @@ export function EngravePanel(): JSX.Element {
   // #743 P-6 — a board on a holding of the operator's: stated with the one-click fix that tapes
   // it to the bed, so a board is not left held by jaws a 0.1 mm cut cannot follow.
   const [pcbHoldingFix, setPcbHoldingFix] = useState<string | null>(null);
+  // #743 P-8 — a two-sided board whose holes the fitted probe cannot read: stated with the
+  // numbers, and with the two alignment holes a press adds beside the board.
+  const [pcbAlignment, setPcbAlignment] = useState<PcbAlignmentOffer | null>(null);
 
   async function readPcb(files: File[]): Promise<void> {
     setPcbMessage(null);
     setPcbStockFix(null);
     setPcbHoldingFix(null);
+    setPcbAlignment(null);
     setPcbBusy(true);
     try {
       const out = await useEngraveJobStore.getState().importPcbFiles(files);
@@ -1375,8 +1380,12 @@ export function EngravePanel(): JSX.Element {
       }
       setPcbStockFix(out.stockNotice);
       setPcbHoldingFix(out.holdingNotice);
+      setPcbAlignment(out.alignment);
+      const what = out.twoSided
+        ? 'copper on both faces, two isolations, holes, outlines and the board cut-out'
+        : 'copper, isolation, holes, outline and the board cut-out';
       const lines = [
-        `Imported ${out.fileCount} file${out.fileCount === 1 ? '' : 's'} as the board: ${out.itemCount} items — copper, isolation, holes, outline and the board cut-out.`,
+        `Imported ${out.fileCount} file${out.fileCount === 1 ? '' : 's'} as the board: ${out.itemCount} items — ${what}.`,
       ];
       for (const w of out.warnings) lines.push(w.message);
       lines.push(...out.notes);
@@ -1558,7 +1567,14 @@ export function EngravePanel(): JSX.Element {
     const cutterKey = finding.suggestedCutterKey;
     const frameId = finding.labelId;
     if (cutterKey === undefined || frameId === undefined) return;
-    const setup = jobSetups(job)[0];
+    // #743 P-8 — the frame belongs to the setup that cuts it: a two-sided board's bottom frame
+    // is setup 2's, and its fix rewrites that setup (the top's plan and the job's tool stay).
+    const setups = jobSetups(job);
+    const at = setups.findIndex(
+      (s) => s.itemIds.includes(frameId) || s.tools.some((key, i) => toolItemsFor(s, key, i).includes(frameId)),
+    );
+    const setupIndex = at < 0 ? 0 : at;
+    const setup = setups[setupIndex];
     if (setup === undefined) return;
     const tools = setupTools(setup, job);
     const plan = tools.map((key, i) => ({ key, items: [...toolItemsFor(setup, key, i)] }));
@@ -1574,7 +1590,7 @@ export function EngravePanel(): JSX.Element {
       if (prev === undefined) merged.push({ ...c, items: [...c.items] });
       else prev.items.push(...c.items);
     }
-    useEngraveJobStore.getState().applyCutterPlan(merged);
+    useEngraveJobStore.getState().applyCutterPlan(merged, 'computed', setupIndex);
   };
 
   const cutTopBand = (finding: JobFinding): void => {
@@ -3151,6 +3167,25 @@ export function EngravePanel(): JSX.Element {
                 >
                   Tape it to the bed
                 </button>
+              </p>
+            )}
+            {pcbAlignment !== null && (
+              <p style={MUTED} data-testid="engrave-pcb-alignment-notice">
+                {pcbAlignment.message}{' '}
+                {pcbAlignment.holes.length > 0 && (
+                  <button
+                    type="button"
+                    data-testid="engrave-pcb-add-alignment"
+                    onClick={() => {
+                      useEngraveJobStore
+                        .getState()
+                        .addPcbAlignmentHoles(pcbAlignment.holes, pcbAlignment.diameterMm);
+                      setPcbAlignment(null);
+                    }}
+                  >
+                    Add two {pcbAlignment.diameterMm} mm alignment holes
+                  </button>
+                )}
               </p>
             )}
             {pcbStockFix !== null && job.stock.material !== 'pcb' && (

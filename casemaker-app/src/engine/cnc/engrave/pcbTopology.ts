@@ -23,6 +23,8 @@
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { flatStockOutline, itemProfile } from '@/engine/cnc/engrave/partPlan';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import type { Face } from '@/engine/cnc/setups/types';
 import type { Profile } from '@/engine/compiler/profile';
 import type { EngraveAnyItem, EngraveFrameShape, EngraveJob } from '@/types/engraveJob';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
@@ -42,8 +44,8 @@ export interface PcbCopperTopologyInput {
   band: Profile;
 }
 
-/** The copper's own verdict, as the run report carries it. */
-export interface CopperTopologyReport {
+/** One face's copper counts. */
+export interface CopperTopologyCounts {
   ok: boolean;
   /** Connected pieces the DESIGN states. */
   designPieces: number;
@@ -57,35 +59,95 @@ export interface CopperTopologyReport {
   bandLeftMm2: number;
 }
 
+/** One face's verdict (#743 P-8): the same numbers, tagged with the face the setup cut. */
+export interface CopperSideReport extends CopperTopologyCounts {
+  face: Face;
+}
+
+/** The copper's own verdict, as the run report carries it. */
+export interface CopperTopologyReport extends CopperTopologyCounts {
+  /** Per-face verdicts, in setup order, when the board has copper on two faces. */
+  sides?: readonly CopperSideReport[];
+}
+
 /**
- * The job's PCB facts, or null for every job without a board: no laminate cap, a rotary job (a
- * board is cut flat), or no isolation frame. Pure — the caller hands it the job it holds.
+ * The job's PCB facts per SETUP, or an empty list for every job without a board: no laminate
+ * cap, a rotary job (a board is cut flat), or no isolation frame. Pure — the caller hands it the
+ * job it holds.
+ *
+ * A two-sided board has one isolation frame per setup, each around the copper of THAT setup's
+ * work frame (#743 P-8's import). The copper and the band are built from the frame's own `around`,
+ * so each side is read in the frame its program was posted in.
  */
-export function pcbCopperTopologyInput(job: EngraveJob): PcbCopperTopologyInput | null {
+export function pcbCopperTopologyInputs(job: EngraveJob): { setupIndex: number; faceUp: Face; input: PcbCopperTopologyInput }[] {
   const colour = job.stock.colour;
   const capMm = colour !== undefined && colour.kind === 'laminate' ? colour.capMm : null;
-  if (capMm === null || !(capMm > 0)) return null;
-  if (rotaryMapOf(job) !== null) return null;
+  if (capMm === null || !(capMm > 0)) return [];
+  if (rotaryMapOf(job) !== null) return [];
   const frames = (job.combined ?? []).filter(
     (item): item is EngraveFrameShape => item.kind === 'frame' && item.isolation === true && item.enabled,
   );
-  const frame = frames[0];
-  if (frame === undefined) return null;
+  if (frames.length === 0) return [];
   const items: EngraveAnyItem[] = [
     ...job.labels,
     ...job.shapes,
     ...(job.combined ?? []),
     ...(job.vectors ?? []),
   ];
-  const copperItem = items.find((item) => item.id === frame.around);
-  if (copperItem === undefined || !('kind' in copperItem)) return null;
   const stock = flatStockOutline(job.stock);
-  const copper = itemProfile(copperItem, job.customFonts ?? []);
-  const band = itemProfile(frame, job.customFonts ?? [], {
-    stockOutline: stock,
-    profileOf: (id) => (id === frame.around ? copper : null),
+  const forFrame = (frame: EngraveFrameShape): PcbCopperTopologyInput | null => {
+    const copperItem = items.find((item) => item.id === frame.around);
+    if (copperItem === undefined || !('kind' in copperItem)) return null;
+    const copper = itemProfile(copperItem, job.customFonts ?? []);
+    const band = itemProfile(frame, job.customFonts ?? [], {
+      stockOutline: stock,
+      profileOf: (id) => (id === frame.around ? copper : null),
+    });
+    return { capMm, stock, copper, band };
+  };
+
+  const out: { setupIndex: number; faceUp: Face; input: PcbCopperTopologyInput }[] = [];
+  jobSetups(job).forEach((setup, i) => {
+    // A setup owns the isolation frame it cuts; a frame in no setup (a hand-added one on a saved
+    // list that predates it) is left to the single-frame fallback below.
+    const frame = frames.find((f) => setup.itemIds.includes(f.id));
+    if (frame === undefined) return;
+    const input = forFrame(frame);
+    if (input !== null) out.push({ setupIndex: i + 1, faceUp: setup.orientation.top, input });
   });
-  return { capMm, stock, copper, band };
+  if (out.length === 0) {
+    // The document's first isolation frame is the one a job without a saved list states (the
+    // single-sided reading, unchanged).
+    const input = forFrame(frames[0]!);
+    if (input !== null) out.push({ setupIndex: 1, faceUp: jobSetups(job)[0]?.orientation.top ?? 'top', input });
+  }
+  return out;
+}
+
+/**
+ * The job's PCB facts, or null for every job without a board. The FIRST face's — every caller
+ * that knows only one side (the P-6 surface budget's arithmetic, a test fixture) reads this.
+ */
+export function pcbCopperTopologyInput(job: EngraveJob): PcbCopperTopologyInput | null {
+  return pcbCopperTopologyInputs(job)[0]?.input ?? null;
+}
+
+/**
+ * One report for a board cut on several faces (#743 P-8): the counts summed, `ok` only when every
+ * face is, and the per-face verdicts carried for the sentence. A side that was not checked is not
+ * in the list, so a run that never swept the second face cannot claim it passed.
+ */
+export function combineCopperSides(sides: readonly CopperSideReport[]): CopperTopologyReport {
+  const sum = (pick: (s: CopperSideReport) => number): number => sides.reduce((n, s) => n + pick(s), 0);
+  return {
+    ok: sides.length > 0 && sides.every((s) => s.ok),
+    designPieces: sum((s) => s.designPieces),
+    pieces: sum((s) => s.pieces),
+    matched: sum((s) => s.matched),
+    shorts: sum((s) => s.shorts),
+    bandLeftMm2: sum((s) => s.bandLeftMm2),
+    sides: sides.map((s) => ({ ...s })),
+  };
 }
 
 function bboxOf(cs: CrossSectionInstance): { minX: number; maxX: number; minY: number; maxY: number } {

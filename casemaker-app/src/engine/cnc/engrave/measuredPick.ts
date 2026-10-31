@@ -102,6 +102,12 @@ export interface PlanCutter {
 /** A candidate plan: cutters in cut order. */
 export interface CutterPlanLike {
   cutters: readonly PlanCutter[];
+  /**
+   * #743 P-8 — WHICH setup the plan rewrites (0-based), defaulting to the first. A two-sided
+   * board has one setup per face, and a fix applied to the bottom's cutter must not collapse the
+   * job back to one setup — nor change the job's own tool, which is the first program's.
+   */
+  setupIndex?: number;
 }
 
 /**
@@ -118,7 +124,9 @@ export function applyCutterPlanToJob(job: EngraveJob, plan: CutterPlanLike): Eng
   const applied: EngraveJob = structuredClone(job);
   const first = plan.cutters[0];
   if (first === undefined) return applied;
-  applied.toolKey = first.key;
+  const index = plan.setupIndex ?? 0;
+  // The job's cutter is the FIRST program's; a plan for a later setup leaves it alone.
+  if (index === 0) applied.toolKey = first.key;
   // #766 fix — A PURE GOAL JOB GETS NO SETUP. Its derived setup is empty BY DESIGN (#535): the
   // goal mesh is the setup's one program, and `pureGoalObject` only recognises the job while it
   // states NO setups. Writing one made the generator validate the goal as an ordinary item that
@@ -129,14 +137,18 @@ export function applyCutterPlanToJob(job: EngraveJob, plan: CutterPlanLike): Eng
   // document validates its `toolKey` against the built-in registry (`jobTool`), which by design
   // does not hold the location's `inv:` cutters; the setup path resolves each cutter from the
   // caller's own list (the same seam the CLI and the sim worker use).
-  const setup = jobSetups(applied)[0]!;
-  applied.setups = [
-    {
-      ...setup,
-      tools: plan.cutters.map((c) => c.key),
-      toolItems: Object.fromEntries(plan.cutters.map((c) => [c.key, [...c.items]])),
-    },
-  ];
+  const setups = jobSetups(applied);
+  const setup = setups[index];
+  if (setup === undefined) return applied;
+  applied.setups = setups.map((s, i) =>
+    i === index
+      ? {
+          ...s,
+          tools: plan.cutters.map((c) => c.key),
+          toolItems: Object.fromEntries(plan.cutters.map((c) => [c.key, [...c.items]])),
+        }
+      : s,
+  );
   return applied;
 }
 

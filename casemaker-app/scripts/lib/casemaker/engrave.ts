@@ -2191,11 +2191,18 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     writeFileSync(join(outDir, jobFile), JSON.stringify(built.job, null, 2) + '\n');
     runOutputs.push(fileReceipt(join(outDir, jobFile)));
     const holes = built.plan.items.drills.length;
+    const second = built.plan.second;
+    const itemCount =
+      built.plan.items.vectors.length +
+      built.plan.items.frames.length +
+      holes +
+      built.plan.items.cutouts.length +
+      (second === null ? 0 : second.items.vectors.length + second.items.frames.length + second.items.cutouts.length);
     out.progress(
       `${jobFile} — the board on a ${blank.length} × ${blank.width} × ${blank.thickness} mm PCB blank: ` +
         `${built.plan.files.length} file${built.plan.files.length === 1 ? '' : 's'}, ` +
-        `${built.plan.items.vectors.length + built.plan.items.frames.length + holes + built.plan.items.cutouts.length} ` +
-        `items (copper, isolation, ${holes} hole${holes === 1 ? '' : 's'}, outline, cut-out).`,
+        `${itemCount} items (copper${second === null ? '' : ' on both faces'}, isolation${second === null ? '' : 's'}, ` +
+        `${holes} hole${holes === 1 ? '' : 's'}, outline${second === null ? ', cut-out' : 's, cut-out'}).`,
     );
     for (const note of built.notes) out.progress(`  ${note}`);
     for (const w of built.warnings) out.progress(`  ! ${w.message}`);

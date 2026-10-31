@@ -52,6 +52,14 @@ export interface ReferencePlanInput extends PlanInput {
   openings: ReferenceOpening[];
   /** Blind cuts on the face now up: no scan starts, and no surface touch lands, on them. */
   blind?: { min: [number, number]; max: [number, number] }[];
+  /**
+   * #743 P-8 — the extent a turn's error is judged across, mm. The turn is not corrected (G54
+   * cannot rotate); the plan only decides whether it is small enough, and a turn error moves a
+   * point by its distance from where the correction is taken. Absent, the STOCK's span is used
+   * (#429's original reading). A board passes the extent it actually cuts, so a small board on a
+   * big blank is judged where its copper is rather than at the blank's far corner.
+   */
+  spanMm?: number;
 }
 
 type Rect = { min: [number, number]; max: [number, number] };
@@ -166,7 +174,8 @@ export function planReferences(input: ReferencePlanInput, s: RegistrationSetting
   }
 
   // The turn: from the two whole features farthest apart, to what resolution.
-  const span = Math.max(input.stock.xMax - input.stock.xMin, input.stock.yMax - input.stock.yMin);
+  const span = input.spanMm ?? Math.max(input.stock.xMax - input.stock.xMin, input.stock.yMax - input.stock.yMin);
+  const across = input.spanMm === undefined ? 'the stock' : 'the work';
   const whole = references.filter((r) => r.xScans.length > 0 && r.yScans.length > 0);
   let rotation: RegistrationPlan['referenceRotation'] = null;
   for (let i = 0; i < whole.length; i++) {
@@ -184,7 +193,7 @@ export function planReferences(input: ReferencePlanInput, s: RegistrationSetting
       reason:
         rotation === null
           ? 'on tape nothing holds the turn, and it needs two references measured on both axes'
-          : `on tape nothing holds the turn, and the references are only ${rotation.separation} mm apart: a turn could be read only to ±${rotation.resolutionMm} mm across the stock, no better than the ${s.edgeMarginMm} mm margin`,
+          : `on tape nothing holds the turn, and the references are only ${rotation.separation} mm apart: a turn could be read only to ±${rotation.resolutionMm} mm across ${across}, no better than the ${s.edgeMarginMm} mm margin`,
     };
   }
   const plan: RegistrationPlan = {
@@ -197,8 +206,8 @@ export function planReferences(input: ReferencePlanInput, s: RegistrationSetting
       rotation === null
         ? 'the turn: no two references were read on both axes'
         : measurable
-          ? `the turn is read between ${rotation.between.join(' and ')}, ${rotation.separation} mm apart, to ±${rotation.resolutionMm} mm across the stock`
-          : `the turn is NOT measurable: the references are ${rotation.separation} mm apart, so it could be read only to ±${rotation.resolutionMm} mm across the stock`,
+          ? `the turn is read between ${rotation.between.join(' and ')}, ${rotation.separation} mm apart, to ±${rotation.resolutionMm} mm across ${across}`
+          : `the turn is NOT measurable: the references are ${rotation.separation} mm apart, so it could be read only to ±${rotation.resolutionMm} mm across ${across}`,
       ...skipped.map((k) => `not scanned: ${k}`),
       // #743 — a disc's rim note belongs to the four rim scans, which the reference walls REPLACE
       // here: the plan must not claim to register on a rim it is not touching.
