@@ -4,7 +4,7 @@ import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/
 import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
-import { useEngraveRunStore, firstRunError, gateViewFor, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
+import { useEngraveRunStore, firstRunError, gateViewFor, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker, type EngraveRunState } from '@/store/engraveRunStore';
 import { ROTARY_UNMEASURED_REFUSAL } from '@/store/engraveRunGate';
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
@@ -722,6 +722,27 @@ function RemovalAnnouncement(): JSX.Element {
       {top === undefined ? '' : `${top.what} removed. Undo is available.`}
     </p>
   );
+}
+
+/**
+ * #830 — WHAT THE RUN IS DOING, for the progress line. Generate's own stages are one half; the
+ * SIMULATION is the other, and it used to show a bare "Working…" for a whole multi-program sweep.
+ * The sweep's stage names the program and, from the sim store, how many checkpoints are done.
+ */
+function runProgressWords(
+  run: Pick<EngraveRunState, 'phase' | 'progress' | 'simProgram'>,
+  simStatus: string,
+  simPhase: string | null,
+  simProgress: { done: number; total: number } | null,
+): string {
+  if (run.phase === 'simulating') {
+    const where = run.simProgram === null ? 'simulating' : `simulating program ${run.simProgram.index} of ${run.simProgram.count}`;
+    if (simStatus === 'loading' && simPhase === 'playback') return `${where} · preparing playback`;
+    if (simStatus === 'loading' && simProgress !== null) return `${where} · swept ${simProgress.done} of ${simProgress.total}`;
+    return where;
+  }
+  if (run.phase === 'checking') return 'checking the result';
+  return run.progress === null ? 'Working…' : `${run.progress.label}…`;
 }
 
 export function EngravePanel(): JSX.Element {
@@ -1833,6 +1854,10 @@ export function EngravePanel(): JSX.Element {
   // ---- the run (#206) ----------------------------------------------------------------------
 
   const run = useEngraveRunStore();
+  // #830 — the simulation's own stage feeds the progress line while the sweep runs.
+  const simStatus = useSimStore((s) => s.status);
+  const simPhase = useSimStore((s) => s.phase);
+  const simProgress = useSimStore((s) => s.progress);
   const simEnabled = featureSim;
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
 
@@ -4336,9 +4361,27 @@ export function EngravePanel(): JSX.Element {
               data-testid="engrave-generate-progress"
               style={{ display: 'flex', alignItems: 'center', gap: 8, flexBasis: '100%', fontSize: 12, color: '#c8d3de' }}
             >
-              <span>{run.progress === null ? 'Working…' : `${run.progress.label}…`}</span>
+              <span>{runProgressWords(run, simStatus, simPhase, simProgress)}</span>
               <button type="button" data-testid="engrave-generate-cancel" onClick={() => run.cancelGenerate()}>
                 Cancel
+              </button>
+            </span>
+          )}
+          {run.phase === 'blocked' && run.error !== null && (
+            // #830 — the run stopped with a reason that is not a finding: the worker died, or it
+            // went quiet past the stall limit. Say it, and offer the one action that helps.
+            <span
+              data-testid="engrave-generate-error"
+              style={{ flex: '1 1 180px', fontSize: 12, lineHeight: 1.45, color: SEVERITY_COLOR.error }}
+            >
+              {run.error}{' '}
+              <button
+                type="button"
+                data-testid="engrave-generate-retry"
+                style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}
+                onClick={() => void generate()}
+              >
+                Try again
               </button>
             </span>
           )}

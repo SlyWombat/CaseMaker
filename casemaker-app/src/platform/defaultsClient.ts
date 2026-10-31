@@ -340,6 +340,7 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'sim.defaultStockWidthMm': { label: 'simulation stock width when the file states none (chosen)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 100 },
   'sim.defaultStockThicknessMm': { label: 'simulation stock thickness when the file states none (chosen)', unit: 'mm', rule: z.number().min(0.1).max(100), fallback: 10 },
   'sim.budgetMs': { label: 'simulation load budget (chosen)', unit: 'ms', rule: z.number().min(5000).max(600000), fallback: 60_000 },
+  'sim.stallMs': { label: 'how long Generate may be silent before the worker is presumed stopped (chosen)', unit: 'ms', rule: z.number().min(10_000).max(1_800_000), fallback: 180_000 },
   // ── #451 sim starting values (end)
   // ── #451 new-item starting depths (begin) — where an item the panel just added begins. CHOSEN,
   // not measured: nobody measured what depth a new item should start at, and the person who asked

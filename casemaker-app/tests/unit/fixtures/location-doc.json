@@ -1271,6 +1271,13 @@
       "unit": "ms",
       "note": "chosen, not measured: the wall-clock limit one simulation load starts with. Past it the load is refused (or the worker killed), and Retry starts a load with twice this"
     },
+    "sim.stallMs": {
+      "value": 180000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long Generate may be silent before the app presumes the worker stopped and Reports it; three minutes, because one stage of a large job can be a long CAM pass"
+    },
     "plan.homeSeconds": {
       "value": 27.5,
       "source": "measured",

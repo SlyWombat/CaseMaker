@@ -1,7 +1,7 @@
 // The engrave RUN state (#206): the save gate and the staleness rule. No wasm, no worker — the
 // client is faked, so this is the pure half of the store.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -31,7 +31,7 @@ import {
 import { useSimStore } from '@/store/simStore';
 import type { SimLoadOk } from '@/workers/sim/session';
 import { useSettingsStore } from '@/store/settingsStore';
-import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { calibrationFromReplies, type MachineCalibration } from '@/engine/cnc';
 import { clearFeedCatalogue, setFeedCatalogue, setLocatedFeedTable, type FeedCatalogueRow, type StoredFeedRow } from '@/engine/cnc/feeds';
 import { resetFeedTableStore, useFeedTableStore } from '@/store/feedTableStore';
@@ -1287,5 +1287,50 @@ describe('#785 progress and Cancel', () => {
     await running;
     expect(useEngraveRunStore.getState().phase).toBe('idle');
     expect(useEngraveRunStore.getState().generated).toBeNull();
+  });
+
+
+  // #830 — THE RUN CANNOT SIT ON "Working…" FOREVER. A worker that dies rejects its pending calls
+  // with its own words; a worker that goes quiet past the shop's `sim.stallMs` is stopped and
+  // reported. Both leave the run blocked with a sentence, which is what the panel's Try again
+  // hangs off.
+  it('a Generate that goes quiet past the shop’s stall time is stopped and reported', async () => {
+    vi.useFakeTimers();
+    try {
+      let cancelled = 0;
+      setEngraveRunClientLoader(async () => ({
+        engraveGenerate: () => new Promise<EngraveGenerated>(() => undefined),
+        cancelGenerate: () => {
+          cancelled += 1;
+        },
+        simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+      }));
+      const done = useEngraveRunStore.getState().generate();
+      // The client loads on a microtask; the watchdog is armed behind it.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(useEngraveRunStore.getState().phase).toBe('generating');
+      await vi.advanceTimersByTimeAsync(shopDefault('sim.stallMs').value);
+      const s = useEngraveRunStore.getState();
+      expect(s.phase).toBe('blocked');
+      expect(s.error).toContain('The generator stopped reporting for');
+      expect(s.error).toContain('try again');
+      expect(cancelled, 'the stuck worker is killed, not left running').toBe(1);
+      void done;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a dead worker’s error is the run’s error, not a silent hang', async () => {
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => {
+        throw new Error('the simulation worker stopped');
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    await useEngraveRunStore.getState().generate();
+    const s = useEngraveRunStore.getState();
+    expect(s.phase).toBe('blocked');
+    expect(s.error).toBe('the simulation worker stopped');
   });
 });

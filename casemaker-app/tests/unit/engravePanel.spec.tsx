@@ -12,6 +12,7 @@ import { OPERATION_OPTIONS, OPERATION_TYPES } from '@/components/panels/operatio
 import { useEngraveJobStore, undoEngraveRemoval, resetEngraveRemovalUndo, REMOVAL_UNDO_MS } from '@/store/engraveJobStore';
 import { setEngraveRunClientLoader, useEngraveRunStore } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
+import { useSimStore } from '@/store/simStore';
 import { resetEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngravePackageStore } from '@/store/engravePackageStore';
 import { resetCncMode, useCncModeStore } from '@/store/cncModeStore';
@@ -4807,6 +4808,31 @@ describe('#805 — the rotary oversize warning’s two answers', () => {
     expect(setup?.toolItems?.['inv:engrave-fine']).toEqual(['iso-1']);
     expect(setup?.toolItems?.['inv:engrave-old'] ?? []).toEqual([]);
     expect(setup?.tools).toContain('inv:engrave-fine');
+  });
+
+
+  // #830 — the run's progress line names the SIMULATION too: a sweep of several programs used to
+  // show a bare "Working…", which is the hang the maintainer saw; and a stopped run says why and
+  // offers the one action that helps.
+  it('names the simulation’s program and its swept checkpoints', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({ phase: 'simulating', simProgram: { index: 1, count: 2 }, progress: null } as never);
+      useSimStore.setState({ status: 'loading', phase: 'sweep', progress: { done: 5, total: 10 } } as never);
+    });
+    expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('simulating program 1 of 2 · swept 5 of 10');
+  });
+
+  it('a stopped run shows its reason and offers Try again', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({
+        phase: 'blocked',
+        error: 'The generator stopped reporting for 180 s. Its worker may have stopped; try again.',
+      } as never);
+    });
+    expect(screen.getByTestId('engrave-generate-error').textContent).toContain('The generator stopped reporting for 180 s.');
+    expect(screen.getByTestId('engrave-generate-retry')).toBeTruthy();
   });
 });
 

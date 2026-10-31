@@ -312,6 +312,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("sim.defaultStockWidthMm", 100.0, "mm", "chosen, not measured: the blank a simulation starts with when the file states no stock, along Y; 100 x 100 x 10 is the documented default (/Simulation.md §6)"),
     ("sim.defaultStockThicknessMm", 10.0, "mm", "chosen, not measured: the blank a simulation starts with when the file states no stock, in Z; 100 x 100 x 10 is the documented default (/Simulation.md §6)"),
     ("sim.budgetMs", 60000.0, "ms", "chosen, not measured: the wall-clock limit one simulation load starts with. Past it the load is refused (or the worker killed), and Retry starts a load with twice this"),
+    ("sim.stallMs", 180000.0, "ms", "chosen, not measured: how long Generate may be silent before the app presumes the worker stopped and Reports it; three minutes, because one stage of a large job can be a long CAM pass"),
     // ── #451 sim starting values (end)
     // ── #451 new-item starting depths (begin) — where an item the Engrave panel just added begins.
     // CHOSEN, not measured: nobody measured what depth a new item should start at, and the person who
@@ -972,6 +973,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "sim.budgetMs" => Some(need(
             n.is_some_and(|v| (5000.0..=600000.0).contains(&v)),
             "5000 to 600000 ms",
+        )),
+        "sim.stallMs" => Some(need(
+            n.is_some_and(|v| (10000.0..=1800000.0).contains(&v)),
+            "10000 to 1800000 ms",
         )),
         // ── #451 sim starting values (end)
         // ── #451 new-item starting depths (begin) — `defaultsClient.ts` states the same bounds. Not

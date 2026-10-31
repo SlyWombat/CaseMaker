@@ -26,6 +26,7 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
+import { recordCrumb } from '@/platform/flightRecorder';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { createFrameCoalescer } from './frameCoalescer';
 
@@ -34,9 +35,74 @@ let simApi: Comlink.Remote<SimWorkerApi> | null = null;
 let frameSink: ((k: number, frame: SimFrame) => void) | null = null;
 let errorSink: ((e: unknown) => void) | null = null;
 
+/**
+ * #830 — THE WORKER CAN DIE, AND ITS PENDING CALLS USED TO HANG FOREVER. A wasm trap, an OOM kill
+ * or a terminated worker leaves every Comlink promise pending: the panel then shows "Working…" with
+ * nothing behind it, which is the hang the maintainer saw before the tab crashed. One deferred
+ * failure per worker is raced against every call; `failWorker` rejects it, writes the error into the
+ * flight recorder (so the crash report carries it) and forgets the worker, so the next call starts
+ * a fresh one.
+ */
+interface WorkerFailure {
+  promise: Promise<never>;
+  reject: (e: Error) => void;
+}
+
+let failure: WorkerFailure | null = null;
+
+function newFailure(): WorkerFailure {
+  let reject!: (e: Error) => void;
+  const promise = new Promise<never>((_, rej) => {
+    reject = rej;
+  });
+  // A crash while nothing is in flight must not surface as an unhandled rejection.
+  promise.catch(() => undefined);
+  return { promise, reject };
+}
+
+function ensureFailure(): WorkerFailure {
+  failure ??= newFailure();
+  return failure;
+}
+
+/** Keep the worker's failure (or null) around a call, so a dead worker rejects instead of hanging. */
+function guarded<T>(call: Promise<T>): Promise<T> {
+  return failure === null ? call : Promise.race([call, failure.promise]);
+}
+
+/**
+ * #830 — the worker stopped: record WHY in the flight recorder, fail every pending call with it,
+ * and forget the worker so the next call creates a new one.
+ */
+function failWorker(message: string): void {
+  recordCrumb({ kind: 'error', data: { source: 'sim-worker', message } });
+  const f = failure;
+  failure = null;
+  frames.reset();
+  simWorker?.terminate();
+  simWorker = null;
+  simApi = null;
+  f?.reject(new Error(message));
+}
+
+/**
+ * #830 — the worker is gone without a cancel (`terminateSim` is the app's own stop; this is the
+ * crash path, e.g. killed by the browser). Exposed so a test can prove the panel reports it.
+ */
+export function killSimWorkerForTest(message = 'the simulation worker stopped'): void {
+  failWorker(message);
+}
+
 export function getSimApi(): Comlink.Remote<SimWorkerApi> {
   if (!simApi) {
     simWorker = new Worker(new URL('../../workers/sim.worker.ts', import.meta.url), { type: 'module', name: 'sim' });
+    ensureFailure();
+    simWorker.onerror = (event) => {
+      // The browser has already logged it; the page's record must carry the worker's words.
+      event.preventDefault?.();
+      failWorker(event.message !== '' ? event.message : 'the simulation worker stopped with an error');
+    };
+    simWorker.onmessageerror = () => failWorker('the simulation worker sent a message the page could not read');
     simApi = Comlink.wrap<SimWorkerApi>(simWorker);
   }
   return simApi;
@@ -235,6 +301,9 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
           return r;
         }),
       expired,
+      // #830 — a worker that died mid-sweep fails this load AT ONCE, with its own words, rather
+      // than letting the budget timer report a misleading "too slow" a minute later.
+      ...(failure === null ? [] : [failure.promise]),
     ]);
     return result;
   } finally {
@@ -250,17 +319,17 @@ export function requestFrame(k: number, design?: SimDesign): void {
 
 export async function disposeSim(): Promise<void> {
   frames.reset();
-  if (simApi) await simApi.simDispose();
+  if (simApi) await guarded(simApi.simDispose());
 }
 
-export const simStateAt = (step: number) => getSimApi().simStateAt(step);
-export const simToolPath = (from: number, to: number) => getSimApi().simToolPath(from, to);
+export const simStateAt = (step: number) => guarded(getSimApi().simStateAt(step));
+export const simToolPath = (from: number, to: number) => guarded(getSimApi().simToolPath(from, to));
 
 /**
  * The whole path, with kinds and times, fetched once per load (#197). The four buffers are
  * transferred, so the copy lives in the main thread from here on.
  */
-export const simPath = (): Promise<SimPath> => getSimApi().simPath();
+export const simPath = (): Promise<SimPath> => guarded(getSimApi().simPath());
 
 /**
  * The engrave preview (#205): the stock cut to each label's depth, its pocket floors and the
@@ -292,7 +361,7 @@ export const engravePreview = (
   shop?: EngraveShopOpts,
   residuals?: ProbeResiduals,
 ): Promise<EngravePreview | null> =>
-  getSimApi().engravePreview(job, tools, catalogue, gen, margins, conditions, shop, residuals);
+  guarded(getSimApi().engravePreview(job, tools, catalogue, gen, margins, conditions, shop, residuals));
 
 /**
  * #766 D — the measured cutter pick, in the background. Same `gen` as the preview: the worker
@@ -310,14 +379,16 @@ export const engraveSmartPick = (
   /** #785 — the search's candidate counts; its own argument for the Comlink.proxy rule. */
   onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void,
 ): Promise<EngravePickSummary | null> =>
-  getSimApi().engraveSmartPick(
-    job,
-    tools,
-    catalogue,
-    gen,
-    conditions,
-    shop,
-    onProgress === undefined ? undefined : Comlink.proxy(onProgress),
+  guarded(
+    getSimApi().engraveSmartPick(
+      job,
+      tools,
+      catalogue,
+      gen,
+      conditions,
+      shop,
+      onProgress === undefined ? undefined : Comlink.proxy(onProgress),
+    ),
   );
 
 /**
@@ -358,14 +429,16 @@ export const engraveGenerate = (
    */
   onProgress?: (progress: EngraveProgress) => void,
 ): Promise<EngraveGenerated> =>
-  getSimApi().engraveGenerate(
-    job,
-    tool,
-    catalogue,
-    calibration,
-    margins,
-    shop,
-    onProgress === undefined ? undefined : Comlink.proxy(onProgress),
+  guarded(
+    getSimApi().engraveGenerate(
+      job,
+      tool,
+      catalogue,
+      calibration,
+      margins,
+      shop,
+      onProgress === undefined ? undefined : Comlink.proxy(onProgress),
+    ),
   );
 
 /**
@@ -387,7 +460,7 @@ export const simOracle = (
    * simulation at the copper's underside and folds its verdict into the report.
    */
   pcb?: PcbCopperTopologyInput | null,
-): Promise<OracleReport> => getSimApi().simOracle(predicted, pcb ?? null);
+): Promise<OracleReport> => guarded(getSimApi().simOracle(predicted, pcb ?? null));
 
 /**
  * Read a PrusaSlicer project (.3mf) as a blank-and-items patch (#410 item 4's second entry point).
@@ -401,4 +474,4 @@ export const simOracle = (
 export const readDesign3mf = (
   bytes: ArrayBuffer,
   direction: DesignReadingDirection,
-): Promise<DesignJobPatch> => getSimApi().readDesign3mf(bytes, direction);
+): Promise<DesignJobPatch> => guarded(getSimApi().readDesign3mf(bytes, direction));

@@ -25,6 +25,7 @@ import {
   noteStage,
   noteWorkEnd,
   noteWorkStart,
+  recordCrumb,
   type WorkFacts,
 } from '@/platform/flightRecorder';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -280,6 +281,11 @@ export interface EngraveRunState {
   error: string | null;
   /** #785 — the current stage's words while a run works ("roughing level 41 of 112"), else null. */
   progress: EngraveProgress | null;
+  /**
+   * #830 — WHICH PROGRAM OF THE SWEEP IS RUNNING while `phase === 'simulating'`: the simulation's
+   * own stage, so the panel never shows a bare "Working…" through a multi-program sweep.
+   */
+  simProgram: { index: number; count: number } | null;
   /** Run the whole pipeline for the job as it is NOW. `surface` (#608) re-posts against a tilt. */
   generate: (surface?: SurfacePostFit | null) => Promise<void>;
   /**
@@ -327,6 +333,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     previousVerdict: null as boolean | null,
     error: null as string | null,
     progress: null as EngraveProgress | null,
+    simProgram: null as { index: number; count: number } | null,
   };
 
   async function run(surface: SurfacePostFit | null = null): Promise<void> {
@@ -481,13 +488,48 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 
     let client: EngraveRunClient;
     let generated: EngraveGenerated;
+    // #830 — THE SILENCE WATCHDOG. A worker that DIES is caught below (its pending calls reject);
+    // a worker that stops ANSWERING cannot be probed while it is inside one wasm call, so the only
+    // signal is time. No stage for the shop's `sim.stallMs` (three minutes by default) and the run
+    // is stopped and REPORTED, the worker is killed, and the panel offers Try again. The stage
+    // crumbs in the flight recorder say what it was doing when it went quiet.
+    const stallMs = shopDefault('sim.stallMs').value;
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearStall = (): void => {
+      if (stallTimer !== null) {
+        clearTimeout(stallTimer);
+        stallTimer = null;
+      }
+    };
+    const armStall = (): void => {
+      clearStall();
+      stallTimer = setTimeout(() => {
+        if (mine !== seq) return;
+        const seconds = Math.round(stallMs / 1000);
+        recordCrumb({
+          kind: 'error',
+          data: { source: 'generate-stall', message: `no stage for ${seconds} s (last: ${lastStage ?? 'the press'})` },
+        });
+        activeClient?.cancelGenerate?.();
+        activeClient = null;
+        noteWorkEnd('generate', 'failed');
+        set({
+          ...empty,
+          generated: get().generated,
+          phase: 'blocked',
+          error: `The generator stopped reporting for ${seconds} s. Its worker may have stopped; try again.`,
+        });
+      }, stallMs);
+    };
     try {
       client = await clientLoader();
       activeClient = client;
+      armStall();
       // #785 — every stage report is BOTH the panel's progress and a flight-recorder crumb: one
       // event stream, two readers. A stage change is a crumb of its own (the marker moves with it);
-      // a count inside a stage is progress.
+      // a count inside a stage is progress. #830 — every report re-arms the silence watchdog.
       const onProgress = (progress: EngraveProgress): void => {
+        armStall();
         if (mine === seq) set({ progress });
         if (lastStage !== progress.stage) {
           lastStage = progress.stage;
@@ -496,8 +538,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           noteFlightProgress('generate', progress.stage, progress.done, progress.total, progress.label);
         }
       };
-      generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress);
+      try {
+        generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress);
+      } finally {
+        clearStall();
+      }
     } catch (e) {
+      clearStall();
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
       noteWorkEnd('generate', 'failed');
       activeClient = null;
@@ -621,6 +668,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         cutterFor: (program) =>
           program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
         load: async ({ program, index, cutter, drillPoint, priorRemoval }) => {
+          // #830 — the simulation's own stage: which program of the sweep is being simulated, so
+          // the panel never shows a bare "Working…" through a multi-program sweep.
+          if (mine === seq) set({ simProgram: { index: index + 1, count: generated.programs.length } });
           try {
             // #723 P2-2b-ii — CARRY THE SIDES. The walk hands us the earlier programs' remaining
             // solids in the frame of the program that cut them; a program in a later setup starts
@@ -852,6 +902,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     previousVerdict: null,
     error: null,
     progress: null,
+    simProgram: null,
     generate: run,
     cancelGenerate: () => {
       const phase = get().phase;

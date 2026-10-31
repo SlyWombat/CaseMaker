@@ -29,6 +29,7 @@ const KEYS = [
   'sim.defaultStockWidthMm',
   'sim.defaultStockThicknessMm',
   'sim.budgetMs',
+  'sim.stallMs',
 ] as const;
 
 const HERE = dirname(fileURLToPath(import.meta.url));

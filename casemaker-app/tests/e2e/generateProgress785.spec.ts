@@ -46,7 +46,7 @@ test('#785 Generate shows its stage, and Cancel returns the panel to its pre-Gen
   // The store names the first stage at the press, and the worker's own stages replace it as they
   // arrive; either is a stage the run really reports.
   await expect(progress).toContainText(
-    /starting the worker|reading the job|sampling the goal|roughing level|finishing row|posting the program|done/i,
+    /starting the worker|reading the job|sampling the goal|roughing level|finishing row|posting the program|done|simulating program|checking the result/i,
     { timeout: 120_000 },
   );
 
