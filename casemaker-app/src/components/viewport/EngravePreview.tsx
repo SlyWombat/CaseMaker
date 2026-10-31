@@ -83,9 +83,16 @@ const AXIS_FRACTION = 0.2;
 const SELECTED_FLOOR_GLOW = '#9adcff';
 
 /**
- * A geometry built from a worker mesh, disposed when the mesh is replaced or on unmount. A
+ * A geometry built from a worker mesh, with SUPERSEDED buffers disposed as they are replaced. A
  * rebuild replaces the stock/floors as the user types, so without this the geometries would
  * accumulate (`renderer.info.memory.geometries` must stay bounded — #197).
+ *
+ * #810 — DISPOSE REPLACED BUFFERS, NEVER THE LIVE ONE IN A CLEANUP. React StrictMode runs a
+ * mount's cleanup immediately after its setup while keeping the memoized geometry, so a cleanup
+ * that disposed the live buffer freed the geometry the mesh was still drawing with — the class of
+ * defect behind the rotary goal surface's intermittent empty picture (RotaryGoalSurface was fixed
+ * the same way in #808). The last buffer is released with the canvas context, which lives as long
+ * as the app does.
  */
 function useMeshGeometry(
   mesh: NodeMeshOutput | null,
@@ -102,7 +109,12 @@ function useMeshGeometry(
     map.dispose();
     return wrapped;
   }, [mesh, wrapRadius, wrapLift]);
-  useEffect(() => () => geom?.dispose(), [geom]);
+  const previous = useRef<THREE.BufferGeometry | null>(null);
+  useEffect(() => {
+    const old = previous.current;
+    previous.current = geom;
+    if (old !== null && old !== geom) old.dispose();
+  }, [geom]);
   return geom;
 }
 

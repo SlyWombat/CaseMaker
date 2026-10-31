@@ -362,20 +362,24 @@ test('the relief draws on the map and the rod, and cuts to the program the sheet
   // flat band (about 1 run in 3: 3.9 s, alternations 2). Poll the DISCRIMINATING measure — the
   // lobes' swings and the colour spread — until the rendered picture reads, within a deadline;
   // no sleep, and a picture that never renders still fails at the deadline.
-  await expect
-    .poll(
-      async () => {
-        const s = await goalDrawState(page);
-        return s.count > 200 && s.alternations >= 4 && s.spread > 8;
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(true);
-  const map = await goalDrawState(page);
+  const deadline = Date.now() + 60_000;
+  let map = await goalDrawState(page);
+  while (Date.now() < deadline && !(map.count > 200 && map.alternations >= 4 && map.spread > 8)) {
+    await page.waitForTimeout(250);
+    map = await goalDrawState(page);
+  }
+  // #810 — the failure message carries the state the picture was in, so the next report says
+  // whether the goal bytes were there and what the preview thought it was doing.
+  const drawDiagnostic = await page.evaluate(() => ({
+    target: window.__caseMaker!.engraveTargetState(),
+    preview: window.__caseMaker!.engravePreviewState(),
+  }));
+  const drawWords = `draw ${JSON.stringify(map)} diag ${JSON.stringify(drawDiagnostic)}`;
   // THE LOBES MUST READ. Three crests around the map's arc are several brightness swings in the
   // row-mean profile — a uniform band (the defect the manager saw) measures zero.
-  expect(map.alternations, 'the depth ramp varies around the stock (the lobes are legible)').toBeGreaterThanOrEqual(4);
-  expect(map.spread, 'crests and troughs differ in colour, not just in position').toBeGreaterThan(8);
+  expect(map.count, drawWords).toBeGreaterThan(200);
+  expect(map.alternations, drawWords).toBeGreaterThanOrEqual(4);
+  expect(map.spread, drawWords).toBeGreaterThan(8);
   await shoot(page, 'lobed-shaft-map.png');
 
   // ── The Stock view: the SAME buffer wrapped onto the rod, so the lobes turn with it. ──
