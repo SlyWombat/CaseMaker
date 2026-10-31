@@ -256,8 +256,11 @@ export function EngraveJobFileBar({
                 data-testid="engrave-save"
                 disabled={saveProgramBlocker !== null}
                 title={
-                  saveProgramBlocker ??
-                  'Save the generated program to carry it to the Cut step, or to open in Makera Studio.'
+                  saveProgramBlocker !== null
+                    ? // #803 — the reason Save is closed lives HERE, on the item, not as a
+                      // sentence under the footer's primary about a button not on screen.
+                      `Save is disabled — ${saveProgramBlocker}${/[.!?]$/.test(saveProgramBlocker) ? '' : '.'}`
+                    : 'Save the generated program to carry it to the Cut step, or to open in Makera Studio.'
                 }
                 style={MENU_ITEM}
                 onClick={() => choose(onSaveProgram)}

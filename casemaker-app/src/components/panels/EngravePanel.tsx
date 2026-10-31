@@ -4,7 +4,7 @@ import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/
 import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
-import { useEngraveRunStore, firstRunError, gateViewFor, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker, withPeriod } from '@/store/engraveRunStore';
+import { useEngraveRunStore, firstRunError, gateViewFor, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
 import { useCncModeStore } from '@/store/cncModeStore';
@@ -517,14 +517,6 @@ function Group({
 
 /** The four run rows' states (#206): a tick, a cross, a spinner, or nothing yet. */
 type RowState = 'tick' | 'cross' | 'pending' | 'idle';
-
-/**
- * #688 — the exact sentence `saveBlocker` returns when the clearance acknowledgement is missing.
- * Save's blocker line uses the match to know that Cut is where this one is resolved (and gets the
- * Fix); every other Save blocker is a Design fact. #689 writes the same words where Cut step 1
- * asks the question, so the sentence and the control it names cannot drift apart.
- */
-const CLEARANCE_ACK_BLOCKER = 'tick the clearance check in Cut, step 1';
 
 const ROW_MARK: Record<RowState, string> = { tick: '✓', cross: '✗', pending: '…', idle: '·' };
 const ROW_COLOR: Record<RowState, string> = { tick: '#8fd694', cross: '#f0b4ad', pending: '#c8d3de', idle: '#66707a' };
@@ -1990,6 +1982,52 @@ export function EngravePanel(): JSX.Element {
       <RunTick testid="engrave-run-simulated" state={rowSimulated} label={rowSimulatedText} />
       <RunTick testid="engrave-run-oracle" state={rowOracle} label={rowOracleText} last />
     </>
+  );
+
+  /**
+   * #793/#794 — THE READY CARD: one line above the primary that states the fact ("Program ready"
+   * and the estimate), with the four ticks folded behind its `›`. #803 follow-up (manager, at the
+   * #792 hand-in): the card reads FACT, then ACTION — the line sits above the button, never below.
+   */
+  const readyCard = (
+    <details data-testid="engrave-run-ready" style={{ marginTop: 6, marginBottom: 6 }}>
+      <summary
+        data-testid="engrave-run-ready-summary"
+        style={{
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 6,
+          fontSize: 12,
+          color: '#c8d3de',
+          listStyle: 'none',
+        }}
+      >
+        <span aria-hidden style={{ color: ROW_COLOR.tick }}>
+          ✓
+        </span>
+        <span>Program ready</span>
+        {runTimeText !== null && (
+          <>
+            <span aria-hidden style={{ color: '#66707a' }}>
+              ·
+            </span>
+            <span data-testid="engrave-run-time" style={{ color: '#9aa4b0' }}>
+              {runTimeText}
+            </span>
+          </>
+        )}
+        <span aria-hidden data-testid="engrave-run-ready-chevron" style={{ marginLeft: 'auto', color: '#8fb8e0' }}>
+          ›
+        </span>
+      </summary>
+      <div
+        data-testid="engrave-run-rows"
+        style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
+      >
+        {runTicks}
+      </div>
+    </details>
   );
 
   // #432 review R11 — a FACING job has a second program, and a withheld facing file must not be
@@ -3807,7 +3845,9 @@ export function EngravePanel(): JSX.Element {
         )}
 
         {/* 8 — generate → verify → simulate → oracle → save. #792 — no subheading: the primary
-            button is the step. */}
+            button is the step. #794/#803 — the Ready card is the FACT above it, and it precedes
+            the action. */}
+      {!blocked && runReady && readyCard}
       <div data-testid="engrave-generate-slot">
         {/* #688 — the blocker is the button's OWN sentence with its Fix (design §1 principle 4).
             It used to be one tooltip for two causes, "Fix the errors above first.", which could
@@ -3906,61 +3946,20 @@ export function EngravePanel(): JSX.Element {
                 (#691), whose data is already the run view's. */}
             {/* #793 — before any run there is nothing to report, so nothing is drawn. While a run
                 works, or after one that did not pass, the four ticks are the one line. A run that
-                passed and still matches the job collapses to the Ready card, its ticks folded
-                behind the `›` so the next step is what the eye lands on. */}
-            {runSaysSomething &&
-              (runReady ? (
-                <details data-testid="engrave-run-ready" style={{ marginTop: 6 }}>
-                  <summary
-                    data-testid="engrave-run-ready-summary"
-                    style={{
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'baseline',
-                      gap: 6,
-                      fontSize: 12,
-                      color: '#c8d3de',
-                      listStyle: 'none',
-                    }}
-                  >
-                    <span aria-hidden style={{ color: ROW_COLOR.tick }}>
-                      ✓
-                    </span>
-                    <span>Program ready</span>
-                    {runTimeText !== null && (
-                      <>
-                        <span aria-hidden style={{ color: '#66707a' }}>
-                          ·
-                        </span>
-                        <span data-testid="engrave-run-time" style={{ color: '#9aa4b0' }}>
-                          {runTimeText}
-                        </span>
-                      </>
-                    )}
-                    <span aria-hidden data-testid="engrave-run-ready-chevron" style={{ marginLeft: 'auto', color: '#8fb8e0' }}>
-                      ›
-                    </span>
-                  </summary>
-                  <div
-                    data-testid="engrave-run-rows"
-                    style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
-                  >
-                    {runTicks}
-                  </div>
-                </details>
-              ) : (
-                <div
-                  data-testid="engrave-run-rows"
-                  style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
-                >
-                  {runTicks}
-                  {runTimeText !== null && (
-                    <span data-testid="engrave-run-time" style={{ marginLeft: 'auto', color: '#9aa4b0' }}>
-                      {runTimeText}
-                    </span>
-                  )}
-                </div>
-              ))}
+                passed and still matches the job is the Ready card ABOVE the primary (#794). */}
+            {runSaysSomething && !runReady && (
+              <div
+                data-testid="engrave-run-rows"
+                style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
+              >
+                {runTicks}
+                {runTimeText !== null && (
+                  <span data-testid="engrave-run-time" style={{ marginLeft: 'auto', color: '#9aa4b0' }}>
+                    {runTimeText}
+                  </span>
+                )}
+              </div>
+            )}
             {/* #432 review R11 — the facing program is its own file: name the cutter it runs, or
                 the reason it was withheld. Absent when the job does not face. */}
             {facingJob && <RunRow testid="engrave-run-facing" state={rowFacing} text={rowFacingText} />}
@@ -4026,33 +4025,10 @@ export function EngravePanel(): JSX.Element {
               </p>
             )}
 
-            {saveBlockerText !== null && (
-              <p style={MUTED} data-testid="engrave-save-blocked">
-                Save is disabled — {withPeriod(saveBlockerText!)}{' '}
-                {/* #688 — only the acknowledgement is something Cut can resolve, so only that
-                    blocker gets the Fix. The sentence and #689's Cut step 1 use the same words.
-                    #794 — when the Ready card is up the primary IS "Cut…", so the link would be
-                    the same press twice; it goes with the Ready card. */}
-                {saveBlockerText === CLEARANCE_ACK_BLOCKER && !runReady && (
-                  <button
-                    type="button"
-                    data-testid="engrave-save-fix"
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      padding: 0,
-                      font: 'inherit',
-                      color: '#8fb8e0',
-                      cursor: 'pointer',
-                      textDecoration: 'underline',
-                    }}
-                    onClick={() => showMode('cut')}
-                  >
-                    ▸ Fix
-                  </button>
-                )}
-              </p>
-            )}
+            {/* #803 (as the manager asked at the #792 hand-in) — SAVE SAYS NOTHING HERE. Save is
+                not on this screen any more: it is the File ▾ menu's item, and the reason it is
+                closed is that item's disabled state and its hover. A sentence under the primary
+                about a button the operator cannot see is noise. */}
 
             {/* #419 §3 — the run controls live under CUT now, over the frozen package. Design
                 stops at a verified, saved program; Cut is the approval and the run. */}

@@ -109,9 +109,10 @@ test('#744 — a later program’s cutter collision blocks Save, naming that pro
     timeout: 180_000,
   });
   await expect(await menuItem(page, 'engrave-save')).toBeDisabled();
-  const blocked = page.getByTestId('engrave-save-blocked');
-  await expect(blocked).toContainText('the facing pass (user:744-short-flat)');
-  await expect(blocked).toContainText('shoulder length of 0.1');
+  // #803 — the reason is the File ▾ item's own tooltip (the menu is open from the disabled check).
+  const blocked = page.getByTestId('engrave-save');
+  await expect(blocked).toHaveAttribute('title', /the facing pass \(user:744-short-flat\)/);
+  await expect(blocked).toHaveAttribute('title', /shoulder length of 0\.1/);
 
   const state = await page.evaluate(() => window.__caseMaker!.getEngraveRunState());
   expect(state.programs).toBe(2);

@@ -121,7 +121,7 @@ test('editing the job after Generate makes the result stale and blocks Save', as
 
   await expect(await menuItem(page, 'engrave-save')).toBeDisabled({ timeout: STATE_MS });
   // #581 — the blocker names the input that moved: this edit changed the job.
-  await expect(page.getByTestId('engrave-save-blocked')).toContainText('the job changed since it was generated', { timeout: STATE_MS });
+  await expect(page.getByTestId('engrave-save')).toHaveAttribute('title', /the job changed since it was generated/, { timeout: STATE_MS });
 });
 
 test("the saved .nc, reloaded as a stranger's file, removes the same volume", async ({ cm, page }, testInfo) => {

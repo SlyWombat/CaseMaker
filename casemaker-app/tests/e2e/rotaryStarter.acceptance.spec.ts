@@ -118,9 +118,13 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   // are the operator's, the decimals are three at most, and the bench is one sentence.
   await page.getByTestId('cnc-mode-design').click();
   await expect(await menuItem(page, 'engrave-save')).toBeDisabled();
-  await expect(page.getByTestId('engrave-save-blocked')).toContainText(BENCH);
+  // #803 — the reason is the File ▾ item's tooltip, not a sentence under the primary: the bench
+  // is said once, in the words the operator reads, and nowhere else on the Design surface.
+  const saveTitle = await page.getByTestId('engrave-save').getAttribute('title');
+  expect(saveTitle).toContain(BENCH);
+  expect(saveTitle!.split(BENCH).length - 1).toBe(1);
   const designText = await page.getByTestId('engrave-panel').innerText();
   expect(designText).not.toMatch(ROTARY_CODES);
   expect(designText).not.toMatch(/\.\d{4,}/);
-  expect(designText.split(BENCH).length - 1).toBe(1);
+  expect(designText).not.toContain(BENCH);
 });

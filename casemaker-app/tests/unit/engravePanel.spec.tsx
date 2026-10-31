@@ -1116,23 +1116,23 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     expect(screen.queryByTestId('engrave-ack-label')).toBeNull();
 
     // Save writes the file that goes to Makera Studio, so it does NOT skip the clearance
-    // acknowledgement: it is blocked and says where the statement lives. #794 — the ▸ Fix link is
-    // gone: the Ready card's primary IS "Cut…", and the link would be the same press twice.
+    // acknowledgement: it is blocked and its own hover says where the statement lives. #803 — the
+    // reason is the File ▾ item's tooltip; there is no sentence under the primary about a button
+    // that is not on this screen.
     openFileMenu();
     const save = screen.getByTestId('engrave-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-save-blocked').textContent).toBe(
-      'Save is disabled — tick the clearance check in Cut, step 1. ',
-    );
-    expect(screen.queryByTestId('engrave-save-fix')).toBeNull();
+    expect(save.title).toBe('Save is disabled — tick the clearance check in Cut, step 1.');
+    expect(screen.queryByTestId('engrave-save-blocked')).toBeNull();
   });
 
   it('#726 P7 — a blocked sentence carries one full stop, not two', () => {
     render(<EngravePanel />);
     // No Generate yet, so the gate's own sentence is "Generate first." — one that already ends in
-    // a stop. The panel used to append a second one unconditionally, printing "Generate first..".
-    expect(screen.getByTestId('engrave-save-blocked').textContent).toBe(
-      'Save is disabled — Generate first. ',
+    // a stop. The item's tooltip must not append a second one ("Generate first..").
+    openFileMenu();
+    expect((screen.getByTestId('engrave-save') as HTMLButtonElement).title).toBe(
+      'Save is disabled — Generate first.',
     );
   });
 
@@ -1279,10 +1279,9 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
 
     openFileMenu();
     expect((screen.getByTestId('engrave-save') as HTMLButtonElement).disabled).toBe(true);
-    // The button's own tooltip carries the reason, and the line under it spells it out.
+    // The item's own tooltip carries the reason (#803 — it is not repeated under the primary).
     // #724 B2 — the refusal carries the finding's OWN sentence, not a count of errors.
     expect(screen.getByTestId('engrave-save')!.getAttribute('title')).toContain('cuts to -1.5 mm; only 1 mm is allowed');
-    expect(screen.getByTestId('engrave-save-blocked').textContent).toContain('cuts to -1.5 mm; only 1 mm is allowed');
     expect(screen.getByTestId('engrave-run-errors').textContent).toContain('cuts to -1.5 mm; only 1 mm is allowed');
   });
 });
