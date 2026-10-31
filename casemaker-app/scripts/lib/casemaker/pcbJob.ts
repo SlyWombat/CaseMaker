@@ -20,12 +20,13 @@ import { basename, extname } from 'node:path';
 import type { ManifoldToplevel } from '../../../src/workers/geometry/evaluateOp';
 import { PCB_COPPER_MM } from '../../../src/engine/cnc/stockStart';
 import { defaultEngraveJob, newEngraveCutoutId, newEngraveDrillId, newEngraveShapeId } from '../../../src/engine/cnc/engrave/defaults';
-import { defaultTapeHold } from '../../../src/engine/cnc/engrave/jobSetup';
+import { defaultTapeHold, jobSetups } from '../../../src/engine/cnc/engrave/jobSetup';
 import { embedSource } from '../../../src/engine/cnc/engrave/jobSources';
 import { viseForNewJob } from '../../../src/engine/cnc/fixture';
 import { getTools } from '../../../src/engine/cnc/toolRegistry';
 import type { ToolLibraryEntry } from '../../../src/engine/cnc/toolLibrary';
-import { pcbHoleAssignment } from '../../../src/engine/import/pcbCutters';
+import type { FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
+import { pcbCutterPlan, pcbHoleAssignment } from '../../../src/engine/import/pcbCutters';
 import { planPcbImport, type PcbImportOk, type PcbSourceFile, type PcbWarning } from '../../../src/engine/import/pcbImport';
 import { readPcbArchive } from '../../../src/engine/import/pcbArchive';
 import { defaultSacrificialUnder, noneSacrificial } from '../../../src/engine/cnc/sacrificial';
@@ -45,6 +46,12 @@ export interface PcbJobBuildOpts {
   tabs: { count: number; width: number; height: number };
   /** The owned cutters §3.4 chooses between (default: the registry's own list). */
   tools?: readonly ToolLibraryEntry[];
+  /**
+   * Makera's feed rows, when the caller has them: the engraver and the outline cutter are chosen
+   * from the rows that answer PCB first (§3.4). Absent, a house with no synced catalogue gets its
+   * own cutters and the feeds gate says what it cannot cut.
+   */
+  catalogue?: readonly FeedCatalogueRow[];
 }
 
 export interface PcbJobBuild {
@@ -128,7 +135,9 @@ export async function buildPcbJob(
     if (embedded.skipped !== null) skippedNotes.push(embedded.skipped);
   }
 
-  // §3.4 — drill where an owned cutter is the hole's size, bore where a flat must helix it.
+  // §3.4 — drill where an owned cutter is the hole's size, bore where a flat must helix it; the
+  // engraver owns the isolation and a flat that reaches through the board owns the cut-out. The
+  // modes and the assignment are computed once, from the library as it stands.
   const holes = pcbHoleAssignment(plan.items.drills, opts.tools ?? getTools());
   const drills = plan.items.drills.map((d) => ({ ...d, mode: holes.modes.get(d.id) ?? d.mode }));
 
@@ -172,7 +181,42 @@ export async function buildPcbJob(
       source: 'default',
     },
   };
-  return { ok: true, job, plan, notes: [...skippedNotes, ...plan.notes, ...holes.notes], warnings: plan.warnings };
+  // §3.4 — the setup's cutters, written as ordinary `setups[].tools`/`toolItems` (#472/#746): the
+  // board arrives with all three programs assigned, and a role no owned cutter fills is stated.
+  // Read off the ASSEMBLED job, so the setup's item list is the board's own (the demo lines are
+  // gone by now).
+  const cutters = pcbCutterPlan(
+    { frames: plan.items.frames, drills, cutouts: plan.items.cutouts },
+    opts.tools ?? getTools(),
+    job.stock.thickness + job.breakthrough,
+    opts.catalogue ?? [],
+  );
+  const setup = jobSetups(job)[0]!;
+  const withCutters: EngraveJob =
+    cutters.tools.length === 0
+      ? job
+      : {
+          ...job,
+          setups: [
+            {
+              ...setup,
+              tools: [...cutters.tools],
+              toolItems: Object.fromEntries(
+                cutters.tools.map((key) => [
+                  key,
+                  [...cutters.assignment].filter(([, owns]) => owns === key).map(([id]) => id),
+                ]),
+              ),
+            },
+          ],
+        };
+  return {
+    ok: true,
+    job: withCutters,
+    plan,
+    notes: [...skippedNotes, ...plan.notes, ...holes.notes, ...cutters.notes],
+    warnings: plan.warnings,
+  };
 }
 
 /**

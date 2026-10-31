@@ -30,6 +30,7 @@ import { getMeshBlob, putMeshBlob } from '@/platform/meshBlobs';
 import {
   itemKindWord,
   itemRowName,
+  jobSetups,
   jobTool,
   type EngraveNamedItem,
 } from '@/engine/cnc/engrave/jobSetup';
@@ -48,7 +49,7 @@ import { DESIGN_POCKET_KEEP_OUT_ID, designReplacesItems, mergeDesignItems, type 
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import type { BlankParams } from '@/types/blank';
 import { materializeSetups } from '@/engine/cnc/setups/authoring';
-import type { CutParams } from '@/engine/cnc/feeds';
+import { feedCatalogueRows, type CutParams } from '@/engine/cnc/feeds';
 import type {
   BracketHold,
   EngraveBorderShape,
@@ -102,7 +103,7 @@ import type {
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import { withSource } from '@/engine/cnc/engrave/jobSources';
 import { PCB_COPPER_MM, pcbStockNotice } from '@/engine/cnc/stockStart';
-import { pcbHoleAssignment } from '@/engine/import/pcbCutters';
+import { pcbCutterPlan, pcbHoleAssignment, withPcbCutters } from '@/engine/import/pcbCutters';
 
 /** What {@link EngraveJobState.importPcbFiles} reports to the door that asked for the import. */
 export type PcbImportOutcome =
@@ -2488,14 +2489,27 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         });
         if (!planned.ok) return { ok: false, reason: planned.error };
         const plan = planned.plan;
-        // §3.4 — drill where an owned cutter IS the hole's size, bore where a flat must helix it.
-        // The modes are computed once, before the one `apply`, from the library as it stands.
+        // §3.4 — drill where an owned cutter IS the hole's size, bore where a flat must helix it;
+        // the engraver owns the isolation and a flat that reaches through the board owns the
+        // cut-out. The modes and the assignment are computed once, before the one `apply`, from
+        // the library as it stands.
         const holes = pcbHoleAssignment(plan.items.drills, getTools());
         const drills = plan.items.drills.map((d) => ({ ...d, mode: holes.modes.get(d.id) ?? d.mode }));
+        const cutters = pcbCutterPlan(
+          { frames: plan.items.frames, drills, cutouts: plan.items.cutouts },
+          getTools(),
+          job.stock.thickness + job.breakthrough,
+          feedCatalogueRows(),
+        );
+        const boardItemIds = [
+          ...plan.items.frames.map((f) => f.id),
+          ...drills.map((d) => d.id),
+          ...plan.items.cutouts.map((c) => c.id),
+        ];
         apply((current) => {
           let sources = current.sourceFiles;
           for (const s of planned.sources) sources = withSource(sources, s.source);
-          return {
+          const merged: EngraveJob = {
             ...current,
             // The board is a whole job: on a document still holding only the shipped demo lines
             // (CASE / MAKER / first chips), those are REPLACED — the same rule a design import
@@ -2507,11 +2521,20 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             cutouts: [...(current.cutouts ?? []), ...plan.items.cutouts],
             ...(sources === undefined ? {} : { sourceFiles: sources }),
           };
+          if (cutters.tools.length === 0) return merged;
+          // The cutter plan is written as ordinary setups[0] tools/toolItems (#472/#746), so the
+          // board arrives with its programs assigned; a role no owned cutter fills is stated in
+          // the notes and its items stay unassigned for the job's own check to name.
+          const setups = jobSetups(merged);
+          const first = setups[0]!;
+          const written = withPcbCutters(first, cutters, boardItemIds);
+          return { ...merged, setups: [written, ...setups.slice(1)] };
         });
         const notes = [
           ...planned.skipped.map((n) => `${n} is not a Gerber or drill file and was not used.`),
           ...plan.notes,
           ...holes.notes,
+          ...cutters.notes,
         ];
         return {
           ok: true,

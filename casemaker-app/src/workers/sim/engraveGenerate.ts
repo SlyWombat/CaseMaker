@@ -5091,12 +5091,18 @@ export function engraveGenerate(
     // takes #472's model exactly as before (one program, or rough + measured rest). Partitioning
     // rather than special-casing the whole group keeps the (setup, tool) list the one split — the
     // drill is just another program in it — and leaves the rest-pass geometry untouched.
+    //
+    // #743 P-5 — EACH DRILL CUTTER IS ITS OWN PROGRAM. A PCB has several hole sizes, each drilled
+    // by the bit of that size (§3.4), so two drill refs in one setup are two programs. Grouping
+    // them (the first version) silently dropped every drill after the first: a board's ⌀1 holes
+    // would have had no file carrying them.
     const segments: { drill: boolean; refs: JobProgramRef[] }[] = [];
     for (const ref of group) {
       const drill = toolForProgram(ref, job, tool, shop)?.shape === 'drill';
       const last = segments.at(-1);
-      if (last !== undefined && last.drill === drill) last.refs.push(ref);
-      else segments.push({ drill, refs: [ref] });
+      if (drill) segments.push({ drill: true, refs: [ref] });
+      else if (last !== undefined && last.drill === false) last.refs.push(ref);
+      else segments.push({ drill: false, refs: [ref] });
     }
 
     for (const segment of segments) {

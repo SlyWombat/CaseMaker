@@ -151,8 +151,23 @@ export function kindedWork(job: EngraveJob): KindedItem[] {
   }
   for (const item of job.combined ?? []) {
     if (!usable(item)) continue;
-    const cone = isCone(item);
-    push(item.id, item.id, cone ? 'cone' : 'flat', item.depth, cone ? 'a V-carve / inlay is a cone' : 'a region is a flat pocket');
+    // #743 — AN ISOLATION BAND IS A CONE'S WORK. A frame flagged `isolation` exists to open the
+    // copper between two pieces the board keeps: its design is correct at the COLOUR PLANE, where
+    // the engraving bit's flank touches the copper's underside, so a flat end mill is the wrong
+    // cutter by construction (and a flat wider than the band opens nothing at all).
+    const isolation = item.kind === 'frame' && item.isolation === true;
+    const cone = isCone(item) || isolation;
+    push(
+      item.id,
+      item.id,
+      cone ? 'cone' : 'flat',
+      item.depth,
+      isolation
+        ? 'an isolation band is a cone’s flank'
+        : cone
+          ? 'a V-carve / inlay is a cone'
+          : 'a region is a flat pocket',
+    );
   }
   for (const vector of job.vectors ?? []) {
     if (!usable(vector)) continue;

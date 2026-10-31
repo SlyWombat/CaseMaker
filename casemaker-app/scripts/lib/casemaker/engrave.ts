@@ -2177,6 +2177,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     const built = await buildPcbJob(tl, files, {
       blank,
       tabs: { count: tabs.count, width: tabs.widthMm, height: tabs.heightMm },
+      // §3.4 — the engraver and the outline cutter come from the rows that answer PCB first.
+      catalogue: catalogueRows,
     });
     if (!built.ok) fail(built.error);
     const docProblem = jobDocumentProblem(built.job);
