@@ -243,6 +243,23 @@ export function MachineStatusStrip(): JSX.Element | null {
   const job = useEngraveJobStore((s) => s.job);
   // #652 — the program the machine holds (prepared or running), for its own frozen cutter.
   const prepared = useMachineRunStore((s) => (machine === null ? null : s.runs[machineKey(machine)] ?? null));
+  // #826 — the diagnostic line's last CHANGED reading (the heartbeat folds it in), and the
+  // endstops it says are held, in the firmware's own order.
+  const diagnose = useMachineStore((s) => s.diagnose);
+  const heldLimits =
+    diagnose === null
+      ? []
+      : (
+          [
+            ['X min', diagnose.endstops.xMin],
+            ['X max', diagnose.endstops.xMax],
+            ['Y min', diagnose.endstops.yMin],
+            ['Y max', diagnose.endstops.yMax],
+            ['Z min', diagnose.endstops.zMin],
+          ] as const
+        )
+          .filter(([, held]) => held === true)
+          .map(([name]) => name);
   const forgetAccessories = useStripAccessoryStore((s) => s.forget);
   // #530 — the camera, when the machine's profile has one: a link inside the same popover, so the
   // strip's one-line rule survives and the bed is still a press away.
@@ -549,6 +566,42 @@ export function MachineStatusStrip(): JSX.Element | null {
                   </li>
                 )}
               </ul>
+            )}
+            {/* #826 — THE SWITCHES, from the diagnostic line the heartbeat polls alongside `?`.
+                A reading is folded in only when it CHANGED, so what is drawn here is the last
+                change, not a stream; the probe input is the live companion to #788's diagram. */}
+            {diagnose !== null && (
+              <div
+                data-testid="machine-status-diagnose"
+                style={{ marginTop: 8, paddingTop: 7, borderTop: '1px solid #2a2f36', lineHeight: 1.6 }}
+              >
+                <p style={{ margin: '0 0 2px', color: '#a8b4c0' }}>Switches</p>
+                <ul style={{ margin: 0, paddingLeft: 14 }}>
+                  {diagnose.probe !== null && (
+                    <li data-testid="machine-status-probe" data-state={diagnose.probe ? 'touched' : 'open'}>
+                      Probe — {diagnose.probe ? 'touched' : 'open'}
+                    </li>
+                  )}
+                  {diagnose.coverClosed !== null && (
+                    <li data-testid="machine-status-cover" data-state={diagnose.coverClosed ? 'closed' : 'open'}>
+                      Cover — {diagnose.coverClosed ? 'closed' : 'open'}
+                    </li>
+                  )}
+                  {diagnose.estop !== null && (
+                    <li data-testid="machine-status-estop" data-state={diagnose.estop ? 'pressed' : 'released'}>
+                      E-stop — {diagnose.estop ? 'pressed' : 'released'}
+                    </li>
+                  )}
+                  <li data-testid="machine-status-limits" data-state={heldLimits.length === 0 ? 'clear' : 'held'}>
+                    Limits — {heldLimits.length === 0 ? 'all clear' : `${heldLimits.join(', ')} held`}
+                  </li>
+                </ul>
+                {diagnose.rssi !== null && (
+                  <p style={{ margin: '4px 0 0' }} data-testid="machine-status-rssi">
+                    Wi-Fi — {diagnose.rssi} dBm
+                  </p>
+                )}
+              </div>
             )}
             {/* #530 — the bed, from the same place the readings are: absent for a machine whose
                 profile names no camera (and the pane itself is then unreachable). */}

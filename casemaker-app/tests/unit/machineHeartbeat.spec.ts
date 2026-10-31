@@ -34,11 +34,18 @@ function observation(over: Partial<MachineObservation> = {}): MachineObservation
 
 /** A client whose answer can be flipped between ticks, so transitions can be scripted. */
 function makeClient() {
-  const state = { reachable: true };
+  const state = { reachable: true, diagnose: null as string | null };
   const client: MachineHeartbeatClient = {
-    status: async () => ({ ok: state.reachable, text: state.reachable ? '<Idle|MPos:0,0,0>' : null }),
+    inspect: async () => ({
+      status: { ok: state.reachable, text: state.reachable ? '<Idle|MPos:0,0,0>' : null },
+      diagnose: state.diagnose === null ? null : { ok: true, text: state.diagnose },
+    }),
   };
-  return { client, setReachable: (v: boolean) => (state.reachable = v) };
+  return {
+    client,
+    setReachable: (v: boolean) => (state.reachable = v),
+    setDiagnose: (line: string | null) => (state.diagnose = line),
+  };
 }
 
 function rememberMachine(): void {
@@ -85,7 +92,7 @@ describe('#555 — machineHeartbeat', () => {
 
   it('a rejected status read is a result (unreachable), not a fault', async () => {
     setMachineHeartbeatLoader(async () => ({
-      status: async () => {
+      inspect: async () => {
         throw new Error('tcp: connection refused');
       },
     }));
@@ -142,7 +149,10 @@ describe('#555 — machineHeartbeat', () => {
   // stops it being drawn as live, and the line is still the last thing the machine said.
   it('records the status line it read, and the parsed work position with it', async () => {
     setMachineHeartbeatLoader(async () => ({
-      status: async () => ({ ok: true, text: '<Idle|MPos:1,2,3|WPos:11.5,22.25,-0.5|F:0,0,100>' }),
+      inspect: async () => ({
+        status: { ok: true, text: '<Idle|MPos:1,2,3|WPos:11.5,22.25,-0.5|F:0,0,100>' },
+        diagnose: null,
+      }),
     }));
     rememberMachine();
 
@@ -152,6 +162,34 @@ describe('#555 — machineHeartbeat', () => {
     const machine = useMachineStore.getState().machine!;
     expect(machine.status).toContain('WPos:11.5,22.25,-0.5');
     expect(machine.statusLine?.wpos).toMatchObject({ x: 11.5, y: 22.25, z: -0.5 });
+  });
+
+  // #826 — the same tick asks `diagnose`; a changed reading reaches the store, an unchanged one
+  // does not (the monitor shows changes, not a stream).
+  it('folds the diagnostic line in, and keeps the same reading when nothing changed', async () => {
+    const { client, setDiagnose } = makeClient();
+    setMachineHeartbeatLoader(async () => client);
+    rememberMachine();
+    setDiagnose('{S:0|T:0|C:1|E:0,0,0,0,0,1,1,0|P:0,0|I:0|RSSI:-40}');
+
+    startHeartbeat({ host: '192.168.10.43', port: 2222 });
+    await vi.advanceTimersByTimeAsync(0);
+    const first = useMachineStore.getState().diagnose;
+    expect(first?.probe).toBe(false);
+    expect(first?.coverClosed).toBe(true);
+    expect(first?.rssi).toBe(-40);
+
+    // The same line next tick: the store keeps the SAME object, so nothing re-renders.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(useMachineStore.getState().diagnose).toBe(first);
+
+    // The probe is pressed: the reading moves.
+    setDiagnose('{S:0|T:0|C:1|E:0,0,0,0,0,1,1,0|P:1,0|I:0|RSSI:-41}');
+    await vi.advanceTimersByTimeAsync(2000);
+    const next = useMachineStore.getState().diagnose;
+    expect(next).not.toBe(first);
+    expect(next?.probe).toBe(true);
+    expect(next?.rssi).toBe(-41);
   });
 
   it('does not persist the live line: the record stays the check’s', async () => {

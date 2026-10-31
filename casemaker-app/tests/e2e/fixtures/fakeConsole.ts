@@ -79,9 +79,19 @@ export interface FakeConsoleOptions {
   steps?: number;
 }
 
+/** #826 — the bench's own diagnostic line: probe open, cover closed, no limit, e-stop released. */
+export const DIAGNOSE_IDLE =
+  '{S:0,10000,0,0,20,22|L:0,0|V:1,26|F:0,0|G:1,0,0,0,0|T:0|C:1|E:0,0,0,0,0,1,1,0|P:0,0|I:0|RSSI:-40}';
+
+/** #826 — the same line with the stylus held: the probe input reads 1. */
+export const DIAGNOSE_TOUCHED =
+  '{S:0,10000,0,0,20,22|L:0,0|V:1,26|F:0,0|G:1,0,0,0,0|T:0|C:1|E:0,0,0,0,0,1,1,0|P:1,0|I:0|RSSI:-41}';
+
 export interface FakeConsole {
   /** Every line the app wrote, in order (`?` for a status poll). */
   lines(): string[];
+  /** #826 — the `diagnose` answer from now on; a spec flips it to prove the monitor follows changes. */
+  setDiagnose(line: string): void;
 }
 
 /**
@@ -97,6 +107,7 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   let percent = 0;
   let line = 0;
   let elapsed = 0;
+  let diagnoseLine = DIAGNOSE_IDLE;
 
   const statusLine = (): string => {
     if (phase === 'running') {
@@ -113,6 +124,8 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   const replyFor = (text: string): number[] => {
     const lineText = text.trim();
     if (lineText === '?') return frame(PTYPE_REPLY, `${statusLine()}\r\n`);
+    // #826 — the diagnostic read the heartbeat sends alongside `?`.
+    if (lineText === 'diagnose') return frame(PTYPE_REPLY, `${diagnoseLine}\r\n`);
     if (lineText.startsWith('play ')) {
       phase = 'running';
       percent = 0;
@@ -177,5 +190,5 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
     return route.fulfill({ json: {} });
   });
 
-  return { lines: () => [...seen] };
+  return { lines: () => [...seen], setDiagnose: (next: string) => (diagnoseLine = next) };
 }

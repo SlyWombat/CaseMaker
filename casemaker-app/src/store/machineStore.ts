@@ -22,7 +22,7 @@
 
 import { create } from 'zustand';
 import type { MachineObservation, MachineProbeResult } from '@/platform/machineProbe';
-import { readStatusLine } from '@/platform/desktop/protocol';
+import { readDiagnoseLine, readStatusLine, type DiagnoseReading } from '@/platform/desktop/protocol';
 
 const MACHINE_KEY = 'casemaker.machine.v1';
 
@@ -88,8 +88,16 @@ export interface MachineState {
    * written). Identity and `observedAt` stay the check's; only what the machine just said moves.
    */
   noteLiveStatusLine: (status: string) => void;
+  /**
+   * #826 — fold one `diagnose` answer in WITHOUT persisting it, and only when it CHANGED: a steady
+   * machine (same probe, same cover, same signal) keeps the last reading and causes no render. The
+   * monitor shows what is different, not a stream of identical polls.
+   */
+  noteDiagnoseLine: (line: string) => void;
   /** #527 — the viewport draws the probe, not the cutter, while {@link registrationActive}. */
   setRegistrationActive: (active: boolean) => void;
+  /** #826 — the last CHANGED `diagnose` reading: probe input, cover, endstops, e-stop, Wi-Fi. */
+  diagnose: DiagnoseReading | null;
 }
 
 interface MachineSlice {
@@ -100,6 +108,8 @@ interface MachineSlice {
   heartbeat: MachineHeartbeat;
   /** #527 — see {@link MachineState.registrationActive}. Never persisted. */
   registrationActive: boolean;
+  /** #826 — see {@link MachineState.diagnose}. Never persisted (a poll's live claim). */
+  diagnose: DiagnoseReading | null;
 }
 
 const EMPTY: MachineSlice = {
@@ -109,6 +119,7 @@ const EMPTY: MachineSlice = {
   checkedAt: null,
   heartbeat: { reachable: null, lastSeenAt: null },
   registrationActive: false,
+  diagnose: null,
 };
 
 /** The four outcomes, stated once so a corrupted or older payload cannot invent a fifth. */
@@ -165,6 +176,7 @@ function loadMachine(): MachineSlice {
       // Reachability is a live claim, never a record: the heartbeat re-establishes it on open.
       heartbeat: { reachable: null, lastSeenAt: null },
       registrationActive: false,
+      diagnose: null,
     };
   } catch {
     return { ...EMPTY };
@@ -207,6 +219,8 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
       heartbeat: { reachable: null, lastSeenAt: null },
       // A check is not a registration run; a stale "registering" claim must not outlive one.
       registrationActive: false,
+      // A different machine's diagnostic reading has nothing to do with this one.
+      diagnose: null,
     };
     set(slice);
     persist(slice);
@@ -222,6 +236,8 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
       checkedAt: get().checkedAt,
       heartbeat: get().heartbeat,
       registrationActive: get().registrationActive,
+      // A live status answer is the SAME machine; its switches reading still stands.
+      diagnose: get().diagnose,
     };
     set(slice);
     persist(slice);
@@ -249,6 +265,15 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
     // NOT persisted and `observedAt` untouched: the heartbeat runs every 2 s, and the record's
     // stamp is the CHECK's moment, not the poll's (see the interface notes).
     set({ machine: { ...current, status, statusLine: readStatusLine(status) } });
+  },
+
+  noteDiagnoseLine: (line) => {
+    const reading = readDiagnoseLine(line);
+    const current = get().diagnose;
+    // #826 — SHOW CHANGES, NOT A STREAM. The same reading keeps the same object, so a steady
+    // machine never re-renders the monitor; a switch, limit or signal that moved does.
+    if (current !== null && JSON.stringify(current) === JSON.stringify(reading)) return;
+    set({ diagnose: reading });
   },
 
   setRegistrationActive: (active) => set({ registrationActive: active }),

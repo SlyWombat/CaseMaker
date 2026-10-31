@@ -482,6 +482,61 @@ describe('#652 the strip’s follow-ups', () => {
   });
 });
 
+// #826 — THE SWITCHES, from the diagnose line the heartbeat folds in: the probe input, the cover,
+// the endstops, the e-stop and the Wi-Fi signal, in the same popover.
+describe('#826 the diagnostic switches', () => {
+  it('shows the probe input, the cover, the limits, the e-stop and the signal', () => {
+    remember('<Idle|MPos:0,0,0|WPos:0,0,0>');
+    useMachineStore.setState({
+      diagnose: {
+        coverClosed: true,
+        endstops: { xMin: false, xMax: false, yMin: false, yMax: false, zMin: false },
+        probe: false,
+        calibrate: false,
+        estop: false,
+        rssi: -40,
+      },
+    });
+    render(<MachineStatusStrip />);
+    fireEvent.click(screen.getByTestId('machine-status-state'));
+    expect(screen.getByTestId('machine-status-probe').textContent).toBe('Probe — open');
+    expect(screen.getByTestId('machine-status-probe').getAttribute('data-state')).toBe('open');
+    expect(screen.getByTestId('machine-status-cover').textContent).toBe('Cover — closed');
+    expect(screen.getByTestId('machine-status-estop').textContent).toBe('E-stop — released');
+    expect(screen.getByTestId('machine-status-limits').textContent).toBe('Limits — all clear');
+    expect(screen.getByTestId('machine-status-rssi').textContent).toBe('Wi-Fi — -40 dBm');
+  });
+
+  it('a held limit is named, the probe reads touched, and an open cover says so', () => {
+    remember('<Idle|MPos:0,0,0|WPos:0,0,0>');
+    useMachineStore.setState({
+      diagnose: {
+        coverClosed: false,
+        endstops: { xMin: true, xMax: false, yMin: false, yMax: true, zMin: false },
+        probe: true,
+        calibrate: false,
+        estop: true,
+        rssi: -77,
+      },
+    });
+    render(<MachineStatusStrip />);
+    fireEvent.click(screen.getByTestId('machine-status-state'));
+    expect(screen.getByTestId('machine-status-probe').textContent).toBe('Probe — touched');
+    expect(screen.getByTestId('machine-status-cover').textContent).toBe('Cover — open');
+    expect(screen.getByTestId('machine-status-estop').textContent).toBe('E-stop — pressed');
+    expect(screen.getByTestId('machine-status-limits').textContent).toBe('Limits — X min, Y max held');
+    expect(screen.getByTestId('machine-status-limits').getAttribute('data-state')).toBe('held');
+    expect(screen.getByTestId('machine-status-rssi').textContent).toBe('Wi-Fi — -77 dBm');
+  });
+
+  it('draws none of it before a diagnostic line has been read', () => {
+    remember('<Idle|MPos:0,0,0|WPos:0,0,0>');
+    render(<MachineStatusStrip />);
+    fireEvent.click(screen.getByTestId('machine-status-state'));
+    expect(screen.queryByTestId('machine-status-diagnose')).toBeNull();
+  });
+});
+
 // #659 — THE STATUS MONITOR behind a click on the state element: nothing added to the strip's text,
 // the readings in operator words, Escape closes.
 describe('#659 the state popover', () => {

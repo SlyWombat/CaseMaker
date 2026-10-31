@@ -28,6 +28,7 @@ import {
   openConsole,
   readConfigKey,
   runDeleteSd,
+  runDiagnose,
   runDiscovery,
   runListSd,
   runIdentify,
@@ -245,6 +246,32 @@ export async function status(
   const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     return await runStatus(transport, conn, { windowMs: opts.windowMs });
+  } finally {
+    await closeQuietly(transport, conn);
+  }
+}
+
+/** One connection's two motion-free reads: the status line and the diagnostic line (#826). */
+export interface MachineInspection {
+  status: MachineStatus;
+  diagnose: MachineStatus;
+}
+
+/**
+ * #826 — THE STATUS AND THE DIAGNOSE ON ONE CONNECTION. The heartbeat already opens a socket
+ * every 2 s; asking the diagnostic line on a SECOND connection would double that churn for a
+ * read the controller answers in milliseconds. Both are fixed, motion-free reads.
+ */
+export async function inspect(
+  target: MachineTarget,
+  opts: BridgeOptions & { windowMs?: number } = {},
+): Promise<MachineInspection> {
+  const transport = transportOf(opts);
+  const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+  try {
+    const status = await runStatus(transport, conn, { windowMs: opts.windowMs });
+    const diagnose = await runDiagnose(transport, conn, { windowMs: opts.windowMs });
+    return { status, diagnose };
   } finally {
     await closeQuietly(transport, conn);
   }

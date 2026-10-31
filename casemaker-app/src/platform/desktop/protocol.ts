@@ -766,18 +766,8 @@ export function alarmLine(text: string | null): string | null {
   return null;
 }
 
-/** Send `?` and return the controller's status line verbatim. Empty is reported as `ok: false`. */
-export async function runStatus(
-  transport: MachineTransport,
-  conn: number,
-  opts: { windowMs?: number } = {},
-): Promise<MachineStatus> {
-  const windowMs = opts.windowMs ?? 1500;
-  const channel = new FrameChannel(transport, conn);
-
-  await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_SINGLE, new Uint8Array([STATUS_POLL_BYTE])));
-  const frames = await channel.drain(windowMs);
-
+/** The reply frames of one status-family read, folded into the one answer callers compare. */
+function statusFromFrames(frames: readonly Frame[]): MachineStatus {
   const statusLines: string[] = [];
   const diagnostics: string[] = [];
   for (const frame of frames) {
@@ -788,6 +778,103 @@ export async function runStatus(
   }
   const text = statusLines.join('\n').trim();
   return { ok: text.length > 0, text: text.length > 0 ? text : null, diagnostics };
+}
+
+/** Send `?` and return the controller's status line verbatim. Empty is reported as `ok: false`. */
+export async function runStatus(
+  transport: MachineTransport,
+  conn: number,
+  opts: { windowMs?: number } = {},
+): Promise<MachineStatus> {
+  const windowMs = opts.windowMs ?? 1500;
+  const channel = new FrameChannel(transport, conn);
+
+  await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_SINGLE, new Uint8Array([STATUS_POLL_BYTE])));
+  return statusFromFrames(await channel.drain(windowMs));
+}
+
+/**
+ * #826 — THE `diagnose` LINE. Studio's Diagnostic panel polls it; the firmware builds it in
+ * `Kernel::get_diagnose_string` and the 2026-10-30 bench captured it (docs/bench/
+ * 2026-10-30-3d-probe-survey.md):
+ *
+ *   {S:..|L:..|V:..|F:..|G:..|T:<toolsensor out>|C:<probecharger out>|E:<endstops>|P:<probe>,<calibrate>|I:<estop>|RSSI:<dBm>}
+ *
+ * A fixed, motion-free read like `?`: no user text, so it does not go through the console gate.
+ * The `diagnose` word is a console frame (multi-byte), not a realtime byte.
+ */
+export async function runDiagnose(
+  transport: MachineTransport,
+  conn: number,
+  opts: { windowMs?: number } = {},
+): Promise<MachineStatus> {
+  const windowMs = opts.windowMs ?? 1500;
+  const channel = new FrameChannel(transport, conn);
+  await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_MULTI, utf8('diagnose')));
+  return statusFromFrames(await channel.drain(windowMs));
+}
+
+/**
+ * #826 — WHAT THE `diagnose` LINE CARRIES, named. The E slots are the firmware's own
+ * (`Endstops.cpp`): data[0..4] are the first five limit-enabled endstops in axis order (X min,
+ * X max, Y min, Y max, Z min), and data[5] is then OVERWRITTEN by the two cover switches ANDed
+ * (`cover_endstop && cover_endstop2`) — so the sixth value is the cover, never Z max. When the
+ * rotary's home flags are set, A and B follow the six; they are not read here (the strip's ATC
+ * cell already reports `A:` from the status line).
+ *
+ * P is the probe and the calibrate (tool-setter) inputs; I is the emergency stop; RSSI is the
+ * Wi-Fi signal, dBm. Every field is null when the line does not carry it — a value the machine
+ * did not say is never invented as 0.
+ */
+export interface DiagnoseReading {
+  /** E slot 6: both cover switches closed (true = the cover is closed). */
+  coverClosed: boolean | null;
+  /** E slots 1–5, the firmware's order. True = the endstop reads triggered/held. */
+  endstops: {
+    xMin: boolean | null;
+    xMax: boolean | null;
+    yMin: boolean | null;
+    yMax: boolean | null;
+    zMin: boolean | null;
+  };
+  /** P slot 1: the probe input (true = touching / triggered). */
+  probe: boolean | null;
+  /** P slot 2: the calibrate (tool-setter) input. */
+  calibrate: boolean | null;
+  /** I: the emergency stop. */
+  estop: boolean | null;
+  /** RSSI, dBm. */
+  rssi: number | null;
+}
+
+/** The bit at `at`, or null when the field did not carry that slot. */
+function diagnoseBit(bits: readonly boolean[], at: number): boolean | null {
+  return at < bits.length ? bits[at]! : null;
+}
+
+/** Parse one `diagnose` line into the facts the monitor shows (#826). Pure; absent is null. */
+export function readDiagnoseLine(text: string): DiagnoseReading {
+  const bits = (field: string | null): boolean[] =>
+    field === null ? [] : field.split(',').map((value) => value.trim() === '1');
+  const e = bits(statusField(text, 'E'));
+  const p = bits(statusField(text, 'P'));
+  const i = statusField(text, 'I');
+  const rssiField = statusField(text, 'RSSI');
+  const rssi = rssiField === null ? null : Number.parseInt(rssiField.split(',')[0]!.trim(), 10);
+  return {
+    coverClosed: diagnoseBit(e, 5),
+    endstops: {
+      xMin: diagnoseBit(e, 0),
+      xMax: diagnoseBit(e, 1),
+      yMin: diagnoseBit(e, 2),
+      yMax: diagnoseBit(e, 3),
+      zMin: diagnoseBit(e, 4),
+    },
+    probe: diagnoseBit(p, 0),
+    calibrate: diagnoseBit(p, 1),
+    estop: i === null ? null : i.trim() === '1',
+    rssi: rssi === null || Number.isNaN(rssi) ? null : rssi,
+  };
 }
 
 // ---------------------------------------------------------------------------

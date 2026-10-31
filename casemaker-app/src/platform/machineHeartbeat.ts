@@ -9,6 +9,10 @@
  * (never faster), records reachable/unreachable/last-seen into `machineStore`, and posts a notice
  * on the store when the answer flips.
  *
+ * #826 — the same tick also asks `diagnose`, on the SAME connection (`bridge.inspect`): the
+ * controller's motion-free line with the probe input, the cover, the endstops, the e-stop and the
+ * Wi-Fi signal. The store keeps a changed reading only, so a steady machine causes no render.
+ *
  * THE WEB-SAFE BOUNDARY, same shape as `machineProbe` / `machineUpload`: the real client is the
  * bridge reached through `loadMachineBridge()` behind the `canReachMachine` guard — never a
  * top-level import of `platform/desktop/`, or the bridge leaks into the web bundle and
@@ -46,20 +50,30 @@ export interface HeartbeatStatus {
   text: string | null;
 }
 
-/** The socket-facing half: one status read, the same shape `MachineProbeClient.status` has. */
+/** #826 — one tick's two reads: the status line, and the diagnostic line when it answered. */
+export interface HeartbeatInspection {
+  status: HeartbeatStatus;
+  diagnose: HeartbeatStatus | null;
+}
+
+/** The socket-facing half: one inspection per tick, both reads on one connection. */
 export interface MachineHeartbeatClient {
-  status(target: HeartbeatTarget): Promise<HeartbeatStatus>;
+  inspect(target: HeartbeatTarget): Promise<HeartbeatInspection>;
 }
 
 /** The real client: the bridge, reached only through the capability guard. */
 async function loadRealClient(): Promise<MachineHeartbeatClient> {
   const bridge = await loadMachineBridge();
   return {
-    status: async (target) => {
-      const reading = await bridge.status(target, {
+    inspect: async (target) => {
+      const reading = await bridge.inspect(target, {
         connectTimeoutMs: machineTiming(liveShopDefaults()).connectTimeoutMs,
       });
-      return { ok: reading.ok, text: reading.text };
+      return {
+        status: { ok: reading.status.ok, text: reading.status.text },
+        // A controller that does not answer the word (an older firmware) simply has no reading.
+        diagnose: { ok: reading.diagnose.ok, text: reading.diagnose.text },
+      };
     },
   };
 }
@@ -106,13 +120,16 @@ export function startHeartbeat(target: HeartbeatTarget): void {
 
     let reachable = false;
     let line: string | null = null;
+    let diagnoseLine: string | null = null;
     try {
-      const reading = await client.status(target);
-      reachable = reading.ok;
+      const reading = await client.inspect(target);
+      reachable = reading.status.ok;
       // #527 — the same answer is the viewport's live position: keep the raw line, not just a bit.
       // Only the ANSWER is kept, so a failed poll leaves the last reading in place and the
       // heartbeat's `reachable` is what stops a stale line being drawn as live.
-      line = reading.ok ? reading.text : null;
+      line = reading.status.ok ? reading.status.text : null;
+      // #826 — the diagnostic line rides the same tick; the store drops an unchanged reading.
+      diagnoseLine = reading.diagnose !== null && reading.diagnose.ok ? reading.diagnose.text : null;
     } catch {
       // `tcpConnect`/`tcpRead` reject when the peer is gone — exactly the drop this heartbeat exists
       // to notice, so it is a result (unreachable) rather than a fault to propagate.
@@ -120,6 +137,7 @@ export function startHeartbeat(target: HeartbeatTarget): void {
 
     if (!running) return;
     if (line !== null) useMachineStore.getState().noteLiveStatusLine(line);
+    if (diagnoseLine !== null) useMachineStore.getState().noteDiagnoseLine(diagnoseLine);
     note(reachable);
     schedule();
   };
