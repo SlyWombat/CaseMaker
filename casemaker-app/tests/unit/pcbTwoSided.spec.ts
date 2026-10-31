@@ -519,3 +519,17 @@ describe('the setups section reads a board’s own cut-out (#743 P-8)', () => {
     expect(reading.items[1]!.cut).toContain(job.cutouts![0]!.id);
   });
 });
+
+describe('a cutter key resolves against the caller’s library (#743 P-8)', () => {
+  it('validateJob reads options.tools, so a worker realm need not hold a registry', async () => {
+    const { job } = await twoSided();
+    const { validateJob } = await import('@/engine/cnc/engrave/jobSetup');
+    // No registry in this test realm beyond the built-ins: the engraver key only resolves because
+    // the caller hands its library in — the same seam the preview worker and the run use.
+    const findings = validateJob(job, null, { tools: TOOLS });
+    expect(findings.some((f) => f.code === 'tool-missing')).toBe(false);
+    // And it still names a key nothing holds.
+    const missing = validateJob({ ...job, tool: undefined, toolKey: 'inv:not-a-cutter' }, null, { tools: TOOLS });
+    expect(missing.some((f) => f.code === 'tool-missing')).toBe(true);
+  });
+});

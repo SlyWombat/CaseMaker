@@ -2789,8 +2789,20 @@ export function validateJob(
   // chosen yet (the empty key a fresh default job / import route starts from) is the normal
   // pre-recommendation state, not an error. The finding is only for a REAL key that names nothing:
   // a stale or hand-typed cutter the library does not hold.
+  // A caller may name the tool itself (`options.tool`), which is the reading it had before #743
+  // P-8; that named tool wins.
   const resolvedTool = options.tool === undefined ? jobTool(job) : options.tool;
-  if (resolvedTool === null && hasWork && job.toolKey !== NO_TOOL_KEY) {
+  //
+  // #743 P-8 — AND THE CALLER'S LIBRARY IS THE LIBRARY. A worker (the preview, the run) hands its
+  // registry snapshot in through `options.tools`; reading the module's own registry instead made
+  // every `inv:` key read "not in the tool library" in a realm that holds no registry at all. The
+  // finding stands only when neither the named tool nor the caller's library resolves the key.
+  if (
+    resolvedTool === null &&
+    toolForJob(job, options.tools ?? getTools()) === null &&
+    hasWork &&
+    job.toolKey !== NO_TOOL_KEY
+  ) {
     findings.push({
       severity: 'error',
       code: 'tool-missing',

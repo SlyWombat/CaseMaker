@@ -2604,7 +2604,13 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           if (designReplacesItems(current)) {
             return {
               ...merged,
-              ...(cutters.toolKey === null ? {} : { toolKey: cutters.toolKey }),
+              // #743 P-8 — THE MATERIALISED TOOL FOLLOWS THE KEY. A previous job's snapshot
+              // (`job.tool`, written by the recommendation or a pick) survives a spread, and the
+              // preview reads the SNAPSHOT over the key — a board measured with the old job's
+              // cutter. The import writes the snapshot its own key names.
+              ...(cutters.toolKey === null
+                ? {}
+                : { toolKey: cutters.toolKey, tool: resolveTool(cutters.toolKey) }),
               // #743 P-8 — THE IMPORT'S PLAN IS A DECISION, NOT A SUGGESTION. The background
               // single-cutter search (#516) must not replace §3.4's per-role cutters — it plans
               // one held position with one chain and cannot express a board's three roles. The
@@ -2624,7 +2630,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           // The job's own cutter is the first program's, so `jobTool` resolves everywhere.
           return {
             ...merged,
-            ...(cutters.toolKey === null ? {} : { toolKey: cutters.toolKey }),
+            ...(cutters.toolKey === null
+              ? {}
+              : { toolKey: cutters.toolKey, tool: resolveTool(cutters.toolKey) }),
             // #743 P-8 — the import's plan is a decision (see the fresh branch's note).
             ...(cutters.toolKey === null ? {} : { sources: { ...(current.sources ?? {}), tool: 'catalogue' as const } }),
             setups: [written, ...setups.slice(1), ...extra],
