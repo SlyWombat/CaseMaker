@@ -5902,6 +5902,77 @@
       ],
       "type": "object"
     },
+    "substitution": {
+      "description": "Set while the job's cutter is a measured substitute for one the operator chose; omit otherwise.",
+      "properties": {
+        "fromKey": {
+          "description": "The key the operator's cutter was named by.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "fromName": {
+          "description": "How the sentence names that cutter (its display name, or the key).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "material": {
+          "description": "The material a feeds refusal was judged on; omit for the other reasons.",
+          "enum": [
+            "softwood",
+            "hardwood",
+            "mdf",
+            "pla",
+            "petg",
+            "pet",
+            "abs",
+            "asa",
+            "hips",
+            "pa",
+            "pa-cf",
+            "pa-gf",
+            "pc",
+            "pp",
+            "tpu",
+            "pva",
+            "acrylic",
+            "plastic",
+            "pcb",
+            "aluminium-6061",
+            "aluminium-7075",
+            "brass",
+            "copper"
+          ],
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why it could not be used: missing from the library, no feeds for the material, or unusable here.",
+          "enum": [
+            "missing",
+            "no-feeds",
+            "refused"
+          ],
+          "type": "string"
+        },
+        "toKey": {
+          "description": "The measured plan's first cutter, now in the spindle.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "toName": {
+          "description": "How the sentence names that cutter (its display name at the time of the write).",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "fromKey",
+        "fromName",
+        "reason",
+        "toKey",
+        "toName"
+      ],
+      "type": "object"
+    },
     "targetObject": {
       "additionalProperties": false,
       "description": "Reference mesh the primitives are positioned against; omit for none.",

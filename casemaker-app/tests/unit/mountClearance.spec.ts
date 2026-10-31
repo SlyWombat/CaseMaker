@@ -233,6 +233,9 @@ describe('#727 F4 — a drill’s chip-clear peck is not travel', () => {
       ...defaultEngraveJob(),
       labels: [],
       toolKey: 'flat-1.0',
+      // #786 slice 4c-2 — a proven centre-cutting record, so the hole is in the program this
+      // assertion is about.
+      tool: flatEndMill(1, { name: '1 mm flat end', fluteLength: 12, centreCutting: true }),
       drills: [
         {
           id: 'hole',

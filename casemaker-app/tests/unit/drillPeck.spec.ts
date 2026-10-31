@@ -165,7 +165,10 @@ describe('the drill-bit program — the document’s peck reaches the file and t
 
 describe('the milling cutter’s plunge drill — the same override, the feeds row beside it', () => {
   it('pecks at the item’s length and the sheet states both numbers', () => {
-    const flat = flatEndMill(1, { id: null, name: '1 mm flat end', typeText: 'Flat End' });
+    // #786 slice 4c-2 — the fixture's record answers the plunge question: this describe is
+    // about a MILLING cutter that plunges, so `plunge-unproven`'s withholding must not be what
+    // these assertions measure.
+    const flat = flatEndMill(1, { id: null, name: '1 mm flat end', typeText: 'Flat End', centreCutting: true });
     const job = drillJob([hole({ depth: 2, peckMm: 0.5 })], false);
     job.toolKey = 'flat-1.0';
     job.tool = flat;
@@ -187,7 +190,10 @@ describe('the milling cutter’s plunge drill — the same override, the feeds r
   }, 60_000);
 
   it('leaves a drill with no override to the feeds row alone', () => {
-    const flat = flatEndMill(1, { id: null, name: '1 mm flat end', typeText: 'Flat End' });
+    // #786 slice 4c-2 — the fixture's record answers the plunge question: this describe is
+    // about a MILLING cutter that plunges, so `plunge-unproven`'s withholding must not be what
+    // these assertions measure.
+    const flat = flatEndMill(1, { id: null, name: '1 mm flat end', typeText: 'Flat End', centreCutting: true });
     const job = drillJob([hole({ depth: 2 })], false);
     job.toolKey = 'flat-1.0';
     job.tool = flat;

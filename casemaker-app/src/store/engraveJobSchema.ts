@@ -2367,15 +2367,17 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   // for the same byte-for-byte reason as every other post-V1 field.
   substitution: z
     .object({
-      fromKey: z.string().min(1),
-      fromName: z.string().min(1),
-      reason: z.enum(['missing', 'no-feeds', 'refused']),
-      material: z.enum(STOCK_MATERIALS).optional(),
-      toKey: z.string().min(1),
-      toName: z.string().min(1),
+      fromKey: z.string().min(1).describe("The key the operator's cutter was named by."),
+      fromName: z.string().min(1).describe('How the sentence names that cutter (its display name, or the key).'),
+      reason: z
+        .enum(['missing', 'no-feeds', 'refused'])
+        .describe('Why it could not be used: missing from the library, no feeds for the material, or unusable here.'),
+      material: z.enum(STOCK_MATERIALS).optional().describe("The material a feeds refusal was judged on; omit for the other reasons."),
+      toKey: z.string().min(1).describe("The measured plan's first cutter, now in the spindle."),
+      toName: z.string().min(1).describe('How the sentence names that cutter (its display name at the time of the write).'),
     })
     .optional()
-    .describe('Set while the job\'s cutter is a measured substitute for one the operator chose; omit otherwise.'),
+    .describe("Set while the job's cutter is a measured substitute for one the operator chose; omit otherwise."),
   // #305's snapshot of the cutter the job was written with. OPTIONAL, not defaulted, for the
   // same byte-for-byte reason as `combined`/`traces`/`vectors`/`keepOuts`/`drills`, and nullable
   // so a snapshot that could not be taken stays an explicit null. Validated by the SAME
