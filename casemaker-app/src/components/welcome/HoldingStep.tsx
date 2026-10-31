@@ -2048,6 +2048,14 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
           <span style={{ fontSize: 12, fontWeight: 500 }} data-testid="engrave-setup-holding-heading">
             {heading}
           </span>
+          {/* #809 — the unmeasured vise is a FACT here, not a warning. It used to be a finding row
+              on every vise job; now it is one line, and `vise-default` speaks only where an
+              unmeasured figure could decide the job (a grip or proud height inside the band). */}
+          {answers.workholding === 'vise' && answers.vise.source === 'default' && (
+            <p style={MUTED} data-testid="engrave-setup-holding-vise-provenance">
+              Vise: the shipped dimensions, not measured on this machine.
+            </p>
+          )}
 
           <div data-testid="engrave-setup-holding-vise" style={{ display: 'grid', gap: 7 }}>
             {rows.map((option) => (

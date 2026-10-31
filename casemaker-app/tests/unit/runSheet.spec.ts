@@ -211,8 +211,16 @@ describe('runSheet (#207)', () => {
     expect(stopStep().text).toContain('less than 6 mm, stop');
   });
 
-  it('opens section 8 with the shipped-vise warning only when the vise is a default', () => {
-    const def = section(sheetFor(dj()), 'warnings');
+  it('opens section 8 with the shipped-vise warning only when an unmeasured figure decides (#809)', () => {
+    // The default blank's shipped figures are clear — 9 mm gripped against a 3 mm minimum — so
+    // the provenance is a fact in the Hold summary, and section 8 says nothing about it.
+    const clear = section(sheetFor(dj()), 'warnings');
+    expect(clear.steps.some((s) => s.text.includes('Vise: the shipped dimensions'))).toBe(false);
+
+    // Grip = thickness − stockProud with no sacrificial material. 3.2 mm passes the 3 mm minimum
+    // by 0.2 — inside the vise's 0.5 mm uncertainty — so the unmeasured jaws could decide.
+    const deciding = dj({ ...DEFAULT_VISE, stockProud: dj().stock.thickness - 3.2 });
+    const def = section(sheetFor(deciding), 'warnings');
     expect(def.steps[0]!.text).toContain('Vise: the shipped dimensions, not measured on this machine');
     expect(def.steps[0]!.bold).toBe(true);
 

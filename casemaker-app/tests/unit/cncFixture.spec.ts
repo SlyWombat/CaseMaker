@@ -261,12 +261,35 @@ describe('validateVise (#203)', () => {
     expect(findings.some((f) => f.code === 'vise-jaw-short')).toBe(true);
   });
 
-  it('the shipped default produces exactly one warning: vise-default', () => {
+  it('#809 — the shipped default is silent when its figures are clear of every threshold', () => {
+    // 9 mm gripped against a 3 mm minimum, 3 mm proud of the jaw tops on a 12 mm blank: neither
+    // figure is within the 0.5 mm band of its threshold, so the provenance is a FACT (the Hold
+    // summary's badge), not a warning on the run.
     const findings = validateVise(STOCK, DEFAULT_VISE);
     expect(findings.filter((f) => f.severity === 'error')).toHaveLength(0);
-    const warnings = findings.filter((f) => f.severity === 'warning');
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]!.code).toBe('vise-default');
+    expect(findings.some((f) => f.code === 'vise-default')).toBe(false);
+  });
+
+  it('#809 — the shipped default warns when a GRIP figure is within the uncertainty of the minimum', () => {
+    // Grip = thickness − stockProud with no sacrificial material. 3.2 mm passes the 3 mm minimum
+    // by 0.2 — inside the 0.5 mm band — so the unmeasured jaws could tip the verdict.
+    const findings = validateVise(STOCK, { ...DEFAULT_VISE, stockProud: STOCK.thickness - (GRIP_MIN + 0.2) });
+    const f = findings.find((x) => x.code === 'vise-default');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('warning');
+    expect(f!.message).toContain('3.2 mm grip');
+    expect(f!.message).toContain('0.5 mm uncertainty of the 3 mm minimum');
+    expect(f!.message).toContain('could decide this job');
+    // The stated grip is not shallow: the provenance is the only warning.
+    expect(findings.some((x) => x.code === 'vise-grip-shallow')).toBe(false);
+  });
+
+  it('#809 — the shipped default warns when the PROUD height is within the uncertainty of the jaw tops', () => {
+    const findings = validateVise(STOCK, { ...DEFAULT_VISE, stockProud: 0.3 });
+    const f = findings.find((x) => x.code === 'vise-default');
+    expect(f).toBeDefined();
+    expect(f!.message).toContain('0.3 mm proud height');
+    expect(f!.message).toContain('uncertainty of the jaw tops');
   });
 });
 

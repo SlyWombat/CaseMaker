@@ -130,6 +130,9 @@ describe('guided job setup — the pure answers (#254)', () => {
   it('shows `vise-default` once on the blank step, not once per validator (#353)', () => {
     const job = dj();
     const answers = defaultSetupAnswers(job);
+    // #809 — the warning speaks only where an unmeasured figure decides the job, so put the grip
+    // inside the uncertainty band of its minimum.
+    answers.vise = { ...answers.vise, stockProud: answers.stock.thickness - 3.2 };
 
     // Both passes used to answer it, and the step printed both copies. Now the vise validator
     // owns the finding…
@@ -326,14 +329,13 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     expect(screen.getByTestId('engrave-vise-badge').textContent).toMatch(/^saved/);
   });
 
-  it('renders the shipped-vise warning once, not once per validator (#353)', () => {
+  it('renders the shipped-vise warning once, not once per validator (#353), and only when it decides (#809)', () => {
     renderPanel();
     fireEvent.click(screen.getByTestId('engrave-hold-edit'));
-    // The row is keyed by code, so two copies would be two elements with the same testid — which
-    // is exactly what the review saw. One row, and its words, is the fix.
-    const rows = screen.getAllByTestId('engrave-setup-step-finding-vise-default');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.textContent).toContain('Vise: the shipped dimensions, not measured on this machine');
+    // #809 — the shipped figures are clear on this job, so there is NO warning row: the provenance
+    // is the Hold summary's badge, which says where the numbers came from.
+    expect(screen.queryAllByTestId('engrave-setup-step-finding-vise-default')).toHaveLength(0);
+    expect(screen.getByTestId('engrave-vise-badge').textContent).toBe('shipped · not measured here');
   });
 
   it('the panel’s Stock and Hold edit controls open that step of the same wizard, with the same counter', () => {

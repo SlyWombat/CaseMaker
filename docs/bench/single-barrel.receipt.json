@@ -28,8 +28,8 @@
     },
     {
       "path": "<out>/single-barrel-run-sheet.md",
-      "sha256": "d2d8361b062cb338180839eeed9b205e35fc63cdb76714da3fe8a345de7ea5e7",
-      "bytes": 18026
+      "sha256": "3ce6a55b6f2a4258e5c772cafdd27fd48f4044c1308dd0396879a8665ad2d853",
+      "bytes": 17959
     }
   ],
   "diagnostics": [
@@ -62,14 +62,6 @@
       "guideRow": "vise-seat",
       "severity": "info",
       "message": "The job seats the blank on the soft jaws' ledge, 3.1 mm below the jaw tops. It states the 3.81 mm blank stands 1.2 mm proud of the jaw tops.",
-      "source": "findings",
-      "program": "single barrel"
-    },
-    {
-      "code": "vise-default",
-      "guideRow": "vise-default",
-      "severity": "warning",
-      "message": "Vise: the shipped dimensions, not measured on this machine.",
       "source": "findings",
       "program": "single barrel"
     },

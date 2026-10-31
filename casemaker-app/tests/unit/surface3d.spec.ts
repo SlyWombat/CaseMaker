@@ -333,9 +333,12 @@ describe('generateGoalProgram — the worker dispatches a pure goal job', () => 
     expect(bbox.max[1]).toBeGreaterThan(40 + 3.175);
     expect(program.programHash).toMatch(/^[0-9a-f]{8}$/);
     expect(program.toolKey).toBe(job.toolKey);
-    // #726 W16 — the run's findings carry the DOCUMENT's, as the item pipeline's always have: the
-    // shipped default vise's clearance warning is what Save/Upload/Release and Cut step 1 share.
-    expect(out.findings.some((f) => f.code === 'vise-default' && f.severity === 'warning')).toBe(true);
+    // #726 W16 — the run's findings carry the DOCUMENT's, as the item pipeline's always have.
+    // #809 — the shipped vise's figures are clear on this blank, so the provenance is the Hold
+    // summary's fact, not a warning; `vise-seat` is one of the document's findings that still
+    // travels with the run.
+    expect(out.findings.some((f) => f.code === 'vise-seat')).toBe(true);
+    expect(out.findings.some((f) => f.code === 'vise-default')).toBe(false);
   });
 });
 

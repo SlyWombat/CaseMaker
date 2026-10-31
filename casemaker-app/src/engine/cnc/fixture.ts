@@ -732,17 +732,39 @@ export function validateVise(
         : `sits ${fmtMm(-vise.stockProud)} mm below them.`),
   });
 
+  // #809 — THE UNMEASURED VISE IS A ONE-LINE FACT, NOT A WARNING ON EVERY JOB. The shipped
+  // dimensions are a statement about provenance, and it warns only where that provenance can
+  // change the answer: a GRIP or PROUD figure sitting within the published uncertainty of the
+  // threshold it is judged against. The default fixture's own figures (9 mm gripped against a
+  // 3 mm minimum, 3 mm proud of the jaw tops on a 12 mm blank) are clear of both, so the ordinary
+  // job says nothing here; the Hold summary carries the fact.
   if (vise.source === 'default') {
-    findings.push({
-      severity: 'warning',
-      code: 'vise-default',
-      // Still a warning now that the jaws are calipered: the numbers are the product's, measured
-      // once on the one the product was designed around, and this job's vise has not been measured
-      // ITSELF. The sentence says which of the two it is in the operator's words (#690b): the
-      // shipped set is a fact, and where it came from belongs in the Technical fold, not here.
-      message:
-        'Vise: the shipped dimensions, not measured on this machine.',
-    });
+    const band =
+      Number.isFinite(vise.uncertainty) && vise.uncertainty > 0 ? vise.uncertainty : VISE_UNCERTAINTY_FALLBACK;
+    // A shallow grip is already `vise-grip-shallow`'s; the provenance matters only where the
+    // stated grip passes the minimum by no more than the band.
+    const gripDecides = grip >= minGripMm && grip - minGripMm <= band;
+    // Proud has two thresholds the unmeasured jaws could move the job across: the jaw tops
+    // (`0`), where the cutter's reach changes, and the blank's own thickness, past which nothing
+    // is left in the jaws.
+    const proudNearThickness = vise.stockProud < thickness && thickness - vise.stockProud <= band;
+    const proudNearTop = Math.abs(vise.stockProud) <= band;
+    if (gripDecides || proudNearThickness || proudNearTop) {
+      const decides = gripDecides
+        ? `the ${fmtMm(grip)} mm grip is within the ${fmtMm(band)} mm uncertainty of the ${fmtMm(minGripMm)} mm minimum`
+        : proudNearThickness
+          ? `the ${fmtMm(vise.stockProud)} mm proud height is within the ${fmtMm(band)} mm uncertainty of the ${fmtMm(thickness)} mm blank thickness`
+          : `the ${fmtMm(vise.stockProud)} mm proud height is within the ${fmtMm(band)} mm uncertainty of the jaw tops`;
+      findings.push({
+        severity: 'warning',
+        code: 'vise-default',
+        // Still a warning now that the jaws are calipered: the numbers are the product's, measured
+        // once on the one the product was designed around, and this job's vise has not been measured
+        // ITSELF. The sentence says which of the two it is in the operator's words (#690b): the
+        // shipped set is a fact, and where it came from belongs in the Technical fold, not here.
+        message: `Vise: the shipped dimensions, not measured on this machine — ${decides}, so the unmeasured jaws could decide this job.`,
+      });
+    }
   }
 
   return findings;

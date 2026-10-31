@@ -535,9 +535,12 @@ describe('validateJob (#200)', () => {
 
   it('leaves the unmeasured-vise warning to `validateVise`, and the merged list carries it once (#353)', () => {
     const job = defaultEngraveJob();
-    // One owner: the vise validator says it, `validateJob` does not repeat it.
+    // #809 — the shipped figures are clear of every threshold, so a default job says nothing.
+    expect(validateVise(job.stock, jobVise(job), job.sacrificial).some((f) => f.code === 'vise-default')).toBe(false);
+    // Put the grip within the uncertainty band: the vise validator says it…
+    const deciding = { ...jobVise(job), stockProud: job.stock.thickness - 3.2 };
     expect(validateJob(job).some((f) => f.code === 'vise-default')).toBe(false);
-    const vise = validateVise(job.stock, jobVise(job), job.sacrificial);
+    const vise = validateVise(job.stock, deciding, job.sacrificial);
     expect(vise.filter((f) => f.code === 'vise-default')).toHaveLength(1);
     // The safety net: the two passes merged as every consumer merges them, still one.
     const merged = dedupeFindings([...validateJob(job), ...vise]);
@@ -841,7 +844,9 @@ describe('engraveJobStore (#200)', () => {
     const findings = stepFindings('blank', job, defaultSetupAnswers(job));
     expect(findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(findings.map((f) => f.code)).not.toContain('vise-jaw-collision');
-    // …while the warnings that are telling the truth about an unmeasured vise stay.
+    // #809 — and this small badge is exactly where the shipped vise DOES decide: the derived
+    // proud leaves 3.1 mm gripped against the 3 mm minimum, 0.1 inside the 0.5 mm band, so the
+    // unmeasured jaws could tip the grip under and the warning speaks.
     expect(findings.map((f) => f.code)).toContain('vise-default');
   });
 

@@ -707,15 +707,17 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     expect(screen.queryByTestId('engrave-setup-orientation')).toBeNull();
   });
 
-  it('keeps the jaw numbers and the vise-default provenance in the Technical fold, once', () => {
+  it('states the shipped-vise provenance as one fact line, not a warning (#809)', () => {
     seedLocation(machineWith(null));
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
-    const rows = screen.getAllByTestId('engrave-setup-step-finding-vise-default');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.textContent).toContain('Vise: the shipped dimensions, not measured on this machine');
+    // The shipped dimensions are a fact about where the numbers came from: one line in the step,
+    // not a finding row. The warning speaks only where an unmeasured figure could decide the job.
+    expect(screen.queryAllByTestId('engrave-setup-step-finding-vise-default')).toHaveLength(0);
+    expect(screen.getByTestId('engrave-setup-holding-vise-provenance').textContent).toContain(
+      'Vise: the shipped dimensions, not measured on this machine.',
+    );
     const technical = screen.getByTestId('engrave-setup-holding-technical');
-    expect(technical.contains(rows[0]!)).toBe(true);
     expect(technical.textContent).toContain('10 mm fixed');
     expect(technical.textContent).toContain('10 mm moving');
     expect(technical.textContent).toContain('100 mm long');
