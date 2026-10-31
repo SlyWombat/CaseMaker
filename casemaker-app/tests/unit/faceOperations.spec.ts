@@ -26,6 +26,7 @@ import {
 } from '@/engine/cnc/rotary/faceOps';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { createSimSession } from '@/workers/sim/session';
+import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { engraveJobSchema } from '@/store/engraveJobSchema';
@@ -228,6 +229,15 @@ describe('#241 slice 2 — a face program, generated and swept', () => {
     expect(report.ok, JSON.stringify(report.levels)).toBe(true);
     expect(report.levels.map((l) => l.a)).toEqual([0, 60, 120, 180, 240, 300]);
   }, 300_000);
+
+  it('the run sheet builds for a face job', () => {
+    const job = rod([flat('f1', 0, 1)]);
+    job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
+    const g = engraveGenerate(tl, job, TOOL, [], null);
+    expect(g.ok).toBe(true);
+    const sheet = buildRunSheet(job, g, null);
+    expect(sheet).toBeTruthy();
+  }, 120_000);
 
   it('a cross-hole through at 90° is one plunge, judged on the face it was drilled from', () => {
     const job = rod([{ id: 'h', kind: 'cross-hole', a: 90, diameter: 3.175 }]);
