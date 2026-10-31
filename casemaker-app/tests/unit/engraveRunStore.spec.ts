@@ -1313,7 +1313,10 @@ describe('#785 progress and Cancel', () => {
       const s = useEngraveRunStore.getState();
       expect(s.phase).toBe('blocked');
       expect(s.error).toContain('The generator stopped reporting for');
-      expect(s.error).toContain('try again');
+      // #830 review — a silence while GENERATING is the generator's stop, not the simulation's,
+      // and the sentence no longer carries its own "try again" (the press says it).
+      expect(s.simStopped).toBe(false);
+      expect(s.error).not.toContain('try again');
       expect(cancelled, 'the stuck worker is killed, not left running').toBe(1);
       void done;
     } finally {
@@ -1332,5 +1335,35 @@ describe('#785 progress and Cancel', () => {
     const s = useEngraveRunStore.getState();
     expect(s.phase).toBe('blocked');
     expect(s.error).toBe('the simulation worker stopped');
+    // The throw came from the CAM, not the sweep: this is not a stopped simulation.
+    expect(s.simStopped).toBe(false);
+  });
+
+  it('a worker that dies mid-sweep is a STOP, not an error finding against the program', async () => {
+    // #830 review — the sweep's load comes back null with the sim store in 'error': the worker
+    // died. Nothing about the program was judged, so the run carries the worker's own sentence as
+    // its stop; no `program 1 (…)` finding is invented, and the gate reads "not finished".
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async () => {
+        useSimStore.setState({ status: 'error', error: 'the simulation worker was killed', progress: null, phase: null });
+        return null;
+      },
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => clean(),
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+    const s = useEngraveRunStore.getState();
+    expect(s.phase).toBe('blocked');
+    expect(s.simStopped, 'a worker that stopped judged no program').toBe(true);
+    expect(s.error).toBe('the simulation worker was killed');
+    expect(s.simDiagnostics, 'no finding is manufactured for a program that was never swept').toEqual([]);
+    expect(s.simStatus, 'no simulation verdict was reached').toBeNull();
   });
 });

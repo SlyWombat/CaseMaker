@@ -57,9 +57,22 @@ test('#830 — the sweep names its stage, and a worker killed mid-sweep is repor
   });
 
   const error = page.getByTestId('engrave-generate-error');
-  await expect(error).toContainText('the simulation worker was killed by the test', { timeout: 30_000 });
+  // #830 review — the worker's words sit inside the STOP frame, once, beside Generate.
+  await expect(error).toContainText('The simulation stopped: the simulation worker was killed by the test', {
+    timeout: 30_000,
+  });
   await expect(page.getByTestId('engrave-generate-retry')).toBeVisible();
   // The run is blocked with a reason, not still "Working".
   await expect(progress).toHaveCount(0);
+  // A stop is not a failed check: the simulation row says it stopped before it finished, without
+  // a cross. And the sentence is not repeated as a program finding or at the foot, nor given a Fix.
+  const simulatedRow = page.getByTestId('engrave-run-simulated');
+  await expect(simulatedRow).toContainText('the simulation stopped before it finished');
+  await expect(simulatedRow).toHaveAttribute('data-state', 'idle');
+  await expect(page.getByTestId('engrave-run-errors')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-run-error')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-run-blocker-fix')).toHaveCount(0);
+  // …and the STOP sentence itself is on screen once, not mirrored anywhere else.
+  await expect(page.getByText('The simulation stopped: the simulation worker was killed by the test.')).toHaveCount(1);
   await page.screenshot({ path: path.join(OUT, 'worker-stopped.png') });
 });

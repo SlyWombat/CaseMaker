@@ -745,6 +745,15 @@ function runProgressWords(
   return run.progress === null ? 'Working…' : `${run.progress.label}…`;
 }
 
+/**
+ * #830 review — the ONE sentence a stopped simulation gets, with the worker's own words inside it
+ * ("The simulation stopped: the simulation worker was killed by the test."). Said once, beside
+ * Generate with Try again; the run's other surfaces stay quiet or say "not simulated".
+ */
+function simulationStoppedWords(error: string): string {
+  return `The simulation stopped: ${error.replace(/\.+$/, '')}.`;
+}
+
 export function EngravePanel(): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
   const setJobMargins = useEngraveJobStore((s) => s.setJobMargins);
@@ -2154,8 +2163,19 @@ export function EngravePanel(): JSX.Element {
             ? 'not checked yet'
             : 'not checked yet';
 
-  const rowSimulated: RowState =
-    run.simStatus === 'ready' ? (simErrors > 0 ? 'cross' : 'tick') : run.phase === 'simulating' ? 'pending' : run.simStatus ? 'cross' : 'idle';
+  // #830 review — a simulation that STOPPED (its worker died or went silent) judged no program:
+  // it is not a failed check, so the row is neither a cross nor a pass. It says so in words.
+  const rowSimulated: RowState = run.simStopped
+    ? 'idle'
+    : run.simStatus === 'ready'
+      ? simErrors > 0
+        ? 'cross'
+        : 'tick'
+      : run.phase === 'simulating'
+        ? 'pending'
+        : run.simStatus
+          ? 'cross'
+          : 'idle';
   const rowSimulatedText =
     rowSimulated === 'tick'
       ? 'simulated'
@@ -2163,7 +2183,9 @@ export function EngravePanel(): JSX.Element {
         ? 'the simulation did not pass'
         : rowSimulated === 'pending'
           ? 'simulating…'
-          : 'not simulated yet';
+          : run.simStopped
+            ? 'the simulation stopped before it finished'
+            : 'not simulated yet';
 
   const rowOracle: RowState = run.oracle ? (run.oracle.ok ? 'tick' : 'cross') : run.phase === 'checking' ? 'pending' : 'idle';
   const rowOracleText =
@@ -2186,7 +2208,8 @@ export function EngravePanel(): JSX.Element {
   // #793 — the idle state says nothing. The four ticks are drawn only while a run works or after
   // one it produced: a fresh job showed four "not … yet" rows under a button that had not been
   // pressed, which reads as work the job has lost. A refusal with no result speaks its own
-  // sentence (`engrave-run-errors` / `engrave-run-error`); it is not four failed rows.
+  // sentence (`engrave-run-errors`); it is not four failed rows. #830 review — the run's OWN
+  // `error` is stated once beside Generate (`engrave-generate-error`), not printed here too.
   const runSaysSomething = running || run.generated !== null || run.error !== null;
   // …and a run that PASSED and still matches the job collapses to ONE line, with the ticks behind
   // its `›`. #794 — that line is the Ready card, and the footer's primary becomes the next step.
@@ -4369,12 +4392,16 @@ export function EngravePanel(): JSX.Element {
           )}
           {run.phase === 'blocked' && run.error !== null && (
             // #830 — the run stopped with a reason that is not a finding: the worker died, or it
-            // went quiet past the stall limit. Say it, and offer the one action that helps.
+            // went quiet past the stall limit. Say it HERE, once, and offer the one action that
+            // helps. #830 review — a stopped simulation is framed as a stop with the worker's own
+            // words inside; the run rows and the gate say "not simulated", never the same
+            // sentence again, and there is no Fix press (#832 is removing bare press-to-Fix
+            // everywhere; the press for a stop is Try again).
             <span
               data-testid="engrave-generate-error"
               style={{ flex: '1 1 180px', fontSize: 12, lineHeight: 1.45, color: SEVERITY_COLOR.error }}
             >
-              {run.error}{' '}
+              {run.simStopped ? simulationStoppedWords(run.error) : run.error}{' '}
               <button
                 type="button"
                 data-testid="engrave-generate-retry"
@@ -4529,12 +4556,6 @@ export function EngravePanel(): JSX.Element {
                 )}
               </p>
             )}
-            {run.error && (
-              <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-run-error">
-                {run.error}
-              </p>
-            )}
-
             {/* #803 (as the manager asked at the #792 hand-in) — SAVE SAYS NOTHING HERE. Save is
                 not on this screen any more: it is the File ▾ menu's item, and the reason it is
                 closed is that item's disabled state and its hover. A sentence under the primary

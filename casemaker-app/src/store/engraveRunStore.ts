@@ -286,6 +286,14 @@ export interface EngraveRunState {
    * own stage, so the panel never shows a bare "Working…" through a multi-program sweep.
    */
   simProgram: { index: number; count: number } | null;
+  /**
+   * #830 review — the run stopped because the SIMULATION PROCESS itself ended (its worker died or
+   * went silent), so no program was ever judged. This is a STOP, not a failed simulation: the
+   * panel states it once beside Generate, and the checklist's simulation row reads "stopped before
+   * it finished" rather than a cross. False for a sweep that ran and found errors, and for every
+   * failure of the other stages.
+   */
+  simStopped: boolean;
   /** Run the whole pipeline for the job as it is NOW. `surface` (#608) re-posts against a tilt. */
   generate: (surface?: SurfacePostFit | null) => Promise<void>;
   /**
@@ -306,6 +314,15 @@ export interface EngraveRunState {
   /** Forget the run (and the staleness). Does not touch the job. */
   reset: () => void;
 }
+
+/**
+ * #830 review — THE SWEEP STOPPED WITHOUT A VERDICT. Raised by the sweep adapter when the
+ * simulation could not finish (the worker stopped, or a call was cut off): there is no result to
+ * attribute to the program that happened to be loaded, so the failure leaves the sweep as a STOP.
+ * The run blocks with the worker's own words, and no error finding is invented for a program that
+ * was never judged — so the run's error count carries no sentence about work that never happened.
+ */
+class SimulationStopped extends Error {}
 
 let seq = 0;
 /** #785 — the loaded client (so Cancel can terminate the worker without a second import). */
@@ -334,6 +351,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     error: null as string | null,
     progress: null as EngraveProgress | null,
     simProgram: null as { index: number; count: number } | null,
+    simStopped: false,
   };
 
   async function run(surface: SurfacePostFit | null = null): Promise<void> {
@@ -506,6 +524,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       stallTimer = setTimeout(() => {
         if (mine !== seq) return;
         const seconds = Math.round(stallMs / 1000);
+        // #830 review — WHAT went quiet decides what the panel says. A silence while the SWEEP
+        // runs is a stopped simulation (no verdict for any program); a silence while the CAM
+        // generates is the generator stopping, and is said without that frame.
+        const during = get().phase;
+        const inSimulation = during === 'simulating' || during === 'checking';
         recordCrumb({
           kind: 'error',
           data: { source: 'generate-stall', message: `no stage for ${seconds} s (last: ${lastStage ?? 'the press'})` },
@@ -517,7 +540,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           ...empty,
           generated: get().generated,
           phase: 'blocked',
-          error: `The generator stopped reporting for ${seconds} s. Its worker may have stopped; try again.`,
+          simStopped: inSimulation,
+          error: inSimulation
+            ? `its worker stopped answering after ${seconds} s`
+            : `The generator stopped reporting for ${seconds} s. Its worker may have stopped.`,
         });
       }, stallMs);
     };
@@ -742,34 +768,17 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               return result;
             }
             const sim = useSimStore.getState();
-            // null means this load no longer owns the session: a newer run/panel load stopped it
-            // (the walk stops quietly), or the worker failed (block, naming this program).
+            // null means this load no longer owns the session (a newer run/panel load stopped it),
+            // and the walk stops quietly. A WORKER that failed is different: the sweep cannot go
+            // on, and nothing about this program was judged — so it leaves as a STOP carrying the
+            // worker's own words, never as a finding against the program that happened to be
+            // loading. #830 review: a stopped simulation is not a failed one.
             if (sim.status !== 'error') return null;
-            return {
-              ok: false as const,
-              pathOnly: false,
-              diagnostics: [
-                {
-                  source: 'sweep' as const,
-                  severity: 'error' as const,
-                  code: 'sim-error',
-                  message: `${programLabel(generated.programs, index)}: ${sim.error ?? 'the simulation failed'}`,
-                },
-              ],
-            };
+            throw new SimulationStopped(sim.error ?? 'the simulation worker stopped');
           } catch (e) {
-            return {
-              ok: false as const,
-              pathOnly: false,
-              diagnostics: [
-                {
-                  source: 'sweep' as const,
-                  severity: 'error' as const,
-                  code: 'sim-error',
-                  message: `${programLabel(generated.programs, index)}: ${e instanceof Error ? e.message : String(e)}`,
-                },
-              ],
-            };
+            // Every other throw from a load is the same kind of fact — no verdict was reached
+            // (a cut-off call, the time budget) — so it is a stop too, in the worker's words.
+            throw e instanceof SimulationStopped ? e : new SimulationStopped(e instanceof Error ? e.message : String(e));
           }
         },
         afterLoad: async ({ index }) => {
@@ -792,7 +801,17 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         aborted: () => mine !== seq,
       });
     } catch (e) {
-      if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
+      // #830 review — a sweep that threw reached NO verdict: the worker stopped, or a call was cut
+      // off. The run blocks with the worker's own words (the panel frames them as the simulation
+      // stopping) and the checklist reads "stopped before it finished", never a failed check. A
+      // throw from anywhere else in the walk is a generation failure and keeps its own sentence.
+      if (mine === seq) {
+        set({
+          phase: 'blocked',
+          error: e instanceof Error ? e.message : String(e),
+          ...(e instanceof SimulationStopped ? { simStopped: true } : {}),
+        });
+      }
       noteWorkEnd('generate', 'failed');
       activeClient = null;
       return;
@@ -825,20 +844,20 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // count is the RUN's files, not the results: a walk stopped at its first program still names it.
     const simDiagnostics = attributedDiagnostics(summaries, generated.programs.length > 1);
     const firstSwept = summaries.find((s) => s.index === firstEngravingIndex) ?? summaries[0] ?? null;
-    const sim = useSimStore.getState();
 
     if (!outcome.ok) {
       set({
         phase: 'blocked',
         simPrograms: summaries,
         simDiagnostics,
-        // A sweep that RAN with errors is 'ready' — the gate reads the errors. Only a refusal (or a
-        // worker failure) is anything else, exactly as the single-program run has always read it.
-        simStatus: outcome.failed?.kind === 'diagnostics' ? 'ready' : sim.status === 'error' ? 'error' : 'refused',
+        // A sweep that RAN with errors is 'ready' — the gate reads the errors; anything else here
+        // is the simulator's own refusal of a program it was given. A dead worker never reaches
+        // this branch: it stops the walk with `SimulationStopped`, so there is no verdict to
+        // record and the panel states the stop once, beside Generate.
+        simStatus: outcome.failed?.kind === 'diagnostics' ? 'ready' : 'refused',
         pathOnly: outcome.failed?.pathOnly ?? false,
         simEngine: firstSwept?.engine ?? null,
         simGridPitchMm: firstSwept?.gridPitchMm ?? null,
-        error: sim.status === 'error' ? sim.error : null,
       });
       noteWorkEnd('generate', 'refused');
       activeClient = null;
@@ -903,6 +922,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     error: null,
     progress: null,
     simProgram: null,
+    simStopped: false,
     generate: run,
     cancelGenerate: () => {
       const phase = get().phase;

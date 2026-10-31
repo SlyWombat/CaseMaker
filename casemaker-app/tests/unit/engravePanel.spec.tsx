@@ -4823,15 +4823,44 @@ describe('#805 — the rotary oversize warning’s two answers', () => {
     expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('simulating program 1 of 2 · swept 5 of 10');
   });
 
-  it('a stopped run shows its reason and offers Try again', () => {
+  // #830 review — a stopped SIMULATION judged no program. It is said ONCE, in the worker's words,
+  // beside Generate with the Try again press; the checklist says it stopped before it finished
+  // (not a cross), and nothing else repeats the sentence — no finding row, no Fix press.
+  it('a stopped simulation is said once, in the worker’s words, with Try again', () => {
     render(<EngravePanel />);
     act(() => {
       useEngraveRunStore.setState({
         phase: 'blocked',
-        error: 'The generator stopped reporting for 180 s. Its worker may have stopped; try again.',
+        simStopped: true,
+        error: 'the simulation worker was killed by the test.',
       } as never);
     });
-    expect(screen.getByTestId('engrave-generate-error').textContent).toContain('The generator stopped reporting for 180 s.');
+    const error = screen.getByTestId('engrave-generate-error');
+    expect(error.textContent).toContain('The simulation stopped: the simulation worker was killed by the test.');
+    expect(screen.getByTestId('engrave-generate-retry')).toBeTruthy();
+
+    // The checklist says it STOPPED — neither a pass nor a failure.
+    const row = screen.getByTestId('engrave-run-simulated');
+    expect(row.getAttribute('data-state')).toBe('idle');
+    expect(row.textContent).toContain('the simulation stopped before it finished');
+    expect(row.textContent).not.toContain('did not pass');
+
+    // Once. Not again as a program finding, not at the foot, and no Fix press for a stop.
+    expect(screen.queryByTestId('engrave-run-errors')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-error')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-blocker-fix')).toBeNull();
+    const panelText = screen.getByTestId('engrave-panel').textContent ?? '';
+    expect(panelText.split('The simulation stopped:').length - 1).toBe(1);
+  });
+
+  it('a generator failure keeps its own sentence, without the simulation frame', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({ phase: 'blocked', error: 'the job has no usable cutter' } as never);
+    });
+    const error = screen.getByTestId('engrave-generate-error');
+    expect(error.textContent).toContain('the job has no usable cutter');
+    expect(error.textContent).not.toContain('The simulation stopped');
     expect(screen.getByTestId('engrave-generate-retry')).toBeTruthy();
   });
 });
