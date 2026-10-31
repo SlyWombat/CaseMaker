@@ -40,6 +40,7 @@
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Tool } from '@/engine/cnc/tool';
 import { jobSetups, setupTools, toolItemsFor } from './jobSetup';
+import { surfacePrimitivesOf } from './primitiveSurface';
 
 /** One program, before it is cut: a setup, the items it cuts, and the cutter. */
 export interface JobProgramRef {
@@ -49,6 +50,13 @@ export interface JobProgramRef {
   toolKey: string;
   /** The setup items assigned to this cutter, in the setup's own document order. */
   itemIds: readonly string[];
+  /**
+   * #786 slice 4a-2 — a SURFACE program: its one item is a cone or sphere primitive, cut by the
+   * 3D surfacing CAM and checked by its `surfaceCheck` (there is no 2.5D verifier report). The
+   * ref is emitted right after its owner cutter's ordinary ref, so the cut order is the setup's
+   * own; a cut-out still posts after every surface (it releases the part).
+   */
+  surface?: true;
 }
 
 /**
@@ -58,13 +66,27 @@ export interface JobProgramRef {
  */
 export function setupPrograms(job: EngraveJob): JobProgramRef[] {
   const cutoutIds = new Set((job.cutouts ?? []).map((cutout) => cutout.id));
+  // #786 slice 4a-2 — A CONE OR SPHERE IS ITS OWN SURFACE PROGRAM. Its item is cut by the 3D
+  // surfacing CAM, not the region CAM, so it cannot share a program with the cutter's pockets:
+  // one program carries one check, and a mixed file would judge 3D moves with the 2.5D verifier
+  // (or lose the 2D verdict). The owner cutter still cuts it — the primitive is one of its items
+  // — and the surface ref follows that cutter's ordinary ref in cut order.
+  const surfaceIds = new Set(surfacePrimitivesOf(job).map((p) => p.id));
   return jobSetups(job).flatMap((setup, i) => {
-    const refs: JobProgramRef[] = setupTools(setup, job).map((toolKey, toolIndex) => ({
-      setupIndex: i + 1,
-      setupId: setup.id,
-      toolKey,
-      itemIds: toolItemsFor(setup, toolKey, toolIndex),
-    }));
+    const refs: JobProgramRef[] = [];
+    setupTools(setup, job).forEach((toolKey, toolIndex) => {
+      const items = toolItemsFor(setup, toolKey, toolIndex);
+      const ordinary = items.filter((id) => !surfaceIds.has(id));
+      const surfaces = items.filter((id) => surfaceIds.has(id));
+      // A cutter assigned ONLY surfaces writes no ordinary program: an empty one has nothing to
+      // clear and would read as `setup-tool-no-items`.
+      if (ordinary.length > 0 || surfaces.length === 0) {
+        refs.push({ setupIndex: i + 1, setupId: setup.id, toolKey, itemIds: ordinary });
+      }
+      for (const id of surfaces) {
+        refs.push({ setupIndex: i + 1, setupId: setup.id, toolKey, itemIds: [id], surface: true });
+      }
+    });
     // A one-cutter setup cuts its own cut-outs last inside its program (the CAM's operation order),
     // so there is nothing to move. A setup with no cut-outs keeps its refs exactly as they were.
     if (refs.length <= 1) return refs;

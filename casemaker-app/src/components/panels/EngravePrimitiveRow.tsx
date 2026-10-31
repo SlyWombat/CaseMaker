@@ -58,6 +58,11 @@ export interface EngravePrimitiveRowProps {
   /** Findings about THIS primitive (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
   /**
+   * #786 slice 4a-2 — a finding's one-click action on this row (the ball offer's "Cut the surface
+   * with …"). The panel owns the action; the row only places it.
+   */
+  findingAction?: (finding: JobFinding) => ReactNode;
+  /**
    * #667 — the rest pair's control data (the setup's rough and rest cutters), or null when this
    * row's item is not in a setup or the job has no cutter. The panel owns the registry reading.
    */
@@ -74,6 +79,7 @@ export function EngravePrimitiveRow({
   onChange,
   onRemove,
   findings,
+  findingAction,
   rest = null,
   technical = null,
 }: EngravePrimitiveRowProps): JSX.Element {
@@ -167,6 +173,7 @@ export function EngravePrimitiveRow({
       removeTitle="Remove this 3D primitive."
       removeNoun={kindWord}
       findings={findings}
+      {...(findingAction === undefined ? {} : { findingAction })}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
       restLabel={rest?.chip ?? null}
@@ -299,11 +306,11 @@ export function EngravePrimitiveRow({
       <p style={MUTED} data-testid={`engrave-primitive-cut-${index}`}>
         {primitiveReducesToRegion(primitive)
           ? 'Cut as a flat-floor region by the ordinary pocket CAM.'
-          : primitive.kind === 'cone'
-            ? 'A cone has a sloped wall; the region CAM cannot cut it and Generate refuses it by name.'
-            : primitive.kind === 'sphere'
-              ? 'A sphere is a dexel job; the region CAM cannot cut it and Generate refuses it by name.'
-              : 'A side-opening primitive is an undercut; the region CAM cannot cut it and Generate refuses it by name.'}
+          : (primitive.axis ?? 'z') !== 'z'
+            ? 'A side-opening primitive is an undercut; the top-face CAM does not cut it.'
+            : primitive.kind === 'cone'
+              ? 'Cut by a 3D surface program: the cone is an analytic heightfield the surface CAM follows.'
+              : 'Cut by a 3D surface program: the sphere’s cap is an analytic heightfield the surface CAM follows.'}
       </p>
 
       <p style={{ ...MUTED, ...(depthInvalid || shapeInvalid ? { color: '#f0b4ad' } : null) }} data-testid={`engrave-primitive-maxdepth-${index}`}>

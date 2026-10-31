@@ -45,6 +45,7 @@ import { carryPointBetweenSetups } from '@/engine/cnc/setups/carry';
 import type { Box } from '@/engine/cnc/setups/types';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { surfaceBallOffer } from './primitiveSurface';
 import { inlayGlueGap, inlayMarked, inlayNumbers } from './inlay';
 import { textureNumbers, textureStrokes } from './texture';
 import { fluteNumbers, fluteOperationName } from './flute';
@@ -103,6 +104,13 @@ export type JobFindingCode =
   // no CAM here could use it). INFO: the sentence names whose cutter it was, why, and what is in
   // the spindle now, with a one-click way back to the cutter list.
   | 'cutter-substituted'
+  // #786 slice 4a-2 — a cone or sphere primitive is cut by a 3D surface program (the region CAM
+  // cannot cut a sloped wall or a curved floor). INFO: the sentence names the primitive and the
+  // grid, and says what the finish is; the primitives' old refusals are gone.
+  | 'primitive-surface-program'
+  // #786 slice 4a-2 — an owned ball that fits the surface (the largest one), offered one click
+  // away so the app proposes the better cutter rather than the operator hunting for it.
+  | 'primitive-surface-ball-offer'
   | 'vise-jaw-collision'
   | 'vise-default'
   | 'vise-stock-not-proud'
@@ -790,10 +798,13 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
     ...(job.vectors ?? []),
     ...(job.drills ?? []),
     ...(job.threads ?? []),
-    // #435 — only the primitives that actually cut belong in a setup's item list. A refused cone
-    // or sphere is still the document's, and `validateJob` names it, but it is not work any cutter
-    // owns.
-    ...(job.primitives ?? []).filter(primitiveReducesToRegion),
+    // #435 — only the primitives that actually cut belong in a setup's item list. #786 slice 4a-2:
+    // a box or a cylinder is a flat region, and a top-facing cone or sphere is a 3D surface
+    // program — all three are work a cutter owns. A side-opening primitive is not: it stays the
+    // document's, with its existing undercut warning, and is cut by no top-face program.
+    ...(job.primitives ?? []).filter(
+      (p) => primitiveReducesToRegion(p) || ((p.kind === 'cone' || p.kind === 'sphere') && (p.axis ?? 'z') === 'z'),
+    ),
     // #218 — a cut-out is cutting work like any other item: it belongs to the setup (and so to a
     // cutter's program) or a job with only cut-outs has no program assigned to it at all.
     ...(job.cutouts ?? []),
@@ -1606,27 +1617,30 @@ export function validateJob(
       });
       continue;
     }
-    if (primitive.kind === 'cone') {
-      findings.push({
-        severity: 'error',
-        code: 'primitive-cone-needs-cam',
-        labelId: primitive.id,
-        message:
-          `${primitiveLabel(primitive)} has a sloped wall. The region CAM only cuts walls parallel ` +
-          `to the cutter axis, so a cone would be approximated as a cylinder and is refused. The ` +
-          `V-carve/chamfer work and the 3D engine are the ways to cut it.`,
-      });
-      continue;
-    }
-    if (primitive.kind === 'sphere') {
-      findings.push({
-        severity: 'error',
-        code: 'primitive-sphere-needs-3d',
-        labelId: primitive.id,
-        message:
-          `${primitiveLabel(primitive)} has a curved floor. A sphere is a dexel job, not a ` +
-          `flat-floor region; it is refused rather than approximated as a circle pocket.`,
-      });
+    // #786 slice 4a-2 — A CONE OR A SPHERE IS CUT, NOT REFUSED. Both are analytic top-Z fields,
+    // and the 3D surfacing CAM cuts them as their own surface programs (`primitiveSurface.ts`,
+    // `generateSurfacePrimitiveProgram`); the old `primitive-cone-needs-cam` and
+    // `primitive-sphere-needs-3d` refusals are gone. The program's own info names the grid and its
+    // finish; the BALL OFFER below is the design panel's, because it is a cutter choice with a
+    // one-click fix, and the panel can offer it before Generate.
+    if (primitive.kind === 'cone' || primitive.kind === 'sphere') {
+      const chosen = jobTool(job);
+      const round = chosen !== null && (chosen.shape === 'ball' || chosen.shape === 'bull');
+      if (chosen !== null && !round) {
+        const offer = surfaceBallOffer(primitive, options.tools ?? getTools());
+        if (offer !== null) {
+          findings.push({
+            severity: 'info',
+            code: 'primitive-surface-ball-offer',
+            labelId: primitive.id,
+            suggestedCutterKey: offer.key,
+            suggestedCutterDiameterMm: offer.radius * 2,
+            message:
+              `A ⌀${Number((offer.radius * 2).toFixed(3))} mm ball nose fits this surface — the largest that does; ` +
+              `the ${toolDisplayName(chosen).split(' · ')[0]!} leaves it stepped.`,
+          });
+        }
+      }
     }
   }
 

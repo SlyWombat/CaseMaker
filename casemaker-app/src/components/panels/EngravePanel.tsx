@@ -1698,6 +1698,28 @@ export function EngravePanel(): JSX.Element {
     useEngraveJobStore.getState().applyCutterPlan(merged, 'computed', setupIndex);
   };
 
+  /**
+   * #786 slice 4a-2 — the cone/sphere ball offer's one press: give the primitive to the owned ball
+   * that fits it, and take it away from the cutter it was on. The plan is the setup's CURRENT one
+   * with that one item moved, so every other item keeps its cutter and order — the smart-selection
+   * rule (the app proposes; the operator presses).
+   */
+  const giveSurfaceToBall = (finding: JobFinding): void => {
+    const cutterKey = finding.suggestedCutterKey;
+    const itemId = finding.labelId;
+    if (cutterKey === undefined || itemId === undefined) return;
+    const setup = jobSetups(job)[0];
+    if (setup === undefined) return;
+    const plan = setupTools(setup, job).map((key, i) => ({ key, items: [...toolItemsFor(setup, key, i)] }));
+    const owner = plan.find((c) => c.items.includes(itemId));
+    if (owner !== undefined && owner.key === cutterKey) return;
+    if (owner !== undefined) owner.items = owner.items.filter((id) => id !== itemId);
+    const ball = plan.find((c) => c.key === cutterKey);
+    if (ball === undefined) plan.push({ key: cutterKey, items: [itemId] });
+    else ball.items.push(itemId);
+    useEngraveJobStore.getState().applyCutterPlan(plan.filter((c) => c.items.length > 0));
+  };
+
   const cutTopBand = (finding: JobFinding): void => {
     updateTargetObject({ cutWithinReach: true });
     if (errors.length === 1 && errors[0]?.code === 'goal-reach-short' && errors[0]?.targetId === finding.targetId) {
@@ -3607,6 +3629,16 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(primitive.id)}
+          findingAction={(f) => {
+            if (f.code !== 'primitive-surface-ball-offer' || f.suggestedCutterKey === undefined) return null;
+            const entry = tools.find((e) => e.key === f.suggestedCutterKey);
+            if (entry === undefined) return null;
+            return (
+              <button type="button" data-testid="engrave-primitive-surface-ball" onClick={() => giveSurfaceToBall(f)}>
+                Cut the surface with the {toolDisplayName(entry.tool).split(' · ')[0]!}
+              </button>
+            );
+          }}
           rest={primitiveReducesToRegion(primitive) ? restFor(primitive.id) : null}
           technical={vCarveTechnical(primitive.id)}
           onChange={(patch) => updatePrimitive(primitive.id, patch)}

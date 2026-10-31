@@ -3231,12 +3231,12 @@ describe('EngravePanel — 3D primitives and the target object (#435)', () => {
     expect(screen.getByTestId('engrave-primitive-row-0').textContent).toContain('1.5 mm');
   });
 
-  it('shows the by-name refusal on a cone row instead of approximating it', () => {
+  it('cuts a cone as a 3D surface program instead of refusing it', () => {
+    // #786 slice 4a-2 — the refusal is gone: the row states the program that cuts it.
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-add-primitive-cone'));
-    expect(screen.getByTestId('engrave-primitive-finding-0-primitive-cone-needs-cam')).toBeTruthy();
-    expect(screen.getByTestId('engrave-primitive-warn-0')).toBeTruthy();
-    expect(screen.getByTestId('engrave-primitive-cut-0').textContent).toContain('refuses it by name');
+    expect(screen.queryByTestId(/primitive-cone-needs-cam/)).toBeNull();
+    expect(screen.getByTestId('engrave-primitive-cut-0').textContent).toContain('3D surface program');
   });
 
   it('will not commit a sphere cap deeper than its diameter', () => {
@@ -4878,5 +4878,63 @@ describe('EngravePanel — the blocker presses name their action (#832)', () => 
     const button = screen.getByTestId('engrave-generate-fix');
     expect(button.textContent).toBe('Open the cutter list');
     expect(document.body.textContent).not.toContain('▸ Fix');
+  });
+});
+
+// #786 slice 4a-2 — THE BALL OFFER IS ONE PRESS. A cone (or sphere) cut by a flat end mill leaves
+// a stepped surface; the app proposes the largest owned ball that fits and moves the primitive to
+// it, leaving every other item on its own cutter.
+describe('EngravePanel — the surface ball offer (#786 4a-2)', () => {
+  it('offers the fitting ball on the cone row and assigns the cone to it', () => {
+    const BALL: Tool = flatEndMill(2, {
+      name: '2 mm ball',
+      typeText: 'Ball End',
+      shape: 'ball',
+      tipDiameter: 2,
+      diameter: 2,
+      fluteLength: 20,
+    });
+    act(() => setInventoryEntries([{ key: 'inv:ball2', tool: BALL, provenance: 'test' }]));
+    const base = defaultEngraveJob();
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          labels: [],
+          // A pocket keeps the flat end mill busy, so the offer moves ONLY the cone.
+          shapes: [
+            { id: 'pocket', name: 'pocket', kind: 'circle', position: { x: 20, y: 20 }, rotation: 0, depth: 2, enabled: true, diameter: 8 },
+          ],
+          primitives: [
+            {
+              id: 'funnel',
+              name: 'funnel',
+              kind: 'cone',
+              position: { x: 50, y: 30 },
+              rotation: 0,
+              enabled: true,
+              depth: 2,
+              diameter: 10,
+              tipDiameter: 2,
+            },
+          ],
+          toolKey: 'flat-1.0',
+          tool: flatEndMill(1, { name: '1 mm flat end', fluteLength: 20, centreCutting: true }),
+        },
+      });
+    });
+    render(<EngravePanel />);
+    expand('engrave-primitive');
+    const action = screen.getByTestId('engrave-primitive-finding-action-0-primitive-surface-ball-offer');
+    expect(action.textContent).toContain('Cut the surface with the ⌀ 2 mm ball');
+    fireEvent.click(screen.getByTestId('engrave-primitive-surface-ball'));
+
+    const after = useEngraveJobStore.getState().job;
+    const setup = after.setups?.[0];
+    expect(setup?.tools).toContain('inv:ball2');
+    expect(setup?.toolItems?.['inv:ball2']).toEqual(['funnel']);
+    // The flat keeps the rest of the job — nothing else changed owner.
+    expect(setup?.tools).toContain('flat-1.0');
+    act(() => resetRegistry());
   });
 });

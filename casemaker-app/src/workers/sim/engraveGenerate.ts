@@ -48,6 +48,7 @@ import {
   cuttingForTrace,
   cuttingRadiusForSweep,
   drillPointAngle,
+  flatEndMill,
   pointLength,
   statedCuttingSize,
   tipNotRecorded,
@@ -76,6 +77,7 @@ import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
+import { primitiveHeightfield, surfacePrimitiveWord, surfacePrimitivesOf, type SurfacePrimitive } from '@/engine/cnc/engrave/primitiveSurface';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import {
@@ -154,6 +156,7 @@ import {
   DEFAULT_MAX_FINISH_TIP_OPS,
   DEFAULT_STOCK_TO_LEAVE_MM,
   generateSurface3dForGoal,
+  generateSurface3dIR,
   GOAL_MOVE_BUDGET,
   sampleGoalHeightfield,
   type SampleGoalOpts,
@@ -161,6 +164,7 @@ import {
   steepestWallDeg,
   type GoalSurfaceFacts,
   type SurfaceFeeds,
+  type Surface3dResult,
 } from '@/engine/cnc/cam/surface3d';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
@@ -3241,7 +3245,34 @@ export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm,
 /**
  * One program's result, before the list is assembled. `generateOneProgram`'s return shape.
  */
+/**
+ * #786 slice 4a-2 — the job's work BESIDES its cone/sphere surfaces. A surface program is its own
+ * file (one check per program), so a sub-job of only surfaces goes to the 3D CAM and everything
+ * else goes to the region pipeline.
+ */
+function jobHasNonSurfaceWork(job: EngraveJob): boolean {
+  const on = <T extends { enabled: boolean; construction?: boolean }>(list: readonly T[] | undefined): boolean =>
+    (list ?? []).some((i) => i.enabled && i.construction !== true);
+  return (
+    on(job.labels) ||
+    on(job.shapes) ||
+    on(job.combined) ||
+    on(job.vectors) ||
+    on(job.traces) ||
+    on(job.drills) ||
+    on(job.threads) ||
+    on(job.cutouts) ||
+    on(job.chamfers) ||
+    (job.primitives ?? []).some((p) => p.enabled && (p.kind === 'box' || p.kind === 'cylinder'))
+  );
+}
+
 type OneProgram = Omit<EngraveGenerated, 'programs'> & {
+  /**
+   * #786 slice 4a-2 — a SURFACE program's check: the analytic cone/sphere program has no 2.5D
+   * verifier report, so its check is the same `SurfaceProgramCheck` a goal program carries.
+   */
+  surfaceCheck?: SurfaceProgramCheck | null;
   /**
    * #737 — the neck for parting THIS program leaves, or null/absent on a program that cuts no
    * neck. The run sheet's saw step belongs to the file that leaves it; the top-level field is the
@@ -4876,6 +4907,143 @@ function generateGoalPrograms(
 }
 
 /**
+ * #786 slice 4a-2 — ONE CONE OR SPHERE, SURFACED: the analytic heightfield becomes the 3D CAM's
+ * program, posts, and carries a `surfaceCheck` instead of a 2.5D verifier report (there is none to
+ * have: the file cuts a curved surface, not plateaus). The fields and passes are the goal
+ * program's own — the same `generateSurface3dIR`, the same feeds resolution (a ball through its
+ * flat proxy), the same check shape — so a primitive and a goal are cut and checked the same way.
+ */
+function generateSurfacePrimitiveProgram(
+  job: EngraveJob,
+  primitive: SurfacePrimitive,
+  tool: Tool,
+  catalogue: readonly FeedCatalogueRow[],
+  calibration: MachineCalibration | null,
+  shop: EngraveShopOpts,
+  span: VacuumSpan,
+): OneProgram {
+  const base: OneProgram = {
+    ok: false,
+    stage: 'findings',
+    findings: [],
+    feeds: null,
+    cam: null,
+    nc: null,
+    verify: null,
+    ...emptyGoalResult(),
+  };
+  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null): OneProgram => ({
+    ...base,
+    ok: false,
+    stage,
+    feeds,
+    errors: [{ stage, message }],
+  });
+
+  const mill = jobMachine(job, calibration);
+  // The job's 2.5D feeds, reused unchanged (the goal path's rule): a ball or bull resolves through
+  // a FLAT PROXY of its cutting diameter, because `feedsFor` cannot feed a shape it cannot trace.
+  const isRound = tool.shape === 'ball' || tool.shape === 'bull';
+  const feedTool = isRound ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)` }) : tool;
+  const resolved = feedsFor(catalogue, job.stock.material, feedTool, mill, job.cutOverride, shop.feeds ?? undefined);
+  if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
+
+  const field = primitiveHeightfield(primitive, {
+    pitchMm: shop.surfaceGrid?.pitchMm.value ?? null,
+    stockTopZ: 0,
+  });
+  if (field === null) {
+    return fail('cam', `${surfacePrimitiveWord(primitive)} has no surface to cut: its depth, diameter or tip cannot form one`);
+  }
+
+  const feeds: SurfaceFeeds = {
+    feed: resolved.params.feed,
+    plungeFeed: resolved.params.plungeFeed,
+    stepDown: resolved.params.stepDown,
+    roughStepOver: resolved.params.stepOver,
+    finishStepOver: resolved.params.stepOver,
+  };
+  const radius = (cuttingDiameter(tool) ?? 0) / 2;
+  let surfaced: Surface3dResult;
+  try {
+    surfaced = generateSurface3dIR({
+      heightfield: field,
+      tool: { radius, ball: isRound },
+      toolObj: tool,
+      toolNumber: toolNumberFor(tool),
+      spindleRpm: resolved.params.rpm,
+      air: job.cutOverride?.air ?? true,
+      feeds,
+      rapid: mill.rapidEstimate,
+      labelId: primitive.id,
+      opts: { stockToLeaveMm: shop.finish?.stockToLeaveMm.value },
+    });
+  } catch (e) {
+    return fail('cam', e instanceof Error ? e.message : String(e), resolved);
+  }
+
+  const ctx: PostContext = {
+    jobName: job.name,
+    stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
+    materialName: job.stock.material,
+    zDatum: 'probed-top-face',
+    origin: 'topFrontLeft',
+    camVersion: CAM_VERSION,
+    toolKey: job.toolKey,
+  };
+  let nc: string;
+  try {
+    const posted = postZ1(surfaced.ir, ctx, mill, {
+      vacuum: span,
+      thumbnail: heightfieldTopViewPng(job.stock, field),
+    });
+    if (!posted.ok) return fail('post', posted.errors.join('; '), resolved);
+    nc = posted.text;
+  } catch (e) {
+    return fail('post', e instanceof Error ? e.message : String(e), resolved);
+  }
+
+  const surfaceCheck: SurfaceProgramCheck = {
+    kind: 'surface',
+    gridPitchMm: field.pitch,
+    roughingLayers: surfaced.roughingLayers,
+    passes: surfaced.ir.operations.map((op) => op.name),
+    resolutionNote: field.resolutionNote,
+    bbox: pathBbox(surfaced.ir),
+  };
+
+  const shortName = toolDisplayName(tool).split(' · ')[0]!;
+  const findings: JobFinding[] = [
+    {
+      severity: 'info',
+      code: 'primitive-surface-program',
+      labelId: primitive.id,
+      message:
+        `${surfacePrimitiveWord(primitive)} is cut by a 3D surface program (${field.resolutionNote}); ` +
+        (isRound
+          ? `the ${shortName} follows the curve.`
+          : `the ${shortName} is a flat cutter, so its finish is a stepped approximation — a ball nose follows the curve.`),
+    },
+  ];
+
+  return {
+    ...base,
+    ok: true,
+    stage: 'done',
+    findings: dedupeFindings([
+      ...findings,
+      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools }),
+      ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
+    ]),
+    feeds: resolved,
+    cam: summarize(surfaced.ir),
+    nc,
+    verify: null,
+    surfaceCheck,
+  };
+}
+
+/**
  * The XY extent of a program's positioned moves, for the console's laser frame (#535). The
  * verifier's report normally carries this bbox; a surface program has no report, and its check
  * carries the same fact so the frame is still the program's own outline.
@@ -5249,21 +5417,35 @@ export function engraveGenerate(
   const documentFloors = supportingFloors(tl, toPartPlan(job));
   onProgress?.({ stage: 'items', label: 'cutting the items' });
   if (job.setups === undefined) {
-    const one = generateOneProgram(
-      tl,
-      job,
-      tool,
-      catalogue,
-      calibration,
-      margins,
-      shop,
-      'whole',
-      true,
-      'rough-and-finish',
-      true,
-      undefined,
-      documentFloors,
-    );
+    // #786 slice 4a-2 — A CONE OR SPHERE (OR SEVERAL) IS A SURFACE PROGRAM OF ITS OWN. On a legacy
+    // document the surfaces are generated here, in document order, BEFORE the item program: the
+    // item program cuts its cut-outs last (they release the part), so a surface after it would be
+    // cut on a part held only by its tabs. A document whose only work is surfaces returns them as
+    // the whole run; one with both returns the surfaces first, then the item program.
+    const legacySurfaces = surfacePrimitivesOf(job);
+    const itemWork = jobHasNonSurfaceWork(job);
+    const surfaceOnes =
+      tool === null || legacySurfaces.length === 0
+        ? []
+        : legacySurfaces.map((p) => generateSurfacePrimitiveProgram(job, p, tool, catalogue, calibration, shop, 'whole'));
+    const one =
+      itemWork || legacySurfaces.length === 0
+        ? generateOneProgram(
+            tl,
+            job,
+            tool,
+            catalogue,
+            calibration,
+            margins,
+            shop,
+            'whole',
+            true,
+            'rough-and-finish',
+            true,
+            undefined,
+            documentFloors,
+          )
+        : surfaceOnes[0]!;
     // #677 — a legacy document names ONE cutter, so a variable carve's core cannot be cleared: it
     // stands, and the warning says what to add. A job that has setups gets the same sentence from
     // the loop below, with the setup's number on it.
@@ -5275,10 +5457,16 @@ export function engraveGenerate(
       toolKey: job.toolKey,
       itemIds: [],
     };
-    const face = facingProgramOf(oneReady, ref);
-    const engraved = oneReady.ok && oneReady.nc !== null && oneReady.verify !== null ? [programOf(oneReady, ref)] : [];
+    const surfacePrograms = surfaceOnes
+      .filter((s) => s.ok && s.nc !== null && s.surfaceCheck != null)
+      .map((s) => programOf(s, ref));
+    // A surface-only document has no item program to face or engrave; the surfaces ARE the run.
+    const itemProgramHere = itemWork || legacySurfaces.length === 0;
+    const face = itemProgramHere ? facingProgramOf(oneReady, ref) : null;
+    const engraved =
+      itemProgramHere && oneReady.ok && oneReady.nc !== null && oneReady.verify !== null ? [programOf(oneReady, ref)] : [];
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
-    return { ...oneReady, surface: shop.surface ?? null, programs: [...(face === null ? [] : [face]), ...engraved] };
+    return { ...oneReady, surface: shop.surface ?? null, programs: [...surfacePrograms, ...(face === null ? [] : [face]), ...engraved] };
   }
 
   // A setup that cannot become exactly one program is refused BEFORE anything is cut: the panel's
@@ -5346,8 +5534,11 @@ export function engraveGenerate(
     const segments: { drill: boolean; refs: JobProgramRef[] }[] = [];
     for (const ref of group) {
       const drill = toolForProgram(ref, job, tool, shop)?.shape === 'drill';
+      // #786 slice 4a-2 — a surface ref is a SOLO program too: the rest pass measures flat
+      // regions, and a curved surface is neither a rough nor a rest region.
+      const solo = drill || ref.surface === true;
       const last = segments.at(-1);
-      if (drill) segments.push({ drill: true, refs: [ref] });
+      if (solo) segments.push({ drill: true, refs: [ref] });
       else if (last !== undefined && last.drill === false) last.refs.push(ref);
       else segments.push({ drill: false, refs: [ref] });
     }
@@ -5383,7 +5574,8 @@ export function engraveGenerate(
           );
         const one = make(span);
         attempts.push(one);
-        if (one.ok && one.nc !== null && one.verify !== null) posted.push({ ref, one, make, span });
+        // #786 slice 4a-2 — a surface program posts on its `surfaceCheck`; it has no verifier.
+        if (one.ok && one.nc !== null && (one.verify !== null || one.surfaceCheck != null)) posted.push({ ref, one, make, span });
         // #677 — a variable carve with no later cutter leaves its CORE standing: say so with the
         // area and name what to add. A core the clearance program clears raises nothing; the core
         // program's own section of the sheet states it.
@@ -5521,6 +5713,7 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     chamfer: one.chamfer ?? null,
     core: one.core ?? null,
     neck: one.neck ?? null,
+    surfaceCheck: one.surfaceCheck ?? null,
   };
 }
 
@@ -5639,6 +5832,27 @@ function generateOneProgram(
    */
   raisedCoFlat?: Tool | null,
 ): OneProgram {
+  // #786 slice 4a-2 — A CONE OR SPHERE IS ITS OWN SURFACE PROGRAM. `setupPrograms` splits the
+  // primitive out of its owner's ordinary ref, so a sub-job whose only work is surfaces lands
+  // here; the region pipeline has nothing to plan for a sloped wall or a curved floor.
+  const surfacePrimitives = surfacePrimitivesOf(job);
+  if (surfacePrimitives.length > 0 && !jobHasNonSurfaceWork(job)) {
+    const only = surfacePrimitives[0]!;
+    if (tool === null) {
+      return {
+        ...emptyGoalResult(),
+        ok: false,
+        stage: 'feeds',
+        findings: [],
+        feeds: null,
+        cam: null,
+        nc: null,
+        verify: null,
+        errors: [{ stage: 'feeds', message: 'the job has no usable cutter' }],
+      };
+    }
+    return generateSurfacePrimitiveProgram(job, only, tool, catalogue, calibration, shop, span);
+  }
   // #347 — the JOB's machine, not the app's only one: the envelope, the spindle ceiling and the
   // frame below are read off the profile the document names. The POST is still `postZ1`'s dialect,
   // which is the only post this app has; a second mill is a second post, and this line is where a
