@@ -19,7 +19,6 @@
 import { useMemo } from 'react';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
 import type { MachineRecord } from '@/platform/locationClient';
 import { resolvedMachineById } from '@/engine/cnc/calibration';
 import { bedScene, type BedSceneBox, type BedSceneDatum } from '@/engine/cnc/bedScene';
@@ -105,24 +104,21 @@ function DashedEdges({
   );
 }
 
-/** A datum or a provisional note, as a small non-interactive label. */
-function Label({ position, color, children }: { position: [number, number, number]; color: string; children: string }) {
-  return (
-    <Html position={position} center style={{ pointerEvents: 'none' }} zIndexRange={[0, 0]}>
-      <span style={{ fontSize: 9, color, background: 'rgba(15,18,22,0.72)', borderRadius: 3, padding: '1px 4px', whiteSpace: 'nowrap' }}>
-        {children}
-      </span>
-    </Html>
-  );
-}
-
-/** A box's annotation ("top not measured", "provisional") at its centre. */
-function boxLabel(b: BedSceneBox): string | null {
-  return b.label ?? null;
-}
-
-function datumLabelPosition(d: BedSceneDatum): [number, number, number] {
-  return d.position;
+/**
+ * #783 review — ONE legend line under the picture, not a label per part: at the card's size the
+ * per-part labels collided ("rotary axis", "provisional", the module's own). The line states what
+ * the drawing cannot: how many parts are provisional, whether the movable side is parked, and
+ * every measured datum. A box that carries no label needs none.
+ */
+function legendOf(scene: { boxes: BedSceneBox[]; datums: BedSceneDatum[] }): string {
+  const parts: string[] = [];
+  const provisional = scene.boxes.filter((b) => b.label === 'provisional').length;
+  if (provisional > 0) parts.push(`${provisional} part${provisional === 1 ? '' : 's'} provisional`);
+  if (scene.boxes.some((b) => b.label === 'provisional opening')) parts.push('the movable side is parked');
+  if (scene.boxes.some((b) => b.label === 'from the pins, not measured')) parts.push('placed from the pins, not measured');
+  if (scene.boxes.some((b) => b.label === 'top: no reading')) parts.push('the surface top has no reading');
+  for (const d of scene.datums) parts.push(d.label);
+  return parts.join(' · ');
 }
 
 /**
@@ -168,6 +164,8 @@ export function BedScene({ machine }: { machine: MachineRecord }) {
     centre[2] + (dir[2]! / len) * distance,
   ];
 
+  const legend = legendOf(scene);
+
   return (
     <div data-testid="bed-scene">
       <Canvas
@@ -182,29 +180,12 @@ export function BedScene({ machine }: { machine: MachineRecord }) {
         {scene.boxes.map((b) => (
           <Box key={b.id} b={b} />
         ))}
-        {scene.boxes.map((b) => {
-          const label = boxLabel(b);
-          if (label === null) return null;
-          return (
-            <Label
-              key={`${b.id}-label`}
-              position={[
-                (b.min[0]! + b.max[0]!) / 2,
-                (b.min[1]! + b.max[1]!) / 2,
-                b.max[2]! + 1,
-              ]}
-              color={b.color}
-            >
-              {label}
-            </Label>
-          );
-        })}
-        {scene.datums.map((d) => (
-          <Label key={d.id} position={datumLabelPosition(d)} color="#30a46c">
-            {d.label}
-          </Label>
-        ))}
       </Canvas>
+      {legend !== '' && (
+        <p data-testid="bed-scene-legend" style={{ margin: '4px 0 0', fontSize: 10, lineHeight: 1.5, color: '#9aa4b0' }}>
+          {legend}
+        </p>
+      )}
     </div>
   );
 }

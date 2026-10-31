@@ -173,19 +173,28 @@ function Floor({
 /** One vise jaw, drawn where the user SAID it is (un-inflated). */
 function Jaw({ mesh, name }: { mesh: NodeMeshOutput; name: string }) {
   const geom = useMeshGeometry(mesh);
-  if (!geom) return null;
+  // #783 review — THE JAWS MUST READ AS JAWS, not as one plate. They stay translucent (the #162
+  // rule: a transparent mesh that writes depth hides what is inside it), so the fix is an edge
+  // outline on top: the fixed jaw, the moving jaw and its carrier each show their own box.
+  const edges = useMemo(() => (geom === null ? null : new THREE.EdgesGeometry(geom, 30)), [geom]);
+  if (!geom || edges === null) return null;
   return (
-    <mesh geometry={geom} name={name}>
-      {/* depthWrite:false — a transparent mesh that writes depth hides what is inside it (#162). */}
-      <meshStandardMaterial
-        color={JAW_COLOR}
-        transparent
-        opacity={0.5}
-        depthWrite={false}
-        metalness={0.2}
-        roughness={0.6}
-      />
-    </mesh>
+    <group name={name}>
+      <mesh geometry={geom}>
+        {/* depthWrite:false — a transparent mesh that writes depth hides what is inside it (#162). */}
+        <meshStandardMaterial
+          color={JAW_COLOR}
+          transparent
+          opacity={0.5}
+          depthWrite={false}
+          metalness={0.2}
+          roughness={0.6}
+        />
+      </mesh>
+      <lineSegments geometry={edges} name={`${name}-edges`}>
+        <lineBasicMaterial color="#9fb8cc" transparent opacity={0.85} depthWrite={false} />
+      </lineSegments>
+    </group>
   );
 }
 
