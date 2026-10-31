@@ -10,14 +10,13 @@
  * WHERE THEY GO (the manager's rule, 2026-10-31): on the TURN'S AXIS LINE — the line of the flip
  * that does not move — so each hole appears at the same work coordinate with the other face up.
  * For a stock turned over about Y that is `x = length/2` (the tape flip); about X it is
- * `y = width/2` (the vise flip). Each hole sits in the scrap beside the board, its rim clear of
- * the blank's edge and of the board's edge by a labelled allowance.
+ * `y = width/2` (the vise flip). Each hole sits in the scrap beside the board, far enough from
+ * both edges that #429's own scan rules accept every wall it needs.
  *
- * THE SIZE is the smallest one the fitted probe can read: #429 skips a feature narrower than the
- * tip plus twice the fine step, and one whose mid-line is not clear of its corners by the tip's
- * radius plus the corner clearance. So the minimum is `tip + 2·max(fineStep, cornerClearance)`,
- * and the offer takes an owned drill or flat of at least that size (the smallest), else the
- * minimum itself — the job's own `hole-no-cutter` then says no cutter makes it.
+ * THE SIZE is a standard one — 4 mm is the usual alignment hole — raised to the smallest standard
+ * size the probe can read when the probe needs more. #429 skips a feature narrower than the tip
+ * plus twice the fine step, and one whose mid-line is not clear of its corners by the rim offset
+ * plus the corner clearance; `minProbeableHoleMm` is those two rules together.
  *
  * THIS INFORMS. Nothing is added without the operator's press, and a board with no usable holes
  * still cuts: the second side is placed by eye, and how far that lands is unmeasured, which the
@@ -34,9 +33,9 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { pcbCutterPlan, pcbHoleAssignment, withPcbCutters } from './pcbCutters';
 
 /**
- * The rim's distance from the blank's edge and from the board's edge, mm — a labelled allowance,
- * not a measurement: enough scrap to drill into and enough gap that the alignment hole's own
- * break-out cannot reach the copper.
+ * The extra scrap every placement keeps beyond what the scan itself needs, mm — a labelled
+ * allowance, not a measurement: enough material that the alignment hole's own break-out cannot
+ * reach the copper.
  */
 export const ALIGNMENT_CLEARANCE_MM = 1;
 
@@ -123,7 +122,10 @@ export function pcbAlignmentOffer(input: PcbAlignmentInput): PcbAlignmentOffer |
   // same clearance, and a board hole can sit at the board's edge. The offer is calibrated to
   // those checks, so the hole it promises really is read.
   const keep = input.probe.tipRadiusMm + input.probe.cornerClearanceMm;
-  const boardClear = Math.max(r + ALIGNMENT_CLEARANCE_MM, input.probe.scanInsideMm + keep + ALIGNMENT_CLEARANCE_MM);
+  // A wall's scan starts `scanInsideMm` outside that wall, so the farthest a scan reaches toward
+  // an edge is the hole's centre plus its radius plus that run-out. Both distances are that,
+  // plus the clearance #429 keeps every scan start from an edge or another opening.
+  const boardClear = r + input.probe.scanInsideMm + keep + ALIGNMENT_CLEARANCE_MM;
   const blankClear = r + input.probe.scanInsideMm + keep + ALIGNMENT_CLEARANCE_MM;
 
   const numbers =
