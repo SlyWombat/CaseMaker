@@ -45,5 +45,5 @@ export function statedGoalTarget(job: Pick<EngraveJob, 'targetObject'>): Engrave
 
 /** What the goal's legend line says, in the row's own words ("mold", the app's spelling). */
 export function goalLegendWords(mode: 'item' | 'mold'): string {
-  return mode === 'mold' ? 'Goal: a mold of the part' : 'Goal: the part, standing proud';
+  return mode === 'mold' ? 'Goal: a mould of the part' : 'Goal: the part, standing proud';
 }

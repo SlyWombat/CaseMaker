@@ -174,6 +174,6 @@ describe('#811 — the drawing decisions', () => {
 
   it('the legend names what the drawing shows, in the row’s spelling', () => {
     expect(goalLegendWords('item')).toBe('Goal: the part, standing proud');
-    expect(goalLegendWords('mold')).toBe('Goal: a mold of the part');
+    expect(goalLegendWords('mold')).toBe('Goal: a mould of the part');
   });
 });
