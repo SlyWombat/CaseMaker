@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { tl } from './helpers/manifoldExec';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { goalSides, jobHasItems, jobSetups, jobTargetObjects } from '@/engine/cnc/engrave/jobSetup';
+import { goalSides, jobHasItems, jobSetups, jobTargetObjects, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -166,6 +166,28 @@ describe('#723 P2-1b — one program per side', () => {
     // The first goal is surfaced from its own placement (20 × 20 centred on 40,25).
     expect(out.programs[0]!.nc).toContain('X');
   }, 120_000);
+
+  it('a pure-goal multi-side job is WORK: its sides are the programs, not "nothing to cut"', () => {
+    // #723 P2-3 — the panel's Generate gate reads `validateJob`; a job whose only work is two
+    // side goals must not be refused `no-items`, and each side's cutter is not "a cutter with no
+    // items" — the goal IS that side's clearing work.
+    const codes = validateJob(twoSideJob()).map((f) => f.code);
+    expect(codes).not.toContain('no-items');
+    expect(codes).not.toContain('setup-tool-no-items');
+  });
+
+  it('the worker passes validateJob the resolved cutter: a house key is not "not in the library"', () => {
+    // #723 P2-3 — the sim worker has no registry; the main thread resolves `jobTool(job)` and
+    // hands the Tool in. Without `options.tool` the worker's own empty registry made every
+    // `user:…` job read `tool-missing`, in the preview and in Generate alike.
+    const job = twoSideJob();
+    job.toolKey = 'user:house-ball';
+    // The file the worker receives carries no resolved snapshot: the main thread's registry is
+    // what answers for the key, and the worker only has what the caller hands it.
+    job.tool = null;
+    expect(validateJob(job).some((f) => f.code === 'tool-missing')).toBe(true);
+    expect(validateJob(job, null, { tool: BALL }).some((f) => f.code === 'tool-missing')).toBe(false);
+  });
 
   it('a single goal on a job with setups is cut in the first setup — the one-goal compatibility path', () => {
     const job = twoSideJob();

@@ -202,6 +202,33 @@ describe('#471 readSetups — the saved list against the document', () => {
     reading = readSetups(job);
     expect(reading.findings.map((f) => f.code)).toEqual(['setup-item-missing', 'setup-no-cuts']);
   });
+
+  it('a setup that cuts a side GOAL has work: empty itemIds is not "no cuts" (#723 P2-3)', () => {
+    const job = defaultEngraveJob();
+    job.labels = [];
+    job.shapes = [];
+    job.toolKey = 'flat-3.175x12-metal';
+    job.setups = [
+      { id: 'setup-1', orientation: { ...IDENTITY }, mount: { kind: 'vise' }, itemIds: [], tools: [job.toolKey] },
+    ];
+    job.targetObjects = [
+      {
+        id: 'goal-1',
+        name: 'shell.stl',
+        format: 'stl',
+        sha256: 'a'.repeat(64),
+        size: { x: 10, y: 10, z: 5 },
+        position: { x: 40, y: 25, z: 0 },
+        rotation: 0,
+        enabled: true,
+        role: 'goal',
+        setupId: 'setup-1',
+      },
+    ];
+    const reading = readSetups(job);
+    expect(reading.findings).toEqual([]);
+    expect(reading.stale).toBe(false);
+  });
 });
 
 describe('#471 materializeSetups — the one write from the implicit reading', () => {

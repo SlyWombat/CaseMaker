@@ -13,7 +13,7 @@
  * the middle of helping the person edit.
  */
 
-import { jobMount, jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { goalSides, jobMount, jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 import { removalsFrom, isSyntheticRemovalId } from './fromJob';
 import { buildSetups, planSetups } from './plan';
@@ -157,7 +157,13 @@ export function readSetups(job: EngraveJob): SetupsReading {
   const assigned = new Set(items.flatMap((r) => r.cut));
   const unassigned = cutIds.filter((id) => !assigned.has(id));
   const findings: SetupAuthoringFinding[] = [];
+  // #723 P2-3 — a setup that cuts a SIDE's goal HAS work: the surface program is its cut, and its
+  // `itemIds` are legitimately empty. Without this every two-side goal job wore a red "Setup 1
+  // names no items" and a stale badge — a warning firing on every normal job of the kind.
+  const goalSetupIds = new Set(goalSides(job).map((side) => side.setup.id));
   for (const r of items) {
+    const setupId = setups[r.setupIndex - 1]?.id;
+    const cutsGoal = setupId !== undefined && goalSetupIds.has(setupId);
     if (r.missing.length > 0) {
       findings.push({
         severity: 'error',
@@ -170,7 +176,7 @@ export function readSetups(job: EngraveJob): SetupsReading {
           `Remove ${r.missing.length === 1 ? 'it' : 'them'} from the setup, or re-plan.`,
       });
     }
-    if (r.cut.length === 0) {
+    if (r.cut.length === 0 && !cutsGoal) {
       findings.push({
         severity: 'error',
         code: 'setup-no-cuts',

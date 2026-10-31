@@ -43,7 +43,7 @@ import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
-import { dedupeFindings, withTargetBlobState, itemKindWord, itemRowName, jobSetups, jobTool, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobSetups, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
 import { toolForJob } from '@/engine/cnc/toolRegistry';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
@@ -77,7 +77,7 @@ import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { surfaceSpreadFor, firstRegistrationFor } from '@/store/engraveRegistrationStore';
 import { openTextFile } from '@/utils/openTextFile';
-import { feedCatalogueSnapshot, feedsFor, type CutParams } from '@/engine/cnc/feeds';
+import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, type CutParams } from '@/engine/cnc/feeds';
 import {
   TRACE_DEFAULTS,
   importOutlineFromDisk,
@@ -1016,7 +1016,20 @@ export function EngravePanel(): JSX.Element {
   // The rows AND their sync date (#366): the panel shows the catalogue's provenance sentence, so it
   // is the caller that has to hand `feedsFor` the age. The worker passes rows alone and gets the
   // sentence without it — it never renders one.
-  const feeds = tool ? feedsFor(feedCatalogueSnapshot(), job.stock.material, tool, jobMachine(job), job.cutOverride) : null;
+  // #723 P2-3 — A PURE-GOAL job's feed row is the SURFACING row, at the flat proxy of a round
+  // cutter (the same `feedsToolForSurface` the goal CAM resolves with). Asking `feedsFor` about
+  // the ball itself refused every surfacing job with a ball nose — "cannot cut this job" — while
+  // the CAM that would cut it proxies the row. An item job keeps the cutter's own row.
+  const goalOnly = !jobHasItems(job) && (pureGoalObject(job) !== null || goalSides(job).length > 0);
+  const feeds = tool
+    ? feedsFor(
+        feedCatalogueSnapshot(),
+        job.stock.material,
+        goalOnly ? feedsToolForSurface(tool) : tool,
+        jobMachine(job),
+        job.cutOverride,
+      )
+    : null;
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;
   // #221 — the V-carve strategy's facts, all READ from the engine: the cone from the cutter, the
   // colour plane the preview resolved from the print (the same `colourBoundaryDepth` the sheet and

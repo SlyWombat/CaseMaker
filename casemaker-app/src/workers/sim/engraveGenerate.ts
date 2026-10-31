@@ -42,13 +42,12 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { version as CAM_VERSION } from '../../../package.json';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
-import { catalogueCoverageFor, feedsFor, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { catalogueCoverageFor, feedsFor, feedsToolForSurface, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import {
   cuttingDiameter,
   cuttingForTrace,
   cuttingRadiusForSweep,
   drillPointAngle,
-  flatEndMill,
   pointLength,
   statedCuttingSize,
   tipNotRecorded,
@@ -2191,7 +2190,9 @@ export function engraveRegions(
     ...validateJob(
       job,
       { deg: drillResolved.settings.pointAngleDeg, source: drillResolved.sources.pointAngleDeg },
-      { derivedCores: derivedCores?.length ?? 0, bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools },
+      // #723 P2-3 — the caller's resolved cutter: this realm has no registry, so a house key
+      // would otherwise read as missing.
+      { derivedCores: derivedCores?.length ?? 0, bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools, tool },
     ),
     // #240 — the vise's validator is the VISE's; a rotary job's holding findings are slice 3's.
     ...(job.workholding.kind === 'vise'
@@ -4138,7 +4139,7 @@ export function generateRotaryGoalProgram(
   });
   const documentFindings = (): JobFinding[] =>
     dedupeFindings([
-      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools }),
+      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools, tool }),
       ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
     ]);
   if (goal.format === 'png') {
@@ -4153,9 +4154,7 @@ export function generateRotaryGoalProgram(
     );
   }
   const mill = jobMachine(job, calibration);
-  const isRound = shape === 'ball' || shape === 'bull';
-  const feedTool = isRound ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)` }) : tool;
-  const resolved = feedsFor(catalogue, job.stock.material, feedTool, mill, job.cutOverride, shop.feeds ?? undefined);
+  const resolved = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), mill, job.cutOverride, shop.feeds ?? undefined);
   if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
   const settings = goal.surface ?? {};
   const stockToLeaveMm = settings.stockToLeaveMm ?? shop.finish?.stockToLeaveMm.value ?? undefined;
@@ -4359,7 +4358,7 @@ export function generateGoalProgram(
   // Save/Upload/Release asked for no clearance tick while Cut step 1 had no warning to show it.
   const documentFindings = (): JobFinding[] =>
     dedupeFindings([
-      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools }),
+      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools, tool }),
       ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
     ]);
 
@@ -4411,11 +4410,9 @@ export function generateGoalProgram(
   const mill = jobMachine(job, calibration);
 
   // Feeds — the job's 2.5D feeds, reused unchanged (slice F tunes 3D engagement, #536). A ball/bull
-  // is refused by `feedsFor` (it cannot trace), so its feeds come through a FLAT proxy of its
-  // cutting diameter; a flat cutter resolves directly.
-  const isRound = tool.shape === 'ball' || tool.shape === 'bull';
-  const feedTool = isRound ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)` }) : tool;
-  const resolved = feedsFor(catalogue, job.stock.material, feedTool, mill, job.cutOverride, shop.feeds ?? undefined);
+  // is refused by `feedsFor` (it cannot trace), so its feeds come through the shared FLAT proxy
+  // (feedsToolForSurface); a flat cutter resolves directly.
+  const resolved = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), mill, job.cutOverride, shop.feeds ?? undefined);
   if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
 
   // #535 — the goal operation's own settings, each falling back to the default it overrides: the
@@ -5048,7 +5045,7 @@ export function engraveGenerate(
       stage: 'findings',
       // #725 B7 — the bed facts ride this call too: it is the same document gate as `engraveRegions`,
       // and a through sentence judged without them would name the vise on a bed job.
-      findings: dedupeFindings([...setupProblems, ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools })]),
+      findings: dedupeFindings([...setupProblems, ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools, tool })]),
       feeds: null,
       threads: null,
       threadMachining: null,

@@ -2,8 +2,8 @@
 // pin its shape, the two refusals (no row; step-over past the radius) and the machine clamp.
 
 import { describe, it, expect } from 'vitest';
-import { FEEDS_TABLE, feedsFor, type FeedsEntry } from '@/engine/cnc/feeds';
-import { flatEndMill, cuttingRadiusForSweep } from '@/engine/cnc/tool';
+import { FEEDS_TABLE, feedsFor, feedsToolForSurface, type FeedsEntry } from '@/engine/cnc/feeds';
+import { cuttingDiameter, flatEndMill, cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { Z1, CLAMP_REFUSE_FRACTION_FALLBACK } from '@/engine/cnc/machine';
 
 /**
@@ -30,6 +30,18 @@ function vBit30(tip: number) {
     angle: 30,
   });
 }
+
+describe('#723 P2-3 — the surfacing feed row', () => {
+  it('a ball or bull asks through a flat of its cutting diameter; a flat is its own row', () => {
+    const ball = flatEndMill(3.175, { shape: 'ball', typeText: 'Ball Nose', tipDiameter: 2, cornerRadius: 1 });
+    const proxy = feedsToolForSurface(ball);
+    expect(proxy.shape).toBe('flat');
+    expect(cuttingDiameter(proxy)).toBe(2);
+    // The goal CAM and the panel resolve one rule; a flat is untouched.
+    const flat = flatEndMill(1);
+    expect(feedsToolForSurface(flat)).toBe(flat);
+  });
+});
 
 describe('the V1 feeds table', () => {
   it('is entirely unmeasured, and every row names its own source', () => {

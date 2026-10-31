@@ -1398,6 +1398,14 @@ export function validateJob(
      * named against this list; absent, `getTools()` answers, exactly as `jobTool` reads it.
      */
     tools?: readonly ToolLibraryEntry[] | null;
+    /**
+     * #723 P2-3 — the cutter the CALLER resolved, for a realm that cannot see the registry (the
+     * sim worker). The worker is handed the resolved `Tool` (or null) on the main thread's
+     * authority; without this its `validateJob` read its own empty registry and refused every
+     * house cutter (`user:…`) as "not in the tool library". Absent: `jobTool(job)` reads this
+     * realm's registry, which is right on the main thread.
+     */
+    tool?: Tool | null;
   } = {},
 ): JobFinding[] {
   const bed = options.bed ?? null;
@@ -2704,7 +2712,13 @@ export function validateJob(
   // #535 — a PURE GOAL job's work is the goal mesh itself: it posts the surfacing program, so it
   // must not read as "nothing to cut" (a job emptied of its items to add Surface a mesh is the
   // ordinary way to build one).
+  //
+  // #723 P2-3 — and a MULTI-SIDE goal job's work is its SIDES: one goal per setup, each posting a
+  // surface program in setup order. `pureGoalObject` reads only the single `targetObject` form, so
+  // without `goalSides` the landed sides list generated nothing from the panel (the e2e walk found
+  // it: "Nothing to cut yet" over a job whose two sides were both stated).
   const pureGoal = pureGoalObject(job);
+  const sideGoals = goalSides(job);
   const hasWork =
     enabled.some(itemHasWork) ||
     enabledTraces.some(traceHasWork) ||
@@ -2714,7 +2728,8 @@ export function validateJob(
     enabledCutouts.length > 0 ||
     enabledChamfers.length > 0 ||
     (options.derivedCores ?? 0) > 0 ||
-    pureGoal !== null;
+    pureGoal !== null ||
+    sideGoals.length > 0;
 
   if (!hasWork) {
     findings.push({
@@ -2729,7 +2744,8 @@ export function validateJob(
   // chosen yet (the empty key a fresh default job / import route starts from) is the normal
   // pre-recommendation state, not an error. The finding is only for a REAL key that names nothing:
   // a stale or hand-typed cutter the library does not hold.
-  if (jobTool(job) === null && hasWork && job.toolKey !== NO_TOOL_KEY) {
+  const resolvedTool = options.tool === undefined ? jobTool(job) : options.tool;
+  if (resolvedTool === null && hasWork && job.toolKey !== NO_TOOL_KEY) {
     findings.push({
       severity: 'error',
       code: 'tool-missing',
@@ -3205,6 +3221,9 @@ export function setupProgramFindings(
   for (const cutout of job.cutouts ?? []) {
     if (cutout.enabled) workById.set(cutout.id, cutoutOperationName(cutout, null));
   }
+  // #723 P2-3 — the setups that cut a SIDE's goal. Their work is the surface program, not an
+  // `itemIds` clearing pass, so the rest-pass bookkeeping below does not apply to them.
+  const goalSetupIds = new Set(goalSides(job).map((side) => side.setup.id));
   jobSetups(job).forEach((setup, i) => {
     const tools = setupTools(setup, job);
     if (setup.tools.length === 0) {
@@ -3294,7 +3313,11 @@ export function setupProgramFindings(
     }
 
     const firstItems = toolItemsFor(setup, tools[0]!, 0).filter((id) => itemSet.has(id));
-    if (firstItems.length === 0) {
+    // #723 P2-3 — a side that cuts a GOAL has its work stated on the goal, not in `itemIds`: the
+    // surface program is the clearing pass, so "no items to measure the rest from" is not a fact
+    // about this setup. (An item job that also cuts a side's goal keeps the rule for its items.)
+    const cutsGoal = goalSetupIds.has(setup.id);
+    if (firstItems.length === 0 && !cutsGoal) {
       findings.push({
         severity: 'error',
         code: 'setup-tool-no-items',

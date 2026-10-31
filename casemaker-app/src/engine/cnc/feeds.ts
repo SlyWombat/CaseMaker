@@ -91,7 +91,7 @@
  */
 
 import { z } from 'zod';
-import { cuttingForTrace, feedRowDiameter, vendorId } from './tool';
+import { cuttingDiameter, cuttingForTrace, feedRowDiameter, flatEndMill, vendorId } from './tool';
 import type { Tool, ToolShape } from './tool';
 import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
 import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
@@ -1447,6 +1447,22 @@ export type FeedsResult =
  * {@link applyMeasurements}, which is the only way a measured row can be put in front of this
  * function without hand-editing a machine-written region of this file.
  */
+/**
+ * The cutter whose FEED ROW a SURFACING pass resolves against (#535).
+ *
+ * `feedsFor` refuses a ball or bull nose — it cannot trace a 2.5D path — but a surface finish's
+ * engagement is the flat row at the cutter's cutting diameter, so a round cutter asks through a
+ * FLAT proxy of that diameter. The goal CAM has always done this; the rule lives here so the
+ * panel's Generate gate and the worker cannot disagree about whether a ball can cut a goal.
+ *
+ * A flat cutter is returned unchanged, so an item job's numbers do not move.
+ */
+export function feedsToolForSurface(tool: Tool): Tool {
+  return tool.shape === 'ball' || tool.shape === 'bull'
+    ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)` })
+    : tool;
+}
+
 export function feedsFor(
   catalogue: readonly FeedCatalogueRow[] | FeedCatalogue,
   material: StockMaterial,
