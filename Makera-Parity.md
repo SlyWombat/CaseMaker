@@ -1,5 +1,7 @@
 # Makera Studio — capability parity review
 
+> **Current score: §15, Scorecard — 2026-10-31** (78 rows; 89.3 % on code, 80.7 % bench-proved).
+
 Status as of 2026-10-03; §13 added 2026-10-04; §14 added 2026-10-05. Nothing here is
 implemented; this document is the inventory and the gap list that `/Fabrication.md` plans
 against.
@@ -1117,3 +1119,163 @@ comment in `feeds.ts`.
 | engrave: batch from a list — demand-gated | after #176 | M4 |
 | import: raster → profile trace, after #217 | CNC-2.1 follow-on | M5 — filed as #252 and shipped |
 | docs: `/Fabrication.md` decisions 6, 9, 19 and the §9.1 DB row, as §14.5 states them | — | §14.5 |
+
+---
+
+## 15. Scorecard — 2026-10-31
+
+**Method.** The rows are built from Studio's side, not ours: §2 (strategies), §3 (the tool model),
+§4 (shared parameters), §5 (stock, materials, feeds), §6 (output), §7 (the machine-control surface),
+the decompile notes in `docs/reverse/makera-studio/` (cited RE nn), and the descriptions in the
+nineteen issues of the *Parity with Makera Studio* milestone. One row is one capability a Studio
+user would see. Sub-parameters are folded into their row, and features that only Case Maker has
+(the oracle, coupons, run records, the house) are left out, because they don't measure parity.
+`docs/market-research/MAKERA-VS-CASEMAKER.md` (113 rows, 2026-10-29) was the starting list. Every
+Case Maker cell was then re-checked against `main` **60fe2f47**. A commit counts only if
+`git merge-base --is-ancestor` puts it on `main`; otherwise the evidence is a file on `main` or the
+closed issue's landing comment. In-flight branches (#778, #783) count as not built.
+
+**Statuses.** **YES**: built and tested. **PARTIAL**: built but limited; the cell says what's missing.
+**NO**: not built. **N/A**: Studio does it, and Case Maker declines it on the record; the reason is
+given, and the row is left out of the percentage. **bench-unverified** marks a YES whose code and
+tests are on `main` but whose machine check hasn't run (#767's checklist, #823, #238 for the rotary,
+#536 for the 3D feeds). Rotary rows are YES bench-unverified, not PARTIAL. The code is complete,
+and `engraveRunGate.ts`'s `ROTARY_UNMEASURED_REFUSAL` deliberately withholds the `.nc` save and the
+run until #238 measures the module. The second score below is the one that discounts this.
+
+### 15.1 The table
+
+| # | Capability | Studio | Case Maker on 60fe2f47 | Status | Evidence |
+|--:|---|---|---|---|---|
+| | **Connection and status** | | | | |
+| 1 | TCP connection to the controller | `WIFIStream` on :2222 (RE 01) | Five socket calls, framing in the protocol layer | YES | #255; `src-tauri/src/machine.rs`, `platform/desktop/protocol.ts` |
+| 2 | USB serial connection | `SerialPortStream`, `USBStream` (RE 01) | A serial port behind the same protocol layer; Windows desktop only | YES, bench-unverified | #775, 1c8719da; `platform/machineSerial.ts` |
+| 3 | Discovery, typed IP, saved machines, identify | UDP discovery, `AddDeviceFromIPWgt`, `t_MyDeviceList`, `MachineDetector` (RE 01, 07) | Passive UDP :3333, Connect by IP, nicknamed machines, `M482.x` identify | YES | #275, #596, #280; `platform/machineProbe.ts` |
+| 4 | Status frame and DRO | Parses `State/MPos/WPos/F/S/T/W/L/P/A` (RE 02) | State, MPos, WPos, P, F, S, T, A, H, O read; work over machine per axis; tool by name | YES | #769 (38bcc2b3, 34ee1e86), #647, #659 |
+| 5 | Status monitor | Limits, probe, tool sensor, E-stop, cover, temperatures, RSSI (Workflow A.7) | Temperatures, halt reason, levelling state. **Limits, probe input, cover and RSSI are not read** (`L:/C:/E:/W:` unread with reasons) | PARTIAL | #659, b6a9d462; `platform/desktop/protocol.ts` |
+| | **Homing, probing and origin** | | | | |
+| 6 | Home and unlock | `$H`; Unlock on the Control card (RE 03, Workflow A.6) | `$H` around every activity; Unlock only in Alarm | YES | #644 (3242722c); `platform/machineUnlock.ts`, `platform/machineRun.ts` |
+| 7 | Tool length and tool setter | `M491`, `M6`'s setter macro (RE 03) | `M491` for probe and cutter, Z0 corrected by the difference, reading kept | YES | #599, #600, #563; `registration/execute.ts` |
+| 8 | Z surface probe and set work origin | `G38.2` touch, `G10 L20 P0 Z0` (Workflow A.5) | `G38.3` fast and slow touches within a plausibility band; `G10 L2 P1 X Y Z` | YES | #589, #518; `registration/execute.ts` |
+| 9 | 3D-probe sideways edge finding | `Probe3DTaskManager` (RE 03, Workflow A.5) | Sideways `G38.3` edge touches with the ball radius, where the mount allows | YES, bench-unverified | #525, 2307b7d3; `registration/probe3d.ts`. The probe was hand-surveyed on 2026-10-30 (`docs/bench/2026-10-30-3d-probe-survey.md`), not run through the app |
+| 10 | 3D-probe corner find | `Set Origin with 3D Probe` corner mode | Two lines per edge, intersected, out-of-square stated. **Tape mount only**: no vise or bracket, never a disc. Bench-unverified | PARTIAL | #525, 00803648; #767's #525 line |
+| 11 | 3D-probe centre finding (bore, boss, round part) | Centre finding on round workpieces (#525, quoting the probe's guide) | A drilled hole registers as a round reference by the wired probe's Z scans. **No sideways 3D-probe bore or boss centre cycle** | PARTIAL | #813, 60fe2f47; `registration/references.ts` |
+| 12 | Auto workpiece levelling | 3 × 3 grid, 5 mm clearance (Workflow A.4) | Five-touch plane fit and re-post against tilt; tilt told from dome; G32 grid recommended via the console. **G32 not proven on the Z1** | PARTIAL | #608, #623, #631, 3373736d; **#501** |
+| 13 | Area or margin scan before cutting | `Scan Now` → `M495` trace (Workflow A.4) | Frame file, laser frame, lifted dry-run program | YES | #244, #431, #547 |
+| | **Machine controls** | | | | |
+| 14 | Spindle on/off by hand | `M3`/`M5` toggle (Workflow A.7) | Spindle runs only inside a verified program | N/A | R-10; the verifier refuses an unestablished start (#396) |
+| 15 | Jog pad and QuickMove | Workflow A.6 | None (single fixed moves only: park, camera home, laser point) | N/A | R-10 |
+| 16 | Feed and spindle override controls | Control card (Workflow A.6) | Override **readout** only | N/A | R-10; readout #769 |
+| 17 | MDI console | `G-Code`/`MDI` tabs (Workflow A.6) | Guarded one-line console, desktop and LAN | YES | #302, #386; `engine/cnc/consoleGate.ts` |
+| 18 | Stop a running job | `abort`; realtime halt (Workflow A.5) | `abort`, then `M332` once Idle. The realtime halt is left to the machine's button by choice (Q16) | YES | #424; `platform/machineStop.ts` |
+| 19 | Pause and resume | `suspend`/`resume` (RE 05) | The firmware's own words at the next poll boundary | YES, bench-unverified | #618 (open for the bench only), 138e3ea7; `platform/machinePause.ts`; #767 |
+| 20 | Vacuum / dust collection | `M331`/`M332` (RE 03) | In every program; card switch when Idle; state from what was sent | YES | #283, #390, #648; `platform/machineVacuum.ts` |
+| 21 | Anti-static | Assist option (Workflow A.4) | `M331.4`/`M332.4` auto-enabled for plastic | YES | #564. #568 closed: no visible behaviour to bench-check |
+| 22 | Work light | `M821`/`M822` (Workflow A.7) | Card switch, bench-proved 2026-10-18 | YES | #422, 3242722c |
+| 23 | Probe laser pointer | `M831`/`M832` (Workflow A.7) | Laser frame and point-to-origin | YES | #431; `platform/machineLaser.ts` |
+| 24 | Other accessory switches (spindle fan, power fan, external output, probe charger) | Toggles (§7) | One card switch each, Idle and jobless only | YES, bench-unverified | #289, 6aa73a4a; `platform/machineAccessory.ts`; #767 |
+| 25 | Laser module (image and vector) | Strategy types 3 and 4 (§2) | None | N/A | Decision 4: no laser strategy (the Z1 has no module); `capabilities.laser: false` |
+| 26 | Machine settings editor | Probe speeds, rotary offsets, etc. as editable config (§7) | Reads `config-get sd`; **writes refused** | N/A | `consoleGate.ts` refuses `config-set`; read #279 |
+| 27 | Firmware update | Launcher pushes `/sd/firmware.bin` (RE 05, 08) | Refused | N/A | `consoleGate.ts` refuses `dfu`/`flash`/`upgrade` |
+| | **Camera** | | | | |
+| 28 | Live camera view | `ws://host:82/ws_video` (RE 04) | Camera pane with frame age | YES | #530, cadf14ba; `platform/cameraStream.ts` |
+| 29 | Camera to home | Fixed move to the camera pose (RE 04) | One fixed move to the clearance pose, Idle and jobless only | YES, bench-unverified | #770, 67642024; `platform/machineCameraHome.ts`. No bench record found |
+| 30 | Time-lapse | Recorded per job, replayed over `vpreview` (RE 04) | None in the app | N/A | R-17 |
+| | **Transfer and run** | | | | |
+| 31 | Upload to `/sd/gcodes` | Generic put (RE 05) | Framed transfer with MD5; Idle checked first | YES | #255, #291, #298, #296; `platform/machineUpload.ts` |
+| 32 | QuickLZ compressed upload | QuickLZ `.bin` over 4096 B (RE 05) | Same, opt-in; default `plain` until benched | YES, bench-unverified | #562, 5ecb1ace; `platform/desktop/quicklz.ts`; #767 |
+| 33 | SD file list and delete | `FileSystemNetworkManager` (RE 05) | Files view; delete only for files this browser uploaded, never mid-job | YES, bench-unverified | #772, a117a73a; `platform/machineFiles.ts`; #767 |
+| 34 | Play and progress | `play`; progress, elapsed, remaining (RE 05, Workflow A.6) | `play` on Idle only; `P:` progress, viewport follows | YES | #386, #423, #442; `platform/machineRun.ts` |
+| 35 | Tool-change prompt | "Tool Change Required" (RE 06) | The firmware's `Tool` stop named by cutter; `M490.2` continue | YES | #655, #469 |
+| | **Library** | | | | |
+| 36 | Cutter catalogue | `t_MakeraCutterList`, 129 rows (§3) | The same 129 rows, imported and diffed | YES | #308; `src-tauri/src/catalogue.rs` |
+| 37 | Tool library sync | Account sync (RE 07) | Reads Studio's local DB; a headless house imports over the API | YES | #308, #560 (b9c906d1, d2222c95). Account half is row 78 |
+| 38 | User (custom) tools | `t_CustomCutterList` (§3.2) | Clones and typed cutters with provenance | YES | #212, #311, #309 |
+| 39 | Tool types | Flat, ball, chamfer, V, bull nose, drill, thread, ball engraving (§3) | `ToolShape` covers all eight | YES | `engine/cnc/tool.ts` |
+| 40 | Feeds and speeds by material × cutter | `t_MakeraCutterProperties` (§5) | Catalogue tier clamped to the machine; a measured row wins | YES | #310, #246; no row measured yet (#284) |
+| 41 | Materials list | 15 materials (§5) | Material classes incl. PCB (FR-4) | YES | #456, #743; `engine/cnc/materials.ts` |
+| 42 | Stock sizes | `t_MaterialSpecs`, 189 (§5) | Vendor sizes read at runtime, stock shelf | YES | #446, #466, #413 |
+| 43 | Z1 profile | `t_MachineType` Z1 row | Profile with per-field provenance, frame read from the machine | YES | #184, #279; `engine/cnc/machine.ts` |
+| 44 | Carvera and Carvera Air profiles | `t_MachineType` C1, CA1 (RE 07) | Air: framed profile. **Carvera: vendor row with no frame; a Carvera job is refused by name; the 6-tool ATC isn't driven** | PARTIAL | #773, 2a89efd7; `machine.ts` `CARVERA`, `CARVERA_AIR` |
+| | **Stock and setup** | | | | |
+| 45 | Round blank milled flat (disc) | Round stock in the specs (`'C'`, §5) | Disc stock form on the bed and vise | YES | #743; `engine/cnc/stockStart.ts` |
+| 46 | Square block in the rotary chuck | Stock shape Square or Round (`/Rotary.md` §1.3) | Section-aware radius, envelope, CAM and sim | YES, bench-unverified | #777, 05b81d72; `rotary/wrap.ts`; run gated on #238 |
+| 47 | Rod held in a vise | Round stock in a vise (#778) | **Standing on its end, ≤ 20 mm only**; lying rods refused to the rotary | PARTIAL | `ROD_VISE_MAX_LENGTH_MM`, `components/welcome/holdingMounts.ts`; **#778** (in the gate) |
+| 48 | Stock orientation choice | Set at stock setup (#783) | Fixed by the typed L × W × T | NO | **#783** (slice 1 on a branch, not on `main`) |
+| | **CAM strategies** | | | | |
+| 49 | 2D pocket | Type 0 | Contour-parallel and adaptive | YES | #172, #214–#216; `cam/pocket.ts` |
+| 50 | 2D contour, inside/outside, with tabs | Type 1; `supportTabs…` | Profile sides and holding tabs | YES | #218; `cam/profile.ts`, `cam/tabSettings.ts` |
+| 51 | Drilling and peck | Types 2, 10 | Plunge and peck as `G1`/`G0` | YES | #220; `cam/drill.ts` |
+| 52 | V-carve | Type 5 hypothesis, `AVVCarvePath` (§2.1) | Floor-correct V-carve, width-following | YES | #221, #405, #665 |
+| 53 | Chamfer | Types 13 (2D) and 14 (3D) | One bevel by the cone's flank, following a 2D item. **No 3D chamfer of mesh edges** | PARTIAL | #669, e2c838f6; `cam/chamfer.ts` |
+| 54 | 3D relief and pocket from a mesh | Types 6, 7 | Heightfield roughing, ball finishing, scallop and pencil, image relief | YES, bench-unverified | #534 (c019724b), #671, #672, #764; `cam/surface3d.ts`; feeds are a placeholder until **#536** |
+| 55 | Thread milling | Types 9, 12 | Helical thread in a pilot, ISO 261 | YES | #445; `cam/threadMill.ts` |
+| 56 | Ramping and helix entry | `useRamping`, `rampingType` on every strategy (§4) | Helix or ramp for metal shape pockets and bores. **Wood, text, V-cuts and cut-outs plunge** (Q9, by choice) | PARTIAL | #433, #666, #668; `cam/adaptive.ts` |
+| 57 | Stock to leave and finish pass | `radial_allowance`, `axial_allowance` (§4) | Finish pass with a shop-setting allowance | YES | #250 |
+| 58 | Rest machining and two-tool jobs | Guided Mode main and clearance tool (Workflow A.2) | Sim-measured rest regions; per-item cutter pick by simulated outcome | YES | #410, #436, #472, #766 |
+| 59 | Rotary relief (Rotation Relief) | Type 11 | Goal mesh on a rod: radial heightfield, roughing and finishing as A sweeps | YES, bench-unverified | #723 R-1…R-4 (6768b049, 4700e97c); `cam/rotaryRelief.ts`; `.nc` and run gated on **#238** |
+| 60 | Rotary wrap engrave | `AVRotationVReliefPath`, V-carving on the 4th axis (§2.1, binary only); §2 counts wrap (class W) as Studio's gap | Wrapped text, pockets and flutes on the map | YES, bench-unverified | #240 (1b01088d), #752; `rotary/wrap.ts`; gated on **#238** |
+| 61 | Indexed rotary faces | Rotate, clamp, cut (milestone #241) | Indexed faces in the sim and the 180° acceptance. **The job model's per-face setup and the 'On a face' operations aren't done** | PARTIAL | #716 (5f4fe170), #757 (34365143); `cam/indexed.ts`; **#241** |
+| 62 | PCB from Gerber and Excellon | Gerber import (RE 06) | Isolation, drills, two-sided flip with round-hole registration | YES, bench-unverified | #743 P-1…P-8, #813; `engine/import/gerber.ts`, `excellon.ts`, `pcbImport.ts`; **#823** |
+| | **Import** | | | | |
+| 63 | STL | RE 06 | Stock or goal | YES | #418, #533; `engine/import/stlParser.ts` |
+| 64 | OBJ | RE 06 | **No OBJ reader** | NO | `engine/import/` has none |
+| 65 | STEP / STP | RE 06 | OpenCascade WASM, tessellated on import | YES | #774, c4b7c0fe; `engine/import/stepMesh.ts` |
+| 66 | DXF and SVG | RE 06 | Outlines | YES | #217; `svgOutline.ts`, `dxfOutline.ts` |
+| 67 | Images (JPG/PNG/BMP) | RE 06 | Raster trace to outline; image relief | YES | #252, #672; `engine/import/imageDecode.ts` (`.bmp` included) |
+| | **Output and preview** | | | | |
+| 68 | Makera `.nc` dialect and `;@MKR` header | §6 | Same header and framing, linear only | YES | `engine/cnc/post/z1.ts` |
+| 69 | Embedded thumbnail | Base64 PNG after `M02` (§6) | Same form, ≤ 20 kB, skipped by parser and verifier | YES | #771, dd248fef; `post/thumbnail.ts` |
+| 70 | Toolpath preview and simulation | Path preview; `dexeltool.dll` unwired (RE 06) | Exact sweep, dexel route, column engine | YES | #182, #193–#199, #531 |
+| 71 | Time estimate | From path vertices (Workflow A.6) | Trapezoid estimate from the rapid model | YES | #242, #281, #657 |
+| 72 | G-code viewer | `G-Code` tab | Read-only pane synced to playback | YES | #245 |
+| 73 | Open an existing `.nc` | Reads its own | Parser with `G2`/`G3`; rotary files simulate | YES | #174, #385, #761 |
+| | **Project and platform** | | | | |
+| 74 | Save and reload a project | `*.mks` (Workflow A.1) | `.cutjob.json` v3 with embedded sources | YES | #425 |
+| 75 | Guided machining wizard | Set Stock → Origin → Probe → Assist → Run (Workflow A.4) | Start wizard and Cut mode's flow | YES | #280, #254, #689 |
+| 76 | Windows installer | Installer and launcher (RE 00) | NSIS installer; a tag attaches a signed x64 build | YES | #403, #290 (769102e5) |
+| 77 | App self-update | `MakeraStudioLauncher.exe` updater (RE 00, 08) | **Nothing checks for or applies an update** | NO | no issue |
+| 78 | Account, licence and cloud sync | Auth0 login, device-bound licence, account sync (RE 07, 08) | None; Apache-2.0, local-first | N/A | R-19, R-20 |
+
+### 15.2 The score
+
+78 rows: 58 YES (12 of them bench-unverified), 9 PARTIAL, 3 NO, 8 N/A. **70 rows are scored.**
+
+| Score | Sum | Result |
+|---|---|---|
+| **Parity, code on `main`** (YES 1, PARTIAL 0.5, NO 0) | (58 + 4.5) / 70 | **89.3 %** |
+| **Parity, bench-proved** (bench-unverified YES counts 0.5) | (46 + 6 + 4.5) / 70 | **80.7 %** |
+
+For transparency: if the eight N/A refusals counted as NO, the first score would be
+62.5 / 78 = **80.1 %**. Four of them are R-10 (jog, spindle, overrides) and three are hardware
+or firmware choices (laser, config writes, firmware update). Those are decisions, not gaps.
+
+### 15.3 What's left
+
+**NO**
+- **Stock orientation choice** (row 48): **#783**. Slice 1 is on `wt/783-stock-orientation` and needs its UI.
+- **OBJ import** (row 64): no issue. File one; a mesh reader beside `stlParser.ts`.
+- **App self-update** (row 77): no issue. File one if the maintainer wants in-app updates beyond the signed installer (#290).
+
+**PARTIAL**
+- **Status monitor** (row 5): limits, probe input, cover switch and RSSI aren't read. #767 records `C:`/`E:` from the bench; no issue for reading them. The 2026-10-30 survey found `diagnose` carries them, so one should be filed.
+- **3D-probe corner find** (row 10): tape mount only, bench-unverified. #767 for the bench. No issue for vise or bracket corners.
+- **3D-probe centre finding** (row 11): no bore or boss centre cycle with the 3D probe. No issue.
+- **Auto workpiece levelling** (row 12): G32 unproven on the Z1. **#501**, #767 (#631 line).
+- **Carvera and Carvera Air** (row 44): the Carvera has no frame and its ATC isn't driven. No issue (needs a Carvera's `config-get` and an ATC post).
+- **Rod in a vise** (row 47): **#778** (in the gate).
+- **Chamfer** (row 53): no 3D chamfer of mesh edges. No issue.
+- **Ramping** (row 56): plunge for wood, text, V-cuts and cut-outs by choice (Q9). No issue; reopen Q9 only if a bench cut shows the plunge hurting.
+- **Indexed rotary faces** (row 61): **#241** (in progress).
+
+**Bench-unverified YES rows** (what the second score is waiting on): USB serial (#775 → #767),
+3D-probe edges (#525), pause/resume (#618, #767), accessory switches (#289, #767), camera to home
+(#770, no bench line yet), QuickLZ (#562, #767), SD files (#772, #767), block in the chuck, rotary
+relief and wrap (all **#238**), 3D relief feeds (**#536**), PCB (**#823**).
+
+**Could not be scored either way, so left out of the table:** Studio's `BluetoothDeviceScanner`
+(RE 01: the mechanism is confirmed, but not whether a user ever sees it); type 8 *3D Contour* and
+type 10 *3D Drilling* (§2 names them, but nothing read so far says what they cut that types 6/7 and
+2 don't; Case Maker has no waterline pass in `cam/`); inch units (Studio writes `UNIT`, but whether
+its UI offers inches isn't established; Case Maker's post writes `UNIT|value=MM` only); and "Repeat
+Last Job" (Workflow A.7; Case Maker keeps finished-program hashes but has no one-press repeat).
