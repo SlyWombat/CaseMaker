@@ -20,7 +20,7 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { LiveToolHead } from './LiveToolHead';
 import { toolPlacement } from './liveMachineTool';
 import { TouchMarkers } from './TouchMarkers';
-import { drawnSimPath, simTurningRadians } from './rotarySimView';
+import { drawnSimPath, shownSimDesign, simTurningRadians } from './rotarySimView';
 import {
   cleanStockGeometry,
   drawsSacrificial,
@@ -126,7 +126,8 @@ export function SimMeshes() {
   const info = useSimStore((s) => s.info);
   const tool = useSimStore((s) => s.tool);
   // #716 slice 2 — Stock (the rod in the chuck) | Unroll (the same columns on the map).
-  const design = useSimStore((s) => s.design);
+  // #824 — an indexed job offers no Unroll, so a stored map is drawn as Stock.
+  const design = shownSimDesign(useSimStore((s) => s.design), info?.summary);
 
   const lastStep = info ? info.summary.steps - 1 : -1;
   // Issue #197: on a fresh load the step is already the last one but no frame has been delivered

@@ -78,6 +78,8 @@ test('an indexed job turns the stock at the index, and a seek across it keeps th
   await page.getByTestId('sim-simulate').click();
   await expect(page.getByTestId('sim-result')).toBeVisible({ timeout: 240_000 });
   await expect(page.getByTestId('sim-backend')).toContainText(/exact/i);
+  // An indexed job's material has no map, so the simulation offers no Unroll (#824).
+  await expect(page.getByTestId('sim-view-unroll')).toHaveCount(0);
 
   // The faces from the session's own checkpoints: the first step of the 90° run is the index.
   const faces = await page.evaluate(() => window.__caseMaker!.getSimState().runs);

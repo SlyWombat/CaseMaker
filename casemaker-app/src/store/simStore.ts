@@ -24,6 +24,7 @@ import { stepAtTime, timeAtStep, totalTime } from '@/engine/cnc/playbackClock';
 import { generateRestart as buildRestart, stockFromSetup, type RestartResult } from '@/engine/cnc/restart';
 import type { Tool } from '@/engine/cnc/tool';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
+import { shownSimDesign } from '@/components/viewport/rotarySimView';
 import type { SimDesign, SimDiagnostic, SimFrame, SimLoadOk, SimLoadResult, SimPath } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { CarriedField } from '@/workers/geometry/carriedField';
@@ -612,8 +613,10 @@ export const useSimStore = create<SimState>()((set, get) => {
       set({ k });
       void clientLoader().then((c) => c.requestFrame(k));
     },
-    setDesign(design) {
+    setDesign(asked) {
       const s = get();
+      // #824 — an indexed rotary job offers no Unroll: a remembered or asked-for map is Stock.
+      const design = s.info !== null ? shownSimDesign(asked, s.info.summary) : asked;
       if (s.design === design) return;
       set({ design });
       // The SAME checkpoint in a different frame — never a seek to another step.

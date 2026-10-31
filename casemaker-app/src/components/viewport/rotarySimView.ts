@@ -9,7 +9,7 @@
  * The values come from the path's own `a` array (session `simPath`), read at the same vertex the
  * tool tip is read from — the two can never point at different steps.
  */
-import type { SimPath } from '@/workers/sim/session';
+import type { SimDesign, SimPath } from '@/workers/sim/session';
 import { vertexIndexAtStep } from './simGeometry';
 
 // #769 — the A's words moved to `rotaryWords.ts` so the status strip can print them without
@@ -98,5 +98,32 @@ export function drawnSimPath(
   rotaryClass: 'none' | 'indexed' | 'wrapped' | undefined,
   mapView: boolean,
 ): SimPath | null {
-  return path !== null && rotaryClass === 'indexed' && !mapView ? stockFramePath(path) : path;
+  return path !== null && isIndexedRotary(rotaryClass) && !mapView ? stockFramePath(path) : path;
+}
+
+type RotaryClass = 'none' | 'indexed' | 'wrapped' | undefined;
+
+/**
+ * #241 — the ONE test for an INDEXED rotary job (A held per face, swept by the exact engine), as
+ * the timeline's `rotaryClass` states it and the sim session routes on it.
+ */
+export function isIndexedRotary(rotaryClass: RotaryClass): boolean {
+  return rotaryClass === 'indexed';
+}
+
+/**
+ * #824 — whether the simulation offers Unroll. Only a WRAPPED (column-engine) rotary job has an
+ * unrolled frame: an INDEXED job's material is the exact sweeper's stock-frame meshes, which have
+ * no map, so Unroll would draw no stock at all. A flat job has no Unroll either.
+ */
+export function offersUnroll(summary: { rotary?: boolean; rotaryClass?: RotaryClass } | null | undefined): boolean {
+  return summary?.rotary === true && !isIndexedRotary(summary.rotaryClass);
+}
+
+/** #824 — the view actually shown: an Unroll the job does not offer falls back to Stock. */
+export function shownSimDesign(
+  design: SimDesign,
+  summary: { rotary?: boolean; rotaryClass?: RotaryClass } | null | undefined,
+): SimDesign {
+  return design === 'map' && !offersUnroll(summary) ? 'stock' : design;
 }

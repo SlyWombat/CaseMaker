@@ -17,7 +17,7 @@ import { isSimSceneActive, SIM_SPEEDS, useSimStore, type SimSpeed } from '@/stor
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import type { PausePoint, ToolState } from '@/engine/cnc';
 import { toolPositionAt } from './simGeometry';
-import { aboveAxisWords, angleAtStep, rotaryAngleWords } from './rotarySimView';
+import { aboveAxisWords, angleAtStep, isIndexedRotary, offersUnroll, rotaryAngleWords, shownSimDesign } from './rotarySimView';
 
 /**
  * A backgrounded tab's first frame can carry minutes of wall time, which at 100x would jump the
@@ -181,7 +181,7 @@ function TransportBar() {
   const info = useSimStore((s) => s.info);
   const origin = useSimStore((s) => s.origin);
   // #716 slice 2 — Stock | Unroll (rotary jobs only) and the indexed job's face ticks.
-  const design = useSimStore((s) => s.design);
+  const storedDesign = useSimStore((s) => s.design);
   const setDesign = useSimStore((s) => s.setDesign);
   // #716 slice 2 — a refused crossing is said where the path is drawn, not only in the panel.
   const crossing = useSimStore((s) => s.diagnostics.find((d) => d.code === 'axis-crossing') ?? null);
@@ -204,11 +204,14 @@ function TransportBar() {
   const rotaryProgram = path?.a !== undefined;
   const rotaryAngle = path ? angleAtStep(path, step) : null;
   const tip = path ? toolPositionAt(path, step) : null;
-  const rotaryJob = info !== null && info.summary?.rotary === true;
+  // #824 — only a wrapped rotary job offers Unroll; an indexed job's material has no map, so the
+  // switch is not shown and the view stays on Stock.
+  const unrollOffered = info !== null && offersUnroll(info.summary);
+  const design = shownSimDesign(storedDesign, info?.summary);
   // #241 — the faces an INDEXED job is cut on: one tick where each new A begins. A wrapped job's
   // A changes within its cuts, so no face boundaries exist to mark.
   const faces = useMemo(() => {
-    if (info === null || info.summary?.rotaryClass !== 'indexed') return [];
+    if (info === null || !isIndexedRotary(info.summary?.rotaryClass)) return [];
     const out: { step: number; a: number }[] = [];
     let prev: number | null = null;
     for (const cp of info.checkpoints) {
@@ -345,7 +348,7 @@ function TransportBar() {
             </option>
           ))}
         </select>
-        {rotaryJob && (
+        {unrollOffered && (
           <div style={VIEW_GROUP} role="group" aria-label="Simulation view">
             <button
               type="button"

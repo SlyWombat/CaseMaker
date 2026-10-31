@@ -152,8 +152,8 @@ describe('SimTransport (#198)', () => {
     expect(callout.textContent).toContain('not simulated');
   });
 
-  it('a rotary job offers Stock | Unroll, and an indexed job marks its faces (#716, #241)', () => {
-    const info = {
+  const indexedInfo = (): SimLoadInfo =>
+    ({
       summary: { steps: 101, rotary: true, rotaryClass: 'indexed' },
       checkpoints: [
         { firstStep: 0, a: 0 },
@@ -168,11 +168,31 @@ describe('SimTransport (#198)', () => {
       radius: 10,
       stats: {},
       axisClamped: null,
-    } as unknown as SimLoadInfo;
-    setStore({ info, path: fakePath(), k: 0 });
+    }) as unknown as SimLoadInfo;
+
+  it('an indexed job marks its faces and offers no Unroll (#241, #824)', () => {
+    setStore({ info: indexedInfo(), path: fakePath(), k: 0 });
     render(<SimTransport />);
     // Three faces — A 0°, 90° and 180°; the second 90° checkpoint is the same face.
     expect(screen.getAllByTestId('sim-face-tick')).toHaveLength(3);
+    // Its material is the exact sweeper's stock-frame meshes, which have no map: no switch at all.
+    expect(screen.queryByTestId('sim-view-unroll')).toBeNull();
+    expect(screen.queryByTestId('sim-view-stock')).toBeNull();
+  });
+
+  it('a remembered Unroll falls back to Stock for an indexed job (#824)', () => {
+    setStore({ info: indexedInfo(), path: fakePath(), k: 0, design: 'map' });
+    // Asked for directly (a stored or remembered view), the store keeps Stock.
+    useSimStore.getState().setDesign('map');
+    expect(useSimStore.getState().design).toBe('stock');
+  });
+
+  it('a wrapped rotary job offers Stock | Unroll (#716)', () => {
+    const info = { ...indexedInfo(), summary: { steps: 101, rotary: true, rotaryClass: 'wrapped' } } as unknown as SimLoadInfo;
+    setStore({ info, path: fakePath(), k: 0 });
+    render(<SimTransport />);
+    // A wrapped job's A changes within its cuts, so it has no face boundaries.
+    expect(screen.queryAllByTestId('sim-face-tick')).toHaveLength(0);
     expect(screen.getByTestId('sim-view-stock').getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(screen.getByTestId('sim-view-unroll'));
     expect(useSimStore.getState().design).toBe('map');

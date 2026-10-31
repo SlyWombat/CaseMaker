@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import type { SimPath } from '@/workers/sim/session';
-import { aboveAxisWords, angleAtStep, rotaryAngleWords, turningRadians } from '@/components/viewport/rotarySimView';
+import { aboveAxisWords, angleAtStep, offersUnroll, rotaryAngleWords, shownSimDesign, turningRadians } from '@/components/viewport/rotarySimView';
 
 function path(a?: number[]): SimPath {
   const n = a?.length ?? 4;
@@ -70,5 +70,20 @@ describe('#716 the rotary read-out', () => {
     top.applyAxisAngle(new THREE.Vector3(1, 0, 0), turningRadians(90));
     expect(top.y).toBeCloseTo(-r, 9);
     expect(top.z).toBeCloseTo(0, 9);
+  });
+});
+
+describe('#824 Unroll is offered only where the material has a map', () => {
+  it('an indexed job offers no Unroll, a wrapped job does, a flat job does not', () => {
+    expect(offersUnroll({ rotary: true, rotaryClass: 'indexed' })).toBe(false);
+    expect(offersUnroll({ rotary: true, rotaryClass: 'wrapped' })).toBe(true);
+    expect(offersUnroll({ rotary: false, rotaryClass: 'none' })).toBe(false);
+    expect(offersUnroll(null)).toBe(false);
+  });
+
+  it('a remembered Unroll falls back to Stock for an indexed job, and stays for a wrapped one', () => {
+    expect(shownSimDesign('map', { rotary: true, rotaryClass: 'indexed' })).toBe('stock');
+    expect(shownSimDesign('map', { rotary: true, rotaryClass: 'wrapped' })).toBe('map');
+    expect(shownSimDesign('stock', { rotary: true, rotaryClass: 'wrapped' })).toBe('stock');
   });
 });
