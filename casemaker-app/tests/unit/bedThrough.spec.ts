@@ -72,11 +72,14 @@ describe('#712 a through cut on the bed (§3.5)', () => {
     );
   });
 
-  it('a bad board whose boards are too small is refused with the board’s own size', () => {
+  it('#786 slice 1 — a board too small is INFORMED with the overhang and the board’s own size', () => {
     const big = sheet({ stock: { ...defaultEngraveJob().stock, length: 120, width: 90, thickness: 2, material: 'pla' } });
     const f = finding(big, BARE_BED, 'board-too-small');
-    expect(f?.severity).toBe('error');
-    expect(f?.message).toBe('The 2 mm MDF boards are 100 × 100 mm; this plate is 120 mm long — tape it to the wasteboard, or choose a larger board.');
+    expect(f?.severity).toBe('warning');
+    expect(f?.message).toBe(
+      'The 2 mm MDF boards are 100 × 100 mm; this plate is 120 mm long, 20 mm past the board, so a ' +
+        'through cut overhangs it. Generate cuts it as it is — tape it to the wasteboard, or choose a larger board.',
+    );
     // …and the item finding stands aside: one fix, one sentence.
     expect(codes(big, BARE_BED)).not.toContain('through-needs-board');
   });
@@ -95,10 +98,10 @@ describe('#712 a through cut on the bed (§3.5)', () => {
     // A breakthrough deeper than the shop's limit is refused once, job-level.
     const deep = sheet({ breakthrough: 0.8 });
     const f = finding(deep, WASTEBOARD, 'wasteboard-depth');
-    expect(f?.severity).toBe('error');
+    expect(f?.severity).toBe('warning');
     expect(f?.message).toBe(
-      'A through cut goes 0.8 mm into the wasteboard, deeper than the 0.5 mm limit — reduce the ' +
-        'breakthrough, or put a board under the part.',
+      'A through cut goes 0.8 mm into the wasteboard, deeper than the 0.5 mm limit. The wasteboard is ' +
+        'sacrificial and Generate cuts it as it is — reduce the breakthrough, or put a board under the part.',
     );
   });
 
@@ -218,7 +221,7 @@ describe('#712 through the pipeline: the tag on each surface (§6 fixture 2)', (
       ],
     });
     const f = validateJob(drilled, { deg: 118, source: 'test' }, { bed: WASTEBOARD }).find((x) => x.code === 'wasteboard-depth');
-    expect(f?.severity).toBe('error');
+    expect(f?.severity).toBe('warning');
     expect(f?.message).toContain('1.201 mm');
   });
 

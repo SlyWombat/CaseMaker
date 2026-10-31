@@ -1462,12 +1462,20 @@ export function validateJob(
     if (have < need && !wasteboardTakesBed(bed, need) && !boardCoversStock(bed, job)) {
       const long = bed.boardLengthMm !== null && job.stock.length > bed.boardLengthMm;
       const extent = long ? `${fmt3(job.stock.length)} mm long` : `${fmt3(job.stock.width)} mm wide`;
+      // #786 slice 1 — informed: the through cut overhangs the board, and the operator's own tape
+      // or a larger board is the fix. Generate cuts it as it is.
+      const over = Math.max(
+        0,
+        job.stock.length - (bed.boardLengthMm ?? 0),
+        job.stock.width - (bed.boardWidthMm ?? 0),
+      );
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'board-too-small',
         message:
           `The ${bed.boardWords} boards are ${fmt3(bed.boardLengthMm ?? 0)} × ${fmt3(bed.boardWidthMm ?? 0)} mm; ` +
-          `this plate is ${extent} — tape it to the wasteboard, or choose a larger board.`,
+          `this plate is ${extent}, ${fmt3(over)} mm past the board, so a through cut overhangs it. ` +
+          `Generate cuts it as it is — tape it to the wasteboard, or choose a larger board.`,
       });
     }
     // #727 F5/F8 — the depth that ENTERS the wasteboard is the deepest reach less whatever the
@@ -1480,11 +1488,12 @@ export function validateJob(
       const intoWasteboard = Math.round(Math.max(0, job.breakthrough + throughDrillPoint - have) * 1000) / 1000;
       if (intoWasteboard > bed.wasteboardLimitMm) {
         findings.push({
-          severity: 'error',
+          severity: 'warning',
           code: 'wasteboard-depth',
           message:
             `A through cut goes ${fmt3(intoWasteboard)} mm into the wasteboard, deeper than the ` +
-            `${fmt3(bed.wasteboardLimitMm)} mm limit — reduce the breakthrough, or put a board under the part.`,
+            `${fmt3(bed.wasteboardLimitMm)} mm limit. The wasteboard is sacrificial and Generate cuts it as it is ` +
+            `— reduce the breakthrough, or put a board under the part.`,
         });
       }
     }
@@ -2241,14 +2250,20 @@ export function validateJob(
       } else {
         const tipDepth = thread.depth + runOut;
         if (tipDepth > floorAllowed) {
+          // #786 slice 1 — the FLOOR under the run-out is a preference, INFORMED. (The flute
+          // branch below stays an error: a tip past the flutes is the shank in the material.)
+          const floorLeft = thickness - (tipDepth - facingDepth);
           findings.push({
-            severity: 'error',
+            severity: 'warning',
             code: 'thread-too-deep',
             labelId: thread.id,
             message:
-              `${who} threads ${thread.depth} mm, and its tip runs about ${Number(runOut.toFixed(3))} mm ` +
-              `below the last full thread; on a ${thickness} mm stock that leaves less than the ` +
-              `${job.minFloor} mm minimum floor.`,
+              `${who} threads ${fmt3(thread.depth)} mm, and its tip runs about ${Number(runOut.toFixed(3))} mm ` +
+              `below the last full thread; on a ${fmt3(thickness)} mm stock that ` +
+              (floorLeft > 0
+                ? `leaves ${fmt3(floorLeft)} mm of floor where the job asks for a ${fmt3(job.minFloor)} mm minimum. `
+                : `breaks through by ${fmt3(-floorLeft)} mm. `) +
+              `Generate cuts it as it is — the board and fixture checks judge what lies beneath.`,
           });
         }
         if (threadTool !== null && threadTool.fluteLength !== null && threadTool.fluteLength > 0 && tipDepth > threadTool.fluteLength) {

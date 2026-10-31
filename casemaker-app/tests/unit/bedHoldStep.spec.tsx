@@ -371,7 +371,8 @@ describe('#715 the clamp handles and the board under', () => {
 
     expect(job().workholding.kind).toBe('tape');
     expect(screen.getByTestId('engrave-setup-board-too-small').textContent).toBe(
-      'The 2 mm MDF boards are 100 × 100 mm; this plate is 120 mm long — tape it to the wasteboard, or choose a larger board.',
+      'The 2 mm MDF boards are 100 × 100 mm; this plate is 120 mm long, 20 mm past the board, so a ' +
+        'through cut overhangs it. Generate cuts it as it is — tape it to the wasteboard, or choose a larger board.',
     );
   });
 
