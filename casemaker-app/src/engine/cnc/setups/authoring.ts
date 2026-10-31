@@ -102,6 +102,10 @@ function itemIdsIn(job: EngraveJob): Set<string> {
     // form is `notCut`, not `missing`.
     ...(job.primitives ?? []),
     ...(job.keepOuts ?? []),
+    // #743 P-8 — a cut-out is an ITEM the setups name (it has been in `cutItemIds` since #218),
+    // so it must be in the presence set too: without it every board's cut-out read as "no longer
+    // in the job" while also being "in no setup" — one item, two contradictory stale sentences.
+    ...(job.cutouts ?? []),
   ];
   for (const item of lists) ids.add(item.id);
   return ids;

@@ -1728,7 +1728,11 @@ export function EngravePanel(): JSX.Element {
     });
   useEffect(() => {
     const source = job.sources?.tool;
-    if (source === 'user' || source === 'measured') return;
+    // #743 P-8 — a BOARD ARRIVES WITH ITS PLAN. The import writes each role's cutter (§3.4) and
+    // records it as the catalogue's answer; the background search below plans one held position
+    // with one cutter chain and cannot express a board's engraver + drills + flat, so it must not
+    // replace that plan. A person's or a measured plan is left alone for the same reason (#516).
+    if (source === 'user' || source === 'measured' || source === 'catalogue') return;
     // #516 item 5 — the first recommendation lands on the first edit or Generate, not on load: a
     // clean (just-opened or just-saved) tool-less document keeps its empty key, so opening a saved
     // job does not immediately dirty it.

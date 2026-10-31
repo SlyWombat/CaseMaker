@@ -575,18 +575,30 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // unassigned (its kind of cutter is not in the library) belongs to no program, so its "nothing
     // reachable" is not a fault of the design — the unassigned warning states it and Generate posts
     // the rest. A job with no assignment at all (no cutter yet) keeps every finding it had.
-    const assignedIds = new Set<string>();
+    //
+    // #743 P-8 — AND THE SAME IS TRUE OF AN ITEM ANOTHER CUTTER OWNS. A board arrives as several
+    // programs (an engraver isolates, drills make the holes, a flat frees the board); the preview
+    // holds ONE cutter, so measuring the cut-out against the engraver reports "it needs a flat end
+    // mill", and measuring the isolation against the flat reports "nothing this cutter can reach".
+    // Both are true of a program that will never cut that item and false of the run: each item's
+    // OWN program is measured when Generate posts it. Only the five sentences that say "this item
+    // and THIS cutter do not fit" are withheld — a geometry fault stays, whatever cutter is held.
+    const FIT_CODES = new Set(['item-empty', 'item-chars-lost', 'item-detail-lost', 'cutout-needs-flat', 'raised-text-fused']);
+    const ownerByItem = new Map<string, string>();
     for (const setup of jobSetups(job)) {
       const keys = setupTools(setup, job);
       keys.forEach((key, i) => {
-        for (const id of toolItemsFor(setup, key, i)) assignedIds.add(id);
+        for (const id of toolItemsFor(setup, key, i)) ownerByItem.set(id, key);
       });
     }
+    const foreign = (id: string | undefined): boolean => {
+      if (id === undefined) return false;
+      const owner = ownerByItem.get(id);
+      return owner !== undefined && owner !== job.toolKey;
+    };
     const unowned = (id: string | undefined): boolean =>
-      id !== undefined && assignedIds.size > 0 && !assignedIds.has(id);
-    const liveFindings = findings.filter(
-      (f) => !(unowned(f.labelId) && (f.code === 'item-empty' || f.code === 'item-chars-lost' || f.code === 'item-detail-lost')),
-    );
+      id !== undefined && ownerByItem.size > 0 && !ownerByItem.has(id);
+    const liveFindings = findings.filter((f) => !((unowned(f.labelId) || foreign(f.labelId)) && FIT_CODES.has(f.code)));
 
     // #420 slice 4 — a V-bit trace's cut is the cone dragged along its path, not its mouth
     // extruded straight down. The cone comes from the same `vCone` the oracle and the column

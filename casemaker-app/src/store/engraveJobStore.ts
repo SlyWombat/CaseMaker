@@ -2605,6 +2605,12 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             return {
               ...merged,
               ...(cutters.toolKey === null ? {} : { toolKey: cutters.toolKey }),
+              // #743 P-8 — THE IMPORT'S PLAN IS A DECISION, NOT A SUGGESTION. The background
+              // single-cutter search (#516) must not replace §3.4's per-role cutters — it plans
+              // one held position with one chain and cannot express a board's three roles. The
+              // source records that: the cutters came from the board's roles against the shop's
+              // catalogue, and the panel leaves a catalogue-sourced cutter alone.
+              ...(cutters.toolKey === null ? {} : { sources: { ...(current.sources ?? {}), tool: 'catalogue' as const } }),
               setups: cutters.sides.map((side) => side.setup),
             };
           }
@@ -2619,6 +2625,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           return {
             ...merged,
             ...(cutters.toolKey === null ? {} : { toolKey: cutters.toolKey }),
+            // #743 P-8 — the import's plan is a decision (see the fresh branch's note).
+            ...(cutters.toolKey === null ? {} : { sources: { ...(current.sources ?? {}), tool: 'catalogue' as const } }),
             setups: [written, ...setups.slice(1), ...extra],
           };
         });

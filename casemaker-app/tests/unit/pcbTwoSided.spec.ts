@@ -481,3 +481,41 @@ describe('alignment holes for a board the probe cannot read (#743 P-8)', () => {
   });
 
 });
+
+describe('the live preview and a multi-cutter board (#743 P-8)', () => {
+  it('does not judge an item with a cutter that will never cut it', async () => {
+    const { job } = await twoSided();
+    const { createEngravePreviewer } = await import('@/workers/sim/engravePreview');
+    const { effectiveMargins, MARGIN_DEFAULTS } = await import('@/engine/cnc/engrave/depthBounds');
+    const pv = createEngravePreviewer(tl).engravePreview(
+      job,
+      TOOLS,
+      ROWS,
+      1,
+      effectiveMargins(job, MARGIN_DEFAULTS),
+      new Map(),
+    );
+    expect(pv).not.toBeNull();
+    // The preview holds the job's cutter (the engraver). The cut-out belongs to the flat, so
+    // "it needs a flat end mill" is not this preview's error — and the top isolation, which the
+    // engraver owns, is reachable, so no item is "smaller than the cutter".
+    const errors = pv!.findings.filter((f) => f.severity === 'error');
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+    expect(pv!.findings.some((f) => f.code === 'cutout-needs-flat')).toBe(false);
+  });
+});
+
+describe('the setups section reads a board’s own cut-out (#743 P-8)', () => {
+  it('names every item, so a freshly imported board is not “stale” with a missing cut-out', async () => {
+    const { job } = await twoSided();
+    const { readSetups } = await import('@/engine/cnc/setups/authoring');
+    const reading = readSetups(job);
+    expect(reading.source).toBe('saved');
+    expect(reading.setups).toHaveLength(2);
+    expect(reading.findings).toEqual([]);
+    expect(reading.unassigned).toEqual([]);
+    expect(reading.stale).toBe(false);
+    // The cut-out is cut in setup 2 and reads as a cut item there, not as a missing reference.
+    expect(reading.items[1]!.cut).toContain(job.cutouts![0]!.id);
+  });
+});
