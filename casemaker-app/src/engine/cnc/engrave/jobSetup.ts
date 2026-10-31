@@ -99,6 +99,10 @@ export type JobFindingCode =
   // catalogue row for the SAME cutter (matched by g_ID) states it. INFO: the run uses that value,
   // and the sentence says which record it came from.
   | 'tool-geometry-from-catalogue'
+  // #786 slice 4c-2 — the measured search replaced a cutter the operator CHOSE (it was missing or
+  // no CAM here could use it). INFO: the sentence names whose cutter it was, why, and what is in
+  // the spindle now, with a one-click way back to the cutter list.
+  | 'cutter-substituted'
   | 'vise-jaw-collision'
   | 'vise-default'
   | 'vise-stock-not-proud'

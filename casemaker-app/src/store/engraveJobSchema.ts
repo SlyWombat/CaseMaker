@@ -2363,6 +2363,19 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   sources: jobSourcesSchema
     .optional()
     .describe('Where asserted feeds, stock and label values came from; omit when nothing was stamped.'),
+  // #786 slice 4c-2 — a substitution record (who was chosen, why, and what replaced it). OPTIONAL,
+  // for the same byte-for-byte reason as every other post-V1 field.
+  substitution: z
+    .object({
+      fromKey: z.string().min(1),
+      fromName: z.string().min(1),
+      reason: z.enum(['missing', 'no-feeds', 'refused']),
+      material: z.enum(STOCK_MATERIALS).optional(),
+      toKey: z.string().min(1),
+      toName: z.string().min(1),
+    })
+    .optional()
+    .describe('Set while the job\'s cutter is a measured substitute for one the operator chose; omit otherwise.'),
   // #305's snapshot of the cutter the job was written with. OPTIONAL, not defaulted, for the
   // same byte-for-byte reason as `combined`/`traces`/`vectors`/`keepOuts`/`drills`, and nullable
   // so a snapshot that could not be taken stays an explicit null. Validated by the SAME

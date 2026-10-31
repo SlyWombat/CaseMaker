@@ -22,7 +22,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
 import type { ToolCandidate } from '@/engine/cnc/engrave/recommendTool';
-import { resetRegistry } from '@/engine/cnc/toolRegistry';
+import { resetRegistry, setRegistry } from '@/engine/cnc/toolRegistry';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { EngravePickSummary } from '@/workers/sim/smartPickRun';
@@ -388,6 +388,41 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     render(<EngravePanel />);
 
     expect(useEngraveJobStore.getState().job.toolKey).toBe('flat-3.175');
+  });
+
+  // #786 slice 4c-2 — the substitution of the operator's OWN cutter is stated on the cutter line
+  // AND as a finding, never silent, with a one-click way back to the cutter list.
+  it('states a substitution of the operator’s own cutter, on the line and as a finding', () => {
+    // The measured answer's cutter is in the registry, so the job's snapshot resolves and the
+    // cutter line can name it (the app's own state; the other tests only assert the key).
+    act(() => {
+      setRegistry([{ key: 'flat-3.175', tool: flatEndMill(3.175, { name: '3.175 mm flat end' }), provenance: 'test' }]);
+    });
+    const job = pocketJob();
+    job.toolKey = 'user:ball';
+    job.tool = flatEndMill(3.175, { name: 'ball nose', typeText: 'Ball End', shape: 'ball' });
+    job.sources = { tool: 'user' };
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    const measured = measuredFlat();
+    useEngravePreviewStore.setState({
+      preview: previewWith(),
+      status: 'ready',
+      measured,
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+    render(<EngravePanel />);
+
+    // The app's ONE display name form: the ball names its kind and size, never the vendor string.
+    const sentence = /Your ⌀ 3\.175 mm ball cannot cut this job; the ⌀ 3\.175 mm flat end is used instead\./;
+    // On the cutter line…
+    expect(screen.getByTestId('engrave-cutter-line').textContent).toMatch(sentence);
+    // …and as a finding, with the one-click override.
+    const finding = screen.getByTestId(/^engrave-finding-\d+-cutter-substituted$/);
+    expect(finding.textContent).toMatch(sentence);
+    expect(screen.getByTestId('cutter-substituted-choose')).toBeTruthy();
   });
 
   it('leaves the rule answer standing, labelled, when the search fails', () => {

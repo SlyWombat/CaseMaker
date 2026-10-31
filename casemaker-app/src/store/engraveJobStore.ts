@@ -104,6 +104,7 @@ import type {
   StockHold,
   TapeHold,
   ViseParams,
+  EngraveJobSubstitution,
 } from '@/types/engraveJob';
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import {
@@ -1013,7 +1014,14 @@ export interface EngraveJobState {
    * The first cutter becomes the job's `toolKey` and the source defaults to `'computed'` — the
    * software chose it, and a later preview must be free to correct it (a `'user'` cutter is not).
    */
-  applyCutterPlan: (cutters: readonly { key: string; items: readonly string[] }[], source?: FieldSource, setupIndex?: number) => void;
+  applyCutterPlan: (
+    cutters: readonly { key: string; items: readonly string[] }[],
+    source?: FieldSource,
+    /** #743 P-8 — which setup the plan is written to (0: the job's own cutter). */
+    setupIndex?: number,
+    /** #786 slice 4c-2 — set ONLY when this plan replaces a cutter the operator chose. */
+    substitution?: EngraveJobSubstitution,
+  ) => void;
   /** #572 — record (or clear) the double-confirmed cutter/material override. */
   setMetalLineOverride: (override: boolean) => void;
   setVise: (patch: Partial<ViseParams>) => void;
@@ -1821,6 +1829,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     setTool: (key, source = 'user') =>
       apply((job) => ({
         ...job,
+        // #786 slice 4c-2 — choosing a cutter is the operator overriding the substitute: the
+        // substitution sentence is cleared with it.
+        substitution: undefined,
         toolKey: key,
         // #305 design point 2 — snapshot the materialised cutter beside its key, so the job is
         // still reproducible when the tier that key names is not loaded (the built-ins always
@@ -1832,7 +1843,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     // #766 D — see the interface note. The plan itself is written by the same function the
     // evaluator applies (engine/cnc/engrave/measuredPick), so the app and the search cannot
     // disagree about what "this plan" means in the document.
-    applyCutterPlan: (cutters, source = 'computed', setupIndex = 0) =>
+    applyCutterPlan: (cutters, source = 'computed', setupIndex = 0, substitution) =>
       apply((job) => {
         if (cutters.length === 0) return job;
         const next = applyCutterPlanToJob(job, { cutters, setupIndex });
@@ -1843,6 +1854,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           ...next,
           tool: resolveTool(cutters[0]!.key),
           sources: { ...(job.sources ?? {}), tool: source },
+          // A plan applied without a substitution CLEARS an earlier record: the sentence must
+          // never outlive the replacement it describes.
+          ...(substitution === undefined ? { substitution: undefined } : { substitution }),
         };
       }),
 

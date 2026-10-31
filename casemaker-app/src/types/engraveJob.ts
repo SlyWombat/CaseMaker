@@ -118,6 +118,29 @@ export type FieldSource = 'computed' | 'catalogue' | 'user' | 'measured' | 'assu
  * which are untagged and unmeasured. A key absent WITHIN a map means that one field is still the
  * shipped default.
  */
+/**
+ * #786 slice 4c-2 — A CUTTER THE OPERATOR CHOSE WAS REPLACED, AND THE JOB SAYS SO.
+ *
+ * The measured search substitutes for a missing or unusable cutter; a substitution of the
+ * operator's OWN choice must never be silent, so the job carries the pencil line: who was chosen,
+ * why it could not cut, and what the plan put in the spindle. `setTool` and a fresh plan without a
+ * substitution clear it, so the sentence can never outlive the replacement it describes.
+ */
+export interface EngraveJobSubstitution {
+  /** The key the operator's cutter was named by. */
+  fromKey: string;
+  /** How the sentence names it: its display name, or the key when the library does not hold it. */
+  fromName: string;
+  /** Why it could not be used, for the sentence's clause. */
+  reason: 'missing' | 'no-feeds' | 'refused';
+  /** The material the feeds refusal was judged on (`reason: 'no-feeds'`). */
+  material?: StockMaterial;
+  /** The plan's first cutter — the one now in the spindle. */
+  toKey: string;
+  /** How the sentence names it (its display name at the time of the write). */
+  toName: string;
+}
+
 export interface EngraveJobSources {
   /**
    * Which stock fields were asserted, and how (#254). Absent = the shipped default blank. `colour`
@@ -2010,6 +2033,11 @@ export interface EngraveJob {
    * applied carries no key, so a pre-#246 document round-trips byte-for-byte.
    */
   sources?: EngraveJobSources;
+  /**
+   * #786 slice 4c-2 — present while the job's cutter is the measured search's SUBSTITUTE for one
+   * the operator chose. The finding and the cutter line render it; choosing a cutter clears it.
+   */
+  substitution?: EngraveJobSubstitution;
   customFonts: CustomFont[];
   /**
    * Where the stock came from (#418, §5.1) — the shelf entry, the file, or a piece typed in the start

@@ -43,6 +43,7 @@ export function findingFix(f: { code: string; labelId?: string }): PanelFix | nu
   if (f.labelId !== undefined) return { group: 'engrave-group-job', itemId: f.labelId };
   if (code === 'rotary-stock') return { group: 'engrave-group-job', openWizardStep: 'stock' };
   if (code === 'tool-missing') return { group: 'engrave-group-cutter', focusTestid: 'engrave-tool' };
+  if (code === 'cutter-substituted') return { group: 'engrave-group-cutter', focusTestid: 'engrave-tool' };
   if (code === 'no-items') {
     return { group: 'engrave-group-job', openDetails: 'engrave-add-menu', focusTestid: 'engrave-add-summary' };
   }

@@ -32,6 +32,7 @@ import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds'
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
+import { substitutionSentence } from '@/engine/cnc/engrave/substitution';
 import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -165,6 +166,7 @@ import type {
   EngraveChamfer,
   EngraveDrill,
   EngraveJob,
+  EngraveJobSubstitution,
   EngraveKeepOut,
   EngraveLabel,
   EngraveShape,
@@ -1003,6 +1005,11 @@ export function EngravePanel(): JSX.Element {
   const tool = jobTool(job);
   const findings = dedupeFindings([
     ...withTargetBlobState(jobOnlyFindings, job, targetBlob),
+    // #786 slice 4c-2 — a substitute for the operator's own cutter is stated as a finding too,
+    // with a one-click way back to the cutter list.
+    ...(job.substitution === undefined
+      ? []
+      : [{ severity: 'info' as const, code: 'cutter-substituted' as const, message: substitutionSentence(job.substitution) }]),
     // #785 — the reach check joins the list at Generate's own sentence: a goal deeper than the
     // chosen cutter's known reach blocks here, with the numbers and the one-click top-band option;
     // an unrecorded reach is an info and blocks nothing.
@@ -1911,13 +1918,40 @@ export function EngravePanel(): JSX.Element {
       return;
     }
     if (measuredNow !== null) {
-      if (!measuredApplied) applyCutterPlan(measuredNow.cutters, 'computed');
+      if (!measuredApplied) {
+        // #786 slice 4c-2 — replacing a cutter the operator CHOSE is recorded, so the finding and
+        // the cutter line can say whose cutter it was, why it could not cut, and what replaced it.
+        const said = substituteNamed && (source === 'user' || source === 'measured');
+        if (said) {
+          const toKey = measuredNow.cutters[0]!.key;
+          const toEntry = tools.find((e) => e.key === toKey);
+          const reason: EngraveJobSubstitution['reason'] = namedMissing
+            ? 'missing'
+            : feeds !== null && !feeds.ok && feeds.cause === 'no-feeds'
+              ? 'no-feeds'
+              : 'refused';
+          applyCutterPlan(measuredNow.cutters, 'computed', 0, {
+            fromKey: job.toolKey,
+            fromName: namedNow !== null ? toolDisplayName(namedNow).split(' · ')[0]! : job.toolKey,
+            reason,
+            ...(reason === 'no-feeds' ? { material: job.stock.material } : {}),
+            toKey,
+            toName: toEntry !== undefined ? toolDisplayName(toEntry.tool).split(' · ')[0]! : toKey,
+          });
+        } else {
+          applyCutterPlan(measuredNow.cutters, 'computed');
+        }
+      }
       return;
     }
+    // #786 slice 4c-2 — a substitution is the MEASURED search's answer, not a provisional rule
+    // pick: while the search re-answers for the edited job, the rule must not undo it. The record
+    // is cleared the moment the operator chooses a cutter, so this only protects the substitute.
+    if (job.substitution !== undefined) return;
     const key = rec?.key ?? null;
     if (key === null) return;
     if (job.toolKey !== key) setTool(key, 'computed');
-  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, namedSplit, substituteNamed, applyCutterPlan, setTool]);
+  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, job.substitution, namedSplit, substituteNamed, namedMissing, namedNow, feeds, tools, job.stock.material, applyCutterPlan, setTool]);
 
   // ---- #798 — THE CUTTER AS ONE LINE ------------------------------------------------------
   // What is in the spindle, where that answer came from, and — when the measured search chose it
@@ -1937,6 +1971,8 @@ export function EngravePanel(): JSX.Element {
               ? 'recommended'
               : null;
   const cutterFidelity = measuredNow !== null && measuredApplied ? `${Math.round(measuredNow.worstFidelity * 100)} % fidelity` : null;
+  // #786 slice 4c-2 — the substitution is on the line, not only in the findings fold.
+  const substitutionNote = job.substitution === undefined ? null : substitutionSentence(job.substitution);
   // #786 slice 4c-2 — WHAT THE CATALOGUE'S OWN RECORD SUPPLIED, on the same line: a value the
   // toolpath is actually cutting with (the engine fills the blank before the CAM), not a footnote
   // beside it. Nothing is shown when the record states everything.
@@ -1951,7 +1987,7 @@ export function EngravePanel(): JSX.Element {
   // its answer is waiting to be applied), the line says the app is choosing.
   const cutterVerdict =
     tool !== null
-      ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote].filter((w): w is string => w !== null).join(' · ')
+      ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote, substitutionNote].filter((w): w is string => w !== null).join(' · ')
       : measuredStatus === 'measuring' || measuredNow !== null || rec !== null
         ? 'choosing…'
         : 'no cutter chosen';
@@ -4392,6 +4428,17 @@ export function EngravePanel(): JSX.Element {
                   {/* #786 slice 4c-2 — the plunge question, answered in place. The write goes to
                       the cutter's own record (user: or inv:), and the answer is asked once per
                       cutter, ever; until then the hole is left out of the programs. */}
+                  {f.code === 'cutter-substituted' && (
+                    <span style={{ flexShrink: 0, marginLeft: 'auto' }}>
+                      <button
+                        type="button"
+                        data-testid="cutter-substituted-choose"
+                        onClick={() => applyFix({ group: 'engrave-group-cutter', focusTestid: 'engrave-tool' })}
+                      >
+                        Choose another…
+                      </button>
+                    </span>
+                  )}
                   {f.code === 'plunge-unproven' && centreCutterWritable && (
                     <span style={{ flexShrink: 0, marginLeft: 'auto', display: 'flex', gap: 6 }}>
                       <button type="button" data-testid="plunge-centre-yes" onClick={() => void answerCentreCutting(true)}>
