@@ -296,9 +296,11 @@ describe('#757 the 180° indexed castellated slots', () => {
     const refused = postZ1(generateIndexed(spec({ ...PARAMS, feed: 1500 })), ctx(), Z1);
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
+    // #241 slice 2 — a face's passes lift to the safe height and traverse there, so the feed's own
+    // moves sit two later in the face's sequence; the sentence and the line's refusal are the same.
     expect(refused.errors).toEqual([
-      'move 3: feed 1500 mm/min is not in (0, 1200]',
-      'move 9: feed 1500 mm/min is not in (0, 1200]',
+      'move 4: feed 1500 mm/min is not in (0, 1200]',
+      'move 11: feed 1500 mm/min is not in (0, 1200]',
     ]);
   });
 });

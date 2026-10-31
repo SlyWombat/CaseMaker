@@ -319,7 +319,7 @@ describe('the refusal sentences (§4, §6.4) — operator words, units, no codes
     const s = offAxisSentence(2.5);
     expect(s).toContain('leaves the line over the axis');
     expect(s).toContain('(Y 2.5 mm)');
-    expect(s).toContain('every Y is 0');
+    expect(s).toContain('every Y at 0');
     noCode(s);
   });
 

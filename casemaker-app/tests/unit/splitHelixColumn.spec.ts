@@ -299,7 +299,9 @@ describe('#753 split-helix column, line-to-line (simulated; the verifier refuses
 
   it('PIN the Y ≡ 0 rule: a true helicoid boundary with a flat end mill needs the cutter off the axis', () => {
     // The tool's SIDE has to run on the split face: Y offset by r_t to one side of the axis line.
-    // A rotary program cannot say that today; the post refuses the off-axis move in exact words...
+    // A WRAPPED rotary program cannot say that: its cutting moves change A, so the cutter must stay
+    // over the axis and the post refuses the off-axis move in exact words. (An INDEXED face may
+    // move Y while A is held — #241 slice 2 — but a helicoid is not one.)
     const base = splitIr(0, 0);
     const op = base.operations[0]!;
     const offAxis: ToolpathIR = {
@@ -309,7 +311,9 @@ describe('#753 split-helix column, line-to-line (simulated; the verifier refuses
     const refused = postZ1(offAxis, POST_CTX, Z1);
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
-    expect(refused.errors[0]).toBe('move 0: Y=1.5875 is not 0; a rotary job holds the tool over the axis, so every Y is 0');
+    expect(refused.errors[0]).toBe(
+      'move 0: Y=1.5875 on a move that changes A; a turn is taken with the cutter over the axis, so a move carrying an A word has Y=0 (Y moves freely only while A is held)',
+    );
     // ...and a hand-written program that leaves the line is refused by the verifier's own sentence.
     const good = pipeline(0);
     const lines = good.posted.text.split('\n');
@@ -327,7 +331,7 @@ describe('#753 split-helix column, line-to-line (simulated; the verifier refuses
     const off = verified.findings.filter((f) => f.code === 'rotary-y-off-axis');
     expect(off.length).toBeGreaterThan(0);
     expect(off[0]!.message).toBe(
-      'leaves the line over the axis (Y 1.588 mm): a rotary program keeps the cutter over the axis, and every Y is 0',
+      'leaves the line over the axis (Y 1.588 mm): the stock turns only with the cutter over the axis, so a wrapped program keeps every Y at 0 and a move that changes A is taken at Y 0',
     );
   });
 
