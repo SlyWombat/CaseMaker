@@ -617,6 +617,10 @@ describe('#739 raised text warns when its gaps are narrower than the cutter', ()
     expect(warning.message).toContain('0.278 mm');
     expect(warning.message).toContain('1 mm cutter');
     expect(warning.message).toContain('13 mm');
+    // #765 — the warning names the pinches the cut leaves joined, never the whole word as one blob.
+    expect(warning.message).toMatch(/\d+ of its \d+ pinch points? stays? joined/);
+    expect(warning.message).toContain('between');
+    expect(warning.message).not.toContain('the letters will join');
     expect(allDiagnostics(receipt), '"CNX" at 7 mm survives the same cutter').not.toContain('"CNX"');
     expect(code, 'a warning must not refuse the job').toBe(0);
   }, 150_000);
@@ -656,6 +660,11 @@ describe('#760/#766 the measured pick gives raised text a cutter that fits its g
     // survives that width and must not be warned about.
     const fused = receipt.diagnostics.filter((d) => d.code === 'raised-text-fused');
     for (const warning of fused) expect(warning.message).not.toContain('"CNX"');
+    // #765 — a warning that does fire names the pinches it leaves, not "the letters will join".
+    for (const warning of fused) {
+      expect(warning.message).toMatch(/pinch points? stays? joined/);
+      expect(warning.message).not.toContain('the letters will join');
+    }
     expect(allDiagnostics(receipt), '"CNX" at 7 mm survives the rest cutter').not.toContain('"CNX"');
   }, 150_000);
 });

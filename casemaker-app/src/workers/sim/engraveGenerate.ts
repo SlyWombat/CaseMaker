@@ -186,8 +186,9 @@ import {
   engravabilityFindings,
   keepOutFindings,
   measureLabels,
+  measureRaisedTextDetail,
   measureRaisedTexts,
-  raisedTextFindings,
+  raisedTextPinchFindings,
   traceCutRegions,
   type CutRegion,
   type LabelEngravability,
@@ -1933,8 +1934,6 @@ export function engraveRegions(
     flatRadius === null && coCone === null && coFlatRadius === null
       ? null
       : (cutawayId: string): number | null => judgeRadiusAt(cutawayId);
-  const raisedMeasured =
-    raisedRadiusFor === null ? [] : measureRaisedTexts(tl, job, plan.raisedTexts, raisedRadiusFor);
   // The sentence names the cutter whose width the rows actually used: the co-cutter when it is
   // finer for at least one cut-away, else this program's own.
   const coIsFiner = plan.raisedTexts.some((raised) => {
@@ -1943,6 +1942,15 @@ export function engraveRegions(
     return co !== null && (own === null || co < own - 1e-9);
   });
   const raisedJudgeTool = coIsFiner && raisedCoFlat !== null && raisedCoFlat !== undefined ? raisedCoFlat : tool;
+  // #765 — the warning is built from the PINCHES at that same width, so it names only the pairs
+  // the rest pass leaves joined instead of calling the whole word fused. The judge tool decides
+  // whether a pinch that its flank crosses within the edge-loss tolerance reads separated.
+  const raisedDetails =
+    raisedRadiusFor === null
+      ? []
+      : measureRaisedTextDetail(tl, job, plan.raisedTexts, raisedRadiusFor, {
+          cone: raisedJudgeTool !== null && vCone(raisedJudgeTool) !== null,
+        });
 
   // #171/#345 — the cut regions a void check reads are built ONCE, below: the engrave openings,
   // the swept traces (#270) and — since #218 — each cut-out's kerf. A void-free job is the common
@@ -2290,7 +2298,7 @@ export function engraveRegions(
     // read the shank as the cutter.
     ...tipFindings,
     ...engFindings,
-    ...raisedTextFindings(raisedMeasured, raisedJudgeTool),
+    ...raisedTextPinchFindings(raisedDetails, raisedJudgeTool),
     ...metalLineFindings(job, tool, catalogue),
     // #741 — a V-cut past the cutter's cone is not a V, so it is refused by name before the CAM.
     ...depthFindings,

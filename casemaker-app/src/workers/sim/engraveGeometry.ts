@@ -948,55 +948,65 @@ function pairGapMm(
 }
 
 /**
- * The sentences for the raised labels the cutter joins (#739).
+ * The sentences for the raised labels the cutter leaves joined (#739, #765).
  *
- * A WARNING, not an error: the cut still runs, and the operator may want the joined look. The
- * sentence names the text, its size, the measured gap, the width that cannot clear it, and the
- * two measured ways out. Every number carries its unit through `fmtMm` (three decimals at most,
- * trailing zeros dropped); the finding code stays in the diagnostic data and never in the words.
+ * A WARNING, not an error: the cut still runs, and the operator may want the joined look. Since
+ * #765 the sentence is built from the PINCHES, not the label's single tightest gap: it names only
+ * the pairs the measured cut leaves joined (with their own gaps), says how many of the label's
+ * pinches separate, and states the way out. A V whose flank crosses a pinch within the edge-loss
+ * tolerance separates it and is not named. Every number carries its unit through `fmtMm` (three
+ * decimals at most, trailing zeros dropped); the finding code stays in the diagnostic data and
+ * never in the words.
  */
-export function raisedTextFindings(
-  measurements: readonly RaisedTextMeasurement[],
+export function raisedTextPinchFindings(
+  details: readonly RaisedTextDetail[],
   tool: Tool | null,
 ): JobFinding[] {
   const cutter = cutterPhrase(tool);
-  // What the gap was measured AGAINST. For a flat cutter that is its own diameter; for a V it is
-  // the WIDTH AT THE CUTAWAY'S DEPTH, not the tip (`planeRadiusFor`, the plane the CAM and the
-  // reachability measurement use). Saying "narrower than a 0.3 mm V-bit" about a 1.6 mm gap would
-  // be false, so the row's own radius supplies the number and the tip only names the tool.
   const cone = tool === null ? null : vCone(tool);
-  return measurements.map((m) => {
-    const gap = fmtMm(m.gap);
-    // #760 — a cone is compared at its TOP-FACE opening, where the raised letters stand.
-    const compared =
-      cone === null ? cutter : `the ${fmtMm(2 * m.cutterRadius)} mm width ${cutter} opens at the top face`;
+  return details.flatMap((m) => {
+    const joined = m.pinches.filter((p) => !p.separated);
+    if (joined.length === 0) return [];
+    const total = m.pinches.length;
+    const names = joined.map((p) => `${p.a}–${p.b}`);
+    const list =
+      names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
+    const tightest = Math.min(...joined.map((p) => p.gapMm));
+    const gap = fmtMm(tightest);
+    // What the gap was measured AGAINST: a flat by its diameter, a V by the width its flank opens
+    // at the top face — where the raised letters stand (#760).
+    const verb = joined.length === 1 ? 'stays' : 'stay';
+    const bridged =
+      cone === null
+        ? `${verb} joined at ${cutter}`
+        : `${verb} joined at the ${fmtMm(2 * m.cutterRadius)} mm width ${cutter} opens at the top face`;
     // A V's way out is a width too, because that is the number the warning compared.
-    const narrower =
-      cone === null ? `a cutter ${gap} mm or smaller` : `a cutter no wider than ${gap} mm at the top face`;
-    // The sentence says which measured thing happened, not a generic "it fails": two letters
-    // bridged into one is a different picture from a counter filled in, and both are possible.
-    const what =
-      m.joined && m.counterFilled
-        ? 'the letters will join and a counter will fill in'
-        : m.joined
-          ? 'the letters will join'
-          : m.counterFilled
-            ? 'a counter will fill in'
-            : 'the raised text will lose its gaps';
+    const narrower = cone === null ? `a cutter ${gap} mm or smaller` : `a cutter no wider than ${gap} mm at the top face`;
+    // Glyph geometry scales exactly with the cap height, so the size that clears the tightest
+    // joined gap is linear; the epsilon keeps an exact multiple from rounding up a millimetre.
+    const minSize = tightest > 0 ? Math.ceil((m.size * (2 * m.cutterRadius)) / tightest - 1e-9) : null;
+    const separated = total - joined.length;
+    const losses = m.pinches.filter((p) => p.separated && p.edgeLossMm > 0);
+    const apart =
+      separated === 0
+        ? ''
+        : losses.length === 0
+          ? ` The other ${separated} separate.`
+          : ` The other ${separated} separate, taking up to ${fmtMm(Math.max(...losses.map((p) => p.edgeLossMm)))} mm off the letters' edges.`;
     const advice =
-      m.minSize !== null
-        ? `Use ${narrower}, or text ${m.minSize} mm or more.`
-        : m.joined
-          ? `Use ${narrower}, or space the letters apart.`
-          : `Use ${narrower}, or use larger text.`;
-    return {
-      severity: 'warning' as const,
-      code: 'raised-text-fused' as const,
-      labelId: m.labelId,
-      message:
-        `Raised text "${m.text}" at ${fmtMm(m.size)} mm has gaps down to ${gap} mm, ` +
-        `narrower than ${compared}; ${what}. ${advice}`,
-    };
+      minSize !== null
+        ? `Use ${narrower}, or text ${minSize} mm or more.`
+        : `Use ${narrower}, or space the letters apart.`;
+    return [
+      {
+        severity: 'warning' as const,
+        code: 'raised-text-fused' as const,
+        labelId: m.labelId,
+        message:
+          `Raised text "${m.text}" at ${fmtMm(m.size)} mm: ${joined.length} of its ${total} pinch point${total === 1 ? '' : 's'} ` +
+          `${bridged} (${gap} mm at the tightest), between ${list}.${apart} ${advice}`,
+      },
+    ];
   });
 }
 
