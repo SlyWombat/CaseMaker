@@ -1453,19 +1453,21 @@ describe('EngravePanel — bore to size (#668)', () => {
     expect(pitch).toContain('ramp (fallback)');
   });
 
-  it('writes the hole ⌀, and refuses a hole no wider than the cutter', () => {
+  it('writes the hole ⌀, and informs on a hole no wider than the cutter (#786 slice 5)', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-add-bore'));
     fireEvent.change(screen.getByTestId('engrave-drill-diameter-0'), { target: { value: '4.5' } });
     expect(useEngraveJobStore.getState().job.drills![0]!.diameter).toBe(4.5);
     expect(screen.queryByTestId('engrave-drill-finding-0-bore-narrow')).toBeNull();
 
-    // ⌀1 against a ⌀1 cutter has no centre path: the finding names it and Generate is gated.
+    // ⌀1 against a ⌀1 cutter has no centre path: the finding states it, offers the plunge at the
+    // cutter's ⌀, and does NOT gate Generate — the job cuts the hole the cutter can make.
     fireEvent.change(screen.getByTestId('engrave-drill-diameter-0'), { target: { value: '1' } });
     expect(useEngraveJobStore.getState().job.drills![0]!.diameter).toBe(1);
     const finding = screen.getByTestId('engrave-drill-finding-0-bore-narrow');
     expect(finding.textContent).toContain('not wider than');
-    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('engrave-bore-plunge-0').textContent).toContain('Plunge it at');
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(false);
   });
 });
 
@@ -4936,5 +4938,38 @@ describe('EngravePanel — the surface ball offer (#786 4a-2)', () => {
     // The flat keeps the rest of the job — nothing else changed owner.
     expect(setup?.tools).toContain('flat-1.0');
     act(() => resetRegistry());
+  });
+});
+
+// #786 slice 5 — A HOLE NO WIDER THAN THE CUTTER INFORMS, AND THE OFFER IS ONE PRESS. The bore
+// would come out at the cutter's own diameter; "Plunge it at ⌀X" turns it into that drill, the
+// hole the cutter can actually make, without the operator retyping the item.
+describe('EngravePanel — the narrow-bore plunge offer (#786 slice 5)', () => {
+  it('offers the cutter’s diameter and turns the bore into a drill', () => {
+    const FLAT = flatEndMill(3.175, { name: '3.175 mm flat end', fluteLength: 20, centreCutting: true });
+    const base = defaultEngraveJob();
+    const bore = {
+      kind: 'drill' as const,
+      id: 'bore-1',
+      name: 'port',
+      mode: 'bore' as const,
+      diameter: 3,
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      depth: 4,
+      enabled: true,
+      through: false,
+    };
+    act(() => {
+      useEngraveJobStore.setState({
+        job: { ...base, labels: [], shapes: [], drills: [bore], toolKey: 'user:flat', tool: FLAT },
+      });
+    });
+    render(<EngravePanel />);
+    expand('engrave-drill');
+    const button = screen.getByTestId('engrave-bore-plunge-0');
+    expect(button.textContent).toContain('3.175');
+    fireEvent.click(button);
+    expect(useEngraveJobStore.getState().job.drills?.[0]?.mode).toBe('drill');
   });
 });

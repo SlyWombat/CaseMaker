@@ -236,11 +236,12 @@ export function validateSacrificial(job: EngraveJob): JobFinding[] {
     const h = stripHeight(side, T);
     if (h > T) {
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'strip-taller-than-part',
         message:
           `The ${pos} strip is ${h} mm tall on a ${T} mm part — its top rises above the part's ` +
-          `top face, where the first pass would hit it.`,
+          `top face, so the first pass cuts it down to the part's height. That is what sacrificial ` +
+          'material is for; state a strip height at or under the part if the extra cut is unwanted.',
       });
     }
   }

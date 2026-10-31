@@ -72,8 +72,13 @@ export function validateScrewDownAlignment(project: Project): ValidationIssue[] 
     if (px < 0 || py < 0 || px > pcb.x || py > pcb.y) {
       issues.push({
         code: 'board-overlap-boss',
-        severity: 'error',
-        message: `Boss ${b.id} sits outside the PCB outline at (${px.toFixed(2)}, ${py.toFixed(2)}).`,
+        // #786 slice 5 — a design fact, not a refusal: the boss still sits where it was placed,
+        // and the board cannot lie over it there. The export goes ahead and the sentence says so.
+        severity: 'warn',
+        message:
+          `Boss ${b.id} sits outside the PCB outline at (${px.toFixed(2)}, ${py.toFixed(2)}): the ` +
+          'board cannot sit over it there, so that mount holds nothing. Move the boss inside the ' +
+          'outline, or enlarge the board.',
         refId: b.id,
       });
     }

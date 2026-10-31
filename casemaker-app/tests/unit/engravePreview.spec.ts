@@ -1117,7 +1117,7 @@ describe('engravePreview — the lost layer (§5.7)', () => {
     }
   });
 
-  it('does not paint a fully dropped glyph as lost: `item-empty` already refuses it by name', () => {
+  it('does not paint a fully dropped glyph as lost: `item-empty` already states it by name', () => {
     const job = dj();
     job.labels = [{ ...job.labels[0]!, id: 'tiny', text: 'I', size: 1.5, depth: 0.5 }];
     const p = buildPreview(job);
@@ -1126,10 +1126,10 @@ describe('engravePreview — the lost layer (§5.7)', () => {
     // The cutter is 1.0 mm across; a 1.5 mm bar is far thinner, so the opening is empty.
     expect(row.openedArea).toBe(0);
     expect(row.glyphArea).toBeGreaterThan(0);
-    // That is an ERROR (`item-empty`), and the picture leaves the item uncut. The lost layer is
-    // deliberately silent here: the finding already says the item is not cut, and amber over the
-    // whole glyph would read as a cutter limitation rather than the refusal it is.
-    expect(p.findings.some((f) => f.code === 'item-empty' && f.labelId === 'tiny' && f.severity === 'error')).toBe(true);
+    // That is `item-empty` (a WARNING since #786 slice 5), and the picture still leaves the item
+    // uncut without painting it amber: the finding already says it cuts nothing, and amber over
+    // the whole glyph would read as a cutter limitation rather than the fact it is.
+    expect(p.findings.some((f) => f.code === 'item-empty' && f.labelId === 'tiny' && f.severity === 'warning')).toBe(true);
     expect(p.lost).toHaveLength(0);
   });
 

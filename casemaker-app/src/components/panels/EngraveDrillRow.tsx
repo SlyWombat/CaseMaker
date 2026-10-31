@@ -1,4 +1,4 @@
-import type { CSSProperties, JSX } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { drillOperationName } from '@/engine/cnc/engrave/partPlan';
 import { rowSummary } from '@/components/panels/engraveRowText';
@@ -93,6 +93,11 @@ export interface EngraveDrillRowProps {
   onRemove: () => void;
   /** Findings about THIS drill (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
+  /**
+   * #786 slice 5 — a finding's one-click action on this row (`bore-narrow`'s "Plunge it at ⌀X").
+   * The panel owns the action; the row only places it.
+   */
+  findingAction?: (finding: JobFinding) => ReactNode;
   /** #668 — a bore's helix pitch, resolved by the panel; null when the job's feeds did not resolve. */
   borePitch?: BorePitchFacts | null;
   /** #675 — the plunge drill's peck, resolved by the panel; null on a bore or with no cutter. */
@@ -107,6 +112,7 @@ export function EngraveDrillRow({
   onChange,
   onRemove,
   findings,
+  findingAction,
   borePitch = null,
   peck = null,
 }: EngraveDrillRowProps): JSX.Element {
@@ -194,6 +200,7 @@ export function EngraveDrillRow({
       removeTitle={`Remove this ${isBore ? 'bore' : 'drill'}.`}
       removeNoun={kindLabel}
       findings={findings}
+      {...(findingAction === undefined ? {} : { findingAction })}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
     >

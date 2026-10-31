@@ -478,10 +478,12 @@ describe('the inlay findings (#673)', () => {
     const flat: EngraveJob = { ...femaleJob(), tool: flatEndMill(3.175, { name: '3.175 flat' }) };
     expect(validateJob(flat).map((f) => f.code)).toContain('inlay-needs-cone');
 
+    // #786 slice 5 — a glue gap AT the pocket depth is a fit: stated and cut, not refused.
     const wide = femaleJob(rect('design', { inlay: { role: 'female', glueGapMm: 2 } }));
     const gap = validateJob(wide).find((f) => f.code === 'inlay-gap');
-    expect(gap?.severity).toBe('error');
+    expect(gap?.severity).toBe('warning');
     expect(gap?.message).toContain('must be below the pocket depth');
+    expect(gap?.message).toContain('The cut proceeds');
 
     const variable = femaleJob(rect('design', { vCarveDepth: 'variable' }));
     expect(validateJob(variable).map((f) => f.code)).toContain('inlay-plane-depth');

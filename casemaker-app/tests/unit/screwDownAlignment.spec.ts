@@ -29,7 +29,7 @@ describe('Issue #21 — screw-down lid posts + validation', () => {
     expect(validateScrewDownAlignment(project)).toEqual([]);
   });
 
-  it('boss outside the PCB outline produces a board-overlap-boss error', () => {
+  it('boss outside the PCB outline informs — a design fact, not a refusal (#786 slice 5)', () => {
     const project = createDefaultProject('rpi-4b');
     project.case.joint = 'screw-down';
     project.board = {
@@ -41,7 +41,10 @@ describe('Issue #21 — screw-down lid posts + validation', () => {
       ],
     };
     const issues = validateScrewDownAlignment(project);
-    expect(issues.some((i) => i.code === 'board-overlap-boss')).toBe(true);
+    const boss = issues.find((i) => i.code === 'board-overlap-boss');
+    expect(boss).toBeDefined();
+    expect(boss!.severity).toBe('warn');
+    expect(boss!.message).toContain('cannot sit over it there');
   });
 
   it('a +z component overlapping a boss XY footprint produces a lid-post collision warning', () => {

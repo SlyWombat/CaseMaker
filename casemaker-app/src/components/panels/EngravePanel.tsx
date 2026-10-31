@@ -3603,6 +3603,18 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(drill.id)}
+          findingAction={(f) => {
+            if (f.code !== 'bore-narrow' || f.suggestedPlungeMm === undefined) return null;
+            return (
+              <button
+                type="button"
+                data-testid={`engrave-bore-plunge-${i}`}
+                onClick={() => updateDrill(drill.id, { mode: 'drill' })}
+              >
+                Plunge it at ⌀{f.suggestedPlungeMm} mm
+              </button>
+            );
+          }}
           borePitch={borePitchFor(drill)}
           peck={peckFor(drill)}
           onChange={(patch) => updateDrill(drill.id, patch)}

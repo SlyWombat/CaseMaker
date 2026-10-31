@@ -175,12 +175,13 @@ describe('engraveGenerate (#206)', () => {
         shoulderLength: 12,
       }),
     };
+    // #786 slice 5 — lost characters INFORM: the rest of the text and the rest of the job post.
     const g = generate(tl, job);
-    expect(g.ok).toBe(false);
-    expect(g.stage).toBe('findings');
-    expect(g.nc).toBeNull();
-    const codes = g.findings.filter((f) => f.severity === 'error').map((f) => f.code);
-    expect(codes).toContain('item-chars-lost');
+    expect(g.ok).toBe(true);
+    expect(g.nc).not.toBeNull();
+    const lost = g.findings.find((f) => f.code === 'item-chars-lost');
+    expect(lost?.severity).toBe('warning');
+    expect(lost?.message).toContain('Characters lost');
   });
 
   // #213 — `validateVise` has accepted the sacrificial stack since `454110a`, but this call never
@@ -2848,13 +2849,14 @@ describe('through-cuts and cut-outs (#218)', () => {
       { of: 'rect-1', side: 'outside', inset: 0, tabs: { count: 4, width: 4, height: 1 } },
       { shapes: [{ ...RECT, width: 3, height: 3 }] },
     );
+    // #786 slice 5 — the cut proceeds with the tabs that fit, and the sentence says how many did
+    // not; the loose-piece check (not this one) is what judges a part left free.
     const g = generate(tl, job);
-    expect(g.ok).toBe(false);
-    expect(g.stage).toBe('findings');
-    expect(g.nc).toBeNull();
+    expect(g.ok, JSON.stringify(g.findings.filter((x) => x.severity === 'error'))).toBe(true);
+    expect(g.nc).not.toBeNull();
     const f = g.findings.find((x) => x.code === 'tab-unplaceable');
     expect(f).toBeDefined();
-    expect(f!.severity).toBe('error');
+    expect(f!.severity).toBe('warning');
     expect(f!.labelId).toBe('cut-1');
     expect(f!.message).toContain('4 holding tabs');
     expect(f!.message).toContain('2 could not be placed');
@@ -3241,15 +3243,13 @@ describe('a setup’s cut-outs and uncut items stay safe across cutters (#746)',
         }),
       ],
     };
+    // #786 slice 5 — the slot INFORMS that it cuts nothing; the rim and the small block post.
     const g = generate(tl, job, null, [], undefined, { tools: CUTTERS });
-    expect(g.ok, 'the 2 mm slot is owned by the 3.175 mm cutter and no rest pass exists').toBe(false);
-    expect(g.stage).toBe('findings');
+    expect(g.ok, JSON.stringify(g.findings.filter((f) => f.severity === 'error'))).toBe(true);
+    expect(g.nc).not.toBeNull();
     const empty = g.findings.find((f) => f.code === 'item-empty' && f.labelId === 'slot');
-    expect(
-      empty,
-      JSON.stringify(g.findings.filter((f) => f.severity === 'error')),
-    ).toBeDefined();
-    expect(empty!.severity).toBe('error');
+    expect(empty).toBeDefined();
+    expect(empty!.severity).toBe('warning');
     expect(empty!.message).toContain('"Narrow"');
   }, 120_000);
 

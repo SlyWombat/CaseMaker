@@ -137,13 +137,14 @@ describe('validateSacrificial (#213)', () => {
     expect(validateSacrificial(job).some((x) => x.code === 'side-strip-unsupported')).toBe(false);
   });
 
-  it('errors when a strip is taller than the part', () => {
+  it('warns when a strip is taller than the part — the first pass cuts it down (#786 slice 5)', () => {
     const job = withSacrificial(defaultEngraveJob(), {
       ...noneSacrificial(),
       sides: { ...noneSacrificial().sides, left: { thickness: 6, height: 20 } },
     });
     const f = validateSacrificial(job).find((x) => x.code === 'strip-taller-than-part');
-    expect(f?.severity).toBe('error');
+    expect(f?.severity).toBe('warning');
+    expect(f?.message).toContain('first pass cuts it');
   });
 
   it('warns when the part is only loose on the board', () => {

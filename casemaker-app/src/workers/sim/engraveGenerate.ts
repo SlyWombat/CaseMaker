@@ -520,8 +520,8 @@ export interface DrillProgramFacts {
 /**
  * #218 — what the CUT-OUT program cut, for the run sheet's tab-removal step. One entry per
  * cut-out the program carries, with the tab spec the file was cut with and how many tabs were
- * actually placed (a `tab-unplaceable` finding refuses the run, so a successful run has every
- * requested tab, but the count is stated rather than inferred).
+ * actually placed (a `tab-unplaceable` warning does not stop the run — it cuts with the tabs
+ * that fit — so the count states what was really placed rather than what was requested).
  */
 export interface ThroughCutFacts {
   /** The breakthrough the cut-out programs cut to, mm below the blank's bottom face. */
@@ -2154,7 +2154,7 @@ export function engraveRegions(
       cutoutMask.push({ path, spans, toolRadius: radius, tabHeight: c.tabs.height });
       if (unplaceable > 0) {
         tabFindings.push({
-          severity: 'error',
+          severity: 'warning',
           code: 'tab-unplaceable',
           labelId: c.id,
           message:

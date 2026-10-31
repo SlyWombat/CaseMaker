@@ -633,9 +633,13 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     const traceById = new Map(plan.traces.map((t) => [t.id, t] as const));
 
     // A label whose findings include an error is left out of the cut — the stock is drawn
-    // uncut there — but its row and findings are still reported (the issue's rule).
+    // uncut there — but its row and findings are still reported (the issue's rule). #786 slice 5:
+    // an `item-empty` finding is a warning now, and an item that opens nothing is still not a
+    // LOST layer — the finding states it cuts nothing; amber would read as a cutter limitation.
     const errored = new Set(
-      liveFindings.filter((f) => f.severity === 'error' && f.labelId !== undefined).map((f) => f.labelId as string),
+      liveFindings
+        .filter((f) => f.labelId !== undefined && (f.severity === 'error' || f.code === 'item-empty'))
+        .map((f) => f.labelId as string),
     );
 
     // #432 — a faced job is drawn as the blank that REMAINS after the skim. The document's cuts

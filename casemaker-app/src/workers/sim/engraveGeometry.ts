@@ -286,8 +286,9 @@ function cutterPhrase(tool: Tool | null): string {
  * Turn the measured losses into job findings (#201, #214).
  *
  * Codes and thresholds are the issue's table, renamed `item-*` by #214 (a shape is an item
- * too, and a shape has no characters): `item-empty` is an error, `item-chars-lost` an error,
- * `item-detail-lost` a warning, `item-outside-stock` a warning (#786 slice 1 part 2 — the edge
+ * too, and a shape has no characters): all four INFORM — `item-empty`, `item-chars-lost`,
+ * `item-detail-lost` and `item-outside-stock` are warnings (#786 slice 5: an item the cutter
+ * cannot open cuts nothing, and the rest of the job must still post), `item-outside-stock` (#786 slice 1 part 2 — the edge
  * margin is a preference, and the part that hangs off the blank cuts air there). They are members
  * of `JobFindingCode` (`jobSetup.ts`), so this returns `JobFinding[]` like `validateJob`.
  *
@@ -329,7 +330,7 @@ export function engravabilityFindings(
       (primitive !== undefined && row.glyphArea > 0 && row.openedArea === 0);
     if (empty) {
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'item-empty',
         labelId: row.labelId,
         message:
@@ -345,7 +346,7 @@ export function engravabilityFindings(
     if (label && row.emptyChars.length > 0) {
       const list = row.emptyChars.map((c) => `"${c.char}" (index ${c.index})`).join(', ');
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'item-chars-lost',
         labelId: row.labelId,
         message: `Characters lost to ${cutter}: ${list}.`,

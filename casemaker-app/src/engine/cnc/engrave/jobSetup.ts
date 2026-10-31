@@ -489,6 +489,11 @@ export interface JobFinding {
    */
   suggestedCutterKey?: string;
   suggestedCutterDiameterMm?: number;
+  /**
+   * #786 slice 5 — on `bore-narrow`, the cutter's own diameter, mm: the hole a plunge with this
+   * cutter would make. The panel's one-click "Plunge it at ⌀X" turns the bore into that drill.
+   */
+  suggestedPlungeMm?: number;
   message: string;
 }
 
@@ -1587,11 +1592,15 @@ export function validateJob(
   // undercut — and each message names the way the shape CAN be cut.
   for (const primitive of enabledPrimitives) {
     if (primitive.depth > floorAllowed) {
+      // #786 slice 5 — the floor is a preference for a primitive too: state the floor (or the
+      // breakthrough) it leaves and cut it; the board and fixture checks judge what lies beneath.
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'depth-exceeds-stock',
         labelId: primitive.id,
-        message: `${primitiveLabel(primitive)} cuts ${primitive.depth} mm deep; ${overDepthClause(job, primitive.depth, facingDepth, floorAllowed)}.`,
+        message:
+          `${primitiveLabel(primitive)} cuts ${primitive.depth} mm deep; ${overDepthClause(job, primitive.depth, facingDepth, floorAllowed)}. ` +
+          'Generate cuts it as it is — the board and fixture checks judge what lies beneath.',
       });
     }
     const axis = primitive.axis ?? 'z';
@@ -1903,13 +1912,18 @@ export function validateJob(
       }
       if (holeRadius !== null && drillRadius !== null && holeRadius <= drillRadius) {
         findings.push({
-          severity: 'error',
+          // #786 slice 5 — a hole no wider than the cutter is not refused: the plunge at the
+          // cutter's own diameter makes the hole it can make, stated with both numbers, and the
+          // operator can take that offer in one press.
+          severity: 'warning',
           code: 'bore-narrow',
           labelId: drill.id,
           message:
             `${who} asks for a ⌀${fmt3(holeRadius * 2)} mm hole, which is not wider than the ` +
-            `⌀${fmt3(drillRadius * 2)} mm cutter. A bore needs a hole wider than the cutter — ` +
-            'cut a bigger hole or use a smaller cutter.',
+            `⌀${fmt3(drillRadius * 2)} mm cutter, so a helix has no wall to orbit — the hole would ` +
+            `come out at the cutter's ⌀. Plunge it at ⌀${fmt3(drillRadius * 2)} mm instead, or use ` +
+            'a smaller cutter for the hole the job asks for.',
+          suggestedPlungeMm: drillRadius * 2,
         });
       }
     }
@@ -1940,14 +1954,18 @@ export function validateJob(
         });
       }
     } else if (depthAtFloor > floorAllowed) {
+      // #786 slice 5 — the same rule for a drill: the sentence states the floor or breakthrough,
+      // and the fixture/board checks are the ones that judge contact.
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'depth-exceeds-stock',
         labelId: drill.id,
-        message: drillIsBit
-          ? `${who}'s tip reaches ${fmt3(tipDepth)} mm (${fmt3(drill.depth)} mm of full diameter ` +
-            `plus the ${fmt3(drillPointLength)} mm point); ${overDepthClause(job, tipDepth, facingDepth, floorAllowed)}.`
-          : `${who} drills ${drill.depth} mm deep; ${overDepthClause(job, drill.depth, facingDepth, floorAllowed)}.`,
+        message:
+          (drillIsBit
+            ? `${who}'s tip reaches ${fmt3(tipDepth)} mm (${fmt3(drill.depth)} mm of full diameter ` +
+              `plus the ${fmt3(drillPointLength)} mm point); ${overDepthClause(job, tipDepth, facingDepth, floorAllowed)}.`
+            : `${who} drills ${drill.depth} mm deep; ${overDepthClause(job, drill.depth, facingDepth, floorAllowed)}.`) +
+          ' Generate cuts it as it is — the board and fixture checks judge what lies beneath.',
       });
     }
     // A hole is a disc — the cutter's radius for a drill, the HOLE's own radius for a bore — so it
@@ -2272,13 +2290,22 @@ export function validateJob(
       continue;
     }
     if (mark.role === 'female') {
-      const check = inlayNumbers(inlayCone, item.depth, inlayGlueGap(mark));
+      const gap = inlayGlueGap(mark);
+      const check = inlayNumbers(inlayCone, item.depth, gap);
       if (!check.ok) {
+        // #786 slice 5 — A FIT IS INFORMED, THE DATA IS NOT. A glue gap at or above the pocket's
+        // depth is a fit the operator can see and cut anyway (the plug reaches the floor and has
+        // no gap); a non-positive depth or gap is a number that cannot mean anything, and stays.
+        const dataInvalid = !(item.depth > 0) || !(gap > 0);
         findings.push({
-          severity: 'error',
+          severity: dataInvalid ? 'error' : 'warning',
           code: 'inlay-gap',
           labelId: item.id,
-          message: `${who} cannot pair with a plug: ${check.reason}.`,
+          message: dataInvalid
+            ? `${who} cannot pair with a plug: ${check.reason}.`
+            : `${who} pairs with a plug with no glue gap: ${check.reason}. The cut proceeds; the ` +
+              `plug reaches the floor, so there is no glue gap under it — lower the gap below the ` +
+              `pocket's ${fmt3(item.depth)} mm depth for an inlay that can be glued.`,
         });
       }
       continue;

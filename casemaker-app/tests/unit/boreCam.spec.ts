@@ -322,10 +322,12 @@ describe('bore findings (#668)', () => {
     expect(f?.message).toContain('hole diameter');
   });
 
-  it('refuses a hole that is not wider than the cutter', () => {
+  it('informs when a hole is not wider than the cutter, and offers the plunge (#786 slice 5)', () => {
     const f = validateJob(boreJob([bore(3)])).find((x) => x.code === 'bore-narrow');
-    expect(f?.severity).toBe('error');
+    expect(f?.severity).toBe('warning');
     expect(f?.message).toContain('not wider than');
+    // The one-press offer carries the cutter's own diameter: the hole a plunge would make.
+    expect(f?.suggestedPlungeMm).toBeCloseTo(3.175, 6);
   });
 
   it('refuses a cutter that cannot ramp, naming it', () => {

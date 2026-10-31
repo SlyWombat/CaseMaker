@@ -526,11 +526,23 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
     return f!;
   }
 
+  /** #786 slice 5 — a thin neck INFORMS: the sentence states the numbers and the run posts. */
+  function neckWarning(job: EngraveJob, code: string) {
+    const g = gen(job);
+    expect(g.ok, JSON.stringify(g.findings.filter((x) => x.severity === 'error'))).toBe(true);
+    const f = g.findings.find((x) => x.code === code);
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('warning');
+    expect(f!.labelId).toBe('rotary-neck');
+    expect(f!.message).not.toContain(code);
+    return f!;
+  }
+
   it('refuses a neck thinner than the carried piece calls for — as a labelled default', () => {
     // Chuck-side ⌀2 mm: the root is X 3, so the piece the check treats as carried runs 82 mm to
     // the free end. The tailstock centre holds its far end, so the check counts half of it, 41 mm,
     // where PLA's default minimum is ⌀5.18 mm (10 N side load, 30 MPa allowable bending stress).
-    const f = neckError(dowel({ end: 'chuck', diameter: 2, length: 5 }), 'neck-thin');
+    const f = neckWarning(dowel({ end: 'chuck', diameter: 2, length: 5 }), 'neck-thin');
     expect(f.message).toContain('The neck for parting is too thin');
     expect(f.message).toContain('the neck is ⌀2 mm');
     expect(f.message).toContain('PLA with the whole part beyond the neck runs 82 mm');
@@ -560,7 +572,7 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
         },
       },
     );
-    const f = neckError(job, 'neck-thin');
+    const f = neckWarning(job, 'neck-thin');
     expect(f.message).toContain('the stub beyond the neck runs 5 mm');
     expect(f.message).toContain('from the neck’s root at X 80 mm to the free end and hangs free');
     expect(f.message).toContain('the check counts all of it (5 mm)');
@@ -580,7 +592,7 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
     expect(facts.carriedMm).toBe(20);
     expect(facts.effectiveMm).toBe(20);
     expect(rotaryNeckMinDiameterMm('pla', facts.effectiveMm).diameterMm).toBeCloseTo(4.08, 2);
-    const f = neckError(job, 'neck-thin');
+    const f = neckWarning(job, 'neck-thin');
     expect(f.message).toContain('runs 20 mm from the neck’s root at X 65 mm');
     expect(f.message).toContain('needs at least ⌀4.08 mm');
   });

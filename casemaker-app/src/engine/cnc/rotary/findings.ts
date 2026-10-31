@@ -251,7 +251,9 @@ export function rotaryJobFindings(
           const min = rotaryNeckMinDiameterMm(job.stock.material, neck.effectiveMm);
           if (neck.diameterMm < min.diameterMm) {
             findings.push({
-              severity: 'error',
+              // #786 slice 5 — a strength ESTIMATE, informed: the numbers are stated and the run
+              // posts; the saw step and the operator's own judgement are what the neck is for.
+              severity: 'warning',
               code: 'neck-thin',
               labelId: ROTARY_NECK_ID,
               message: `The neck for parting is too thin: ${neckThinnerSentence(job.stock.material, neck.diameterMm, { ...neck, tailstock: map.tailstock }, min.diameterMm)}.`,

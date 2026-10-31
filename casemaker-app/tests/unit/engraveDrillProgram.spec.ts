@@ -134,9 +134,11 @@ describe('the drill geometry in validateJob (#434)', () => {
     // 12 mm stock, 1 mm minimum floor → at most 11 mm. A 10.5 mm blind hole is legal for a flat
     // cutter; the drill's tip is a point length lower, at 11.401 mm, and is refused.
     const job = drillJob([hole(10.5)]);
+    // #786 slice 5 — the floor is a preference: the sentence states the tip's breakthrough.
     const finding = validateJob(job, point).find((f) => f.code === 'depth-exceeds-stock');
-    expect(finding?.severity).toBe('error');
+    expect(finding?.severity).toBe('warning');
     expect(finding?.message).toContain('point');
+    expect(finding?.message).toContain('judge what lies beneath');
   });
 
   it('checks the hole rim with the FULL diameter', () => {
