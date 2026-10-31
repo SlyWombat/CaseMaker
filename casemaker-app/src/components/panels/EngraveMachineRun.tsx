@@ -28,6 +28,8 @@ import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { formatDuration } from '@/engine/cnc/plan';
+import { useCncModeStore } from '@/store/cncModeStore';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 /** #655 — the waiting prompt's box: the same frame the panel's other notices use. */
@@ -124,6 +126,8 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
   // runs with the vacuum left off. "Vacuum on before it plays" described a run that does not happen
   // in either case. Only an entry prepared some other way is bracketed by the runner.
   const ownsVacuum = entry.context?.vacuumOwned === true || programOwnsVacuum(entry.context?.nc);
+  /** #806 — the run's own clock, as the machine last reported it (a refused outcome has none). */
+  const elapsedS = entry.outcome !== null && 'last' in entry.outcome ? entry.outcome.last.elapsedS : null;
   const span = entry.context?.vacuumSpan;
   const vacuumLine =
     span === 'first'
@@ -240,9 +244,18 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
           </button>
         </div>
       )}
-      {/* #414 — the end of the run, worked out once in the store: what it did, and at most one question. */}
+      {/* #414 / #806 — THE DONE CARD. One card when the run ends: what happened and how long
+          ("Finished · 2 min 14 s"), the end's own lines (the finished-program record, the shelf,
+          the runtime), the offcut question only when there is one, and the ONE primary action. */}
       {!running && entry.end !== null && (
-        <div data-testid="engrave-run-end" data-kind={entry.end.kind}>
+        <div data-testid="engrave-run-end" data-kind={entry.end.kind} style={BOX}>
+          <p
+            data-testid="engrave-run-done-title"
+            style={{ fontSize: 12, fontWeight: 600, color: '#e6edf5', margin: '0 0 4px' }}
+          >
+            {entry.end.kind === 'finished' ? 'Finished' : entry.end.kind === 'stopped' ? 'Stopped' : 'Nothing was cut'}
+            {entry.end.kind === 'finished' && elapsedS !== null ? ` · ${formatDuration(elapsedS)}` : ''}
+          </p>
           {entry.end.lines.map((l, i) => (
             <p key={i} style={MUTED}>
               {l}
@@ -259,6 +272,16 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
               </button>
             </div>
           )}
+          {/* #806 — THE NEXT PART, in one verb. The design's rule is that the card holds the next
+              step's only primary action: after a finished part that step is another design. */}
+          <button
+            type="button"
+            data-testid="engrave-run-another"
+            style={{ width: '100%', padding: 7, marginTop: 6, fontWeight: 600 }}
+            onClick={() => useCncModeStore.getState().show('design')}
+          >
+            Cut another
+          </button>
         </div>
       )}
     </div>

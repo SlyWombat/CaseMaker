@@ -12,6 +12,7 @@ import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } 
 import { setMachineUploadLoader } from '@/platform/machineUpload';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { useCncModeStore } from '@/store/cncModeStore';
 import { machineKey, resetMachineRunStore, runContextFor, useMachineRunStore } from '@/store/machineRunStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { Tool } from '@/engine/cnc/tool';
@@ -157,6 +158,13 @@ describe('#423 the run panel, in the real tree', () => {
     // every finish; it is the file (or its absence) that switches the vacuum.
     expect(sent).toEqual(['?', 'play /sd/gcodes/job.nc', '?', '$H']);
     expect(screen.queryByTestId('engrave-run-home')).toBeNull();
+    // #806 — THE DONE CARD: the run and its clock in one title, the end's own lines under it,
+    // the offcut question only when there is one, and ONE primary action.
+    expect(screen.getByTestId('engrave-run-end').dataset.kind).toBe('finished');
+    expect(screen.getByTestId('engrave-run-done-title').textContent).toMatch(/^Finished( · .+)?$/);
+    expect(screen.queryByTestId('engrave-run-offcut')).toBeNull();
+    fireEvent.click(screen.getByTestId('engrave-run-another'));
+    expect(useCncModeStore.getState().mode).toBe('design');
     // #797 — the at-machine statement is Cut step 1's ONE statement now; this panel asks nothing
     // of its own, on this program or on the next.
     expect(screen.queryByTestId('engrave-run-at-machine')).toBeNull();
