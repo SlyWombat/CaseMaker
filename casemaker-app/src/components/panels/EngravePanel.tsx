@@ -746,6 +746,8 @@ export function EngravePanel(): JSX.Element {
   const updatePrimitive = useEngraveJobStore((s) => s.updatePrimitive);
   const removePrimitive = useEngraveJobStore((s) => s.removePrimitive);
   const setTargetObject = useEngraveJobStore((s) => s.setTargetObject);
+  const setSideGoal = useEngraveJobStore((s) => s.setSideGoal);
+  const clearSideGoal = useEngraveJobStore((s) => s.clearSideGoal);
   const updateTargetObject = useEngraveJobStore((s) => s.updateTargetObject);
   const removeTargetObject = useEngraveJobStore((s) => s.removeTargetObject);
   const updateCutout = useEngraveJobStore((s) => s.updateCutout);
@@ -1323,6 +1325,8 @@ export function EngravePanel(): JSX.Element {
   const targetInputRef = useRef<HTMLInputElement>(null);
   /** #662 — the Surface a mesh operation's own input: the file becomes the job's GOAL. */
   const goalInputRef = useRef<HTMLInputElement>(null);
+  /** #723 P2-3 — the setup a goal picked now belongs to; null for the job's single target. */
+  const sideGoalSetupRef = useRef<string | null>(null);
   // The wizard asks for the goal import through `operationIntake` (it is a portal and cannot hold
   // this input). One listener while the panel is mounted, cleared with it.
   useEffect(() => {
@@ -1362,7 +1366,7 @@ export function EngravePanel(): JSX.Element {
    * X/Y with its TOP on the stock's top face (Z0), which is where a reference part sits when it is
    * being used to lay out pockets.
    */
-  async function readTarget(file: File, role: 'reference' | 'goal' = 'reference'): Promise<void> {
+  async function readTarget(file: File, role: 'reference' | 'goal' = 'reference', setupId?: string): Promise<void> {
     setTargetError(null);
     setTargetImporting(true);
     try {
@@ -1381,7 +1385,7 @@ export function EngravePanel(): JSX.Element {
         setTargetError(result.error);
         return;
       }
-      setTargetObject({
+      const target = {
         id: result.id,
         name: result.name,
         format: result.format,
@@ -1394,7 +1398,11 @@ export function EngravePanel(): JSX.Element {
         // #662 — the Surface a mesh operation: a goal is the shape to MAKE (the engine roughs and
         // ball-finishes it), where a reference is only something to position against.
         ...(role === 'goal' || isPng ? { role: 'goal' as const } : {}),
-      });
+      };
+      // #723 P2-3 — a goal picked for a SIDE is written in the multi-goal form; anything else is
+      // the job's single target object, exactly as before.
+      if (setupId !== undefined) setSideGoal(setupId, target);
+      else setTargetObject(target);
       // A new object arrives open, like every other add: its placement is the field the import
       // could not settle.
       expandEngraveRow(result.id);
@@ -3237,7 +3245,9 @@ export function EngravePanel(): JSX.Element {
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = '';
-          if (file) void readTarget(file, 'goal');
+          const side = sideGoalSetupRef.current;
+          sideGoalSetupRef.current = null;
+          if (file) void readTarget(file, 'goal', side ?? undefined);
         }}
       />
       </Group>
@@ -3850,7 +3860,14 @@ export function EngravePanel(): JSX.Element {
         )}
       </div>
 
-      <EngraveSetupsSection />
+      <EngraveSetupsSection
+        onPickGoal={(setupId) => {
+          // The SAME goal reader as Surface a mesh: a side's goal is a goal, with a setup on it.
+          sideGoalSetupRef.current = setupId;
+          goalInputRef.current?.click();
+        }}
+        onClearGoal={(setupId) => clearSideGoal(setupId)}
+      />
       </Group>
 
       {/* #686 — the footer is the panel's LAST flow child, so `position: sticky; bottom: 0` pins the

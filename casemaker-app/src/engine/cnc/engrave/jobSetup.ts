@@ -1180,6 +1180,54 @@ export function jobTargetObjects(job: EngraveJob): EngraveTargetObject[] {
   return job.targetObject === undefined ? [] : [job.targetObject];
 }
 
+/** Whether a target object is a SIDE's goal (a reference is not a side, #723 P2-1b). */
+export function isSideGoal(target: EngraveTargetObject): boolean {
+  return (target.role ?? 'reference') === 'goal' && target.enabled;
+}
+
+/** The setup a target belongs to: the one it names, else the job's first (the one-side rule). */
+export function sideSetupIdOf(job: EngraveJob, target: EngraveTargetObject): string | undefined {
+  return target.setupId ?? jobSetups(job)[0]?.id;
+}
+
+/**
+ * #723 P2-3 — WRITE ONE SIDE'S GOAL, in the multi-goal form. A job that still carries the single
+ * `targetObject` is migrated: that object becomes the FIRST setup's explicitly-named goal (a
+ * reference stays unnamed — it is not a side), and the document moves to `targetObjects[]`. Any
+ * goal already naming this setup is replaced; the other sides are untouched. The schema's rules
+ * (one form, one goal per setup, a named setup the job really has) are what this writes to.
+ */
+export function withSideGoal(job: EngraveJob, setupId: string, goal: EngraveTargetObject): EngraveJob {
+  const setups = jobSetups(job);
+  if (!setups.some((s) => s.id === setupId)) return job;
+  const list: EngraveTargetObject[] = jobTargetObjects(job).map((t) => ({ ...t }));
+  if (job.targetObject !== undefined && list.length > 0 && list[0]!.setupId === undefined) {
+    const first = setups[0];
+    if (first !== undefined && isSideGoal(list[0]!)) list[0]!.setupId = first.id;
+  }
+  const kept = list.filter((t) => !(isSideGoal(t) && sideSetupIdOf(job, t) === setupId));
+  kept.push({ ...goal, role: 'goal', setupId });
+  const { targetObject: _single, ...rest } = job;
+  return { ...rest, targetObjects: kept };
+}
+
+/** #723 P2-3 — remove the goal this setup cuts, if any. The other sides are untouched. */
+export function withoutSideGoal(job: EngraveJob, setupId: string): EngraveJob {
+  if (job.targetObject !== undefined) {
+    const single = job.targetObject;
+    if (!isSideGoal(single) || sideSetupIdOf(job, single) !== setupId) return job;
+    const { targetObject: _single, ...rest } = job;
+    return rest;
+  }
+  const list = (job.targetObjects ?? []).filter((t) => !(isSideGoal(t) && sideSetupIdOf(job, t) === setupId));
+  if (list.length === (job.targetObjects ?? []).length) return job;
+  if (list.length === 0) {
+    const { targetObjects: _list, ...rest } = job;
+    return rest;
+  }
+  return { ...job, targetObjects: list };
+}
+
 /** One side of a multi-setup goal job: the enabled goal and the setup that cuts it. */
 export interface GoalSide {
   setup: JobSetup;

@@ -130,3 +130,71 @@ describe('#471 the remount page', () => {
     expect(screen.queryByTestId('engrave-remount-page')).toBeNull();
   });
 });
+
+// #723 P2-3 — the flip preview: the stock's rectangle, the two stated pins and the turn, drawn
+// only when the remount really is a turn.
+describe('#723 P2-3 the flip preview', () => {
+  function flipSetup() {
+    const plan = buildSetups(
+      INPUT,
+      [
+        { face: 'top', items: [A] },
+        { face: 'bottom', items: [B] },
+      ],
+      setupsSettings(null),
+    );
+    const setup = plan.setups[1]!;
+    expect(setup.remount?.rotate).not.toBeNull();
+    return setup;
+  }
+
+  it('draws the turn, the stock and both pins; the words name the axis and the faces', () => {
+    const setup = flipSetup();
+    render(
+      <EngraveRemountPage
+        setup={setup}
+        total={2}
+        mount={setup.mount}
+        preview={{ length: 100, width: 60, pins: [{ x: 20, y: 30 }, { x: 80, y: 30 }] }}
+        onClose={() => {}}
+        onMounted={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('engrave-remount-preview')).toBeTruthy();
+    expect(screen.getByTestId('engrave-remount-preview-pin-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-remount-preview-pin-1')).toBeTruthy();
+    const words = screen.getByTestId('engrave-remount-preview-words').textContent ?? '';
+    expect(words).toContain(`Turn ${Math.abs(setup.remount!.rotate!.degrees)}° about ${setup.remount!.rotate!.about.toUpperCase()}`);
+    expect(words).toContain(`${setup.remount!.faceDown} goes down`);
+  });
+
+  it('draws nothing when the page is given no preview, or when the step is not a turn', () => {
+    const setup = flipSetup();
+    render(<EngraveRemountPage setup={setup} total={2} mount={setup.mount} onClose={() => {}} onMounted={() => {}} />);
+    expect(screen.queryByTestId('engrave-remount-preview')).toBeNull();
+    cleanup();
+
+    // A same-face remount (no rotate) never shows a flip.
+    const same = buildSetups(
+      INPUT,
+      [
+        { face: 'top', items: [A] },
+        { face: 'top', items: [B] },
+      ],
+      setupsSettings(null),
+    ).setups[1]!;
+    if (same.remount !== null) {
+      render(
+        <EngraveRemountPage
+          setup={same}
+          total={2}
+          mount={same.mount}
+          preview={{ length: 100, width: 60, pins: null }}
+          onClose={() => {}}
+          onMounted={() => {}}
+        />,
+      );
+      expect(screen.queryByTestId('engrave-remount-preview')).toBeNull();
+    }
+  });
+});

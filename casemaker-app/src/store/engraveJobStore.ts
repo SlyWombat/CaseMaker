@@ -22,6 +22,7 @@ import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
+import { withSideGoal, withoutSideGoal } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { applyHoldAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { scaleJobAboutCentre } from '@/engine/cnc/engrave/scaleJob';
@@ -1027,6 +1028,13 @@ export interface EngraveJobState {
   /** Merge a placement/visibility edit into the target object (#435). No-op when there is none. */
   updateTargetObject: (patch: TargetObjectPatch) => void;
   removeTargetObject: () => void;
+  /**
+   * #723 P2-3 — ONE SIDE'S GOAL. Writes the multi-goal form (`targetObjects[]`, one goal per
+   * setup), migrating a job that still carries the single `targetObject`; a goal already naming
+   * this setup is replaced. `clearSideGoal` removes the goal a side cuts, leaving the rest.
+   */
+  setSideGoal: (setupId: string, target: EngraveTargetObject) => void;
+  clearSideGoal: (setupId: string) => void;
   /** Add a profile cut-out (#218) with the shop's tab numbers and return its id. */
   addCutout: () => string;
   /** Merge a hand edit into one cut-out (#218). A partial `tabs` is merged, not replaced. */
@@ -1925,6 +1933,20 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       apply((job) => ({ ...job, targetObject: target }));
       if (target.data === undefined) void reattachTargetBlob();
     },
+
+    setSideGoal: (setupId, target) => {
+      // The bytes travel beside the job exactly as the single-object write's do (#720).
+      if (typeof target.data === 'string') {
+        set({ targetBlob: 'ready' });
+        storeTargetMesh(target.sha256, target.data);
+      } else {
+        set({ targetBlob: 'loading' });
+      }
+      apply((job) => withSideGoal(job, setupId, target));
+      if (target.data === undefined) void reattachTargetBlob();
+    },
+
+    clearSideGoal: (setupId) => apply((job) => withoutSideGoal(job, setupId)),
 
     updateTargetObject: (patch) =>
       apply((job) => {

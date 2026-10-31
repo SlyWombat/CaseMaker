@@ -203,6 +203,20 @@ The registration writes the same datum as any setup (XY and rotation, plus a Z t
 face); what part 2 adds is only that the flip's reference is **stated on the setup** rather than
 inferred, and that the run sheet names the pins in the operator's words.
 
+### The sides list in the UI (P2-3)
+
+The Setups section is the sides list for a part cut from several sides: a job with more than one
+saved setup shows, under each setup's row, the GOAL that side cuts (or "none — this side cuts the
+stock flat") with **Goal…** / **Replace…** and **Clear** where the job states setups. Picking a
+goal uses the same reader as Surface a mesh; the store writes the multi-goal form, migrating a
+single `targetObject` to the first setup's named goal, and the schema's one-form/one-goal-per-setup
+rules are what that write targets. The row's own registration and remount controls are unchanged.
+
+A remount that is a TURN — `RemountStep.rotate` — opens the remount page with a flip preview: the
+stock's own rectangle, the turn's axis and angle, and the two locating pins when the setup states
+them (the saved `JobSetup.pins`, not the engine's derived setup). The confirmation is the page's
+existing landmark question; the preview adds the picture, never a second gate.
+
 ### The carried stock (P2-2b)
 
 Between setups the simulation carries the **remaining solid as meshes**, not a heightfield: after
@@ -228,7 +242,7 @@ so rather than showing a shape it does not have.
 | P2-1b | The sides list | `targetObjects[]` with a `setupId` per goal, one goal program per setup, flip setups from the existing orientation/remount model, tests | P2-1a |
 | P2-2a | The flip reference | the pins stated as the flip's datum (remount words/confirm, registration plan, run sheet), acceptance fixtures | P2-1b |
 | P2-2b | The carried stock | `priorRemoval` meshes transformed by the next setup's orientation, seeded per setup, the preview union; the #754 one-job check un-todoed | P2-1b, P2-2a |
-| P2-3 | The UI and the acceptance | the sides list in the panel/wizard, the flip preview and confirmation, an e2e walk; docs | P2-2b |
+| P2-3 | The UI and the acceptance | the sides list in the panel/wizard, the flip preview and confirmation, an e2e walk; docs — **the sides list and the flip preview landed**; the e2e walk remains | P2-2b |
 
 ## Open questions
 

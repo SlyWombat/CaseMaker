@@ -12,13 +12,13 @@
  * the row notices. Every plan, every reason and every set of words comes from `engine/cnc/setups`.
  */
 
-import { useMemo, useState, type CSSProperties, type JSX } from 'react';
+import { Fragment, useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useMachineStore } from '@/store/machineStore';
-import { clampPlacementsFor, jobMount } from '@/engine/cnc/engrave/jobSetup';
+import { clampPlacementsFor, isSideGoal, jobMount, jobTargetObjects } from '@/engine/cnc/engrave/jobSetup';
 import { jobVise } from '@/engine/cnc/fixture';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { expandEngraveRow } from '@/store/engraveRowStore';
@@ -256,7 +256,22 @@ function draftFromPlan(plan: SetupsPlan, toolKey: string): JobSetup[] {
   }));
 }
 
-export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?: boolean } = {}): JSX.Element {
+export interface EngraveSetupsSectionProps {
+  initiallyOpen?: boolean;
+  /**
+   * #723 P2-3 — the SIDES list's two presses. A part cut from several sides gives each setup a
+   * goal; the panel opens its goal reader for that side, or clears the side's goal. Absent: the
+   * section stays read-only about goals (a test, a preview, the Cut surface).
+   */
+  onPickGoal?: (setupId: string) => void;
+  onClearGoal?: (setupId: string) => void;
+}
+
+export function EngraveSetupsSection({
+  initiallyOpen = false,
+  onPickGoal,
+  onClearGoal,
+}: EngraveSetupsSectionProps = {}): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
   const setSetups = useEngraveJobStore((s) => s.setSetups);
   const defaults = useShopDefaultsStore((s) => s.defaults);
@@ -526,6 +541,14 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
 
   const canUsePlan = draft !== null ? draft.setups.length > 0 : reading.source === 'implicit';
 
+  // #723 P2-3 — THE SIDES LIST. A job with more than one SAVED setup is a part cut from sides:
+  // each row says which goal its side cuts, or that the side cuts the stock flat. Goals are only
+  // shown against the saved list (a re-plan draft has its own, unsaved setup ids).
+  const sideGoals = jobTargetObjects(job);
+  const showSides = job.setups !== undefined && draft === null && displayed.length > 1;
+  const goalFor = (setup: JobSetup, index: number): (typeof sideGoals)[number] | null =>
+    sideGoals.find((t) => isSideGoal(t) && (t.setupId === setup.id || (t.setupId === undefined && index === 0))) ?? null;
+
   return (
     <section className="engrave-setups" data-testid="engrave-setups" aria-label="Setups">
       <div className="engrave-setups__header">
@@ -683,6 +706,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
             .filter((id) => !here.has(id) && (removalById.get(id)?.opensTo.includes(face) ?? false))
             .map((id) => ({ id, name: itemName(id) }));
           return (
+            <Fragment key={setup.id}>
             <EngraveSetupRow
               key={setup.id}
               index={index}
@@ -736,6 +760,33 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
               onTapJaw={mountTapApi.tapJaw}
               tapBusy={tapBusy}
             />
+            {showSides && (() => {
+              const goal = goalFor(setup, index);
+              return (
+                <div
+                  key={`${setup.id}-goal`}
+                  data-testid={`engrave-side-goal-${index}`}
+                  style={{ ...MUTED, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'baseline', margin: '0 0 6px 8px' }}
+                >
+                  <span>
+                    <span style={{ ...MUTED, margin: 0 }}>Goal</span> ·{' '}
+                    {goal === null ? 'none — this side cuts the stock flat' : goal.name}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  {onPickGoal !== undefined && (
+                    <button type="button" data-testid={`engrave-side-goal-pick-${index}`} onClick={() => onPickGoal(setup.id)}>
+                      {goal === null ? 'Goal…' : 'Replace…'}
+                    </button>
+                  )}
+                  {goal !== null && onClearGoal !== undefined && (
+                    <button type="button" data-testid={`engrave-side-goal-clear-${index}`} onClick={() => onClearGoal(setup.id)}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+            </Fragment>
           );
         })
       )}
@@ -761,6 +812,13 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
           setup={remount.setup}
           total={remount.total}
           mount={remount.mount}
+          // #723 P2-3 — the flip preview reads the SAVED setup's pins (the engine's setup does not
+          // carry them) and the job's stock for its rectangle.
+          preview={{
+            length: job.stock.length,
+            width: job.stock.width,
+            pins: displayed[remount.index]?.pins?.at ?? null,
+          }}
           onClose={() => setRemount(null)}
           onMounted={storeRemount}
         />

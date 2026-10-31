@@ -48,9 +48,20 @@ export function EngraveRemountPage({
   onClose,
   onMounted,
   doneLabel = 'It is mounted',
+  preview,
 }: {
   /** The engine's setup: its `remount` step carries the words and the question. */
   setup: Setup;
+  /**
+   * #723 P2-3 — THE FLIP PREVIEW: the stock's own rectangle and, when the job states them, the
+   * two locating pins. The page draws the turn only when the step really has one, so a same-face
+   * remount never shows a flip it is not.
+   */
+  preview?: {
+    length: number;
+    width: number;
+    pins: readonly { x: number; y: number }[] | null;
+  };
   /** How many setups the job has, for the title ("setup 2 of 3"). */
   total: number;
   mount: MountSpec;
@@ -94,6 +105,53 @@ export function EngraveRemountPage({
             Close
           </button>
         </div>
+
+        {step.rotate !== null && preview !== undefined && (() => {
+          const { length, width, pins } = preview;
+          // The flip line: through both pins when the job states them, else the stock's centre
+          // about the stated axis. SVG's y runs down; the stock frame's y runs up.
+          const alongX = step.rotate.about === 'x';
+          const lineAt =
+            pins !== null && pins.length === 2
+              ? alongX
+                ? pins[0]!.y
+                : pins[0]!.x
+              : alongX
+                ? width / 2
+                : length / 2;
+          return (
+            <figure data-testid="engrave-remount-preview" style={{ margin: '8px 0 0' }}>
+              <svg
+                viewBox={`0 0 ${length} ${width}`}
+                width="100%"
+                role="img"
+                aria-label={`The stock turns ${Math.abs(step.rotate.degrees)} degrees about ${step.rotate.about.toUpperCase()}`}
+                style={{ maxHeight: 120, background: '#0f141a', border: '1px solid #2a2f36', borderRadius: 4, display: 'block' }}
+              >
+                <rect x={0} y={0} width={length} height={width} fill="#1a222b" stroke="#3a4a5a" strokeWidth={Math.max(0.3, length / 300)} />
+                {alongX ? (
+                  <line x1={0} y1={width - lineAt} x2={length} y2={width - lineAt} stroke="#e0c07a" strokeWidth={Math.max(0.25, length / 400)} strokeDasharray={`${length / 60} ${length / 90}`} />
+                ) : (
+                  <line x1={lineAt} y1={0} x2={lineAt} y2={width} stroke="#e0c07a" strokeWidth={Math.max(0.25, length / 400)} strokeDasharray={`${length / 60} ${length / 90}`} />
+                )}
+                {pins?.map((pin, i) => (
+                  <circle
+                    key={i}
+                    data-testid={`engrave-remount-preview-pin-${i}`}
+                    cx={pin.x}
+                    cy={width - pin.y}
+                    r={Math.max(0.8, length / 80)}
+                    fill="#8fb8e0"
+                  />
+                ))}
+              </svg>
+              <figcaption style={MUTED} data-testid="engrave-remount-preview-words">
+                Turn {Math.abs(step.rotate.degrees)}° about {step.rotate.about.toUpperCase()}: {step.faceDown} goes
+                down, {step.faceAgainstReference} against the reference.
+              </figcaption>
+            </figure>
+          );
+        })()}
 
         <ol style={{ margin: '8px 0 0', paddingLeft: 18 }}>
           {described.steps.map((line, i) => (
