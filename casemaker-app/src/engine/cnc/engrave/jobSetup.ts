@@ -2796,10 +2796,14 @@ export function validateJob(
   // #743 P-8 — AND THE CALLER'S LIBRARY IS THE LIBRARY. A worker (the preview, the run) hands its
   // registry snapshot in through `options.tools`; reading the module's own registry instead made
   // every `inv:` key read "not in the tool library" in a realm that holds no registry at all. The
-  // finding stands only when neither the named tool nor the caller's library resolves the key.
+  // The built-ins are still the module's own: they are in every realm, and a caller's snapshot is
+  // additive to them (the app's `getTools()` is both). The finding stands only when neither the
+  // named tool (main's caller override) nor the assembled library resolves the key.
+  const assembled =
+    options.tools === undefined || options.tools === null ? getTools() : [...options.tools, ...getTools()];
   if (
     resolvedTool === null &&
-    toolForJob(job, options.tools ?? getTools()) === null &&
+    toolForJob(job, assembled) === null &&
     hasWork &&
     job.toolKey !== NO_TOOL_KEY
   ) {
