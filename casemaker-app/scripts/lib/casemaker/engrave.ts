@@ -74,8 +74,9 @@ import { dirname, join, basename, isAbsolute } from 'node:path';
 import { engraveGenerate, type EngraveGenerated, type EngraveShopOpts } from '../../../src/workers/sim/engraveGenerate';
 // #766 — the measured search: slice A scores a candidate plan, B chooses, C writes the sentences.
 import { evaluatePlan, type CandidatePlan, type PlanEvaluation } from '../../../src/workers/sim/planEvaluate';
-import { smartPick } from '../../../src/engine/cnc/engrave/smartPick';
+import { candidatePlans, smartPick } from '../../../src/engine/cnc/engrave/smartPick';
 import { explainSmartPick } from '../../../src/engine/cnc/engrave/smartPickWords';
+import type { ToolLibraryEntry } from '../../../src/engine/cnc/toolLibrary';
 import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
 import { unionRemoval, restMachining } from '../../../src/workers/sim/engraveRest';
 import { restJobFor, roughPick, restToolPick, unroughedItems, vBitRestRefusal, type RestPassFacts } from '../../../src/engine/cnc/engrave/restPass';
@@ -1419,6 +1420,37 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   }
 
   /**
+   * #786 slice 4b — THE SEARCH'S OWN VIEW OF THE SHOP, plus the cutter the DOCUMENT names when the
+   * location does not list it. A saved job can carry its operator's own cutter (a drill from
+   * another bench, a one-off); the split keeps that cutter for its holes, so the search has to be
+   * able to see it rather than conclude the job's cutter does not exist.
+   */
+  function searchToolsFor(job: EngraveJob): ToolLibraryEntry[] {
+    const listed = [...getTools()];
+    if (job.toolKey === NO_TOOL_KEY || job.tool === undefined || job.tool === null) return listed;
+    if (listed.some((e) => e.key === job.toolKey)) return listed;
+    return [...listed, { key: job.toolKey, tool: job.tool, provenance: 'the job’s own cutter' }];
+  }
+
+  /**
+   * #786 slice 4b — A NAMED DRILL BIT OR THREAD MILL WITH OTHER WORK IS SPLIT BY THE SEARCH, not
+   * refused. The app's panel applies the same plan before Generate (4c); a headless run asks the
+   * same question here, because `drill-mixed-tools` would otherwise refuse a document the app
+   * cuts. True when the first candidate plan keeps the job's own cutter and adds another.
+   */
+  function splitKeepsNamedCutter(job: EngraveJob): boolean {
+    if (job.toolKey === NO_TOOL_KEY || job.setups !== undefined) return false;
+    // ONLY a drill bit or a thread mill: every ordinary job also has multi-cutter candidates
+    // (rough + rest), and those are not a reason to hand the job to the search.
+    const tools = searchToolsFor(job);
+    const named = job.tool !== undefined && job.tool !== null ? job.tool : tools.find((e) => e.key === job.toolKey)?.tool;
+    if (named === undefined || (named.shape !== 'drill' && named.shape !== 'thread')) return false;
+    return candidatePlans(job, tools, catalogueRows).some(
+      (p) => p.cutters.length > 1 && p.cutters[0]?.key === job.toolKey,
+    );
+  }
+
+  /**
    * #766/#743 P-4b — THE CUTTERS A JOB DOES NOT NAME, chosen by the measured search.
    *
    * The kind-valid plans are generated (`smartPick`), slice A scores each by what it would cut, and
@@ -1436,7 +1468,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // #766 — THE CHOICE IS MEASURED, NOT RULED. The search generates the kind-valid plans and
         // slice A simulates each one: fidelity, pinches, time, risk. The chosen plan and its
         // reasons are printed here; the run writes the plan the search chose.
-        const searchTools = getTools();
+        const searchTools = searchToolsFor(job);
         const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
           evaluatePlan(job, plan, { tl, tools: searchTools, catalogue: catalogueRows, shop, calibration: null }, { level });
         const searchStart = Date.now();
@@ -1463,7 +1495,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // that POSTS (`runnable`), and C's note names the refused best-measured one.
         const chosen = pick.runnable;
         if (chosen === null) {
-          return `${label} names no cutter, and no plan the search tried can post: ${pick.notes.join(' ') || pick.bestMeasured.evaluation.refusal || 'the generator refuses every candidate'}`;
+          const what = job.toolKey === NO_TOOL_KEY ? 'names no cutter, and' : 'cannot be split into programs, and';
+          return `${label} ${what} no plan the search tried can post: ${pick.notes.join(' ') || pick.bestMeasured.evaluation.refusal || 'the generator refuses every candidate'}`;
+        }
+        // #786 slice 4b — the split is SAID: the cutter the document names keeps its own work and
+        // the search adds the one the rest needs.
+        if (job.toolKey !== NO_TOOL_KEY && chosen.plan.cutters.length > 1) {
+          out.progress(
+            `  split     ${job.toolKey} keeps its ${chosen.plan.cutters[0]!.items.length} item(s); ` +
+              `${chosen.plan.cutters.slice(1).map((c) => c.key).join(', ')} takes the rest — one program per cutter`,
+          );
         }
         job.toolKey = chosen.plan.cutters[0]!.key;
         if (chosen.plan.cutters.length > 1) {
@@ -1525,9 +1566,15 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // (`smartPick`), slice A scores each by what it would cut, and the best POSTING plan is the
     // one written. The search's own sentence is printed, and `--tool`/`--rest` still override.
     // #743 P-4b — the same step serves the Gerber door, which builds its own job document.
-    if (parsed.job.toolKey === NO_TOOL_KEY && parsed.job.setups === undefined) {
-      const why = await chooseCutters(parsed.job, path);
-      if (why !== null) return stop(invalidJob(why));
+    // #786 slice 4b — the same question is asked when the document NAMES a drill bit or thread
+    // mill and also has other work: the search's split keeps that cutter for its holes/threads and
+    // adds the flat for the rest, so a headless run posts the programs the app would.
+    const needsSplit = splitKeepsNamedCutter(parsed.job);
+    if (parsed.job.setups === undefined && (parsed.job.toolKey === NO_TOOL_KEY || needsSplit)) {
+      if (args.tool === undefined && args.rest === undefined) {
+        const why = await chooseCutters(parsed.job, path);
+        if (why !== null) return stop(invalidJob(why));
+      }
     }
     const result = await runJob(parsed.job, outDir, {
       writeJobDocument: false,
