@@ -201,3 +201,31 @@ describe('#783 the words', () => {
     expect(holdCutFaceWords('disc', discHolds()[1]!)).toContain('edge');
   });
 });
+
+// #783 — a frozen package remembers the hold it was frozen in, so a turn is NAMED.
+describe('#783 the frozen package names a stock turn', () => {
+  it('says "the stock was turned" when only the hold moved', async () => {
+    const { freezePackage, packageStaleness } = await import('@/engine/cnc/engrave/package');
+    const job = defaultEngraveJob();
+    // A minimal program input: freezePackage hashes the text; the profile's shapes do not matter.
+    const frozen = freezePackage(
+      job,
+      [{ setupIndex: 0, setupId: 'setup-1', toolKey: 'flat-1.0', nc: 'G0 X0 Y0\n', programHash: 'p1', frameNc: null }],
+      '2026-10-31T12:00:00.000Z',
+    );
+    expect(frozen.ok).toBe(true);
+    if (!frozen.ok) return;
+    expect(frozen.package.hold).toEqual(jobHold(job));
+    expect(packageStaleness(frozen.package, job).stale).toBe(false);
+
+    const turned = {
+      ...job,
+      hold: { x: 'width', y: 'length', z: 'thickness' } as const,
+      stock: { ...job.stock, length: job.stock.width, width: job.stock.length },
+    };
+    expect(packageStaleness(frozen.package, turned)).toEqual({
+      stale: true,
+      reason: 'the stock was turned since it was frozen',
+    });
+  });
+});

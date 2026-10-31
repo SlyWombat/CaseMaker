@@ -91,6 +91,7 @@ const STAMP = (): EngraveRunInputs => runInputs(sources());
 describe('#581 the input stamp', () => {
   it('names every input, in reading order, in words', () => {
     expect(RUN_INPUT_ORDER.map(inputLabel)).toEqual([
+      'the stock was turned',
       'the job',
       'the depth margins',
       'the machine frame',
@@ -177,5 +178,24 @@ describe('#581 the input stamp', () => {
 
     const surface = { ...sources(), surface: SURFACE };
     expect(changedInputs(base, runInputs(surface))).toEqual(['surface']);
+  });
+});
+
+// #783 — the stock turned at the machine is its OWN input: it is named first, and its sentence
+// does not read as "changed" (the operator did the turning, not an edit).
+describe('#783 the stock turn', () => {
+  it('reports the turn before any other input and in its own sentence', () => {
+    const before = STAMP();
+    const turned: RunInputSources = {
+      ...sources(),
+      job: {
+        ...sources().job,
+        hold: { x: 'width', y: 'length', z: 'thickness' },
+        stock: { ...sources().job.stock, length: 60, width: 100 },
+      },
+    };
+    const after = runInputs(turned);
+    expect(changedInputs(before, after)[0]).toBe('hold');
+    expect(staleSentence('hold')).toBe('the stock was turned since it was generated');
   });
 });

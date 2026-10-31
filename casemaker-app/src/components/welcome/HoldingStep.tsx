@@ -72,7 +72,17 @@ import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { NARROW_QUERY } from './wizardLayout';
 import { openMachineChange } from '@/components/machine-change';
-import type { BracketHold, EngraveJob, JobSetup, JobStockForm, RotaryChuck, RotaryJawMode, RotaryNeck, TapeHold, ViseParams } from '@/types/engraveJob';
+import type { BracketHold, EngraveJob, JobSetup, JobStockForm, RotaryChuck, RotaryJawMode, RotaryNeck, StockHold, TapeHold, ViseParams } from '@/types/engraveJob';
+import {
+  formHolds,
+  holdBox,
+  holdCutFaceWords,
+  holdWords,
+  itemsFaceWords,
+  itemsOnTop,
+  jobHold as stockHoldOf,
+  partDimsOf,
+} from '@/engine/cnc/engrave/stockHold';
 import {
   HOLDING_MOUNT_LABELS,
   HOLDING_MOUNT_WORDS,
@@ -1188,6 +1198,14 @@ export interface HoldingStepProps {
    * board under it are one fact. `hold` null is the vise, with `next`'s vise and sacrificial.
    */
   onBedHold: (hold: TapeHold | BracketHold | null, next: SetupAnswers) => void;
+  /**
+   * #783 — WHICH WAY ROUND the part sits: one store write that restates the job's box through the
+   * hold (`setHold`). The items stay on their part face; when that face is turned to a side the
+   * step states where, and {@link onMoveItemsToTop} is the operator's one press.
+   */
+  onHold: (hold: StockHold) => void;
+  /** #783 — move the items onto the face that is now up (never automatic). */
+  onMoveItemsToTop: () => void;
 }
 
 /** The answers with a board under the part, or none — the bed's own field, as the design writes it. */
@@ -1205,7 +1223,104 @@ function withBedSacrificial(a: SetupAnswers, mm: number | null): SetupAnswers {
   };
 }
 
-export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: HoldingStepProps): JSX.Element {
+/** The plan of one hold at a glance: the job box's length × width, and its numbers. */
+function HoldPlan({ box }: { box: { length: number; width: number; thickness: number } }): JSX.Element {
+  const w = Math.max(12, Math.min(96, (box.length / Math.max(box.length, box.width, 0.001)) * 96));
+  const h = Math.max(9, Math.min(40, (box.width / Math.max(box.length, box.width, 0.001)) * 40));
+  return (
+    <svg viewBox="0 0 100 46" style={{ width: '100%', height: 46, display: 'block' }} role="img" aria-label={`${box.length} by ${box.width} plan`}>
+      <rect x={(100 - w) / 2} y={(46 - h) / 2} width={w} height={h} fill="#1e3a4a" stroke="#6aa6c9" strokeWidth={1.2} />
+      <text x="50" y={46 - (46 - h) / 2 + 3} textAnchor="middle" fontSize="8" fill="#d1d5db">
+        {Number(box.length.toFixed(2))} × {Number(box.width.toFixed(2))}
+      </text>
+    </svg>
+  );
+}
+
+/**
+ * #783 — the hold chooser: EVERY hold the form offers, as a plan and its words, with the current
+ * one pressed. The proportions only SUGGEST one; nothing here decides, and no hold is hidden.
+ *
+ * When a hold turns the items' part face to a side, the line states where that face now points and
+ * offers the one press that moves the items onto the face that is up — never automatic.
+ */
+function HoldChoice({
+  form,
+  job,
+  selected,
+  onHold,
+  onMoveItemsToTop,
+}: {
+  form: JobStockForm;
+  job: EngraveJob;
+  selected: StockHold;
+  onHold: (hold: StockHold) => void;
+  onMoveItemsToTop: () => void;
+}): JSX.Element {
+  const part = partDimsOf(job.stock, selected);
+  const holds = formHolds(form);
+  const items =
+    job.labels.length +
+    job.shapes.length +
+    (job.combined?.length ?? 0) +
+    (job.vectors?.length ?? 0) +
+    (job.traces?.length ?? 0) +
+    (job.keepOuts?.length ?? 0) +
+    (job.drills?.length ?? 0) +
+    (job.threads?.length ?? 0) +
+    (job.primitives?.length ?? 0);
+  const faceWords = itemsOnTop(selected) ? null : itemsFaceWords(selected);
+  return (
+    <div data-testid="engrave-setup-orientation-holds" style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+      <p style={{ ...MUTED, margin: 0 }}>Which way round the part sits — every hold this stock offers:</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(136px, 1fr))', gap: 6 }}>
+        {holds.map((hold) => {
+          const isSelected = hold.x === selected.x && hold.y === selected.y && hold.z === selected.z;
+          return (
+            <button
+              key={`${hold.x}-${hold.y}-${hold.z}`}
+              type="button"
+              aria-pressed={isSelected}
+              data-testid={`engrave-setup-hold-${hold.x}-${hold.y}-${hold.z}`}
+              onClick={() => onHold(hold)}
+              style={{
+                display: 'grid',
+                gap: 3,
+                textAlign: 'left',
+                padding: 6,
+                borderRadius: 4,
+                border: isSelected ? '1px solid #6aa6c9' : '1px solid #2a2f36',
+                background: isSelected ? '#16222b' : '#10151b',
+                color: 'inherit',
+                cursor: 'pointer',
+              }}
+            >
+              <HoldPlan box={holdBox(part, hold)} />
+              <b style={{ fontSize: 11 }}>{holdWords(hold)}</b>
+              <span style={{ ...MUTED, fontSize: 10, margin: 0 }}>{holdCutFaceWords(form, hold)}</span>
+            </button>
+          );
+        })}
+      </div>
+      {faceWords !== null && (
+        <p style={{ ...MUTED, margin: 0 }} data-testid="engrave-setup-orientation-items-face">
+          {items} item{items === 1 ? ' is' : 's are'} on the part&rsquo;s face that is {faceWords}.
+          <button
+            type="button"
+            className="btn btn--sm"
+            style={{ marginLeft: 6 }}
+            data-testid="engrave-setup-orientation-move-items"
+            onClick={onMoveItemsToTop}
+          >
+            Move them to the top face
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHold, onMoveItemsToTop }: HoldingStepProps): JSX.Element {
   const location = useLocationStore((s) => s.location);
   // #730 — the JOB's machine (its `machineId` names a profile id), not the house's first: the
   // step's profile and its board sentence must judge the same bed Generate will. The change
@@ -2160,6 +2275,21 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
               />
             ))}
           </div>
+
+          {/* #783 — WHICH WAY ROUND is ASKED for every form, beside the mount: every hold this
+              stock offers, as a plan and its words. A suggestion is pre-pressed; nothing decides. */}
+          <details open data-testid="engrave-setup-hold-fold" style={{ marginTop: 8 }}>
+            <summary style={{ fontSize: 12, cursor: 'pointer', color: '#d1d5db' }}>
+              Which way round the part sits
+            </summary>
+            <HoldChoice
+              form={form ?? 'plate'}
+              job={job}
+              selected={stockHoldOf(job)}
+              onHold={onHold}
+              onMoveItemsToTop={onMoveItemsToTop}
+            />
+          </details>
 
           {hasFace && (
             <details data-testid="engrave-setup-orientation">

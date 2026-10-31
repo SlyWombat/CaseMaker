@@ -27,6 +27,7 @@
 
 import type { EngraveJob, FrozenPackage, FrozenProgram, JobRunLogEntry } from '@/types/engraveJob';
 import { jobSetups } from './jobSetup';
+import { jobHold, sameHold } from './stockHold';
 import { programHash } from '@/engine/cnc/programHash';
 
 /**
@@ -165,6 +166,7 @@ export function freezePackage(
     ...(p.frame === undefined ? {} : { frame: p.frame }),
   }));
   const jobHash = jobFingerprint(job);
+  const frozenHold = jobHold(job);
   return {
     ok: true,
     package: {
@@ -176,6 +178,10 @@ export function freezePackage(
       setups: structuredClone(jobSetups(job)),
       stockEntryId: job.stockEntry?.shelfId ?? null,
       surface: surface === null ? null : { plane: { ...surface.plane }, z0: surface.z0 },
+      // #783 — the hold this package was frozen in, so a later turn can be named as one. Written
+      // even for the shipped orientation: absence means a PACKAGE THAT PREDATES the field, not a
+      // part that has not been turned, and the two get different sentences.
+      hold: frozenHold,
     },
   };
 }
@@ -206,6 +212,11 @@ export function packageStaleness(pkg: FrozenPackage, job: EngraveJob): PackageSt
   }
   if (pkg.programs.length === 0) return { stale: true, reason: 'nothing was frozen for this job yet' };
   if (jobFingerprint(job) !== pkg.jobHash) {
+    // #783 — a turned stock is named as such, not folded into "the job changed": the package
+    // knows the hold it was frozen in, and the operator turned it at the machine.
+    if (pkg.hold !== undefined && !sameHold(pkg.hold, jobHold(job))) {
+      return { stale: true, reason: 'the stock was turned since it was frozen' };
+    }
     return { stale: true, reason: 'the job changed since it was frozen' };
   }
   // #574 — the registration plan is NOT in the program fingerprint (it does not change the .nc),

@@ -98,10 +98,22 @@ import type {
   JobSource,
   RotaryChuck,
   Sacrificial,
+  StockHold,
   TapeHold,
   ViseParams,
 } from '@/types/engraveJob';
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
+import {
+  holdBox,
+  isStockHold,
+  itemsOnTop,
+  jobHold,
+  jobItemsHold,
+  moveItemsToTop,
+  partDimsOf,
+  sameHold,
+  type PartDims,
+} from '@/engine/cnc/engrave/stockHold';
 import { withSource } from '@/engine/cnc/engrave/jobSources';
 import { PCB_COPPER_MM, pcbBlankPatch, pcbStockNotice, type PcbBlankPatch } from '@/engine/cnc/stockStart';
 import { pcbHoleAssignment, withPcbCutters } from '@/engine/import/pcbCutters';
@@ -947,6 +959,15 @@ export interface EngraveJobState {
     patch: Partial<EngraveJob['stock']>,
     source?: FieldSource | Partial<Record<keyof EngraveJob['stock'], FieldSource>>,
   ) => void;
+  /**
+   * #783 — WHICH WAY ROUND the part sits: write a hold (see `stockHold.ts`) and restate the job's
+   * box. When the items' face stays up, their positions re-map with the part automatically; when
+   * the hold turns that face to a side they stay where they are, and {@link moveItemsToHoldFace}
+   * is the operator's one-press move onto the face that is now up.
+   */
+  setHold: (hold: StockHold) => void;
+  /** #783 — move the items onto the face that is now up (the one-press offer, never automatic). */
+  moveItemsToHoldFace: () => void;
   /** Add a default label and return its id. */
   addLabel: () => string;
   /**
@@ -1410,6 +1431,31 @@ export function adoptInitialTargetBlob(job: EngraveJob): void {
 
 const initialJob = loadJob();
 
+/**
+ * #783 — the job with every positioned item moved from one top face to another. The cut-outs and
+ * chamfers have no position of their own (they follow another item's outline), so they are left
+ * alone; the goal object's 3D placement is the job's own and not a face layout.
+ */
+function withItemsMovedTo(job: EngraveJob, from: StockHold, to: StockHold, part: PartDims): EngraveJob {
+  const moved = <T extends { position: { x: number; y: number } }>(items: readonly T[] | undefined): T[] | undefined =>
+    items === undefined ? undefined : moveItemsToTop(items, from, to, part);
+  const next: EngraveJob = {
+    ...job,
+    labels: moveItemsToTop(job.labels, from, to, part),
+    shapes: moveItemsToTop(job.shapes, from, to, part),
+    itemsHold: to,
+  };
+  if (job.combined !== undefined) next.combined = moved(job.combined);
+  if (job.vectors !== undefined) next.vectors = moved(job.vectors);
+  if (job.traces !== undefined) next.traces = moved(job.traces);
+  if (job.keepOuts !== undefined) next.keepOuts = moved(job.keepOuts);
+  if (job.drills !== undefined) next.drills = moved(job.drills);
+  if (job.threads !== undefined) next.threads = moved(job.threads);
+  if (job.primitives !== undefined) next.primitives = moved(job.primitives);
+  return next;
+}
+
+/** The job store: one document, persisted on every change (#200). */
 export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
   /** Arm the 8 s window for whatever is on top now; an empty stack has nothing to retire. */
   const armUndoWindow = (): void => {
@@ -1558,6 +1604,32 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         return job.workholding.kind !== 'vise' || vise === job.workholding.vise
           ? next
           : { ...next, workholding: { ...job.workholding, vise } };
+      }),
+
+    setHold: (hold) =>
+      apply((job) => {
+        const current = jobHold(job);
+        if (!isStockHold(hold) || sameHold(current, hold)) return job;
+        // The part's own dimensions round-trip through the hold, so a hold change never invents
+        // or loses a dimension: the box is the same three numbers, placed differently (#783).
+        const part = partDimsOf(job.stock, current);
+        const box = holdBox(part, hold);
+        const itemsHold = jobItemsHold(job);
+        const next = { ...job, hold, stock: { ...job.stock, ...box } };
+        // THE ITEMS STAY ON THEIR PART FACE. While that face is up, both before and after, they
+        // re-map with it; when the hold turns it to a side, they are left where they are and the
+        // face's new direction is stated, with the explicit move on offer.
+        return itemsOnTop(itemsHold) && itemsOnTop(hold)
+          ? withItemsMovedTo(next, itemsHold, hold, part)
+          : next;
+      }),
+
+    moveItemsToHoldFace: () =>
+      apply((job) => {
+        const from = jobItemsHold(job);
+        const to = jobHold(job);
+        if (sameHold(from, to)) return job;
+        return withItemsMovedTo(job, from, to, partDimsOf(job.stock, to));
       }),
 
     addLabel: () => {

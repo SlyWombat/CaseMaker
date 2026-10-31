@@ -23,6 +23,7 @@
  */
 
 import { canonicalJson, jobFingerprint } from './package';
+import { jobHold } from './stockHold';
 import { programHash } from '@/engine/cnc/programHash';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
@@ -37,6 +38,7 @@ import type { SurfacePostFit } from './surfaceSpread';
  * the most specific thing that moved (a job edit before a shop-default edit, and so on).
  */
 export const RUN_INPUT_ORDER = [
+  'hold',
   'job',
   'margins',
   'machine',
@@ -54,6 +56,8 @@ export type EngraveRunInputs = Readonly<Record<EngraveInputKey, string>>;
 
 /** The input in words, for a sentence: "the job changed since it was generated". */
 export const INPUT_LABELS: Readonly<Record<EngraveInputKey, string>> = {
+  // #783 — the one input a person changes AT THE MACHINE, and its own sentence below.
+  hold: 'the stock was turned',
   job: 'the job',
   margins: 'the depth margins',
   machine: 'the machine frame',
@@ -74,6 +78,7 @@ export function inputLabel(key: EngraveInputKey): string {
  * is unknown.
  */
 export function staleSentence(reason: EngraveInputKey | null | undefined): string {
+  if (reason === 'hold') return 'the stock was turned since it was generated';
   return reason === null || reason === undefined
     ? 'the job or the machine frame changed since it was generated'
     : `${inputLabel(reason)} changed since it was generated`;
@@ -107,6 +112,8 @@ export interface RunInputSources {
 
 export function runInputs(sources: RunInputSources): EngraveRunInputs {
   return {
+    // #783 — the hold alone, so turning the stock at the machine is named as that, not as "the job".
+    hold: hashOf(jobHold(sources.job)),
     job: jobFingerprint(sources.job),
     margins: marginsKey(sources.margins),
     machine: machineKey(sources.calibration),

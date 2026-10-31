@@ -857,6 +857,57 @@ describe('#723 P2-3 — the holding step names the job’s sides', () => {
   it('a one-side job shows no sides block', () => {
     seedLocation(machineWith(BOARDS_AND_TAPE));
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
-    expect(screen.queryByTestId('engrave-setup-holding-sides')).toBeNull();
-  });
+    expect(screen.queryByTestId('engrave-setup-holding-sides')).toBeNull();  });
 });
+
+// #783 — the orientation is ASKED for every form, beside the mount: every hold the stock offers
+// is shown and selectable, the box restates through the hold, and items stay on their part face.
+describe('#783 the hold choice', () => {
+  const oneLabel = (job: EngraveJob): EngraveJob => ({
+    ...job,
+    labels: [{ ...job.labels[0]!, id: 'l1', position: { x: 10, y: 20 }, rotation: 0 }],
+  });
+
+  it('offers all six block holds and restates the box when one is pressed', () => {
+    seedLocation(machineWith(null));
+    openHolding(dj({ length: 100, width: 60, thickness: 12 }));
+    const fold = screen.getByTestId('engrave-setup-hold-fold') as HTMLDetailsElement;
+    expect(fold.open).toBe(true);
+    // Six permutations, each a picture and its words.
+    const buttons = screen.getByTestId('engrave-setup-orientation-holds').querySelectorAll('button[aria-pressed]');
+    expect(buttons).toHaveLength(6);
+    expect(screen.getByTestId('engrave-setup-hold-length-width-thickness').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('engrave-setup-hold-width-length-thickness'));
+    expect(useEngraveJobStore.getState().job.stock).toMatchObject({ length: 60, width: 100, thickness: 12 });
+    expect(useEngraveJobStore.getState().job.hold).toEqual({ x: 'width', y: 'length', z: 'thickness' });
+  });
+
+  it('keeps a label on its part face when the face stays up, turning it with the part', () => {
+    seedLocation(machineWith(null));
+    openHolding(oneLabel(dj({ length: 100, width: 60, thickness: 12 })));
+    fireEvent.click(screen.getByTestId('engrave-setup-hold-width-length-thickness'));
+    const label = useEngraveJobStore.getState().job.labels.find((l) => l.id === 'l1')!;
+    // The same physical corner of the part, now expressed in the swapped plan.
+    expect(label.position.x).toBeCloseTo(20, 6);
+    expect(label.position.y).toBeCloseTo(10, 6);
+    expect(label.rotation).toBe(90);
+    expect(useEngraveJobStore.getState().job.itemsHold).toEqual({ x: 'width', y: 'length', z: 'thickness' });
+  });
+
+  it('states where the items\' face points when it is turned to a side, and moves them on one press', () => {
+    seedLocation(machineWith(null));
+    openHolding(oneLabel(dj({ length: 100, width: 60, thickness: 12 })));
+    fireEvent.click(screen.getByTestId('engrave-setup-hold-width-thickness-length'));
+    // Length up: the items' thickness face is now a side. NOT moved automatically.
+    expect(useEngraveJobStore.getState().job.stock).toMatchObject({ length: 60, width: 12, thickness: 100 });
+    const line = screen.getByTestId('engrave-setup-orientation-items-face');
+    expect(line.textContent).toContain('1 item');
+    expect(line.textContent).toContain('now facing');
+    expect(useEngraveJobStore.getState().job.labels[0]!.position).toMatchObject({ x: 10, y: 20 });
+
+    fireEvent.click(screen.getByTestId('engrave-setup-orientation-move-items'));
+    const moved = useEngraveJobStore.getState().job;
+    expect(moved.itemsHold).toEqual({ x: 'width', y: 'thickness', z: 'length' });
+    expect(moved.labels[0]!.position.x).toBeCloseTo(20, 6);
+    expect(moved.labels[0]!.position.y).toBeCloseTo(6, 6);

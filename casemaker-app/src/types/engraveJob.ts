@@ -1557,6 +1557,12 @@ export interface FrozenPackage {
   hash: string;
   /** FNV over the job's program-relevant data at freeze time; staleness compares against the job now. */
   jobHash: string;
+  /**
+   * #783 — the hold the programs were frozen in. Absent on a package frozen before #783 (or one
+   * frozen in the shipped orientation); when present, a later hold change stales the package with
+   * the sentence that names it ("the stock was turned") rather than the generic "the job changed".
+   */
+  hold?: StockHold;
   programs: FrozenProgram[];
   /** The setups as frozen: the stored record, or the derived single setup. */
   setups: JobSetup[];
@@ -1729,6 +1735,14 @@ export interface EngraveJob {
    * tion (`stockHold.ts`'s `partDimsOf`), and a hold change re-states the box.
    */
   hold?: StockHold;
+  /**
+   * #783 — the hold whose JOB FRAME the items' positions are written in. It is the hold the items
+   * were last on top of: a hold that leaves the items' face up re-maps them automatically and
+   * updates this; a hold that turns their face to a side leaves them where they are (informed),
+   * and the one-press "Move them to the new top face" maps them and updates it. Absent is the
+   * shipped orientation, so pre-#783 documents are read exactly as before.
+   */
+  itemsHold?: StockHold;
   labels: EngraveLabel[];
   /** Shape pockets (#214), each at its own depth. Empty for a text-only job. */
   shapes: EngraveShape[];

@@ -1082,6 +1082,45 @@
       "minLength": 1,
       "type": "string"
     },
+    "itemsHold": {
+      "additionalProperties": false,
+      "description": "The hold the item positions are written in; omit when they are in the shipped orientation.",
+      "properties": {
+        "x": {
+          "description": "The part axis between the jaw faces.",
+          "enum": [
+            "length",
+            "width",
+            "thickness"
+          ],
+          "type": "string"
+        },
+        "y": {
+          "description": "The part axis along the jaws.",
+          "enum": [
+            "length",
+            "width",
+            "thickness"
+          ],
+          "type": "string"
+        },
+        "z": {
+          "description": "The part axis that is up.",
+          "enum": [
+            "length",
+            "width",
+            "thickness"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "type": "object"
+    },
     "jawClearance": {
       "default": 1,
       "description": "Clearance kept from the vise jaws, in millimetres.",
@@ -1586,6 +1625,45 @@
           "description": "Package fingerprint over the frozen content.",
           "minLength": 1,
           "type": "string"
+        },
+        "hold": {
+          "additionalProperties": false,
+          "description": "The hold the programs were frozen in; omit when it was the shipped orientation.",
+          "properties": {
+            "x": {
+              "description": "The part axis between the jaw faces.",
+              "enum": [
+                "length",
+                "width",
+                "thickness"
+              ],
+              "type": "string"
+            },
+            "y": {
+              "description": "The part axis along the jaws.",
+              "enum": [
+                "length",
+                "width",
+                "thickness"
+              ],
+              "type": "string"
+            },
+            "z": {
+              "description": "The part axis that is up.",
+              "enum": [
+                "length",
+                "width",
+                "thickness"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object"
         },
         "jobHash": {
           "description": "Hash of the job document the package froze.",

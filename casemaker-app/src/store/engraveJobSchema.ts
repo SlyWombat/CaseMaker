@@ -2049,6 +2049,11 @@ export const frozenPackageSchema = z
     frozenAt: z.string().min(1).describe('When the package was frozen.'),
     hash: z.string().min(1).describe('Package fingerprint over the frozen content.'),
     jobHash: z.string().min(1).describe('Hash of the job document the package froze.'),
+    // #783 — the hold the programs were frozen in; absent for the shipped orientation (and for
+    // every package written before the field existed).
+    hold: stockHoldSchema
+      .optional()
+      .describe('The hold the programs were frozen in; omit when it was the shipped orientation.'),
     programs: z
       .array(frozenProgramSchema)
       .min(1)
@@ -2357,6 +2362,11 @@ const engraveJobV3Schema = engraveJobV2Schema
     hold: stockHoldSchema
       .optional()
       .describe('Which part axis runs between the jaws, along them and up; omit for the shipped orientation.'),
+    // #783 — the hold whose job frame the ITEM POSITIONS are in (see `EngraveJob.itemsHold`).
+    // OPTIONAL and not defaulted; absent reads as the shipped orientation.
+    itemsHold: stockHoldSchema
+      .optional()
+      .describe('The hold the item positions are written in; omit when they are in the shipped orientation.'),
     // #240 §1 — version 3 is the first version that can state the rotary chuck. v1/v2 keep their
     // vise-only arm (a document at either version predates the module's model), so a v3 document
     // gains nothing unless it actually says `rotary-chuck`.

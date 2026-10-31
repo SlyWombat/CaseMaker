@@ -26,7 +26,7 @@ import { useStockStore } from '@/store/stockStore';
 import { expandEngraveRow } from '@/store/engraveRowStore';
 import { addOperationOfType, jobHasOperations } from '@/components/panels/operationTypes';
 import type { Project } from '@/types/project';
-import type { BracketHold, EngraveJob, JobStockEntry, RotaryChuck, TapeHold } from '@/types/engraveJob';
+import type { BracketHold, EngraveJob, JobStockEntry, RotaryChuck, StockHold, TapeHold } from '@/types/engraveJob';
 import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { facingSeed, facingShopFrom, jobItemCount, rodDimsOf } from '@/engine/cnc/stockStart';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -407,6 +407,22 @@ export function StartWizard(): JSX.Element {
     useEngraveJobStore.getState().setBedHold(hold, next.vise, next.sacrificial);
     setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
   }
+
+  /**
+   * #783 — WHICH WAY ROUND the part sits is the job's own field (`hold`), written by `setHold`:
+   * the box's three dimensions move to different axes, and the items re-map with their face. The
+   * answers are re-seeded from that write, since the box they judge is the box it restated.
+   */
+  function applyStockHold(hold: StockHold): void {
+    useEngraveJobStore.getState().setHold(hold);
+    setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
+  }
+
+  /** #783 — the one-press move of items onto the face that is now up (never automatic). */
+  function applyMoveItemsToTop(): void {
+    useEngraveJobStore.getState().moveItemsToHoldFace();
+    setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
+  }
   /**
    * Step 2, new job (#418): start from the settled stock with an empty design.
    *
@@ -771,6 +787,8 @@ export function StartWizard(): JSX.Element {
           onAnswers={applyHoldAnswers}
           onRotary={applyRotaryHolding}
           onBedHold={applyBedHolding}
+          onHold={applyStockHold}
+          onMoveItemsToTop={applyMoveItemsToTop}
         />
       )}
 

@@ -72,6 +72,16 @@ import { pcbSurfaceBudget, pcbSurfaceSentence } from '@/engine/cnc/engrave/pcbBu
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useStockStore } from '@/store/stockStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import {
+  formHolds,
+  holdCutFaceWords,
+  holdWords,
+  itemsFaceWords,
+  itemsOnTop,
+  jobHold,
+  sameHold,
+} from '@/engine/cnc/engrave/stockHold';
 import type { LaserLift } from '@/platform/machineLaser';
 import {
   MACHINE_MOUNT_WORDS,
@@ -245,6 +255,70 @@ function surfaceChecksByHash(generated: EngraveGenerated | null): Map<string, Su
     if (program.surfaceCheck != null) checks.set(program.programHash, program.surfaceCheck);
   }
   return checks;
+}
+
+/**
+ * #783 — "I turned the stock", in Fit and clamp: the SAME holds Holding asks for, offered at the
+ * machine. A turn restates the job's box through the hold; the items stay on their part face (a
+ * face turned to a side is stated, with the one press that moves them up), and the frozen program
+ * is older than the design from that moment on, with the reason that says the stock was turned.
+ */
+function TurnStockControl({ job }: { job: EngraveJob }): JSX.Element {
+  const current = jobHold(job);
+  const form = job.stock.shape === 'disc' ? 'disc' : (job.stockEntry?.form ?? 'plate');
+  const holds = formHolds(form);
+  const faceWords = itemsOnTop(current) ? null : itemsFaceWords(current);
+  return (
+    <details style={{ ...BOX, marginTop: 6 }} data-testid="engrave-cut-turn-stock">
+      <summary style={{ fontSize: 12, cursor: 'pointer' }}>I turned the stock…</summary>
+      <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))', gap: 6 }}>
+          {holds.map((hold) => {
+            const isSelected = sameHold(current, hold);
+            return (
+              <button
+                key={`${hold.x}-${hold.y}-${hold.z}`}
+                type="button"
+                aria-pressed={isSelected}
+                data-testid={`engrave-cut-turn-${hold.x}-${hold.y}-${hold.z}`}
+                onClick={() => useEngraveJobStore.getState().setHold(hold)}
+                style={{
+                  display: 'grid',
+                  gap: 2,
+                  textAlign: 'left',
+                  padding: 6,
+                  borderRadius: 4,
+                  border: isSelected ? '1px solid #6aa6c9' : '1px solid #2a2f36',
+                  background: isSelected ? '#16222b' : '#10151b',
+                  color: 'inherit',
+                  cursor: 'pointer',
+                }}
+              >
+                <b style={{ fontSize: 11 }}>{holdWords(hold)}</b>
+                <span style={{ ...MUTED, fontSize: 10, margin: 0 }}>{holdCutFaceWords(form, hold)}</span>
+              </button>
+            );
+          })}
+        </div>
+        {faceWords !== null && (
+          <p style={MUTED} data-testid="engrave-cut-turn-items-face">
+            The items are on the part&rsquo;s face that is {faceWords}.{' '}
+            <button
+              type="button"
+              className="btn btn--sm"
+              data-testid="engrave-cut-turn-move-items"
+              onClick={() => useEngraveJobStore.getState().moveItemsToHoldFace()}
+            >
+              Move them to the top face
+            </button>
+          </p>
+        )}
+        <p style={{ ...MUTED, margin: 0 }} data-testid="engrave-cut-turn-note">
+          The program is older than the design from a turn on — Generate again before cutting.
+        </p>
+      </div>
+    </details>
+  );
 }
 
 export function EngraveCutSurface({
@@ -791,6 +865,9 @@ export function EngraveCutSurface({
             </button>
           </div>
         )}
+        {/* #783 — I TURNED THE STOCK: the holds, at the machine, in the step that runs before
+            registration. A turn restates the box; the program goes stale with its own reason. */}
+        <TurnStockControl job={job} />
         {/* #795 — THE STATEMENT IS THE STEP'S FIRST LINE. The clearance acknowledgement used to sit
             at the foot of the step, under the gate's fold; it is what the operator must say about
             THIS step, so it reads before the details rather than after them. */}

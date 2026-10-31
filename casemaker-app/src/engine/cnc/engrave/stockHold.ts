@@ -47,6 +47,11 @@ export function jobHold(job: { hold?: StockHold }): StockHold {
   return job.hold !== undefined && isStockHold(job.hold) ? job.hold : DEFAULT_HOLD;
 }
 
+/** The hold the job's ITEM POSITIONS are written in (#783); absent is the shipped orientation. */
+export function jobItemsHold(job: { itemsHold?: StockHold }): StockHold {
+  return job.itemsHold !== undefined && isStockHold(job.itemsHold) ? job.itemsHold : DEFAULT_HOLD;
+}
+
 /** The part face the items are cut on: the part's top (+thickness) unless the job says otherwise. */
 export const DEFAULT_ITEM_FACE: PartAxis = 'thickness';
 
@@ -250,14 +255,37 @@ export interface FacePoint {
   y: Mm;
 }
 
+/** Two holds are the same way round when all three axes agree. */
+export function sameHold(a: StockHold, b: StockHold): boolean {
+  return a.x === b.x && a.y === b.y && a.z === b.z;
+}
+
 /**
- * Move an item's position from one job top face to another — the one-press "Move them to the new
- * top face" (#783). The two faces share one of the part's axes; the item keeps its offset along
- * that shared axis and lands on the face's centre along the other (a face has no counterpart for
- * it). The item's turn is reported separately ({@link moveItemToTopFace} returns it).
- *
- * `from` and `to` are the holds before and after; `part` is the part's own dimensions.
+ * Move a list of items from one job top face to another — the automatic remap when a hold keeps
+ * the items' part face up, and the one-press "Move them to the new top face" when it does not.
+ * Every item's position is moved by {@link moveItemToTopFace}; an item that carries a `rotation`
+ * turns with the face. Items without a position (a cut-out, a chamfer — they reference another
+ * item's outline) are returned unchanged.
  */
+export function moveItemsToTop<T extends { position: { x: Mm; y: Mm } }>(
+  items: readonly T[],
+  from: StockHold,
+  to: StockHold,
+  part: PartDims,
+): T[] {
+  return items.map((item) => {
+    const moved = moveItemToTopFace({ x: item.position.x, y: item.position.y }, from, to, part);
+    const next = { ...item, position: { ...item.position, x: moved.point.x, y: moved.point.y } } as T;
+    const turned = next as unknown as { rotation?: number };
+    if (typeof turned.rotation === 'number') turned.rotation = round6(turned.rotation + moved.turnDeg);
+    return next;
+  });
+}
+
+/** Six decimal places — enough for a layout, and it keeps a turn from accumulating float dust. */
+function round6(n: number): number {
+  return Math.round(n * 1e6) / 1e6;
+}
 export function moveItemToTopFace(
   point: FacePoint,
   from: StockHold,
