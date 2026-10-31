@@ -7,8 +7,12 @@
  * program's hash); this panel shows whatever that entry holds. Closing the engrave panel leaves the
  * run watching; reopening it finds the run, its progress and its Stop exactly where they were.
  *
- * "I AM AT THE MACHINE", ONCE PER PROGRAM (Q17) — keyed on the machine and the uploaded program's
- * hash, so a re-generated program asks again. It covers the machine moving, nothing done by hand.
+ * THE STATEMENT IS CUT STEP 1'S (#797): the at-machine ask, the probe-fitted ask and the clearance
+ * tick are one statement there, recorded once per program. This panel asks nothing of its own; it
+ * reads the run store's flag.
+ *
+ * THE CONTROLS ARE VERBS (#801): Pause / Resume and Stop, with the how in ONE caption under them.
+ * The progress itself lives on the status strip — the one home for it — not in this panel.
  *
  * STOP IS ALWAYS THERE WHILE IT RUNS, and says what it is. Home is offered only after a stop the
  * machine CONFIRMED (Idle, vacuum off).
@@ -178,23 +182,21 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
               </button>
             </div>
           )}
-          {/* #618 — Pause beside Stop: the suspend goes out at the run's next poll boundary, and the
-              same button resumes a suspended job. Stop stays the one that ends the job. #655 — a
-              machine waiting for a tool has nothing to suspend; Pause is not offered until it moves. */}
+          {/* #801 — THE CONTROLS ARE VERBS. Pause beside Stop: the suspend goes out at the run's
+              next poll boundary, and the same button resumes a suspended job. Stop stays the one
+              that ends the job. #655 — a machine waiting for a tool has nothing to suspend; Pause
+              is not offered until it moves. The how is ONE caption under them, not a sentence per
+              button; the progress itself lives on the status strip, the one home for it. */}
           {entry.toolWaiting == null && (
             <button
               type="button"
               data-testid="engrave-run-pause"
               disabled={entry.stopAsked}
+              title={entry.stopAsked ? 'the program is stopping' : undefined}
               style={{ width: '100%', padding: 7, marginTop: 6 }}
               onClick={() => (entry.paused ? requestResume(machine) : requestPause(machine))}
             >
-              {/* #640 — a disabled control says why: while a stop is asked, Pause cannot act. */}
-              {entry.stopAsked
-                ? 'Pause unavailable — the program is stopping'
-                : entry.paused
-                  ? 'Resume program'
-                  : 'Pause program — suspend goes out at the next status poll'}
+              {entry.paused ? 'Resume' : 'Pause'}
             </button>
           )}
           <button
@@ -204,17 +206,14 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
             style={{ width: '100%', padding: 7, marginTop: 6 }}
             onClick={() => requestStop(machine)}
           >
-            {entry.stopAsked ? 'Stopping…' : 'Stop program — the machine’s red button is the emergency stop'}
+            {entry.stopAsked ? 'Stopping…' : 'Stop'}
           </button>
+          <p style={MUTED} data-testid="engrave-run-controls-caption">
+            Pause takes effect at the next status read. The machine’s red button is the emergency stop.
+          </p>
         </>
       )}
 
-      {entry.progress && (
-        <p style={MUTED} data-testid="engrave-run-progress">
-          {entry.progress.state ?? '—'} · {entry.progress.percent === null ? '—' : `${entry.progress.percent} %`} · line{' '}
-          {entry.progress.line ?? '—'} · {entry.progress.elapsedS === null ? '—' : `${entry.progress.elapsedS} s`}
-        </p>
-      )}
       {outcome !== null && !running && (
         <p style={MUTED} data-testid="engrave-run-outcome" data-state={outcome.kind}>
           {describeRun(outcome)}

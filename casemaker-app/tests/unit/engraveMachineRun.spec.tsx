@@ -112,7 +112,17 @@ describe('#423 the run panel, in the real tree', () => {
     await uploadIt();
     act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
-    await waitFor(() => expect(screen.getByTestId('engrave-run-progress').textContent).toContain('20 %'), { timeout: 6000 });
+    // #801 — THE CONTROLS ARE VERBS, with the how in ONE caption; the progress lives on the strip.
+    expect(screen.getByTestId('engrave-run-pause').textContent).toBe('Pause');
+    expect(screen.getByTestId('engrave-run-stop').textContent).toBe('Stop');
+    expect(screen.getByTestId('engrave-run-controls-caption').textContent).toContain(
+      'Pause takes effect at the next status read.',
+    );
+    expect(screen.queryByTestId('engrave-run-progress')).toBeNull();
+    await waitFor(() =>
+      expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.progress?.percent).toBe(20),
+      { timeout: 6000 },
+    );
 
     first.unmount(); // the engrave panel closes mid-run
     const polledBefore = sent.filter((l) => l === '?').length;
@@ -169,7 +179,10 @@ describe('#423 the run panel, in the real tree', () => {
     await uploadIt();
     act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
-    await waitFor(() => expect(screen.getByTestId('engrave-run-progress').textContent).toContain('20 %'), { timeout: 6000 });
+    await waitFor(() =>
+      expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.progress?.percent).toBe(20),
+      { timeout: 6000 },
+    );
 
     fireEvent.click(screen.getByTestId('engrave-run-pause'));
     await waitFor(() => expect(sent).toContain('suspend'), { timeout: 6000 });
