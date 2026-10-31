@@ -127,9 +127,9 @@ export interface VerifyReport {
 }
 
 /**
- * The CNC-2 depth limit: `thickness − minFloor` inside the stock rectangle, `0` outside.
- * A positive return is the deepest permitted cut; 0 means no cutting is allowed at that
- * XY (outside the stock, or with no floor left).
+ * The CNC-2 depth limit: the blank's physical bottom (`thickness`) at every XY of the flat frame.
+ * A positive return is the deepest permitted cut; 0 means no cutting is allowed at that XY, a
+ * statement only a caller's own no-cut zone (a keep-out, a restart bound) makes now.
  */
 export function stockDepthLimit(stock: { length: number; width: number; thickness: number }, _minFloor: number): DepthLimit {
   // #786 slice 1 — THE VERIFIER'S FLOOR IS THE BLANK'S PHYSICAL BOTTOM, not the operator's minimum
@@ -138,8 +138,14 @@ export function stockDepthLimit(stock: { length: number; width: number; thicknes
   // it — and contact there is the sweep's fixture/bed checks' job, not this rule's. The parameter
   // stays for every caller's shape (and for `sacrificialDepthLimit`'s tab/board numbers); it is
   // deliberately not read.
+  //
+  // #786 slice 1 part 2 — THE XY MAP IS NOT A PERMISSION MAP ANY MORE. An item that hangs off the
+  // blank cuts air there; `item-outside-stock` states the area, and the sweep's fixture and bed
+  // checks judge any real contact. So the answer is the physical bottom EVERYWHERE: a cut deeper
+  // than the blank is below its underside, where the bed and the fixture are, and a through cut
+  // that overhangs the blank without a board under it is refused by that same number.
   const limit = stock.thickness;
-  return (x, y) => (x >= 0 && x <= stock.length && y >= 0 && y <= stock.width ? limit : 0);
+  return () => limit;
 }
 
 /** The stock a sacrificial setup is expressed against. Same shape `stockDepthLimit` takes. */
@@ -192,9 +198,10 @@ function insideBox(b: SacrificialBox, x: number, y: number): boolean {
 
 /**
  * The verifier's `DepthLimit` for a job with sacrificial material (#213 §3). It is positive over
- * `supportedFootprint` and `0` over air, so check 5's `cut-outside-stock` — which asks whether
- * `depthLimit ≤ 0` at the tool's four edge points — means exactly "the cutter left the supported
- * region": it may run off the part onto sacrificial material, never into air.
+ * `supportedFootprint` and over air alike, so check 5's `cut-outside-stock` now fires only where a
+ * caller deliberately says "no cutting here" (a keep-out, a restart bound). #786 slice 1 part 2 —
+ * an item running off the edge cuts air there, and the job finding states the area; the sweep's
+ * fixture and bed checks judge real contact.
  *
  * The table (#213 §3), all work-frame mm below the part's top face (Z = 0), `T` = part thickness:
  *
@@ -206,7 +213,8 @@ function insideBox(b: SacrificialBox, x: number, y: number): boolean {
  *                         the point;
  *   over board overhang   `T + breakthrough` — the cutter is in air above the board down to the
  *                         part's underside, then may break through into the board;
- *   anywhere else         `0`.
+ *   anywhere else         `T` — air beside the blank, cuttable down to the blank's own bottom (a
+ *                         through cut that overhangs without a board under it is refused there).
  *
  * With `noneSacrificial()` this is exactly `stockDepthLimit(stock, minFloor)`. Pure data, no wasm:
  * every region here is an axis-aligned box, so containment is arithmetic and the verifier stays
@@ -247,7 +255,10 @@ export function sacrificialDepthLimit(stock: StockDims, s: Sacrificial, opts: Sa
       }
     }
     if (under !== null && insideBox(under, x, y)) return T + breakthrough;
-    return 0;
+    // #786 slice 1 part 2 — AIR IS THE BLANK'S BOTTOM, not a refusal. Beyond every supported box
+    // the cutter may still pass at any depth inside the blank; real contact below it is the
+    // sweep's fixture and bed checks.
+    return partLimit;
   };
 }
 
@@ -632,9 +643,11 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         }
 
         // ---- 5. cut-outside-stock. The tool EDGE, not just the centre: depthLimit must be
-        // above 0 at the four points ±r in X and Y. With a sacrificial setup the limit is
-        // `sacrificialDepthLimit`, positive over `supportedFootprint` (#213), so this is "the
-        // cutter left the part onto air", not "it touched anything but the part".
+        // above 0 at the four points ±r in X and Y. #786 slice 1 part 2 — the standard limits
+        // answer the blank's physical bottom everywhere in the flat frame, so cutting air beside
+        // the stock is allowed; this check now fires only where the caller's own limit says "no
+        // cutting here" (a keep-out zone, a restart bound). With a sacrificial setup the limit is
+        // `sacrificialDepthLimit`, positive over `supportedFootprint` and over air alike (#213 §3).
         //
         // The EDGE is the cutter's footprint at the DEEPEST point of the move, and for a V-bit
         // that is a function of the depth (#405): a 30° bit 1 mm down cuts a groove 0.418 mm
@@ -753,9 +766,11 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
             }
             // #724 B3 review — the tailstock-out twin: the map ends at the stick-out, and past it
             // there is no stock. Its own code, because naming a tailstock that is not fitted
-            // would be a false sentence.
+            // would be a false sentence. #786 slice 1 part 2 — cutting air past the free end is
+            // informed, not refused: the job finding states the reach, and the sweep's checks
+            // have already judged anything the cutter would touch.
             if (!rotary.tailstock && p[0] + edgeRadius > rotary.stickout) {
-              push('wrap-off-free-end', m.line, freeEndSentence(p[0] + edgeRadius, rotary.stickout));
+              push('wrap-off-free-end', m.line, freeEndSentence(p[0] + edgeRadius, rotary.stickout), 'warning');
               break;
             }
           }

@@ -29,20 +29,21 @@ import type { EngraveJob, EngraveKeepOut } from '@/types/engraveJob';
 const job = (over: Partial<EngraveJob> = {}): EngraveJob => ({ ...dj(), ...over });
 
 describe('jobDepthLimit composes the sacrificial table (#213 §3)', () => {
-  it('with no sacrificial material is the plain stock limit, 0 off the blank', () => {
+  it('with no sacrificial material the limit is the blank\u2019s bottom everywhere (#786 slice 1 part 2)', () => {
     const limit = jobDepthLimit(job());
     expect(limit(50, 30)).toBe(12); // 12 — the blank's bottom; the floor is a preference (#786 slice 1)
-    expect(limit(101, 30)).toBe(0);
-    expect(limit(-1, 30)).toBe(0);
+    // Air beside the blank is cuttable to the same bottom; a through cut there exceeds it.
+    expect(limit(101, 30)).toBe(12);
+    expect(limit(-1, 30)).toBe(12);
   });
 
-  it('over a flush side strip is the strip height, and 0 beyond the strip', () => {
+  it('over a flush side strip is the strip height, and the blank\u2019s bottom beyond it', () => {
     const limit = jobDepthLimit(job({ sacrificial: presetJawStrips() })); // 6 mm left+right, flush
     expect(limit(50, 30)).toBe(12); // still the part — the blank's bottom (#786 slice 1)
     expect(limit(103, 30)).toBe(12); // 3 mm past the right edge, on the strip: height = T
     expect(limit(-3, 30)).toBe(12); // the left strip
-    expect(limit(107, 30)).toBe(0); // past the strip's outer face
-    expect(limit(50, 61)).toBe(0); // strips span the part's Y only
+    expect(limit(107, 30)).toBe(12); // past the strip's outer face: air, to the blank's bottom
+    expect(limit(50, 61)).toBe(12); // strips span the part's Y only — beyond it, air to the bottom
   });
 
   it('takes the shallower of the strip and an under-surface void when both cover a point', () => {
@@ -95,11 +96,17 @@ describe('an item may run over an edge onto sacrificial material (#213 §3)', ()
     };
   };
 
-  it('refuses it on bare stock: item-outside-stock, stopped at findings', () => {
+  it('informs it on bare stock with the area; the JAW is what still refuses the cut (#786 slice 1 part 2)', () => {
     const g = generate(tl, overEdge());
+    // The edge margin is a preference now: the sentence states the area and the cut would post.
+    expect(
+      g.findings.some((f) => f.code === 'item-outside-stock' && f.severity === 'warning' && /mm²/.test(f.message)),
+    ).toBe(true);
+    // With no strip to move the jaw face out, the cut over the stock's right edge runs into the
+    // moving jaw — a contact refusal, and it stays.
+    expect(g.findings.some((f) => f.code === 'vise-jaw-collision' && f.severity === 'error')).toBe(true);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
-    expect(g.findings.some((f) => f.code === 'item-outside-stock' && f.severity === 'error')).toBe(true);
   });
 
   it('generates and verifies it cleanly with 6 mm strips between the jaws', () => {
@@ -114,13 +121,15 @@ describe('an item may run over an edge onto sacrificial material (#213 §3)', ()
     expect(g.findings.some((f) => f.code === 'item-outside-stock')).toBe(false);
   });
 
-  it('still refuses it when it runs past the strip too', () => {
+  it('informs it when it runs past the strip too; the jaw refuses that reach (#786 slice 1 part 2)', () => {
     const g = generate(tl, overEdge({ sacrificial: presetJawStrips(), labels: [
       { ...overEdge().labels[0]!, position: { x: 110, y: 30 } },
     ] }));
+    expect(g.findings.some((f) => f.code === 'item-outside-stock' && f.severity === 'warning')).toBe(true);
+    // Past the strip's outer face the moving jaw is there, and the cut reaches it.
+    expect(g.findings.some((f) => f.code === 'vise-jaw-collision' && f.severity === 'error')).toBe(true);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
-    expect(g.findings.some((f) => f.code === 'item-outside-stock' && f.severity === 'error')).toBe(true);
   });
 
   it('the supported footprint the geometry check reads is the part outline with no material', () => {

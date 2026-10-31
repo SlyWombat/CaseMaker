@@ -1681,14 +1681,25 @@ export function validateJob(
     const rimRadius = holeRadius ?? drillRadius;
     if (rimRadius !== null) {
       for (const [hx, hy] of drillHoles(drill)) {
-        if (hx - rimRadius < 0 || hx + rimRadius > length || hy - rimRadius < 0 || hy + rimRadius > width) {
+        // #786 slice 1 part 2 — a rim off the edge cuts AIR there, and that is informed, not
+        // refused: the sentence names the edge and the overhang, and Generate cuts it as it is.
+        const past = (
+          [
+            [rimRadius - hx, 'left'],
+            [hx + rimRadius - length, 'right'],
+            [rimRadius - hy, 'front'],
+            [hy + rimRadius - width, 'back'],
+          ] as [number, string][]
+        ).reduce((a, b) => (b[0] > a[0] ? b : a));
+        if (past[0] > 0) {
           findings.push({
-            severity: 'error',
+            severity: 'warning',
             code: 'drill-outside-stock',
             labelId: drill.id,
             message:
-              `${who} has a hole centred at (${hx}, ${hy}) mm whose rim reaches past the stock ` +
-              `edge; the cutter must stay on the blank.`,
+              `${who} has a hole centred at (${hx}, ${hy}) mm whose rim reaches ` +
+              `${fmt3(past[0])} mm past the stock’s ${past[1]} edge; that part of the cut passes ` +
+              `over air, and Generate cuts it as it is.`,
           });
           break; // one finding per item is enough
         }
@@ -2306,14 +2317,25 @@ export function validateJob(
       // The thread is a disc of the MAJOR radius — the widest the orbit reaches — so it is off
       // the stock when that rim crosses an edge, not just its axis.
       const r = major / 2;
-      if (thread.position.x - r < 0 || thread.position.x + r > length || thread.position.y - r < 0 || thread.position.y + r > width) {
+      // #786 slice 1 part 2 — the part of the thread off the edge cuts air there; state the edge
+      // and the overhang, and Generate cuts it as it is.
+      const past = (
+        [
+          [r - thread.position.x, 'left'],
+          [thread.position.x + r - length, 'right'],
+          [r - thread.position.y, 'front'],
+          [thread.position.y + r - width, 'back'],
+        ] as [number, string][]
+      ).reduce((a, b) => (b[0] > a[0] ? b : a));
+      if (past[0] > 0) {
         findings.push({
-          severity: 'error',
+          severity: 'warning',
           code: 'thread-off-stock',
           labelId: thread.id,
           message:
             `${who} is centred at (${thread.position.x}, ${thread.position.y}) mm and its ` +
-            `⌀${major} mm thread reaches past the stock edge; the thread must stay on the blank.`,
+            `⌀${major} mm thread reaches ${fmt3(past[0])} mm past the stock’s ${past[1]} edge; ` +
+            `that part of the cut passes over air, and Generate cuts it as it is.`,
         });
       }
 
@@ -2553,15 +2575,17 @@ export function validateJob(
       // a ⌀30 disc has corners in the air outside the rim it never enters; `reach` is the upper
       // bound read from the profile and the path (see `SweptCut.reach`).
       if (cut.reach <= radius + 1e-6) continue;
+      // #786 slice 1 part 2 — the corners are air, and a cut that enters them cuts air: state how
+      // far past the face it reaches and cut it as it is. Contact with the jaws is the sweep's.
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'item-off-round-stock',
         labelId: cut.id,
         message:
-          `${cut.name} reaches past the ⌀${fmt3(diameter)} mm face of the ${disc ? 'disc' : 'round stock'}: the ` +
+          `${cut.name} reaches ${fmt3(cut.reach - radius)} mm past the ⌀${fmt3(diameter)} mm face of the ${disc ? 'disc' : 'round stock'}: the ` +
           `${fmt3(job.stock.length)} × ${fmt3(job.stock.width)} mm box around it has air at its ` +
-          `corners, and the cut runs into that air. Keep it inside the circle, ` +
-          `${fmt3(job.edgeMargin)} mm in from the edge.`,
+          `corners, and the cut runs into that air. Generate cuts it as it is; keep it inside the ` +
+          `circle, ${fmt3(job.edgeMargin)} mm in from the edge, to cut the whole part.`,
       });
     }
     // #743 — REFERENCE-ONLY ITEMS SIT ON THE FACE TOO. A construction label is not cut, but it is
@@ -2575,13 +2599,14 @@ export function validateJob(
       const reach = profileReachFrom(profile, [job.stock.length / 2, job.stock.width / 2]);
       if (reach <= radius + 1e-6) continue;
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'item-off-round-stock',
         labelId: item.id,
         message:
-          `${itemOperationName(item)} reaches past the ⌀${fmt3(diameter)} mm face of the ${disc ? 'disc' : 'round stock'}: ` +
-          `it sits outside the circle the stock actually has. Keep it inside the circle, ` +
-          `${fmt3(job.edgeMargin)} mm in from the edge.`,
+          `${itemOperationName(item)} reaches ${fmt3(reach - radius)} mm past the ⌀${fmt3(diameter)} mm face of the ${disc ? 'disc' : 'round stock'}: ` +
+          `it sits outside the circle the stock actually has. It is reference-only, so nothing is ` +
+          `cut there, but the design places it where the blank has no face; keep it inside the ` +
+          `circle, ${fmt3(job.edgeMargin)} mm in from the edge, for the design to match the part.`,
       });
     }
   }

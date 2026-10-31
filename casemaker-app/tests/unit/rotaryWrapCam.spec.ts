@@ -580,17 +580,18 @@ describe('an item that reaches a band is refused at its row', () => {
     expect(out.ok).toBe(true);
   });
 
-  it('runs off the free end with the tailstock out — its own sentence, never a tailstock', () => {
+  it('runs off the free end with the tailstock out — its own sentence, and the cut posts (#786 slice 1 part 2)', () => {
     // At X 75 the opening ends past the 85 mm stick-out. With the tailstock out there is no band
-    // to name — but there is no stock there either, so the cut would carve air.
+    // to name — past the stick-out the cut passes over air, which is INFORMED: the sentence has
+    // the reach, and the program still posts. With the tailstock in the band is an error.
     const outJob = dowel({}, { position: { x: 75, y: 0 } });
     outJob.workholding = { kind: 'rotary-chuck', rotary: { ...CHUCK, tailstock: false } };
     const out = generate(tl, outJob);
-    expect(out.ok).toBe(false);
+    expect(out.ok).toBe(true);
     expect(out.findings.some((x) => x.code === 'wrap-into-clamp')).toBe(false);
     const f = out.findings.find((x) => x.code === 'wrap-off-free-end');
     expect(f).toBeDefined();
-    expect(f!.severity).toBe('error');
+    expect(f!.severity).toBe('warning');
     expect(f!.labelId).toBeDefined();
     expect(f!.message).toContain('runs off the free end of the rod');
     expect(f!.message).toContain('stick-out is 85 mm');

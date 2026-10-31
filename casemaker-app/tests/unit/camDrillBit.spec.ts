@@ -93,7 +93,9 @@ describe('#434 refusals', () => {
     expect(planDrillBit(input({ tool: { ...DRILL, tipDiameter: null, diameter: null } }))).toMatchObject({ ok: false, reason: expect.stringContaining('no diameter') });
     expect(planDrillBit(input({ tool: { ...DRILL, angle: 30 } }))).toMatchObject({ ok: false, reason: expect.stringContaining('not a drill') });
     expect(planDrillBit(input({ holes: [] }))).toMatchObject({ ok: false });
-    expect(planDrillBit(input({ holes: [[0.5, 10]] }))).toMatchObject({ ok: false, reason: expect.stringContaining('runs off') });
+    // #786 slice 1 part 2 — a rim off the stock cuts air there: the job finding states the edge
+    // and the overhang, and the CAM no longer refuses it.
+    expect(planDrillBit(input({ holes: [[0.5, 10]] }))).toMatchObject({ ok: true });
   });
 });
 

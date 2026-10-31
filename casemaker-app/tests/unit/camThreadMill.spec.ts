@@ -203,8 +203,8 @@ describe('#445 refusals name the number', () => {
     expect(reason({ tool: { ...MILL, tipDiameter: 0.3, diameter: 0.3 } })).toMatch(/radial depth/);
   });
 
-  it('a thread whose major rim leaves the stock', () => {
-    expect(reason({ position: [1, 12] })).toMatch(/runs off/);
+  it('a thread whose major rim leaves the stock posts: the edge cuts air, informed (#786 slice 1 part 2)', () => {
+    expect(reason({ position: [1, 12] })).toBeNull();
   });
 
   it('a thread deeper than the stated flute', () => {

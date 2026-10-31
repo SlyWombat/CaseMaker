@@ -133,11 +133,9 @@ export function planDrillBit(input: DrillBitInput): DrillBitResult {
   const point0 = drillPointAngle(tool, { deg: s.pointAngleDeg, source: input.pointAngleSource });
   if (!point0.ok) return point0;
   const angle = { deg: point0.deg, from: point0.from };
-  if (input.stock) {
-    const r = d / 2;
-    const off = input.holes.find(([x, y]) => x - r < 0 || y - r < 0 || x + r > input.stock!.length || y + r > input.stock!.width);
-    if (off) return { ok: false, reason: `the ${d} mm hole at (${off[0]}, ${off[1]}) runs off the ${input.stock.length} × ${input.stock.width} mm stock` };
-  }
+  // #786 slice 1 part 2 — A RIM OFF THE STOCK IS NOT THIS MODULE'S REFUSAL. The hole cuts air
+  // where it leaves the blank, `drill-outside-stock` states the edge and the overhang on the job,
+  // and the sweep's fixture and bed checks judge any real contact. The drill still posts.
   const point = pointLength(d, angle.deg);
   const tipDepth =
     input.depth.kind === 'blind' ? input.depth.fullDiameterDepth + point : input.depth.thickness + input.depth.breakthroughMm + point;

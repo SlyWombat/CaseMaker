@@ -4199,7 +4199,10 @@ export function generateRotaryGoalProgram(
   if (xEnd > span.to) {
     const sentence = rotary.tailstock ? tailstockSentence(xEnd, rotary.stickout) : freeEndSentence(xEnd, rotary.stickout);
     findings.push({
-      severity: 'error',
+      // #786 slice 1 part 2 — with the tailstock OUT, the field running past the stick-out cuts
+      // air, and that is informed (the sentence states the reach); with it IN, `span.to` is the
+      // tailstock's band, and the cut would touch what holds the rod — that stays an error.
+      severity: rotary.tailstock ? 'error' : 'warning',
       code: 'wrap-off-free-end',
       message: `The goal "${goal.name}" ${sentence}`,
       labelId: goal.id,

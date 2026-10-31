@@ -177,8 +177,11 @@ export function rotaryJobFindings(
       // #724 B3 review — with the tailstock OUT there is no band to name, but the map still ends
       // at the stick-out: past it there is no stock, so the cut would carve air. Its own sentence
       // and code, because "runs into the tailstock's band" would name a tailstock that is absent.
+      // #786 slice 1 part 2 — cutting that air is INFORMED, not refused: the sentence states the
+      // reach against the stick-out, Generate cuts what is on the rod, and the sweep's checks
+      // judge anything the cutter would touch. The tailstock case above stays an error.
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'wrap-off-free-end',
         labelId: region.labelId,
         message: `${who} ${freeEndSentence(xMax, map.stickout)}.`,

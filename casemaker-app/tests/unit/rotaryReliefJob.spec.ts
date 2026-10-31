@@ -118,10 +118,14 @@ describe('#723 R-3 — a goal on a rod generates the relief program', () => {
     expect(out.findings.some((f) => f.code === 'axis-crossing')).toBe(true);
   });
 
-  it('refuses a part outside the free span', () => {
+  it('informs a part outside the free span and cuts what the rod holds (#786 slice 1 part 2)', () => {
     const out = engraveGenerate(tl, rotaryJob(goal(CONE, { position: { x: 80, y: 0, z: 0 } })), BALL, [], null, undefined, {});
-    expect(out.ok).toBe(false);
-    expect(out.findings.some((f) => f.code === 'wrap-off-free-end')).toBe(true);
+    // With the tailstock out, past the stick-out the field cuts air: the finding says so and the
+    // program posts. (With it in, the same reach is the band's and stays an error.)
+    expect(out.ok).toBe(true);
+    const f = out.findings.find((x) => x.code === 'wrap-off-free-end');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('warning');
   });
 
   it('refuses a V-bit as the relief’s cutter', () => {

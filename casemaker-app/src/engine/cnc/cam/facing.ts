@@ -11,11 +11,11 @@
  * "full extent" is read as the CUTTER'S DISC: the centre is held one radius in from every edge, so
  * the disc's edge lands on the boundary (a micron inside it, on the POSTED text — see
  * {@link FACING_EDGE_CLEARANCE_MM}) and the whole top is faced without a single move cutting air
- * outside the stock. That second half is not decoration — the verifier checks the tool edge
- * (`cut-outside-stock`, `verify.ts` check 5), so a centre-line raster to the edge is refused on
- * every line. Clamps, jaws and brackets are the verifier's to refuse (`mountObstacles`, #427); this
- * module never shrinks the patch to dodge one, because silently leaving a strip at the finish is
- * worse than a refusal.
+ * outside the stock. Since #786 slice 1 part 2 the verifier no longer refuses a cutter edge over
+ * air, so the inset is coverage — every line stays in material — rather than a refusal dodged.
+ * Clamps, jaws and brackets are the verifier's to refuse (`mountObstacles`, #427); this module
+ * never shrinks the patch to dodge one, because silently leaving a strip at the finish is worse
+ * than a refusal.
  *
  * RASTER ALONG THE LONGER SIDE. Lines run down the stock's longer axis and step across the shorter
  * one: fewer passes, fewer direction changes, and the line order is what an operator can follow on

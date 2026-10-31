@@ -186,15 +186,18 @@ describe('round stock — the cut face is a circle, not its box (#683)', () => {
     return job;
   }
 
-  it('refuses a label that reaches a box corner, naming the item and the circle', () => {
+  it('informs a label that reaches a box corner, naming the item and the circle (#786 slice 1 part 2)', () => {
     const job = roundJob(3, 3);
     const off = validateJob(job).find((f) => f.code === 'item-off-round-stock');
     expect(off).toBeDefined();
-    expect(off!.severity).toBe('error');
-    // #688: the finding points at the item, so the panel draws its Fix beside that item.
+    // The corners are air: the sentence states how far past the face the cut reaches, and the
+    // cut proceeds. The finding still points at the item.
+    expect(off!.severity).toBe('warning');
     expect(off!.labelId).toBe(job.labels[0]!.id);
     expect(off!.message).toContain('⌀50 mm');
+    expect(off!.message).toContain('mm past the');
     expect(off!.message).toContain('1 mm in from the edge');
+    expect(off!.message).toContain('Generate cuts it as it is');
   });
 
   it('a centred label is inside the inscribed circle, so there is no finding', () => {

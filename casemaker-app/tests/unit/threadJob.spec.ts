@@ -197,8 +197,12 @@ describe('#445 the document findings', () => {
     expect(findings.find((f) => f.code === 'thread-cutter-fit')?.message).toMatch(/radial depth/);
   });
 
-  it('refuses a thread whose MAJOR rim leaves the stock', () => {
-    expect(codes(jobWith({ position: { x: 1, y: 30 } }))).toContain('thread-off-stock');
+  it('informs a thread whose MAJOR rim leaves the stock (#786 slice 1 part 2)', () => {
+    const f = validateJob(jobWith({ position: { x: 1, y: 30 } })).find((x) => x.code === 'thread-off-stock');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('warning');
+    expect(f!.message).toContain('past the stock’s left edge');
+    expect(f!.message).toContain('Generate cuts it as it is');
   });
 
   it('refuses a blind thread that leaves less than the minimum floor, charging one pitch', () => {

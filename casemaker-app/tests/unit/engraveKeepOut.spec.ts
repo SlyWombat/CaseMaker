@@ -210,12 +210,14 @@ describe('the void depth limit (#231, #351)', () => {
     expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(0, 9); // 12 - 11 - 1.0
   });
 
-  it('jobDepthLimit is the stock limit with no void, and 0 outside the stock', () => {
+  it('jobDepthLimit is the blank\u2019s bottom everywhere with no void (#786 slice 1 part 2)', () => {
     const flat = jobDepthLimit(defaultEngraveJob()); // #786 slice 1 — the blank's own 12 mm bottom
     expect(flat(50, 30)).toBe(12);
-    expect(flat(-1, 30)).toBe(0);
-    expect(flat(101, 30)).toBe(0);
-    expect(flat(50, 61)).toBe(0);
+    // #786 slice 1 part 2 — air beside the blank is cuttable to the same bottom: cutting air is
+    // informed by the job finding, and real contact is the sweep's.
+    expect(flat(-1, 30)).toBe(12);
+    expect(flat(101, 30)).toBe(12);
+    expect(flat(50, 61)).toBe(12);
   });
 
   it('jobDepthLimit tightens over a void and leaves the rest of the blank alone', () => {

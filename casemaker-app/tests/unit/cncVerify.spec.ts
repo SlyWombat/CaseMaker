@@ -132,12 +132,22 @@ describe('cncVerify (#174): the checks', () => {
     expect(report.ok).toBe(false);
   });
 
-  it('cut-outside-stock: a stroke centre at X = 0.3 with a 1 mm cutter is refused at the edge', () => {
+  it('#786 slice 1 part 2 — a stroke at the stock’s edge cuts air there and is not refused', () => {
+    // The cutter edge reaches X = −0.2, off the blank. Cutting air beside the blank is informed
+    // (by the job finding, with the area), and the physical bottom is the verifier's limit.
     const { text, ctx } = program(['G0 X0.3 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02']);
     const findings = verifyProgram(text, ctx).findings.filter((x) => x.code === 'cut-outside-stock');
+    expect(findings).toEqual([]);
+  });
+
+  it('cut-outside-stock: a caller’s own no-cut zone is still refused at the tool edge', () => {
+    // The code stays for limits that deliberately say "no cutting here" — a keep-out, a restart
+    // bound. This one refuses every XY left of X = 1; the stroke centre at 0.3 is outside it.
+    const { text, ctx } = program(['G0 X0.3 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02']);
+    const limited = { ...ctx, depthLimit: (x: number) => (x >= 1 ? 12 : 0) };
+    const findings = verifyProgram(text, limited).findings.filter((x) => x.code === 'cut-outside-stock');
     expect(findings.length).toBeGreaterThan(0);
-    // The edge sits at 0.3 − 0.5 = −0.2, which depthLimit reports as 0 (no cutting allowed).
-    expect(findings[0]?.message).toContain('-0.200');
+    expect(findings[0]?.message).toContain('0.800');
   });
 
   it('sticky coordinates: G1 X10 after G1 X5 Y5 Z-1 is (10, 5, −1), not (10, 0, 0)', () => {
@@ -530,13 +540,15 @@ describe('sacrificialDepthLimit (#213 §3): the depth table', () => {
     }
   });
 
-  it('#786 slice 1 — over the part is the blank’s physical bottom; over a flush strip its height; over air 0', () => {
+  it('#786 slice 1 — over the part is the blank’s physical bottom; over a flush strip its height; air is the bottom too', () => {
     const limit = sacrificialDepthLimit(STOCK, presetJawStrips(), OPTS); // left+right 6 mm, flush, no board
     expect(limit(10, 5)).toBe(5); // T, the whole blank
     expect(limit(-3, 5)).toBe(5); // flush strip height = T
     expect(limit(23, 5)).toBe(5); // right strip
-    expect(limit(-7, 5)).toBe(0); // beyond the left strip
-    expect(limit(10, 12)).toBe(0); // beyond the part in Y
+    // #786 slice 1 part 2 — air beside the blank is cuttable down to the blank's own bottom; the
+    // sweep judges any real contact.
+    expect(limit(-7, 5)).toBe(5); // beyond the left strip
+    expect(limit(10, 12)).toBe(5); // beyond the part in Y
   });
 
   it('over board overhang is thickness + breakthrough; the part stays the blank’s bottom without a through-cut', () => {
@@ -544,7 +556,9 @@ describe('sacrificialDepthLimit (#213 §3): the depth table', () => {
     expect(limit(10, 5)).toBe(5); // part: the whole blank (#786 slice 1)
     expect(limit(-5, 5)).toBe(5.3); // board overhang
     expect(limit(-5, -5)).toBe(5.3); // board corner
-    expect(limit(-11, 5)).toBe(0); // beyond the board
+    // #786 slice 1 part 2 — beyond the board, air: the blank's bottom stands. A THROUGH cut there
+    // would exceed it and fire `cut-too-deep`, which is what a board that is too small means.
+    expect(limit(-11, 5)).toBe(5);
   });
 
   it('a through-cut makes the part limit thickness + breakthrough, but only with a board', () => {
@@ -557,17 +571,21 @@ describe('sacrificialDepthLimit (#213 §3): the depth table', () => {
     expect(noBoard(10, 5)).toBe(5);
   });
 
-  it('the positive region is exactly supportedFootprint (#213 §3)', () => {
+  it('the supported footprint still decides HOW DEEP: board allowance inside it, the blank’s bottom outside (#213 §3)', () => {
     const s = presetPartOnBoard();
     const limit = sacrificialDepthLimit(STOCK, s, OPTS);
     const { length: L, width: W } = STOCK;
     const boxes = sacrificialBoxes(STOCK, s);
-    const inFootprint = (x: number, y: number): boolean =>
-      (x >= 0 && x <= L && y >= 0 && y <= W) ||
+    const overPart = (x: number, y: number): boolean => x >= 0 && x <= L && y >= 0 && y <= W;
+    const inBoardBox = (x: number, y: number): boolean =>
       boxes.some((b) => x >= b.min[0] && x <= b.max[0] && y >= b.min[1] && y <= b.max[1]);
     for (let x = -12; x <= 32; x += 0.5) {
       for (let y = -12; y <= 22; y += 1) {
-        expect(limit(x, y) > 0).toBe(inFootprint(x, y));
+        // #786 slice 1 part 2 — the answer is positive everywhere (air is cuttable to the blank's
+        // bottom); beyond the part, the BOARD allowance applies exactly over the board.
+        const answer = limit(x, y);
+        expect(answer > 0).toBe(true);
+        expect(answer > STOCK.thickness).toBe(!overPart(x, y) && inBoardBox(x, y));
       }
     }
     const bb = aabbOfProfile(supportedFootprint(STOCK, s))!;
@@ -581,8 +599,8 @@ describe('cut-outside-stock against supportedFootprint (#213 §3)', () => {
   // A stroke from X = 17 to X = 23: it runs 3 mm past the part's right edge at X = 20.
   const PAST_EDGE = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3', 'G0 X17 Y5', 'G1 Z-1 F200', 'G1 X23', 'M5', 'M02'].join('\n');
 
-  it('with no sacrificial material, 3 mm past the edge is refused at the tool edge', () => {
-    expect(codes(ctxFor(), PAST_EDGE)).toContain('cut-outside-stock');
+  it('#786 slice 1 part 2 — with no sacrificial material, 3 mm past the edge cuts air and is allowed', () => {
+    expect(codes(ctxFor(), PAST_EDGE)).not.toContain('cut-outside-stock');
   });
 
   it('with a 6 mm right strip the same stroke passes: the cutter is on sacrificial material, not air', () => {
@@ -592,9 +610,9 @@ describe('cut-outside-stock against supportedFootprint (#213 §3)', () => {
     expect(report.ok).toBe(true);
   });
 
-  it('a stroke that leaves the strip too is still cut-outside-stock', () => {
+  it('#786 slice 1 part 2 — a stroke that leaves the strip too cuts air there, and is allowed', () => {
     const depthLimit = sacrificialDepthLimit(STOCK, presetJawStrips(), { minFloor: 1, breakthrough: 0.3 });
     const pastStrip = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3', 'G0 X23 Y5', 'G1 Z-1 F200', 'G1 X30', 'M5', 'M02'].join('\n');
-    expect(codes(ctxFor({ depthLimit }), pastStrip)).toContain('cut-outside-stock');
+    expect(codes(ctxFor({ depthLimit }), pastStrip)).not.toContain('cut-outside-stock');
   });
 });

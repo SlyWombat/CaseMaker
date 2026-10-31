@@ -167,7 +167,10 @@ export function sacrificialBoxes(stock: StockSize, s: Sacrificial): SacrificialB
 /**
  * The region a cutter may travel over without leaving material: the part outline ∪ every
  * sacrificial footprint, in XY (#213 §3). The verifier's `cut-outside-stock` becomes "outside
- * `supportedFootprint`". With no sacrificial material this is exactly the part outline.
+ * `supportedFootprint`", where a caller's own limit may still say no cut; since #786 slice 1
+ * part 2 the depth limit is positive over air too (the blank's bottom), so the footprint now
+ * decides HOW DEEP a cut may go (the board allowance), not whether air may be cut. With no
+ * sacrificial material this is exactly the part outline.
  */
 export function supportedFootprint(stock: StockSize, s: Sacrificial): Profile {
   const part = rectProfile(stock.length, stock.width);

@@ -343,3 +343,27 @@ describe('the panel-side assignment check (#434)', () => {
     expect(setupProgramFindings(job).map((f) => f.code)).not.toContain('drill-mixed-tools');
   });
 });
+
+// #786 slice 1 part 2 — a hole whose rim crosses an edge cuts air there. The sentence names the
+// edge and the overhang, and the drill's own program still posts and verifies.
+describe('#786 slice 1 part 2 — a hole off the edge informs and still drills', () => {
+  beforeEach(() => setInventoryEntries([DRILL_ENTRY]));
+  afterEach(() => resetRegistry());
+
+  it('names the edge and the overhang, and the drill program verifies', () => {
+    // A 3 mm drill at x = 1: the rim reaches 0.5 mm past the left edge.
+    const job = drillJob([hole(2, { x: 1, y: 30 })]);
+    const outside = validateJob(job).find((f) => f.code === 'drill-outside-stock');
+    expect(outside).toBeDefined();
+    expect(outside!.severity).toBe('warning');
+    expect(outside!.message).toContain('0.5 mm past the stock’s left edge');
+    expect(outside!.message).toContain('Generate cuts it as it is');
+
+    const g = engraveGenerate(tl, job, jobTool(job), [], null, undefined, SHOP_WITH_DRILL);
+    expect(g.errors).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.programs).toHaveLength(1);
+    expect(g.programs[0]!.verify!.ok).toBe(true);
+    expect(g.programs[0]!.verify!.findings.filter((f) => f.code === 'cut-outside-stock')).toEqual([]);
+  }, 60_000);
+});

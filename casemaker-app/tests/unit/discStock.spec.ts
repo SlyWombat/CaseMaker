@@ -206,7 +206,7 @@ describe('#743 the off-the-disc refusal reads stock.shape', () => {
     expect(validateJob(job).some((f) => f.code === 'item-off-round-stock')).toBe(false);
   });
 
-  it('refuses “Software” moved 2 mm out, on a job with NO stock entry', () => {
+  it('informs that “Software” moved 2 mm out, on a job with NO stock entry (#786 slice 1 part 2)', () => {
     const job = loadCoin();
     expect(job.stockEntry).toBeUndefined();
     const moved: EngraveJob = {
@@ -215,10 +215,15 @@ describe('#743 the off-the-disc refusal reads stock.shape', () => {
     };
     const off = validateJob(moved).find((f) => f.code === 'item-off-round-stock');
     expect(off).toBeDefined();
-    expect(off!.severity).toBe('error');
+    // The corners are air and the cut passes over them: the sentence states how far past the face
+    // it reaches, and Generate cuts it as it is.
+    expect(off!.severity).toBe('warning');
     expect(off!.labelId).toBe('software');
     expect(off!.message).toContain('⌀30 mm');
     expect(off!.message).toContain('the disc');
+    expect(off!.message).toContain('mm past the');
+    // The label is reference-only in this design: nothing is cut there, and the sentence says so.
+    expect(off!.message).toContain('It is reference-only, so nothing is cut there');
   });
 });
 

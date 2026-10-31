@@ -287,8 +287,9 @@ function cutterPhrase(tool: Tool | null): string {
  *
  * Codes and thresholds are the issue's table, renamed `item-*` by #214 (a shape is an item
  * too, and a shape has no characters): `item-empty` is an error, `item-chars-lost` an error,
- * `item-detail-lost` a warning, `item-outside-stock` an error. They are members of
- * `JobFindingCode` (`jobSetup.ts`), so this returns `JobFinding[]` like `validateJob`.
+ * `item-detail-lost` a warning, `item-outside-stock` a warning (#786 slice 1 part 2 — the edge
+ * margin is a preference, and the part that hangs off the blank cuts air there). They are members
+ * of `JobFindingCode` (`jobSetup.ts`), so this returns `JobFinding[]` like `validateJob`.
  *
  * `item-detail-lost` is suppressed at `ratio === 0`: a fully-lost item is already the
  * `item-empty` error, and there is no partial detail left to recover. `ratioAt` is consulted
@@ -381,13 +382,17 @@ export function engravabilityFindings(
 
     if (row.outsideArea > OUTSIDE_AREA_TOLERANCE_MM2) {
       const who = src ? itemLabel(src) : `Item ${row.labelId}`;
+      // #786 slice 1 part 2 — the edge margin is a PREFERENCE. The sentence states the area past
+      // it, and Generate cuts it as it is: the part beyond the stock's edge passes over air, and
+      // the sweep's fixture and bed checks judge anything the cutter would actually touch.
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'item-outside-stock',
         labelId: row.labelId,
         message:
           `${who} cuts ${row.outsideArea.toFixed(2)} mm² beyond the supported material inset ` +
-          `by the ${job.edgeMargin} mm edge margin.`,
+          `by the ${job.edgeMargin} mm edge margin; that part of the cut passes over air, and ` +
+          `Generate cuts it as it is.`,
       });
     }
   }

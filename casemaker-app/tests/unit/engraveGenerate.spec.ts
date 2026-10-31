@@ -3357,3 +3357,34 @@ describe('the fitted surface plane is posted against (#608)', () => {
     expect(fitted.frameNc).toBe(flat.frameNc);
   });
 });
+
+// #786 slice 1 part 2 — the edge margin is a PREFERENCE. An item that hangs off the blank cuts
+// air there: the finding states the area, Generate posts the program, and the verifier no longer
+// refuses the move for leaving the stock — the sweep's fixture and bed checks judge real contact.
+describe('#786 slice 1 part 2 — an item hanging off the blank still generates', () => {
+  it('informs with the area, posts the program and verifies it', () => {
+    const base = dj();
+    const first = base.labels[0]!;
+    // Off the FRONT edge, not the left: a cut at X 0 is the fixed jaw's own face, and that
+    // collision is `vise-jaw-collision`'s error — a separate, still-refused fact. The air cut
+    // this test is about is the one the edge margin covers, away from the jaws.
+    const job: EngraveJob = {
+      ...base,
+      labels: [{ ...first, position: { ...first.position, y: 0 } }, ...base.labels.slice(1)],
+    };
+
+    const g = engraveGenerate(tl, job, jobTool(job), [], null, undefined, {});
+    const outside = g.findings.find((f) => f.code === 'item-outside-stock');
+    expect(outside).toBeDefined();
+    expect(outside!.severity).toBe('warning');
+    expect(outside!.message).toMatch(/mm²/);
+    expect(outside!.message).toContain('Generate cuts it as it is');
+
+    // The program was cut and passed the verifier: no `cut-outside-stock`, no `cut-too-deep`.
+    expect(g.errors).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.verify).not.toBeNull();
+    expect(g.verify!.ok).toBe(true);
+    expect(g.verify!.findings.filter((f) => f.code === 'cut-outside-stock')).toEqual([]);
+  }, 60_000);
+});

@@ -302,12 +302,9 @@ export function planThreadMill(input: ThreadMillInput): ThreadMillResult {
     };
   }
   const [cx, cy] = input.position;
-  const rThread = major / 2;
-  if (input.stock) {
-    if (cx - rThread < 0 || cy - rThread < 0 || cx + rThread > input.stock.length || cy + rThread > input.stock.width) {
-      return { ok: false, reason: `the ⌀${major} mm thread at (${cx}, ${cy}) runs off the ${input.stock.length} × ${input.stock.width} mm stock` };
-    }
-  }
+  // #786 slice 1 part 2 — a thread's rim off the stock cuts air there; `thread-off-stock` states
+  // the edge and the overhang on the job, and the sweep's checks judge real contact. The orbit
+  // still posts.
 
   const runOut = r3(s.bottomClearancePitches * pitch);
   const tipDepth = r3(input.depth + runOut);
