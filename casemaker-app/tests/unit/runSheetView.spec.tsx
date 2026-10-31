@@ -110,3 +110,45 @@ describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
     expect(screen.getByText('G38.2 Z-8 F150').closest('[data-section-id="origin"]')).not.toBeNull();
   });
 });
+
+// #788 — the step that asks for the probe carries the drawn head diagram, and a sheet without that
+// step draws none. The step is injected because the default job's registration plan refuses (it has
+// no openings), so its sheet prints the refusal instead of the probe routine.
+function sheetWithProbeStep(): RunSheet {
+  const sheet = sheetFor(dj());
+  const first = sheet.sections[0]!;
+  return {
+    ...sheet,
+    sections: [
+      { ...first, steps: [...first.steps, { text: 'Fit the probe and touch off ONCE on the top face.', probeFit: true }] },
+      ...sheet.sections.slice(1),
+    ],
+  };
+}
+
+describe('#788 the run sheet draws the head diagram where it asks for the probe', () => {
+  it('draws the diagram under the probe step, with the Makera line', () => {
+    render(<RunSheetView sheet={sheetWithProbeStep()} />);
+    const diagram = screen.getByTestId('run-sheet-probe-fit');
+    expect(diagram.textContent).toContain('Unplug the wired probe connector and connect the 3D probe cable.');
+    expect(diagram.textContent).toContain('3D Probe Rod');
+    expect(diagram.querySelector('svg')).not.toBeNull();
+    expect(diagram.querySelector('svg')?.getAttribute('aria-label')).toContain('not the 3-pin ionizer port');
+  });
+
+  it('draws nothing when no step asks for a probe', () => {
+    const sheet = sheetWithProbeStep();
+    const stripped = {
+      ...sheet,
+      sections: sheet.sections.map((section) => ({
+        ...section,
+        steps: section.steps.map((step) => {
+          const { probeFit: _drop, ...rest } = step;
+          return rest;
+        }),
+      })),
+    };
+    render(<RunSheetView sheet={stripped} />);
+    expect(screen.queryByTestId('run-sheet-probe-fit')).toBeNull();
+  });
+});

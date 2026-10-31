@@ -70,6 +70,15 @@ test('#795 — the statement leads step 1, and ‹ Design sits beside the switch
 
   // The clearance statement leads the step: it is above the gate's fold in the document.
   await expect(page.getByTestId('engrave-cut-ack')).toBeVisible();
+  // #788 — the statement asks for the probe to be fitted, so the head diagram stands with it:
+  // the probe connector to use, and the 3-pin ionizer port marked as not that one. The screenshot
+  // below is the drawing's visual evidence.
+  const probeDiagram = page.getByTestId('engrave-cut-ack').getByTestId('probe-fit-diagram');
+  await expect(probeDiagram).toBeVisible();
+  await expect(probeDiagram).toContainText('Unplug the wired probe connector and connect the 3D probe cable.');
+  await expect(probeDiagram).toContainText('3-pin ionizer port');
+  await expect(probeDiagram).toContainText('not this one');
+  await expect(probeDiagram).toContainText('probe connector');
   const ackLeads = await page.evaluate(() => {
     const ack = document.querySelector('[data-testid="engrave-cut-ack"]');
     const fold = document.querySelector('[data-testid="engrave-cut-details"]');

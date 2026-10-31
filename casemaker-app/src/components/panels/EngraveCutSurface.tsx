@@ -29,6 +29,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react';
+import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
 import type { EngraveJob, FrozenPackage } from '@/types/engraveJob';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { MachineObservation } from '@/platform/machineProbe';
@@ -892,6 +893,9 @@ export function EngraveCutSurface({
                 clamped — and I have checked clearance to the vise and the tool's reach myself.
               </span>
             </label>
+            {/* #788 — the ask above is where the probe is fitted, so the head diagram stands with
+                it: the probe connector to use, and the 3-pin ionizer port marked as not that one. */}
+            <ProbeFitDiagram compact />
           </div>
         )}
         {/* #796 — THE PROGRAM, AS ONE CARD WITH ONE ACTION. Checked and Frozen were two steps;

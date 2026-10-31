@@ -13,6 +13,7 @@
  */
 
 import { Fragment, useMemo, useState, type CSSProperties, type JSX } from 'react';
+import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -677,14 +678,19 @@ export function EngraveSetupsSection({
         </p>
       )}
       {mountTapApi.prompt !== null && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0' }} data-testid="engrave-setups-tap-prompt">
-          <span style={{ fontSize: 12 }}>{mountTapApi.prompt.text}</span>
-          <button type="button" data-testid="engrave-mount-tap-continue" onClick={() => mountTapApi.resolve(true)}>
-            Continue
-          </button>
-          <button type="button" data-testid="engrave-mount-tap-cancel" onClick={() => mountTapApi.resolve(false)}>
-            Cancel
-          </button>
+        <div style={{ margin: '8px 0' }} data-testid="engrave-setups-tap-prompt">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12 }}>{mountTapApi.prompt.text}</span>
+            <button type="button" data-testid="engrave-mount-tap-continue" onClick={() => mountTapApi.resolve(true)}>
+              Continue
+            </button>
+            <button type="button" data-testid="engrave-mount-tap-cancel" onClick={() => mountTapApi.resolve(false)}>
+              Cancel
+            </button>
+          </div>
+          {/* #788 — this prompt is the executor asking for the probe to be fitted (the mount tap
+              runs it before the first touch): show which connector it goes into. */}
+          {mountTapApi.prompt.kind === 'fit-probe' && <ProbeFitDiagram compact />}
         </div>
       )}
 

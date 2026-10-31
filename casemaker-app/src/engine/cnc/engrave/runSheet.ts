@@ -641,6 +641,11 @@ export interface RunSheetStep {
   unverified?: string;
   /** Render the step's text bold. The `vise-default` warning opens section 8 this way. */
   bold?: boolean;
+  /**
+   * #788 — the step asks the operator to fit a probe, so the view draws the head diagram beside
+   * it: the probe connector to use, and the 3-pin ionizer port marked as not that one.
+   */
+  probeFit?: boolean;
 }
 
 export interface RunSheetSection {
@@ -1939,6 +1944,7 @@ function materialPositionSteps(
         `Fit the probe and touch off ONCE on the ${part}’s top face, near the middle (M491 for the ` +
         'probe’s own length). Every reading below is a change from this one, so its Z is the zero ' +
         'depth to compare against.',
+      probeFit: true,
       unverified,
     },
     {
@@ -3876,6 +3882,7 @@ export function buildRunSheet(
               're-touch.',
             code: 'M491',
             record: 'the probe’s PRB (mm)',
+            probeFit: true,
           },
         ]
       : []),

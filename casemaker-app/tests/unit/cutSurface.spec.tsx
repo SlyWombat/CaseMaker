@@ -542,6 +542,11 @@ describe('#419 §3 the Cut surface', () => {
     const fold = screen.getByTestId('engrave-cut-details');
     expect(screen.getByTestId('engrave-cut-step-1').contains(ackBox)).toBe(true);
     expect(ackBox.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // #788 — the statement asks for the probe to be fitted, so the head diagram stands with it.
+    expect(ackBox.querySelector('[data-testid="probe-fit-diagram"]')).not.toBeNull();
+    expect(screen.getByTestId('probe-fit-diagram').textContent).toContain(
+      'Unplug the wired probe connector and connect the 3D probe cable.',
+    );
 
     // Run is blocked with its ONE sentence.
     const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
