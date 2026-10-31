@@ -337,6 +337,10 @@
                     ],
                     "type": "object"
                   },
+                  "isolation": {
+                    "description": "True when this band must separate every piece of the copper it follows (#743): a band the cut cannot open is an error, not a warning.",
+                    "type": "boolean"
+                  },
                   "kind": {
                     "const": "frame",
                     "description": "A frame around an existing item, with a gap.",
@@ -5092,7 +5096,9 @@
                   "dxf",
                   "image",
                   "3mf",
-                  "font"
+                  "font",
+                  "gerber",
+                  "excellon"
                 ],
                 "type": "string"
               },
@@ -5577,6 +5583,7 @@
                 "pva",
                 "acrylic",
                 "plastic",
+                "pcb",
                 "aluminium-6061",
                 "aluminium-7075",
                 "brass",
