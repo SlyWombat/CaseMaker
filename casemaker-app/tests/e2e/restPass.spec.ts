@@ -8,6 +8,14 @@
 
 import { test, expect } from './fixtures/caseMaker';
 
+/** #792 — Save .nc… / Run sheet… / Open run record… are File ▾ items now; open the menu first. */
+async function menuItem(page: import('@playwright/test').Page, testid: string) {
+  const item = page.getByTestId(testid);
+  if (!(await item.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();
+  await expect(item).toBeVisible();
+  return item;
+}
+
 test.setTimeout(240_000);
 
 test('#667 — a region row pairs a rough and a rest cutter, and the run is two programs', async ({ cm, page }) => {
@@ -66,7 +74,7 @@ test('#667 — a region row pairs a rough and a rest cutter, and the run is two 
   expect(state.programs).toBe(2);
 
   // The run sheet names the pair, both files and the cutter change between them.
-  await page.getByTestId('engrave-run-sheet').click();
+  await (await menuItem(page, 'engrave-run-sheet')).click();
   const sheet = page.getByTestId('run-sheet');
   await expect(sheet).toBeVisible();
   await expect(sheet).toContainText('TWO programs');

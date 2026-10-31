@@ -255,8 +255,9 @@ test.describe('first job acceptance (§6)', () => {
       await expect(page.getByTestId(id), id).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
     }
     // #745 — the run's terminal state, in the button's own word: "Working…" is a run still in
-    // flight, and a capture must never scan that. The ticks are the result; this is the run over.
-    await expect(page.getByTestId('engrave-generate')).toHaveText('Generate');
+    // flight, and a capture must never scan that. #794 — the terminal word is now the NEXT step:
+    // "Cut…" replacing Generate once the program is ready and still matches the job.
+    await expect(page.getByTestId('engrave-generate')).toHaveText('Cut…');
     await capture(page, 'engrave-panel-generated');
 
     // Cut: the four lines, with the plan's facts.

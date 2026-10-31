@@ -161,18 +161,22 @@ describe('EngravePanel — the design import entry (#410)', () => {
     expect(screen.queryByTestId('engrave-design-input')).toBeNull();
   });
 
-  it('offers the design door as the File menu’s last item in a simulator build (#686)', () => {
+  it('offers the design door in the File menu, with the run’s own files after it (#686, #792)', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
     const items = screen.getByTestId('engrave-file-menu').querySelectorAll('[role="menuitem"]');
-    // #686 follow-up — "New cutting job…" is the first item; the design read is still last, after
-    // the three file actions it belongs beside.
+    // #686 follow-up — "New cutting job…" is the first item. #792 — the design read sits after
+    // the job's own file actions, and the RUN's three files are the menu's last group: the
+    // footer holds Generate alone.
     expect([...items].map((el) => el.getAttribute('data-testid'))).toEqual([
       'engrave-job-new',
       'engrave-job-save',
       'engrave-job-save-as',
       'engrave-job-open',
       'engrave-design-import',
+      'engrave-save',
+      'engrave-run-sheet',
+      'engrave-open-record',
     ]);
   });
 });

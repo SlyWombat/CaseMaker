@@ -47,9 +47,32 @@ export interface EngraveJobFileBarProps {
   onReadDesign?: () => void;
   /** True while the picked design is being read: the item says so and is disabled. */
   designReading?: boolean;
+  /**
+   * #792 — THE RUN'S OWN FILES LIVE HERE. The Design footer holds ONE primary button (Generate /
+   * Cut…), so Save .nc…, Run sheet… and Open run record… are the File menu's last three items —
+   * the job's files and the run's files in the one place a file bar puts them. Their testids and
+   * their availability rules are the panel's, handed in as props; each is absent when the panel
+   * has nothing to offer.
+   */
+  onSaveProgram?: () => void;
+  /** The sentence that keeps Save .nc… closed, or null when it may be pressed. */
+  saveProgramBlocker?: string | null;
+  onRunSheet?: () => void;
+  runSheetReady?: boolean;
+  runSheetBlocked?: boolean;
+  onOpenRecord?: () => void;
 }
 
-export function EngraveJobFileBar({ onReadDesign, designReading = false }: EngraveJobFileBarProps): JSX.Element {
+export function EngraveJobFileBar({
+  onReadDesign,
+  designReading = false,
+  onSaveProgram,
+  saveProgramBlocker = null,
+  onRunSheet,
+  runSheetReady = false,
+  runSheetBlocked = false,
+  onOpenRecord,
+}: EngraveJobFileBarProps): JSX.Element {
   const jobName = useEngraveJobStore((s) => s.job.name);
   const fileName = useEngraveJobFileStore((s) => s.fileName);
   const savedAt = useEngraveJobFileStore((s) => s.savedAt);
@@ -221,6 +244,56 @@ export function EngraveJobFileBar({ onReadDesign, designReading = false }: Engra
                 }
               >
                 {designReading ? 'Reading the design…' : 'Read a design (.3mf)…'}
+              </button>
+            )}
+            {(onSaveProgram !== undefined || onRunSheet !== undefined || onOpenRecord !== undefined) && (
+              <div role="separator" style={{ borderTop: '1px solid #2c3540', margin: '3px 0' }} />
+            )}
+            {onSaveProgram !== undefined && (
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="engrave-save"
+                disabled={saveProgramBlocker !== null}
+                title={
+                  saveProgramBlocker ??
+                  'Save the generated program to carry it to the Cut step, or to open in Makera Studio.'
+                }
+                style={MENU_ITEM}
+                onClick={() => choose(onSaveProgram)}
+              >
+                Save .nc…
+              </button>
+            )}
+            {onRunSheet !== undefined && (
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="engrave-run-sheet"
+                disabled={!runSheetReady || runSheetBlocked}
+                title={
+                  runSheetBlocked
+                    ? 'The job changed since it was generated; regenerate before opening the sheet.'
+                    : runSheetReady
+                      ? 'Open the printable run sheet for the machine.'
+                      : 'Generate and verify the job first.'
+                }
+                style={MENU_ITEM}
+                onClick={() => choose(onRunSheet)}
+              >
+                Run sheet…
+              </button>
+            )}
+            {onOpenRecord !== undefined && (
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="engrave-open-record"
+                title="Open the run record saved beside a previous run's .nc, and show its measured wall clock beside the estimate."
+                style={MENU_ITEM}
+                onClick={() => choose(onOpenRecord)}
+              >
+                Open run record…
               </button>
             )}
           </div>

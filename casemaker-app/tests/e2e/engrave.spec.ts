@@ -31,6 +31,18 @@ async function acknowledgeClearance(page: Page): Promise<void> {
 }
 
 /**
+ * #792 — Save .nc…, Run sheet… and Open run record… live in the File ▾ menu now, not in the
+ * footer: the footer holds Generate alone. Opening the menu is part of reaching them; the item's
+ * own availability rules are unchanged.
+ */
+async function menuItem(page: Page, testid: string) {
+  const item = page.getByTestId(testid);
+  if (!(await item.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();
+  await expect(item).toBeVisible();
+  return item;
+}
+
+/**
  * A 12 × 12 mm plate: one closed, FILLED path, and the size stated in millimetres on the element —
  * so the parser takes the file's own units instead of assuming 96 px/inch, and the dialog has
  * nothing to warn about (#217). Written here rather than checked in, so the drawing and the row
@@ -68,12 +80,12 @@ test('the default job generates, verifies, simulates and saves a .nc', async ({ 
   // #688 — Save writes the .nc that goes to Makera Studio, so it waits on the clearance
   // acknowledgement; the statement's home is Cut step 1 (#689), so acknowledge it here.
   expect(state.canSave).toBe(false);
-  await expect(page.getByTestId('engrave-save')).toBeDisabled();
+  await expect(await menuItem(page, 'engrave-save')).toBeDisabled();
   await acknowledgeClearance(page);
-  await expect(page.getByTestId('engrave-save')).toBeEnabled({ timeout: STATE_MS });
+  await expect(await menuItem(page, 'engrave-save')).toBeEnabled({ timeout: STATE_MS });
 
   const downloadPromise = page.waitForEvent('download', { timeout: STATE_MS });
-  await page.getByTestId('engrave-save').click();
+  await (await menuItem(page, 'engrave-save')).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.nc$/);
 
@@ -98,7 +110,7 @@ test('editing the job after Generate makes the result stale and blocks Save', as
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   // #688 — the acknowledgement lives in Cut step 1 now; the Save path is still gated on it.
   await acknowledgeClearance(page);
-  await expect(page.getByTestId('engrave-save')).toBeEnabled({ timeout: STATE_MS });
+  await expect(await menuItem(page, 'engrave-save')).toBeEnabled({ timeout: STATE_MS });
 
   // Change a label's depth: the run no longer describes the job on screen. #411 folds a job's
   // rows, so the field is behind the chevron.
@@ -107,7 +119,7 @@ test('editing the job after Generate makes the result stale and blocks Save', as
   await depth.fill('1.8');
   await depth.blur();
 
-  await expect(page.getByTestId('engrave-save')).toBeDisabled({ timeout: STATE_MS });
+  await expect(await menuItem(page, 'engrave-save')).toBeDisabled({ timeout: STATE_MS });
   // #581 — the blocker names the input that moved: this edit changed the job.
   await expect(page.getByTestId('engrave-save-blocked')).toContainText('the job changed since it was generated', { timeout: STATE_MS });
 });
@@ -128,7 +140,7 @@ test("the saved .nc, reloaded as a stranger's file, removes the same volume", as
   // Save the exact bytes, then open them in "Simulate .nc" as though they came from someone else.
   await acknowledgeClearance(page);
   const downloadPromise = page.waitForEvent('download');
-  await page.getByTestId('engrave-save').click();
+  await (await menuItem(page, 'engrave-save')).click();
   const path = await (await downloadPromise).path();
   expect(path).not.toBeNull();
   const nc = readFileSync(path!, 'utf8');
@@ -218,20 +230,20 @@ test('the run sheet opens for a verified job, names the saved file, and prints w
   await openEngravePanel(page);
 
   // Nothing generated yet: the sheet is not offered.
-  await expect(page.getByTestId('engrave-run-sheet')).toBeDisabled();
+  await expect(await menuItem(page, 'engrave-run-sheet')).toBeDisabled();
 
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   // #688 — the sheet itself needs no acknowledgement; Save does, because its file goes to the
   // machine. The statement's home is Cut step 1 (#689).
-  await expect(page.getByTestId('engrave-run-sheet')).toBeEnabled();
+  await expect(await menuItem(page, 'engrave-run-sheet')).toBeEnabled();
   await acknowledgeClearance(page);
 
   // Save writes THREE files (#273, #277): the job, the frame beside it, then the run record. Awaiting
   // only the first download is what let the frame go missing unnoticed.
   const downloads: string[] = [];
   page.on('download', (d) => downloads.push(d.suggestedFilename()));
-  await page.getByTestId('engrave-save').click();
+  await (await menuItem(page, 'engrave-save')).click();
   await expect.poll(() => downloads.length).toBe(3);
   const suggested = downloads[0]!;
   expect(suggested).toMatch(/\.nc$/);
@@ -241,7 +253,7 @@ test('the run sheet opens for a verified job, names the saved file, and prints w
   expect(downloads[2]).toBe(suggested.replace(/\.nc$/, '-run.json'));
 
   // …is the name the sheet prints.
-  await page.getByTestId('engrave-run-sheet').click();
+  await (await menuItem(page, 'engrave-run-sheet')).click();
   const sheet = page.getByTestId('run-sheet');
   await expect(sheet).toBeVisible();
   await expect(sheet).toContainText(suggested);
@@ -277,11 +289,11 @@ test('a filled run record shows its measured run beside the estimate', async ({ 
   expect(planned).toMatch(/^about \d+ min \d+ s$/);
   // #688 — the acknowledgement lives in Cut step 1 now; the Save path is still gated on it.
   await acknowledgeClearance(page);
-  await expect(page.getByTestId('engrave-save')).toBeEnabled();
+  await expect(await menuItem(page, 'engrave-save')).toBeEnabled();
 
   const downloads: { name: string; file: Download }[] = [];
   page.on('download', (d) => downloads.push({ name: d.suggestedFilename(), file: d }));
-  await page.getByTestId('engrave-save').click();
+  await (await menuItem(page, 'engrave-save')).click();
   await expect.poll(() => downloads.length).toBe(3);
 
   const ncFile = downloads[0]!.name;

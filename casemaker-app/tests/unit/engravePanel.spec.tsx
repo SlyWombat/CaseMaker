@@ -991,56 +991,57 @@ describe('EngravePanel — combined shapes (#215)', () => {
   });
 });
 
+function readyGenerated(nc: string): EngraveGenerated {
+  return {
+    ok: true,
+    stage: 'done',
+    findings: [],
+    feeds: null,
+    threads: null,
+    cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
+    nc,
+    verify: {
+      ok: true,
+      findings: [],
+      stats: { lines: 2, cuttingMoves: 1, deepestZ: -2, bbox: { min: [0, 0, -2], max: [1, 1, 0] } },
+    },
+    // #244 — a run that reached `ok` always has the frame (§5 of engraveGenerate), and Save must
+    // write BOTH files (#273): the sheet's dry run loads this one by name.
+    frameNc: `${nc}\n;frame\n`,
+    frameVerify: null,
+    // #432 — a run that does not face emits no facing program, and that is not a refusal.
+    facingNc: null,
+    facingVerify: null,
+    facingToolKey: null,
+    facingError: null,
+    facingCam: null,
+    predicted: [],
+    // #419 J3 — the same program, as the run's list of one.
+    programs: [
+      {
+        setupIndex: 1,
+        setupId: 'setup-implicit',
+        toolKey: 'flat-1.0',
+        nc,
+        verify: {
+          ok: true,
+          findings: [],
+          stats: { lines: 2, cuttingMoves: 1, deepestZ: -2, bbox: { min: [0, 0, -2], max: [1, 1, 0] } },
+        },
+        frameNc: `${nc}\n;frame\n`,
+        frameVerify: null,
+        programHash: '00000000',
+        cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
+      },
+    ],
+    errors: [],
+  };
+}
+
 // #207's mount: the "Run sheet" button opens the printable sheet for a generated, verified job,
 // and the file it names is the file Save writes.
 describe('EngravePanel — the run sheet mount (#207)', () => {
   /** A generated + verified result the panel can open the sheet for. */
-  function readyGenerated(nc: string): EngraveGenerated {
-    return {
-      ok: true,
-      stage: 'done',
-      findings: [],
-      feeds: null,
-      threads: null,
-      cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
-      nc,
-      verify: {
-        ok: true,
-        findings: [],
-        stats: { lines: 2, cuttingMoves: 1, deepestZ: -2, bbox: { min: [0, 0, -2], max: [1, 1, 0] } },
-      },
-      // #244 — a run that reached `ok` always has the frame (§5 of engraveGenerate), and Save must
-      // write BOTH files (#273): the sheet's dry run loads this one by name.
-      frameNc: `${nc}\n;frame\n`,
-      frameVerify: null,
-      // #432 — a run that does not face emits no facing program, and that is not a refusal.
-      facingNc: null,
-      facingVerify: null,
-      facingToolKey: null,
-      facingError: null,
-      facingCam: null,
-      predicted: [],
-      // #419 J3 — the same program, as the run's list of one.
-      programs: [
-        {
-          setupIndex: 1,
-          setupId: 'setup-implicit',
-          toolKey: 'flat-1.0',
-          nc,
-          verify: {
-            ok: true,
-            findings: [],
-            stats: { lines: 2, cuttingMoves: 1, deepestZ: -2, bbox: { min: [0, 0, -2], max: [1, 1, 0] } },
-          },
-          frameNc: `${nc}\n;frame\n`,
-          frameVerify: null,
-          programHash: '00000000',
-          cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
-        },
-      ],
-      errors: [],
-    };
-  }
 
   beforeEach(() => {
     useEngraveRunStore.getState().reset();
@@ -1049,8 +1050,17 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     vi.mocked(saveEngraveProgram).mockClear();
   });
 
+  /** #792 — the run's files live in the File menu now; open it before reading one. */
+  function openFileMenu(): void {
+    if (screen.queryByTestId('engrave-file-menu') === null) {
+      fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
+    }
+  }
+
   it('is disabled until a job has generated and verified', () => {
     render(<EngravePanel />);
+    openFileMenu();
+    openFileMenu();
     expect((screen.getByTestId('engrave-run-sheet') as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -1106,16 +1116,15 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     expect(screen.queryByTestId('engrave-ack-label')).toBeNull();
 
     // Save writes the file that goes to Makera Studio, so it does NOT skip the clearance
-    // acknowledgement: it is blocked and says where the statement lives, with a Fix that takes
-    // the operator there.
+    // acknowledgement: it is blocked and says where the statement lives. #794 — the ▸ Fix link is
+    // gone: the Ready card's primary IS "Cut…", and the link would be the same press twice.
+    openFileMenu();
     const save = screen.getByTestId('engrave-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     expect(screen.getByTestId('engrave-save-blocked').textContent).toBe(
-      'Save is disabled — tick the clearance check in Cut, step 1. ▸ Fix',
+      'Save is disabled — tick the clearance check in Cut, step 1. ',
     );
-    fireEvent.click(screen.getByTestId('engrave-save-fix'));
-    expect(useCncModeStore.getState().mode).toBe('cut');
-    act(() => resetCncMode());
+    expect(screen.queryByTestId('engrave-save-fix')).toBeNull();
   });
 
   it('#726 P7 — a blocked sentence carries one full stop, not two', () => {
@@ -1141,6 +1150,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
       });
     });
 
+    openFileMenu();
     const button = screen.getByTestId('engrave-run-sheet') as HTMLButtonElement;
     expect(button.disabled).toBe(false);
     fireEvent.click(button);
@@ -1162,6 +1172,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     // Save's file name is the sheet's, not the mesh-export sanitiser's — asserted, not trusted.
     // And it writes the FRAME too (#273): §6 sends the operator to that file by name, so the panel
     // that writes one without the other would make the dry run a dead step.
+    openFileMenu();
     fireEvent.click(screen.getByTestId('engrave-save'));
     await waitFor(() => expect(vi.mocked(saveEngraveProgram)).toHaveBeenCalledTimes(1));
     const [savedNc, savedFrame, savedName] = vi.mocked(saveEngraveProgram).mock.calls[0]!;
@@ -1214,6 +1225,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
         acknowledged: true,
       });
     });
+    openFileMenu();
     fireEvent.click(screen.getByTestId('engrave-run-sheet'));
     const sheet = await screen.findByTestId('run-sheet');
 
@@ -1238,6 +1250,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
         staleSince: Date.now(),
       });
     });
+    openFileMenu();
     expect((screen.getByTestId('engrave-run-sheet') as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -1264,6 +1277,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
       useEngraveRunStore.setState({ generated: refused, simStatus: null, phase: 'blocked' });
     });
 
+    openFileMenu();
     expect((screen.getByTestId('engrave-save') as HTMLButtonElement).disabled).toBe(true);
     // The button's own tooltip carries the reason, and the line under it spells it out.
     // #724 B2 — the refusal carries the finding's OWN sentence, not a count of errors.
@@ -3915,6 +3929,10 @@ describe('EngravePanel — the Design main path (#686)', () => {
       'engrave-job-save-as',
       'engrave-job-open',
       'engrave-design-import',
+      // #792 — the run's own files live here, after the job's: the footer keeps one primary.
+      'engrave-save',
+      'engrave-run-sheet',
+      'engrave-open-record',
     ]);
     // The deleted owner note's fact survives as the Save item's hover.
     expect(screen.getByTestId('engrave-job-save').getAttribute('title')).toContain('The file is the owner');
@@ -4367,5 +4385,116 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     await waitFor(() => expect(screen.queryByTestId('engrave-generate-progress')).toBeNull());
     release({ ok: false, stage: 'findings', findings: [], feeds: null, cam: null, nc: null, verify: null, errors: [] } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated);
     setEngraveRunClientLoader(null);
+  });
+});
+
+// #792 — the Design footer holds ONE primary button; the job's and the run's files live in File ▾.
+describe('#792 — one primary button in the Design footer', () => {
+  it('Generate is full width on the primary container, the subheading is gone, and the run’s files are in File ▾', () => {
+    render(<EngravePanel />);
+    const footer = screen.getByTestId('engrave-footer');
+    const generate = screen.getByTestId('engrave-generate') as HTMLButtonElement;
+    expect(generate.style.width).toBe('100%');
+    expect(generate.style.background).toContain('--cm-color-primary-container');
+    // The old "Generate" subheading is gone: the button is the step.
+    expect([...footer.querySelectorAll('h3')].map((h) => h.textContent)).not.toContain('Generate');
+    // The footer carries no file button of its own any more.
+    for (const id of ['engrave-save', 'engrave-run-sheet', 'engrave-open-record']) {
+      expect(footer.querySelector(`[data-testid="${id}"]`), id).toBeNull();
+    }
+    // …and the File menu carries all three, with their own state.
+    fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
+    const menu = screen.getByTestId('engrave-file-menu');
+    for (const id of ['engrave-save', 'engrave-run-sheet', 'engrave-open-record']) {
+      expect(menu.querySelector(`[data-testid="${id}"]`), id).toBeTruthy();
+    }
+    // Before a run, each says why it is not available — the same rules the footer buttons had.
+    expect((menu.querySelector('[data-testid="engrave-save"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((menu.querySelector('[data-testid="engrave-run-sheet"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// #793/#794 — the footer's state machine. Before a run it says nothing: the primary button IS the
+// step. While a run works, or after one that did not pass, the four ticks are the one line. After
+// a run that passed and still matches the job, ONE Ready line carries the outcome and the time,
+// the ticks fold behind its `›`, and the primary becomes the next step: Cut….
+describe('#793/#794 — the idle footer is silent and the Ready card is the next step', () => {
+  beforeEach(() => {
+    useEngraveRunStore.getState().reset();
+    resetCncMode();
+  });
+
+  /** A run that reached its terminal state with all four ticks green. */
+  function pass(): void {
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: readyGenerated(';@MKR|BEGIN\nG21 G90\nM02'),
+        simStatus: 'ready',
+        simDiagnostics: [],
+        oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+        phase: 'ready',
+      });
+    });
+  }
+
+  it('#793 — a job that has not been run draws no run rows at all', () => {
+    render(<EngravePanel />);
+    expect(screen.queryByTestId('engrave-run-rows')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-ready')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-time')).toBeNull();
+    expect(screen.getByTestId('engrave-generate').textContent).toBe('Generate');
+  });
+
+  it('#793 — a passing run collapses to one Ready line, the four ticks kept behind its ›', () => {
+    render(<EngravePanel />);
+    pass();
+    const ready = screen.getByTestId('engrave-run-ready');
+    expect(ready.tagName).toBe('DETAILS');
+    expect((ready as HTMLDetailsElement).open).toBe(false);
+    const summary = screen.getByTestId('engrave-run-ready-summary');
+    expect(summary.textContent).toContain('✓');
+    expect(summary.textContent).toContain('Program ready');
+    expect(summary.textContent).toContain('about 5 s');
+    expect(summary.textContent).toContain('›');
+    // The four ticks survive — folded inside the Ready line, not deleted.
+    const rows = screen.getByTestId('engrave-run-rows');
+    expect(ready.contains(rows)).toBe(true);
+    for (const [testid, label] of [
+      ['engrave-run-toolpath', 'generated'],
+      ['engrave-run-verified', 'verified'],
+      ['engrave-run-simulated', 'simulated'],
+      ['engrave-run-oracle', 'matches the design'],
+    ] as const) {
+      expect(screen.getByTestId(testid).getAttribute('data-state')).toBe('tick');
+      expect(rows.textContent).toContain(label);
+    }
+    // #793 — the collision: an idle mark beside the separator read "· ·". When a row has not been
+    // reached it now carries no mark at all.
+    expect(rows.textContent).not.toContain('· ·');
+  });
+
+  it('#793 — a run still working shows its rows, with no idle dot beside the separator', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({ phase: 'generating' });
+    });
+    const rows = screen.getByTestId('engrave-run-rows');
+    // Reached rows are marked; rows not reached yet are the bare sentence.
+    expect(rows.textContent).toContain('generating…');
+    expect(rows.textContent).toContain('not simulated yet');
+    expect(rows.textContent).not.toContain('· ·');
+    // Not a result: the primary is still Generate, showing that it is working.
+    expect(screen.getByTestId('engrave-generate').textContent).toBe('Working…');
+  });
+
+  it('#794 — after a passing run the primary is Cut…, and pressing it switches to Cut', () => {
+    render(<EngravePanel />);
+    pass();
+    const primary = screen.getByTestId('engrave-generate') as HTMLButtonElement;
+    expect(primary.textContent).toBe('Cut…');
+    expect(primary.getAttribute('data-action')).toBe('cut');
+    expect(primary.disabled).toBe(false);
+    fireEvent.click(primary);
+    expect(useCncModeStore.getState().mode).toBe('cut');
   });
 });

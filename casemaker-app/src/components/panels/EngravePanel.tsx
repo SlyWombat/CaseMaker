@@ -545,13 +545,19 @@ function RunRow({ testid, state, text }: { testid: string; state: RowState; text
  * #688 — one of the FOUR ticks Generate leaves on one line (§3.6): `✓ generated · ✓ verified · ✓
  * simulated · ✓ matches the design`. The counts and under/over-cut numbers those rows used to
  * carry are the simulation's own facts and live in its panel (#691).
+ *
+ * #793 — an idle row carries NO mark: it used to draw a `·` beside the `·` separator, so a footer
+ * with two rows not yet reached read "· not generated yet · · not verified yet". The sentence is
+ * enough; the mark belongs to a state the run actually reached.
  */
 function RunTick({ testid, state, label, last = false }: { testid: string; state: RowState; label: string; last?: boolean }): JSX.Element {
   return (
     <span data-testid={testid} data-state={state} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
-      <span aria-hidden style={{ color: ROW_COLOR[state] }}>
-        {ROW_MARK[state]}
-      </span>
+      {state !== 'idle' && (
+        <span aria-hidden style={{ color: ROW_COLOR[state] }}>
+          {ROW_MARK[state]}
+        </span>
+      )}
       <span>{label}</span>
       {!last && (
         <span aria-hidden style={{ color: '#66707a', marginLeft: 4 }}>
@@ -1961,6 +1967,31 @@ export function EngravePanel(): JSX.Element {
   // #726 P7 — "about" is the estimate word; "(estimated)" said it a second time on every time.
   const runTimeText = cam === null ? null : `about ${formatDuration(cam.estimatedSeconds)}`;
 
+  // #793 — the idle state says nothing. The four ticks are drawn only while a run works or after
+  // one it produced: a fresh job showed four "not … yet" rows under a button that had not been
+  // pressed, which reads as work the job has lost. A refusal with no result speaks its own
+  // sentence (`engrave-run-errors` / `engrave-run-error`); it is not four failed rows.
+  const runSaysSomething = running || run.generated !== null || run.error !== null;
+  // …and a run that PASSED and still matches the job collapses to ONE line, with the ticks behind
+  // its `›`. #794 — that line is the Ready card, and the footer's primary becomes the next step.
+  const runReady =
+    !blocked &&
+    !running &&
+    run.staleSince === null &&
+    rowToolpath === 'tick' &&
+    rowVerified === 'tick' &&
+    rowSimulated === 'tick' &&
+    rowOracle === 'tick';
+
+  const runTicks = (
+    <>
+      <RunTick testid="engrave-run-toolpath" state={rowToolpath} label={rowToolpathText} />
+      <RunTick testid="engrave-run-verified" state={rowVerified} label={rowVerifiedText} />
+      <RunTick testid="engrave-run-simulated" state={rowSimulated} label={rowSimulatedText} />
+      <RunTick testid="engrave-run-oracle" state={rowOracle} label={rowOracleText} last />
+    </>
+  );
+
   // #432 review R11 — a FACING job has a second program, and a withheld facing file must not be
   // invisible: Save writes one file fewer than the sheet says, and the sheet's own sentence is the
   // explanation. The row mirrors `facingSteps`' vocabulary ("the facing program was not produced"),
@@ -2547,6 +2578,15 @@ export function EngravePanel(): JSX.Element {
       <EngraveJobFileBar
         onReadDesign={featureSim ? () => designInputRef.current?.click() : undefined}
         designReading={designReading}
+        // #792 — the run's own files are the File menu's last three items; the footer keeps one
+        // primary button. Their availability rules are unchanged — the menu item is disabled by
+        // the same sentence the footer button carried.
+        onSaveProgram={() => void saveProgram()}
+        saveProgramBlocker={saveBlockerText}
+        onRunSheet={() => void openRunSheet()}
+        runSheetReady={runSheetReady}
+        runSheetBlocked={runSheetBlocked}
+        onOpenRecord={() => void openRunRecord()}
       />
       {featureSim && (
         <>
@@ -3766,26 +3806,44 @@ export function EngravePanel(): JSX.Element {
           </p>
         )}
 
-        {/* 8 — generate → verify → simulate → oracle → save */}
-        <h3 style={SUBHEAD}>Generate</h3>
+        {/* 8 — generate → verify → simulate → oracle → save. #792 — no subheading: the primary
+            button is the step. */}
       <div data-testid="engrave-generate-slot">
         {/* #688 — the blocker is the button's OWN sentence with its Fix (design §1 principle 4).
             It used to be one tooltip for two causes, "Fix the errors above first.", which could
             be — and was — shown beside "0 errors" (audit B9). */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
           <button
             type="button"
             data-testid="engrave-generate"
-            disabled={blocked || running || !simEnabled}
+            // #794 — the card is the NEXT step. Once the program is ready and still matches the
+            // job, that step is Cut, so the same primary slot switches mode instead of offering
+            // a second Generate. `data-action` names which press it is.
+            data-action={runReady ? 'cut' : 'generate'}
+            disabled={runReady ? false : blocked || running || !simEnabled}
             title={
-              !simEnabled
-                ? 'This build has no simulation worker.'
-                : 'Generate the toolpath, verify it, simulate it and check it against the design.'
+              runReady
+                ? 'Go to Cut — the program is generated, verified, simulated and checked against the design.'
+                : !simEnabled
+                  ? 'This build has no simulation worker.'
+                  : 'Generate the toolpath, verify it, simulate it and check it against the design.'
             }
-            style={{ padding: '7px 14px' }}
-            onClick={() => void generate()}
+            // #792 — THE footer's one primary button: full width, on the app's primary container.
+            style={{
+              width: '100%',
+              padding: '9px 14px',
+              fontSize: 13,
+              fontWeight: 700,
+              background: 'var(--cm-color-primary-container)',
+              borderColor: 'transparent',
+              color: 'var(--cm-color-on-primary-container)',
+            }}
+            onClick={() => {
+              if (runReady) showMode('cut');
+              else void generate();
+            }}
           >
-            {running ? 'Working…' : 'Generate'}
+            {runReady ? 'Cut…' : running ? 'Working…' : 'Generate'}
           </button>
           {running && (
             // #785 — WHAT it is doing, with a number when the stage has one, and a way to stop.
@@ -3846,20 +3904,63 @@ export function EngravePanel(): JSX.Element {
             {/* #688 — four ticks and ONE labelled time (§3.6, audit B14/B15). The counts and the
                 under/over-cut numbers the old rows carried belong to the simulation's own panel
                 (#691), whose data is already the run view's. */}
-            <div
-              data-testid="engrave-run-rows"
-              style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
-            >
-              <RunTick testid="engrave-run-toolpath" state={rowToolpath} label={rowToolpathText} />
-              <RunTick testid="engrave-run-verified" state={rowVerified} label={rowVerifiedText} />
-              <RunTick testid="engrave-run-simulated" state={rowSimulated} label={rowSimulatedText} />
-              <RunTick testid="engrave-run-oracle" state={rowOracle} label={rowOracleText} last />
-              {runTimeText !== null && (
-                <span data-testid="engrave-run-time" style={{ marginLeft: 'auto', color: '#9aa4b0' }}>
-                  {runTimeText}
-                </span>
-              )}
-            </div>
+            {/* #793 — before any run there is nothing to report, so nothing is drawn. While a run
+                works, or after one that did not pass, the four ticks are the one line. A run that
+                passed and still matches the job collapses to the Ready card, its ticks folded
+                behind the `›` so the next step is what the eye lands on. */}
+            {runSaysSomething &&
+              (runReady ? (
+                <details data-testid="engrave-run-ready" style={{ marginTop: 6 }}>
+                  <summary
+                    data-testid="engrave-run-ready-summary"
+                    style={{
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 6,
+                      fontSize: 12,
+                      color: '#c8d3de',
+                      listStyle: 'none',
+                    }}
+                  >
+                    <span aria-hidden style={{ color: ROW_COLOR.tick }}>
+                      ✓
+                    </span>
+                    <span>Program ready</span>
+                    {runTimeText !== null && (
+                      <>
+                        <span aria-hidden style={{ color: '#66707a' }}>
+                          ·
+                        </span>
+                        <span data-testid="engrave-run-time" style={{ color: '#9aa4b0' }}>
+                          {runTimeText}
+                        </span>
+                      </>
+                    )}
+                    <span aria-hidden data-testid="engrave-run-ready-chevron" style={{ marginLeft: 'auto', color: '#8fb8e0' }}>
+                      ›
+                    </span>
+                  </summary>
+                  <div
+                    data-testid="engrave-run-rows"
+                    style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
+                  >
+                    {runTicks}
+                  </div>
+                </details>
+              ) : (
+                <div
+                  data-testid="engrave-run-rows"
+                  style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
+                >
+                  {runTicks}
+                  {runTimeText !== null && (
+                    <span data-testid="engrave-run-time" style={{ marginLeft: 'auto', color: '#9aa4b0' }}>
+                      {runTimeText}
+                    </span>
+                  )}
+                </div>
+              ))}
             {/* #432 review R11 — the facing program is its own file: name the cutter it runs, or
                 the reason it was withheld. Absent when the job does not face. */}
             {facingJob && <RunRow testid="engrave-run-facing" state={rowFacing} text={rowFacingText} />}
@@ -3925,22 +4026,14 @@ export function EngravePanel(): JSX.Element {
               </p>
             )}
 
-            <button
-              type="button"
-              data-testid="engrave-save"
-              disabled={saveBlockerText !== null}
-              title={saveBlockerText ?? 'Save the generated program to carry it to the Cut step, or to open in Makera Studio.'}
-              style={{ width: '100%', padding: 7, marginTop: 6 }}
-              onClick={() => void saveProgram()}
-            >
-              Save .nc…
-            </button>
             {saveBlockerText !== null && (
               <p style={MUTED} data-testid="engrave-save-blocked">
                 Save is disabled — {withPeriod(saveBlockerText!)}{' '}
                 {/* #688 — only the acknowledgement is something Cut can resolve, so only that
-                    blocker gets the Fix. The sentence and #689's Cut step 1 use the same words. */}
-                {saveBlockerText === CLEARANCE_ACK_BLOCKER && (
+                    blocker gets the Fix. The sentence and #689's Cut step 1 use the same words.
+                    #794 — when the Ready card is up the primary IS "Cut…", so the link would be
+                    the same press twice; it goes with the Ready card. */}
+                {saveBlockerText === CLEARANCE_ACK_BLOCKER && !runReady && (
                   <button
                     type="button"
                     data-testid="engrave-save-fix"
@@ -3964,40 +4057,12 @@ export function EngravePanel(): JSX.Element {
             {/* #419 §3 — the run controls live under CUT now, over the frozen package. Design
                 stops at a verified, saved program; Cut is the approval and the run. */}
 
-            {/* The operator run sheet (#207): printable, built from this job and the verified
-                result. Offered once a job has generated AND verified; a stale result is refused,
-                because the sheet would describe a job the user has since changed. */}
-            <button
-              type="button"
-              data-testid="engrave-run-sheet"
-              disabled={!runSheetReady || runSheetBlocked}
-              title={
-                runSheetBlocked
-                  ? 'The job changed since it was generated; regenerate before opening the sheet.'
-                  : runSheetReady
-                    ? 'Open the printable run sheet for the machine.'
-                    : 'Generate and verify the job first.'
-              }
-              style={{ width: '100%', padding: 7, marginTop: 6 }}
-              onClick={() => void openRunSheet()}
-            >
-              Run sheet…
-            </button>
           </>
         )}
 
         {/* #277 — the record a previous run of this job left beside its `.nc`, brought back in.
-            Offered whether or not the job on screen has generated: it is about a run that already
-            happened, and the estimate's "last measured" line is what it feeds. */}
-        <button
-          type="button"
-          data-testid="engrave-open-record"
-          title="Open the run record saved beside a previous run's .nc, and show its measured wall clock beside the estimate."
-          style={{ width: '100%', padding: 7, marginTop: 6 }}
-          onClick={() => void openRunRecord()}
-        >
-          Open run record…
-        </button>
+            #792 — opened from the File menu now; its message still prints here, where the
+            estimate's "last measured" line reads it. */}
         {recordMessage !== null && (
           <p style={MUTED} data-testid="engrave-record-message">
             {recordMessage}

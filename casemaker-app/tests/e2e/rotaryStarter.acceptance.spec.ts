@@ -9,6 +9,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect } from './fixtures/caseMaker';
 
+/** #792 — Save .nc… / Run sheet… / Open run record… are File ▾ items now; open the menu first. */
+async function menuItem(page: import('@playwright/test').Page, testid: string) {
+  const item = page.getByTestId(testid);
+  if (!(await item.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();
+  await expect(item).toBeVisible();
+  return item;
+}
+
 test.setTimeout(300_000);
 const OUT = path.join(process.cwd(), 'test-results', 'rotary-starter-acceptance');
 
@@ -109,7 +117,7 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   // The same gate sentence blocks Save on the Design side, and item 6 holds there too: the words
   // are the operator's, the decimals are three at most, and the bench is one sentence.
   await page.getByTestId('cnc-mode-design').click();
-  await expect(page.getByTestId('engrave-save')).toBeDisabled();
+  await expect(await menuItem(page, 'engrave-save')).toBeDisabled();
   await expect(page.getByTestId('engrave-save-blocked')).toContainText(BENCH);
   const designText = await page.getByTestId('engrave-panel').innerText();
   expect(designText).not.toMatch(ROTARY_CODES);

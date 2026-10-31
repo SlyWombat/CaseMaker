@@ -17,6 +17,14 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { test, expect } from './fixtures/caseMaker';
 
+/** #792 — Save .nc… / Run sheet… / Open run record… are File ▾ items now; open the menu first. */
+async function menuItem(page: import('@playwright/test').Page, testid: string) {
+  const item = page.getByTestId(testid);
+  if (!(await item.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();
+  await expect(item).toBeVisible();
+  return item;
+}
+
 test.setTimeout(240_000);
 
 /**
@@ -100,7 +108,7 @@ test('#744 — a later program’s cutter collision blocks Save, naming that pro
   await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'cross', {
     timeout: 180_000,
   });
-  await expect(page.getByTestId('engrave-save')).toBeDisabled();
+  await expect(await menuItem(page, 'engrave-save')).toBeDisabled();
   const blocked = page.getByTestId('engrave-save-blocked');
   await expect(blocked).toContainText('the facing pass (user:744-short-flat)');
   await expect(blocked).toContainText('shoulder length of 0.1');
