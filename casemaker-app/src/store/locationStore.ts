@@ -57,6 +57,7 @@ import {
   type FixtureRecord,
   type LocationView,
   type MachineRecord,
+  type ViseBedFrame,
 } from '@/platform/locationClient';
 import { houseAddFinishedProgram } from '@/platform/finishedProgramsClient';
 import { bedFromLegacy, bedMigrationDue, ensureFirstRegistrationBed, firstRegistrationBed, newestViseRegistration, type LegacyViseRegistration } from '@/platform/bedProfiles';
@@ -380,6 +381,34 @@ export function machineAt(target: { host: string; port: number }): MachineRecord
 export function machineRecordByProfile(profileId: string | null): MachineRecord | null {
   if (profileId === null) return null;
   return useLocationStore.getState().location?.machines.find((m) => m.profileId === profileId) ?? null;
+}
+
+/**
+ * #779 — the ACTIVE bed profile's vise placement frame (machine XY), or null when the record has
+ * not placed it. A registration's write (#600) is what fills it; until then the pictures fall
+ * back to the pins plus the drawn base's constants, and say so.
+ */
+export function visePlacementFrameOf(machine: MachineRecord | null): ViseBedFrame | null {
+  if (machine === null) return null;
+  const profiles = machine.bedProfiles ?? [];
+  const profile = profiles.find((p) => p.id === machine.activeBedProfileId) ?? profiles[0] ?? null;
+  const placement =
+    profile?.placements.find((pl) => pl.where.kind === 'pins' && pl.where.pins === 'vise') ?? null;
+  const frame = placement?.frame ?? null;
+  if (frame === null || frame.fixedJawFaceX === null || frame.jawStartY === null) return null;
+  return { fixedJawFaceX: frame.fixedJawFaceX, jawStartY: frame.jawStartY };
+}
+
+/** The same frame, read non-reactively by a job's machine profile id (the viewport's bounds). */
+export function visePlacementFrame(profileId: string | null): ViseBedFrame | null {
+  return visePlacementFrameOf(machineRecordByProfile(profileId));
+}
+
+/** #779 — the vise placement frame for a component, reactive to the location's machine records. */
+export function useVisePlacementFrame(profileId: string | null): ViseBedFrame | null {
+  const machines = useLocationStore((s) => (s.status === 'present' ? s.location?.machines : undefined));
+  if (profileId === null || machines === undefined) return null;
+  return visePlacementFrameOf(machines.find((m) => m.profileId === profileId) ?? null);
 }
 
 /**

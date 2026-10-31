@@ -21,7 +21,14 @@
 
 import type { FixtureRecord, BedProfile } from '@/platform/locationClient';
 import type { MillProfile } from './machine';
-import { LEDGE_STEP, LEDGE_WIDTH, VISE_BAR_HEIGHT, VISE_BODY_DEPTH } from './fixture';
+import { Z1_VISE } from './fixture';
+import {
+  VISE_DRAWN_TOTAL_HEIGHT,
+  VISE_PARKED_OPENING,
+  drawnVise,
+  translateVisePart,
+  viseFrameFromPins,
+} from './drawnVise';
 
 /** A box in machine coordinates, with how it is drawn. */
 export interface BedSceneBox {
@@ -105,10 +112,16 @@ export const ANCHOR_SLOT_WIDTH = 15;
 export const ANCHOR_HOLE = 8;
 /** The locating pins' diameter: the vise sits on "its two 4×11 pins". */
 export const PIN_DIAMETER = 4;
-/** PROVISIONAL (#511): where the shared pin pair sits, machine XY. Revisit at the bench. */
+/**
+ * PROVISIONAL (#511, refined by #779 from the manual's figure 1.4): the shared 4×11 pin pair,
+ * machine XY. The figure shows one pin near the table's LEFT edge toward the FRONT (machine Y
+ * min is the operator's side), and one near the RIGHT edge at mid-depth — a diagonal pair, not
+ * the two-across-Y pair this record guessed before. Both the vise's base and the 4th-axis
+ * module's extrusion cover that diagonal. Revisit with the bench calipers (#444).
+ */
 export const PIN_PAIR: readonly [number, number][] = [
-  [-100, -40],
-  [-100, -160],
+  [-195, -165],
+  [-10, -105],
 ];
 /** PROVISIONAL (#511): a top clamp's footprint defaults, until the calipers list replaces them. */
 export const CLAMP_LENGTH = 30;
@@ -269,89 +282,87 @@ export function bedScene(input: BedSceneInput): BedScene {
     }
   }
 
-  const datums = datumPoints(profile);
+  const datums = datumPoints(profile, fixtures);
 
   return { boxes, datums, bbox: boxesBounds(boxes) };
 }
 
-// ── The vise (#508's drawn shape, in machine coordinates) ───────────────────────────────────────
+// ── The vise (#779's one drawn model, placed in machine coordinates) ───────────────────────────
 
+/**
+ * The vise's parts, translated from `drawnVise`'s canonical frame into machine coordinates: the
+ * fixed jaw's face at the placement's measured `fixedJawFaceX` (or at the pins' provisional
+ * position), the bar's front end at `jawStartY`, and the jaw tops at the measured datum.
+ *
+ * The STOCK is not drawn here: the bed profile describes the machine's bed, not a job. With no
+ * job the moving jaw sits where the fixture's `maxOpening` last left it, or parked at a
+ * PROVISIONAL 60 mm — drawn dashed "provisional opening", never presented as a reading.
+ */
 function drawVise(
   boxes: BedSceneBox[],
   placement: BedProfile['placements'][number],
   fixture: FixtureRecord,
   profile: BedProfile,
 ): void {
-  const jawBarWidth = num(fixture.constants, 'jawBarWidth', 10);
-  const jawLength = num(fixture.constants, 'jawLength', 100);
-  const barHeight = num(fixture.unit, 'jawBarHeight', VISE_BAR_HEIGHT);
-  const frame = placement.frame;
+  const jawBarWidth = num(fixture.constants, 'jawBarWidth', Z1_VISE.fixedJawThickness);
+  const jawLength = num(fixture.constants, 'jawLength', Z1_VISE.jawLength);
   const surfaceZ = surfaceTop(profile).z;
 
-  // The jaw tops: measured when the datum exists, else nominal (surface + bar height) — provisional.
+  // The jaw tops: measured when the datum exists, else the bed's top plus the drawn base and bar
+  // (both PROVISIONAL figures, composed here only because the picture needs a height).
   const jawTop = profile.datums.viseJawTopZ;
-  const jawTopZ = jawTop !== null ? jawTop.value : surfaceZ + barHeight;
-  const jawBottomZ = jawTopZ - barHeight;
+  const jawTopZ = jawTop !== null ? jawTop.value : surfaceZ + VISE_DRAWN_TOTAL_HEIGHT;
 
-  // The fixed jaw face X, measured by the registration (#475/#495) or provisional at the pins.
-  const frameX = frame?.fixedJawFaceX ?? null;
-  const frameY = frame?.jawStartY ?? null;
-  const fixedJawFaceX = frameX ?? PIN_PAIR[0]![0];
-  const jawStartY = frameY ?? PIN_PAIR[0]![1] - jawLength / 2;
-  const placed = frameX !== null && frameY !== null && jawTop !== null;
-  const jawKind: 'solid' | 'dashed' = placed ? 'solid' : 'dashed';
-  const jawColor = provenanceColor(placement.provenance.fixedJawFaceX);
+  // The fixed jaw face X, measured by the registration (#475/#495), else from the left pin (#779).
+  const frameX = placement.frame?.fixedJawFaceX ?? null;
+  const frameY = placement.frame?.jawStartY ?? null;
+  const fromPins = viseFrameFromPins(PIN_PAIR[0]!);
+  const fixedJawFaceX = frameX ?? fromPins.fixedJawFaceX;
+  const jawStartY = frameY ?? fromPins.jawStartY;
+  const placementKnown = frameX !== null && frameY !== null && jawTop !== null;
 
-  // Fixed jaw bar (left).
-  boxes.push(
-    box(
-      'pl-vise-fixed-jaw',
-      [fixedJawFaceX - jawBarWidth, jawStartY, jawBottomZ],
-      [fixedJawFaceX, jawStartY + jawLength, jawTopZ],
-      jawKind,
-      jawColor,
-      placed ? undefined : 'provisional',
-    ),
-  );
-  // The soft-jaw ledge (#208): a thin strip facing inward, `LEDGE_STEP` below the top.
-  boxes.push(
-    box(
-      'pl-vise-fixed-ledge',
-      [fixedJawFaceX, jawStartY, jawTopZ - LEDGE_STEP - LEDGE_STEP],
-      [fixedJawFaceX + LEDGE_WIDTH, jawStartY + jawLength, jawTopZ - LEDGE_STEP],
-      jawKind,
-      jawColor,
-    ),
-  );
-
-  // The moving jaw: where the operator left it. No stock, so the opening is the fixture's unmeasured
-  // `maxOpening` when present, else a PROVISIONAL 60 mm opening — drawn dashed either way.
+  // Where the movable side is: the fixture's measured maximum opening, else the parked position.
   const maxOpening = typeof fixture.unit?.maxOpening === 'number' ? fixture.unit.maxOpening : null;
-  const opening = maxOpening ?? 60;
-  const movingInnerX = fixedJawFaceX + opening;
-  boxes.push(
-    box(
-      'pl-vise-moving-jaw',
-      [movingInnerX, jawStartY, jawBottomZ],
-      [movingInnerX + jawBarWidth, jawStartY + jawLength, jawTopZ],
-      'dashed',
-      jawColor,
-      'provisional opening',
-    ),
-  );
+  const opening = maxOpening ?? VISE_PARKED_OPENING;
 
-  // The body below the bars — unmeasured height, drawn dashed "provisional".
-  const bodyBottomZ = jawBottomZ - VISE_BODY_DEPTH;
-  boxes.push(
-    box(
-      'pl-vise-body',
-      [fixedJawFaceX - jawBarWidth - 5, jawStartY, bodyBottomZ],
-      [movingInnerX + jawBarWidth + 5, jawStartY + jawLength, jawBottomZ],
-      'dashed',
-      provenanceColor(undefined),
-      'provisional',
-    ),
-  );
+  const parts = drawnVise({
+    openingMm: opening,
+    openingKnown: maxOpening !== null,
+    placementKnown,
+    fixedJawThickness: jawBarWidth,
+    movingJawThickness: jawBarWidth,
+    jawLength,
+  });
+
+  const jawColor = provenanceColor(placement.provenance.fixedJawFaceX);
+  for (const part of parts) {
+    const b = translateVisePart(part, [fixedJawFaceX, jawStartY, jawTopZ]);
+    const known = part.provenance === 'measured';
+    // ONE statement per thing that could be misread: the base's plate is provisional, the
+    // movable side's PLACE is, and an unplaced fixed jaw's is. Labelling every rail and screw
+    // would bury the picture in the same word — the dashed drawing already says "provisional".
+    const label = known
+      ? undefined
+      : part.role === 'base'
+        ? 'provisional'
+        : part.role === 'moving-jaw'
+          ? 'provisional opening'
+          : part.role === 'fixed-jaw'
+            ? frameX === null
+              ? 'from the pins, not measured'
+              : 'provisional'
+            : undefined;
+    boxes.push(
+      box(
+        `pl-${part.id}`,
+        b.min,
+        b.max,
+        known ? 'solid' : 'dashed',
+        known ? jawColor : provenanceColor(undefined),
+        label,
+      ),
+    );
+  }
 }
 
 // ── The bracket ─────────────────────────────────────────────────────────────────────────────────
@@ -471,8 +482,14 @@ function drawRotary(
 
 // ── Datums ─────────────────────────────────────────────────────────────────────────────────────
 
-/** Each measured datum as a labelled point, with its machine Z (and its date in the caller's words). */
-function datumPoints(profile: BedProfile): BedSceneDatum[] {
+/**
+ * Each measured datum as a labelled point, with its machine Z (and its date in the caller's words).
+ *
+ * The vise jaw datum is often recorded without an XY (`at: null`: the probe measured Z on the
+ * bar). Its point then sits at the CENTRE OF THE FIXED JAW — the tap a person would make — not at
+ * the bed's machine origin, which reads as if the datum belonged to the bed's back-right corner.
+ */
+function datumPoints(profile: BedProfile, fixtures: FixtureRecord[]): BedSceneDatum[] {
   const out: BedSceneDatum[] = [];
   const d = profile.datums;
   if (d.surfaceTopZ !== null) {
@@ -483,9 +500,10 @@ function datumPoints(profile: BedProfile): BedSceneDatum[] {
     });
   }
   if (d.viseJawTopZ !== null) {
+    const at = d.viseJawTopZ.at ?? jawTopTap(profile, fixtures);
     out.push({
       id: 'datum-jaw',
-      position: [d.viseJawTopZ.at?.[0] ?? 0, d.viseJawTopZ.at?.[1] ?? 0, d.viseJawTopZ.value],
+      position: [at[0], at[1], d.viseJawTopZ.value],
       label: `jaw top ${fmt(d.viseJawTopZ.value)}`,
     });
   }
@@ -504,6 +522,18 @@ function datumPoints(profile: BedProfile): BedSceneDatum[] {
     });
   }
   return out;
+}
+
+/** The fixed jaw's top-centre machine XY — where a probe tap on the datum lands (`mounts/vise.ts`). */
+function jawTopTap(profile: BedProfile, fixtures: FixtureRecord[]): [number, number] {
+  const placement = profile.placements.find((pl) => pl.where.kind === 'pins' && pl.where.pins === 'vise') ?? null;
+  const fixture = placement === null ? undefined : fixtures.find((f) => f.id === placement.fixture);
+  const barWidth = num(fixture?.constants, 'jawBarWidth', Z1_VISE.fixedJawThickness);
+  const jawLength = num(fixture?.constants, 'jawLength', Z1_VISE.jawLength);
+  const fromPins = viseFrameFromPins(PIN_PAIR[0]!);
+  const faceX = placement?.frame?.fixedJawFaceX ?? fromPins.fixedJawFaceX;
+  const startY = placement?.frame?.jawStartY ?? fromPins.jawStartY;
+  return [faceX - barWidth / 2, startY + jawLength / 2];
 }
 
 /** `-70.2` — trailing zeros dropped, like every other printed figure (`fixture.ts`'s `fmtMm`). */

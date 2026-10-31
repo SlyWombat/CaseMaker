@@ -1,6 +1,6 @@
 // #520 — the preview draws the Makera Low-Profile Vise as it actually is, not the collision
-// envelope. Two stepped soft jaws (a 10 mm land and a 1.9 mm ledge set 3.1 mm below the top), two
-// rails, the screws and a provisional bed, all from `viseBody`.
+// envelope: two stepped soft jaws (a 10 mm land and a 1.9 mm ledge set 3.1 mm below the top), the
+// base plate with its grooved rails, the carrier, the screws — all from `viseBody` (#779).
 //
 // This spec is the eyeball half. It captures the shipped 12 mm blank and then a 50 mm cube — the
 // case where the old picture differed most — and checks the seat still moves the blank. The

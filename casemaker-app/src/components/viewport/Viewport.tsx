@@ -27,6 +27,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineBedPlate } from '@/engine/cnc/bedPlate';
 import { jobVise } from '@/engine/cnc/fixture';
+import { visePlacementFrame } from '@/store/locationStore';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import { pathBounds } from './simGeometry';
 
@@ -129,7 +130,8 @@ function activeSceneBoundsFromStores(): { center: THREE.Vector3; diag: number } 
   const bedBox: SceneBox | null = engraveActive
     ? (() => {
         const job = useEngraveJobStore.getState().job;
-        return machineBedPlate(jobVise(job), job.sacrificial, jobMachine(job, null));
+        // #779 — the measured placement when the record has one; the pins otherwise.
+        return machineBedPlate(jobVise(job), job.sacrificial, jobMachine(job, null), visePlacementFrame(job.machineId));
       })()
     : null;
   return activeSceneBounds({

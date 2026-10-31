@@ -31,6 +31,7 @@ import { Html } from '@react-three/drei';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useMachineStore } from '@/store/machineStore';
+import { useVisePlacementFrame } from '@/store/locationStore';
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { useSimStore } from '@/store/simStore';
@@ -640,15 +641,18 @@ function WarningOutlines() {
  */
 function MachineBed() {
   const job = useEngraveJobStore((s) => s.job);
-  // Memoised on the job: the box changes only when the job does, so a scrub or a camera move
-  // rebuilds nothing (`renderer.info.memory.geometries` must stay bounded — #197).
+  // #779 — the vise placement's measured machine XY places the bed under the drawn vise. Without
+  // one the plate is placed from the locating pins, which is a labelled provisional figure.
+  const frame = useVisePlacementFrame(job.machineId);
+  // Memoised on the job and the frame: the box changes only when they do, so a scrub or a camera
+  // move rebuilds nothing (`renderer.info.memory.geometries` must stay bounded — #197).
   const { centre, size } = useMemo(() => {
-    const box = machineBedPlate(jobVise(job), job.sacrificial, jobMachine(job, null));
+    const box = machineBedPlate(jobVise(job), job.sacrificial, jobMachine(job, null), frame);
     return {
       centre: [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2] as [number, number, number],
       size: [box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]] as [number, number, number],
     };
-  }, [job]);
+  }, [job, frame]);
   if (!(size[0] > 0 && size[1] > 0 && size[2] > 0)) return null;
   return (
     <mesh position={centre} name="engrave-bed-plate">

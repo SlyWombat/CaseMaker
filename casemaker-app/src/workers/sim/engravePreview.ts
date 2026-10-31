@@ -43,7 +43,8 @@ import {
 } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { clampPlacementsFor, jobMount, jobSetups, setupTools, toolItemsFor } from '@/engine/cnc/engrave/jobSetup';
-import { jobVise, viseBody } from '@/engine/cnc/fixture';
+import { jobVise } from '@/engine/cnc/fixture';
+import { viseBody } from '@/engine/cnc/drawnVise';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
 import type { ObstacleBox } from '@/engine/cnc/setup';
 import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial';

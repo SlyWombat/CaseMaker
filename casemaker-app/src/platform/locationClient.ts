@@ -351,6 +351,16 @@ export const BedProfileSchema = z
 export type FixtureRecord = z.infer<typeof FixtureRecordSchema>;
 export type BedProfile = z.infer<typeof BedProfileSchema>;
 
+/**
+ * #779 — the vise placement's machine XY, as every picture reads it: the fixed jaw's inner face
+ * and the jaw bar's front end. Written by a registration (#600) or typed; `null` on a placement
+ * when nothing has placed it yet.
+ */
+export interface ViseBedFrame {
+  fixedJawFaceX: number;
+  jawStartY: number;
+}
+
 
 /**
  * One machine at the location (§3.1). `serial` and `firmware` are null until something READS them

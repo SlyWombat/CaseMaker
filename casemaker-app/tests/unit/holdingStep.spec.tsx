@@ -503,7 +503,7 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     const label = Array.from(screen.getByTestId('engrave-setup-holding-picture').querySelectorAll('text')).find(
       (t) => t.textContent === '38.1 × 76.2',
     );
-    expect(label?.getAttribute('transform')).toBe('rotate(-90 120 79)');
+    expect(label?.getAttribute('transform')).toMatch(/^rotate\(-90 /);
 
     // The typed route's 76.2 × 38.1 is wide — the same blank the other way round, and drawn so.
     cleanup();

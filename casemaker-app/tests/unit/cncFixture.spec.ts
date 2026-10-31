@@ -37,10 +37,10 @@ import {
   todayISODate,
   uncertaintyFor,
   validateVise,
-  viseBody,
   viseEnvelope,
   viseForNewJob,
 } from '@/engine/cnc/fixture';
+import { viseBody } from '@/engine/cnc/drawnVise';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { noneSacrificial, presetJawStrips } from '@/engine/cnc/sacrificial';
@@ -101,10 +101,10 @@ describe('viseEnvelope (#203)', () => {
 // to draw the envelope's boxes, so a thick blank made the jaws grow with it; these tests pin the
 // split: drawn geometry depends on the jaw layout and the PROVISIONAL bar height, never on the
 // stock's thickness, while the envelope keeps its collision behaviour untouched.
-describe('viseBody — the drawn vise (#508, #520)', () => {
+describe('viseBody — the drawn vise (#508, #520, #779)', () => {
   const find = (boxes: ObstacleBox[], id: string): ObstacleBox => boxes.find((b) => b.id === id)!;
 
-  it('draws the stepped jaws, the rails, the screws and a provisional bed', () => {
+  it('draws the stepped jaws, the base, its rails and the screws', () => {
     const body = viseBody(STOCK, DEFAULT_VISE);
     const ids = body.boxes.map((b) => b.id);
     // The two jaw bars stay first, so the preview's fixture[0]/fixture[1] contract holds.
@@ -112,13 +112,15 @@ describe('viseBody — the drawn vise (#508, #520)', () => {
     expect(ids[1]).toBe('vise-moving-jaw');
     expect(ids).toContain('vise-fixed-ledge');
     expect(ids).toContain('vise-moving-ledge');
-    expect(ids).toContain('vise-fixed-rail');
-    expect(ids).toContain('vise-moving-rail');
-    // "screw 2" — the numbered clamp station the operator counts on the moving rail.
-    expect(ids).toContain('vise-moving-clamp-2');
-    expect(ids).toContain('vise-bed');
-    expect(ids).toContain('vise-bed-rail-left');
-    expect(ids).toContain('vise-bed-rail-right');
+    expect(ids).toContain('vise-carrier');
+    // #779 — the base plate and its three grooved rails, not the old two under-jaw rails.
+    expect(ids).toContain('vise-base');
+    expect(ids).toContain('vise-rail-1');
+    expect(ids).toContain('vise-rail-3');
+    // The clamping screw the operator turns ("screw 2"), and the six base screws.
+    expect(ids).toContain('vise-clamp-screw');
+    expect(ids).toContain('vise-base-screw-1');
+    expect(ids).toContain('vise-base-screw-6');
     // The solid body that used to fill the slot is gone: below the ledges the opening is OPEN, so
     // a probe that lands on a miss reads air, not the vise.
     expect(ids).not.toContain('vise-body');
@@ -142,12 +144,16 @@ describe('viseBody — the drawn vise (#508, #520)', () => {
     expect(ledge.max[2]).toBe(fixed.max[2] - LEDGE_STEP);
   });
 
-  it('keeps the slot between the jaws open at the rail depth', () => {
+  it('keeps the opening between the jaw faces clear, at the stock\'s own length', () => {
     const body = viseBody(STOCK, DEFAULT_VISE);
-    // The fixed rail ends at the fixed jaw's face, the moving rail starts at the moving jaw's —
+    // The fixed jaw ends at the stock's left edge, the moving jaw starts at its right edge —
     // nothing spans the opening where the blank sits and the probe lands.
-    expect(find(body.boxes, 'vise-fixed-rail').max[0]).toBe(0);
-    expect(find(body.boxes, 'vise-moving-rail').min[0]).toBe(STOCK.length);
+    expect(find(body.boxes, 'vise-fixed-jaw').max[0]).toBe(0);
+    expect(find(body.boxes, 'vise-moving-jaw').min[0]).toBe(STOCK.length);
+    // The carrier is behind the moving jaw, inside the base's run.
+    const carrier = find(body.boxes, 'vise-carrier');
+    expect(carrier.min[0]).toBe(STOCK.length + DEFAULT_VISE.movingJawThickness);
+    expect(carrier.max[0]).toBeLessThan(find(body.boxes, 'vise-base').max[0]!);
   });
 
   it('draws the same jaw height for a 3.8 mm blank, a 12 mm blank and a 50 mm cube', () => {

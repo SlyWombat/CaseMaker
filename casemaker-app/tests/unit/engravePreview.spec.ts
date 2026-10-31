@@ -98,17 +98,18 @@ describe('engravePreview (#205)', () => {
     for (const floor of p.floors) expect(meshVolume(floor.mesh)).toBeGreaterThan(0);
   });
 
-  it('draws the stepped jaws, the rails, the screws and a provisional bed (#520)', () => {
+  it('draws the stepped jaws, the base, its rails and the screws (#520, #779)', () => {
     const p = buildPreview(dj());
     const ids = p.fixture.map((f) => f.id);
     expect(ids[0]).toBe('vise-fixed-jaw');
     expect(ids[1]).toBe('vise-moving-jaw');
     expect(ids).toContain('vise-fixed-ledge');
     expect(ids).toContain('vise-moving-ledge');
-    expect(ids).toContain('vise-fixed-rail');
-    expect(ids).toContain('vise-moving-rail');
-    expect(ids).toContain('vise-moving-clamp-2');
-    expect(ids).toContain('vise-bed');
+    expect(ids).toContain('vise-carrier');
+    expect(ids).toContain('vise-base');
+    expect(ids).toContain('vise-rail-1');
+    expect(ids).toContain('vise-clamp-screw');
+    expect(ids).toContain('vise-base-screw-1');
     for (const piece of p.fixture) expect(meshVolume(piece.mesh)).toBeGreaterThan(0);
   });
 

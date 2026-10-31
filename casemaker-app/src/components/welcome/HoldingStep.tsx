@@ -49,6 +49,7 @@ import {
 import { dedupeFindings, isSideGoal, jobSetups, jobTargetObjects, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { flipAxisOf } from '@/engine/cnc/setups/flip';
 import { LEDGE_STEP, VISE_FLOOR_DEPTH } from '@/engine/cnc/fixture';
+import { drawnVise } from '@/engine/cnc/drawnVise';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { chuckStockOf } from '@/engine/cnc/stockStart';
 import { formLabel } from '@/engine/cnc/stockStart';
@@ -242,38 +243,11 @@ export function HoldingPicture({
     }
   })();
 
-  // #726 W18 — the blank is drawn to ITS OWN aspect. It used to be one fixed 136 × 46 rectangle
-  // whatever the stock said, so the badge starter's 38.1 × 76.2 blank (the bench's quarter turn,
-  // #383) drew LONG ALONG X — the opposite of its own numbers, and the same picture a typed
-  // 76.2 × 38.1 blank gets. Now the longer side is the longer side: the jaws close on the blank's
-  // X ends (a narrow blank moves them inward), and the dims run along the blank when it is too
-  // narrow to hold them across.
-  const drawn = ((): { w: number; h: number; x: number; y: number } => {
-    const maxW = 136;
-    const maxH = 88;
-    const scale = Math.min(maxW / Math.max(stock.length, 0.001), maxH / Math.max(stock.width, 0.001));
-    const w = Math.max(18, Math.min(maxW, stock.length * scale));
-    const h = Math.max(14, Math.min(maxH, stock.width * scale));
-    return { w, h, x: 120 - w / 2, y: 75 - h / 2 };
-  })();
-  const jawW = 34;
-  const fixedJawX = Math.max(2, drawn.x - jawW);
-  const movingJawX = Math.min(240 - 2 - jawW, drawn.x + drawn.w);
-  const dimsAlongY = drawn.w < 70;
-  const viseStock = round ? (
-    <circle cx="120" cy="75" r="30" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
-  ) : (
-    <rect
-      data-testid="engrave-setup-holding-picture-stock"
-      x={drawn.x}
-      y={drawn.y}
-      width={drawn.w}
-      height={drawn.h}
-      fill="#1e3a4a"
-      stroke="#6aa6c9"
-      strokeWidth="1.5"
-    />
-  );
+  // #779 — the vise's top view is drawn from the SAME parts as the bed scene and the engrave
+  // preview (`drawnVise`): the base plate, its rails, the fixed jaw at the base's left end, the
+  // moving jaw on its carrier at the stock's own length, and the clamping screw. The stock is
+  // placed in that vise — a short blank leaves most of the base empty toward +X, which is what
+  // the machine looks like.
 
   // #715 — the two bed mounts draw their scene, and its handles, from the bed's own model.
   if (mechanism === 'bed') {
@@ -354,49 +328,7 @@ export function HoldingPicture({
           </marker>
         </defs>
         {mechanism === 'vise' ? (
-          <>
-            <rect x={fixedJawX} y="30" width={jawW} height="90" fill="#5b6672" />
-            <rect x={movingJawX} y="30" width={jawW} height="90" fill="#39424c" stroke="#5b6672" />
-            {mount === 'board' && (
-              <rect
-                data-testid="engrave-setup-holding-picture-board"
-                x={drawn.x - 10}
-                y={drawn.y - 10}
-                width={drawn.w + 20}
-                height={drawn.h + 20}
-                fill="#3a3325"
-                stroke="#7a6a45"
-                strokeWidth="1"
-              />
-            )}
-            {viseStock}
-            <text
-              x="120"
-              y="79"
-              textAnchor="middle"
-              {...SVG_MONO}
-              transform={dimsAlongY ? 'rotate(-90 120 79)' : undefined}
-            >
-              {dims}
-            </text>
-            <text x={fixedJawX + jawW / 2} y="22" textAnchor="middle" {...SVG_MUTED}>
-              fixed jaw
-            </text>
-            <text x={movingJawX + jawW / 2} y="22" textAnchor="middle" {...SVG_MUTED}>
-              moving jaw
-            </text>
-            <path d="M60 128 H180" stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
-            <text x="120" y="142" textAnchor="middle" {...SVG_TEXT}>
-              X runs between the jaws
-            </text>
-            {/* The Y axis, inside the picture: an arrow up the page (+Y runs away from the operator) and
-                its letter above it — drawn at the edge, the label once sat past the viewBox and only a
-                bare line showed. */}
-            <path d="M222 108 V64" stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
-            <text x="222" y="56" textAnchor="middle" {...SVG_TEXT} data-testid="engrave-setup-holding-y-label">
-              Y
-            </text>
-          </>
+          <ViseTopView stock={stock} round={round} mount={mount} dims={dims} />
         ) : (
           <RotaryFrontView
             rotary={
@@ -426,6 +358,168 @@ export function HoldingPicture({
 }
 
 // ── #714: the front view — looking along Y at the X–Z plane the cutter lives in ───────────────
+
+/**
+ * #779 — the vise's top view, drawn from `drawnVise`'s parts so it cannot disagree with the bed
+ * scene or the engrave preview: the base plate, its three grooved rails, the fixed jaw at the
+ * base's left end, the stock in the jaws, the moving jaw on its carrier at the stock's length,
+ * and the clamping screw running along X into the long hex key on the right.
+ *
+ * The picture is a true top view at ONE scale, so a short blank leaves most of the base empty
+ * toward +X — the stock goes INTO the vise; the vise does not shrink around it. The screw's hex
+ * key runs off the right edge on purpose; the base, its rails and the jaws stay in frame.
+ *
+ * The schematic's two conventions are kept because the step's words use them: X runs between the
+ * jaws (left → right) and +Y runs away from the operator (up the page).
+ */
+function ViseTopView({
+  stock,
+  round,
+  mount,
+  dims,
+}: {
+  stock: { length: number; width: number; thickness: number };
+  round: boolean;
+  mount: HoldingMount;
+  dims: string;
+}): JSX.Element {
+  const W = 240;
+  const H = 150;
+  const pad = 6;
+  const opening = Math.max(0.1, stock.length);
+  const parts = drawnVise({ openingMm: opening, openingKnown: true, placementKnown: true });
+  // The stock sits in the middle of the 100 mm bar's length, as the step centres it.
+  const barLength = Math.max(stock.width, 0);
+  const stockY = (100 - Math.min(barLength, 100)) / 2;
+
+  // The layout reads every part except the clamping screw and its hex key: those run off the
+  // right edge on purpose, and letting them set the scale would shrink the vise to half a picture.
+  const laidOut = parts.filter((p) => p.role !== 'clamp-screw' && p.role !== 'base-screw');
+  const xs = laidOut.flatMap((p) => [p.min[0], p.max[0]]).concat([0, opening]);
+  const ys = laidOut.flatMap((p) => [p.min[1], p.max[1]]).concat([stockY, stockY + barLength]);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  const scale = Math.min((W - pad * 2) / Math.max(xMax - xMin, 0.001), (H - pad * 2) / Math.max(yMax - yMin, 0.001));
+  const ox = W / 2 - ((xMin + xMax) / 2) * scale;
+  const oy = H / 2 - ((yMin + yMax) / 2) * scale;
+  const X = (x: number): number => ox + x * scale;
+  const Y = (y: number): number => oy + y * scale;
+  const rect = (p: (typeof parts)[number]): JSX.Element => (
+    <rect
+      key={p.id}
+      x={X(p.min[0])}
+      y={Y(p.min[1])}
+      width={Math.max(0.5, (p.max[0] - p.min[0]) * scale)}
+      height={Math.max(0.5, (p.max[1] - p.min[1]) * scale)}
+      fill={VISE_PART_FILL[p.role]}
+      stroke={VISE_PART_EDGE[p.role]}
+      strokeWidth={0.8}
+    />
+  );
+
+  const stockW = opening * scale;
+  const stockH = Math.max(0.5, barLength * scale);
+  const stockCx = X(opening / 2);
+  const stockCy = Y(stockY + barLength / 2);
+  const dimsAlongY = stockW < 70;
+  const jawLabelY = Math.max(9, Y(-8) - 3);
+  const movingLabelX = opening < 40 ? X(opening + 18) : X(opening + 5);
+  const xArrowFrom = X(0);
+  const xArrowTo = Math.max(X(opening), xArrowFrom + 40);
+
+  return (
+    <>
+      {parts.filter((p) => p.role === 'base').map(rect)}
+      {parts.filter((p) => p.role === 'rail').map(rect)}
+      {parts.filter((p) => p.role === 'base-screw').map(rect)}
+      {parts.filter((p) => p.role === 'fixed-jaw' || p.role === 'fixed-ledge').map(rect)}
+      {parts.filter((p) => p.role === 'carrier').map(rect)}
+      {parts.filter((p) => p.role === 'clamp-screw').map(rect)}
+      {parts.filter((p) => p.role === 'moving-jaw' || p.role === 'moving-ledge').map(rect)}
+      {parts.filter((p) => p.role === 'lock-screw').map(rect)}
+      {mount === 'board' && (
+        <rect
+          data-testid="engrave-setup-holding-picture-board"
+          x={X(0) - 6}
+          y={Y(stockY) - 6}
+          width={stockW + 12}
+          height={stockH + 12}
+          fill="#3a3325"
+          stroke="#7a6a45"
+          strokeWidth="1"
+        />
+      )}
+      {round ? (
+        <circle cx={stockCx} cy={stockCy} r={Math.max(2, (Math.min(stock.length, stock.width) / 2) * scale)} fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
+      ) : (
+        <rect
+          data-testid="engrave-setup-holding-picture-stock"
+          x={X(0)}
+          y={Y(stockY)}
+          width={stockW}
+          height={stockH}
+          fill="#1e3a4a"
+          stroke="#6aa6c9"
+          strokeWidth="1.5"
+        />
+      )}
+      <text
+        x={stockCx}
+        y={stockCy + 4}
+        textAnchor="middle"
+        {...SVG_MONO}
+        transform={dimsAlongY ? `rotate(-90 ${stockCx.toFixed(1)} ${(stockCy + 4).toFixed(1)})` : undefined}
+      >
+        {dims}
+      </text>
+      <text x={X(-5)} y={jawLabelY} textAnchor="middle" {...SVG_MUTED}>
+        fixed jaw
+      </text>
+      <text x={movingLabelX} y={jawLabelY} textAnchor="middle" {...SVG_MUTED}>
+        moving jaw
+      </text>
+      <path d={`M${xArrowFrom} ${H - 14} H${xArrowTo}`} stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
+      <text x={W / 2} y={H - 3} textAnchor="middle" {...SVG_TEXT}>
+        X runs between the jaws
+      </text>
+      {/* The Y axis, inside the picture: an arrow up the page (+Y runs away from the operator) and
+          its letter above it — drawn at the edge, the label once sat past the viewBox and only a
+          bare line showed. */}
+      <path d={`M${W - 6} ${H - 48} V${H - 88}`} stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
+      <text x={W - 6} y={H - 94} textAnchor="middle" {...SVG_TEXT} data-testid="engrave-setup-holding-y-label">
+        Y
+      </text>
+    </>
+  );
+}
+
+/** The vise part colours in the Holding picture — the fixture's greys, the screws a lighter one. */
+const VISE_PART_FILL: Record<string, string> = {
+  base: '#242b33',
+  rail: '#39424c',
+  'fixed-jaw': '#5b6672',
+  'fixed-ledge': '#4a5560',
+  'moving-jaw': '#39424c',
+  'moving-ledge': '#323b45',
+  carrier: '#323b45',
+  'clamp-screw': '#8a93a3',
+  'lock-screw': '#8a93a3',
+  'base-screw': '#8a93a3',
+};
+const VISE_PART_EDGE: Record<string, string> = {
+  base: '#4a5560',
+  rail: '#5b6672',
+  'fixed-jaw': '#6d7885',
+  'fixed-ledge': '#5b6672',
+  'moving-jaw': '#5b6672',
+  'moving-ledge': '#4a5560',
+  carrier: '#4a5560',
+  'clamp-screw': '#b6bec8',
+  'lock-screw': '#b6bec8',
+  'base-screw': '#b6bec8',
+};
 
 /**
  * The rotary job's front view (design §3.4, station 3): the chuck on the left with its jaws and the

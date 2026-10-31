@@ -70,10 +70,11 @@ describe('#511 the bed scene bbox is pinned per placement', () => {
       ],
     });
     const s = scene([VISE_FIXTURE], p);
-    // The jaws span X to the moving jaw + its 10 mm bar (opening 60) and the body's 5 mm margin →
-    // 75; Y to jawStartY + jawLength (100); Z up to the measured jaw top (-50).
+    // #779 — the drawn base runs 180 mm past the fixed face, its Y runs 8 mm past the bar each
+    // way, and the clamping screw's end reaches 15 mm past the base's right end; the jaw top is
+    // the measured −50. The moving jaw is parked at the provisional 60 mm opening.
     expect(s.bbox.min).toEqual([-200, -200, BED_TOP_Z - BED_PLATE_THICKNESS]);
-    expect(s.bbox.max).toEqual([75, 100, -50]);
+    expect(s.bbox.max).toEqual([195, 108, -50]);
   });
 
   it('a provisional (unmeasured) vise still contributes boxes, drawn dashed', () => {
@@ -95,6 +96,59 @@ describe('#511 the bed scene bbox is pinned per placement', () => {
     // Nothing measured → the fixed jaw is dashed "provisional".
     expect(jaws.every((b) => b.kind === 'dashed')).toBe(true);
     expect(jaws.some((b) => b.label === 'provisional')).toBe(true);
+  });
+
+  it('#779 puts the fixed jaw face exactly on a measured fixedJawFaceX', () => {
+    const p = profile({
+      datums: { surfaceTopZ: null, viseJawTopZ: { value: -56.82, measuredAt: NOW, by: 'wired-probe', at: null }, bracketSeatZ: null, rotaryAxis: null },
+      placements: [
+        {
+          id: 'pl-vise',
+          fixture: 'fx-vise-1',
+          where: { kind: 'pins', pins: 'vise', anchor: null },
+          count: null,
+          frame: { fixedJawFaceX: -180.375, jawStartY: -202.75 },
+          provenance: { fixedJawFaceX: 'measured:2026-10-24', jawStartY: 'typed' },
+        },
+      ],
+    });
+    const s = scene([VISE_FIXTURE], p);
+    const jaw = s.boxes.find((b) => b.id === 'pl-vise-fixed-jaw')!;
+    expect(jaw.max[0]).toBe(-180.375);
+    expect(jaw.min[0]).toBe(-180.375 - 10);
+    expect(jaw.max[2]).toBe(-56.82);
+    expect(jaw.kind).toBe('solid');
+    // The base is the same drawn model: 200 mm across, its left end 10 mm past the jaw's outer
+    // face, and it is still labelled provisional because its own plate has never been measured.
+    const base = s.boxes.find((b) => b.id === 'pl-vise-base')!;
+    expect(base.max[0] - base.min[0]).toBe(200);
+    expect(base.kind).toBe('dashed');
+    expect(base.label).toBe('provisional');
+    // The moving jaw is parked, and says so.
+    const moving = s.boxes.find((b) => b.id === 'pl-vise-moving-jaw')!;
+    expect(moving.kind).toBe('dashed');
+    expect(moving.label).toBe('provisional opening');
+  });
+
+  it('#779 without a measurement places the vise from the pins and flags it provisional', () => {
+    const p = profile({
+      placements: [
+        {
+          id: 'pl-vise',
+          fixture: 'fx-vise-1',
+          where: { kind: 'pins', pins: 'vise', anchor: null },
+          count: null,
+          frame: null,
+          provenance: {},
+        },
+      ],
+    });
+    const s = scene([VISE_FIXTURE], p);
+    const jaw = s.boxes.find((b) => b.id === 'pl-vise-fixed-jaw')!;
+    // The left pin (−195) plus the drawn base's own 15 mm: the face is at −180.
+    expect(jaw.max[0]).toBe(-180);
+    expect(jaw.kind).toBe('dashed');
+    expect(jaw.label).toBe('from the pins, not measured');
   });
 });
 
