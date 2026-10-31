@@ -179,12 +179,19 @@ function previewInputs(job: EngraveJob): PreviewInputs {
   // The warn ratio is the shop's (#451), read here for the same reason: the worker cannot see the
   // location, and the preview's findings must warn at the bar the run would raise.
   const shopDefaults = useShopDefaultsStore.getState().defaults;
+  // #743 P-8 — ONE registry snapshot for the whole request: the worker measures with it, and its
+  // own `validateJob` resolves the job's cutter keys against `shop.tools` (the worker has no
+  // registry of its own). Without it every job whose cutter is an `inv:` key reads "Tool key ...
+  // is not in the tool library" the moment the preview lands, and the panel blocks Generate on a
+  // library it plainly has.
+  const tools = getTools();
   return {
-    tools: getTools(),
+    tools,
     catalogue: feedCatalogueRows(),
     margins: effectiveMargins(job, useSettingsStore.getState().margins),
     conditions: inventoryConditions(),
     shop: {
+      tools,
       lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
       // #434 — the drill point angle (and the other `drill.*` numbers) with their sources, so
       // the preview's depth findings are judged with the point the run would plan.
