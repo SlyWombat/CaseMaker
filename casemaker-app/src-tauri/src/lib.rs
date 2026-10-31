@@ -381,6 +381,73 @@ mod tests {
         assert_eq!(webview_host("2001:db8::5".parse().unwrap()), "2001:db8::5");
     }
 
+    /// #389 — THE GRANT IS THE ONE URL THE WINDOW LOADS, AND THE WHOLE PERMISSION LIST.
+    ///
+    /// The issue's two faults, asserted on the grant itself rather than on the function that
+    /// chooses the host: (1) a `--host <LAN IP>` window's origin is named — exactly
+    /// `http://192.168.10.16:5399/*`, and nothing else — so the machine transport is allowed
+    /// there; (2) the loopback patterns the old capability file carried are NOT inherited, so a
+    /// page on any other local port gets nothing. The permission list comes from the
+    /// build-checked file, so the runtime grant and `capabilities/default.json` cannot drift.
+    #[test]
+    fn window_capability_grants_exactly_the_bound_origin_and_the_whole_list() {
+        let origin = "http://192.168.10.16:5399";
+        let grant = window_capability(origin).expect("the embedded capability parses");
+        let value: serde_json::Value = serde_json::from_str(&grant).unwrap();
+
+        // The identifier the runtime capability is registered under, and the window it is for.
+        assert_eq!(value["identifier"], "embedded-server");
+        assert_eq!(value["local"], false);
+        assert_eq!(value["windows"], serde_json::json!(["main"]));
+
+        // ONE remote URL: the window's own origin, path open the way the old entry left it.
+        assert_eq!(
+            value["remote"]["urls"],
+            serde_json::json!([format!("{origin}/*")])
+        );
+
+        // Every permission the build checked survives the runtime instantiation, the machine
+        // transport among them (point 1: it answered "not allowed by ACL" without this).
+        let template: serde_json::Value = serde_json::from_str(CAPABILITY_FILE).unwrap();
+        assert_eq!(value["permissions"], template["permissions"]);
+        let permissions: Vec<&str> = template["permissions"]
+            .as_array()
+            .expect("the capability file states a permission list")
+            .iter()
+            .map(|p| p.as_str().expect("a permission is a string"))
+            .collect();
+        for machine in [
+            "allow-machine-udp-listen",
+            "allow-machine-tcp-connect",
+            "allow-machine-tcp-write",
+            "allow-machine-tcp-read",
+            "allow-machine-tcp-close",
+        ] {
+            assert!(
+                permissions.contains(&machine),
+                "{machine} must be granted to the window"
+            );
+        }
+
+        // AND NOTHING ELSE (point 2): neither loopback form the old file named is present, so one
+        // grant cannot hand the raw transport to a page on some other local port.
+        let urls = value["remote"]["urls"].as_array().unwrap();
+        for url in urls {
+            let url = url.as_str().unwrap();
+            assert!(!url.contains("127.0.0.1"), "unexpected {url}");
+            assert!(!url.contains("localhost"), "unexpected {url}");
+        }
+
+        // The loopback launch is granted its own origin the same way — the grant follows the
+        // server, whatever it bound, rather than a list that guesses.
+        let loopback = window_capability("http://127.0.0.1:5399").unwrap();
+        let loopback: serde_json::Value = serde_json::from_str(&loopback).unwrap();
+        assert_eq!(
+            loopback["remote"]["urls"],
+            serde_json::json!(["http://127.0.0.1:5399/*"])
+        );
+    }
+
     fn args(host: Option<&str>, port: Option<u16>, bind_all: bool) -> CliArgs {
         CliArgs {
             host: host.map(str::to_string),
