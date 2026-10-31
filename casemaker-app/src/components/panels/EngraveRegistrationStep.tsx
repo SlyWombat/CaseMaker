@@ -43,9 +43,9 @@
  * sheet, which prints the measured landing range.
  */
 
-import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
 import type { EngraveJob } from '@/types/engraveJob';
-import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { probeInstrumentOf, type RegistrationPlan } from '@/engine/cnc/registration/plan';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import { summarizeOutcome, summarizePlan } from '@/engine/cnc/registration/summary';
 import {
@@ -71,7 +71,23 @@ import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type MachineUpdate } from '@/store/locationStore';
-import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
+import {
+  accessoryNameFor,
+  mountDatumFor,
+  mountDatumMismatch,
+  mountTapFor,
+  probeFor,
+  probeNameFor,
+  recordMountReading,
+  recordProbeReading,
+  surfaceTopDatumFor,
+} from '@/engine/cnc/registration/mountContext';
+import { registrationSettings } from '@/engine/cnc/registration/settings';
+import { registrationTouches } from '@/engine/cnc/plan';
+import { faceUpOf, planFromSetups, setupsSettings } from '@/engine/cnc/setups';
+import { jobMachine } from '@/engine/cnc/calibration';
+import { planRegistrationAttempt } from './EngraveSetupsSection';
+import type { RegistrationAttempt } from './EngraveSetupRow';
 import {
   viseFrameFromRegistration,
   withBracketSeatDatum,
@@ -108,6 +124,22 @@ export interface EngraveRegistrationStepProps {
 type Phase = 'idle' | 'running' | 'measured' | 'writing' | 'recorded' | 'failed';
 
 const n = (v: number): string => String(Math.round(v * 1000) / 1000);
+
+/** #797 follow-up — the plan in one line: where it touches, how many touches, which probe. */
+function proposalLine(plan: RegistrationPlan): string {
+  const order = ['left', 'front', 'right', 'back'] as const;
+  const edges = order.filter((edge) => plan.scans.some((scan) => scan.edge === edge));
+  const touches = registrationTouches({ ok: true, plan });
+  const touchWords = `${touches} touch${touches === 1 ? '' : 'es'}`;
+  const probeWords = probeInstrumentOf(plan.probe) === 'xyz' ? '3D probe' : 'wired probe';
+  const list =
+    edges.length === 0
+      ? 'no edge scan'
+      : edges.length === 1
+        ? `${edges[0]} edge`
+        : `${edges.slice(0, -1).join(', ')} and ${edges.at(-1)} edges`;
+  return `${list}, then the top · ${touchWords} · ${probeWords}`;
+}
 
 /** The plan the Setups section approved for the job's first setup, or why there is none. */
 function approvedPlan(job: EngraveJob): { plan: RegistrationPlan | null; why: string | null } {
@@ -158,6 +190,87 @@ function marginRefusal(outcome: RegistrationOutcome): boolean {
 
 export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStepProps): JSX.Element {
   const { plan, why } = approvedPlan(job);
+  // #797 follow-up — THE REGISTER CARD HOLDS THE ACTION. With no approved plan, the planner's
+  // proposal is computed HERE, from the same machine record, shop defaults and engine call the
+  // Setups section previews, and shown in one line. One press approves it and starts the run;
+  // Design → Setups stays the place to edit it.
+  const defaults = useShopDefaultsStore((s) => s.defaults);
+  const calibration = useSettingsStore((s) => s.machineCalibration);
+  const machineRecord = target === null ? null : machineAt(target);
+  const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
+  const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
+  const mountDatumMismatchBy = useMemo(() => mountDatumMismatch(machineRecord), [machineRecord]);
+  const mountDatumMismatchName = useMemo(
+    () => (mountDatumMismatchBy === null ? null : accessoryNameFor(mountDatumMismatchBy)),
+    [mountDatumMismatchBy],
+  );
+  const surfaceTopZ = useMemo(() => surfaceTopDatumFor(machineRecord), [machineRecord]);
+  const registrations = useEngraveRegistrationStore((s) => s.records);
+  const seekFromMachineZ = useMemo(() => jobMachine(job, calibration).toolChange.clearanceZ, [job, calibration]);
+  const mountTap = useMemo(
+    () => mountTapFor(machineRecord, Object.values(registrations), seekFromMachineZ, jobVise(job).jawStartY),
+    [machineRecord, registrations, seekFromMachineZ, job],
+  );
+  const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
+  const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
+  const setupSettings = useMemo(() => setupsSettings(defaults), [defaults]);
+  const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
+  const proposal = useMemo<RegistrationAttempt | null>(() => {
+    if (plan !== null || job.setups === undefined || job.setups.length === 0) return null;
+    const savedPlan = planFromSetups(job, setupSettings, rotaryEnvelope);
+    const setup0 = job.setups[0]!;
+    const derived = savedPlan.setups.find(
+      (s) => s.faceUp === faceUpOf(setup0) && s.itemIds.some((id) => setup0.itemIds.includes(id)),
+    );
+    if (derived === undefined) return null;
+    return planRegistrationAttempt({
+      job,
+      setup: derived,
+      mount: setup0.mount,
+      seatZ: '',
+      useTypedSeat: false,
+      mountDatum,
+      mountDatumMismatch: mountDatumMismatchBy,
+      mountDatumMismatchName,
+      surfaceTopZ,
+      probe,
+      probeName,
+      mountTap,
+      defaults,
+      calibration,
+      settings: regSettings,
+    });
+  }, [
+    plan,
+    job,
+    setupSettings,
+    rotaryEnvelope,
+    mountDatum,
+    mountDatumMismatchBy,
+    mountDatumMismatchName,
+    surfaceTopZ,
+    probe,
+    probeName,
+    mountTap,
+    defaults,
+    calibration,
+    regSettings,
+  ]);
+  const [proposalOpen, setProposalOpen] = useState(false);
+
+  /** #797 follow-up — approve the planner's proposal and start the run in ONE press. */
+  async function approveAndStart(attempt: Extract<RegistrationAttempt, { kind: 'plan' }>): Promise<void> {
+    const setups = job.setups ?? [];
+    useEngraveJobStore.getState().setSetups(
+      setups.map((setup, i) =>
+        i === 0
+          ? { ...setup, registration: { method: attempt.method, plan: attempt.plan, expected: attempt.expected } }
+          : setup,
+      ),
+    );
+    await start(attempt.plan);
+  }
+
   const record = useEngraveRegistrationStore((s) => s.record);
   // #797 — the one statement at Cut step 1 covers this step's probe-fitted ask.
   const statementGiven = useEngraveRunStore((s) => s.acknowledged);
@@ -272,10 +385,13 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     }
   }
 
-  async function start(): Promise<void> {
+  async function start(planOverride?: RegistrationPlan): Promise<void> {
+    // #797 follow-up — the Register card approves the planner's proposal and starts in ONE press:
+    // the plan it approved is handed here, because the render-time `plan` is still null.
+    const effectivePlan = planOverride ?? plan;
     // #797 — the ONE statement at Cut step 1 replaced this step's own at-machine tick.
     const acknowledged = useEngraveRunStore.getState().acknowledged;
-    if (target === null || plan === null || !acknowledged || busy) return;
+    if (target === null || effectivePlan === null || !acknowledged || busy) return;
     // #639 — A NEW RUN FORGETS THE LAST CLAMPING. The record and the surface assessment belong to
     // the blank as it was; keeping them through a re-run (which may alarm out or be stopped) left
     // the Cut step claiming "Registration recorded", the dome tick ticked, and Upload enabled
@@ -289,7 +405,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     setNarration(null);
     // #638 — the plan this run is measured under travels with its result: a later setup edit must
     // not change what the record says was approved and run.
-    runPlanRef.current = plan;
+    runPlanRef.current = effectivePlan;
     frameSavedRef.current = false;
     runJawStartYRef.current = jobVise(job).jawStartY;
     // #519 item 1 — a new run's readings replace the last run's dots and table, and they are
@@ -302,7 +418,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     // resolved exactly as the run sheet resolves it, so the band the assessment refuses on and the
     // band the sheet prints for the same readings cannot be two different numbers.
     const spreadPlan = surfaceSpreadPlan(job, {
-      touchCount: plan.settings.surfaceTouchCount,
+      touchCount: effectivePlan.settings.surfaceTouchCount,
       margin: effectiveMargins(job, houseMargins).boundaryMargin,
       // #501 — the console G32 recipe's shape, when the measurement comes back a TILT: the cutter's
       // radius (the grid grows by it), the APPROVED plan's own probe clearance, and the shop's grid
@@ -314,14 +430,14 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           ? null
           : {
               toolRadiusMm: diameter / 2,
-              clearanceMm: plan.settings.parkAboveSurfaceMm,
+              clearanceMm: effectivePlan.settings.parkAboveSurfaceMm,
               points: shopDefault('plan.autoLevelPoints').value,
             };
       })(),
     });
     try {
       const r = await runRegistration(
-        plan,
+        effectivePlan,
         {
           console: { send: (line, timing) => handle.send(line, timing) },
           // The at-machine tick already names the probe, so the executor's first prompt is answered
@@ -404,7 +520,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           // writing it here would aim them where this run found the jaw, not where it now is. The
           // operator's acceptance (`writeOrigin`) writes them from the held result instead.
           const frameRegistration =
-            r.outcome.usable && r.outcome.withinMargin && plan.mount === 'vise'
+            r.outcome.usable && r.outcome.withinMargin && effectivePlan.mount === 'vise'
               ? { measuredAt: now, correctedG54: r.outcome.correctedG54 }
               : null;
           // #613/#636 — ONE bed for the whole run: the frame and the datum land in ONE save, not two
@@ -413,20 +529,20 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           // a stale guard re-applies them to the re-read record instead of overwriting another
           // window's change with this run's pre-read copy.
           const bed = await createFirstBed(machine, frameRegistration, now);
-          const probeId = plan.probe?.id ?? null;
-          const reference = plan.mountTap?.reference ?? 'vise-jaw-top';
+          const probeId = effectivePlan.probe?.id ?? null;
+          const reference = effectivePlan.mountTap?.reference ?? 'vise-jaw-top';
           const mountTap = r.mountTap;
           // #607 — the reading is the bracket's TOP; the datum is the SEAT it stands on, one bracket
           // height below (`bracketSeatFromTap`), using the arm's measured top.
           const bracketSeat =
-            mountTap !== null && reference === 'bracket-seat' ? bracketSeatFromTap(mountTap.z, plan.mountTap?.datumOffsetMm ?? 0) : null;
+            mountTap !== null && reference === 'bracket-seat' ? bracketSeatFromTap(mountTap.z, effectivePlan.mountTap?.datumOffsetMm ?? 0) : null;
           const update: MachineUpdate = (current) => {
             let rec = bed(current);
             if (frameRegistration !== null) {
               const frame = viseFrameFromRegistration(frameRegistration, jobVise(job).jawStartY);
               rec = withVisePlacementFrame(rec, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now);
               // #619 — write the measured surface top so the next plan expects the found top.
-              rec = withSurfaceTopDatum(rec, { z: r.data.surface.z, at: plan.surfacePoint }, probeId, now);
+              rec = withSurfaceTopDatum(rec, { z: r.data.surface.z, at: effectivePlan.surfacePoint }, probeId, now);
             }
             if (mountTap !== null) {
               rec =
@@ -475,9 +591,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         if (r.mountTap !== null) {
           await recordMountReading(
             machineAt(target),
-            plan.mountTap?.reference === 'bracket-seat' ? 'bracket' : 'vise',
+            effectivePlan.mountTap?.reference === 'bracket-seat' ? 'bracket' : 'vise',
             r.mountTap,
-            plan.probe?.id ?? null,
+            effectivePlan.probe?.id ?? null,
           );
         }
       } catch (e) {
@@ -641,7 +757,49 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         </p>
       )}
 
-      {why !== null && (
+      {plan === null && proposal !== null && proposal.kind === 'plan' && (
+        <div
+          data-testid="engrave-registration-proposal"
+          style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 8, margin: '6px 0' }}
+        >
+          <p style={{ ...MUTED, margin: 0 }} data-testid="engrave-registration-proposal-line">
+            {proposalLine(proposal.plan)}{' '}
+            <button
+              type="button"
+              data-testid="engrave-registration-proposal-open"
+              aria-expanded={proposalOpen}
+              aria-label="Show the plan"
+              style={{ font: 'inherit', padding: 0, border: 0, background: 'none', color: '#8ab4f8', cursor: 'pointer' }}
+              onClick={() => setProposalOpen((v) => !v)}
+            >
+              ›
+            </button>
+          </p>
+          {proposalOpen && (
+            <p style={MUTED} data-testid="engrave-registration-proposal-detail">
+              {summarizePlan(proposal.plan)}
+            </p>
+          )}
+          <button
+            type="button"
+            data-testid="engrave-registration-approve-start"
+            disabled={!statementGiven || busy}
+            style={{ width: '100%', padding: 7, marginTop: 6, fontWeight: 600 }}
+            onClick={() => void approveAndStart(proposal)}
+          >
+            Register
+          </button>
+          <p style={MUTED} data-testid="engrave-registration-proposal-where">
+            This is the planner’s proposal; Design → Setups is where it is edited.
+          </p>
+        </div>
+      )}
+      {plan === null && proposal !== null && proposal.kind !== 'plan' && (
+        <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-no-plan">
+          {proposal.kind === 'refused' ? proposal.reason : proposal.message}
+        </p>
+      )}
+      {plan === null && proposal === null && why !== null && (
         <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-no-plan">
           {why}
         </p>

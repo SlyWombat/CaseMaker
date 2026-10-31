@@ -987,3 +987,113 @@ describe('#743 D-2 — a different-sized disc asks the operator, and never refus
     expect(screen.getByTestId('engrave-registration-write')).toBeTruthy();
   });
 });
+
+// #797 follow-up — THE REGISTER CARD HOLDS THE ACTION.
+describe('#797 follow-up — the Register card proposes the plan it runs', () => {
+  /** A location whose machine carries a measured jaw-top datum and a checked-out wired probe. */
+  function proposalLocation(): void {
+    useLocationStore.setState({
+      status: 'present',
+      etag: '"e-proposal"',
+      reason: null,
+      location: {
+        machines: [
+          {
+            id: 'm-proposal',
+            profileId: 'Z1',
+            address: { host: TARGET.host, port: TARGET.port },
+            bedProfiles: [
+              {
+                id: 'bp-proposal',
+                datums: {
+                  surfaceTopZ: null,
+                  viseJawTopZ: { value: -57.491, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  bracketSeatZ: null,
+                  rotaryAxis: null,
+                },
+                placements: [
+                  {
+                    id: 'pl-vise',
+                    fixture: 'fx-vise-1',
+                    where: { kind: 'pins', pins: 'vise', anchor: null },
+                    count: null,
+                    frame: { fixedJawFaceX: -181.2, jawStartY: -203.5 },
+                    provenance: {},
+                  },
+                ],
+                history: [],
+              },
+            ],
+            activeBedProfileId: 'bp-proposal',
+            history: [],
+            notes: [],
+            observedAt: '2026-10-23T00:00:00.000Z',
+          },
+        ],
+        accessories: [
+          {
+            id: 'fx-probe-1',
+            kind: 'probe',
+            product: 'Makera Wired Probe V2',
+            variant: 'wired-touch',
+            unit: { tipDiameterMm: 2.0, rimOffsetMm: 0.7, rimOffsetUncertaintyMm: 0.25 },
+            provenance: {},
+            history: [],
+            whereabouts: { kind: 'machine', machineId: 'm-proposal', since: '2026-10-23T00:00:00.000Z' },
+          },
+          {
+            id: 'fx-vise-1',
+            kind: 'vise',
+            constants: { jawBarWidth: 10, jawLength: 100 },
+            unit: { jawStartY: -203.5 },
+            provenance: {},
+            history: [],
+            whereabouts: { kind: 'machine', machineId: 'm-proposal', since: '2026-10-01T00:00:00.000Z' },
+          },
+        ],
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+  }
+
+  it('shows the planner’s one-line proposal, and one Register press approves it and starts', async () => {
+    // The default blank on the vise: a blank whose top stands proud of the jaws, which is the
+    // configuration the planner can bracket. (The badge fixture's thin laminate sits flush.)
+    const base = defaultEngraveJob();
+    const setup0 = jobSetups(base)[0]!;
+    const job: EngraveJob = { ...base, setups: [{ ...setup0, mount: { kind: 'vise' } }] };
+    proposalLocation();
+    useEngraveJobStore.setState({ job });
+    useEngraveRunStore.setState({ acknowledged: false, acknowledgedFor: null });
+
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    // The card proposes; the old dead end ("Plan and approve it in Design → Setups") is gone.
+    const line = await screen.findByTestId('engrave-registration-proposal-line');
+    expect(line.textContent).toContain('then the top');
+    expect(line.textContent).toContain('touches');
+    expect(line.textContent).toContain('wired probe');
+    expect(screen.queryByTestId('engrave-registration-no-plan')).toBeNull();
+    // The plan opens behind ›.
+    fireEvent.click(screen.getByTestId('engrave-registration-proposal-open'));
+    expect(screen.getByTestId('engrave-registration-proposal-detail').textContent).toContain('Home, fit the wired probe');
+
+    // The ONE statement at Cut step 1 arms the press.
+    const register = screen.getByTestId('engrave-registration-approve-start') as HTMLButtonElement;
+    expect(register.textContent).toBe('Register');
+    expect(register.disabled).toBe(true);
+    act(() => {
+      useEngraveRunStore.getState().acknowledgeProgram('program-key');
+    });
+    expect(register.disabled).toBe(false);
+
+    // One press approves it AND starts: the job's setup carries the plan the card showed.
+    await act(async () => {
+      fireEvent.click(register);
+    });
+    const approved = useEngraveJobStore.getState().job.setups?.[0]?.registration;
+    expect(approved).toBeDefined();
+    expect(approved!.method).toBe('vise');
+    expect(approved!.plan.scans.length).toBeGreaterThan(0);
+    expect(approved!.expected.length).toBeGreaterThan(0);
+  });
+});

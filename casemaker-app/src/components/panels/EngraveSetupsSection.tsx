@@ -117,7 +117,7 @@ function expectedWords(plan: RegistrationPlan): string {
  * from the machine's own anchor and the shop defaults — `anchorFrom` / `bracketExpectedSurface`
  * refuse when the machine has not supplied them.
  */
-function planRegistrationAttempt(args: {
+export function planRegistrationAttempt(args: {
   job: EngraveJob;
   setup: Setup;
   mount: MountSpec;
