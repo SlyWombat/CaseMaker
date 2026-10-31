@@ -204,7 +204,7 @@ describe('#741 the depth limit is the cutter’s own cone, not a table', () => {
   });
 });
 
-describe('#741 the bench’s over-deep V-carves are refused by name', () => {
+describe('#786 slice 3 — an over-deep V-carve is CUT TO THE CONE and stated', () => {
   const depthFinding = (job: EngraveJob, tool: Tool) => {
     const gen = generate(job, tool);
     return {
@@ -217,26 +217,31 @@ describe('#741 the bench’s over-deep V-carves are refused by name', () => {
     const job = benchJob('j11-v1-star-female-90.json');
     const { gen, finding } = depthFinding(job, CHAMFER_90);
     expect(finding, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBeDefined();
-    expect(finding!.severity).toBe('error');
+    // #786 slice 3 — the cut runs to the height the cone reaches; the sentence states the rest.
+    expect(finding!.severity).toBe('warning');
     expect(finding!.labelId).toBe('s1');
     expect(finding!.message).toContain('5.1 mm');
     expect(finding!.message).toContain('1.538 mm');
+    expect(finding!.message).toContain('3.562 mm');
     expect(finding!.message).toContain('C1-BIT-CHAMFER-90');
-    // The program is not written.
-    expect(gen.ok).toBe(false);
-    expect(gen.programs).toEqual([]);
+    // The program is WRITTEN, cut to the cone.
+    expect(gen.ok, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
+    expect(gen.programs.length).toBeGreaterThan(0);
   });
 
   it('the derived 3.8 mm male plug on the same 1.5375 mm cone', () => {
     const job = benchJob('j11-v1-star-male-90.json');
     const { gen, finding } = depthFinding(job, CHAMFER_90);
     expect(finding).toBeDefined();
+    expect(finding!.severity).toBe('warning');
     expect(finding!.message).toContain('3.8 mm');
     expect(finding!.message).toContain('1.538 mm');
-    expect(gen.programs).toEqual([]);
+    expect(finding!.message).toContain('2.262 mm');
+    expect(gen.ok, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
+    expect(gen.programs.length).toBeGreaterThan(0);
   });
 
-  it('the 30v inlay female now sits inside the 4.9916 mm cone, and a 5.1 mm cut is still refused', () => {
+  it('the 30v inlay female sits inside the 4.9916 mm cone, and a 5.1 mm cut is cut to it and stated', () => {
     // #742 moved the real bench job from 5.1 mm to 4.8 mm when it gained its female inlay mark,
     // so the fixture no longer exercises the 30° cone's bound — it must generate.
     const job = benchJob('j11-inlay-female-30v.json');
@@ -252,18 +257,25 @@ describe('#741 the bench’s over-deep V-carves are refused by name', () => {
     // recipe asked for before #742 — so the 4.9916 mm sentence cannot regress unseen.
     const over = depthFinding(shallowJob(5.1, ENGRAVER_30), ENGRAVER_30);
     expect(over.finding).toBeDefined();
-    expect(over.finding!.severity).toBe('error');
+    expect(over.finding!.severity).toBe('warning');
     expect(over.finding!.message).toContain('5.1 mm');
     expect(over.finding!.message).toContain('4.992 mm');
+    expect(over.finding!.message).toContain('0.108 mm');
     expect(over.finding!.message).toContain('30°');
-    expect(over.gen.programs).toEqual([]);
+    // The depth no longer stops the run: this constructed 0.5 mm V-bit has no feed row of its own
+    // (the star and plug cases above post the clamped program), so the run reaches the FEEDS
+    // stage — not `findings` — which is the assertion that the warning demoted the refusal.
+    expect(over.gen.stage).toBe('feeds');
+    expect(over.gen.errors.some((e) => e.message.includes('0.5 mm V-bit'))).toBe(true);
   });
 
-  it('a cut exactly at the cone height is allowed, and one past it is not', () => {
+  it('a cut exactly at the cone height is allowed, and one past it is cut to the cone and stated', () => {
     const at = engraveRegions(tl, shallowJob(1.5375, CHAMFER_90), CHAMFER_90);
     expect(at.findings.filter((f) => f.code === 'vcarve-depth-beyond-cone')).toEqual([]);
     const past = engraveRegions(tl, shallowJob(1.5376, CHAMFER_90), CHAMFER_90);
-    expect(past.findings.find((f) => f.code === 'vcarve-depth-beyond-cone')).toBeDefined();
+    const finding = past.findings.find((f) => f.code === 'vcarve-depth-beyond-cone');
+    expect(finding).toBeDefined();
+    expect(finding!.severity).toBe('warning');
   });
 
   it('a plain V-carve inside the limit is unaffected', () => {

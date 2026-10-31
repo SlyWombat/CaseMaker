@@ -1248,7 +1248,7 @@ describe('a V-bit trace job (#405)', () => {
     expect(cut.vCarve!.surfaceOutset).toBeCloseTo(1 * Math.tan(Math.PI / 12), 12);
   });
 
-  it('refuses a groove narrower than the machine step, by name, and says the way out (#221)', () => {
+  it('warns that a groove is narrower than the machine step, by name, and says the way out (#221, #786 slice 3)', () => {
     // A pointed bit with no film: the plane IS the floor and the tip has no width there, so the
     // groove is 0 µm — under the Z1's 2 × 0.625 µm bar. `regions` stops before feeds, so the
     // geometry refusal is what answers.
@@ -1260,7 +1260,8 @@ describe('a V-bit trace job (#405)', () => {
     const r = regions(tl, job);
     const refusal = r.findings.find((f) => f.code === 'vcarve-groove-too-narrow');
     expect(refusal).toBeDefined();
-    expect(refusal!.severity).toBe('error');
+    // #786 slice 3 — the groove is still cut; the sentence says how narrow it comes out.
+    expect(refusal!.severity).toBe('warning');
     expect(refusal!.message).toContain('0 µm');
     expect(refusal!.message).toContain('1.25 µm');
     expect(refusal!.message).toContain('go deeper or widen the stroke');

@@ -60,7 +60,7 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { vCone, vDepthLimit, vDepthRefusal, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
+import { vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
   coreOffsetRadius,
@@ -1255,11 +1255,16 @@ function vCarveDepthFindings(plan: PartPlan, tool: Tool): JobFinding[] {
   for (const item of plan.engraves) {
     if (item.prism !== undefined) continue;
     if (!(item.depth > limit.limitMm + 1e-9)) continue;
+    // #786 slice 3 — CUT TO THE CONE, INFORMED. Past the cone's height the flank has ended; the
+    // cut stops at the height the cone reaches and the sentence states the shortfall. A STATED
+    // FLUTE shorter than the cone still refuses: past it there is no cutting edge at all, and the
+    // shank would enter the material.
+    const shank = limit.boundBy === 'flute';
     findings.push({
-      severity: 'error',
+      severity: shank ? 'error' : 'warning',
       code: 'vcarve-depth-beyond-cone',
       labelId: item.id,
-      message: vDepthRefusal(item.name, item.depth, tool, limit),
+      message: shank ? vDepthRefusal(item.name, item.depth, tool, limit) : vDepthShortfall(item.name, item.depth, tool, limit),
     });
   }
   for (const trace of plan.traces) {
@@ -1370,7 +1375,9 @@ function vCarveFindings(
     // `item.depth` deep below the TOP FACE exactly as before.
     if (plane.film > 0 && item.depth < plane.film - 1e-9) {
       findings.push({
-        severity: 'error',
+        // #786 slice 3 — the cut still runs; the second colour will not show, and the sentence
+        // states the depth it would need.
+        severity: 'warning',
         code: 'vcarve-above-colour-plane',
         labelId: item.id,
         message:
@@ -1398,7 +1405,9 @@ function vCarveFindings(
       const narrow = vCarveGrooveRefusal(plane, stepMm);
       if (narrow !== null) {
         findings.push({
-          severity: 'error',
+          // #786 slice 3 — a groove narrower than the machine's step is still cut; the sentence
+          // names which grooves come out narrower (or vanish) rather than refusing the job.
+          severity: 'warning',
           code: 'vcarve-groove-too-narrow',
           labelId: item.id,
           message: `${item.name}: ${narrow}.`,
@@ -2236,13 +2245,19 @@ export function engraveRegions(
     const item = itemById.get(id);
     return item !== undefined && 'kind' in item;
   };
+  // #786 slice 3 — a V-carve deeper than the CONE is cut to the height the cone reaches (the
+  // finding states the shortfall); a stated flute shorter than the cone keeps its refusal, so its
+  // depth is left alone and `generateEngrave`'s guard still stops it.
+  const vLimit = tool === null ? null : vDepthLimit(tool);
   const regions: EngraveRegion[] = plan.engraves.map((e) => {
     const vCarve = vCarveById.get(e.id);
+    const clampToCone =
+      vCarve !== undefined && vLimit !== null && vLimit.boundBy === 'cone' && e.depth > vLimit.limitMm + 1e-9;
     return {
       id: e.id,
       text: regionText(itemById.get(e.id)),
       name: e.name,
-      depth: e.depth,
+      depth: clampToCone ? vLimit.limitMm : e.depth,
       polygons: designOf(e),
       ...(vCarve === undefined ? {} : { vCarve }),
       ...(e.inlay === undefined ? {} : { inlay: e.inlay }),

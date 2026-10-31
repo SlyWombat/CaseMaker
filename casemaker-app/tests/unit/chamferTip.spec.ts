@@ -143,33 +143,31 @@ describe('#740 — the Makera row’s 0.1 mm tip V-carves what the shank refused
     expect(gen.programs.length).toBeGreaterThan(0);
   }, 180_000);
 
-  it('refuses j11 on its depth alone, not on its 0.1 mm tip (#741)', () => {
+  it('cuts j11 to its cone and states the shortfall, not its 0.1 mm tip (#741, #786 slice 3)', () => {
     // #740's subject is the TIP: with the Makera row's 0.1 mm stated, none of the shank-width
-    // sentences may come back. #741 — the job's 5.1 mm inlay pocket is deeper than this bit's
-    // 1.5375 mm cone, so the job is refused; that depth sentence is the ONLY error, and it is the
-    // job's depth talking, not its cutter's tip.
+    // sentences may come back. #741/#786 slice 3 — the job's 5.1 mm inlay pocket is deeper than
+    // this bit's 1.5375 mm cone, so the cut STOPS at the cone and the shortfall is stated; the
+    // depth warnings are the only complaint, and they are the job's depth talking, not its tip.
     const gen = generate(tl, benchJob('j11-inlay-female-90v.json', 0.1));
 
     expect(codes(gen)).not.toContain('tool-tip-unrecorded');
     expect(codes(gen)).not.toContain('item-empty');
     expect(codes(gen)).not.toContain('vcarve-groove-too-narrow');
     expect(gen.findings.some((f) => SHANK_READ_AS_CUTTER.test(f.message))).toBe(false);
-    // Both V-carved items — the FF label and the pocket ring — are 5.1 mm deep, so both are
-    // refused, each by its own name and both on the same 1.538 mm cone.
-    const errors = gen.findings.filter((f) => f.severity === 'error');
-    const dumps = JSON.stringify(errors.map((f) => f.message));
-    expect(errors.map((f) => f.code), dumps).toEqual([
-      'vcarve-depth-beyond-cone',
-      'vcarve-depth-beyond-cone',
-    ]);
-    expect(errors.map((f) => f.labelId).sort(), dumps).toEqual(['ff', 'ring']);
-    for (const error of errors) {
-      expect(error.message, dumps).toContain('1.538 mm');
-      expect(error.message, dumps).toContain('C1-BIT-CHAMFER-90');
+    // Both V-carved items — the FF label and the pocket ring — are 5.1 mm deep, so both are cut
+    // to the same 1.538 mm cone, each by its own name, with the shortfall stated.
+    const depth = gen.findings.filter((f) => f.code === 'vcarve-depth-beyond-cone');
+    const dumps = JSON.stringify(depth.map((f) => f.message));
+    expect(depth.map((f) => f.severity), dumps).toEqual(['warning', 'warning']);
+    expect(depth.map((f) => f.labelId).sort(), dumps).toEqual(['ff', 'ring']);
+    for (const warning of depth) {
+      expect(warning.message, dumps).toContain('1.538 mm');
+      expect(warning.message, dumps).toContain('3.562 mm');
+      expect(warning.message, dumps).toContain('C1-BIT-CHAMFER-90');
     }
-    expect(gen.stage).toBe('findings');
-    expect(gen.ok).toBe(false);
-    expect(gen.programs).toEqual([]);
+    expect(gen.findings.filter((f) => f.severity === 'error'), dumps).toEqual([]);
+    expect(gen.ok, dumps).toBe(true);
+    expect(gen.programs.length).toBeGreaterThan(0);
   }, 180_000);
 });
 

@@ -265,6 +265,23 @@ export function vDepthRefusal(itemName: string, depthMm: number, tool: Tool, lim
   );
 }
 
+/**
+ * #786 slice 3 — A V-CARVE CUT TO THE CONE, in words the panel shows verbatim: what the design
+ * asked, where the cone ends, how much of the design is left in the stock, and the one way to get
+ * it. The SHANK case (a stated flute shorter than the cone) is not this sentence — there is no
+ * cutting edge past the flute, so it stays a refusal.
+ */
+export function vDepthShortfall(itemName: string, depthMm: number, tool: Tool, limit: VDepthLimit): string {
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+  const { angle, body } = coneWords(tool);
+  const short = depthMm - limit.limitMm;
+  return (
+    `${itemName} is ${mm(depthMm)} mm deep, but the cutter "${tool.name}"'s ${angle}cone reaches its ` +
+    `${body ?? 'body'} at ${mm(limit.limitMm)} mm. The cut stops there and leaves ${mm(short)} mm of the ` +
+    `design in the stock — use a cutter whose cone reaches ${mm(depthMm)} mm for the full depth.`
+  );
+}
+
 /** The cone's angle and body as the trace sentences name them, or blanks when unstated. */
 function coneWords(tool: Tool): { angle: string; body: string | null } {
   const cone = vConeGeometry(tool);
