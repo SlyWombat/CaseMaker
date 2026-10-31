@@ -4538,17 +4538,23 @@ export function generateGoalProgram(
       moveEstimate.pitch + 0.01,
       Math.ceil(moveEstimate.pitch * scale * 100) / 100,
     );
+    // #832 — THE OTHER PRESS: at the pitch the run settled on, the step-down that fits the same
+    // budget. Both are stated, so the sentence names two numbers rather than one and a verb.
+    const suggestedStepDown =
+      Math.ceil(feeds.stepDown * (moveEstimate.moves / GOAL_MOVE_BUDGET) * 1.05 * 100) / 100;
     const finding: JobFinding = {
       severity: 'error',
       code: 'goal-program-too-big',
       targetId: goal.id,
       suggestedPitchMm: suggestedPitch,
+      suggestedStepDownMm: suggestedStepDown,
       message:
         `The goal would need about ${moveEstimate.moves.toLocaleString('en-US')} moves — ` +
         `${Number(moveEstimate.depth.toFixed(3))} mm deep at a ${feeds.stepDown} mm step-down on ` +
         `${moveEstimate.cells.toLocaleString('en-US')} cells at ${Number(moveEstimate.pitch.toFixed(4))} mm — and the ` +
-        `app's budget is ${GOAL_MOVE_BUDGET.toLocaleString('en-US')}. Coarsen the grid to about ${suggestedPitch} mm, ` +
-        `raise the step-down, or cut the goal in two setups.`,
+        `app's budget is ${GOAL_MOVE_BUDGET.toLocaleString('en-US')}. A budget limit, not a fault: ` +
+        `coarsen the grid to about ${suggestedPitch} mm, raise the step-down to about ${suggestedStepDown} mm, ` +
+        `or cut the goal in two setups.`,
     };
     return {
       ...base,

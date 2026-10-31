@@ -435,6 +435,12 @@ export interface JobFinding {
    */
   suggestedPitchMm?: number;
   /**
+   * #832 — on `goal-program-too-big`, the step-down that fits the move budget AT the pitch the
+   * run settled on, mm. The moves fall with the step-down as they do with the pitch, so this is
+   * the other press the operator can make: "Raise the step-down to N mm".
+   */
+  suggestedStepDownMm?: number;
+  /**
    * #805 — on `goal-rotary-oversize`, the goal's own outermost radius, mm (the field's
    * `maxRadius`). The panel's "Scale the goal to fit (r …)" button turns it into the factor that
    * brings the part to the rod; absent on every other finding.

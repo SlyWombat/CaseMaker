@@ -1612,6 +1612,38 @@ export function EngravePanel(): JSX.Element {
     void generate();
   };
 
+  /**
+   * #832 — the budget's OTHER press: raise the step-down to the number the finding states, and
+   * Generate in the same click. The moves fall with the step-down exactly as they do with the
+   * pitch, so this is the same kind of choice, not a hint.
+   */
+  const generateAtStepDown = (finding: JobFinding): void => {
+    const stepDown = finding.suggestedStepDownMm;
+    if (stepDown === undefined) return;
+    updateTargetObject({ surface: { roughStepDownMm: stepDown } });
+    void generate();
+  };
+
+  /** #832 — the split suggestion is a place to go: the Holding step is where setups are made. */
+  const openSetupsToSplit = (): void => {
+    openWizard('holding');
+  };
+
+  /**
+   * #832 — NO BARE "Fix". A press is named by the action it takes, so the operator knows what will
+   * happen before pressing it: the group/row/step it opens, in words.
+   */
+  const fixActionLabel = (fix: PanelFix): string => {
+    if (fix.openWizardStep === 'holding') return 'Open the Holding step';
+    if (fix.openWizardStep === 'stock') return 'Open the Stock step';
+    if (fix.group === 'engrave-group-cutter') return 'Open the cutter list';
+    if (fix.openDetails === 'engrave-override') return 'Open the feeds override';
+    if (fix.openDetails === 'engrave-add-menu') return 'Open the add menu';
+    if (fix.group === 'engrave-group-hold') return 'Open the holding';
+    if (fix.itemId !== undefined) return 'Show the item';
+    return 'Open the control';
+  };
+
   // #673 — THE INLAY HALF: the derived plug numbers (null when they do not derive) and the action
   // that saves the MALE blank as its own job. The action is offered only when the female's job has
   // no blocking finding — a male built from a job that cannot cut would be a second broken job.
@@ -4279,7 +4311,7 @@ export function EngravePanel(): JSX.Element {
                 }}
                 onClick={() => applyFix(generateBlocker.fix!)}
               >
-                ▸ Fix
+                {fixActionLabel(generateBlocker.fix!)}
               </button>
               </>
               )}
@@ -4335,12 +4367,17 @@ export function EngravePanel(): JSX.Element {
             )}
 
             {runErrors.length > 0 && (
-              <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-run-errors">
+              <p
+                // #832 — A BUDGET IS NOT A FAULT: the too-big sentence is drawn in the inform
+                // colour, with its presses named, rather than as an error-red refusal.
+                style={{ ...MUTED, color: runPitchFinding !== null ? SEVERITY_COLOR.warning : SEVERITY_COLOR.error }}
+                data-testid="engrave-run-errors"
+              >
                 {firstRunErrorText ?? `${runErrors.length} error${runErrors.length === 1 ? '' : 's'} outstanding.`}
                 {runErrors.length > 1 && ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'})`}
-                {/* #725 B4 — the same sentence's Fix, in the footer at the button: the verifier's
-                    clamp/arm refusals and the rotary's have always had their sentences, but no
-                    control took the operator to what resolves one. */}
+                {/* #832 — the budget's presses, each NAMED: the recommended one first, then the
+                    step-down alternative and the place to split. No bare "Fix": every press says
+                    what it will do. The budget finding has no generic fix any more — it has these. */}
                 {runPitchFinding !== null && (
                   <>
                     {' '}
@@ -4351,9 +4388,28 @@ export function EngravePanel(): JSX.Element {
                     >
                       Generate at {runPitchFinding.suggestedPitchMm} mm
                     </button>
+                    {runPitchFinding.suggestedStepDownMm !== undefined && (
+                      <>
+                        {' '}
+                        <button
+                          type="button"
+                          data-testid="engrave-generate-at-stepdown"
+                          onClick={() => generateAtStepDown(runPitchFinding)}
+                        >
+                          Raise the step-down to {runPitchFinding.suggestedStepDownMm} mm
+                        </button>
+                      </>
+                    )}
+                    {' '}
+                    <button type="button" data-testid="engrave-open-setups-to-split" onClick={openSetupsToSplit}>
+                      Open the setups to split it
+                    </button>
                   </>
                 )}
-                {runFix !== null && (
+                {/* #725 B4 — the same sentence's Fix, in the footer at the button: the verifier's
+                    clamp/arm refusals and the rotary's have always had their sentences, but no
+                    control took the operator to what resolves one. #832: named by its action. */}
+                {runFix !== null && runPitchFinding === null && (
                   <>
                     {' '}
                     <button
@@ -4370,7 +4426,7 @@ export function EngravePanel(): JSX.Element {
                       }}
                       onClick={() => applyFix(runFix)}
                     >
-                      ▸ Fix
+                      {fixActionLabel(runFix)}
                     </button>
                   </>
                 )}

@@ -4343,7 +4343,12 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
       code: 'goal-program-too-big' as const,
       targetId: goal.id,
       suggestedPitchMm: 0.25,
-      message: "The goal would need about 22,000,000 moves — the app's budget is 12,000,000.",
+      // #832 — the finding now states the other press too, and the sentence says it is a budget.
+      suggestedStepDownMm: 0.42,
+      message:
+        "The goal would need about 22,000,000 moves — the app's budget is 12,000,000. A budget " +
+        'limit, not a fault: coarsen the grid to about 0.25 mm, raise the step-down to about ' +
+        '0.42 mm, or cut the goal in two setups.',
     };
     act(() => {
       useEngraveRunStore.setState({
@@ -4368,9 +4373,29 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
       simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
     }));
     render(<EngravePanel />);
-    const button = screen.getByTestId('engrave-generate-at-pitch');
-    expect(button.textContent).toContain('Generate at 0.25 mm');
-    fireEvent.click(button);
+    // #832 — the budget is drawn as INFORM, not error red, and every press names its action:
+    // no bare "Fix" anywhere.
+    const line = screen.getByTestId('engrave-run-errors');
+    // SEVERITY_COLOR.warning (#e0c07a), not the error red (#f0b4ad).
+    expect(line.style.color).toBe('rgb(224, 192, 122)');
+    expect(line.textContent).not.toContain('▸ Fix');
+    const pitchButton = screen.getByTestId('engrave-generate-at-pitch');
+    expect(pitchButton.textContent).toContain('Generate at 0.25 mm');
+    const stepButton = screen.getByTestId('engrave-generate-at-stepdown');
+    expect(stepButton.textContent).toContain('Raise the step-down to 0.42 mm');
+    expect(screen.getByTestId('engrave-open-setups-to-split').textContent).toContain('Open the setups');
+
+    // The step-down press is the same kind of choice as the pitch: it writes the goal's setting.
+    fireEvent.click(stepButton);
+    expect(useEngraveJobStore.getState().job.targetObject?.surface?.roughStepDownMm).toBe(0.42);
+
+    // And the split suggestion is a place to go.
+    fireEvent.click(screen.getByTestId('engrave-open-setups-to-split'));
+    expect(useStartWizardStore.getState().open).toBe(true);
+    expect(useStartWizardStore.getState().initialStep).toBe('holding');
+    act(() => useStartWizardStore.getState().closeWizard());
+
+    fireEvent.click(pitchButton);
     // The press is the choice: the goal's own grid records the pitch the refusal suggested.
     expect(useEngraveJobStore.getState().job.targetObject?.surface?.gridPitchMm).toBe(0.25);
     setEngraveRunClientLoader(null);
@@ -4781,5 +4806,21 @@ describe('#805 — the rotary oversize warning’s two answers', () => {
     expect(setup?.toolItems?.['inv:engrave-fine']).toEqual(['iso-1']);
     expect(setup?.toolItems?.['inv:engrave-old'] ?? []).toEqual([]);
     expect(setup?.tools).toContain('inv:engrave-fine');
+  });
+});
+
+// #832 — NO BARE "Fix". Every blocker press is named by the action it takes, so the operator
+// knows what will happen before pressing it.
+describe('EngravePanel — the blocker presses name their action (#832)', () => {
+  it('names the cutter press instead of a bare Fix', () => {
+    act(() => {
+      useEngraveJobStore.setState({
+        job: { ...defaultEngraveJob(), toolKey: 'user:gone', tool: null },
+      });
+    });
+    render(<EngravePanel />);
+    const button = screen.getByTestId('engrave-generate-fix');
+    expect(button.textContent).toBe('Open the cutter list');
+    expect(document.body.textContent).not.toContain('▸ Fix');
   });
 });
