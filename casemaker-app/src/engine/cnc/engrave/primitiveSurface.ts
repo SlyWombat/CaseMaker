@@ -196,3 +196,41 @@ export function surfacePrimitiveWord(p: SurfacePrimitive): string {
 export function isSurfacePrimitive(p: EngravePrimitive): p is SurfacePrimitive {
   return p.kind === 'cone' || p.kind === 'sphere';
 }
+
+/**
+ * #822 — THE CAVITY'S CROSS-SECTION, for the preview picture: the material the surface program
+ * removes, as a closed polygon in (radius, depth-below-the-top) — the form Manifold's revolve
+ * takes (it turns a cross-section about the Y axis into a solid about Z). The caller revolves it
+ * and turns it over so the cavity opens at the stock's top face.
+ *
+ *   - CONE: the top face from the axis to the rim, down the flank to the tip's disc, and back
+ *     along the floor to the axis.
+ *   - SPHERE: the top face to ρmax, then the cap's arc down to its floor at the axis.
+ *
+ * `null` for a record that is not a surface (see {@link surfacePrimitiveUsable}).
+ */
+export function primitiveCavityProfile(p: SurfacePrimitive): [number, number][] | null {
+  if (!surfacePrimitiveUsable(p)) return null;
+  const R = p.diameter / 2;
+  const d = p.depth;
+  if (p.kind === 'cone') {
+    return [
+      [0, 0],
+      [R, 0],
+      [p.tipDiameter / 2, d],
+      [0, d],
+    ];
+  }
+  const rim = Math.sqrt(Math.max(0, R * R - (R - d) * (R - d)));
+  const profile: [number, number][] = [
+    [0, 0],
+    [rim, 0],
+  ];
+  const samples = 48;
+  for (let i = 1; i < samples; i++) {
+    const rho = rim * (1 - i / samples);
+    profile.push([rho, Math.sqrt(Math.max(0, R * R - rho * rho)) - (R - d)]);
+  }
+  profile.push([0, d]);
+  return profile;
+}

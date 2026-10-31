@@ -12,6 +12,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { EngraveLegend } from '@/components/viewport/EngraveLegend';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 
 // #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
 // These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
@@ -268,5 +269,54 @@ describe('the engrave legend on a blank that states its split (#170)', () => {
     expect(screen.getByTestId('engrave-legend-top')).not.toBeNull();
     expect(screen.getByTestId('engrave-legend-split').textContent).toContain('split 1 mm down');
     expect(screen.getByTestId('engrave-legend-nothing-cut').textContent).toContain('nothing cut');
+  });
+});
+
+// #822 — A SURFACE PRIMITIVE DRAWN AS ITS ANALYTIC FIELD. A flat cutter leaves that surface rough
+// in a way the picture does not model, so the legend says so in the program's own words; a ball
+// follows the curve and needs no line.
+describe('the surface caption (#822)', () => {
+  const CONE = {
+    id: 'funnel',
+    name: 'funnel',
+    kind: 'cone' as const,
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    enabled: true,
+    depth: 2,
+    diameter: 10,
+    tipDiameter: 2,
+  };
+  const coneJob = (tool: Tool): EngraveJob => ({
+    ...dj(),
+    labels: [],
+    shapes: [],
+    traces: [],
+    drills: [],
+    threads: [],
+    primitives: [CONE],
+    toolKey: 'user:surface-cutter',
+    tool,
+  });
+
+  it('states the stepped finish for a flat cutter', () => {
+    const job = coneJob(flatEndMill(1, { name: '1 mm flat end', fluteLength: 20, centreCutting: true }));
+    useEngraveJobStore.setState({ job });
+    useEngravePreviewStore.setState({ preview: previewFor(job) });
+    render(<EngraveLegend />);
+    const caption = screen.getByTestId('engrave-legend-surface-stepped');
+    expect(caption.textContent).toContain('flat cutter');
+    expect(caption.textContent).toContain('stepped approximation');
+    expect(caption.textContent).toContain('ball nose follows the curve');
+  });
+
+  it('says nothing for a ball, which follows the curve', () => {
+    const job = coneJob(
+      flatEndMill(2, { name: '2 mm ball', typeText: 'Ball End', shape: 'ball', tipDiameter: 2, diameter: 2, fluteLength: 20 }),
+    );
+    useEngraveJobStore.setState({ job });
+    useEngravePreviewStore.setState({ preview: previewFor(job) });
+    render(<EngraveLegend />);
+    expect(screen.queryByTestId('engrave-legend-surface-stepped')).toBeNull();
   });
 });

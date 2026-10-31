@@ -70,6 +70,8 @@ function previewWith(reason = 'the largest cutter that keeps every item intact')
     colourBoundaryDepth: null,
     supportingFloors: {},
     goal: null,
+    // #822 — no surface primitives in these fixtures.
+    surfaces: [],
     recommendation: {
       key: PICK.key,
       compromise: false,

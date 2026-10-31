@@ -57,6 +57,7 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { boxSolid, OVERSHOOT_MM } from '@/workers/geometry/sweep';
 import { manifoldOfTriangles, meshOutputOf, type NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import { primitiveCavityProfile, surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { rotationMatrix, targetPlacement } from '@/engine/cnc/engrave/targetScale';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
@@ -304,8 +305,23 @@ export interface EngravePreview {
    * solid. Absent means the viewport keeps its pre-#811 drawing.
    */
   goal: EngravePreviewGoal | null;
+  /**
+   * #822 — the cone/sphere primitives whose cavity the preview draws: the same analytic field the
+   * surface program cuts, revolved into a solid and subtracted from the blank at its own depth.
+   * Empty when the job has none (and then the picture is exactly the pre-#822 one).
+   */
+  surfaces: EngravePreviewSurface[];
   /** #211's cutter recommendation, with the compromise message completed here (see below). */
   recommendation: ToolRecommendation;
+}
+
+/** #822 — one drawn cavity, in the primitive's own words for the legend. */
+export interface EngravePreviewSurface {
+  id: string;
+  name: string;
+  kind: 'cone' | 'sphere';
+  /** How far below the top face the cavity reaches, mm. */
+  depthMm: number;
 }
 
 /** The preview worker, one per worker. Mirrors `SimSession`'s shape. */
@@ -772,6 +788,36 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       }
     }
 
+    // #822 — THE SURFACE PRIMITIVES' CAVITIES JOIN THE CUTS. Each is the analytic field the
+    // surface program cuts, revolved into a closed solid and subtracted at the primitive's own
+    // depth, so the stock shows the hole where the program makes it and the slider steps through
+    // it with the other cuts. A mesh Manifold will not close is left out (the picture is honest
+    // about what it cannot draw; the program still cuts it).
+    const surfaceCavities: { preview: EngravePreviewSurface; body: ManifoldInstance }[] = [];
+    for (const primitive of surfacePrimitivesOf(job)) {
+      const profile = primitiveCavityProfile(primitive);
+      if (profile === null) continue;
+      const crossSection = tl.CrossSection.ofPolygons([profile]);
+      // The revolve turns (radius, depth) about the axis into a solid rising in +Z; the turn puts
+      // the cavity's opening on the stock's top face, where the program cuts it.
+      const body = crossSection.revolve(96).rotate([180, 0, 0]).translate([primitive.position.x, primitive.position.y, 0]);
+      crossSection.delete();
+      if (body.status() !== 'NoError') {
+        body.delete();
+        continue;
+      }
+      surfaceCavities.push({
+        preview: {
+          id: primitive.id,
+          name: primitive.name ?? primitive.id,
+          kind: primitive.kind,
+          depthMm: primitive.depth,
+        },
+        body,
+      });
+    }
+    for (const cavity of surfaceCavities) cutBodies.push({ body: cavity.body, depth: cavity.preview.depthMm });
+
     // §5.7 — the cumulative states the design ↔ as-cut slider steps through, built in the same
     // pass as the finished stock. Subtracting one depth group at a time is exactly as correct as
     // the one-shot difference (`(blank − A) − B = blank − (A ∪ B)`) and costs one difference per
@@ -977,6 +1023,8 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
               part: copyMesh(goalCache.drawing.part),
               removed: copyMesh(goalCache.drawing.removed),
             },
+      // #822 — the cavities the stock above was cut by, for the legend's caption.
+      surfaces: surfaceCavities.map((c) => c.preview),
       recommendation: {
         ...recommendation,
         reason: completeCompromiseReason(tl, job, recommendation, catalogueEntries, shop.lostDetailWarnRatio ?? null),

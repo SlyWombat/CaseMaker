@@ -20,6 +20,8 @@
 import { useMemo, type CSSProperties, type JSX } from 'react';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSimStore } from '@/store/simStore';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
@@ -80,6 +82,9 @@ export function EngraveLegend(): JSX.Element | null {
   const setScrubStage = useEngravePreviewStore((s) => s.setScrubStage);
   const stock = useEngraveJobStore((s) => s.job.stock);
   const minFloor = useEngraveJobStore((s) => s.job.minFloor);
+  // #822 — the surface caption's cutter: the job's own, resolved the way every other reader does.
+  const jobForSurface = useEngraveJobStore((s) => s.job);
+  const surfaceTool = jobTool(jobForSurface);
   // #519 item 1 — the touches layer's row: shown only while the layer is on AND there are readings
   // to describe, so the legend never names dots the scene is not drawing.
   const touchesOn = useSimStore((s) => s.layers.touches);
@@ -192,6 +197,16 @@ export function EngraveLegend(): JSX.Element | null {
             }}
           />
           {goalLegendWords(preview.goal.mode)}
+        </div>
+      )}
+      {/* #822 — a cone or sphere is drawn as its analytic surface (the program's own field). A
+          flat cutter leaves that surface rough in a way the picture does not model, so the
+          caption states it in the program's own words: the picture must not promise a finish the
+          program will not give. A ball needs no line. */}
+      {preview.surfaces.length > 0 && surfaceTool !== null && surfaceTool.shape !== 'ball' && surfaceTool.shape !== 'bull' && (
+        <div data-testid="engrave-legend-surface-stepped" style={{ ...ROW, marginTop: 2, color: '#9aa4b0', display: 'block' }}>
+          surface: the {toolDisplayName(surfaceTool).split(' · ')[0]!} is a flat cutter, so the finish is a
+          stepped approximation — a ball nose follows the curve.
         </div>
       )}
       {/* §5.7 — the lost layer: an amber swatch and the area the cutter could not reach. Only at
