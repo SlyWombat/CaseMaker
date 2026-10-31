@@ -4287,6 +4287,60 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     expect(warning?.textContent).toContain("only the stock's top 11 mm is cut");
   });
 
+  it('#785 a goal-program-too-big refusal offers the pitch that fits, and one press writes it', async () => {
+    const goal: EngraveTargetObject = {
+      id: 'goal-pitch',
+      name: 'big.stl',
+      format: 'stl',
+      sha256: 'b'.repeat(64),
+      data: 'AAAA',
+      size: { x: 10, y: 10, z: 5 },
+      position: { x: 25, y: 25, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+    };
+    act(() => {
+      useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal } });
+    });
+    const finding = {
+      severity: 'error' as const,
+      code: 'goal-program-too-big' as const,
+      targetId: goal.id,
+      suggestedPitchMm: 0.25,
+      message: "The goal would need about 22,000,000 moves — the app's budget is 12,000,000.",
+    };
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: false,
+          stage: 'findings',
+          findings: [finding],
+          feeds: null,
+          cam: null,
+          nc: null,
+          verify: null,
+          programs: [],
+          errors: [{ stage: 'findings', message: finding.message }],
+        } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated,
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () =>
+        ({ ok: false, stage: 'findings', findings: [], feeds: null, cam: null, nc: null, verify: null, programs: [], errors: [] }) as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    render(<EngravePanel />);
+    const button = screen.getByTestId('engrave-generate-at-pitch');
+    expect(button.textContent).toContain('Generate at 0.25 mm');
+    fireEvent.click(button);
+    // The press is the choice: the goal's own grid records the pitch the refusal suggested.
+    expect(useEngraveJobStore.getState().job.targetObject?.surface?.gridPitchMm).toBe(0.25);
+    setEngraveRunClientLoader(null);
+  });
+
   it('#785 Generate says its stage while it works, and Cancel puts the panel back', async () => {
     let release: (g: import('@/workers/sim/engraveGenerate').EngraveGenerated) => void = () => {};
     const held = new Promise<import('@/workers/sim/engraveGenerate').EngraveGenerated>((resolve) => {

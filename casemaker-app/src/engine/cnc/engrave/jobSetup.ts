@@ -405,6 +405,12 @@ export interface JobFinding {
    * panel's button names the number; absent when the band would be zero.
    */
   goalBandMm?: number;
+  /**
+   * #785 — on `goal-program-too-big`, the grid pitch that fits the move budget, mm. The panel's
+   * one-click "Generate at N mm" writes it onto the goal's `surface.gridPitchMm` and presses
+   * Generate; absent on every other finding.
+   */
+  suggestedPitchMm?: number;
   message: string;
 }
 

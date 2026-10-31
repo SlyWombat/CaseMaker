@@ -4518,11 +4518,24 @@ export function generateGoalProgram(
     }
   }
   if (moveEstimate.moves > GOAL_MOVE_BUDGET) {
-    const scale = Math.sqrt(moveEstimate.moves / GOAL_MOVE_BUDGET);
-    const suggestedPitch = Math.max(moveEstimate.pitch + 0.01, Math.ceil(moveEstimate.pitch * scale * 100) / 100);
+    // The pitch that fits BOTH budgets the CAM holds: the move array (∝ 1/pitch²) and the finishing
+    // tip field (∝ 1/pitch⁴ — the cells AND the stencil grow). Cells fall with the square of the
+    // pitch and the stencil with the square too, so each ratio has its own root; 5 % of margin and
+    // a hundredth's rounding keep the suggestion under both.
+    const radius = (cuttingDiameter(tool) ?? 0) / 2;
+    const stencil = Math.max(1, (Math.PI * radius * radius) / (moveEstimate.pitch * moveEstimate.pitch));
+    const tipOps = moveEstimate.cells * stencil;
+    const tipScale = tipOps > DEFAULT_MAX_FINISH_TIP_OPS ? Math.pow(tipOps / DEFAULT_MAX_FINISH_TIP_OPS, 0.25) : 1;
+    const scale = Math.max(Math.sqrt(moveEstimate.moves / GOAL_MOVE_BUDGET), tipScale) * 1.05;
+    const suggestedPitch = Math.max(
+      moveEstimate.pitch + 0.01,
+      Math.ceil(moveEstimate.pitch * scale * 100) / 100,
+    );
     const finding: JobFinding = {
       severity: 'error',
       code: 'goal-program-too-big',
+      targetId: goal.id,
+      suggestedPitchMm: suggestedPitch,
       message:
         `The goal would need about ${moveEstimate.moves.toLocaleString('en-US')} moves — ` +
         `${Number(moveEstimate.depth.toFixed(3))} mm deep at a ${feeds.stepDown} mm step-down on ` +

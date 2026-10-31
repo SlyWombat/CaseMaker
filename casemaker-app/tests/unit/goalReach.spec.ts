@@ -273,8 +273,16 @@ describe('#785 — Generate', () => {
     expect(refusal?.message).toContain('moves');
     expect(refusal?.message).toContain("the app's budget is 12,000,000");
     expect(refusal?.message).toContain('Coarsen the grid to about');
+    expect(refusal?.suggestedPitchMm).toBeGreaterThan(0.02);
     expect(out.nc).toBeNull();
     expect(out.programs).toEqual([]);
+
+    // #785 follow-up — the suggested pitch IS the one-click fix: written onto the goal's grid, the
+    // same job generates.
+    const pitched = { ...target, surface: { ...(target.surface ?? {}), gridPitchMm: refusal!.suggestedPitchMm } };
+    const retry = generateGoalProgram(tallJob(pitched), pitched, flat({ fluteLength: 40 }), [], null, {});
+    expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
+    expect(retry.findings.some((f) => f.code === 'goal-program-too-big')).toBe(false);
   }, 120_000);
 
   it('a goal within reach generates with no reach finding at all', () => {

@@ -1488,6 +1488,18 @@ export function EngravePanel(): JSX.Element {
     }
   };
 
+  /**
+   * #785 follow-up — the too-big refusal's one press. It writes the pitch the refusal suggested
+   * onto the goal's own grid setting (so the job says what it will be cut at, and the result stays
+   * current), then presses Generate — the operator already chose, by pressing.
+   */
+  const generateAtPitch = (finding: JobFinding): void => {
+    const pitch = finding.suggestedPitchMm;
+    if (pitch === undefined) return;
+    updateTargetObject({ surface: { gridPitchMm: pitch } });
+    void generate();
+  };
+
   // #673 — THE INLAY HALF: the derived plug numbers (null when they do not derive) and the action
   // that saves the MALE blank as its own job. The action is offered only when the female's job has
   // no blocking finding — a male built from a job that cannot cut would be a second broken job.
@@ -1824,6 +1836,13 @@ export function EngravePanel(): JSX.Element {
   // replaces this one. `firstRunError` (#724 B2) is the one owner of "which error".
   const currentRunError = run.staleSince === null ? firstRunError(run) : null;
   const runFix: PanelFix | null = currentRunError === null ? null : findingFix(currentRunError);
+  // #785 follow-up — the too-big refusal's one-click grid: the run stopped on it, and the finding
+  // carries the pitch that fits. The button beside the sentence writes that pitch onto the goal's
+  // grid and presses Generate in the same click, so the refusal turns into a choice.
+  const runPitchFinding =
+    run.staleSince === null
+      ? (run.generated?.findings.find((f) => f.code === 'goal-program-too-big' && f.suggestedPitchMm !== undefined) ?? null)
+      : null;
   // #688 — Save writes the .nc that goes to Makera Studio: a path to the machine, so it waits on
   // the clearance acknowledgement exactly as Upload and Release do. The statement's home is Cut
   // step 1 (#689); the sentence names it and the Fix beside Save takes the operator there.
@@ -3865,6 +3884,18 @@ export function EngravePanel(): JSX.Element {
                 {/* #725 B4 — the same sentence's Fix, in the footer at the button: the verifier's
                     clamp/arm refusals and the rotary's have always had their sentences, but no
                     control took the operator to what resolves one. */}
+                {runPitchFinding !== null && (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      data-testid="engrave-generate-at-pitch"
+                      onClick={() => generateAtPitch(runPitchFinding)}
+                    >
+                      Generate at {runPitchFinding.suggestedPitchMm} mm
+                    </button>
+                  </>
+                )}
                 {runFix !== null && (
                   <>
                     {' '}
