@@ -2146,14 +2146,17 @@ export function validateJob(
         });
       } else if (chamfer.width > reach + 1e-9) {
         findings.push({
-          severity: 'error',
+          // #786 slice 3 — the bevel is cut to the cone's one-pass reach; the sentence states the
+          // shortfall (the CAM clamps the same number).
+          severity: 'warning',
           code: 'chamfer-too-wide',
           labelId: chamfer.id,
           message:
             `${who} asks for a ${fmt3(chamfer.width)} mm chamfer, but "${chamferTool.name}"’s cone ` +
             `reaches ${fmt3(reach)} mm in one pass (its ${fmt3(fluteLength as number)} mm flute at ` +
-            `${fmt3(cone.halfAngleDeg * 2)}°). Use a wider chamfer bit, or a chamfer up to ` +
-            `${fmt3(reach)} mm.`,
+            `${fmt3(cone.halfAngleDeg * 2)}°). The cut is ${fmt3(reach)} mm wide, ` +
+            `${fmt3(chamfer.width - reach)} mm short of the design — use a wider chamfer bit for ` +
+            `the full width.`,
         });
       }
       // The tip plane is the bevel's bottom: `width / tan(halfAngle)` below the top face. A
@@ -2162,7 +2165,8 @@ export function validateJob(
       const floor = chamfer.side === 'outside' ? thickness : floorOf(rim);
       if (floor !== null && depth >= floor - 1e-9) {
         findings.push({
-          severity: 'error',
+          // #786 slice 3 — the tip stops at the floor; the sentence states the width that leaves.
+          severity: 'warning',
           code: 'chamfer-too-deep',
           labelId: chamfer.id,
           message:
@@ -2170,7 +2174,8 @@ export function validateJob(
             (chamfer.side === 'outside' || isThroughRim(rim)
               ? `the blank is only ${fmt3(floor)} mm thick`
               : `the pocket’s floor is only ${fmt3(floor)} mm down`) +
-            '; the tip would cut past it. Use a smaller chamfer.',
+            `; the tip stops at the floor, so the bevel is ${fmt3((floor - 1e-6) * cone.tanHalf)} mm ` +
+            `wide instead of ${fmt3(chamfer.width)} — use a smaller chamfer or a deeper pocket.`,
         });
       }
     }

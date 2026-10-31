@@ -60,7 +60,7 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
+import { vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
   coreOffsetRadius,
@@ -2400,10 +2400,21 @@ export function engraveRegions(
             ? edge.map((contour) => [...contour].reverse())
             : edge;
       if (path.length === 0) continue;
-      const depth = c.width / chamferCone.tanHalf;
+      // #786 slice 3 — CUT WHAT THE CONE AND THE FLOOR ALLOW. A bevel wider than the cone's
+      // one-pass reach is cut to that reach; one deeper than the floor is cut to the floor. The
+      // findings state both shortfalls, so the program and the sentence carry the same numbers.
+      const fluteLength = tool === null ? null : vFluteLength(tool);
+      const reach = fluteLength === null ? null : fluteLength * chamferCone.tanHalf;
+      let width = c.width;
+      if (reach !== null && width > reach) width = reach;
+      if (c.floor !== null && width / chamferCone.tanHalf >= c.floor - 1e-9) {
+        width = Math.max(0, (c.floor - 1e-6) * chamferCone.tanHalf);
+      }
+      if (!(width > 0)) continue;
+      const depth = width / chamferCone.tanHalf;
       chamferCuts.push({ id: c.id, name: c.name, path, depth });
       // The picture shows the bevel's MOUTH at the top face.
-      chamferRings.push({ id: c.id, name: c.name, depth, polygons: sweptBand(edge, c.side, c.width) });
+      chamferRings.push({ id: c.id, name: c.name, depth, polygons: sweptBand(edge, c.side, width) });
       // The oracle judges the band at the shallow level the groove prediction uses — the widest
       // section, where a wrong offset or width shows. The bevel has closed to `1 − fraction` of
       // its width there.

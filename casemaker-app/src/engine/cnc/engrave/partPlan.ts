@@ -180,6 +180,12 @@ export interface PartPlan {
     side: 'outside' | 'inside';
     /** The chamfer's width on the top face, mm. */
     width: Mm;
+    /**
+     * #786 slice 3 — the floor the bevel's tip must stop above, mm below the top face: the blank's
+     * thickness for a part's edge (or a through rim), the pocket's own depth for a pocket's rim.
+     * Null when the rim item states no depth, in which case the CAM has no floor to clamp to.
+     */
+    floor: Mm | null;
   }[];
   /**
    * SINGLE-LINE traces (#219), a SIBLING of `engraves` rather than more entries in it. A trace
@@ -2231,16 +2237,31 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
   // A chamfer whose rim never resolved is absent here, exactly as a cut-out with a broken
   // reference is: `validateJob` reports it and no path is generated.
   const chamfers: PartPlan['chamfers'] = [];
+  // #786 slice 3 — the rim's depth, for the bevel's floor: a pocket's own depth; a part's edge or
+  // a through rim is bounded by the blank. The same items `validateJob` calls rims.
+  const rimItems = [...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])] as readonly {
+    id: string;
+    depth?: number;
+    through?: boolean;
+  }[];
   for (const chamfer of job.chamfers ?? []) {
     if (!chamfer.enabled || chamfer.of === undefined) continue;
     const region = profiles.get(chamfer.of);
     if (region === undefined) continue;
+    const rim = rimItems.find((i) => i.id === chamfer.of);
+    const floor =
+      chamfer.side === 'outside' || rim === undefined || rim.through === true
+        ? job.stock.thickness
+        : typeof rim.depth === 'number'
+          ? rim.depth
+          : null;
     chamfers.push({
       id: chamfer.id,
       name: chamferOperationName(chamfer, names.get(chamfer.of) ?? null),
       outline: region,
       side: chamfer.side,
       width: chamfer.width,
+      floor,
     });
   }
 

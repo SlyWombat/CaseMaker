@@ -155,16 +155,17 @@ describe('chamfer geometry and findings (#669)', () => {
     expect(vCone(CHAMFER_TOOL)!.tipRadius).toBe(0.1);
   });
 
-  it('refuses a width past the cone’s reach, naming both numbers', () => {
+  it('cuts a width past the cone’s reach to the reach, naming both numbers and the shortfall', () => {
     const job: EngraveJob = { ...partEdgeJob(), chamfers: [chamfer('ch-part', 'lid edge', 'part', 'outside', 2)] };
     const f = validateJob(job).find((x) => x.code === 'chamfer-too-wide');
-    expect(f?.severity).toBe('error');
+    expect(f?.severity).toBe('warning');
     // This cutter's cone is (3.175 − 0.2)/2 = 1.4875 mm tall, so at 45° it reaches that width.
     expect(f?.message).toContain('2 mm');
     expect(f?.message).toMatch(/reaches 1\.48/);
+    expect(f?.message).toContain('0.513 mm');
   });
 
-  it('refuses a cutter that is not a cone, a rim that is not an edge, and a bevel past the floor', () => {
+  it('refuses a cutter that is not a cone, a rim that is not an edge, and CUTS a bevel past the floor', () => {
     const flat = flatEndMill(3.175, { name: '3.175 flat' });
     const noCone = validateJob({ ...partEdgeJob(), tool: flat }).find((x) => x.code === 'chamfer-needs-cone');
     expect(noCone?.severity).toBe('error');
@@ -180,7 +181,8 @@ describe('chamfer geometry and findings (#669)', () => {
     // A pocket's rim, on a pocket shallower than the bevel reaches.
     const deep = { ...bothRimsJob(), shapes: [rect('pocket', 'well', 25, 20, { depth: 0.3 }), rect('part', 'lid', 70, 20, { construction: true })] };
     const f = validateJob(deep).find((x) => x.code === 'chamfer-too-deep');
-    expect(f?.severity).toBe('error');
+    // #786 slice 3 — the tip stops at the floor; the bevel is cut to the width that leaves.
+    expect(f?.severity).toBe('warning');
     expect(f?.message).toContain('0.3');
 
     const noRim: EngraveJob = { ...partEdgeJob(), chamfers: [chamfer('ch-none', 'no rim', undefined, 'outside')] };
