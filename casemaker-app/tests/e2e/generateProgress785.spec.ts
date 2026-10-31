@@ -41,8 +41,11 @@ test('#785 Generate shows its stage, and Cancel returns the panel to its pre-Gen
   // finishing, posting) and then the simulation. Any of them is a stage the run really reports.
   const progress = page.getByTestId('engrave-generate-progress');
   await expect(progress).toBeVisible({ timeout: 120_000 });
+  // The store names the first stage at the press, and the worker's own stages replace it as they
+  // arrive; either is a stage the run really reports.
   await expect(progress).toContainText(
-    /reading the job|sampling the goal|roughing level|finishing row|posting the program|done/i,
+    /starting the worker|reading the job|sampling the goal|roughing level|finishing row|posting the program|done/i,
+    { timeout: 120_000 },
   );
 
   // Cancel terminates the worker and returns the panel to the phase it was in — the idle state the

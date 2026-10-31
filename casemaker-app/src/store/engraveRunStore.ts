@@ -327,7 +327,14 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     noteWorkStart('generate', generateFacts(job));
     const previousVerdict = before.oracle === null ? null : before.oracle.ok;
     const previousInputs = before.inputs;
-    set({ ...empty, phase: 'generating', generated: get().generated });
+    set({
+      ...empty,
+      phase: 'generating',
+      generated: get().generated,
+      // #785 — a name from the FIRST frame: the worker's own first stage can be seconds away (the
+      // module and its wasm load), and "Working…" with no words is the complaint this issue is.
+      progress: { stage: 'prepare', label: 'starting the worker' },
+    });
 
     // ONE machine per run (#297): the saved frame is read once, here, and handed to the generator
     // (post, verify, frame file) and to the simulation load below. Two reads could straddle a change
