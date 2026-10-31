@@ -1620,6 +1620,27 @@ export interface JobRunLogEntry {
   transcript?: string;
 }
 
+/**
+ * #783 — one of the part's own dimensions, in the user's words. The part's `length`, `width` and
+ * `thickness` are the piece as it was made; the JOB's box is whatever those three become once the
+ * operator says which way round the part sits.
+ */
+export type PartAxis = 'length' | 'width' | 'thickness';
+
+/**
+ * #783 — WHICH WAY ROUND the part sits in the job's frame: a permutation of the part's own three
+ * axes into the job's. `x` runs between the jaw faces, `y` along the jaws, `z` up.
+ *
+ * It is the operator's CHOICE for every form, asked in Holding — a block's six, a rod's three, a
+ * disc's two — never a rule. Absent on the job is the shipped orientation: the part's length
+ * between the jaws, its width along them, its thickness up.
+ */
+export interface StockHold {
+  x: PartAxis;
+  y: PartAxis;
+  z: PartAxis;
+}
+
 export interface EngraveJob {
   schemaVersion: 3;
   /**
@@ -1701,6 +1722,13 @@ export interface EngraveJob {
     colour?: StockColour;
     flatness?: StockFlatness;
   };
+  /**
+   * #783 — which way round the PART sits in this job's box (see {@link StockHold}). ABSENT is the
+   * shipped orientation, so every pre-#783 document round-trips byte-for-byte. The stock box above
+   * is always the JOB's box; the part's own dimensions are recovered from it through this permuta-
+   * tion (`stockHold.ts`'s `partDimsOf`), and a hold change re-states the box.
+   */
+  hold?: StockHold;
   labels: EngraveLabel[];
   /** Shape pockets (#214), each at its own depth. Empty for a text-only job. */
   shapes: EngraveShape[];

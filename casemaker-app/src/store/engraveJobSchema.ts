@@ -1536,6 +1536,26 @@ const stockObjectSchema = z
 const stockSchema = z.preprocess(migrateStockPrint, stockObjectSchema);
 
 /**
+ * #783 — a hold is a PERMUTATION of the part's own three axes into the job's. The refinement is
+ * the definition: the same axis twice is not a way round, and the schema says which one is wrong.
+ */
+const stockHoldSchema = z
+  .object({
+    x: z.enum(['length', 'width', 'thickness']).describe('The part axis between the jaw faces.'),
+    y: z.enum(['length', 'width', 'thickness']).describe('The part axis along the jaws.'),
+    z: z.enum(['length', 'width', 'thickness']).describe('The part axis that is up.'),
+  })
+  .strict()
+  .superRefine((hold, ctx) => {
+    if (new Set([hold.x, hold.y, hold.z]).size !== 3) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'a hold names each of the part’s length, width and thickness exactly once',
+      });
+    }
+  });
+
+/**
  * The job's own Z-error margins (#345). OPTIONAL, not defaulted: a job with none runs on the house
  * setting at generate time, and a stored document that keeps no key round-trips byte-for-byte.
  * Both numbers may be 0 (a job that has decided it needs no margin), so neither is `.positive()`.
@@ -2331,6 +2351,12 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
 const engraveJobV3Schema = engraveJobV2Schema
   .extend({
     schemaVersion: z.literal(3).describe('Document schema version.'),
+    // #783 — WHICH WAY ROUND the part sits: a permutation of its own L/W/T into the job frame.
+    // OPTIONAL and not defaulted, so every pre-#783 document keeps its exact shape; absent is the
+    // shipped orientation (`DEFAULT_HOLD`).
+    hold: stockHoldSchema
+      .optional()
+      .describe('Which part axis runs between the jaws, along them and up; omit for the shipped orientation.'),
     // #240 §1 — version 3 is the first version that can state the rotary chuck. v1/v2 keep their
     // vise-only arm (a document at either version predates the module's model), so a v3 document
     // gains nothing unless it actually says `rotary-chuck`.

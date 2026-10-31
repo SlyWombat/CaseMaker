@@ -1041,6 +1041,45 @@
           ],
           "type": "object"
         },
+        "hold": {
+          "additionalProperties": false,
+          "description": "Which part axis runs between the jaws, along them and up; omit for the shipped orientation.",
+          "properties": {
+            "x": {
+              "description": "The part axis between the jaw faces.",
+              "enum": [
+                "length",
+                "width",
+                "thickness"
+              ],
+              "type": "string"
+            },
+            "y": {
+              "description": "The part axis along the jaws.",
+              "enum": [
+                "length",
+                "width",
+                "thickness"
+              ],
+              "type": "string"
+            },
+            "z": {
+              "description": "The part axis that is up.",
+              "enum": [
+                "length",
+                "width",
+                "thickness"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object"
+        },
         "id": {
           "description": "Stable job id; generated when a document does not state one.",
           "minLength": 1,
