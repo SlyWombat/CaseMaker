@@ -15,9 +15,11 @@
  * so each lands in its own hole after the turn, and at unequal distances from the part's centre,
  * so a blank also spun 180° about Z cannot sit on them (the mistake the pins exist to stop).
  *
- * WHAT IS NOT YET THE APP'S. One job does not carry both sides with the pins as their datum
- * (#723 part 2): here the two sides are two jobs and the test does the flip transform. That gap
- * is stated as a `todo`, not faked.
+ * THE ONE-JOB ACCEPTANCE (#723 part 2) is the last block: one document names both sides, each on
+ * its own setup; the turn between them is the second setup's bottom-up mount, its datum is the two
+ * pins, and the app's own carry transform is what pairs the sides' work frames. The two sides are
+ * generated as one job's two programs and swept through the app's session — side 2 from the stock
+ * side 1 left — and the wall is checked where the app's map says each side's point is.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -42,14 +44,20 @@ import {
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
-import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import { engraveGenerate, generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import { createSimSession } from '@/workers/sim/session';
+import { goalSides, jobSetups, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { carriedMaps, carryPointBetweenSetups, flipAxisOf, orient, setupPinReference, type CarrySetup } from '@/engine/cnc/setups';
+import { Z1 } from '@/engine/cnc/machine';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
-import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject, JobSetupPins } from '@/types/engraveJob';
 import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
 import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
+import type { FlatField } from '@/workers/geometry/carriedField';
 import { stubSetup, type Setup } from '@/engine/cnc/setup';
 import { rectProfile } from '@/engine/compiler/profile';
+import { tl } from './helpers/manifoldExec';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -369,7 +377,170 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     }
   });
 
-  it.todo(
-    'one job carries both sides with the pins as their datum, and the app does the flip transform (#723 part 2)',
-  );
+  /**
+   * #723 part 2 / #754 — ONE JOB CARRIES BOTH SIDES. The document names one goal per setup; the
+   * second setup is the stock turned over in the vise (a bottom-up mount, which the setups engine
+   * turns 180° about X), and the two pins lie on that turn's line. The app generates the two
+   * programs, carries side 1's remaining stock into side 2's work frame with its own maps, and
+   * sweeps side 2 on that stock. The wall is read where the app's map says the same physical
+   * point is — so a wrong transform moves the probe, not just the picture.
+   */
+  const STOCK = { x: BLANK.length, y: BLANK.width, z: BLANK.thickness };
+  const BOUNDS = {
+    min: [0, 0, 0] as [number, number, number],
+    max: [BLANK.length, BLANK.width, BLANK.thickness] as [number, number, number],
+  };
+  /** The stock face up is the one that was down: a 180° turn about X, the vise's bottom-up mount. */
+  const BOTTOM_UP = { top: 'bottom', bottom: 'top', left: 'left', right: 'right', front: 'back', back: 'front' } as const;
+  const PINS_WORD: JobSetupPins = { at: [{ x: PINS[0]!.x, y: PINS[0]!.y }, { x: PINS[1]!.x, y: PINS[1]!.y }] };
+
+  /** The #754 part as ONE document: the outside on setup 1, the inside (a mold) on setup 2. */
+  function oneJob(): EngraveJob {
+    const base = defaultEngraveJob();
+    const first = jobSetups(base)[0]!;
+    const toolKey = 'flat-3.175x12-metal';
+    return {
+      ...base,
+      labels: [],
+      shapes: [],
+      stock: { ...base.stock, ...BLANK },
+      toolKey,
+      tool: BALL_TOOL,
+      setups: [
+        { ...first, id: 'setup-1', orientation: { ...first.orientation }, itemIds: [], tools: [toolKey] },
+        {
+          ...first,
+          id: 'setup-2',
+          orientation: BOTTOM_UP,
+          mount: { kind: 'vise', viseOpeningMm: 100 },
+          itemIds: [],
+          tools: [toolKey],
+          // What the operator does between the sides, and the datum it is done against.
+          remount: {
+            instruction: ['Turn the stock over about the two pins, so the face that was up is down.'],
+            confirm: null,
+          },
+          pins: PINS_WORD,
+        },
+      ],
+      targetObjects: [
+        goal(zOut, { id: 'shell-out', setupId: 'setup-1', surface: { finishStepOverMm: FINISH_STEP, scallop: true } }),
+        goal(zIn, { id: 'shell-in', setupId: 'setup-2', goalMode: 'mold', surface: { finishStepOverMm: FINISH_STEP } }),
+      ],
+    };
+  }
+
+  /** A column-swept program's final top field, at a work point (nearest column, as the engine reads). */
+  function topAt(f: FlatField, x: number, y: number): number {
+    const i = Math.min(f.nu - 1, Math.max(0, Math.round((x - f.u0) / f.du)));
+    const j = Math.min(f.nv - 1, Math.max(0, Math.round((y - f.v0) / f.dv)));
+    return f.top[j * f.nu + i] as number;
+  }
+
+  it('one job carries both sides with the pins as their datum, and the app does the flip transform', () => {
+    const job = oneJob();
+    // The document reads as two sides, in setup order, one goal each.
+    expect(goalSides(job).map((s) => [s.setupIndex, s.setup.id, s.goal.id])).toEqual([
+      [0, 'setup-1', 'shell-out'],
+      [1, 'setup-2', 'shell-in'],
+    ]);
+
+    // ONE job, TWO programs: side 1's outside, then side 2's mold, each on its own setup.
+    const out = engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
+    expect(out.errors).toEqual([]);
+    expect(out.ok).toBe(true);
+    expect(out.programs.map((p) => [p.setupIndex, p.setupId])).toEqual([
+      [1, 'setup-1'],
+      [2, 'setup-2'],
+    ]);
+    expect(out.programs[1]!.nc).not.toBe(out.programs[0]!.nc);
+
+    // The app's own frames, built exactly as the run store builds them: top-up first, bottom-up
+    // in the vise second, and the second rotation is the turn the remount states.
+    const frames = jobSetups(job).map((s) => orient(s.orientation.top, s.mount, STOCK));
+    const topFrame = frames[0]!;
+    const flipFrame = frames[1]!;
+    expect(topFrame.ok && flipFrame.ok).toBe(true);
+    if (!topFrame.ok || !flipFrame.ok) return;
+    expect(flipFrame.rotate).toEqual({ about: 'x', degrees: 180 });
+    const top: CarrySetup = { rotation: topFrame.matrix, bounds: BOUNDS };
+    const flip: CarrySetup = { rotation: flipFrame.matrix, bounds: BOUNDS };
+    const map = carryPointBetweenSetups(top, flip);
+    // A point on side 1 lands where the turn puts it: same X, Y mirrored about the pins' line, and
+    // the old top T below the new one.
+    const point = [CX + 5, CY - 7, -3] as [number, number, number];
+    const landedPoint = map(point);
+    expect(landedPoint[0]).toBeCloseTo(point[0], 9);
+    expect(landedPoint[1]).toBeCloseTo(2 * CY - point[1], 9);
+    expect(landedPoint[2]).toBeCloseTo(-BLANK.thickness - point[2], 9);
+
+    // THE PINS ARE THE DATUM: the same turn lands each in its own hole (they lie on its line, so
+    // their XY is fixed), and the reference asks the question that catches a stock spun 180°.
+    expect(flipAxisOf(job.setups![1]!)).toBe('x');
+    for (const pin of PINS_WORD.at) {
+      const landedPin = map([pin.x, pin.y, 0] as [number, number, number]);
+      expect(landedPin[0]).toBeCloseTo(pin.x, 9);
+      expect(landedPin[1]).toBeCloseTo(pin.y, 9);
+      expect(landedPin[2]).toBeCloseTo(-BLANK.thickness, 9);
+    }
+    const ref = setupPinReference(job.setups![1]!, { x: BLANK.length, y: BLANK.width }, 1);
+    expect(ref?.confirm).not.toBeNull();
+    expect(ref!.confirm!.options[ref!.confirm!.correct]).toBe('the pin 4 mm from the left edge');
+
+    // THE SWEEPS, on the app's own machinery: side 1 first; side 2 seeded with the stock side 1
+    // left, carried into its frame by the app's maps.
+    const setup = toSetup(job, Z1);
+    const session = createSimSession(tl);
+    let sideTwoStock = 0;
+    let blankStock = 0;
+    try {
+      const r1 = session.load(out.programs[0]!.nc, setup, BALL_TOOL, Z1.id);
+      expect(r1.ok, r1.ok ? '' : JSON.stringify(r1.diagnostics)).toBe(true);
+      if (!r1.ok || !r1.flatField) return;
+      const maps = carriedMaps(top, flip);
+      expect(maps.ok).toBe(true);
+      if (!maps.ok) return;
+      const r2 = session.load(out.programs[1]!.nc, setup, BALL_TOOL, Z1.id, {
+        carried: { ...r1.flatField, ...maps.maps },
+      });
+      expect(r2.ok, r2.ok ? '' : JSON.stringify(r2.diagnostics)).toBe(true);
+      if (!r2.ok || !r2.flatField) return;
+      expect(r2.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+      sideTwoStock = r2.stats.stockVolume;
+
+      // SIDE 2 STARTED FROM SIDE 1'S STOCK, not the blank: the carried stock is lighter by the
+      // material side 1 removed. The run store hands the field across exactly this way.
+      const blank = createSimSession(tl);
+      try {
+        const r2b = blank.load(out.programs[1]!.nc, setup, BALL_TOOL, Z1.id);
+        expect(r2b.ok, r2b.ok ? '' : JSON.stringify(r2b.diagnostics)).toBe(true);
+        if (r2b.ok) blankStock = r2b.stats.stockVolume;
+      } finally {
+        blank.dispose();
+      }
+      expect(blankStock).toBeGreaterThan(BLANK.length * BLANK.width * BLANK.thickness * 0.99);
+      expect(sideTwoStock).toBeLessThan(blankStock - 1000);
+
+      // THE WALL, at the point the app's map pairs with each side-1 probe: side 1's finished top
+      // (its height above the rim is + the crown), and the side-2 cavity's floor there.
+      const crown = crownOf(zOut);
+      for (const [lx, ly] of PROBES) {
+        const s2 = map([CX + lx, CY + ly, 0] as [number, number, number]);
+        const outside = topAt(r1.flatField, CX + lx, CY + ly) + crown;
+        const cavity = topAt(r2.flatField, s2[0], s2[1]);
+        const wall = outside + cavity;
+        const slope = Math.hypot(
+          (zOut(lx + 0.01, ly) - zOut(lx - 0.01, ly)) / 0.02,
+          (zOut(lx, ly + 0.01) - zOut(lx, ly - 0.01)) / 0.02,
+        );
+        const band = SCALLOP * (1 + slope) + SAMPLE_SLOP * Math.max(1, slope);
+        expect(wall, `wall under (${lx}, ${ly}): not cut through`).toBeGreaterThanOrEqual(
+          W - SAMPLE_SLOP * Math.max(1, slope),
+        );
+        expect(wall, `wall under (${lx}, ${ly}): within the finish's band`).toBeLessThanOrEqual(W + band);
+      }
+    } finally {
+      session.dispose();
+    }
+  }, 600_000);
 });
