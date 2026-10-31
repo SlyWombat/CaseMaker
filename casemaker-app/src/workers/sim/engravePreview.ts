@@ -49,6 +49,7 @@ import type { ObstacleBox } from '@/engine/cnc/setup';
 import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { toolForJob } from '@/engine/cnc/toolRegistry';
+import { withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { recommendTool, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
@@ -559,13 +560,21 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     const perChar = perCharFor(job);
     // The job's own snapshot wins over its key's entry (design point 2, #305), resolved against
     // the list the main thread sent — the worker has no registry of its own to read.
-    const tool = toolForJob(job, tools);
+    //
+    // #786 slice 4c-2 — THE PREVIEW CUTS WITH THE SAME FILLED TOOL THE RUN WILL. A blank tip or
+    // flute filled from the catalogue row for the same g_ID is part of the tool here, not only in
+    // `engraveGenerate`: the preview's cone, its predictions and the regions all read the same
+    // values, so the picture cannot disagree with the program. The entries are enriched too, so a
+    // candidate cutter the recommendation measures carries its catalogue values as well.
+    const catalogueEntries = withCatalogueEntries(tools);
+    const resolvedTool = toolForJob(job, catalogueEntries);
+    const tool = resolvedTool === null ? null : withCatalogueValues(resolvedTool, catalogueEntries).tool;
     const { plan, measured, cuts, findings, colourBoundaryDepth, floors: supportingFloors } = engraveRegions(
       tl,
       job,
       tool,
       margins,
-      shop,
+      { ...shop, tools: catalogueEntries },
       null,
       catalogue,
     );
@@ -914,10 +923,12 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     const raisedText = raisedTextMeasure(tl, job, plan);
     const recommendation = recommendTool(
       job,
-      tools,
+      // #786 slice 4c-2 — the candidates carry their catalogue values too: a cutter whose tip the
+      // catalogue states must qualify for a V job the run would cut with that same tip.
+      catalogueEntries,
       catalogue,
       (key) => {
-        const entry = tools.find((e) => e.key === key);
+        const entry = catalogueEntries.find((e) => e.key === key);
         if (!entry) return [];
         const r = cuttingRadiusForSweep(entry.tool);
         return r.ok ? measureLabels(tl, plan, r.radius, job.edgeMargin, perChar) : [];
@@ -933,7 +944,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       // #760 — and the same raised measurement `raised-text-fused` makes, so the recommendation
       // never calls a cutter that joins the letters one that "keeps every item intact".
       (key) => {
-        const entry = tools.find((e) => e.key === key);
+        const entry = catalogueEntries.find((e) => e.key === key);
         return entry ? raisedText(entry.tool) : [];
       },
     );
@@ -968,7 +979,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
             },
       recommendation: {
         ...recommendation,
-        reason: completeCompromiseReason(tl, job, recommendation, tools, shop.lostDetailWarnRatio ?? null),
+        reason: completeCompromiseReason(tl, job, recommendation, catalogueEntries, shop.lostDetailWarnRatio ?? null),
       },
     };
   };

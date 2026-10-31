@@ -95,6 +95,10 @@ export type JobFindingCode =
   // cone, so the plan assumes a SHARP POINT. A warning, not the error above: those items are not
   // judged at a colour plane, and the carve proceeds with the assumption stated.
   | 'tool-tip-assumed-point'
+  // #786 slice 4c-2 — the cutter's own record leaves its tip or its flute blank, and Makera's
+  // catalogue row for the SAME cutter (matched by g_ID) states it. INFO: the run uses that value,
+  // and the sentence says which record it came from.
+  | 'tool-geometry-from-catalogue'
   | 'vise-jaw-collision'
   | 'vise-default'
   | 'vise-stock-not-proud'

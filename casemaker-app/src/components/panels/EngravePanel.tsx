@@ -31,6 +31,7 @@ import {
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineDisplayName } from '@/platform/locationClient';
 import { machineRecordByProfile, useLocationStore } from '@/store/locationStore';
@@ -1880,11 +1881,21 @@ export function EngravePanel(): JSX.Element {
               ? 'recommended'
               : null;
   const cutterFidelity = measuredNow !== null && measuredApplied ? `${Math.round(measuredNow.worstFidelity * 100)} % fidelity` : null;
+  // #786 slice 4c-2 — WHAT THE CATALOGUE'S OWN RECORD SUPPLIED, on the same line: a value the
+  // toolpath is actually cutting with (the engine fills the blank before the CAM), not a footnote
+  // beside it. Nothing is shown when the record states everything.
+  const catalogueNote = (() => {
+    if (tool === null) return null;
+    const filled = withCatalogueValues(tool, tools).filled;
+    if (filled.length === 0) return null;
+    const words = filled.map((f) => `${f.field === 'tip' ? 'tip' : 'reach'} ${fmt(f.mm)} mm`).join(' and ');
+    return `${words} from Makera's catalogue`;
+  })();
   // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
   // its answer is waiting to be applied), the line says the app is choosing.
   const cutterVerdict =
     tool !== null
-      ? [toolDisplayName(tool), cutterProvenance, cutterFidelity].filter((w): w is string => w !== null).join(' · ')
+      ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote].filter((w): w is string => w !== null).join(' · ')
       : measuredStatus === 'measuring' || measuredNow !== null || rec !== null
         ? 'choosing…'
         : 'no cutter chosen';

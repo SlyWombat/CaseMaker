@@ -75,6 +75,7 @@ import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
+import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import {
@@ -1640,6 +1641,30 @@ export function engraveRegions(
    */
   raisedCoFlat?: Tool | null,
 ): EngraveRegions {
+  // #786 slice 4c-2 — THE CATALOGUE'S RECORD OF THE SAME CUTTER FILLS WHAT THE RECORD LEAVES
+  // BLANK. A cutter carrying Makera's g_ID is the same physical bit a catalogue row describes, so
+  // an absent tip or flute is filled from that row — and the TOOLPATH uses the filled value (the
+  // cone, the reach the holder rule reads), not merely a sentence about it. `shop.tools` is
+  // enriched too, so every key this run resolves (a setup's per-program cutters included) carries
+  // the same values, and `job.tool` is the enriched snapshot `validateJob` judges.
+  const catalogueEntries = withCatalogueEntries(shop.tools);
+  if (catalogueEntries !== shop.tools) shop = { ...shop, tools: catalogueEntries };
+  const catalogueFill = tool === null ? null : withCatalogueValues(tool, catalogueEntries);
+  tool = catalogueFill?.tool ?? null;
+  if (catalogueFill !== null && catalogueFill.filled.length > 0 && job.tool !== undefined && job.tool !== null) {
+    job = { ...job, tool: withCatalogueValues(job.tool, catalogueEntries).tool };
+  }
+  const catalogueFindings: JobFinding[] =
+    catalogueFill !== null && catalogueFill.filled.length > 0
+      ? [
+          {
+            severity: 'info',
+            code: 'tool-geometry-from-catalogue',
+            message: catalogueValueSentence(catalogueFill.tool, catalogueFill.filled)!,
+          },
+        ]
+      : [];
+
   const plan = toPartPlan(
     job,
     derivedCores === undefined || derivedCores.length === 0
@@ -2198,6 +2223,8 @@ export function engraveRegions(
   // takes, so the depth a finding accepts and the depth a program cuts cannot disagree.
   const drillResolved = shop.drill ?? drillSettings(shop.defaults ?? null);
   const findings = dedupeFindings([
+    // #786 slice 4c-2 — the blanks the catalogue's own record filled, and the record it was.
+    ...catalogueFindings,
     ...validateJob(
       job,
       { deg: drillResolved.settings.pointAngleDeg, source: drillResolved.sources.pointAngleDeg },
@@ -5069,6 +5096,29 @@ export function engraveGenerate(
   onProgress?: EngraveProgressFn,
 ): EngraveGenerated {
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
+  // #786 slice 4c-2 — the same catalogue fill as `engraveRegions`, applied HERE as well so the
+  // CAM (which reads the tool after the regions step) and every sub-job cutter use the values the
+  // run's own sentence names. `engraveRegions` then finds nothing left to fill and adds no second
+  // finding.
+  const catalogueEntries = withCatalogueEntries(shop.tools);
+  if (catalogueEntries !== shop.tools) shop = { ...shop, tools: catalogueEntries };
+  const catalogueFill = tool === null ? null : withCatalogueValues(tool, catalogueEntries);
+  tool = catalogueFill?.tool ?? null;
+  if (catalogueFill !== null && catalogueFill.filled.length > 0 && job.tool !== undefined && job.tool !== null) {
+    job = { ...job, tool: withCatalogueValues(job.tool, catalogueEntries).tool };
+  }
+  // The sentence travels on the run's findings; `engraveRegions` sees the already-filled tool, so
+  // this is the ONE emission on the generate path (a preview emits it from `engraveRegions`).
+  const catalogueFindings: JobFinding[] =
+    catalogueFill !== null && catalogueFill.filled.length > 0
+      ? [
+          {
+            severity: 'info',
+            code: 'tool-geometry-from-catalogue',
+            message: catalogueValueSentence(catalogueFill.tool, catalogueFill.filled)!,
+          },
+        ]
+      : [];
   // #473 — A MATERIAL `facingRefusal` REFUSES IS REFUSED OUTRIGHT, BEFORE ANY PROGRAM IS POSTED.
   //
   // #474 settled that facing is offered for wood and metal only: a flat cutter smears a plastic
@@ -5209,8 +5259,7 @@ export function engraveGenerate(
     // stands, and the warning says what to add. A job that has setups gets the same sentence from
     // the loop below, with the setup's number on it.
     const coreWarnings = (one.cores?.length ?? 0) === 0 ? [] : coreWarningFindings(one.cores!, null);
-    const oneReady: OneProgram =
-      coreWarnings.length === 0 ? one : { ...one, findings: dedupeFindings([...one.findings, ...coreWarnings]) };
+    const oneReady: OneProgram = { ...one, findings: dedupeFindings([...catalogueFindings, ...one.findings, ...coreWarnings]) };
     const ref: JobProgramRef = {
       setupIndex: 1,
       setupId: jobSetups(job)[0]!.id,
@@ -5235,7 +5284,7 @@ export function engraveGenerate(
       stage: 'findings',
       // #725 B7 — the bed facts ride this call too: it is the same document gate as `engraveRegions`,
       // and a through sentence judged without them would name the vise on a bed job.
-      findings: dedupeFindings([...setupProblems, ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools, tool })]),
+      findings: dedupeFindings([...catalogueFindings, ...setupProblems, ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools, tool })]),
       feeds: null,
       threads: null,
       threadMachining: null,
@@ -5414,6 +5463,7 @@ export function engraveGenerate(
     ok: stopped === undefined && restErrors.length === 0,
     stage: stopped?.stage ?? (restErrors.length > 0 ? 'findings' : 'done'),
     findings: dedupeFindings([
+      ...catalogueFindings,
       ...attempts.flatMap((one) => one.findings),
       ...restFindings,
       // #743 P-5 — a HOLE NO OWNED CUTTER MAKES belongs to no program, so no per-program sub-job
