@@ -516,21 +516,20 @@ describe('#734 the typical jobs run clean through the cut pipeline', () => {
     expect(elapsed, `cut took ${elapsed} ms`).toBeLessThan(BUDGET_MS);
   }, 150_000);
 
-  it('j11 inlay female: the 5.1 mm pocket is refused on the cutter’s 4.992 mm cone (#741)', async () => {
+  it('j11 inlay female: the 5.1 mm pocket is cut to the cutter’s 4.992 mm cone and stated (#741, #786 slice 3)', async () => {
     // The bench's own recipe asks for a 5.1 mm pocket with a 30° × 0.5 mm engraver whose cone
-    // reaches its ⌀3.175 mm body at 4.9916 mm. Above the cone the bit's BODY cuts a vertical wall,
-    // not a V, so the pocket would not be the inlay it claims to be. #741 refuses it by name, and
-    // the refusal comes before any program is written — which is why the finish-time budget #734
-    // pinned no longer applies to this job; j05 above still pins the ring-growth fix.
+    // reaches its ⌀3.175 mm body at 4.9916 mm. #786 slice 3 — the cut stops at the cone and the
+    // sentence states the shortfall; the program IS written. j05 above still pins the ring-growth
+    // fix.
     const { code, receipt } = await cut('j11-inlay-female.json');
     const depth = receipt.diagnostics.filter((d) => d.code === 'vcarve-depth-beyond-cone');
-    expect(depth.map((d) => d.severity), JSON.stringify(receipt.diagnostics)).toEqual(['error']);
+    expect(depth.map((d) => d.severity), JSON.stringify(receipt.diagnostics)).toEqual(['warning']);
     expect(depth[0]!.message).toContain('5.1 mm');
     expect(depth[0]!.message).toContain('4.992 mm');
     expect(receipt.command).toBe('engrave');
     if (receipt.command !== 'engrave') return;
-    expect(receipt.details.programs, 'a refused job writes no program').toEqual([]);
-    expect(code, 'a refused job exits non-zero').toBe(1);
+    expect(receipt.details.programs.length, 'the clamped job writes its program').toBeGreaterThan(0);
+    expect(code, 'a warned job exits zero').toBe(0);
   }, 60_000);
 });
 
