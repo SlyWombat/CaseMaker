@@ -33,7 +33,6 @@ import type { MachineObservation } from '@/platform/machineProbe';
 import { machineForJob } from '@/platform/bedProfiles';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { FeatureKind, FeatureOverrides } from '@/engine/cnc/plan';
-import type { PreflightCause } from '@/engine/cnc/preflight';
 import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
@@ -218,7 +217,6 @@ export interface EngraveCutSurfaceProps {
   releaseBlocker: string | null;
   onProgramLine?: (line: number | null) => void;
   onLiveStatus?: (live: { busy: boolean; status: string }) => void;
-  onBackToDesign: (cause: PreflightCause | null) => void;
 }
 
 /** "14:02" from the package's ISO timestamp, the hub's own reading. */
@@ -257,7 +255,6 @@ export function EngraveCutSurface({
   releaseBlocker,
   onProgramLine,
   onLiveStatus,
-  onBackToDesign,
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
   const openManage = useManageModeStore((s) => s.openManage);
@@ -762,6 +759,23 @@ export function EngraveCutSurface({
             </button>
           </div>
         )}
+        {/* #795 — THE STATEMENT IS THE STEP'S FIRST LINE. The clearance acknowledgement used to sit
+            at the foot of the step, under the gate's fold; it is what the operator must say about
+            THIS step, so it reads before the details rather than after them. */}
+        {ackRequired && (
+          <div style={{ ...BOX, marginTop: 6 }} data-testid="engrave-cut-ack">
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#e6edf5' }}>
+              <input
+                type="checkbox"
+                data-testid="engrave-ack"
+                checked={acknowledged}
+                onChange={(e) => setAcknowledged(e.target.checked)}
+                style={{ marginTop: 2 }}
+              />
+              <span>I have checked clearance to the vise and the tool's reach myself.</span>
+            </label>
+          </div>
+        )}
         {/* #726 W20 — STEP 1 IS ONE LINE; the gate's rows are its DETAIL (§3.7: "▸ details").
             It opens by itself while something blocks, and stays where the operator left it after. */}
         <details
@@ -784,24 +798,8 @@ export function EngraveCutSurface({
           >
             details
           </summary>
-          <EngravePreflight report={report} onBackToDesign={onBackToDesign} />
+          <EngravePreflight report={report} />
         </details>
-        {/* #689 — the clearance acknowledgement moved here from the Generate footer. It is the
-            run gate's own flag; the sentence is the one the operator has always ticked. */}
-        {ackRequired && (
-          <div style={{ ...BOX, marginTop: 8 }} data-testid="engrave-cut-ack">
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#e6edf5' }}>
-              <input
-                type="checkbox"
-                data-testid="engrave-ack"
-                checked={acknowledged}
-                onChange={(e) => setAcknowledged(e.target.checked)}
-                style={{ marginTop: 2 }}
-              />
-              <span>I have checked clearance to the vise and the tool's reach myself.</span>
-            </label>
-          </div>
-        )}
       </Step>
 
       <Step number={2} title="Frozen" done={frozen} current={currentStep === 2} summary={step2Summary}>

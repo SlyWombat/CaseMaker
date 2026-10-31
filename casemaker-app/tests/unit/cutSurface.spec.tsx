@@ -285,7 +285,6 @@ function Harness(props: Props) {
       runContext={{}}
       uploadBlocker={props.uploadBlocker ?? null}
       releaseBlocker={props.releaseBlocker ?? null}
-      onBackToDesign={() => {}}
     />
   );
 }
@@ -518,6 +517,12 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('clearance not acknowledged');
     const ack = screen.getByTestId('engrave-ack') as HTMLInputElement;
     expect(ack.checked).toBe(false);
+
+    // #795 — THE STATEMENT IS THE STEP'S FIRST LINE: above the gate's fold, not under it.
+    const ackBox = screen.getByTestId('engrave-cut-ack');
+    const fold = screen.getByTestId('engrave-cut-details');
+    expect(screen.getByTestId('engrave-cut-step-1').contains(ackBox)).toBe(true);
+    expect(ackBox.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     // Run is blocked with its ONE sentence, and the step-4 statement does not stand in for it.
     const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;

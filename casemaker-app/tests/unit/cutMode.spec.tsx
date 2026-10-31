@@ -129,6 +129,8 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     expect(screen.getByTestId('engrave-stock-edit')).toBeTruthy();
     expect(screen.getByTestId('engrave-generate')).toBeTruthy();
     expect(screen.queryByTestId('engrave-preflight')).toBeNull();
+    // #795 — leaving Cut is a header link that exists only on Cut.
+    expect(screen.queryByTestId('engrave-back-to-design')).toBeNull();
   });
 
   it('pressing Cut asks the gate; with nothing generated the page says there is no program', () => {
@@ -136,6 +138,8 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     openCut();
 
     expect(pressed('cnc-mode-cut')).toBe('true');
+    // #795 — the way back is BESIDE the switch, not a button at the foot of the gate's page.
+    expect(screen.getByTestId('cnc-mode-switch').contains(screen.getByTestId('engrave-back-to-design'))).toBe(true);
     expect(screen.getByTestId('engrave-preflight')).toBeTruthy();
     // The Design stack is gone, not merely covered.
     expect(screen.queryByTestId('engrave-stock-edit')).toBeNull();

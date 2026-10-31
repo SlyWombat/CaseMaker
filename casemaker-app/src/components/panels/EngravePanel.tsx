@@ -2723,8 +2723,31 @@ export function EngravePanel(): JSX.Element {
         data-testid="cnc-mode-switch"
         role="group"
         aria-label="CNC mode"
-        style={{ display: 'flex', gap: 4, marginBottom: 8 }}
+        style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}
       >
+        {/* #795 — LEAVING CUT IS CHROME, NOT A STEP. The gate's page used to end in a full-width
+            "Back to Design" button; it is a text link beside the switch now, and it keeps its
+            testid and its §5.6 address (the first blocking row's cause). Absent on Design: there
+            is nowhere to go back to. */}
+        {mode === 'cut' && (
+          <button
+            type="button"
+            data-testid="engrave-back-to-design"
+            title="Back to Design"
+            style={{
+              flex: '0 0 auto',
+              padding: '6px 6px',
+              background: 'none',
+              border: 'none',
+              color: '#9aa4b0',
+              cursor: 'pointer',
+              fontSize: 12,
+            }}
+            onClick={() => backToDesign(preflight?.firstBlocking?.cause ?? null)}
+          >
+            ‹ Design
+          </button>
+        )}
         <button
           type="button"
           data-testid="cnc-mode-design"
@@ -4349,7 +4372,6 @@ export function EngravePanel(): JSX.Element {
               releaseBlocker={releaseBlockerText}
               onProgramLine={followProgramLine}
               onLiveStatus={noteLiveStatus}
-              onBackToDesign={backToDesign}
             />
           </>
         )

@@ -34,7 +34,6 @@ describe('#802 — severity words in the Cut panel', () => {
           row('warning', 'vise-default', 'the vise is not measured'),
           row('info', 'vise-seat', 'the blank seats on the ledge'),
         ])}
-        onBackToDesign={() => {}}
       />,
     );
     expect(screen.getByTestId('engrave-preflight-row-0-bad-ending').textContent).toContain('Error');

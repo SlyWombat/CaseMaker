@@ -10,13 +10,14 @@
  * slice 1 stops at "the gate was asked and this is what it said". The release step, the package line
  * and the plan ride on this page in the next slice, over the same report.
  *
- * "Back to Design" is the only control, and it is never dead: it leaves Cut, and when the first red
- * row names an item it expands that item's row through #411's `expandEngraveRow`. Scrolling to the
- * row waits for §7's `hubTarget`; until then the expansion is the whole of the address.
+ * This page has no controls of its own: leaving Cut is the panel's `‹ Design` header link (#795),
+ * beside the mode switch, and it is never dead — when the first red row names an item it expands
+ * that item's row through #411's `expandEngraveRow`. Scrolling to the row waits for §7's
+ * `hubTarget`; until then the expansion is the whole of the address.
  */
 
 import type { CSSProperties, JSX } from 'react';
-import type { PreflightCause, PreflightRow } from '@/engine/cnc/preflight';
+import type { PreflightRow } from '@/engine/cnc/preflight';
 import { entryFor } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
@@ -43,11 +44,6 @@ function cutterWords(toolKey: string): string {
 export interface EngravePreflightProps {
   /** The hub's aggregate — one `collect()` per scope, plus the two run-policy rows. */
   report: PreflightHubReport;
-  /**
-   * Leave Cut. The cause is the first blocking row's address when there is one, so the Design
-   * surface can expand the row that sent the operator back; null on a green page.
-   */
-  onBackToDesign: (cause: PreflightCause | null) => void;
 }
 
 /**
@@ -139,7 +135,7 @@ function ScopeGroup({
   );
 }
 
-export function EngravePreflight({ report, onBackToDesign }: EngravePreflightProps): JSX.Element {
+export function EngravePreflight({ report }: EngravePreflightProps): JSX.Element {
   const blocking = report.firstBlocking;
   // One setup and one cutter is the ordinary case; naming it adds a distinction the operator
   // cannot act on (#690).
@@ -195,14 +191,6 @@ export function EngravePreflight({ report, onBackToDesign }: EngravePreflightPro
         </p>
       )}
 
-      <button
-        type="button"
-        data-testid="engrave-back-to-design"
-        style={{ width: '100%', padding: 7, marginTop: 8 }}
-        onClick={() => onBackToDesign(blocking?.cause ?? null)}
-      >
-        Back to Design
-      </button>
     </div>
   );
 }
