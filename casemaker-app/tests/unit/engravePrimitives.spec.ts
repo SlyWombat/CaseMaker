@@ -1,9 +1,9 @@
 // #435 — 3D primitives as cut-aways: where they reduce to the existing region CAM, and where the
 // job refuses them BY NAME instead of approximating.
 //
-// Pure plan/validation only: no React, no wasm, no worker. `toPartPlan` is the one funnel every
-// item kind goes through, so a cuttable primitive is asserted there rather than in a second CAM
-// path; `validateJob` is where the refusals live.
+// Plan/validation, plus one GENERATE case for the side-opening warning (#786 slice 4a). `toPartPlan`
+// is the one funnel every item kind goes through, so a cuttable primitive is asserted there rather
+// than in a second CAM path; `validateJob` is where the refusals live.
 
 import { describe, it, expect } from 'vitest';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -14,6 +14,8 @@ import {
 } from '@/engine/cnc/engrave/partPlan';
 import { jobSetups, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup } from '@/engine/cnc/engrave/programs';
+import { engraveGenerate } from '@/workers/sim/engraveGenerate';
+import { tl } from './helpers/manifoldExec';
 import { reachabilityFor } from '@/engine/cnc/engrave/reachability';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { aabbOfProfile } from '@/engine/compiler/profile';
@@ -97,15 +99,50 @@ describe('#435 — which primitives reduce to the region CAM', () => {
 });
 
 describe('#435 — refusals are by name, never an approximation', () => {
-  it('refuses a side-opening primitive and points at the 3D engine', () => {
+  it('warns that a side-opening primitive stays in the stock, and names the setup face that could reach it', () => {
     const job = jobWith([primitive({ kind: 'box', width: 10, height: 10, axis: 'x' })]);
     const found = validateJob(job).find((f) => f.code === 'primitive-not-vertical');
     expect(found).toBeDefined();
-    expect(found?.severity).toBe('error');
+    // #786 slice 4a — the rest of the job generates; this cut stays in the stock, stated.
+    expect(found?.severity).toBe('warning');
     expect(found?.labelId).toBe('prm-1');
     expect(found?.message).toContain('side-opening');
-    expect(found?.message).toContain('3D engine');
+    expect(found?.message).toContain('stays');
+    expect(found?.message).toContain("No setup has the stock's right face up");
+
+    // A saved setup with the right face up is NAMED as the way to cut it.
+    const base = jobSetups(defaultEngraveJob())[0]!;
+    const withSide = jobWith([primitive({ kind: 'box', width: 10, height: 10, axis: 'x' })], {
+      toolKey: 'flat-1.0',
+      setups: [
+        { ...base, id: 's1', orientation: { ...base.orientation }, itemIds: [], tools: ['flat-1.0'] },
+        {
+          ...base,
+          id: 's2',
+          orientation: { top: 'right', bottom: 'left', left: 'top', right: 'bottom', front: 'front', back: 'back' },
+          itemIds: [],
+          tools: ['flat-1.0'],
+        },
+      ],
+    });
+    const named = validateJob(withSide).find((f) => f.code === 'primitive-not-vertical');
+    expect(named?.severity).toBe('warning');
+    expect(named?.message).toContain("Setup 2 has the stock's right face up");
   });
+
+  it('GENERATES the rest of the job with a side-opening primitive left in the stock (#786 slice 4a)', () => {
+    const job = jobWith([
+      primitive({ id: 'side', kind: 'box', width: 10, height: 10, axis: 'x' }),
+      primitive({ id: 'top', kind: 'box', width: 8, height: 8 }),
+    ]);
+    job.toolKey = 'flat-1.0';
+    job.tool = flatEndMill(1);
+    const out = engraveGenerate(tl, job, flatEndMill(1), [], null);
+    expect(out.errors, JSON.stringify(out.errors)).toEqual([]);
+    expect(out.ok).toBe(true);
+    expect(out.programs.length).toBeGreaterThan(0);
+    expect(out.findings.find((f) => f.code === 'primitive-not-vertical')?.severity).toBe('warning');
+  }, 60_000);
 
   it('refuses a cone and names the sloped wall and the two routes to cut it', () => {
     const job = jobWith([primitive({ kind: 'cone', diameter: 8, tipDiameter: 1 })]);

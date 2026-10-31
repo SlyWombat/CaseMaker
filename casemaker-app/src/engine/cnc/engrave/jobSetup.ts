@@ -1571,14 +1571,24 @@ export function validateJob(
     }
     const axis = primitive.axis ?? 'z';
     if (axis !== 'z') {
+      // #786 slice 4a — INFORMED, NOT REFUSED. A side-opening primitive is an undercut the
+      // top-face CAM cannot reach, so THIS setup leaves that part in the stock; the sentence
+      // states it and names the setup face that could reach it (a side setup turned that face
+      // up), so Generate cuts the rest of the job.
+      const face: 'right' | 'back' = axis === 'x' ? 'right' : 'back';
+      const setups = jobSetups(job);
+      const at = setups.findIndex((setup) => setup.orientation.top === face);
+      const route =
+        at >= 0
+          ? `Setup ${at + 1} has the stock's ${face} face up — cut it there.`
+          : `No setup has the stock's ${face} face up; add one with that face up, or set its axis to Z.`;
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'primitive-not-vertical',
         labelId: primitive.id,
         message:
-          `${primitiveLabel(primitive)} opens along ${axis.toUpperCase()}, which is a side-opening ` +
-          `undercut — not a top-face region the region CAM can cut. Set its axis to Z, or cut it ` +
-          `with the 3D engine; it is refused rather than approximated.`,
+          `${primitiveLabel(primitive)} opens along ${axis.toUpperCase()}, a side-opening undercut ` +
+          `the top-face CAM does not cut: that part of the stock stays. ${route}`,
       });
       continue;
     }
