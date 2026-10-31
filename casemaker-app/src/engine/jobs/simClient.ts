@@ -20,6 +20,7 @@ import type { SimDesign } from '@/workers/sim/session';
 import type { EngraveProgress, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { EngravePickSummary } from '@/workers/sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
@@ -372,8 +373,14 @@ export const cancelGenerate = (): void => terminateSim();
  * The volumetric oracle (#206 §3) over the program CURRENTLY loaded in the worker's session.
  * Throws when no swept program is loaded — only call after a load that reported `ok`.
  */
-export const simOracle = (predicted: OraclePredicted[]): Promise<OracleReport> =>
-  getSimApi().simOracle(predicted);
+export const simOracle = (
+  predicted: OraclePredicted[],
+  /**
+   * #743 P-5 — the board's copper, when the run is a PCB: the topology check reads the SAME loaded
+   * simulation at the copper's underside and folds its verdict into the report.
+   */
+  pcb?: PcbCopperTopologyInput | null,
+): Promise<OracleReport> => getSimApi().simOracle(predicted, pcb ?? null);
 
 /**
  * Read a PrusaSlicer project (.3mf) as a blank-and-items patch (#410 item 4's second entry point).

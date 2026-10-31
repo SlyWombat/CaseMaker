@@ -92,6 +92,7 @@ import {
   type JobFinding,
 } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
+import { pcbIsolationFindings, pcbIsolationSubjects } from '@/workers/sim/pcbIsolation';
 import {
   restJobFor,
   vBitRestRefusal,
@@ -2189,7 +2190,7 @@ export function engraveRegions(
     ...validateJob(
       job,
       { deg: drillResolved.settings.pointAngleDeg, source: drillResolved.sources.pointAngleDeg },
-      { derivedCores: derivedCores?.length ?? 0, bed: shop.bed ?? null, defaults: shop.defaults },
+      { derivedCores: derivedCores?.length ?? 0, bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools },
     ),
     // #240 — the vise's validator is the VISE's; a rotary job's holding findings are slice 3's.
     ...(job.workholding.kind === 'vise'
@@ -4136,7 +4137,7 @@ export function generateRotaryGoalProgram(
   });
   const documentFindings = (): JobFinding[] =>
     dedupeFindings([
-      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults }),
+      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools }),
       ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
     ]);
   if (goal.format === 'png') {
@@ -4357,7 +4358,7 @@ export function generateGoalProgram(
   // Save/Upload/Release asked for no clearance tick while Cut step 1 had no warning to show it.
   const documentFindings = (): JobFinding[] =>
     dedupeFindings([
-      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults }),
+      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools }),
       ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
     ]);
 
@@ -5046,7 +5047,7 @@ export function engraveGenerate(
       stage: 'findings',
       // #725 B7 — the bed facts ride this call too: it is the same document gate as `engraveRegions`,
       // and a through sentence judged without them would name the vise on a bed job.
-      findings: dedupeFindings([...setupProblems, ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults })]),
+      findings: dedupeFindings([...setupProblems, ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools })]),
       feeds: null,
       threads: null,
       threadMachining: null,
@@ -5402,6 +5403,13 @@ function generateOneProgram(
     floors,
     raisedCoFlat,
   );
+  // #743 P-5 — A BOARD'S ISOLATION, measured on the profile the CAM cuts: can every gap the
+  // copper leaves be opened (an error — a short is a broken board), and is any trace finer than
+  // the cutter's tip after the job's own Z budget (a warning)? Both read the same morphological
+  // opening the pocket's erosion uses, so the refusal and the path cannot disagree.
+  for (const subject of pcbIsolationSubjects(job, plan, shop.tools ?? [], tool, margins.zTolerance, colourBoundaryFor(plan, job) ?? 0)) {
+    findings.push(...pcbIsolationFindings(tl, subject));
+  }
   /**
    * #667 — WHAT THIS PROGRAM IS ASKED TO REMOVE. `predicted` is the design at its stated depths,
    * which is right for a program that reaches full depth; a ROUGH-ONLY program (the first file of

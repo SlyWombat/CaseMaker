@@ -1,0 +1,10 @@
+G04 #743 P-5 - one pair of pads 0.40 mm apart: the isolation opens it*
+%FSLAX46Y46*%
+%MOMM*%
+%TF.FileFunction,Copper,L1,Top*%
+%ADD10C,0.5*%
+G75*
+D10*
+X5000000Y5000000D03*
+X5900000Y5000000D03*
+M02*

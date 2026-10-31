@@ -42,6 +42,7 @@ import { grooveRadiusAt, type VCone } from '@/engine/cnc/vProfile';
 import { traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { CHUNK as SWEEP_CHUNK, FANOUT as SWEEP_FANOUT, SWEEP_TOLERANCES } from '@/workers/geometry/sweep';
+import type { CopperTopologyReport } from '@/engine/cnc/engrave/pcbTopology';
 import {
   cutterReach,
   rotaryFacetTerm,
@@ -271,6 +272,12 @@ export interface OracleReport {
    * to {@link ORACLE_AREA_FLOOR}.
    */
   areaFloor?: number;
+  /**
+   * #743 P-5 — A PCB'S COPPER, judged by topology rather than by volume. Present only when the
+   * run is a board: `ok` above is already `report.ok && copper.ok`, so the tick that reads `ok`
+   * states the copper's verdict too. Absent on every other job.
+   */
+  copper?: CopperTopologyReport;
 }
 
 /**

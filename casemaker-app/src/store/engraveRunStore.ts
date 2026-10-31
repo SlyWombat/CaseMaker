@@ -39,6 +39,7 @@ import { useLocationStore } from './locationStore';
 import { isVShape } from '@/engine/cnc/vProfile';
 import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { pcbCopperTopologyInput, type PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { getTools, entryFor } from '@/engine/cnc/toolRegistry';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
@@ -121,7 +122,7 @@ export type EngraveRunClient = {
     /** #785 — stage progress for the panel and the flight recorder. */
     onProgress?: (progress: EngraveProgress) => void,
   ) => Promise<EngraveGenerated>;
-  simOracle: (predicted: OraclePredicted[]) => Promise<OracleReport>;
+  simOracle: (predicted: OraclePredicted[], pcb?: PcbCopperTopologyInput | null) => Promise<OracleReport>;
   /**
    * #785 — stop the run's worker; the store has already orphaned the run (see `cancelGenerate`).
    * OPTIONAL so a fake client (a test, a preview-only build) need not implement a stop it has no
@@ -561,6 +562,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     /** The setup each cumulative prior-removal mesh came from, aligned with the walk's list. */
     const seedSources: number[] = [];
     const firstEngravingIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
+    // #743 P-5 — A BOARD IS JUDGED BY ITS COPPER'S TOPOLOGY, on the WHOLE run's swept stock. The
+    // volumetric comparison is program 1's own; a board's isolation, holes and outline are three
+    // programs, and a short is only visible after all of them have cut. So a PCB runs the topology
+    // check on the LAST program's session (which holds the cumulative removal) and asks no
+    // volumetric question at all.
+    const pcbTopology = pcbCopperTopologyInput(job);
+    const lastProgramIndex = generated.programs.length - 1;
     // #445 §4 — the thread facts belong to the first engraving program, the one
     // `generated.threads` describes; a facing pass or a later program states none.
     const threadsFor = (index: number) =>
@@ -668,6 +676,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // THE PREDICTION IS THE FIRST ENGRAVING PROGRAM'S. The oracle compares it against the
           // sweep of THAT program, so it runs while that program is still the session's live one —
           // the walk awaits this hook before loading the next.
+          if (pcbTopology !== null) {
+            // #743 P-5 — the board's own check, on the run's last swept stock (see above).
+            if (index === lastProgramIndex) oracleBox.report = await client.simOracle([], pcbTopology);
+            return;
+          }
           if (index === firstEngravingIndex) oracleBox.report = await client.simOracle(generated.predicted);
         },
         aborted: () => mine !== seq,

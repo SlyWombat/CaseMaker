@@ -28,6 +28,7 @@ import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type Engr
 import { evaluatePlan } from './sim/planEvaluate';
 import { runSmartPick, type EngravePickSummary } from './sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import { readDesign } from '@/engine/import/design3mf';
 import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
 import { sha256Hex } from '@/engine/import/meshStock';
@@ -240,8 +241,8 @@ const api = {
    * session owns the removal solid, so only the worker can run this. Throws when no swept
    * program is loaded; the main thread only calls it after a successful load.
    */
-  async simOracle(predicted: OraclePredicted[]): Promise<OracleReport> {
-    return (await getSession()).oracle(predicted);
+  async simOracle(predicted: OraclePredicted[], pcb?: PcbCopperTopologyInput | null): Promise<OracleReport> {
+    return (await getSession()).oracle(predicted, pcb ?? null);
   },
   /**
    * Read a PrusaSlicer project (.3mf) as a blank-and-items patch (#410 item 4's second entry

@@ -38,6 +38,8 @@ import {
   type SweptCut,
 } from '@/engine/cnc/engrave/partPlan';
 import { FASTENERS } from '@/engine/compiler/fasteners';
+import { PCB_DRILL_SLACK_MM } from '@/engine/import/pcbCutters';
+import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { inlayGlueGap, inlayMarked, inlayNumbers } from './inlay';
 import { textureNumbers, textureStrokes } from './texture';
@@ -46,6 +48,7 @@ import { prismHeightRefusal, prismNumbers } from './prism';
 import { reliefNumbers } from '@/engine/cnc/cam/relief';
 import { bracketSettings, defaultClampPlacements, validateBracketMount, type ClampPlacement, type StockSize } from '@/engine/cnc/mounts/bracket';
 import type { ShopDefaults } from '@/platform/defaultsClient';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type {
   BracketHold,
   EngraveAnyItem,
@@ -59,6 +62,7 @@ import type {
   EngraveTargetObject,
   EngraveThread,
   EngraveTraceItem,
+  EngraveVectorShape,
   JobSetup,
   TapeHold,
   TextureMark,
@@ -123,6 +127,20 @@ export type JobFindingCode =
   // nothing, or into the jaw zone the square says is stock. The face is the inscribed circle of
   // ⌀D, less the job's edge margin, and every corner of the cut's swept box must be inside it.
   | 'item-off-round-stock'
+  // #743 P-5 — A BOARD'S HOLES. `hole-no-cutter`: a drill item that states its hole's size (a
+  // Gerber import does) has no owned drill or flat end mill that can make it, by drilling within
+  // the +0.1 mm slack or boring it. `item-off-board`: a hole's centre lies outside the outline the
+  // part's cut-out follows, so it would be drilled into air beside the board.
+  | 'hole-no-cutter'
+  | 'item-off-board'
+  // #743 P-5 — A TRACE THE SURFACE BUDGET CAN NARROW. A warning: after the job's Z budget moves
+  // each isolation cut edge into the copper, a trace finer than the cutter's own tip is worth
+  // checking before soldering. It is still a trace; the warning names it, the width and the place.
+  | 'thin-trace'
+  // #743 P-5 — THE ISOLATION CANNOT OPEN A GAP. Two pieces of copper the design separates are
+  // closer than the cutter's own width at the copper, so the band between them is not cut and they
+  // come out joined. An error (design principle 18): a short is a broken board.
+  | 'isolation-short'
   // V-CARVE region findings (#221). The design is correct at the COLOUR PLANE, so the two
   // disqualifying facts are about that plane: a cut that stops above it never reaches the second
   // colour, and a groove at it narrower than the machine's own X/Y step cannot be resolved into
@@ -1262,6 +1280,85 @@ export function goalSides(job: EngraveJob): GoalSide[] {
   });
 }
 
+/**
+ * #743 P-5 — the outline a part's cut-out follows, as placed rings in the work frame, or null.
+ *
+ * Read from the DOCUMENT, because `validateJob` is pure and has no CrossSection: a vector's
+ * contours, a polygon's points, an axis-aligned rectangle or a circle approximated at the arc
+ * resolution every other 2D reader uses. A reference-following outline (`border`, `frame`,
+ * `cutaway`) or a rounded rectangle is SKIPPED rather than approximated — the hole check then says
+ * nothing, which is honest, where a guessed outline could refuse a sound board.
+ */
+function boardOutlineOf(
+  cutouts: readonly EngraveCutout[],
+  byId: ReadonlyMap<string, EngraveAnyItem>,
+): [number, number][][] | null {
+  for (const cutout of cutouts) {
+    if (cutout.side !== 'outside' || cutout.of === 'stock-inset') continue;
+    const target = byId.get(cutout.of);
+    if (target === undefined || !target.enabled) continue;
+    const rings = placedOutlineRings(target);
+    if (rings !== null && rings.length > 0) return rings;
+  }
+  return null;
+}
+
+/** One item's own closed outline, placed (rotated about its origin, then translated), or null. */
+function placedOutlineRings(item: EngraveAnyItem): [number, number][][] | null {
+  if (!('kind' in item)) return null;
+  const shape = item as EngraveShape | EngraveVectorShape;
+  const deg = (shape as { rotation?: number }).rotation ?? 0;
+  const rad = (deg * Math.PI) / 180;
+  const pos = (shape as { position?: { x: number; y: number } }).position ?? { x: 0, y: 0 };
+  const place = (x: number, y: number): [number, number] => [
+    x * Math.cos(rad) - y * Math.sin(rad) + pos.x,
+    x * Math.sin(rad) + y * Math.cos(rad) + pos.y,
+  ];
+  switch (shape.kind) {
+    case 'vector':
+      return shape.contours.map((ring) => ring.map(([x, y]) => place(x, y)));
+    case 'polygon':
+      return [shape.points.map(([x, y]) => place(x, y))];
+    case 'rect': {
+      if (shape.cornerRadius > 0) return null;
+      const w = shape.width / 2;
+      const h = shape.height / 2;
+      return [
+        [
+          place(-w, -h),
+          place(w, -h),
+          place(w, h),
+          place(-w, h),
+        ],
+      ];
+    }
+    case 'circle': {
+      const r = shape.diameter / 2;
+      if (!(r > 0)) return null;
+      const n = Math.max(32, Math.ceil(r * 16));
+      const ring: [number, number][] = [];
+      for (let i = 0; i < n; i++) {
+        const a = (2 * Math.PI * i) / n;
+        ring.push(place(r * Math.cos(a), r * Math.sin(a)));
+      }
+      return [ring];
+    }
+    default:
+      return null;
+  }
+}
+
+/** The cutter the job's setups assign to one item, or null when none does. */
+function assignedCutterKey(job: EngraveJob, itemId: string): string | null {
+  for (const setup of jobSetups(job)) {
+    const keys = setupTools(setup, job);
+    for (let i = 0; i < keys.length; i++) {
+      if (toolItemsFor(setup, keys[i]!, i).includes(itemId)) return keys[i]!;
+    }
+  }
+  return null;
+}
+
 export function validateJob(
   job: EngraveJob,
   drillPoint: { deg: number; source: string } | null = null,
@@ -1285,6 +1382,12 @@ export function validateJob(
      * rather than judged with a clamp the house may not own.
      */
     defaults?: ShopDefaults | null;
+    /**
+     * #743 P-5 — the owned cutters, when the caller holds the library (the sim worker receives
+     * them on `shop.tools`; the app's realm reads its registry). A hole size no cutter makes is
+     * named against this list; absent, `getTools()` answers, exactly as `jobTool` reads it.
+     */
+    tools?: readonly ToolLibraryEntry[] | null;
   } = {},
 ): JobFinding[] {
   const bed = options.bed ?? null;
@@ -1758,6 +1861,93 @@ export function validateJob(
           break; // one finding per item is enough
         }
       }
+    }
+  }
+
+  // #743 P-5 — THE BOARD'S OWN TWO CHECKS, both about holes a Gerber import placed.
+  //
+  // `hole-no-cutter`: a drill item that states its HOLE's size (a PCB import does; a hand-made
+  // drill's hole is its cutter and reads nothing here) is assigned to a cutter by the setup. When
+  // NO owned drill or flat end mill can make that size — drill it within the +0.1 mm slack, or
+  // bore it — the board cannot be cut as drawn, and the sentence names the size, the count and the
+  // smallest cutter that could have. A tolerance question is informed elsewhere; this one is the
+  // cutter genuinely not existing.
+  //
+  // `item-off-board`: a hole whose CENTRE is outside the outline the part's cut-out follows would
+  // be drilled into air beside the board. The outline is read from the document (a vector, polygon,
+  // rectangle or circle) because `validateJob` is pure; a reference-following outline is skipped
+  // rather than guessed.
+  if (enabledDrills.length > 0) {
+    const owned = options.tools ?? getTools();
+    const board = boardOutlineOf(enabledCutouts, allById);
+    const outside = new Map<string, { who: string; count: number }>();
+    const bySize = new Map<string, { size: number; ids: string[]; labelId: string }>();
+    for (const drill of enabledDrills) {
+      if (drill.mode !== 'bore' && drill.diameter !== undefined && drill.diameter > 0) {
+        const key = drill.diameter.toFixed(3);
+        const entry = bySize.get(key);
+        if (entry === undefined) bySize.set(key, { size: drill.diameter, ids: [drill.id], labelId: drill.id });
+        else entry.ids.push(drill.id);
+      }
+      if (board !== null) {
+        const who = drillOperationName(drill);
+        let off = 0;
+        for (const [hx, hy] of drillHoles(drill)) if (!pointInPolygons(board, hx, hy)) off += 1;
+        if (off > 0) outside.set(drill.id, { who, count: off });
+      }
+    }
+    if (outside.size > 0) {
+      const total = [...outside.values()].reduce((n, o) => n + o.count, 0);
+      const first = [...outside.values()][0]!;
+      findings.push({
+        severity: 'error',
+        code: 'item-off-board',
+        labelId: [...outside.keys()][0]!,
+        message:
+          `${total} hole${total === 1 ? ' is' : 's are'} outside the board outline that frees the ` +
+          `part (${first.who}${outside.size > 1 ? ` and ${outside.size - 1} other item(s)` : ''}); ` +
+          'they would be drilled into air beside the board. Check the drill file’s placement against ' +
+          'the outline file, or widen the outline.',
+      });
+    }
+    for (const { size, ids, labelId } of bySize.values()) {
+      const assigned = assignedCutterKey(job, ids[0]!);
+      const assignedTool = assigned === null ? null : toolForJob({ toolKey: assigned }, owned);
+      // A cutter the caller's library does not hold is `tool-missing`'s to name, not this check's.
+      if (assignedTool === null) continue;
+      const d = cuttingDiameter(assignedTool);
+      if (d !== null && d >= size - 1e-9 && d <= size + PCB_DRILL_SLACK_MM + 1e-9) continue;
+      // Any owned cutter that could make the size: a drill or flat at the hole's size (up to the
+      // slack), or a flat narrower than it, which bores it.
+      const canMake = owned.some((entry) => {
+        const cd = cuttingDiameter(entry.tool);
+        if (cd === null || !(cd > 0)) return false;
+        if (
+          (entry.tool.shape === 'drill' || entry.tool.shape === 'flat') &&
+          cd >= size - 1e-9 &&
+          cd <= size + PCB_DRILL_SLACK_MM + 1e-9
+        ) {
+          return true;
+        }
+        return entry.tool.shape === 'flat' && cd < size - 1e-9;
+      });
+      if (canMake) continue;
+      const smallest = owned.reduce<number | null>((m, entry) => {
+        if (entry.tool.shape !== 'drill' && entry.tool.shape !== 'flat') return m;
+        const cd = cuttingDiameter(entry.tool);
+        return cd === null || !(cd > 0) ? m : m === null ? cd : Math.min(m, cd);
+      }, null);
+      findings.push({
+        severity: 'error',
+        code: 'hole-no-cutter',
+        labelId,
+        message:
+          `No cutter for the ${fmt3(size)} mm holes (${ids.length}): ` +
+          (smallest === null
+            ? 'no drill or flat end mill is in the tool library.'
+            : `the smallest drill or flat end mill you own is ${fmt3(smallest)} mm.`) +
+          ' Add a cutter of that size, or change the board’s holes.',
+      });
     }
   }
 

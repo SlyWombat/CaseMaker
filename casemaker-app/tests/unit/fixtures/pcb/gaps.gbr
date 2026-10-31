@@ -1,0 +1,12 @@
+G04 gaps for #743 P-5 - a 0.40 mm gap that opens, and a 0.15 mm gap that does not*
+%FSLAX46Y46*%
+%MOMM*%
+%TF.FileFunction,Copper,L1,Top*%
+%ADD10C,0.5*%
+G75*
+D10*
+X5000000Y5000000D03*
+X5900000Y5000000D03*
+X10000000Y5000000D03*
+X10650000Y5000000D03*
+M02*

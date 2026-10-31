@@ -46,7 +46,9 @@ import {
   type OracleLevel,
   type OraclePredicted,
   type OracleReport,
+  type OracleSliceAt,
 } from '@/engine/cnc/engrave/oracle';
+import { computeCopperTopology, type PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
@@ -419,7 +421,7 @@ export interface SimSession {
    * lift subtracted at each XY and stamps `frame: 'surface'` on the report, so a program posted
    * against a tilted blank is compared with the flat prediction that blank's design is.
    */
-  oracle(predicted: readonly OraclePredicted[]): OracleReport;
+  oracle(predicted: readonly OraclePredicted[], pcb?: PcbCopperTopologyInput | null): OracleReport;
   dispose(): void;
   readonly loaded: boolean;
 }
@@ -958,7 +960,23 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * and the flat comparison runs there, at the face's own top (the stock's radius). The per-face
    * reports merge into the flat one's shape, tagged with the face so a refusal can name it.
    */
-  const oracle = (predicted: readonly OraclePredicted[]): OracleReport => {
+  /**
+   * #743 P-5 — fold the copper's topology verdict into a flat report when the run is a board. The
+   * SAME sliceAt the volumetric comparison used reads the copper at its underside, so the two
+   * checks see one simulation; `ok` is the pair, and the tick that reads it states both.
+   */
+  const withCopper = (
+    report: OracleReport,
+    sliceAt: OracleSliceAt,
+    band: number,
+    pcb: PcbCopperTopologyInput | null,
+  ): OracleReport => {
+    if (pcb === null) return { ...report, frame: surfaceFrame === null ? 'work' : 'surface' };
+    const copper = computeCopperTopology(tl, sliceAt, pcb, band);
+    return { ...report, copper, ok: report.ok && copper.ok, frame: surfaceFrame === null ? 'work' : 'surface' };
+  };
+
+  const oracle = (predicted: readonly OraclePredicted[], pcb: PcbCopperTopologyInput | null = null): OracleReport => {
     // #623 — the frame the loaded program speaks. A flat post is judged exactly as it always was;
     // a surface post is read with its lift taken back out at each XY, which is the only way a
     // correct tilt-following file can match the flat prediction (and the flat post's mismatch).
@@ -983,8 +1001,10 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         });
         return { ...report, frame: surface === null ? 'work' : 'surface' };
       }
-      const report = computeOracle(tl, gridSliceAt(tl, grid), predicted, columnOracleBand(worstContours(l.timeline), grid), grid);
-      return { ...report, frame: surface === null ? 'work' : 'surface' };
+      const band = columnOracleBand(worstContours(l.timeline), grid);
+      const sliceAt = gridSliceAt(tl, grid);
+      const report = computeOracle(tl, sliceAt, predicted, band, grid);
+      return withCopper(report, sliceAt, band, pcb);
     }
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
     // #708 — AN INDEXED ROTARY SWEEP IS JUDGED A FACE AT A TIME. Its removal is in the STOCK frame
@@ -1003,7 +1023,9 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // frame: compare it directly. `frame` still says `'surface'` when the program was posted against
     // a fitted plane, because that is the frame the numbers speak — which, for the flat program the
     // un-lift recovers, coincides with the work frame. No shear: the removal is never tilted.
-    return { ...computeOracle(tl, removalSliceAt(removal), predicted, oracleBand(worstContours(l.timeline))), frame: surface === null ? 'work' : 'surface' };
+    const band = oracleBand(worstContours(l.timeline));
+    const sliceAt = removalSliceAt(removal);
+    return withCopper(computeOracle(tl, sliceAt, predicted, band), sliceAt, band, pcb);
   };
 
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);
