@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { PCB_DRILL_SLACK_MM, pcbCutterPlan, pcbHoleAssignment, withPcbCutters } from '@/engine/import/pcbCutters';
 
 const entry = (key: string, shape: 'flat' | 'drill' | 'engraving', d: number): ToolLibraryEntry => ({
@@ -31,6 +32,38 @@ describe('§3.4 — a board hole and the cutter it asks for (#743 P-4b)', () => 
     // No narrower flat either: the mode stays a plunge, and the import STATES the absence (#743 P-5).
     expect(tooBig.notes.join(' ')).toContain('No owned drill or flat end mill makes the ⌀1 mm holes (1)');
     expect(tooBig.notes.join(' ')).toContain('left out of the programs');
+  });
+
+  it('among cutters that are equally the hole’s, the one Makera’s catalogue answers for wins', () => {
+    // The shipped library’s own ⌀1 mm flat carries no Makera id, so no row can name it; the
+    // inventory cutter beside it has a PCB row. The import must hand the job the cutter that can
+    // be fed, or a board arrives with a cutter the feeds refuse (#743 P-8).
+    const shipped: ToolLibraryEntry = {
+      key: 'flat-1.0',
+      provenance: 'test',
+      tool: flatEndMill(1, { tipDiameter: 1, diameter: 1 }),
+    };
+    const listed: ToolLibraryEntry = {
+      key: 'inv:flat',
+      provenance: 'test',
+      tool: flatEndMill(1, { id: 'e2e-flat-1-0', tipDiameter: 1, diameter: 1 }),
+    };
+    const rows: FeedCatalogueRow[] = [
+      { cutterId: 'e2e-flat-1-0', material: 'PCB', rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.2 },
+    ];
+    const out = pcbHoleAssignment([drill('a', 1.0)], [shipped, listed], rows);
+    expect(out.keys.get('a')).toBe('inv:flat');
+    expect(out.modes.get('a')).toBe('drill');
+    // The row only separates cutters the hole already allows: with no catalogue the library’s
+    // order stands, and a worse-fitting covered cutter never displaces the hole’s own size.
+    expect(pcbHoleAssignment([drill('a', 1.0)], [shipped, listed]).keys.get('a')).toBe('flat-1.0');
+    const covered = (d: number): ToolLibraryEntry => ({
+      key: `inv:${d}`,
+      provenance: 'test',
+      tool: flatEndMill(d, { id: 'e2e-flat-1-0', tipDiameter: d, diameter: d }),
+    });
+    const closer = pcbHoleAssignment([drill('a', 1.0)], [entry('user:exact', 'flat', 1.0), covered(1.05)], rows);
+    expect(closer.keys.get('a')).toBe('user:exact');
   });
 
   it('never drills UNDER the hole, and bores with a flat narrower than it, saying so once', () => {

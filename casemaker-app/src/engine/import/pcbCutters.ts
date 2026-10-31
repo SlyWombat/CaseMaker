@@ -9,7 +9,9 @@
  *   - each HOLE SIZE is drilled by an owned drill or end mill whose ⌀ is the hole's, up to +0.1 mm
  *     and never under (Q7); otherwise it is BORED by a flat end mill narrower than the hole; and
  *     when nothing owned can make it the mode stays `'drill'` and the job's own checks name the
- *     missing cutter at the item (`hole-no-cutter`);
+ *     missing cutter at the item (`hole-no-cutter`). Cutters that are equally the hole's own size
+ *     are separated by the same catalogue preference as the other two roles, so the job arrives
+ *     with a cutter that can be fed; a size or a shape is never traded for a row;
  *   - the CUT-OUT is cut by an owned flat (a corn bit on a PCB) whose flute reaches through the
  *     board, preferring one the catalogue answers for PCB.
  *
@@ -67,6 +69,7 @@ function isEngraver(entry: ToolLibraryEntry): boolean {
 export function pcbHoleAssignment(
   drills: readonly { id: string; diameter?: number }[],
   tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[] = [],
 ): PcbHoleAssignment {
   const cutters = tools.flatMap((entry) => {
     const d = cuttingDiameter(entry.tool);
@@ -86,14 +89,22 @@ export function pcbHoleAssignment(
           c.diameter >= hole - 1e-9 &&
           c.diameter <= hole + PCB_DRILL_SLACK_MM + 1e-9,
       )
-      .sort((a, b) =>
-        a.shape === b.shape ? a.diameter - b.diameter : a.shape === 'drill' ? -1 : 1,
-      )[0];
+      // Shape first, then the size closest to the hole — and only where those tie, the cutter
+      // Makera's catalogue answers for PCB (#743 P-8): the same preference the engraver and the
+      // cut-out get, so an imported board arrives with cutters that can be fed.
+      .sort((a, b) => {
+        if (a.shape !== b.shape) return a.shape === 'drill' ? -1 : 1;
+        if (a.diameter !== b.diameter) return a.diameter - b.diameter;
+        return Number(onPcbRow(b.tool, catalogue)) - Number(onPcbRow(a.tool, catalogue));
+      })[0];
     if (exact !== undefined) return { mode: 'drill', key: exact.key };
-    // 2 · a flat end mill narrower than the hole bores it to size.
+    // 2 · a flat end mill narrower than the hole bores it to size: the widest, then a covered one.
     const borer = cutters
       .filter((c) => c.shape === 'flat' && c.diameter < hole - 1e-9)
-      .sort((a, b) => b.diameter - a.diameter)[0];
+      .sort((a, b) => {
+        if (a.diameter !== b.diameter) return b.diameter - a.diameter;
+        return Number(onPcbRow(b.tool, catalogue)) - Number(onPcbRow(a.tool, catalogue));
+      })[0];
     return borer === undefined ? { mode: 'drill', key: null } : { mode: 'bore', key: borer.key };
   };
 
@@ -188,7 +199,7 @@ export function pcbCutterPlan(
   }
 
   // The holes: their own drill where one is the size, a bore where a flat can helix them.
-  const holes = pcbHoleAssignment(items.drills, tools);
+  const holes = pcbHoleAssignment(items.drills, tools, catalogue);
   for (const [id, key] of holes.keys) own(id, key);
   notes.push(...holes.notes);
 
