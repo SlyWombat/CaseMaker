@@ -533,3 +533,28 @@ describe('a cutter key resolves against the caller’s library (#743 P-8)', () =
     expect(missing.some((f) => f.code === 'tool-missing')).toBe(true);
   });
 });
+
+describe('a board’s through drills sweep on the column engine (#743 P-8)', () => {
+  it('the last peck’s retract from below the modelled floor is not a gouge', async () => {
+    const { job } = await twoSided();
+    const { createSimSession } = await import('@/workers/sim/session');
+    const { toSetup } = await import('@/engine/cnc/engrave/jobSetup');
+    const { Z1 } = await import('@/engine/cnc/machine');
+    const gen = engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
+    expect(gen.ok).toBe(true);
+    const drill = gen.programs.find((p) => p.toolKey === 'inv:d08')!;
+    // The app's run hands the session the job's breakthrough, so the grid reaches below the blank.
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(drill.nc, toSetup(job, Z1), TOOLS[1]!.tool, Z1.id, {
+        drillPointDefault: { deg: 118, source: 'shop' },
+        breakthroughMm: job.breakthrough,
+      });
+      expect(load.ok).toBe(true);
+      if (!load.ok) return;
+      expect(load.diagnostics.filter((d) => d.code === 'rapid-through-stock')).toEqual([]);
+    } finally {
+      session.dispose();
+    }
+  });
+});

@@ -2131,6 +2131,14 @@ function gougeAlongFlat(
     const y = mv.from[1] + (mv.to[1] - mv.from[1]) * t;
     const tipZ = mv.from[2] + (mv.to[2] - mv.from[2]) * t;
     if (tipZ > grid.initial) continue;
+    // #743 P-8 — A TIP BELOW THE MODELLED FLOOR IS IN THE BOARD THE GRID DOES NOT HOLD. A through
+    // drill's last peck posts its point below `base` (the blank's bottom less the breakthrough),
+    // and its retract starts there: read literally, every column of the hole stands above a tip
+    // that is under the grid, and each hole's final retract flagged `rapid-through-stock`. The
+    // peck that took the tip down cut the columns it stands in; below `base` the grid models
+    // nothing, so the test is taken from the base. A rapid that is genuinely under solid stock
+    // still reads: the material above it is above the base's floor.
+    const testZ = Math.max(tipZ, grid.base);
     const iLo = Math.max(0, Math.floor((x - toolRadius - u0) / du));
     const iHi = Math.min(nu - 1, Math.ceil((x + toolRadius - u0) / du));
     const jLo = Math.max(0, Math.floor((y - toolRadius - v0) / dv));
@@ -2145,7 +2153,7 @@ function gougeAlongFlat(
         // 0 above the tip inside a flat end's radius, a rising flank outside a V-bit's tip. A
         // column standing above that floor is material the rapid cuts — a gouge. For a flat end
         // this is exactly `tipZ < h`.
-        const floorHere = tipZ + surfaceAboveTip(cutter, rho);
+        const floorHere = testZ + surfaceAboveTip(cutter, rho);
         if (floorHere < (h[j * nu + i] as number) - GOUGE_EPSILON) return true;
       }
     }
