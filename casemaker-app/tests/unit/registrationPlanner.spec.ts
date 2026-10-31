@@ -321,6 +321,8 @@ function fakeZ1(opts: {
       if (alarmed) return reply('error:Alarm lock');
       if (line === '$H') return (pos.x = -1), (pos.y = -1), (pos.z = -1), reply('ok');
       if (line === 'G54' || line === 'G92.1') return reply('ok');
+      // #789 — the probe connector's supply (execute.ts's PROBE_SUPPLY_ON/OFF).
+      if (line === 'M831' || line === 'M832') return reply('ok');
       if (line === 'M119') return reply(opts.probeTouched ? 'X_max:0 Y_max:0 Z_max:0 A_min:1 Probe: 1' : 'X_max:0 Y_max:0 Z_max:0 A_min:1 Probe: 0');
       if (line === 'M491') {
         const z = tool === 'probe' ? -76.063 : -79.163;
@@ -757,8 +759,9 @@ describe('#599 the standalone mount tap', () => {
     if (!r.ok) throw new Error(r.reason);
     expect(r.z).toBe(-56.82);
     expect(r.at).toEqual({ x: -186.2, y: -180 });
-    expect(z1.lines.slice(0, 4)).toEqual(['?', '$H', 'M119', 'M491']);
-    expect(z1.lines.at(-1)).toBe('$H');
+    // #789 — the supply goes on before the rest check and off after the run's own home.
+    expect(z1.lines.slice(0, 5)).toEqual(['?', '$H', 'M831', 'M119', 'M491']);
+    expect(z1.lines.at(-1)).toBe('M832');
     // #615 — the standalone tap has no expected Z, so the whole descent stays ONE touch-feed pass.
     expect(z1.lines.filter((l) => l.startsWith('G38.3 Z-'))).toEqual(['G38.3 Z-97 F150']);
   });
@@ -786,8 +789,9 @@ describe('#430 the executor, on a fake machine', () => {
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
 
-    expect(z1.lines.slice(0, 6)).toEqual(['?', '$H', 'G54', 'G92.1', 'M119', 'M491']);
-    expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
+    expect(z1.lines.slice(0, 6)).toEqual(['?', '$H', 'G54', 'G92.1', 'M831', 'M119']);
+    // #789 — the supply's off is the last line, after the run's own lift and home.
+    expect(z1.lines.slice(-3)).toEqual(['G53 G0 Z-3', '$H', 'M832']);
     for (const line of z1.lines) expect(consoleProblem(line), line).toBeNull();
     // `?` reads Idle right before every G38.3.
     z1.lines.forEach((l, i) => {
@@ -913,7 +917,8 @@ describe('#430 the executor, on a fake machine', () => {
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('touched at rest');
-    expect(z1.lines).toEqual(['?', '$H', 'G54', 'G92.1', 'M119', '?']);
+    // #789 — the rest check runs with the supply ON, and the stop switches it OFF again.
+    expect(z1.lines).toEqual(['?', '$H', 'G54', 'G92.1', 'M831', 'M119', '?', 'M832']);
   });
 
   it('#448: the recovery sentence names the travel height it was given, not −3', async () => {
@@ -934,6 +939,9 @@ describe('#430 the executor, on a fake machine', () => {
     if (!full.ok) throw new Error(full.reason);
     const count = clean.lines.length;
     for (let k = 1; k < count; k++) {
+      // #789 — the closing supply-off is best-effort by design (asserted below): its timeout is
+      // not a step whose failure may be read as the run's.
+      if (clean.lines[k] === 'M832') continue;
       const z1 = fakeZ1({ actual: SHIFTED });
       let n = 0;
       const flaky = {
@@ -949,10 +957,28 @@ describe('#430 the executor, on a fake machine', () => {
       if (!r.ok) expect(r.reason).not.toContain('To recover');
       // After the failing line the only lines are the State read, and in relative mode `G90` — in that order.
       const after = z1.lines.slice(k);
-      expect(['?', '?,G90']).toContain(after.join(','));
+      // #789 — once the probe's supply is on, the closing M832 follows the State read (and G90).
+      expect(['?', '?,G90', '?,M832', '?,G90,M832']).toContain(after.join(','));
       // And the machine is never left relative.
       expect(z1.mode(), `step ${k}`).toBe('G90');
     }
+
+    // #789 — the supply's OFF must not be able to replace a decided outcome: the line times out
+    // and the run still reports its own success.
+    const timedOutClose = fakeZ1({ actual: SHIFTED });
+    let closeAsked = false;
+    const closesFlaky = {
+      async send(line: string): Promise<ConsoleSendResult> {
+        if (line === 'M832') {
+          closeAsked = true;
+          return { kind: 'timeout', line, detail: 'no answer', text: '' };
+        }
+        return timedOutClose.console.send(line);
+      },
+    };
+    const stillOk = await runRegistration(plan('vise'), { console: closesFlaky, operator: yes });
+    expect(stillOk.ok).toBe(true);
+    expect(closeAsked).toBe(true);
   });
 
   it('a stop on a real alarm during a scan touch unlocks BEFORE G90 — the Z1 refuses G90 in alarm', async () => {
@@ -973,7 +999,8 @@ describe('#430 the executor, on a fake machine', () => {
     };
     const r = await runRegistration(plan('vise'), { console: faulty, operator: yes });
     expect(r.ok).toBe(false);
-    expect(z1.lines.slice(-2)).toEqual(['$X', 'G90']);
+    // #789 — and the supply's OFF is the last line, after the recovery.
+    expect(z1.lines.slice(-3)).toEqual(['$X', 'G90', 'M832']);
     expect(z1.mode()).toBe('G90');
     expect(z1.alarmed()).toBe(false);
     if (!r.ok) expect(r.reason).toContain(`${S.capBelowSurfaceMm} mm below the surface (a scan touch)`);
@@ -1031,7 +1058,7 @@ describe('#430 the executor, on a fake machine', () => {
     // machine is only relative, never alarmed), so it sends `G90` alone — no `$X` on suspicion.
     const stoppedAt = z1.lines.indexOf('STOPPED');
     expect(z1.lines.slice(0, stoppedAt)).not.toContain('$X');
-    expect(z1.lines.slice(stoppedAt + 1)).toEqual(['?', 'G90']);
+    expect(z1.lines.slice(stoppedAt + 1)).toEqual(['?', 'G90', 'M832']);
     expect(z1.mode()).toBe('G90');
     expect(z1.alarmed()).toBe(false);
   });
@@ -1083,7 +1110,8 @@ describe('#430 the executor, on a fake machine', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain(`as low as ${S.surfaceSlowSeekMm - 1} mm below the fast touch's reading (the slow surface touch)`);
     // Relative mode at the stop, but the State read answers Idle: `G90` alone, no `$X` on suspicion.
-    expect(z1.lines.slice(-2)).toEqual(['?', 'G90']);
+    // #789 — the supply's OFF is the last line.
+    expect(z1.lines.slice(-3)).toEqual(['?', 'G90', 'M832']);
     expect(z1.mode()).toBe('G90');
   });
 

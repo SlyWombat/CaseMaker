@@ -161,6 +161,8 @@ function fakeZ1(opts: {
       if (alarmed) return reply('error:Alarm lock');
       if (line === '$H') return (pos.x = -1), (pos.y = -1), (pos.z = -1), reply('ok');
       if (line === 'G54' || line === 'G92.1') return reply('ok');
+      // #789 — the probe connector's supply (see execute.ts's PROBE_SUPPLY_ON/OFF).
+      if (line === 'M831' || line === 'M832') return reply('ok');
       if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
       if (line === 'M491') {
         const z = tool === 'probe' ? -76.063 : -79.163;
@@ -280,7 +282,8 @@ describe('#475 the executor measures the cut extents', () => {
     expect(probeSeeks(z1.lines)).toBe(2 + 4 * 2 + 14);
     // #430's bounds are unchanged: nothing probed below the cap, and the run finished homed.
     expect(z1.lowest()).toBeGreaterThanOrEqual(-55.0 - S.capBelowSurfaceMm);
-    expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
+    // #789 — the probe's supply goes off after the run's own lift and home.
+    expect(z1.lines.slice(-3)).toEqual(['G53 G0 Z-3', '$H', 'M832']);
   });
 
   it('PASSES the thin laminate: 0.08 mm inside a 0.225 mm band, landing range and Z0 at the low touch', async () => {
@@ -355,7 +358,8 @@ describe('#475 the executor measures the cut extents', () => {
     expect(extentYs.length).toBe(4);
     const plannedYs = spreadPlan.touches.slice(1).map((t) => Math.round((t.y + r.outcome.offset.y) * 1000) / 1000);
     expect(extentYs).toEqual(plannedYs);
-    expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
+    // #789 — the probe's supply goes off after the run's own lift and home.
+    expect(z1.lines.slice(-3)).toEqual(['G53 G0 Z-3', '$H', 'M832']);
   });
 
   it('#593 — a blank clamped 5 mm INWARD along the jaws: the front scan searches inward and finds the edge', async () => {
@@ -380,7 +384,8 @@ describe('#475 the executor measures the cut extents', () => {
     expect(Math.abs(r.outcome.offset.y - SHIFT)).toBeLessThanOrEqual(S.fineStepMm);
     // The run still completes with a valid spread verdict and homes at the end.
     expect(r.spread!.ok).toBe(true);
-    expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
+    // #789 — the probe's supply goes off after the run's own lift and home.
+    expect(z1.lines.slice(-3)).toEqual(['G53 G0 Z-3', '$H', 'M832']);
   });
 
   it('#594 — a blank 20 mm along the jaws: the bracket-and-bisect finds the edge within the fine step', async () => {
@@ -433,7 +438,8 @@ describe('#475 the executor measures the cut extents', () => {
     }
     // No extent seek went below the cap, and the run finished homed.
     expect(z1.lowest()).toBeGreaterThanOrEqual(-55 - S.capBelowSurfaceMm);
-    expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
+    // #789 — the probe's supply goes off after the run's own lift and home.
+    expect(z1.lines.slice(-3)).toEqual(['G53 G0 Z-3', '$H', 'M832']);
   });
 
   it('#632 — a blank PROUDER than the record expects: the extents approach from the measured surface', async () => {

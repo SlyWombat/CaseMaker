@@ -88,6 +88,9 @@ function fakeZ1(opts: { holes?: ReferenceOpening[]; shift?: { x: number; y: numb
       if (line === '$X') return (alarmed = false), reply('ok');
       if (alarmed) return reply('error:Alarm lock');
       if (['$H', 'G54', 'G92.1'].includes(line) || /^G10 L2 P1 /.test(line)) return reply('ok');
+      // #789 — the probe connector's supply: the executor switches it on before the first probe
+      // move and off once the last is done.
+      if (line === 'M831' || line === 'M832') return reply('ok');
       if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
       if (line === 'M491') return reply('[PRB:-9.890,-12.830,-76.063:1]\nok');
       if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
@@ -128,6 +131,50 @@ async function run(p: RegistrationPlan, fake = fakeZ1()) {
   if (!r.ok) throw new Error(r.reason);
   return { ...r, fake };
 }
+
+describe('#789 the probe connector’s supply', () => {
+  it('is switched on before the first probe move and off after the last, once', async () => {
+    const fake = fakeZ1();
+    await run(plan(), fake);
+    const lines = fake.lines;
+    const on = lines.indexOf('M831');
+    const firstProbe = lines.findIndex((line) => line.startsWith('G38.3'));
+    expect(on).toBeGreaterThan(-1);
+    // Before the rest check and the M491 as well: an electronic probe answers neither unpowered.
+    expect(lines.indexOf('M119')).toBeGreaterThan(on);
+    expect(lines.indexOf('M491')).toBeGreaterThan(on);
+    expect(firstProbe).toBeGreaterThan(on);
+    // OFF once, after the last touch (the home and its lift come after the touches).
+    const lastProbe = lines.map((l, i) => (l.startsWith('G38.3') ? i : -1)).filter((i) => i >= 0).at(-1)!;
+    expect(lines.filter((line) => line === 'M832')).toHaveLength(1);
+    expect(lines.lastIndexOf('M832')).toBeGreaterThan(lastProbe);
+  });
+
+  it('goes off again when the run stops after the supply is on', async () => {
+    // M491 answering no PRB stops the run right after the supply went on: the connector must not
+    // be left powered for whatever is fitted next.
+    const fake = fakeZ1();
+    const noPrb = {
+      send: async (line: string, timing?: Partial<ConsoleTiming>) =>
+        line === 'M491'
+          ? { kind: 'sent' as const, line, text: 'ok', frames: 1, elapsedMs: 1 }
+          : fake.console.send(line, timing),
+    };
+    const r = await runRegistration(plan(), { console: noPrb, operator: yes });
+    expect(r.ok).toBe(false);
+    expect(fake.lines).toContain('M831');
+    expect(fake.lines.filter((line) => line === 'M832')).toHaveLength(1);
+    expect(fake.lines.at(-1)).toBe('M832');
+  });
+
+  it('sends neither line when the probe is never fitted', async () => {
+    const fake = fakeZ1();
+    const r = await runRegistration(plan(), { console: fake.console, operator: async () => false });
+    expect(r.ok).toBe(false);
+    expect(fake.lines).not.toContain('M831');
+    expect(fake.lines).not.toContain('M832');
+  });
+});
 
 describe('#563 the M491 read window', () => {
   it('sends M491 with a probe-length quiet window, not the 800 ms default', async () => {

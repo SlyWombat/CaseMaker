@@ -84,6 +84,19 @@ export interface RegistrationConsole {
  */
 const PROBE_TIMING: Partial<ConsoleTiming> = { quietMs: 20_000 };
 
+/**
+ * #789 — THE PROBE CONNECTOR'S SUPPLY. `M831`/`M832` switch the toolsensor output (`switch.toolsensor`,
+ * pin 2.13) — the supply the probe's connector draws on. The Makera 3D probe is electronic and reads
+ * as permanently open while it is off, so a `G38.3` descends on a probe that cannot trigger (bench,
+ * 2026-10-30: the ring lights and `P:` starts moving only after `M831`). The wired V2 is a mechanical
+ * switch and runs the same either way, so BOTH kinds of probe session bracket their probe moves:
+ * ON once the operator says the probe is fitted (before the rest check, which an electronic probe
+ * can only answer while powered), OFF in a finally once the last touch is done, whatever happened
+ * in between. The firmware's own macros do the same around their probe cycles.
+ */
+export const PROBE_SUPPLY_ON = 'M831';
+export const PROBE_SUPPLY_OFF = 'M832';
+
 export type OperatorStep = {
   kind: 'fit-probe' | 'fit-cutter' | 'confirm-mount' | 'search-lower';
   text: string;
@@ -182,6 +195,20 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
     return reply;
   }
 
+  /**
+   * #789 — a best-effort line after the run's outcome is already decided (the supply's OFF). It
+   * never throws: the outcome must not be replaced by the closing line's failure, and a dead
+   * socket at that moment still leaves the machine's own switch where it was.
+   */
+  async function trySend(line: string): Promise<void> {
+    try {
+      const r = await deps.console.send(line);
+      transcript.push({ line, reply: r.kind === 'sent' || r.kind === 'timeout' ? r.text : r.detail });
+    } catch {
+      // The outcome is already decided; a dead socket here must not replace it.
+    }
+  }
+
   /** `?` until the machine reads Idle; stop if it never does. */
   async function idle(): Promise<void> {
     for (let i = 0; i < idlePolls; i++) {
@@ -249,7 +276,7 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
     return `${reason}. Stopped — the probe may be ${depth}. The machine is Idle; nothing to recover.`;
   }
 
-  return { send, idle, stopped, at, saw, markHomed: () => { homed = true; }, transcript };
+  return { send, trySend, idle, stopped, at, saw, markHomed: () => { homed = true; }, transcript };
 }
 
 type Session = ReturnType<typeof session>;
@@ -689,6 +716,8 @@ export async function runMountTap(
   const io = session(deps, seekFromMachineZ, settings.idlePollLimit);
   const bad = settingsProblem(settings);
   if (bad !== null) return { ok: false, reason: `nothing was sent: ${bad}`, transcript: [] };
+  /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
+  let powered = false;
   try {
     const status = await io.send('?');
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
@@ -696,6 +725,9 @@ export async function runMountTap(
     if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
       throw new Stop('stopped: the probe was not fitted');
     }
+    // #789 — the standalone tap is a probe session too: power the connector before its first move.
+    powered = true;
+    await io.send(PROBE_SUPPLY_ON);
     const rest = await io.send('M119');
     if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
@@ -714,6 +746,9 @@ export async function runMountTap(
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
     throw e;
+  } finally {
+    // #789 — OFF whatever happened, the same as the registration's own session.
+    if (powered) await io.trySend(PROBE_SUPPLY_OFF);
   }
 }
 
@@ -732,6 +767,8 @@ export async function runRegistration(
   // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
   const bad = settingsProblem(s);
   if (bad !== null) return { ok: false, reason: `nothing was sent: ${bad}`, transcript: [] };
+  /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
+  let powered = false;
   try {
     const status = await io.send('?');
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
@@ -741,6 +778,10 @@ export async function runRegistration(
     if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
       throw new Stop('stopped: the probe was not fitted');
     }
+    // #789 — the probe's supply, before the first probe move and before the rest check: an
+    // electronic probe reads open while it is unpowered, so the check would prove nothing.
+    powered = true;
+    await io.send(PROBE_SUPPLY_ON);
     // #599 — the probe must read OPEN (untouched) at rest: a touched reading before anything moves
     // means the plug is bad or wired wrong (the Carvera firmware halts PROBE_FAIL on exactly this).
     const rest = await io.send('M119');
@@ -993,6 +1034,11 @@ export async function runRegistration(
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
     throw e;
+  } finally {
+    // #789 — OFF whatever happened (a miss is a reading, not a reason to leave the connector
+    // powered): the supply is one switch for the whole machine, and the next thing fitted there
+    // may be a cutter, not a probe.
+    if (powered) await io.trySend(PROBE_SUPPLY_OFF);
   }
 }
 
@@ -1043,6 +1089,8 @@ export async function retouchSurface(
     };
   }
   const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit);
+  /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
+  let powered = false;
   try {
     const status = await io.send('?');
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
@@ -1057,6 +1105,9 @@ export async function retouchSurface(
     ) {
       throw new Stop('stopped: the probe was not fitted');
     }
+    // #789 — the re-touch is a probe session of its own: power the connector before its first move.
+    powered = true;
+    await io.send(PROBE_SUPPLY_ON);
     const surface = await seekSurface(
       io,
       plan,
@@ -1088,6 +1139,9 @@ export async function retouchSurface(
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
     throw e;
+  } finally {
+    // #789 — the re-touch's supply goes off too, whether it measured the top or stopped trying.
+    if (powered) await io.trySend(PROBE_SUPPLY_OFF);
   }
 }
 

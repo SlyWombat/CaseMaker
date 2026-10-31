@@ -573,6 +573,15 @@ describe('#469 the release step', () => {
         expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('ENGRAVING cutter'),
       { timeout: 10000 },
     );
+    // #789 — the re-touch is a probe session of its own: the supply goes on before its first
+    // touch and off once the last is done (before the cutter is asked for).
+    const touches = sent.map((line, i) => (line.startsWith('G38.3') ? i : -1)).filter((i) => i >= 0);
+    const supplyOn = sent.indexOf('M831');
+    expect(touches.length).toBeGreaterThan(0);
+    expect(supplyOn).toBeGreaterThan(-1);
+    expect(supplyOn).toBeLessThan(touches[0]!);
+    expect(sent.filter((line) => line === 'M832')).toHaveLength(1);
+    expect(sent.indexOf('M832')).toBeGreaterThan(touches.at(-1)!);
     fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
 
     await screen.findByTestId('engrave-release-done', undefined, { timeout: 15000 });
