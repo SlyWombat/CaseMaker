@@ -158,6 +158,16 @@ export interface CaseMakerTestApi {
   engravePreviewState(): { status: string; error: string | null };
   /** #723 R-4 e2e — the open job's target object as the stores hold it (bytes included?). */
   engraveTargetState(): { role: string | null; enabled: boolean; format: string; hasData: boolean } | null;
+  /**
+   * #811 e2e — THE GOAL'S DRAWING as the preview worker built it: the mode and the two volumes'
+   * closed-form sizes (mm³). A spec can then tell "the picture changed with the mode toggle" from
+   * "the legend's word changed", without reading pixels. Null until a goal drawing exists.
+   */
+  engraveGoalDrawing(): {
+    mode: 'item' | 'mold';
+    partVolumeMm3: number | null;
+    removedVolumeMm3: number | null;
+  } | null;
   getEngraveRunState(): {
     phase: string;
     stale: boolean;
@@ -458,6 +468,15 @@ export function installCaseMakerTestApi(): void {
       const t = useEngraveJobStore.getState().job.targetObject;
       if (t === undefined) return null;
       return { role: t.role ?? null, enabled: t.enabled, format: t.format, hasData: t.data !== undefined };
+    },
+    engraveGoalDrawing() {
+      const goal = useEngravePreviewStore.getState().preview?.goal ?? null;
+      if (goal === null) return null;
+      return {
+        mode: goal.mode,
+        partVolumeMm3: goal.part === null ? null : Math.abs(meshVolume(goal.part)),
+        removedVolumeMm3: goal.removed === null ? null : Math.abs(meshVolume(goal.removed)),
+      };
     },
     getEngraveRunState() {
       const r = useEngraveRunStore.getState();

@@ -158,3 +158,47 @@ export function scaleForAxisSize(
 export function isUniform(scale: TargetScale): boolean {
   return Math.abs(scale.x - scale.y) < 1e-9 && Math.abs(scale.x - scale.z) < 1e-9;
 }
+
+/**
+ * #811 — THE PLACED FRAME, in one place. The row's position is the parsed bbox CENTRE in X/Y and
+ * the mesh's TOP at `position.z` (Z0 is the stock's top face); the turns are about that centre.
+ *
+ * A MOLD composes a half turn about X with the mesh's own turns and anchors the TURNED body at
+ * the stock top instead: the cavity it cuts opens at the top face (#721), so the row's Z is not a
+ * placement there. These are the numbers the viewport has drawn with since #435 and the
+ * heightfield has sampled since #722/#723; they live here so the drawing and the preview
+ * worker's removed volume cannot describe two different placements.
+ */
+export interface TargetPlacement {
+  /** Per-axis factor, applied before the turn. */
+  scale: TargetScale;
+  /** The turn about the bbox centre, degrees — a mold's half turn included. */
+  turns: TargetTurns;
+  /** Where the bbox centre lands, work frame, AFTER the turn's half-height offset. */
+  at: { x: number; y: number; z: number };
+}
+
+export function targetPlacement(
+  target: Pick<
+    EngraveTargetObject,
+    'format' | 'scale' | 'size' | 'position' | 'rotation' | 'rotationX' | 'rotationY'
+  >,
+  mode: 'item' | 'mold' = 'item',
+): TargetPlacement {
+  const scale = targetScale(target);
+  const turns = targetTurns(target);
+  const mold = mode === 'mold';
+  const turned = { x: turns.x + (mold ? 180 : 0), y: turns.y, z: turns.z };
+  const ext = placedSize(target);
+  // The geometry's origin is the bbox centre in X/Y and its TOP in Z, while the turn is about the
+  // bbox CENTRE: the half-height offset is what carries the drawn mesh from one anchor to the other.
+  const anchor = applyMat(rotationMatrix(turned), { x: 0, y: 0, z: (target.size.z * scale.z) / 2 });
+  const base = mold
+    ? { x: target.position.x, y: target.position.y, z: -ext.z / 2 }
+    : { x: target.position.x, y: target.position.y, z: target.position.z - ext.z / 2 };
+  return {
+    scale,
+    turns: turned,
+    at: { x: base.x + anchor.x, y: base.y + anchor.y, z: base.z + anchor.z },
+  };
+}

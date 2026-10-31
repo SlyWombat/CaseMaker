@@ -23,8 +23,9 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSimStore } from '@/store/simStore';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
-import { SACRIFICIAL_COLOR } from './simGeometry';
-import { depthColor, LOST_COLOR, REGISTRATION_COLOR, splitColor, VOID_COLOR } from './engraveRamp';
+import { REMOVED_COLOR, SACRIFICIAL_COLOR } from './simGeometry';
+import { depthColor, LOST_COLOR, REGISTRATION_COLOR, splitColor, STOCK_COLOR, VOID_COLOR } from './engraveRamp';
+import { goalLegendWords } from './goalDrawing';
 import { TOUCH_VERDICT_COLORS, TOUCH_VERDICT_WORDS } from './touchPalette';
 import { scrubStateAt, scrubWords } from './engraveScrub';
 
@@ -174,6 +175,20 @@ export function EngraveLegend(): JSX.Element | null {
             {d.toFixed(1)} mm
           </div>
         ))
+      )}
+      {/* #811 — what the goal is drawn as: the part standing in the cleared blank (its material
+          colour), or the cavity a mold leaves (the removed colour). The label follows the row's
+          toggle; the drawing above it changes with the same field. */}
+      {preview.goal !== null && (
+        <div data-testid="engrave-legend-goal" style={{ ...ROW, marginTop: 2 }}>
+          <span
+            style={{
+              ...SWATCH,
+              background: preview.goal.mode === 'mold' ? REMOVED_COLOR : STOCK_COLOR,
+            }}
+          />
+          {goalLegendWords(preview.goal.mode)}
+        </div>
       )}
       {/* §5.7 — the lost layer: an amber swatch and the area the cutter could not reach. Only at
           the as-cut end, matching the picture: part-way through, a not-yet-cut glyph is not lost. */}

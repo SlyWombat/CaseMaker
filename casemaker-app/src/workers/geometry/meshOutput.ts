@@ -63,14 +63,29 @@ export function meshOutputOf(m: ManifoldInstance, componentCount = 1): NodeMeshO
  * disturbed by deleting the handle it was built from (playback.ts, ONE MANIFOLD TRAP).
  */
 export function manifoldOfMesh(tl: ManifoldToplevel, mesh: NodeMeshOutput): ManifoldInstance | null {
-  if (mesh.indices.length < 3 || mesh.positions.length < 9) return null;
-  const { positions, indices } = deduplicateMesh(mesh.positions, mesh.indices);
+  return manifoldOfTriangles(tl, mesh.positions, mesh.indices);
+}
+
+/**
+ * The same conversion for a triangle soup that is not a {@link NodeMeshOutput} — #811's goal mesh
+ * is transformed straight out of the parser, so there is no bbox or count to fabricate just to
+ * hand it over. Null under exactly the `manifoldOfMesh` rule: not closed, or Manifold rejects it.
+ */
+export function manifoldOfTriangles(
+  tl: ManifoldToplevel,
+  positions: Float32Array,
+  indices: Uint32Array,
+): ManifoldInstance | null {
+  if (indices.length < 3 || positions.length < 9) return null;
+  const deduped = deduplicateMesh(positions, indices);
   // `ofMesh` THROWS `ManifoldError: Not manifold` for a mesh that is not closed — it does not
   // report through `status()` and carry on — so the two failure paths are both here. Measured, not
   // assumed: an open triangle mesh throws, which is why this is a `try` and not just the check below.
   let solid: ManifoldInstance;
   try {
-    solid = tl.Manifold.ofMesh(new tl.Mesh({ numProp: 3, vertProperties: positions, triVerts: indices }));
+    solid = tl.Manifold.ofMesh(
+      new tl.Mesh({ numProp: 3, vertProperties: deduped.positions, triVerts: deduped.indices }),
+    );
   } catch {
     return null;
   }

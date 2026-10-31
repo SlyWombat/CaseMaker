@@ -164,6 +164,9 @@ const api = {
         ...p.lost.map((l) => l.mesh),
         ...p.fixture.map((f) => f.mesh),
         ...p.sacrificial.map((s) => s.mesh),
+        // #811 — the goal's drawn volumes (the part and/or the removed overlay).
+        p.goal?.part ?? null,
+        p.goal?.removed ?? null,
       ]),
     );
   },

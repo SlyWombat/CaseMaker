@@ -51,13 +51,14 @@ import { geometryFromMesh, SACRIFICIAL_COLOR, segmentGeometry } from './simGeome
 import { fittedTool, toolPlacement } from './liveMachineTool';
 import { LiveToolHead } from './LiveToolHead';
 import { TouchMarkers } from './TouchMarkers';
-import { floorColor, LOST_COLOR, REGISTRATION_COLOR, VOID_COLOR, WARNING_COLOR } from './engraveRamp';
+import { floorColor, LOST_COLOR, REGISTRATION_COLOR, STOCK_COLOR, VOID_COLOR, WARNING_COLOR } from './engraveRamp';
 import { hatchSegments } from './engraveHatch';
 import { clampLabelBox, projectToCanvas } from './projectedLabel';
 import { activateEngraveItem } from './engravePick';
 import { floorsForScrub, scrubStateAt } from './engraveScrub';
 import { warningOutlinesFor, type WarningRing } from './engraveWarning';
 import { EngravePrimitives } from './EngravePrimitives';
+import { stockGhost, statedGoalTarget } from './goalDrawing';
 import { foundTransform } from './foundTransform';
 import { useThree } from '@react-three/fiber';
 import { rotaryMapOf, type RotaryMap } from '@/engine/cnc/rotary/wrap';
@@ -67,10 +68,10 @@ import { ROTARY_MAP_NARROW_PX } from './rotaryMapView';
 import { wrapMapGeometry } from './rotaryStockView';
 import { RotaryGoalSurface } from './RotaryGoalSurface';
 
-/** The same neutral wood tone the simulation's stock uses (#197). */
-const STOCK_COLOR = '#c9a26b';
 /** The same fixture grey the simulation's jaws use (#197, #204). */
 const JAW_COLOR = '#4b5563';
+/** #811 — the blank's outline while the stock is ghosted: pale, a step lighter than the stock. */
+const STOCK_OUTLINE_COLOR = '#e8cfa1';
 /** PROVISIONAL (#205): the axis marker's length as a fraction of the stock's smaller side. */
 const AXIS_FRACTION = 0.2;
 /**
@@ -788,6 +789,36 @@ function RotaryViewCamera({ map, mode }: { map: RotaryMap; mode: 'map' | 'stock'
   return null;
 }
 
+/**
+ * #811 — the blank's CRISP outline. With the stock ghosted so a goal reads through it, the
+ * silhouette would otherwise dissolve; the blank's edges stay as lines. The bbox of the drawn
+ * stock mesh IS the blank — a cut changes the surface, never the outside — so this is one box's
+ * edges whatever state the design ↔ as-cut slider is showing.
+ */
+function StockOutline({ geom }: { geom: THREE.BufferGeometry }) {
+  const edges = useMemo(() => {
+    if (geom.boundingBox === null) geom.computeBoundingBox();
+    const box = geom.boundingBox;
+    if (box === null) return null;
+    const size = new THREE.Vector3();
+    const centre = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(centre);
+    const boxGeom = new THREE.BoxGeometry(size.x, size.y, size.z);
+    const out = new THREE.EdgesGeometry(boxGeom);
+    boxGeom.dispose();
+    out.translate(centre.x, centre.y, centre.z);
+    return out;
+  }, [geom]);
+  useEffect(() => () => edges?.dispose(), [edges]);
+  if (edges === null) return null;
+  return (
+    <lineSegments geometry={edges} name="engrave-stock-outline">
+      <lineBasicMaterial color={STOCK_OUTLINE_COLOR} />
+    </lineSegments>
+  );
+}
+
 export function EngravePreview() {
   const preview = useEngravePreviewStore((s) => s.preview);
   // §5.7 — the design ↔ as-cut slider's position. `null` (the store's default and its state after
@@ -813,8 +844,11 @@ export function EngravePreview() {
   // before it — hiding the part once it arrived behind an opaque sheet's depth (the #723 R-4
   // e2e's 1-in-3 blank map: the goal mesh was in the scene, visible, and never drew a pixel).
   // The job stating a goal is what the ghosting is for, and that is known without the bytes.
-  const statedGoal = job.targetObject !== undefined && job.targetObject.enabled && (job.targetObject.role ?? 'reference') === 'goal';
+  // #811 — the same rule now ghosts FLAT stock too: a stated goal lies in or under the blank's
+  // top face, and an opaque sheet hides it exactly as it hid the rotary relief.
+  const statedGoal = statedGoalTarget(job) !== null;
   const rotaryGoal = rotary !== null && statedGoal;
+  const ghost = stockGhost(statedGoal);
   const machine = useMachineStore((s) => s.machine);
   const target = machine === null ? null : { host: machine.host, port: machine.port };
   const machineKey = machine === null ? null : `${machine.host}:${machine.port}`;
@@ -880,28 +914,33 @@ export function EngravePreview() {
                 color={STOCK_COLOR}
                 metalness={0.05}
                 roughness={0.75}
-                transparent={rotaryGoal}
-                opacity={rotaryGoal ? 0.22 : 1}
-                depthWrite={!rotaryGoal}
+                transparent={ghost.transparent}
+                opacity={ghost.opacity}
+                depthWrite={ghost.depthWrite}
               />
             </mesh>
           </>
         ) : (
           <mesh geometry={stockGeom} name="engrave-stock">
-            {/* #723 R-3 — the MAP view's stock surface is the same story as the Stock view's
-                cylinder: a goal's relief lies BELOW it (z = r − R ≤ 0), and an opaque sheet
-                would hide exactly the surface being previewed. Ghosted while a goal is drawn. */}
+            {/* #723 R-3 / #811 — the stock surface is ghosted while a goal is drawn: on a rod the
+                relief lies BELOW it (z = r − R ≤ 0), and on flat stock the goal lies in or under
+                the top face. Opaque otherwise, as it has always been. */}
             <meshStandardMaterial
               color={STOCK_COLOR}
               flatShading
               metalness={0.05}
               roughness={0.75}
-              transparent={rotaryGoal}
-              opacity={rotaryGoal ? 0.22 : 1}
-              depthWrite={!rotaryGoal}
+              transparent={ghost.transparent}
+              opacity={ghost.opacity}
+              depthWrite={ghost.depthWrite}
             />
           </mesh>
         )}
+
+        {/* #811 — a ghosted stock loses its silhouette; the blank's edges stay drawn crisply so
+            the operator can still read where the stock is. Flat stock only: the rotary views have
+            their own seam and rulers. */}
+        {rotary === null && ghost.transparent && <StockOutline geom={stockGeom} />}
 
       {/* #716 — the Stock view draws only what wraps: the stock, its floors and the seam. The flat
           overlays below are map-frame drawings (or a vise a rotary job does not sit in); leaving

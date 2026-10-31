@@ -8,24 +8,36 @@
  * cut-preview convention. They are not part of the stock mesh and never touch the CAM: this file
  * only draws the item model, exactly like the panel row does.
  *
- * The target object is drawn with ordinary depth testing: it is a reference part sitting against
- * the stock, not a cut, so it is opaque enough to read and is still hidden by anything in front of
- * it. Its bbox centre is placed at the row's X/Y and its TOP at the row's Z (Z0 is the stock top),
- * which is the placement contract in `EngraveTargetObject`.
+ * A REFERENCE target is drawn with ordinary depth testing: it sits against the stock, not in it,
+ * so it is opaque enough to read and is still hidden by anything in front of it. Its bbox centre
+ * is placed at the row's X/Y and its TOP at the row's Z (Z0 is the stock top), which is the
+ * placement contract in `EngraveTargetObject`; the frame comes from `targetPlacement`.
  *
- * Both are pick targets in the Select tool, like a floor (#441): clicking either opens its row.
- * The tags are `engravePrimitive` and `engraveTarget`, read by `engravePick.ts`.
+ * #811 — A GOAL is drawn from the PREVIEW WORKER's volumes instead (`preview.goal`), not from the
+ * job's raw mesh: the part standing proud with the cleared blank around it (item), or the cavity a
+ * mold leaves. That is what lets the picture and the CAM describe one part — the worker builds
+ * them from the same parsed mesh, the same placed frame and (for the mold) the same blank the cut
+ * is clipped to. The raw drawing above remains the fallback for a goal whose triangles are not a
+ * closed solid or whose bytes have not arrived.
+ *
+ * Every drawn item is a pick target in the Select tool, like a floor (#441): clicking one opens
+ * its row. The tags are `engravePrimitive` and `engraveTarget`, read by `engravePick.ts`.
  */
 
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import { targetObjectMesh } from '@/engine/import/targetObject';
-import { applyMat, placedSize, rotationMatrix, targetScale, targetTurns } from '@/engine/cnc/engrave/targetScale';
+import { targetPlacement } from '@/engine/cnc/engrave/targetScale';
 import { isMold } from '@/engine/cnc/cam/surface3d';
 import type { EngravePrimitive, EngraveTargetObject } from '@/types/engraveJob';
+import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import type { EngravePreviewGoal } from '@/workers/sim/engravePreview';
 import { activateEngraveItem } from './engravePick';
+import { geometryFromMesh, REMOVED_COLOR } from './simGeometry';
+import { STOCK_COLOR } from './engraveRamp';
 
 /** The cut-away volume's colour: warm red, distinct from the stock's wood and the floor ramp. */
 const CUT_COLOR = '#e0685f';
@@ -35,6 +47,11 @@ const TARGET_COLOR = '#8aa2bd';
 const SELECTED_GLOW = '#9adcff';
 const CUT_OPACITY = 0.32;
 const TARGET_OPACITY = 0.5;
+/**
+ * #811 — the removed volume's opacity: the same 0.25 the simulation's removal ghost uses, so "this
+ * is the material the program takes away" reads the same on Design and on Simulate.
+ */
+const REMOVED_OPACITY = 0.25;
 const SEGMENTS = 48;
 
 const DEG = Math.PI / 180;
@@ -179,27 +196,21 @@ function TargetObjectMesh({ target }: { target: EngraveTargetObject }) {
   }, [sha256, format, data]);
   useEffect(() => () => geom?.dispose(), [geom]);
   const selected = useViewportStore((s) => isEngraveItemSelected(s.selection, target.id));
-  const scale = targetScale(target);
   // #721 — a MOLD draws the part as its cavity: the heightfield turns the sampled part over about
   // its X axis at the stock top, which in the placed frame is the same as composing its turn with
   // Rx(π) and anchoring the turned bbox's own centre; #723 part 2 generalises that to X/Y turns.
+  // #811 — the frame itself lives in `targetPlacement`, shared with the preview worker's removed
+  // volume so the two pictures cannot place the part differently.
   const mold = isMold(target) && (target.role ?? 'reference') === 'goal';
-  // #723 part 2 — the mesh's turns, Z then Y then X, the same matrix the sampler uses
-  // (`rotationMatrix`, three's Euler "XYZ"); a mold composes Rx(π) with them.
-  const turns = targetTurns(target);
-  const ext = placedSize(target);
-  const turnsOf = { x: turns.x + (mold ? 180 : 0), y: turns.y, z: turns.z };
-  // The geometry's origin is the bbox centre in X/Y and its TOP in Z, while the turn is about the
-  // bbox CENTRE: the half-height offset is what carries the drawn mesh from one anchor to the other.
-  const anchor = applyMat(rotationMatrix(turnsOf), { x: 0, y: 0, z: (target.size.z * scale.z) / 2 });
-  const base = mold
-    ? { x: target.position.x, y: target.position.y, z: -ext.z / 2 }
-    : { x: target.position.x, y: target.position.y, z: target.position.z - ext.z / 2 };
+  const placement = targetPlacement(target, mold ? 'mold' : 'item');
   if (geom === null) return null;
 
   return (
-    <group position={[base.x + anchor.x, base.y + anchor.y, base.z + anchor.z]}>
-      <group rotation={[turnsOf.x * DEG, turnsOf.y * DEG, turnsOf.z * DEG]} scale={[scale.x, scale.y, scale.z]}>
+    <group position={[placement.at.x, placement.at.y, placement.at.z]}>
+      <group
+        rotation={[placement.turns.x * DEG, placement.turns.y * DEG, placement.turns.z * DEG]}
+        scale={[placement.scale.x, placement.scale.y, placement.scale.z]}
+      >
         <mesh
           geometry={geom}
           name={`engrave-target-${target.id}`}
@@ -228,17 +239,99 @@ function TargetObjectMesh({ target }: { target: EngraveTargetObject }) {
   );
 }
 
+/** A geometry built from a worker mesh, disposed when the mesh is replaced or on unmount (#197). */
+function useMeshOutputGeometry(mesh: NodeMeshOutput | null): THREE.BufferGeometry | null {
+  const geom = useMemo(() => (mesh === null ? null : geometryFromMesh(mesh)), [mesh]);
+  useEffect(() => () => geom?.dispose(), [geom]);
+  return geom;
+}
+
+/**
+ * #811 — THE GOAL AS THE JOB MAKES IT. The preview worker builds the volumes (`preview.goal`), so
+ * this component only chooses materials:
+ *
+ *  - `item`: the part as placed, OPAQUE in the stock's material colour — it is the piece that is
+ *    left standing — with the rest of the blank (the volume the program clears) as the translucent
+ *    removed overlay, so the operator sees the part inside the material it comes out of.
+ *  - `mold`: the cavity alone, in the removed colour: a hole the shape of the part, inside the
+ *    ghosted stock (which `EngravePreview` draws translucent whenever a goal is stated).
+ *
+ * Both meshes are pick targets for the target row, exactly like the raw mesh they replace.
+ */
+function GoalVolumes({ target, goal }: { target: EngraveTargetObject; goal: EngravePreviewGoal }) {
+  const partGeom = useMeshOutputGeometry(goal.part);
+  const removedGeom = useMeshOutputGeometry(goal.removed);
+  const selected = useViewportStore((s) => isEngraveItemSelected(s.selection, target.id));
+  const onPick = (e: { object: THREE.Object3D; stopPropagation: () => void }) => {
+    const { activeTool } = useViewportStore.getState();
+    if (activeTool !== 'select') return;
+    if (!activateEngraveItem(e.object)) return;
+    e.stopPropagation();
+  };
+
+  return (
+    <group name="engrave-goal">
+      {partGeom !== null && (
+        <mesh
+          geometry={partGeom}
+          name={`engrave-target-${target.id}`}
+          userData={{ engraveTarget: target.id }}
+          onClick={onPick}
+        >
+          <meshStandardMaterial
+            color={STOCK_COLOR}
+            emissive={selected ? SELECTED_GLOW : '#000000'}
+            emissiveIntensity={selected ? 0.6 : 0}
+            metalness={0.05}
+            roughness={0.75}
+          />
+        </mesh>
+      )}
+      {removedGeom !== null && (
+        <mesh
+          geometry={removedGeom}
+          name={partGeom === null ? `engrave-target-${target.id}` : `engrave-goal-removed-${target.id}`}
+          userData={{ engraveTarget: target.id }}
+          onClick={onPick}
+          renderOrder={3}
+        >
+          <meshStandardMaterial
+            color={REMOVED_COLOR}
+            transparent
+            opacity={REMOVED_OPACITY}
+            depthWrite={false}
+            metalness={0.05}
+            roughness={0.8}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
 /** #435 — every enabled primitive and the target object, or nothing when the job has neither. */
 export function EngravePrimitives() {
   const primitives = useEngraveJobStore((s) => s.job.primitives);
   const target = useEngraveJobStore((s) => s.job.targetObject);
+  // #811 — the goal's drawing is compiled by the preview worker; a stated goal with no compiled
+  // volume (a picture, missing bytes, an open mesh) falls back to the pre-#811 drawing.
+  const goal = useEngravePreviewStore((s) => s.preview?.goal ?? null);
   const enabled = (primitives ?? []).filter((p) => p.enabled);
+  const goalTarget =
+    target !== undefined && target.enabled && (target.role ?? 'reference') === 'goal';
 
   if (enabled.length === 0 && (target === undefined || !target.enabled)) return null;
 
   return (
     <group name="engrave-3d">
-      {target !== undefined && target.enabled && <TargetObjectMesh target={target} />}
+      {target !== undefined &&
+        target.enabled &&
+        (goalTarget && goal !== null ? (
+          <GoalVolumes target={target} goal={goal} />
+        ) : (
+          <TargetObjectMesh target={target} />
+        ))}
       {enabled.map((primitive) => (
         <PrimitiveBody key={primitive.id} primitive={primitive} />
       ))}

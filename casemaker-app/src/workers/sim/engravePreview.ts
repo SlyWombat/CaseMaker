@@ -55,7 +55,11 @@ import { recommendTool, type ToolRecommendation } from '@/engine/cnc/engrave/rec
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { boxSolid, OVERSHOOT_MM } from '@/workers/geometry/sweep';
-import { meshOutputOf, type NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import { manifoldOfTriangles, meshOutputOf, type NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import { targetObjectMesh } from '@/engine/import/targetObject';
+import { rotationMatrix, targetPlacement } from '@/engine/cnc/engrave/targetScale';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import type { EngraveTargetObject } from '@/types/engraveJob';
 import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
 import { grooveRadiusAt, vCone } from '@/engine/cnc/vProfile';
 import { vGrooveSolid } from './engraveGroove';
@@ -175,6 +179,24 @@ export interface EngravePreviewLost {
 }
 
 /**
+ * #811 — WHAT THE GOAL MAKES, DRAWN. A stated goal is not a hole in the preview's stock mesh: its
+ * drawing is a separate volume built from the same parsed mesh and the same placed frame the CAM
+ * samples, so the picture and the cut describe one part.
+ *
+ * `item` draws the part standing proud in the material colour, with the rest of the blank — the
+ * volume the program clears — as the translucent removed overlay. `mold` draws the cavity: the
+ * part's volume clipped to the blank, in the removed colour, inside the ghosted stock.
+ */
+export interface EngravePreviewGoal {
+  /** Which drawing this is: the part itself, or the mold cavity. */
+  mode: 'item' | 'mold';
+  /** item: the part as placed, in the material colour. Null when it is not a closed solid (and always for a mold). */
+  part: NodeMeshOutput | null;
+  /** The volume the program removes: item = the blank minus the part; mold = the cavity. */
+  removed: NodeMeshOutput | null;
+}
+
+/**
  * §5.7 — one step of the design ↔ as-cut slider: the stock after every cut at or SHALLOWER than
  * this depth has been removed, cumulative.
  *
@@ -274,6 +296,13 @@ export interface EngravePreview {
    * mesh per cut.)
    */
   supportingFloors: Record<string, number>;
+  /**
+   * #811 — the goal's drawn volume, in the work frame, or null when the job states no mesh goal
+   * (a reference object is not cut), the goal is a picture relief, the bytes are not loaded, the
+   * job is on a rod (the rotary view draws its own relief), or the triangles are not a closed
+   * solid. Absent means the viewport keeps its pre-#811 drawing.
+   */
+  goal: EngravePreviewGoal | null;
   /** #211's cutter recommendation, with the compromise message completed here (see below). */
   recommendation: ToolRecommendation;
 }
@@ -385,8 +414,124 @@ function completeCompromiseReason(
   return `${rec.reason} ${hint}`;
 }
 
+/**
+ * #811 — THE GOAL'S DRAWN VOLUMES, from the mesh the CAM samples and the frame the viewport draws
+ * with (`targetPlacement`, shared). Null when there is nothing honest to build: no mesh goal, a
+ * picture or missing bytes (both have no triangles), or triangles Manifold will not close.
+ *
+ * The bodies are materialised into leaves by a mesh round-trip before the caller keeps them: a
+ * Manifold boolean is LAZY and shares its inputs' children (ONE MANIFOLD TRAP, playback.ts), and
+ * the blank it was subtracted from is deleted before the next preview asks for this drawing.
+ */
+function goalDrawingBody(
+  tl: ManifoldToplevel,
+  target: EngraveTargetObject,
+  blank: ManifoldInstance,
+): { mode: 'item' | 'mold'; part: NodeMeshOutput | null; removed: NodeMeshOutput | null } | null {
+  const mode: 'item' | 'mold' = target.goalMode === 'mold' ? 'mold' : 'item';
+  let parsed: ReturnType<typeof targetObjectMesh>;
+  try {
+    parsed = targetObjectMesh(target);
+  } catch {
+    return null;
+  }
+  const placement = targetPlacement(target, mode);
+  const m = rotationMatrix(placement.turns);
+  const { x: sx, y: sy, z: sz } = placement.scale;
+  // The parser's local origin is the bbox centre in X/Y and the TOP in Z (the placement contract
+  // in `EngraveTargetObject`); `targetPlacement` says where that origin lands after the turn.
+  const cx = (parsed.bbox.min[0] + parsed.bbox.max[0]) / 2;
+  const cy = (parsed.bbox.min[1] + parsed.bbox.max[1]) / 2;
+  const top = parsed.bbox.max[2];
+  const src = parsed.positions;
+  const moved = new Float32Array(src.length);
+  for (let i = 0; i < src.length; i += 3) {
+    const x = (src[i]! - cx) * sx;
+    const y = (src[i + 1]! - cy) * sy;
+    const z = (src[i + 2]! - top) * sz;
+    moved[i] = m[0]! * x + m[1]! * y + m[2]! * z + placement.at.x;
+    moved[i + 1] = m[3]! * x + m[4]! * y + m[5]! * z + placement.at.y;
+    moved[i + 2] = m[6]! * x + m[7]! * y + m[8]! * z + placement.at.z;
+  }
+  const body = manifoldOfTriangles(tl, moved, parsed.indices);
+  if (body === null) return null;
+
+  // Both volumes are MESHED before anything is deleted: each boolean is lazy and shares the body
+  // as a child, so forcing its mesh must happen while every input handle still exists.
+  let part: NodeMeshOutput | null = null;
+  let removed: NodeMeshOutput | null = null;
+  try {
+    if (mode === 'mold') {
+      // The cavity is drawn where the cut is: the turned part clipped to the blank (#784 clips the
+      // sampler to the same rectangle), so an oversized goal shows exactly the walls it leaves.
+      const cavity = tl.Manifold.intersection([body, blank]);
+      removed = cavity.status() === 'NoError' ? meshOutputOf(cavity) : null;
+      cavity.delete();
+    } else {
+      part = meshOutputOf(body);
+      const rest = tl.Manifold.difference([blank, body]);
+      removed = rest.status() === 'NoError' ? meshOutputOf(rest) : null;
+      rest.delete();
+    }
+  } catch {
+    removed = null;
+  } finally {
+    body.delete();
+  }
+  if (part === null && removed === null) return null;
+  return { mode, part, removed };
+}
+
+/**
+ * #811 — the drawing's cache key: everything the two volumes depend on. Edits elsewhere in the
+ * job (a label's text, the cutter) rebuild the preview but must not re-run the boolean, and the
+ * goal's own row is what changes this string.
+ */
+function goalDrawingKey(job: EngraveJob, facingDepth: number): string | null {
+  const target = job.targetObject;
+  if (target === undefined || !target.enabled) return null;
+  if ((target.role ?? 'reference') !== 'goal') return null;
+  if (target.format === 'png' || target.data === undefined) return null;
+  // The rotary view draws its own radial relief (#723 R-3); a flat goal drawing here would be a
+  // volume the rod's CAM never removes.
+  if (rotaryMapOf(job) !== null) return null;
+  const s = target.scale;
+  return [
+    target.sha256,
+    target.goalMode === 'mold' ? 'mold' : 'item',
+    target.position.x,
+    target.position.y,
+    target.position.z,
+    s?.x ?? 1,
+    s?.y ?? 1,
+    s?.z ?? 1,
+    target.rotation,
+    target.rotationX ?? 0,
+    target.rotationY ?? 0,
+    target.size.x,
+    target.size.y,
+    target.size.z,
+    job.stock.length,
+    job.stock.width,
+    job.stock.thickness,
+    facingDepth,
+  ].join('|');
+}
+
+/**
+ * A copy of one cached drawing mesh: the worker transfers the buffers it returns, so the cache
+ * keeps its own copy and hands out a fresh one per preview.
+ */
+function copyMesh(m: NodeMeshOutput | null): NodeMeshOutput | null {
+  return m === null
+    ? null
+    : { ...m, positions: new Float32Array(m.positions), indices: new Uint32Array(m.indices) };
+}
+
 export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
   let latestGen = Number.NEGATIVE_INFINITY;
+  /** #811 — the compiled goal drawing, keyed by {@link goalDrawingKey}. */
+  let goalCache: { key: string; drawing: EngravePreviewGoal } | null = null;
 
   const engravePreview = (
     job: EngraveJob,
@@ -453,6 +598,20 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // The prism extrudes from z = 0 up; translate so the TOP face is at Z = 0 (cuts at −Z).
     const placedStock = stockBody.translate([0, 0, -facedThickness]);
     stockBody.delete();
+
+    // #811 — THE GOAL'S DRAWN VOLUMES, built while the blank is alive and cached across the
+    // previews its own row did not change. `placedStock` is the faced blank, the same body the
+    // cuts below are subtracted from; the drawing never consumes it (the boolean is lazy but its
+    // result is materialised inside `goalDrawingBody`).
+    const goalKey = goalDrawingKey(job, facingDepth);
+    const goalTarget = job.targetObject;
+    if (goalKey === null || goalTarget === undefined) {
+      goalCache = null;
+    } else if (goalCache?.key !== goalKey) {
+      goalCache = null;
+      const built = goalDrawingBody(tl, goalTarget, placedStock);
+      if (built !== null) goalCache = { key: goalKey, drawing: built };
+    }
 
     // Each body keeps its depth: the cumulative states below are built by subtracting one depth
     // group at a time, so the slider can stop between cut depths without a second geometry pass.
@@ -769,6 +928,14 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       findings,
       colourBoundaryDepth,
       supportingFloors,
+      goal:
+        goalCache === null
+          ? null
+          : {
+              mode: goalCache.drawing.mode,
+              part: copyMesh(goalCache.drawing.part),
+              removed: copyMesh(goalCache.drawing.removed),
+            },
       recommendation: {
         ...recommendation,
         reason: completeCompromiseReason(tl, job, recommendation, tools, shop.lostDetailWarnRatio ?? null),

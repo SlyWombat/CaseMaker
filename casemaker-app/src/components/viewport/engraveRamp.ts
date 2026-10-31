@@ -22,6 +22,13 @@
 import * as THREE from 'three';
 import { floorColour, type FloorColour } from '@/engine/cnc/engrave/depthIntent';
 
+/**
+ * The stock's material colour (the neutral wood tone, #197). Shared by the stock mesh, the goal
+ * drawn as the part (#811, "in the material colour") and the legend's goal row — one constant, so
+ * a re-tint cannot leave the legend naming a colour the scene is not drawing.
+ */
+export const STOCK_COLOR = '#c9a26b';
+
 /** The ramp's ends: shallowest and deepest, per the issue (#205). */
 export const SHALLOW_COLOR = '#ffe08a';
 export const DEEP_COLOR = '#7a2e0e';
