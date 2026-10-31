@@ -1115,7 +1115,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     openFileMenu();
     const save = screen.getByTestId('engrave-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    expect(save.title).toBe('Save is disabled — tick the clearance check in Cut, step 1.');
+    expect(save.title).toBe('Save is disabled — tick the statement in Cut, step 1.');
     expect(screen.queryByTestId('engrave-save-blocked')).toBeNull();
   });
 
@@ -2928,6 +2928,8 @@ describe('EngravePanel — the release step routing (#469)', () => {
     render(<EngravePanel />);
     // #419 §3 — the run controls live under Cut, over the package the green gate freezes.
     fireEvent.click(screen.getByTestId('cnc-mode-cut'));
+    // #797 — the ONE statement at step 1 arms every run control; these tests are about routing.
+    fireEvent.click(screen.getByTestId('engrave-ack'));
   }
 
   beforeEach(() => {

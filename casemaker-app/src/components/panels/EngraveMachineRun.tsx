@@ -21,6 +21,7 @@ import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { runKey, useRunConfirmStore } from '@/store/runConfirmStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 
@@ -62,7 +63,8 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
   const keepOffcut = useMachineRunStore((s) => s.keepOffcut);
   const skipOffcut = useMachineRunStore((s) => s.skipOffcut);
   const answerStockUsed = useMachineRunStore((s) => s.answerStockUsed);
-  const [atMachine, setAtMachine] = useState(false);
+  // #797 — the ONE statement at Cut step 1 replaced this run's own at-machine tick.
+  const acknowledged = useEngraveRunStore((s) => s.acknowledged);
   const [homeNote, setHomeNote] = useState<string | null>(null);
   // #442's #423 item — the panel follows the line the machine reports. The callback is kept in a
   // ref so a parent that passes a fresh closure on each render does not fire it again for a line
@@ -111,7 +113,7 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
   };
 
   const outcome = entry.outcome;
-  const canRun = !running && (confirmed || atMachine);
+  const canRun = !running && (confirmed || acknowledged);
   // #470 (review R7) — the vacuum sentence says what THIS prepared file will do, not what the runner
   // used to do for every file. An app upload owns the vacuum (#469), so the file's own words decide:
   // one that carries `M331` switches it itself, and an `air: false` job carries no words at all and
@@ -137,17 +139,6 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
                   : 'This program runs without the vacuum; the machine homes when it finishes.';
   return (
     <div data-testid="engrave-run" data-file={entry.filename}>
-      {!controlled && !confirmed && !running && (
-        <label style={MUTED}>
-          <input
-            type="checkbox"
-            checked={atMachine}
-            data-testid="engrave-run-at-machine"
-            onChange={(e) => setAtMachine(e.target.checked)}
-          />{' '}
-          I am at the machine, with the head clear and the stock clamped — asked once for this program.
-        </label>
-      )}
       {!controlled && (
         <button
           type="button"

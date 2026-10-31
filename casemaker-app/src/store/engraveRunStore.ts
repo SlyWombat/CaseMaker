@@ -246,8 +246,14 @@ export interface EngraveRunState {
    */
   simPrograms: ProgramSweepSummary[];
   phase: EngraveRunPhase;
-  /** The clearance acknowledgement (see `ACKNOWLEDGE_CODES`), reset on every Generate. */
+  /** The ONE statement (see `ACKNOWLEDGE_CODES`), reset on every Generate. */
   acknowledged: boolean;
+  /**
+   * #797 — WHICH program the statement was given for: the frozen package's hash. The statement is
+   * asked once per program, so a package that changes (a new Generate, a re-freeze) is not covered
+   * by the old tick; a job edit that leaves the program alone keeps it.
+   */
+  acknowledgedFor: string | null;
   /** Set when the job changed after a Generate; null while the result still matches. */
   staleSince: number | null;
   /**
@@ -277,6 +283,8 @@ export interface EngraveRunState {
    */
   cancelGenerate: () => void;
   setAcknowledged: (v: boolean) => void;
+  /** #797 — the one statement, given for `hash` (the package the tick covers). */
+  acknowledgeProgram: (hash: string) => void;
   /**
    * #490 — record a diagnostic that did not come from a sim stage: the panel's error boundary
    * writes a render crash here, into the same list the run sheet reads, so a panel that threw
@@ -305,6 +313,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     simGridPitchMm: null as number | null,
     simPrograms: [] as ProgramSweepSummary[],
     acknowledged: false,
+    acknowledgedFor: null as string | null,
     staleSince: null as number | null,
     staleReason: null as EngraveInputKey | null,
     inputs: null as EngraveRunInputs | null,
@@ -788,6 +797,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     simPrograms: [],
     phase: 'idle',
     acknowledged: false,
+    acknowledgedFor: null,
     staleSince: null,
     staleReason: null,
     inputs: null,
@@ -817,7 +827,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
             : phaseBeforeRun,
       });
     },
-    setAcknowledged: (v) => set({ acknowledged: v }),
+    setAcknowledged: (v) => set(v ? { acknowledged: true } : { acknowledged: false, acknowledgedFor: null }),
+    acknowledgeProgram: (hash) => set({ acknowledged: true, acknowledgedFor: hash }),
     reportDiagnostic: (diagnostic) =>
       set((state) => ({ simDiagnostics: [...state.simDiagnostics, diagnostic] })),
     reset: () => {

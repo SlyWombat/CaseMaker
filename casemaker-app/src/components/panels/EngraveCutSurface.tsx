@@ -292,7 +292,9 @@ export function EngraveCutSurface({
   // gate's own flag; the warning codes that need it come from the Generate (re-post included) and
   // the sweep, so both are subscribed to and the step re-renders when they arrive.
   const acknowledged = useEngraveRunStore((s) => s.acknowledged);
+  const acknowledgedFor = useEngraveRunStore((s) => s.acknowledgedFor);
   const setAcknowledged = useEngraveRunStore((s) => s.setAcknowledged);
+  const acknowledgeProgram = useEngraveRunStore((s) => s.acknowledgeProgram);
   const ackGenerated = useEngraveRunStore((s) => s.generated);
   const ackDiagnostics = useEngraveRunStore((s) => s.simDiagnostics);
   const anyRegistration = useEngraveRegistrationStore((s) => s.records[job.id] ?? null);
@@ -301,10 +303,18 @@ export function EngraveCutSurface({
     [ackGenerated, ackDiagnostics, generated],
   );
   const ackRequired = ackCodes.length > 0;
-  // The one sentence that unblocks Run while clearance is unticked. The gate's own saveBlocker says
-  // the same thing; it is repeated here because this surface is also driven without the panel's
-  // pre-computed blockers (tests, and any caller that hands them in null).
-  const ackBlocker = ackRequired && !acknowledged ? 'tick the clearance check in Cut, step 1' : null;
+  // #797 — ONE STATEMENT, ASKED ONCE PER PROGRAM. The clearance tick, "the probe is fitted" and
+  // both "I am at the machine" boxes were four asks for one fact; they are this one statement,
+  // and its tick carries the program (the package's hash) it was given for. A new program asks
+  // again; editing a label does not.
+  const programKey = pkg?.hash ?? generated?.programs[0]?.programHash ?? null;
+  const statementTicked = programKey !== null && acknowledgedFor === programKey;
+  // The one sentence that unblocks Start cut while the statement is unticked. The gate's own
+  // saveBlocker says the same thing; it is repeated here because this surface is also driven
+  // without the panel's pre-computed blockers (tests, and any caller that hands them in null).
+  // The statement is about the MACHINE, so it is asked whenever there is a program to run, not
+  // only when one of the gate's warning codes wants a clearance tick (#797).
+  const ackBlocker = programKey !== null && !statementTicked ? 'tick the statement in Cut, step 1' : null;
   // #608 — the cut-extent measurement this machine took: its tilt feeds the re-post step line, and
   // the registration's fitted plane is what the release gate compares the frozen package against.
   const spreadMeasurement = useSurfaceSpread(job.id, target);
@@ -759,17 +769,24 @@ export function EngraveCutSurface({
         {/* #795 — THE STATEMENT IS THE STEP'S FIRST LINE. The clearance acknowledgement used to sit
             at the foot of the step, under the gate's fold; it is what the operator must say about
             THIS step, so it reads before the details rather than after them. */}
-        {ackRequired && (
+        {programKey !== null && (
           <div style={{ ...BOX, marginTop: 6 }} data-testid="engrave-cut-ack">
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#e6edf5' }}>
               <input
                 type="checkbox"
                 data-testid="engrave-ack"
-                checked={acknowledged}
-                onChange={(e) => setAcknowledged(e.target.checked)}
+                checked={statementTicked}
+                onChange={(e) => {
+                  if (!e.target.checked) setAcknowledged(false);
+                  else if (programKey !== null) acknowledgeProgram(programKey);
+                  else setAcknowledged(true);
+                }}
                 style={{ marginTop: 2 }}
               />
-              <span>I have checked clearance to the vise and the tool's reach myself.</span>
+              <span>
+                I am at the machine — the probe is fitted, the head is clear, and the stock is
+                clamped — and I have checked clearance to the vise and the tool's reach myself.
+              </span>
             </label>
           </div>
         )}

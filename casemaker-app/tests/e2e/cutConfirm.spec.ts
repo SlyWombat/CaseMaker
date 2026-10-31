@@ -72,7 +72,22 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   const ack = page.getByTestId('engrave-ack');
   await expect(ack).toHaveCount(1);
   await expect(details).toHaveAttribute('open');
+  // #797 — ONE STATEMENT: the clearance tick, the probe-fitted ask and both at-machine boxes are
+  // this one line. The other three asks are gone from the whole screen.
+  const statement = page.getByTestId('engrave-cut-ack');
+  await expect(statement).toContainText('the probe is fitted');
+  await expect(statement).toContainText('clearance');
+  await expect(page.getByTestId('engrave-cut-statement')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-run-at-machine')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-registration-at-machine')).toHaveCount(0);
+  // ONE statement arms the press: disabled while it is unticked, enabled once step 1's is given.
+  const go = page.getByTestId('engrave-cut-go');
+  await expect(go).toBeDisabled();
+  const statementDir = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img', '2026-10-31-one-statement');
+  fs.mkdirSync(statementDir, { recursive: true });
+  await page.screenshot({ path: path.join(statementDir, 'one-statement.png') });
   await ack.check();
+  await expect(go).toBeEnabled();
   await expect(details).not.toHaveAttribute('open');
   // #796 — THE THREE-STEP CUT, in the state the operator sees after a real Generate: step 1's
   // one readiness line replaces the old Checked and Frozen steps. Screenshot committed under
@@ -101,11 +116,6 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   await expect(page.getByTestId('engrave-cut-confirm-program')).toContainText(frozen!.filename);
   await expect(page.getByTestId('engrave-cut-confirm-cutter')).toContainText(frozen!.cutterName);
 
-  // ONE statement arms the press: disabled until it is ticked, enabled after. Clearance was step 1.
-  const go = page.getByTestId('engrave-cut-go');
-  await expect(go).toBeDisabled();
-  await page.getByTestId('engrave-cut-statement').check();
-  await expect(go).toBeEnabled();
   // NOT pressed: the press uploads and starts a run, and e2e has no machine.
 });
 

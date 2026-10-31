@@ -14,6 +14,7 @@ import {
 import { EngraveRegistrationStep } from '@/components/panels/EngraveRegistrationStep';
 import { useLocationStore } from '@/store/locationStore';
 import type { MachineRecord } from '@/platform/locationClient';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -282,7 +283,7 @@ function install(plan: RegistrationPlan, opts: FakeOptions = {}): void {
 }
 
 async function runStep(): Promise<void> {
-  fireEvent.click(screen.getByTestId('engrave-registration-at-machine'));
+  act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
   await act(async () => {
     fireEvent.click(screen.getByTestId('engrave-registration-start'));
   });
@@ -413,7 +414,7 @@ describe('#639 a re-run forgets the last clamping', () => {
     install(plan, { alarmAtFastTouch: true });
     useEngraveJobStore.setState({ job });
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
-    fireEvent.click(screen.getByTestId('engrave-registration-at-machine'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     await act(async () => {
       fireEvent.click(screen.getByTestId('engrave-registration-start'));
     });
@@ -623,7 +624,7 @@ describe('#495 — the registration step', () => {
     install(plan, { alarmAtM491: true });
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
 
-    fireEvent.click(screen.getByTestId('engrave-registration-at-machine'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     await act(async () => {
       fireEvent.click(screen.getByTestId('engrave-registration-start'));
     });
@@ -644,7 +645,7 @@ describe('#495 — the registration step', () => {
     install(plan, { missFastTouch: true });
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
 
-    fireEvent.click(screen.getByTestId('engrave-registration-at-machine'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     await act(async () => {
       fireEvent.click(screen.getByTestId('engrave-registration-start'));
     });
@@ -664,7 +665,7 @@ describe('#495 — the registration step', () => {
     install(plan, { alarmAtFastTouch: true });
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
 
-    fireEvent.click(screen.getByTestId('engrave-registration-at-machine'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     await act(async () => {
       fireEvent.click(screen.getByTestId('engrave-registration-start'));
     });

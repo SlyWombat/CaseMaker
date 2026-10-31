@@ -176,6 +176,5 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   );
   const go = page.getByTestId('engrave-cut-go');
   await expect(go).toBeDisabled();
-  await page.getByTestId('engrave-cut-statement').check();
   await expect(go).toBeEnabled();
 });

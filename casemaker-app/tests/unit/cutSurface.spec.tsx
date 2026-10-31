@@ -357,6 +357,15 @@ afterEach(() => {
   setMachineUploadLoader(null);
 });
 
+/**
+ * #797 — give the ONE statement at Cut step 1 for the program on screen. The clearance tick, the
+ * probe-fitted ask and the at-machine boxes are this one statement now, so the upload and one
+ * screen gates read it here.
+ */
+function giveStatement(): void {
+  fireEvent.click(screen.getByTestId('engrave-ack'));
+}
+
 function storedPackage(job: EngraveJob): FrozenPackage {
   const pkg = useEngravePackageStore.getState().packageFor(job.id);
   if (pkg === null) throw new Error('no package was frozen');
@@ -368,6 +377,7 @@ describe('#419 §3 the Cut surface', () => {
     const job = defaultEngraveJob();
     const made = generated([P1]);
     draw({ job, report: reportOf(), pkg: null, generated: made });
+    giveStatement();
 
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
     const pkg = storedPackage(job);
@@ -533,13 +543,10 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-cut-step-1').contains(ackBox)).toBe(true);
     expect(ackBox.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // Run is blocked with its ONE sentence, and the Start cut statement does not stand in for it.
+    // Run is blocked with its ONE sentence.
     const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
     expect(go.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the clearance check in Cut, step 1');
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
-    expect(go.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the clearance check in Cut, step 1');
+    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the statement in Cut, step 1');
 
     // #726 W16 — the Design panel's Save gate reads the same run findings and the same flag: the
     // box that appears here is the one that clears Save there (one source, no deadlock).
@@ -550,8 +557,9 @@ describe('#419 §3 the Cut surface', () => {
       machine: jobMachine(job, null),
       rotaryHeld: false,
     });
-    expect(saveBlocker(gateView())).toBe('tick the clearance check in Cut, step 1');
-    // Ticking it in step 1 records the gate's own flag and clears the sentence.
+    expect(saveBlocker(gateView())).toBe('tick the statement in Cut, step 1');
+    // #797 — TICKING THE ONE STATEMENT arms the press AND records the gate's own flag: the
+    // clearance tick and the at-machine ask are the same statement now, not two.
     fireEvent.click(ack);
     expect(useEngraveRunStore.getState().acknowledged).toBe(true);
     expect(screen.queryByTestId('engrave-cut-go-blocked')).toBeNull();
@@ -581,7 +589,7 @@ describe('#419 §3 the Cut surface', () => {
 
     const sentence = 'The program is older than the design — press Generate in step 1.';
     // The statement is ticked so only the stale package can hold the press.
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    fireEvent.click(screen.getByTestId('engrave-ack'));
     const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
     expect(go.disabled).toBe(true);
     expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toBe(sentence);
@@ -610,7 +618,7 @@ describe('#419 §3 the Cut surface', () => {
     });
 
     // The report row's own words, not a generic "clear step 1".
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    fireEvent.click(screen.getByTestId('engrave-ack'));
     const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
     expect(go.disabled).toBe(true);
     expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toBe('the cutter cannot reach the label');
@@ -647,6 +655,7 @@ describe('#419 §3 the Cut surface', () => {
     draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
 
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+    giveStatement();
 
     const select = screen.getByTestId('engrave-dry-run-level') as HTMLSelectElement;
     expect(select.value).toBe('off');
@@ -739,6 +748,7 @@ describe('#419 §3 the Cut surface', () => {
       { ...P2, nc: 'LIVE P2\n', programHash: P2.programHash },
     ]);
     draw({ job, report: reportOf(), pkg, generated: live });
+    giveStatement();
 
     fireEvent.click(await screen.findByTestId('engrave-release-upload'));
     fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
@@ -757,6 +767,7 @@ describe('#419 §3 the Cut surface', () => {
     const pkg = frozen(job, [P1, P2]);
     // A fresh session with no Generate: no report matches the frozen texts.
     draw({ job, report: reportOf(), pkg, generated: null });
+    giveStatement();
 
     await waitFor(() =>
       expect(screen.getByTestId('engrave-release-blocked').textContent).toContain(
@@ -843,6 +854,7 @@ describe('#419 §3 the Cut surface', () => {
     } as unknown as SurfaceSpreadAssessment);
 
     draw({ job, report: reportOf(), pkg: null, generated: made });
+    giveStatement();
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
 
     // The dome route is shown with the recipe and the operator's tick; no tilt re-post section.
@@ -881,6 +893,7 @@ describe('#419 §3 the Cut surface', () => {
     useEngraveRegistrationStore.getState().measureSurface(job.id, TARGET, dome());
 
     draw({ job, report: reportOf(), pkg: null, generated: made });
+    giveStatement();
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
 
     // The tick is the operator saying "the grid was run for THIS clamping".
@@ -926,6 +939,7 @@ describe('#419 §3 the Cut surface', () => {
     } as unknown as SurfaceSpreadAssessment);
 
     draw({ job, report: reportOf(), pkg: null, generated: made });
+    giveStatement();
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
 
     // The alternative route carries the computed miss (here 0.4 + 0 − 0.2 = 0.2 mm at the centre).
@@ -1073,7 +1087,7 @@ describe('#656 from the cutter prompt to the cut', () => {
     expect(screen.getByTestId('engrave-cut-confirm-program').textContent).toContain('job');
     // One press, held until the one statement is ticked.
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    fireEvent.click(screen.getByTestId('engrave-ack'));
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(false);
     // The expert path is there, unchanged, folded.
     expect((screen.getByTestId('engrave-cut-expert') as HTMLDetailsElement).open).toBe(false);

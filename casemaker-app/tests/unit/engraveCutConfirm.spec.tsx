@@ -5,7 +5,7 @@
 // through the same seams the manual path uses. Nothing here reaches a machine or the shelf.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngraveCutConfirm } from '@/components/panels/EngraveCutConfirm';
 import { setMachineUploadLoader } from '@/platform/machineUpload';
 import { resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
@@ -99,16 +99,15 @@ describe('#656 the one screen', () => {
     expect(screen.getByTestId('engrave-cut-confirm-oracle').getAttribute('data-ok')).toBe('true');
     // One button, disabled until the ONE statement is ticked.
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(false);
-    // #689 — the statement is the at-machine/cutter confirmation only. Clearance is Cut step 1's
-    // own tick, so this press neither sets nor stands in for it.
-    expect(useEngraveRunStore.getState().acknowledged).toBe(false);
+    // #797 — the shared statement is given; the press reads it rather than owning a copy.
+    expect(useEngraveRunStore.getState().acknowledged).toBe(true);
   });
 
   it('uploads, prepares and starts on the one press, with the frozen program’s own cutter', async () => {
     render(confirm());
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-cut-go'));
 
     await waitFor(() => expect(uploads).toHaveLength(1));
@@ -146,7 +145,7 @@ describe('#656 the one screen', () => {
       },
     };
     render(confirm({ source: surfaceSource }));
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-cut-go'));
 
     await waitFor(() => expect(uploads).toHaveLength(1));
@@ -158,7 +157,7 @@ describe('#656 the one screen', () => {
   it('stops with the upload’s own sentence and starts nothing', async () => {
     uploadKind = 'refused';
     render(confirm());
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-cut-go'));
     await waitFor(() => expect(screen.getByTestId('engrave-cut-confirm-error').textContent).toContain('the card is full'));
     expect(prepareSpy).not.toHaveBeenCalled();
@@ -167,7 +166,7 @@ describe('#656 the one screen', () => {
 
   it('refuses the press until the check is 0/0, and says why', () => {
     render(confirm({ oracle: { ...OK_ORACLE, ok: false, worst: { underCut: 2, overCut: 0 } } }));
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('engrave-cut-go-oracle').textContent).toContain('found a difference');
     expect(screen.getByTestId('engrave-cut-confirm-oracle').getAttribute('data-ok')).toBe('false');
@@ -175,7 +174,7 @@ describe('#656 the one screen', () => {
 
   it('shows the gate’s own sentence and stays disabled while it holds', () => {
     render(confirm({ blocker: 're-post against the tilt first — the frozen program is flat but the blank is tilted' }));
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('re-post against the tilt first');
   });
@@ -217,7 +216,7 @@ describe('#535 a surface program’s verdict line', () => {
     expect(line).not.toContain('0.0000');
     // The gate is unchanged: the press arms once the ONE statement is ticked.
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(false);
   });
 

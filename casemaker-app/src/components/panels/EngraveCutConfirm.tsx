@@ -30,6 +30,7 @@ import { useRunConfirmStore, runKey } from '@/store/runConfirmStore';
 import { oracleSentence } from '@/store/engraveRunGate';
 import { useMachineRunStore, type RunContext } from '@/store/machineRunStore';
 import { useCameraPaneStore } from '@/store/cameraPaneStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useMachineCamera } from '@/hooks/useMachineCamera';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 import { releaseCheck, type ReleaseSource } from '@/engine/cnc/engrave/release';
@@ -135,7 +136,8 @@ export function EngraveCutConfirm({
   surfaceCheck = null,
   onLiveStatus,
 }: EngraveCutConfirmProps): JSX.Element {
-  const [statement, setStatement] = useState(false);
+  // #797 — the ONE statement at Cut step 1 replaced this screen's own tick.
+  const statement = useEngraveRunStore((s) => s.acknowledged);
   const [pressing, setPressing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const start = useMachineRunStore((s) => s.start);
@@ -153,9 +155,9 @@ export function EngraveCutConfirm({
   const refused = blocker ?? domeBlocker;
 
   /**
-   * THE ONE PRESS. The cutter-fitted confirmation and "I am at the machine" are the statement
-   * here; the clearance acknowledgement is Cut step 1's own flag and is never asserted by this
-   * press. It then uploads, prepares and starts through the same seams the manual path uses.
+   * THE ONE PRESS. The statement that covers the machine, the probe, the cutter and the clearance is
+   * Cut step 1's ONE statement (#797); this screen only reads whether it was given. It then
+   * uploads, prepares and starts through the same seams the manual path uses.
    */
   async function cut(): Promise<void> {
     if (!statement || pressing || refused !== null || !oracleOk) return;
@@ -183,7 +185,8 @@ export function EngraveCutConfirm({
     recordUploadedFile(machine.host, outcome.filename);
     const hash = programHash(source.nc);
     const key = runKey({ host: machine.host, port: machine.port }, hash);
-    // The statement covered the cutter and the at-machine confirmation; record it now.
+    // The ONE statement at Cut step 1 covered the machine, probe, cutter and clearance; record
+    // the press in the confirm ledger now.
     useRunConfirmStore.getState().confirm(key);
     const prepared = prepare(
       { host: machine.host, port: machine.port },
@@ -234,15 +237,6 @@ export function EngraveCutConfirm({
         .
       </p>
       {dome !== null && <DomeChoice {...dome} />}
-      <label style={{ display: 'block', marginTop: 8, fontSize: 12, color: '#c8d3de' }}>
-        <input
-          type="checkbox"
-          checked={statement}
-          data-testid="engrave-cut-statement"
-          onChange={(e) => setStatement(e.target.checked)}
-        />{' '}
-        I am at the machine, head clear, and the stock is clamped.
-      </label>
       {camera !== null && (
         <button
           type="button"

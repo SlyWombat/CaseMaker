@@ -5,12 +5,13 @@
 // a run goes. The upload and the console are fake clients; nothing reaches a machine.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngraveMachineRun } from '@/components/panels/EngraveMachineRun';
 import { EngraveMachineUpload } from '@/components/panels/EngraveMachineUpload';
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } from '@/platform/machineConsole';
 import { setMachineUploadLoader } from '@/platform/machineUpload';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { machineKey, resetMachineRunStore, runContextFor, useMachineRunStore } from '@/store/machineRunStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { Tool } from '@/engine/cnc/tool';
@@ -109,7 +110,7 @@ describe('#423 the run panel, in the real tree', () => {
     setMachineConsoleLoader(async () => client(100));
     const first = render(upload());
     await uploadIt();
-    fireEvent.click(screen.getByTestId('engrave-run-at-machine'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
     await waitFor(() => expect(screen.getByTestId('engrave-run-progress').textContent).toContain('20 %'), { timeout: 6000 });
 
@@ -137,7 +138,7 @@ describe('#423 the run panel, in the real tree', () => {
     // The prepare the app makes says the file owns the vacuum (#469 R20), rather than leaving the
     // runner to infer it from the text of one file of the job.
     expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.context?.vacuumOwned).toBe(true);
-    fireEvent.click(screen.getByTestId('engrave-run-at-machine'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
     await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeout: 6000 });
     // #469 (R20) — the app's upload OWNS the vacuum, so the runner adds no `M331`/`M332` of its
@@ -146,12 +147,13 @@ describe('#423 the run panel, in the real tree', () => {
     // every finish; it is the file (or its absence) that switches the vacuum.
     expect(sent).toEqual(['?', 'play /sd/gcodes/job.nc', '?', '$H']);
     expect(screen.queryByTestId('engrave-run-home')).toBeNull();
-    // The same program again: no question. A different program under the same name: asked again.
+    // #797 — the at-machine statement is Cut step 1's ONE statement now; this panel asks nothing
+    // of its own, on this program or on the next.
     expect(screen.queryByTestId('engrave-run-at-machine')).toBeNull();
     useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'another-hash');
     cleanup();
     render(<EngraveMachineRun target={TARGET} />);
-    expect(screen.getByTestId('engrave-run-at-machine')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-run-at-machine')).toBeNull();
   }, 15000);
 
   it('draws nothing for a machine with no prepared program', () => {
@@ -165,7 +167,7 @@ describe('#423 the run panel, in the real tree', () => {
     setMachineConsoleLoader(async () => client(100));
     render(upload());
     await uploadIt();
-    fireEvent.click(screen.getByTestId('engrave-run-at-machine'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
     await waitFor(() => expect(screen.getByTestId('engrave-run-progress').textContent).toContain('20 %'), { timeout: 6000 });
 
@@ -192,7 +194,7 @@ describe('#423 the run panel, in the real tree', () => {
     const lines: (number | null)[] = [];
     render(upload('M02\n', (line) => lines.push(line)));
     await uploadIt();
-    fireEvent.click(screen.getByTestId('engrave-run-at-machine'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
     // The fake controller runs reporting `P:10,20,5` and finishes on `P:9,100,4`.
     await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeout: 12000 });
@@ -254,7 +256,7 @@ describe('#655 the tool-change stop', () => {
     setMachineConsoleLoader(async () => client(1, { toolPolls: 8 }));
     render(upload());
     await uploadIt();
-    fireEvent.click(screen.getByTestId('engrave-run-at-machine'));
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
 
     await screen.findByTestId('engrave-run-tool-prompt', undefined, { timeout: 8000 });

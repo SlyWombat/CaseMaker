@@ -370,8 +370,8 @@ describe('engraveRunStore (#206)', () => {
       acknowledged: false,
       simDiagnostics: [{ severity: 'warning', code: 'vise-default', message: 'x' }] as EngraveRunView['simDiagnostics'],
     });
-    expect(saveBlocker(v)).toBe('tick the clearance check in Cut, step 1');
-    expect(uploadBlocker(v)).toBe('tick the clearance check in Cut, step 1');
+    expect(saveBlocker(v)).toBe('tick the statement in Cut, step 1');
+    expect(uploadBlocker(v)).toBe('tick the statement in Cut, step 1');
     // The same run, acknowledged in Cut step 1, is what Save writes.
     expect(saveBlocker({ ...v, acknowledged: true })).toBeNull();
   });

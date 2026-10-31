@@ -84,6 +84,7 @@ import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const BOX: CSSProperties = {
@@ -158,10 +159,11 @@ function marginRefusal(outcome: RegistrationOutcome): boolean {
 export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStepProps): JSX.Element {
   const { plan, why } = approvedPlan(job);
   const record = useEngraveRegistrationStore((s) => s.record);
+  // #797 — the one statement at Cut step 1 covers this step's probe-fitted ask.
+  const statementGiven = useEngraveRunStore((s) => s.acknowledged);
   const measureSurface = useEngraveRegistrationStore((s) => s.measureSurface);
   const houseMargins = useSettingsStore((s) => s.margins);
   const [phase, setPhase] = useState<Phase>('idle');
-  const [atMachine, setAtMachine] = useState(false);
   const [prompt, setPrompt] = useState<OperatorStep | null>(null);
   const [result, setResult] = useState<RunResult | null>(null);
   const [written, setWritten] = useState<ApplyResult | null>(null);
@@ -271,7 +273,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   }
 
   async function start(): Promise<void> {
-    if (target === null || plan === null || !atMachine || busy) return;
+    // #797 — the ONE statement at Cut step 1 replaced this step's own at-machine tick.
+    const acknowledged = useEngraveRunStore.getState().acknowledged;
+    if (target === null || plan === null || !acknowledged || busy) return;
     // #639 — A NEW RUN FORGETS THE LAST CLAMPING. The record and the surface assessment belong to
     // the blank as it was; keeping them through a re-run (which may alarm out or be stopped) left
     // the Cut step claiming "Registration recorded", the dome tick ticked, and Upload enabled
@@ -654,19 +658,12 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
 
           {(phase === 'idle' || phase === 'failed' || phase === 'recorded') && target !== null && (
             <>
-              <label style={MUTED}>
-                <input
-                  type="checkbox"
-                  checked={atMachine}
-                  data-testid="engrave-registration-at-machine"
-                  onChange={(e) => setAtMachine(e.target.checked)}
-                />{' '}
-                I am at the machine, the probe is fitted.
-              </label>
+              {/* #797 — the at-machine statement is the ONE statement at Cut step 1 (which names
+                  the probe), so this step asks nothing of its own; it reads whether it was given. */}
               <button
                 type="button"
                 data-testid="engrave-registration-start"
-                disabled={!atMachine}
+                disabled={!statementGiven}
                 style={{ width: '100%', padding: 7, marginTop: 6 }}
                 onClick={() => void start()}
               >
