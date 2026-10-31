@@ -625,6 +625,20 @@ export function measureRaisedTexts(
 export const RAISED_EDGE_LOSS_TOLERANCE_MM = 0.03;
 
 /**
+ * #818 — THE WIDEST RIDGE THE EYE READS AS SEPARATED, mm.
+ *
+ * A flat cutter cannot cross a pinch: where its radius overshoots the pinch's half-gap it leaves a
+ * ridge that wide at the throat, and a ridge below this width reads as cut. The number is DERIVED
+ * FROM THE COIN'S BENCH EVIDENCE, not chosen: with the 0.6 mm corn as the rest (#765 — "a 0.6 mm
+ * corn reads, with only one or two slight touches at the tightest pinches") the model's seven pinch
+ * ridges are 0.161, 0.113, 0.107, 0.075, 0.075, 0.046 and 0.042 mm, and the bench judged one or two
+ * of them visible. With the ⌀1 mm rest every ridge is 0.242 mm or more and the word fused. A
+ * 0.15 mm threshold keeps the one the bench saw (0.161 mm) and reads the next (0.113 mm) as cut —
+ * the upper end of "one or two" — so the warning never counts a join nobody could see.
+ */
+export const RAISED_RIB_VISIBLE_MM = 0.15;
+
+/**
  * #765/#766 — ONE PINCH a raised label keeps: the two glyph components it stands between, the
  * design's clearance there, and what the cutter leaves or takes.
  */
@@ -634,10 +648,18 @@ export interface RaisedTextPinch {
   b: string;
   /** The design's clearance at this pinch, mm — twice the smallest joining radius. */
   gapMm: number;
-  /** True when the cutter leaves no field bridging the two components (a V within tolerance included). */
+  /**
+   * True when the cutter leaves no field bridging the two components: a V whose flank crosses the
+   * pinch within its tolerance, or a flat whose ridge is below the visible width (#818).
+   */
   separated: boolean;
   /** Per side, mm: how far a cone's top-face opening overshoots the half-gap (0 for a flat). */
   edgeLossMm: number;
+  /**
+   * #818 — the ridge left at the throat, mm: the cutter's radius past the pinch's half-gap. For a
+   * flat it is the step that stands; a cone crosses it by the same amount on each side.
+   */
+  ribStepMm: number;
   /** The field still standing in the pinch, mm² (0 when `separated`). */
   areaMm2: number;
 }
@@ -848,12 +870,16 @@ export function measureRaisedTextDetail(
           if (joinedPairs.length === 0) continue;
           const share = group.sliverArea / joinedPairs.length;
           for (const pair of joinedPairs) {
-            // A cone's top-face opening overshoots the pinch's half-gap; within the tolerance its
-            // flank has crossed the pinch and the letters read apart.
-            const edgeLossMm = opts.cone === true ? Math.max(0, cutterRadius - pair.gapMm / 2) : 0;
-            const separated = opts.cone === true && edgeLossMm <= tolerance + 1e-9;
+            // The cutter's radius past the pinch's half-gap is the ridge left at the throat. A
+            // cone's top-face opening overshoots it, and within its tolerance the flank has crossed
+            // the pinch and the letters read apart. A flat cannot cross it — it leaves a step that
+            // wide — so a step below the visible width reads as cut too (#818).
+            const ribStepMm = Math.max(0, cutterRadius - pair.gapMm / 2);
+            const edgeLossMm = opts.cone === true ? ribStepMm : 0;
+            const separated =
+              opts.cone === true ? ribStepMm <= tolerance + 1e-9 : ribStepMm < RAISED_RIB_VISIBLE_MM - 1e-9;
             const areaMm2 = separated ? 0 : share;
-            pinches.push({ a: pair.a.char, b: pair.b.char, gapMm: pair.gapMm, separated, edgeLossMm, areaMm2 });
+            pinches.push({ a: pair.a.char, b: pair.b.char, gapMm: pair.gapMm, separated, edgeLossMm, ribStepMm, areaMm2 });
             sliver += areaMm2;
           }
         }

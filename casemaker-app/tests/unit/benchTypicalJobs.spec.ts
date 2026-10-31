@@ -617,6 +617,9 @@ describe('#739 raised text warns when its gaps are narrower than the cutter', ()
     expect(warning.message).toContain('0.278 mm');
     expect(warning.message).toContain('1 mm cutter');
     expect(warning.message).toContain('13 mm');
+    // #818 — the ⌀1 rest is the fused result the bench saw: every ridge is 0.242 mm or more, above
+    // the 0.15 mm visible width, so all seven pairs stay joined.
+    expect(warning.message).toContain('7 of its 7 pinch points stay joined');
     // #765 — the warning names the pinches the cut leaves joined, never the whole word as one blob.
     expect(warning.message).toMatch(/\d+ of its \d+ pinch points? stays? joined/);
     expect(warning.message).toContain('between');

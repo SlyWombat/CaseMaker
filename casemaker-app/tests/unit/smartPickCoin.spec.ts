@@ -5,11 +5,17 @@
 // real generator — one job, a handful of candidates, so this is the fixture's own small run.
 
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { tl } from './helpers/manifoldExec';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { smartPick } from '@/engine/cnc/engrave/smartPick';
 import { evaluatePlan, type CandidatePlan, type PlanEvaluation } from '@/workers/sim/planEvaluate';
+import { measureRaisedTextDetail } from '@/workers/sim/engraveGeometry';
+import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { Tool, ToolShape } from '@/engine/cnc/tool';
@@ -98,5 +104,50 @@ describe('#765/#766 the coin’s raised "Software"', () => {
     expect(run.plan.cutters.some((c) => c.key === CORN_06.key), 'the 0.6 mm corn is in the chosen plan').toBe(true);
     expect(joined, 'fewer pinches stay joined than with a ⌀1 cutter').toBeLessThan(oneJoined);
     expect(pick.chosen.worstFidelity).toBeGreaterThan(0.7);
+  });
+
+  it('#818 — a ridge below the visible width reads as cut; the ⌀1 rest keeps every pair', () => {
+    // The bench evidence (#765): the 0.6 mm corn makes the word read, with one or two slight
+    // touches at the tightest pinches; the ⌀1 rest fuses it. The ridge at a pinch is the cutter's
+    // radius past the half-gap, and 0.15 mm is the visible width derived from those runs. The
+    // real bold coin's exact count (1 of 7) is pinned through the CLI proxy in benchTypicalJobs.
+    const job = coin();
+    const plan = toPartPlan(job);
+    const detail = (radius: number) => measureRaisedTextDetail(tl, job, plan.raisedTexts, () => radius)[0]!;
+    for (const radius of [0.3, 0.5]) {
+      const row = detail(radius);
+      expect(row.pinches.length).toBeGreaterThan(0);
+      for (const p of row.pinches) {
+        expect(p.ribStepMm, `${p.a}–${p.b} at r ${radius}`).toBeCloseTo(Math.max(0, radius - p.gapMm / 2), 6);
+        expect(p.separated, `${p.a}–${p.b} at ${p.ribStepMm.toFixed(3)} mm`).toBe(p.ribStepMm < 0.15 - 1e-9);
+      }
+    }
+  });
+
+  it('#818 — the committed coin proxy: the 0.6 corn names one visible ridge, the ⌀1 rest seven', () => {
+    // The real card's bold 3.6 mm "Software" (docs/bench/.../j04-coin-disc-pla.json): the bench
+    // read it with a 0.6 mm corn and saw one or two slight touches; the ⌀1 rest fused it.
+    const parsed = parseEngraveJob(
+      JSON.parse(
+        readFileSync(
+          join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'docs', 'bench', '2026-10-28-z1-real-jobs', 'jobs', 'j04-coin-disc-pla.json'),
+          'utf8',
+        ),
+      ),
+    );
+    if (!parsed.ok) throw new Error(parsed.errors.join('\n'));
+    const job = parsed.job;
+    const plan = toPartPlan(job);
+    const software = (radius: number) =>
+      measureRaisedTextDetail(tl, job, plan.raisedTexts, () => radius).find((d) => d.text === 'Software')!;
+    const corn = software(0.3);
+    const joined = corn.pinches.filter((p) => !p.separated);
+    expect(joined.map((p) => `${p.a}–${p.b}`)).toEqual(['t–f']);
+    expect(joined[0]!.ribStepMm).toBeCloseTo(0.161, 3);
+    const separated = corn.pinches.filter((p) => p.separated);
+    expect(separated).toHaveLength(6);
+    expect(Math.max(...separated.map((p) => p.ribStepMm))).toBeCloseTo(0.113, 2);
+    // The ⌀1 rest is the fused result the bench saw: every ridge 0.242 mm or more.
+    expect(software(0.5).pinches.every((p) => !p.separated)).toBe(true);
   });
 });

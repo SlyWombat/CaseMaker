@@ -15,7 +15,7 @@ import {
 } from '@/workers/sim/engraveGeometry';
 
 function pinch(over: Partial<RaisedTextPinch> = {}): RaisedTextPinch {
-  return { a: 'S', b: 'o', gapMm: 1.08, separated: false, edgeLossMm: 0, areaMm2: 2, ...over };
+  return { a: 'S', b: 'o', gapMm: 1.08, separated: false, edgeLossMm: 0, ribStepMm: 0, areaMm2: 2, ...over };
 }
 
 /** One measured label, carrying the values the j02 fixtures produce unless a case overrides. */
