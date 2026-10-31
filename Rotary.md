@@ -253,6 +253,14 @@ radius-over-(A, X) column model can represent (§4). Simultaneous 4-axis in the 
 off-axis tool (Y ≠ 0 while A moves) is **out of scope**, and §6 makes `Y ≠ 0` a refusal rather than a
 silent assumption.
 
+**Amended 2026-10-31 (#241 slice 2) — the constant-A exception.** The scope above is about moves
+that INTERPOLATE A, and it stays: a wrapped program keeps Y ≡ 0 everywhere, and an index turn is
+taken with the cutter over the axis (Y 0) and in the air. But inside an INDEXED run A is held, so
+the stock frame is a rigid rotation and the machine is an ordinary 3-axis mill — Y is an ordinary
+axis there. A face pocket's step-over uses it (`cam/indexed.ts`), and the post writes a Y word only
+on a move that carries no A word. #238 carries the bench check: an indexed Y move at constant A
+runs and cuts the plane expected.
+
 Three classes inside that scope, in the order they should land:
 
 | | Class | Motion | Stock representation it needs | First consumer |
@@ -394,6 +402,10 @@ test**, hand-derived, for a glyph off-centre in both X and A, before either side
 distance above the axis, work Y ≡ 0, X along the axis; A is the stock's rotation about +X.** *Reason:*
 §1.2 — it is read from the machine's own feed arithmetic. The sign of +A (which way the chuck turns)
 is **unknown** until the bench (§9); the frame carries it as a field, not an assumption.
+
+**Amended 2026-10-31 (#241 slice 2):** Y ≡ 0 is the WRAPPED frame's rule and the turn's rule. Inside
+a held index the face frame is the turned stock's own plane, and Y there is an ordinary axis — see
+R1's constant-A exception. Z stays the radius above the axis in both cases.
 
 ### 3.7 The verifier's context (#174)
 
@@ -732,12 +744,12 @@ origin diagram becomes the axis-centred one.
 
 | # | Decision | Reason | Section |
 |---|---|---|---|
-| R1 | Scope is 3+1 wrapped: tool over the axis (Y = 0), A interpolating freely with X and Z; tilt / off-axis out | the vendor's files, the firmware's feed model and the column model all assume it; §5.5's "no interpolation" is measured false | §2 |
+| R1 | Scope is 3+1 wrapped: tool over the axis (Y = 0), A interpolating freely with X and Z; tilt / off-axis out. **Amended #241 slice 2: Y is free inside a held index** (a constant-A run is an ordinary 3-axis cut); a turn stays at Y 0 | the vendor's files, the firmware's feed model and the column model all assume it; §5.5's "no interpolation" is measured false | §2 |
 | R2 | Order: W (wrap engraving) → I (indexed) → R (continuous relief, not committed) | W is the stated first job with an analytic oracle; I reuses the exact sweeper; R needs a representation nobody has specified | §2 |
 | R3 | A never joins `Pos` | `Pos` is translation-mapped and consumed everywhere; A has unwind semantics and its own offset | §3.1 |
 | R4 | `Checkpoint` gains one `a`, runs break on A change; per-move A lives in the column engine's record | the checkpoint is the exact sweeper's unit (class I); it is the wrong unit for W and R | §3.2 |
 | R5 | #223 stands: no `a` in IR / post / sweep before W; only the `ToolpathIR` frame discriminant, the second `zDatum` literal and the `stubSetup` cylinder WCS fix go in R-0 | all additions are additive; those three are the ones whose absence lets a later mistake through | §3.3, §3.8 |
-| R6 | Rotary work frame = the firmware's: origin on the axis, Z = radius, Y ≡ 0, X along the axis | read from the firmware's own feed arithmetic; matches the vendor files and Makera CAM | §1.2, §3.6 |
+| R6 | Rotary work frame = the firmware's: origin on the axis, Z = radius, Y ≡ 0, X along the axis. **Amended #241 slice 2: Y ≡ 0 holds for wrapped work and for the turn; a held index is a 3-axis cut** | read from the firmware's own feed arithmetic; matches the vendor files and Makera CAM | §1.2, §3.6 |
 | R7 | One column engine, two parameterisations; the rotary one first if the maintainer chooses (§10) | identical grid / min / mesh / cadence; only the footprint differs | §4.1 |
 | R8 | Single-valued columns; Z ≤ 0 refused by name (`axis-crossing`) | W never nears the axis; the finish file's crossing needs class R's representation | §4.3 |
 | R9 | A carried as Float64 or (turns, angle); never Float32 unwound degrees | 153 720° exceeds Float32's 0.01° resolution | §4.4 |
