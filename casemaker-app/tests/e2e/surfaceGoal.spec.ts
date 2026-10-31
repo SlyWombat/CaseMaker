@@ -166,15 +166,20 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   await rememberMachine(page);
   await page.getByTestId('cnc-mode-cut').click();
   await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
-  // #689 — the clearance tick is step 1's; #796 — the one screen sits in the Start cut line.
-  const ack = page.getByTestId('engrave-ack');
-  if ((await ack.count()) > 0) await ack.check();
+  // #797 — ONE statement arms the press. It is step 1's; this job's current step is Register (no
+  // saved setup), so step 1 arrives folded, and the press inside step 3 is folded with it. The
+  // attribute is readable either way: disabled until the statement is given, enabled after.
+  const go = page.getByTestId('engrave-cut-go');
+  await expect(go).toBeDisabled();
+  const step1 = page.getByTestId('engrave-cut-step-1');
+  if (!(await step1.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('engrave-cut-step-1-summary').click();
+  }
+  await page.getByTestId('engrave-ack').check();
+  await expect(go).toBeEnabled();
   await page.getByTestId('engrave-cut-step-3-summary').click();
   await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('engrave-cut-confirm-oracle')).toContainText(
     'No 2.5D check for a surface program — checked on the',
   );
-  const go = page.getByTestId('engrave-cut-go');
-  await expect(go).toBeDisabled();
-  await expect(go).toBeEnabled();
 });

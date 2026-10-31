@@ -77,7 +77,7 @@ interface Screen {
   stepTitles: StepTitleFact[];
   /** The Cut findings' owner tags (#690) — counted from the DOM, not the transcript. */
   ownerTags: number;
-  /** The four Cut step lines (`engrave-cut-step-N-summary`), the Cut screen's own counter. */
+  /** The three Cut step lines (`engrave-cut-step-N-summary`), the Cut screen's own counter. */
   cutLines: number;
 }
 
@@ -307,7 +307,8 @@ test.describe('first job acceptance (§6)', () => {
         expect(wizardCounters.length, `${screen.name}: no wizard counter`).toBe(0);
       }
       if (screen.name === 'cut') {
-        expect(screen.cutLines, 'the four Cut lines are the Cut counter').toBe(4);
+        // #796 — the Cut stage is THREE steps: Fit and clamp, Register, Start cut.
+        expect(screen.cutLines, 'the three Cut lines are the Cut counter').toBe(3);
       } else {
         expect(screen.cutLines, `${screen.name}: no Cut lines`).toBe(0);
       }
@@ -455,7 +456,7 @@ test.describe('first job acceptance (§6)', () => {
     // is measured on the rendered title: its text's line boxes, and the style the rule sets.
     const cut = screens.find((screen) => screen.name === 'cut');
     expect(cut, 'the Cut screen was captured').toBeDefined();
-    expect(cut!.stepTitles.length, 'the four Cut step titles').toBe(4);
+    expect(cut!.stepTitles.length, 'the three Cut step titles').toBe(3);
     for (const title of cut!.stepTitles) {
       expect(title.whiteSpace, `${title.text}: white-space`).toBe('nowrap');
       expect(title.lines, `${title.text}: line boxes`).toBe(1);
