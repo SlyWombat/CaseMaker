@@ -37,6 +37,7 @@ export const USAGE = [
   '',
   '  casemaker cut <job.json> [--out <dir>]',
   '  casemaker cut --coupon <coupon-spec.json> [--out <dir>]',
+  '  casemaker cut --from-gerber <file> [<file> ...] --blank <L>x<W>x<T> [--out <dir>]',
   '  casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]',
   '          [--rest <key|none>] [--overlap <mm>] [--third-tool <pct>] [--out <dir>]',
   '          [--location <location.json|house.json>]',

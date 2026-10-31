@@ -134,6 +134,8 @@ import { svgToPng } from '../svgToPng';
 import { KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
 import { bootstrap, loadCatalogue, type LoadedCatalogue } from '../../../src/platform/headless/bootstrap';
 import { defaultEngraveJob } from '../../../src/engine/cnc/engrave/defaults';
+import { tabSettings } from '../../../src/engine/cnc/cam/tabSettings';
+import { buildPcbJob, jobDocumentProblem, type PcbJobFile } from './pcbJob';
 import { viseForNewJob } from '../../../src/engine/cnc/fixture';
 import { designJobFor, type DesignReadingDirection } from '../../../src/engine/cnc/engrave/fromDesign';
 import { readDesign } from '../../../src/engine/import/design3mf';
@@ -171,6 +173,10 @@ interface Args {
   job?: string;
   coupon?: string;
   from3mf?: string;
+  /** #743 P-4b — the Gerber set (several files, or one .zip) that becomes the board's job. */
+  fromGerber?: string[];
+  /** #743 P-4b — the blank the board is cut from, mm; the Gerber files do not say. */
+  blank?: { length: number; width: number; thickness: number };
   turn?: DesignReadingDirection;
   tool?: string;
   rest?: string;
@@ -189,6 +195,17 @@ function parseArgs(argv: string[]): Args {
     if (a === '--out') args.out = argv[++i];
     else if (a === '--coupon') args.coupon = argv[++i];
     else if (a === '--from-3mf') args.from3mf = argv[++i];
+    else if (a === '--from-gerber') {
+      const files: string[] = [];
+      while (i + 1 < argv.length && !argv[i + 1]!.startsWith('--')) files.push(argv[++i]!);
+      if (files.length === 0) throw new Error('--from-gerber needs at least one Gerber, drill or .zip file');
+      args.fromGerber = files;
+    } else if (a === '--blank') {
+      const v = argv[++i] ?? '';
+      const m = /^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/i.exec(v);
+      if (m === null) throw new Error(`--blank is <length>x<width>x<thickness> in mm, not "${v}"`);
+      args.blank = { length: Number(m[1]), width: Number(m[2]), thickness: Number(m[3]) };
+    }
     else if (a === '--tool') args.tool = argv[++i];
     else if (a === '--rest') args.rest = argv[++i];
     else if (a === '--overlap') {
@@ -232,6 +249,7 @@ function fail(message: string): never {
 const USAGE =
   'usage: casemaker cut <job.json> [--out <dir>]\n' +
   '       casemaker cut --coupon <coupon-spec.json> [--out <dir>]\n' +
+  '       casemaker cut --from-gerber <file> [<file> ...] --blank <L>x<W>x<T> [--out <dir>]\n' +
   '       casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
   '              [--rest <key|none>] [--overlap <mm>] [--third-tool <pct>] [--out <dir>]\n' +
   '       [--location <location.json|house.json>]  (any input; default: the app’s own location)\n' +
@@ -464,14 +482,24 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     fail(`${(e as Error).message}\n${USAGE}`);
     throw e; // unreachable; `fail` exits
   }
-  const inputs = [args.job, args.coupon, args.from3mf].filter((v) => v !== undefined);
+  const inputs = [
+    args.job,
+    args.coupon,
+    args.from3mf,
+    args.fromGerber === undefined ? undefined : args.fromGerber.join(' '),
+  ].filter((v) => v !== undefined);
   if (inputs.length === 0) fail(USAGE);
-  if (inputs.length > 1) fail('pass a job, --coupon OR --from-3mf — exactly one');
+  if (inputs.length > 1) fail('pass a job, --coupon, --from-3mf OR --from-gerber — exactly one');
   if (!args.from3mf && (args.turn || args.tool || args.rest || args.overlap !== undefined || args.thirdTool !== undefined)) {
     fail('--turn, --tool, --rest, --overlap and --third-tool only apply to --from-3mf');
   }
+  if (args.blank !== undefined && args.fromGerber === undefined) fail('--blank only applies to --from-gerber');
+  if (args.fromGerber !== undefined && args.blank === undefined) {
+    fail('--from-gerber needs --blank <length>x<width>x<thickness> in mm — the files do not say what the board is cut from');
+  }
   kind = args.coupon ? 'coupon' : args.from3mf ? 'design' : 'job';
-  recordInput(inputs[0]!);
+  // The Gerber route records each file as it reads it, below.
+  if (args.fromGerber === undefined) recordInput(inputs[0]!);
   // Before ANY job resolves a cutter: `jobTool` reads the registry, so the machine's own documents
   // have to be in it first. The bootstrap reads the document the args named (`--location`) or the
   // machine's own, and validates it exactly as the app's import panel does (#412).
@@ -1390,28 +1418,20 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     };
   }
 
-  if (args.job) {
-    const path = args.job;
-    // #733 item 3 — read and validate through `invalidJob`, so `--json` still gets its receipt.
-    let raw: unknown;
-    try {
-      raw = JSON.parse(readFileSync(path, 'utf8'));
-    } catch (e) {
-      return stop(invalidJob(`${path} cannot be read: ${(e as Error).message}`));
-    }
-    const parsed = parseEngraveJob(raw);
-    if (!parsed.ok) {
-      return stop(invalidJob(`${path} is not a valid engrave job:\n  ${parsed.errors.join('\n  ')}`));
-    }
-    outDir = args.out ?? dirname(path);
-    mkdirSync(outDir, { recursive: true });
+  /**
+   * #766/#743 P-4b — THE CUTTERS A JOB DOES NOT NAME, chosen by the measured search.
+   *
+   * The kind-valid plans are generated (`smartPick`), slice A scores each by what it would cut, and
+   * the best POSTING plan is the one written. `--tool`/`--rest` still override (the `--from-3mf`
+   * route's rule). Returns null once the job names its plan, or the sentence to stop with.
+   * Extracted so the Gerber door (#743 P-4b) asks exactly the same question of the job it builds.
+   */
+  async function chooseCutters(job: EngraveJob, label: string): Promise<string | null> {
     // #766 — A JOB THAT NAMES NO CUTTER IS GIVEN ONE BY SIMULATION. The rules that came before
     // (area share #762, item kind, the tightest raised gap #760/#765) each failed on a real job;
     // this path now runs the measured search: plausible kind-valid plans are generated
     // (`smartPick`), slice A scores each by what it would cut, and the best POSTING plan is the
     // one written. The search's own sentence is printed, and `--tool`/`--rest` still override.
-    if (parsed.job.toolKey === NO_TOOL_KEY && parsed.job.setups === undefined) {
-      const job = parsed.job;
       if (args.tool === undefined && args.rest === undefined) {
         // #766 — THE CHOICE IS MEASURED, NOT RULED. The search generates the kind-valid plans and
         // slice A simulates each one: fidelity, pinches, time, risk. The chosen plan and its
@@ -1443,11 +1463,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // that POSTS (`runnable`), and C's note names the refused best-measured one.
         const chosen = pick.runnable;
         if (chosen === null) {
-          return stop(
-            invalidJob(
-              `${path} names no cutter, and no plan the search tried can post: ${pick.notes.join(' ') || pick.bestMeasured.evaluation.refusal || 'the generator refuses every candidate'}`,
-            ),
-          );
+          return `${label} names no cutter, and no plan the search tried can post: ${pick.notes.join(' ') || pick.bestMeasured.evaluation.refusal || 'the generator refuses every candidate'}`;
         }
         job.toolKey = chosen.plan.cutters[0]!.key;
         if (chosen.plan.cutters.length > 1) {
@@ -1467,7 +1483,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const pick = roughPick(reach);
         const first = args.tool ?? (restOff ? reach.recommendation.key : (pick.chosen?.key ?? reach.recommendation.key));
         if (first === null) {
-          return stop(invalidJob(`${path} names no cutter, and none in the library can cut it: ${reach.recommendation.reason}`));
+          return `${label} names no cutter, and none in the library can cut it: ${reach.recommendation.reason}`;
         }
         job.toolKey = first;
         out.progress(
@@ -1485,6 +1501,33 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           }
         }
       }
+    return null;
+  }
+
+  if (args.job) {
+    const path = args.job;
+    // #733 item 3 — read and validate through `invalidJob`, so `--json` still gets its receipt.
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(path, 'utf8'));
+    } catch (e) {
+      return stop(invalidJob(`${path} cannot be read: ${(e as Error).message}`));
+    }
+    const parsed = parseEngraveJob(raw);
+    if (!parsed.ok) {
+      return stop(invalidJob(`${path} is not a valid engrave job:\n  ${parsed.errors.join('\n  ')}`));
+    }
+    outDir = args.out ?? dirname(path);
+    mkdirSync(outDir, { recursive: true });
+    // #766 — A JOB THAT NAMES NO CUTTER IS GIVEN ONE BY SIMULATION. The rules that came before
+    // (area share #762, item kind, the tightest raised gap #760/#765) each failed on a real job;
+    // this path now runs the measured search: plausible kind-valid plans are generated
+    // (`smartPick`), slice A scores each by what it would cut, and the best POSTING plan is the
+    // one written. The search's own sentence is printed, and `--tool`/`--rest` still override.
+    // #743 P-4b — the same step serves the Gerber door, which builds its own job document.
+    if (parsed.job.toolKey === NO_TOOL_KEY && parsed.job.setups === undefined) {
+      const why = await chooseCutters(parsed.job, path);
+      if (why !== null) return stop(invalidJob(why));
     }
     const result = await runJob(parsed.job, outDir, {
       writeJobDocument: false,
@@ -2111,6 +2154,66 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         );
       }
     }
+  } else if (args.fromGerber) {
+    // ---------------------------------------------------------------------------------------------
+    // Input: a Gerber set (#743 P-4b) — the fourth way in, and the only one that BUILDS a document
+    // from the board's own files. The files say nothing about the blank, so `--blank` names it; the
+    // rest of the document is the app's default (holding included: a board is taped to the bed).
+    // ---------------------------------------------------------------------------------------------
+    const paths = args.fromGerber;
+    const blank = args.blank!;
+    const files: PcbJobFile[] = [];
+    for (const path of paths) {
+      let bytes: Buffer;
+      try {
+        bytes = readFileSync(path);
+      } catch (e) {
+        fail(`cannot read ${path}: ${(e as Error).message}`);
+      }
+      recordInput(path);
+      files.push({ name: basename(path), bytes: new Uint8Array(bytes) });
+    }
+    const tabs = tabSettings(shopDefaults).settings;
+    const built = await buildPcbJob(tl, files, {
+      blank,
+      tabs: { count: tabs.count, width: tabs.widthMm, height: tabs.heightMm },
+    });
+    if (!built.ok) fail(built.error);
+    const docProblem = jobDocumentProblem(built.job);
+    if (docProblem !== null) fail(docProblem);
+
+    outDir = args.out ?? dirname(paths[0]!);
+    mkdirSync(outDir, { recursive: true });
+    const jobStem = built.job.name.replace(/[^A-Za-z0-9._-]+/g, '-');
+    const jobFile = `${jobStem}.job.json`;
+    writeFileSync(join(outDir, jobFile), JSON.stringify(built.job, null, 2) + '\n');
+    runOutputs.push(fileReceipt(join(outDir, jobFile)));
+    const holes = built.plan.items.drills.length;
+    out.progress(
+      `${jobFile} — the board on a ${blank.length} × ${blank.width} × ${blank.thickness} mm PCB blank: ` +
+        `${built.plan.files.length} file${built.plan.files.length === 1 ? '' : 's'}, ` +
+        `${built.plan.items.vectors.length + built.plan.items.frames.length + holes + built.plan.items.cutouts.length} ` +
+        `items (copper, isolation, ${holes} hole${holes === 1 ? '' : 's'}, outline, cut-out).`,
+    );
+    for (const note of built.notes) out.progress(`  ${note}`);
+    for (const w of built.warnings) out.progress(`  ! ${w.message}`);
+
+    const why = await chooseCutters(built.job, jobFile);
+    if (why !== null) return stop(invalidJob(why));
+
+    const result = await runJob(built.job, outDir, {
+      writeJobDocument: false,
+      note:
+        `*Built from ${paths.map((p) => `\`${basename(p)}\``).join(', ')} by ` +
+        `\`casemaker cut --from-gerber\` (#743 P-4b): the copper, the isolation band, every hole, ` +
+        `the outline and the cut-out come out of the files' own geometry. The blank ` +
+        `(${blank.length} × ${blank.width} × ${blank.thickness} mm) is the one named on the command line, ` +
+        `and the board is held taped to the bed over a board under it.*`,
+    });
+    if (result.ok) {
+      programs.push(...result.programs);
+      runDiagnostics.push(...result.diagnostics);
+    } else return stop(result.failure);
   } else {
     const path = args.coupon as string;
     const spec = parseCouponSpec(readJson(path), path);

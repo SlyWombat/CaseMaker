@@ -54,6 +54,8 @@ describe('the panel Gerber door (#743 P-4b review)', () => {
     // The import happened: the message reports the board, and the stock is still the operator's.
     expect(screen.getByTestId('engrave-pcb-message').textContent).toMatch(/Imported 1 file/);
     expect(useEngraveJobStore.getState().job.stock.material).toBe('pla');
+    // The board is a whole job: the shipped demo lines (CASE / MAKER / first chips) are gone.
+    expect(useEngraveJobStore.getState().job.labels).toEqual([]);
 
     fireEvent.click(screen.getByTestId('engrave-pcb-use-stock'));
     await waitFor(() =>

@@ -26,7 +26,8 @@
  * construction vector for the outline, an `isolation` frame around the copper, one drill item per
  * hole (through), and a cut-out following the outline with the shop's tabs. Cutter assignment
  * (§3.4) belongs to the caller that owns the tool library; the items it would touch are marked
- * `isolation` and `through` here.
+ * `isolation` and `through` here, and a drill carries the HOLE's own ⌀ so that caller can choose
+ * between drilling it and boring it (`pcbCutters.ts`).
  *
  * SLOTS (the maintainer's note, 2026-10-30). A drill file may hold `G85`/`M15` slots. They are
  * READ and reported, and no item is made for them YET — the plan's note names them and their
@@ -350,7 +351,10 @@ export function planPcbImport(tl: ManifoldToplevel, files: readonly PcbSourceFil
     height: outlinePlaced.height,
     position: outlinePlaced.position,
     rotation: 0,
-    depth: 0,
+    // The schema requires a positive depth on every vector. This item is never cut
+    // (`construction`), so the number is inert; the board's thickness is the honest one — the
+    // outline is the through profile the cut-out follows.
+    depth: opts.blank.thickness,
     enabled: true,
     construction: true,
     ...(outlineFiles[0] === undefined ? {} : { importedFrom: { name: outlineFiles[0].name, sha256: outlineFiles[0].sha256 } }),
@@ -380,6 +384,8 @@ export function planPcbImport(tl: ManifoldToplevel, files: readonly PcbSourceFil
       enabled: true,
       through: true,
       mode: 'drill',
+      // The hole's own size: unread by a plunge, but the number a BORE is helixed to (§3.4).
+      diameter: hole.diameter,
     };
   });
   const cutout: EngraveCutout = {

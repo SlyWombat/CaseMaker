@@ -20,7 +20,7 @@ import { defaultStockProud, jobVise, seatedVise, todayISODate, viseForNewJob } f
 import { cylinderFrameOf, rodDimsOf, rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
 import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
-import { resolveTool } from '@/engine/cnc/toolRegistry';
+import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
 import { withSideGoal, withoutSideGoal } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter } from '@/engine/cnc/tool';
@@ -102,6 +102,7 @@ import type {
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import { withSource } from '@/engine/cnc/engrave/jobSources';
 import { PCB_COPPER_MM, pcbStockNotice } from '@/engine/cnc/stockStart';
+import { pcbHoleAssignment } from '@/engine/import/pcbCutters';
 
 /** What {@link EngraveJobState.importPcbFiles} reports to the door that asked for the import. */
 export type PcbImportOutcome =
@@ -2487,14 +2488,22 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         });
         if (!planned.ok) return { ok: false, reason: planned.error };
         const plan = planned.plan;
+        // §3.4 — drill where an owned cutter IS the hole's size, bore where a flat must helix it.
+        // The modes are computed once, before the one `apply`, from the library as it stands.
+        const holes = pcbHoleAssignment(plan.items.drills, getTools());
+        const drills = plan.items.drills.map((d) => ({ ...d, mode: holes.modes.get(d.id) ?? d.mode }));
         apply((current) => {
           let sources = current.sourceFiles;
           for (const s of planned.sources) sources = withSource(sources, s.source);
           return {
             ...current,
+            // The board is a whole job: on a document still holding only the shipped demo lines
+            // (CASE / MAKER / first chips), those are REPLACED — the same rule a design import
+            // applies (`designReplacesItems`). A job a person has worked on keeps its items.
+            ...(designReplacesItems(current) ? { labels: [] } : {}),
             vectors: [...(current.vectors ?? []), ...plan.items.vectors],
             combined: [...(current.combined ?? []), ...plan.items.frames],
-            drills: [...(current.drills ?? []), ...plan.items.drills],
+            drills: [...(current.drills ?? []), ...drills],
             cutouts: [...(current.cutouts ?? []), ...plan.items.cutouts],
             ...(sources === undefined ? {} : { sourceFiles: sources }),
           };
@@ -2502,6 +2511,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         const notes = [
           ...planned.skipped.map((n) => `${n} is not a Gerber or drill file and was not used.`),
           ...plan.notes,
+          ...holes.notes,
         ];
         return {
           ok: true,
