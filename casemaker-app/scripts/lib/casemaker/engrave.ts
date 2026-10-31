@@ -1451,6 +1451,20 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   }
 
   /**
+   * #786 slice 6 — `tool-missing`: THE DOCUMENT NAMES A CUTTER THIS BENCH DOES NOT HOLD. A saved
+   * job can outlive the library it was written against (an `inv:` row deleted, a `user:` row
+   * renamed), and the app's panel answers it by handing the job to the measured search (4c-2).
+   * The headless run asks the same question here, so the command line posts the programs the app
+   * would instead of stopping on a key that no longer resolves. A document carrying its OWN tool
+   * snapshot is not missing — that snapshot IS the cutter (searchToolsFor's rule) — so only a key
+   * that resolves to nothing counts.
+   */
+  function namesMissingCutter(job: EngraveJob): boolean {
+    if (job.toolKey === NO_TOOL_KEY || job.setups !== undefined) return false;
+    return jobTool(job) === null;
+  }
+
+  /**
    * #766/#743 P-4b — THE CUTTERS A JOB DOES NOT NAME, chosen by the measured search.
    *
    * The kind-valid plans are generated (`smartPick`), slice A scores each by what it would cut, and
@@ -1495,7 +1509,12 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // that POSTS (`runnable`), and C's note names the refused best-measured one.
         const chosen = pick.runnable;
         if (chosen === null) {
-          const what = job.toolKey === NO_TOOL_KEY ? 'names no cutter, and' : 'cannot be split into programs, and';
+          const what =
+            job.toolKey === NO_TOOL_KEY
+              ? 'names no cutter, and'
+              : jobTool(job) === null
+                ? 'names a cutter this bench does not hold, and'
+                : 'cannot be split into programs, and';
           return `${label} ${what} no plan the search tried can post: ${pick.notes.join(' ') || pick.bestMeasured.evaluation.refusal || 'the generator refuses every candidate'}`;
         }
         // #786 slice 4b — the split is SAID: the cutter the document names keeps its own work and
@@ -1570,10 +1589,19 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // mill and also has other work: the search's split keeps that cutter for its holes/threads and
     // adds the flat for the rest, so a headless run posts the programs the app would.
     const needsSplit = splitKeepsNamedCutter(parsed.job);
-    if (parsed.job.setups === undefined && (parsed.job.toolKey === NO_TOOL_KEY || needsSplit)) {
+    // #786 slice 6 — a key the library no longer holds is `tool-missing`'s, and the measured
+    // search is its answer here exactly as in the panel (4c-2).
+    const missingCutter = namesMissingCutter(parsed.job);
+    if (parsed.job.setups === undefined && (parsed.job.toolKey === NO_TOOL_KEY || needsSplit || missingCutter)) {
       if (args.tool === undefined && args.rest === undefined) {
+        const namedKey = missingCutter ? parsed.job.toolKey : null;
         const why = await chooseCutters(parsed.job, path);
         if (why !== null) return stop(invalidJob(why));
+        // The substitution is SAID: a document's key that no longer resolves was replaced by the
+        // search's measured answer, and the operator reads which key and what cuts instead.
+        if (namedKey !== null) {
+          out.progress(`  substitute ${namedKey} is not in the tool library; ${parsed.job.toolKey} cuts this job`);
+        }
       }
     }
     const result = await runJob(parsed.job, outDir, {

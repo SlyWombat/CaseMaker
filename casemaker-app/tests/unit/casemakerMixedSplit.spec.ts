@@ -1,4 +1,5 @@
-// #786 slice 4b — A NAMED DRILL BIT WITH OTHER WORK IS SPLIT BY THE HEADLESS RUN.
+// #786 slices 4b/6 — A NAMED DRILL BIT WITH OTHER WORK IS SPLIT BY THE HEADLESS RUN, AND A CUTTER
+// THE LOCATION NO LONGER HOLDS IS REPLACED BY THE SEARCH'S CHOICE.
 //
 // The app applies the measured search's split before Generate (4c): the drill keeps its holes and
 // the search adds the flat for the rest. `casemaker engrave --job` asks the same question, because
@@ -123,4 +124,38 @@ describe('#786 4b the headless run splits a named drill', () => {
     // The split is stated, not silent.
     expect(run.progress.some((line) => line.includes('split') && line.includes('one program per cutter'))).toBe(true);
   }, 180_000);
+});
+
+/** A saved job whose cutter key no longer resolves: the `tool-missing` the app substitutes for. */
+function missingCutterJob(): EngraveJob {
+  const base = defaultEngraveJob();
+  return {
+    ...base,
+    name: 'missing cutter job',
+    toolKey: 'user:gone',
+    tool: undefined,
+    sources: { tool: 'user' },
+  };
+}
+
+describe('#786 slice 6 the headless run answers a key the location does not hold', () => {
+  it('chooses a cutter, posts the program, and says which key was replaced', async () => {
+    const job = missingCutterJob();
+    const run = await engrave(job, 'missing-cutter');
+
+    expect(
+      run.code,
+      JSON.stringify({ refusals: run.receipt?.refusals ?? null, diagnostics: run.receipt?.diagnostics ?? null }),
+    ).toBe(0);
+    expect(run.receipt?.ok).toBe(true);
+    if (run.receipt?.command !== 'engrave') throw new Error('expected the engrave receipt');
+    const written = run.receipt.details.programs[0]!;
+    const nc = readFileSync(join(run.outDir, written.ncFile), 'utf8');
+    // The program names a cutter the location holds — not the dead key.
+    expect(nc).not.toContain('key=user:gone');
+    // The substitution is stated, with both keys.
+    expect(
+      run.progress.some((line) => line.includes('substitute') && line.includes('user:gone') && line.includes('is not in the tool library')),
+    ).toBe(true);
+  }, 240_000);
 });
