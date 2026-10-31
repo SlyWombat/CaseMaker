@@ -304,6 +304,7 @@ export function SimPanel() {
           outcome: run.simStatus === 'ready' ? 'swept' : run.pathOnly ? 'path-only' : 'refused',
           engine: run.simEngine ?? undefined,
           oracleBand: jobSurfaceRun ? undefined : run.oracle?.band,
+          ...(jobSurfaceRun || run.oracle?.copper === undefined ? {} : { copper: run.oracle.copper }),
           fixtureLabels:
             rotary === null
               ? viseEnvelope(job.stock, jobVise(job), job.sacrificial).boxes.map((b) => b.label)

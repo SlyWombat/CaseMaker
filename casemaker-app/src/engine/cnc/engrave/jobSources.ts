@@ -105,6 +105,8 @@ export interface SourceInput {
    * re-import before it ever gets here). Omitted, it is computed from `bytes`.
    */
   sha256?: string;
+  /** #743 P-6 — what a board's file was read AS, for the run sheet. Absent on other sources. */
+  role?: JobSource['role'];
 }
 
 /** A source record, and the sentence to show when its bytes did not fit. */
@@ -130,6 +132,7 @@ export async function embedSource(input: SourceInput): Promise<EmbeddedSource> {
     name: input.name,
     size,
     path: input.path ?? null,
+    ...(input.role === undefined ? {} : { role: input.role }),
   } as const;
   if (size > MAX_EMBEDDED_SOURCE_BYTES) {
     return {

@@ -19,7 +19,7 @@ import {
 import { defaultStockProud, jobVise, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { cylinderFrameOf, rodDimsOf, rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
 import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
-import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
+import { defaultSacrificialUnder, sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
 import { withSideGoal, withoutSideGoal } from '@/engine/cnc/engrave/jobSetup';
@@ -28,6 +28,7 @@ import { applyHoldAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupF
 import { scaleJobAboutCentre } from '@/engine/cnc/engrave/scaleJob';
 import { getMeshBlob, putMeshBlob } from '@/platform/meshBlobs';
 import {
+  defaultTapeHold,
   itemKindWord,
   itemRowName,
   jobSetups,
@@ -115,6 +116,13 @@ export type PcbImportOutcome =
       warnings: PcbWarning[];
       /** The board-on-a-non-PCB-blank fact (#743 P-4b review): stated, with a one-click fix. */
       stockNotice: string | null;
+      /**
+       * #743 P-6 — the board-on-a-VISE fact: a PCB is taped to the bed by default (design D8),
+       * because jaws bow a thin board and a 0.1 mm cut cannot follow a bow. Stated when the job
+       * already had a holding of the operator's, with a one-click fix; null when the import set
+       * the tape itself.
+       */
+      holdingNotice: string | null;
     }
   | { ok: false; reason: string };
 import type { PcbWarning } from '@/engine/import/pcbImport';
@@ -1184,6 +1192,13 @@ export interface EngraveJobState {
    * not the operator's assertion.
    */
   usePcbStock: () => void;
+  /**
+   * #743 P-6 — the import's one-click fix for a board held in the vise: hold it the way a board is
+   * held — taped flat to the bed, over a sacrificial board under it (design §3.2, D8). The tape's
+   * numbers are the house defaults with their provenance; the operator can change them on the
+   * Holding step.
+   */
+  usePcbHolding: () => void;
   /** Merge a hand edit into one vector (#217). A partial `position` is merged, not replaced. */
   updateVector: (id: string, patch: VectorPatch) => void;
   removeVector: (id: string) => void;
@@ -2471,6 +2486,14 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         { material: 'user', colour: 'assumed' },
       ),
 
+    /** #743 P-6 — the board's own holding in one click: taped to the bed, over a board under it. */
+    usePcbHolding: () =>
+      apply((job) => ({
+        ...job,
+        workholding: { kind: 'tape', tape: defaultTapeHold() },
+        sacrificial: { ...job.sacrificial, under: defaultSacrificialUnder(), source: 'default' },
+      })),
+
     importPcbFiles: async (files) => {
       const job = get().job;
       // A practice cut on the blank in hand is legitimate: the notice is stated, never a refusal.
@@ -2506,9 +2529,23 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           ...drills.map((d) => d.id),
           ...plan.items.cutouts.map((c) => c.id),
         ];
+        // #743 P-6 — A BOARD IS TAPED TO THE BED (design §3.2, D8). On a document that still holds
+        // only the shipped demo work, the import states that holding itself; on a job the operator
+        // has set up, the holding is theirs and the fact is offered as a one-click fix instead.
+        const fresh = designReplacesItems(job);
+        const holdingNotice =
+          fresh || job.workholding.kind === 'tape'
+            ? null
+            : 'This board is held in the vise. A circuit board is taped flat to the bed, over a board under it — jaws bow a thin board, and a 0.1 mm isolation cannot follow a bow, so the through cuts also need the board under it.';
         apply((current) => {
           let sources = current.sourceFiles;
-          for (const s of planned.sources) sources = withSource(sources, s.source);
+          // #743 P-6 — each file's LAYER ROLE rides its source record, so the run sheet can say
+          // what each file made without re-reading its bytes.
+          const roleByName = new Map(plan.files.map((f) => [f.name, f.role] as const));
+          for (const s of planned.sources) {
+            const role = roleByName.get(s.source.name);
+            sources = withSource(sources, role === undefined ? s.source : { ...s.source, role });
+          }
           const merged: EngraveJob = {
             ...current,
             // The board is a whole job: on a document still holding only the shipped demo lines
@@ -2519,6 +2556,12 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             combined: [...(current.combined ?? []), ...plan.items.frames],
             drills: [...(current.drills ?? []), ...drills],
             cutouts: [...(current.cutouts ?? []), ...plan.items.cutouts],
+            ...(fresh
+              ? {
+                  workholding: { kind: 'tape' as const, tape: defaultTapeHold() },
+                  sacrificial: { ...current.sacrificial, under: defaultSacrificialUnder(), source: 'default' as const },
+                }
+              : {}),
             ...(sources === undefined ? {} : { sourceFiles: sources }),
           };
           if (cutters.tools.length === 0) return merged;
@@ -2528,7 +2571,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           const setups = jobSetups(merged);
           const first = setups[0]!;
           const written = withPcbCutters(first, cutters, boardItemIds);
-          return { ...merged, setups: [written, ...setups.slice(1)] };
+          // The job's own cutter is the first program's, so `jobTool` resolves everywhere.
+          return { ...merged, toolKey: cutters.tools[0]!, setups: [written, ...setups.slice(1)] };
         });
         const notes = [
           ...planned.skipped.map((n) => `${n} is not a Gerber or drill file and was not used.`),
@@ -2543,6 +2587,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           notes,
           warnings: plan.warnings,
           stockNotice,
+          holdingNotice,
         };
       } catch (e) {
         return { ok: false, reason: `the board could not be read: ${e instanceof Error ? e.message : String(e)}` };

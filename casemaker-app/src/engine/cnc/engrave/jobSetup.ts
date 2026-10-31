@@ -3052,6 +3052,126 @@ function holeWithNoCutter(job: EngraveJob, id: string, owned: readonly ToolLibra
   return !ownedCutterMakesHole(owned, hole);
 }
 
+
+/** The shape of cutter a piece of work needs, for the missing-cutter sentence. */
+type OwnedShapeKind = 'cone' | 'flat' | 'drill' | 'thread' | 'ball';
+
+/** Whether the library holds any cutter of a shape at all. */
+function ownedHasShape(owned: readonly ToolLibraryEntry[], shape: OwnedShapeKind): boolean {
+  return owned.some((entry) => {
+    switch (shape) {
+      case 'cone':
+        return vCone(entry.tool) !== null && vFluteLength(entry.tool) !== null;
+      case 'drill':
+        return entry.tool.shape === 'drill';
+      case 'thread':
+        return entry.tool.shape === 'thread';
+      case 'ball':
+        return entry.tool.shape === 'ball' || entry.tool.shape === 'bull';
+      case 'flat':
+        return entry.tool.shape === 'flat';
+    }
+  });
+}
+
+/** The shape a work item needs — the same classes `kindedWork` assigns, for this sentence only. */
+function neededShapeForItem(job: EngraveJob, id: string): OwnedShapeKind {
+  const drill = (job.drills ?? []).find((d) => d.id === id);
+  if (drill !== undefined) return 'drill';
+  if ((job.threads ?? []).some((t) => t.id === id)) return 'thread';
+  if ((job.chamfers ?? []).some((c) => c.id === id)) return 'cone';
+  const combined = (job.combined ?? []).find((item) => item.id === id);
+  if (combined !== undefined && combined.kind === 'frame' && combined.isolation === true) return 'cone';
+  const shaped = [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])].find(
+    (item) => item.id === id,
+  );
+  if (shaped !== undefined && 'vCarveDepth' in shaped && shaped.vCarveDepth === 'variable') return 'cone';
+  if (shaped !== undefined && 'inlay' in shaped && shaped.inlay !== undefined) return 'cone';
+  return 'flat';
+}
+
+/** `an engraving bit (a cone with a stated flute)` — the library that is missing. */
+function shapeWords(shape: OwnedShapeKind): string {
+  switch (shape) {
+    case 'cone':
+      return 'engraving bit (a cone with a stated flute)';
+    case 'drill':
+      return 'drill';
+    case 'thread':
+      return 'thread mill';
+    case 'ball':
+      return 'ball end mill';
+    case 'flat':
+      return 'flat end mill';
+  }
+}
+
+/**
+ * The unassigned items as the OPERATOR names them (#743 P-6 review: no internal ids in a sentence):
+ * drills are grouped by their size, an isolation frame is "the isolation", and everything else is
+ * its own `itemLabel`. One phrase per kind/size, never one per item.
+ */
+function unassignedPhrases(job: EngraveJob, ids: readonly string[]): string[] {
+  const out: string[] = [];
+  const holes = new Map<string, { size: number; count: number }>();
+  let isolation = false;
+  for (const id of ids) {
+    const drill = (job.drills ?? []).find((d) => d.id === id);
+    if (drill !== undefined) {
+      const size = drill.diameter;
+      const key = size !== undefined && size > 0 ? size.toFixed(3) : 'unknown';
+      const entry = holes.get(key) ?? { size: size ?? 0, count: 0 };
+      entry.count += 1;
+      holes.set(key, entry);
+      continue;
+    }
+    const combined = (job.combined ?? []).find((item) => item.id === id);
+    if (combined !== undefined && combined.kind === 'frame' && combined.isolation === true) {
+      if (!isolation) out.push('the isolation');
+      isolation = true;
+      continue;
+    }
+    const item = [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])].find(
+      (entry) => entry.id === id,
+    );
+    if (item !== undefined) {
+      out.push(itemLabel(item));
+      continue;
+    }
+    const trace = (job.traces ?? []).find((t) => t.id === id);
+    if (trace !== undefined) {
+      out.push(traceOperationName(trace));
+      continue;
+    }
+    const thread = (job.threads ?? []).find((t) => t.id === id);
+    if (thread !== undefined) {
+      out.push(threadOperationName(thread));
+      continue;
+    }
+    const primitive = (job.primitives ?? []).find((p) => p.id === id);
+    if (primitive !== undefined) {
+      out.push(primitiveOperationName(primitive));
+      continue;
+    }
+    const cutout = (job.cutouts ?? []).find((c) => c.id === id);
+    if (cutout !== undefined) {
+      out.push(cutoutOperationName(cutout, null));
+      continue;
+    }
+    out.push(`item “${id}”`);
+  }
+  for (const entry of holes.values()) {
+    out.push(`${entry.count} hole${entry.count === 1 ? '' : 's'}${entry.size > 0 ? ` ⌀${fmt3(entry.size)} mm` : ''}`);
+  }
+  return out;
+}
+
+/** `The isolation` for one phrase, `The isolation and 2 holes ⌀0.8 mm` for several. */
+function phraseSentence(phrases: readonly string[]): string {
+  const list = phrases.length <= 1 ? (phrases[0] ?? '') : `${phrases.slice(0, -1).join(', ')} and ${phrases.at(-1)}`;
+  return list.charAt(0).toUpperCase() + list.slice(1);
+}
+
 export function setupProgramFindings(
   job: EngraveJob,
   /** #743 P-5 — the owned cutters, when the caller has them: a hole none can make is `hole-no-cutter`'s
@@ -3144,13 +3264,31 @@ export function setupProgramFindings(
 
       const owned = ownedTools ?? getTools();
       const unassigned = setup.itemIds.filter((id) => !claimed.has(id) && !holeWithNoCutter(job, id, owned));
-      if (unassigned.length > 0) {
+      // #743 P-6 review — INFORM, DON'T REFUSE. An item whose KIND of cutter the library simply does
+      // not hold is stated as a warning, and the run still posts everything it can; an item the setup
+      // could have given a cutter to, and did not, stays an error (a genuinely inconsistent setup).
+      const noCutter = unassigned.filter((id) => !ownedHasShape(owned, neededShapeForItem(job, id)));
+      const inconsistent = unassigned.filter((id) => !noCutter.includes(id));
+      if (noCutter.length > 0) {
+        const phrases = unassignedPhrases(job, noCutter);
+        const shapes = [...new Set(noCutter.map((id) => neededShapeForItem(job, id)))].map(shapeWords);
+        const missing = shapes.length === 1 ? `no ${shapes[0]}` : shapes.map((w) => `no ${w}`).join(' or ');
+        findings.push({
+          severity: 'warning',
+          code: 'setup-items-unassigned',
+          message:
+            `${phraseSentence(phrases)} ${phrases.length === 1 ? 'is' : 'are'} not cut: ${missing} ` +
+            `is in the tool library. ${phrases.length === 1 ? 'Add one' : 'Add the missing cutter'} in Manage › Tools.`,
+        });
+      }
+      if (inconsistent.length > 0) {
+        const phrases = unassignedPhrases(job, inconsistent);
         findings.push({
           severity: 'error',
           code: 'setup-items-unassigned',
           message:
-            `Setup ${i + 1} names no cutter for ${unassigned.length === 1 ? 'an item' : `${unassigned.length} items`} ` +
-            `(${words(unassigned)}), so ${unassigned.length === 1 ? 'it' : 'they'} would not be cut.`,
+            `Setup ${i + 1} names no cutter for ${phrases.length === 1 ? 'an item' : `${inconsistent.length} items`} ` +
+            `(${phrases.join(', ')}), so ${inconsistent.length === 1 ? 'it' : 'they'} would not be cut.`,
         });
       }
     }

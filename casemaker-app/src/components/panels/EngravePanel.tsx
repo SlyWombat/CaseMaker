@@ -1345,10 +1345,14 @@ export function EngravePanel(): JSX.Element {
   // #743 P-4b review — the board-on-a-non-PCB-blank fact, with its one-click fix. The import is
   // NEVER refused for it: a practice cut in PLA is a legitimate thing to do.
   const [pcbStockFix, setPcbStockFix] = useState<string | null>(null);
+  // #743 P-6 — a board on a holding of the operator's: stated with the one-click fix that tapes
+  // it to the bed, so a board is not left held by jaws a 0.1 mm cut cannot follow.
+  const [pcbHoldingFix, setPcbHoldingFix] = useState<string | null>(null);
 
   async function readPcb(files: File[]): Promise<void> {
     setPcbMessage(null);
     setPcbStockFix(null);
+    setPcbHoldingFix(null);
     setPcbBusy(true);
     try {
       const out = await useEngraveJobStore.getState().importPcbFiles(files);
@@ -1357,6 +1361,7 @@ export function EngravePanel(): JSX.Element {
         return;
       }
       setPcbStockFix(out.stockNotice);
+      setPcbHoldingFix(out.holdingNotice);
       const lines = [
         `Imported ${out.fileCount} file${out.fileCount === 1 ? '' : 's'} as the board: ${out.itemCount} items — copper, isolation, holes, outline and the board cut-out.`,
       ];
@@ -1876,6 +1881,7 @@ export function EngravePanel(): JSX.Element {
           diagnostics: run.simDiagnostics,
           engine: run.simEngine ?? undefined,
           oracleBand: run.oracle?.band,
+          ...(run.oracle?.copper === undefined ? {} : { copper: run.oracle.copper }),
           programs: run.simPrograms,
         },
         new Date(),
@@ -3093,6 +3099,21 @@ export function EngravePanel(): JSX.Element {
             {pcbMessage && (
               <p style={MUTED} data-testid="engrave-pcb-message">
                 {pcbMessage}
+              </p>
+            )}
+            {pcbHoldingFix !== null && job.workholding.kind !== 'tape' && (
+              <p style={MUTED} data-testid="engrave-pcb-holding-notice">
+                {pcbHoldingFix}{' '}
+                <button
+                  type="button"
+                  data-testid="engrave-pcb-use-holding"
+                  onClick={() => {
+                    useEngraveJobStore.getState().usePcbHolding();
+                    setPcbHoldingFix(null);
+                  }}
+                >
+                  Tape it to the bed
+                </button>
               </p>
             )}
             {pcbStockFix !== null && job.stock.material !== 'pcb' && (

@@ -91,6 +91,8 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   const [pcbSummary, setPcbSummary] = useState<string | null>(null);
   // #743 P-4b review — the board-on-a-non-PCB-blank fact and its one-click fix; never a refusal.
   const [pcbStockFix, setPcbStockFix] = useState<string | null>(null);
+  // #743 P-6 — a board on a holding of the operator's (the vise): stated with its one-click fix.
+  const [pcbHoldingFix, setPcbHoldingFix] = useState<string | null>(null);
 
   const surfaceChoice: OperationChoice = {
     type: 'surface',
@@ -135,6 +137,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   async function readPcbSet(files: File[]): Promise<void> {
     setPcbSummary(null);
     setPcbStockFix(null);
+    setPcbHoldingFix(null);
     setPcbReading(true);
     try {
       const out = await useEngraveJobStore.getState().importPcbFiles(files);
@@ -143,7 +146,10 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
           ? `The board is in: ${out.itemCount} items from ${out.fileCount} files${out.warnings.length > 0 ? ` — ${out.warnings.map((w) => w.message).join(' ')}` : ''}`
           : out.reason,
       );
-      if (out.ok) setPcbStockFix(out.stockNotice);
+      if (out.ok) {
+        setPcbStockFix(out.stockNotice);
+        setPcbHoldingFix(out.holdingNotice);
+      }
     } finally {
       setPcbReading(false);
     }
@@ -386,6 +392,21 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
             {pcbSummary !== null && !pcbReading && (
               <span style={MUTED} data-testid="start-wizard-op-pcb-summary">
                 {pcbSummary}
+              </span>
+            )}
+            {pcbHoldingFix !== null && !pcbReading && job.workholding.kind !== 'tape' && (
+              <span style={MUTED} data-testid="start-wizard-op-pcb-holding-notice">
+                {pcbHoldingFix}{' '}
+                <button
+                  type="button"
+                  data-testid="start-wizard-op-pcb-use-holding"
+                  onClick={() => {
+                    useEngraveJobStore.getState().usePcbHolding();
+                    setPcbHoldingFix(null);
+                  }}
+                >
+                  Tape it to the bed
+                </button>
               </span>
             )}
             {pcbStockFix !== null && !pcbReading && job.stock.material !== 'pcb' && (

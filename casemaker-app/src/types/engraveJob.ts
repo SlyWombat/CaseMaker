@@ -1591,6 +1591,12 @@ export interface JobSource {
   size: number | null;
   /** A path when one is known (CLI/desktop); null in the browser, which never exposes one. */
   path: string | null;
+  /**
+   * #743 P-6 — the LAYER ROLE a Gerber or drill file was read as (the import's own report), so the
+   * run sheet can say what each file made without re-reading its bytes. Absent on every other
+   * source, and on documents that predate the field.
+   */
+  role?: 'top-copper' | 'bottom-copper' | 'outline' | 'drills' | 'unused' | 'unknown';
 }
 
 /**

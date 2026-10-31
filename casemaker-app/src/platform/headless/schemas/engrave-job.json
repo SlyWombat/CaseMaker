@@ -5115,6 +5115,18 @@
             ],
             "description": "Path the source was read from, or null when not recorded."
           },
+          "role": {
+            "description": "The layer role a Gerber or drill file was read as; omit for none.",
+            "enum": [
+              "top-copper",
+              "bottom-copper",
+              "outline",
+              "drills",
+              "unused",
+              "unknown"
+            ],
+            "type": "string"
+          },
           "sha256": {
             "description": "Lowercase SHA-256 of the source file's bytes (64 hex characters).",
             "pattern": "^[0-9a-f]{64}$",

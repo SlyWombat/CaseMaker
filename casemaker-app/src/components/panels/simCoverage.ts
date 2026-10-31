@@ -24,6 +24,8 @@
 
 import { rowSummary } from '@/components/panels/engraveRowText';
 import type { RotaryNeckFacts } from '@/engine/cnc/rotary/neck';
+import { copperSentence } from '@/engine/cnc/engrave/pcbWords';
+import type { CopperTopologyReport } from '@/engine/cnc/engrave/pcbTopology';
 
 /** What the load did: a full sweep, the runner only (sweep refused), or nothing at all. */
 export type SimRunOutcome = 'swept' | 'path-only' | 'refused';
@@ -56,6 +58,12 @@ export interface SimCoverageInput {
    * cannot describe another's.
    */
   engine?: 'exact' | 'column';
+  /**
+   * #743 P-5/P-6 — the copper's topology verdict when the run is a board, so the run sheet names
+   * the pieces, the shorts and the copper left in the isolation, in the same words the Cut confirm
+   * uses. Absent on every other job.
+   */
+  copper?: CopperTopologyReport;
   /**
    * The band the oracle judged the prediction with (#408), mm — the width by which a boundary may
    * disagree before it counts as a CAM error. Undefined when the caller checked no prediction, or
@@ -326,6 +334,11 @@ export function coverageSummaryLine(input: SimCoverageInput): string {
  * — for a run that did not sweep — why. A path-only or refused run says so here too.
  */
 export function coverageDisclaimer(input: SimCoverageInput): string[] {
+  const out = coverageSentences(input);
+  return input.copper === undefined ? out : [...out, copperSentence(input.copper)];
+}
+
+function coverageSentences(input: SimCoverageInput): string[] {
   const programs = input.programs ?? null;
   const expected = input.expectedPrograms ?? programs?.length ?? 0;
   // #744 — the run's own sentence when the run has more than one program. A one-program run keeps

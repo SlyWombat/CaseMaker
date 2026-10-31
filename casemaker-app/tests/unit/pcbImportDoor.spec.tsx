@@ -65,4 +65,35 @@ describe('the panel Gerber door (#743 P-4b review)', () => {
     expect(stock.material).toBe('pcb');
     expect(stock.colour).toEqual({ kind: 'laminate', capMm: PCB_COPPER_MM });
   });
+
+  it('puts the board on the bed, taped, when it lands on a fresh document (#743 P-6)', async () => {
+    render(<EngravePanel />);
+    pickFiles('engrave-pcb-input', [new File([new Uint8Array([1, 2, 3])], 'practice-F_Cu.gbr')]);
+    await screen.findByTestId('engrave-pcb-message');
+
+    // A board is taped flat to the bed over a board under it (design D8): the through cuts and the
+    // 0.1 mm isolation both need it, and the import must not leave the fresh job in the vise.
+    const job = useEngraveJobStore.getState().job;
+    expect(job.workholding.kind).toBe('tape');
+    expect(job.sacrificial.under?.attach).toBe('tape');
+    expect(screen.queryByTestId('engrave-pcb-holding-notice')).toBeNull();
+  });
+
+  it('keeps an operator’s holding, states the board’s, and tapes it in one click (#743 P-6)', async () => {
+    // A job the operator has worked on is not a fresh document: its holding is theirs.
+    const first = useEngraveJobStore.getState().job.labels[0]!;
+    useEngraveJobStore.getState().updateLabel(first.id, { text: 'HELLO' });
+    render(<EngravePanel />);
+    pickFiles('engrave-pcb-input', [new File([new Uint8Array([1, 2, 3])], 'practice-F_Cu.gbr')]);
+
+    const notice = await screen.findByTestId('engrave-pcb-holding-notice');
+    expect(notice.textContent).toContain('taped flat to the bed, over a board under it');
+    expect(useEngraveJobStore.getState().job.workholding.kind).toBe('vise');
+
+    fireEvent.click(screen.getByTestId('engrave-pcb-use-holding'));
+    await waitFor(() => expect(screen.queryByTestId('engrave-pcb-holding-notice')).toBeNull());
+    const job = useEngraveJobStore.getState().job;
+    expect(job.workholding.kind).toBe('tape');
+    expect(job.sacrificial.under).not.toBeNull();
+  });
 });

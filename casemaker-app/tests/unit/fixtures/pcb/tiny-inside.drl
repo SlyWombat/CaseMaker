@@ -1,0 +1,19 @@
+M48
+; #743 P-6 - the tiny board's drills, all INSIDE its 2..34 x 2..12 mm outline (tiny.drl is the
+; parser's fixture and states coordinates beyond it)
+METRIC,TZ
+FMAT,2
+T1C0.800
+T2C1.000
+%
+T1
+X5.0Y5.0
+X15.0Y5.0
+X5.0Y10.0
+X15.0Y10.0
+X10.0Y7.5
+X20.0Y7.5
+T2
+X25.0Y5.0
+X30.0Y10.0
+M30

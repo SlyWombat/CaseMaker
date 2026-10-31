@@ -111,6 +111,22 @@ describe('the engrave depth legend (#349)', () => {
 // #170 — a blank that states its colour split is not drawn on the depth ramp (`floorColor`), so a
 // ramp of depth swatches would name colours the meshes are NOT in. The legend says which two colours
 // the floors are drawn in instead, where they part, and that the colours are stand-ins.
+describe('the engrave legend on a PCB blank (#743 P-6)', () => {
+  it('names the copper and the FR-4 with the stock’s own words, never the stand-ins', () => {
+    const job = dj();
+    job.stock.material = 'pcb';
+    job.stock.colour = { kind: 'laminate', capMm: 0.035 };
+    useEngraveJobStore.setState({ job });
+    useEngravePreviewStore.setState({ preview: previewFor(job) });
+    render(<EngraveLegend />);
+
+    expect(screen.getByTestId('engrave-legend-top').textContent).toContain('copper 0.035 mm');
+    expect(screen.getByTestId('engrave-legend-bottom').textContent).toContain('FR-4 below');
+    expect(screen.getByTestId('engrave-legend-split').textContent).toContain('copper 0.035 mm down');
+    expect(screen.getByTestId('engrave-preview-legend').textContent).not.toContain('stand-in');
+  });
+});
+
 describe('the engrave legend on a blank that states its split (#170)', () => {
   /** The shipped job, printed: a 1 mm top colour on a 12 mm blank puts the boundary 1 mm down. */
   function printed(capMm = 1): EngraveJob {

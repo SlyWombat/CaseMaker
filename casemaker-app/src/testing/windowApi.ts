@@ -32,7 +32,9 @@ import { useRunRecordStore } from '@/store/runRecordStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
-import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
+import { getTools, resolveTool, setRegistry } from '@/engine/cnc/toolRegistry';
+import { setFeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { useToolRegistryStore, type HouseStatus } from '@/store/toolRegistryStore';
 import { useManageModeStore } from '@/store/manageModeStore';
 import { useMachineStore } from '@/store/machineStore';
@@ -125,6 +127,13 @@ export interface CaseMakerTestApi {
    * never read pixels.
    */
   engraveReset(): void;
+  /**
+   * #743 P-6 — SEED THE BENCH for an e2e: the tool registry and Makera's rows. A PCB has no
+   * starting-table row (P-1), so a board only generates against a cutter the catalogue answers;
+   * a spec that must watch a board post needs this seam. Test-only, like everything here.
+   */
+  seedCutters(entries: readonly ToolLibraryEntry[], rows: readonly FeedCatalogueRow[]): void;
+
   /**
    * #688 — the clearance acknowledgement's UI home is Cut step 1 (#689). Until that step is on
    * screen, the Design e2e specs cannot tick it there; this writes the same run-store field the
@@ -424,6 +433,10 @@ export function installCaseMakerTestApi(): void {
         removedVolume: s.info?.stats.removedVolume ?? 0,
         errors: s.diagnostics.filter((d) => d.severity === 'error').length,
       };
+    },
+    seedCutters(entries, rows) {
+      setRegistry(entries);
+      setFeedCatalogue(rows, '2026-10-31T00:00:00.000Z');
     },
     engraveReset() {
       // The pure default job (#200), not `newDefaultJob()`: the latter reads the SAVED setup from

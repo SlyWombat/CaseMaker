@@ -188,4 +188,37 @@ describe('a hole no cutter makes does not block the board (#743 P-5 review)', ()
     expect(gen.findings.some((f) => f.code === 'hole-no-cutter' && f.severity === 'warning')).toBe(true);
   });
 });
+
+describe('an item whose cutter the library does not hold is stated, not blocked (#743 P-6 review)', () => {
+  it('warns for the isolation in the bench library’s own words, with no raw ids', async () => {
+    const { buildPcbJob } = await import('../../scripts/lib/casemaker/pcbJob');
+    const { setupProgramFindings } = await import('@/engine/cnc/engrave/jobSetup');
+    const { TOOL_LIBRARY } = await import('@/engine/cnc/toolLibrary');
+    const { tl } = await import('./helpers/manifoldExec');
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const FIX = join(process.cwd(), 'tests/unit/fixtures/pcb');
+    const file = (name: string) => ({ name, bytes: Uint8Array.from(readFileSync(join(FIX, name))) });
+    // The bench library: two flats, no engraver and no 0.8 bit.
+    const built = await buildPcbJob(
+      tl,
+      [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')],
+      { blank: { length: 100, width: 60, thickness: 12 }, tabs: { count: 3, width: 3, height: 1 }, tools: TOOL_LIBRARY },
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const findings = setupProgramFindings(built.job, TOOL_LIBRARY);
+    const unassigned = findings.filter((f) => f.code === 'setup-items-unassigned');
+    // The isolation has no cutter: a WARNING, in the operator's words, with the fix.
+    expect(unassigned.some((f) => f.severity === 'warning')).toBe(true);
+    const warning = unassigned.find((f) => f.severity === 'warning')!;
+    expect(warning.message).toContain('The isolation is not cut');
+    expect(warning.message).toContain('no engraving bit (a cone with a stated flute)');
+    expect(warning.message).toContain('Manage › Tools');
+    // No error: the run posts what it can.
+    expect(unassigned.some((f) => f.severity === 'error')).toBe(false);
+    // No internal ids anywhere in the sentence.
+    expect(warning.message).not.toMatch(/\b(shp|drl|cut)-[a-z0-9]+/);
+  });
+});
 });

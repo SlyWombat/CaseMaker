@@ -121,6 +121,7 @@ export async function buildPcbJob(
   // One content-addressed record per file the set used. A duplicate basename (two folders in one
   // zip) takes the planner's role for the name it merged the bytes under, as the browser door does.
   const kindByName = new Map(plan.files.map((f) => [f.name, f.kind] as const));
+  const roleByName = new Map(plan.files.map((f) => [f.name, f.role] as const));
   const sources: JobSource[] = [];
   const skippedNotes: string[] = skipped.map((n) => `${n} is not a Gerber or drill file and was not used.`);
   for (const file of sourceFiles) {
@@ -130,7 +131,8 @@ export async function buildPcbJob(
       file.bytes.byteOffset,
       file.bytes.byteOffset + file.bytes.byteLength,
     ) as ArrayBuffer;
-    const embedded = await embedSource({ kind, name: file.name, bytes: copy });
+    const role = roleByName.get(file.name);
+    const embedded = await embedSource({ kind, name: file.name, bytes: copy, ...(role === undefined ? {} : { role }) });
     sources.push(embedded.source);
     if (embedded.skipped !== null) skippedNotes.push(embedded.skipped);
   }
@@ -197,6 +199,9 @@ export async function buildPcbJob(
       ? job
       : {
           ...job,
+          // The job's own cutter is the first program's (the setup's chain starts with it), so the
+          // document resolves a cutter everywhere `jobTool` is read.
+          toolKey: cutters.tools[0]!,
           setups: [
             {
               ...setup,

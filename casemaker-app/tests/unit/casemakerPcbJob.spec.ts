@@ -38,7 +38,7 @@ const DRILLS = [tool('user:d08', 'drill', 0.8), tool('user:d10', 'drill', 1.0)];
 
 describe('the CLI Gerber door (#743 P-4b)', () => {
   it('builds a PCB job from the files, with the board holding and no demo lines', async () => {
-    const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny.drl')], {
+    const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')], {
       blank: BLANK,
       tabs: TABS,
       tools: DRILLS,
@@ -67,9 +67,11 @@ describe('the CLI Gerber door (#743 P-4b)', () => {
     expect(job.drills?.every((d) => d.mode === 'drill')).toBe(true);
     expect(out.notes.join(' ')).not.toMatch(/bored/);
 
-    // One content-addressed record per file, kinds from the reader.
+    // One content-addressed record per file, kinds from the reader, and the LAYER ROLE the run
+    // sheet names (#743 P-6) — the record survives the schema's own round trip below.
     expect(job.sourceFiles).toHaveLength(3);
     expect(job.sourceFiles?.map((s) => s.kind).sort()).toEqual(['excellon', 'gerber', 'gerber']);
+    expect(job.sourceFiles?.map((s) => s.role).sort()).toEqual(['drills', 'outline', 'top-copper']);
     for (const s of job.sourceFiles ?? []) expect(s.sha256).toMatch(/^[0-9a-f]{64}$/);
 
     // The app's own schema reads it back without losing a field.
@@ -77,7 +79,7 @@ describe('the CLI Gerber door (#743 P-4b)', () => {
   });
 
   it('bores a hole size no owned cutter is, and says which sizes that is', async () => {
-    const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny.drl')], {
+    const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')], {
       blank: BLANK,
       tabs: TABS,
       tools: [tool('user:f05', 'flat', 0.5)],
@@ -92,7 +94,7 @@ describe('the CLI Gerber door (#743 P-4b)', () => {
     const zip = zipSync({
       'tiny-F_Cu.gbr': bytes('tiny-F_Cu.gbr'),
       'tiny-Edge_Cuts.gbr': bytes('tiny-Edge_Cuts.gbr'),
-      'tiny.drl': bytes('tiny.drl'),
+      'tiny-inside.drl': bytes('tiny-inside.drl'),
       'README.md': strToU8('# tiny\n'),
     });
     const out = await buildPcbJob(tl, [file('tiny.zip', new Uint8Array(zip))], { blank: BLANK, tabs: TABS, tools: DRILLS });
@@ -167,7 +169,7 @@ describe('the board’s cutters are assigned at import (#743 §3.4)', () => {
   ];
 
   it('writes the engraver, each drill and the outline cutter into the setup', async () => {
-    const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny.drl')], {
+    const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')], {
       blank: BLANK,
       tabs: TABS,
       tools,
@@ -190,7 +192,7 @@ describe('the board’s cutters are assigned at import (#743 §3.4)', () => {
   });
 
   it('posts one program per cutter, including both drill sizes', async () => {
-    const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny.drl')], {
+    const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')], {
       blank: BLANK,
       tabs: TABS,
       tools,

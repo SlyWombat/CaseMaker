@@ -20,6 +20,7 @@
 
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob } from '@/types/engraveJob';
+import { copperSentence } from '@/engine/cnc/engrave/pcbWords';
 import type { MillProfile } from '@/engine/cnc/machine';
 import type { OracleBbox, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
@@ -258,16 +259,7 @@ export function oracleSentence(v: OracleSentenceInput): string {
   // #743 P-5 — A BOARD IS JUDGED BY ITS COPPER, and the under/over-cut numbers describe a
   // comparison the board never ran: report the pieces, the shorts and the copper left in the
   // isolation instead, so a board's verdict is in its own words.
-  if (v.oracle.copper !== undefined) {
-    const c = v.oracle.copper;
-    const pieces = `${c.pieces} piece${c.pieces === 1 ? '' : 's'}`;
-    const still = `${c.matched} of ${c.designPieces} still there`;
-    const short = c.shorts === 0 ? 'no short' : `${c.shorts} short${c.shorts === 1 ? '' : 's'}`;
-    const left = c.bandLeftMm2 > floor ? `, ${figure(c.bandLeftMm2)} mm² of copper left in the isolation` : '';
-    return v.oracle.ok
-      ? `The copper came out as designed: ${pieces}, ${still}, ${short}${left}.`
-      : `The copper does not match the design: ${pieces}, ${still}, ${short}${left}.`;
-  }
+  if (v.oracle.copper !== undefined) return copperSentence(v.oracle.copper, floor);
   // #623 — a re-posted package is judged in the blank's fitted surface frame, and the row says so:
   // the numbers otherwise read as if the lift were never applied, and a reader comparing this run
   // with the pre-re-post one needs to know the frame did not change the question asked.

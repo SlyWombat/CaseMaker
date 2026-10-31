@@ -42,7 +42,7 @@ import {
   traceSweptProfile,
 } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { clampPlacementsFor, jobMount } from '@/engine/cnc/engrave/jobSetup';
+import { clampPlacementsFor, jobMount, jobSetups, setupTools, toolItemsFor } from '@/engine/cnc/engrave/jobSetup';
 import { jobVise, viseBody } from '@/engine/cnc/fixture';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
 import type { ObstacleBox } from '@/engine/cnc/setup';
@@ -570,6 +570,24 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       catalogue,
     );
 
+    // #743 P-6 review — AN ITEM NO SETUP ASSIGNS IS NOT MEASURED AGAINST A CUTTER THAT WILL NEVER CUT
+    // IT. The preview judges the whole document with the job's own cutter; an item the setups leave
+    // unassigned (its kind of cutter is not in the library) belongs to no program, so its "nothing
+    // reachable" is not a fault of the design — the unassigned warning states it and Generate posts
+    // the rest. A job with no assignment at all (no cutter yet) keeps every finding it had.
+    const assignedIds = new Set<string>();
+    for (const setup of jobSetups(job)) {
+      const keys = setupTools(setup, job);
+      keys.forEach((key, i) => {
+        for (const id of toolItemsFor(setup, key, i)) assignedIds.add(id);
+      });
+    }
+    const unowned = (id: string | undefined): boolean =>
+      id !== undefined && assignedIds.size > 0 && !assignedIds.has(id);
+    const liveFindings = findings.filter(
+      (f) => !(unowned(f.labelId) && (f.code === 'item-empty' || f.code === 'item-chars-lost' || f.code === 'item-detail-lost')),
+    );
+
     // #420 slice 4 — a V-bit trace's cut is the cone dragged along its path, not its mouth
     // extruded straight down. The cone comes from the same `vCone` the oracle and the column
     // engine resolve, and the trace's own geometry comes from the plan those cuts were built
@@ -580,7 +598,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // A label whose findings include an error is left out of the cut — the stock is drawn
     // uncut there — but its row and findings are still reported (the issue's rule).
     const errored = new Set(
-      findings.filter((f) => f.severity === 'error' && f.labelId !== undefined).map((f) => f.labelId as string),
+      liveFindings.filter((f) => f.severity === 'error' && f.labelId !== undefined).map((f) => f.labelId as string),
     );
 
     // #432 — a faced job is drawn as the blank that REMAINS after the skim. The document's cuts
@@ -786,7 +804,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     const measuredById = new Map(measured.map((m) => [m.labelId, m] as const));
     const lost: EngravePreviewLost[] = [];
     for (const engrave of plan.engraves) {
-      if (errored.has(engrave.id)) continue;
+      if (errored.has(engrave.id) || unowned(engrave.id)) continue;
       const opening = measuredById.get(engrave.id);
       if (!opening || opening.glyphArea <= 0) continue;
 
@@ -925,7 +943,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       registration,
       lost,
       engravability: measured.map(({ polygons: _polygons, ...rest }) => rest),
-      findings,
+      findings: liveFindings,
       colourBoundaryDepth,
       supportingFloors,
       goal:

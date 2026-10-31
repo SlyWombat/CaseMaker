@@ -33,6 +33,7 @@ import { cutterLegend, cutterProfileSvg } from '@/engine/cnc/cutterProfile';
 // #221 — the V-carve facts are the CAM's own arithmetic and cone resolution, imported rather than
 // re-derived: the sheet, the panel and the program must not print different plane radii or pitches.
 import { vCone } from '@/engine/cnc/vProfile';
+import type { Tool } from '@/engine/cnc/tool';
 import { inlayGlueGap, inlayMarked, inlayMm, inlayNumbers } from './inlay';
 import {
   DEFAULT_MAX_TEXTURE_STROKES,
@@ -100,6 +101,7 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
 // re-worded, so the sheet and the panel cannot disagree about what the sweep did not see.
 import { coverageDisclaimer, type SimCoverageInput, type SimRunOutcome } from '@/components/panels/simCoverage';
+import type { CopperTopologyReport } from '@/engine/cnc/engrave/pcbTopology';
 // #737 — the neck's facts are the ROTARY module's (the span, the saw line and the floor, from
 // `rotaryFreeSpan`): the coverage sentence the sheet and the panel print quotes them, never a
 // second reading of the job.
@@ -574,6 +576,11 @@ export interface RunSheetSimDiagnostic {
 /** What the sheet needs from a simulation run. A `SimLoadResult` (either variant) satisfies it. */
 export interface RunSheetSim {
   diagnostics: readonly RunSheetSimDiagnostic[];
+  /**
+   * #743 P-6 — the PCB topology verdict the run's oracle reached, when the run is a board: the
+   * sheet's coverage states the pieces, the shorts and the copper left in the isolation.
+   */
+  copper?: CopperTopologyReport;
   /**
    * #243 — what the load reached: a full sweep, a path-only refusal, or a refusal before the
    * path. Omitted means `'swept'`, which is what the panel's generate → simulate action leaves
@@ -1296,6 +1303,8 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
     outcome: sim?.outcome ?? 'swept',
     engine: sim?.engine,
     oracleBand: sim?.oracleBand,
+    // #743 P-6 — the copper's own verdict, when the run is a board (the sheet names the shorts).
+    ...(sim?.copper === undefined ? {} : { copper: sim.copper }),
     fixtureLabels: envelope.boxes.map((b) => b.label),
     fixtureSource: envelope.source,
     sacrificialModelled: hasSacrificial(job.sacrificial),
@@ -3326,6 +3335,77 @@ export function runSheetStockLine(job: Pick<EngraveJob, 'stock'>): string {
     : `${fmtNum(stock.length)} × ${fmtNum(stock.width)} × ${fmtNum(stock.thickness)} mm ${MATERIAL_LABELS[stock.material]}`;
 }
 
+
+/**
+ * #743 P-6 — THE BOARD'S SECTION (design §3.7): what the blank is, what the files made, and the
+ * program order. Null for every job that is not a board, so a non-PCB sheet is byte-identical.
+ *
+ * The files are read from the job's `sourceFiles` and their own persisted ROLES, never from the
+ * bytes: the sheet is a statement about the job as it was imported, and the SHA-256 prefix ties
+ * the cut to those exact files.
+ */
+function pcbBoardSteps(job: EngraveJob, tool: Tool | null): RunSheetStep[] | null {
+  const colour = job.stock.colour;
+  if (colour === undefined || colour.kind !== 'laminate') return null;
+  const frames = (job.combined ?? []).filter(
+    (item) => item.kind === 'frame' && item.isolation === true && item.enabled,
+  );
+  const frame = frames[0];
+  if (frame === undefined) return null;
+
+  const steps: RunSheetStep[] = [];
+  const under = job.sacrificial.under;
+  const { length, width, thickness } = job.stock;
+  const holding =
+    job.workholding.kind === 'tape'
+      ? 'taped flat to the bed'
+      : job.workholding.kind === 'bracket'
+        ? 'held by the bracket'
+        : job.workholding.kind === 'rotary-chuck'
+          ? 'held in the rotary chuck'
+          : 'held in the vise';
+  steps.push({
+    text:
+      `The board: PCB ${fmtNum(length)} × ${fmtNum(width)} × ${fmtNum(thickness)} mm, ` +
+      `copper ${fmtNum(colour.capMm)} mm on the top face, copper side up.`,
+    value: `${holding}${under === null ? '' : ` over a ${fmtNum(under.thickness)} mm board`}`,
+    bold: true,
+  });
+
+  const roleWords: Record<string, string> = {
+    'top-copper': 'top copper',
+    'bottom-copper': 'bottom copper',
+    outline: 'outline',
+    drills: 'drills',
+    unused: 'not used',
+    unknown: 'role not told',
+  };
+  for (const source of job.sourceFiles ?? []) {
+    if (source.role === undefined) continue;
+    steps.push({
+      text: `What the files made — ${source.name}`,
+      value: `${roleWords[source.role] ?? source.role} · ${source.sha256.slice(0, 8)}`,
+    });
+  }
+
+  // The programs, in the order the setup cuts them (§3.3): isolation, holes, then the cut-out —
+  // the board is freed last, and only by its tabs.
+  const cone = tool === null ? null : vCone(tool);
+  const cutWidth = cone === null ? null : 2 * (cone.tipRadius + frame.depth * cone.tanHalf);
+  const sizes = [...new Set((job.drills ?? []).filter((d) => d.enabled).map((d) => d.diameter).filter((d): d is number => d !== undefined && d > 0))].sort((a, b) => a - b);
+  const holeCount = (job.drills ?? []).filter((d) => d.enabled).length;
+  const cutout = (job.cutouts ?? []).find((c) => c.enabled);
+  const parts = [
+    `1 Isolate the copper${cutWidth === null ? '' : ` · ${fmtNum(cutWidth)} mm wide`} · ${fmtNum(frame.depth)} mm deep`,
+    holeCount === 0
+      ? null
+      : `2 ${holeCount} hole${holeCount === 1 ? '' : 's'}${sizes.length === 0 ? '' : ` (${sizes.map((d) => `⌀${fmtNum(d)} mm`).join(', ')})`}`,
+    cutout === undefined ? null : `3 Cut out the board${cutout.tabs.count > 0 ? ` · ${cutout.tabs.count} tabs` : ''}`,
+  ].filter((part): part is string => part !== null);
+  steps.push({ text: `The programs, in cut order: ${parts.join(' · ')}.` });
+  return steps;
+}
+
 export function buildRunSheet(
   job: EngraveJob,
   generated: RunSheetGenerated,
@@ -4245,6 +4325,14 @@ export function buildRunSheet(
     { text: 'Surface finish', record: 'clean / fuzzy / burnt' },
     { text: 'Anything that went wrong', record: 'notes' },
   );
+  // #743 P-6 — a board's one after-run advice line (design §3.7): the burr is the one thing the
+  // copper's own oracle cannot see, so the meter check is the operator's.
+  if (pcbBoardSteps(job, tool) !== null) {
+    recordSteps.push(
+      { text: 'Break the tabs and sand the edge.' },
+      { text: 'Check for shorts with a meter between neighbouring pads before soldering.', record: 'measured (yes / no)' },
+    );
+  }
 
   // #410 — the reachability report, when the caller measured one, sits directly after §1: that
   // section names the cutter, and this one is why it is that cutter. Section NUMBERS are worked out
@@ -4303,6 +4391,9 @@ export function buildRunSheet(
       ];
     })();
 
+  // #743 P-6 — a board's own section: the blank, the files and the program order.
+  const pcbSteps = pcbBoardSteps(job, tool);
+
   const sections: { id: string; title: string; steps: RunSheetStep[] }[] = [
     { id: 'need', title: 'What you need', steps: needSteps },
     ...(reachSteps ? [{ id: 'reach', title: 'What each cutter reaches', steps: reachSteps }] : []),
@@ -4312,6 +4403,7 @@ export function buildRunSheet(
     { id: 'mount', title: 'Mount the vise', steps: mountSteps },
     ...rotaryFeedSection,
     { id: 'load', title: 'Load the blank', steps: loadSteps },
+    ...(pcbSteps === null ? [] : [{ id: 'board', title: 'The board', steps: pcbSteps }]),
     ...(options.found
       ? [{ id: 'found', title: 'Found position', steps: foundSteps(options.found) }]
       : []),

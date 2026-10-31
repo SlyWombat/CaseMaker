@@ -67,6 +67,8 @@ import {
 } from '@/store/engraveRunGate';
 import { useManageModeStore } from '@/store/manageModeStore';
 import { domeAcceptSentence, surfaceDomeAssumption, surfaceTiltWords } from '@/engine/cnc/engrave/surfaceSpread';
+import { pcbSurfaceBudget, pcbSurfaceSentence } from '@/engine/cnc/engrave/pcbBudget';
+import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useStockStore } from '@/store/stockStore';
 import type { LaserLift } from '@/platform/machineLaser';
@@ -322,6 +324,16 @@ export function EngraveCutSurface({
   // in a file).
   const spreadAssessment = spreadMeasurement?.assessment ?? null;
   const domeStanding = spreadAssessment?.verdict === 'dome';
+  // #743 P-6 — A BOARD'S ISOLATION HAS A FLATNESS BUDGET (design §3.6). The plane the program is
+  // posted against follows a tilt; the residual is what it cannot. The isolation needs the top
+  // within `depth − copper − Z budget` of that plane, and the Cut surface states the miss with the
+  // measured numbers and the physical fix — never as a refusal (a tolerance fact, 2026-10-29 rule).
+  const houseMarginSettings = useSettingsStore((s) => s.margins);
+  const pcbBudget = pcbSurfaceBudget(job, effectiveMargins(job, houseMarginSettings).zTolerance);
+  const surfaceResidualMm =
+    spreadAssessment === null ? null : (spreadAssessment.fit?.residual ?? spreadAssessment.spread);
+  const pcbSurfaceOver =
+    pcbBudget !== null && surfaceResidualMm !== null && surfaceResidualMm > pcbBudget.budgetMm + 1e-9;
   // A fresh measurement is a fresh clamping: neither tick carries over from the last one. The
   // ticks are TAGGED with the assessment they were made on rather than reset in an effect
   // (react-hooks/set-state-in-effect): a different assessment reads as unticked, exactly as the
@@ -906,6 +918,23 @@ export function EngraveCutSurface({
           </p>
         ) : (
           <>
+            {pcbSurfaceOver && pcbBudget !== null && surfaceResidualMm !== null && (
+              <section style={{ ...BOX, borderColor: '#a08040', marginBottom: 8 }} data-testid="engrave-cut-pcb-surface">
+                <p style={{ fontSize: 12, color: '#f0d79b', margin: '0 0 6px' }}>
+                  {pcbSurfaceSentence(pcbBudget, surfaceResidualMm)}
+                </p>
+                <button
+                  type="button"
+                  data-testid="engrave-cut-pcb-register-again"
+                  onClick={() => {
+                    const el = document.querySelector<HTMLElement>('[data-testid="engrave-registration"]');
+                    if (el !== null && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+                  }}
+                >
+                  Register again
+                </button>
+              </section>
+            )}
             {rotaryGate !== null && (
               <p style={MUTED} data-testid="engrave-cut-rotary-bench">{withPeriod(rotaryGate)}</p>
             )}

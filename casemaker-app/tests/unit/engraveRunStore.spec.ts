@@ -949,7 +949,13 @@ describe('#395 one gate, two ways to reach it', () => {
     // #581 added the second one: `runInputs` is pure engine data (`jobFingerprint`, `canonicalJson`,
     // `programHash`) whose every other import is `import type`, so it loads in a node script exactly
     // as `simGate` does. A browser import (`platform/features`, a client, a worker) still fails here.
-    expect(runtimeImports).toEqual(['@/engine/cnc/simGate', '@/engine/cnc/engrave/runInputs']);
+    // #743 P-6 added `pcbWords`: one exported sentence builder whose only import is `import type`,
+    // so it loads in a node script exactly as the other two do.
+    expect(runtimeImports).toEqual([
+      '@/engine/cnc/engrave/pcbWords',
+      '@/engine/cnc/simGate',
+      '@/engine/cnc/engrave/runInputs',
+    ]);
   });
 });
 

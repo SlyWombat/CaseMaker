@@ -140,13 +140,17 @@ export function EngraveLegend(): JSX.Element | null {
       )}
       {split !== null ? (
         <>
+          {/* #743 P-6 — A BOARD'S TWO LAYERS HAVE NAMES. A PCB's cap is copper and the substrate
+              under it is FR-4, so the two rows say that instead of the laminate's stand-in words;
+              every other blank keeps the stand-ins (nothing in the app maps an extruder to a
+              colour). */}
           <div data-testid="engrave-legend-top" style={ROW}>
             <span style={{ ...SWATCH, background: splitColor('top') }} />
-            top colour (stand-in)
+            {stock.material === 'pcb' ? `copper ${mm(split)} mm` : 'top colour (stand-in)'}
           </div>
           <div data-testid="engrave-legend-bottom" style={ROW}>
             <span style={{ ...SWATCH, background: splitColor('bottom') }} />
-            bottom colour (stand-in)
+            {stock.material === 'pcb' ? 'FR-4 below' : 'bottom colour (stand-in)'}
           </div>
           {/* The plane the two rows are read against, stated as the depth it sits at rather than
               drawn as a third colour: it is not a colour a floor lands IN, it is where they part.
@@ -154,7 +158,7 @@ export function EngraveLegend(): JSX.Element | null {
               `mm` and not `toFixed(2)` (#170 review): the split is a depth, and every other depth
               the app prints goes through the one formatter — `split 1 mm down`, not `1.00`. */}
           <div data-testid="engrave-legend-split" style={{ color: '#9aa4b0' }}>
-            split {mm(split)} mm down
+            {stock.material === 'pcb' ? `copper ${mm(split)} mm down` : `split ${mm(split)} mm down`}
           </div>
           {/* This branch is taken on the BLANK's own print, not on anything being cut, so it is
               reached by a two-colour job with no enabled label — where the two rows above describe a

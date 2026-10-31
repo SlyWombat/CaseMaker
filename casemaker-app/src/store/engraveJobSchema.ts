@@ -1988,6 +1988,11 @@ export const jobSourceSchema = z
       .string()
       .nullable()
       .describe('Path the source was read from, or null when not recorded.'),
+    // #743 P-6 — what a board's file was read AS; absent on every other source.
+    role: z
+      .enum(['top-copper', 'bottom-copper', 'outline', 'drills', 'unused', 'unknown'])
+      .optional()
+      .describe('The layer role a Gerber or drill file was read as; omit for none.'),
   })
   .strict()
   .describe('A file the job was made from, with its identity and optionally its bytes.');
