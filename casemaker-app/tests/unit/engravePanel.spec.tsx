@@ -4701,4 +4701,82 @@ describe('#805 — the rotary oversize warning’s two answers', () => {
     expect(useStartWizardStore.getState().open).toBe(true);
     expect(useStartWizardStore.getState().initialStep).toBe('stock');
   });
+
+  it('#743 P-5 gives the isolation to the finer engraver the short offers, in one press', () => {
+    const base = useEngraveJobStore.getState().job;
+    const iso: EngraveCombinedShape = {
+      id: 'iso-1',
+      kind: 'frame',
+      name: 'Isolate the copper',
+      around: 'copper-1',
+      gap: 0,
+      width: 0.4,
+      depth: 0.1,
+      isolation: true,
+      enabled: true,
+      position: { x: 0, y: 0 },
+      rotation: 0,
+    };
+    const copper: EngraveVectorShape = {
+      id: 'copper-1',
+      kind: 'vector',
+      name: 'Copper — top',
+      sourceName: 'board-F_Cu.gbr',
+      contours: [[[0, 0], [10, 0], [10, 10], [0, 10]]],
+      fillRule: 'NonZero',
+      width: 10,
+      height: 10,
+      position: { x: 20, y: 20 },
+      rotation: 0,
+      depth: 0.1,
+      enabled: true,
+      construction: true,
+    };
+    const job: EngraveJob = {
+      ...base,
+      labels: [],
+      shapes: [],
+      combined: [iso],
+      vectors: [copper],
+      toolKey: 'inv:engrave-old',
+      setups: [
+        {
+          id: 'setup-1',
+          orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
+          mount: { kind: 'vise' },
+          itemIds: ['iso-1'],
+          tools: ['inv:engrave-old', 'inv:corn'],
+          toolItems: { 'inv:engrave-old': ['iso-1'], 'inv:corn': [] },
+        },
+      ],
+    };
+    act(() => useEngraveJobStore.setState({ job }));
+    const preview = {
+      colourBoundaryDepth: null,
+      recommendation: null,
+      findings: [
+        {
+          severity: 'warning',
+          code: 'isolation-short',
+          labelId: 'iso-1',
+          message: 'The isolation cannot open the gap near X 25 Y 25 mm: …',
+          suggestedCutterKey: 'inv:engrave-fine',
+          suggestedCutterDiameterMm: 0.05,
+        },
+      ],
+    } as unknown as EngravePreview;
+    act(() => useEngravePreviewStore.setState({ preview, status: 'ready' }));
+    render(<EngravePanel />);
+
+    // The finding is the isolation ITEM's (`labelId`), so it lives in the row's body: open the row.
+    fireEvent.click(screen.getByTestId('engrave-combined-expand-0'));
+    const button = screen.getByTestId('engrave-pcb-finer-engraver');
+    expect(button.textContent).toBe('Use the ⌀0.05 mm engraver');
+    fireEvent.click(button);
+
+    const setup = useEngraveJobStore.getState().job.setups?.[0];
+    expect(setup?.toolItems?.['inv:engrave-fine']).toEqual(['iso-1']);
+    expect(setup?.toolItems?.['inv:engrave-old'] ?? []).toEqual([]);
+    expect(setup?.tools).toContain('inv:engrave-fine');
+  });
 });

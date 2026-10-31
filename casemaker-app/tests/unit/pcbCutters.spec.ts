@@ -28,8 +28,9 @@ describe('§3.4 — a board hole and the cutter it asks for (#743 P-4b)', () => 
     // Over by more than the slack is not the hole's cutter.
     const tooBig = pcbHoleAssignment([drill('a', 1.0)], [entry('user:m', 'flat', 1.11)]);
     expect(tooBig.modes.get('a')).toBe('drill');
-    // (no narrower flat either, so the mode stays a plunge and the job's checks name the gap)
-    expect(tooBig.notes).toEqual([]);
+    // No narrower flat either: the mode stays a plunge, and the import STATES the absence (#743 P-5).
+    expect(tooBig.notes.join(' ')).toContain('No owned drill or flat end mill makes the ⌀1 mm holes (1)');
+    expect(tooBig.notes.join(' ')).toContain('left out of the programs');
   });
 
   it('never drills UNDER the hole, and bores with a flat narrower than it, saying so once', () => {

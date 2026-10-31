@@ -335,7 +335,7 @@
                 "type": "object"
               },
               "isolation": {
-                "description": "True when this band must separate every piece of the copper it follows (#743): a band the cut cannot open is an error, not a warning.",
+                "description": "True when this band must separate every piece of the copper it follows (#743): a gap the cut cannot open is reported as isolation-short — a warning with its place, because the rest of the board still cuts.",
                 "type": "boolean"
               },
               "kind": {

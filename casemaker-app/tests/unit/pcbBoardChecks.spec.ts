@@ -81,9 +81,11 @@ describe('hole-no-cutter (#743 P-5)', () => {
       tools: [drillBit('inv:d10', 1.0), drillBit('inv:d08', 0.8)],
     });
     const finding = findings.find((f) => f.code === 'hole-no-cutter');
-    expect(finding?.severity).toBe('error');
-    expect(finding?.message).toContain('No cutter for the 0.6 mm holes (2)');
+    // #743 P-5 review — a WARNING: the rest of the board posts, and these holes are left out.
+    expect(finding?.severity).toBe('warning');
+    expect(finding?.message).toContain('No cutter makes the 0.6 mm holes (2) at X 10 Y 10 mm, X 12 Y 10 mm');
     expect(finding?.message).toContain('smallest drill or flat end mill you own is 0.8 mm');
+    expect(finding?.message).toContain('left out of the programs');
   });
 
   it('says nothing when the assigned cutter is the hole’s size, or when a flat can bore it', () => {
@@ -115,7 +117,8 @@ describe('item-off-board (#743 P-5)', () => {
       tools: [drillBit('inv:d10', 1.0)],
     });
     const finding = findings.find((f) => f.code === 'item-off-board');
-    expect(finding?.severity).toBe('error');
+    // #743 P-5 review — a WARNING, like #786's edge codes: the part off the board cuts air.
+    expect(finding?.severity).toBe('warning');
     expect(finding?.message).toContain('1 hole is outside the board outline');
   });
 
@@ -131,4 +134,58 @@ describe('item-off-board (#743 P-5)', () => {
     const findings = validateJob(job, null, { tools: [drillBit('inv:d10', 1.0)] });
     expect(findings.some((f) => f.code === 'item-off-board')).toBe(false);
   });
+
+describe('a hole no cutter makes does not block the board (#743 P-5 review)', () => {
+  it('is a warning, and the setup split leaves the hole out instead of refusing it', async () => {
+    const { buildPcbJob } = await import('../../scripts/lib/casemaker/pcbJob');
+    const { engraveGenerate } = await import('@/workers/sim/engraveGenerate');
+    const { tl } = await import('./helpers/manifoldExec');
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { flatEndMill: mill } = await import('@/engine/cnc/tool');
+    const FIX = join(process.cwd(), 'tests/unit/fixtures/pcb');
+    const file = (name: string) => ({ name, bytes: Uint8Array.from(readFileSync(join(FIX, name))) });
+    const engraver: ToolLibraryEntry = {
+      key: 'inv:engrave-60',
+      provenance: 'test',
+      tool: mill(3.175, {
+        id: 'pcb-engrave-0-1-60',
+        shape: 'engraving',
+        tipDiameter: 0.1,
+        diameter: 3.175,
+        halfAngle: 30,
+        angle: 60,
+        fluteLength: 12,
+      }),
+    };
+    const corn: ToolLibraryEntry = {
+      key: 'inv:corn-0-8',
+      provenance: 'test',
+      tool: mill(0.8, { id: 'pcb-corn-0-8', fluteLength: 12 }),
+    };
+    const rows = [
+      { cutterId: 'pcb-engrave-0-1-60', material: 'PCB', rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.1 },
+      { cutterId: 'pcb-corn-0-8', material: 'PCB', rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.2 },
+    ];
+    const built = await buildPcbJob(
+      tl,
+      [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('holes-06.drl')],
+      { blank: { length: 60, width: 40, thickness: 1.6 }, tabs: { count: 3, width: 3, height: 1 }, tools: [engraver, corn], catalogue: rows },
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const job = built.job;
+    job.toolKey = engraver.key;
+    expect(built.notes.join(' ')).toContain('No owned drill or flat end mill makes the ⌀0.6 mm holes (2)');
+    // The 0.6 holes are NOT assigned to a cutter (nothing owned can make them) …
+    const assigned = Object.values(job.setups?.[0]?.toolItems ?? {}).flat();
+    for (const hole of job.drills ?? []) expect(assigned).not.toContain(hole.id);
+    // … and the run still posts, with the hole stated as a warning.
+    const gen = engraveGenerate(tl, job, engraver.tool, rows as never, null, undefined, { tools: [engraver, corn] });
+    expect(gen.findings.some((f) => f.code === 'setup-items-unassigned')).toBe(false);
+    expect(gen.errors).toEqual([]);
+    expect(gen.ok).toBe(true);
+    expect(gen.findings.some((f) => f.code === 'hole-no-cutter' && f.severity === 'warning')).toBe(true);
+  });
+});
 });

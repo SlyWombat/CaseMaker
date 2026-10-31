@@ -127,10 +127,11 @@ export type JobFindingCode =
   // nothing, or into the jaw zone the square says is stock. The face is the inscribed circle of
   // ⌀D, less the job's edge margin, and every corner of the cut's swept box must be inside it.
   | 'item-off-round-stock'
-  // #743 P-5 — A BOARD'S HOLES. `hole-no-cutter`: a drill item that states its hole's size (a
-  // Gerber import does) has no owned drill or flat end mill that can make it, by drilling within
-  // the +0.1 mm slack or boring it. `item-off-board`: a hole's centre lies outside the outline the
-  // part's cut-out follows, so it would be drilled into air beside the board.
+  // #743 P-5 — A BOARD'S HOLES, both WARNINGS (inform, don't refuse). `hole-no-cutter`: a drill
+  // item that states its hole's size (a Gerber import does) has no owned drill or flat end mill
+  // that can make it, by drilling within the +0.1 mm slack or boring it — the rest of the board
+  // still posts, and those holes are left out. `item-off-board`: a hole's centre lies outside the
+  // outline the part's cut-out follows, so it would be drilled into air beside the board.
   | 'hole-no-cutter'
   | 'item-off-board'
   // #743 P-5 — A TRACE THE SURFACE BUDGET CAN NARROW. A warning: after the job's Z budget moves
@@ -139,7 +140,8 @@ export type JobFindingCode =
   | 'thin-trace'
   // #743 P-5 — THE ISOLATION CANNOT OPEN A GAP. Two pieces of copper the design separates are
   // closer than the cutter's own width at the copper, so the band between them is not cut and they
-  // come out joined. An error (design principle 18): a short is a broken board.
+  // come out joined. A WARNING with its place and both widths: the board still cuts, and the
+  // operator may bridge it by hand or accept it on a test board.
   | 'isolation-short'
   // V-CARVE region findings (#221). The design is correct at the COLOUR PLANE, so the two
   // disqualifying facts are about that plane: a cut that stops above it never reaches the second
@@ -435,6 +437,14 @@ export interface JobFinding {
    * brings the part to the rod; absent on every other finding.
    */
   goalRadiusMm?: number;
+  /**
+   * #743 P-5 — on `isolation-short`, the owned engraver whose tip would open the measured gap at
+   * the isolation's depth, and its tip's diameter, mm. The panel's one-click fix assigns it to the
+   * isolation; absent when no owned engraver can open the gap (the sentence then names the design
+   * fix) and on every other finding.
+   */
+  suggestedCutterKey?: string;
+  suggestedCutterDiameterMm?: number;
   message: string;
 }
 
@@ -1900,7 +1910,9 @@ export function validateJob(
       const total = [...outside.values()].reduce((n, o) => n + o.count, 0);
       const first = [...outside.values()][0]!;
       findings.push({
-        severity: 'error',
+        // #743 P-5 review — INFORM, like #786's edge codes: the part off the board cuts air, and
+        // the sweep judges any real contact.
+        severity: 'warning',
         code: 'item-off-board',
         labelId: [...outside.keys()][0]!,
         message:
@@ -1910,45 +1922,7 @@ export function validateJob(
           'the outline file, or widen the outline.',
       });
     }
-    for (const { size, ids, labelId } of bySize.values()) {
-      const assigned = assignedCutterKey(job, ids[0]!);
-      const assignedTool = assigned === null ? null : toolForJob({ toolKey: assigned }, owned);
-      // A cutter the caller's library does not hold is `tool-missing`'s to name, not this check's.
-      if (assignedTool === null) continue;
-      const d = cuttingDiameter(assignedTool);
-      if (d !== null && d >= size - 1e-9 && d <= size + PCB_DRILL_SLACK_MM + 1e-9) continue;
-      // Any owned cutter that could make the size: a drill or flat at the hole's size (up to the
-      // slack), or a flat narrower than it, which bores it.
-      const canMake = owned.some((entry) => {
-        const cd = cuttingDiameter(entry.tool);
-        if (cd === null || !(cd > 0)) return false;
-        if (
-          (entry.tool.shape === 'drill' || entry.tool.shape === 'flat') &&
-          cd >= size - 1e-9 &&
-          cd <= size + PCB_DRILL_SLACK_MM + 1e-9
-        ) {
-          return true;
-        }
-        return entry.tool.shape === 'flat' && cd < size - 1e-9;
-      });
-      if (canMake) continue;
-      const smallest = owned.reduce<number | null>((m, entry) => {
-        if (entry.tool.shape !== 'drill' && entry.tool.shape !== 'flat') return m;
-        const cd = cuttingDiameter(entry.tool);
-        return cd === null || !(cd > 0) ? m : m === null ? cd : Math.min(m, cd);
-      }, null);
-      findings.push({
-        severity: 'error',
-        code: 'hole-no-cutter',
-        labelId,
-        message:
-          `No cutter for the ${fmt3(size)} mm holes (${ids.length}): ` +
-          (smallest === null
-            ? 'no drill or flat end mill is in the tool library.'
-            : `the smallest drill or flat end mill you own is ${fmt3(smallest)} mm.`) +
-          ' Add a cutter of that size, or change the board’s holes.',
-      });
-    }
+    findings.push(...holeNoCutterFindings(job, owned));
   }
 
   // CHAMFERS (#669): a bevel is cut by a CONE's flank along a rim the job cuts, so every check
@@ -2917,7 +2891,7 @@ export function validateJob(
   // #677 — a derived-work program (the core clearance) has no items by construction, and its
   // sub-job has no stored setups: the setup split has nothing to judge there. The run's own
   // whole-job pass owns that question.
-  if ((options.derivedCores ?? 0) === 0) findings.push(...setupProgramFindings(job));
+  if ((options.derivedCores ?? 0) === 0) findings.push(...setupProgramFindings(job, options.tools));
 
   return findings;
 }
@@ -2988,7 +2962,102 @@ function words(ids: readonly string[]): string {
  * construction, so the multi-tool case can only be seen before the split. Exported so the run's own
  * findings list says the same thing the panel's validation does.
  */
-export function setupProgramFindings(job: EngraveJob): JobFinding[] {
+
+/** Can one owned cutter make a hole of `size`, by drilling it within the slack or boring it? */
+function ownedCutterMakesHole(owned: readonly ToolLibraryEntry[], size: number): boolean {
+  return owned.some((entry) => {
+    const cd = cuttingDiameter(entry.tool);
+    if (cd === null || !(cd > 0)) return false;
+    if (
+      (entry.tool.shape === 'drill' || entry.tool.shape === 'flat') &&
+      cd >= size - 1e-9 &&
+      cd <= size + PCB_DRILL_SLACK_MM + 1e-9
+    ) {
+      return true;
+    }
+    return entry.tool.shape === 'flat' && cd < size - 1e-9;
+  });
+}
+
+
+/**
+ * #743 P-5 — THE HOLES NO OWNED CUTTER MAKES, one warning per size. Extracted so the RUN can state
+ * them on the whole job: a hole with no cutter belongs to no program, so no per-program sub-job
+ * ever validates it. `validateJob` runs it for the editor; `engraveGenerate` adds it to the run.
+ */
+export function holeNoCutterFindings(job: EngraveJob, owned: readonly ToolLibraryEntry[]): JobFinding[] {
+  const findings: JobFinding[] = [];
+  const bySize = new Map<string, { size: number; ids: string[]; labelId: string }>();
+  for (const drill of job.drills ?? []) {
+    if (!drill.enabled || drill.mode === 'bore') continue;
+    const hole = drill.diameter;
+    if (hole === undefined || !(hole > 0)) continue;
+    const key = hole.toFixed(3);
+    const entry = bySize.get(key);
+    if (entry === undefined) bySize.set(key, { size: hole, ids: [drill.id], labelId: drill.id });
+    else entry.ids.push(drill.id);
+  }
+  for (const { size, ids, labelId } of bySize.values()) {
+    const assigned = assignedCutterKey(job, ids[0]!);
+    const assignedTool = assigned === null ? null : toolForJob({ toolKey: assigned }, owned);
+    // A cutter the caller's library does not hold is `tool-missing`'s to name, not this check's.
+    if (assigned !== null && assignedTool === null) continue;
+    if (assignedTool !== null) {
+      const d = cuttingDiameter(assignedTool);
+      if (d !== null && d >= size - 1e-9 && d <= size + PCB_DRILL_SLACK_MM + 1e-9) continue;
+    }
+    // A capable cutter the setup simply does not use is the assignment's problem
+    // (`setup-items-unassigned`), not this sentence's.
+    if (ownedCutterMakesHole(owned, size)) continue;
+    const smallest = owned.reduce<number | null>((m, entry) => {
+      if (entry.tool.shape !== 'drill' && entry.tool.shape !== 'flat') return m;
+      const cd = cuttingDiameter(entry.tool);
+      return cd === null || !(cd > 0) ? m : m === null ? cd : Math.min(m, cd);
+    }, null);
+    // INFORM: the rest of the board still posts, and the holes this size are just absent from
+    // the programs. The sentence names them where they are.
+    const where = ids
+      .flatMap((id) => {
+        const item = (job.drills ?? []).find((d) => d.id === id);
+        return item === undefined ? [] : drillHoles(item).map(([x, y]) => `X ${fmt3(x)} Y ${fmt3(y)} mm`);
+      })
+      .slice(0, 5)
+      .join(', ');
+    findings.push({
+      severity: 'warning',
+      code: 'hole-no-cutter',
+      labelId,
+      message:
+        `No cutter makes the ${fmt3(size)} mm holes (${ids.length})${where === '' ? '' : ` at ${where}`}: ` +
+        (smallest === null
+          ? 'no drill or flat end mill is in the tool library, so they are left out of the programs.'
+          : `the smallest drill or flat end mill you own is ${fmt3(smallest)} mm, so they are left out of the programs.`) +
+        ' Add a drill of that size, or a flat end mill that can bore them.',
+    });
+  }
+  return findings;
+}
+
+/**
+ * #743 P-5 review — A HOLE NO OWNED CUTTER MAKES IS STATED, NOT A BLOCK. When the import could not
+ * assign a cutter to a drill that states its own size, the hole is left out of the setup's
+ * assignment on purpose: everything else still posts, and `hole-no-cutter` names the missing size.
+ * This is the predicate both checks read, so they cannot disagree about which holes those are.
+ */
+function holeWithNoCutter(job: EngraveJob, id: string, owned: readonly ToolLibraryEntry[]): boolean {
+  const drill = (job.drills ?? []).find((d) => d.id === id);
+  if (drill === undefined || !drill.enabled || drill.mode === 'bore') return false;
+  const hole = drill.diameter;
+  if (hole === undefined || !(hole > 0)) return false;
+  return !ownedCutterMakesHole(owned, hole);
+}
+
+export function setupProgramFindings(
+  job: EngraveJob,
+  /** #743 P-5 — the owned cutters, when the caller has them: a hole none can make is `hole-no-cutter`'s
+   * to state, so its deliberate absence from the assignment is not an unassigned item here. */
+  ownedTools?: readonly ToolLibraryEntry[] | null,
+): JobFinding[] {
   const findings: JobFinding[] = [];
   // #535 — A PURE GOAL JOB's derived setup has no items BY DESIGN: the goal mesh is the setup's
   // one program (the surfacing pass). The rest-pass bookkeeping below measures a clearing program
@@ -3073,7 +3142,8 @@ export function setupProgramFindings(job: EngraveJob): JobFinding[] {
         });
       }
 
-      const unassigned = setup.itemIds.filter((id) => !claimed.has(id));
+      const owned = ownedTools ?? getTools();
+      const unassigned = setup.itemIds.filter((id) => !claimed.has(id) && !holeWithNoCutter(job, id, owned));
       if (unassigned.length > 0) {
         findings.push({
           severity: 'error',

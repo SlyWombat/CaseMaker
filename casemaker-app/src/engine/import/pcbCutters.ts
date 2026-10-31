@@ -109,11 +109,17 @@ export function pcbHoleAssignment(
     if (decided === undefined) {
       decided = decide(hole);
       bySize.set(key, decided);
+      const count = drills.filter((d) => d.diameter !== undefined && d.diameter.toFixed(3) === key).length;
       if (decided.mode === 'bore') {
-        const count = drills.filter((d) => d.diameter !== undefined && d.diameter.toFixed(3) === key).length;
         notes.push(
           `No owned ⌀${mm(hole)} mm drill or end mill within +${PCB_DRILL_SLACK_MM} mm; ` +
             `the ${count} ⌀${mm(hole)} hole${count === 1 ? ' is' : 's are'} bored to size with a flat end mill.`,
+        );
+      } else if (decided.key === null) {
+        // #743 P-5 review — INFORM: the rest of the board still posts, and this size is left out.
+        notes.push(
+          `No owned drill or flat end mill makes the ⌀${mm(hole)} mm holes ` +
+            `(${count}); ${count === 1 ? 'it is' : 'they are'} left out of the programs.`,
         );
       }
     }

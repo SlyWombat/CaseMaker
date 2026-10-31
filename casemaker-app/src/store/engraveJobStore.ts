@@ -2533,7 +2533,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         const notes = [
           ...planned.skipped.map((n) => `${n} is not a Gerber or drill file and was not used.`),
           ...plan.notes,
-          ...holes.notes,
+          // `cutters.notes` already carries §3.4's hole notes (its own `pcbHoleAssignment` call).
           ...cutters.notes,
         ];
         return {

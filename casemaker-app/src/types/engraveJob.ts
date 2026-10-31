@@ -886,8 +886,9 @@ export interface EngraveFrameShape extends EngraveShapeBase {
   width: Mm;
   /**
    * #743 P-4/D5 — this band exists to SEPARATE copper: every piece the design keeps must come out
-   * apart. Two pieces the cut cannot separate are `isolation-short`, an error (a short is a broken
-   * board), where a thinned letter would only be cosmetic. Absent on every other frame.
+   * apart. Two pieces the cut cannot separate are `isolation-short`, a WARNING with its place and
+   * both widths — the board still cuts, and the operator may bridge the gap by hand or accept it on
+   * a test board (the 2026-10-29 inform-first rule). Absent on every other frame.
    */
   isolation?: boolean;
 }

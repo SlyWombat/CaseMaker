@@ -43,7 +43,7 @@ import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
-import { dedupeFindings, withTargetBlobState, itemKindWord, itemRowName, jobSetups, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, withTargetBlobState, itemKindWord, itemRowName, jobSetups, jobTool, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
 import { toolForJob } from '@/engine/cnc/toolRegistry';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
@@ -1531,6 +1531,34 @@ export function EngravePanel(): JSX.Element {
    * click. The point of the option is to turn a dead end into the part the operator can have, not
    * into a second thing to find — the operator still chose it.
    */
+  /**
+   * #743 P-5 — the isolation-short warning's one-click fix: give the isolation frame to the owned
+   * engraver whose tip would open the measured gap. The plan is the setup's CURRENT one with that
+   * one cutter swapped, so every other item keeps its cutter and order.
+   */
+  const giveIsolationToFinerEngraver = (finding: JobFinding): void => {
+    const cutterKey = finding.suggestedCutterKey;
+    const frameId = finding.labelId;
+    if (cutterKey === undefined || frameId === undefined) return;
+    const setup = jobSetups(job)[0];
+    if (setup === undefined) return;
+    const tools = setupTools(setup, job);
+    const plan = tools.map((key, i) => ({ key, items: [...toolItemsFor(setup, key, i)] }));
+    const owner = plan.find((c) => c.items.includes(frameId));
+    if (owner !== undefined && owner.key === cutterKey) return;
+    if (owner === undefined) plan.push({ key: cutterKey, items: [frameId] });
+    else owner.key = cutterKey;
+    // One cutter, one entry: a library that already lists the key merges its items rather than
+    // assigning the frame twice.
+    const merged: { key: string; items: string[] }[] = [];
+    for (const c of plan) {
+      const prev = merged.find((m) => m.key === c.key);
+      if (prev === undefined) merged.push({ ...c, items: [...c.items] });
+      else prev.items.push(...c.items);
+    }
+    useEngraveJobStore.getState().applyCutterPlan(merged);
+  };
+
   const cutTopBand = (finding: JobFinding): void => {
     updateTargetObject({ cutWithinReach: true });
     if (errors.length === 1 && errors[0]?.code === 'goal-reach-short' && errors[0]?.targetId === finding.targetId) {
@@ -3161,6 +3189,13 @@ export function EngravePanel(): JSX.Element {
           maxDepthWhy={maxDepthWhy}
           candidates={referenceableItems(shape.id)}
           findings={findingsFor(shape.id)}
+          findingAction={(f) =>
+            f.code === 'isolation-short' && f.suggestedCutterKey !== undefined && f.suggestedCutterDiameterMm !== undefined ? (
+              <button type="button" data-testid="engrave-pcb-finer-engraver" onClick={() => giveIsolationToFinerEngraver(f)}>
+                Use the ⌀{f.suggestedCutterDiameterMm} mm engraver
+              </button>
+            ) : null
+          }
           rest={shape.construction === true ? null : restFor(shape.id)}
           technical={vCarveTechnical(shape.id)}
           onChange={(patch) => updateCombined(shape.id, patch)}

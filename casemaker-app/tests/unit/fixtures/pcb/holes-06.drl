@@ -1,0 +1,10 @@
+M48
+; #743 P-5 review: two 0.6 mm holes no owned cutter can make
+METRIC,TZ
+FMAT,2
+T1C0.600
+%
+T1
+X10.0Y5.0
+X12.0Y5.0
+M30

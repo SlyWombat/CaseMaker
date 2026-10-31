@@ -214,7 +214,9 @@ export async function buildPcbJob(
     ok: true,
     job: withCutters,
     plan,
-    notes: [...skippedNotes, ...plan.notes, ...holes.notes, ...cutters.notes],
+    // `cutters.notes` already carries §3.4's hole notes (its own `pcbHoleAssignment` call), so a
+    // missing size is said once.
+    notes: [...skippedNotes, ...plan.notes, ...cutters.notes],
     warnings: plan.warnings,
   };
 }

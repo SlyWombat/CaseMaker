@@ -372,7 +372,7 @@ const combinedShapeSchema = z.discriminatedUnion('kind', [
     isolation: z
       .boolean()
       .optional()
-      .describe('True when this band must separate every piece of the copper it follows (#743): a band the cut cannot open is an error, not a warning.'),
+      .describe('True when this band must separate every piece of the copper it follows (#743): a gap the cut cannot open is reported as isolation-short — a warning with its place, because the rest of the board still cuts.'),
   }),
   shapeBaseSchema.extend({
     kind: z

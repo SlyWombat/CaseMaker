@@ -74,13 +74,14 @@ import {
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
-import { entryFor } from '@/engine/cnc/toolRegistry';
+import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import {
   dedupeFindings,
   goalSides,
+  holeNoCutterFindings,
   jobHasItems,
   jobSetups,
   pureGoalObject,
@@ -5040,7 +5041,7 @@ export function engraveGenerate(
 
   // A setup that cannot become exactly one program is refused BEFORE anything is cut: the panel's
   // validation says the same sentence (#419 J3, `setupProgramFindings`).
-  const setupProblems = setupProgramFindings(job);
+  const setupProblems = setupProgramFindings(job, shop.tools);
   if (setupProblems.length > 0) {
     return {
       ok: false,
@@ -5225,7 +5226,13 @@ export function engraveGenerate(
     ...first,
     ok: stopped === undefined && restErrors.length === 0,
     stage: stopped?.stage ?? (restErrors.length > 0 ? 'findings' : 'done'),
-    findings: dedupeFindings([...attempts.flatMap((one) => one.findings), ...restFindings]),
+    findings: dedupeFindings([
+      ...attempts.flatMap((one) => one.findings),
+      ...restFindings,
+      // #743 P-5 — a HOLE NO OWNED CUTTER MAKES belongs to no program, so no per-program sub-job
+      // ever validates it. State it on the whole job, once, so the run still posts everything else.
+      ...holeNoCutterFindings(job, shop.tools ?? getTools()),
+    ]),
     errors: attempts.flatMap((one) => one.errors),
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
     surface: shop.surface ?? null,

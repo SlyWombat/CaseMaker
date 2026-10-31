@@ -76,6 +76,8 @@ export interface EngraveCombinedRowProps {
   onRemove: () => void;
   /** Findings about THIS shape (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
+  /** #743 P-5 — a one-click fix under a finding's sentence, when the panel has one. */
+  findingAction?: (finding: JobFinding) => ReactNode;
   /**
    * #667 — the rest pair's control data (the setup's rough and rest cutters), or null when this
    * row's item is not in a setup or the job has no cutter. The panel owns the registry reading.
@@ -94,6 +96,7 @@ export function EngraveCombinedRow({
   onChange,
   onRemove,
   findings,
+  findingAction,
   rest = null,
   technical = null,
 }: EngraveCombinedRowProps): JSX.Element {
@@ -173,6 +176,7 @@ export function EngraveCombinedRow({
       removeTitle="Remove this item."
       removeNoun={KIND_LABEL[shape.kind].toLowerCase()}
       findings={findings}
+      {...(findingAction === undefined ? {} : { findingAction })}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
       restLabel={rest?.chip ?? null}

@@ -26,7 +26,8 @@ import { jobSetups, setupTools, toolItemsFor, type JobFinding } from '@/engine/c
 import { toolForJob } from '@/engine/cnc/toolRegistry';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import { vCone, type VCone } from '@/engine/cnc/vProfile';
+import { vCone, vFluteLength, type VCone } from '@/engine/cnc/vProfile';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { Profile } from '@/engine/compiler/profile';
 import type { EngraveAnyItem, EngraveJob } from '@/types/engraveJob';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
@@ -49,6 +50,11 @@ export interface PcbIsolationInput {
   zToleranceMm: number;
   /** The frame item, for the finding's row. */
   frameId: string;
+  /**
+   * The owned engravers, tip diameter in mm — how the one-click fix is named. The finest that would
+   * open a measured gap at this depth is offered on the finding; empty when the caller has no list.
+   */
+  engravers?: readonly { key: string; tipMm: number }[];
 }
 
 /** Areas below this are clamping dust, mm² — the same floor the oracle uses for a sliver. */
@@ -75,6 +81,65 @@ function bboxOf(cs: CrossSectionInstance): { minX: number; maxX: number; minY: n
 function centreOf(cs: CrossSectionInstance): { x: number; y: number } {
   const b = bboxOf(cs);
   return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+}
+
+
+type Pt = [number, number];
+type Rings = number[][][];
+
+/** Squared distance from point p to segment ab. */
+function pointSegmentDist2(p: Pt, a: Pt, b: Pt): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len = dx * dx + dy * dy;
+  let t = len > 0 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len : 0;
+  t = Math.max(0, Math.min(1, t));
+  const qx = a[0] + t * dx;
+  const qy = a[1] + t * dy;
+  return (p[0] - qx) ** 2 + (p[1] - qy) ** 2;
+}
+
+/** True when segments ab and cd cross (proper or touching). */
+function segmentsCross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
+  const cross = (o: Pt, p: Pt, q: Pt): number => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+  const d1 = cross(a, b, c);
+  const d2 = cross(a, b, d);
+  const d3 = cross(c, d, a);
+  const d4 = cross(c, d, b);
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+  const on = (o: Pt, p: Pt, q: Pt, v: number): boolean =>
+    v === 0 &&
+    Math.min(o[0], p[0]) - 1e-12 <= q[0] &&
+    q[0] <= Math.max(o[0], p[0]) + 1e-12 &&
+    Math.min(o[1], p[1]) - 1e-12 <= q[1] &&
+    q[1] <= Math.max(o[1], p[1]) + 1e-12;
+  return on(a, b, c, d1) || on(a, b, d, d2) || on(c, d, a, d3) || on(c, d, b, d4);
+}
+
+/** The closest approach between two placed polygon sets, mm — the gap between two copper pieces. */
+function closestApproach(a: Rings, b: Rings): number | null {
+  let best = Number.POSITIVE_INFINITY;
+  for (const ringA of a) {
+    for (const ringB of b) {
+      for (let i = 0; i < ringA.length; i++) {
+        const a1 = ringA[i] as Pt;
+        const a2 = ringA[(i + 1) % ringA.length] as Pt;
+        for (let j = 0; j < ringB.length; j++) {
+          const b1 = ringB[j] as Pt;
+          const b2 = ringB[(j + 1) % ringB.length] as Pt;
+          if (segmentsCross(a1, a2, b1, b2)) return 0;
+          const d = Math.min(
+            pointSegmentDist2(a1, b1, b2),
+            pointSegmentDist2(a2, b1, b2),
+            pointSegmentDist2(b1, a1, a2),
+            pointSegmentDist2(b2, a1, a2),
+          );
+          if (d < best) best = d;
+        }
+      }
+    }
+  }
+  return Number.isFinite(best) ? Math.sqrt(best) : null;
 }
 
 /**
@@ -104,7 +169,8 @@ export function pcbIsolationFindings(tl: ManifoldToplevel, input: PcbIsolationIn
           const pieces = copperCS.decompose();
           try {
             const pieceBoxes = pieces.map(bboxOf);
-            const joins = new Map<string, { pieces: number[]; places: { x: number; y: number }[] }>();
+            const pieceRings = pieces.map((p) => p.toPolygons() as Rings);
+            const joins = new Map<string, { pieces: number[]; places: { x: number; y: number }[]; gapMm: number }>();
             for (const part of uncut.decompose()) {
               try {
                 if (!(part.area() > AREA_FLOOR_MM2)) continue;
@@ -134,8 +200,20 @@ export function pcbIsolationFindings(tl: ManifoldToplevel, input: PcbIsolationIn
                   }
                   if (touched.length < 2) continue;
                   const key = [...touched].sort((a, b) => a - b).join('-');
-                  const entry = joins.get(key) ?? { pieces: touched, places: [] };
+                  const entry = joins.get(key) ?? { pieces: touched, places: [], gapMm: -1 };
                   entry.places.push(centreOf(part));
+                  // The gap AT THE COPPER: the closest approach between the pieces this band fails
+                  // to separate — the exact width the design left between them.
+                  if (entry.gapMm < 0) {
+                    let gap = Number.POSITIVE_INFINITY;
+                    for (let i = 0; i < touched.length; i++) {
+                      for (let j = i + 1; j < touched.length; j++) {
+                        const d = closestApproach(pieceRings[touched[i]!] ?? [], pieceRings[touched[j]!] ?? []);
+                        if (d !== null && d < gap) gap = d;
+                      }
+                    }
+                    entry.gapMm = Number.isFinite(gap) ? gap : 0;
+                  }
                   joins.set(key, entry);
                 } finally {
                   reach.delete();
@@ -151,14 +229,28 @@ export function pcbIsolationFindings(tl: ManifoldToplevel, input: PcbIsolationIn
                 .map((p) => place(p.x, p.y))
                 .join(', ');
               const more = join.places.length > PLACES_SHOWN ? `, and ${join.places.length - PLACES_SHOWN} more` : '';
+              // A finer engraver is the one-click fix when the library has one: its tip must satisfy
+              // tip/2 + (depth − copper)·tan ≤ gap/2, i.e. tip ≤ gap − 2·(depth − copper)·tan.
+              const maxTip = join.gapMm > 0 ? join.gapMm - 2 * Math.max(0, depthMm - colourMm) * cone.tanHalf : 0;
+              const finer = (input.engravers ?? [])
+                .filter((e) => e.tipMm <= maxTip + 1e-9)
+                .sort((a, b) => a.tipMm - b.tipMm)[0];
+              const gapWords = join.gapMm > 0 ? `the gap is ${fmt(join.gapMm)} mm across and ` : '';
               findings.push({
-                severity: 'error',
+                // #743 P-5 review — INFORM, DO NOT REFUSE (the maintainer's 2026-10-29 rule). The board
+                // still cuts; the operator may bridge the gap by hand or accept it on a test board.
+                severity: 'warning',
                 code: 'isolation-short',
                 labelId: input.frameId,
+                ...(finer === undefined
+                  ? {}
+                  : { suggestedCutterKey: finer.key, suggestedCutterDiameterMm: finer.tipMm }),
                 message:
-                  `The isolation cannot open the gap near ${places}${more}: the cut is ` +
-                  `${fmt(cutWidth)} mm wide at the copper, and the gap is narrower, so two pieces of ` +
-                  'copper stay joined. Use a finer bit, or widen the gap in the board’s design.',
+                  `The isolation cannot open the gap near ${places}${more}: ${gapWords}the cut is ` +
+                  `${fmt(cutWidth)} mm wide at the copper, so two pieces of copper stay joined. ` +
+                  (finer === undefined
+                    ? 'A finer engraver would open it, or widen the gap in the board’s design.'
+                    : `A finer engraver opens it, or widen the gap in the board’s design.`),
               });
             }
           } finally {
@@ -257,6 +349,13 @@ export function pcbIsolationSubjects(
     ...(job.vectors ?? []),
   ];
   const byId = new Map(items.map((item) => [item.id, item] as const));
+  // The owned engravers, for the one-click fix: a cone with a stated flute and tip.
+  const engravers = tools.flatMap((entry) => {
+    const tip = cuttingDiameter(entry.tool);
+    return vCone(entry.tool) !== null && vFluteLength(entry.tool) !== null && tip !== null && tip > 0
+      ? [{ key: entry.key, tipMm: tip }]
+      : [];
+  });
   for (const item of job.combined ?? []) {
     if (item.kind !== 'frame' || item.isolation !== true || !item.enabled) continue;
     const engrave = plan.engraves.find((e) => e.id === item.id);
@@ -277,6 +376,7 @@ export function pcbIsolationSubjects(
       colourMm,
       zToleranceMm,
       frameId: item.id,
+      engravers,
     });
   }
   return out;

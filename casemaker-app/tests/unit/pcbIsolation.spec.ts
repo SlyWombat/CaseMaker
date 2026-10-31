@@ -97,11 +97,15 @@ describe('isolation-short (#743 P-5)', () => {
     });
     const short = findings.filter((f) => f.code === 'isolation-short');
     expect(short).toHaveLength(1);
-    expect(short[0]!.severity).toBe('error');
+    // #743 P-5 review — a WARNING: the board still cuts, and the operator may bridge the gap.
+    expect(short[0]!.severity).toBe('warning');
     // 0.1 tip + 2 × (0.1 − 0.035) × tan 30° = 0.175 mm at the copper; the 0.15 gap is narrower.
     expect(short[0]!.message).toContain('0.175 mm wide at the copper');
+    expect(short[0]!.message).toContain('the gap is 0.15 mm across');
     expect(short[0]!.message).toMatch(/near X \d+(\.\d)? Y \d+(\.\d)?/);
     expect(short[0]!.message).toContain('widen the gap');
+    // No finer engraver in this list: the message carries the design fix and no button.
+    expect(short[0]!.suggestedCutterKey).toBeUndefined();
   });
 
   it('passes a board whose only gap is 0.40 mm', () => {
@@ -156,7 +160,7 @@ describe('thin-trace (#743 P-5)', () => {
 });
 
 describe('the isolation reaches Generate (#743 P-5)', () => {
-  it('refuses the gaps board at the findings gate, before any program is posted', async () => {
+  it('still posts the gaps board, with the short stated as a warning', async () => {
     const built = await buildPcbJob(tl, [file('gaps.gbr')], {
       blank: BLANK,
       tabs: { count: 3, width: 3, height: 1 },
@@ -168,10 +172,11 @@ describe('the isolation reaches Generate (#743 P-5)', () => {
     const job = built.job;
     job.toolKey = ENGRAVER.key;
     const gen = engraveGenerate(tl, job, ENGRAVER.tool, ROWS, null, undefined, { tools: [ENGRAVER, CORN] });
-    expect(gen.ok).toBe(false);
-    expect(gen.stage).toBe('findings');
-    expect(gen.programs).toEqual([]);
-    expect(gen.findings.some((f) => f.code === 'isolation-short' && f.severity === 'error')).toBe(true);
+    // #743 P-5 review — INFORM: the board still generates; the short is a warning on the run.
+    expect(gen.errors).toEqual([]);
+    expect(gen.ok).toBe(true);
+    expect(gen.programs.length).toBeGreaterThan(0);
+    expect(gen.findings.some((f) => f.code === 'isolation-short' && f.severity === 'warning')).toBe(true);
   });
 
   it('generates the board whose gap opens', async () => {

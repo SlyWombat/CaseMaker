@@ -102,6 +102,11 @@ export interface EngraveItemRowProps {
    */
   removeNoun: string;
   findings: readonly JobFinding[];
+  /**
+   * #743 P-5 — an optional one-click fix drawn under a finding's sentence (the isolation's finer
+   * engraver). Return null for a finding with no action; the row draws nothing then.
+   */
+  findingAction?: (finding: JobFinding) => ReactNode;
   onToggleEnabled: (enabled: boolean) => void;
   onRemove: () => void;
   /** The editor. Drawn only while the row is open. */
@@ -149,6 +154,7 @@ export function EngraveItemRow({
   removeTitle,
   removeNoun,
   findings,
+  findingAction,
   onToggleEnabled,
   onRemove,
   children,
@@ -314,6 +320,14 @@ export function EngraveItemRow({
               {f.message}
             </p>
           ))}
+          {findings.map((f, i) => {
+            const action = findingAction?.(f) ?? null;
+            return action === null ? null : (
+              <div key={`action-${f.code}-${i}`} data-testid={`${prefix}-finding-action-${index}-${f.code}`} style={{ margin: '2px 0 4px' }}>
+                {action}
+              </div>
+            );
+          })}
           {children}
           {technical !== null && (
             <details data-testid={`${prefix}-technical-${index}`} style={{ marginTop: 6 }}>
