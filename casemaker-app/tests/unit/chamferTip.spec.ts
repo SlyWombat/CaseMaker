@@ -86,7 +86,9 @@ describe('#740 — an unrecorded tip is asked for, not invented', () => {
     expect(ask[0]!.message).toContain('C1-BIT-CHAMFER-90');
     expect(ask[0]!.message).toContain('tip ⌀');
     expect(ask[0]!.message).toContain('mm');
-    expect(ask[0]!.message).toContain('Manage → Tools');
+    // #786 slice 6 — the field is answered on the record where the sentence is read (the panel
+    // draws the input beside it), not by a trip to another screen.
+    expect(ask[0]!.message).toContain('cutter’s record');
     expect(ask[0]!.message).not.toContain('tool-tip-unrecorded');
     expect(ask[0]!.labelId).toBeUndefined();
 

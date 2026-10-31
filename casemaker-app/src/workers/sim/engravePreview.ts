@@ -585,9 +585,17 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     const catalogueEntries = withCatalogueEntries(tools);
     const resolvedTool = toolForJob(job, catalogueEntries);
     const tool = resolvedTool === null ? null : withCatalogueValues(resolvedTool, catalogueEntries).tool;
+    // #786 slice 6 — the job's OWN SNAPSHOT is enriched too, exactly as `engraveGenerate` does
+    // (there at the top of `engraveRegions`' caller): `validateJob` reads `jobTool(job)`, and the
+    // snapshot wins over the list, so a blank base diameter that the catalogue states would
+    // otherwise still refuse the chamfer here while the run cuts it.
+    const judgedJob =
+      job.tool === undefined || job.tool === null
+        ? job
+        : { ...job, tool: withCatalogueValues(job.tool, catalogueEntries).tool };
     const { plan, measured, cuts, findings, colourBoundaryDepth, floors: supportingFloors } = engraveRegions(
       tl,
-      job,
+      judgedJob,
       tool,
       margins,
       { ...shop, tools: catalogueEntries },

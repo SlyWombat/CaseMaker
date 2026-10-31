@@ -19,7 +19,7 @@ import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob
 import { Z1 } from '@/engine/cnc/machine';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 
 /** The house's own 30° engraver: its tip and flute are NOT recorded, but it carries Makera's id. */
 const ID = '9000000000001001';
@@ -170,4 +170,111 @@ describe('#786 4c-2 the engine cuts with the catalogue value', () => {
     expect(smallSpan.dx).toBeCloseTo(20 - 2 * inset, 1);
     expect(smallSpan.dy).toBeCloseTo(10 - 2 * inset, 1);
   }, 60_000);
+});
+
+/** A 90° chamfer whose record states its tip and angle but NOT the body its cone flares to. */
+const USER_CHAMFER: Tool = flatEndMill(3.175, {
+  id: ID,
+  name: '90° chamfer (no base)',
+  typeText: 'Chamfer',
+  shape: 'chamfer',
+  tipDiameter: 0.2,
+  diameter: null,
+  angle: 90,
+  halfAngle: null,
+  fluteLength: null,
+});
+
+/** Makera's row for the same g_ID: the 3.175 mm body the cone runs into (no tip, no flute). */
+const CAT_CHAMFER: Tool = flatEndMill(3.175, {
+  id: ID,
+  name: 'C1-BIT-CHAMFER-90',
+  typeText: 'Chamfer',
+  shape: 'chamfer',
+  tipDiameter: 0.2,
+  diameter: 3.175,
+  angle: 90,
+  halfAngle: null,
+  fluteLength: null,
+});
+
+const USER_CHAMFER_ENTRY: ToolLibraryEntry = { key: 'user:chamfer-90', tool: USER_CHAMFER, provenance: 'test' };
+const CAT_CHAMFER_ENTRY: ToolLibraryEntry = { key: 'cat:chamfer-90', tool: CAT_CHAMFER, provenance: 'test' };
+const FLAT_ENTRY: ToolLibraryEntry = {
+  key: 'user:flat-1-5-786',
+  tool: flatEndMill(1.5, { name: '1.5 mm flat (786)', fluteLength: 20, shoulderLength: 20 }),
+  provenance: 'test',
+};
+
+const IDENTITY = { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' } as const;
+function setup(id: string, itemIds: string[], tools: string[]): JobSetup {
+  return { id, orientation: { ...IDENTITY }, mount: { kind: 'vise' }, itemIds, tools };
+}
+
+/** A part's edge: a construction outline, the cut-out that frees it, the chamfer on its edge. */
+function chamferJob(): EngraveJob {
+  const base = defaultEngraveJob();
+  return {
+    ...base,
+    stock: { ...base.stock, length: 40, width: 30 },
+    labels: [],
+    traces: [],
+    shapes: [
+      {
+        id: 'part',
+        name: 'lid',
+        kind: 'rect',
+        position: { x: 20, y: 15 },
+        rotation: 0,
+        depth: 1,
+        enabled: true,
+        width: 20,
+        height: 10,
+        cornerRadius: 0,
+        construction: true,
+      },
+    ],
+    cutouts: [
+      { kind: 'cutout', id: 'cut', name: 'lid-out', enabled: true, of: 'part', side: 'outside', inset: 0, tabs: { count: 2, width: 3, height: 1 } },
+    ],
+    chamfers: [{ kind: 'chamfer', id: 'ch', name: 'lid edge', side: 'outside', width: 0.5, enabled: true, of: 'part' }],
+    sacrificial: {
+      under: { thickness: base.breakthrough + 1, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'tape' },
+      sides: { left: null, right: null, front: null, back: null },
+      source: 'default',
+    },
+    toolKey: USER_CHAMFER_ENTRY.key,
+    tool: USER_CHAMFER,
+    setups: [setup('setup-1', ['ch'], [USER_CHAMFER_ENTRY.key]), setup('setup-2', ['part', 'cut'], [FLAT_ENTRY.key])],
+  };
+}
+
+describe('#786 slice 6 the catalogue states the cone’s body', () => {
+  it('fills a chamfer’s blank diameter from the row for the same g_ID, and nothing else', () => {
+    const out = withCatalogueValues(USER_CHAMFER, [USER_CHAMFER_ENTRY, CAT_CHAMFER_ENTRY]);
+    expect(out.tool.diameter).toBe(3.175);
+    // The tip is the operator's own claim (0.2) and the flute has no catalogue value to take.
+    expect(out.filled.map((f) => [f.field, f.mm])).toEqual([['diameter', 3.175]]);
+    expect(USER_CHAMFER.diameter).toBeNull();
+  });
+
+  it('engraveRegions proves the chamfer’s reach from it, so the finding clears and the sentence names the source', () => {
+    const entries = [USER_CHAMFER_ENTRY, CAT_CHAMFER_ENTRY, FLAT_ENTRY];
+    const gen = engraveRegions(tl, chamferJob(), USER_CHAMFER, undefined, { tools: entries }, null, []);
+    const codes = gen.findings.map((f) => f.code);
+    expect(codes).not.toContain('chamfer-reach-unproven');
+    const note = gen.findings.find((f) => f.code === 'tool-geometry-from-catalogue');
+    expect(note?.severity).toBe('info');
+    expect(note?.message).toContain('cutting diameter (3.175 mm)');
+    expect(note?.message).toContain(CAT_CHAMFER.name);
+  });
+
+  it('without a catalogue row the same record still asks for the diameter', () => {
+    const entries = [USER_CHAMFER_ENTRY, FLAT_ENTRY];
+    const gen = engraveRegions(tl, chamferJob(), USER_CHAMFER, undefined, { tools: entries }, null, []);
+    const ask = gen.findings.find((f) => f.code === 'chamfer-reach-unproven');
+    expect(ask?.severity).toBe('error');
+    expect(ask?.message).toContain('cutting diameter');
+    expect(gen.findings.map((f) => f.code)).not.toContain('tool-geometry-from-catalogue');
+  });
 });

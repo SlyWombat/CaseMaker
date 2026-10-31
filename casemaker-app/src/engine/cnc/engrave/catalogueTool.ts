@@ -23,7 +23,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 
 /** Which blank the catalogue filled, and the number it stated. */
 export interface CatalogueValue {
-  field: 'tip' | 'reach';
+  field: 'tip' | 'diameter' | 'reach';
   /** The catalogue's number, mm. */
   mm: number;
   /** The catalogue cutter's own name — the record the number comes from. */
@@ -83,6 +83,19 @@ export function withCatalogueValues(
     }
   }
 
+  // THE CUTTING DIAMETER — a V shape's BODY. A chamfer's reach at a given bevel width is the
+  // cone's flank up to its base, derived from the base diameter and the angle; a record that
+  // states neither a tip nor a base cannot say how wide a chamfer its cone reaches
+  // (`chamfer-reach-unproven`). The catalogue row for the same g_ID states the base it machined,
+  // so the body is filled from it — and the run then proves the reach it cuts with.
+  if (isVShape(tool) && positive(tool.diameter) === null) {
+    const stated = positive(twin.tool.diameter);
+    if (stated !== null) {
+      next = { ...next, diameter: stated };
+      filled.push({ field: 'diameter', mm: stated, cutterName: twin.tool.name });
+    }
+  }
+
   // THE REACH — a cutter that states neither a shoulder nor a flute. The shoulder wins when the
   // catalogue states one, because it is the shank-collision limit the holder rule reads first.
   if (positive(tool.shoulderLength) === null && positive(tool.fluteLength) === null) {
@@ -138,8 +151,10 @@ export function catalogueValueSentence(tool: Tool, filled: readonly CatalogueVal
   const parts = filled.map((f) =>
     f.field === 'tip'
       ? `its tip ⌀ (${mm3(f.mm)} mm) from Makera's catalogue record for "${f.cutterName}"`
-      : `its reach (${mm3(f.mm)} mm) from Makera's catalogue record for "${f.cutterName}"`,
+      : f.field === 'diameter'
+        ? `its cutting diameter (${mm3(f.mm)} mm) from Makera's catalogue record for "${f.cutterName}"`
+        : `its reach (${mm3(f.mm)} mm) from Makera's catalogue record for "${f.cutterName}"`,
   );
   const joined = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]!}`;
-  return `The cutter "${tool.name}" records no ${filled.map((f) => (f.field === 'tip' ? 'tip ⌀' : 'flute length')).join(' or ')}; this run uses ${joined}.`;
+  return `The cutter "${tool.name}" records no ${filled.map((f) => (f.field === 'tip' ? 'tip ⌀' : f.field === 'diameter' ? 'cutting diameter' : 'flute length')).join(' or ')}; this run uses ${joined}.`;
 }
