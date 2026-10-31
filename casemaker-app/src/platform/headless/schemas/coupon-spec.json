@@ -1009,6 +1009,64 @@
           "minimum": 0,
           "type": "number"
         },
+        "faces": {
+          "description": "Cuts on the round stock’s faces (flats, rings, cross-holes), in cut order; omit for none.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "a": {
+                "description": "The index the cut is taken at, degrees (the first face of a ring).",
+                "type": "number"
+              },
+              "acrossFlats": {
+                "description": "The across-flats a ring leaves, millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "atX": {
+                "description": "Where along the stock a cross-hole is drilled, millimetres from the jaw face.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "count": {
+                "description": "How many flats a ring cuts.",
+                "maximum": 24,
+                "minimum": 3,
+                "type": "integer"
+              },
+              "depth": {
+                "description": "A flat's depth below the surface, millimetres.",
+                "type": "number"
+              },
+              "diameter": {
+                "description": "A cross-hole's diameter, millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "id": {
+                "description": "Id of this face operation, unique within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "description": "The kind of cut taken on the face.",
+                "enum": [
+                  "flat",
+                  "faces-all-round",
+                  "cross-hole"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "a"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "facing": {
           "description": "The facing pass to run first; omit to skip facing.",
           "properties": {

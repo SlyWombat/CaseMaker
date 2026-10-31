@@ -506,6 +506,11 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     }
 
     const minRapidZ = ctx.minRapidZ;
+    // #241 slice 2 — the file's own class, from the same reader the simulator uses: a WRAPPED
+    // program (a cutting move changes A) keeps Y 0 everywhere; an INDEXED one may move Y while A
+    // is held, and turns only with the cutter over the axis. The class is the file's, not the
+    // caller's, so a hand-written or imported file is judged by what it does.
+    const wrappedFile = timeline.summary.rotaryClass === 'wrapped';
 
     let state: MachineState = initialState(ctx.setup);
     let seenCut = false;
@@ -578,14 +583,20 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       const toW = after.work;
       const isCut = m.mode === 'cut' && state.spindle !== 'off';
 
-      // ---- #240 — "leaves the line over the axis". A rotary program keeps the cutter over the
-      // axis (R1): every Y is 0, on any move, cutting or not. Checked on both ends so a diagonal
-      // that leaves and returns is caught at either end.
+      // ---- #240 — "leaves the line over the axis". A WRAPPED program keeps the cutter over the
+      // axis (R1): every Y is 0, on any move, cutting or not, because the column map interpolates
+      // A with X and Z. An INDEXED program (#241 slice 2) turns only at Y 0 too — a move that
+      // carries an A word is a turn — but while A is HELD its stock frame is a rigid rotation and
+      // the machine is an ordinary 3-axis mill, so a face pocket's step-over moves Y. Checked on
+      // both ends so a diagonal that leaves and returns is caught at either end.
       if (rotary !== null) {
-        for (const y of [fromW[1], toW[1]]) {
-          if (y !== null && Math.abs(y) > 1e-6) {
-            push('rotary-y-off-axis', m.line, offAxisSentence(y));
-            break;
+        const aWord = m.a !== null && (state.a === null || m.a !== state.a);
+        if (wrappedFile || aWord) {
+          for (const y of [fromW[1], toW[1]]) {
+            if (y !== null && Math.abs(y) > 1e-6) {
+              push('rotary-y-off-axis', m.line, offAxisSentence(y));
+              break;
+            }
           }
         }
       }
@@ -754,14 +765,18 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
           // move's lowest point (a V-bit's edge widens with depth, the flat rule's own reasoning).
           const lowest = Math.min(fromW[2] ?? rotary.radius, toW[2] ?? rotary.radius);
           const edgeRadius = toolRadiusOf(ctx.tool, Math.max(0, rotary.radius - lowest));
+          // An edge that lands EXACTLY on a band's line is clear — a pass planned to end there
+          // arrives within float dust of it (#241 slice 2), and a hair of overshoot is not a cut
+          // into the band. `BAND_EPS_MM` is the same micron every other reach check uses.
+          const BAND_EPS_MM = 1e-6;
           for (const p of [fromW, toW]) {
             if (p[0] === null) continue;
             const left = p[0] - edgeRadius;
-            if (left < ROTARY_JAW_KEEP_OUT_MM) {
+            if (left < ROTARY_JAW_KEEP_OUT_MM - BAND_EPS_MM) {
               push('wrap-into-clamp', m.line, jawsSentence(left));
               break;
             }
-            if (rotary.tailstock && p[0] + edgeRadius > rotary.stickout - ROTARY_TAILSTOCK_BAND_MM) {
+            if (rotary.tailstock && p[0] + edgeRadius > rotary.stickout - ROTARY_TAILSTOCK_BAND_MM + BAND_EPS_MM) {
               push('wrap-into-clamp', m.line, tailstockSentence(p[0] + edgeRadius, rotary.stickout));
               break;
             }
@@ -770,7 +785,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
             // would be a false sentence. #786 slice 1 part 2 — cutting air past the free end is
             // informed, not refused: the job finding states the reach, and the sweep's checks
             // have already judged anything the cutter would touch.
-            if (!rotary.tailstock && p[0] + edgeRadius > rotary.stickout) {
+            if (!rotary.tailstock && p[0] + edgeRadius > rotary.stickout + BAND_EPS_MM) {
               push('wrap-off-free-end', m.line, freeEndSentence(p[0] + edgeRadius, rotary.stickout), 'warning');
               break;
             }

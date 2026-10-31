@@ -1556,6 +1556,53 @@ const stockHoldSchema = z
   });
 
 /**
+ * #241 slice 2 — one cut ON A FACE of a round stock, with its index (see `EngraveFaceOp`).
+ *
+ * STRUCTURAL ONLY: the fields the kind needs must be present and no other kind's may be, because
+ * a document that says `cross-hole` while carrying a flat's depth is a muddle no reader can
+ * resolve. The numbers themselves are NOT bounded against the stock here — a flat deeper than the
+ * radius is a CUTTING mistake, and Generate names it in operator words rather than failing the
+ * whole document on load (the same rule `cutOverride` follows).
+ */
+const faceOpSchema = z
+  .object({
+    id: z.string().min(1).describe('Id of this face operation, unique within the job.'),
+    kind: z.enum(['flat', 'faces-all-round', 'cross-hole']).describe('The kind of cut taken on the face.'),
+    a: z.number().finite().describe('The index the cut is taken at, degrees (the first face of a ring).'),
+    depth: z.number().finite().describe("A flat's depth below the surface, millimetres.").optional(),
+    count: z.number().int().min(3).max(24).describe('How many flats a ring cuts.').optional(),
+    acrossFlats: z.number().finite().positive().describe('The across-flats a ring leaves, millimetres.').optional(),
+    diameter: z.number().finite().positive().describe("A cross-hole's diameter, millimetres.").optional(),
+    atX: z.number().finite().nonnegative().describe('Where along the stock a cross-hole is drilled, millimetres from the jaw face.').optional(),
+  })
+  .strict()
+  .superRefine((op, ctx) => {
+    const require_ = (key: 'depth' | 'count' | 'acrossFlats' | 'diameter', why: string): void => {
+      if (op[key] === undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: why });
+      }
+    };
+    const forbid = (keys: readonly ('depth' | 'count' | 'acrossFlats' | 'diameter' | 'atX')[]): void => {
+      for (const key of keys) {
+        if (op[key] !== undefined) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `a ${op.kind} has no \`${key}\`` });
+        }
+      }
+    };
+    if (op.kind === 'flat') {
+      require_('depth', 'a flat states its depth, in millimetres');
+      forbid(['count', 'acrossFlats', 'diameter', 'atX']);
+    } else if (op.kind === 'faces-all-round') {
+      require_('count', 'faces all round states how many faces');
+      require_('acrossFlats', 'faces all round states the across-flats it leaves, in millimetres');
+      forbid(['depth', 'diameter', 'atX']);
+    } else {
+      require_('diameter', 'a cross-hole states its diameter, in millimetres');
+      forbid(['depth', 'count', 'acrossFlats']);
+    }
+  });
+
+/**
  * The job's own Z-error margins (#345). OPTIONAL, not defaulted: a job with none runs on the house
  * setting at generate time, and a stored document that keeps no key round-trips byte-for-byte.
  * Both numbers may be 0 (a job that has decided it needs no margin), so neither is `.positive()`.
@@ -2367,6 +2414,12 @@ const engraveJobV3Schema = engraveJobV2Schema
     itemsHold: stockHoldSchema
       .optional()
       .describe('The hold the item positions are written in; omit when they are in the shipped orientation.'),
+    // #241 slice 2 — the face operations, in cut order, each with its own index. OPTIONAL and not
+    // defaulted, like every list above: a job without them is exactly the job it was.
+    faces: z
+      .array(faceOpSchema)
+      .optional()
+      .describe('Cuts on the round stock’s faces (flats, rings, cross-holes), in cut order; omit for none.'),
     // #240 §1 — version 3 is the first version that can state the rotary chuck. v1/v2 keep their
     // vise-only arm (a document at either version predates the module's model), so a v3 document
     // gains nothing unless it actually says `rotary-chuck`.

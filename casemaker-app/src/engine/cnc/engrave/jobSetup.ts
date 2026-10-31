@@ -398,6 +398,19 @@ export type JobFindingCode =
   | 'neck-too-narrow-for-cutter'
   | 'neck-jaw-clearance'
   | 'neck-not-cut'
+  // #241 slice 2 — THE FACE OPERATIONS' refusals (see `rotary/faceOps.ts`). `face-needs-chuck` — a
+  // job with faces is not round stock in the rotary chuck; `face-needs-flat-tool` — the cutter has
+  // no flat width to cut a face with; `face-too-deep` — a depth reaches the axis, or an
+  // across-flats is not inside the stock; `face-no-room` — the free span between the bands leaves
+  // no room for the cutter; `face-items-mixed` — the job carries map items AND faces, which one
+  // program cannot be; `cross-hole-cutter` (warning) — the cross-hole's diameter differs from the
+  // cutter's, so the hole comes out at the cutter's size.
+  | 'face-needs-chuck'
+  | 'face-needs-flat-tool'
+  | 'face-too-deep'
+  | 'face-no-room'
+  | 'face-items-mixed'
+  | 'cross-hole-cutter'
   // #666 — THE ADAPTIVE-CLEARING STRATEGY a metal pocket is cut with (see `cam/adaptive.ts`).
   // `adaptive-clearing` (info) states the plan the file was cut from — engagement, levels, entry,
   // feed owner — in the plan's own words. `adaptive-fallback` (warning) says the planner declined a
@@ -2787,7 +2800,10 @@ export function validateJob(
     enabledChamfers.length > 0 ||
     (options.derivedCores ?? 0) > 0 ||
     pureGoal !== null ||
-    sideGoals.length > 0;
+    sideGoals.length > 0 ||
+    // #241 slice 2 — a FACE OPERATION is work: an indexed job cuts its faces from a list that is
+    // not an item list, and "nothing to cut" over it would hide a job that generates a program.
+    (job.faces?.length ?? 0) > 0;
 
   if (!hasWork) {
     findings.push({
@@ -3390,8 +3406,12 @@ export function setupProgramFindings(
     // #723 P2-3 — a side that cuts a GOAL has its work stated on the goal, not in `itemIds`: the
     // surface program is the clearing pass, so "no items to measure the rest from" is not a fact
     // about this setup. (An item job that also cuts a side's goal keeps the rule for its items.)
+    //
+    // #241 slice 2 — a FACE JOB's work is its face list: the indexed program cuts the faces and
+    // holes the job states, and there is no clearing pass or rest pair to measure from items.
     const cutsGoal = goalSetupIds.has(setup.id);
-    if (firstItems.length === 0 && !cutsGoal) {
+    const cutsFaces = (job.faces?.length ?? 0) > 0;
+    if (firstItems.length === 0 && !cutsGoal && !cutsFaces) {
       findings.push({
         severity: 'error',
         code: 'setup-tool-no-items',

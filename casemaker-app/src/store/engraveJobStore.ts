@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { newId } from '@/utils/id';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { tabSettings, type TabSettings } from '@/engine/cnc/cam/tabSettings';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
@@ -19,6 +20,7 @@ import {
 import { defaultStockProud, jobVise, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { chuckStockOf, cylinderFrameOf, rodDimsOf, rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
 import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { faceOperationWords } from '@/engine/cnc/rotary/faceOps';
 import { defaultSacrificialUnder, sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
@@ -63,6 +65,7 @@ import type {
   EngraveCutout,
   EngraveCylinderPrimitive,
   EngraveDrill,
+  EngraveFaceOp,
   EngraveDrillArrayItem,
   EngraveDrillItem,
   EngraveFacing,
@@ -1065,6 +1068,15 @@ export interface EngraveJobState {
   /** Merge a hand edit into one drill (#220). A partial `position` is merged, not replaced. */
   updateDrill: (id: string, patch: DrillPatch) => void;
   removeDrill: (id: string) => void;
+  /**
+   * #241 slice 2 — add a cut ON A FACE of the round stock (a flat, a ring of flats or a
+   * cross-hole) and return its id. The operation carries its own index; `job.faces` is the cut
+   * order. Absent fields take the operation's stated default (see `defaultFaceOperation`).
+   */
+  addFaceOperation: (op: Omit<EngraveFaceOp, 'id'>) => string;
+  /** Merge a hand edit into one face operation (#241 slice 2). */
+  updateFaceOperation: (id: string, patch: Partial<Omit<EngraveFaceOp, 'id' | 'kind'>>) => void;
+  removeFaceOperation: (id: string) => void;
   /** Add a chamfer on the job's first rim (#669) and return its id. */
   addChamfer: () => string;
   /** Merge a hand edit into one chamfer (#669). */
@@ -1972,6 +1984,30 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         (job) => ({ ...job, drills: (job.drills ?? []).filter((d) => d.id !== id) }),
         removalWhat(drill),
         (job) => ({ ...job, drills: insertAt(job.drills ?? [], at, drill) }),
+      );
+    },
+
+    addFaceOperation: (op) => {
+      const face: EngraveFaceOp = { ...op, id: newId('face') };
+      apply((job) => ({ ...job, faces: [...(job.faces ?? []), face] }));
+      return face.id;
+    },
+
+    updateFaceOperation: (id, patch) =>
+      apply((job) => ({
+        ...job,
+        faces: (job.faces ?? []).map((face) => (face.id === id ? ({ ...face, ...patch } as EngraveFaceOp) : face)),
+      })),
+
+    removeFaceOperation: (id) => {
+      const list = get().job.faces ?? [];
+      const at = list.findIndex((f) => f.id === id);
+      const face = list[at];
+      if (!face) return;
+      removeWithUndo(
+        (job) => ({ ...job, faces: (job.faces ?? []).filter((f) => f.id !== id) }),
+        faceOperationWords(face),
+        (job) => ({ ...job, faces: insertAt(job.faces ?? [], at, face) }),
       );
     },
 

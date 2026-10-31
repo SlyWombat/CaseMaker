@@ -380,7 +380,7 @@ export function feedAtRadiusSentence(f: FeedAtRadiusFacts): string {
 
 /** "leaves the line over the axis" — work Y is not 0 (R1). */
 export function offAxisSentence(y: number): string {
-  return `leaves the line over the axis (Y ${Math.round(y * 1000) / 1000} mm): a rotary program keeps the cutter over the axis, and every Y is 0`;
+  return `leaves the line over the axis (Y ${Math.round(y * 1000) / 1000} mm): the stock turns only with the cutter over the axis, so a wrapped program keeps every Y at 0 and a move that changes A is taken at Y 0`;
 }
 
 /** "runs into the jaws" — a cut inside the jaws' keep-out band at the map's left end. */

@@ -4,8 +4,11 @@
  *
  * The IR produced here is a ROTARY-frame IR in the exact sense `ir.ts` defines (R6): X along the
  * stock axis, Z the distance ABOVE the rotary axis — so the surface is at `Z = radius` and a cut
- * `d` deep is at `radius − d` — Y ≡ 0 on every move, and an `a` on every move (R5: the post
- * refuses a rotary move without one, because it has no angular position to write).
+ * `d` deep is at `radius − d` — and an `a` on every move (R5: the post refuses a rotary move
+ * without one, because it has no angular position to write). Y is 0 except inside a FACE POCKET
+ * (#241 slice 2), where it is an ordinary axis: A is held for the whole run, so the stock frame is
+ * a rigid rotation and the machine is a 3-axis mill. A move that changes A is taken at Y 0 and in
+ * the air — the post's narrowed rule — so no turn is ever made off the axis.
  *
  * ONE PASS PER OPERATION, and that is the frame's doing, not a simplification: with the tool held
  * over the axis (R1) the cutter can only reach the face under it, so a pass is as wide as the
@@ -39,7 +42,7 @@ import {
   toolNumberFor,
 } from './ir';
 
-/** One face cut at one index angle: a single pass along X at constant Z levels. */
+/** One face cut at one index angle: X passes at constant Z levels, across the face's width. */
 export interface IndexedFace {
   /** The index angle, degrees. Unwound is allowed; the post writes it as given (R5). */
   a: number;
@@ -48,6 +51,17 @@ export interface IndexedFace {
   toX: Mm;
   /** Total depth below the surface at this index, positive mm. */
   depth: Mm;
+  /**
+   * #241 slice 2 — THE FACE'S WIDTH ACROSS Y, mm, centred on Y 0, for a FACE POCKET. Absent (or
+   * not wider than the cutter) is one pass over the axis, the shape every pre-slice-2 caller and
+   * every §6 fixture states. Present and wider, the face is cut by several X passes stepping over
+   * in Y at the SAME `Z = radius − depth`, which is a plane on a turned stock: A is held constant,
+   * so the machine is an ordinary 3-axis mill for the whole run and Y is an ordinary axis.
+   *
+   * The CALLER owns the chord: a flat `d` deep on radius R is `2√(R² − (R − d)²)` wide, and a
+   * width wider than the stock is clamped here rather than cutting air.
+   */
+  width?: Mm;
 }
 
 /** A cross-feature at one index angle: a plunge on the axis plane, through the stock if deep enough. */
@@ -81,19 +95,57 @@ function assertFinite(name: string, v: number): void {
   if (!Number.isFinite(v)) throw new Error(`generateIndexed: ${name} must be a finite number, got ${String(v)}`);
 }
 
-/** The moves of one face: a rapid in at the safe height, then a pass at each Z level. */
-function faceMoves(face: IndexedFace, radius: Mm, params: CutParams): CamMove[] {
+/**
+ * The Y centres of a face pocket's passes, mm — one at 0 when the face is no wider than the
+ * cutter, otherwise as many passes as the step-over needs, the outermost two tangent to the
+ * face's edges so the whole chord is cut. `stepOver` is the feeds row's own number (the design
+ * keeps it at or under the cutter's radius).
+ */
+export function facePassYs(width: Mm, cutterRadius: Mm, stepOver: Mm): number[] {
+  const half = Math.abs(width) / 2;
+  // A face no wider than the cutter, or a caller with no width, is the one pass over the axis.
+  if (!(width > 0) || half <= cutterRadius) return [0];
+  const reach = half - cutterRadius; // where the outermost pass's centre must sit
+  const step = Number.isFinite(stepOver) && stepOver > 0 ? Math.min(stepOver, cutterRadius) : cutterRadius;
+  const moves = Math.ceil((2 * reach) / step);
+  if (moves <= 1) return [0];
+  return Array.from({ length: moves + 1 }, (_, k) => -reach + (2 * reach * k) / moves);
+}
+
+/**
+ * The moves of one face: at each Z level, a pass at every Y the width needs.
+ *
+ * The first move states the index at Y 0 and the safe height — a turn is taken with the cutter
+ * over the axis and in the air. Every X traverse ALSO happens at the safe height, because the
+ * verifier refuses an X rapid below the rotary clearance; each pass then drops to the hop, cuts,
+ * and lifts back. Y itself moves only at the safe height, so no Y travel is made at cutting depth.
+ */
+function faceMoves(face: IndexedFace, radius: Mm, params: CutParams, cutterRadius: Mm): CamMove[] {
   const { a, fromX, toX } = face;
   const safe = radius + SAFE_Z;
   const hop = radius + HOP_Z;
+  const ys = facePassYs(face.width ?? 0, cutterRadius, params.stepOver);
   const moves: CamMove[] = [{ kind: 'rapid', x: fromX, y: 0, z: safe, a }];
+  let atX = fromX;
+  let atY = 0;
+  let atZ = safe;
   for (const z of zPasses(face.depth, params.stepDown)) {
-    moves.push({ kind: 'rapid', x: fromX, y: 0, z: hop, a });
-    moves.push({ kind: 'feed', x: fromX, y: 0, z: radius + z, f: params.plungeFeed, a });
-    moves.push({ kind: 'feed', x: toX, y: 0, z: radius + z, f: params.feed, a });
-    moves.push({ kind: 'rapid', x: toX, y: 0, z: hop, a });
+    for (const y of ys) {
+      // Lift clear of the stock, move over the axis plane at the safe height, then drop.
+      if (atZ !== safe) moves.push({ kind: 'rapid', x: atX, y: atY, z: safe, a });
+      moves.push({ kind: 'rapid', x: fromX, y, z: safe, a });
+      moves.push({ kind: 'rapid', x: fromX, y, z: hop, a });
+      moves.push({ kind: 'feed', x: fromX, y, z: radius + z, f: params.plungeFeed, a });
+      moves.push({ kind: 'feed', x: toX, y, z: radius + z, f: params.feed, a });
+      moves.push({ kind: 'rapid', x: toX, y, z: hop, a });
+      atX = toX;
+      atY = y;
+      atZ = hop;
+    }
   }
-  moves.push({ kind: 'rapid', x: toX, y: 0, z: safe, a });
+  // Home in Y before the next operation's turn, which must start over the axis.
+  if (atZ !== safe) moves.push({ kind: 'rapid', x: atX, y: atY, z: safe, a });
+  if (atY !== 0) moves.push({ kind: 'rapid', x: atX, y: 0, z: safe, a });
   return moves;
 }
 
@@ -122,6 +174,7 @@ export function generateIndexed(spec: IndexedSpec): ToolpathIR {
   if (!(radius > 0)) throw new Error(`generateIndexed: the stock radius must be > 0, got ${radius} mm`);
   const radiusResult = cuttingRadiusForSweep(tool);
   if (!radiusResult.ok) throw new Error(`generateIndexed: ${radiusResult.reason}`);
+  const cutterRadius = radiusResult.radius;
   if (!(params.stepDown > 0)) throw new Error(`generateIndexed: stepDown must be > 0, got ${params.stepDown} mm`);
 
   const toolNumber = toolNumberFor(tool);
@@ -136,7 +189,12 @@ export function generateIndexed(spec: IndexedSpec): ToolpathIR {
       throw new Error(`generateIndexed: the face at A${face.a} has an empty X span (${face.fromX} to ${face.toX})`);
     }
     if (!(face.depth > 0)) throw new Error(`generateIndexed: the face at A${face.a} must cut a positive depth, got ${face.depth} mm`);
-    const moves = faceMoves(face, radius, params);
+    if (face.width !== undefined) {
+      assertFinite('face.width', face.width);
+      if (!(face.width > 0)) throw new Error(`generateIndexed: the face at A${face.a} states a width of ${face.width} mm; a face pocket is wider than nothing`);
+      if (face.width > 2 * radius) throw new Error(`generateIndexed: the face at A${face.a} is ${face.width} mm wide, wider than the stock (⌀2×${radius} mm)`);
+    }
+    const moves = faceMoves(face, radius, params, cutterRadius);
     operations.push({
       number: number++,
       // Named for the machine's screen: the index the operator hears the chuck turn to.

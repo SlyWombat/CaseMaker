@@ -201,6 +201,8 @@ import {
   rotaryNeckOf,
   type RotaryNeckFacts,
 } from '@/engine/cnc/rotary/neck';
+import { generateIndexed } from '@/engine/cnc/cam/indexed';
+import { faceJobRefusal, planFaceCuts } from '@/engine/cnc/rotary/faceOps';
 import { rotaryMapOf, toRotaryIR } from '@/engine/cnc/rotary/wrap';
 import { rotaryFreeSpan, freeEndSentence, jawsSentence, tailstockSentence, throughCentreSentence } from '@/engine/cnc/rotary/wrap';
 import { generateRotaryReliefIR, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
@@ -2722,7 +2724,7 @@ function fmtArea(mm2: number): string {
 }
 
 /** Count what the panel reports: operations, cutting moves, estimated seconds, depth passes. */
-function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
+function summarize(ir: Pick<ToolpathIR, 'operations' | 'ordering'>): EngraveCamSummary {
   let cuttingMoves = 0;
   let passes = 0;
   let estimatedSeconds = 0;
@@ -4887,6 +4889,146 @@ export interface EngraveProgress {
 }
 export type EngraveProgressFn = (progress: EngraveProgress) => void;
 
+/**
+ * #241 slice 2 — A JOB WHOSE WORK IS ON THE STOCK'S FACES, GENERATED.
+ *
+ * `job.faces` is the operation list the wizard's step 4 makes (flats, rings of flats, cross-holes,
+ * each with its own index). `rotary/faceOps.ts` turns it into `cam/indexed.ts`'s faces and holes —
+ * a face a pocket at `Z = R − d` whose passes step over in Y — and into the per-face oracle
+ * predictions. Here that becomes ONE program: feeds from the job's own row, the indexed IR, the
+ * rotary post, and the verifier read against the chuck's frame (the narrowed Y rule included).
+ *
+ * The job must be round stock in the chuck, and must not also carry map items: a wrapped program
+ * and an indexed one are two programs, and one file cannot be both. Both refusals, and the
+ * operations' own geometry checks, are findings in operator words; nothing is cut until they
+ * clear. The result carries `frame: 'rotary'`, the predictions and a `verify` report, so the
+ * simulation, the oracle and the run gates read it exactly as they read a wrapped program.
+ */
+function generateFaceProgram(
+  job: EngraveJob,
+  tool: Tool | null,
+  catalogue: readonly FeedCatalogueRow[],
+  calibration: MachineCalibration | null,
+  margins: EngraveMargins,
+  shop: EngraveShopOpts,
+): EngraveGenerated {
+  const base = emptyGoalResult();
+  const fail = (
+    stage: EngraveStage,
+    message: string,
+    extra?: Partial<Pick<EngraveGenerated, 'feeds' | 'findings' | 'nc' | 'verify' | 'predicted' | 'cam'>>,
+  ): EngraveGenerated => ({
+    ...base,
+    ok: false,
+    stage,
+    findings: extra?.findings ?? [],
+    feeds: extra?.feeds ?? null,
+    cam: extra?.cam ?? null,
+    nc: extra?.nc ?? null,
+    verify: extra?.verify ?? null,
+    predicted: extra?.predicted ?? [],
+    errors: [{ stage, message }],
+  });
+
+  const documentFindings = dedupeFindings([
+    ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools, tool }),
+    ...(faceJobRefusal(job) === null ? [] : [faceJobRefusal(job)!]),
+  ]);
+  if (documentFindings.some((f) => f.severity === 'error')) {
+    return fail('findings', 'the job has a refusal that stops Generate', { findings: documentFindings });
+  }
+  if (tool === null) return fail('feeds', 'the job has no usable cutter', { findings: documentFindings });
+  const mill = jobMachine(job, calibration);
+  const feeds = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride, shop.feeds ?? undefined);
+  if (!feeds.ok) return fail('feeds', feeds.reason, { feeds, findings: documentFindings });
+  const map = rotaryMapOf(job);
+  if (map === null) return fail('findings', 'the face operations need the rotary chuck', { findings: documentFindings });
+
+  const planned = planFaceCuts(job, map, tool, feeds.params);
+  if (!planned.ok) {
+    return fail('findings', 'a face operation cannot be cut as it is', {
+      findings: dedupeFindings([...documentFindings, ...planned.findings]),
+      feeds,
+    });
+  }
+  const { faces, holes, predicted } = planned.plan;
+  const allFindings = dedupeFindings([...documentFindings, ...planned.findings]);
+
+  let ir: ToolpathIR;
+  try {
+    ir = generateIndexed({
+      radius: map.radius,
+      faces,
+      holes,
+      tool,
+      params: feeds.params,
+      rapid: mill.rapidEstimate,
+    });
+  } catch (e) {
+    return fail('cam', e instanceof Error ? e.message : String(e), { findings: allFindings, feeds });
+  }
+
+  const ctx: PostContext = {
+    jobName: job.name,
+    stock: { length: job.stock.length, width: 2 * map.radius, thickness: 2 * map.radius },
+    materialName: job.stock.material,
+    zDatum: 'rotary-axis',
+    origin: 'topFrontLeft',
+    camVersion: CAM_VERSION,
+    toolKey: job.toolKey,
+  };
+  let nc: string;
+  try {
+    const posted = postZ1(ir, ctx, mill, { vacuum: 'whole' });
+    if (!posted.ok) return fail('post', posted.errors.join('; '), { findings: allFindings, feeds });
+    nc = posted.text;
+  } catch (e) {
+    return fail('post', e instanceof Error ? e.message : String(e), { findings: allFindings, feeds });
+  }
+
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+  const limit: DepthLimit = jobDepthLimit(job, margins.boundaryMargin);
+  const verify = verifyProgram(nc, {
+    setup,
+    machine: mill,
+    tool,
+    depthLimit: limit,
+    minRapidZ: ir.hopZ,
+    rotary: { radius: map.radius, stickout: map.stickout, tailstock: map.tailstock },
+  });
+  if (verify.findings.some((f) => f.severity === 'error')) {
+    return fail('verify', `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)`, {
+      findings: allFindings,
+      feeds,
+      nc,
+      verify,
+      predicted,
+    });
+  }
+
+  const cam = summarize(ir);
+  const one: Omit<EngraveGenerated, 'programs'> = {
+    ...base,
+    ok: true,
+    stage: 'done',
+    findings: allFindings,
+    feeds,
+    cam,
+    nc,
+    frame: 'rotary',
+    verify,
+    predicted,
+    errors: [],
+  };
+  const ref: JobProgramRef = {
+    setupIndex: 1,
+    setupId: jobSetups(job)[0]!.id,
+    toolKey: job.toolKey,
+    itemIds: [],
+  };
+  return { ...one, programs: [programOf(one, ref)] };
+}
+
 export function engraveGenerate(
   tl: ManifoldToplevel,
   job: EngraveJob,
@@ -4940,6 +5082,14 @@ export function engraveGenerate(
       programs: [],
       errors: [],
     };
+  }
+
+  // #241 slice 2 — A JOB WHOSE WORK IS ON THE STOCK'S FACES. Its operations are a list, not the
+  // item pipeline's, so it is generated by its own function BEFORE the goal and item dispatches;
+  // one indexed program carries every face and hole in cut order. A job with faces AND map items
+  // is refused there, by name, because a wrapped program and an indexed one are two programs.
+  if ((job.faces ?? []).length > 0) {
+    return generateFaceProgram(job, tool, catalogue, calibration, margins, shop);
   }
 
   // #534 slice D — A PURE 3D-SURFACING JOB. A job whose only work is a `role: 'goal'` mesh is

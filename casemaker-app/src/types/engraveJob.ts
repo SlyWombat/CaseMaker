@@ -1181,6 +1181,52 @@ export interface RotaryNeck {
 /** The chuck's jaws, by Makera's rule by the rod's diameter (#714). */
 export type RotaryJawMode = 'standard' | 'reverse-inner' | 'reverse-outer';
 
+/** The kinds of cut taken ON A FACE of a round stock (`docs/design/rotary-flow.md` §3.6). */
+export type EngraveFaceOpKind = 'flat' | 'faces-all-round' | 'cross-hole';
+
+/**
+ * #241 slice 2 — ONE OPERATION CUT ON A FACE of a round stock, and the index (A) it is cut at.
+ *
+ * A is ON THE OPERATION, not on the job's setup: one mounting in the chuck can cut a hex's six
+ * faces in one program, so the angle belongs to each cut. The list is in CUT ORDER, exactly the
+ * order `cam/indexed.ts` walks into its faces and holes; `faces-all-round` expands to its `count`
+ * faces at `a + k·360/count` where it stands.
+ *
+ * The cut is an INDEXED one: A is held through the cut and turned only between operations, at the
+ * safe height. On a round stock a flat at depth `d` is as wide as the chord there,
+ * `2√(R² − (R − d)²)`, so it is cut as a FACE POCKET at `Z = R − d` with passes stepping over in Y
+ * (`rotary/faceOps.ts`). Y moves freely while A is held — an indexed run is an ordinary 3-axis cut
+ * on the rigidly turned stock — and a move that changes A is taken at Y 0, in the air. On a face,
+ * the plane is exactly the analytic chord segment, never a fan of facets.
+ *
+ * OPTIONAL on the job and absent-not-defaulted, so every document written before this field keeps
+ * its exact shape.
+ */
+export interface EngraveFaceOp {
+  /** Stable within the job; minted with `newId('face')`. */
+  id: string;
+  kind: EngraveFaceOpKind;
+  /** The index the cut is taken at, degrees (the FIRST face for `faces-all-round`). */
+  a: number;
+  /**
+   * `flat`: how deep below the stock's surface the face is cut, mm. The chord at that depth is the
+   * face's width; the CAM steps across it with neighbouring indexes when the cutter is narrower.
+   */
+  depth?: Mm;
+  /** `faces-all-round`: how many flats are cut, evenly spaced from {@link a}. */
+  count?: number;
+  /** `faces-all-round`: the across-flats the ring leaves, mm — the depth is `R − acrossFlats/2`. */
+  acrossFlats?: Mm;
+  /** `cross-hole`: the diameter asked for, mm. The job's cutter decides what the hole comes out at. */
+  diameter?: Mm;
+  /**
+   * `cross-hole`: where along the stock it is drilled, mm from the jaw face. Absent is the middle
+   * of the free span (`rotaryFreeSpan`). A cross-hole crosses the stock — the design's default and
+   * the one field list §3.6 gives it; a blind hole is a later operation, not this one.
+   */
+  atX?: Mm;
+}
+
 /**
  * A job held on the bed under tape (#707 BM-1, `docs/design/bed-mounts-flow.md` §3.4).
  *
@@ -1833,6 +1879,18 @@ export interface EngraveJob {
    * `job.primitives ?? []`.
    */
   primitives?: EngravePrimitive[];
+  /**
+   * #241 slice 2 — THE FACE OPERATIONS, in cut order: flats, rings of flats and cross-holes taken
+   * on a round stock held in the chuck, each carrying its own index (see {@link EngraveFaceOp}).
+   *
+   * A SEPARATE LIST, like `drills` and `threads`, so every exhaustive item switch keeps compiling
+   * and old documents keep parsing. A job that states them is an INDEXED rotary job: Generate walks
+   * this list, in order, into `cam/indexed.ts`'s faces and holes, and its per-face oracle judges
+   * each face at its own A. A job without the key is exactly the job it was.
+   *
+   * Optional, so a pre-#241 document round-trips byte-for-byte. Consumers read `job.faces ?? []`.
+   */
+  faces?: EngraveFaceOp[];
   /**
    * The reference object the primitives are positioned against (#435). OPTIONAL and absent on
    * every document that predates it. It is embedded rather than referenced by path, so the job

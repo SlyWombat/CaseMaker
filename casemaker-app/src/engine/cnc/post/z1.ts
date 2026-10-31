@@ -23,9 +23,16 @@
  * THE ROTARY DIALECT (#240, `/Rotary.md` R6). A rotary-frame IR with the `'rotary-axis'` datum
  * is posted by its own emitter, in the vendor's rotary structure (`Rotation/NefertitiRough.nc`):
  * `%`, the plane/unit/work-offset line, `M5`, the tool change, the spindle, a fed line to the
- * safe height, `G01 Y0 Z<safe>`, the moves with A modal and Y never a word, then the firmware's
- * `G92.4A0S0` unwind as the LAST motion, `M9`, `M5`, `M30`. Work Z is the distance above the
+ * safe height, `G01 Y0 Z<safe>`, the moves with A modal, then the firmware's `G92.4A0S0` unwind
+ * as the LAST motion, `M9`, `M5`, `M30`. Work Z is the distance above the
  * axis, so the stock's surface is at Z = radius and "safe" is the radius plus `ir.safeZ`.
+ *
+ * THE NARROWED Y RULE (#241 slice 2). The vendor's own rotary files keep Y 0, and the column
+ * map's whole reparameterisation (R1, R6) is written for moves that INTERPOLATE A — so a move
+ * carrying an A word is posted only at Y 0. Inside an indexed run A is held, the stock frame is a
+ * rigid rotation, and the machine is an ordinary 3-axis mill: a face pocket's step-over moves in
+ * Y there, and the file states it. `/Rotary.md` R1/R6 carry this exception and #238 carries the
+ * bench check for it.
  *
  * NO `;@MKR` HEADER ON A ROTARY FILE. The vendor's rotary output carries none, and the round
  * stock's `STOCK`/`ORIGIN` forms are §9's open question. FOR THE BENCH, as a candidate only: the
@@ -201,23 +208,32 @@ function postRotary(
 
   const surface = radiusOk ? (radius as number) : null;
   let moveIndex = 0;
+  // #241 slice 2 — THE NARROWED Y RULE. Y is 0 for the whole file EXCEPT inside an indexed run,
+  // where A is held: the stock frame is then a rigid rotation and the machine is an ordinary
+  // 3-axis mill, so a face pocket's step-over moves in Y. A move that CHANGES A is a turn, and a
+  // turn is taken with the cutter over the axis at Y 0 — the column map's contract (R1/R6) is
+  // about moves that interpolate A, and this file never does that off the axis.
+  let prevA: number | null = null;
   for (const op of ir.operations) {
+    // The emitter re-states A on every operation's first move, so each op starts a new word.
+    prevA = null;
     for (const move of op.moves) {
       // R5 — `a` is OPTIONAL on the type so every flat IR stays constructible unchanged, and the
       // post is where it becomes required: a rotary move with no A has no angular position, and
       // inventing one would cut a different path from the one CAM planned.
-      if (move.a === undefined || !Number.isFinite(move.a)) {
+      const hasA = move.a !== undefined && Number.isFinite(move.a);
+      if (!hasA) {
         errors.push(
           `move ${moveIndex}: a rotary-frame IR needs a finite A position (degrees) on every move, and this one has ${move.a === undefined ? 'none' : String(move.a)}`,
         );
       }
-      // R1 — the tool axis passes through the rotary axis, so work Y is 0 for the whole file.
-      // The vendor's own files command Y three times at most and always 0.
-      if (Math.abs(move.y) > 1e-9) {
+      const turns = !hasA || prevA === null || move.a !== prevA;
+      if (turns && Math.abs(move.y) > 1e-9) {
         errors.push(
-          `move ${moveIndex}: Y=${move.y} is not 0; a rotary job holds the tool over the axis, so every Y is 0`,
+          `move ${moveIndex}: Y=${move.y} on a move that changes A; a turn is taken with the cutter over the axis, so a move carrying an A word has Y=0 (Y moves freely only while A is held)`,
         );
       }
+      if (hasA) prevA = move.a as number;
       // The rotary frame's version of the flat air-cut check: the stock's top is the RADIUS, so a
       // feed between the surface and the hop height above it cuts nothing (R6).
       if (move.kind === 'feed' && surface !== null && move.z > surface + 1e-9 && move.z < surface + ir.hopZ) {
@@ -257,7 +273,8 @@ function postRotary(
     // last job left it, and a feed at the safe height cuts nothing. The flat post already orders
     // it this way; the golden test pins the relocation as the only difference, by name.
     `G01 Z${safeWord} F${feed(preambleFeed)}`,
-    // Y is stated here ONCE and is never a word again in this file (see `emit`).
+    // Y is stated at 0 here for the first turn; a FACE POCKET's step-over moves state it again
+    // (see `emit`). Work Y 0 is the axis, which is the frame R6 defines.
     `G01 Y0 Z${safeWord}`,
     `M3 S${axis(ir.spindleRpm)}`,
     // Provenance, as `;@CM|` records the machine's reader ignores. There is deliberately no
@@ -269,24 +286,27 @@ function postRotary(
     cycleEstimateNote(machine),
   ];
 
-  // Sticky modal state, exactly as the flat emitter keeps it, plus A.
+  // Sticky modal state, exactly as the flat emitter keeps it, plus A and — since #241 slice 2 —
+  // Y. The preamble states Y 0, so the first Y word is the first face-pocket step-over.
   let lastX: string | null = null;
+  let lastY: string | null = axis(0);
   let lastZ: string | null = null;
   let lastA: string | null = null;
   let lastF: string | null = null;
 
-  // Y IS NEVER A WORD AFTER THE PREAMBLE, and that is a fact about the frame rather than an
-  // omission: Studio's 4-axis mode forces the work Y to 0 and centres the origin on the rotary
-  // axis, which is EXACTLY R6's frame (origin on the axis, Z = radius, Y ≡ 0, X along the axis).
-  // `postRotary` refuses a move whose Y is not 0 rather than writing it, so leaving Y out cannot
-  // hide a tool taken off the axis — the Y a reader sees is the one the preamble stated.
+  // Y IS A WORD ONLY WHILE A IS HELD (#241 slice 2). A move that changes A is a turn and was
+  // validated at Y 0 above; a move inside an indexed run may step over in Y, because there the
+  // stock frame is a rigid rotation and the machine is an ordinary 3-axis mill. That is the
+  // narrowed contract the module header states, and the bench item #238 carries.
   const emit = (move: CamMove): void => {
     const fx = axis(move.x);
+    const fy = axis(move.y);
     const fz = axis(move.z);
     const fa = axis(move.a as number); // every move's `a` was validated above
     const code = move.kind === 'rapid' ? 'G0' : 'G1';
     const words: string[] = [];
     if (fx !== lastX) words.push(`X${fx}`);
+    if (fy !== lastY) words.push(`Y${fy}`);
     if (fz !== lastZ) words.push(`Z${fz}`);
     if (fa !== lastA) words.push(`A${fa}`);
     if (move.kind === 'feed') {
@@ -298,6 +318,7 @@ function postRotary(
     if (words.length === 0) return;
     lines.push(`${code} ${words.join(' ')}`);
     lastX = fx;
+    lastY = fy;
     lastZ = fz;
     lastA = fa;
     if (move.kind === 'feed') lastF = feed(move.f);
@@ -312,10 +333,12 @@ function postRotary(
   }
 
   // The vendor retracts to its safe height before the unwind, so the unwind is not the last thing
-  // holding the tool at cutting depth.
-  if (lastZ !== safeWord) {
+  // holding the tool at cutting depth. A face pocket may end off the axis, so the retract also
+  // brings Y home to 0 before the axis is unwound.
+  if (lastZ !== safeWord || lastY !== axis(0)) {
     const words: string[] = [];
     if (lastX !== null) words.push(`X${lastX}`);
+    if (lastY !== axis(0)) words.push(`Y${axis(0)}`);
     words.push(`Z${safeWord}`);
     if (lastA !== null) words.push(`A${lastA}`);
     lines.push(`G0 ${words.join(' ')}`);
