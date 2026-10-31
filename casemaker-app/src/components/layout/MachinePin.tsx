@@ -6,6 +6,7 @@ import { machineDisplayName } from '@/platform/locationClient';
 import { useMachineNoticeStore } from '@/store/machineNoticeStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useMachineRecord } from '@/store/locationStore';
+import { useManageModeStore } from '@/store/manageModeStore';
 import { formatStamp } from '../manage/display';
 
 /**
@@ -50,6 +51,7 @@ export function MachinePin(): JSX.Element {
   const heartbeat = useMachineStore((s) => s.heartbeat);
   const notice = useMachineNoticeStore((s) => s.notice);
   const dismiss = useMachineNoticeStore((s) => s.dismiss);
+  const openManage = useManageModeStore((s) => s.openManage);
 
   const profile = machine?.profileId != null ? MILL_MODELS[machine.profileId] : undefined;
   const record = useMachineRecord(machine);
@@ -61,7 +63,8 @@ export function MachinePin(): JSX.Element {
   if (machine === null) {
     dot = 'unknown';
     dotTestId = 'machine-unknown';
-    statusText = 'No machine yet';
+    // #820 — the row states what it DOES, not only the state: pressing it opens Manage › Machines.
+    statusText = 'No machine yet · Add';
   } else if (heartbeat.reachable === true) {
     dot = 'online';
     dotTestId = 'machine-online';
@@ -98,7 +101,33 @@ export function MachinePin(): JSX.Element {
         color: '#d1d5db',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* #820 — THE ROW IS A BUTTON. The rail's machine row used to be a status badge that did
+          nothing when pressed; it now opens Manage › Machines, where a machine is added (or the
+          machine's card, when one is known). The dot and the text stay the heartbeat's reading. */}
+      <button
+        type="button"
+        data-testid="machine-pin-open"
+        onClick={() => openManage('machines')}
+        aria-label={
+          machine === null
+            ? 'Machine — no machine yet. Add one in Manage › Machines'
+            : `${name} — open Manage › Machines`
+        }
+        title="Opens Manage › Machines"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          width: '100%',
+          padding: 0,
+          background: 'none',
+          border: 'none',
+          color: 'inherit',
+          font: 'inherit',
+          textAlign: 'left',
+          cursor: 'pointer',
+        }}
+      >
         <span
           data-testid={dotTestId}
           data-state={dot}
@@ -125,7 +154,7 @@ export function MachinePin(): JSX.Element {
         <span data-testid="machine-pin-status" style={{ marginLeft: 'auto', flex: 'none', fontSize: 11, color: dot === 'offline' ? 'var(--cm-color-error)' : '#8b95a3' }}>
           {statusText}
         </span>
-      </div>
+      </button>
 
       {notice !== null && (
         <div
