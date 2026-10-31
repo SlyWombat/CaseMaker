@@ -12,7 +12,7 @@ import {
   DRILL_POINT_FALLBACK_DEG,
   type Tool,
 } from '@/engine/cnc/tool';
-import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
+import { jobVise, LEDGE_WIDTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { blankDepthCeiling } from '@/engine/cnc/engrave/depthBounds';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
@@ -281,6 +281,7 @@ export type JobFindingCode =
   // raised by the CAM checks that have the path geometry (`tab-unplaceable`, `cutout-empty`) and
   // the removal solid (`loose-piece`).
   | 'through-needs-board'
+  | 'through-into-air'
   | 'through-tool-reach'
   | 'tab-unplaceable'
   | 'cutout-empty'
@@ -510,6 +511,14 @@ export interface JobFinding {
    * cutter would make. The panel's one-click "Plunge it at ⌀X" turns the bore into that drill.
    */
   suggestedPlungeMm?: number;
+  /**
+   * #736 — on `through-needs-board` / `through-into-air`, the thickness of the under-board that
+   * clears the breakthrough with its millimetre (mm), and the membrane `through: false` would
+   * leave if the cut stops short (mm, the job's own floor). The panel's two one-click fixes name
+   * these numbers: add the board, or stop short by the membrane.
+   */
+  underBoardMm?: number;
+  stopShortMm?: number;
   message: string;
 }
 
@@ -551,6 +560,68 @@ function boardCoversStock(bed: BedUnderFacts, job: EngraveJob): boolean {
 }
 
 /**
+ * #736 — the soft jaws' ledges in the blank's own XY, mm (#208): the two strips the blank rests
+ * on, one at each X edge, along the jaws' length. A cut that reaches one of them has the ledge,
+ * not air, under its breakthrough.
+ */
+function ledgeRects(job: EngraveJob): { minX: number; maxX: number; minY: number; maxY: number }[] {
+  const vise = jobVise(job);
+  const minY = Math.max(0, vise.jawStartY);
+  const maxY = Math.min(job.stock.width, vise.jawStartY + vise.jawLength);
+  if (!(maxY > minY)) return [];
+  return [
+    { minX: 0, maxX: LEDGE_WIDTH, minY, maxY },
+    { minX: job.stock.length - LEDGE_WIDTH, maxX: job.stock.length, minY, maxY },
+  ];
+}
+
+/**
+ * #736 — WHAT IS UNDER A THROUGH CUT IN THE VISE: the jaw rule's own swept reading (#488) against
+ * the vise's stated geometry. A blank on the soft jaws' ledges is open under its middle, so a cut
+ * inside the ledges passes into the slot between the jaws; a cut whose footprint reaches a ledge
+ * (the strip the blank rests on), or a blank seated on the body (`floor`), has vise under it.
+ * `null` when the geometry cannot say (no swept box for the item): the board rule then stands.
+ */
+type ViseUnder = { kind: 'air' } | { kind: 'vise'; where: string };
+
+function viseUnderOf(
+  job: EngraveJob,
+  box: { minX: number; maxX: number; minY: number; maxY: number } | null,
+): ViseUnder | null {
+  const vise = jobVise(job);
+  if (vise.seat === 'floor') return { kind: 'vise', where: 'the vise body the blank is clamped against' };
+  if (box === null) return null;
+  for (const ledge of ledgeRects(job)) {
+    if (box.minX < ledge.maxX && box.maxX > ledge.minX && box.minY < ledge.maxY && box.maxY > ledge.minY) {
+      return { kind: 'vise', where: 'the soft jaw’s ledge the blank rests on' };
+    }
+  }
+  return { kind: 'air' };
+}
+
+/**
+ * #736 — THE BREAKTHROUGH INTO AIR, STATED NOT REFUSED. A cut inside the jaws' open centre has no
+ * vise surface under its breakthrough, so nothing is wrong with it; the row is an info that says
+ * where the material goes and offers the two precautions the refusal used to force: a board under
+ * the part, or a membrane left by stopping short.
+ */
+function throughIntoAirFinding(labelId: string, who: string, job: EngraveJob): JobFinding {
+  const boardMm = job.breakthrough + 1;
+  return {
+    severity: 'info',
+    code: 'through-into-air',
+    labelId,
+    underBoardMm: boardMm,
+    stopShortMm: job.minFloor,
+    message:
+      `${who} cuts through the blank into the open centre between the jaws: the blank rests on the ` +
+      `soft jaws' ledges and the cut is inside them, so the ${fmt3(job.breakthrough)} mm breakthrough ` +
+      `has no vise surface under it and the cut lands in the air below the jaws. Add a board at least ` +
+      `${fmt3(boardMm)} mm thick under the part, or stop short of the bottom by ${fmt3(job.minFloor)} mm.`,
+  };
+}
+
+/**
  * The one `through-needs-board` finding (#218, #712). A through cut needs material under the blank
  * to cut INTO: the under-board must be at least `breakthrough + 1` mm thick, so the breakthrough
  * never reaches its far face.
@@ -562,7 +633,13 @@ function boardCoversStock(bed: BedUnderFacts, job: EngraveJob): boolean {
  * refuse (a board or the wasteboard takes the cut), INCLUDING the one case another finding owns:
  * a default board too small for the stock is `board-too-small`'s refusal, not this one's.
  */
-function throughBoardFinding(labelId: string, who: string, job: EngraveJob, bed?: BedUnderFacts | null): JobFinding | null {
+function throughBoardFinding(
+  labelId: string,
+  who: string,
+  job: EngraveJob,
+  bed?: BedUnderFacts | null,
+  under?: ViseUnder | null,
+): JobFinding | null {
   const need = job.breakthrough + 1;
   const have = job.sacrificial.under?.thickness ?? 0;
   const bedHeld = job.workholding.kind === 'tape' || job.workholding.kind === 'bracket';
@@ -583,19 +660,34 @@ function throughBoardFinding(labelId: string, who: string, job: EngraveJob, bed?
         ? `${who} cuts through the blank, and the wasteboard is ${fmt3(bed.wasteboardMm ?? 0)} mm — a ` +
           `through cut needs at least ${fmt3(need)} mm under it: put ${board} under it, or tape it on the wasteboard.`
         : `${who} cuts through the blank, and only the bed is under it — put ${board} under it, or tape it on the wasteboard.`;
-    return { severity: 'error', code: 'through-needs-board', labelId, message };
+    // #736 — the button carries the board the SENTENCE names: the house board when the bed
+    // profile states one (a bare bed's 2 mm MDF), otherwise the thinnest that clears the
+    // breakthrough with its millimetre.
+    return { severity: 'error', code: 'through-needs-board', labelId, underBoardMm: bed.boardMm ?? need, stopShortMm: job.minFloor, message };
   }
+  // #736 — the vise case names WHAT the cutter would run into, from the job's own swept reading,
+  // and offers both ways out with their numbers. A cut the sweep shows over the open centre never
+  // reaches here (it is `through-into-air`).
+  const intoVise =
+    under?.kind === 'vise'
+      ? `${who} cuts through the blank into ${under.where}: the cutter would run into the vise. ` +
+        `Add a board at least ${fmt3(need)} mm thick under the part, or stop short of the bottom by ` +
+        `${fmt3(job.minFloor)} mm.`
+      : null;
   return {
     severity: 'error',
     code: 'through-needs-board',
     labelId,
+    underBoardMm: need,
+    stopShortMm: job.minFloor,
     message:
-      have > 0
+      intoVise ??
+      (have > 0
         ? `${who} cuts through the blank, but the under-board is ${fmt3(have)} mm; a through cut ` +
           `needs at least ${fmt3(need)} mm (the ${fmt3(job.breakthrough)} mm breakthrough plus ` +
           `1 mm) so it cannot reach the far face.`
         : `${who} cuts through the blank, which needs a sacrificial under-board at least ` +
-          `${fmt3(need)} mm thick; add one under the part or this cut reaches the vise.`,
+          `${fmt3(need)} mm thick; add one under the part or this cut reaches the vise.`),
   };
 }
 
@@ -1750,6 +1842,9 @@ export function validateJob(
   const throughReady =
     (job.sacrificial.under !== null && job.sacrificial.under.thickness >= job.breakthrough + 1) ||
     (bedHeldJob && bed !== null && wasteboardTakesBed(bed, job.breakthrough + 1));
+  // #488/#736 — ONE swept reading serves both vise rules: the jaw collision below and the
+  // under-cut geometry this gate reads (what a through cut's breakthrough would land on).
+  const swept = job.workholding.kind === 'vise' ? sweptCuts(job) : [];
   // #712 — THE BED'S OWN THROUGH RULES, said ONCE (the per-item findings say the rest):
   //   - the house board a bare bed needs must COVER the stock (the design's size sentence);
   //   - a cut may enter the wasteboard only to the shop's depth limit.
@@ -1817,24 +1912,39 @@ export function validateJob(
   const profilerReach =
     drillTool !== null && !drillIsBit ? (drillTool.shoulderLength ?? drillTool.fluteLength) : null;
 
-  // Through shape pockets (#218). Their depth is the board, so the ordinary floor check above
-  // skipped them; these are the two facts that can refuse one.
-  for (const item of enabled) {
-    if (!('through' in item) || item.through !== true) continue;
-    const who = itemLabel(item);
-    if (!throughReady) {
-      const board = throughBoardFinding(item.id, who, job, bed);
+  // #218/#736 — the through gate, one reading for every through cut (a through shape pocket or a
+  // cut-out). Without a board, the VISE's own geometry decides: a cut the sweep shows inside the
+  // jaws' open centre breaks into air and is stated (with both precautions offered), and only a
+  // cut that reaches a ledge — or a blank seated on the body — is refused. A thin under-board is
+  // still the board rule's.
+  const throughGate = (id: string, who: string): void => {
+    const under =
+      !throughReady && job.sacrificial.under === null && job.workholding.kind === 'vise'
+        ? viseUnderOf(job, swept.find((cut) => cut.id === id)?.box ?? null)
+        : null;
+    const air = under !== null && under.kind === 'air';
+    if (air) findings.push(throughIntoAirFinding(id, who, job));
+    if (!throughReady && !air) {
+      const board = throughBoardFinding(id, who, job, bed, under);
       if (board !== null) findings.push(board);
-    } else if (profilerReach !== null && profilerReach > 0 && throughDepth > profilerReach) {
+    }
+    if ((throughReady || air) && profilerReach !== null && profilerReach > 0 && throughDepth > profilerReach) {
       findings.push({
         severity: 'error',
         code: 'through-tool-reach',
-        labelId: item.id,
+        labelId: id,
         message:
           `${who} cuts through to ${fmt3(throughDepth)} mm, past the ${fmt3(profilerReach)} mm of ` +
           `"${drillTool!.name}" above its shank; the holder would rub the blank.`,
       });
     }
+  };
+
+  // Through shape pockets (#218). Their depth is the board, so the ordinary floor check above
+  // skipped them; these are the two facts that can refuse one.
+  for (const item of enabled) {
+    if (!('through' in item) || item.through !== true) continue;
+    throughGate(item.id, itemLabel(item));
   }
 
   // Cut-outs (#218): every one cuts through, so the same board and reach gates apply, and its
@@ -1853,19 +1963,7 @@ export function validateJob(
           `"${drillTool.name}" is a ${drillTool.shape} cutter and cannot profile.`,
       });
     }
-    if (!throughReady) {
-      const board = throughBoardFinding(cutout.id, who, job, bed);
-      if (board !== null) findings.push(board);
-    } else if (profilerReach !== null && profilerReach > 0 && throughDepth > profilerReach) {
-      findings.push({
-        severity: 'error',
-        code: 'through-tool-reach',
-        labelId: cutout.id,
-        message:
-          `${who} cuts through to ${fmt3(throughDepth)} mm, past the ${fmt3(profilerReach)} mm of ` +
-          `"${drillTool!.name}" above its shank; the holder would rub the blank.`,
-      });
-    }
+    throughGate(cutout.id, who);
     if (cutout.tabs.count === 0) {
       findings.push({
         severity: 'warning',
@@ -3029,7 +3127,6 @@ export function validateJob(
   // #240 — the jaw rule is the VISE's, and a job in the rotary chuck has no jaw faces to reach.
   // Slice 1 reads no swept cuts for it at all; slice 3's rotary rules are what will judge the cut
   // against the chuck, the tailstock and the stock's own cylinder.
-  const swept = job.workholding.kind === 'vise' ? sweptCuts(job) : [];
   for (const cut of swept) {
     const { jaw, gap } = jawGapFor(job, cut.box);
     if (gap >= jawClearance) continue;

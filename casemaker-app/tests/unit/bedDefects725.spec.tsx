@@ -391,7 +391,18 @@ describe('#725 B4 — a blocked run names its first error and its Fix', () => {
     } as unknown as import('@/types/engraveJob').EngraveShape;
     act(() => {
       const base = useEngraveJobStore.getState().job;
-      useEngraveJobStore.setState({ job: { ...base, shapes: [shape] } });
+      // #736 — a tape hold with no board keeps a through cut a real refusal; a vise job over the
+      // open centre is now an info, not a red row.
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          shapes: [shape],
+          workholding: {
+            kind: 'tape' as const,
+            tape: { width: 20, thickness: 0.2, inset: 2, where: null, squareTo: 'front' as const, source: 'saved' as const },
+          },
+        },
+      });
     });
     render(<EngravePanel />);
     act(() => {

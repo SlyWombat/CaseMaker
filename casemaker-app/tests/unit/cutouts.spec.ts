@@ -136,7 +136,7 @@ describe('cut-out findings (#218)', () => {
     expect(disabled.some((f) => f.code === 'through-needs-board')).toBe(false);
   });
 
-  it('judges a through SHAPE by the same board gate', () => {
+  it('#736 — a through SHAPE over the jaws’ open centre breaks into air, stated not refused', () => {
     const job = defaultEngraveJob();
     const shape = {
       kind: 'rect' as const,
@@ -152,7 +152,13 @@ describe('cut-out findings (#218)', () => {
       through: true,
     };
     const throughJob: EngraveJob = { ...job, shapes: [shape], sacrificial: noneSacrificial() };
-    expect(validateJob(throughJob).some((f) => f.code === 'through-needs-board')).toBe(true);
+    // The default job is a 100 × 60 blank in the vise; the 20 × 10 pocket sits at (50, 30), well
+    // inside the soft jaws' ledges, so the sweep finds the open centre and nothing is refused.
+    const findings = validateJob(throughJob);
+    expect(findings.some((f) => f.code === 'through-needs-board')).toBe(false);
+    const air = findings.find((f) => f.code === 'through-into-air');
+    expect(air?.severity).toBe('info');
+    expect(air?.message).toContain('open centre between the jaws');
   });
 });
 

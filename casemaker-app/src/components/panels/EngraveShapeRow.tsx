@@ -140,6 +140,11 @@ export interface EngraveShapeRowProps {
   prism?: PrismCheck | null;
   /** #687 — the row's Technical fold (the V-carve geometry), when this item has any. */
   technical?: ReactNode;
+  /**
+   * #736 — the one-click fixes a row's findings offer (the through cut's board or membrane),
+   * rendered beside the sentence. The panel owns the job writes.
+   */
+  findingAction?: (finding: JobFinding) => ReactNode;
 }
 
 export function EngraveShapeRow({
@@ -156,6 +161,7 @@ export function EngraveShapeRow({
   texture = null,
   prism = null,
   technical = null,
+  findingAction,
 }: EngraveShapeRowProps): JSX.Element {
   // #662 - the chip states what THIS cutter makes of a region.
   const region = useRegionOperationType();
@@ -252,6 +258,7 @@ export function EngraveShapeRow({
       removeTitle="Remove this shape."
       removeNoun="shape"
       findings={findings}
+      {...(findingAction === undefined ? {} : { findingAction })}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
       restLabel={rest?.chip ?? null}

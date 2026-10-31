@@ -1,4 +1,4 @@
-import type { CSSProperties, JSX } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { cutoutOperationName } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -42,6 +42,8 @@ export interface EngraveCutoutRowProps {
   onRemove: () => void;
   /** Findings about THIS cut-out (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
+  /** #736 — the one-click fixes the findings offer (a board under the part); the panel owns the write. */
+  findingAction?: (finding: JobFinding) => ReactNode;
 }
 
 export function EngraveCutoutRow({
@@ -51,6 +53,7 @@ export function EngraveCutoutRow({
   onChange,
   onRemove,
   findings,
+  findingAction,
 }: EngraveCutoutRowProps): JSX.Element {
   const tabCount = cutout.tabs.count;
   return (
@@ -69,6 +72,7 @@ export function EngraveCutoutRow({
       removeTitle="Remove this cut-out."
       removeNoun="cut-out"
       findings={findings}
+      {...(findingAction === undefined ? {} : { findingAction })}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
     >

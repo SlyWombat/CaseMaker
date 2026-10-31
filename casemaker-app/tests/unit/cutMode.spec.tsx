@@ -172,7 +172,16 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
   it('lands a red row on the page in the owner`s words', () => {
     // #786 slice 1 — a depth past the floor is a warning now, so the red row is a cut that still
     // refuses: a through cut-out on a vise job with no board under it (through-needs-board).
-    const job = { ...defaultEngraveJob(), toolKey: 'flat-1.0' }; // #516 item 5 — the default job no longer seeds a cutter
+    // #736 — a through cut on the VISE now breaks into air when the sweep shows the open centre,
+    // so the red row comes from a TAPE job with no board: the bed gate still refuses it.
+    const job = {
+      ...defaultEngraveJob(),
+      toolKey: 'flat-1.0',
+      workholding: {
+        kind: 'tape' as const,
+        tape: { width: 20, thickness: 0.2, inset: 2, where: null, squareTo: 'front' as const, source: 'saved' as const },
+      },
+    };
     const shape = {
       id: 'cut-through',
       kind: 'rect',
@@ -192,7 +201,6 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     });
     render(<EngravePanel />);
     openCut();
-
     expect(screen.getByTestId('engrave-preflight').getAttribute('data-state')).toBe('blocked');
     const row = screen.getByTestId(/^engrave-preflight-row-\d+-through-needs-board$/);
     expect(row.getAttribute('data-severity')).toBe('error');
@@ -201,7 +209,15 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
   });
 
   it('Back to Design expands the item the first red row names', () => {
-    const job = { ...defaultEngraveJob(), toolKey: 'flat-1.0' }; // #516 item 5 — the default job no longer seeds a cutter
+    // #736 — a tape hold with no board is the through cut that still refuses (see the red row above).
+    const job = {
+      ...defaultEngraveJob(),
+      toolKey: 'flat-1.0',
+      workholding: {
+        kind: 'tape' as const,
+        tape: { width: 20, thickness: 0.2, inset: 2, where: null, squareTo: 'front' as const, source: 'saved' as const },
+      },
+    };
     const shape = {
       id: 'cut-through',
       kind: 'rect',

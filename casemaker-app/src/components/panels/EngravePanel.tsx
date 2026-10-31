@@ -1797,6 +1797,43 @@ export function EngravePanel(): JSX.Element {
       construction: true,
     });
   };
+   * #736 — THE THROUGH CUT'S TWO ONE-CLICK FIXES. The finding carries the numbers, so the button
+   * and the sentence cannot disagree: the board is the thickness that clears the breakthrough with
+   * its millimetre, and the membrane is the job's own floor (`minFloor`). Both are ordinary job
+   * writes — the board a saved sacrificial answer, the stop a shape with its through flag cleared.
+   */
+  const addThroughBoard = (thicknessMm: number): void => {
+    setSacrificial({
+      ...job.sacrificial,
+      under: { thickness: thicknessMm, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'tape' },
+      source: 'saved',
+    });
+  };
+  const stopShortOfBottom = (shapeId: string, membraneMm: number): void => {
+    updateShape(shapeId, { through: false, depth: Math.max(0, job.stock.thickness - membraneMm) });
+  };
+  /** The row action for a through finding; `stopShortId` is null on a cut-out, which has no depth. */
+  const throughFix =
+    (stopShortId: string | null) =>
+    (f: JobFinding): ReactNode => {
+      if (f.code !== 'through-needs-board' && f.code !== 'through-into-air') return null;
+      const board = f.underBoardMm;
+      const stop = f.stopShortMm;
+      return (
+        <>
+          {board !== undefined && (
+            <button type="button" data-testid="engrave-through-add-board" onClick={() => addThroughBoard(board)}>
+              Add a {board} mm board
+            </button>
+          )}
+          {stop !== undefined && stopShortId !== null && (
+            <button type="button" data-testid="engrave-through-stop-short" onClick={() => stopShortOfBottom(stopShortId, stop)}>
+              Stop short by {stop} mm
+            </button>
+          )}
+        </>
+      );
+    };
 
   const cutTopBand = (finding: JobFinding): void => {
     updateTargetObject({ cutWithinReach: true });
@@ -3782,6 +3819,7 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(shape.id)}
+          findingAction={throughFix(shape.id)}
           rest={shape.construction === true || shape.prism !== undefined ? null : restFor(shape.id)}
           vCarve={
             cone === null
@@ -3936,6 +3974,7 @@ export function EngravePanel(): JSX.Element {
           index={i}
           targets={cutoutTargets}
           findings={findingsFor(cutout.id)}
+          findingAction={throughFix(null)}
           onChange={(patch) => updateCutout(cutout.id, patch)}
           onRemove={() => removeCutout(cutout.id)}
         />

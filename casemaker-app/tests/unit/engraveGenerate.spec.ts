@@ -2838,29 +2838,45 @@ describe('through-cuts and cut-outs (#218)', () => {
     expectOracleMatches(job, g);
   });
 
-  it('refuses tabs the cut path has no free room for, before any program is posted (#736)', () => {
-    // A 3 × 3 rect's outside path is offset 1.5875 mm with ROUND joins, so its sides are 3 mm,
-    // its corners are quarter arcs and no joint turns anywhere near the 20° corner: the whole
-    // outline is ONE smooth edge of 4 × 3 + 2πr = 21.96 mm. Four 4 mm tabs need four 7.175 mm
-    // spans — 28.7 mm of path — so only two fit and the job refuses rather than free the part
-    // where a requested tab is missing. A genuinely short edge is refused outright: the 5 × 2
-    // rect in camProfile.spec holds no 7.175 mm span at all.
+  it('cuts with the tabs that fit, and says which were dropped and where the rest sit (#736)', () => {
+    // A 3 × 3 rect's outside path is offset 1.5875 mm with ROUND joins, so no joint turns anywhere
+    // near the 20° corner: the whole outline is ONE smooth edge of 4 × 3 + 2πr = 21.96 mm. Four
+    // 4 mm tabs need four 7.175 mm spans — 28.7 mm of path — so only two fit. Since #736 that is a
+    // warning: the job cuts with the two that fit and says two were dropped, rather than refusing a
+    // part that is still held. The shape is reference-only, so no pocket-size finding stands beside it.
     const job = cutoutJob(
       { of: 'rect-1', side: 'outside', inset: 0, tabs: { count: 4, width: 4, height: 1 } },
-      { shapes: [{ ...RECT, width: 3, height: 3 }] },
+      { shapes: [{ ...RECT, width: 3, height: 3, construction: true }] },
     );
-    // #786 slice 5 — the cut proceeds with the tabs that fit, and the sentence says how many did
-    // not; the loose-piece check (not this one) is what judges a part left free.
     const g = generate(tl, job);
-    expect(g.ok, JSON.stringify(g.findings.filter((x) => x.severity === 'error'))).toBe(true);
-    expect(g.nc).not.toBeNull();
+    expect(g.ok, JSON.stringify(g.findings)).toBe(true);
     const f = g.findings.find((x) => x.code === 'tab-unplaceable');
     expect(f).toBeDefined();
     expect(f!.severity).toBe('warning');
     expect(f!.labelId).toBe('cut-1');
     expect(f!.message).toContain('4 holding tabs');
-    expect(f!.message).toContain('2 could not be placed');
-    expect(f!.message).toContain('with enough free length');
+    expect(f!.message).toContain('2 are placed');
+    expect(f!.message).toContain('2 could not be');
+    expect(f!.message).toContain('held by the tabs that fit');
+  });
+
+  it('refuses only a cut-out with no tab at all, because the part would be released (#736)', () => {
+    // The 3 × 3 path is 21.96 mm long, so a 40 mm tab's 43.175 mm span cannot fit anywhere: none
+    // of the requested tabs can be placed, and the part would be released during the cut.
+    const job = cutoutJob(
+      { of: 'rect-1', side: 'outside', inset: 0, tabs: { count: 1, width: 40, height: 1 } },
+      { shapes: [{ ...RECT, width: 3, height: 3, construction: true }] },
+    );
+    // #786 slice 5 — the cut proceeds with the tabs that fit, and the sentence says how many did
+    // not; the loose-piece check (not this one) is what judges a part left free.
+    const g = generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const f = g.findings.find((x) => x.code === 'tab-unplaceable');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.message).toContain('none could be placed');
+    expect(f!.message).toContain('released during the cut');
   });
 
   it('#786 slice 5 — when NO tab fits the part is still refused: nothing holds it', () => {
@@ -2876,7 +2892,7 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(g.nc).toBeNull();
     const f = g.findings.find((x) => x.code === 'tab-unplaceable');
     expect(f?.severity).toBe('error');
-    expect(f?.message).toContain('NONE of them could be placed');
+    expect(f?.message).toContain('none could be placed');
     expect(g.findings.some((x) => x.code === 'loose-piece' && x.severity === 'error')).toBe(true);
   }, 120_000);
 

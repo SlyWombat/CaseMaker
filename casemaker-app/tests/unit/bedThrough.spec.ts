@@ -122,12 +122,44 @@ describe('#712 a through cut on the bed (§3.5)', () => {
     expect(f?.message).toContain('put a 2 mm MDF board under it');
   });
 
-  it('a VISE job and a caller with no bed facts keep the sentences they always had', () => {
+  it('#736 — a VISE job with no board breaks through into air when the sweep finds the open centre', () => {
     const vise = sheet({ workholding: defaultEngraveJob().workholding });
-    expect(finding(vise, BARE_BED, 'through-needs-board')?.message).toContain('this cut reaches the vise');
-    // No location at all: the bed facts are absent and the sentence is unchanged.
-    expect(finding(sheet(), null, 'through-needs-board')?.message).toContain('this cut reaches the vise');
+    const air = finding(vise, BARE_BED, 'through-into-air');
+    expect(air?.severity).toBe('info');
+    expect(air?.message).toContain('open centre between the jaws');
+    expect(air?.underBoardMm).toBe(1.3);
+    expect(air?.stopShortMm).toBe(1); // the default job's own floor, mm
+    expect(codes(vise, BARE_BED)).not.toContain('through-needs-board');
+    // No location at all: the bed facts are absent and the vise's own geometry still decides.
+    expect(finding(sheet({ workholding: defaultEngraveJob().workholding }), null, 'through-into-air')?.message).toContain(
+      'open centre between the jaws',
+    );
     expect(codes(sheet(), null)).not.toContain('board-too-small');
+  });
+
+  it('#736 — a through cut that reaches a soft-jaw ledge is refused, and the fix names the membrane', () => {
+    // The 80 × 60 sheet's fixed ledge is the strip at its left edge; a 20 × 20 pocket at x = 12
+    // starts at x = 0, which reaches it. Nothing of the blank's underside is under the cut there.
+    const edge: EngraveShape = { ...TAG, id: 'sh-edge', name: 'Edge', width: 20, height: 20, position: { x: 10, y: 30 } };
+    const job = sheet({ shapes: [edge], workholding: defaultEngraveJob().workholding });
+    const f = finding(job, BARE_BED, 'through-needs-board');
+    expect(f?.severity).toBe('error');
+    expect(f?.message).toContain('soft jaw');
+    expect(f?.underBoardMm).toBe(1.3);
+    expect(f?.stopShortMm).toBe(1);
+    expect(codes(job, BARE_BED)).not.toContain('through-into-air');
+  });
+
+  it('#736 — a blank seated on the vise body has the body under every through cut', () => {
+    const base = defaultEngraveJob();
+    const held = base.workholding.kind === 'vise' ? base.workholding.vise : null;
+    if (held === null) throw new Error('the default job is held in the vise');
+    const floorJob = sheet({
+      workholding: { kind: 'vise', vise: { ...held, seat: 'floor' } },
+    });
+    const f = finding(floorJob, BARE_BED, 'through-needs-board');
+    expect(f?.severity).toBe('error');
+    expect(f?.message).toContain('vise body');
   });
 });
 

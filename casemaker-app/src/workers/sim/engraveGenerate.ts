@@ -2178,26 +2178,41 @@ export function engraveRegions(
       });
       cutoutMask.push({ path, spans, toolRadius: radius, tabHeight: c.tabs.height });
       if (unplaceable > 0) {
-        // #786 slice 5 — PARTIAL loss INFORMS (the tabs that fit hold the part); losing EVERY
-        // requested tab is a SAFETY refusal: nothing holds the part, and a freed part moves under
-        // the cutter. The sentence says which case it is and what to do.
-        const none = placed === 0;
-        tabFindings.push({
-          severity: none ? 'error' : 'warning',
-          code: 'tab-unplaceable',
-          labelId: c.id,
-          message: none
-            ? `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide, ` +
-              'and NONE of them could be placed: no straight or smoothly curved edge has enough ' +
-              'free length to hold one. Nothing holds the part — it is freed the moment this cut ' +
-              'closes, and it can move under the cutter. Use a smaller tab width or count, a ' +
-              'larger outline, or no tabs at all and hold the piece another way.'
-            : `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide, ` +
-              `but ${unplaceable} could not be placed: the cut path has no straight or smoothly ` +
-              `curved edge with enough free length to hold ${unplaceable === 1 ? 'it' : 'them'}. The ` +
-              `remaining ${placed} hold the part; the missing ${unplaceable === 1 ? 'one is' : 'ones are'} ` +
-              'stated rather than silently dropped. Use a smaller tab width or count, or a larger outline.',
-        });
+        // #736 — INFORM, DON'T REFUSE. A cut that fits some of its tabs still holds the part: it
+        // cuts with the tabs that fit and says which were dropped and where the rest sit. Only a
+        // cut-out with NO tab at all is refused, because the part would be released during the cut.
+        const positions = spans
+          .flat()
+          .map((span) => {
+            const x = (span.start[0] + span.end[0]) / 2;
+            const y = (span.start[1] + span.end[1]) / 2;
+            return `X ${mm3(x)} Y ${mm3(y)}`;
+          })
+          .join(', ');
+        tabFindings.push(
+          placed === 0
+            ? {
+                severity: 'error',
+                code: 'tab-unplaceable',
+                labelId: c.id,
+                message:
+                  `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide, ` +
+                  `but none could be placed: the cut path has no straight or smoothly curved edge ` +
+                  'with enough free length to hold one. The part would be released during the cut. ' +
+                  'Use a smaller tab width, a larger outline, or no tabs and a holding method that suits a freed part.',
+              }
+            : {
+                severity: 'warning',
+                code: 'tab-unplaceable',
+                labelId: c.id,
+                message:
+                  `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide: ` +
+                  `${placed} are placed (at ${positions}) and ${unplaceable} could not be, because the cut ` +
+                  'path has no other straight or smoothly curved edge with enough free length. The part is ' +
+                  `held by the ${placed === 1 ? 'tab' : 'tabs'} that fit; add the rest by hand, use a smaller ` +
+                  'tab width or count, or cut a larger outline.',
+              },
+        );
       }
       const kerf = kerfPolygons(path, radius, offset);
       const tabTop = c.thickness - c.tabs.height;
@@ -2826,6 +2841,11 @@ function loosePieceFindings(
 }
 
 /** A printed area for a finding, in mm²: one decimal below 10, whole numbers above. */
+/** A coordinate for a finding sentence: three decimals at most, trailing zeros dropped (#736). */
+function mm3(v: number): string {
+  return String(Math.round(v * 1000) / 1000);
+}
+
 function fmtArea(mm2: number): string {
   return `${mm2 < 10 ? mm2.toFixed(1) : Math.round(mm2)} mm²`;
 }

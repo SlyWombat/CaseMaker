@@ -89,5 +89,6 @@ const HOLD_FIX_CODES: ReadonlySet<string> = new Set([
   'tape-hold-piece',
   'tape-tall-stock',
   'through-needs-board',
+  'through-into-air',
   'board-too-small',
 ]);

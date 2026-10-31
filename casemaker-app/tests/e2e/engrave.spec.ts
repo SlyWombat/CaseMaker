@@ -560,9 +560,15 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   // and a line that counted them the same would be hiding the difference.
   //
   // The error is the added pocket cut THROUGH the blank on a job held in the vise with no board
-  // under it: `through-needs-board` is a refusal (a through cut needs material beneath), and the
-  // row must wear the error's class. (#786 slice 1 — a label merely deeper than the preferred floor
-  // is a warning now, so it no longer serves as the error here.)
+  // under it, at the STOCK'S EDGE where the sweep reaches the soft-jaw ledge the blank rests on:
+  // `through-needs-board` is a refusal there, and the row must wear the error's class. (#786 slice 1
+  // — a label merely deeper than the preferred floor is a warning now, so it no longer serves as the
+  // error here. #736 — a through cut over the jaws' OPEN CENTRE is an info that cuts, so the pocket
+  // is placed at x = 5 where the ledge is under it.)
+  await page.getByTestId('engrave-shape-width-0').fill('10');
+  await page.getByTestId('engrave-shape-height-0').fill('10');
+  await page.getByTestId('engrave-shape-x-0').fill('5');
+  await page.getByTestId('engrave-shape-y-0').fill('30');
   await page.getByTestId('engrave-shape-through-0').check();
   await expect(page.getByTestId('engrave-shape-warn-0')).toBeVisible();
   await expect(page.getByTestId('engrave-shape-warn-0')).toHaveClass(/engrave-item-row__warn--error/);
