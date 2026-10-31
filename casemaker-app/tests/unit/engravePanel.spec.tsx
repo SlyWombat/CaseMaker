@@ -4165,10 +4165,17 @@ describe('EngravePanel — the Design main path (#686)', () => {
 
   it('#802 — the footer tallies findings by severity word, not as one pile of notes', () => {
     deepJob();
+    // #809 — the shipped vise raises nothing now, so the fixture carries a REAL warning: a 1 mm
+    // grip, below the shop's 3 mm minimum.
+    act(() => {
+      const thickness = useEngraveJobStore.getState().job.stock.thickness;
+      useEngraveJobStore.getState().setVise({ stockProud: thickness - 1 });
+    });
     render(<EngravePanel />);
     const summary = screen.getByTestId('engrave-findings').querySelector('summary')!;
     // One count per severity in its own word: "1 warning · 1 note", never "2 notes".
     expect(summary.textContent).toMatch(/^(\d+ (?:error|warning|note)s?)( · \d+ (?:error|warning|note)s?)* ▸ show$/);
+    expect(summary.textContent).toContain('warning');
     expect(summary.textContent).not.toMatch(/^\d+ notes? ▸ show$/);
     fireEvent.click(summary);
     const rows = screen.getAllByTestId(/^engrave-finding-\d+-/);
