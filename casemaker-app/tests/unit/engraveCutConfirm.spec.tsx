@@ -169,7 +169,7 @@ describe('#656 the one screen', () => {
     render(confirm({ oracle: { ...OK_ORACLE, ok: false, worst: { underCut: 2, overCut: 0 } } }));
     fireEvent.click(screen.getByTestId('engrave-cut-statement'));
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-go-oracle').textContent).toContain('not 0/0');
+    expect(screen.getByTestId('engrave-cut-go-oracle').textContent).toContain('found a difference');
     expect(screen.getByTestId('engrave-cut-confirm-oracle').getAttribute('data-ok')).toBe('false');
   });
 

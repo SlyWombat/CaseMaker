@@ -24,6 +24,8 @@ import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const SUBHEAD: CSSProperties = { margin: '12px 0 4px', fontSize: 12, fontWeight: 600, color: '#c8d3de' };
 const SEVERITY_COLOR: Record<PreflightRow['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
+/** #802 — the same severity words the Design footer uses; a dot asked the reader to learn a legend. */
+const SEVERITY_WORD: Record<PreflightRow['severity'], string> = { error: 'Error', warning: 'Warning', info: 'Note' };
 
 /**
  * #690 — the collector's owner is an internal tag (`engraveRunGate`, `fixture`, …). It stays on
@@ -75,7 +77,9 @@ function Row({
       data-expanded={expanded ? 'true' : 'false'}
       style={{ display: 'flex', gap: 6, fontSize: 12, lineHeight: 1.45, margin: '3px 0', color: '#d1d5db' }}
     >
-      <span style={{ color, flexShrink: 0 }}>●</span>
+      <span style={{ color, flexShrink: 0, fontWeight: 600 }} data-severity={row.severity}>
+        {SEVERITY_WORD[row.severity]}
+      </span>
       <span>
         {row.message}
         {expanded && (
@@ -158,7 +162,7 @@ export function EngravePreflight({ report, onBackToDesign }: EngravePreflightPro
         data-testid="engrave-preflight-summary"
       >
         {blocking === null
-          ? `The gate found nothing blocking${report.warningCount === 0 ? '.' : ` — ${report.warningCount} warning${report.warningCount === 1 ? '' : 's'} carried.`}`
+          ? `The check found nothing blocking${report.warningCount === 0 ? '.' : ` — ${report.warningCount} warning${report.warningCount === 1 ? '' : 's'} carried.`}`
           : `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}${report.warningCount === 0 ? '' : `, ${report.warningCount} warning${report.warningCount === 1 ? '' : 's'}`}.`}
       </p>
 

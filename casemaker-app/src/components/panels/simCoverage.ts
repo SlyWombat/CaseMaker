@@ -310,6 +310,18 @@ function wholeRunDisclaimer(
 }
 
 /**
+ * #804 — THE ONE SUMMARY LINE for the "What was checked ›" fold: what the sweep was checked
+ * against, and how many facts it did NOT check (every sentence after the first is a blind spot).
+ * The full sentences — the physics caveat and the disclaimer — live behind the fold.
+ */
+export function coverageSummaryLine(input: SimCoverageInput): string {
+  const sentences = coverageDisclaimer(input);
+  const blind = Math.max(0, sentences.length - 1);
+  const checked = `Checked against ${obstacleWords(input)}`;
+  return blind === 0 ? `${checked}.` : `${checked} · ${blind} thing${blind === 1 ? '' : 's'} not checked`;
+}
+
+/**
  * One sentence per fact, in the order the reader needs them: what was checked, what was not, and
  * — for a run that did not sweep — why. A path-only or refused run says so here too.
  */

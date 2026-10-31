@@ -411,6 +411,12 @@ export interface JobFinding {
    * Generate; absent on every other finding.
    */
   suggestedPitchMm?: number;
+  /**
+   * #805 — on `goal-rotary-oversize`, the goal's own outermost radius, mm (the field's
+   * `maxRadius`). The panel's "Scale the goal to fit (r …)" button turns it into the factor that
+   * brings the part to the rod; absent on every other finding.
+   */
+  goalRadiusMm?: number;
   message: string;
 }
 

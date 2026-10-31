@@ -24,7 +24,7 @@
  */
 
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 /** Load the committed badge template — the walkthrough's route to a real stock grid. */
 async function loadBadgeTemplate(page: Page): Promise<void> {
@@ -160,8 +160,10 @@ test('#503 — engrave lines fit and the drawer handle covers nothing', async ({
   });
   await expect(page.getByTestId('engrave-stock-line')).toContainText('38.1 × 76.2 × 3.81');
 
-  // The margins line is inside Technical now (#686). Open the fold before measuring so the
-  // line is laid out, rather than a closed `<details>`'s zero-height box.
+  // The margins line is inside Technical now (#686). #798 — the Cutter group defaults closed, so
+  // open the GROUP first (the same helper every other spec uses), then the Technical fold: the
+  // #503 intent is to measure the laid-out margins line, not a closed `<details>`'s zero box.
+  await openCutterGroup(page);
   await page.getByTestId('engrave-cutter-technical').locator('summary').click();
   await expect(page.getByTestId('engrave-margins-value')).toBeVisible();
 
@@ -181,13 +183,13 @@ test('#503 — engrave lines fit and the drawer handle covers nothing', async ({
       const pr = panel.getBoundingClientRect();
       const hr = handle.getBoundingClientRect();
       // The file bar's three visible pieces (the menu itself is closed, so nothing to measure
-      // there), and the stock's one line plus its edit.
+      // there), and the stock's one line. #807 — the stock's edit lives inside its opened body,
+      // so it is not on this closed first screen.
       const ids = [
         'engrave-job-file-name',
         'engrave-job-saved-time',
         'engrave-file-menu-toggle',
         'engrave-stock-line',
-        'engrave-stock-edit',
       ];
       const boxes = ids.flatMap((id) => {
         const el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
@@ -226,7 +228,9 @@ test('#503 — engrave lines fit and the drawer handle covers nothing', async ({
     expect(m.panel.scrollW - m.panel.clientW, `${viewport.name}: the panel scrolls sideways`).toBeLessThanOrEqual(0);
 
     // Every line and its control is inside the panel and clear of the handle.
-    expect(m.boxes.length, `${viewport.name}: file bar and stock line found`).toBeGreaterThanOrEqual(5);
+    // #807 — the stock's edit is inside its opened body, so the closed first screen has the file
+    // bar's three pieces and the stock's one line: four.
+    expect(m.boxes.length, `${viewport.name}: file bar and stock line found`).toBeGreaterThanOrEqual(4);
     for (const b of m.boxes) {
       expect(b.width, `${viewport.name}: ${b.id} has no width`).toBeGreaterThan(0);
       expect(b.left, `${viewport.name}: ${b.id} left edge`).toBeGreaterThanOrEqual(m.panel.left - 0.5);

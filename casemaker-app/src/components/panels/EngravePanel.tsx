@@ -443,7 +443,17 @@ function sacrificialBadge(s: Sacrificial): string {
  * summary says how many notes there are.
  */
 function findingTally(findings: JobFinding[]): string {
-  return `${findings.length} note${findings.length === 1 ? '' : 's'}`;
+  // #802 — AN HONEST TALLY: one count per severity, in the severity's own word. "2 notes" for a
+  // warning and a note read as two of the same thing; the footer says "1 warning · 1 note".
+  const count = (severity: JobFinding['severity']): number => findings.filter((f) => f.severity === severity).length;
+  const parts: string[] = [];
+  for (const severity of ['error', 'warning', 'info'] as const) {
+    const n = count(severity);
+    if (n === 0) continue;
+    const word = SEVERITY_WORD[severity].toLowerCase();
+    parts.push(`${n} ${word}${n === 1 ? '' : 's'}`);
+  }
+  return parts.join(' · ');
 }
 
 /** The severity as the operator reads it in a finding row (#686). */
@@ -535,12 +545,12 @@ function RunRow({ testid, state, text }: { testid: string; state: RowState; text
 }
 
 /**
- * #688 — one of the FOUR ticks Generate leaves on one line (§3.6): `✓ generated · ✓ verified · ✓
+ * #688 — one of the FOUR ticks Generate leaves on one line (§3.6): `✓ generated · ✓ checked · ✓
  * simulated · ✓ matches the design`. The counts and under/over-cut numbers those rows used to
  * carry are the simulation's own facts and live in its panel (#691).
  *
  * #793 — an idle row carries NO mark: it used to draw a `·` beside the `·` separator, so a footer
- * with two rows not yet reached read "· not generated yet · · not verified yet". The sentence is
+ * with two rows not yet reached read "· not generated yet · · not checked yet". The sentence is
  * enough; the mark belongs to a state the run actually reached.
  */
 function RunTick({ testid, state, label, last = false }: { testid: string; state: RowState; label: string; last?: boolean }): JSX.Element {
@@ -1663,10 +1673,14 @@ export function EngravePanel(): JSX.Element {
               ? 'recommended'
               : null;
   const cutterFidelity = measuredNow !== null && measuredApplied ? `${Math.round(measuredNow.worstFidelity * 100)} % fidelity` : null;
+  // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
+  // its answer is waiting to be applied), the line says the app is choosing.
   const cutterVerdict =
-    tool === null
-      ? 'no cutter chosen'
-      : [toolDisplayName(tool), cutterProvenance, cutterFidelity].filter((w): w is string => w !== null).join(' · ');
+    tool !== null
+      ? [toolDisplayName(tool), cutterProvenance, cutterFidelity].filter((w): w is string => w !== null).join(' · ')
+      : measuredStatus === 'measuring' || measuredNow !== null || rec !== null
+        ? 'choosing…'
+        : 'no cutter chosen';
 
   // ---- the run (#206) ----------------------------------------------------------------------
 
@@ -1868,6 +1882,12 @@ export function EngravePanel(): JSX.Element {
     run.staleSince === null
       ? (run.generated?.findings.find((f) => f.code === 'goal-program-too-big' && f.suggestedPitchMm !== undefined) ?? null)
       : null;
+  // #805 — a rotary goal wider than the rod is INFORMED (the relief is cut clipped, #786 slice 2).
+  // Its sentence carries the two answers, beside it, as presses.
+  const rotaryOversizeFinding =
+    run.staleSince === null
+      ? (run.generated?.findings.find((f) => f.code === 'goal-rotary-oversize' && f.goalRadiusMm !== undefined) ?? null)
+      : null;
   // #688 — Save writes the .nc that goes to Makera Studio: a path to the machine, so it waits on
   // the clearance acknowledgement exactly as Upload and Release do. The statement's home is Cut
   // step 1 (#689); the sentence names it and the Fix beside Save takes the operator there.
@@ -1923,7 +1943,7 @@ export function EngravePanel(): JSX.Element {
           : 'not generated yet';
 
   // #726 W16 — a SURFACE program has no 2.5D verifier report by design (`verify: null`; its check
-  // is the material sweep, #535). The row read "not verified yet" after a good run; it now states
+  // is the material sweep, #535). The row read "not checked yet" after a good run; it now states
   // the check that was made, at the step where it is made (the sweep runs with the simulation).
   // A pure GOAL run: its `verify` is null by design and its check is the material sweep (#535),
   // which the result records as `surface3d`.
@@ -1947,18 +1967,18 @@ export function EngravePanel(): JSX.Element {
     rowVerified === 'tick'
       ? surfaceProgram
         ? 'checked on the simulation’s grid'
-        : 'verified'
+        : 'checked'
       : rowVerified === 'cross'
         ? surfaceProgram
           ? 'the sweep found errors'
-          : 'verification found errors'
+          : 'the check found errors'
         : rowVerified === 'pending'
           ? surfaceProgram
             ? 'checking on the sweep…'
-            : 'verifying…'
+            : 'checking…'
           : surfaceProgram
             ? 'not checked yet'
-            : 'not verified yet';
+            : 'not checked yet';
 
   const rowSimulated: RowState =
     run.simStatus === 'ready' ? (simErrors > 0 ? 'cross' : 'tick') : run.phase === 'simulating' ? 'pending' : run.simStatus ? 'cross' : 'idle';
@@ -2192,6 +2212,15 @@ export function EngravePanel(): JSX.Element {
   // with the surface under it and the mount's own numbers. `null` for the vise and rotary, whose
   // lines are below.
   const bedLine = bedHoldLine(job, activeProfileOf(locationMachine), shopDefaults);
+
+  /** #805 — the rotary oversize warning's first answer: scale the goal so its outermost radius
+   *  meets the rod, in one write of the object's own scale, from the number the sentence states. */
+  function scaleGoalToRod(maxRadiusMm: number): void {
+    if (rotaryRod === null || !(maxRadiusMm > 0)) return;
+    const factor = rotaryRod.diameter / 2 / maxRadiusMm;
+    const current = job.targetObject?.scale ?? { x: 1, y: 1, z: 1 };
+    updateTargetObject({ scale: { x: current.x * factor, y: current.y * factor, z: current.z * factor } });
+  }
 
   /** Apply a whole sacrificial model. An edit is the user asserting a setup: it is `'saved'`,
    *  never a shipped `'default'` (decision 28) — a preset already carries `'saved'`. */
@@ -2726,23 +2755,20 @@ export function EngravePanel(): JSX.Element {
             <span style={MUTED}>Stock</span> · {stockFormWord} {stockSizeWords(job.stock)} ·{' '}
             {MATERIAL_LABELS[job.stock.material]}
           </span>
-          <span aria-hidden style={{ marginLeft: 4, color: '#8fb8e0' }}>›</span>
+          <span aria-hidden style={{ marginLeft: 'auto', color: '#8fb8e0' }}>›</span>
+        </summary>
+        <div style={{ marginTop: 4, display: 'grid', gap: 4 }}>
           <button
             type="button"
             data-testid="engrave-stock-edit"
-            style={{ ...MUTED, margin: 0, padding: '1px 6px', cursor: 'pointer', marginLeft: 'auto' }}
+            style={{ ...MUTED, margin: 0, padding: '1px 6px', cursor: 'pointer', justifySelf: 'start' }}
             title="Open the cutting-job wizard at step 2 and state the stock — the same wizard, the same counter."
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              openWizard('stock');
-            }}
+            onClick={() => openWizard('stock')}
           >
-            ▸ edit
+            ▸ edit stock and holding
           </button>
-        </summary>
         {(!roundStock || keepOuts.length > 0) && (
-          <div style={{ marginTop: 4 }}>
+          <div style={{ marginTop: 0 }}>
             <p
               style={{ ...MUTED, margin: 0 }}
               data-testid="engrave-voids-line"
@@ -2788,6 +2814,7 @@ export function EngravePanel(): JSX.Element {
           </div>
           </div>
         )}
+        </div>
       </details>
 
       {/* #798 — the Cutter as ONE line above the fold: the tool, where the answer came from, and
@@ -2829,7 +2856,7 @@ export function EngravePanel(): JSX.Element {
               : facingOn
                 ? `${fmt(facing.depth)} mm off the top`
                 : 'off'}{' '}
-          <span style={{ color: '#8fb8e0' }}>▸ change</span>
+          <span aria-hidden style={{ marginLeft: 4, color: '#8fb8e0' }}>›</span>
         </summary>
       <p style={MUTED} data-testid="engrave-facing-why">
         {facingRefused ? (
@@ -3840,7 +3867,9 @@ export function EngravePanel(): JSX.Element {
           is the sentence alone (#505): `data-code` keeps the code for the tests. */}
       <footer
         data-testid="engrave-footer"
-        style={{ position: 'sticky', bottom: 0, background: 'var(--cm-color-surface-container-low)', borderTop: '1px solid #2a2f36', paddingTop: 6, paddingBottom: 6 }}
+        // #807 — the sticky footer's background must reach the scroller's edge: the box-shadow of
+        // the same colour paints the 6 px below the box that content used to show through.
+        style={{ position: 'sticky', bottom: 0, background: 'var(--cm-color-surface-container-low)', boxShadow: '0 6px 0 0 var(--cm-color-surface-container-low)', borderTop: '1px solid #2a2f36', paddingTop: 6, paddingBottom: 6 }}
       >
         {jobFindings.length > 0 && (
           <details data-testid="engrave-findings">
@@ -3906,6 +3935,32 @@ export function EngravePanel(): JSX.Element {
           </p>
         )}
 
+        {/* #805 — the rotary oversize warning, with its two answers beside the sentence. */}
+        {!blocked && rotaryOversizeFinding !== null && rotaryRod !== null && (
+          <div
+            data-testid="engrave-rotary-oversize-finding"
+            data-code="goal-rotary-oversize"
+            style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 12, lineHeight: 1.45, margin: '4px 0', color: '#d1d5db' }}
+          >
+            <span style={{ color: SEVERITY_COLOR.warning, flexShrink: 0, fontWeight: 600 }} data-severity="warning">
+              Warning
+            </span>
+            <span style={{ flex: '1 1 200px' }}>{rotaryOversizeFinding.message}</span>
+            <span style={{ flexShrink: 0, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                data-testid="engrave-goal-scale-to-rod"
+                onClick={() => scaleGoalToRod(rotaryOversizeFinding.goalRadiusMm!)}
+              >
+                Scale the goal to fit (r {fmt(rotaryRod.diameter / 2)} mm)
+              </button>
+              <button type="button" data-testid="engrave-goal-change-stock" onClick={() => openWizard('stock')}>
+                Change the stock…
+              </button>
+            </span>
+          </div>
+        )}
+
         {/* 8 — generate → verify → simulate → oracle → save. #792 — no subheading: the primary
             button is the step. #794/#803 — the Ready card is the FACT above it, and it precedes
             the action. */}
@@ -3925,10 +3980,10 @@ export function EngravePanel(): JSX.Element {
             disabled={runReady ? false : blocked || running || !simEnabled}
             title={
               runReady
-                ? 'Go to Cut — the program is generated, verified, simulated and checked against the design.'
+                ? 'Go to Cut — the program is generated, checked, simulated and matched against the design.'
                 : !simEnabled
                   ? 'This build has no simulation worker.'
-                  : 'Generate the toolpath, verify it, simulate it and check it against the design.'
+                  : 'Generate the program, check it, simulate it and compare it with the design.'
             }
             // #792 — THE footer's one primary button: full width, on the app's primary container.
             style={{

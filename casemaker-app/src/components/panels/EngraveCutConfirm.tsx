@@ -59,8 +59,8 @@ export function DomeChoice({ accept, g32Acked, floorAccepted, onG32, onFloor, re
   return (
     <section style={BOX} data-testid="engrave-cut-dome-g32">
       <p style={{ fontSize: 12, color: '#f0d79b', margin: '0 0 6px' }}>
-        The blank's top is a dome — a plane re-post cannot follow it. The machine's own leveling
-        follows a curved top; the program uploads FLAT.
+        The blank's top is a dome — a plane re-made for the measured tilt cannot follow it. The
+        machine's own leveling follows a curved top; the program uploads FLAT.
       </p>
       {recommendation !== null && (
         <p style={MUTED} data-testid="engrave-cut-dome-g32-recipe">
@@ -269,7 +269,7 @@ export function EngraveCutConfirm({
       )}
       {!oracleOk && oracle !== null && (
         <p style={{ ...MUTED, color: BAD }} data-testid="engrave-cut-go-oracle">
-          The check is not 0/0 — this program is not cut until it is.
+          The check found a difference — this program is not cut until it is.
         </p>
       )}
       {error !== null && (

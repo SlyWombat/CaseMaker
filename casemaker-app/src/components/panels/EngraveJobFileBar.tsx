@@ -127,11 +127,11 @@ export function EngraveJobFileBar({
     <section
       aria-label="Job file"
       data-testid="engrave-job-file"
+      // #807 — the file bar is a LINE on the panel, not a box: no border, no radius; the name,
+      // its saved state and the File menu read as the job's first sentence.
       style={{
-        border: '1px solid #2c3540',
-        borderRadius: 6,
-        padding: '4px 8px',
-        marginBottom: 8,
+        padding: '2px 0',
+        marginBottom: 6,
         display: 'flex',
         flexWrap: 'wrap',
         alignItems: 'baseline',

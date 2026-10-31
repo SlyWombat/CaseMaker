@@ -205,6 +205,9 @@ test('acceptance #196: ACRYLIC-Balloon.nc simulates to a result; TopClamp.nc pre
   await page.evaluate(() => window.__caseMaker!.simRun());
   await expect(page.getByTestId('sim-result')).toBeVisible({ timeout: 30_000 });
   const elapsed = Date.now() - t0;
+  // #804 — the results are the surface; the caveats are behind the one fold, one press away.
+  await expect(page.getByTestId('sim-what-checked-summary')).toBeVisible();
+  await page.getByTestId('sim-what-checked-summary').click();
   await expect(page.getByTestId('sim-disclaimer')).toBeVisible();
   await expect(page.getByTestId('sim-refusal')).toHaveCount(0);
   const sim = await page.evaluate(() => window.__caseMaker!.getSimState());

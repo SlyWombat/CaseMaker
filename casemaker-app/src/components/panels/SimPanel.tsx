@@ -17,7 +17,7 @@ import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
 import { MAX_TEXT_FILE_BYTES, openTextFile } from '@/utils/openTextFile';
 import { GcodePane } from '@/components/panels/GcodePane';
 import { CutterProfile } from '@/components/ui/CutterProfile';
-import { coverageDisclaimer, type SimRunOutcome } from '@/components/panels/simCoverage';
+import { coverageDisclaimer, coverageSummaryLine, type SimCoverageInput, type SimRunOutcome } from '@/components/panels/simCoverage';
 import {
   ambiguousSentence,
   matchSentence,
@@ -267,7 +267,7 @@ export function SimPanel() {
           length: stock.length,
           tailstock: rodChuck.tailstock,
         };
-  const coverage = coverageDisclaimer({
+  const coverageInput: SimCoverageInput = {
     outcome,
     fixtureLabels: (meshes?.fixture ?? []).map((f) => f.label),
     rotaryBands: rodMap === null ? null : rotaryBandFacts(rodMap),
@@ -277,7 +277,11 @@ export function SimPanel() {
     // is the vendor's label (`3.175*12mm Flat End(Metal)`), which is data, not a name.
     toolName: tool === null ? null : toolDisplayName(tool),
     codes: diagnostics.map((d) => d.code),
-  });
+  };
+  const coverage = coverageDisclaimer(coverageInput);
+  // #804 — the results stay on the surface; what the sweep did and did not check is one line,
+  // with the caveats behind it.
+  const coverageLine = coverageSummaryLine(coverageInput);
 
   // #691 — the "Checked: … / Not checked: …" sentence and the under/over-cut numbers moved here
   // from under Generate (audit B14): they are facts about this job's picture, so they sit in the
@@ -830,13 +834,19 @@ export function SimPanel() {
             </div>
           )}
 
-          {/* 7 — the disclaimer: the constant physics caveat, then the run's own blind spots (#243) */}
-          <div data-testid="sim-disclaimer" style={DISCLAIM}>
-            <div>{DISCLAIMER}</div>
-            {coverage.map((sentence, i) => (
-              <div key={i}>{sentence}</div>
-            ))}
-          </div>
+          {/* 7 — #804 — the results are the surface; what the sweep checked, and everything it
+              did not, sits behind one fold whose summary line is the facts in one sentence. */}
+          <details data-testid="sim-what-checked" style={DISCLAIM}>
+            <summary style={{ cursor: 'pointer' }} data-testid="sim-what-checked-summary">
+              What was checked › <span style={MUTED}>{coverageLine}</span>
+            </summary>
+            <div data-testid="sim-disclaimer">
+              <div>{DISCLAIMER}</div>
+              {coverage.map((sentence, i) => (
+                <div key={i}>{sentence}</div>
+              ))}
+            </div>
+          </details>
         </div>
       )}
 

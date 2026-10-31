@@ -57,6 +57,8 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   // #686 — the blank's twin route is no longer a button under a field grid: the line's edit opens
   // the wizard's stock step, where the same blank starter lives. The panel still reads what the
   // seed wrote, which is what the assertions above prove.
+  // #807 — the Stock row is the disclosure; its edit is in the opened body.
+  await page.getByTestId('engrave-stock-line').click();
   await expect(page.getByTestId('engrave-stock-edit')).toBeEnabled();
 
   // And the geometry really is the one centred plate — no placeholder PCB, no shell.

@@ -609,7 +609,7 @@ describe('#726 W16 — a goal job counts its goal, verifies by the sweep, and as
       });
     });
     expect(screen.getByTestId('engrave-run-verified').textContent).toContain('checked on the simulation’s grid');
-    expect(screen.getByTestId('engrave-run-verified').textContent).not.toContain('not verified yet');
+    expect(screen.getByTestId('engrave-run-verified').textContent).not.toContain('not checked yet');
   });
 });
 
@@ -1085,7 +1085,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
 
     const ticks: readonly (readonly [string, string])[] = [
       ['engrave-run-toolpath', 'generated'],
-      ['engrave-run-verified', 'verified'],
+      ['engrave-run-verified', 'checked'],
       ['engrave-run-simulated', 'simulated'],
       ['engrave-run-oracle', 'matches the design'],
     ];
@@ -4003,7 +4003,7 @@ describe('EngravePanel — the Design main path (#686)', () => {
     render(<EngravePanel />);
     const editor = screen.getByTestId('engrave-facing-editor') as HTMLDetailsElement;
     expect(editor.open).toBe(false);
-    expect(screen.getByTestId('engrave-facing-line').textContent).toBe('Facing — 0.2 mm off the top ▸ change');
+    expect(screen.getByTestId('engrave-facing-line').textContent).toBe('Facing — 0.2 mm off the top ›');
     // The two-button row is not on the main path: it is inside the line's own disclosure.
     expect(editor.contains(screen.getByTestId('engrave-facing-on'))).toBe(true);
     expect(editor.contains(screen.getByTestId('engrave-facing-off'))).toBe(true);
@@ -4032,7 +4032,7 @@ describe('EngravePanel — the Design main path (#686)', () => {
       });
     });
     render(<EngravePanel />);
-    expect(screen.getByTestId('engrave-facing-line').textContent).toBe('Facing — not offered on plastic ▸ change');
+    expect(screen.getByTestId('engrave-facing-line').textContent).toBe('Facing — not offered on plastic ›');
     expect(screen.getByTestId('engrave-facing-why').textContent).toContain('turn it off before it is generated');
     fireEvent.click(screen.getByTestId('engrave-facing-line'));
     expect((screen.getByTestId('engrave-facing-editor') as HTMLDetailsElement).open).toBe(true);
@@ -4163,11 +4163,13 @@ describe('EngravePanel — the Design main path (#686)', () => {
     expect(margins).toBe('Margins 1.429 mm · Z tolerance 1.429 mm');
   });
 
-  it('the footer counts the findings as notes and names each one’s severity in words', () => {
+  it('#802 — the footer tallies findings by severity word, not as one pile of notes', () => {
     deepJob();
     render(<EngravePanel />);
     const summary = screen.getByTestId('engrave-findings').querySelector('summary')!;
-    expect(summary.textContent).toMatch(/^\d+ notes? ▸ show$/);
+    // One count per severity in its own word: "1 warning · 1 note", never "2 notes".
+    expect(summary.textContent).toMatch(/^(\d+ (?:error|warning|note)s?)( · \d+ (?:error|warning|note)s?)* ▸ show$/);
+    expect(summary.textContent).not.toMatch(/^\d+ notes? ▸ show$/);
     fireEvent.click(summary);
     const rows = screen.getAllByTestId(/^engrave-finding-\d+-/);
     expect(rows.length).toBeGreaterThan(0);
@@ -4466,7 +4468,7 @@ describe('#793/#794 — the idle footer is silent and the Ready card is the next
     expect(ready.contains(rows)).toBe(true);
     for (const [testid, label] of [
       ['engrave-run-toolpath', 'generated'],
-      ['engrave-run-verified', 'verified'],
+      ['engrave-run-verified', 'checked'],
       ['engrave-run-simulated', 'simulated'],
       ['engrave-run-oracle', 'matches the design'],
     ] as const) {
@@ -4614,5 +4616,82 @@ describe('#803 — the Ready card states why saving waits', () => {
     expect(screen.getByTestId('engrave-ready-rotary-bench').textContent).toBe(
       'Saving waits for the rotary’s bench check.',
     );
+  });
+});
+
+// #805 — a rotary goal wider than the rod is informed; its two answers are presses beside the
+// sentence: scale the goal to the rod, or change the stock.
+describe('#805 — the rotary oversize warning’s two answers', () => {
+  beforeEach(() => {
+    useEngraveJobStore.getState().replace(defaultEngraveJob());
+    useEngraveRunStore.getState().reset();
+    resetStartWizard();
+  });
+
+  it('offers Scale the goal to fit (r …) and Change the stock…, and both act', () => {
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.getState().replace({
+        ...base,
+        labels: [{ ...base.labels[0]!, position: { x: 10, y: 10 }, size: 4 }],
+        shapes: [],
+        drills: [],
+        targetObject: {
+          id: 'goal-1',
+          name: 'lobes',
+          format: 'stl',
+          sha256: 'x',
+          // The bytes travel with the job here, so the panel does not wait on the blob store.
+          data: 'AA==',
+          size: { x: 24, y: 24, z: 24 },
+          position: { x: 20, y: 10, z: 0 },
+          rotation: 0,
+          enabled: true,
+          role: 'goal',
+        },
+        stock: { ...base.stock, length: 100, width: 20, thickness: 20, shape: 'cylinder', diameter: 20 },
+        workholding: {
+          kind: 'rotary-chuck',
+          rotary: { stickout: 60, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' },
+        },
+      });
+      // A cutter the registry owns, so the job is not blocked for want of one.
+      useEngraveJobStore.getState().setTool('flat-1.0', 'computed');
+      useEngraveRunStore.setState({
+        generated: {
+          ...readyGenerated(';@MKR|BEGIN\nG21 G90\nM02'),
+          findings: [
+            {
+              severity: 'warning',
+              code: 'goal-rotary-oversize',
+              targetId: 'goal-1',
+              goalRadiusMm: 12,
+              message:
+                'The goal "lobes" reaches r 12 mm, and the stock it is turned from is ⌀20 mm: the outermost 2 mm of the goal is not reproduced.',
+            },
+          ],
+        },
+        simStatus: 'ready',
+        simDiagnostics: [],
+        oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+        phase: 'ready',
+        acknowledged: true,
+      });
+    });
+    render(<EngravePanel />);
+
+    const row = screen.getByTestId('engrave-rotary-oversize-finding');
+    expect(row.textContent).toContain('reaches r 12 mm');
+    const scale = screen.getByTestId('engrave-goal-scale-to-rod');
+    expect(scale.textContent).toBe('Scale the goal to fit (r 10 mm)');
+
+    // One press brings the goal's outermost radius to the rod's 10 mm.
+    fireEvent.click(scale);
+    expect(useEngraveJobStore.getState().job.targetObject?.scale?.x).toBeCloseTo(10 / 12, 6);
+
+    // The second answer is the stock wizard, at the stock step.
+    fireEvent.click(screen.getByTestId('engrave-goal-change-stock'));
+    expect(useStartWizardStore.getState().open).toBe(true);
+    expect(useStartWizardStore.getState().initialStep).toBe('stock');
   });
 });

@@ -470,6 +470,29 @@ describe('SimPanel', () => {
     expect(screen.getByTestId('sim-disclaimer').textContent).toContain('rigid, ideal machine');
   });
 
+  it('#804 — the results stay on the surface and the caveats sit behind “What was checked”', async () => {
+    setSimClientLoader(async () => fakeClient(READY));
+    openPlainFile();
+    act(() => useSimSetupStore.getState().setTool(CHOSEN_TOOL));
+    render(<SimPanel />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sim-simulate'));
+    });
+    await screen.findByTestId('sim-result');
+
+    const fold = screen.getByTestId('sim-what-checked') as HTMLDetailsElement;
+    expect(fold.open).toBe(false);
+    // ONE line: what the sweep was checked against, and how many facts it did not check.
+    const summary = screen.getByTestId('sim-what-checked-summary').textContent ?? '';
+    expect(summary).toContain('What was checked');
+    expect(summary).toContain('Checked against the stock');
+    // The physics sentence and the coverage sentences are behind the fold.
+    fireEvent.click(screen.getByTestId('sim-what-checked-summary'));
+    expect(fold.open).toBe(true);
+    expect(screen.getByTestId('sim-disclaimer').textContent).toContain('rigid, ideal machine');
+  });
+
   it('names the backend that ran, and defaults to the exact sweeper (#222)', async () => {
     setSimClientLoader(async () => fakeClient(READY));
     openPlainFile();

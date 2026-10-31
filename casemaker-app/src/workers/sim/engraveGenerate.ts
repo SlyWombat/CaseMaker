@@ -4172,6 +4172,9 @@ export function generateRotaryGoalProgram(
     findings.push({
       severity: 'warning',
       code: 'goal-rotary-oversize',
+      // #805 — the panel's two answers (Scale the goal to fit · Change the stock…) need the
+      // number the sentence already states.
+      goalRadiusMm: field.maxRadius,
       message:
         `The goal "${goal.name}" reaches r ${Number(field.maxRadius.toFixed(3))} mm, and the stock it is turned from ` +
         `is ⌀${Number((2 * rotary.radius).toFixed(3))} mm: Generate cuts the relief only where the rod's surface is, ` +

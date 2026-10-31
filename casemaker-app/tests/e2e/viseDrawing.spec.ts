@@ -38,6 +38,7 @@ async function setStockBox(
   page: Page,
   box: { length: number; width: number; thickness: number },
 ): Promise<void> {
+  await page.getByTestId('engrave-stock-line').click();
   await page.getByTestId('engrave-stock-edit').click();
   await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
   for (const key of ['length', 'width', 'thickness'] as const) {
