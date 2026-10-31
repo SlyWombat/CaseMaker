@@ -350,7 +350,8 @@ describe('#725 B4 — a blocked run names its first error and its Fix', () => {
     // #724 B2 owns the sentence in the row; #725 B4 adds the Fix beside it.
     expect(screen.getByTestId('engrave-run-errors').textContent).toContain('runs under the clamp on the back edge');
     expect(screen.getByTestId('engrave-run-errors').textContent).not.toContain('error outstanding');
-    expect(screen.getByTestId('engrave-run-blocker-fix').textContent).toBe('▸ Fix');
+    // #832 — named by its action, not a bare Fix.
+    expect(screen.getByTestId('engrave-run-blocker-fix').textContent).toBe('Open the Holding step');
 
     fireEvent.click(screen.getByTestId('engrave-run-blocker-fix'));
     expect(useStartWizardStore.getState().open).toBe(true);

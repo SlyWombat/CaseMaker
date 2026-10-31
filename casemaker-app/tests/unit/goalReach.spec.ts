@@ -285,8 +285,13 @@ describe('#785 — Generate', () => {
     expect(refusal?.severity).toBe('error');
     expect(refusal?.message).toContain('moves');
     expect(refusal?.message).toContain("the app's budget is 12,000,000");
-    expect(refusal?.message).toContain('Coarsen the grid to about');
+    // #832 — the sentence says it is a budget, names the step-down that fits too, and the
+    // finding carries both numbers.
+    expect(refusal?.message).toContain('A budget limit, not a fault');
+    expect(refusal?.message).toContain('coarsen the grid to about');
+    expect(refusal?.message).toContain('raise the step-down to about');
     expect(refusal?.suggestedPitchMm).toBeGreaterThan(0.02);
+    expect(refusal?.suggestedStepDownMm).toBeGreaterThan(0.3);
     expect(out.nc).toBeNull();
     expect(out.programs).toEqual([]);
 

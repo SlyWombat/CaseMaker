@@ -644,7 +644,7 @@ describe('EngravePanel — the Generate blocker (#688)', () => {
     expect(screen.getByTestId('engrave-feeds-refused').textContent).toContain('V-bit');
     // …and now at the button too, in words that name the cutter and the material (§3.6's copy).
     expect(screen.getByTestId('engrave-generate-blocker').textContent).toBe(
-      'No feeds for the ⌀ 0.2 mm 30° engraver on PLA — choose a flat end mill ▸ Fix',
+      'No feeds for the ⌀ 0.2 mm 30° engraver on PLA — choose a flat end mill Open the cutter list',
     );
 
     fireEvent.click(screen.getByTestId('engrave-generate-fix'));
@@ -4202,7 +4202,8 @@ describe('EngravePanel — the Design main path (#686)', () => {
     expect(footer.style.bottom).toBe('0px');
     expect(footer.contains(screen.getByTestId('engrave-generate-blocker'))).toBe(true);
     expect(footer.contains(screen.getByTestId('engrave-generate-fix'))).toBe(true);
-    expect(screen.getByTestId('engrave-generate-blocker').textContent).toContain('▸ Fix');
+    // #832 — the press names its action.
+    expect(screen.getByTestId('engrave-generate-blocker').textContent).toMatch(/Open the (cutter list|holding|control)/);
     expect(footer.parentElement?.lastElementChild).toBe(footer);
   });
 });
