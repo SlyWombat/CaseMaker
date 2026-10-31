@@ -113,7 +113,10 @@ test('a two-layer Gerber set becomes a two-setup board that generates on both fa
   }
   await expect(page.getByTestId('engrave-setup-2')).toBeVisible();
   await expect(page.getByTestId('engrave-setup-face-words-2')).toContainText(/bottom/i);
+  // The row's body carries the flip as a derived remount to preview and approve.
+  await page.getByTestId('engrave-setup-expand-2').click();
   await expect(page.getByTestId('engrave-setup-remount-2')).toBeVisible();
+  await expect(page.getByTestId('engrave-setup-remount-2')).toContainText(/Preview the remount/);
   // The board's own checks: the flip does not put the holes off the board, and every role has a
   // cutter, so nothing is refused or left unassigned.
   await expect(page.locator('[data-code="item-off-board"]')).toHaveCount(0);
