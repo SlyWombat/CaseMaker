@@ -30,6 +30,8 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
+import { probeFor } from '@/engine/cnc/registration/mountContext';
+import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import type { EngraveJob, FrozenPackage } from '@/types/engraveJob';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { MachineObservation } from '@/platform/machineProbe';
@@ -348,6 +350,12 @@ export function EngraveCutSurface({
   // profile id), not the house's first: two machines hold two beds.
   const locationView = useLocationStore((s) => s.location);
   const locationMachine = useMemo(() => machineForJob(locationView, job.machineId), [locationView, job.machineId]);
+  // #788 — the probe the job will register with, from the machine it targets: null when no probe
+  // is checked out, and the diagram then stays away.
+  const jobProbeInstrument = useMemo(() => {
+    const probe = probeFor(locationMachine ?? null);
+    return probe === null ? null : probeInstrumentOf(probe);
+  }, [locationMachine]);
   const [overrides, setOverrides] = useState<FeatureOverrides>({});
   /** #726 W20 — whether step 1's detail fold is open; null = follow the gate (open while blocked). */
   const [detailsOpen, setDetailsOpen] = useState<boolean | null>(null);
@@ -894,8 +902,9 @@ export function EngraveCutSurface({
               </span>
             </label>
             {/* #788 — the ask above is where the probe is fitted, so the head diagram stands with
-                it: the probe connector to use, and the 3-pin ionizer port marked as not that one. */}
-            <ProbeFitDiagram compact />
+                it, drawn for the probe the job will use; a job with no probe checked out gets no
+                diagram. */}
+            <ProbeFitDiagram compact instrument={jobProbeInstrument} />
           </div>
         )}
         {/* #796 — THE PROGRAM, AS ONE CARD WITH ONE ACTION. Checked and Frozen were two steps;

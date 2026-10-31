@@ -16,6 +16,60 @@ test.setTimeout(240_000);
 
 const OUT = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img', '2026-10-31-cut-step1');
 
+/**
+ * #788 — the app's location, as this spec needs it: the canonical fixture location with the
+ * Makera 3D probe checked out to its machine (the fixture checks the wired V2 out by default).
+ * The Cut statement draws the head diagram for that probe, and the screenshot is the 3D probe's
+ * case — Makera's "unplug the wired probe… connect the 3D probe cable" line belongs to it.
+ */
+function locationWith3dProbe(): unknown {
+  const doc = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), 'tests', 'unit', 'fixtures', 'location-doc.json'), 'utf8'),
+  ) as { machines: { id: string }[]; accessories: { id: string; whereabouts: unknown }[] };
+  const machineId = doc.machines[0]!.id;
+  for (const a of doc.accessories) {
+    if (a.id === 'fx-probe-3d') a.whereabouts = { kind: 'machine', machineId, since: '2026-10-23T00:00:00.000Z' };
+    if (a.id === 'fx-probe-1') a.whereabouts = { kind: 'box' };
+  }
+  return doc;
+}
+
+/** The house the web build asks for: the lists it reads, and the location with the 3D probe. */
+async function fakeHouse(page: Page): Promise<void> {
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace(/^.*\/api\/v1/, '');
+    const json = (body: unknown): Promise<void> =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { etag: '"e1"' },
+        body: JSON.stringify(body),
+      });
+    const doc = locationWith3dProbe() as { inventory?: unknown; stock?: unknown; defaults?: unknown };
+    if (path === '/health') {
+      return json({
+        ok: true,
+        schemaVersion: 1,
+        build: 'e2e',
+        hasCatalogue: false,
+        feedRows: 0,
+        materialSpecRows: 0,
+        catalogueSyncedAt: null,
+        lastSync: null,
+        problems: [],
+        warnings: [],
+      });
+    }
+    if (path === '/tools') return json([]);
+    if (path === '/inventory') return json(doc.inventory ?? []);
+    if (path === '/stock') return json(doc.stock ?? []);
+    if (path === '/defaults') return json(doc.defaults ?? {});
+    if (path === '/location') return json(locationWith3dProbe());
+    return route.fulfill({ status: 404, body: '' });
+  });
+}
+
 /** A status line with the monitor fields the state popover reads, for the machine observation. */
 const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
 
@@ -40,6 +94,7 @@ async function rememberMachine(page: Page): Promise<void> {
 }
 
 test('#795 — the statement leads step 1, and ‹ Design sits beside the switch', async ({ cm, page }) => {
+  await fakeHouse(page);
   await cm.ready();
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');

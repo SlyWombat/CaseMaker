@@ -1,3 +1,4 @@
+import type { ProbeFitInstrument } from '@/engine/cnc/probeFitDiagram';
 import type { CamPassStep, RapidEstimate } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { itemLabel, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -643,9 +644,10 @@ export interface RunSheetStep {
   bold?: boolean;
   /**
    * #788 — the step asks the operator to fit a probe, so the view draws the head diagram beside
-   * it: the probe connector to use, and the 3-pin ionizer port marked as not that one.
+   * it, drawn for the probe the job uses: `xyz` is the Makera 3D probe, `z-only` the wired probe
+   * V2. Absent when the job has no probe checked out — no diagram fires on a job that needs none.
    */
-  probeFit?: boolean;
+  probeFit?: ProbeFitInstrument;
 }
 
 export interface RunSheetSection {
@@ -1510,14 +1512,14 @@ function facingSteps(
 function registrationSteps(
   job: EngraveJob,
   onBoard: boolean,
-  tipDiameterMm?: Mm,
+  tipDiameterMm: Mm | undefined,
   /**
    * #432 review R1 — the job is skimmed before it is engraved, so the origin is probed with the
    * probe FITTED and the Z0 step records the probe's PRB rather than "the tool that made it": on
    * this job there is only one candidate, and naming it is what lets the facing cutter's and the
    * engraving cutter's Z0 be worked out from this one reading.
    */
-  facingRun = false,
+  facingRun: boolean,
 ): RunSheetStep[] {
   // #743 §4.6/§4.7 — A DISC IS REGISTERED ON ITS RIM, not on a rectangle's edges. Four touches
   // through the centre-lines find the circle's extreme points; the centre sets the origin and the
@@ -1861,6 +1863,8 @@ function materialPositionSteps(
   unverified: string,
   clearanceZ: number,
   scan: MaterialScanSettings = SCAN_FALLBACK,
+  /** #788 — the checked-out probe's instrument, so the fit step draws the right diagram. */
+  probeInstrument?: ProbeFitInstrument,
 ): RunSheetStep[] {
   const part = onBoard ? 'part' : 'blank';
   // Nothing to check the blank against when the origin itself could not be resolved: §5 is then one
@@ -1944,7 +1948,7 @@ function materialPositionSteps(
         `Fit the probe and touch off ONCE on the ${part}’s top face, near the middle (M491 for the ` +
         'probe’s own length). Every reading below is a change from this one, so its Z is the zero ' +
         'depth to compare against.',
-      probeFit: true,
+      ...(probeInstrument === undefined ? {} : { probeFit: probeInstrument }),
       unverified,
     },
     {
@@ -2227,6 +2231,12 @@ export interface RunSheetOptions {
   machineName?: string;
   /** #604 — the checked-out probe's name, or absent when none. */
   probeName?: string;
+  /**
+   * #788 — the checked-out probe's instrument, so the probe steps draw the head diagram for the
+   * probe this job will use (`xyz` = the Makera 3D probe, `z-only` = the wired probe V2). Absent
+   * with no probe checked out, and the sheet then draws no diagram.
+   */
+  probeInstrument?: ProbeFitInstrument;
   /** #604 — the mount's name (the vise the job holds with), or absent. */
   mountName?: string;
   /**
@@ -3882,7 +3892,7 @@ export function buildRunSheet(
               're-touch.',
             code: 'M491',
             record: 'the probe’s PRB (mm)',
-            probeFit: true,
+            ...(options.probeInstrument === undefined ? {} : { probeFit: options.probeInstrument }),
           },
         ]
       : []),
@@ -3893,7 +3903,9 @@ export function buildRunSheet(
     ...(registrationRefused
       ? []
       : surfaceSpreadSteps(job, margins.boundaryMargin, options.surfaceTouchCount, options.surfaceReadings, options.surfaceLevel)),
-    ...(options.materialScan === true ? materialPositionSteps(job, onBoard, BENCH_ISSUE, machine.toolChange.clearanceZ, options.scan) : []),
+    ...(options.materialScan === true
+      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, machine.toolChange.clearanceZ, options.scan, options.probeInstrument)
+      : []),
   ];
 
   // ---- 6 · Dry run ---------------------------------------------------------------------------

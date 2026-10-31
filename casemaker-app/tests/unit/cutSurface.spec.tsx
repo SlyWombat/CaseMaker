@@ -228,7 +228,7 @@ function machineObservation(): MachineObservation {
  * #695 — a location whose machine has a vise profile and a rotary profile, with `active` one of
  * them. The frozen job's setup mount is the vise, so the rotary-active record is the disagreement.
  */
-function locationWith(active: 'vise' | 'rotary'): LocationView {
+function locationWith(active: 'vise' | 'rotary', probe: '3d' | 'wired' | null = null): LocationView {
   const placement = (mount: 'vise' | 'rotary') => ({
     id: `pl-${mount}`,
     fixture: `fx-${mount}`,
@@ -249,7 +249,22 @@ function locationWith(active: 'vise' | 'rotary'): LocationView {
         activeBedProfileId: active === 'vise' ? 'bp-vise' : 'bp-rotary',
       },
     ],
-    accessories: [],
+    accessories:
+      probe === null
+        ? []
+        : [
+            {
+              id: probe === '3d' ? 'fx-probe-3d' : 'fx-probe-1',
+              kind: 'probe',
+              product: probe === '3d' ? 'Makera 3D Wired Probe' : 'Makera Wired Probe V2',
+              variant: probe === '3d' ? '3d' : 'wired-touch',
+              constants: {},
+              unit: {},
+              provenance: {},
+              whereabouts: { kind: 'machine', machineId: 'machine-695', since: '2026-10-23T00:00:00.000Z' },
+              history: [],
+            },
+          ],
   } as unknown as LocationView;
 }
 
@@ -542,11 +557,9 @@ describe('#419 §3 the Cut surface', () => {
     const fold = screen.getByTestId('engrave-cut-details');
     expect(screen.getByTestId('engrave-cut-step-1').contains(ackBox)).toBe(true);
     expect(ackBox.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // #788 — the statement asks for the probe to be fitted, so the head diagram stands with it.
-    expect(ackBox.querySelector('[data-testid="probe-fit-diagram"]')).not.toBeNull();
-    expect(screen.getByTestId('probe-fit-diagram').textContent).toContain(
-      'Unplug the wired probe connector and connect the 3D probe cable.',
-    );
+    // #788 — the statement asks for the probe to be fitted, so the head diagram stands with it,
+    // drawn for the probe the job will use. (This draw has no machine record yet; the probe cases
+    // are their own test below.)
 
     // Run is blocked with its ONE sentence.
     const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
@@ -571,6 +584,38 @@ describe('#419 §3 the Cut surface', () => {
     expect(go.disabled).toBe(false);
     expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('clearance acknowledged');
     expect(saveBlocker(gateView())).toBeNull();
+  });
+
+  it('#788 — the statement draws the head for the probe the job uses, and none without one', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } } as never,
+      acknowledged: false,
+    });
+    // The job's machine carries the Makera 3D probe: the drawing names the 3D probe cable and
+    // Makera's own line.
+    useLocationStore.setState({ status: 'ready', location: locationWith('vise', '3d'), etag: '"loc-1"' } as never);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    const first = screen.getByTestId('engrave-cut-ack').querySelector('[data-testid="probe-fit-diagram"]');
+    expect(first).not.toBeNull();
+    expect(first!.textContent).toContain('3D probe cable in here');
+    expect(first!.textContent).toContain('Unplug the wired probe connector and connect the 3D probe cable.');
+
+    // The wired probe V2: the V2's own line, and never the instruction to unplug it.
+    cleanup();
+    useLocationStore.setState({ status: 'ready', location: locationWith('vise', 'wired'), etag: '"loc-2"' } as never);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    const wired = screen.getByTestId('engrave-cut-ack').querySelector('[data-testid="probe-fit-diagram"]');
+    expect(wired).not.toBeNull();
+    expect(wired!.textContent).toContain('Plug the wired probe in here.');
+    expect(wired!.textContent).not.toContain('Unplug the wired probe connector');
+
+    // No probe checked out: no diagram at all, so the ask does not carry a picture on every job.
+    cleanup();
+    useLocationStore.setState({ status: 'ready', location: locationWith('vise', null), etag: '"loc-3"' } as never);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    expect(screen.getByTestId('engrave-cut-ack').querySelector('[data-testid="probe-fit-diagram"]')).toBeNull();
   });
 
   it('#796 — a program older than the design disables the one-screen press and the upload until Generate', () => {

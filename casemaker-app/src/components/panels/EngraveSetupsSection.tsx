@@ -14,6 +14,7 @@
 
 import { Fragment, useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
+import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -689,8 +690,11 @@ export function EngraveSetupsSection({
             </button>
           </div>
           {/* #788 — this prompt is the executor asking for the probe to be fitted (the mount tap
-              runs it before the first touch): show which connector it goes into. */}
-          {mountTapApi.prompt.kind === 'fit-probe' && <ProbeFitDiagram compact />}
+              runs it before the first touch): show which connector, for the probe this machine
+              has checked out; none checked out means no diagram. */}
+          {mountTapApi.prompt.kind === 'fit-probe' && (
+            <ProbeFitDiagram compact instrument={probe === null ? null : probeInstrumentOf(probe)} />
+          )}
         </div>
       )}
 

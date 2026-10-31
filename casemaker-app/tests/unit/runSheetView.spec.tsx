@@ -114,41 +114,38 @@ describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
 // #788 — the step that asks for the probe carries the drawn head diagram, and a sheet without that
 // step draws none. The step is injected because the default job's registration plan refuses (it has
 // no openings), so its sheet prints the refusal instead of the probe routine.
-function sheetWithProbeStep(): RunSheet {
+function sheetWithProbeStep(instrument: 'xyz' | 'z-only' | null = 'xyz'): RunSheet {
   const sheet = sheetFor(dj());
   const first = sheet.sections[0]!;
+  const step = { text: 'Fit the probe and touch off ONCE on the top face.', ...(instrument === null ? {} : { probeFit: instrument }) };
   return {
     ...sheet,
-    sections: [
-      { ...first, steps: [...first.steps, { text: 'Fit the probe and touch off ONCE on the top face.', probeFit: true }] },
-      ...sheet.sections.slice(1),
-    ],
+    sections: [{ ...first, steps: [...first.steps, step] }, ...sheet.sections.slice(1)],
   };
 }
 
 describe('#788 the run sheet draws the head diagram where it asks for the probe', () => {
-  it('draws the diagram under the probe step, with the Makera line', () => {
-    render(<RunSheetView sheet={sheetWithProbeStep()} />);
+  it('for the 3D probe: the 3D cable and Makera’s line', () => {
+    render(<RunSheetView sheet={sheetWithProbeStep('xyz')} />);
     const diagram = screen.getByTestId('run-sheet-probe-fit');
+    expect(diagram.textContent).toContain('3D probe cable in here');
     expect(diagram.textContent).toContain('Unplug the wired probe connector and connect the 3D probe cable.');
     expect(diagram.textContent).toContain('3D Probe Rod');
-    expect(diagram.querySelector('svg')).not.toBeNull();
+    expect(diagram.textContent).not.toContain('Plug the wired probe in here.');
     expect(diagram.querySelector('svg')?.getAttribute('aria-label')).toContain('not the 3-pin ionizer port');
   });
 
+  it('for the wired probe V2: the wired probe is plugged in, and the 3D line is absent', () => {
+    render(<RunSheetView sheet={sheetWithProbeStep('z-only')} />);
+    const diagram = screen.getByTestId('run-sheet-probe-fit');
+    expect(diagram.textContent).toContain('wired probe in here');
+    expect(diagram.textContent).toContain('Plug the wired probe in here.');
+    // Telling a V2 job to unplug the wired probe would unplug the probe the job uses.
+    expect(diagram.textContent).not.toContain('Unplug the wired probe connector');
+  });
+
   it('draws nothing when no step asks for a probe', () => {
-    const sheet = sheetWithProbeStep();
-    const stripped = {
-      ...sheet,
-      sections: sheet.sections.map((section) => ({
-        ...section,
-        steps: section.steps.map((step) => {
-          const { probeFit: _drop, ...rest } = step;
-          return rest;
-        }),
-      })),
-    };
-    render(<RunSheetView sheet={stripped} />);
+    render(<RunSheetView sheet={sheetWithProbeStep(null)} />);
     expect(screen.queryByTestId('run-sheet-probe-fit')).toBeNull();
   });
 });

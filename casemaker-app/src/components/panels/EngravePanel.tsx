@@ -38,7 +38,8 @@ import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineDisplayName } from '@/platform/locationClient';
 import { machineRecordByProfile, useLocationStore } from '@/store/locationStore';
-import { mountNameFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
+import { mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
+import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { findingFix, type PanelFix } from './findingFix';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -2376,6 +2377,9 @@ export function EngravePanel(): JSX.Element {
         : firstRegistrationFor(job.id, { host: measuredMachine.host, port: measuredMachine.port });
     const machineRecord = machineRecordByProfile(job.machineId);
     const probeName = probeNameFor(machineRecord);
+    // #788 — the sheet's probe steps draw the head diagram for the probe this job will use; none
+    // checked out means none drawn.
+    const sheetProbe = machineRecord === null ? null : probeFor(machineRecord);
     const mountName = mountNameFor(machineRecord, job.workholding.kind);
     // #345 — the house setting the run was gated to, handed over rather than a pre-resolved margin:
     // the sheet resolves it the same way `engraveRunStore` did at Generate, so its depth notes are
@@ -2411,6 +2415,7 @@ export function EngravePanel(): JSX.Element {
           machineName:
             machineDisplayName(machineRecordByProfile(job.machineId), jobMachine(job)) ?? undefined,
           probeName: probeName ?? undefined,
+          ...(sheetProbe === null ? {} : { probeInstrument: probeInstrumentOf(sheetProbe) }),
           mountName,
           found:
             foundReg === null

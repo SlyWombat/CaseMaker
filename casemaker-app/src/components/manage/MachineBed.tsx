@@ -20,6 +20,7 @@
 
 import { useState, type JSX } from 'react';
 import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
+import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import type { BedProfile, FixtureRecord, MachineRecord } from '@/platform/locationClient';
 import { formatDay, mm } from './display';
 import { BedScene } from '@/components/viewport/BedScene';
@@ -168,8 +169,11 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
               Cancel
             </button>
           </span>
-          {/* #788 — the tap asks for the probe before it touches: the head diagram says which port. */}
-          {api.prompt.kind === 'fit-probe' && <ProbeFitDiagram compact />}
+          {/* #788 — the tap asks for the probe before it touches: the head diagram says which port,
+              for the probe this machine has checked out; none checked out means no diagram. */}
+          {api.prompt.kind === 'fit-probe' && (
+            <ProbeFitDiagram compact instrument={probe === null ? null : probeInstrumentOf(probe)} />
+          )}
         </div>
       )}
     </span>

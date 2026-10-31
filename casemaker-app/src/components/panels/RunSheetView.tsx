@@ -6,7 +6,7 @@ import {
   type RunSheet,
   type RunSheetStep,
 } from '@/engine/cnc/engrave/runSheet';
-import { PROBE_FIT_ALL, PROBE_FIT_LINE, probeFitDiagramSvg } from '@/engine/cnc/probeFitDiagram';
+import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
 import './runSheet.css';
 
 /**
@@ -40,12 +40,9 @@ function StepBody({ step }: { step: RunSheetStep }): JSX.Element {
       <span className="run-sheet-step-text">{step.text}</span>
       {step.value !== undefined && <b className="run-sheet-step-value">{step.value}</b>}
       {step.code !== undefined && <code className="run-sheet-step-code">{step.code}</code>}
-      {step.probeFit === true && (
+      {step.probeFit !== undefined && (
         <div className="run-sheet-diagram run-sheet-probe-fit" data-testid="run-sheet-probe-fit">
-          <div dangerouslySetInnerHTML={{ __html: probeFitDiagramSvg('print') }} />
-          <p className="run-sheet-probe-fit-caption">
-            <strong>{PROBE_FIT_LINE}</strong> {PROBE_FIT_ALL}
-          </p>
+          <ProbeFitDiagram size="print" instrument={step.probeFit} testId="run-sheet-probe-fit-diagram" />
         </div>
       )}
       {step.record !== undefined && (
