@@ -2863,6 +2863,23 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(f!.message).toContain('with enough free length');
   });
 
+  it('#786 slice 5 — when NO tab fits the part is still refused: nothing holds it', () => {
+    // A 10 x 10 outline with four 60 mm tabs: not one can be placed on a ~40 mm path. The cut is
+    // a SAFETY refusal (and the loose-piece check names the freed part), not an informed warning.
+    const job = cutoutJob(
+      { of: 'rect-1', side: 'outside', inset: 0, tabs: { count: 4, width: 60, height: 1 } },
+      { shapes: [{ ...RECT, width: 10, height: 10 }] },
+    );
+    const g = generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    expect(g.nc).toBeNull();
+    const f = g.findings.find((x) => x.code === 'tab-unplaceable');
+    expect(f?.severity).toBe('error');
+    expect(f?.message).toContain('NONE of them could be placed');
+    expect(g.findings.some((x) => x.code === 'loose-piece' && x.severity === 'error')).toBe(true);
+  }, 120_000);
+
   it('refuses a through cut the cutter cannot reach above its shank', () => {
     // 12 mm of blank plus the 0.3 mm breakthrough is 12.3 mm; this cutter states 5 mm of shoulder.
     const short = flatEndMill(3.175, { name: 'short flat end', fluteLength: 20, shoulderLength: 5 });

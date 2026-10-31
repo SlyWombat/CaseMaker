@@ -2153,16 +2153,25 @@ export function engraveRegions(
       });
       cutoutMask.push({ path, spans, toolRadius: radius, tabHeight: c.tabs.height });
       if (unplaceable > 0) {
+        // #786 slice 5 — PARTIAL loss INFORMS (the tabs that fit hold the part); losing EVERY
+        // requested tab is a SAFETY refusal: nothing holds the part, and a freed part moves under
+        // the cutter. The sentence says which case it is and what to do.
+        const none = placed === 0;
         tabFindings.push({
-          severity: 'warning',
+          severity: none ? 'error' : 'warning',
           code: 'tab-unplaceable',
           labelId: c.id,
-          message:
-            `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide, ` +
-            `but ${unplaceable} could not be placed: the cut path has no straight or smoothly ` +
-            `curved edge with enough free length to hold ${unplaceable === 1 ? 'it' : 'them'}. The part ` +
-            `would be released where ${unplaceable === 1 ? 'that tab was' : 'those tabs were'} ` +
-            'meant to hold it. Use a smaller tab width or count, or a larger outline.',
+          message: none
+            ? `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide, ` +
+              'and NONE of them could be placed: no straight or smoothly curved edge has enough ' +
+              'free length to hold one. Nothing holds the part — it is freed the moment this cut ' +
+              'closes, and it can move under the cutter. Use a smaller tab width or count, a ' +
+              'larger outline, or no tabs at all and hold the piece another way.'
+            : `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide, ` +
+              `but ${unplaceable} could not be placed: the cut path has no straight or smoothly ` +
+              `curved edge with enough free length to hold ${unplaceable === 1 ? 'it' : 'them'}. The ` +
+              `remaining ${placed} hold the part; the missing ${unplaceable === 1 ? 'one is' : 'ones are'} ` +
+              'stated rather than silently dropped. Use a smaller tab width or count, or a larger outline.',
         });
       }
       const kerf = kerfPolygons(path, radius, offset);
@@ -2173,10 +2182,16 @@ export function engraveRegions(
           tabs: tabBridgeRectangles(spans[i] ?? [], radius),
         });
       }
-      // The part a released cut-out frees is the area ENCLOSED by its centre path. `path` is CW
-      // for an inside profile, so it is put back to a fillable winding first: a CW outer reads as
-      // empty in the loose-piece cross-section and the part would be counted as the loose piece.
-      if (placed === 0) {
+      // The part a DELIBERATELY released cut-out frees is the area ENCLOSED by its centre path.
+      // `path` is CW for an inside profile, so it is put back to a fillable winding first: a CW
+      // outer reads as empty in the loose-piece cross-section and the part would be counted as the
+      // loose piece.
+      //
+      // #786 slice 5 — ONLY WHEN THE JOB ASKED FOR NO TABS. A cut-out that requested tabs and got
+      // NONE is not a deliberate release: no tab could hold the part, and the part is free. It is
+      // left OUT of the released set so the loose-piece check (a safety refusal) finds it, while
+      // the `tab-unplaceable` warning states why none fitted.
+      if (placed === 0 && c.tabs.count === 0) {
         const piece = enclosedPath(path);
         cutoutReleased.push(piece);
         if (tapeInset !== null && radius !== null) {
@@ -2689,11 +2704,12 @@ export function engraveRegions(
  * decided by two coincident edges; following the span's own points (#736), the bridge curves with
  * an arc.
  *
- * A cut-out the job deliberately released (no tabs placed) is expected to be one of those parts:
- * it is the piece the operator asked to cut out, and `released-onto-board` (or the error
- * `tab-unplaceable`) already says so. Its region is the area enclosed by the centre path, so a
- * component that lies wholly inside one of those regions is that part, not a second finding.
- * Everything else is reported, once, as `loose-piece`.
+ * A cut-out the job deliberately released (asked for NO tabs) is expected to be one of those
+ * parts: it is the piece the operator asked to cut out, and `released-onto-board` already says so.
+ * Its region is the area enclosed by the centre path, so a component that lies wholly inside one
+ * of those regions is that part, not a second finding. #786 slice 5 — a cut-out that REQUESTED
+ * tabs and got none is NOT in that set: it is a free part, and this check is the safety refusal
+ * that says so. Everything else is reported, once, as `loose-piece`.
  *
  * The 2D bottom face is the right test: every cut here passes through the full thickness, and a
  * tab is material at the bottom, so connectivity at the bottom is connectivity of the solid.
