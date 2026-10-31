@@ -85,7 +85,7 @@ describe('the rotary refusals — operator words, at the step', () => {
     expect(f!.line).toBe(lineOf(body, 'G1 Y1 A20'));
     expect(f!.message).toContain('leaves the line over the axis');
     expect(f!.message).toContain('(Y 1 mm)');
-    expect(f!.message).toContain('every Y is 0');
+    expect(f!.message).toContain('every Y at 0');
     expect(f!.message).not.toMatch(CODE);
   });
 

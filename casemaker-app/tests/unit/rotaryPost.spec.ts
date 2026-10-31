@@ -254,7 +254,7 @@ describe('the rotary dialect’s refusals (#240)', () => {
     const ir = rotaryIr({}, [rapid(0, 5, 30, 0), cut(0, 5, 9.5, 500, 0)]);
     const res = postZ1(ir, ROTARY_CTX, Z1);
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.errors.join(' ')).toMatch(/Y=5 is not 0/);
+    if (!res.ok) expect(res.errors.join(' ')).toMatch(/Y=5 on a move that changes A/);
   });
 
   it('refuses a rotary IR with no stock radius', () => {
