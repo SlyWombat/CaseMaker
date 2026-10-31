@@ -5,7 +5,7 @@
 // Run (WSL, this checkout):
 //   CASEMAKER_PORT=5403 npx playwright test tests/e2e/stockOrientation783.spec.ts
 
-import type { Page, TestInfo } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 1440, height: 900 } });

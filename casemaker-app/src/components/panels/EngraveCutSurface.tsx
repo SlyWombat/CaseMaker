@@ -76,10 +76,11 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import {
   formHolds,
   holdCutFaceWords,
-  holdWords,
+  holdWordsFor,
   itemsFaceWords,
   itemsOnTop,
   jobHold,
+  partDimsOf,
   sameHold,
 } from '@/engine/cnc/engrave/stockHold';
 import type { LaserLift } from '@/platform/machineLaser';
@@ -267,6 +268,7 @@ function TurnStockControl({ job }: { job: EngraveJob }): JSX.Element {
   const current = jobHold(job);
   const form = job.stock.shape === 'disc' ? 'disc' : (job.stockEntry?.form ?? 'plate');
   const holds = formHolds(form);
+  const part = partDimsOf(job.stock, current);
   const faceWords = itemsOnTop(current) ? null : itemsFaceWords(current);
   return (
     <details style={{ ...BOX, marginTop: 6 }} data-testid="engrave-cut-turn-stock">
@@ -294,7 +296,7 @@ function TurnStockControl({ job }: { job: EngraveJob }): JSX.Element {
                   cursor: 'pointer',
                 }}
               >
-                <b style={{ fontSize: 11 }}>{holdWords(hold)}</b>
+                <b style={{ fontSize: 11 }}>{holdWordsFor(form, hold, part)}</b>
                 <span style={{ ...MUTED, fontSize: 10, margin: 0 }}>{holdCutFaceWords(form, hold)}</span>
               </button>
             );

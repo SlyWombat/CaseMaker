@@ -77,7 +77,7 @@ import {
   formHolds,
   holdBox,
   holdCutFaceWords,
-  holdWords,
+  holdWordsFor,
   itemsFaceWords,
   itemsOnTop,
   jobHold as stockHoldOf,
@@ -1296,7 +1296,7 @@ function HoldChoice({
               }}
             >
               <HoldPlan box={holdBox(part, hold)} />
-              <b style={{ fontSize: 11 }}>{holdWords(hold)}</b>
+              <b style={{ fontSize: 11 }}>{holdWordsFor(form, hold, part)}</b>
               <span style={{ ...MUTED, fontSize: 10, margin: 0 }}>{holdCutFaceWords(form, hold)}</span>
             </button>
           );

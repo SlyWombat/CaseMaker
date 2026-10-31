@@ -15,6 +15,7 @@ import {
   holdCutFaceWords,
   holdSentence,
   holdWords,
+  holdWordsFor,
   isStockHold,
   itemsFaceWords,
   itemsOnTop,
@@ -192,7 +193,15 @@ describe('#783 the job document', () => {
 
 describe('#783 the words', () => {
   it('names the hold and its cut face in the operator\'s terms', () => {
-    expect(holdWords(DEFAULT_HOLD)).toBe('T up · L between the jaws');
+    expect(holdWords(DEFAULT_HOLD, PART)).toBe('12 mm up · 100 mm between the jaws (60 mm along them)');
+    expect(holdWordsFor('plate', DEFAULT_HOLD, PART)).toBe('12 mm up · 100 mm between the jaws (60 mm along them)');
+    const rod = { length: 120, width: 20, thickness: 20 };
+    expect(holdWordsFor('rod', rodHolds()[0]!, rod)).toBe('flat ends against the jaws');
+    expect(holdWordsFor('rod', rodHolds()[1]!, rod)).toBe('standing on its end');
+    expect(holdWordsFor('rod', rodHolds()[2]!, rod)).toBe('lying across, gripped on the curve');
+    const disc = { length: 55, width: 55, thickness: 10 };
+    expect(holdWordsFor('disc', discHolds()[0]!, disc)).toBe('flat side up');
+    expect(holdWordsFor('disc', discHolds()[1]!, disc)).toBe('on its edge');
     expect(holdSentence(DEFAULT_HOLD)).toBe(
       'The part\'s thickness is up, its length runs between the jaws, and its width runs along them.',
     );

@@ -203,11 +203,32 @@ export function suggestedHold({ form, part, openingMm }: HoldSuggestionArgs): St
 
 // ── Words ──────────────────────────────────────────────────────────────────────────────────────
 
-const AXIS_WORD: Record<PartAxis, string> = { length: 'L', width: 'W', thickness: 'T' };
+/**
+ * The hold in the STOCK'S OWN NUMBERS, as the cards read it: `12 mm up · 100 mm between the jaws
+ * (60 mm along them)`. The letter form (`T up · L between…`) made the operator decode axes; the
+ * numbers are the piece they are holding.
+ */
+export function holdWords(hold: StockHold, part: PartDims): string {
+  return `${num(part[hold.z])} mm up · ${num(part[hold.x])} mm between the jaws (${num(part[hold.y])} mm along them)`;
+}
 
-/** `T up · L between the jaws` — the hold in the step's own words. */
-export function holdWords(hold: StockHold): string {
-  return `${AXIS_WORD[hold.z]} up · ${AXIS_WORD[hold.x]} between the jaws`;
+/**
+ * The card's words for a FORM: a block's own numbers, a rod's or a disc's phrases — "flat ends
+ * against the jaws", "standing on its end", "lying across, gripped on the curve"; "flat side up",
+ * "on its edge". The picture beside them keeps the plan and its numbers.
+ */
+export function holdWordsFor(form: JobStockForm, hold: StockHold, part: PartDims): string {
+  if (form === 'rod' || form === 'tube') {
+    if (hold.z === 'length') return 'standing on its end';
+    if (hold.y === 'length') return 'lying across, gripped on the curve';
+    return 'flat ends against the jaws';
+  }
+  if (form === 'disc') return hold.z === 'thickness' ? 'flat side up' : 'on its edge';
+  return holdWords(hold, part);
+}
+
+function num(v: number): string {
+  return String(Number(v.toFixed(2)));
 }
 
 /** The full sentence for a picture: the part's dimensions in the job's places. */
