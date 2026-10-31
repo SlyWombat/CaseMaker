@@ -1678,6 +1678,15 @@ export function engraveRegions(
           })),
         },
   );
+  // #786 slice 4c-2 — AN UNPROVEN PLUNGE IS NOT IN THE PROGRAMS. A plunge needs a centre-cutting
+  // cutter; when nothing records that (and it is not a drill bit, whose point is the cutting end),
+  // the hole is WITHHELD — the finding asks the operator the one question — while every other cut
+  // still posts. A BORE is helixed down the wall, so it needs no plunge proof and stays. This is
+  // the one point the preview, the CAM and the oracle all read the holes from, so none of them
+  // can show a cut the run does not make.
+  if (tool !== null && tool.shape !== 'drill' && tool.centreCutting !== true) {
+    plan.drills = plan.drills.filter((d) => d.mode === 'bore');
+  }
   // #748 — THE FLOOR EACH ITEM SITS ON, one owner for the whole pipeline. Every plane below, the
   // merge findings, the cores and the prediction read this map; the run hands in the document's
   // map so a program's sub-job still knows the pocket another setup cuts.

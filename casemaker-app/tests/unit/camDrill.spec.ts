@@ -40,6 +40,9 @@ const DRILL_TOOL = flatEndMill(3.175, {
   name: '3.175*12mm Flat End',
   fluteLength: 12,
   shoulderLength: 12,
+  // #786 slice 4c-2 — a plunge hole is cut only by a cutter RECORDED as centre-cutting; this
+  // fixture's cutter is the one the drill tests plunge with, so its record answers the question.
+  centreCutting: true,
 });
 
 /** A job whose only work is the given drills, on the default 100 × 60 × 12 softwood blank. */
@@ -272,7 +275,9 @@ describe('drill findings (#220)', () => {
   });
 
   it('warns that an unrecorded cutter is not proven centre-cutting', () => {
-    const job: EngraveJob = { ...singleHole(), toolKey: 'flat-1.0' }; // centreCutting is null
+    // #786 slice 4c-2 — an UNKNOWN record: the fixture's drill cutter states `true`, so this one
+    // carries its own null-bearing snapshot (the question is what this test is about).
+    const job: EngraveJob = { ...singleHole(), toolKey: 'flat-1.0', tool: flatEndMill(3.175, { centreCutting: null }) };
     // #516 item 5 — a fresh default job no longer seeds `flat-1.0`; it starts with no cutter.
     expect(defaultEngraveJob().toolKey).toBe('');
     const f = validateJob(job).find((x) => x.code === 'plunge-unproven');

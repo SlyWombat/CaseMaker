@@ -437,6 +437,9 @@ describe('engravePreview — drills and traces are in the picture (#288)', () =>
   function oneLabelJob(): EngraveJob {
     const job = dj();
     job.labels = [{ ...job.labels[0]!, id: 'lbl', depth: 0.5 }];
+    // #786 slice 4c-2 — this describe is about the PICTURE of a drilled hole, so its cutter is
+    // recorded as centre-cutting; an unknown record would (correctly) leave the hole out.
+    job.tool = { ...(job.tool ?? resolveTool('flat-1.0')!), centreCutting: true };
     return job;
   }
 

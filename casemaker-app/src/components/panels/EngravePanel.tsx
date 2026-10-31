@@ -32,6 +32,8 @@ import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds'
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
+import { useHouseStore } from '@/store/houseStore';
+import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineDisplayName } from '@/platform/locationClient';
 import { machineRecordByProfile, useLocationStore } from '@/store/locationStore';
@@ -809,6 +811,35 @@ export function EngravePanel(): JSX.Element {
   const updateVector = useEngraveJobStore((s) => s.updateVector);
   const removeVector = useEngraveJobStore((s) => s.removeVector);
   const setTool = useEngraveJobStore((s) => s.setTool);
+  /**
+   * #786 slice 4c-2 — record whether the chosen cutter can plunge straight down, on its own
+   * record, with the answer's provenance (#208 A1). The write goes through the house service, so
+   * it survives a reload and is asked once per cutter, ever; the job's snapshot is then refreshed
+   * so the finding clears and the withheld hole is cut. Nothing here decides the answer — the
+   * operator does.
+   */
+  const answerCentreCutting = async (centreCutting: boolean): Promise<void> => {
+    const entry = tools.find((e) => e.key === job.toolKey);
+    if (entry === undefined) return;
+    const toolWithAnswer = { ...entry.tool, centreCutting };
+    if (entry.key.startsWith('user:')) {
+      const ok = await useHouseStore.getState().updateTool({
+        ...entry,
+        tool: toolWithAnswer,
+        provenance: `${entry.provenance} — centre-cutting stated by you`,
+      });
+      if (ok) setTool(job.toolKey, job.sources?.tool ?? 'user');
+      return;
+    }
+    const item = inventoryItems.find((i) => `inv:${i.id}` === entry.key);
+    if (item === undefined) return;
+    const ok = await useHouseStore.getState().updateItem({
+      ...item,
+      tool: toolWithAnswer,
+      notes: [item.notes, 'centre-cutting stated by you'].filter((n): n is string => n !== null && n !== '').join('; '),
+    });
+    if (ok) setTool(job.toolKey, job.sources?.tool ?? 'user');
+  };
   // #766 D — the measured plan's write-back. The rule's single-cutter answer still uses setTool.
   const applyCutterPlan = useEngraveJobStore((s) => s.applyCutterPlan);
   const setVise = useEngraveJobStore((s) => s.setVise);
@@ -964,6 +995,11 @@ export function EngravePanel(): JSX.Element {
   // can never come from two different places. Read before the findings because #785's reach check
   // is the run's own rule and needs the chosen cutter and the registry it resolves in.
   const tools = useToolRegistry();
+  // #786 slice 4c-2 — THE CUTTER'S CENTRE-CUTTING ANSWER is written to the cutter's OWN record: a
+  // `user:` definition through the tool list, an `inv:` possession through the inventory. A
+  // catalogue row is the service's, so it is answered once the cutter is owned — the finding's
+  // buttons appear only for a record this app can write.
+  const inventoryItems = useToolRegistryStore((s) => s.items);
   const tool = jobTool(job);
   const findings = dedupeFindings([
     ...withTargetBlobState(jobOnlyFindings, job, targetBlob),
@@ -973,6 +1009,11 @@ export function EngravePanel(): JSX.Element {
     ...jobReachFindings(job, tool, tools.map((e) => e.tool), tools),
   ]);
   const jobFindings = findings.filter((f) => f.labelId === undefined);
+  // A cutter this app can write an answer to: a house definition or an owned cutter. A catalogue
+  // row alone is the service's — the sentence stands without buttons until the cutter is owned.
+  const centreCutterWritable =
+    (job.toolKey.startsWith('user:') && tools.some((e) => e.key === job.toolKey)) ||
+    (job.toolKey.startsWith('inv:') && inventoryItems.some((i) => `inv:${i.id}` === job.toolKey));
   const findingsFor = (labelId: string): JobFinding[] => findings.filter((f) => f.labelId === labelId);
 
   const toolEntry = tools.find((e) => e.key === job.toolKey) ?? null;
@@ -1827,6 +1868,21 @@ export function EngravePanel(): JSX.Element {
     measuredNow.cutters[0]?.key === job.toolKey &&
     namedNow !== null &&
     (namedNow.shape === 'drill' || namedNow.shape === 'thread');
+  // #786 slice 4c-2 — A MISSING OR REFUSED CUTTER IS REPLACED BY THE SEARCH'S ANSWER. The guard
+  // above protects a decision that still holds; a key the library does not hold, or a cutter no
+  // CAM here can use on this job (a ball in a region job, no feeds row for this material), holds
+  // no usable decision to protect — and the measured plan is exactly the answer to that question.
+  // A 'values' refusal is the operator's own override or the machine's limit, not the cutter's
+  // shape: a different cutter is no honest fix for it, so it is left alone.
+  const namedMissing = job.toolKey !== '' && namedNow === null;
+  const namedRefused =
+    namedNow !== null &&
+    namedNow.shape !== 'drill' &&
+    namedNow.shape !== 'thread' &&
+    feeds !== null &&
+    !feeds.ok &&
+    feeds.cause !== 'values';
+  const substituteNamed = measuredNow !== null && (namedMissing || namedRefused);
   useEffect(() => {
     const source = job.sources?.tool;
     // #743 P-8 — a BOARD ARRIVES WITH ITS PLAN. The import writes each role's cutter (§3.4) and
@@ -1834,9 +1890,9 @@ export function EngravePanel(): JSX.Element {
     // with one cutter chain and cannot express a board's engraver + drills + flat, so it must not
     // replace that plan. A person's or a measured plan is left alone for the same reason (#516) —
     // except that #786 4c's named split KEEPS the named cutter and adds the rest, so it may be
-    // applied over a user or measured pick.
+    // applied over a user or measured pick, and 4c-2 substitutes a missing or refused one.
     if (source === 'catalogue') return;
-    if ((source === 'user' || source === 'measured') && !namedSplit) return;
+    if ((source === 'user' || source === 'measured') && !namedSplit && !substituteNamed) return;
     // #516 item 5 — the first recommendation lands on the first edit or Generate, not on load: a
     // clean (just-opened or just-saved) tool-less document keeps its empty key, so opening a saved
     // job does not immediately dirty it.
@@ -1861,7 +1917,7 @@ export function EngravePanel(): JSX.Element {
     const key = rec?.key ?? null;
     if (key === null) return;
     if (job.toolKey !== key) setTool(key, 'computed');
-  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, namedSplit, applyCutterPlan, setTool]);
+  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, namedSplit, substituteNamed, applyCutterPlan, setTool]);
 
   // ---- #798 — THE CUTTER AS ONE LINE ------------------------------------------------------
   // What is in the spindle, where that answer came from, and — when the measured search chose it
@@ -4330,6 +4386,19 @@ export function EngravePanel(): JSX.Element {
                     <span style={{ flexShrink: 0, marginLeft: 'auto' }}>
                       <button type="button" data-testid="engrave-goal-cut-top-band" onClick={() => cutTopBand(f)}>
                         Cut the top {f.goalBandMm} mm only
+                      </button>
+                    </span>
+                  )}
+                  {/* #786 slice 4c-2 — the plunge question, answered in place. The write goes to
+                      the cutter's own record (user: or inv:), and the answer is asked once per
+                      cutter, ever; until then the hole is left out of the programs. */}
+                  {f.code === 'plunge-unproven' && centreCutterWritable && (
+                    <span style={{ flexShrink: 0, marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                      <button type="button" data-testid="plunge-centre-yes" onClick={() => void answerCentreCutting(true)}>
+                        Yes
+                      </button>
+                      <button type="button" data-testid="plunge-centre-no" onClick={() => void answerCentreCutting(false)}>
+                        No
                       </button>
                     </span>
                   )}

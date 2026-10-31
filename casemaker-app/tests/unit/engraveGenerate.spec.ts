@@ -2257,7 +2257,8 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     const base = dj();
     // A 1 mm bit with real reach: the demo labels are cut at their own size, and the through cut
     // is 12.3 mm deep.
-    const profiler = flatEndMill(1, { name: '1 mm flat end (reach)', fluteLength: 20, shoulderLength: 20 });
+    // #786 slice 4c-2 — its record answers the plunge question: this job drills through with it.
+    const profiler = flatEndMill(1, { name: '1 mm flat end (reach)', fluteLength: 20, shoulderLength: 20, centreCutting: true });
     const trace: EngraveTraceItem = {
       kind: 'line',
       id: 'line-1',

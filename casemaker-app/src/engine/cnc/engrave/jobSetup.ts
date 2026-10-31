@@ -2692,27 +2692,45 @@ export function validateJob(
   // A plunge needs a CENTRE-CUTTING cutter. The tool record does not carry the field (#220), so
   // a parsed or generic tool is `null` — unknown. That is a WARNING with the uncertainty named,
   // never a silent plunge; a tool explicitly recorded as not centre-cutting is an ERROR.
-  if (enabledDrills.length > 0 && drillTool) {
+  //
+  // #786 slice 4c-2 — A BORE IS NOT A PLUNGE: it helixes down the wall of a hole wider than the
+  // cutter, so a centre-cutting proof is not what it needs, and the question must not be asked
+  // about one. The check below is the PLUNGE drills' only (`mode` absent means a drill).
+  const plungeDrills = enabledDrills.filter((d) => (d.mode ?? 'drill') !== 'bore');
+  if (plungeDrills.length > 0 && drillTool) {
     if (drillTool.centreCutting === false) {
+      // #786 slice 4c-2 — ANSWERED NO: the hole is left out, like the unanswered one. The job is not
+      // refused for a hole this cutter cannot plunge — every other cut still posts, and a drill
+      // bit or a centre-cutting mill is the way to cut it.
+      const holes = plungeDrills.map(drillOperationName);
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'plunge-unproven',
-        labelId: enabledDrills[0]!.id,
         message:
-          `The job drills, but "${drillTool.name}" is recorded as NOT centre-cutting: it cannot ` +
-          `plunge straight down without a pilot hole.`,
+          `"${drillTool.name}" is recorded as NOT centre-cutting, so ` +
+          `${holes.length === 1 ? holes[0] : `${holes.length} plunge holes`} ` +
+          `${holes.length === 1 ? 'is' : 'are'} left out of the programs — every other cut still ` +
+          `posts. Use a centre-cutting end mill, or a drill bit, for the plunge.`,
       });
     } else if (drillTool.centreCutting === null && !drillIsBit) {
       // A DRILL BIT is centre-cutting by construction (#434): its point is the cutting end, so
       // the flat cutter's unproven-plunge warning would be a false doubt. The explicit `false`
       // above still fires: a record that says so is a contradiction worth showing.
+      //
+      // #786 slice 4c-2 — THE UNKNOWN IS ASKED, IN PLACE, ONCE PER CUTTER. The hole is left out
+      // of the programs until the operator answers (the engine withholds it; every other cut
+      // still posts), and the answer goes on the cutter's own record — so this sentence is shown
+      // once per cutter, ever, not once per job.
+      const holes = plungeDrills.map(drillOperationName);
       findings.push({
         severity: 'warning',
         code: 'plunge-unproven',
-        labelId: enabledDrills[0]!.id,
         message:
-          `The job drills, but nothing recorded for "${drillTool.name}" says it is centre-cutting ` +
-          `(the .nc header has no such field); an owned cutter's own record settles it.`,
+          `Is the ${toolDisplayName(drillTool).split(' · ')[0]!} centre-cutting? ` +
+          `${holes.length === 1 ? holes[0] : `${holes.length} plunge holes`} ` +
+          `${holes.length === 1 ? 'is' : 'are'} left out of the programs until this is answered — ` +
+          `every other cut still posts. A centre-cutting end mill plunges straight down; a cutter ` +
+          `that cannot needs a pilot hole or a drill bit.`,
       });
     }
     // A peck must fit inside the flute: beyond it the chips have nowhere to go. A drill bit's

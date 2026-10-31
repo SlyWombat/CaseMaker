@@ -317,6 +317,79 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     expect(after.setups?.[0]?.toolItems).toEqual({ 'user:drill-3': ['hole'], 'flat-3.175': ['pocket'] });
   });
 
+  // #786 slice 4c-2 — A MISSING OR REFUSED CUTTER IS SUBSTITUTED. The replace-guard protects a
+  // decision that still holds; a key the library does not hold, or a cutter no CAM here can use,
+  // holds none — the measured plan is the answer and is applied even though the source is 'user'.
+  function pocketJob(): ReturnType<typeof defaultEngraveJob> {
+    const job = defaultEngraveJob();
+    job.labels = [];
+    job.shapes = [
+      {
+        kind: 'circle',
+        id: 'pocket',
+        name: 'pocket',
+        position: { x: 40, y: 25 },
+        rotation: 0,
+        depth: 2,
+        enabled: true,
+        diameter: 10,
+      },
+    ];
+    return job;
+  }
+
+  function measuredFlat(): EngravePickSummary {
+    return {
+      ...measuredFor(defaultEngraveJob()),
+      cutters: [{ key: 'flat-3.175', items: ['pocket'], source: 'owned' }],
+    };
+  }
+
+  it('replaces a key the library does not hold', () => {
+    const job = pocketJob();
+    job.toolKey = 'user:gone';
+    job.tool = null;
+    job.sources = { tool: 'user' };
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    const measured = measuredFlat();
+    useEngravePreviewStore.setState({
+      preview: previewWith(),
+      status: 'ready',
+      measured,
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+    render(<EngravePanel />);
+
+    const after = useEngraveJobStore.getState().job;
+    expect(after.toolKey).toBe('flat-3.175');
+    expect(after.setups?.[0]?.tools).toEqual(['flat-3.175']);
+    expect(after.setups?.[0]?.toolItems).toEqual({ 'flat-3.175': ['pocket'] });
+  });
+
+  it('replaces a cutter no CAM here can use (a ball in a region job)', () => {
+    const job = pocketJob();
+    job.toolKey = 'user:ball';
+    job.tool = flatEndMill(3.175, { name: 'ball nose', typeText: 'Ball End', shape: 'ball' });
+    job.sources = { tool: 'user' };
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    const measured = measuredFlat();
+    useEngravePreviewStore.setState({
+      preview: previewWith(),
+      status: 'ready',
+      measured,
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+    render(<EngravePanel />);
+
+    expect(useEngraveJobStore.getState().job.toolKey).toBe('flat-3.175');
+  });
+
   it('leaves the rule answer standing, labelled, when the search fails', () => {
     useEngravePreviewStore.setState({ preview: previewWith(), status: 'ready' });
     render(<EngravePanel />);
