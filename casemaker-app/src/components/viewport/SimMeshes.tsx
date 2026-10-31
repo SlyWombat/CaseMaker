@@ -20,7 +20,7 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { LiveToolHead } from './LiveToolHead';
 import { toolPlacement } from './liveMachineTool';
 import { TouchMarkers } from './TouchMarkers';
-import { angleAtStep, turningRadians } from './rotarySimView';
+import { drawnSimPath, simTurningRadians } from './rotarySimView';
 import {
   cleanStockGeometry,
   drawsSacrificial,
@@ -179,9 +179,20 @@ export function SimMeshes() {
   const sacrificialGeom = useMeshGeometry(mapView ? null : sacrificialMesh(frameForDesign, meshes));
   const showSacrificial = drawsSacrificial(layers, sacrificialGeom !== null);
 
+  // #241 slice 3 — an INDEXED job's material is in the STOCK frame (the exact sweeper turns each
+  // run's removal by −a), so its drawn path is carried into the same frame and turns with it; the
+  // tool tip below stays in the work frame, under the still cutter. A wrapped or flat job's path is
+  // drawn exactly as before.
+  const rotaryClass = info?.summary?.rotaryClass;
+  const drawnPath = useMemo(() => drawnSimPath(path, rotaryClass, mapView), [path, rotaryClass, mapView]);
   const split = useMemo(
-    () => (path ? (mapView && stockRadius !== null ? splitMapPath(path, stockRadius) : splitPath(path)) : null),
-    [path, mapView, stockRadius],
+    () =>
+      drawnPath
+        ? mapView && stockRadius !== null
+          ? splitMapPath(drawnPath, stockRadius)
+          : splitPath(drawnPath)
+        : null,
+    [drawnPath, mapView, stockRadius],
   );
   const cutSegments = split ? vertexIndexAtStep(split.cutStep, step) : 0;
   const rapidSegments = split ? vertexIndexAtStep(split.rapidStep, step) : 0;
@@ -210,8 +221,9 @@ export function SimMeshes() {
   // stock's bounding box is invariant under the rotation, so the camera never chases it. A flat
   // program (no A on the path) turns by 0 — its scene is exactly what it was.
   // Unroll already IS the map — the rod's turn would rotate an opened surface out of its frame.
-  const turning = path && !mapView ? angleAtStep(path, step) : null;
-  const turningRad = turning === null ? 0 : turningRadians(turning);
+  // #241 slice 3 — an INDEXED job turns to each face's A in the same way, so the face being cut
+  // is the one on top; crossing an index turn changes this angle and nothing about the step.
+  const turningRad = simTurningRadians(path, step, mapView);
 
   return (
     <group>

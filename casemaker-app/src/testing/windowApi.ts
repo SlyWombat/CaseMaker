@@ -1,3 +1,4 @@
+import { simTurningRadians } from '@/components/viewport/rotarySimView';
 import type { Project, MeshStats } from '@/types';
 import {
   useProjectStore,
@@ -221,6 +222,10 @@ export interface CaseMakerTestApi {
     errorCodes: string[];
     gougeCount: number;
     pathVertexCount: number;
+    /** #241 slice 3 — the viewport's stock-group turn about X at the current step, degrees (0 flat / Unroll). */
+    turningDeg: number;
+    /** #241 slice 3 — each run's A and step span, so a spec can scrub inside a face. */
+    runs: { a: number | null; firstStep: number; lastStep: number }[];
     visibleLayers: SimLayers;
   };
   /**
@@ -575,6 +580,8 @@ export function installCaseMakerTestApi(): void {
         errorCodes: s.diagnostics.filter((d) => d.severity === 'error').map((d) => d.code),
         gougeCount: s.meshes?.gouges.length ?? 0,
         pathVertexCount: s.path?.step.length ?? 0,
+        turningDeg: (simTurningRadians(s.path, s.step, s.design === 'map') * 180) / Math.PI,
+        runs: (s.info?.checkpoints ?? []).map((c) => ({ a: c.a, firstStep: c.firstStep, lastStep: c.lastStep })),
         visibleLayers: s.layers,
       };
     },
