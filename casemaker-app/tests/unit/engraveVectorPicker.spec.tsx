@@ -348,12 +348,13 @@ describe('EngravePanel — the imported vector row (#217)', () => {
     expect(useEngraveJobStore.getState().job.vectors).toEqual([]);
   });
 
-  it('shows the depth-past-floor finding under the row and gates Generate', async () => {
+  it('#786 slice 1 — a depth past the preferred floor posts under the row and leaves Generate open', async () => {
     await addVector();
-    // 12 mm stock, 1 mm minimum floor -> at most 11 mm.
+    // 12 mm stock, 1 mm minimum floor -> 11 mm is preferred; 11.5 leaves half a millimetre.
     fireEvent.change(screen.getByTestId('engrave-vector-depth-0'), { target: { value: '11.5' } });
-    expect(screen.getByTestId('engrave-vector-finding-0-depth-exceeds-stock')).toBeTruthy();
-    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
+    const row = screen.getByTestId('engrave-vector-finding-0-depth-exceeds-stock');
+    expect(row.textContent).toContain('only 0.5 mm of floor would remain');
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(false);
   });
 });
 

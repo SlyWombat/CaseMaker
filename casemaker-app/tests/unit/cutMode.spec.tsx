@@ -166,43 +166,64 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
   });
 
   it('lands a red row on the page in the owner`s words', () => {
+    // #786 slice 1 — a depth past the floor is a warning now, so the red row is a cut that still
+    // refuses: a through cut-out on a vise job with no board under it (through-needs-board).
     const job = { ...defaultEngraveJob(), toolKey: 'flat-1.0' }; // #516 item 5 — the default job no longer seeds a cutter
-    const deep: EngraveJob = {
-      ...job,
-      labels: job.labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
-    };
+    const shape = {
+      id: 'cut-through',
+      kind: 'rect',
+      name: 'Cut-out',
+      enabled: true,
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      width: 40,
+      height: 20,
+      cornerRadius: 2,
+      depth: 2,
+      through: true,
+    } as unknown as EngraveJob['shapes'] extends (infer S)[] | undefined ? S : never;
+    const blocked: EngraveJob = { ...job, shapes: [shape] };
     act(() => {
-      useEngraveJobStore.setState({ job: deep });
+      useEngraveJobStore.setState({ job: blocked });
     });
     render(<EngravePanel />);
     openCut();
 
     expect(screen.getByTestId('engrave-preflight').getAttribute('data-state')).toBe('blocked');
-    const row = screen.getByTestId(/^engrave-preflight-row-\d+-depth-exceeds-stock$/);
+    const row = screen.getByTestId(/^engrave-preflight-row-\d+-through-needs-board$/);
     expect(row.getAttribute('data-severity')).toBe('error');
     expect(row.getAttribute('data-expanded')).toBe('true');
-    expect(screen.getByTestId('engrave-preflight-first-blocking').textContent).toContain('11.5 mm deep');
+    expect(screen.getByTestId('engrave-preflight-first-blocking').textContent).toContain('cuts through the blank');
   });
 
   it('Back to Design expands the item the first red row names', () => {
     const job = { ...defaultEngraveJob(), toolKey: 'flat-1.0' }; // #516 item 5 — the default job no longer seeds a cutter
-    const labelId = job.labels[0]!.id;
-    const deep: EngraveJob = {
-      ...job,
-      labels: job.labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
-    };
+    const shape = {
+      id: 'cut-through',
+      kind: 'rect',
+      name: 'Cut-out',
+      enabled: true,
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      width: 40,
+      height: 20,
+      cornerRadius: 2,
+      depth: 2,
+      through: true,
+    } as unknown as EngraveJob['shapes'] extends (infer S)[] | undefined ? S : never;
+    const itemId = shape.id;
     act(() => {
-      useEngraveJobStore.setState({ job: deep });
+      useEngraveJobStore.setState({ job: { ...job, shapes: [shape] } });
     });
     render(<EngravePanel />);
     openCut();
-    expect(useEngraveRowStore.getState().open.has(labelId)).toBe(false);
+    expect(useEngraveRowStore.getState().open.has(itemId)).toBe(false);
 
     fireEvent.click(screen.getByTestId('engrave-back-to-design'));
 
     expect(pressed('cnc-mode-design')).toBe('true');
     expect(screen.getByTestId('engrave-stock-edit')).toBeTruthy();
-    expect(useEngraveRowStore.getState().open.has(labelId)).toBe(true);
+    expect(useEngraveRowStore.getState().open.has(itemId)).toBe(true);
   });
 
   it('keeps Cut across a remount of the panel, because the mode belongs to the job', () => {

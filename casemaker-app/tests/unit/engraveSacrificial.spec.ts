@@ -31,14 +31,14 @@ const job = (over: Partial<EngraveJob> = {}): EngraveJob => ({ ...dj(), ...over 
 describe('jobDepthLimit composes the sacrificial table (#213 §3)', () => {
   it('with no sacrificial material is the plain stock limit, 0 off the blank', () => {
     const limit = jobDepthLimit(job());
-    expect(limit(50, 30)).toBe(11); // 12 − minFloor
+    expect(limit(50, 30)).toBe(12); // 12 — the blank's bottom; the floor is a preference (#786 slice 1)
     expect(limit(101, 30)).toBe(0);
     expect(limit(-1, 30)).toBe(0);
   });
 
   it('over a flush side strip is the strip height, and 0 beyond the strip', () => {
     const limit = jobDepthLimit(job({ sacrificial: presetJawStrips() })); // 6 mm left+right, flush
-    expect(limit(50, 30)).toBe(11); // still the part
+    expect(limit(50, 30)).toBe(12); // still the part — the blank's bottom (#786 slice 1)
     expect(limit(103, 30)).toBe(12); // 3 mm past the right edge, on the strip: height = T
     expect(limit(-3, 30)).toBe(12); // the left strip
     expect(limit(107, 30)).toBe(0); // past the strip's outer face

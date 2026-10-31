@@ -895,6 +895,18 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
     expect(d?.message).toContain('Vise fixed jaw');
   });
 
+  it('#786 slice 1 — a through-break at the blank’s edge is caught by the FIXTURE, not by the floor preference', () => {
+    // The cut runs 12.5 mm deep on a 12 mm blank, past the blank's physical bottom, with the tool's
+    // edge 0.59 mm outside the stock's left face — inside the fixed jaw, whose top is at Z −4 and
+    // whose body reaches below the blank. The minimum-floor PREFERENCE is gone from the findings
+    // (#786 slice 1); the safety net is this check, and it names the jaw.
+    const { out } = sweep(stroke(1.0, -12.5), T3, fixtureSetup());
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const d = out.value.diagnostics.find((x) => x.code === 'tool-into-fixture');
+    expect(d?.severity).toBe('error');
+    expect(d?.message).toContain('Vise fixed jaw');
+  });
+
   it('the same stroke ABOVE the jaw top cuts air beside the stock: no fixture error', () => {
     expect(codesOf(sweep(stroke(1.0, -3), T3, fixtureSetup()).out)).not.toContain('tool-into-fixture');
   });

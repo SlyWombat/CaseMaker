@@ -172,16 +172,18 @@ describe('engravePreview (#205)', () => {
     expect(p.registration[0]!.uncertainty).toBeGreaterThan(0);
   });
 
-  it('leaves a label that is too deep out of the cut and reports it', () => {
+  it('#786 slice 1 — a label past the preferred floor is CUT, and the warning states the floor', () => {
     const job = dj();
     job.labels = [{ ...job.labels[0]!, id: 'too-deep', text: 'DEEP', depth: 11.5 }];
     const p = buildPreview(job);
     const uncut = job.stock.length * job.stock.width * job.stock.thickness;
 
-    expect(p.findings.some((f) => f.code === 'depth-exceeds-stock' && f.severity === 'error')).toBe(true);
-    expect(p.floors).toHaveLength(0);
-    // The stock is drawn uncut there: volume unchanged, within the mesh's own tolerance.
-    expect(Math.abs(meshVolume(p.stock) - uncut)).toBeLessThan(uncut * 0.001);
+    const finding = p.findings.find((f) => f.code === 'depth-exceeds-stock');
+    expect(finding?.severity).toBe('warning');
+    expect(finding?.message).toContain('only 0.5 mm of floor would remain');
+    // The picture cuts it: one floor, and material removed.
+    expect(p.floors).toHaveLength(1);
+    expect(meshVolume(p.stock)).toBeLessThan(uncut);
   });
 
   // #171 — the void warning has to reach the LIVE panel, not only the run: the user places the
@@ -1128,15 +1130,16 @@ describe('engravePreview — the lost layer (§5.7)', () => {
     expect(p.lost).toHaveLength(0);
   });
 
-  it('leaves an item with an ERROR finding out of the picture, and out of the lost layer too', () => {
+  it('#786 slice 1 — a deep item is measured and drawn like the others, with its warning', () => {
     const job = dj();
     job.labels = job.labels.map((l, i) => (i === 1 ? { ...l, depth: 11.5 } : l));
     const p = buildPreview(job);
 
-    expect(p.findings.some((f) => f.code === 'depth-exceeds-stock' && f.labelId === job.labels[1]!.id)).toBe(true);
-    expect(p.lost.map((l) => l.labelId)).not.toContain(job.labels[1]!.id);
-    // The other two are still measured and still drawn.
-    expect(p.lost.map((l) => l.labelId)).toEqual([job.labels[0]!.id, job.labels[2]!.id]);
+    const finding = p.findings.find((f) => f.code === 'depth-exceeds-stock' && f.labelId === job.labels[1]!.id);
+    expect(finding?.severity).toBe('warning');
+    // No longer left out of the picture: every label is measured, and the deep one has its floor.
+    expect(p.lost.map((l) => l.labelId)).toEqual([job.labels[0]!.id, job.labels[1]!.id, job.labels[2]!.id]);
+    expect(p.floors.some((f) => f.labelId === job.labels[1]!.id)).toBe(true);
   });
 
   // §5.7 — the design ↔ as-cut slider. Each stage is a CLOSED-FORM material state: the blank less

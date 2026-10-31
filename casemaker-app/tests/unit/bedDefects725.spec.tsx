@@ -373,9 +373,26 @@ describe('#725 B4 — a blocked run names its first error and its Fix', () => {
   });
 
   it('a document finding still wins over the run’s own, so the button and the run cannot disagree', () => {
+    // #786 slice 1 — a depth past the preferred floor is a warning now, so the document ERROR that
+    // must outrank the run's is a through pocket with no board under it (a table-C refusal).
+    const shape = {
+      id: 'cut-through',
+      kind: 'rect',
+      name: 'Cut-out',
+      enabled: true,
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      width: 40,
+      height: 20,
+      cornerRadius: 2,
+      depth: 2,
+      through: true,
+    } as unknown as import('@/types/engraveJob').EngraveShape;
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({ job: { ...base, shapes: [shape] } });
+    });
     render(<EngravePanel />);
-    fireEvent.click(screen.getByTestId('engrave-label-expand-0'));
-    fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '11.5' } });
     act(() => {
       useEngraveRunStore.setState({
         generated: refused([{ code: 'clamp-in-path', message: 'a clamp is in the way' }]),
@@ -385,7 +402,7 @@ describe('#725 B4 — a blocked run names its first error and its Fix', () => {
         staleSince: null,
       });
     });
-    expect(screen.getByTestId('engrave-generate-blocker').textContent).toContain('11.5 mm deep');
+    expect(screen.getByTestId('engrave-generate-blocker').textContent).toContain('cuts through the blank');
   });
 });
 

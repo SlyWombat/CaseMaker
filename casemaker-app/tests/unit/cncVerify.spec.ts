@@ -119,13 +119,15 @@ describe('cncVerify (#174): the default job and the authored fixture', () => {
 
 describe('cncVerify (#174): the checks', () => {
   it('cut-too-deep: the primary check names the line and the coordinates', () => {
-    const { text, ctx } = program(['G0 X5 Y5', 'G1 Z-11.5 F200', 'G1 X10', 'M5', 'M02'], {
+    // #786 slice 1 — the limit is the blank's physical bottom (12 mm), so the cut that trips the
+    // check is one PAST it; a cut inside the blank at 11.5 mm is the operator's preference now.
+    const { text, ctx } = program(['G0 X5 Y5', 'G1 Z-12.5 F200', 'G1 X10', 'M5', 'M02'], {
       depthLimit: stockDepthLimit({ length: 20, width: 10, thickness: 12 }, 1),
     });
     const report = verifyProgram(text, ctx);
     const f = report.findings.find((x) => x.code === 'cut-too-deep' && x.line === 7);
     expect(f).toBeDefined();
-    expect(f?.message).toContain('-11.500');
+    expect(f?.message).toContain('-12.500');
     expect(f?.message).toContain('5.000');
     expect(report.ok).toBe(false);
   });
@@ -528,18 +530,18 @@ describe('sacrificialDepthLimit (#213 §3): the depth table', () => {
     }
   });
 
-  it('over the part is thickness − minFloor; over a flush strip its height; over air 0', () => {
+  it('#786 slice 1 — over the part is the blank’s physical bottom; over a flush strip its height; over air 0', () => {
     const limit = sacrificialDepthLimit(STOCK, presetJawStrips(), OPTS); // left+right 6 mm, flush, no board
-    expect(limit(10, 5)).toBe(4); // T − minFloor
+    expect(limit(10, 5)).toBe(5); // T, the whole blank
     expect(limit(-3, 5)).toBe(5); // flush strip height = T
     expect(limit(23, 5)).toBe(5); // right strip
     expect(limit(-7, 5)).toBe(0); // beyond the left strip
     expect(limit(10, 12)).toBe(0); // beyond the part in Y
   });
 
-  it('over board overhang is thickness + breakthrough; the part stays thickness − minFloor without a through-cut', () => {
+  it('over board overhang is thickness + breakthrough; the part stays the blank’s bottom without a through-cut', () => {
     const limit = sacrificialDepthLimit(STOCK, presetPartOnBoard(), OPTS); // 12 mm board, 10 mm overhang all round
-    expect(limit(10, 5)).toBe(4); // part
+    expect(limit(10, 5)).toBe(5); // part: the whole blank (#786 slice 1)
     expect(limit(-5, 5)).toBe(5.3); // board overhang
     expect(limit(-5, -5)).toBe(5.3); // board corner
     expect(limit(-11, 5)).toBe(0); // beyond the board
@@ -549,8 +551,10 @@ describe('sacrificialDepthLimit (#213 §3): the depth table', () => {
     const through = (): number => STOCK.thickness + OPTS.breakthrough;
     const withBoard = sacrificialDepthLimit(STOCK, presetPartOnBoard(), { ...OPTS, through });
     expect(withBoard(10, 5)).toBe(5.3);
+    // Without a board the through mask is not honoured: the blank's own bottom stands (and the
+    // board/through gates refuse the through work by name).
     const noBoard = sacrificialDepthLimit(STOCK, noneSacrificial(), { ...OPTS, through });
-    expect(noBoard(10, 5)).toBe(4);
+    expect(noBoard(10, 5)).toBe(5);
   });
 
   it('the positive region is exactly supportedFootprint (#213 §3)', () => {

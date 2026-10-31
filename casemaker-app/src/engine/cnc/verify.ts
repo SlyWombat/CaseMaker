@@ -131,8 +131,14 @@ export interface VerifyReport {
  * A positive return is the deepest permitted cut; 0 means no cutting is allowed at that
  * XY (outside the stock, or with no floor left).
  */
-export function stockDepthLimit(stock: { length: number; width: number; thickness: number }, minFloor: number): DepthLimit {
-  const limit = stock.thickness - minFloor;
+export function stockDepthLimit(stock: { length: number; width: number; thickness: number }, _minFloor: number): DepthLimit {
+  // #786 slice 1 — THE VERIFIER'S FLOOR IS THE BLANK'S PHYSICAL BOTTOM, not the operator's minimum
+  // floor. The floor is a PREFERENCE: `depth-exceeds-stock` states the floor a deeper cut leaves,
+  // and Generate cuts it. What is still refused here is cutting past the blank into whatever holds
+  // it — and contact there is the sweep's fixture/bed checks' job, not this rule's. The parameter
+  // stays for every caller's shape (and for `sacrificialDepthLimit`'s tab/board numbers); it is
+  // deliberately not read.
+  const limit = stock.thickness;
   return (x, y) => (x >= 0 && x <= stock.length && y >= 0 && y <= stock.width ? limit : 0);
 }
 
@@ -192,8 +198,9 @@ function insideBox(b: SacrificialBox, x: number, y: number): boolean {
  *
  * The table (#213 §3), all work-frame mm below the part's top face (Z = 0), `T` = part thickness:
  *
- *   over the part         `T − minFloor`, or `T + breakthrough` for a through-cut with a board
- *                         (a through drill's point a point length below that, #218);
+ *   over the part         `T` (the blank's bottom — the physical floor, #786 slice 1), or
+ *                         `T + breakthrough` for a through-cut with a board (a through drill's
+ *                         point a point length below that, #218);
  *   over a side strip     `T` — the strip's full height down to the part's underside, so cutting
  *                         the strip away is allowed — plus `breakthrough` where a board lies under
  *                         the point;
@@ -207,9 +214,12 @@ function insideBox(b: SacrificialBox, x: number, y: number): boolean {
  */
 export function sacrificialDepthLimit(stock: StockDims, s: Sacrificial, opts: SacrificialLimitOptions): DepthLimit {
   const { length: L, width: W, thickness: T } = stock;
-  const { minFloor, breakthrough } = opts;
+  const { breakthrough } = opts;
   const mask = opts.through ?? null;
-  const partLimit = T - minFloor;
+  // #786 slice 1 — the part's floor is the blank's physical bottom (see `stockDepthLimit`); the
+  // minimum floor is the finding's preference, not this rule's limit. The tab mask and the board
+  // keep their own numbers below.
+  const partLimit = T;
 
   const boxes = sacrificialBoxes(stock, s);
   const under = boxes.find((b) => b.id === 'under') ?? null;

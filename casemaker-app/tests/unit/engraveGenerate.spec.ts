@@ -136,17 +136,19 @@ describe('engraveGenerate (#206)', () => {
     expect(a.nc).toBe(b.nc);
   });
 
-  it('stops at findings for a cut deeper than the stock allows', () => {
+  it('#786 slice 1 — a cut deeper than the floor allows is INFORMED and posted, inside the blank', () => {
     const job = dj();
     const deep: EngraveJob = {
       ...job,
       labels: job.labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
     };
     const g = generate(tl, deep);
-    expect(g.ok).toBe(false);
-    expect(g.stage).toBe('findings');
-    expect(g.nc).toBeNull();
-    expect(g.findings.some((f) => f.code === 'depth-exceeds-stock' && f.severity === 'error')).toBe(true);
+    expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
+    expect(g.nc).not.toBeNull();
+    const finding = g.findings.find((f) => f.code === 'depth-exceeds-stock');
+    expect(finding?.severity).toBe('warning');
+    expect(finding?.message).toContain('only 0.5 mm of floor would remain');
+    expect(finding?.message).toContain('Generate cuts it as it is');
   });
 
   it('stops at feeds for a step-over past the cutter radius (#191)', () => {
@@ -1046,11 +1048,9 @@ describe('the frame file (#244)', () => {
   });
 
   it('offers no frame when the job is refused', () => {
-    const deep: EngraveJob = {
-      ...dj(),
-      labels: dj().labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
-    };
-    const g = generate(tl, deep);
+    // #786 slice 1 — a deep cut is no longer a refusal; the FEEDS gate still is (a 0.6 mm step-over
+    // on a 0.5 mm radius).
+    const g = generate(tl, { ...dj(), cutOverride: { stepOver: 0.6 } });
     expect(g.ok).toBe(false);
     expect(g.frameNc).toBeNull();
     expect(g.frameVerify).toBeNull();
@@ -1821,14 +1821,17 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(wood.programs[0]!.kind).toBe('facing');
   });
 
-  it('refuses a facing depth that eats the minimum floor, before any CAM', () => {
-    const thickness = 3;
-    const g = generate(tl, faced({ stock: { ...dj().stock, thickness }, minFloor: 1, facing: { enabled: true, depth: 2.5 } }));
-    expect(g.ok).toBe(false);
-    expect(g.stage).toBe('findings');
+  it('#786 slice 1 — a facing depth that eats the minimum floor is INFORMED, and the run posts', () => {
+    // An 8 mm blank the vise can hold, skimmed 7.5 mm: 0.5 mm left where the job asks for 1. (A
+    // 3 mm blank would be refused by the VISE — a 3 mm part cannot sit proud in the shipped jaws —
+    // which is a holding refusal of its own, not this rule.)
+    const thickness = 8;
+    const g = generate(tl, faced({ stock: { ...dj().stock, thickness }, minFloor: 1, facing: { enabled: true, depth: 7.5 } }));
+    expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
     const finding = g.findings.find((f) => f.code === 'facing-too-deep');
-    expect(finding?.severity).toBe('error');
-    expect(g.cam).toBeNull();
+    expect(finding?.severity).toBe('warning');
+    expect(finding?.message).toContain('leaving 0.5 mm where the job asks for a 1 mm minimum floor');
+    expect(g.nc).not.toBeNull();
   });
 
   it('round-trips the facing choice, its depth and its own cutter key through the schema', () => {

@@ -554,12 +554,13 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   // TWO kinds of `⚠`, because they are two claims: an ERROR blocks Generate and a WARNING does not,
   // and a line that counted them the same would be hiding the difference.
   //
-  // The error is a label the person made too deep for the blank. Its row arrives open (a row just
-  // added is open), so its fields are here without a press, and 11.5 mm is past the 11 mm the panel
-  // says this stock allows — the finding the line must count without growing.
-  await page.getByTestId('engrave-label-depth-3').fill('11.5');
-  await expect(page.getByTestId('engrave-label-warn-3')).toBeVisible();
-  await expect(page.getByTestId('engrave-label-warn-3')).toHaveClass(/engrave-item-row__warn--error/);
+  // The error is the added pocket cut THROUGH the blank on a job held in the vise with no board
+  // under it: `through-needs-board` is a refusal (a through cut needs material beneath), and the
+  // row must wear the error's class. (#786 slice 1 — a label merely deeper than the preferred floor
+  // is a warning now, so it no longer serves as the error here.)
+  await page.getByTestId('engrave-shape-through-0').check();
+  await expect(page.getByTestId('engrave-shape-warn-0')).toBeVisible();
+  await expect(page.getByTestId('engrave-shape-warn-0')).toHaveClass(/engrave-item-row__warn--error/);
   // The warning is the hole's, and it is the fitted cutter's own uncertainty rather than anything
   // typed here: nothing records that `flat-1.0` centre-cuts, so a job that plunges gets
   // `plunge-unproven` as a warning (`jobSetup.ts`). It sits on a FOLDED row — the drill's — which is

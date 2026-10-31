@@ -211,8 +211,8 @@ describe('the void depth limit (#231, #351)', () => {
   });
 
   it('jobDepthLimit is the stock limit with no void, and 0 outside the stock', () => {
-    const flat = jobDepthLimit(defaultEngraveJob()); // 12 - 1 = 11
-    expect(flat(50, 30)).toBe(11);
+    const flat = jobDepthLimit(defaultEngraveJob()); // #786 slice 1 — the blank's own 12 mm bottom
+    expect(flat(50, 30)).toBe(12);
     expect(flat(-1, 30)).toBe(0);
     expect(flat(101, 30)).toBe(0);
     expect(flat(50, 61)).toBe(0);
@@ -221,7 +221,7 @@ describe('the void depth limit (#231, #351)', () => {
   it('jobDepthLimit tightens over a void and leaves the rest of the blank alone', () => {
     const limit = jobDepthLimit(jobWithKeepOut());
     expect(limit(50, 30)).toBeCloseTo(1.0, 9); // over the pocket: 2 − max(0.2, 1.0)
-    expect(limit(5, 5)).toBe(11); // solid stock
+    expect(limit(5, 5)).toBe(12); // solid stock — the blank's bottom (#786 slice 1)
   });
 
   it('snaps a roof that is off the printer’s layer grid, so the limit is the enforced one (#351)', () => {

@@ -1121,7 +1121,13 @@ function overDepthClause(job: EngraveJob, depth: number, facingDepth: number, fl
     );
   }
   const remaining = job.stock.thickness - facingDepth - depth;
-  return `only ${fmt3(remaining)} mm of floor would remain on a ${job.stock.thickness} mm stock, below the ${job.minFloor} mm minimum`;
+  if (remaining <= 0) {
+    return (
+      `it breaks through the ${fmt3(job.stock.thickness)} mm stock by ${fmt3(-remaining)} mm ` +
+      `(the ${fmt3(job.minFloor)} mm minimum floor is a preference; the board and fixture checks judge the rest)`
+    );
+  }
+  return `only ${fmt3(remaining)} mm of floor would remain on a ${fmt3(job.stock.thickness)} mm stock, below the ${fmt3(job.minFloor)} mm minimum`;
 }
 
 /**
@@ -1264,13 +1270,15 @@ export function validateJob(
   // Absent, disabled or zero means the job does not face and every number below is unchanged.
   const facingDepth = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0 ? job.facing.depth : 0;
   if (facingDepth > thickness - job.minFloor) {
+    // #786 slice 1 — THE MINIMUM FLOOR IS A PREFERENCE, INFORMED. The skim is cut; the sentence
+    // states the floor it leaves, and the fixtures judge what actually remains.
     findings.push({
-      severity: 'error',
+      severity: 'warning',
       code: 'facing-too-deep',
       message:
-        `The facing pass would take ${facingDepth} mm off the ${thickness} mm stock, leaving less ` +
-        `than the ${job.minFloor} mm minimum floor. A facing pass is a light skim: keep it shallow, ` +
-        `or start from thicker stock.`,
+        `The facing pass would take ${fmt3(facingDepth)} mm off the ${fmt3(thickness)} mm stock, leaving ` +
+        `${fmt3(thickness - facingDepth)} mm where the job asks for a ${fmt3(job.minFloor)} mm minimum floor. ` +
+        `Generate cuts it as it is. Keep the skim shallow, or start from thicker stock.`,
     });
   }
   // #724 W4 — the floor allowed is the BLANK's ceiling, facing taken: on a plate the thickness
@@ -1285,11 +1293,15 @@ export function validateJob(
     // carry `through`; a label has no such field.
     if ('through' in item && item.through === true) continue;
     if (item.depth > floorAllowed) {
+      // #786 slice 1 — A FLOOR IS A PREFERENCE, INFORMED. The cut proceeds; the sentence states the
+      // floor (or breakthrough) it leaves, and the board/fixture/through checks judge contact.
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'depth-exceeds-stock',
         labelId: item.id,
-        message: `${itemLabel(item)} cuts ${item.depth} mm deep; ${overDepthClause(job, item.depth, facingDepth, floorAllowed)}.`,
+        message:
+          `${itemLabel(item)} cuts ${fmt3(item.depth)} mm deep; ${overDepthClause(job, item.depth, facingDepth, floorAllowed)}. ` +
+          `Generate cuts it as it is — the board and fixture checks judge what lies beneath.`,
       });
     }
   }
@@ -1297,10 +1309,12 @@ export function validateJob(
   for (const trace of enabledTraces) {
     if (trace.depth > floorAllowed) {
       findings.push({
-        severity: 'error',
+        severity: 'warning',
         code: 'depth-exceeds-stock',
         labelId: trace.id,
-        message: `${traceOperationName(trace)} cuts ${trace.depth} mm deep; ${overDepthClause(job, trace.depth, facingDepth, floorAllowed)}.`,
+        message:
+          `${traceOperationName(trace)} cuts ${fmt3(trace.depth)} mm deep; ${overDepthClause(job, trace.depth, facingDepth, floorAllowed)}. ` +
+          `Generate cuts it as it is — the board and fixture checks judge what lies beneath.`,
       });
     }
   }

@@ -131,8 +131,9 @@ describe('EngravePanel (#205)', () => {
 
     fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '11.5' } });
     expect(screen.getByTestId('engrave-label-finding-0-depth-exceeds-stock')).toBeTruthy();
-    // …and Generate is gated on it.
-    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
+    // #786 slice 1 — the floor is a preference: the sentence states the floor and Generate stays open.
+    expect(screen.getByTestId('engrave-label-finding-0-depth-exceeds-stock').textContent).toContain('only 0.5 mm of floor would remain');
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('a rod in the chuck reads its own numbers, and its ceiling is the radius (#724 W3/W4)', () => {
@@ -652,24 +653,16 @@ describe('EngravePanel — the Generate blocker (#688)', () => {
     act(() => resetRegistry());
   });
 
-  it('names a blocking finding and its Fix opens the item row it is about', () => {
+  it('#786 slice 1 — a depth past the preferred floor posts under the row and leaves Generate open', () => {
     render(<EngravePanel />);
-    // 12 mm stock, 1 mm minimum floor -> at most 11 mm.
     expand('engrave-label');
     fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '11.5' } });
-    // Fold the row again: the Fix has to reopen what the finding points at, not just point at it.
-    fireEvent.click(screen.getByTestId('engrave-label-expand-0'));
-    expect(screen.queryByTestId('engrave-label-text-0')).toBeNull();
-
-    const blocker = screen.getByTestId('engrave-generate-blocker').textContent ?? '';
-    expect(blocker).toContain('11.5 mm deep');
-    expect(blocker).toContain('▸ Fix');
-    expect(blocker).not.toContain('#');
-
-    fireEvent.click(screen.getByTestId('engrave-generate-fix'));
-    // The row is open again, and the editor's first field has focus.
-    expect(screen.getByTestId('engrave-label-text-0')).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByTestId('engrave-label-text-0'));
+    const row = screen.getByTestId('engrave-label-finding-0-depth-exceeds-stock');
+    expect(row.textContent).toContain('only 0.5 mm of floor would remain');
+    // The blocker and its Fix belong to findings that still REFUSE; this one informs, so there is
+    // none — and the press is available.
+    expect(screen.queryByTestId('engrave-generate-blocker')).toBeNull();
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(false);
   });
 });
 
@@ -1843,7 +1836,7 @@ describe('EngravePanel — under-surface voids (#271)', () => {
     // minimum floor, which #345 decision A gates a no-print blank's void ceiling to (2 − 1.0 = 1.0).
     expect(limit(ko.position.x, ko.position.y)).toBeCloseTo(1.0, 6);
     // Well clear of it: the stock's own limit, untouched by the void.
-    expect(limit(2, 2)).toBeCloseTo(job.stock.thickness - job.minFloor, 6);
+    expect(limit(2, 2)).toBeCloseTo(job.stock.thickness, 6); // #786 slice 1 — the blank's bottom
     // The name reaches the job too — the run sheet and the warning both print it.
     expect(ko.name).toBe('Magnet pocket');
   });
@@ -1877,7 +1870,7 @@ describe('EngravePanel — under-surface voids (#271)', () => {
     // The blank still has the pocket; the job simply reserves nothing for it.
     const limit = jobDepthLimit(job);
     expect(limit(job.keepOuts![0]!.position.x, job.keepOuts![0]!.position.y)).toBeCloseTo(
-      job.stock.thickness - job.minFloor,
+      job.stock.thickness,
       6,
     );
   });
@@ -1938,7 +1931,7 @@ describe('EngravePanel — the badge blank route, as the panel reads it (#271, #
     // that states no print (#345 decision A), and this one does state one.
     const limit = jobDepthLimit(job);
     expect(limit(19.05, 38.1)).toBeCloseTo(1.2, 6);
-    expect(limit(5, 5)).toBeCloseTo(2.81, 6);
+    expect(limit(5, 5)).toBeCloseTo(3.81, 6); // #786 slice 1 — the blank's bottom
   });
 
   it('reads the layer-aligned limit, not the analytic one, once the blank states its print (#351)', () => {
@@ -3860,9 +3853,9 @@ describe('EngravePanel — the Design main path (#686)', () => {
   function deepJob(): void {
     act(() => {
       const base = useEngraveJobStore.getState().job;
-      useEngraveJobStore.setState({
-        job: { ...base, labels: base.labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)) },
-      });
+      // #786 slice 1 — a depth past the floor no longer refuses; the FEEDS refusal is the stable
+      // blocker these shape tests render against (a 2 mm step-over on the 1 mm cutter's 0.5 radius).
+      useEngraveJobStore.setState({ job: { ...base, cutOverride: { stepOver: 2 } } });
     });
   }
 

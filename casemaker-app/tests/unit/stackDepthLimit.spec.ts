@@ -73,7 +73,9 @@ describe('stackDepthLimit (#285): what binds where', () => {
       // 1.51 mm membrane) less the 0.2 mm boundary margin the ceiling's `above` bound carries
       // (#345), the full stock floor elsewhere.
       expect(stack!.limit(19.05, 38.1)).toBeCloseTo(1.2, 6);
-      expect(stack!.limit(10, 19.05)).toBeCloseTo(job.stock.thickness - job.minFloor, 6);
+      // #786 slice 1 — the verifier's floor is the blank's physical bottom, not the preference:
+      // what remains under it is the stack's own 0.2 mm boundary margin, never the minimum floor.
+      expect(stack!.limit(10, 19.05)).toBeCloseTo(job.stock.thickness - 0.2, 6);
     } finally {
       stack!.dispose();
     }

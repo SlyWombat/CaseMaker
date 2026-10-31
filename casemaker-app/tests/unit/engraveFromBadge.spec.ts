@@ -92,7 +92,7 @@ describe('badgeBlankFor (#271)', () => {
     expect(keepOutLimitAt(job, 19.05, 38.1)).toBeCloseTo(0.51, 6);
     // …and nothing reserved out at the blank's corner, where the limit is the stock's own.
     expect(keepOutLimitAt(job, 5, 5)).toBeNull();
-    expect(jobDepthLimit(job)(5, 5)).toBeCloseTo(3.81 - 1, 6);
+    expect(jobDepthLimit(job)(5, 5)).toBeCloseTo(3.81, 6); // #786 slice 1 — the blank's bottom, not floor 3.81 − 1
     // The membrane is thin: a 1.5 mm cut on the badge's engraved face breaks through it.
     expect(jobDepthLimit(job)(19.05, 38.1)).toBeLessThan(1.5);
   });

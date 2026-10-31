@@ -479,14 +479,16 @@ describe('toPartPlan (#200)', () => {
 });
 
 describe('validateJob (#200)', () => {
-  it('errors when depth exceeds thickness - minFloor, not at the boundary', () => {
-    const job = defaultEngraveJob(); // 12 mm stock, minFloor 1 -> 11 mm allowed
+  it('#786 slice 1 — a depth past the floor INFORMS with the floor it leaves, not at the boundary', () => {
+    const job = defaultEngraveJob(); // 12 mm stock, minFloor 1 -> 11 mm is the preferred depth
     job.labels[0]!.depth = 11.5;
     const deep = validateJob(job).find((f) => f.code === 'depth-exceeds-stock');
     expect(deep).toBeTruthy();
-    expect(deep!.severity).toBe('error');
+    expect(deep!.severity).toBe('warning');
     expect(deep!.labelId).toBe(job.labels[0]!.id);
     expect(deep!.message).toContain('CASE');
+    expect(deep!.message).toContain('only 0.5 mm of floor would remain');
+    expect(deep!.message).toContain('Generate cuts it as it is');
 
     job.labels[0]!.depth = 11.0;
     expect(validateJob(job).some((f) => f.code === 'depth-exceeds-stock')).toBe(false);
@@ -664,14 +666,15 @@ describe('validateJob (#200)', () => {
     expect(f!.labelId).toBe('tr');
   });
 
-  it('errors when a trace is deeper than the floor allows (#219)', () => {
+  it('#786 slice 1 — a trace deeper than the floor allows is INFORMED (#219)', () => {
     const job = defaultEngraveJob(); // 12 mm stock, minFloor 1 -> 11 mm allowed
     job.traces = [
       { id: 'tr', kind: 'line', position: { x: 50, y: 30 }, rotation: 0, depth: 11.5, enabled: true, points: [[0, 0], [10, 0]], closed: false },
     ];
     const f = validateJob(job).find((x) => x.code === 'depth-exceeds-stock' && x.labelId === 'tr');
     expect(f).toBeTruthy();
-    expect(f!.severity).toBe('error');
+    expect(f!.severity).toBe('warning');
+    expect(f!.message).toContain('Generate cuts it as it is');
   });
 });
 
