@@ -50,6 +50,7 @@ import { dedupeFindings, isSideGoal, jobSetups, jobTargetObjects, validateJob, t
 import { flipAxisOf } from '@/engine/cnc/setups/flip';
 import { LEDGE_STEP, VISE_FLOOR_DEPTH } from '@/engine/cnc/fixture';
 import { drawnVise } from '@/engine/cnc/drawnVise';
+import { drawnRotary } from '@/engine/cnc/drawnRotary';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { chuckStockOf } from '@/engine/cnc/stockStart';
 import { formLabel } from '@/engine/cnc/stockStart';
@@ -239,7 +240,7 @@ export function HoldingPicture({
       case 'bed-bracket':
         return `Top view. The ${formWord} sits in the bed's corner bracket, clamped.`;
       case 'rotary':
-        return `Front view. The chuck is on the left; X runs along the ${formWord} from the jaws, and A turns it.`;
+        return `Front view. The four-jaw chuck is on the left; X runs along the ${formWord} from the jaws, and A turns it.`;
     }
   })();
 
@@ -522,66 +523,143 @@ const VISE_PART_EDGE: Record<string, string> = {
 };
 
 /**
- * The rotary job's front view (design §3.4, station 3): the chuck on the left with its jaws and the
- * GRIP, the rod with its STICK-OUT, the tailstock on the right where it is in, X from the jaws and
- * the A arrow around the rod. The diameter is drawn to a readable height, not to scale — the
- * lengths along X are scaled together, so grip and stick-out compare honestly.
+ * The rotary job's front view (design §3.4, station 3), drawn from `drawnRotary` — the SAME parts
+ * the bed scene draws (#782): the extruded base on its pins, the L-shaped headstock with its motor
+ * hanging out front, the four-jaw self-centring chuck facing +X with its jaws on the rod's own
+ * radius, and the tailstock at the stick-out's end (or absent when it is parked).
+ *
+ * It is a true front view (X to the right, Z up) at ONE scale: the grip sits inside the chuck, the
+ * rod runs from the chuck face, and the stick-out is the cuttable length. The axis centreline is
+ * the dashed X. Looking from the operator's side, the motor is in FRONT of the headstock, so it is
+ * drawn over it in its own shade rather than hidden behind.
  */
 function RotaryFrontView({ rotary }: { rotary: RotaryPicture }): JSX.Element {
-  const length = Math.max(0.1, rotary.lengthMm);
-  const scale = Math.min(1.5, 150 / length);
-  const gripPx = Math.max(0, Math.min(rotary.gripMm, length)) * scale;
-  const stickoutPx = Math.max(0, Math.min(rotary.stickoutMm, length)) * scale;
-  const jawFace = 52;
-  const rodStart = jawFace;
-  const rodEnd = Math.min(228, rodStart + stickoutPx);
-  const rodTop = 62;
-  const rodBottom = 84;
+  const W = 240;
+  const grip = Math.max(0, Math.min(rotary.gripMm, rotary.lengthMm));
+  const stickout = Math.max(0.1, rotary.stickoutMm);
+  const radius = Math.max(0.1, rotary.diameterMm / 2);
   const tail = rotary.tailstock;
+  const parts = drawnRotary({
+    stockDiameterMm: rotary.diameterMm,
+    stickoutMm: rotary.stickoutMm,
+    jawMode: rotary.jawMode,
+    tailstock: tail,
+  }).filter(
+    (p) => p.role !== 'axis' && p.role !== 'slot' && (tail || !p.role.startsWith('tailstock')),
+  );
+
+  // The projected extent: X from the grip's far end to the module's right end, Z from the base's
+  // bottom to the highest body. The labels get the band under 82.
+  const xs = parts.flatMap((p) => [p.min[0], p.max[0]]).concat([-grip, stickout]);
+  const zs = parts.flatMap((p) => [p.min[2], p.max[2]]).concat([-radius, radius]);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const zMin = Math.min(...zs);
+  const zMax = Math.max(...zs);
+  const top = 8;
+  const band = 74;
+  const scale = Math.min((W - 16) / Math.max(xMax - xMin, 0.01), band / Math.max(zMax - zMin, 0.01));
+  const ox = W / 2 - ((xMin + xMax) / 2) * scale;
+  const oy = top + band / 2 + ((zMin + zMax) / 2) * scale;
+  const X = (x: number): number => ox + x * scale;
+  const Y = (z: number): number => oy - z * scale;
+
+  const rect = (p: (typeof parts)[number]): JSX.Element => (
+    <rect
+      key={p.id}
+      x={X(p.min[0])}
+      y={Y(p.max[2])}
+      width={Math.max(0.5, (p.max[0] - p.min[0]) * scale)}
+      height={Math.max(0.5, (p.max[2] - p.min[2]) * scale)}
+      fill={ROTARY_PART_FILL[p.role]}
+      stroke={ROTARY_PART_EDGE[p.role]}
+      strokeWidth={0.8}
+    />
+  );
+  const order = ['base', 'headstock', 'motor', 'chuck', 'jaw', 'tailstock-cone', 'tailstock', 'tailstock-knob'];
+  const rodTop = Y(radius);
+  const rodBottom = Y(-radius);
+  const gripLeft = X(0) - grip * scale;
+
   return (
     <>
-      {/* The chuck block and its two jaws; the grip sits inside them. */}
-      <rect x="12" y="40" width="30" height="70" fill="#39424c" stroke="#5b6672" />
-      <rect x={jawFace - 8} y={rodTop - 12} width="8" height="14" fill="#5b6672" />
-      <rect x={jawFace - 8} y={rodBottom - 2} width="8" height="14" fill="#5b6672" />
-      <text x="27" y="126" textAnchor="middle" {...SVG_MUTED}>
-        chuck
-      </text>
-      {/* The rod, and the grip hidden in the jaws. */}
-      <rect x={Math.max(20, rodStart - gripPx)} y={rodTop} width={rodEnd - Math.max(20, rodStart - gripPx)} height={rodBottom - rodTop} fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
-      <text x={(rodStart + rodEnd) / 2} y={(rodTop + rodBottom) / 2 + 4} textAnchor="middle" {...SVG_MONO}>
+      {order.flatMap((role) => parts.filter((p) => p.role === role).map(rect))}
+      {/* The axis centreline: A's zero, drawn as the dashed X through the rod. */}
+      <path
+        d={`M${gripLeft} ${Y(0)} H${X(Math.max(stickout, 10))}`}
+        stroke="#6aa6c9"
+        strokeWidth={0.8}
+        strokeDasharray="3 2"
+        opacity={0.7}
+      />
+      {/* The rod: the cuttable stick-out, and the grip's span outlined inside the chuck. */}
+      <rect x={X(0)} y={rodTop} width={Math.max(1, stickout * scale)} height={rodBottom - rodTop} fill={STOCK_FILL} stroke={STOCK_EDGE} strokeWidth={1.5} />
+      <rect
+        x={gripLeft}
+        y={rodTop}
+        width={Math.max(0.5, grip * scale)}
+        height={rodBottom - rodTop}
+        fill="none"
+        stroke={STOCK_EDGE}
+        strokeWidth={1}
+        strokeDasharray="2 2"
+      />
+      <text x={X(stickout / 2)} y={(rodTop + rodBottom) / 2 + 4} textAnchor="middle" {...SVG_MONO}>
         rod ⌀{fmt(rotary.diameterMm)}
       </text>
-      {/* The grip and the stick-out, under the rod. */}
-      <path d={`M${rodStart - gripPx} 96 H${rodStart}`} stroke="#9aa4b0" strokeWidth="1" />
-      <text x={rodStart - gripPx} y="108" {...SVG_MUTED}>
+      {/* The grip's own span, under the base. */}
+      <path d={`M${gripLeft} 94 H${X(0)}`} stroke="#9aa4b0" strokeWidth="1" />
+      <text x={gripLeft} y="104" {...SVG_MUTED}>
         grip {fmt(rotary.gripMm)} mm
       </text>
-      <path d={`M${rodStart} 118 H${rodEnd}`} stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
-      <text x={(rodStart + rodEnd) / 2} y="114" textAnchor="middle" {...SVG_TEXT}>
+      {/* The stick-out, X from the jaws, and A around the rod. */}
+      <path d={`M${X(0)} 118 H${X(stickout)}`} stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
+      <text x={(X(0) + X(stickout)) / 2} y="114" textAnchor="middle" {...SVG_TEXT}>
         stick-out {fmt(rotary.stickoutMm)} mm
       </text>
-      {/* The tailstock, where it is in. */}
       {tail ? (
-        <>
-          <path d={`M${rodEnd + 12} ${rodTop} L${rodEnd} ${(rodTop + rodBottom) / 2} L${rodEnd + 12} ${rodBottom} Z`} fill="#39424c" stroke="#5b6672" />
-          <text x={rodEnd + 4} y="126" {...SVG_MUTED}>
-            tailstock
-          </text>
-        </>
+        <text x={X(stickout + 8)} y="96" {...SVG_MUTED}>
+          tailstock
+        </text>
       ) : null}
-      {/* X from the jaws, and A around the rod. */}
-      <path d={`M${rodStart} 138 H228`} stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
-      <text x={rodStart} y="150" {...SVG_MUTED}>
+      <text x={Math.max(2, X(0) - 2)} y="148" {...SVG_MUTED}>
         X 0 at the jaws
       </text>
-      <path d={`M${(rodStart + rodEnd) / 2 - 14} ${rodTop - 8} a 14 8 0 1 0 28 0`} fill="none" stroke="#6aa6c9" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
-      <text x={(rodStart + rodEnd) / 2} y="44" textAnchor="middle" {...SVG_TEXT}>
+      <path
+        d={`M${X(stickout / 2) - 14} ${rodTop - 10} a 14 8 0 1 0 28 0`}
+        fill="none"
+        stroke={STOCK_EDGE}
+        strokeWidth="1"
+        markerEnd="url(#holding-x-arrow)"
+      />
+      <text x={X(stickout / 2)} y={Math.max(9, rodTop - 16)} textAnchor="middle" {...SVG_TEXT}>
         A turns the rod about X
       </text>
     </>
   );
 }
+
+/** The rotary fixture's greys in the front view — the motor darker, the centre and knob lighter. */
+const ROTARY_PART_FILL: Record<string, string> = {
+  base: '#242b33',
+  headstock: '#39424c',
+  motor: '#2a3138',
+  chuck: '#4a5560',
+  jaw: '#5b6672',
+  'tailstock-cone': '#8a93a3',
+  tailstock: '#39424c',
+  'tailstock-knob': '#8a93a3',
+};
+const ROTARY_PART_EDGE: Record<string, string> = {
+  base: '#4a5560',
+  headstock: '#5b6672',
+  motor: '#5b6672',
+  chuck: '#6d7885',
+  jaw: '#6d7885',
+  'tailstock-cone': '#b6bec8',
+  tailstock: '#5b6672',
+  'tailstock-knob': '#b6bec8',
+};
 
 // ── The pictures' palette, shared by the mount picture and the orientation fold ───────────────
 

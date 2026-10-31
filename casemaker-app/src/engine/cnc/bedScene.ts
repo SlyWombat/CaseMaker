@@ -29,6 +29,7 @@ import {
   translateVisePart,
   viseFrameFromPins,
 } from './drawnVise';
+import { drawnRotary, rotaryPlacement, translateRotaryPart } from './drawnRotary';
 
 /** A box in machine coordinates, with how it is drawn. */
 export interface BedSceneBox {
@@ -449,35 +450,41 @@ function drawRotary(
   boxes: BedSceneBox[],
   profile: BedProfile,
 ): void {
-  // The axis is the machine's rotary offset (#238), the chuck body is unmeasured.
-  const axis = profile.datums.rotaryAxis;
+  // #782 — the module from its one drawn model: the extruded base on the pins, the L-shaped
+  // headstock with its motor out front, the four-jaw chuck facing +X, and the tailstock parked
+  // at the rail's right end (the bed profile carries no job, so no stock and no stick-out).
+  const datum = profile.datums.rotaryAxis;
   const surfaceZ = surfaceTop(profile).z;
-  const axisZ = axis !== null ? axis.value : surfaceZ + 40; // PROVISIONAL axis height
-  const kind: 'solid' | 'dashed' = axis !== null ? 'solid' : 'dashed';
-  const color = provenanceColor(axis !== null ? 'measured' : undefined);
-
-  // A chuck body centred on the shared pins' midpoint, plus the axis as a thin bar along Y.
-  const cy = (PIN_PAIR[0]![1] + PIN_PAIR[1]![1]) / 2;
-  boxes.push(
-    box(
-      'pl-rotary-chuck',
-      [PIN_PAIR[0]![0] - 20, cy - 40, surfaceZ],
-      [PIN_PAIR[0]![0] + 20, cy + 40, axisZ],
-      kind,
-      color,
-      kind === 'dashed' ? 'provisional' : undefined,
-    ),
-  );
-  boxes.push(
-    box(
-      'pl-rotary-axis',
-      [PIN_PAIR[0]![0], -200, axisZ - 2],
-      [PIN_PAIR[0]![0] + 4, 0, axisZ + 2],
-      kind,
-      color,
-      'rotary axis',
-    ),
-  );
+  const placement = rotaryPlacement({
+    datum: datum === null ? null : { value: datum.value, at: datum.at ?? null },
+    pins: PIN_PAIR,
+    surfaceTopZ: surfaceZ,
+  });
+  const parts = drawnRotary({ tailstock: false });
+  for (const part of parts) {
+    const b = translateRotaryPart(part, [placement.chuckFaceX, placement.axisY, placement.axisZ]);
+    // The axis LINE's height is the machine's own reading when it has one; every other figure is
+    // an uncalipered estimate (the base, the headstock, the chuck, the jaws).
+    const measured = datum !== null && part.role === 'axis';
+    const label =
+      part.role === 'axis'
+        ? 'A axis'
+        : measured
+          ? undefined
+          : part.role === 'base'
+            ? 'provisional'
+            : undefined;
+    boxes.push(
+      box(
+        `pl-${part.id}`,
+        b.min,
+        b.max,
+        measured ? 'solid' : 'dashed',
+        measured ? provenanceColor('measured') : provenanceColor(undefined),
+        label,
+      ),
+    );
+  }
 }
 
 // ── Datums ─────────────────────────────────────────────────────────────────────────────────────

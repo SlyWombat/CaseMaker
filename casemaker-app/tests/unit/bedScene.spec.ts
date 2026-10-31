@@ -191,3 +191,60 @@ describe('#511 the surface slab', () => {
     expect(s.boxes.some((b) => b.id === 'bed-plate')).toBe(true);
   });
 });
+
+// #782 — the 4th-axis module drawn as it is, placed at the machine's own axis reading.
+const ROTARY_FIXTURE: FixtureRecord = FixtureRecordSchema.parse({
+  id: 'fx-rotary',
+  kind: 'rotary-module',
+  product: 'makera-4th-axis',
+  variant: null,
+  constants: {},
+  unit: {},
+  provenance: {},
+});
+
+function rotaryProfile(axis: Record<string, unknown> | null): BedProfile {
+  return profile({
+    datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: axis },
+    placements: [
+      {
+        id: 'pl-rotary',
+        fixture: 'fx-rotary',
+        where: { kind: 'pins', pins: 'rotary', anchor: null },
+        count: null,
+        frame: null,
+        provenance: {},
+      },
+    ],
+  });
+}
+
+describe('#782 the 4th-axis module on the bed', () => {
+  it('puts the axis line at the measured datum and the chuck face at the datum XY', () => {
+    const s = scene([ROTARY_FIXTURE], rotaryProfile({ value: -40, measuredAt: NOW, by: 'wired-probe', at: [-155, -135] }));
+    const axis = s.boxes.find((b) => b.id === 'pl-rotary-axis')!;
+    // A 4 mm bar centred on the measured axis height, drawn solid: the height is a reading.
+    expect(axis.min[2]).toBe(-42);
+    expect(axis.max[2]).toBe(-38);
+    expect(axis.kind).toBe('solid');
+    // The chuck's face is the recorded datum's X; the body runs +X from it.
+    const chuck = s.boxes.find((b) => b.id === 'pl-rotary-chuck')!;
+    expect(chuck.min[0]).toBe(-155);
+    expect(chuck.max[0]).toBe(-155 + 25);
+    // The headstock is behind the chuck face, and its geometry is uncalipered: dashed.
+    const head = s.boxes.find((b) => b.id === 'pl-rotary-headstock')!;
+    expect(head.max[0]).toBeLessThan(-155);
+    expect(head.kind).toBe('dashed');
+  });
+
+  it('draws four jaws and a parked tailstock when nothing is measured', () => {
+    const s = scene([ROTARY_FIXTURE], rotaryProfile(null));
+    expect(s.boxes.filter((b) => b.id.startsWith('pl-rotary-jaw-'))).toHaveLength(4);
+    // The tailstock parks at the base's right end, cone facing −X.
+    const tail = s.boxes.find((b) => b.id === 'pl-rotary-tailstock')!;
+    const base = s.boxes.find((b) => b.id === 'pl-rotary-base')!;
+    expect(tail.max[0]).toBe(base.max[0]);
+    // Nothing measured: the axis line is provisional too.
+    expect(s.boxes.find((b) => b.id === 'pl-rotary-axis')!.kind).toBe('dashed');
+  });
+});
