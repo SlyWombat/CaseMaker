@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { devServerPort } from './scripts/e2ePort';
+import { devServerPort, machineServerPort } from './scripts/e2ePort';
 
 const isCI = !!process.env.CI;
 // #704 — the port belongs to THIS checkout (derived from its path), so two worktrees' runs rarely
@@ -9,6 +9,11 @@ const isCI = !!process.env.CI;
 // stranger's (#728).
 const PORT = devServerPort();
 const BASE = `http://127.0.0.1:${PORT}`;
+// #816 — the machine console is reachable only in the DESKTOP target, so the one spec that drives a
+// fake controller gets a second server serving `--mode desktop` beside the ordinary web one. Same
+// checkout-derived band; the checkout tag judges both servers.
+const MACHINE_PORT = machineServerPort();
+const MACHINE_BASE = `http://127.0.0.1:${MACHINE_PORT}`;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -77,11 +82,24 @@ export default defineConfig({
     },
   ],
   globalSetup: './tests/e2e/globalSetup.ts',
-  webServer: {
-    command: `npm run dev -- --port ${PORT} --strictPort`,
-    url: BASE,
-    reuseExistingServer: !isCI,
-    timeout: 120_000,
-    env: { VITE_E2E: '1', CASEMAKER_PORT: String(PORT) },
-  },
+  webServer: [
+    {
+      command: `npm run dev -- --port ${PORT} --strictPort`,
+      url: BASE,
+      reuseExistingServer: !isCI,
+      timeout: 120_000,
+      env: { VITE_E2E: '1', CASEMAKER_PORT: String(PORT) },
+    },
+    {
+      // #816 — the desktop target, for the machine-console spec alone (`runStates.spec.ts` sets its
+      // baseURL to this). `--mode desktop` is what makes `canDriveMachine` true, which is what lets
+      // the app open a console at all; with no Tauri runtime in the browser it then uses the house
+      // HTTP bridge (`httpTransport`), which the spec's fake serves.
+      command: `npm run dev:desktop -- --port ${MACHINE_PORT} --strictPort`,
+      url: MACHINE_BASE,
+      reuseExistingServer: !isCI,
+      timeout: 120_000,
+      env: { VITE_E2E: '1', CASEMAKER_PORT: String(MACHINE_PORT) },
+    },
+  ],
 });

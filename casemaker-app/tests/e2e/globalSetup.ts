@@ -9,12 +9,15 @@
  * build) is allowed through with a note, so the guard never blocks a run it cannot judge.
  */
 import path from 'node:path';
-import { devServerPort } from '../../scripts/e2ePort';
+import { devServerPort, machineServerPort } from '../../scripts/e2ePort';
 
 const norm = (p: string): string => path.resolve(p).replace(/\\/g, '/').toLowerCase();
 
-export default async function globalSetup(): Promise<void> {
-  const port = devServerPort();
+/**
+ * Refuse a reused server that belongs to another checkout. #816 runs this for BOTH dev servers: the
+ * web one every spec uses, and the desktop-target one the machine-console spec uses.
+ */
+async function checkCheckout(port: number): Promise<void> {
   const url = `http://127.0.0.1:${port}/__casemaker_checkout`;
   let served: string | null = null;
   try {
@@ -34,4 +37,9 @@ export default async function globalSetup(): Promise<void> {
         'for this run, or stop the other server.',
     );
   }
+}
+
+export default async function globalSetup(): Promise<void> {
+  await checkCheckout(devServerPort());
+  await checkCheckout(machineServerPort());
 }

@@ -65,3 +65,21 @@ export function devServerPort(env: NodeJS.ProcessEnv = process.env, cwd: string 
   if (env.CI !== undefined && env.CI !== '') return DEFAULT_DEV_PORT;
   return portForCheckout(cwd);
 }
+
+/**
+ * #816 — THE DESKTOP-TARGET DEV SERVER, one port above the web one.
+ *
+ * The machine console is reachable only in the desktop target: `loadMachineBridge()` sits behind
+ * `canDriveMachine`, which `vite.config.ts` folds from the build target (`--mode desktop`). The spec
+ * that drives a fake controller over the house HTTP bridge (`tests/e2e/runStates.spec.ts`) therefore
+ * needs a server serving that target beside the ordinary web-target one. Both are derived from the
+ * checkout, so a worktree's two servers stay together and apart from another worktree's pair — and
+ * `/__casemaker_checkout` judges each, since a +1 can land on another checkout's web port.
+ */
+export function machineServerPort(env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): number {
+  const port = devServerPort(env, cwd) + 1;
+  if (port > 65535) {
+    throw new Error(`The desktop-target e2e port would be ${port}; CASEMAKER_PORT must leave room for it.`);
+  }
+  return port;
+}

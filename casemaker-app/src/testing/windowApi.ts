@@ -27,6 +27,8 @@ import { useSimStore, type SimLayers, type SimState } from '@/store/simStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveRunStore, gateViewFor, saveBlocker, runErrorCodes } from '@/store/engraveRunStore';
+import { useMachineRunStore } from '@/store/machineRunStore';
+import { programHash } from '@/engine/cnc/programHash';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -177,6 +179,12 @@ export interface CaseMakerTestApi {
     partVolumeMm3: number | null;
     removedVolumeMm3: number | null;
   } | null;
+  /**
+   * #816 — PREPARE A MACHINE RUN without an upload, so an e2e can drive the run panel against a
+   * fake console (tests/e2e/fixtures/fakeConsole.ts). The same store seam the upload's last step
+   * uses; testing surface only, no app code calls it.
+   */
+  machineRunPrepare(host: string, port: number, filename: string, nc: string): boolean;
   getEngraveRunState(): {
     phase: string;
     stale: boolean;
@@ -490,6 +498,9 @@ export function installCaseMakerTestApi(): void {
         partVolumeMm3: goal.part === null ? null : Math.abs(meshVolume(goal.part)),
         removedVolumeMm3: goal.removed === null ? null : Math.abs(meshVolume(goal.removed)),
       };
+    },
+    machineRunPrepare(host, port, filename, nc) {
+      return useMachineRunStore.getState().prepare({ host, port }, filename, programHash(nc), { nc });
     },
     getEngraveRunState() {
       const r = useEngraveRunStore.getState();
