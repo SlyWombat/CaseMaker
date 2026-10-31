@@ -222,18 +222,37 @@ test('the remove control on an item line is a real touch target at phone width (
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // The row is FOLDED, which is the state the report was about and the state a phone opens on.
-  const box = await page.getByTestId('engrave-label-remove-0').boundingBox();
+  //
+  // #815 — ALL THREE RECTS FROM ONE LAYOUT PASS. The three controls were measured by three
+  // separate `boundingBox()` calls; while the panel was still settling, a reflow between them
+  // made the x values incomparable and the FRONT-of-line assertion flaked (~2 in 10 runs). One
+  // evaluate is one layout snapshot, so their positions are read against each other.
+  const boxes = await page.evaluate(() => {
+    const rect = (testid: string) => {
+      const el = document.querySelector(`[data-testid="${testid}"]`);
+      if (el === null) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    };
+    return {
+      remove: rect('engrave-label-remove-0'),
+      show: rect('engrave-label-enabled-0'),
+      name: rect('engrave-label-expand-0'),
+    };
+  });
+  const box = boxes.remove;
   expect(box, 'there is no remove control on the line').not.toBeNull();
-  expect(box!.width, 'the touch target is narrower than a fingertip').toBeGreaterThanOrEqual(24);
-  expect(box!.height, 'the touch target is shorter than a fingertip').toBeGreaterThanOrEqual(24);
+  // #815 — the control's CSS already states 24 px (index.css, the narrow/coarse-pointer query);
+  // the measured box can read 23.99999 through layout-unit rounding on the emulated device. The
+  // ROUNDED box is the CSS intent; a control really under 24 px (23.4 px) still fails here.
+  expect(Math.round(box!.width), 'the touch target is narrower than a fingertip').toBeGreaterThanOrEqual(24);
+  expect(Math.round(box!.height), 'the touch target is shorter than a fingertip').toBeGreaterThanOrEqual(24);
 
   // It is the FRONT of the line, beside the show/hide box — not wrapped away from the name.
-  const [show, name] = await Promise.all([
-    page.getByTestId('engrave-label-enabled-0').boundingBox(),
-    page.getByTestId('engrave-label-expand-0').boundingBox(),
-  ]);
-  expect(box!.x).toBeLessThan(show!.x);
-  expect(box!.x).toBeLessThan(name!.x);
+  expect(boxes.show, 'there is no show/hide control on the line').not.toBeNull();
+  expect(boxes.name, 'there is no name/expand control on the line').not.toBeNull();
+  expect(box!.x).toBeLessThan(boxes.show!.x);
+  expect(box!.x).toBeLessThan(boxes.name!.x);
 
   // And it works from the line, with the undo offered at the same place.
   await page.getByTestId('engrave-label-remove-0').tap();
