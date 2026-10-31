@@ -507,10 +507,13 @@ test('a part wider than the rod is clipped to it, warned on the run sheet, and S
   await page.getByTestId('engrave-generate').click();
   await page.waitForFunction(() => window.__caseMaker!.engraveProgramText() !== null, undefined, { timeout: 300_000 });
 
-  // The design's rule holds: the field still samples, so the clipped part is drawn.
-  await expect.poll(async () => (await goalDrawState(page)).count, { timeout: 30_000 }).toBeGreaterThan(200);
+  // The design's rule holds: the field still samples, so the clipped part is drawn. The bar is
+  // the CLIPPED part's own: its crests are cut flat at the rod's surface (z = 0), which carries
+  // little of the depth ramp, so the drawn part measures ~70–80 blue pixels where the unclipped
+  // job measures thousands. A blank sheet measures ~20 (measured in the 5× repeat, #808).
+  await expect.poll(async () => (await goalDrawState(page)).count, { timeout: 30_000 }).toBeGreaterThan(40);
   const drawn = await goalDrawState(page);
-  expect(drawn.count, 'a clipped part is still drawn').toBeGreaterThan(200);
+  expect(drawn.count, 'a clipped part is still drawn').toBeGreaterThan(40);
 
   // The warning's home is the job's findings, which the run sheet prints: it states how much of
   // the goal the rod cannot carry. (The sheet itself is not offered before registration is
