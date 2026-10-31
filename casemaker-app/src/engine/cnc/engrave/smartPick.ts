@@ -31,7 +31,7 @@ import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { statedCuttingSize as stated } from '@/engine/cnc/tool';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
-import { kindedWork, materialRefusal, planCutters, reachOf, type PlannedCutter } from './cutterPlan';
+import { faceCutterOptions, faceWorkOf, kindedWork, materialRefusal, planCutters, reachOf, type PlannedCutter } from './cutterPlan';
 import { goalNeedMm } from './goalReach';
 import { jobTargetObjects } from './jobSetup';
 
@@ -194,6 +194,17 @@ export function candidatePlans(
 
   const work = kindedWork(job);
 
+  // #834 — A JOB WHOSE WORK IS ON THE FACES. The rule plan above is the WIDEST flat end that fits;
+  // the search must also measure the narrower ones, because the choice is by simulated TIME at
+  // equal fidelity (any fitting width leaves the same face). Each candidate is one cutter owning
+  // no items — there are none; its program is the indexed face list.
+  const face = faceCutterOptions(job, tools, catalogue, conditions ?? undefined, table ?? undefined);
+  if (face !== null) {
+    for (const entry of face.candidates.slice(0, 6)) {
+      add({ cutters: [{ key: entry.key, items: [] }], source: { [entry.key]: sourceOf(entry) } });
+    }
+  }
+
   // #766 fix — A GOAL'S BALL IS CHOSEN BY THE FINISH BUDGET, AND THE BUDGET MAY NOT BE SAMPLABLE
   // HERE. `planCutters` refuses a ball whose finish tip field would exceed the cap (#540) — but
   // only when it can sample the goal heightfield; a job whose goal mesh is attached later (the
@@ -345,9 +356,20 @@ export function candidatePlans(
   return out;
 }
 
-/** The worst and mean fidelity over the plan's items (all enabled items, so an uncut one counts). */
-function fidelityOf(evaluation: PlanEvaluation): { worst: number; mean: number; worstItem: EvaluatedItem | null } {
-  if (evaluation.items.length === 0) return { worst: 0, mean: 0, worstItem: null };
+/**
+ * The worst and mean fidelity over the plan's items (all enabled items, so an uncut one counts).
+ *
+ * `exactWhenEmpty` (#834): a FACE job has no items at all, and its fidelity is the FACE's — every
+ * fitting cutter leaves the same plane at the same depth, so the items' absence is a perfect
+ * result, not a zero. Ranking then falls to the run's own time, which is the point.
+ */
+function fidelityOf(
+  evaluation: PlanEvaluation,
+  exactWhenEmpty = false,
+): { worst: number; mean: number; worstItem: EvaluatedItem | null } {
+  if (evaluation.items.length === 0) {
+    return exactWhenEmpty ? { worst: 1, mean: 1, worstItem: null } : { worst: 0, mean: 0, worstItem: null };
+  }
   let worst = 1;
   let sum = 0;
   let worstItem: EvaluatedItem | null = null;
@@ -362,8 +384,8 @@ function fidelityOf(evaluation: PlanEvaluation): { worst: number; mean: number; 
   return { worst, mean: sum / evaluation.items.length, worstItem };
 }
 
-function toScored(plan: CandidatePlan, evaluation: PlanEvaluation): ScoredPlan {
-  const { worst, mean, worstItem } = fidelityOf(evaluation);
+function toScored(plan: CandidatePlan, evaluation: PlanEvaluation, exactWhenEmpty = false): ScoredPlan {
+  const { worst, mean, worstItem } = fidelityOf(evaluation, exactWhenEmpty);
   let raisedStandingMm2 = 0;
   let raisedJoined = 0;
   for (const item of evaluation.items) {
@@ -441,6 +463,8 @@ export async function smartPick(
   const margin = opts.buyThisMargin ?? 0.02;
   const notes: string[] = [];
   const rulePlan = rulePlanOf(job, tools, catalogue, conditions, table);
+  // #834 — a face job's plans have no items to score; their fidelity is the face's (see fidelityOf).
+  const exactWhenEmpty = faceWorkOf(job) !== null;
   const plans = candidatePlans(job, tools, catalogue, conditions, table).slice(0, maxCandidates);
   if (plans.length === 0) {
     throw new Error('the search found no candidate cutter plan for this job');
@@ -458,12 +482,12 @@ export async function smartPick(
   // COARSE FIRST — measure-only: every candidate is scored cheaply, and the top few are promoted
   // to a FULL evaluation, which is the level that says whether a plan actually posts.
   const verdicts = new Map<string, ScoredPlan>();
-  for (const plan of plans) verdicts.set(planKey(plan), toScored(plan, await evaluateAsync(plan, 'coarse')));
+  for (const plan of plans) verdicts.set(planKey(plan), toScored(plan, await evaluateAsync(plan, 'coarse'), exactWhenEmpty));
   // COARSE ok IS NOT POSTING: it says the plan is structurally evaluable. Only a full verdict's
   // `ok` is the generator's fact (slice A's seam), so the posting pool is drawn from this set.
   const fullDone = new Set<string>();
   const full = async (plan: CandidatePlan): Promise<ScoredPlan> => {
-    const scoredFull = toScored(plan, await evaluateAsync(plan, 'full'));
+    const scoredFull = toScored(plan, await evaluateAsync(plan, 'full'), exactWhenEmpty);
     verdicts.set(planKey(plan), scoredFull);
     fullDone.add(planKey(plan));
     return scoredFull;

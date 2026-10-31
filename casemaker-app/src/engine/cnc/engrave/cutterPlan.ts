@@ -54,7 +54,9 @@ import { threadGeometry } from '@/engine/cnc/cam/threadMill';
 import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_FINISH_TIP_OPS, sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
-import { pureGoalObject } from './jobSetup';
+import { jobHasItems, pureGoalObject } from './jobSetup';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { faceChordMm } from '@/engine/cnc/rotary/faceOps';
 import { fmtMm } from '@/workers/sim/engraveGeometry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
@@ -117,6 +119,153 @@ export function reachOf(entry: ToolLibraryEntry): number | null {
 /** `⌀2 mm` — a sentence's diameter, as `recommendTool` writes it. */
 function dia(v: number): string {
   return `⌀${Number(v.toFixed(3))} mm`;
+}
+
+/** How close a cutter's diameter must be to a cross-hole's to be the one that drills it, mm. */
+const HOLE_MATCH_MM = 0.1;
+
+/**
+ * #834 — WHAT THE JOB'S FACE OPERATIONS ASK OF A CUTTER. A Flat or a ring is a face pocket as wide
+ * as its chord; a Cross-hole comes out at the cutter's own diameter. Read from the job alone, so
+ * the rule pick, the search and the CLI cannot disagree about the faces.
+ */
+export interface FaceWorkFacts {
+  /** The NARROWEST face chord across the job's faces, mm — `Infinity` when it has none. */
+  chordMm: number;
+  /** The deepest face below the surface, mm. */
+  deepestMm: number;
+  /** The distinct cross-hole diameters asked for, mm, ascending. */
+  holesMm: number[];
+  /** How many face cuts the list expands to (a ring counts its faces). */
+  faceCount: number;
+}
+
+/** The face work the job states, or null when it has none (or is not round stock in the chuck). */
+export function faceWorkOf(job: EngraveJob): FaceWorkFacts | null {
+  const ops = job.faces ?? [];
+  if (ops.length === 0) return null;
+  const map = rotaryMapOf(job);
+  if (map === null) return null;
+  let chordMm = Number.POSITIVE_INFINITY;
+  let deepestMm = 0;
+  let faceCount = 0;
+  const holes = new Set<number>();
+  for (const op of ops) {
+    if (op.kind === 'cross-hole') {
+      const d = op.diameter ?? 0;
+      if (d > 0) holes.add(r3(d));
+      continue;
+    }
+    const depth = op.kind === 'flat' ? (op.depth ?? 0) : map.radius - (op.acrossFlats ?? 0) / 2;
+    if (!(depth > 0) || depth >= map.radius) continue;
+    chordMm = Math.min(chordMm, faceChordMm(map.radius, depth));
+    deepestMm = Math.max(deepestMm, depth);
+    faceCount += op.kind === 'flat' ? 1 : Math.max(0, op.count ?? 0);
+  }
+  if (faceCount === 0 && holes.size === 0) return null;
+  return { chordMm, deepestMm, holesMm: [...holes].sort((a, b) => a - b), faceCount };
+}
+
+/** Does this entry cut the job's faces? A flat end, stated size, no wider than the chord, matching the holes. */
+function faceCutterFits(entry: ToolLibraryEntry, facts: FaceWorkFacts, matchHoles: boolean): boolean {
+  if (entry.tool.shape !== 'flat') return false;
+  const d = statedCuttingSize(entry.tool) ?? 0;
+  if (!(d > 0)) return false;
+  if (facts.faceCount > 0 && d > facts.chordMm + 1e-9) return false;
+  if (matchHoles && facts.holesMm.length > 0 && !facts.holesMm.every((h) => Math.abs(d - h) <= HOLE_MATCH_MM)) return false;
+  return true;
+}
+
+/** Largest stated diameter first; the key breaks a tie, so the pick is deterministic. */
+const widestFirst = (a: ToolLibraryEntry, b: ToolLibraryEntry): number => {
+  const da = statedCuttingSize(a.tool) ?? 0;
+  const db = statedCuttingSize(b.tool) ?? 0;
+  if (db !== da) return db - da;
+  return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+};
+
+/**
+ * #834 — THE CUTTER FOR A JOB WHOSE WORK IS ITS FACES. A hex face on ⌀20 is 10 mm wide; the largest
+ * flat end that fits cuts it in the fewest passes, and every fitting flat end leaves the SAME face
+ * at the same depth — width changes the time, not the result. So the pick is the widest owned flat
+ * end that fits, with the cross-holes deciding when the job has them: a hole is the cutter's own
+ * diameter, so a cutter matching them is tried first, and when none matches the pick still names a
+ * cutter for the faces and the generator's `cross-hole-cutter` warning says what the hole comes
+ * out at.
+ */
+export interface FaceCutterPick {
+  entry: ToolLibraryEntry;
+  facts: FaceWorkFacts;
+  /** True when the pick's diameter matches every cross-hole (or the job has none). */
+  matchedHoles: boolean;
+  reason: string;
+}
+
+export interface FaceCutterOptions {
+  facts: FaceWorkFacts;
+  /** The flat ends that can cut every face and (when any matches) every cross-hole, widest first. */
+  candidates: ToolLibraryEntry[];
+  /** True when `candidates` match every cross-hole's diameter (or the job has none). */
+  matchedHoles: boolean;
+}
+
+/** Every cutter that can take the job's faces, widest first — the pick and the search share this. */
+export function faceCutterOptions(
+  job: EngraveJob,
+  tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[],
+  conditions?: ReadonlyMap<string, ConditionSummary> | null,
+  table?: readonly FeedsEntry[],
+  /** Owned cutters vouch for themselves (#766's rule), as the search does. */
+  ownedVouches = true,
+): FaceCutterOptions | null {
+  const facts = faceWorkOf(job);
+  if (facts === null) return null;
+  // A job that also carries map items is refused by Generate (a wrapped program and an indexed one
+  // are two programs); its pick is not this rule's to make.
+  if (jobHasItems(job)) return null;
+  const eligible = tools.filter(
+    (entry) => materialRefusal(job, entry, catalogue, conditions, table, { ownedVouches }) === null,
+  );
+  const matched = eligible.filter((e) => faceCutterFits(e, facts, true)).sort(widestFirst);
+  if (matched.length > 0) return { facts, candidates: matched, matchedHoles: true };
+  const chordOnly = eligible.filter((e) => faceCutterFits(e, facts, false)).sort(widestFirst);
+  return chordOnly.length === 0 ? null : { facts, candidates: chordOnly, matchedHoles: facts.holesMm.length === 0 };
+}
+
+export function faceCutterPick(
+  job: EngraveJob,
+  tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[],
+  conditions?: ReadonlyMap<string, ConditionSummary> | null,
+  table?: readonly FeedsEntry[],
+  ownedVouches = true,
+): FaceCutterPick | null {
+  const options = faceCutterOptions(job, tools, catalogue, conditions, table, ownedVouches);
+  if (options === null) return null;
+  const { facts, matchedHoles } = options;
+  const pick = options.candidates[0];
+  if (pick === undefined) return null;
+  const d = statedCuttingSize(pick.tool) ?? 0;
+  // The chord is derived (17.321 mm across a hex is 9.999… wide): two decimals is the width a
+  // person reads, and it keeps the sentence from naming float dust.
+  const chordWords = fmtMm(Math.round(facts.chordMm * 100) / 100);
+  const faces =
+    facts.faceCount === 0 || facts.chordMm === Number.POSITIVE_INFINITY
+      ? ''
+      : `The largest flat end that fits the ${chordWords} mm faces — a wider cutter rubs the face’s shoulders, and a smaller one cuts the same face in more passes.`;
+  const holes =
+    facts.holesMm.length === 0
+      ? ''
+      : matchedHoles
+        ? `It drills the ${facts.holesMm.map(dia).join(' and ')} cross-hole${facts.holesMm.length === 1 ? '' : 's'} at its own diameter.`
+        : `No cutter in the shop matches ${facts.holesMm.map(dia).join(' or ')}, so the hole comes out at ${dia(d)}.`;
+  return {
+    entry: pick,
+    facts,
+    matchedHoles,
+    reason: [faces, holes].filter((w) => w !== '').join(' '),
+  };
 }
 
 /**
@@ -295,6 +444,28 @@ export function planCutters(
   /** The shop's `sim.columnFlatPitchYMm` (the goal finish's grid), for the ball's budget check. */
   gridPitchMm?: number | null,
 ): CutterPlan {
+  // #834 — A JOB WHOSE WORK IS ON ITS FACES. The face pick is one flat end, and the plan's one
+  // cutter owns no ITEMS (there are none): the indexed program cuts the face list the job states.
+  // It is answered here so the rule plan, the CLI and the search's baseline are the same cutter.
+  const face = faceCutterPick(job, tools, catalogue, conditions, table);
+  if (face !== null) {
+    return {
+      cutters: [
+        {
+          key: face.entry.key,
+          name: face.entry.tool.name,
+          shape: face.entry.tool.shape,
+          diameter: statedCuttingSize(face.entry.tool) ?? 0,
+          items: [],
+          reachMm: face.facts.deepestMm,
+          reason: face.reason,
+        },
+      ],
+      unassigned: [],
+      notes: [],
+    };
+  }
+
   const work = kindedWork(job);
   const unassigned: CutterPlan['unassigned'] = [];
   const notes: string[] = [];

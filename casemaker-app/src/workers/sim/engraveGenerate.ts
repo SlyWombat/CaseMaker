@@ -4932,6 +4932,9 @@ function generateFaceProgram(
 
   const documentFindings = dedupeFindings([
     ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools, tool }),
+    // #407/#834 — Makera's "for Metal" line is refused by name on a blank that is not metal, in
+    // this program as in every other: the pair is the finding, whatever the cutter's shape.
+    ...metalLineFindings(job, tool, catalogue),
     ...(faceJobRefusal(job) === null ? [] : [faceJobRefusal(job)!]),
   ]);
   if (documentFindings.some((f) => f.severity === 'error')) {

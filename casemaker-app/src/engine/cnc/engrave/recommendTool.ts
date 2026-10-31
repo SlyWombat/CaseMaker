@@ -84,7 +84,7 @@ import { vCone } from '@/engine/cnc/vProfile';
 import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { inlayMarked } from './inlay';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
-import { kindOnlyPick, raisedGapSentence } from './cutterPlan';
+import { faceCutterPick, kindOnlyPick, raisedGapSentence } from './cutterPlan';
 import { pureGoalObject } from './jobSetup';
 import {
   lostDetailRatioFrom,
@@ -603,6 +603,24 @@ export function recommendTool(
   // #455 — the caution the job's own (hand-picked) cutter must carry, independent of what the
   // recommendation picked. Computed before the returns so every outcome carries it.
   const selectedNote = handPickedNote(job, tools, catalogue);
+
+  // #834 — A JOB WHOSE WORK IS ON THE ROUND STOCK'S FACES. Its items are empty by construction,
+  // so the item rules below would tie every cutter at nothing and hand back the finest (the hex
+  // screenshot's ⌀1 mm flat end, an hour and a half of passes). The face rule picks the WIDEST
+  // flat end that fits the narrowest face and drills the cross-holes; every fitting width leaves
+  // the same face, so width changes the time, not the result.
+  const facePick = faceCutterPick(job, tools, catalogue, conditions, table);
+  if (facePick !== null) {
+    return {
+      key: facePick.entry.key,
+      compromise: false,
+      reason: facePick.reason,
+      conditionNote: conditions?.get(facePick.entry.key)?.note ?? null,
+      catalogueNote: null,
+      selectedNote,
+      candidates: [],
+    };
+  }
 
   // #762 — A GOAL OR A THREAD-ONLY JOB IS NOT A FLAT JOB. A ball and a thread mill are
   // `not-flat` to the candidate map below, so by construction it could never name them; the
