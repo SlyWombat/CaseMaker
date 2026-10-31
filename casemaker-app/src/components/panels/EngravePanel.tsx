@@ -2831,7 +2831,7 @@ export function EngravePanel(): JSX.Element {
         <button
           type="button"
           data-testid="engrave-cutter-open"
-          style={{ ...MUTED, margin: 0, padding: '1px 6px', cursor: 'pointer', marginLeft: 'auto' }}
+          style={{ background: 'none', border: 'none', font: 'inherit', color: '#8fb8e0', margin: 0, padding: 0, cursor: 'pointer', marginLeft: 'auto' }}
           title="Open the Cutter group — the cutter select, the cutting rows, the override and the technical facts."
           onClick={() => setGroupsOpen((m) => ({ ...m, 'engrave-group-cutter': true }))}
         >
@@ -2847,7 +2847,7 @@ export function EngravePanel(): JSX.Element {
           exception — its line is how it is turned back off. */}
       {(!facingRefused || facingOn) && (
       <details data-testid="engrave-facing-editor" style={{ marginTop: 6 }}>
-        <summary data-testid="engrave-facing-line" style={{ ...MUTED, cursor: 'pointer', margin: 0 }}>
+        <summary data-testid="engrave-facing-line" style={{ ...MUTED, cursor: 'pointer', margin: 0, listStyle: 'none' }}>
           Facing —{' '}
           {facingRefused
             ? 'not offered on plastic'
