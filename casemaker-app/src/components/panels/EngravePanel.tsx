@@ -1814,13 +1814,28 @@ export function EngravePanel(): JSX.Element {
       const owned = measuredSetup?.toolItems?.[c.key] ?? [];
       return owned.length === c.items.length && owned.every((id, i) => id === c.items[i]);
     });
+  // #786 slice 4c — A DRILL BIT OR THREAD MILL THE OPERATOR NAMED KEEPS ITS JOB AND GAINS THE
+  // CUTTER THE OTHER WORK NEEDS. The guard above still holds for every plan that would REPLACE
+  // their cutter, but the measured search's split KEEPS it: the named cutter is first and owns
+  // exactly its own holes/threads, and the flat (or the kind plan's cutters) take the rest. That
+  // is the operator's own decision carried out, so it is applied like a computed answer.
+  const namedNow = jobTool(job);
+  const namedSplit =
+    measuredNow !== null &&
+    measuredNow.cutters.length > 1 &&
+    measuredNow.cutters[0]?.key === job.toolKey &&
+    namedNow !== null &&
+    (namedNow.shape === 'drill' || namedNow.shape === 'thread');
   useEffect(() => {
     const source = job.sources?.tool;
     // #743 P-8 — a BOARD ARRIVES WITH ITS PLAN. The import writes each role's cutter (§3.4) and
     // records it as the catalogue's answer; the background search below plans one held position
     // with one cutter chain and cannot express a board's engraver + drills + flat, so it must not
-    // replace that plan. A person's or a measured plan is left alone for the same reason (#516).
-    if (source === 'user' || source === 'measured' || source === 'catalogue') return;
+    // replace that plan. A person's or a measured plan is left alone for the same reason (#516) —
+    // except that #786 4c's named split KEEPS the named cutter and adds the rest, so it may be
+    // applied over a user or measured pick.
+    if (source === 'catalogue') return;
+    if ((source === 'user' || source === 'measured') && !namedSplit) return;
     // #516 item 5 — the first recommendation lands on the first edit or Generate, not on load: a
     // clean (just-opened or just-saved) tool-less document keeps its empty key, so opening a saved
     // job does not immediately dirty it.
@@ -1845,7 +1860,7 @@ export function EngravePanel(): JSX.Element {
     const key = rec?.key ?? null;
     if (key === null) return;
     if (job.toolKey !== key) setTool(key, 'computed');
-  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, applyCutterPlan, setTool]);
+  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, namedSplit, applyCutterPlan, setTool]);
 
   // ---- #798 — THE CUTTER AS ONE LINE ------------------------------------------------------
   // What is in the spindle, where that answer came from, and — when the measured search chose it

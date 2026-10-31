@@ -44,6 +44,7 @@ import { orient } from '@/engine/cnc/setups/orient';
 import { carryPointBetweenSetups } from '@/engine/cnc/setups/carry';
 import type { Box } from '@/engine/cnc/setups/types';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { inlayGlueGap, inlayMarked, inlayNumbers } from './inlay';
 import { textureNumbers, textureStrokes } from './texture';
 import { fluteNumbers, fluteOperationName } from './flute';
@@ -351,6 +352,11 @@ export type JobFindingCode =
   | 'setup-items-duplicated'
   | 'setup-tool-unknown'
   | 'setup-tool-no-items'
+  // #786 slice 4c — how a multi-cutter setup is cut: one program per cutter, in the setup's order.
+  // INFO, not a warning: the split is what the operator asked for (or the measured plan answered),
+  // and the sentence names each cutter and the work it owns so Generate's program count is stated
+  // before it happens.
+  | 'setup-programs-split'
   // #472 — the rest pass itself. `unavailable` is an error: the first programme could not be
   // simulated, the named cutter is not on the bench, or a V-bit was named as a flat rest cutter, so
   // no honest second file can be written. `nothing` is a warning: the finer cutter is real and
@@ -2536,23 +2542,28 @@ export function validateJob(
       });
     }
     // One program has one tool (D1). A thread beside any other enabled cut would need a tool
-    // change mid-program, which `ToolpathIR` cannot describe.
-    const otherWork: string[] = [
-      ...enabled.filter(itemHasWork).map(itemLabel),
-      ...enabledTraces.filter(traceHasWork).map(traceOperationName),
-      ...enabledDrills.map(drillOperationName),
-      ...cuttablePrimitives.map(primitiveOperationName),
-    ];
-    if (otherWork.length > 0) {
-      findings.push({
-        severity: 'error',
-        code: 'thread-mixed-tools',
-        labelId: enabledThreads[0]!.id,
-        message:
-          `A thread program has ONE tool (the thread mill), but this job also cuts ` +
-          `${otherWork[0]}${otherWork.length > 1 ? ` and ${otherWork.length - 1} other item(s)` : ''}. ` +
-          `Cut the thread in its own program, after the pilot and any other work is done.`,
-      });
+    // change mid-program, which `ToolpathIR` cannot describe. On a SETUP job the cutters are per
+    // setup — one program is one (setup, tool) — and `setupProgramFindings` judges each cutter's
+    // assignment exactly as it does the drill bit's; this document-level pairing is the LEGACY
+    // job's only (#786 slice 4c: a split setup is how the pairing becomes two programs).
+    if (job.setups === undefined) {
+      const otherWork: string[] = [
+        ...enabled.filter(itemHasWork).map(itemLabel),
+        ...enabledTraces.filter(traceHasWork).map(traceOperationName),
+        ...enabledDrills.map(drillOperationName),
+        ...cuttablePrimitives.map(primitiveOperationName),
+      ];
+      if (otherWork.length > 0) {
+        findings.push({
+          severity: 'error',
+          code: 'thread-mixed-tools',
+          labelId: enabledThreads[0]!.id,
+          message:
+            `A thread program has ONE tool (the thread mill), but this job also cuts ` +
+            `${otherWork[0]}${otherWork.length > 1 ? ` and ${otherWork.length - 1} other item(s)` : ''}. ` +
+            `Cut the thread in its own program, after the pilot and any other work is done.`,
+        });
+      }
     }
 
     for (const thread of enabledThreads) {
@@ -3329,6 +3340,25 @@ export function setupProgramFindings(
   // #723 P2-3 — the setups that cut a SIDE's goal. Their work is the surface program, not an
   // `itemIds` clearing pass, so the rest-pass bookkeeping below does not apply to them.
   const goalSetupIds = new Set(goalSides(job).map((side) => side.setup.id));
+  // #786 slice 4c — the split sentence names every cutter's work, drills and chamfers included.
+  // A plain name the operator gave ("pocket") reads better in the sentence than the row's full
+  // description ("Circle \"pocket\" ⌀10"); a label has only its text, which `itemLabel` quotes.
+  const nameById = new Map(workById);
+  for (const item of [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])]) {
+    if (!item.enabled) continue;
+    const given = (item as { name?: string }).name;
+    if (given !== undefined && given.length > 0) nameById.set(item.id, given);
+  }
+  for (const drill of job.drills ?? []) if (drill.enabled) nameById.set(drill.id, drillOperationName(drill));
+  for (const chamfer of job.chamfers ?? []) if (chamfer.enabled) nameById.set(chamfer.id, chamfer.name ?? chamfer.id);
+  /** The cutter a setup key names, with the job's own snapshot when the key is the job's own. */
+  const resolvedFor = (toolKey: string): Tool | null =>
+    toolForJob(
+      { toolKey, ...(toolKey === job.toolKey && job.tool !== undefined && job.tool !== null ? { tool: job.tool } : {}) },
+      getTools(),
+    );
+  const shortName = (entry: Tool): string => toolDisplayName(entry).split(' · ')[0]!;
+
   jobSetups(job).forEach((setup, i) => {
     const tools = setupTools(setup, job);
     if (setup.tools.length === 0) {
@@ -3441,10 +3471,7 @@ export function setupProgramFindings(
     // cannot do, and one program has one tool. The generator's sub-job check sees the same fact
     // with the cutter materialised; this one lets the panel say it before Generate.
     tools.forEach((toolKey, toolIndex) => {
-      const entryTool = toolForJob(
-        { toolKey, ...(toolKey === job.toolKey && job.tool !== undefined && job.tool !== null ? { tool: job.tool } : {}) },
-        getTools(),
-      );
+      const entryTool = resolvedFor(toolKey);
       if (entryTool?.shape !== 'drill') return;
       const other = toolItemsFor(setup, toolKey, toolIndex).filter((id) => itemSet.has(id) && workById.has(id));
       if (other.length === 0) return;
@@ -3459,6 +3486,68 @@ export function setupProgramFindings(
           `an end mill, or put it in its own setup.`,
       });
     });
+
+    // #786 slice 4c — a THREAD MILL cuts that setup's threads only, symmetrically with the drill
+    // bit's check: a region or trace assigned to it is work the mill cannot do, and one program
+    // has one tool.
+    const threadIds = new Set((job.threads ?? []).filter((t) => t.enabled).map((t) => t.id));
+    tools.forEach((toolKey, toolIndex) => {
+      const entryTool = resolvedFor(toolKey);
+      if (entryTool?.shape !== 'thread') return;
+      // Its OWN threads are what the mill is for (`workById` holds them); anything else is the
+      // work one program cannot give it.
+      const other = toolItemsFor(setup, toolKey, toolIndex).filter(
+        (id) => itemSet.has(id) && workById.has(id) && !threadIds.has(id),
+      );
+      if (other.length === 0) return;
+      findings.push({
+        severity: 'error',
+        code: 'thread-mixed-tools',
+        labelId: other[0],
+        message:
+          `Setup ${i + 1} assigns ${workById.get(other[0]!)}` +
+          `${other.length > 1 ? ` and ${other.length - 1} other item(s)` : ''} to the thread mill ` +
+          `"${entryTool.name}". A thread program cuts threads only; assign the other work to ` +
+          `an end mill, or put it in its own setup.`,
+      });
+    });
+
+    // #786 slice 4c — THE SPLIT IS SAID OUT LOUD. A setup with more than one cutter is cut as one
+    // program per cutter (`setupPrograms`); when one of them is a drill or a thread mill, the
+    // sentence names each cutter and the work it owns, so Generate's program count is explained
+    // before it happens. INFO: a split is how the job is cut, not a fault in it.
+    if (tools.length > 1) {
+      const parts: string[] = [];
+      let hasBit = false;
+      tools.forEach((toolKey, toolIndex) => {
+        const entry = resolvedFor(toolKey);
+        const ids = toolItemsFor(setup, toolKey, toolIndex).filter((id) => itemSet.has(id));
+        if (entry?.shape === 'drill') {
+          hasBit = true;
+          parts.push(`the drill for the ${ids.length === 1 ? 'hole' : 'holes'}`);
+          return;
+        }
+        if (entry?.shape === 'thread') {
+          hasBit = true;
+          parts.push(`the thread mill for the ${ids.length === 1 ? 'thread' : 'threads'}`);
+          return;
+        }
+        const what = entry === null ? `the cutter "${toolKey}"` : `the ${shortName(entry)}`;
+        const first = ids.map((id) => nameById.get(id) ?? id)[0];
+        parts.push(
+          first === undefined
+            ? `${what} for the rest pass`
+            : `${what} for ${first}${ids.length > 1 ? ` and ${ids.length - 1} more` : ''}`,
+        );
+      });
+      if (hasBit) {
+        findings.push({
+          severity: 'info',
+          code: 'setup-programs-split',
+          message: `Split into ${tools.length} programs: ${parts.join(', ')}.`,
+        });
+      }
+    }
   });
   return findings;
 }

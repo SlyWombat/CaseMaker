@@ -5226,7 +5226,10 @@ export function engraveGenerate(
   // A setup that cannot become exactly one program is refused BEFORE anything is cut: the panel's
   // validation says the same sentence (#419 J3, `setupProgramFindings`).
   const setupProblems = setupProgramFindings(job, shop.tools);
-  if (setupProblems.length > 0) {
+  // #786 slice 4c — an INFO states how the job is cut (the split into programs), not that it
+  // cannot be: only errors and warnings refuse here. The info still travels on a successful run's
+  // findings through `validateJob`'s own call to `setupProgramFindings`.
+  if (setupProblems.some((f) => f.severity !== 'info')) {
     return {
       ok: false,
       stage: 'findings',

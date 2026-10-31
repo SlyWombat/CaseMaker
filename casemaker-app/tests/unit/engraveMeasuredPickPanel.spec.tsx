@@ -19,6 +19,7 @@ import {
   type EngravePreviewClient,
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { flatEndMill } from '@/engine/cnc/tool';
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
 import type { ToolCandidate } from '@/engine/cnc/engrave/recommendTool';
 import { resetRegistry } from '@/engine/cnc/toolRegistry';
@@ -254,6 +255,66 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     const after = useEngraveJobStore.getState().job;
     expect(after.toolKey).toBe('flat-3.175');
     expect(after.setups?.[0]?.tools ?? []).toEqual(['flat-3.175', 'engraver-0.3']);
+  });
+
+  // #786 slice 4c — a hand-chosen drill bit with other work: the split KEEPS the cutter the
+  // operator named, so it is applied like a computed answer. The guard's subject is the cutter,
+  // not the source: a plan that would replace the drill is never applied, this one never does.
+  it('applies a split that keeps a hand-chosen drill first, for its holes only', () => {
+    const DRILL = flatEndMill(3, {
+      name: '3 mm drill',
+      typeText: 'Drill',
+      shape: 'drill',
+      tipDiameter: 3,
+      diameter: 3,
+      cornerRadius: null,
+      angle: 118,
+      fluteLength: 20,
+    });
+    const job = defaultEngraveJob();
+    job.labels = [];
+    job.shapes = [
+      {
+        kind: 'circle',
+        id: 'pocket',
+        name: 'pocket',
+        position: { x: 40, y: 25 },
+        rotation: 0,
+        depth: 2,
+        enabled: true,
+        diameter: 10,
+      },
+    ];
+    job.drills = [
+      { kind: 'drill', id: 'hole', position: { x: 20, y: 20 }, rotation: 0, depth: 2, enabled: true, through: false },
+    ];
+    job.toolKey = 'user:drill-3';
+    job.tool = DRILL;
+    job.sources = { tool: 'user' };
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    const measured: EngravePickSummary = {
+      ...measuredFor(defaultEngraveJob()),
+      cutters: [
+        { key: 'user:drill-3', items: ['hole'], source: 'owned' },
+        { key: 'flat-3.175', items: ['pocket'], source: 'owned' },
+      ],
+    };
+    useEngravePreviewStore.setState({
+      preview: previewWith(),
+      status: 'ready',
+      measured,
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+    render(<EngravePanel />);
+
+    const after = useEngraveJobStore.getState().job;
+    // The named drill is STILL the job's cutter, and now owns exactly its hole.
+    expect(after.toolKey).toBe('user:drill-3');
+    expect(after.setups?.[0]?.tools).toEqual(['user:drill-3', 'flat-3.175']);
+    expect(after.setups?.[0]?.toolItems).toEqual({ 'user:drill-3': ['hole'], 'flat-3.175': ['pocket'] });
   });
 
   it('leaves the rule answer standing, labelled, when the search fails', () => {

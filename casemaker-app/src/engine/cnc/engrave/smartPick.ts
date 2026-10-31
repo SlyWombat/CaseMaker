@@ -186,13 +186,57 @@ export function candidatePlans(
     out.push(plan);
   };
 
+  /** A plan from bare cutters, with each cutter's provenance filled in from the library. */
+  const sourced = (cutters: { key: string; items: readonly string[] }[]): CandidatePlan => {
+    const source: Record<string, 'owned' | 'catalogue'> = {};
+    for (const c of cutters) {
+      const entry = tools.find((t) => t.key === c.key);
+      source[c.key] = entry === undefined ? 'owned' : sourceOf(entry);
+    }
+    return { cutters, source };
+  };
+
+  // #786 slice 4c — A NAMED DRILL BIT OR THREAD MILL WITH OTHER WORK KEEPS ITS JOB. The document
+  // names the operator's drill (or thread mill) and also asks for regions, traces or threads. No
+  // single cutter can do both, and the answer is not to replace the named cutter with a flat that
+  // could: it is the SPLIT the operator means — the named cutter for its own holes/threads, and a
+  // flat (or the kind plan's other cutters) for the rest. The mixed-tool refusal then has nothing
+  // left to refuse, because each program has one cutter that can do its work.
+  const work = kindedWork(job);
+  const named = tools.find((t) => t.key === job.toolKey);
+  const drillIds = new Set(
+    (job.drills ?? []).filter((d) => d.enabled).map((d) => d.id),
+  );
+  const threadIds = new Set(
+    (job.threads ?? []).filter((t) => t.enabled).map((t) => t.id),
+  );
+  const namedKind: 'drill' | 'thread' | null =
+    named === undefined
+      ? null
+      : named.tool.shape === 'drill' && drillIds.size > 0
+        ? 'drill'
+        : named.tool.shape === 'thread' && threadIds.size > 0
+          ? 'thread'
+          : null;
+  const ownedIds: ReadonlySet<string> = namedKind === 'drill' ? drillIds : namedKind === 'thread' ? threadIds : new Set<string>();
+  const otherWork = work.filter((w) => !ownedIds.has(w.id));
+  const mixedNamed = namedKind !== null && otherWork.length > 0;
+
   // The kind plan: one cutter per kind, and — when the reach table is absent — no rest pair. It is
-  // the rule-based answer; the search treats it as one candidate among the measured ones.
+  // the rule-based answer; the search treats it as one candidate among the measured ones. A MIXED
+  // NAMED job does not take it: that plan would replace the cutter the operator named.
   const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined);
   const basePlan = planFrom(base.cutters, tools);
-  if (basePlan.cutters.length > 0) add(basePlan);
-
-  const work = kindedWork(job);
+  if (!mixedNamed && basePlan.cutters.length > 0) add(basePlan);
+  // The kind plan's NON-FLAT cutters other than the named one — what the split keeps for the thread
+  // and cone work. A flat never comes from here: the split chooses its own clearance flat, and the
+  // kind plan's flat would own the very items that flat is for.
+  const splitOthers = basePlan.cutters.filter((c) => {
+    const shape = tools.find((t) => t.key === c.key)?.tool.shape;
+    if (shape === undefined || shape === 'flat') return false;
+    if (c.key === named?.key) return false;
+    return !(namedKind === 'thread' && shape === 'thread');
+  });
 
   // #834 — A JOB WHOSE WORK IS ON THE FACES. The rule plan above is the WIDEST flat end that fits;
   // the search must also measure the narrower ones, because the choice is by simulated TIME at
@@ -219,7 +263,9 @@ export function candidatePlans(
   // being refused at Generate. An UNSTATED reach is not a promise either way: such a ball stays a
   // candidate, and the sweep's holder gate judges it (`holder-unproven`).
   const ballWork = work.filter((w) => w.kind === 'ball');
-  if (ballWork.length > 0) {
+  // A mixed named job's plans are the split's alone (a ball owns no holes, so its plan would be
+  // refused for the unassigned drill items anyway).
+  if (ballWork.length > 0 && !mixedNamed) {
     const ids = ballWork.map((w) => w.id);
     const goalDepth = jobTargetObjects(job).reduce((deepest, target) => {
       if ((target.role ?? 'reference') !== 'goal' || !target.enabled || target.format === 'png') return deepest;
@@ -240,7 +286,14 @@ export function candidatePlans(
     for (const ball of balls) add({ cutters: [{ key: ball.key, items: ids }], source: { [ball.key]: sourceOf(ball) } });
   }
   const flatWork = work.filter((w) => w.kind === 'flat');
-  if (flatWork.length === 0) return out;
+  if (flatWork.length === 0) {
+    // A named thread mill beside other NON-FLAT work (a chamfer) is still a split; the kind plan's
+    // other cutters already own that work. Every other job with no flat work has nothing to split.
+    if (mixedNamed) {
+      add(sourced([{ key: named!.key, items: [...ownedIds] }, ...splitOthers]));
+    }
+    return out;
+  }
 
   // The flat kind's own numbers, the same rules `planCutters` applies: the deepest cut, the
   // smallest bore, and a through cut-out's depth.
@@ -289,15 +342,8 @@ export function candidatePlans(
     const entry = tools.find((t) => t.key === c.key);
     return entry !== undefined && entry.tool.shape !== 'flat';
   });
-  const withOthers = (flatCutters: { key: string; items: readonly string[] }[]): CandidatePlan => {
-    const all = [...flatCutters, ...others.map((c) => ({ key: c.key, items: [...c.items] }))];
-    const source: Record<string, 'owned' | 'catalogue'> = {};
-    for (const c of all) {
-      const entry = tools.find((t) => t.key === c.key);
-      source[c.key] = entry === undefined ? 'owned' : sourceOf(entry);
-    }
-    return { cutters: all, source };
-  };
+  const withOthers = (flatCutters: { key: string; items: readonly string[] }[]): CandidatePlan =>
+    sourced([...flatCutters, ...others.map((c) => ({ key: c.key, items: [...c.items] }))]);
 
   // The interesting clearances: the largest, the middle and the two finest a shop would reach for.
   const interesting = (list: readonly ToolLibraryEntry[], n: number): ToolLibraryEntry[] => {
@@ -311,6 +357,24 @@ export function candidatePlans(
   };
   // Clearance first: the LARGEST interesting flats clear fastest; the rests stay finest-first.
   const clearances = interesting(flats, 4).reverse();
+
+  // The split for a mixed named job: the named cutter for its own items, the best clearance flat
+  // for the other flat work, and the kind plan's other (non-flat) cutters for theirs. A thread
+  // cutter from the kind plan is dropped when the named cutter IS the thread mill: the thread
+  // items belong to the named cutter, and an item is cut once.
+  if (mixedNamed) {
+    const otherFlatIds = otherWork.filter((w) => w.kind === 'flat').map((w) => w.id);
+    for (const clearance of otherFlatIds.length > 0 ? clearances : [null]) {
+      const cutters = [
+        { key: named!.key, items: [...ownedIds] },
+        ...(clearance === null ? [] : [{ key: clearance.key, items: otherFlatIds }]),
+        ...splitOthers,
+      ];
+      add(sourced(cutters));
+    }
+    return out;
+  }
+
   const restChoices = interesting(rests, 3);
   for (const clearance of clearances) {
     add(withOthers([{ key: clearance.key, items: flatItems }]));
