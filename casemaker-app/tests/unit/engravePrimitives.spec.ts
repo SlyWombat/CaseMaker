@@ -144,37 +144,42 @@ describe('#435 — refusals are by name, never an approximation', () => {
     expect(out.findings.find((f) => f.code === 'primitive-not-vertical')?.severity).toBe('warning');
   }, 60_000);
 
-  it('refuses a cone and names the sloped wall and the two routes to cut it', () => {
-    const job = jobWith([primitive({ kind: 'cone', diameter: 8, tipDiameter: 1 })]);
-    const found = validateJob(job).find((f) => f.code === 'primitive-cone-needs-cam');
-    expect(found).toBeDefined();
-    expect(found?.severity).toBe('error');
-    expect(found?.message).toContain('sloped wall');
-    expect(found?.message).toContain('V-carve/chamfer');
-    expect(found?.message).toContain('3D engine');
-    expect(codes(job)).not.toContain('primitive-sphere-needs-3d');
-  });
+  it('CUTS a cone as a 3D surface program — the #435 refusal is gone (#786 4a-2)', () => {
+    const job = jobWith([primitive({ kind: 'cone', diameter: 8, tipDiameter: 1 })], {
+      toolKey: 'flat-1.0',
+      tool: flatEndMill(1, { fluteLength: 20, centreCutting: true }),
+    });
+    const found = codes(job);
+    expect(found).not.toContain('primitive-cone-needs-cam');
+    expect(found).not.toContain('primitive-sphere-needs-3d');
+    const out = engraveGenerate(tl, job, job.tool!, [], null);
+    expect(out.ok, JSON.stringify(out.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
+    const surface = out.programs.find((p) => p.surfaceCheck != null);
+    expect(surface).toBeDefined();
+    expect(out.findings.some((f) => f.code === 'primitive-surface-program' && f.severity === 'info')).toBe(true);
+  }, 60_000);
 
-  it('refuses a sphere as the dexel job it is (#222)', () => {
-    const job = jobWith([primitive({ kind: 'sphere', diameter: 8 })]);
-    const found = validateJob(job).find((f) => f.code === 'primitive-sphere-needs-3d');
-    expect(found).toBeDefined();
-    expect(found?.severity).toBe('error');
-    expect(found?.message).toContain('a dexel job');
-    expect(found?.message).toContain('refused rather than approximated');
-  });
+  it('CUTS a sphere the same way, as the surface it is (#786 4a-2)', () => {
+    const job = jobWith([primitive({ kind: 'sphere', diameter: 8 })], {
+      toolKey: 'flat-1.0',
+      tool: flatEndMill(1, { fluteLength: 20, centreCutting: true }),
+    });
+    expect(codes(job)).not.toContain('primitive-sphere-needs-3d');
+    const out = engraveGenerate(tl, job, job.tool!, [], null);
+    expect(out.ok, JSON.stringify(out.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
+    expect(out.programs.some((p) => p.surfaceCheck != null)).toBe(true);
+  }, 60_000);
 
   it('does not say the job is empty when a cuttable primitive is its only work', () => {
     const job = jobWith([primitive({ kind: 'box', width: 20, height: 10 })]);
     expect(codes(job)).not.toContain('no-items');
   });
 
-  it('names a sphere-only job as having nothing it can cut, and names the sphere', () => {
+  it('a sphere-only job is WORK: it is cut, so it says neither "nothing to do" nor refused', () => {
     const job = jobWith([primitive({ kind: 'sphere', diameter: 8 })]);
     const found = codes(job);
-    expect(found).toContain('primitive-sphere-needs-3d');
-    // The refusal is the error, not a second "nothing to do" about a shape the person drew.
     expect(found).not.toContain('no-items');
+    expect(found).not.toContain('primitive-sphere-needs-3d');
   });
 
   it('warns that an enabled target object is a reference, not a cut', () => {
@@ -207,13 +212,15 @@ describe('#435 — refusals are by name, never an approximation', () => {
 });
 
 describe('#435 — setups see the primitives that actually cut', () => {
-  it('puts a cuttable primitive in the implicit setup and leaves refused forms out', () => {
+  it('puts every cuttable primitive in the implicit setup — a sphere is surface work now (#786 4a-2)', () => {
     const job = jobWith([
       primitive({ id: 'box', kind: 'box', width: 20, height: 10 }),
       primitive({ id: 'sphere', kind: 'sphere', diameter: 8 }),
+      // A side-opening cut stays out: no top-face program owns it.
+      primitive({ id: 'side', kind: 'box', width: 10, height: 10, axis: 'x' }),
     ]);
     const [setup] = jobSetups(job);
-    expect(setup?.itemIds).toEqual(['box']);
+    expect(setup?.itemIds).toEqual(['box', 'sphere']);
   });
 
   it('puts a cuttable primitive in the reach table, so the two-tool split sees its area', () => {
