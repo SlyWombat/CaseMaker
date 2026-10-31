@@ -103,7 +103,7 @@ import type {
 } from '@/types/engraveJob';
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import { withSource } from '@/engine/cnc/engrave/jobSources';
-import { PCB_COPPER_MM, pcbStockNotice } from '@/engine/cnc/stockStart';
+import { PCB_COPPER_MM, pcbBlankPatch, pcbStockNotice, type PcbBlankPatch } from '@/engine/cnc/stockStart';
 import { pcbHoleAssignment, withPcbCutters } from '@/engine/import/pcbCutters';
 import { pcbSetupPlan } from '@/engine/import/pcbSetups';
 import { pcbAlignmentOffer, withAlignmentHoles, type PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
@@ -2505,11 +2505,21 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       return shape.id;
     },
 
-    usePcbStock: () =>
+    usePcbStock: () => {
+      // #743 P-8 review — a PCB is a BOARD: when the blank's thickness is not a board's, the
+      // press states the standard 1.6 mm (assumed, editable) with the material. The blank's
+      // length and width stay the operator's — a blank that holds the board is not re-sized.
+      const patch = pcbBlankPatch(get().job.stock);
       get().setStock(
-        { material: 'pcb', colour: { kind: 'laminate', capMm: PCB_COPPER_MM }, fibre: undefined },
-        { material: 'user', colour: 'assumed' },
-      ),
+        {
+          material: 'pcb',
+          colour: { kind: 'laminate', capMm: PCB_COPPER_MM },
+          fibre: undefined,
+          ...(patch?.stock ?? {}),
+        },
+        { material: 'user', colour: 'assumed', ...(patch?.sources ?? {}) },
+      );
+    },
 
     /** #743 P-6 — the board's own holding in one click: taped to the bed, over a board under it. */
     usePcbHolding: () =>
@@ -2541,20 +2551,45 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         const fresh = designReplacesItems(job);
         const heldKind = fresh ? 'tape' : job.workholding.kind;
         const mount: MountSpec = { kind: heldKind === 'vise' || heldKind === 'bracket' ? heldKind : 'tape' };
-        const planned = await planPcbJobImport(tl, files, {
-          blank: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
-          tabs: { count: tabs.count, width: tabs.widthMm, height: tabs.heightMm },
-          mount,
-        });
+        const tabSet = { count: tabs.count, width: tabs.widthMm, height: tabs.heightMm };
+        // #743 P-8 review — THE BLANK A BOARD ASKS FOR. A fresh board lands on the shipped plank,
+        // whose 12 mm is not a board's thickness: the import states the standard 1.6 mm (assumed)
+        // in the same write as the board. A board the blank cannot hold is laid on a blank sized
+        // to its outline plus scrap, rather than refused for the stock it was handed.
+        const freshPatch = fresh ? pcbBlankPatch(job.stock) : null;
+        const blankNow = {
+          length: job.stock.length,
+          width: job.stock.width,
+          thickness: freshPatch?.stock.thickness ?? job.stock.thickness,
+        };
+        let planBlank = blankNow;
+        let planned = await planPcbJobImport(tl, files, { blank: planBlank, tabs: tabSet, mount });
+        let fitPatch: PcbBlankPatch | null = null;
+        if (!planned.ok && planned.code === 'pcb-off-blank' && planned.boardMm !== undefined) {
+          fitPatch = pcbBlankPatch(blankNow, planned.boardMm);
+          if (fitPatch !== null && fitPatch.stock.length !== undefined && fitPatch.stock.width !== undefined) {
+            planBlank = { ...blankNow, length: fitPatch.stock.length, width: fitPatch.stock.width };
+            planned = await planPcbJobImport(tl, files, { blank: planBlank, tabs: tabSet, mount });
+          }
+        }
         if (!planned.ok) return { ok: false, reason: planned.error };
         const plan = planned.plan;
+        // The stock the board is actually laid on: the fresh thickness, and any fit it needed.
+        const stockPatch: PcbBlankPatch | null =
+          freshPatch === null && fitPatch === null
+            ? null
+            : {
+                stock: { ...(freshPatch?.stock ?? {}), ...(fitPatch?.stock ?? {}) },
+                sources: { ...(freshPatch?.sources ?? {}), ...(fitPatch?.sources ?? {}) },
+                notes: [...(freshPatch?.notes ?? []), ...(fitPatch?.notes ?? [])],
+              };
         // §3.4 — drill where an owned cutter IS the hole's size, bore where a flat must helix it;
         // the engraver owns the isolation and a flat that reaches through the board owns the
         // cut-out. The modes and the assignment are computed once, before the one `apply`, from
         // the library as it stands.
         const holes = pcbHoleAssignment(plan.items.drills, getTools());
         const drills = plan.items.drills.map((d) => ({ ...d, mode: holes.modes.get(d.id) ?? d.mode }));
-        const cutters = pcbSetupPlan(plan, getTools(), job.stock.thickness + job.breakthrough, feedCatalogueRows());
+        const cutters = pcbSetupPlan(plan, getTools(), planBlank.thickness + job.breakthrough, feedCatalogueRows());
         const sideItems = (i: number) => cutters.sides[i]!.items;
         const boardItemIds = [0, 1]
           .filter((i) => cutters.sides[i] !== undefined)
@@ -2595,6 +2630,16 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
                   sacrificial: { ...current.sacrificial, under: defaultSacrificialUnder(), source: 'default' as const },
                 }
               : {}),
+            // #743 P-8 review — the board's own blank, stated in the same write.
+            ...(stockPatch === null
+              ? {}
+              : {
+                  stock: { ...current.stock, ...stockPatch.stock },
+                  sources: {
+                    ...(current.sources ?? {}),
+                    stock: { ...(current.sources?.stock ?? {}), ...stockPatch.sources },
+                  },
+                }),
             ...(sources === undefined ? {} : { sourceFiles: sources }),
           };
           // #743 P-8 — a board on a still-demo document IS these setups: the top, and the flipped
@@ -2641,6 +2686,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         const notes = [
           ...planned.skipped.map((n) => `${n} is not a Gerber or drill file and was not used.`),
           ...plan.notes,
+          ...(stockPatch?.notes ?? []),
           // `cutters.notes` already carries §3.4's hole notes (its own `pcbHoleAssignment` call).
           ...cutters.notes,
         ];
@@ -2653,7 +2699,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
               const probe = machine === null ? null : probeFor(machineAt({ host: machine.host, port: machine.port }));
               const settings = registrationSettings(useShopDefaultsStore.getState().defaults, probe).settings;
               return pcbAlignmentOffer({
-                blank: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
+                blank: planBlank,
                 board: plan.board,
                 mount,
                 probe: {

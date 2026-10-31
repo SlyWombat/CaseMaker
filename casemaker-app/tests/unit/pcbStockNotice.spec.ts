@@ -9,7 +9,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { PCB_COPPER_MM, pcbStockNotice } from '@/engine/cnc/stockStart';
+import { PCB_COPPER_MM, PCB_STANDARD_THICKNESS_MM, pcbBlankPatch, pcbStockNotice } from '@/engine/cnc/stockStart';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 
 describe('a board on a non-PCB blank (#743 P-4b review)', () => {
@@ -23,7 +23,25 @@ describe('a board on a non-PCB blank (#743 P-4b review)', () => {
     expect(pcbStockNotice('softwood')).toContain("This job's stock is");
   });
 
-  it('fixes the stock in one click: PCB, copper cap, no filament fibre', () => {
+  it('states the blank a board asks for: the standard thickness, and a fit when it cannot hold the board', () => {
+    // A plank is not a board's thickness: the standard 1.6 mm is ASSUMED, and the operator edits it.
+    expect(pcbBlankPatch({ length: 100, width: 60, thickness: 12 })).toEqual({
+      stock: { thickness: PCB_STANDARD_THICKNESS_MM },
+      sources: { thickness: 'assumed' },
+      notes: [expect.stringContaining('the standard board thickness — assumed, not measured')],
+    });
+    // A blank that is already a board keeps everything, and so does one that holds the board.
+    expect(pcbBlankPatch({ length: 100, width: 60, thickness: 1.6 })).toBeNull();
+    expect(pcbBlankPatch({ length: 60, width: 40, thickness: 1.6 }, { width: 32, height: 10 })).toBeNull();
+    // A board the blank cannot hold is laid on its outline plus 2 mm of scrap each side — computed.
+    expect(pcbBlankPatch({ length: 60, width: 40, thickness: 1.6 }, { width: 80, height: 50 })).toEqual({
+      stock: { length: 84, width: 54 },
+      sources: { length: 'computed', width: 'computed' },
+      notes: [expect.stringContaining("the board's outline plus 2 mm of scrap each side")],
+    });
+  });
+
+  it('fixes the stock in one click: PCB, the board’s standard thickness, copper cap, no filament fibre', () => {
     const store = useEngraveJobStore.getState();
     store.setStock({ material: 'petg', fibre: 'cf', colour: { kind: 'laminate', capMm: 0.4 } });
     expect(useEngraveJobStore.getState().job.stock.material).toBe('petg');
@@ -34,11 +52,13 @@ describe('a board on a non-PCB blank (#743 P-4b review)', () => {
     expect(job.stock.material).toBe('pcb');
     expect(job.stock.colour).toEqual({ kind: 'laminate', capMm: PCB_COPPER_MM });
     expect(job.stock.fibre).toBeUndefined();
-    // The dimensions are the blank the board is already on; the fix never re-sizes it.
-    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([100, 60, 12]);
-    // The material is the operator's choice; the 1 oz number is the default, not theirs.
+    // The length and width are the blank the board is already on; the 12 mm plank is not a
+    // board's thickness, so the press states the standard 1.6 mm — assumed, and editable.
+    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([100, 60, PCB_STANDARD_THICKNESS_MM]);
+    // The material is the operator's choice; the copper and the thickness are defaults, not theirs.
     expect(job.sources?.stock?.material).toBe('user');
     expect(job.sources?.stock?.colour).toBe('assumed');
+    expect(job.sources?.stock?.thickness).toBe('assumed');
     expect(pcbStockNotice(job.stock.material)).toBeNull();
   });
 });

@@ -22,10 +22,6 @@ test('a two-layer Gerber set becomes a two-setup board that generates on both fa
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
-    // The design's blank, not the shipped 12 mm plank: a PCB blank is 1.6 mm (design §3.2), and
-    // the board's through drills are cut in it. The stock's MATERIAL is still the shipped PLA, so
-    // the import's stock notice and its one-click fix below are exercised as before.
-    window.__caseMaker!.setEngraveStock({ length: 60, width: 40, thickness: 1.6 });
   });
   await page.getByTestId('sidebar-button-cnc-engrave').click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();

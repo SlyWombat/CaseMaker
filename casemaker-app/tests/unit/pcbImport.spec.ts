@@ -164,6 +164,9 @@ describe('the PCB import (#743 P-4)', () => {
       expect(tinyBlank.error).toMatch(/32 × 10 mm/);
       expect(tinyBlank.error).toMatch(/20 × 20 mm/);
       expect(tinyBlank.error).toMatch(/Use a larger blank/);
+      // #743 P-8 review — the refusal carries the board's size, so a caller that owns the stock
+      // can lay it on a blank that holds the board.
+      expect(tinyBlank.boardMm).toEqual({ width: 32, height: 10 });
     }
   });
 

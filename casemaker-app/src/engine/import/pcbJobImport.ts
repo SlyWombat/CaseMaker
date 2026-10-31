@@ -15,7 +15,7 @@ import { newEngraveCutoutId, newEngraveDrillId, newEngraveShapeId } from '@/engi
 import type { MountSpec } from '@/engine/cnc/setups/types';
 import { newId } from '@/utils/id';
 import { readPcbArchive } from './pcbArchive';
-import { planPcbImport, type PcbImportOk, type PcbSourceFile } from './pcbImport';
+import { planPcbImport, type PcbImportOk, type PcbImportRefusalCode, type PcbSourceFile } from './pcbImport';
 
 export interface PcbJobImportOk {
   ok: true;
@@ -26,7 +26,16 @@ export interface PcbJobImportOk {
   skipped: string[];
 }
 
-export type PcbJobImportResult = PcbJobImportOk | { ok: false; error: string };
+export type PcbJobImportResult =
+  | PcbJobImportOk
+  | {
+      ok: false;
+      error: string;
+      /** The planner's own refusal code, when the files were the reason. */
+      code?: PcbImportRefusalCode;
+      /** #743 P-8 review — the board's size, when the blank could not hold it. */
+      boardMm?: { width: number; height: number };
+    };
 
 export interface PcbJobImportOpts {
   blank: { length: number; width: number; thickness: number };
@@ -81,7 +90,14 @@ export async function planPcbJobImport(
     ...(opts.mount === undefined ? {} : { mount: opts.mount }),
     idFor,
   });
-  if (!plan.ok) return { ok: false, error: plan.error };
+  if (!plan.ok) {
+    return {
+      ok: false,
+      error: plan.error,
+      code: plan.code,
+      ...(plan.boardMm === undefined ? {} : { boardMm: plan.boardMm }),
+    };
+  }
 
   // The report is keyed by the file NAME the planner read; the archive's entries keep their own
   // basename, so the two lists line up. A duplicate basename (two folders in one zip) takes the

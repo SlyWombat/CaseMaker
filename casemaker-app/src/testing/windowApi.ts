@@ -128,12 +128,6 @@ export interface CaseMakerTestApi {
    */
   engraveReset(): void;
   /**
-   * #743 P-8 — state the blank a board is cut from. The engrave door starts on the shipped plank;
-   * a board's design says PCB 60 × 40 × 1.6 mm, and a spec needs the job on THAT blank rather
-   * than a 12 mm stand-in. Written as the operator's own stock (source 'user').
-   */
-  setEngraveStock(stock: { length: number; width: number; thickness: number }): void;
-  /**
    * #743 P-6 — SEED THE BENCH for an e2e: the tool registry and Makera's rows. A PCB has no
    * starting-table row (P-1), so a board only generates against a cutter the catalogue answers;
    * a spec that must watch a board post needs this seam. Test-only, like everything here.
@@ -452,10 +446,6 @@ export function installCaseMakerTestApi(): void {
       // #277 — records opened by an earlier test live in localStorage, where they would otherwise
       // put a "last measured" line under a later test's estimate.
       useRunRecordStore.getState().clear();
-    },
-    setEngraveStock(stock) {
-      // #743 P-8 — the blank the board's design states, written as the operator's own.
-      useEngraveJobStore.getState().setStock(stock, 'user');
     },
     setMachine(observation, statusLine) {
       // The app's own "a check found it" path (and its persistence), then the live line the

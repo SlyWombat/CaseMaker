@@ -61,6 +61,10 @@ describe('the panel Gerber door (#743 P-4b review)', () => {
     // The import happened: the message reports the board, and the stock is still the operator's.
     expect(screen.getByTestId('engrave-pcb-message').textContent).toMatch(/Imported 1 file/);
     expect(useEngraveJobStore.getState().job.stock.material).toBe('pla');
+    // #743 P-8 review — the shipped 12 mm plank is not a board's thickness: a fresh board states
+    // the standard 1.6 mm in the same write, as an assumption the stock step can correct.
+    expect(useEngraveJobStore.getState().job.stock.thickness).toBe(1.6);
+    expect(useEngraveJobStore.getState().job.sources?.stock?.thickness).toBe('assumed');
     // The board is a whole job: the shipped demo lines (CASE / MAKER / first chips) are gone.
     expect(useEngraveJobStore.getState().job.labels).toEqual([]);
 
@@ -96,6 +100,9 @@ describe('the panel Gerber door (#743 P-4b review)', () => {
     const notice = await screen.findByTestId('engrave-pcb-holding-notice');
     expect(notice.textContent).toContain('taped flat to the bed, over a board under it');
     expect(useEngraveJobStore.getState().job.workholding.kind).toBe('vise');
+    // #743 P-8 review — a job the operator has set up keeps its blank: the fresh-job thickness
+    // rule does not touch it.
+    expect(useEngraveJobStore.getState().job.stock.thickness).toBe(12);
 
     fireEvent.click(screen.getByTestId('engrave-pcb-use-holding'));
     await waitFor(() => expect(screen.queryByTestId('engrave-pcb-holding-notice')).toBeNull());

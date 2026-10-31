@@ -294,6 +294,65 @@ export function pcbStockNotice(material: StockMaterial): string | null {
 }
 
 /**
+ * #743 P-8 review — THE BLANK A BOARD IS CUT FROM. A PCB blank's THICKNESS is a board fact, not
+ * whatever the last job was: the shipped document starts on a 12 mm plank, and a board cut there
+ * is a different object. The standard is 1.6 mm FR-4 (design §3.2). The number is an ASSUMPTION —
+ * a board's thickness is read from its blank or stated — so it travels as `assumed`, is named in
+ * the import's summary, and stays editable in the stock step.
+ */
+export const PCB_STANDARD_THICKNESS_MM = 1.6;
+/** The thicknesses copper-clad boards are supplied in, mm — outside this, the blank is not a board. */
+export const PCB_BOARD_THICKNESS_RANGE_MM = { min: 0.4, max: 3.2 } as const;
+/** The scrap kept outside the board's outline when a blank is sized for it, mm, each side. */
+export const PCB_BLANK_MARGIN_MM = 2;
+
+export interface PcbBlankPatch {
+  /** The stock fields to write — only the ones the rule changes. */
+  stock: Partial<Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness'>>;
+  sources: Partial<Record<'length' | 'width' | 'thickness', FieldSource>>;
+  /** What the import states about the change, in the operator's words. */
+  notes: string[];
+}
+
+/**
+ * The stock a board asks for, or null when the stock is already one: a standard board THICKNESS
+ * when the blank is not a board's, and a blank large enough to hold the board when it is not.
+ *
+ * The length and width move ONLY when the current blank cannot hold the board (the outline plus
+ * `PCB_BLANK_MARGIN_MM` of scrap each side); a blank that already holds it is the operator's and
+ * keeps its size. `board` is omitted where the caller does not know it (the "Use PCB stock"
+ * press), and then nothing is resized.
+ */
+export function pcbBlankPatch(
+  stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness'>,
+  board?: { width: number; height: number },
+): PcbBlankPatch | null {
+  const patch: PcbBlankPatch['stock'] = {};
+  const sources: PcbBlankPatch['sources'] = {};
+  const notes: string[] = [];
+  const range = PCB_BOARD_THICKNESS_RANGE_MM;
+  if (!(stock.thickness >= range.min && stock.thickness <= range.max)) {
+    patch.thickness = PCB_STANDARD_THICKNESS_MM;
+    sources.thickness = 'assumed';
+    notes.push(
+      `The blank is set to ${PCB_STANDARD_THICKNESS_MM} mm, the standard board thickness — assumed, not measured; check the blank's label and correct it in Stock.`,
+    );
+  }
+  if (board !== undefined && !(board.width <= stock.length + 1e-9 && board.height <= stock.width + 1e-9)) {
+    const r = (v: number): number => Math.ceil((v + 2 * PCB_BLANK_MARGIN_MM) * 10) / 10;
+    patch.length = r(board.width);
+    patch.width = r(board.height);
+    sources.length = 'computed';
+    sources.width = 'computed';
+    notes.push(
+      `The blank is set to ${patch.length} × ${patch.width} mm — the board's outline plus ${PCB_BLANK_MARGIN_MM} mm of scrap each side — because the ${stock.length} × ${stock.width} mm blank could not hold it.`,
+    );
+  }
+  if (Object.keys(patch).length === 0) return null;
+  return { stock: patch, sources, notes };
+}
+
+/**
  * Why a rod's length is past the vise's grip, or null. The length is its height standing on end.
  *
  * This is the sentence under the form's picture, not a refusal (#713): a long rod is held in the

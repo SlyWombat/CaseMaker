@@ -353,6 +353,10 @@ export function EngraveSetupsSection({
       job.vectors ?? [],
       job.drills ?? [],
       job.threads ?? [],
+      // #743 P-8 review — a CUT-OUT and a CHAMFER are setup items too: their chips read the
+      // item's own name, never its id ("Cut out the board", not "cut-s00000y").
+      job.cutouts ?? [],
+      job.chamfers ?? [],
     ];
     for (const list of lists) {
       for (const item of list) map.set(item.id, item.name ?? item.text ?? item.id);

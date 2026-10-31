@@ -135,7 +135,18 @@ export interface PcbWarning {
   message: string;
 }
 
-export type PcbImportResult = PcbImportOk | { ok: false; code: PcbImportRefusalCode; error: string };
+export type PcbImportResult =
+  | PcbImportOk
+  | {
+      ok: false;
+      code: PcbImportRefusalCode;
+      error: string;
+      /**
+       * #743 P-8 review — the board's own size, when the refusal is that the blank cannot hold it.
+       * The caller that owns the stock can size a blank to the board instead of stopping here.
+       */
+      boardMm?: { width: number; height: number };
+    };
 
 export interface PcbImportOpts {
   /** The blank the board is laid on, mm. */
@@ -346,6 +357,7 @@ export function planPcbImport(tl: ManifoldToplevel, files: readonly PcbSourceFil
       ok: false,
       code: 'pcb-off-blank',
       error: `The board is ${round(boardWidth)} × ${round(boardHeight)} mm; the blank is ${round(opts.blank.length)} × ${round(opts.blank.width)} mm. Use a larger blank.`,
+      boardMm: { width: boardWidth, height: boardHeight },
     };
   }
 
