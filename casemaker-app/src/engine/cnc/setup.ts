@@ -76,7 +76,12 @@ export type Workholding =
   | { kind: 'anchor-bracket'; anchor: 1 | 2; offset: Vec2 }
   | { kind: 'top-clamps'; clamps: { at: Vec2; footprint: Profile }[] }
   | { kind: 'vise'; jawFaces: [Plane, Plane]; jawHeight: Mm }
-  | { kind: 'rotary-chuck'; jawDiameter: Mm; stickout: Mm }
+  /**
+   * #241 slice 4 (#729 item 1) — whether the TAILSTOCK is in. `true` models it as an obstacle
+   * behind the stock's free end (`rotary/tailstock.ts`), `false` is an open free end, and an
+   * absent flag (a synthetic setup that never stated one) keeps the old "not modelled" notice.
+   */
+  | { kind: 'rotary-chuck'; jawDiameter: Mm; stickout: Mm; tailstock?: boolean }
   | { kind: 'tape-down'; contact: Profile; shim?: Profile }
   | { kind: 'printed-nest'; nest: string; seatClearance: Mm };
 

@@ -59,6 +59,7 @@ import {
   ROTARY_MAX_LENGTH_MM,
   ROTARY_TAILSTOCK_BAND_MM,
 } from './rotary/wrap';
+import { segmentEntersTailstock, tailstockSpan } from './rotary/tailstock';
 
 /** Deepest permitted cut (positive mm below the top face) at a work-frame XY. 0 = no cutting allowed here. */
 export type DepthLimit = (x: number, y: number) => number;
@@ -862,6 +863,27 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
                 m.line,
                 `a rapid moves the ⌀${fmt(2 * edge)} mm cutter past the jaw face (X 0) below Z ${fmt(clearZ)} ` +
                   `(the rod's top plus the clearance): it would drive into the jaws. Move over the chuck only above that height.`,
+              );
+            }
+          }
+          // #241 slice 4 (#729 item 1) — a RAPID INTO THE TAILSTOCK BODY. Cutting moves are judged
+          // by the tailstock band above; a rapid into the body was unchecked. The body is the
+          // provisional cylinder in `rotary/tailstock.ts`, tested along the whole move with the
+          // cutter's edge; a refusal names the provisional figures.
+          if (
+            rotary.tailstock &&
+            fromW[0] !== null && fromW[1] !== null && fromW[2] !== null &&
+            toW[0] !== null && toW[1] !== null && toW[2] !== null
+          ) {
+            const edge = toolRadiusOf(ctx.tool, 0);
+            const body = tailstockSpan(rotary.stickout, rotary.radius * 2, rotary.radius);
+            if (segmentEntersTailstock([fromW[0], fromW[1], fromW[2]], [toW[0], toW[1], toW[2]], edge, body)) {
+              push(
+                'rapid-into-tailstock',
+                m.line,
+                `a rapid moves the ⌀${fmt(2 * edge)} mm cutter into the tailstock, provisionally a ` +
+                  `⌀${fmt(2 * body.radius)} mm housing from X ${fmt(body.x0)} to ${fmt(body.x1)} mm (these figures ` +
+                  `are unmeasured): keep the rapid clear of the stock's free end, or turn the tailstock out.`,
               );
             }
           }

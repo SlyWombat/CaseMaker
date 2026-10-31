@@ -39,6 +39,7 @@ import { obstructionLabels } from '@/engine/cnc/probePlan';
 import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM, segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { executeProfile, type ManifoldToplevel } from './evaluateOp';
 import { manifoldOfMesh, type NodeMeshOutput } from './meshOutput';
+import { segmentEntersTailstock, tailstockSpan } from '@/engine/cnc/rotary/tailstock';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
@@ -1569,7 +1570,9 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // the rod's top if that is higher — which is the height a tool over the chuck must clear. Any
   // move whose cutter edge is past the jaw face (X − radius < 0) below that height is refused,
   // tested along the WHOLE straight move (a rapid can cross the zone between two clear ends).
-  // The chuck body above the jaws and the tailstock are not modelled, and the sweep says so.
+  // The chuck body above the jaws is still not modelled; the TAILSTOCK is, when the setup states
+  // whether it is in (#241 slice 4). An absent flag keeps the pre-#241 behaviour (the synthetic
+  // setups and old documents), where nothing claimed to check it.
   if (setup.part.kind === 'cylinder') {
     const jawReach =
       setup.workholding.kind === 'rotary-chuck' ? Math.max(topZ, setup.workholding.jawDiameter / 2) : topZ;
@@ -1623,6 +1626,48 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     // states the fact once, in the coverage sentence (#724 W7's bands: "checked as keep-out bands
     // … the sweep models neither as a solid"). `fixture-unchecked` remains for its discriminating
     // case — a workholding with obstacles that NO fixture was given for.
+  }
+  // #241 slice 4 (#729 item 1) — THE TAILSTOCK IS AN OBSTACLE when the job says it is in. Its
+  // figures are provisional (`rotary/tailstock.ts`); the radius is the larger of the housing, the
+  // jaws and the stock, so the model errs towards refusing. Rapids and cuts are both tested: a
+  // rapid can cross the body between two clear ends.
+  if (
+    setup.part.kind === 'cylinder' &&
+    setup.workholding.kind === 'rotary-chuck' &&
+    setup.workholding.tailstock === true
+  ) {
+    const span = tailstockSpan(setup.workholding.stickout, setup.workholding.jawDiameter, topZ);
+    const hits: { line: number; kind: string }[] = [];
+    for (const m of timeline.airMoves) {
+      if (segmentEntersTailstock(m.from, m.to, radius, span)) {
+        hits.push({ line: m.line, kind: m.kind === 'rapid' ? 'rapid' : 'spindle-off move' });
+      }
+    }
+    for (const cp of timeline.checkpoints) {
+      for (let k = 0; k < cp.steps.length; k++) {
+        const p0: [number, number, number] = [cp.xy[4 * k] as number, cp.xy[4 * k + 1] as number, cp.zs[2 * k] as number];
+        const p1: [number, number, number] = [cp.xy[4 * k + 2] as number, cp.xy[4 * k + 3] as number, cp.zs[2 * k + 1] as number];
+        if (segmentEntersTailstock(p0, p1, radius, span)) {
+          hits.push({ line: timeline.events[cp.steps[k] as number]?.line ?? 0, kind: 'cut' });
+          break;
+        }
+      }
+    }
+    if (hits.length > 0) {
+      hits.sort((p, q) => p.line - q.line);
+      const first = hits[0]!;
+      diagnostics.push({
+        severity: 'error',
+        code: 'rotary-into-tailstock',
+        message:
+          `line ${first.line}: a ${first.kind} reaches the tailstock — the cutter's edge enters the ` +
+          `tailstock body, provisionally a ⌀${(2 * span.radius).toFixed(3)} mm housing from X ` +
+          `${span.x0.toFixed(3)} to ${span.x1.toFixed(3)} mm (these figures are unmeasured). Keep the pass ` +
+          `clear of the stock's free end, or turn the tailstock out for this job` +
+          (hits.length > 1 ? ` (${hits.length} moves in all)` : '') +
+          '.',
+      });
+    }
   }
   // Every check against it is done; the fixture is not part of the result, so release it now.
   disposeFixture();

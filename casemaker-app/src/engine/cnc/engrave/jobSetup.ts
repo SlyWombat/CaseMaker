@@ -917,6 +917,9 @@ export function toSetup(
         kind: 'rotary-chuck',
         jawDiameter: chuck?.gripDiameter ?? rotary.radius * 2,
         stickout: rotary.stickout,
+        // #241 slice 4 — the job's own tailstock fact, so the sweep can model the obstacle. A
+        // setup built without a chuck (a direct caller) leaves the flag absent: the old notice.
+        ...(chuck === null ? {} : { tailstock: chuck.tailstock }),
       },
       { startingTool: 1 },
       machine,

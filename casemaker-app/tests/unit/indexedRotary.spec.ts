@@ -485,3 +485,50 @@ describe('#729 — a round stock fits the rotary by its own diameter', () => {
     expect(rotaryStockFits({ length: 100, width: 60, thickness: 60 }, false, ENV)).toBe(false);
   });
 });
+
+// #241 slice 4 (#729 item 1) — THE TAILSTOCK IS AN OBSTACLE when the job says it is in. The
+// figures are provisional (`rotary/tailstock.ts`), so a refusal names them; a false refusal is
+// preferred to a missed collision.
+describe('#241 slice 4 the tailstock obstacle', () => {
+  const withTail = (tailstock?: boolean): Setup =>
+    stubSetup(STOCK, tailstock === undefined ? HOLD : { ...HOLD, tailstock });
+
+  it('refuses a cut into the body when it is in, and leaves the free end open when it is out', () => {
+    const src = ['S1000 M3', 'G0 X40 Y0 Z15 A0', 'G1 X50 Z8 F100', 'G0 Z15'].join('\n');
+    const run = (tailstock?: boolean) => {
+      const s = withTail(tailstock);
+      const out = sweepTimeline(tl, buildTimeline(parseGcode(src), s), WIDE, s);
+      return out.ok ? out.value.diagnostics : out.diagnostics;
+    };
+    const inDiags = run(true);
+    const hit = inDiags.find((d) => d.code === 'rotary-into-tailstock');
+    expect(hit?.severity).toBe('error');
+    expect(hit?.message).toContain('unmeasured');
+    expect(run(false).some((d) => d.code === 'rotary-into-tailstock')).toBe(false);
+  });
+
+  it('refuses a RAPID into the body in the verifier', () => {
+    const text = ['S1000 M3', 'G0 X40 Y0 Z15 A0', 'G0 X60 Y0 Z5', 'G0 X40', 'M5'].join('\n');
+    const findings = verifyProgram(text, {
+      setup: withTail(true),
+      machine: Z1,
+      tool: WIDE,
+      depthLimit: () => 0,
+      minRapidZ: 1,
+      rotary: { radius: RADIUS, stickout: LENGTH, tailstock: true },
+    });
+    const hit = findings.findings.find((f) => f.code === 'rapid-into-tailstock');
+    expect(hit?.severity).toBe('error');
+    expect(hit?.message).toContain('unmeasured');
+    // With the tailstock out the same rapid is not this finding.
+    const out = verifyProgram(text, {
+      setup: withTail(false),
+      machine: Z1,
+      tool: WIDE,
+      depthLimit: () => 0,
+      minRapidZ: 1,
+      rotary: { radius: RADIUS, stickout: LENGTH, tailstock: false },
+    });
+    expect(out.findings.some((f) => f.code === 'rapid-into-tailstock')).toBe(false);
+  });
+});
