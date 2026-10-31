@@ -912,7 +912,11 @@ export function toSetup(
   if (rotary !== null) {
     const chuck = job.workholding.kind === 'rotary-chuck' ? job.workholding.rotary : null;
     return stubSetup(
-      { kind: 'cylinder', diameter: rotary.radius * 2, length: rotary.length, section: rotary.section },
+      // #241 slice 1 (#729 item 8) — THE CUTTABLE LENGTH, not the stock's full length: the work
+      // frame's X 0 is the jaw face and the free end is at the stick-out, so the cylinder the
+      // sweep models is 0 … stickout. The grip behind the face is inside the jaws, not stock the
+      // cutter may plan in.
+      { kind: 'cylinder', diameter: rotary.radius * 2, length: rotary.stickout, section: rotary.section },
       {
         kind: 'rotary-chuck',
         jawDiameter: chuck?.gripDiameter ?? rotary.radius * 2,

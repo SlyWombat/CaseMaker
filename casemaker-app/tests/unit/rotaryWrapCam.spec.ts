@@ -788,8 +788,11 @@ describe('⌀6 rod under the 3.175 mm flat — the oracle passes because the fac
     expect(report.band).toBeCloseTo(cellBand + facetTerm(2.5, 1.5875), 12);
     // Without the facet the band would be the cell term alone (~0.050 mm) — nine times smaller
     // than the floor's own edge rise, so the fixture would report an under-cut along the wall.
+    // The team's sum followed the #241 slice-1 setup: the cuttable cylinder is the 50 mm stick-out,
+    // not the 60 mm stock, so the grid's X span (and its last-cell `du`) moved by 7.5 nm of pitch
+    // — the pin reads 0.511848 where it read 0.511852 against the full-length stock.
     expect(report.band - cellBand).toBeCloseTo(0.461445, 6);
-    expect(report.band).toBeCloseTo(0.511852, 6);
+    expect(report.band).toBeCloseTo(0.511848, 6);
   });
 });
 

@@ -689,6 +689,26 @@ describe('toSetup (#200)', () => {
     expect(partToWork(setup, [0, 0, job.stock.thickness])).toEqual([0, 0, 0]);
   });
 
+  // #241 slice 1 (#729 item 8) — A ROTARY JOB IS ONE CYLINDER OF THE CUTTABLE LENGTH. X 0 is the
+  // jaw face and the free end is at the stick-out; the grip behind the face is inside the jaws.
+  it('sets a rotary job up as a cylinder of the stick-out, from the jaw face', () => {
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, length: 100, width: 20, thickness: 20, material: 'pla', shape: 'cylinder', diameter: 20 },
+      workholding: {
+        kind: 'rotary-chuck',
+        rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: true, source: 'test' },
+      },
+    };
+    const setup = toSetup(job, Z1);
+    expect(setup.part.kind).toBe('cylinder');
+    if (setup.part.kind !== 'cylinder') return;
+    expect(setup.part.length).toBe(85); // the stick-out, not the stock's full 100
+    expect(setup.part.diameter).toBe(20);
+    expect(setup.workholding.kind).toBe('rotary-chuck');
+  });
+
   it('builds the vise jaw faces in the part frame with jawHeight = thickness - stockProud', () => {
     const setup = toSetup(defaultEngraveJob(), Z1);
     expect(setup.workholding.kind).toBe('vise');
