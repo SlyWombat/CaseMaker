@@ -19,7 +19,7 @@
 
 import { useLayoutEffect, useState, type CSSProperties, type JSX } from 'react';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
-import { newItemDepthFor, newTargetObjectId } from '@/store/engraveJobStore';
+import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
 import { readGoalObjectFile } from '@/engine/import/targetObject';
 import { FontPicker } from '@/components/panels/FontPicker';
 import { OperationPicker } from '@/components/panels/OperationPicker';
@@ -84,6 +84,11 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   const [surfaceReading, setSurfaceReading] = useState(false);
   // #721 — what the goal makes: the part itself, or a mold to cast it in.
   const [makeMold, setMakeMold] = useState(false);
+  // #743 P-4b — the circuit-board door. The set writes its items through the store's one import
+  // action; the step only reads the files and reports the outcome (there is no `OperationChoice`
+  // for it — the files ARE the design, and Create finishes without adding a placeholder).
+  const [pcbReading, setPcbReading] = useState(false);
+  const [pcbSummary, setPcbSummary] = useState<string | null>(null);
 
   const surfaceChoice: OperationChoice = {
     type: 'surface',
@@ -124,6 +129,21 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
     onChoiceChange(choice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picked, text, depth, font, surface, makeMold, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, onChoiceChange]);
+
+  async function readPcbSet(files: File[]): Promise<void> {
+    setPcbSummary(null);
+    setPcbReading(true);
+    try {
+      const out = await useEngraveJobStore.getState().importPcbFiles(files);
+      setPcbSummary(
+        out.ok
+          ? `The board is in: ${out.itemCount} items from ${out.fileCount} files${out.warnings.length > 0 ? ` — ${out.warnings.map((w) => w.message).join(' ')}` : ''}`
+          : out.reason,
+      );
+    } finally {
+      setPcbReading(false);
+    }
+  }
 
   async function chooseGoal(file: File): Promise<void> {
     setSurfaceError(null);
@@ -331,6 +351,39 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
               {surfaceError}
             </p>
           )}
+        </div>
+      )}
+
+      {!rotary && (
+        <div data-testid="start-wizard-op-pcb" style={FIELD_BOX}>
+          <div style={FIELD_HEADING}>Circuit board from Gerber files</div>
+          <p style={MUTED}>
+            A board's copper, holes and outline as ordinary items: the copper kept, the band
+            isolating it, the holes and the board cut-out. The job must be cut from PCB stock.
+          </p>
+          <div style={FIELDS}>
+            <label style={FIELD_LABEL}>
+              <span>Files</span>
+              <input
+                type="file"
+                multiple
+                accept=".gbr,.gtl,.gbl,.gko,.gm1,.gto,.gbo,.gts,.gbs,.gtp,.gbp,.drl,.xln,.zip"
+                data-testid="start-wizard-op-pcb-files"
+                aria-label="Gerber and drill files"
+                onChange={(e) => {
+                  const files = [...(e.target.files ?? [])];
+                  e.target.value = '';
+                  if (files.length > 0) void readPcbSet(files);
+                }}
+              />
+            </label>
+            {pcbReading && <span style={MUTED}>Reading the board…</span>}
+            {pcbSummary !== null && !pcbReading && (
+              <span style={MUTED} data-testid="start-wizard-op-pcb-summary">
+                {pcbSummary}
+              </span>
+            )}
+          </div>
         </div>
       )}
 

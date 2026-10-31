@@ -101,6 +101,13 @@ import type {
 } from '@/types/engraveJob';
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import { withSource } from '@/engine/cnc/engrave/jobSources';
+import { MATERIAL_LABELS } from '@/engine/cnc/materials';
+
+/** What {@link EngraveJobState.importPcbFiles} reports to the door that asked for the import. */
+export type PcbImportOutcome =
+  | { ok: true; fileCount: number; itemCount: number; notes: string[]; warnings: PcbWarning[] }
+  | { ok: false; reason: string };
+import type { PcbWarning } from '@/engine/import/pcbImport';
 import { parseEngraveJob, type ParseEngraveJobResult } from './engraveJobSchema';
 import { machineForJob } from '@/platform/bedProfiles';
 import { useLocationStore } from './locationStore';
@@ -1148,6 +1155,17 @@ export interface EngraveJobState {
    * placement fields the import dialog settled on.
    */
   addVector: (shape: EngraveVectorShape) => string;
+  /**
+   * #743 P-4b — a circuit board from its Gerber set: read the picked files (or one `.zip`) as the
+   * board's design and write the items of the design's §3.3 into the job in ONE `apply` — the
+   * copper and outline construction vectors, the isolation frame, one through drill per hole and
+   * the cut-out — with each file recorded as a `JobSource` by its SHA-256.
+   *
+   * The job must already be cut from PCB stock: the blank is the board's home, and a board laid on
+   * a PLA blank would be the wrong job (the design's principle 15 has no PCB mode — it has PCB
+   * stock). The manifold toplevel is loaded lazily on the first import, in the browser only.
+   */
+  importPcbFiles: (files: readonly File[]) => Promise<PcbImportOutcome>;
   /** Merge a hand edit into one vector (#217). A partial `position` is merged, not replaced. */
   updateVector: (id: string, patch: VectorPatch) => void;
   removeVector: (id: string) => void;
@@ -2427,6 +2445,56 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     addVector: (shape) => {
       apply((job) => ({ ...job, vectors: [...(job.vectors ?? []), shape] }));
       return shape.id;
+    },
+
+    importPcbFiles: async (files) => {
+      const job = get().job;
+      if (job.stock.material !== 'pcb') {
+        return {
+          ok: false,
+          reason: `This job's stock is ${MATERIAL_LABELS[job.stock.material]}; a circuit board is cut from PCB stock — choose PCB in the stock row first.`,
+        };
+      }
+      let tl;
+      try {
+        const [{ getToplevel }, { planPcbJobImport }] = await Promise.all([
+          import('@/workers/geometry/ManifoldRuntime'),
+          import('@/engine/import/pcbJobImport'),
+        ]);
+        tl = await getToplevel();
+        const tabs = tabSettings(useShopDefaultsStore.getState().defaults).settings;
+        const planned = await planPcbJobImport(tl, files, {
+          blank: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
+          tabs: { count: tabs.count, width: tabs.widthMm, height: tabs.heightMm },
+        });
+        if (!planned.ok) return { ok: false, reason: planned.error };
+        const plan = planned.plan;
+        apply((current) => {
+          let sources = current.sourceFiles;
+          for (const s of planned.sources) sources = withSource(sources, s.source);
+          return {
+            ...current,
+            vectors: [...(current.vectors ?? []), ...plan.items.vectors],
+            combined: [...(current.combined ?? []), ...plan.items.frames],
+            drills: [...(current.drills ?? []), ...plan.items.drills],
+            cutouts: [...(current.cutouts ?? []), ...plan.items.cutouts],
+            ...(sources === undefined ? {} : { sourceFiles: sources }),
+          };
+        });
+        const notes = [
+          ...planned.skipped.map((n) => `${n} is not a Gerber or drill file and was not used.`),
+          ...plan.notes,
+        ];
+        return {
+          ok: true,
+          fileCount: plan.files.length,
+          itemCount: plan.items.vectors.length + plan.items.frames.length + plan.items.drills.length + plan.items.cutouts.length,
+          notes,
+          warnings: plan.warnings,
+        };
+      } catch (e) {
+        return { ok: false, reason: `the board could not be read: ${e instanceof Error ? e.message : String(e)}` };
+      }
     },
 
     updateVector: (id, patch) =>

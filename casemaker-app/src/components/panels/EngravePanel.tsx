@@ -1337,6 +1337,31 @@ export function EngravePanel(): JSX.Element {
   }, []);
   const [targetImporting, setTargetImporting] = useState(false);
   const [targetError, setTargetError] = useState<string | null>(null);
+  // #743 P-4b — the circuit board's Gerber set: several files (or one .zip), read by the store's
+  // import action; the summary line under the menu states what the files made and what they warn.
+  const pcbInputRef = useRef<HTMLInputElement>(null);
+  const [pcbBusy, setPcbBusy] = useState(false);
+  const [pcbMessage, setPcbMessage] = useState<string | null>(null);
+
+  async function readPcb(files: File[]): Promise<void> {
+    setPcbMessage(null);
+    setPcbBusy(true);
+    try {
+      const out = await useEngraveJobStore.getState().importPcbFiles(files);
+      if (!out.ok) {
+        setPcbMessage(out.reason);
+        return;
+      }
+      const lines = [
+        `Imported ${out.fileCount} file${out.fileCount === 1 ? '' : 's'} as the board: ${out.itemCount} items — copper, isolation, holes, outline and the board cut-out.`,
+      ];
+      for (const w of out.warnings) lines.push(w.message);
+      lines.push(...out.notes);
+      setPcbMessage(lines.join(' '));
+    } finally {
+      setPcbBusy(false);
+    }
+  }
 
   async function readDesign(file: File): Promise<void> {
     setDesignError(null);
@@ -3006,6 +3031,37 @@ export function EngravePanel(): JSX.Element {
           {targetError}
         </p>
       )}
+            {/* #743 P-4b — the board's Gerber set, beside the reference object: one entry of the
+                same Add menu. It needs PCB stock (the import says so when the job is not), and it
+                writes the items in one undo step. */}
+            <button
+              type="button"
+              data-testid="engrave-add-pcb"
+              disabled={pcbBusy}
+              style={{ marginTop: 4 }}
+              title="Read a board's Gerber and drill files (several, a folder's worth, or one .zip) as the job’s items: the copper kept, the band isolating it, the holes, the outline and the board cut-out. The job must be cut from PCB stock."
+              onClick={() => pcbInputRef.current?.click()}
+            >
+              {pcbBusy ? 'Reading the board…' : 'Circuit board from Gerber files…'}
+            </button>
+            <input
+              ref={pcbInputRef}
+              type="file"
+              multiple
+              accept=".gbr,.gtl,.gbl,.gko,.gm1,.gto,.gbo,.gts,.gbs,.gtp,.gbp,.drl,.xln,.zip"
+              style={{ display: 'none' }}
+              data-testid="engrave-pcb-input"
+              onChange={(e) => {
+                const files = [...(e.target.files ?? [])];
+                e.target.value = '';
+                if (files.length > 0) void readPcb(files);
+              }}
+            />
+            {pcbMessage && (
+              <p style={MUTED} data-testid="engrave-pcb-message">
+                {pcbMessage}
+              </p>
+            )}
           </>
         )}
         {/* #662/#685 — THE ONE ENTRY POINT, and it says what the operation IS. The type table is
