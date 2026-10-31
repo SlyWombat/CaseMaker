@@ -68,6 +68,7 @@ import {
 import { type EdgeScan, type RegistrationPlan, probeInstrumentOf } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { sideCentreWork, sideTouchAllowed, sideTouchSetup } from './probe3d';
+import { centrePair, readCentrePair, type CentreFindPlan, type CentrePairReading } from './centreFind';
 import type { LiveTouch } from './liveTouch';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
 import { referenceOutcome } from './references';
@@ -748,6 +749,234 @@ export async function runMountTap(
     throw e;
   } finally {
     // #789 — OFF whatever happened, the same as the registration's own session.
+    if (powered) await io.trySend(PROBE_SUPPLY_OFF);
+  }
+}
+
+export type CentreRunResult =
+  | {
+      ok: true;
+      /** The measured centre, MACHINE XY. */
+      centreMachine: { x: number; y: number };
+      /** The measured centre, WORK XY (the frame the moves were sent in). */
+      centreWork: { x: number; y: number };
+      /** Each axis's last pair: its span and the diameter it makes. */
+      pairs: CentrePairReading[];
+      /** The top the routine touched, MACHINE Z — the Z0 reference. */
+      surfaceZ: number;
+      /** The probe's own `M491` reading, MACHINE Z. */
+      probeRefZ: number;
+      /** Ready for `applyCorrection`: the origin lands on the measured centre, Z0 on the top. */
+      outcome: RegistrationOutcome;
+      transcript: Transcript[];
+    }
+  | { ok: false; reason: string; transcript: Transcript[] };
+
+/** Where a centre find runs, in the machine's terms. */
+export interface CentreFindOptions {
+  plan: CentreFindPlan;
+  /** The machine's travel height, MACHINE Z (the resolved `toolChange.clearanceZ`). */
+  seekFromMachineZ: number;
+  /** Where the job expects the top, MACHINE Z. */
+  expectedSurfaceMachineZ: number;
+  /** How far either way that expectation is believed, mm. */
+  surfaceToleranceMm: number;
+  /** The slow feed of the top touch, mm/min. */
+  surfaceFeed: number;
+  /** How far above the found top the head parks, mm. */
+  parkAboveSurfaceMm: number;
+  /** How far a release backs the ball away from a contact before any G0, mm (#790). */
+  releaseMm?: number;
+  /**
+   * Where the TOP is touched, WORK XY — the Z0 reference. Defaults to the estimate (a boss's own
+   * top, a round part's centre). A BORE's centre is a hole: the caller passes a point on the
+   * stock's face beyond the bore's reach, or the top touch would measure the bore's floor.
+   */
+  topTouchAt?: { x: number; y: number };
+}
+
+const f4 = (n: number): string => String(Math.round(n * 1000) / 1000);
+
+/**
+ * #827 — FIND A FEATURE'S CENTRE WITH THE 3D PROBE, and hand back an origin ready to write.
+ *
+ * Studio's routine, as the 2026-10-31 bench ran it by hand: the top is touched once at the
+ * estimate (Z0's reference); then −X/+X, −Y/+Y and −X/+X again, each pair recentring on its
+ * midpoint so the last X pair is taken at the measured Y. A bore is touched OUTWARD from the
+ * estimate and a boss INWARD from beyond its edge (`centreFind.ts` owns which); every touch that
+ * triggers is released with `G38.5` PROBE-AWAY before any `G0` — a G0 retract straight after a
+ * sideways contact raised `ALARM: unexpected probe trigger` on the bench (#790).
+ *
+ * THE PROBE'S SUPPLY is switched on before the first touch and off in a finally (#789), exactly
+ * as the registration's sessions do. A guarded descent to each side touch's depth refuses a start
+ * that is over material: a bore's mouth must be clear, and a boss's start must lie outside it.
+ *
+ * WHAT COMES BACK. The measured centre in machine and work XY, the pairs' spans and diameters
+ * (bore: span + 2R; boss: span − 2R), the top touch and the probe's `M491` reading. `outcome` is
+ * a RegistrationOutcome whose `correctedG54` puts the measured centre at work (0,0) and whose
+ * `surfaceZ` is the top, so `applyCorrection` writes it with no other translation.
+ */
+export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Promise<CentreRunResult> {
+  const plan = opts.plan;
+  const release = opts.releaseMm ?? 3;
+  const io = session(deps, opts.seekFromMachineZ);
+  /** #789 — whether the probe's supply was (or may have been) switched on. */
+  let powered = false;
+  try {
+    const status = await io.send('?');
+    if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
+    await io.send('$H');
+    await io.send('G54');
+    await io.send('G92.1');
+    if (
+      !(await deps.operator({
+        kind: 'fit-probe',
+        text: 'Fit the 3D probe in the spindle — the ball on its cable — then continue.',
+      }))
+    ) {
+      throw new Stop('stopped: the probe was not fitted');
+    }
+    powered = true;
+    await io.send(PROBE_SUPPLY_ON);
+    const rest = await io.send('M119');
+    if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
+    const refPrb = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
+    if (refPrb === null || !refPrb.touched) throw new Stop('M491 answered no tool-length reading');
+
+    // ── THE TOP TOUCH: one slow touch through the expected band. ──
+    const topAt = opts.topTouchAt ?? plan.at;
+    const bandTop = r3(opts.expectedSurfaceMachineZ + opts.surfaceToleranceMm);
+    const bandBottom = r3(opts.expectedSurfaceMachineZ - opts.surfaceToleranceMm);
+    const topDescentMm = r3(opts.seekFromMachineZ - bandBottom);
+    if (!(topDescentMm > 0)) {
+      throw new Stop(
+        `the expected top (machine Z ${f(opts.expectedSurfaceMachineZ)}) is not below the travel height ${f(opts.seekFromMachineZ)} — check the stock's thickness and the mount`,
+      );
+    }
+    await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
+    // The routine runs in the WORK frame (G54 is selected above); the moves are plain G0s there.
+    await io.send(`G0 X${f(topAt.x)} Y${f(topAt.y)}`);
+    await io.idle();
+    await io.at(`down to find the top at (${f4(topAt.x)}, ${f4(topAt.y)}), from machine Z ${f(bandTop)}`);
+    await io.send('G91');
+    const topReply = await io.send(`G38.3 Z-${f(topDescentMm)} F${f(opts.surfaceFeed)}`, { missOk: true });
+    const topPrb = lastPrb(topReply);
+    if (topPrb === null || !topPrb.touched) {
+      await io.send('G90');
+      throw new Stop(
+        `the top touch found nothing between machine Z ${f(opts.seekFromMachineZ)} and ${f(bandBottom)} at the estimate — check the stock is under the probe`,
+      );
+    }
+    // #790 — a Z touch that ends on a surface is released before any G0.
+    await io.send(`G38.5 Z${f4(release)} F100`);
+    await io.send('G90');
+    const surfaceZ = r3(topPrb.z);
+    // The work origin the moves ran in, derived exactly as the registration derives it: the touch's
+    // machine XY less the work point it was sent to.
+    const g54 = { x: r3(topPrb.x - topAt.x), y: r3(topPrb.y - topAt.y) };
+    await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
+
+    // ── THE PAIRS: X, Y, then X again at the measured Y. ──
+    const zMachine = r3(surfaceZ - plan.depthMm);
+    let at = { x: plan.at.x, y: plan.at.y };
+    const pairs: CentrePairReading[] = [];
+    for (const axis of plan.order) {
+      const balls: number[] = [];
+      for (const sign of [-1, 1] as const) {
+        const { from, travelMm } = centrePair(plan.kind, at, axis, sign, plan.searchMm);
+        const word = axis.toUpperCase();
+        const side = `${sign < 0 ? '−' : '+'}${word}`;
+        await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
+        await io.send(`G0 X${f(from.x)} Y${f(from.y)}`);
+        await io.send(`G53 G0 Z${f(r3(surfaceZ + opts.parkAboveSurfaceMm))}`);
+        await io.idle();
+        // A guarded descent to the touch depth: the start must be clear of material.
+        await io.send('G91');
+        const down = await io.send(`G38.3 Z-${f(r3(surfaceZ + opts.parkAboveSurfaceMm - zMachine))} F${f(plan.touchFeed)}`, {
+          missOk: true,
+        });
+        const downPrb = lastPrb(down);
+        if (downPrb !== null && downPrb.touched) {
+          await io.send(`G38.5 Z${f4(release)} F100`);
+          await io.send('G90');
+          throw new Stop(
+            plan.kind === 'bore'
+              ? `the descent at the ${side} start met material — there is no open bore at (${f4(at.x)}, ${f4(at.y)}); check the centre estimate`
+              : `the descent at the ${side} start met material — the part reaches past the ${f(plan.searchMm)} mm search; increase the search radius`,
+          );
+        }
+        await io.send('G90');
+        await io.idle();
+        await io.at(`sideways ${plan.kind === 'bore' ? 'outward' : 'inward'} to the ${side} wall, at machine Z ${f(zMachine)}`);
+        await io.send('G91');
+        const reply = await io.send(`G38.3 ${word}${f4(travelMm)} F${f(plan.touchFeed)}`, { missOk: true });
+        const prb = lastPrb(reply);
+        await io.send('G90');
+        if (prb === null || !prb.touched) {
+          await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
+          throw new Stop(
+            plan.kind === 'bore'
+              ? `the ${side} touch found no wall within ${f(plan.searchMm)} mm of the estimate — the bore is larger than the search, or the centre is off`
+              : `the ${side} touch found no part within ${f(plan.searchMm)} mm of the start — the part is smaller than the search, or the centre is off`,
+          );
+        }
+        // #790 — PROBE-AWAY before any G0: the ball must release the wall first.
+        await io.send('G91');
+        await io.send(`G38.5 ${word}${travelMm < 0 ? f4(release) : `-${f4(release)}`} F100`);
+        await io.send('G90');
+        // The PRB is machine XY; the work coordinate is it less the origin the moves ran in.
+        const ballWork = r3((axis === 'x' ? prb.x : prb.y) - (axis === 'x' ? g54.x : g54.y));
+        balls.push(ballWork);
+        io.saw({
+          source: 'surface',
+          label: `the ${side} wall`,
+          x: axis === 'x' ? ballWork : at.x,
+          y: axis === 'x' ? at.y : ballWork,
+          z: prb.z,
+          touched: true,
+          kind: 'stock',
+        });
+        await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
+      }
+      const reading = readCentrePair(plan.kind, axis, balls[0]!, balls[1]!, plan.ballRadiusMm);
+      pairs.push(reading);
+      at = axis === 'x' ? { x: reading.centre, y: at.y } : { ...at, y: reading.centre };
+    }
+
+    const lastX = [...pairs].reverse().find((p) => p.axis === 'x')!;
+    const lastY = [...pairs].reverse().find((p) => p.axis === 'y')!;
+    const centreWork = { x: lastX.centre, y: lastY.centre };
+    const centreMachine = { x: r3(centreWork.x + g54.x), y: r3(centreWork.y + g54.y) };
+    const notes = [
+      `${plan.kind === 'bore' ? 'bore' : 'boss'} centre: ${pairs.length} wall touches around (${f4(centreWork.x)}, ${f4(centreWork.y)})`,
+      ...pairs.map((p) => `the ${p.axis.toUpperCase()} span is ${f(p.spanMm)} mm between ball centres — ${f(p.diameterMm)} mm across`),
+      `the top touch read machine Z ${f(surfaceZ)}; the origin is the measured centre, with Z0 from this top and the cutter's own M491`,
+    ];
+    const outcome: RegistrationOutcome = {
+      edges: [],
+      offset: { x: r3(centreWork.x - plan.at.x), y: r3(centreWork.y - plan.at.y) },
+      measured: { x: true, y: true },
+      centre: centreWork,
+      rotationDeg: null,
+      rotationShiftMm: null,
+      withinMargin: true,
+      margin: 0,
+      surfaceZ,
+      probeRefZ: r3(refPrb.z),
+      seekFromMachineZ: opts.seekFromMachineZ,
+      currentG54: g54,
+      correctedG54: centreMachine,
+      xyChecked: true,
+      usable: true,
+      problems: [],
+      notes,
+    };
+    return { ok: true, centreMachine, centreWork, pairs, surfaceZ, probeRefZ: r3(refPrb.z), outcome, transcript: io.transcript };
+  } catch (e) {
+    if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
+    throw e;
+  } finally {
+    // #789 — the supply goes OFF whatever happened.
     if (powered) await io.trySend(PROBE_SUPPLY_OFF);
   }
 }
