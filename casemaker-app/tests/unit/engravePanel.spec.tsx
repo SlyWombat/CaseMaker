@@ -426,7 +426,8 @@ describe('EngravePanel (#205)', () => {
     expect(field('engrave-target-x-0')).toBe('Xmm');
     expect(field('engrave-target-y-0')).toBe('Ymm');
     expect(field('engrave-target-z-0')).toBe('Zmm');
-    expect(field('engrave-target-rotation-0')).toBe('rot°');
+    // #831 — a mesh's turns sit with its size, named by the axis they turn about.
+    expect(field('engrave-target-rotation-0')).toBe('about Z°');
   });
 
   it('#726 P13 — the row shows a plain name; the exported operation name is unchanged', () => {

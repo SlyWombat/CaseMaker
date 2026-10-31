@@ -26,6 +26,8 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { useSimStore, type SimLayers, type SimState } from '@/store/simStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { placedSize, targetTurns } from '@/engine/cnc/engrave/targetScale';
+import { goalHandleClientPoint } from '@/components/viewport/goalHandleFrame';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveRunStore, gateViewFor, saveBlocker, runErrorCodes } from '@/store/engraveRunStore';
 import { useMachineRunStore } from '@/store/machineRunStore';
@@ -168,6 +170,18 @@ export interface CaseMakerTestApi {
    * built yet" from "the picture is wrong". Testing surface only.
    */
   engravePreviewState(): { status: string; error: string | null };
+  /**
+   * #831 e2e — the goal's turns (degrees), position and placed size (mm), and the client pixel of a
+   * point on its on-canvas handles (a ring at `value` degrees, an arrow at `value` mm), or null
+   * while the handles are not drawn. Testing surface only.
+   */
+  engraveTargetPlacement(): {
+    turns: { x: number; y: number; z: number };
+    position: { x: number; y: number; z: number };
+    placed: { x: number; y: number; z: number };
+    scale: { x: number; y: number; z: number } | null;
+  } | null;
+  engraveGoalHandlePoint(kind: 'ring' | 'arrow', axis: 'x' | 'y' | 'z', value: number): { x: number; y: number } | null;
   /** #723 R-4 e2e — the open job's target object as the stores hold it (bytes included?). */
   engraveTargetState(): { role: string | null; enabled: boolean; format: string; hasData: boolean } | null;
   /**
@@ -494,6 +508,14 @@ export function installCaseMakerTestApi(): void {
       const t = useEngraveJobStore.getState().job.targetObject;
       if (t === undefined) return null;
       return { role: t.role ?? null, enabled: t.enabled, format: t.format, hasData: t.data !== undefined };
+    },
+    engraveTargetPlacement() {
+      const t = useEngraveJobStore.getState().job.targetObject;
+      if (t === undefined) return null;
+      return { turns: targetTurns(t), position: { ...t.position }, placed: placedSize(t), scale: t.scale ?? null };
+    },
+    engraveGoalHandlePoint(kind, axis, value) {
+      return goalHandleClientPoint(kind, axis, value);
     },
     engraveGoalDrawing() {
       const goal = useEngravePreviewStore.getState().preview?.goal ?? null;

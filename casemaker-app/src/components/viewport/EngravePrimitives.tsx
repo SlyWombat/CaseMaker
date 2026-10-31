@@ -28,6 +28,7 @@ import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
+import { useEngraveRowStore } from '@/store/engraveRowStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { targetPlacement } from '@/engine/cnc/engrave/targetScale';
@@ -36,6 +37,7 @@ import type { EngravePrimitive, EngraveTargetObject } from '@/types/engraveJob';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngravePreviewGoal } from '@/workers/sim/engravePreview';
 import { activateEngraveItem } from './engravePick';
+import { GoalTransformHandles } from './GoalTransformHandles';
 import { geometryFromMesh, REMOVED_COLOR } from './simGeometry';
 import { STOCK_COLOR } from './engraveRamp';
 
@@ -320,6 +322,12 @@ export function EngravePrimitives() {
   const enabled = (primitives ?? []).filter((p) => p.enabled);
   const goalTarget =
     target !== undefined && target.enabled && (target.role ?? 'reference') === 'goal';
+  // #831 — the move/turn compass, while the mesh is selected or its row is open.
+  const selectedTarget = useViewportStore(
+    (s) => target !== undefined && isEngraveItemSelected(s.selection, target.id),
+  );
+  const rowOpen = useEngraveRowStore((s) => target !== undefined && s.open.has(target.id));
+  const handlesOn = target !== undefined && target.format !== 'png' && (selectedTarget || rowOpen);
 
   if (enabled.length === 0 && (target === undefined || !target.enabled)) return null;
 
@@ -332,6 +340,9 @@ export function EngravePrimitives() {
         ) : (
           <TargetObjectMesh target={target} />
         ))}
+      {target !== undefined && target.enabled && handlesOn && (
+        <GoalTransformHandles target={target} mold={goalTarget && isMold(target)} />
+      )}
       {enabled.map((primitive) => (
         <PrimitiveBody key={primitive.id} primitive={primitive} />
       ))}

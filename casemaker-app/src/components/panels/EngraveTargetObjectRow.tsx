@@ -7,10 +7,19 @@ import {
   fitToStockScale,
   isUniform,
   placedSize,
+  rotatedExtents,
   scaleForAxisSize,
   targetScale,
   targetTurns,
 } from '@/engine/cnc/engrave/targetScale';
+import {
+  chooseLayFlat,
+  describeTurn,
+  LAY_FLAT_SUGGEST_RATIO,
+  turnAboutAxis,
+  turnsPatch,
+} from '@/engine/cnc/engrave/goalOrientation';
+import { rememberGoalPlacement, undoGoalPlacement, useGoalTransformUndo } from '@/store/goalTransformUndo';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
 import type { EngraveSurfaceSettings, EngraveTargetObject } from '@/types/engraveJob';
 
@@ -259,6 +268,155 @@ function MeshSizeControls({
             : ` — ${fmt(scale.x * 100)} % of the file’s ${fmt(target.size.x)} × ${fmt(target.size.y)} × ${fmt(target.size.z)} mm.`
           : ` — stretched: ${fmt(scale.x * 100)} % × ${fmt(scale.y * 100)} % × ${fmt(scale.z * 100)} % of the file’s ${fmt(target.size.x)} × ${fmt(target.size.y)} × ${fmt(target.size.z)} mm.`}
       </p>
+      <MeshTurnControls target={target} index={index} onChange={onChange} stock={stock} locked={locked} />
+    </div>
+  );
+}
+
+const fmt1 = (n: number): string => `${Number(n.toFixed(1))}`;
+
+/**
+ * #831 — TURNING THE MESH TO FIT THE STOCK: the three angles (degrees, the stored "XYZ" turns), a
+ * +90° button per stock axis, and "Lay it flat" — the shallowest of the 24 axis-aligned
+ * orientations, re-fitted to the stock when the aspect is kept, stated in one line. A goal that
+ * stands much deeper than it could lie gets the suggestion without being asked (the app proposes
+ * the better choice). Every write here remembers the placement it replaced, so Undo puts it back.
+ */
+function MeshTurnControls({
+  target,
+  index,
+  onChange,
+  stock,
+  locked,
+}: {
+  target: EngraveTargetObject;
+  index: number;
+  onChange: (patch: TargetObjectPatch) => void;
+  stock?: EngraveTargetObjectRowProps['stock'];
+  locked: boolean;
+}): JSX.Element {
+  const turns = targetTurns(target);
+  const turnsKey = `${turns.x},${turns.y},${turns.z}`;
+  const room =
+    stock === undefined ? null : { x: stock.length - 2 * stock.edgeMargin, y: stock.width - 2 * stock.edgeMargin };
+  const flat = chooseLayFlat(target, room);
+  const suggest = flat.changes && flat.currentDepthMm >= LAY_FLAT_SUGGEST_RATIO * flat.depthMm;
+  const [said, setSaid] = useState<{ id: string; key: string; text: string } | null>(null);
+  const canUndo = useGoalTransformUndo(
+    (s) => s.stack.length > 0 && s.stack[s.stack.length - 1]!.targetId === target.id,
+  );
+  const write = (patch: TargetObjectPatch): void => {
+    rememberGoalPlacement(target);
+    onChange(patch);
+  };
+
+  const layFlat = (): void => {
+    if (!flat.changes) {
+      setSaid({
+        id: target.id,
+        key: turnsKey,
+        text: `Already lying flat: ${fmt1(flat.depthMm)} mm deep is its shallowest.`,
+      });
+      return;
+    }
+    const patch: TargetObjectPatch = { ...turnsPatch(flat.turns) };
+    let depth = flat.depthMm;
+    let tail = '';
+    if (locked && stock !== undefined) {
+      const f = fitToStockScale(target.size, stock, stock.edgeMargin, flat.turns);
+      if (f !== null) {
+        patch.scale = { x: f, y: f, z: f };
+        patch.position = { x: stock.length / 2, y: stock.width / 2, z: 0 };
+        depth = rotatedExtents({ x: target.size.x * f, y: target.size.y * f, z: target.size.z * f }, flat.turns).z;
+        tail = `, fitted to the stock at ${fmt1(f * 100)} %`;
+      }
+    }
+    write(patch);
+    setSaid({
+      id: target.id,
+      key: `${flat.turns.x},${flat.turns.y},${flat.turns.z}`,
+      text: `${describeTurn(turns, flat.turns)}: ${fmt1(depth)} mm deep instead of ${fmt1(flat.currentDepthMm)} mm${tail}.`,
+    });
+  };
+
+  const angleField = (axis: 'x' | 'y' | 'z'): JSX.Element => (
+    <span key={axis} style={FIELD_LABEL}>
+      <label style={FIELD_LABEL}>
+        <span>about {axis.toUpperCase()}</span>
+        <input
+          type="number"
+          step="any"
+          value={turns[axis]}
+          data-testid={axis === 'z' ? `engrave-target-rotation-${index}` : `engrave-target-rotation-${axis}-${index}`}
+          aria-label={axis === 'z' ? 'Target object rotation' : `Target object rotation about ${axis.toUpperCase()}`}
+          title={`Degrees about the object's ${axis.toUpperCase()} axis through its centre. The three turns apply Z first, then Y, then X.`}
+          style={NUM}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (!Number.isFinite(v)) return;
+            // 0 about X or Y is written as the absence of the field, so an untouched document
+            // round-trips without gaining a key.
+            if (axis === 'z') onChange({ rotation: v });
+            else if (axis === 'x') onChange({ rotationX: v === 0 ? undefined : v });
+            else onChange({ rotationY: v === 0 ? undefined : v });
+          }}
+        />
+        <span>°</span>
+      </label>
+      <button
+        type="button"
+        data-testid={`engrave-target-turn-${axis}-${index}`}
+        aria-label={`Turn 90° about ${axis.toUpperCase()}`}
+        title={`Turn the object a quarter turn about the stock's ${axis.toUpperCase()} axis, through its centre.`}
+        onClick={() => write(turnsPatch(turnAboutAxis(turns, axis, 90)))}
+      >
+        +90°
+      </button>
+    </span>
+  );
+
+  return (
+    <div data-testid={`engrave-target-turn-${index}`}>
+      <div style={ROW_INLINE}>
+        <span style={{ fontSize: 11, color: '#9aa4b0' }}>turn</span>
+        {angleField('x')}
+        {angleField('y')}
+        {angleField('z')}
+      </div>
+      <div style={ROW_INLINE}>
+        <button
+          type="button"
+          data-testid={`engrave-target-layflat-${index}`}
+          title="Turn the object to whichever of its 24 square-on orientations stands lowest over the stock; ties go to the one that best fits the blank. With the aspect kept, it is then fitted to the stock."
+          onClick={layFlat}
+        >
+          Lay it flat
+        </button>
+        {canUndo && (
+          <button
+            type="button"
+            data-testid={`engrave-target-turn-undo-${index}`}
+            title="Put back the turn, place and size from before the last turn, move or fit."
+            onClick={() => {
+              undoGoalPlacement();
+              setSaid(null);
+            }}
+          >
+            Undo
+          </button>
+        )}
+      </div>
+      {said !== null && said.id === target.id && said.key === turnsKey ? (
+        <p style={MUTED} data-testid={`engrave-target-layflat-said-${index}`}>
+          {said.text}
+        </p>
+      ) : (
+        suggest && (
+          <p style={MUTED} data-testid={`engrave-target-layflat-suggest-${index}`}>
+            {`It stands ${fmt1(flat.currentDepthMm)} mm tall; laid flat it would be ${fmt1(flat.depthMm)} mm deep. Press Lay it flat.`}
+          </p>
+        )
+      )}
     </div>
   );
 }
@@ -445,48 +603,26 @@ export function EngraveTargetObjectRow({
         {positionNum('x')}
         {positionNum('y')}
         {positionNum('z')}
-        <label style={FIELD_LABEL}>
-          <span>rot</span>
-          <input
-            type="number"
-            step="any"
-            value={target.rotation}
-            data-testid={`engrave-target-rotation-${index}`}
-            aria-label="Target object rotation"
-            title="Degrees counter-clockwise about the object's Z axis, through its bbox centre."
-            style={NUM}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isFinite(v)) onChange({ rotation: v });
-            }}
-          />
-          <span>°</span>
-        </label>
-        {/* #723 part 2 — turns about X and Y: how the operator orients a part for a side that is
-            not reached from the top. Applied after Z, before Y and X; absent is 0. */}
-        {(['x', 'y'] as const).map((axis) => (
-          <label key={axis} style={FIELD_LABEL}>
-            <span>rot {axis.toUpperCase()}</span>
+        {/* A picture turns about Z only; a mesh's three turns sit with its size (#831). */}
+        {target.format === 'png' && (
+          <label style={FIELD_LABEL}>
+            <span>rot</span>
             <input
               type="number"
               step="any"
-              value={axis === 'x' ? (target.rotationX ?? 0) : (target.rotationY ?? 0)}
-              data-testid={`engrave-target-rotation-${axis}-${index}`}
-              aria-label={`Target object rotation about ${axis.toUpperCase()}`}
-              title={`Degrees about the object's ${axis.toUpperCase()} axis through its bbox centre, applied after Z (absent = 0). Turn a part 180 about X to cut its other side.`}
+              value={target.rotation}
+              data-testid={`engrave-target-rotation-${index}`}
+              aria-label="Target object rotation"
+              title="Degrees counter-clockwise about the object's Z axis, through its bbox centre."
               style={NUM}
               onChange={(e) => {
                 const v = Number(e.target.value);
-                if (!Number.isFinite(v)) return;
-                // 0 is written as the absence of the field, so an untouched document round-trips
-                // without gaining a key.
-                if (axis === 'x') onChange({ rotationX: v === 0 ? undefined : v });
-                else onChange({ rotationY: v === 0 ? undefined : v });
+                if (Number.isFinite(v)) onChange({ rotation: v });
               }}
             />
             <span>°</span>
           </label>
-        ))}
+        )}
       </div>
 
       {/* #721 — what the goal makes: the part, or a mold to cast it in. A picture is a relief only. */}

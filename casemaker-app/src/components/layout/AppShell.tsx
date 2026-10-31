@@ -21,6 +21,8 @@ import { undoProject, redoProject, useProjectStore } from '@/store/projectStore'
 // Static rather than lazy: `EngravePanel` imports this store from `ContextPanel`, which is in the
 // eager bundle already, so reaching for it here costs nothing and the shortcut needs it at keypress.
 import { undoEngraveRemoval } from '@/store/engraveJobStore';
+import { undoGoalPlacement } from '@/store/goalTransformUndo';
+import { useViewportStore } from '@/store/viewportStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { sweepUnusedMeshBlobs } from '@/store/meshBlobSweep';
 import { startRecentJobTracking } from '@/store/recentJobsStore';
@@ -37,7 +39,10 @@ function useUndoRedoShortcuts(): void {
         // #411: a pending engrave removal outranks the project's undo — the person's last press was
         // a `✕` on an item, and Ctrl-Z has to take that back. Empty stack, the key is the project's
         // again (the precedence rule and its reasoning live in `undoEngraveRemoval`).
-        if (!undoEngraveRemoval()) undoProject();
+        // #831: on the engrave screen, a goal's last turn, move or fit comes next.
+        if (undoEngraveRemoval()) return;
+        if (useViewportStore.getState().activeSidebarSection === 'cnc-engrave' && undoGoalPlacement()) return;
+        undoProject();
       } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
         e.preventDefault();
         redoProject();
