@@ -124,8 +124,7 @@ function options(feature: Feature, over: Partial<CentreFindOptions> = {}): Centr
   return {
     plan: made.plan,
     seekFromMachineZ: -3,
-    expectedSurfaceMachineZ: TOP_Z,
-    surfaceToleranceMm: 1,
+    bandMm: { min: TOP_Z - 1, max: TOP_Z + 1 },
     surfaceFeed: 150,
     parkAboveSurfaceMm: 2,
     // A bore's centre is a hole: the top is touched on the face beside it.

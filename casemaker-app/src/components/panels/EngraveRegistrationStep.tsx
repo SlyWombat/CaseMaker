@@ -87,6 +87,7 @@ import { registrationTouches } from '@/engine/cnc/plan';
 import { faceUpOf, planFromSetups, setupsSettings } from '@/engine/cnc/setups';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { planRegistrationAttempt } from './EngraveSetupsSection';
+import { EngraveCentreFind } from './EngraveCentreFind';
 import type { RegistrationAttempt } from './EngraveSetupRow';
 import {
   viseFrameFromRegistration,
@@ -813,6 +814,12 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           <p style={MUTED} data-testid="engrave-registration-plan-summary">
             {summarizePlan(plan)}
           </p>
+
+          {/* #827 — THE CENTRE PATH: Studio's bore / boss / round-part routine, offered beside
+              the edge plan. Hidden while a registration run owns the machine. */}
+          {(phase === 'idle' || phase === 'failed' || phase === 'recorded') && (
+            <EngraveCentreFind target={target} plan={plan} settings={regSettings} probe={probe} />
+          )}
 
           {(phase === 'idle' || phase === 'failed' || phase === 'recorded') && target !== null && (
             <>

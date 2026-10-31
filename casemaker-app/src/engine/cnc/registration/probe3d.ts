@@ -75,6 +75,14 @@ export interface SideTouchRefusal {
 /** Below this the ball cannot meet the stock's side at all: refuse rather than guess a height. */
 export const MIN_SIDE_DEPTH_MM = 0.3;
 
+/**
+ * #827 — the clearance a stock must stand PROUD of the vise's jaws before its own X face can be
+ * side-touched: the ball's radius plus this margin above the jaw top, plus the touch depth itself
+ * (`MIN_SIDE_DEPTH_MM` at least). Below it the jaw is in the ball's path and the fixed-jaw face is
+ * the X datum, which the plan says in one line.
+ */
+export const SIDE_TOUCH_JAW_MARGIN_MM = 1;
+
 const r3 = (n: number): number => Math.round(n * 1000) / 1000;
 
 /**
@@ -157,15 +165,34 @@ export function sideTouchSetup(
   ballRadiusMm: number,
   surfaceMachineZ: number,
 ): SideTouchSetup | SideTouchRefusal {
-  // #525 — the jaws stand where an X-direction approach travels: the fixed-jaw edge is the frame's
-  // own face and the moving-jaw side is blocked the same way.
+  // #525 — the jaws stand where an X-direction approach travels, so a vise's X edges are only
+  // reachable ABOVE the jaw tops. #827 — when the stock stands proud enough, its OWN face is
+  // touched there (which removes the jaw-position uncertainty); below that, the fixed-jaw face is
+  // the X datum and the plan says so in one line.
+  let maxDepthAboveJaw: number | null = null;
   if (!sideTouchAllowed(plan.mount, scan.edge)) {
-    return {
-      ok: false,
-      reason:
-        `a sideways touch cannot reach the ${scan.edge} edge on a vise: the jaws stand where the ball would travel. ` +
-        `The fixed-jaw face is the frame's own datum; use the wired probe for this edge, or mount on the bracket`,
-    };
+    const xEdge = scan.edge === 'left' || scan.edge === 'right';
+    if (plan.mount === 'vise' && plan.mountDatum !== null && xEdge) {
+      const proud = r3(surfaceMachineZ - plan.mountDatum.jawTopZ);
+      const needed = r3(ballRadiusMm + SIDE_TOUCH_JAW_MARGIN_MM + MIN_SIDE_DEPTH_MM);
+      if (proud < needed) {
+        return {
+          ok: false,
+          reason:
+            `the stock stands ${proud} mm proud of the jaws — side-touching its own ${scan.edge} face needs ${needed} mm ` +
+            `(the ball's ${r3(ballRadiusMm)} mm, ${SIDE_TOUCH_JAW_MARGIN_MM} mm of margin and ${MIN_SIDE_DEPTH_MM} mm of touch depth). ` +
+            `Register the corner with the fixed-jaw face as X: the ordinary left-edge scan, and the free front edge for Y`,
+        };
+      }
+      maxDepthAboveJaw = r3(proud - ballRadiusMm - SIDE_TOUCH_JAW_MARGIN_MM);
+    } else {
+      return {
+        ok: false,
+        reason:
+          `a sideways touch cannot reach the ${scan.edge} edge on a vise: the jaws stand where the ball would travel. ` +
+          `The fixed-jaw face is the frame's own datum; use the wired probe for this edge, or mount on the bracket`,
+      };
+    }
   }
 
   if (plan.mount === 'vise' && plan.mountDatum === null) {
@@ -178,7 +205,10 @@ export function sideTouchSetup(
 
   // The generic depth first: one radius below the top on thick stock, half the thickness on thin.
   const thickness = plan.stockThicknessMm ?? ballRadiusMm * 2;
-  const depthMm = sideTouchDepthMm(ballRadiusMm, thickness);
+  // #827 — an X touch on the vise runs above the jaw top: its depth is capped by that clearance.
+  const depthMm = r3(
+    maxDepthAboveJaw === null ? sideTouchDepthMm(ballRadiusMm, thickness) : Math.min(sideTouchDepthMm(ballRadiusMm, thickness), maxDepthAboveJaw),
+  );
   let zMachine = sideTouchMachineZ(surfaceMachineZ, depthMm);
 
   if (plan.mount === 'vise' && plan.mountDatum !== null) {

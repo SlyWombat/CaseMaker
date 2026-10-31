@@ -420,15 +420,11 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     if (input.disc !== undefined) {
       return { ok: false, reason: 'a disc has no corner to find — it registers on its rim, with the four centre-line scans' };
     }
-    if (mount !== 'tape') {
-      return {
-        ok: false,
-        reason:
-          mount === 'vise'
-            ? 'a corner cannot be found on the vise: its jaws stand where the sideways approach to the left and right edges travels. Register on tape, where all four edges are free, or use the wired probe'
-            : 'the bracket fixes X and Y from its own anchor — its confirming touches are not an origin, so there is no corner to find. Register on tape',
-      };
-    }
+    // #827 — A CORNER ON ANY MOUNT THAT CAN TOUCH THE STOCK'S OWN FACES. On the vise the X face
+    // is touched above the jaw top when the stock stands proud enough (the executor refuses with
+    // the fixed-jaw sentence otherwise); on the bracket the stock's exposed faces are touched,
+    // the anchor remaining the fallback. No tape requirement any more.
+
     if (probeInstrumentOf(probe) !== 'xyz') {
       return {
         ok: false,

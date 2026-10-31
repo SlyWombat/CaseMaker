@@ -777,10 +777,11 @@ export interface CentreFindOptions {
   plan: CentreFindPlan;
   /** The machine's travel height, MACHINE Z (the resolved `toolChange.clearanceZ`). */
   seekFromMachineZ: number;
-  /** Where the job expects the top, MACHINE Z. */
-  expectedSurfaceMachineZ: number;
-  /** How far either way that expectation is believed, mm. */
-  surfaceToleranceMm: number;
+  /**
+   * The band the top may be found in, MACHINE Z — the plan's own seek band (`seek.band`). The top
+   * touch descends to its floor at {@link surfaceFeed}; a touch above the floor is the reading.
+   */
+  bandMm: { min: number; max: number };
   /** The slow feed of the top touch, mm/min. */
   surfaceFeed: number;
   /** How far above the found top the head parks, mm. */
@@ -845,12 +846,12 @@ export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Pr
 
     // ── THE TOP TOUCH: one slow touch through the expected band. ──
     const topAt = opts.topTouchAt ?? plan.at;
-    const bandTop = r3(opts.expectedSurfaceMachineZ + opts.surfaceToleranceMm);
-    const bandBottom = r3(opts.expectedSurfaceMachineZ - opts.surfaceToleranceMm);
+    const bandTop = r3(opts.bandMm.max);
+    const bandBottom = r3(opts.bandMm.min);
     const topDescentMm = r3(opts.seekFromMachineZ - bandBottom);
     if (!(topDescentMm > 0)) {
       throw new Stop(
-        `the expected top (machine Z ${f(opts.expectedSurfaceMachineZ)}) is not below the travel height ${f(opts.seekFromMachineZ)} — check the stock's thickness and the mount`,
+        `the expected top's floor (machine Z ${f(bandBottom)}) is not below the travel height ${f(opts.seekFromMachineZ)} — check the stock's thickness and the mount`,
       );
     }
     await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
@@ -1148,7 +1149,7 @@ export async function runRegistration(
     const g54 = { x: r3(slow.x - plan.surfacePoint.x), y: r3(slow.y - plan.surfacePoint.y) };
     for (const scan of plan.scans) {
       scans.push(
-        probeInstrumentOf(plan.probe) === 'xyz' && sideTouchAllowed(plan.mount, scan.edge)
+        probeInstrumentOf(plan.probe) === 'xyz' && (sideTouchAllowed(plan.mount, scan.edge) || plan.corner !== undefined)
           ? await scanEdgeSideways(io, plan, scan, slow.z, g54)
           : await scanEdge(io, plan, scan, parkZ, slow.z),
       );

@@ -159,14 +159,27 @@ describe('#525 — what the VISE allows sideways (the maintainer’s condition)'
     expect(sideTouchAllowed('tape', 'right')).toBe(true);
   });
 
-  it('refuses a sideways touch on the fixed-jaw edge with the sentence that names why', () => {
+  // #827 — the X face is the STOCK's own when it stands proud enough above the jaws; below that
+  // the fixed-jaw face is the datum, and the sentence names both the clearance and the fallback.
+  it('refuses an X face the stock does not stand proud enough to touch, naming the fixed-jaw fallback', () => {
     const plan = visePlan(SURFACE, 3.81);
     const left = plan.scans.find((s) => s.edge === 'left')!;
     const setup = sideTouchSetup(left, plan, S, 1.5, SURFACE);
     expect(setup.ok).toBe(false);
     if (setup.ok) return;
-    expect(setup.reason).toContain('cannot reach the left edge on a vise');
-    expect(setup.reason).toContain("frame's own datum");
+    expect(setup.reason).toContain('proud of the jaws');
+    expect(setup.reason).toContain('fixed-jaw face as X');
+  });
+
+  it('touches the stock’s own left face above the jaws when it stands proud enough', () => {
+    // 2 mm prouder than the reference blank: proud 3.77 ≥ the ball's 1.5 + 1 margin + 0.3 depth.
+    const plan = visePlan(SURFACE + 2, 3.81);
+    const left = plan.scans.find((s) => s.edge === 'left')!;
+    const setup = sideTouchSetup(left, plan, S, 1.5, SURFACE + 2);
+    expect(setup.ok).toBe(true);
+    if (!setup.ok) return;
+    // The ball's BOTTOM stays the margin clear of the jaw top.
+    expect(setup.zMachine - 1.5).toBeGreaterThanOrEqual(JAW_TOP + 1 - 1e-9);
   });
 
   it('the bench blank (3.81 thick, 1.77 proud): the ball runs one radius below the top, clear of the ledge', () => {
@@ -262,16 +275,21 @@ describe('#525 — corner finding: the plan', () => {
     expect(cornerPlan('back-right').corner).toEqual({ id: 'back-right', xEdge: 'right', yEdge: 'back' });
   });
 
-  it('refuses a corner the mount cannot give: the vise’s jaws, the bracket’s own origin', () => {
+  // #827 — the vise and the bracket find the corner on the STOCK's own faces now; their anchors
+  // are the fallback when a face cannot be touched.
+  it('plans a corner on the vise and the bracket — the stock’s own faces', () => {
     const vise = planRegistration(input({ probe: PROBE_3D, corner: 'front-left' }), S);
-    expect(vise.ok).toBe(false);
-    if (!vise.ok) expect(vise.reason).toContain('jaws');
+    expect(vise.ok).toBe(true);
+    if (vise.ok) {
+      expect(vise.plan.corner).toEqual({ id: 'front-left', xEdge: 'left', yEdge: 'front' });
+      expect(vise.plan.notes.join(' ')).toContain('corner mode');
+    }
     const bracket = planRegistration(
       input({ mount: 'bracket', probe: PROBE_3D, bracketOrigin: { x: -181.55, y: -184.8, from: 'anchor1', offsetMeasured: true }, mountObstacles: [], corner: 'front-left' }),
       S,
     );
-    expect(bracket.ok).toBe(false);
-    if (!bracket.ok) expect(bracket.reason).toContain('bracket fixes X and Y');
+    expect(bracket.ok).toBe(true);
+    if (bracket.ok) expect(bracket.plan.corner).toEqual({ id: 'front-left', xEdge: 'left', yEdge: 'front' });
   });
 
   it('refuses without the 3D probe — the wired probe cannot see the angle between two edges', () => {
