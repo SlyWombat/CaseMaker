@@ -14,7 +14,7 @@ import { tl } from './helpers/manifoldExec';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
-import { engraveRegions } from '@/workers/sim/engraveGenerate';
+import { engraveGenerate, engraveRegions } from '@/workers/sim/engraveGenerate';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
 import { Z1 } from '@/engine/cnc/machine';
 import type { CutParams } from '@/engine/cnc/feeds';
@@ -268,6 +268,22 @@ describe('#786 slice 6 the catalogue states the cone’s body', () => {
     expect(note?.message).toContain('cutting diameter (3.175 mm)');
     expect(note?.message).toContain(CAT_CHAMFER.name);
   });
+
+  it('Generate posts the chamfer program with the catalogue’s body', () => {
+    const entries = [USER_CHAMFER_ENTRY, CAT_CHAMFER_ENTRY, FLAT_ENTRY];
+    const job = chamferJob();
+    const generated = engraveGenerate(tl, job, USER_CHAMFER, [], null, undefined, { tools: entries });
+    const codes = generated.findings.map((f) => f.code);
+    expect(codes).not.toContain('chamfer-reach-unproven');
+    expect(generated.ok, JSON.stringify(generated.errors ?? [])).toBe(true);
+    expect(generated.programs.length).toBeGreaterThan(0);
+    // The chamfer's own operation is in the posted toolpath.
+    const names = (generated.nc ?? '')
+      .split('\n')
+      .filter((line) => line.startsWith(';@MKR|TOOLPATH|'))
+      .map((line) => line.slice(line.indexOf('name=') + 'name='.length));
+    expect(names.some((n) => n.includes('lid edge'))).toBe(true);
+  }, 60_000);
 
   it('without a catalogue row the same record still asks for the diameter', () => {
     const entries = [USER_CHAMFER_ENTRY, FLAT_ENTRY];
