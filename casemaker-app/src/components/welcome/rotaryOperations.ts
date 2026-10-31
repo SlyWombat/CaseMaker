@@ -6,12 +6,10 @@
  * (`relief`). The flat picker is unchanged; this table is what the wizard's step 4 draws when the
  * job is a rod in the rotary chuck.
  *
- * THE FACE GROUP IS NOT AUTHORABLE YET. The job model carries no face/index block — the indexed
- * CAM (`cam/indexed.ts`) is complete but nothing writes a face into a document, and that model is
- * #241's and R-UI-11's to design. Rather than write schema this slice would have to migrate, the
- * three chips are present, disabled, and each states the same one-sentence reason in operator
- * words; nothing about them reaches the job. (`simulate only` on Relief, by contrast, is a FACT
- * tag like `recommended`: that operation can be authored, generated and simulated.)
+ * THE FACE GROUP IS AUTHORABLE SINCE #241 SLICE 2. A Flat, a ring of flats and a Cross-hole each
+ * carry their own index (A) and are cut as an indexed program: the job's `faces` list holds them
+ * in cut order, and Generate walks them into `cam/indexed.ts`'s faces and holes. The three chips
+ * are enabled; each shows its one field under the grid.
  *
  * The words come from §3.6's table; keeping them here means the picker and any later panel entry
  * read one list.
@@ -40,13 +38,6 @@ export interface RotaryOperationDef {
   /** A fact tag beside the chip — `simulate only` — never a disabled state. */
   tag: string | null;
 }
-
-/**
- * The face group's one sentence, stated once under its chips and carried in each chip's title.
- * Operator words: no code, no issue number, and what CAN be done today.
- */
-export const ROTARY_FACE_REASON =
-  'Cutting on a face is not planned yet — the job can carry wrapped and 3D operations today.';
 
 export const ROTARY_OPERATION_GROUPS: readonly {
   id: RotaryOperationGroupId;
@@ -95,21 +86,21 @@ export const ROTARY_OPERATION_GROUPS: readonly {
         id: 'flat',
         label: 'Flat',
         blurb: 'Turn to an angle, hold, and cut a flat to a depth',
-        reason: ROTARY_FACE_REASON,
+        reason: null,
         tag: null,
       },
       {
         id: 'faces-all-round',
         label: 'Faces all round',
         blurb: 'Evenly indexed flats — a square, a hex, an octagon',
-        reason: ROTARY_FACE_REASON,
+        reason: null,
         tag: null,
       },
       {
         id: 'cross-hole',
         label: 'Cross-hole',
         blurb: 'Turn to an angle and drill across the rod',
-        reason: ROTARY_FACE_REASON,
+        reason: null,
         tag: null,
       },
     ],

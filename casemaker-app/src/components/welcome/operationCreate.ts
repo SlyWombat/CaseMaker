@@ -20,5 +20,20 @@ export function operationCreateBlocked(choice: OperationChoice | null): string |
   if (choice.type === 'flute' && choice.lengthMm !== undefined) {
     return !Number.isFinite(choice.lengthMm) || choice.lengthMm <= 0 ? 'The flute needs a length above 0 mm.' : null;
   }
+  // #241 slice 2 — the face group's one field each. A flat's depth is a positive number; a ring
+  // is at least three faces with a positive across-flats; a cross-hole's diameter is above 0. An
+  // index is any finite number of degrees (it unwinds, so it may pass a turn).
+  if (choice.type === 'flat') {
+    if (!Number.isFinite(choice.a)) return 'Give the face an angle, in degrees.';
+    return !Number.isFinite(choice.depth) || choice.depth <= 0 ? 'Depth must be above 0 mm.' : null;
+  }
+  if (choice.type === 'faces-all-round') {
+    if (!Number.isInteger(choice.count) || choice.count < 3) return 'Faces all round needs at least 3 faces.';
+    return !Number.isFinite(choice.acrossFlats) || choice.acrossFlats <= 0 ? 'Across flats must be above 0 mm.' : null;
+  }
+  if (choice.type === 'cross-hole') {
+    if (!Number.isFinite(choice.a)) return 'Give the hole an angle, in degrees.';
+    return !Number.isFinite(choice.diameter) || choice.diameter <= 0 ? 'The hole needs a diameter above 0 mm.' : null;
+  }
   return null;
 }

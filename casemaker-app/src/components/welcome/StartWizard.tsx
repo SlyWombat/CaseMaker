@@ -690,6 +690,16 @@ export function StartWizard(): JSX.Element {
             [choice.lengthMm / 2, 0],
           ],
         });
+      } else if (choice.type === 'flat' || choice.type === 'faces-all-round' || choice.type === 'cross-hole') {
+        // #241 slice 2 — a cut on the round stock's face. The operation carries its own index and
+        // is appended to the job's face list, which is the cut order Generate walks.
+        id = useEngraveJobStore.getState().addFaceOperation(
+          choice.type === 'flat'
+            ? { kind: 'flat', a: choice.a, depth: choice.depth }
+            : choice.type === 'faces-all-round'
+              ? { kind: 'faces-all-round', a: choice.a, count: choice.count, acrossFlats: choice.acrossFlats }
+              : { kind: 'cross-hole', a: choice.a, diameter: choice.diameter },
+        );
       } else {
         id = addOperationOfType(choice.type);
       }

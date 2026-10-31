@@ -104,6 +104,8 @@ import {
 import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { defaultFaceOperation } from '@/engine/cnc/rotary/faceOps';
+import { FaceOperationRow } from './FaceOperationRow';
 import { groupRejections, isActionableRejection, shouldGroupCatalogueRows } from './recommendationRejections';
 import { useShopDefaultsStore, shopDefault } from '@/store/shopDefaultsStore';
 import { readDesignFile } from '@/engine/import/designImport';
@@ -1483,6 +1485,16 @@ export function EngravePanel(): JSX.Element {
     expandEngraveRow(addOperationOfType(type));
   }
 
+  /** #241 slice 2 — add a face operation at the shipped defaults (§5); its row edits the numbers. */
+  function addFace(kind: 'flat' | 'faces-all-round' | 'cross-hole'): void {
+    const store = useEngraveJobStore.getState();
+    const map = rotaryMapOf(store.job);
+    const jobCutter = jobTool(store.job);
+    const cutter = jobCutter === null ? null : cuttingDiameter(jobCutter);
+    const seed = defaultFaceOperation(kind, map?.radius ?? faceRadiusMm, cutter ?? 3.175);
+    expandEngraveRow(store.addFaceOperation(seed));
+  }
+
   /**
    * #685 — what a FOLDED option does. The old second vocabulary's kinds were always one of these
    * operations, so each still makes exactly the item it always made, and arrives open (#411).
@@ -2557,6 +2569,10 @@ export function EngravePanel(): JSX.Element {
   // bed to surface a mesh on. The Voids and Target object rows are not offered for it; a job that
   // already carries one still draws its row, so it can be taken away.
   const roundStock = job.stock.shape === 'cylinder';
+  // #241 slice 2 — the face operations' frame: the chuck's radius (what a flat's chord is measured
+  // against), and whether this job can carry one at all.
+  const rotaryChuck = roundStock && job.workholding.kind === 'rotary-chuck';
+  const faceRadiusMm = rotaryMapOf(job)?.radius ?? Math.max(job.stock.width, job.stock.thickness) / 2;
   const STOCK_FIELD_WORD: Record<string, string> = {
     length: 'length',
     width: 'width',
@@ -3249,6 +3265,30 @@ export function EngravePanel(): JSX.Element {
             Pocket, Line and single-line text under Engrave text, Hole array under Hole, the four
             primitives under Cut away's 3D shape, and the two file routes under the picker (#685,
             B6). */}
+        {rotaryChuck && (
+          <div data-testid="engrave-add-face" style={{ marginTop: 6 }}>
+            <span style={{ fontSize: 10, color: '#9aa4b0' }}>On the stock’s faces</span>
+            <div style={{ display: 'flex', gap: 4, marginTop: 3 }}>
+              {(['flat', 'faces-all-round', 'cross-hole'] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  data-testid={`engrave-add-face-${kind}`}
+                  title={
+                    kind === 'flat'
+                      ? 'Turn to an angle, hold, and cut a flat to a depth.'
+                      : kind === 'faces-all-round'
+                        ? 'Evenly indexed flats — a square, a hex, an octagon.'
+                        : 'Turn to an angle and drill across the rod.'
+                  }
+                  onClick={() => addFace(kind)}
+                >
+                  {kind === 'flat' ? 'Flat' : kind === 'faces-all-round' ? 'Faces all round' : 'Cross-hole'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <OperationPicker
           mode="add"
           testidFor={(id) => operationType(id).addTestId}
@@ -3266,6 +3306,17 @@ export function EngravePanel(): JSX.Element {
           </p>
         )}
       </details>
+      {/* #241 slice 2 — the cuts on the round stock's faces, in cut order, above the map's items. */}
+      {(job.faces ?? []).map((face, i) => (
+        <FaceOperationRow
+          key={face.id}
+          face={face}
+          index={i}
+          radiusMm={faceRadiusMm}
+          onChange={(patch) => useEngraveJobStore.getState().updateFaceOperation(face.id, patch)}
+          onRemove={() => useEngraveJobStore.getState().removeFaceOperation(face.id)}
+        />
+      ))}
       {job.labels.map((label, i) => (
         <EngraveLabelRow
           key={label.id}

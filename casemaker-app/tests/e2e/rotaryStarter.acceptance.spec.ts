@@ -58,14 +58,12 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   await page.getByTestId('engrave-setup-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
   // #752 — on a rod the step is the ROTARY picker: the three groups, each operation's one field,
-  // Relief tagged simulate only, and the face group stated but not authorable.
+  // and Relief tagged simulate only. #241 slice 2 made the face group authorable: Flat, Faces all
+  // round and Cross-hole are enabled, each with its index and its one field.
   await expect(page.getByTestId('rotary-operation-picker')).toBeVisible();
   for (const id of ['flat', 'faces-all-round', 'cross-hole']) {
-    await expect(page.getByTestId(`start-wizard-op-rotary-${id}`)).toBeDisabled();
+    await expect(page.getByTestId(`start-wizard-op-rotary-${id}`)).toBeEnabled();
   }
-  await expect(page.getByTestId('rotary-face-reason')).toHaveText(
-    'Cutting on a face is not planned yet — the job can carry wrapped and 3D operations today.',
-  );
   await expect(page.getByTestId('rotary-operation-tag-relief')).toHaveText('simulate only');
   await expect(page.getByTestId('start-wizard-op-reads-select')).toHaveValue('along');
   await page.getByTestId('start-wizard-op-text').fill('Zoomba');

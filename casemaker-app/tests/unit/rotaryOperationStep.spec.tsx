@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 // #752 R-UI-4 — the Operation step on a rod in the rotary chuck: three groups, each operation's
-// one field, Relief tagged simulate only, and the face group stated but NOT authorable.
+// one field, Relief tagged simulate only, and — since #241 slice 2 — the face group authorable:
+// Flat, Faces all round and Cross-hole each carry the index (A) they are cut at.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { OperationStep, type OperationChoice } from '@/components/welcome/OperationStep';
 import { operationCreateBlocked } from '@/components/welcome/operationCreate';
-import { ROTARY_FACE_REASON, ROTARY_OPERATION_GROUPS } from '@/components/welcome/rotaryOperations';
+import { ROTARY_OPERATION_GROUPS } from '@/components/welcome/rotaryOperations';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveJob } from '@/types/engraveJob';
 
@@ -46,20 +47,31 @@ describe('#752 the rotary Operation step', () => {
     expect(ROTARY_OPERATION_GROUPS.map((g) => g.label)).toEqual(['On the surface', 'On a face', '3D']);
   });
 
-  it('states the face group’s reason once and on every face chip, and those chips cannot be picked', () => {
+  it('offers the face group as authorable, and each face operation asks for its index and its one field', () => {
     const onChoice = renderStep();
-    const before = lastChoice(onChoice);
     for (const id of ['flat', 'faces-all-round', 'cross-hole']) {
       const chip = screen.getByTestId(`start-wizard-op-rotary-${id}`) as HTMLButtonElement;
-      expect(chip.disabled, id).toBe(true);
-      expect(chip.title, id).toBe(ROTARY_FACE_REASON);
-      // A disabled chip takes no pick: the answer the shell would Create from does not change.
-      fireEvent.click(chip);
-      expect(lastChoice(onChoice)).toEqual(before);
+      expect(chip.disabled, id).toBe(false);
     }
-    expect(screen.getByTestId('rotary-face-reason').textContent).toBe(ROTARY_FACE_REASON);
-    // Operator words: no issue number, no code token.
-    expect(ROTARY_FACE_REASON).not.toMatch(/#\d|axis-crossing|wrap-into-clamp|rotary-/);
+
+    fireEvent.click(screen.getByTestId('start-wizard-op-rotary-flat'));
+    expect(lastChoice(onChoice)).toEqual({ type: 'flat', a: 0, depth: 1 });
+    expect((screen.getByTestId('start-wizard-op-face-angle') as HTMLInputElement).value).toBe('0');
+    fireEvent.change(screen.getByTestId('start-wizard-op-face-angle'), { target: { value: '30' } });
+    fireEvent.change(screen.getByTestId('start-wizard-op-face-depth'), { target: { value: '2' } });
+    expect(lastChoice(onChoice)).toEqual({ type: 'flat', a: 30, depth: 2 });
+    expect(operationCreateBlocked(lastChoice(onChoice))).toBeNull();
+
+    fireEvent.click(screen.getByTestId('start-wizard-op-rotary-faces-all-round'));
+    expect(lastChoice(onChoice)).toMatchObject({ type: 'faces-all-round', a: 30, count: 6, acrossFlats: 17.321 });
+    fireEvent.change(screen.getByTestId('start-wizard-op-faces-count'), { target: { value: '8' } });
+    fireEvent.change(screen.getByTestId('start-wizard-op-faces-across'), { target: { value: '18.5' } });
+    expect(lastChoice(onChoice)).toEqual({ type: 'faces-all-round', a: 30, count: 8, acrossFlats: 18.5 });
+
+    fireEvent.click(screen.getByTestId('start-wizard-op-rotary-cross-hole'));
+    expect(lastChoice(onChoice)).toMatchObject({ type: 'cross-hole', a: 30 });
+    fireEvent.change(screen.getByTestId('start-wizard-op-hole-diameter'), { target: { value: '3' } });
+    expect(lastChoice(onChoice)).toEqual({ type: 'cross-hole', a: 30, diameter: 3 });
   });
 
   it('tags Relief from a mesh simulate only, as a fact, not a disabled control', () => {

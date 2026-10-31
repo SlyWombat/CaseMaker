@@ -392,11 +392,13 @@ export function jobHasOperations(job: {
   cutouts?: readonly unknown[];
   vectors?: readonly unknown[];
   chamfers?: readonly unknown[];
+  /** #241 slice 2 — cuts on the round stock's faces are operations too. */
+  faces?: readonly unknown[];
   targetObject?: { role?: 'reference' | 'goal' } | null;
   /** #723 P2-3 — a part cut from several sides states one goal per setup (the multi-goal form). */
   targetObjects?: readonly { role?: 'reference' | 'goal'; enabled?: boolean }[];
 }): boolean {
-  const lists = [job.labels, job.shapes, job.traces, job.drills, job.threads, job.primitives, job.cutouts, job.vectors, job.chamfers];
+  const lists = [job.labels, job.shapes, job.traces, job.drills, job.threads, job.primitives, job.cutouts, job.vectors, job.chamfers, job.faces];
   if (lists.some((list) => (list?.length ?? 0) > 0)) return true;
   if (job.targetObject?.role === 'goal') return true;
   return (job.targetObjects ?? []).some((t) => (t.role ?? 'reference') === 'goal' && t.enabled !== false);

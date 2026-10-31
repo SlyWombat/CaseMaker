@@ -27,7 +27,9 @@ import { OperationPicker } from '@/components/panels/OperationPicker';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { RotaryOperationPicker } from './RotaryOperationPicker';
 import { operationCreateBlocked } from './operationCreate';
-import { isSideGoal, jobHasItems, jobSetups, jobTargetObjects, sideSetupIdOf } from '@/engine/cnc/engrave/jobSetup';
+import { isSideGoal, jobHasItems, jobSetups, jobTargetObjects, jobTool, sideSetupIdOf } from '@/engine/cnc/engrave/jobSetup';
+import { defaultFaceOperation } from '@/engine/cnc/rotary/faceOps';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { RotaryOperationId } from './rotaryOperations';
 import type { OperationTypeId } from '@/components/panels/operationTypes';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -40,6 +42,13 @@ const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap:
 const FIELD: CSSProperties = { width: 72 };
 const FIELDS: CSSProperties = { display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' };
 const FIELD_BOX: CSSProperties = { borderTop: '1px solid #2a2f36', marginTop: 10, paddingTop: 8 };
+
+/** The job's cutter diameter, mm — the size a cross-hole starts at, so the seed is a hole it cuts. */
+function toolDiameterMm(job: EngraveJob): number {
+  const tool = jobTool(job);
+  const d = tool === null ? null : cuttingDiameter(tool);
+  return d !== null && d > 0 ? d : 3.175;
+}
 const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: '6px 0 0' };
 /** #723 P2-3 — one side of a part cut from several sides, as a choice. */
 const SIDE_CHIP: CSSProperties = { fontSize: 11, padding: '4px 8px', borderRadius: 4, border: '1px solid #2a2f36', background: 'transparent', color: '#c8d3de', cursor: 'pointer' };
@@ -52,10 +61,20 @@ const SIDE_CHIP_ON: CSSProperties = { ...SIDE_CHIP, border: '1px solid #4a90d9',
  * (along / around), and a `v-carve` may carry text (a V-cut line) with an empty text meaning "a
  * region to draw in the panel"; a `flute` may carry the length its wizard field states. A flat
  * step creates the same members without those fields and behaves exactly as before.
+ *
+ * #241 slice 2 — the FACE group's three operations are their own members, each carrying the index
+ * (A) it is cut at and its one field. The shell writes them as the job's face operations, in the
+ * order they were made.
  */
 export type OperationChoice =
   | { type: 'engrave'; text: string; depth: number; font: TextFont; reads?: 'along' | 'around' }
   | { type: 'surface'; target: EngraveTargetObject | null; /** #723 P2-3 — the side it is written to. */ setupId?: string }
+  /** #241 slice 2 — a flat on a face: the index and the depth. */
+  | { type: 'flat'; a: number; depth: number }
+  /** #241 slice 2 — evenly spaced flats: the first index, the count, and the across-flats. */
+  | { type: 'faces-all-round'; a: number; count: number; acrossFlats: number }
+  /** #241 slice 2 — a cross-hole: the index and the diameter. */
+  | { type: 'cross-hole'; a: number; diameter: number }
   | { type: Exclude<OperationTypeId, 'engrave' | 'surface'>; text?: string; lengthMm?: number };
 
 export interface OperationStepProps {
@@ -79,6 +98,16 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   const [reads, setReads] = useState<'along' | 'around'>('along');
   const [vcarveText, setVcarveText] = useState('');
   const [fluteLengthMm, setFluteLengthMm] = useState(20);
+  // #241 slice 2 — THE FACE GROUP'S one field each, seeded by `defaultFaceOperation` (§5): a Flat
+  // at 0° and 1 mm; a hex whose across-flats is the largest inside the stock; a cross-hole at 0°
+  // on the job's own cutter. The angle is the FIRST face for a ring.
+  const faceRadiusMm = rotaryMapOf(job)?.radius ?? 0;
+  const faceDefaults = defaultFaceOperation('flat', faceRadiusMm, toolDiameterMm(job));
+  const [faceAngle, setFaceAngle] = useState(0);
+  const [faceDepth, setFaceDepth] = useState(faceDefaults.depth ?? 1);
+  const [facesCount, setFacesCount] = useState(6);
+  const [facesAcross, setFacesAcross] = useState(() => defaultFaceOperation('faces-all-round', faceRadiusMm, toolDiameterMm(job)).acrossFlats ?? 0);
+  const [holeDiameter, setHoleDiameter] = useState(() => defaultFaceOperation('cross-hole', faceRadiusMm, toolDiameterMm(job)).diameter ?? 0);
   const [text, setText] = useState('');
   // The blank's recommended depth (the stock kind decides it), editable here; never a hidden 0.5.
   const [depth, setDepth] = useState(() => newItemDepthFor(job));
@@ -127,7 +156,13 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
             ? { type: 'flute', lengthMm: fluteLengthMm }
             : rotaryPicked === 'relief'
               ? surfaceChoice
-              : null
+              : rotaryPicked === 'flat'
+                ? { type: 'flat', a: faceAngle, depth: faceDepth }
+                : rotaryPicked === 'faces-all-round'
+                  ? { type: 'faces-all-round', a: faceAngle, count: facesCount, acrossFlats: facesAcross }
+                  : rotaryPicked === 'cross-hole'
+                    ? { type: 'cross-hole', a: faceAngle, diameter: holeDiameter }
+                    : null
     : picked === 'engrave'
       ? { type: 'engrave', text, depth, font }
       : picked === 'surface'
@@ -149,7 +184,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   useLayoutEffect(() => {
     onChoiceChange(choice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked, text, depth, font, surface, makeMold, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, onChoiceChange]);
+  }, [picked, text, depth, font, surface, makeMold, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, onChoiceChange]);
 
   async function readPcbSet(files: File[]): Promise<void> {
     setPcbSummary(null);
@@ -193,6 +228,8 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   const vcarveField = rotary && rotaryPicked === 'v-carve';
   const pocketField = rotary && rotaryPicked === 'pocket';
   const fluteField = rotary && rotaryPicked === 'flute';
+  // #241 slice 2 — the face group: each operation's one field, and the index it is cut at.
+  const faceField = rotary && (rotaryPicked === 'flat' || rotaryPicked === 'faces-all-round' || rotaryPicked === 'cross-hole');
 
   return (
     <div data-testid="engrave-setup-step-what" style={{ marginTop: 8 }}>
@@ -353,6 +390,115 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
               <span style={MUTED}>mm</span>
             </label>
           </div>
+        </div>
+      )}
+
+      {faceField && (
+        <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
+          <div style={FIELD_HEADING}>
+            {rotaryPicked === 'flat' ? 'Flat' : rotaryPicked === 'faces-all-round' ? 'Faces all round' : 'Cross-hole'}
+          </div>
+          <div style={FIELDS}>
+            <label style={FIELD_LABEL}>
+              <span>{rotaryPicked === 'faces-all-round' ? 'First face' : 'Angle'}</span>
+              <input
+                type="number"
+                step="any"
+                data-testid="start-wizard-op-face-angle"
+                aria-label="Index angle"
+                style={FIELD}
+                value={faceAngle}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v)) setFaceAngle(v);
+                }}
+              />
+              <span style={MUTED}>°</span>
+            </label>
+            {rotaryPicked === 'flat' && (
+              <label style={FIELD_LABEL}>
+                <span>Depth</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  data-testid="start-wizard-op-face-depth"
+                  aria-label="Flat depth"
+                  style={FIELD}
+                  value={faceDepth}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) setFaceDepth(v);
+                  }}
+                />
+                <span style={MUTED}>mm</span>
+              </label>
+            )}
+            {rotaryPicked === 'faces-all-round' && (
+              <>
+                <label style={FIELD_LABEL}>
+                  <span>Count</span>
+                  <input
+                    type="number"
+                    min={3}
+                    max={24}
+                    step={1}
+                    data-testid="start-wizard-op-faces-count"
+                    aria-label="How many faces"
+                    style={FIELD}
+                    value={facesCount}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v)) setFacesCount(v);
+                    }}
+                  />
+                </label>
+                <label style={FIELD_LABEL}>
+                  <span>Across flats</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    data-testid="start-wizard-op-faces-across"
+                    aria-label="Across flats"
+                    style={FIELD}
+                    value={facesAcross}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v)) setFacesAcross(v);
+                    }}
+                  />
+                  <span style={MUTED}>mm</span>
+                </label>
+              </>
+            )}
+            {rotaryPicked === 'cross-hole' && (
+              <label style={FIELD_LABEL}>
+                <span>Diameter</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  data-testid="start-wizard-op-hole-diameter"
+                  aria-label="Cross-hole diameter"
+                  style={FIELD}
+                  value={holeDiameter}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) setHoleDiameter(v);
+                  }}
+                />
+                <span style={MUTED}>mm</span>
+              </label>
+            )}
+          </div>
+          <p style={MUTED} data-testid="start-wizard-op-face-note">
+            {rotaryPicked === 'flat'
+              ? `Turned to A ${faceAngle}° and held while the face is cut; the flat is ${faceDepth} mm deep.`
+              : rotaryPicked === 'faces-all-round'
+                ? `${facesCount} faces, evenly spaced from A ${faceAngle}°, leaving ${facesAcross} mm across flats.`
+                : `Turned to A ${faceAngle}° and drilled across; the hole comes out at the cutter's own diameter.`}
+          </p>
         </div>
       )}
 

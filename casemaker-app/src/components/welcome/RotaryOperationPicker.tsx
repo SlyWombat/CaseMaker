@@ -5,16 +5,12 @@
  * ones. Each chip is one operation; the step asks for the one field the operation needs (the
  * fields live in `OperationStep`, which owns the answer the shell's Create reads).
  *
- * The face group's chips are DISABLED with a stated reason (#726 W23: a disabled control carries
- * its reason in words on the screen, not only in a hover title). See `rotaryOperations.ts` for
- * why: the job model has no face/index block yet.
+ * Every chip is enabled since #241 slice 2: the face group writes the job's face operations, each
+ * with its own index. A chip that cannot be authored would carry a stated reason in words on the
+ * screen (#726 W23), never only a hover title — no chip carries one today.
  */
 import type { CSSProperties, JSX } from 'react';
-import {
-  ROTARY_FACE_REASON,
-  ROTARY_OPERATION_GROUPS,
-  type RotaryOperationId,
-} from './rotaryOperations';
+import { ROTARY_OPERATION_GROUPS, type RotaryOperationId } from './rotaryOperations';
 
 const GROUP_LABEL: CSSProperties = { fontSize: 11, fontWeight: 600, color: '#9aa4b0', margin: '8px 0 3px' };
 const CHIPS: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' };
@@ -31,7 +27,6 @@ const CHIP: CSSProperties = {
 const CHIP_ON: CSSProperties = { ...CHIP, borderColor: '#5a8abf', background: '#1d2a38', color: '#e6edf5' };
 const CHIP_DISABLED: CSSProperties = { ...CHIP, color: '#6b7480', cursor: 'not-allowed', opacity: 0.7 };
 const TAG: CSSProperties = { fontSize: 10, color: '#e0c07a', border: '1px solid #5a4a1d', borderRadius: 8, padding: '1px 6px' };
-const REASON: CSSProperties = { fontSize: 10, color: '#9aa4b0', lineHeight: 1.4, margin: '4px 0 0' };
 
 export interface RotaryOperationPickerProps {
   selected: RotaryOperationId | null;
@@ -75,11 +70,6 @@ export function RotaryOperationPicker({ selected, onPick, testidFor }: RotaryOpe
                   </span>
                 ))}
           </div>
-          {group.id === 'face' && (
-            <p data-testid="rotary-face-reason" style={REASON}>
-              {ROTARY_FACE_REASON}
-            </p>
-          )}
         </div>
       ))}
     </div>
