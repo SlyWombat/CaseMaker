@@ -543,14 +543,14 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
                   data-testid="start-wizard-op-surface-make-mold"
                   onChange={() => setMakeMold(true)}
                 />
-                <span>Make a mold of it</span>
+                <span>Make a mould of it</span>
               </label>
             </div>
           )}
           {makeMold && surface?.format !== 'png' && (
             <p style={MUTED} data-testid="start-wizard-op-surface-mold-note">
               The part's shape is cut as a cavity from the top, turned over so a casting reads the
-              right way round. One side only: a part with undercuts needs a two-part mold.
+              right way round. One side only: a part with undercuts needs a two-part mould.
             </p>
           )}
           {surfaceError !== null && (

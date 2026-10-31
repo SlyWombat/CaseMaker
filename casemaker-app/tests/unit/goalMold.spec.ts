@@ -301,6 +301,6 @@ describe('#721 review — placement', () => {
   it('a mold run says it is a mold in its facts', () => {
     const j: EngraveJob = { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal(domeTris(R), { goalMode: 'mold', position: { x: 50, y: 30, z: 0 } }) };
     const out = generateGoalProgram(j, j.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
-    expect(out.surface3d?.notes.some((n) => n.startsWith('Made as a mold'))).toBe(true);
+    expect(out.surface3d?.notes.some((n) => n.startsWith('Made as a mould'))).toBe(true);
   });
 });

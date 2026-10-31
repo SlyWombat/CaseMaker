@@ -41,7 +41,7 @@ describe('#721 — the goal row says what it makes', () => {
 
   it('a mold row says so, with its depth in mm; back to the part clears the key', () => {
     const onChange = renderRow({ goalMode: 'mold' });
-    expect(screen.getByText(/made as a MOLD: its shape is cut as a cavity to cast it in, 5 mm deep/)).toBeTruthy();
+    expect(screen.getByText(/made as a MOULD: its shape is cut as a cavity to cast it in, 5 mm deep/)).toBeTruthy();
     fireEvent.change(screen.getByTestId('engrave-target-goal-mode-0'), { target: { value: 'item' } });
     expect(onChange).toHaveBeenLastCalledWith({ goalMode: undefined });
   });

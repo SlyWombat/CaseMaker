@@ -697,7 +697,7 @@ const HINGE_FACE_OPTIONS: { value: HingeFeature['face']; label: string }[] = [
 const HINGE_POSITIONING_OPTIONS: { value: HingePositioning; label: string; hint: string }[] = [
   { value: 'continuous', label: 'Continuous', hint: 'Hinge run starts at the face origin and spans hingeLength.' },
   { value: 'pair-at-ends', label: 'Pair at ends', hint: 'Knuckle clusters near the face ends (v1 approximation).' },
-  { value: 'centered', label: 'Centered', hint: 'Hinge run is centered along the face — recommended default.' },
+  { value: 'centered', label: 'Centred', hint: 'Hinge run is centred along the face — recommended default.' },
 ];
 
 /** Issue #98 — Hinge dropdown values. 'none' fully disables the hinge
@@ -1201,7 +1201,7 @@ function LatchesSection({ params, patch }: LatchesSectionProps) {
             style={{ width: 50 }}
             data-testid={`latch-${i}-throw`}
             aria-label={`Latch ${i} throw`}
-            title="Cam throw distance (mm) — pull-down at over-center"
+            title="Cam throw distance (mm) — pull-down at over-centre"
           />
           <input
             type="number"
@@ -1214,7 +1214,7 @@ function LatchesSection({ params, patch }: LatchesSectionProps) {
             style={{ width: 60 }}
             data-testid={`latch-${i}-tolerance`}
             aria-label={`Latch ${i} tolerance`}
-            title="Issue #113 — engagement clearance (mm) between cam-arm hook and striker. Default 0.2 = pre-#113 behavior. Higher = looser engagement, easier to open."
+            title="Issue #113 — engagement clearance (mm) between cam-arm hook and striker. Default 0.2 = pre-#113 behaviour. Higher = looser engagement, easier to open."
           />
           <button type="button" onClick={() => removeLatch(i)} data-testid={`latch-${i}-remove`} aria-label={`Remove latch ${i}`}>×</button>
         </div>

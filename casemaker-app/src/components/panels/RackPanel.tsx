@@ -537,7 +537,7 @@ export function RackPanel() {
           off the frame on two rails — fans screw on from outside with their own
           self-tapping screws. The vent windows around it stay open, so a fan on
           each side can push and pull through the case. Position is the
-          fan&apos;s center: mm from the front, mm above the panel bottom.
+          fan&apos;s centre: mm from the front, mm above the panel bottom.
         </p>
       )}
 

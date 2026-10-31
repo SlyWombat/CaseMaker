@@ -540,7 +540,7 @@ export function EngraveTargetObjectRow({
         title={
           axis === 'z'
             ? moldGoal
-              ? "A mold's cavity always opens at the stock's top face, so its height is not used."
+              ? "A mould's cavity always opens at the stock's top face, so its height is not used."
               : "Height of the object's TOP above the stock's top face, mm. Z0 is the top face; a negative value sinks it into the blank."
             : `Centre of the object's bounding box in ${axis.toUpperCase()}, mm from the stock's front-left corner.`
         }
@@ -594,7 +594,7 @@ export function EngraveTargetObjectRow({
         ({target.sha256.slice(0, 12)}…).
         {goal
           ? target.goalMode === 'mold' && target.format !== 'png'
-            ? ` The object is the goal, made as a MOLD: its shape is cut as a cavity to cast it in, ${fmt(size.z)} mm deep. Its size is ${sizeText}.`
+            ? ` The object is the goal, made as a MOULD: its shape is cut as a cavity to cast it in, ${fmt(size.z)} mm deep. Its size is ${sizeText}.`
             : ` The object is the goal: the shape to make, roughed and finished in 3D. Its size is ${sizeText}.`
           : ` The object is a reference, not a cut; its size is ${sizeText}.`}
       </p>
@@ -633,11 +633,11 @@ export function EngraveTargetObjectRow({
             value={target.goalMode === 'mold' ? 'mold' : 'item'}
             data-testid={`engrave-target-goal-mode-${index}`}
             aria-label="What the goal makes"
-            title="Make the part (material is removed down to its surface), or a mold of it (its shape is cut as a cavity to cast it in)."
+            title="Make the part (material is removed down to its surface), or a mould of it (its shape is cut as a cavity to cast it in)."
             onChange={(e) => onChange({ goalMode: e.target.value === 'mold' ? 'mold' : undefined })}
           >
             <option value="item">Make the part</option>
-            <option value="mold">Make a mold of it</option>
+            <option value="mold">Make a mould of it</option>
           </select>
         </label>
       )}

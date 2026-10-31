@@ -4825,17 +4825,17 @@ export function generateGoalProgram(
       severity: 'info',
       code: 'goal-mold-one-sided',
       message:
-        `The mold of "${goal.name}" is cut from the top only: the cavity is the part's top surface, ` +
+        `The mould of "${goal.name}" is cut from the top only: the cavity is the part's top surface, ` +
         'turned over so the casting reads the right way round, and the casting\'s underside is the ' +
         'flat face you pour into. A part with undercuts, or one shaped on both sides, needs a ' +
-        'two-part mold — two setups.',
+        'two-part mould — two setups.',
     });
     if (steepest > MOLD_DRAFT_LIMIT_DEG) {
       moldFindings.push({
         severity: 'warning',
         code: 'goal-mold-no-draft',
         message:
-          `The mold of "${goal.name}" has a wall at ${Number(steepest.toFixed(1))}° — steeper than ` +
+          `The mould of "${goal.name}" has a wall at ${Number(steepest.toFixed(1))}° — steeper than ` +
           `${MOLD_DRAFT_LIMIT_DEG}°, so it has little or no draft and may hold the casting. Give the ` +
           'part tapered sides, or use a flexible casting material.',
       });
@@ -5058,7 +5058,7 @@ export function generateGoalProgram(
         ...surfaced.notes,
         ...(isMold(goal)
           ? [
-              "Made as a mold: the part's shape is cut as a cavity from the stock's top face, turned over so a casting reads the right way round.",
+              "Made as a mould: the part's shape is cut as a cavity from the stock's top face, turned over so a casting reads the right way round.",
             ]
           : []),
         ...(clear === null

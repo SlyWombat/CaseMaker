@@ -274,7 +274,7 @@ describe('#685 — step 4, what are you cutting', () => {
     fireEvent.click(screen.getByTestId('engrave-setup-what-surface'));
     expect((screen.getByTestId('start-wizard-op-surface-make-part') as HTMLInputElement).checked).toBe(true);
     fireEvent.click(screen.getByTestId('start-wizard-op-surface-make-mold'));
-    expect(screen.getByTestId('start-wizard-op-surface-mold-note').textContent).toContain('two-part mold');
+    expect(screen.getByTestId('start-wizard-op-surface-mold-note').textContent).toContain('two-part mould');
     const input = screen.getByTestId('start-wizard-op-surface-file') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([ASCII_STL], 'tet.stl')] } });
     await waitFor(() => {

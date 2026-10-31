@@ -1216,7 +1216,7 @@ export function validateGoalObject(
         severity: 'warning',
         code: 'goal-mold-rim',
         message:
-          `The mold of "${target.name}" sits from X ${fmt3(gxMin)} to ${fmt3(gxMax)} mm and Y ${fmt3(gyMin)} to ` +
+          `The mould of "${target.name}" sits from X ${fmt3(gxMin)} to ${fmt3(gxMax)} mm and Y ${fmt3(gyMin)} to ` +
           `${fmt3(gyMax)} mm on the ${fmt3(length)}×${fmt3(width)} mm blank, where a cavity wants a ${fmt3(rim)} mm ` +
           `rim of stock all round it: ${list}. Generate cuts the cavity clipped to the blank, so the casting has no ` +
           `wall on those sides. Move the part inward, scale it down, or use a larger blank.`,
@@ -1229,7 +1229,7 @@ export function validateGoalObject(
         severity: 'warning',
         code: 'goal-mold-floor',
         message:
-          `The mold of "${target.name}" is ${fmt3(depth)} mm deep in the ${fmt3(thickness)} mm blank, ` +
+          `The mould of "${target.name}" is ${fmt3(depth)} mm deep in the ${fmt3(thickness)} mm blank, ` +
           (floorLeft > 0
             ? `leaving ${fmt3(floorLeft)} mm of stock under the cavity where the job asks for at least ${fmt3(floor)} mm. `
             : `so the cavity breaks through the blank's bottom by ${fmt3(-floorLeft)} mm. `) +
