@@ -2550,7 +2550,10 @@ export function EngravePanel(): JSX.Element {
     primitiveCount +
     cutoutCount +
     vectorCount +
-    chamferCount;
+    chamferCount +
+    // #241 slice 2 — a cut on the stock's face is an operation and a row of this list, so it is
+    // counted: a job whose work is faces must not read as an empty one.
+    (job.faces?.length ?? 0);
   // #686 — the Job group's ONE stock line, and the provenance facts that moved off the inline
   // fields (design §2): the line's hover and the Cutter group's Technical fold.
   /** §4's word for the stock's form, lowercase mid-sentence: plate · block · sheet · printed blank. */

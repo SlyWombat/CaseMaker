@@ -16,9 +16,9 @@ test.setTimeout(600_000);
 const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'bench', 'img', '2026-10-31-241-faces');
 
 interface RunSpan {
-  a: number;
-  from: number;
-  to: number;
+  a: number | null;
+  firstStep: number;
+  lastStep: number;
 }
 interface SimInfo {
   status: string;
@@ -54,12 +54,15 @@ async function generateToTicks(page: Page): Promise<void> {
 /** The turning angle the viewport shows at a step inside the run whose A is `a`. */
 async function turnAt(page: Page, a: number): Promise<number> {
   const s = await simState(page);
-  const run = s.runs.find((r) => Math.abs(r.a - a) < 1e-6);
+  const run = s.runs.find((r) => r.a !== null && Math.abs(r.a - a) < 1e-6);
   expect(run, `the program has a run at A ${a}°: ${JSON.stringify(s.runs)}`).toBeDefined();
-  const at = Math.floor((run!.from + run!.to) / 2);
+  const at = Math.floor((run!.firstStep + run!.lastStep) / 2);
   await page.evaluate((step) => window.__caseMaker!.simSetStep(step), at);
-  await page.waitForTimeout(400);
-  return (await simState(page)).turningDeg;
+  await page.waitForTimeout(600);
+  const after = await simState(page);
+  // The scrubber kept its step across the index turn, and the viewport turned to that face.
+  expect(after.step).toBe(at);
+  return after.turningDeg;
 }
 
 test('a Flat turns the stock to its own angle and cuts a plane there', async ({ cm, page }) => {
@@ -80,8 +83,10 @@ test('a Flat turns the stock to its own angle and cuts a plane there', async ({ 
 
   const s = await simState(page);
   expect(s.status).toBe('ready');
-  expect(s.runs).toHaveLength(1);
-  expect(s.runs[0]!.a).toBeCloseTo(30, 6);
+  // A face is cut in several depth passes, so the sweep opens one checkpoint per pass — all at
+  // the ONE angle the face was cut at.
+  expect(s.runs.length).toBeGreaterThan(0);
+  expect(s.runs.every((r) => r.a !== null && Math.abs(r.a - 30) < 1e-6)).toBe(true);
   expect(await turnAt(page, 30)).toBeCloseTo(30, 3);
 
   await page.screenshot({ path: path.join(SHOTS, 'flat-at-30.png') });
@@ -103,7 +108,8 @@ test('Faces all round turns the stock at every index, one face each', async ({ c
 
   const s = await simState(page);
   expect(s.status).toBe('ready');
-  expect(s.runs.map((r) => r.a)).toEqual([0, 60, 120, 180, 240, 300]);
+  // The stock turns to each face in turn; several passes at one index share that index.
+  expect([...new Set(s.runs.map((r) => r.a))]).toEqual([0, 60, 120, 180, 240, 300]);
   // The stock is turned to the face each run cuts — 0° for the first, 120° for the third.
   expect(await turnAt(page, 0)).toBeCloseTo(0, 3);
   expect(await turnAt(page, 120)).toBeCloseTo(120, 3);
@@ -128,8 +134,8 @@ test('a Cross-hole is one plunge at its angle, turned to before it cuts', async 
 
   const s = await simState(page);
   expect(s.status).toBe('ready');
-  expect(s.runs).toHaveLength(1);
-  expect(s.runs[0]!.a).toBeCloseTo(90, 6);
+  expect(s.runs.length).toBeGreaterThan(0);
+  expect(s.runs.every((r) => r.a !== null && Math.abs(r.a - 90) < 1e-6)).toBe(true);
   expect(await turnAt(page, 90)).toBeCloseTo(90, 3);
 
   await page.screenshot({ path: path.join(SHOTS, 'cross-hole-at-90.png') });
