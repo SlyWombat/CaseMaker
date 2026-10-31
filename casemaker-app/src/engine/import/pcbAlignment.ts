@@ -14,9 +14,10 @@
  * both edges that #429's own scan rules accept every wall it needs.
  *
  * THE SIZE is a standard one — 4 mm is the usual alignment hole — raised to the smallest standard
- * size the probe can read when the probe needs more. #429 skips a feature narrower than the tip
- * plus twice the fine step, and one whose mid-line is not clear of its corners by the rim offset
- * plus the corner clearance; `minProbeableHoleMm` is those two rules together.
+ * size the probe can read when the probe needs more. #429's round rule is the one that applies
+ * (#813): a drilled hole is a circle, so every scan line through its centre meets the wall square
+ * with no corner to clear, and the hole is readable from the tip's own width and the rim offset
+ * (`roundReadableDiameter`). `minProbeableHoleMm` is that rule.
  *
  * THIS INFORMS. Nothing is added without the operator's press, and a board with no usable holes
  * still cuts: the second side is placed by eye, and how far that lands is unmeasured, which the
@@ -24,6 +25,7 @@
  */
 
 import { orient } from '@/engine/cnc/setups/orient';
+import { roundReadableDiameter } from '@/engine/cnc/registration/references';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { MountSpec } from '@/engine/cnc/setups/types';
 import { newEngraveDrillId } from '@/engine/cnc/engrave/defaults';
@@ -46,9 +48,9 @@ export interface PcbAlignmentInput {
   /** The holding both setups use: it decides which way the stock is turned over. */
   mount: MountSpec;
   /**
-   * The numbers #429 plans with, already resolved from the fitted probe and the shop. A hole is
-   * probeable when it is wider than the tip plus twice the fine step AND its mid-line is clear of
-   * its corners by the rim offset plus the corner clearance.
+   * The numbers #429 plans with, already resolved from the fitted probe and the shop. A round hole
+   * is probeable at the diameter #429's round rule states (the tip's width and the rim offset); the
+   * corner clearance still keeps a scan START off the stock's edge.
    */
   probe: {
     tipDiameterMm: number;
@@ -81,16 +83,12 @@ export interface PcbAlignmentOffer {
 
 const r3 = (n: number): number => Math.round(n * 1000) / 1000;
 
-/** The smallest hole #429's two width rules let the fitted probe read, mm. */
+/** The smallest hole #429's ROUND rule lets the fitted probe read, mm (#813). */
 export function minProbeableHoleMm(probe: PcbAlignmentInput['probe']): number {
-  // Wider than the tip plus a fine step each side, AND its mid-line far enough from its corners
-  // (rim offset + corner clearance each side). Both are #429's own checks in `references.ts`.
-  return r3(
-    Math.max(
-      probe.tipDiameterMm + 2 * probe.fineStepMm,
-      2 * (probe.tipRadiusMm + probe.cornerClearanceMm),
-    ),
-  );
+  // A drilled hole is a circle: no corners, a wall the scan line meets square, and the rim
+  // offset as its contact distance. The rule itself lives beside the planner's other readability
+  // checks, so the offer and the plan cannot disagree.
+  return roundReadableDiameter(probe);
 }
 
 /** The standard alignment sizes, mm — 4 mm is the usual one, and larger when the probe needs it. */
@@ -117,16 +115,18 @@ export function pcbAlignmentOffer(input: PcbAlignmentInput): PcbAlignmentOffer |
   const { board } = input;
   // The BLANK's edge must leave the whole scan on stock: the start sits `scanInsideMm` out from
   // the wall, and #429 requires that start inside the region its own clearance keeps off the edge
-  // (rim offset + corner clearance). The BOARD's edge must keep the scan start clear of the
-  // openings inside the board too — #429 keeps a start out of every other opening GROWN by that
-  // same clearance, and a board hole can sit at the board's edge. The offer is calibrated to
-  // those checks, so the hole it promises really is read.
+  // (rim offset + corner clearance). The BOARD's own openings are its drilled holes — round, so
+  // #429 keeps a start off each by the rim offset alone — and they all lie inside the board's box.
+  // The extra allowance is scrap protection, so it rides the board's side only.
   const keep = input.probe.tipRadiusMm + input.probe.cornerClearanceMm;
+  const rim = input.probe.tipRadiusMm;
   // A wall's scan starts `scanInsideMm` outside that wall, so the farthest a scan reaches toward
-  // an edge is the hole's centre plus its radius plus that run-out. Both distances are that,
-  // plus the clearance #429 keeps every scan start from an edge or another opening.
-  const boardClear = r + input.probe.scanInsideMm + keep + ALIGNMENT_CLEARANCE_MM;
-  const blankClear = r + input.probe.scanInsideMm + keep + ALIGNMENT_CLEARANCE_MM;
+  // an edge is the hole's centre plus its radius plus that run-out, plus the clearance #429 keeps
+  // every scan start from an edge or another opening.
+  const boardClear = r + input.probe.scanInsideMm + rim + ALIGNMENT_CLEARANCE_MM;
+  // #429 requires the whole scan start strictly INSIDE the region it keeps off the stock's edge,
+  // so the hole sits one fine step within that line rather than on it.
+  const blankClear = r + input.probe.scanInsideMm + keep + input.probe.fineStepMm;
 
   const numbers =
     `The probe cannot read this board's holes: with its ${r3(input.probe.tipDiameterMm)} mm tip it ` +

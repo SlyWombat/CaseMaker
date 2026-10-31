@@ -170,6 +170,26 @@ describe('#429 the plan', () => {
     expect(x > 32 && x < 48 && y > 22 && y < 38).toBe(false);
   });
 
+  it('#813 — a round hole is judged by its diameter, and its walls are a diameter line with no corners', () => {
+    // #429's rectangular rule asks a 4 mm box to keep its mid-line clear of its corners by the rim
+    // plus the corner clearance (2.7 mm) — impossible at 4 mm, so a square is refused. A DRILLED hole
+    // that size is a circle: the scan line crosses a diameter and meets the wall square.
+    const square: ReferenceOpening = { itemId: 'r', name: 'a 4 mm square', min: [28, 28], max: [32, 32], depth: 10 };
+    expect(planReferences(input({ openings: [square] }), S)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('too narrow the other way'),
+    });
+    const round4: ReferenceOpening = { ...square, name: 'alignment hole', roundMm: 4 };
+    const p = plan({ openings: [round4] });
+    expect(p.references).toEqual([expect.objectContaining({ name: 'alignment hole', xScans: [0, 1], yScans: [2, 3] })]);
+    // The seeded probe reads a round hole of 2.5 mm or more; 2 mm is named for what it is.
+    const round2: ReferenceOpening = { ...round4, name: 'a 2 mm hole', min: [29, 29], max: [31, 31], roundMm: 2 };
+    expect(planReferences(input({ openings: [round2] }), S)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('a 2 mm tip can read in a round hole'),
+    });
+  });
+
   it('refuses what it cannot read: a hole narrower than the tip allows, one shallower than the cap, the bracket', () => {
     const tiny: ReferenceOpening = { itemId: 't', name: 'a 2.5 mm hole', min: [38.75, 28.75], max: [41.25, 31.25], depth: 10 };
     expect(planReferences(input({ openings: [tiny] }), S)).toMatchObject({ ok: false, reason: expect.stringContaining('too small to probe with the 2 mm tip') });

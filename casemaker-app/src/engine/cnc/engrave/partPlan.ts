@@ -1853,6 +1853,11 @@ export interface SweptCut {
    * air outside a ⌀30 disc it never enters.
    */
   reach: Mm;
+  /**
+   * #813 — the hole's stated diameter when this cut is ONE round drilled hole, mm. A drill array's
+   * several holes are a group, not one opening, so they do not carry it.
+   */
+  roundDiameterMm?: number;
 }
 
 /** The box grown by `by` mm on every side. */
@@ -1942,7 +1947,14 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
       drill.mode === 'bore' && drill.diameter !== null && drill.diameter > 0
         ? drill.diameter / 2
         : sweepRadiusForJob(job, 0);
-    if (box !== null) add(drill.id, drill.name, drill.depth, box, radius, reach);
+    if (box !== null) {
+      add(drill.id, drill.name, drill.depth, box, radius, reach);
+      // #813 — one hole of a stated size is a CIRCLE: carried so the setup planner can judge it by
+      // the round rule (its box's corners are in the air outside the hole).
+      if (drill.holes.length === 1 && drill.diameter !== null && drill.diameter > 0) {
+        cuts[cuts.length - 1]!.roundDiameterMm = drill.diameter;
+      }
+    }
   }
   for (const thread of plan.threads) {
     const [x, y] = thread.position;

@@ -140,7 +140,14 @@ export function referenceOpenings(setup: Setup): { openings: ReferenceOpening[];
   const refused: string[] = [];
   for (const c of setup.stockBefore.cuts.filter((k) => k.opensTo.includes(setup.faceUp))) {
     const f = footprint(setup, c);
-    if (c.opensTo.length > 1 && c.connected === true) openings.push({ itemId: c.id, name: c.name, ...f });
+    if (c.opensTo.length > 1 && c.connected === true) {
+      openings.push({
+        itemId: c.id,
+        name: c.name,
+        ...f,
+        ...(c.roundDiameterMm === undefined ? {} : { roundMm: c.roundDiameterMm }),
+      });
+    }
     else {
       blind.push({ min: f.min, max: f.max });
       if (c.opensTo.length > 1) refused.push(`${c.name}: not marked as one connected opening, so its outline is not known well enough to scan`);

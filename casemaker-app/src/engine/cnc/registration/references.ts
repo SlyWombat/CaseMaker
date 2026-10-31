@@ -46,6 +46,12 @@ export interface ReferenceOpening {
   max: [number, number];
   /** How deep it goes below the face now up, mm. */
   depth: number;
+  /**
+   * #813 — the hole's stated diameter when the opening is ONE round hole, mm. Every scan line
+   * through its centre crosses a diameter and meets the wall square, so the round rule replaces the
+   * rectangular one (there are no corners to clear, and the box's corners lie in the air).
+   */
+  roundMm?: number;
 }
 
 export interface ReferencePlanInput extends PlanInput {
@@ -89,6 +95,19 @@ export function centreResolution(s: RegistrationSettings): number {
 }
 
 /**
+ * #813 — the smallest ROUND opening the probe can read, mm.
+ *
+ * A round opening has no corners, so the rectangular rule's "mid-line clear of its corners" does
+ * not apply: a scan line through the centre crosses a diameter and meets the wall square. What it
+ * still needs is room for the tip to enter and read a miss (the tip's ⌀ plus a fine step), and a
+ * radius beyond the wall's contact offset (the rim) plus a fine step, so the curved rim does not
+ * close the hole before the tip is inside.
+ */
+export function roundReadableDiameter(s: { tipDiameterMm: number; tipRadiusMm: number; fineStepMm: number }): number {
+  return r3(Math.max(s.tipDiameterMm + s.fineStepMm, 2 * (s.tipRadiusMm + s.fineStepMm)));
+}
+
+/**
  * The plan: #430's (its seek, its band, its mount checks) with the stock-edge scans replaced by scans
  * of the openings' walls. Refused, by name: the bracket mount; no opening deep, wide and placed enough
  * to probe; on tape, references too close together to read the turn.
@@ -115,7 +134,15 @@ export function planReferences(input: ReferencePlanInput, s: RegistrationSetting
       skipped.push(`${o.name}: only ${o.depth} mm deep, within the touch cap — a touch in it reads as a touch, not a miss`);
       continue;
     }
-    const others = [...input.openings.filter((p) => p !== o), ...blind].map((p) => grow(p, keep));
+    // #813 — a scan start is kept clear of another ROUND opening by the rim offset, not the rim
+    // plus the corner clearance: a circle has no corners for the tip to clip. A rectangular
+    // opening (and every blind cut) keeps the full clearance.
+    const others = [
+      ...input.openings
+        .filter((p) => p !== o)
+        .map((p) => grow(p, p.roundMm !== undefined && p.roundMm > 0 ? s.tipRadiusMm : keep)),
+      ...blind.map((p) => grow(p, keep)),
+    ];
     const entry: ReferenceEntry = {
       itemId: o.itemId,
       name: o.name,
@@ -124,17 +151,30 @@ export function planReferences(input: ReferencePlanInput, s: RegistrationSetting
       xScans: [],
       yScans: [],
     };
+    // #813 — a round hole is judged once, by its diameter: the rectangular checks below are about
+    // corners it does not have, and its width IS its diameter, so they would demand 2 mm more tip
+    // room than the circle's own rule needs.
+    const roundMm = o.roundMm !== undefined && o.roundMm > 0 ? o.roundMm : null;
+    if (roundMm !== null) {
+      const need = roundReadableDiameter(s);
+      if (!(roundMm + 1e-9 >= need)) {
+        skipped.push(
+          `${o.name}: ⌀${r3(roundMm)} mm is smaller than the ⌀${r3(need)} mm a ${s.tipDiameterMm} mm tip can read in a round hole`,
+        );
+        continue;
+      }
+    }
     for (const axis of ['x', 'y'] as const) {
       const a = axis === 'x' ? 0 : 1;
       const b = axis === 'x' ? 1 : 0;
       const width = o.max[a] - o.min[a];
       const crossHalf = (o.max[b] - o.min[b]) / 2;
       const name = axis === 'x' ? 'across X' : 'across Y';
-      if (!(width > s.tipDiameterMm + 2 * s.fineStepMm)) {
+      if (roundMm === null && !(width > s.tipDiameterMm + 2 * s.fineStepMm)) {
         skipped.push(`${o.name} ${name}: ${r3(width)} mm, too small to probe with the ${s.tipDiameterMm} mm tip`);
         continue;
       }
-      if (!(crossHalf > keep)) {
+      if (roundMm === null && !(crossHalf > keep)) {
         skipped.push(`${o.name} ${name}: too narrow the other way to scan its mid-line clear of its corners`);
         continue;
       }

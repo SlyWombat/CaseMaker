@@ -407,33 +407,35 @@ describe('alignment holes for a board the probe cannot read (#743 P-8)', () => {
       probe,
       largestBoardHoleMm: 1.0,
     });
-  /** A bench set for board work: the seeded ⌀2 mm 3D probe, a fine step and a tight corner. */
-  const fineBench = () => ({ ...seededProbe(), fineStepMm: 0.1, cornerClearanceMm: 0.1 });
 
-  it('states the hole size the probe needs, and offers two on the turn’s fixed line', () => {
-    // The seeded corner clearance (2 mm) is written for pockets: on this 40 mm blank the flip line
-    // has no scrap left beside the board that the scan rules would accept, so the offer says so
-    // rather than promising a hole the plan then refuses.
-    const coarse = offerFor();
-    expect(coarse).not.toBeNull();
-    expect(coarse!.minProbeableMm).toBe(5.4);
-    expect(coarse!.holes).toEqual([]);
-    expect(coarse!.message).toContain('needs holes of at least 5.4 mm');
-    expect(coarse!.message).toContain("the board's largest is 1 mm");
-    expect(coarse!.message).toContain('no room beside the board on the flip line');
-
-    // A bench set for board work — the same ⌀2 mm probe, a fine step and a tight corner — has the
-    // scrap for a 4 mm pair. The tape flip is a half turn about Y, so x = 30 is the fixed line and
-    // each hole sits in the scrap beyond an end of the board (15..25), clear of both edges.
-    const offer = offerFor(fineBench())!;
-    expect(offer.minProbeableMm).toBe(2.2);
-    expect(offer.diameterMm).toBe(4);
-    expect(offer.holes).toEqual([
-      { x: 30, y: 6.8 },
-      { x: 30, y: 33.2 },
+  it('offers two 4 mm holes on the turn’s fixed line, on the SEEDED bench settings', () => {
+    // #813 — a drilled hole is a circle, so the round rule is the one that applies: the seeded ⌀2 mm
+    // probe with its 0.5 mm fine step reads a hole of 2.5 mm or more, and 4 mm is the standard size.
+    // The tape flip is a half turn about Y, so x = 30 is the fixed line and each hole sits in the
+    // scrap beside an end of the board (15..25), clear of the board's holes and of both blank edges.
+    const offer = offerFor();
+    expect(offer).not.toBeNull();
+    expect(offer!.minProbeableMm).toBe(2.5);
+    expect(offer!.diameterMm).toBe(4);
+    expect(offer!.holes).toEqual([
+      { x: 30, y: 8.2 },
+      { x: 30, y: 31.8 },
     ]);
-    expect(offer.message).toContain('two 4 mm alignment holes');
-    expect(offer.message).toContain('26.4 mm apart');
+    expect(offer!.message).toContain('needs holes of at least 2.5 mm');
+    expect(offer!.message).toContain("the board's largest is 1 mm");
+    expect(offer!.message).toContain('two 4 mm alignment holes');
+    expect(offer!.message).toContain('23.6 mm apart');
+  });
+
+  it('states a coarse probe’s size, and says so when the scrap cannot hold the pair', () => {
+    // A ⌀4.4 mm tip cannot read the 4 mm standard, and its 5 mm holes no longer fit the 40 mm
+    // blank's scrap on the flip line: the offer names the size and the reason, never a refusal.
+    const coarse = offerFor({ ...seededProbe(), tipDiameterMm: 4.4, tipRadiusMm: 1.5 })!;
+    expect(coarse.minProbeableMm).toBe(4.9);
+    expect(coarse.diameterMm).toBe(5);
+    expect(coarse.holes).toEqual([]);
+    expect(coarse.message).toContain('needs holes of at least 4.9 mm');
+    expect(coarse.message).toContain('no room beside the board on the flip line');
   });
 
   it('offers nothing when a board hole is already readable', () => {
@@ -441,15 +443,15 @@ describe('alignment holes for a board the probe cannot read (#743 P-8)', () => {
     expect(offerFor(fineProbe)).toBeNull();
   });
 
-  it('with the holes added, setup 2 registers on them and finds a misplaced flip', async () => {
+  it('with the holes added, setup 2 registers on them on the SEEDED settings, and finds a misplaced flip', async () => {
     const { job } = await twoSided();
-    const bench = fineBench();
+    const bench = seededProbe();
     const offer = offerFor(bench)!;
     const withHoles = withAlignmentHoles(job, offer.holes, offer.diameterMm, alignTools, ROWS);
     const added = withHoles.drills!.slice(8);
     expect(added.map((d) => [d.position.x, d.position.y, d.diameter, d.through])).toEqual([
-      [30, 6.8, 4, true],
-      [30, 33.2, 4, true],
+      [30, 8.2, 4, true],
+      [30, 31.8, 4, true],
     ]);
     expect(withHoles.setups![0]!.tools).toContain('inv:d40');
 
@@ -464,7 +466,7 @@ describe('alignment holes for a board the probe cannot read (#743 P-8)', () => {
       two,
       { kind: 'tape' },
       { seatMachineZ: -31.6, seekFromMachineZ: -3, cornerRadius: 0 },
-      { ...settings, fineStepMm: bench.fineStepMm, cornerClearanceMm: bench.cornerClearanceMm },
+      settings,
     );
     if (!planned.ok) throw new Error(planned.reason);
     expect(planned.plan.references).toHaveLength(2);

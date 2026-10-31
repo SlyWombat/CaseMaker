@@ -115,6 +115,17 @@ describe('#471 removals from the job document', () => {
     expect(removalsFrom(job).map((r) => r.id)).toEqual(['shp-1']);
   });
 
+  it('#813 — one stated drill is a ROUND removal; an array of holes is not', () => {
+    const job = jobWith({ drills: [drill({ diameter: 4 }), array({ diameter: 4 }), drill({ id: 'drl-3' })] });
+    const removals = removalsFrom(job);
+    // One hole of a stated size is a circle: its box's corners are air, and a scan reads a diameter.
+    expect(removals.find((r) => r.id === 'drl-1')!.roundDiameterMm).toBe(4);
+    // A drill array's box is the group's bounding box, whose corners are stock.
+    expect(removals.find((r) => r.id === 'drl-2')!.roundDiameterMm).toBeUndefined();
+    // No stated size: the hole is the cutter's own, which the document does not know.
+    expect(removals.find((r) => r.id === 'drl-3')!.roundDiameterMm).toBeUndefined();
+  });
+
   it('an empty job has no removals', () => {
     expect(removalsFrom(jobWith({}))).toEqual([]);
   });

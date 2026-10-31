@@ -38,6 +38,13 @@ export interface Removal {
    * footprint. Only such a removal is used as a registration reference; a group ("the four holes") is not.
    */
   connected?: boolean;
+  /**
+   * #813: a drilled hole's stated diameter, mm, when this removal is ONE round hole. Its box is the
+   * hole's square, but the walls a probe reads are the circle's: a scan line crosses a diameter and
+   * meets the wall square, so there are no corners to clear and the hole is judged by the round
+   * rule rather than the box's corners (which lie in the air outside the circle).
+   */
+  roundDiameterMm?: number;
 }
 
 export type Mount = 'vise' | 'bracket' | 'tape';

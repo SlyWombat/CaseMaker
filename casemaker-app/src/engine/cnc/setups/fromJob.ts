@@ -127,6 +127,7 @@ export function removalsFrom(job: EngraveJob): Removal[] {
       },
       opensTo: isThrough ? ['top', 'bottom'] : ['top'],
       ...(connected.has(cut.id) ? { connected: true } : {}),
+      ...(cut.roundDiameterMm === undefined ? {} : { roundDiameterMm: cut.roundDiameterMm }),
     });
   }
 
