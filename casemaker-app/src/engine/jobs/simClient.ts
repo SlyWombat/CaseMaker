@@ -222,6 +222,10 @@ export interface SimLoadOpts {
    * work frame. Taken by a column-swept program; an exact-swept one uses `priorRemoval`.
    */
   carried?: CarriedField | null;
+  /** #817 — the earlier column programs' remaining tops, in this program's own frame. */
+  priorFields?: readonly CarriedField[] | null;
+  /** #817 — which of `priorRemoval` an exact program made; a column seed cannot use them. */
+  priorExactRemoval?: readonly NodeMeshOutput[] | null;
 }
 
 /** The two stages of a load (#224). */
@@ -287,6 +291,8 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             breakthroughMm: opts?.breakthroughMm ?? null,
             priorRemoval: opts?.priorRemoval ?? undefined,
             carried: opts?.carried ?? undefined,
+            priorFields: opts?.priorFields ?? undefined,
+            priorExactRemoval: opts?.priorExactRemoval ?? undefined,
           },
           opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
         )

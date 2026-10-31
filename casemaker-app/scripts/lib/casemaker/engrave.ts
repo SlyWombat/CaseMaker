@@ -990,7 +990,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // setup's later cutter.
         cutterFor: (program) =>
           program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
-        load: async ({ program, index, cutter, drillPoint, priorRemoval }) => {
+        load: async ({ program, index, cutter, drillPoint, priorRemoval, priorFields, priorExactRemoval }) => {
           sweeping =
             (program.kind ?? 'engrave') === 'facing'
               ? `the facing pass (${program.toolKey})`
@@ -1004,6 +1004,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
             // #744 — the list as the earlier programs left it; the session unions it into the one seed
             // mesh the exact sweeper takes. An empty list is no seed.
             ...(priorRemoval.length === 0 ? {} : { priorRemoval }),
+            // #817 — the earlier column programs' remaining tops, in the same frame here.
+            ...(priorFields.length === 0 ? {} : { priorFields }),
+            ...(priorExactRemoval === undefined ? {} : { priorExactRemoval }),
             ...(drillPoint === null ? {} : { drillPointDefault: drillPoint }),
           });
         },

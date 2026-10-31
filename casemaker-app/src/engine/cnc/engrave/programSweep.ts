@@ -23,6 +23,7 @@
 
 import type { Tool } from '@/engine/cnc/tool';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { SimDiagnostic, SimLoadOk, SimLoadResult } from '@/workers/sim/session';
 import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
 
@@ -95,6 +96,10 @@ export interface ProgramSweepOk {
   sweeps: ProgramSweepResult[];
   /** The cumulative removal the run leaves, one entry per program that removed material. */
   priorRemoval: NodeMeshOutput[];
+  /** #817 — the cumulative remaining TOPS the column engine handed on, in program order. */
+  priorFields: CarriedField[];
+  /** #817 — the removal meshes of exact-engine programs only (a column seed cannot use them). */
+  priorExactRemoval: NodeMeshOutput[];
 }
 
 export interface ProgramSweepFailed {
@@ -104,6 +109,10 @@ export interface ProgramSweepFailed {
   sweeps: ProgramSweepResult[];
   failed: ProgramSweepFailure | null;
   priorRemoval: NodeMeshOutput[];
+  /** #817 — the cumulative remaining TOPS the column engine handed on, in program order. */
+  priorFields: CarriedField[];
+  /** #817 — the removal meshes of exact-engine programs only (a column seed cannot use them). */
+  priorExactRemoval: NodeMeshOutput[];
 }
 
 export type ProgramSweepOutcome = ProgramSweepOk | ProgramSweepFailed;
@@ -117,6 +126,17 @@ export interface ProgramLoadArgs<P extends SweepProgram = SweepProgram> {
   drillPoint: SweepDrillPoint | null;
   /** The cumulative material left by earlier programs; EMPTY for a from-blank sweep. */
   priorRemoval: readonly NodeMeshOutput[];
+  /**
+   * #817 — the earlier column-engine programs' remaining tops, in this run's work frame. A column
+   * program seeds its grid from these; the mesh list above is for the exact sweeper.
+   */
+  priorFields: readonly CarriedField[];
+  /**
+   * #817 — the removal meshes of EXACT-engine programs only. The column engine can start from the
+   * fields above but not from a mesh, so a run decides whether a column program may seed from the
+   * fields alone: any exact predecessor's material is not in them.
+   */
+  priorExactRemoval: readonly NodeMeshOutput[];
   /** True only on the retry of a program the simulator refused to seed. */
   fromBlank: boolean;
 }
@@ -140,6 +160,8 @@ export interface SweepProgramsOptions<P extends SweepProgram = SweepProgram> {
   afterLoad?: (args: ProgramLoadArgs<P> & { result: SimLoadOk; sweep: ProgramSweepResult }) => void | Promise<void>;
   /** The rest route's seed: material an EARLIER run left (the command line's two-tool rest pass). */
   initialRemoval?: readonly NodeMeshOutput[];
+  /** #817 — the remaining tops a run starts from (an earlier run's column fields). */
+  initialFields?: readonly CarriedField[];
   /** Checked between programs, so a superseded app run stops before loading the next one. */
   aborted?: () => boolean;
 }
@@ -260,8 +282,10 @@ const PRIOR_REFUSAL_CODES: ReadonlySet<string> = new Set([
 export async function sweepPrograms<P extends SweepProgram>(options: SweepProgramsOptions<P>): Promise<ProgramSweepOutcome> {
   const sweeps: ProgramSweepResult[] = [];
   let priorRemoval: NodeMeshOutput[] = [...(options.initialRemoval ?? [])];
+  let priorFields: CarriedField[] = [...(options.initialFields ?? [])];
+  let priorExactRemoval: NodeMeshOutput[] = [];
 
-  const stop = (): ProgramSweepFailed => ({ ok: false, cancelled: true, sweeps, failed: null, priorRemoval });
+  const stop = (): ProgramSweepFailed => ({ ok: false, cancelled: true, sweeps, failed: null, priorRemoval, priorFields, priorExactRemoval });
 
   for (const [index, program] of options.programs.entries()) {
     if (options.aborted?.()) return stop();
@@ -284,12 +308,14 @@ export async function sweepPrograms<P extends SweepProgram>(options: SweepProgra
         ],
         sweep: null,
       };
-      return { ok: false, cancelled: false, sweeps, failed: failure, priorRemoval };
+      return { ok: false, cancelled: false, sweeps, failed: failure, priorRemoval, priorFields, priorExactRemoval };
     }
 
     const drillPoint = program.drill?.simDrillPoint ?? options.shopDrillPoint ?? null;
     const seed = priorRemoval;
-    const args: ProgramLoadArgs<P> = { program, index, cutter, drillPoint, priorRemoval: seed, fromBlank: false };
+    const seedFields = priorFields;
+    const seedExact = priorExactRemoval;
+    const args: ProgramLoadArgs<P> = { program, index, cutter, drillPoint, priorRemoval: seed, priorFields: seedFields, priorExactRemoval: seedExact, fromBlank: false };
     let load = await options.load(args);
     if (load === null) return stop();
     if (options.aborted?.()) return stop();
@@ -304,7 +330,7 @@ export async function sweepPrograms<P extends SweepProgram>(options: SweepProgra
         // still a real check — fixture, stock and rapid collisions — so it is done, and the note
         // says the result covers this program's own cuts only. Refusing a good drill or V job over
         // a limitation of the sweep is not the safety rule this walk exists for.
-        const retry: ProgramLoadArgs<P> = { ...args, priorRemoval: [], fromBlank: true };
+        const retry: ProgramLoadArgs<P> = { ...args, priorRemoval: [], priorFields: [], priorExactRemoval: [], fromBlank: true };
         load = await options.load(retry);
         if (load === null) return stop();
         if (load.ok) {
@@ -328,7 +354,7 @@ export async function sweepPrograms<P extends SweepProgram>(options: SweepProgra
         diagnostics: load.diagnostics,
         sweep: null,
       };
-      return { ok: false, cancelled: false, sweeps, failed: failure, priorRemoval };
+      return { ok: false, cancelled: false, sweeps, failed: failure, priorRemoval, priorFields, priorExactRemoval };
     }
 
     // #393 — `ok` means the sweep produced material, NOT that the program is safe. A rapid through
@@ -356,16 +382,24 @@ export async function sweepPrograms<P extends SweepProgram>(options: SweepProgra
         diagnostics: load.diagnostics,
         sweep,
       };
-      return { ok: false, cancelled: false, sweeps, failed: failure, priorRemoval };
+      return { ok: false, cancelled: false, sweeps, failed: failure, priorRemoval, priorFields, priorExactRemoval };
     }
 
     sweeps.push(sweep);
     if (load.meshes.removal !== null) priorRemoval = [...priorRemoval, load.meshes.removal];
+    // #817 — the column engine hands its remaining top per column on, so a LATER column program
+    // (a drill after a V isolation) starts where it left the stock, not on the blank.
+    if (load.removalField != null) priorFields = [...priorFields, load.removalField];
+    // The exact engine's removal is a mesh and nothing else: a later COLUMN program cannot start
+    // from it, and the run must say so rather than sweep a stock missing that cut.
+    if (load.stats.engine === 'exact' && load.meshes.removal !== null) {
+      priorExactRemoval = [...priorExactRemoval, load.meshes.removal];
+    }
     // The hook sees the load THAT RAN: a retried program was loaded from the blank, not with the
     // seed the first attempt was handed.
-    await options.afterLoad?.({ ...args, priorRemoval: fromBlank ? [] : seed, fromBlank, result: load, sweep });
+    await options.afterLoad?.({ ...args, priorRemoval: fromBlank ? [] : seed, priorFields: fromBlank ? [] : seedFields, priorExactRemoval: fromBlank ? [] : seedExact, fromBlank, result: load, sweep });
     if (options.aborted?.()) return stop();
   }
 
-  return { ok: true, sweeps, priorRemoval };
+  return { ok: true, sweeps, priorRemoval, priorFields, priorExactRemoval };
 }

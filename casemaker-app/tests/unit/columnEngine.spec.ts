@@ -12,6 +12,8 @@ import { stubSetup, type Setup } from '@/engine/cnc/setup';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { rectProfile } from '@/engine/compiler/profile';
 import type { Timeline } from '@/engine/cnc/emulator/timeline';
+import { gridSliceAt } from '@/engine/cnc/engrave/oracle';
+import { tl } from './helpers/manifoldExec';
 
 const RT = 1.5875; // ⌀3.175 flat, the vendor tool
 /** The cutter every pre-#405 case sweeps: a flat end mill, so `tanHalf === null` (a level floor). */
@@ -811,5 +813,69 @@ describe('#776 — the pure-A span sweep is the per-column sweep, exactly', () =
     let lowered = 0;
     for (let i = 0; i < g.h.length; i++) if ((g.h[i] as number) < g.initial) lowered++;
     expect(lowered).toBeGreaterThan(1000);
+  });
+});
+
+// #817 — THE FLAT ENGINE HANDS ITS REMOVAL ON. A later program (the exact sweeper or another
+// column program) must start with the earlier one's cuts already gone, or it is judged against
+// stock that still holds material (a false air-cut where the groove was).
+describe('#817 the column engine carries its remaining tops', () => {
+  it('seeds the next program grid from the previous program field', () => {
+    // Program 1: a 3.175 mm groove along X at y = 20, 1 mm deep.
+    const p1 = fakeTimeline([move({ u0: 10, u1: 30, z: -1 })], false, 20);
+    const out1 = columnSweep(p1, flatEndMill(3.175), prism(40, 40, 5), { resolution: { dx: 0.25, dThetaDeg: 0.25 } });
+    expect(out1.ok).toBe(true);
+    if (!out1.ok) return;
+    expect(out1.field).not.toBeNull();
+    const field = out1.field!;
+    // An identity map in the program's own frame.
+    expect(field.map).toEqual([1, 0, 0, 0, 1, 0]);
+
+    // Program 2 cuts only at the FAR side; the groove must SURVIVE in its grid.
+    const p2 = fakeTimeline([move({ u0: 10, u1: 30, z: -1 })], false, 32);
+    const out2 = columnSweep(p2, flatEndMill(3.175), prism(40, 40, 5), {
+      resolution: { dx: 0.25, dThetaDeg: 0.25 },
+      priorTops: [field],
+    });
+    expect(out2.ok).toBe(true);
+    if (!out2.ok) return;
+    const at = (x: number, y: number): number => {
+      const i = Math.round((x - out2.grid.u0) / out2.grid.du);
+      const j = Math.round((y - out2.grid.v0) / out2.grid.dv);
+      return out2.grid.h[j * out2.grid.nu + i] as number;
+    };
+    // Under groove 1 (untouched by program 2): program 1's floor, not the blank's top.
+    expect(at(20, 20)).toBeCloseTo(-1, 2);
+    // Outside both grooves: the blank top.
+    expect(at(20, 5)).toBeCloseTo(0, 2);
+    // Under program 2's own cut: its floor too.
+    expect(at(20, 32)).toBeCloseTo(-1, 2);
+
+    // THE COPPER ORACLE'S OWN READING (#817). `gridSliceAt` is what the copper report reads a
+    // level's cut area off. At −0.75 mm the isolation's groove is cut; on the LAST program's grid
+    // the same columns must still read cut (no copper resurrected), and the drill's own hole can
+    // only add to that area — the side's last program agrees with the isolation's own.
+    const isoSlice = gridSliceAt(tl, out1.grid)(-0.75);
+    const lastSlice = gridSliceAt(tl, out2.grid)(-0.75);
+    expect(isoSlice).not.toBeNull();
+    expect(lastSlice).not.toBeNull();
+    const isoArea = isoSlice!.area();
+    const lastArea = lastSlice!.area();
+    expect(isoArea).toBeGreaterThan(0);
+    expect(lastArea).toBeGreaterThanOrEqual(isoArea);
+    // Cell by cell over the isolation's grid: every column it cut is cut on the last program too.
+    for (let k = 0; k < out1.grid.h.length; k++) {
+      if ((out1.grid.h[k] as number) <= -0.75) {
+        expect(out2.grid.h[k] as number).toBeLessThanOrEqual(-0.75);
+      }
+    }
+  });
+
+  it('is not invented for a rotary grid (a radius about the axis is not a flat top)', () => {
+    const tl = fakeTimeline([move({ u0: 0, u1: 0, v0: 0, v1: 360, z: 5 })]);
+    const out = columnSweep(tl, flatEndMill(3.175), cyl(10, 30), { resolution: { dx: 0.2, dThetaDeg: 0.5 } });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.field).toBeNull();
   });
 });

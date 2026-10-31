@@ -66,6 +66,18 @@ const DENSE_FLAT = (() => {
   return lines.join('\n');
 })();
 
+/** #817 — a V-bit, the column engine's own cone cutter, and a groove it cuts along the channel. */
+const V_BIT: Tool = {
+  ...flatEndMill(0.3),
+  name: '30° V-bit',
+  typeText: 'Engraving',
+  shape: 'engraving',
+  tipDiameter: 0.3,
+  halfAngle: 15,
+  angle: 30,
+};
+const V_CHANNEL = ['S1000 M3', 'G0 X10 Y10 Z2', 'G1 Z-0.5 F100', 'G1 X30', 'G0 Z2', 'M5'].join('\n');
+
 const POINT = { deg: 118, source: 'the drill plan' };
 
 function program(toolKey: string, nc: string, drill?: { simDrillPoint: { deg: number; source: string } | null }): SweepProgram {
@@ -89,6 +101,9 @@ async function sweep(
         calls.push(args);
         return session.load(args.program.nc, SETUP, args.cutter, null, {
           ...(args.priorRemoval.length === 0 ? {} : { priorRemoval: args.priorRemoval }),
+          // #817 — the earlier column programs' remaining tops; the column engine seeds from them.
+          ...(args.priorFields.length === 0 ? {} : { priorFields: args.priorFields }),
+          ...(args.priorExactRemoval === undefined ? {} : { priorExactRemoval: args.priorExactRemoval }),
           ...(args.drillPoint === null ? {} : { drillPointDefault: args.drillPoint }),
         });
       },
@@ -168,6 +183,25 @@ describe('#744 one sweep per program, shared with the command line', () => {
     // The point the plan used is the one the cone was swept with (#434).
     expect(drill.diagnostics.find((d) => d.code === 'drill-point-angle')?.message).toContain('118°');
     expect(drill.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  });
+
+  // #817 — a COLUMN program is not refused when the material it must start from is a column
+  // program's: the field carries it. The drill starts where the V-groove left the stock, not on
+  // the blank, and the walk reports no old refusal.
+  it('#817 a drill after a column program seeds from its field, not from the blank', async () => {
+    const tools = new Map<string, Tool>([
+      ['vbit', V_BIT],
+      ['inv:drill-2', DRILL],
+    ]);
+    const { outcome, calls } = await sweep(
+      [program('vbit', V_CHANNEL), program('inv:drill-2', DRILL_HOLE, { simDrillPoint: POINT })],
+      tools,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(calls[1]!.priorFields.length).toBeGreaterThan(0);
+    expect(calls[1]!.priorExactRemoval).toHaveLength(0);
+    expect(outcome.sweeps[1]!.fromBlank).toBe(false);
   });
 
   it('a dense flat program is swept from the blank, on its own engine, instead of stopping the run (#746)', async () => {

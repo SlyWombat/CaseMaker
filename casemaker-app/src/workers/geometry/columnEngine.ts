@@ -43,7 +43,7 @@ import { sectionRadiusAt } from '@/engine/cnc/rotary/wrap';
 import type { Setup } from '@/engine/cnc/setup';
 import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/engine/cnc/tool';
 import type { NodeMeshOutput } from './meshOutput';
-import { applyCarriedField, type CarriedField } from './carriedField';
+import { applyCarriedField, applyPriorTops, fieldOfGrid, type CarriedField } from './carriedField';
 import type { SweepDiagnostic, SweepStats } from './sweep';
 import { MAX_AIR_CHECKS, MAX_GOUGES, holderGate } from './sweep';
 // Type-only (erased): the CAM module is not pulled into the worker graph (§4's plain-data rule).
@@ -610,6 +610,12 @@ export interface ColumnSweepOpts {
    */
   carried?: CarriedField | null;
   /**
+   * #817 — what EARLIER programs left, as fields in this program's own frame. The latest top per
+   * column seeds this grid's top (a column cut through starts empty), so a cone or drill program
+   * starts where the previous program left the stock rather than on the blank. Flat only.
+   */
+  priorTops?: readonly CarriedField[] | null;
+  /**
    * The ROTARY grid's θ pitch, degrees: the shop's `sim.rotaryPitchDeg`, read by the caller (#451).
    * Absent: {@link COLUMN_ROTARY_PITCH_FALLBACK_DEG}. Ignored by a flat job (its second axis is
    * millimetres) and when `resolution` overrides the whole grid.
@@ -655,6 +661,11 @@ export interface ColumnSweepOk {
   grid: ColumnGrid;
   stats: SweepStats;
   diagnostics: SweepDiagnostic[];
+  /**
+   * #817 — this program's remaining TOP per column, in its own work frame, for the next program's
+   * seed. Null on a rotary grid (that column is a radius about the axis, not a flat top).
+   */
+  field: CarriedField | null;
   /** Uncut stock, display resolution. */
   stock: NodeMeshOutput;
   /** Final stock, display resolution. */
@@ -1793,6 +1804,12 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   // sends one there), and applied AFTER the breakthrough spread so the floor lands on the grid the
   // sweep actually uses.
   if (!rotary && opts?.carried != null) applyCarriedField(grid, opts.carried);
+  // #817 — the prior programs' remaining tops, in this same frame: a later program starts with
+  // the earlier one's cuts already gone. Applied after the other side's floor, so a flip's wall
+  // stands and an earlier top can only lower this column.
+  if (!rotary && opts?.priorTops != null) {
+    for (const field of opts.priorTops) applyPriorTops(grid, field);
+  }
   const stats = zeroStats();
   stats.resolution = { dx: grid.du, dThetaDeg: grid.dv };
   // The cutter's own notes first: the drill's point and where its angle came from, the thread mill's
@@ -2055,6 +2072,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     diagnostics,
     stock,
     result,
+    field: fieldOfGrid(grid),
     gouges,
     meshAt,
     meshAtMap,

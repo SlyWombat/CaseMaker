@@ -693,7 +693,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         shopDrillPoint: null,
         cutterFor: (program) =>
           program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
-        load: async ({ program, index, cutter, drillPoint, priorRemoval }) => {
+        load: async ({ program, index, cutter, drillPoint, priorRemoval, priorFields, priorExactRemoval }) => {
           // #830 — the simulation's own stage: which program of the sweep is being simulated, so
           // the panel never shows a bare "Working…" through a multi-program sweep.
           if (mine === seq) set({ simProgram: { index: index + 1, count: generated.programs.length } });
@@ -758,6 +758,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               // #723 P2-2b-ii — carried into THIS program's setup frame.
               seeds.meshes.length === 0 ? null : seeds.meshes,
               carried,
+              // #817 — the column programs' remaining tops, only when every earlier program is in
+              // THIS setup's frame (a field carries no affine map in the plain chain).
+              seedSources.every((s) => s === program.setupIndex) ? (priorFields ?? null) : null,
+              priorExactRemoval ?? null,
             );
             if (result !== null) {
               // Keep the frame bookkeeping aligned with the walk's own list: only a load that

@@ -51,11 +51,12 @@ import {
 import { computeCopperTopology, type PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
-import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
+import type { CarriedField } from '../geometry/carriedField';
+import { manifoldOfTriangles, meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
 import { boxSolid, isDenseForExactSweep, sweepTimeline, unliftTimeline, type SweepDiagnostic, type SweepOpts, type SweepResult, type SweepStats } from '../geometry/sweep';
 import { columnSweep, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
-import type { CarriedField, FlatField } from '../geometry/carriedField';
+import type { FlatField } from '../geometry/carriedField';
 import { unionRemoval } from './engraveRest';
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
@@ -107,6 +108,32 @@ export interface SimFixtureMesh {
   mesh: NodeMeshOutput;
 }
 
+/**
+ * #817 — the column engine's removed volume as one mesh: the blank minus what it left. The engine
+ * has no removal solid of its own (its grid IS the material); this realm owns the wasm toplevel,
+ * so the subtraction happens here. Null when either display mesh cannot be made into a solid —
+ * the removal ghost is then absent, and the chain still carries the FIELD.
+ */
+function columnRemovalMesh(tl: ManifoldToplevel, col: { stock: NodeMeshOutput; result: NodeMeshOutput }): NodeMeshOutput | null {
+  const stockSolid = manifoldOfTriangles(tl, col.stock.positions, col.stock.indices);
+  const resultSolid = manifoldOfTriangles(tl, col.result.positions, col.result.indices);
+  if (stockSolid === null || resultSolid === null) {
+    stockSolid?.delete();
+    resultSolid?.delete();
+    return null;
+  }
+  const removal = stockSolid.subtract(resultSolid);
+  stockSolid.delete();
+  resultSolid.delete();
+  if (removal.status() !== 'NoError') {
+    removal.delete();
+    return null;
+  }
+  const mesh = meshOutputOf(removal);
+  removal.delete();
+  return mesh;
+}
+
 export interface SimLoadOk {
   ok: true;
   diagnostics: SimDiagnostic[];
@@ -127,6 +154,12 @@ export interface SimLoadOk {
   pauses: PausePoint[];
   segments: Segment[];
   meshes: { stock: NodeMeshOutput; result: NodeMeshOutput; removal: NodeMeshOutput | null; sacrificial: NodeMeshOutput | null; gouges: SimGougeMesh[]; fixture: SimFixtureMesh[] };
+  /**
+   * #817 — the column engine's remaining TOP per column (its final grid, in the program's own
+   * frame), so the next program's column seed starts with this program's cuts gone. Null for the
+   * exact engine, whose removal is the mesh above and whose later seeds read that.
+   */
+  removalField?: CarriedField | null;
   /**
    * Where the fixture's dimensions came from (#204), present only when the setup models one.
    * A default is NOT a measurement; the viewport shows this so the shown jaws are not read as
@@ -298,6 +331,20 @@ export interface SimLoadOpts {
    * `prior-removal-column`; an exact-swept program uses `priorRemoval`'s meshes and ignores this.
    */
   carried?: CarriedField | null;
+  /**
+   * #817 — the earlier COLUMN programs' remaining tops, in this program's own work frame. A column
+   * program seeds its grid from these; a legacy caller with only `priorRemoval` keeps the old
+   * refusal. The EXACT sweeper ignores them and subtracts the meshes above instead. When both a
+   * carried field and these are present, these win (they are the run's own chain).
+   */
+  priorFields?: readonly CarriedField[];
+  /**
+   * #817 — which of `priorRemoval`'s meshes an EXACT-engine program produced. A column program can
+   * start from the fields but not from an exact sweep's mesh, so a walk that has an exact
+   * predecessor in its history is still refused for a column program; absent, a caller with only
+   * meshes (a rest pass) is refused exactly as before.
+   */
+  priorExactRemoval?: readonly NodeMeshOutput[] | null;
   /**
    * The shop's `drill.pointAngleDeg` as the app read it from the location, for a drill whose record
    * states no point angle (#382). Absent: the registry's labelled fallback (source `fallback`).
@@ -744,9 +791,12 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const rotaryClass = timeline.summary.rotaryClass;
     if (rotaryClass === 'wrapped' || sweepsOnColumn(tool) || denseFlatRoutesToColumn(surfaceTimeline, tool, routingOpts)) {
       // A rest pass is measured against the material a previous program left, and only the exact
-      // sweeper can start from it — UNLESS the seed is the carried FIELD (#723 P2-2b), which the
-      // column engine reads directly as each column's floor. Without one, the pair is refused.
-      if (hasPrior && opts?.carried == null) {
+      // sweeper can start from it. Silently sweeping the blank instead would draw a cut nobody is
+      // going to make, so the pair is refused by name (#410). EITHER seed clears it: the carried
+      // FIELD (#723 P2-2b) or the run's own field chain (#817).
+      const hasExactPrior = opts?.priorExactRemoval == null ? hasPrior : opts.priorExactRemoval.length > 0;
+      const hasFieldPrior = (opts?.priorFields?.length ?? 0) > 0;
+      if (hasPrior && opts?.carried == null && (hasExactPrior || !hasFieldPrior)) {
         return refuse(
           'prior-removal-column',
           timeline.summary.rotary
@@ -757,7 +807,12 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       // #628 — the column engine sweeps the UN-LIFTED (surface-frame) program on the flat stock,
       // exactly as the exact engine does since #625. See the load's comment for why the seat + grid
       // lift this replaces could not be exact.
-      const col = columnSweep(surfaceTimeline, tool, setupArg, { ...routingOpts, carried: opts?.carried ?? null });
+      // #817 — the column engine seeds its grid from the earlier column programs' remaining tops;
+      // without them the carried field (#723 P2-2b) is the seed, exactly as before.
+      const columnOpts = hasFieldPrior
+        ? { ...routingOpts, priorTops: opts?.priorFields ?? null }
+        : { ...routingOpts, carried: opts?.carried ?? null };
+      const col = columnSweep(surfaceTimeline, tool, setupArg, columnOpts);
       if (!col.ok) {
         // Same contract as a refused exact sweep (#194): keep the runner's work, draw the path,
         // show no material. A rotary refusal owns no wasm handle.
@@ -805,10 +860,13 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         })),
         pauses: surfaceTimeline.pauses,
         segments: surfaceTimeline.segments,
-        // No removal ghost and no gouge solids from the column engine yet: the grid IS the
-        // material, so `frameAt` regenerates the stock surface instead (§4.4). A gouge is still
-        // reported as a diagnostic; only its drawn solid is pending.
-        meshes: { stock: col.stock, result: col.result, removal: null, sacrificial: null, gouges: [], fixture },
+        // #817 — the column engine's removal ghost is the stock minus what it left, built here
+        // because this realm owns the wasm toplevel. The FIELD is what a later column program
+        // seeds from; the mesh is what a later exact sweep subtracts. A gouge is still reported
+        // as a diagnostic; only its drawn solid is pending. The flat field stays too: it is the
+        // display's own grid (§4.4), unaffected by the ghost.
+        meshes: { stock: col.stock, result: col.result, removal: col.field === null ? null : columnRemovalMesh(tl, col), sacrificial: null, gouges: [], fixture },
+        removalField: col.field,
         ...(col.grid.kind === 'flat'
           ? {
               flatField: {

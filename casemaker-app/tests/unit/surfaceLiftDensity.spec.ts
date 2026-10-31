@@ -62,8 +62,8 @@ function expectExactEngine(r: SimLoadResult): void {
 function expectColumnEngine(r: SimLoadResult): void {
   expect(r.ok).toBe(true);
   const ok = r as SimLoadOk;
-  // The column (dexel) engine builds no removal ghost.
-  expect(ok.meshes.removal).toBeNull();
+  // The column (dexel) engine ran; its removal ghost is #817's and is not the signal here.
+  expect(ok.stats.engine).toBe('column');
   expect(ok.diagnostics.some((d) => d.code === 'dense-3d-refused')).toBe(false);
 }
 

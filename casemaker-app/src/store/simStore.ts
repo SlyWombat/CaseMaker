@@ -237,12 +237,16 @@ export interface SimState {
      * `null` means this load no longer owned the session (a newer load superseded it).
      */
     priorRemoval?: NodeMeshOutput | readonly NodeMeshOutput[] | null,
-    /**
-     * #723 P2-2b — the other side's remaining stock as a field, for a column-swept program (a
-     * ball/bull finish is one): each column's floor, with the maps into this program's frame.
-     * Takes the place of `priorRemoval` where the column engine runs.
-     */
+    /** #723 P2-2b — the carried field for a column-swept later side, or null. */
     carried?: CarriedField | null,
+    /**
+     * #817 — the earlier column programs' remaining tops, in this program's own frame. A column
+     * program seeds its grid from these; null/empty keeps the blank. Kept with the load for a
+     * retry, like `priorRemoval`.
+     */
+    priorFields?: readonly CarriedField[] | null,
+    /** #817 — which of `priorRemoval` an exact program made; a column seed cannot use them. */
+    priorExactRemoval?: readonly NodeMeshOutput[] | null,
   ): Promise<SimLoadResult | null>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
@@ -387,6 +391,10 @@ interface LoadArgs {
   priorRemoval: NodeMeshOutput[] | null;
   /** #723 P2-2b — the carried field for a column-swept later side, or null. */
   carried: CarriedField | null;
+  /** #817 — the earlier COLUMN programs' remaining tops, in this program's own frame. */
+  priorFields: CarriedField[] | null;
+  /** #817 — which of `priorRemoval` came from an EXACT program (a column seed cannot use them). */
+  priorExactRemoval: NodeMeshOutput[] | null;
 }
 let lastLoad: LoadArgs | null = null;
 
@@ -425,6 +433,8 @@ export const useSimStore = create<SimState>()((set, get) => {
         breakthroughMm: args.breakthroughMm,
         priorRemoval: args.priorRemoval,
         carried: args.carried,
+        priorFields: args.priorFields,
+        priorExactRemoval: args.priorExactRemoval,
       });
       if (mine !== loadSeq) return null; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -475,7 +485,7 @@ export const useSimStore = create<SimState>()((set, get) => {
     ...EMPTY,
     speed: startingSpeed(),
     budgetMs: startingBudgetMs(),
-    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null, breakthroughMm = null, priorRemoval = null, carried = null) {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null, breakthroughMm = null, priorRemoval = null, carried = null, priorFields = null, priorExactRemoval = null) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
@@ -512,6 +522,8 @@ export const useSimStore = create<SimState>()((set, get) => {
         breakthroughMm,
         priorRemoval: priorRemoval === null ? null : Array.isArray(priorRemoval) ? [...priorRemoval] : [priorRemoval as NodeMeshOutput],
         carried,
+        priorFields: priorFields === null ? null : [...priorFields],
+        priorExactRemoval: priorExactRemoval === null ? null : [...priorExactRemoval],
       };
       return run(lastLoad, fresh ? startingBudgetMs() : get().budgetMs);
     },

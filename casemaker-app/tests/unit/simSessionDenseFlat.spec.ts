@@ -7,9 +7,10 @@
 // job now goes to `columnSweep`, while a non-dense flat job still takes the exact sweep, and a ball
 // / bull nose stays refused (that is #532's to admit). This spec pins all three.
 //
-// The engine that ran is read off the load result: the column engine regenerates its surface from
-// the grid and builds NO removal ghost (`meshes.removal === null`, session.ts frameAt / load),
-// whereas the exact sweep that removed material returns a removal mesh. Modelled on simSession.spec.ts.
+// The engine that ran is read off the load result: `stats.engine` says 'column', and (since #817)
+// a flat column load also returns a removal ghost — the blank minus its result — so a later
+// program is swept on the material it left. A ROTARY column load still returns no ghost. Modelled
+// on simSession.spec.ts.
 
 import { describe, it, expect } from 'vitest';
 import { tl } from './helpers/manifoldExec';
@@ -45,8 +46,9 @@ describe('#531: a dense flat job routes to the FLAT dexel instead of being refus
     const ok = r as SimLoadOk;
     // No refusal by name, and not path-only: the dense flat job is drawn, not dropped.
     expect(ok.diagnostics.some((d) => d.code === 'dense-3d-refused')).toBe(false);
-    // The column (dexel) engine ran: it builds no removal ghost, and it regenerates a stock surface.
-    expect(ok.meshes.removal).toBeNull();
+    // The column (dexel) engine ran, and — since #817 — it hands its removal on as a ghost.
+    expect(ok.stats.engine).toBe('column');
+    expect(ok.meshes.removal).not.toBeNull();
     const f = session.frameAt(0, ++gen);
     expect(f).not.toBeNull();
     expect((f!.stock.positions.length)).toBeGreaterThan(0);

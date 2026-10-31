@@ -40,7 +40,48 @@ export interface CarriedField extends FlatField {
   z: readonly [number, number];
 }
 
-/** A source column's top at a work point, nearest column (the grid's own quantisation). */
+/**
+ * #817 — seed a grid from an earlier program's remaining TOP, in the SAME frame. The prior program
+ * removed everything above `top`; the next program's columns must start there. A column at or below
+ * the source stock's bottom was cut through, so it starts empty.
+ *
+ * This is deliberately NOT {@link applyCarriedField}: that one carries the other side of a flip as
+ * the FLOOR (the two sides bound the column from below). Here the earlier top becomes the later
+ * top, and the floor stays the grid's own.
+ */
+export function applyPriorTops(grid: ColumnGrid, field: CarriedField): void {
+  const { nu, nv, u0, v0, du, dv, initial, base } = grid;
+  const [a, b, c, d, e, f] = field.map;
+  const h = grid.h;
+  for (let j = 0; j < nv; j++) {
+    const y = v0 + j * dv;
+    for (let i = 0; i < nu; i++) {
+      const x = u0 + i * du;
+      const srcTop = carriedTopAt(field, a * x + b * y + c, d * x + e * y + f);
+      const idx = j * nu + i;
+      const top = srcTop <= field.base + 1e-9 ? base : srcTop;
+      if (top < h[idx]!) h[idx] = Math.max(base, Math.min(initial, top));
+    }
+  }
+}
+
+/** The field a finished FLAT grid hands on: its remaining top per column, in its own frame. */
+export function fieldOfGrid(grid: ColumnGrid): CarriedField | null {
+  if (grid.kind !== 'flat') return null;
+  return {
+    u0: grid.u0,
+    v0: grid.v0,
+    du: grid.du,
+    dv: grid.dv,
+    nu: grid.nu,
+    nv: grid.nv,
+    top: grid.h.slice(),
+    base: grid.base,
+    map: [1, 0, 0, 0, 1, 0],
+    z: [1, 0],
+  };
+}
+
 export function carriedTopAt(field: CarriedField, x: number, y: number): number {
   const i = Math.min(field.nu - 1, Math.max(0, Math.round((x - field.u0) / field.du)));
   const j = Math.min(field.nv - 1, Math.max(0, Math.round((y - field.v0) / field.dv)));
