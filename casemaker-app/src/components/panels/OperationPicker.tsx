@@ -67,6 +67,8 @@ export interface OperationPickerProps {
   onPick: (id: OperationTypeId) => void;
   /** Whether "Surface a mesh" can run — the job holds no operations yet. */
   surfaceAllowed: boolean;
+  /** #723 P2-3 — what the surface chip means where it is offered (a sides job names its side). */
+  surfaceHint?: string;
   /** `select` mode: which chip is on. */
   selected?: OperationTypeId | null;
   /** `add` mode only: a folded option was picked. */
@@ -84,6 +86,7 @@ export function OperationPicker({
   testidFor,
   onPick,
   surfaceAllowed,
+  surfaceHint,
   selected = null,
   onOption,
   optionEnabled,
@@ -123,7 +126,7 @@ export function OperationPicker({
               <span style={HINT} data-testid="operation-picker-surface-hint">
                 {!surfaceAllowed
                   ? 'this job already has work — Surface a mesh starts a new, empty job'
-                  : 'a whole-job operation; it starts an empty job'}
+                  : (surfaceHint ?? 'a whole-job operation; it starts an empty job')}
               </span>
             )}
           </div>

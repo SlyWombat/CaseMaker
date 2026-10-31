@@ -26,6 +26,7 @@ import { OperationPicker } from '@/components/panels/OperationPicker';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { RotaryOperationPicker } from './RotaryOperationPicker';
 import { operationCreateBlocked } from './operationCreate';
+import { isSideGoal, jobHasItems, jobSetups, jobTargetObjects, sideSetupIdOf } from '@/engine/cnc/engrave/jobSetup';
 import type { RotaryOperationId } from './rotaryOperations';
 import type { OperationTypeId } from '@/components/panels/operationTypes';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -39,6 +40,9 @@ const FIELD: CSSProperties = { width: 72 };
 const FIELDS: CSSProperties = { display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' };
 const FIELD_BOX: CSSProperties = { borderTop: '1px solid #2a2f36', marginTop: 10, paddingTop: 8 };
 const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: '6px 0 0' };
+/** #723 P2-3 — one side of a part cut from several sides, as a choice. */
+const SIDE_CHIP: CSSProperties = { fontSize: 11, padding: '4px 8px', borderRadius: 4, border: '1px solid #2a2f36', background: 'transparent', color: '#c8d3de', cursor: 'pointer' };
+const SIDE_CHIP_ON: CSSProperties = { ...SIDE_CHIP, border: '1px solid #4a90d9', background: '#1c2b3a' };
 
 /**
  * What Create asks the shell to make; `null` = nothing new (the job already has its operation).
@@ -50,7 +54,7 @@ const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: '6px 0 
  */
 export type OperationChoice =
   | { type: 'engrave'; text: string; depth: number; font: TextFont; reads?: 'along' | 'around' }
-  | { type: 'surface'; target: EngraveTargetObject | null }
+  | { type: 'surface'; target: EngraveTargetObject | null; /** #723 P2-3 — the side it is written to. */ setupId?: string }
   | { type: Exclude<OperationTypeId, 'engrave' | 'surface'>; text?: string; lengthMm?: number };
 
 export interface OperationStepProps {
@@ -93,11 +97,21 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   const [pcbStockFix, setPcbStockFix] = useState<string | null>(null);
   // #743 P-6 — a board on a holding of the operator's (the vise): stated with its one-click fix.
   const [pcbHoldingFix, setPcbHoldingFix] = useState<string | null>(null);
+  // #723 P2-3 — THE WIZARD'S SIDES SURFACE. A job cut from more than one saved setup shows its
+  // sides here, and the mesh picked below is written to the chosen side (`withSideGoal`), never
+  // over the job's single target. One side (the ordinary job) keeps today's behaviour.
+  const savedSides = job.setups !== undefined && job.setups.length > 1 ? jobSetups(job) : [];
+  const sideGoals = jobTargetObjects(job).filter(isSideGoal);
+  const [sideId, setSideId] = useState<string | null>(savedSides[0]?.id ?? null);
+  const selectedSide = savedSides.some((s) => s.id === sideId) ? sideId : (savedSides[0]?.id ?? null);
+  const goalForSide = (id: string): EngraveTargetObject | null =>
+    sideGoals.find((g) => sideSetupIdOf(job, g) === id) ?? null;
 
   const surfaceChoice: OperationChoice = {
     type: 'surface',
     target:
       surface === null || !makeMold || surface.format === 'png' ? surface : { ...surface, goalMode: 'mold' },
+    ...(selectedSide === null ? {} : { setupId: selectedSide }),
   };
   const choice: OperationChoice | null = rotary
     ? rotaryPicked === 'engrave'
@@ -132,7 +146,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   useLayoutEffect(() => {
     onChoiceChange(choice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked, text, depth, font, surface, makeMold, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, onChoiceChange]);
+  }, [picked, text, depth, font, surface, makeMold, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, onChoiceChange]);
 
   async function readPcbSet(files: File[]): Promise<void> {
     setPcbSummary(null);
@@ -177,6 +191,33 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
 
   return (
     <div data-testid="engrave-setup-step-what" style={{ marginTop: 8 }}>
+      {savedSides.length > 0 && (
+        <div data-testid="start-wizard-op-sides" style={{ marginBottom: 10 }}>
+          <div style={FIELD_HEADING}>Sides</div>
+          <p style={MUTED} data-testid="start-wizard-op-sides-note">
+            This job is cut from {savedSides.length} sides. A mesh picked below is attached to the
+            side you choose; the other sides keep theirs.
+          </p>
+          <div style={FIELDS} role="radiogroup" aria-label="Which side this mesh is for">
+            {savedSides.map((setup, i) => {
+              const goal = goalForSide(setup.id);
+              return (
+                <button
+                  key={setup.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selectedSide === setup.id}
+                  data-testid={`start-wizard-op-side-${i}`}
+                  onClick={() => setSideId(setup.id)}
+                  style={selectedSide === setup.id ? SIDE_CHIP_ON : SIDE_CHIP}
+                >
+                  Side {i + 1} · {goal === null ? 'no goal yet' : goal.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {rotary ? (
         <RotaryOperationPicker
           selected={rotaryPicked}
@@ -188,7 +229,12 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
           mode="select"
           testidFor={(id) => `engrave-setup-what-${id}`}
           onPick={setPicked}
-          surfaceAllowed={!hasOperations}
+          surfaceAllowed={!jobHasItems(job)}
+          surfaceHint={
+            savedSides.length > 0
+              ? 'the mesh goes on the side chosen above; the other sides keep theirs'
+              : undefined
+          }
           selected={picked}
         />
       )}

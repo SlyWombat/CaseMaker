@@ -645,9 +645,16 @@ export function StartWizard(): JSX.Element {
         });
       } else if (choice.type === 'surface') {
         // #685 — Surface a mesh is the one operation whose item is not a store "add": the file
-        // that was read in the step IS the goal object, and it is the whole job.
+        // that was read in the step IS the goal object.
+        // #723 P2-3 — on a part cut from more than one side the step names WHICH side, and the
+        // goal is written to that side (`withSideGoal`); the job's other sides are untouched. A
+        // single-side job keeps the one-goal form unchanged.
         if (choice.target !== null) {
-          useEngraveJobStore.getState().setTargetObject(choice.target);
+          if (choice.setupId !== undefined) {
+            useEngraveJobStore.getState().setSideGoal(choice.setupId, choice.target);
+          } else {
+            useEngraveJobStore.getState().setTargetObject(choice.target);
+          }
           id = choice.target.id;
         }
       } else if (choice.type === 'v-carve' && choice.text !== undefined && choice.text.trim() !== '') {

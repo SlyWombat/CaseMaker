@@ -33,6 +33,7 @@ import {
   seatedProud,
 } from '@/components/welcome/holdingMounts';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { defaultSetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
@@ -47,7 +48,7 @@ import {
   type LocationView,
   type MachineRecord,
 } from '@/platform/locationClient';
-import type { EngraveJob, JobStockEntry } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject, JobStockEntry } from '@/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, 'fixtures', 'location-doc.json');
@@ -797,5 +798,62 @@ describe('#684 — operator words', () => {
     expect(fmt(3.1)).toBe('3.1');
     expect(fmt(4)).toBe('4');
     expect(fmt(-1.1000000001)).toBe('-1.1');
+  });
+});
+
+describe('#723 P2-3 — the holding step names the job’s sides', () => {
+  const goalBase: EngraveTargetObject = {
+    id: 'goal',
+    name: 'goal.stl',
+    format: 'stl',
+    sha256: 'a'.repeat(64),
+    size: { x: 20, y: 20, z: 5 },
+    position: { x: 40, y: 25, z: 0 },
+    rotation: 0,
+    enabled: true,
+    role: 'goal',
+  };
+
+  function twoSideJob(): EngraveJob {
+    const job = dj({ length: 80, width: 50, thickness: 26 });
+    job.toolKey = 'flat-1.0';
+    const base = jobSetups(job)[0]!;
+    job.setups = [
+      { ...base, id: 'setup-1', orientation: { ...base.orientation }, itemIds: [], tools: [job.toolKey] },
+      {
+        ...base,
+        id: 'setup-2',
+        orientation: { top: 'bottom', bottom: 'top', left: 'left', right: 'right', front: 'back', back: 'front' },
+        mount: { kind: 'vise', viseOpeningMm: 100 },
+        itemIds: [],
+        tools: [job.toolKey],
+        pins: { at: [{ x: 4, y: 25 }, { x: 75, y: 25 }] },
+      },
+    ];
+    job.targetObjects = [
+      { ...goalBase, id: 'shell-out', name: 'shell-out.stl', setupId: 'setup-1' },
+      { ...goalBase, id: 'shell-in', name: 'shell-in.stl', setupId: 'setup-2' },
+    ];
+    return job;
+  }
+
+  it('lists each side, its goal and its turn above the one-holding controls', () => {
+    seedLocation(machineWith(BOARDS_AND_TAPE));
+    openHolding(twoSideJob());
+
+    expect(screen.getByTestId('engrave-setup-holding-sides')).toBeTruthy();
+    const first = screen.getByTestId('engrave-setup-holding-side-0').textContent ?? '';
+    const second = screen.getByTestId('engrave-setup-holding-side-1').textContent ?? '';
+    expect(first).toContain('shell-out.stl');
+    expect(first).toContain('in the vise');
+    expect(first).not.toContain('turned over');
+    expect(second).toContain('shell-in.stl');
+    expect(second).toContain('turned over about X on the two pins');
+  });
+
+  it('a one-side job shows no sides block', () => {
+    seedLocation(machineWith(BOARDS_AND_TAPE));
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
+    expect(screen.queryByTestId('engrave-setup-holding-sides')).toBeNull();
   });
 });

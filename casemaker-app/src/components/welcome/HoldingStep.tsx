@@ -46,7 +46,8 @@ import {
   withVise,
   type SetupAnswers,
 } from '@/engine/cnc/engrave/setupFlow';
-import { dedupeFindings, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, isSideGoal, jobSetups, jobTargetObjects, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { flipAxisOf } from '@/engine/cnc/setups/flip';
 import { LEDGE_STEP, VISE_FLOOR_DEPTH } from '@/engine/cnc/fixture';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { formLabel } from '@/engine/cnc/stockStart';
@@ -70,7 +71,7 @@ import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { NARROW_QUERY } from './wizardLayout';
 import { openMachineChange } from '@/components/machine-change';
-import type { BracketHold, EngraveJob, JobStockForm, RotaryChuck, RotaryJawMode, RotaryNeck, TapeHold, ViseParams } from '@/types/engraveJob';
+import type { BracketHold, EngraveJob, JobSetup, JobStockForm, RotaryChuck, RotaryJawMode, RotaryNeck, TapeHold, ViseParams } from '@/types/engraveJob';
 import {
   HOLDING_MOUNT_LABELS,
   HOLDING_MOUNT_WORDS,
@@ -1225,6 +1226,21 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
   const now = useMemo(() => machineNow(machine), [machine]);
   const profile = now?.profile ?? null;
   const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
+  // #723 P2-3 — THE WIZARD'S SIDES SURFACE, on the step that used to describe one holding. A job
+  // cut from more than one saved setup lists them here, each with the goal it cuts and how it is
+  // held/turned; the step's own controls still set the job's holding, and each side's mount and
+  // registration are edited in the Design panel's sides list.
+  const savedSides = job.setups !== undefined && job.setups.length > 1 ? jobSetups(job) : [];
+  const sideGoals = jobTargetObjects(job).filter(isSideGoal);
+  const sideGoalFor = (setup: JobSetup, index: number): (typeof sideGoals)[number] | null =>
+    sideGoals.find((t) => t.setupId === setup.id || (t.setupId === undefined && index === 0)) ?? null;
+  const sideMountWords = (mount: JobSetup['mount']): string =>
+    mount.kind === 'vise' ? 'in the vise' : mount.kind === 'tape' ? 'on tape' : 'in the bracket';
+  const sideTurnWords = (setup: JobSetup): string => {
+    const axis = flipAxisOf(setup);
+    if (axis === null) return '';
+    return setup.pins === undefined ? `, turned over about ${axis.toUpperCase()}` : `, turned over about ${axis.toUpperCase()} on the two pins`;
+  };
 
   const boards = useMemo(() => boardChoices(now?.profile ?? null), [now]);
   const underMm = answers.sacrificial.under?.thickness ?? null;
@@ -2034,6 +2050,28 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
           </button>
         )}
       </div>
+
+      {savedSides.length > 1 && (
+        <div
+          data-testid="engrave-setup-holding-sides"
+          style={{ margin: '8px 0', padding: '6px 8px', border: '1px solid #2a2f36', borderRadius: 4 }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 500 }}>Sides</span>
+          <p style={MUTED} data-testid="engrave-setup-holding-sides-note">
+            This job is cut from {savedSides.length} sides. This step sets the job’s holding; each
+            side’s own mount and registration are in its row in the Design panel’s Setups list.
+          </p>
+          <ul style={{ margin: '2px 0 0', paddingLeft: 16, fontSize: 12, lineHeight: 1.5 }}>
+            {savedSides.map((setup, i) => (
+              <li key={setup.id} data-testid={`engrave-setup-holding-side-${i}`}>
+                Side {i + 1} · {sideGoalFor(setup, i)?.name ?? 'cuts the stock flat'} ·{' '}
+                {sideMountWords(setup.mount)}
+                {sideTurnWords(setup)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div
         data-testid="engrave-setup-holding-columns"

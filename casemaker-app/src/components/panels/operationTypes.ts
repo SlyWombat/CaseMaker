@@ -393,8 +393,11 @@ export function jobHasOperations(job: {
   vectors?: readonly unknown[];
   chamfers?: readonly unknown[];
   targetObject?: { role?: 'reference' | 'goal' } | null;
+  /** #723 P2-3 — a part cut from several sides states one goal per setup (the multi-goal form). */
+  targetObjects?: readonly { role?: 'reference' | 'goal'; enabled?: boolean }[];
 }): boolean {
   const lists = [job.labels, job.shapes, job.traces, job.drills, job.threads, job.primitives, job.cutouts, job.vectors, job.chamfers];
   if (lists.some((list) => (list?.length ?? 0) > 0)) return true;
-  return job.targetObject?.role === 'goal';
+  if (job.targetObject?.role === 'goal') return true;
+  return (job.targetObjects ?? []).some((t) => (t.role ?? 'reference') === 'goal' && t.enabled !== false);
 }

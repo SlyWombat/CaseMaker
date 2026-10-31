@@ -108,6 +108,10 @@ describe('#662 the operation types', () => {
     expect(jobHasOperations({ targetObject: { role: 'goal' } })).toBe(true);
     // A REFERENCE is not an operation: it is never cut.
     expect(jobHasOperations({ targetObject: { role: 'reference' } })).toBe(false);
+    // #723 P2-3 — a part cut from several sides states one goal per setup.
+    expect(jobHasOperations({ targetObjects: [{ role: 'goal', enabled: true }] })).toBe(true);
+    expect(jobHasOperations({ targetObjects: [{ role: 'goal', enabled: false }] })).toBe(false);
+    expect(jobHasOperations({ targetObjects: [{ role: 'reference', enabled: true }] })).toBe(false);
   });
 
   it('creates the store item each type means', () => {
