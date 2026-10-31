@@ -15,12 +15,12 @@
  */
 
 import { useState } from 'react';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import { accessory, toggleAccessory, type AccessoryId } from '@/platform/machineAccessory';
 
 /** The switch, or nothing at all in a build that cannot open a socket. */
 export function MachineAccessory({ host, port, id }: { host: string; port: number; id: AccessoryId }) {
-  return canDriveMachine ? <AccessorySwitch host={host} port={port} id={id} /> : null;
+  return canReachMachine ? <AccessorySwitch host={host} port={port} id={id} /> : null;
 }
 
 /** `true` on, `false` off, `null` unknown — nothing has been sent, or the last press was unsure. */

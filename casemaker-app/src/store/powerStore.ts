@@ -69,7 +69,7 @@ function triesOf(tries: number | undefined): number {
 
 /** What is known about the machine at the moment of an Off. */
 export interface OffEvidence {
-  /** Whether this window can read a status line at all (`canDriveMachine`). */
+  /** Whether this window can read a status line at all (`canReachMachine`). */
   canReadStatus: boolean;
   /** A status line read JUST NOW, or null when the machine did not answer. */
   status: string | null;

@@ -1,7 +1,7 @@
 // The Z1 network protocol — pure codecs and the discover/identify/upload/status state machines.
 //
 // DESKTOP ONLY. This module is reached only through `machineBridge.ts`, itself reached only through
-// `loadMachineBridge()`'s `canDriveMachine` guard (#181). It must never enter the web bundle.
+// `loadMachineBridge()`'s `canReachMachine` guard (#181). It must never enter the web bundle.
 //
 // It is written from `/Z1-Bridge-Protocol.md`, which is the written description of the protocol
 // produced before this implementation existed. Do not add a fact here that is not in that document

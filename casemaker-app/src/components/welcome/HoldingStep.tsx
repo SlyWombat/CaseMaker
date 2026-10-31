@@ -62,7 +62,7 @@ import {
 } from '@/engine/cnc/mounts/bracket';
 import { TAPE_DEFAULTS } from '@/engine/cnc/engrave/jobSetup';
 import { KNOWN_DEFAULTS, readDefault } from '@/platform/defaultsClient';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import { surfaceWords, type MachineMountKind } from '@/platform/machineChange';
 import type { BedProfile } from '@/platform/locationClient';
@@ -1429,7 +1429,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
   // carries needs no escape and stays on offer.
   const shown = options.filter(
     (o) =>
-      canDriveMachine ||
+      canReachMachine ||
       mechanismOf(o.mount) === 'vise' ||
       (!o.disabled && now !== null && now.mount === mechanismOf(o.mount)),
   );
@@ -2166,7 +2166,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
             {now.parts.length > 1 && <span>· {now.parts.slice(1).join(' · ')}</span>}
           </>
         )}
-        {canDriveMachine && now !== null && (
+        {canReachMachine && now !== null && (
           <button
             type="button"
             className="btn btn--sm"
@@ -2494,7 +2494,7 @@ function MountRow({
           )}
         </span>
       </label>
-      {option.disabled && option.escape !== null && canDriveMachine && (
+      {option.disabled && option.escape !== null && canReachMachine && (
         <button
           type="button"
           className="btn btn--sm"

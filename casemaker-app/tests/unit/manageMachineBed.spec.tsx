@@ -18,7 +18,7 @@ import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 const HERE = dirname(fileURLToPath(import.meta.url));
 vi.mock('@/platform/capabilities', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/platform/capabilities')>();
-  return { ...actual, canDriveMachine: true };
+  return { ...actual, canReachMachine: true };
 });
 // #637 — the mount-tap runner is stubbed so the card host's plumbing (prompt, busy, completion) is
 // what this test drives.

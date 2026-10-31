@@ -47,9 +47,10 @@ the discovery name follows. **OBSERVED 2026-10-06: it is not.** The machine broa
 `Makera_Z1_010290`, so the shipped template does not describe the name a Z1 actually announces —
 the real form is `Makera_Z1_<serial>`. Ports 2222/3333 are as documented.
 
-**The web build cannot do this.** No browser opens a raw TCP or UDP socket; the desktop (Tauri)
-build is the only one where this code is reachable at all. The `canDriveMachine` capability in
-`src/platform/capabilities.ts` is what decides.
+**The web build cannot do this.** No browser opens a raw TCP or UDP socket. The `canReachMachine`
+capability in `src/platform/capabilities.ts` (#821) decides: the Tauri shell opens the socket
+itself; a LAN browser gets it through the local instance's HTTP relay (`/api/v1/machine/*`); the
+relay-less static web deploy compiles the bridge out and cannot reach a machine at all.
 
 **Windows only for development.** WSL2's NAT does not carry the LAN broadcast, so UDP discovery
 must be exercised from the Windows side (`/Fabrication.md` §5.7, §8).

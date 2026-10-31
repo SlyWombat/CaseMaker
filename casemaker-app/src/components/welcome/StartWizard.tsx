@@ -5,7 +5,7 @@ import { DEFAULT_FONT_ID, ensureSeedFontsLoaded } from '@/engine/fonts/registry'
 import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
 import { jobVise } from '@/engine/cnc/fixture';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import { probeMachine } from '@/platform/machineProbe';
 import { useSettingsStore } from '@/store/settingsStore';
 import { findTemplateAcrossSources } from '@/library/templateRegistry';
@@ -869,7 +869,7 @@ export function StartWizard(): JSX.Element {
               title="A job does not need a machine."
               onClick={next}
             >
-              {canDriveMachine ? wizardStep('machine').nextLabel : 'Continue without a machine'}
+              {canReachMachine ? wizardStep('machine').nextLabel : 'Continue without a machine'}
             </button>
           )}
           {step === 'stock' && confirmReplace === null && (

@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import { probeMachine } from '@/platform/machineProbe';
 import type { MachineRecord } from '@/platform/locationClient';
 import {
@@ -119,7 +119,7 @@ export function MachinePower({
     };
   }, [machine.id, machine.power]);
 
-  if (!canDriveMachine) return null;
+  if (!canReachMachine) return null;
   if (machine.power === null) {
     return (
       <>

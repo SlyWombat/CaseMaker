@@ -98,12 +98,13 @@ point:
 ## 2. Today's flow
 
 What exists at `aa1343b`. Paths are under `casemaker-app/src/`. The CNC sections sit behind
-`featureSim` (`?BETA=yes` on the web build); everything that touches the machine is desktop-only.
+`featureSim` (`?BETA=yes` on the web build); everything that touches the machine is in a
+machine-carrying bundle (the Tauri shell, or the house bundle a local instance serves — #821).
 
 ### 2.1 The screens, in order
 
 **A. Welcome → "Set up a cutting job…" → Start wizard** (`components/welcome/StartWizard.tsx`): (1)
-machine — a select over `MACHINES` (one entry, Makera Z1) with a desktop-only network check; writes
+machine — a select over `MACHINES` (one entry, Makera Z1) with a check that needs a machine-carrying bundle; writes
 `machineId`, the probe result and the frame calibration; (2) job — `badge-blank` or `blank`, which
 builds a project and seeds the stock; (3) hands over to the setup wizard.
 

@@ -79,12 +79,20 @@ function checkoutTag(): Plugin {
 
 export default defineConfig(({ mode }) => {
   // Issue #181 — the platform seam's single build-time switch. 'web' unless the build explicitly
-  // asks for the desktop target, so the default `npm run build` and the electricrv.ca `npm run
-  // deploy` are unaffected. `BUILD_TARGET` in the environment wins when set; `--mode desktop` is
-  // the cross-platform equivalent, used by the tauri:* npm scripts because a bare
-  // `BUILD_TARGET=desktop npm …` never works in Windows cmd/PowerShell. Either way the value ends
-  // up in `__BUILD_TARGET__`, which src/platform/capabilities.ts reads.
-  const BUILD_TARGET = process.env.BUILD_TARGET ?? (mode === 'desktop' ? 'desktop' : 'web');
+  // asks for a machine-carrying target, so the default `npm run build` and the electricrv.ca
+  // `npm run deploy` are unaffected (and stay relay-less, #821). `BUILD_TARGET` in the environment
+  // wins when set; `--mode desktop`/`--mode house` are the cross-platform equivalents, used by the
+  // tauri:* npm scripts and `build:house` because a bare `BUILD_TARGET=desktop npm …` never works
+  // in Windows cmd/PowerShell. Either way the value ends up in `__BUILD_TARGET__`, which
+  // src/platform/capabilities.ts reads.
+  // An explicit BUILD_TARGET is validated (a typo must not silently fall back to the relay-less
+  // web target, #821); a Vite mode is only a target when it names one, so the ordinary
+  // `development`/`production`/`test` modes keep building the web bundle.
+  const explicit = process.env.BUILD_TARGET;
+  if (explicit !== undefined && explicit !== 'web' && explicit !== 'desktop' && explicit !== 'house') {
+    throw new Error(`BUILD_TARGET must be web, desktop or house; got "${explicit}".`);
+  }
+  const BUILD_TARGET = explicit ?? (mode === 'desktop' || mode === 'house' ? mode : 'web');
 
   return {
     base: BASE,

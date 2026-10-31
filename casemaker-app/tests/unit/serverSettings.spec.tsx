@@ -28,7 +28,7 @@ import {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // A getter, so a test reads the capability at render rather than at import — the same seam
-// `manageMode.spec.tsx` uses for `canDriveMachine`.
+// `manageMode.spec.tsx` uses for `canReachMachine`.
 const caps = vi.hoisted(() => ({ server: true }));
 vi.mock('@/platform/capabilities', async (orig) => {
   const real = await orig<typeof import('@/platform/capabilities')>();

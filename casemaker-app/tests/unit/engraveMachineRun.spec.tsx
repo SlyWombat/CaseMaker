@@ -235,7 +235,7 @@ describe('#423 the run panel, in the real tree', () => {
 });
 
 // #442 (#414/#464) — what the engrave panel hands the run, built once and tested here rather than
-// by rendering the whole panel behind `canDriveMachine`.
+// by rendering the whole panel behind `canReachMachine`.
 describe('runContextFor', () => {
   const tool: Tool = {
     number: 1, id: null, name: 'A 30° engraver', typeText: 'type=tapered-ball', shape: 'tapered-ball',

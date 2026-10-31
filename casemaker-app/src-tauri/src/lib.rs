@@ -218,7 +218,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         // #255 — the machine bridge's raw-socket transport. The sockets live in Rust; the protocol
-        // lives in TypeScript under the `canDriveMachine` guard. See Z1-Bridge-Protocol.md §7.
+        // lives in TypeScript under the `canReachMachine` guard (#821). See Z1-Bridge-Protocol.md §7.
         .manage(machine::MachineTransport::default())
         .invoke_handler(tauri::generate_handler![
             machine::machine_udp_listen,

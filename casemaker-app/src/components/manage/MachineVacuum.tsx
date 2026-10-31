@@ -32,12 +32,12 @@
  */
 
 import { useState } from 'react';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import { toggleVacuum } from '@/platform/machineVacuum';
 
 /** The switch, or nothing at all in a build that cannot open a socket. Read at render, not at import. */
 export function MachineVacuum({ host, port }: { host: string; port: number }) {
-  return canDriveMachine ? <VacuumSwitch host={host} port={port} /> : null;
+  return canReachMachine ? <VacuumSwitch host={host} port={port} /> : null;
 }
 
 /** `true` on, `false` off, `null` unknown — nothing has been sent, or the last press was unsure. */

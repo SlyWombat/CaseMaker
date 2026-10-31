@@ -1,6 +1,6 @@
 // The Tauri-backed MachineTransport (Z1-Bridge-Protocol.md §7).
 //
-// DESKTOP ONLY — reached only through `machineBridge.ts` under the `canDriveMachine` guard. The
+// DESKTOP ONLY — reached only through `machineBridge.ts` under the `canReachMachine` guard. The
 // `@tauri-apps/api` import belongs here and nowhere else: importing it at this boundary is what
 // keeps the whole dependency out of the web bundle (#181).
 //

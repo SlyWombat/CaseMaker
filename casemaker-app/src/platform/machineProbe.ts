@@ -27,7 +27,7 @@
  * why it could not be read. This module only READS: nothing here writes a setting to a machine.
  *
  * THE DESKTOP-ONLY BOUNDARY. The real client reaches the bridge through `loadMachineBridge()`,
- * whose `await import()` sits behind `canDriveMachine` inside `capabilities.ts` — never a
+ * whose `await import()` sits behind `canReachMachine` inside `capabilities.ts` — never a
  * top-level import here, or the bridge leaks into the web bundle and `npm run check:platform-gate`
  * fails. In a browser `loadMachineBridge()` throws, and that becomes `unavailable` WITH the
  * reason, which the wizard shows rather than hiding the step.

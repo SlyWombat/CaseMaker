@@ -1,4 +1,8 @@
-// #181 — prove the default web bundle carries no desktop-only code.
+// #181/#821 — prove the RELAY-LESS web bundle carries no machine code, and that the HOUSE bundle
+// does. #821 split the capability: a bundle a local instance serves to LAN browsers (`--mode
+// house`) reaches the machine through that instance's relay, so it must carry the bridge; the
+// static web deploy has no relay, so it must not. The web half is the one that gates a leak; the
+// house half gates the opposite mistake (a split that compiles the bridge out of the relay build).
 //
 // `__BUILD_TARGET__` is 'web' unless a build asks for 'desktop' (vite.config.ts). The seam's rule
 // is that desktop-only modules live under src/platform/desktop/ and are reached ONLY through an
@@ -6,11 +10,9 @@
 // builds the web target into a temp outDir and asserts the desktop module's marker string is
 // absent from every emitted file. It exits non-zero and names the offending file otherwise.
 //
-// It also builds the desktop target and reports whether the marker made it in. That half is
-// informational, but it is no longer vacuous: `machineProbe.ts` (#280) and `machineUpload.ts`
-// (#255) both call `loadMachineBridge()`, so the desktop build should carry the marker and the web
-// build must not. The web half is the one that gates — it fails the moment a top-level (unguarded)
-// import leaks the module into the web bundle.
+// It then builds the house target and FAILS if the marker is absent (#821): that bundle is what a
+// local instance serves to LAN browsers, and it must be able to drive the machine through the
+// instance's relay. The desktop build's half stays informational.
 //
 // Not wired into `npm test`: a production build is slow. Run it with `npm run check:platform-gate`.
 
@@ -88,6 +90,25 @@ try {
   console.log(`check:platform-gate ok — no "${MARKER}" in the web build (${web.files.length} emitted files)`);
 } finally {
   if (web) rmSync(web.outDir, { recursive: true, force: true });
+}
+
+// #821 — the house build is the relay-served bundle and MUST carry it.
+let house;
+try {
+  house = await buildTarget('house');
+  const present = filesContaining(house.files, MARKER).length > 0;
+  if (!present) {
+    console.error(
+      '\ncheck:platform-gate FAILED — the house build does not carry the machine bridge.\n' +
+        '  A local instance serves this bundle to LAN browsers, and they drive the machine through\n' +
+        '  its relay: `canReachMachine` must be true for the house target and the bridge must be in\n' +
+        '  the bundle.',
+    );
+    process.exit(1);
+  }
+  console.log(`check:platform-gate — house build carries "${MARKER}" (the relay-served bundle can drive a machine)`);
+} finally {
+  if (house) rmSync(house.outDir, { recursive: true, force: true });
 }
 
 // Informational: does the desktop build carry it? (Not a failure if not — see the header note.)

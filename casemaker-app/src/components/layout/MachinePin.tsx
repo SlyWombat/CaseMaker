@@ -1,6 +1,6 @@
 import { useEffect, type JSX } from 'react';
 import { MILL_MODELS } from '@/engine/cnc/machine';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import { startHeartbeat, stopHeartbeat } from '@/platform/machineHeartbeat';
 import { machineDisplayName } from '@/platform/locationClient';
 import { useMachineNoticeStore } from '@/store/machineNoticeStore';
@@ -27,7 +27,7 @@ function useMachineHeartbeat(): void {
   const host = useMachineStore((s) => s.machine?.host ?? null);
   const port = useMachineStore((s) => s.machine?.port ?? null);
   useEffect(() => {
-    if (!canDriveMachine || host === null || port === null) {
+    if (!canReachMachine || host === null || port === null) {
       stopHeartbeat();
       return;
     }

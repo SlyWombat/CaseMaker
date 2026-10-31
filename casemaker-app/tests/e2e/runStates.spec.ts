@@ -12,15 +12,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { machineServerPort } from '../../scripts/e2ePort';
+import { houseServerPort } from '../../scripts/e2ePort';
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 
 // #816 — the console is reached only in the DESKTOP target (`loadMachineBridge` is behind
-// `canDriveMachine`): the spec runs against the desktop-mode dev server Playwright starts beside
+// `canReachMachine`): the spec runs against the desktop-mode dev server Playwright starts beside
 // the web one (playwright.config.ts). The fake then sits exactly where the bench does — on the
 // house HTTP bridge's `/api/v1/machine/*`, behind `httpTransport`.
-test.use({ baseURL: `http://127.0.0.1:${machineServerPort()}` });
+test.use({ baseURL: `http://127.0.0.1:${houseServerPort()}` });
 
 test.setTimeout(300_000);
 

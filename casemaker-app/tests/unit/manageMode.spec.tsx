@@ -39,15 +39,17 @@ import { formatStamp } from '@/components/manage/display';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// #354 — vitest runs the WEB target, so `canDriveMachine` is already false here; the desktop half of
+// #354 — vitest runs the WEB target, so `canReachMachine` is already false here; the desktop half of
 // the machines tests turns it on through the same seam `startWizard.spec.tsx` uses (#346). A getter,
 // so each test reads the value at render rather than at import.
 const caps = vi.hoisted(() => ({ drive: false }));
+import { NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
+
 vi.mock('@/platform/capabilities', async (orig) => {
   const real = await orig<typeof import('@/platform/capabilities')>();
   return {
     ...real,
-    get canDriveMachine() {
+    get canReachMachine() {
       return caps.drive;
     },
   };
@@ -1020,11 +1022,8 @@ describe('#354 — a build with no socket offers no check', () => {
     expect(q('manage-machine-address')).toBeNull();
     expect(q('manage-machine-connect')).toBeNull();
 
-    // The wizard's own words, less the clause about setting a job up (there is no job here).
-    expect(screen.getByTestId('manage-machine-web-hint').textContent).toBe(
-      'This instance cannot control a machine. To connect one, launch Case Maker from your local ' +
-        '(desktop) instance.',
-    );
+    // #821 — the ONE sentence: why this page cannot, and where a machine can be driven.
+    expect(screen.getByTestId('manage-machine-web-hint').textContent).toBe(NO_MACHINE_RELAY_SENTENCE);
 
     // What is NOT a check stays: the my-machine file is a fact about the setup, not a probe (#247).
     expect(q('manage-machine-export')).not.toBeNull();

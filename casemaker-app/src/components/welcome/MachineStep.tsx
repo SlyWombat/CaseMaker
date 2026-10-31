@@ -24,7 +24,7 @@ import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react
 import { MILL_MODELS } from '@/engine/cnc/machine';
 import { formatStamp } from '@/components/manage/display';
 import { stateColour, stateWord } from '@/components/viewport/machineWords';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine, NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
 import { MACHINE_MOUNT_WORDS, activeMountOf, activeProfileOf, surfaceWords } from '@/platform/machineChange';
 import { readStatusLine } from '@/platform/desktop/protocol';
 import { readMachineRest } from '@/platform/machineChangeRun';
@@ -139,7 +139,7 @@ export function MachineStep({
     if (opened.current) return;
     opened.current = true;
     setCheckStarted(true);
-    if (!canDriveMachine) return;
+    if (!canReachMachine) return;
     onCheck();
   }, [onCheck]);
 
@@ -227,7 +227,7 @@ export function MachineStep({
         </p>
       )}
 
-      {canDriveMachine && (
+      {canReachMachine && (
         <>
           <div style={STATE_ROW}>
             <span
@@ -332,10 +332,11 @@ export function MachineStep({
         </>
       )}
 
-      {!canDriveMachine && (
+      {/* #821 — the same one sentence the Manage card carries: the relay-less deploy cannot drive
+          a machine, and says where it can. The job can still be set up here. */}
+      {!canReachMachine && (
         <p style={NOTE} data-testid="start-wizard-machine-note-build">
-          This instance cannot control a machine. To connect one, launch Case Maker from your local
-          (desktop) instance. You can still set the job up here, without a machine.
+          {NO_MACHINE_RELAY_SENTENCE}
         </p>
       )}
     </div>

@@ -14,12 +14,12 @@
  */
 
 import { useState } from 'react';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import { unlockMachine } from '@/platform/machineUnlock';
 
 /** The control, or nothing at all in a build that cannot open a socket. */
 export function MachineUnlock({ host, port }: { host: string; port: number }) {
-  return canDriveMachine ? <UnlockButton host={host} port={port} /> : null;
+  return canReachMachine ? <UnlockButton host={host} port={port} /> : null;
 }
 
 function UnlockButton({ host, port }: { host: string; port: number }) {

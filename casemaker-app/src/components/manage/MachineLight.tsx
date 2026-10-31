@@ -13,12 +13,12 @@
  */
 
 import { useState } from 'react';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import { toggleLight } from '@/platform/machineLight';
 
 /** The switch, or nothing at all in a build that cannot open a socket. */
 export function MachineLight({ host, port }: { host: string; port: number }) {
-  return canDriveMachine ? <LightSwitch host={host} port={port} /> : null;
+  return canReachMachine ? <LightSwitch host={host} port={port} /> : null;
 }
 
 /** `true` on, `false` off, `null` unknown — nothing has been sent, or the last press was unsure. */

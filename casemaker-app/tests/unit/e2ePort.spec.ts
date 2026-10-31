@@ -8,7 +8,7 @@ import {
   E2E_PORT_LAST,
   devServerPort,
   fnv1a,
-  machineServerPort,
+  houseServerPort,
   portForCheckout,
 } from '../../scripts/e2ePort';
 
@@ -42,11 +42,11 @@ describe('#704 the dev-server port belongs to the checkout', () => {
     expect(fnv1a('a')).toBe(fnv1a('a'));
   });
 
-  // #816 — the desktop-target server sits one above the web one, derived the same way.
-  it('the desktop-target server is one port above, and refuses to overflow', () => {
-    expect(machineServerPort({ CASEMAKER_PORT: '5393' }, '/one/tree')).toBe(5394);
-    expect(machineServerPort({ CI: 'true' }, '/one/tree')).toBe(DEFAULT_DEV_PORT + 1);
-    expect(machineServerPort({}, '/one/tree')).toBe(portForCheckout('/one/tree') + 1);
-    expect(() => machineServerPort({ CASEMAKER_PORT: '65535' }, '/one/tree')).toThrow(/CASEMAKER_PORT/);
+  // #816/#821 — the house-target server sits one above the web one, derived the same way.
+  it('the house-target server is one port above, and refuses to overflow', () => {
+    expect(houseServerPort({ CASEMAKER_PORT: '5393' }, '/one/tree')).toBe(5394);
+    expect(houseServerPort({ CI: 'true' }, '/one/tree')).toBe(DEFAULT_DEV_PORT + 1);
+    expect(houseServerPort({}, '/one/tree')).toBe(portForCheckout('/one/tree') + 1);
+    expect(() => houseServerPort({ CASEMAKER_PORT: '65535' }, '/one/tree')).toThrow(/CASEMAKER_PORT/);
   });
 });

@@ -68,10 +68,10 @@ vi.mock('@/engine/exportTrigger', () => ({ saveEngraveProgram: vi.fn() }));
 // #469 — the desktop gate around the machine surfaces. This harness is jsdom, where the real
 // `__BUILD_TARGET__` is not desktop, so the routing tests would otherwise be dead code. The
 // getter keeps the other 90-odd tests in the web-build state they were written for.
-const caps = vi.hoisted(() => ({ canDriveMachine: false }));
+const caps = vi.hoisted(() => ({ canReachMachine: false }));
 vi.mock('@/platform/capabilities', () => ({
-  get canDriveMachine() {
-    return caps.canDriveMachine;
+  get canReachMachine() {
+    return caps.canReachMachine;
   },
 }));
 
@@ -2934,13 +2934,13 @@ describe('EngravePanel — the release step routing (#469)', () => {
   }
 
   beforeEach(() => {
-    caps.canDriveMachine = true;
+    caps.canReachMachine = true;
     resetCncMode();
     resetEngravePackageStore();
   });
 
   afterEach(() => {
-    caps.canDriveMachine = false;
+    caps.canReachMachine = false;
     useEngraveRunStore.getState().reset();
     useMachineStore.setState({ machine: null });
     resetEngraveReleaseStore();

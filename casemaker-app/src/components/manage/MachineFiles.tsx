@@ -15,7 +15,7 @@
  */
 
 import { useState } from 'react';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import {
   deleteMachineFile,
   isUploadedFile,
@@ -49,7 +49,7 @@ export interface MachineFilesProps {
 
 /** The panel, or nothing at all in a build that cannot open a socket. */
 export function MachineFiles(props: MachineFilesProps) {
-  return canDriveMachine ? <FilesPanel {...props} /> : null;
+  return canReachMachine ? <FilesPanel {...props} /> : null;
 }
 
 function FilesPanel({ host, port, busy }: MachineFilesProps) {

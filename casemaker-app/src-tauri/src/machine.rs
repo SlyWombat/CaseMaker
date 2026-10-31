@@ -14,7 +14,8 @@
 // loops and their tests) is portable, so `cargo test` on any host exercises the fake port.
 //
 // The web build cannot reach any of this: no browser opens a raw socket, and the TypeScript side
-// only calls these through the `canDriveMachine` guard (#181).
+// only calls these from a machine-carrying bundle through the `canReachMachine` guard (#181,
+// #821 — the relay-less web deploy compiles the bridge out).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

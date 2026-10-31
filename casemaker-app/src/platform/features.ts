@@ -12,8 +12,9 @@
 // SimPanel), so a visit without the switch downloads none of it. `scripts/check-sim-gate.mjs`
 // holds that line: the entry chunk carries no simulation code, and the lazy chunk exists.
 //
-// `canDriveMachine` (capabilities.ts) is NOT part of this: a browser cannot open a socket to the
-// controller whatever the address says, and that gate stays compile-time.
+// `canReachMachine` (capabilities.ts) is NOT part of this: whether the bundle carries the machine
+// bridge is compile-time (#821), whatever the address says — a browser reaches the machine only
+// through a local instance's relay, and a relay-less web page cannot reach one at all.
 
 /** The query key, matched case-insensitively (`BETA`, `beta`). The value must be `yes`. */
 export const BETA_PARAM = 'BETA';

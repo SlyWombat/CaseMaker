@@ -26,7 +26,7 @@ import { accessoriesFor, useLocationStore } from '@/store/locationStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import { mountNum, mountTapFor, probeFor, accessoryNameFor } from '@/engine/cnc/registration/mountContext';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -137,7 +137,7 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
     successNote: 'the jaw top is recorded',
   });
 
-  if (frameProblem !== null || !canDriveMachine || target === null || mountTap === null) return null;
+  if (frameProblem !== null || !canReachMachine || target === null || mountTap === null) return null;
 
   return (
     <span data-testid="manage-bed-tap-jaw">
@@ -245,7 +245,7 @@ export function MachineBed({ machine }: { machine: MachineRecord }) {
           {/* #693 — the wizard's Manage entry: with no target it offers the mounts this house can
               give, in step 1. A build with no socket cannot answer the save lines, so it does not
               offer the physical change at all (#354's rule). */}
-          {canDriveMachine && (
+          {canReachMachine && (
             <button
               type="button"
               className="btn btn--sm"

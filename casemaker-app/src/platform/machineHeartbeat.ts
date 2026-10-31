@@ -10,7 +10,7 @@
  * on the store when the answer flips.
  *
  * THE WEB-SAFE BOUNDARY, same shape as `machineProbe` / `machineUpload`: the real client is the
- * bridge reached through `loadMachineBridge()` behind the `canDriveMachine` guard — never a
+ * bridge reached through `loadMachineBridge()` behind the `canReachMachine` guard — never a
  * top-level import of `platform/desktop/`, or the bridge leaks into the web bundle and
  * `npm run check:platform-gate` fails. The poll floor is restated here rather than imported from
  * `protocol.ts` for the same reason; `machineHeartbeat.spec.ts` asserts the two numbers are equal.

@@ -57,11 +57,13 @@ vi.mock('@/engine/fonts/registry', async (orig) => {
 });
 
 const caps = vi.hoisted(() => ({ drive: true }));
+import { NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
+
 vi.mock('@/platform/capabilities', async (orig) => {
   const real = await orig<typeof import('@/platform/capabilities')>();
   return {
     ...real,
-    get canDriveMachine() {
+    get canReachMachine() {
       return caps.drive;
     },
   };
@@ -255,9 +257,9 @@ describe('#280/#682 — step 1, the machine check', () => {
     caps.drive = false;
     try {
       render(<StartWizard />);
+      // #821 — the same ONE sentence the Manage card carries.
       const note = screen.getByTestId('start-wizard-machine-note-build');
-      expect(note.textContent).toContain('This instance cannot control a machine');
-      expect(note.textContent).toContain('local (desktop) instance');
+      expect(note.textContent).toBe(NO_MACHINE_RELAY_SENTENCE);
       // No check, no address box, no Connect, no fold, no Back: nothing that pretends a socket exists.
       expect(screen.queryByTestId('start-wizard-check')).toBeNull();
       expect(screen.queryByTestId('start-wizard-address')).toBeNull();

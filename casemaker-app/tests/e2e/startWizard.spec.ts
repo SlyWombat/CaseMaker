@@ -18,10 +18,10 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
 
-  // Step 1 — a browser cannot open a raw socket, and the wizard says so instead of offering a
-  // check it cannot run (#346): the note, Cancel, and Continue without a machine.
+  // Step 1 — the e2e server is the relay-less web build, and the wizard says why instead of
+  // offering a check it cannot run (#346/#821): the note, Cancel, and Continue without a machine.
   await expect(page.getByTestId('start-wizard-machine-note-build')).toContainText(
-    'cannot control a machine',
+    'without the machine relay',
   );
   await expect(page.getByTestId('start-wizard-check')).toHaveCount(0);
   await expect(page.getByTestId('start-wizard-next')).toHaveText('Continue without a machine');

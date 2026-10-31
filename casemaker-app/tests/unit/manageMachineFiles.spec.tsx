@@ -26,7 +26,7 @@ vi.mock('@/platform/capabilities', async (orig) => {
   const real = await orig<typeof import('@/platform/capabilities')>();
   return {
     ...real,
-    get canDriveMachine() {
+    get canReachMachine() {
       return caps.drive;
     },
   };

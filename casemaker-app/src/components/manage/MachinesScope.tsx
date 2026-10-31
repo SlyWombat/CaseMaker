@@ -24,7 +24,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { MACHINE_FRAME_UNREAD, PRINTER_PROFILES, millModelById, type Mill } from '@/engine/cnc/machine';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine, NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
 import { controllerState } from '@/platform/machineUpload';
 import { probeMachine } from '@/platform/machineProbe';
 import {
@@ -98,7 +98,7 @@ export function MachinesScope() {
   const [serialResult, setSerialResult] = useState<SerialCheckResult | null>(null);
 
   useEffect(() => {
-    if (!canDriveMachine) return;
+    if (!canReachMachine) return;
     let live = true;
     void (async () => {
       if (!(await serialAvailable())) return;
@@ -253,7 +253,7 @@ export function MachinesScope() {
           {/* #354 — a build that cannot open a socket to a controller does not offer to check one.
               The check, the address box and Connect used to sit here under a sentence saying a check
               could only ever answer "unavailable": #346's rule, which the wizard already follows. */}
-          {canDriveMachine && (
+          {canReachMachine && (
             <div className="btn-row">
               <button
                 type="button"
@@ -292,10 +292,11 @@ export function MachinesScope() {
           )}
         </div>
 
-        {!canDriveMachine && (
+        {/* #821 — the relay-less deploy says why in one sentence, and where a machine can be
+            driven from. */}
+        {!canReachMachine && (
           <p className="hint" data-testid="manage-machine-web-hint">
-            This instance cannot control a machine. To connect one, launch Case Maker from your local
-            (desktop) instance.
+            {NO_MACHINE_RELAY_SENTENCE}
           </p>
         )}
 
@@ -345,7 +346,7 @@ export function MachinesScope() {
             <div className="btn-row">
               {/* The card is the RECORD of the last check either way; where there is no socket,
                   re-running one is offered by nothing (#354). */}
-              {canDriveMachine && (
+              {canReachMachine && (
                 <button
                   type="button"
                   className="btn btn--sm"
@@ -370,7 +371,7 @@ export function MachinesScope() {
             </div>
             {machineStatus}
             {/* #390 — the vacuum switch, above the console. Like it, it owns its own
-                `canDriveMachine` rule and draws nothing without it (#354's rule).
+                `canReachMachine` rule and draws nothing without it (#354's rule).
 
                 THE `key` IS THE RESET, and it names one CONNECTION rather than one machine. The
                 switch shows the mode it last sent, which is a claim about the connection that sent
@@ -419,11 +420,11 @@ export function MachinesScope() {
             {/* #431 — the probe laser's two options, both off by default. */}
             <MachineLaserOptions />
             {/* #302 item 4 — the console, collapsed, at the foot of the card. It owns its own
-                `canDriveMachine` rule and draws nothing without it, so a web build sees the card it
+                `canReachMachine` rule and draws nothing without it, so a web build sees the card it
                 has always seen (#354's rule: do not offer what cannot work). */}
             <MachineConsole host={machine.host} port={machine.port} />
             {/* #772 — the card's files: what is on the SD card, and deleting a file this app put
-                there. Same `canDriveMachine` rule as the console, and the seam owns the delete
+                there. Same `canReachMachine` rule as the console, and the seam owns the delete
                 rules (only this app's uploads, never while a job runs). */}
             <MachineFiles host={machine.host} port={machine.port} busy={machine.busy === true} />
           </div>
@@ -450,7 +451,7 @@ export function MachinesScope() {
             runs over this link as over TCP :2222, including the framing, but no job is sent over it
             yet — the Cut flow is network-only, and the pane says so rather than leaving a reader to
             assume. The model cannot be established: nothing on the link announces it. */}
-        {canDriveMachine && serialHere && (
+        {canReachMachine && serialHere && (
           <div className="mcard" data-testid="manage-serial">
             <h4>
               USB serial <span className="tag tag--muted">desktop only</span>

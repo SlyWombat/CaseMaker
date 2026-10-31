@@ -1,8 +1,9 @@
-// The machine bridge — the desktop build's entry point to the Z1 (#255).
+// The machine bridge — the entry point to the Z1 for the bundles that carry it (#255).
 //
-// DESKTOP ONLY. This file must NEVER appear in the web bundle. It is reached only through
+// MACHINE-CARRYING BUNDLES ONLY (desktop and house, #821). This file must NEVER appear in the
+// relay-less web bundle. It is reached only through
 // `loadMachineBridge()` in ../capabilities.ts, whose `await import()` sits behind the
-// `canDriveMachine` guard. `tools/check-platform-gate.mjs` greps the default web build for
+// `canReachMachine` guard. `tools/check-platform-gate.mjs` greps the default web build for
 // DESKTOP_ONLY_MARKER and fails if it is found.
 //
 // It is the public surface #256's callers use: discover, identify, upload a verified program, read

@@ -30,7 +30,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { consoleProblem } from '@/engine/cnc/consoleGate';
-import { canDriveMachine } from '@/platform/capabilities';
+import { canReachMachine } from '@/platform/capabilities';
 import { attachConsole, type ConsoleSendResult } from '@/platform/machineConsole';
 
 /** One exchange: what was typed, what came back, and what to say about it. */
@@ -50,7 +50,7 @@ interface Entry {
 
 /** The panel, or nothing at all in a build that cannot open a socket. Read at render, not at import. */
 export function MachineConsole({ host, port }: { host: string; port: number }) {
-  return canDriveMachine ? <ConsolePanel host={host} port={port} /> : null;
+  return canReachMachine ? <ConsolePanel host={host} port={port} /> : null;
 }
 
 function ConsolePanel({ host, port }: { host: string; port: number }) {

@@ -16,7 +16,7 @@ const world = vi.hoisted(() => ({
 
 vi.mock('@/platform/capabilities', async (orig) => ({
   ...(await orig<typeof import('@/platform/capabilities')>()),
-  canDriveMachine: true,
+  canReachMachine: true,
 }));
 vi.mock('@/platform/machineProbe', () => ({
   probeMachine: async () =>
