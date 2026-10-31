@@ -23,7 +23,7 @@
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { flatStockOutline, itemProfile } from '@/engine/cnc/engrave/partPlan';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
-import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { jobSetups, setupTools, toolItemsFor } from '@/engine/cnc/engrave/jobSetup';
 import type { Face } from '@/engine/cnc/setups/types';
 import type { Profile } from '@/engine/compiler/profile';
 import type { EngraveAnyItem, EngraveFrameShape, EngraveJob } from '@/types/engraveJob';
@@ -79,7 +79,9 @@ export interface CopperTopologyReport extends CopperTopologyCounts {
  * work frame (#743 P-8's import). The copper and the band are built from the frame's own `around`,
  * so each side is read in the frame its program was posted in.
  */
-export function pcbCopperTopologyInputs(job: EngraveJob): { setupIndex: number; faceUp: Face; input: PcbCopperTopologyInput }[] {
+export function pcbCopperTopologyInputs(
+  job: EngraveJob,
+): { setupIndex: number; faceUp: Face; cutterKey: string | null; input: PcbCopperTopologyInput }[] {
   const colour = job.stock.colour;
   const capMm = colour !== undefined && colour.kind === 'laminate' ? colour.capMm : null;
   if (capMm === null || !(capMm > 0)) return [];
@@ -106,20 +108,30 @@ export function pcbCopperTopologyInputs(job: EngraveJob): { setupIndex: number; 
     return { capMm, stock, copper, band };
   };
 
-  const out: { setupIndex: number; faceUp: Face; input: PcbCopperTopologyInput }[] = [];
+  const out: { setupIndex: number; faceUp: Face; cutterKey: string | null; input: PcbCopperTopologyInput }[] = [];
   jobSetups(job).forEach((setup, i) => {
     // A setup owns the isolation frame it cuts; a frame in no setup (a hand-added one on a saved
     // list that predates it) is left to the single-frame fallback below.
     const frame = frames.find((f) => setup.itemIds.includes(f.id));
     if (frame === undefined) return;
     const input = forFrame(frame);
-    if (input !== null) out.push({ setupIndex: i + 1, faceUp: setup.orientation.top, input });
+    if (input === null) return;
+    // The cutter that cuts THIS isolation: the run's check reads the program that drew the
+    // separation, so the caller can find its sweep.
+    const keys = setupTools(setup, job);
+    const cutterKey = keys.find((key, k) => toolItemsFor(setup, key, k).includes(frame.id)) ?? null;
+    out.push({ setupIndex: i + 1, faceUp: setup.orientation.top, cutterKey, input });
   });
   if (out.length === 0) {
     // The document's first isolation frame is the one a job without a saved list states (the
     // single-sided reading, unchanged).
     const input = forFrame(frames[0]!);
-    if (input !== null) out.push({ setupIndex: 1, faceUp: jobSetups(job)[0]?.orientation.top ?? 'top', input });
+    if (input !== null) {
+      const setup = jobSetups(job)[0];
+      const keys = setup === undefined ? [] : setupTools(setup, job);
+      const cutterKey = setup === undefined ? null : (keys.find((key, k) => toolItemsFor(setup, key, k).includes(frames[0]!.id)) ?? null);
+      out.push({ setupIndex: 1, faceUp: setup?.orientation.top ?? 'top', cutterKey, input });
+    }
   }
   return out;
 }

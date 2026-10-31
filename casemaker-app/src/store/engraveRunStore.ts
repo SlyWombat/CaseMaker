@@ -590,6 +590,19 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const pcbSides = pcbCopperTopologyInputs(job);
     const lastIndexOfSetup = new Map<number, number>();
     generated.programs.forEach((program, index) => lastIndexOfSetup.set(program.setupIndex, index));
+    // #743 P-8 — THE CHECK READS THE PROGRAM THAT DREW THE SEPARATION. The design's last-program
+    // reading assumed the earlier programs' material is carried into it, but a board's isolation
+    // is a cone, and the column engine (which sweeps a cone) hands back no removal mesh — so the
+    // later programs' sweeps hold none of the isolation, and a last-program check would read the
+    // board's copper uncut. The isolation's OWN program is the sweep that contains the cut, on
+    // both sides; the drills and the cut-out remove material the copper check does not ask about.
+    const isolationIndexOf = (side: (typeof pcbSides)[number]): number => {
+      const at =
+        side.cutterKey === null
+          ? -1
+          : generated.programs.findIndex((p) => p.setupIndex === side.setupIndex && p.toolKey === side.cutterKey);
+      return at >= 0 ? at : (lastIndexOfSetup.get(side.setupIndex) ?? -1);
+    };
     const copperSides: CopperSideReport[] = [];
     // #445 §4 — the thread facts belong to the first engraving program, the one
     // `generated.threads` describes; a facing pass or a later program states none.
@@ -715,7 +728,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // the walk awaits this hook before loading the next.
           if (pcbSides.length > 0) {
             // #743 P-5 — the board's own check, on the sweep that has finished drawing this side.
-            const side = pcbSides.find((s) => lastIndexOfSetup.get(s.setupIndex) === index);
+            const side = pcbSides.find((s) => isolationIndexOf(s) === index);
             if (side === undefined) return;
             const report = await client.simOracle([], side.input);
             if (report.copper === undefined) return;
