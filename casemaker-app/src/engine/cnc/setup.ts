@@ -51,7 +51,13 @@ export type PartSpec =
       /** Height of the colour change above the back face, if the part is two-colour. */
       colourSplit?: Mm;
     }
-  | { kind: 'cylinder'; diameter: Mm; length: Mm }
+  | {
+      kind: 'cylinder';
+      diameter: Mm;
+      length: Mm;
+      /** #777 — a BLOCK's section about the axis; absent for a round rod (every pre-#777 caller). */
+      section?: import('@/engine/cnc/rotary/wrap').RotarySection;
+    }
   /** A compiled BuildPlan node, resolved by the caller. */
   | { kind: 'node'; id: string };
 

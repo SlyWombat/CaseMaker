@@ -17,7 +17,7 @@ import {
   newEngraveTraceId,
 } from '@/engine/cnc/engrave/defaults';
 import { defaultStockProud, jobVise, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
-import { cylinderFrameOf, rodDimsOf, rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
+import { chuckStockOf, cylinderFrameOf, rodDimsOf, rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
 import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { defaultSacrificialUnder, sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
@@ -2699,13 +2699,21 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     // in a frame that says it stands on end.
     setRotaryHolding: (rotary, vise, sacrificial) =>
       apply((job) => {
-        const size = rodSizeOf(job.stock);
-        if (size === null) return job;
+        // #777 — the chuck takes a ROD or a BLOCK. `chuckStockOf` reads which one the stock is
+        // (the stock step's form decides a square box); a disc is never offered the chuck.
+        const held = chuckStockOf(job);
+        if (held === null) return job;
         const { shape: _shape, diameter: _diameter, ...box } = job.stock;
         if (rotary !== null) {
           const next: EngraveJob = {
             ...job,
-            stock: { ...box, ...rotaryBoxForRod(size.diameter, size.length) },
+            stock: {
+              ...box,
+              ...(held.kind === 'round'
+                ? rotaryBoxForRod(held.diameter, held.length)
+                : // A block in the chuck: its longest dimension along X, the section across.
+                  { length: held.length, width: held.width, thickness: held.height }),
+            },
             workholding: { kind: 'rotary-chuck', rotary: { ...rotary } },
           };
           // The layout is re-stated on the map ONCE, at the frame change. A later edit to the
@@ -2713,11 +2721,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           // has them: the findings then say which band a moved item entered.
           return job.workholding.kind === 'rotary-chuck' ? next : centredOnRotaryFreeSpan(next);
         }
-        // Back in the vise: the standing rod again, with the answers' vise and sacrificial.
+        // Back in the vise: the standing rod again (a block stays axis-frame), with the answers'
+        // vise and sacrificial.
         if (job.workholding.kind !== 'rotary-chuck') return job;
         return {
           ...job,
-          stock: { ...box, ...standingBoxForRod(size.diameter, size.length) },
+          stock: {
+            ...box,
+            ...(held.kind === 'round'
+              ? standingBoxForRod(held.diameter, held.length)
+              : { length: held.length, width: held.width, thickness: held.height }),
+          },
           workholding: { kind: 'vise', vise: { ...vise } },
           ...(sacrificial === undefined ? {} : { sacrificial }),
         };

@@ -261,6 +261,7 @@ export function SimPanel() {
       ? null
       : {
           radius: rodDiameter / 2,
+          section: { kind: 'round', diameter: rodDiameter },
           circumference: Math.PI * rodDiameter,
           stickout: rodChuck.stickout,
           grip: Math.max(0, stock.length - rodChuck.stickout),

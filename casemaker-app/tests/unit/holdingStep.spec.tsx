@@ -306,8 +306,11 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     openHolding(dj({ length: 200, width: 100, thickness: 5 }));
 
     expect(radio('rotary').disabled).toBe(true);
-    expect(rowText('rotary')).toContain('does not fit the rotary');
+    // #777 — the block's sentence names the section and the envelope it turns.
+    expect(rowText('rotary')).toContain('5 × 100 mm section');
+    expect(rowText('rotary')).toContain('envelope');
     expect(rowText('rotary')).toContain('80 × 150 mm');
+    expect(rowText('rotary')).toContain('stays a vise job');
     // A machine change cannot make the stock fit, so there is no escape on that line.
     expect(screen.queryByTestId('engrave-setup-change-rotary')).toBeNull();
   });

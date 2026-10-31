@@ -909,7 +909,7 @@ export function toSetup(
   if (rotary !== null) {
     const chuck = job.workholding.kind === 'rotary-chuck' ? job.workholding.rotary : null;
     return stubSetup(
-      { kind: 'cylinder', diameter: rotary.radius * 2, length: rotary.length },
+      { kind: 'cylinder', diameter: rotary.radius * 2, length: rotary.length, section: rotary.section },
       {
         kind: 'rotary-chuck',
         jawDiameter: chuck?.gripDiameter ?? rotary.radius * 2,

@@ -283,8 +283,9 @@ export interface MountOptionArgs {
   rotaryEnvelope?: { diameter: number; length: number };
   /**
    * Whether the job's stock is ROUND (#240): a rod in step 2, or a box already in the axis frame.
-   * The rotary chuck holds round stock; a plate or a block is refused with the sentence that
-   * points back at step 2. A disc is round in PLAN but is not a rod — see {@link disc}.
+   * #777 — the chuck also takes a squared BLOCK when its section's diagonal fits the envelope;
+   * `round` only selects which reading is used (a rod's diameter, or a block's diagonal). A disc
+   * is round in PLAN but is not a rod — see {@link disc}.
    */
   round?: boolean;
   /**
@@ -419,13 +420,16 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       continue;
     }
     if (mount === 'rotary' && !rotaryStockFits(stock, args.round === true, envelope)) {
-      out.push({
-        ...base,
-        hint: null,
-        disabled: true,
-        reason: `the stock does not fit the rotary's ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm`,
-        escape: null,
-      });
+      // #777 — a block's sentence names the envelope its section turns, and says which mount
+      // takes it, rather than "it does not fit". A rod keeps the diameter/length reading.
+      const dims = [stock.length, stock.width, stock.thickness].sort((a, b) => a - b);
+      const reason =
+        args.round === true
+          ? `the stock does not fit the rotary's ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm`
+          : `a ${fmt(dims[0]!)} × ${fmt(dims[1]!)} mm section turns a ⌀${fmt(
+              Math.hypot(dims[0]!, dims[1]!),
+            )} mm envelope, over the rotary's ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm — it stays a vise job`;
+      out.push({ ...base, hint: null, disabled: true, reason, escape: null });
       continue;
     }
 

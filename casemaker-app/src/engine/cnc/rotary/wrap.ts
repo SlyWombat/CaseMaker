@@ -26,6 +26,7 @@
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
+import { chuckStockOf } from '@/engine/cnc/stockStart';
 import type { CamMove, CamOperation, ToolpathIR } from '@/engine/cnc/cam/ir';
 import { SAFE_Z, estimateCycleSeconds, type RapidEstimate } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
@@ -54,11 +55,58 @@ export const ROTARY_CLEARANCE_MM = 3;
 export const ROTARY_MAX_DIAMETER_MM = 80;
 export const ROTARY_MAX_LENGTH_MM = 150;
 
+/**
+ * #777 — THE STOCK'S SECTION about the chuck's axis. A round rod is a circle; a BLOCK in the
+ * chuck is its square/rectangular section (`width` across machine Y, `height` across machine Z).
+ * The map is authored on the turned ENVELOPE (the circle that circumscribes the section), so its
+ * radius is {@link sectionEnvelopeRadius}; the stock's own surface, at a given angle, is
+ * {@link sectionRadiusAt}.
+ */
+export type RotarySection =
+  | { kind: 'round'; diameter: number }
+  | { kind: 'rect'; width: number; height: number };
+
+/** The section's circumscribed radius: a rod's radius, or half a block's diagonal, mm. */
+export function sectionEnvelopeRadius(section: RotarySection): number {
+  return section.kind === 'round' ? section.diameter / 2 : Math.hypot(section.width, section.height) / 2;
+}
+
+/**
+ * The radius of the section's OWN surface at θ — the distance from the axis to the edge, mm.
+ * θ is radians from +Z toward +Y (the rotary work frame and the column engine's angle). A circle
+ * is constant; a rectangle is `min(halfWidth / |sin θ|, halfHeight / |cos θ|)`.
+ */
+export function sectionRadiusAt(section: RotarySection, theta: number): number {
+  if (section.kind === 'round') return section.diameter / 2;
+  const a = section.width / 2;
+  const b = section.height / 2;
+  const s = Math.abs(Math.sin(theta));
+  const c = Math.abs(Math.cos(theta));
+  const alongY = s > 1e-12 ? a / s : Infinity;
+  const alongZ = c > 1e-12 ? b / c : Infinity;
+  return Math.min(alongY, alongZ);
+}
+
+/** The section in the operator's words: "a ⌀20 mm rod", "a 20 × 30 mm block (⌀36.06 envelope)". */
+export function sectionWords(section: RotarySection): string {
+  if (section.kind === 'round') return `a ⌀${round2(section.diameter)} mm rod`;
+  return `a ${round2(section.width)} × ${round2(section.height)} mm block (the turned envelope is ⌀${round2(
+    2 * sectionEnvelopeRadius(section),
+  )} mm)`;
+}
+
+function round2(v: number): string {
+  return String(Number(v.toFixed(2)));
+}
+
 /** The map a rotary job is authored on, in millimetres at the design radius. */
 export interface RotaryMap {
-  /** The stock's radius, `⌀/2`, mm — the map's radius and the frame's Z datum. */
+  /** The stock's ENVELOPE radius, `⌀/2` for a rod or half the section's diagonal for a block, mm —
+   * the map's radius and the frame's Z datum. The stock's own surface is {@link section}. */
   radius: number;
-  /** One turn's arc at the surface, `2πR`, mm — the map's height. */
+  /** The stock's section about the axis: a round rod, or a block's square/rectangular section. */
+  section: RotarySection;
+  /** One turn's arc at the envelope, `2πR`, mm — the map's height. */
   circumference: number;
   /** The cuttable length: the stick-out, mm — the map's width. */
   stickout: number;
@@ -71,22 +119,32 @@ export interface RotaryMap {
 }
 
 /**
- * The map a job is written on, or `null` for a flat job. A cylinder stock held in the chuck is
- * the whole test: a cylinder in the VISE is not a rotary cut (a rod can be engraved flat), and a
- * rectangular stock in the chuck is not a shape the module holds.
+ * The map a job is written on, or `null` for a flat job. The stock must be IN THE CHUCK: a
+ * cylinder in the VISE is not a rotary cut (a rod can be engraved flat), and a disc is cut on
+ * its face and is never offered the chuck (#743 D6).
+ *
+ * #777 — A BLOCK IS A ROTARY JOB TOO. A shape-less stock in the chuck is its own section
+ * (`width × thickness`) turned about the axis (holding writes the axis frame `L × W × T`); the
+ * map is authored on the turned envelope, the circle that circumscribes the section. A cylinder
+ * is the round section it always was.
  */
 export function rotaryMapOf(job: EngraveJob): RotaryMap | null {
-  if (job.stock.shape !== 'cylinder' || job.workholding.kind !== 'rotary-chuck') return null;
-  const diameter = job.stock.diameter ?? job.stock.width;
-  if (!(diameter > 0)) return null;
-  const radius = diameter / 2;
+  if (job.workholding.kind !== 'rotary-chuck') return null;
+  // #777 — ONE classifier for the chuck's stock: a round rod (a cylinder, a rod/tube form, or a
+  // legacy square standing box with no form) or a block's own section. A disc is null.
+  const held = chuckStockOf(job);
+  if (held === null) return null;
+  const section: RotarySection =
+    held.kind === 'round' ? { kind: 'round', diameter: held.diameter } : { kind: 'rect', width: held.width, height: held.height };
+  const radius = sectionEnvelopeRadius(section);
   const stickout = job.workholding.rotary.stickout;
   return {
     radius,
+    section,
     circumference: 2 * Math.PI * radius,
     stickout,
-    grip: Math.max(0, job.stock.length - stickout),
-    length: job.stock.length,
+    grip: Math.max(0, held.length - stickout),
+    length: held.length,
     tailstock: job.workholding.rotary.tailstock,
   };
 }

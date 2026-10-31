@@ -302,7 +302,7 @@ import {
   type RapidEstimate,
   type ToolpathIR,
 } from './ir';
-import { throughCentreSentence, toRotaryIR } from '@/engine/cnc/rotary/wrap';
+import { sectionRadiusAt, throughCentreSentence, toRotaryIR, type RotarySection } from '@/engine/cnc/rotary/wrap';
 
 /**
  * The radial field as the flat goal pipeline's heightfield: same grid, same sentinel (0 = the
@@ -327,6 +327,13 @@ export function radialFieldAsHeightfield(field: GoalRadialField): GoalHeightfiel
 
 export interface RotaryReliefArgs {
   field: GoalRadialField;
+  /**
+   * #777 — the stock's section, when it is a block. The field's heights are relative to the
+   * turned ENVELOPE; the stock's own surface at a row's angle is `sectionRadiusAt − envelope
+   * radius`, and the roughing starts from IT: a layer above the flat has nothing to remove and
+   * the sweep retracts instead of cutting air at the envelope radius.
+   */
+  section?: RotarySection;
   tool: Tool;
   toolNumber: number;
   spindleRpm: number;
@@ -384,8 +391,8 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
   const surfaceTool: SurfaceTool = { radius: toolRadius, ball: tool.shape === 'ball' || tool.shape === 'bull' };
   const hf = radialFieldAsHeightfield(field);
 
-  // Roughing: the A sweeps at stepped radii.
-  const rough = aSweepRoughing(field, feeds, allowance);
+  // Roughing: the A sweeps at stepped radii, from the stock's own section surface.
+  const rough = aSweepRoughing(field, feeds, allowance, args.section);
   const roughing: CamOperation = {
     number: 1,
     name: `[T${args.toolNumber}] rotary 3D rough — ${allowance} mm to leave`,
@@ -444,6 +451,7 @@ function aSweepRoughing(
   field: GoalRadialField,
   feeds: SurfaceFeeds,
   allowance: number,
+  section?: RotarySection,
 ): { moves: CamMove[]; layers: number } {
   const moves: CamMove[] = [];
   const { nx, ny, pitch, x0, z, covered } = field;
@@ -464,6 +472,13 @@ function aSweepRoughing(
   const retract = (x: number, y: number): void => {
     moves.push({ kind: 'rapid', x, y, z: HOP_Z });
   };
+  /**
+   * #777 — the stock's surface at a map row's angle, relative to the envelope (0 for a rod; a
+   * block's flat is NEGATIVE). A tip at or above it has no material to remove, so the roughing
+   * retracts there rather than sweeping the envelope in air.
+   */
+  const stockSurface = (jj: number): number =>
+    section === undefined ? 0 : sectionRadiusAt(section, (jj * pitch) / field.radius) - field.radius;
 
   for (const L of levels) {
     for (const i of cols) {
@@ -477,7 +492,8 @@ function aSweepRoughing(
         const y = j * pitch;
         const clamp = covered[idx] === 1 ? (z[idx] as number) + allowance : 0;
         const tip = Math.max(L, clamp);
-        const cut = tip < -1e-9;
+        // A cut needs the goal's coverage AND a tip below the stock's own surface at this angle.
+        const cut = covered[idx] === 1 && tip < stockSurface(jj) - 1e-9;
         if (cut) {
           if (!open) {
             moves.push({ kind: 'rapid', x, y, z: HOP_Z });

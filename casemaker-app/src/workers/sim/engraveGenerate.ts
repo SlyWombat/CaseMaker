@@ -4227,6 +4227,8 @@ export function generateRotaryGoalProgram(
   try {
     relief = generateRotaryReliefIR({
       field,
+      // #777 — a block in the chuck roughs from its own section, not the envelope.
+      section: rotary.section,
       tool,
       toolNumber: toolNumberFor(tool),
       spindleRpm: resolved.params.rpm,

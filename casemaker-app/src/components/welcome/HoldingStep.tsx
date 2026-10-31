@@ -50,6 +50,7 @@ import { dedupeFindings, isSideGoal, jobSetups, jobTargetObjects, validateJob, t
 import { flipAxisOf } from '@/engine/cnc/setups/flip';
 import { LEDGE_STEP, VISE_FLOOR_DEPTH } from '@/engine/cnc/fixture';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { chuckStockOf } from '@/engine/cnc/stockStart';
 import { formLabel } from '@/engine/cnc/stockStart';
 import {
   bracketSettings,
@@ -1789,6 +1790,10 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     const chuck =
       job.workholding.kind === 'rotary-chuck' ? job.workholding.rotary : defaultRotaryChuck(job, shopGrip.value);
     const rod = rodAxisOf(job.stock);
+    // #777 — a BLOCK's jaws close on its section's wider dimension; the rule words follow it.
+    const held = chuckStockOf(job);
+    const jawSpan = held !== null && held.kind === 'block' ? Math.max(held.width, held.height) : rod.diameter;
+    const isBlock = held !== null && held.kind === 'block';
     const grip = round3(Math.max(0, rod.length - chuck.stickout));
     const write = (patch: Partial<RotaryChuck>): void => onRotary({ ...chuck, ...patch }, answers);
     // #737 — the neck's placement and its safe minimum are the ENGINE's (`rotary/neck.ts`), read
@@ -1797,6 +1802,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     const neck = chuck.neck;
     const neckMap: RotaryMap = {
       radius: rod.diameter / 2,
+      section: { kind: 'round', diameter: rod.diameter },
       circumference: Math.PI * rod.diameter,
       stickout: chuck.stickout,
       grip,
@@ -1824,9 +1830,16 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
             <option value="reverse-outer">reverse, outer teeth</option>
           </select>
           <span className="hint" style={{ flexBasis: '100%' }} data-testid="engrave-setup-rotary-rule">
-            Makera’s rule for ⌀{fmt(rod.diameter)}: standard under ⌀20, reverse inner 20–35, reverse outer over 35
+            Makera’s rule for {isBlock ? `${fmt(jawSpan)} mm across the section` : `⌀${fmt(jawSpan)}`}: standard under ⌀20,
+            reverse inner 20–35, reverse outer over 35
           </span>
         </FieldRow>
+        {isBlock && (
+          <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-rotary-centring">
+            The chuck is a four-jaw self-centring scroll: a square section centres like a round one.
+            Measure its run-out with the rotary reference tap before the run.
+          </p>
+        )}
         <FieldRow label="Grip">
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <input

@@ -2289,6 +2289,7 @@ export function EngravePanel(): JSX.Element {
   // this slice's flat preview uses (`jobVise`), and the chuck's own facts when the rotary is the
   // holding. `setVise` does not write a rotary job, so its fields are not offered there.
   const vise = jobVise(job);
+  const rotaryMap = rotaryMapOf(job);
   const rotaryRod =
     job.workholding.kind === 'rotary-chuck'
       ? { diameter: job.stock.diameter ?? job.stock.width, length: job.stock.length }
@@ -3839,7 +3840,11 @@ export function EngravePanel(): JSX.Element {
             ? bedLine
             : rotaryRod === null
               ? `Vise — ${viseBadge(vise)} · blank on the ${vise.seat}`
-              : `Rotary chuck — ⌀${fmt(rotaryRod.diameter)} × ${fmt(rotaryRod.length)} mm rod`
+              : rotaryMap !== null && rotaryMap.section.kind === 'rect'
+                ? `Rotary chuck — ${fmt(rotaryMap.section.width)} × ${fmt(rotaryMap.section.height)} mm block, ⌀${fmt(
+                    rotaryMap.radius * 2,
+                  )} turned envelope × ${fmt(rotaryRod.length)} mm`
+                : `Rotary chuck — ⌀${fmt(rotaryRod.diameter)} × ${fmt(rotaryRod.length)} mm rod`
         }
         action={{ testid: 'engrave-hold-edit', label: 'edit', onClick: () => openWizard('holding') }}
         {...groupProps('engrave-group-hold', false)}
@@ -3848,8 +3853,19 @@ export function EngravePanel(): JSX.Element {
       {/* #523 — the vise is a card: the one sentence always visible, the fields open on Edit. */}
       {rotaryRod !== null ? (
         <p style={MUTED} data-testid="engrave-rotary-card">
-          In the rotary chuck: a ⌀{fmt(rotaryRod.diameter)} × {fmt(rotaryRod.length)} mm rod along
-          X. The holding step is where the chuck’s jaws, tailstock and grip are set.
+          {rotaryMap !== null && rotaryMap.section.kind === 'rect' ? (
+            <>
+              In the rotary chuck: a {fmt(rotaryMap.section.width)} × {fmt(rotaryMap.section.height)} mm
+              block along X, turned on its ⌀{fmt(rotaryMap.radius * 2)} mm envelope. The four-jaw
+              self-centring chuck centres the section; measure its run-out with the rotary reference
+              tap. The holding step is where the chuck’s jaws, tailstock and grip are set.
+            </>
+          ) : (
+            <>
+              In the rotary chuck: a ⌀{fmt(rotaryRod.diameter)} × {fmt(rotaryRod.length)} mm rod
+              along X. The holding step is where the chuck’s jaws, tailstock and grip are set.
+            </>
+          )}
         </p>
       ) : bedLine !== null ? (
         // #725 W1 — the bed's card is its mount's one line; the vise's fields are not shown for a

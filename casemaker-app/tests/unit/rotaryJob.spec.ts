@@ -152,11 +152,16 @@ describe('the holding write (#240 §2)', () => {
     expect(job.sacrificial).toEqual(NONE);
   });
 
-  it('does nothing to a rectangular blank — the rotary holds round stock', () => {
+  it('a rectangular BLOCK in the chuck writes its section, not a rod (#777)', () => {
     const plate = defaultEngraveJob(); // 100 × 60 × 12, a plate
     useEngraveJobStore.getState().replace(plate);
     useEngraveJobStore.getState().setRotaryHolding(CHUCK, VISE);
-    expect(useEngraveJobStore.getState().job).toEqual(plate);
+    const job = useEngraveJobStore.getState().job;
+    expect(job.workholding.kind).toBe('rotary-chuck');
+    // The axis frame is the block's own box (its longest dimension along X), with no `shape`:
+    // the map reads the section from width × thickness.
+    expect(job.stock).toEqual({ ...plate.stock, length: 100, width: 60, thickness: 12 });
+    expect(rotaryMapOf(job)!.section).toEqual({ kind: 'rect', width: 60, height: 12 });
   });
 
   it('applyHoldAnswers never clobbers a rotary workholding', () => {

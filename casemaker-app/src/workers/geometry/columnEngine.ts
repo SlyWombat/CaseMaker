@@ -39,6 +39,7 @@
 import type { Timeline, Checkpoint } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
 import { aabbOfProfile } from '@/engine/compiler/profile';
+import { sectionRadiusAt } from '@/engine/cnc/rotary/wrap';
 import type { Setup } from '@/engine/cnc/setup';
 import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/engine/cnc/tool';
 import type { NodeMeshOutput } from './meshOutput';
@@ -408,8 +409,14 @@ export interface ColumnGrid {
   readonly v0: number;
   /** Second-axis pitch (rotary: degrees; flat: mm). */
   readonly dv: number;
-  /** The untouched column value (rotary: the stock radius R; flat: the top-face work Z). */
+  /** The untouched column value (rotary: the stock's ENVELOPE radius R; flat: the top-face work Z). */
   readonly initial: number;
+  /**
+   * #777 — a ROTARY block's untouched radius per θ row (`initialByV[j]`), the section's own
+   * surface: a rod leaves this absent (every column is {@link initial}); a block in the chuck has
+   * flats inside R and corners on it. Volume and the meshes read it where they read `initial`.
+   */
+  readonly initialByV?: Float32Array;
   /**
    * The untouched LOWER bound (rotary: 0, the axis; flat: the stock's bottom-face work Z). Only
    * the flat parameterisation cuts towards it; a cut is clamped to {@link floor}.
@@ -709,8 +716,32 @@ export const ROTARY: ColumnParameterisation = {
     const nu = Math.max(1, Math.ceil((xMax - xMin) / res.dx));
     const nv = Math.max(1, Math.round(360 / res.dThetaDeg));
     const h = new Float32Array(nu * nv);
-    h.fill(R);
-    return { kind: 'rotary', nu, nv, u0: xMin + res.dx / 2, du: (xMax - xMin) / nu, v0: 0, dv: 360 / nv, initial: R, base: 0, h };
+    // #777 — a BLOCK's stock surface is its section, not the envelope: seed each θ row with the
+    // distance from the axis to the section's edge there. A rod (no section) fills with R.
+    const section = part.section;
+    let initialByV: Float32Array | undefined;
+    if (section !== undefined && section.kind !== 'round') {
+      initialByV = new Float32Array(nv);
+      for (let j = 0; j < nv; j++) {
+        initialByV[j] = sectionRadiusAt(section, (j * (360 / nv) * Math.PI) / 180);
+        for (let i = 0; i < nu; i++) h[j * nu + i] = initialByV[j]!;
+      }
+    } else {
+      h.fill(R);
+    }
+    return {
+      kind: 'rotary',
+      nu,
+      nv,
+      u0: xMin + res.dx / 2,
+      du: (xMax - xMin) / nu,
+      v0: 0,
+      dv: 360 / nv,
+      initial: R,
+      ...(initialByV === undefined ? {} : { initialByV }),
+      base: 0,
+      h,
+    };
   },
 
   applyMove(grid, m, cutter) {
@@ -867,17 +898,22 @@ export const ROTARY: ColumnParameterisation = {
 
   volume(grid) {
     // Cross-section area of the remaining star-shaped section at X is ∫ ½ ρ(θ)² dθ; the removed
-    // ring from the uncut disc (R²) is therefore ½ (R² − ρ²) dθ per column, × dx.
+    // ring from the uncut section (ρ₀²) is therefore ½ (ρ₀² − ρ²) dθ per column, × dx.
+    // #777 — a block's uncut section is its own surface per θ (`initialByV`), not the envelope
+    // circle: the stock volume is the block's, and the flats are not counted as removed.
     const R = grid.initial;
     const dThetaRad = grid.dv * DEG;
     const dx = grid.du;
+    const initialAt = (k: number): number => (grid.initialByV === undefined ? R : (grid.initialByV[k % grid.nv] as number));
     let removed = 0;
+    let stock = 0;
     for (let k = 0; k < grid.h.length; k++) {
       const rho = grid.h[k] as number;
-      const rr = rho < R ? rho : R;
-      removed += 0.5 * (R * R - rr * rr) * dThetaRad * dx;
+      const r0 = initialAt(k);
+      const rr = rho < r0 ? rho : r0;
+      removed += 0.5 * (r0 * r0 - rr * rr) * dThetaRad * dx;
+      stock += 0.5 * r0 * r0 * dThetaRad * dx;
     }
-    const stock = Math.PI * R * R * (grid.du * grid.nu);
     return { removed, stock };
   },
 };

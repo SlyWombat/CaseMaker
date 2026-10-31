@@ -198,6 +198,39 @@ export function rodDimsOf(
   return { diameter: stock.width, length: stock.thickness };
 }
 
+/** #777 — how the CHUCK reads this stock: a round rod, or a block's section. */
+export type ChuckStock =
+  | { kind: 'round'; diameter: number; length: number }
+  | { kind: 'block'; length: number; width: number; height: number };
+
+/**
+ * The stock the chuck holds, read the way the stock IS (#777, design Q2). The stock step's FORM
+ * decides a square box: a rod or tube is round (and a `shape: 'cylinder'` stock is too), while a
+ * block is its own section. A disc is never offered the chuck. For a block the axis is the
+ * LONGEST dimension and the other two are the section as held; the map is authored on the
+ * envelope that circumscribes it.
+ */
+export function chuckStockOf(job: Pick<EngraveJob, 'stock' | 'stockEntry'>): ChuckStock | null {
+  const stock = job.stock;
+  if (stock.shape === 'disc') return null;
+  const form = job.stockEntry?.form;
+  if (stock.shape === 'cylinder' || form === 'rod' || form === 'tube') {
+    const size = rodDimsOf(stock);
+    return size === null ? null : { kind: 'round', diameter: size.diameter, length: size.length };
+  }
+  // A shape-less SQUARE box with no form is the legacy standing rod the Holding step wrote before
+  // #713 (rodDimsOf's own rule). With a form of its own ('block', 'plate', …) that same box is the
+  // block the operator said it is.
+  if (form === undefined) {
+    const legacy = rodDimsOf(stock);
+    if (legacy !== null) return { kind: 'round', diameter: legacy.diameter, length: legacy.length };
+  }
+  const dims = [stock.length, stock.width, stock.thickness];
+  if (!dims.every((d) => Number.isFinite(d) && d > 0)) return null;
+  const sorted = [...dims].sort((a, b) => a - b);
+  return { kind: 'block', length: sorted[2]!, width: sorted[1]!, height: sorted[0]! };
+}
+
 /** The rotary module's envelope, mm — the machine profile's own numbers when it has a rotary block. */
 export interface RotaryEnvelope {
   diameter: number;

@@ -9,7 +9,15 @@ import {
   rotarySeamLabels,
 } from '@/components/viewport/rotaryMapView';
 
-const MAP: RotaryMap = { radius: 10, circumference: 2 * Math.PI * 10, stickout: 85, grip: 15, length: 100, tailstock: true };
+const MAP: RotaryMap = {
+  radius: 10,
+  section: { kind: 'round', diameter: 20 },
+  circumference: 2 * Math.PI * 10,
+  stickout: 85,
+  grip: 15,
+  length: 100,
+  tailstock: true,
+};
 
 describe('#716 the map’s read-outs', () => {
   it('the around ruler is mm at the surface with the degrees beside it, every quarter turn', () => {

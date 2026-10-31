@@ -334,6 +334,7 @@ describe('#724 B3 — the shipped layout lands on the free span', () => {
 describe('#724 W7 review — the stated bands are the clamped ones', () => {
   const mapOf = (stickout: number, tailstock: boolean): RotaryMap => ({
     radius: 10,
+    section: { kind: 'round', diameter: 20 },
     circumference: 2 * Math.PI * 10,
     stickout,
     grip: Math.max(0, 100 - stickout),

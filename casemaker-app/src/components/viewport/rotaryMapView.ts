@@ -30,8 +30,17 @@ export function rotaryRulerTicks(map: RotaryMap): RotaryRulerTick[] {
   });
 }
 
-/** `⌀20 · around 62.832 mm` — the read-out above the map. */
+/**
+ * `⌀20 · around 62.832 mm` — the read-out above the map. #777 — a BLOCK states its section and
+ * the envelope it turns, not a fake diameter: the map is authored on the turned envelope, but the
+ * stock the operator holds is the block.
+ */
 export function rotaryReadout(map: RotaryMap): string {
+  if (map.section.kind === 'rect') {
+    return `${rotaryNum(map.section.width)} × ${rotaryNum(map.section.height)} mm section · around ${rotaryNum(
+      map.circumference,
+    )} mm of the ⌀${rotaryNum(map.radius * 2)} turned envelope`;
+  }
   return `⌀${rotaryNum(map.radius * 2)} · around ${rotaryNum(map.circumference)} mm`;
 }
 

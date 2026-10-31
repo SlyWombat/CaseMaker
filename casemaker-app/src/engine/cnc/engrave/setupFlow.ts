@@ -39,7 +39,7 @@ import type {
   StockMaterial,
   ViseParams,
 } from '@/types/engraveJob';
-import { rodDimsOf } from '@/engine/cnc/stockStart';
+import { chuckStockOf, rodDimsOf } from '@/engine/cnc/stockStart';
 
 /** One material the flow offers: the value it writes into the job and the word it shows. */
 export interface MaterialOption {
@@ -131,21 +131,35 @@ export function rodAxisOf(
   // `rotaryBoxForRod`/`standingBoxForRod` own). #724 B3 — the rule that tells them apart is
   // `rodDimsOf`'s, and there is only one: `shape: 'cylinder'` does not say WHICH box the job is
   // in, so reading `length` off it took a typed standing rod's DIAMETER for its length and gave a
-  // 100 mm rod a 5 mm stick-out. The fallback is the old non-round reading, for a box the chuck
-  // never holds (its row is disabled for anything but round stock).
-  return rodDimsOf(stock) ?? { length: stock.thickness, diameter: stock.width };
+  // 100 mm rod a 5 mm stick-out.
+  const round = rodDimsOf(stock);
+  if (round !== null) return round;
+  // #777 — a BLOCK in the chuck: its axis is the longest dimension and the diameter callers read
+  // here is the turned envelope (the section's diagonal). The old fallback read a lying block's
+  // length as its thickness, giving it a stick-out of its own length.
+  const dims = [stock.length, stock.width, stock.thickness].sort((a, b) => a - b);
+  return { length: dims[2]!, diameter: Math.hypot(dims[0]!, dims[1]!) };
 }
 
 export function defaultRotaryChuck(
-  job: Pick<EngraveJob, 'stock'>,
+  job: Pick<EngraveJob, 'stock' | 'stockEntry'>,
   gripMm: number = ROTARY_GRIP_FALLBACK_MM,
 ): RotaryChuck {
-  const { length, diameter } = rodAxisOf(job.stock);
+  // #777 — a BLOCK's jaws close on its section's WIDER dimension (a four-jaw scroll opens to the
+  // flats, not the diagonal); the stick-out is still the length along the axis.
+  const held = chuckStockOf(job);
+  const length = held === null ? rodAxisOf(job.stock).length : held.length;
+  const jawSpan =
+    held === null
+      ? rodAxisOf(job.stock).diameter
+      : held.kind === 'round'
+        ? held.diameter
+        : Math.max(held.width, held.height);
   const grip = Math.min(Math.max(0, gripMm), Math.max(0, length - 0.1));
   return {
     stickout: round3(Math.max(0.1, length - grip)),
     gripDiameter: null,
-    jawMode: rotaryJawModeFor(diameter),
+    jawMode: rotaryJawModeFor(jawSpan),
     tailstock: true,
     source: ROTARY_CHUCK_SOURCE,
   };
