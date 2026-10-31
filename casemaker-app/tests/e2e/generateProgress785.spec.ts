@@ -5,7 +5,7 @@
 // longer than the assertion needs, which is what makes the Cancel deterministic: the progress line
 // is visible while the worker is busy, and the press must return the panel to where it was.
 import { fileURLToPath } from 'node:url';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.url));
 
@@ -27,13 +27,15 @@ test('#785 Generate shows its stage, and Cancel returns the panel to its pre-Gen
     await page.getByTestId('engrave-label-remove-0').click();
     await expect(labels).toHaveCount(2 - i);
   }
+  await openCutterGroup(page);
   await page.getByTestId('engrave-tool').selectOption('flat-1.0');
 
   await page.getByTestId('engrave-add-summary').click();
   const chooser = page.waitForEvent('filechooser');
   await page.getByTestId('engrave-add-surface').click();
   await (await chooser).setFiles(STL);
-  await expect(page.getByTestId('engrave-target-count')).toHaveText('1');
+  // #799 — the object is an item row of its own.
+  await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
 
   await page.getByTestId('engrave-generate').click();
 

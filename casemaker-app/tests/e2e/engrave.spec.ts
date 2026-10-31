@@ -7,7 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import type { Download, Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 /** Load a board (which shows the sidebar) and open the Engrave panel on the deterministic job. */
 async function openEngravePanel(page: Page): Promise<void> {
@@ -537,18 +537,23 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   await expect(page.getByTestId('engrave-vector-row-0')).toHaveCount(1);
   await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
 
-  // A VOID as well, because the review asked for one and it is the panel's other list: the same
-  // shell, drawn ABOVE the items, so it pushes the ten rows down — which is the harder version of
-  // "ten items fit at 1440 × 900" and the one worth measuring. #686 keeps the void list and its add
-  // buttons behind a closed one-line row, so the row is opened first.
-  await page.getByTestId('engrave-voids-summary').click();
+  // A VOID as well. #799 — the voids live inside the Stock line's own detail: open it, add the
+  // void, and close it again before measuring, so the ten items stand alone in the block the
+  // acceptance measures.
+  await page.getByTestId('engrave-stock-line').click();
   await page.getByTestId('engrave-add-keepout-rect').click();
   await expect(page.getByTestId('engrave-keepout-row-0')).toBeVisible();
+  // The new row arrives OPEN (its fields on show); fold it, because every measured row is one
+  // line — and the void list is no longer collapsed from the outside by its fold controls (#799:
+  // those draw only from the third row on, and the whole list lives inside the Stock detail now).
+  await page.getByTestId('engrave-keepout-expand-0').click();
+  await page.getByTestId('engrave-stock-line').click();
 
   // #516 item 5 — a fresh job no longer seeds a cutter, so the drill's `plunge-unproven` warning
   // (the one the next block asserts) has nothing to read. `flat-1.0` is the built-in flat cutter the
   // default job used to carry, and it records no centre-cutting, so a job that plunges gets the
   // warning. Fit it the way a person would, through the panel's own cutter select.
+  await openCutterGroup(page);
   await page.getByTestId('engrave-tool').selectOption('flat-1.0');
 
   // TWO kinds of `⚠`, because they are two claims: an ERROR blocks Generate and a WARNING does not,
@@ -574,7 +579,6 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   await page.getByTestId('engrave-shape-name-0').fill('A NAME LONG ENOUGH THAT IT CANNOT POSSIBLY FIT');
 
   await page.getByTestId('engrave-item-collapse-all').click();
-  await page.getByTestId('engrave-keepout-collapse-all').click();
   // #686 moved the one "Add operation" picker directly under the Items heading, where the mockup
   // has it — so a picker left open while these ten items were added now sits INSIDE the block this
   // test measures. It is a control the operator opened, not part of the list's own height, and it

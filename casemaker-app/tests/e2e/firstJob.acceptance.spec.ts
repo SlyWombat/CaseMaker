@@ -511,7 +511,7 @@ test.describe('first job acceptance (§6)', () => {
     await expect(page.getByTestId('start-wizard')).toHaveCount(0);
     await expect(page.getByTestId('engrave-panel')).toBeVisible();
     await expect(page.getByTestId('engrave-stock-line')).toContainText('Stock · rod');
-    await expect(page.getByTestId('engrave-voids-fold'), 'no Voids row on a rod').toHaveCount(0);
-    await expect(page.getByTestId('engrave-target-fold'), 'no Target object row on a rod').toHaveCount(0);
+    await expect(page.getByTestId('engrave-voids-line'), 'no Voids on a rod').toHaveCount(0);
+    await expect(page.getByTestId('engrave-target-import'), 'no Reference object on a rod').toHaveCount(0);
   });
 });

@@ -11,7 +11,7 @@
 
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 // The bench corpus lives at the repository root, one level above `casemaker-app`.
 const COIN = fileURLToPath(
@@ -49,6 +49,7 @@ test('the coin: the rule answer shows as provisional, then the measured pick rep
   await openJobFile(page, COIN);
 
   // 1 — the rule's answer is on screen AT ONCE, labelled provisional while the search runs.
+  await openCutterGroup(page);
   await expect(page.getByTestId('engrave-pick-provisional')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('engrave-pick-provisional')).toHaveText(/provisional — measuring/);
   await expect(page.getByTestId('engrave-recommendation')).toBeVisible();

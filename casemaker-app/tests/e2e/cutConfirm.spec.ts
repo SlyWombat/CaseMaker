@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 /** A status line with the monitor fields the popover reads: `S:` temperatures. */
 const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
@@ -249,6 +249,7 @@ test('#769 review — at the 760 px column with a rotary module the DRO wraps an
   // column stays 1440 − 320 − 360 = 760 px.
   await page.getByTestId('sidebar-button-cnc-engrave').click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
+  await openCutterGroup(page);
   await page.getByTestId('engrave-tool').selectOption('flat-1.0');
   await rememberMachine(page, ROTARY_CUT);
 

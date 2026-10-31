@@ -36,3 +36,15 @@ export const test = base.extend<{ cm: CaseMakerHandle }>({
 });
 
 export { expect } from '@playwright/test';
+
+/**
+ * #798 — the Cutter group defaults CLOSED. Open it (its summary, or the Job card's `›`) before
+ * touching the cutter select or reading the pick rows; the group's own summary carries the
+ * one-line verdict while closed.
+ */
+export async function openCutterGroup(page: Page): Promise<void> {
+  const group = page.getByTestId('engrave-group-cutter');
+  const open = await group.evaluate((el) => (el as HTMLDetailsElement).open);
+  if (!open) await page.getByTestId('engrave-group-cutter-summary').click();
+  await page.getByTestId('engrave-tool').waitFor({ state: 'visible' });
+}

@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Page, TestInfo } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 const CLEAN = 'three-strokes.nc';
 const readFixture = (testInfo: TestInfo, name: string): string =>
@@ -93,6 +93,7 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await page.screenshot({ path: shot(testInfo, 'slot5-engrave-just-opened.png') });
 
+  await openCutterGroup(page);
   await expect(page.getByTestId('engrave-tool')).toBeVisible();
   // #211 acceptance 1: a fresh job opens with a selected tool AND a recommendation sentence.
   await expect(page.getByTestId('engrave-tool')).not.toHaveValue('');

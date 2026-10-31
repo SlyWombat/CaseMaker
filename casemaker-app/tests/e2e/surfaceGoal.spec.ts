@@ -19,7 +19,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.url));
 
@@ -88,8 +88,7 @@ test('#731 — on plain http (no crypto.subtle) an STL still loads, with the sam
 
   // The pick succeeds — no "could not be hashed" — and the row states the file's SHA, which is
   // Node's digest of the same bytes.
-  await expect(page.getByTestId('engrave-target-count')).toHaveText('1');
-  await page.getByTestId('engrave-target-summary').click();
+  // #799 — the object is an item row of its own (no fold and no count line any more).
   await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
   await expect(page.getByTestId('engrave-target-error')).toHaveCount(0);
   const sha = createHash('sha256').update(readFileSync(STL)).digest('hex');
@@ -115,6 +114,7 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   }
 
   // The cutter: a built-in flat end mill (the web build has no catalogue).
+  await openCutterGroup(page);
   await page.getByTestId('engrave-tool').selectOption('flat-1.0');
 
   // Import the goal through the operation picker — the one entry point (#662). The pick opens the
@@ -126,8 +126,7 @@ test('a goal STL from the picker generates, and the UI states its own check and 
 
   // The mesh is the job's one operation, and its row says what it is. #686 keeps the target
   // object's rows behind a closed one-line row, so the count is read first and the row opened.
-  await expect(page.getByTestId('engrave-target-count')).toHaveText('1');
-  await page.getByTestId('engrave-target-summary').click();
+  // #799 — the object is an item row of its own (no fold and no count line any more).
   await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
   await expect(page.getByTestId('engrave-target-type-0')).toHaveText('Surface a mesh');
   await expect(page.getByTestId('engrave-target-error')).toHaveCount(0);

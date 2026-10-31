@@ -2374,6 +2374,9 @@ describe('EngravePanel item rows (#411)', () => {
 
   it('opens only the void list with the void header’s expand-all', () => {
     act(() => {
+      // #799 — the fold controls draw from the third row on.
+      useEngraveJobStore.getState().addKeepOut('rect');
+      useEngraveJobStore.getState().addKeepOut('rect');
       useEngraveJobStore.getState().addKeepOut('rect');
     });
     render(<EngravePanel />);
@@ -2495,6 +2498,9 @@ describe('EngravePanel item rows (#411)', () => {
     // The bug the review found: `collapseAll` cleared the whole open set, so pressing it on the ITEMS
     // header also folded the void list below it. A list header acts on its own list.
     act(() => {
+      // #799 — the fold controls draw from the third row on.
+      useEngraveJobStore.getState().addKeepOut('rect');
+      useEngraveJobStore.getState().addKeepOut('rect');
       useEngraveJobStore.getState().addKeepOut('rect');
     });
     render(<EngravePanel />);
@@ -3252,7 +3258,8 @@ describe('EngravePanel — 3D primitives and the target object (#435)', () => {
     setJob((job) => ({ ...job, targetObject }));
     render(<EngravePanel />);
 
-    expect(screen.getByTestId('engrave-target-count').textContent).toBe('1');
+    // #799 — the object is an ITEM row; its count and its fold are gone.
+    expect(screen.getByTestId('engrave-target-item').contains(screen.getByTestId('engrave-target-row-0'))).toBe(true);
     expect(screen.getByTestId('engrave-target-row-0').textContent).toContain('bracket.stl');
     expect(screen.getByTestId('engrave-target-row-0').textContent).toContain('10×8×4 mm');
 
@@ -4045,9 +4052,9 @@ describe('EngravePanel — the Design main path (#686)', () => {
 
     act(rod);
     render(<EngravePanel />);
-    // No flat bottom face to pocket, no bed to surface a mesh on: neither row is offered.
-    expect(screen.queryByTestId('engrave-voids-fold')).toBeNull();
-    expect(screen.queryByTestId('engrave-target-fold')).toBeNull();
+    // No flat bottom face to pocket, no bed to surface a mesh on: neither is offered.
+    expect(screen.queryByTestId('engrave-voids-line')).toBeNull();
+    expect(screen.queryByTestId('engrave-target-import')).toBeNull();
 
     // A job that already carries one keeps its row, so it can be taken away.
     cleanup();
@@ -4074,26 +4081,32 @@ describe('EngravePanel — the Design main path (#686)', () => {
       });
     });
     render(<EngravePanel />);
-    expect(screen.getByTestId('engrave-voids-fold')).toBeTruthy();
-    expect(screen.queryByTestId('engrave-target-fold')).toBeNull();
+    // The void is reachable inside the Stock line's own detail, to be taken away.
+    expect(screen.getByTestId('engrave-voids-line')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-target-item')).toBeNull();
   });
 
-  it('shows the voids and the target object as closed one-line rows at 0, each opened by its own +', () => {
+  it('#799 — the Stock line is the voids’ disclosure, and the reference object is an Add entry', () => {
     render(<EngravePanel />);
-    const voids = screen.getByTestId('engrave-voids-fold') as HTMLDetailsElement;
-    expect(voids.open).toBe(false);
+    // The Stock fact line IS the disclosure; its body carries the voids line and its add control.
+    const stock = screen.getByTestId('engrave-stock-detail') as HTMLDetailsElement;
+    expect(stock.open).toBe(false);
+    expect(screen.getByTestId('engrave-stock-line').textContent).toContain('Stock');
+    expect(stock.contains(screen.getByTestId('engrave-voids-line'))).toBe(true);
     expect(screen.getByTestId('engrave-keepout-count').textContent).toBe('0');
-    expect(screen.getByTestId('engrave-voids-summary').textContent).toContain('+');
-    // The explanation and the add buttons are behind the row, not on the main path.
-    expect(voids.contains(screen.getByTestId('engrave-add-keepout-circle'))).toBe(true);
-    fireEvent.click(screen.getByTestId('engrave-voids-summary'));
-    expect(voids.open).toBe(true);
+    // The explanation is the line's hover, not a paragraph on the path.
+    expect(screen.getByTestId('engrave-voids-line').getAttribute('title')).toContain('bottom');
+    expect(stock.contains(screen.getByTestId('engrave-add-keepout-circle'))).toBe(true);
+    // No top-level "Voids under the face (0)" row any more.
+    expect(screen.queryByTestId('engrave-voids-fold')).toBeNull();
+    expect(screen.queryByTestId('engrave-voids-summary')).toBeNull();
+    fireEvent.click(screen.getByTestId('engrave-stock-line'));
+    expect(stock.open).toBe(true);
 
-    const target = screen.getByTestId('engrave-target-fold') as HTMLDetailsElement;
-    expect(target.open).toBe(false);
-    expect(screen.getByTestId('engrave-target-count').textContent).toBe('0');
-    fireEvent.click(screen.getByTestId('engrave-target-summary'));
-    expect(target.open).toBe(true);
+    // The reference/goal object is an entry of the one Add menu; its count and fold are gone.
+    expect(screen.queryByTestId('engrave-target-fold')).toBeNull();
+    expect(screen.queryByTestId('engrave-target-count')).toBeNull();
+    expect(screen.getByTestId('engrave-add-menu').contains(screen.getByTestId('engrave-target-import'))).toBe(true);
   });
 
   it('keeps a typed field’s chip off the field and names it once in the Technical fold', () => {
@@ -4488,5 +4501,118 @@ describe('#793/#794 — the idle footer is silent and the Ready card is the next
     expect(primary.disabled).toBe(false);
     fireEvent.click(primary);
     expect(useCncModeStore.getState().mode).toBe('cut');
+  });
+});
+
+// #798 — the cutter as ONE line above the fold, and the Cutter group (select, cutting rows,
+// override, technical) opens from its `›` and defaults closed.
+describe('#798 — the Cutter line', () => {
+  beforeEach(() => {
+    useEngraveJobStore.getState().replace(defaultEngraveJob());
+    useEngravePreviewStore.setState({ measured: null, measuredJob: null, measuredStatus: 'idle', measuredError: null });
+    resetEngraveRows();
+  });
+
+  it('defaults closed and opens from the Job card’s ›', () => {
+    render(<EngravePanel />);
+    expect((screen.getByTestId('engrave-group-cutter') as HTMLDetailsElement).open).toBe(false);
+    fireEvent.click(screen.getByTestId('engrave-cutter-open'));
+    expect((screen.getByTestId('engrave-group-cutter') as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it('says what the cutter is and where the answer came from', () => {
+    act(() => useEngraveJobStore.getState().setTool('flat-1.0', 'computed'));
+    render(<EngravePanel />);
+    // The panel starts its measured search on mount; park it so the RULE's answer is what the
+    // line states (the search's own word is the next test's).
+    act(() => useEngravePreviewStore.setState({ measuredStatus: 'idle', measured: null }));
+    const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
+    expect(line).toContain('Cutter · ');
+    expect(line).toContain('flat end');
+    expect(line).toContain('recommended');
+  });
+
+  it('says “choosing…” while the measured search runs', () => {
+    act(() => useEngraveJobStore.getState().setTool('flat-1.0', 'computed'));
+    render(<EngravePanel />);
+    act(() => useEngravePreviewStore.setState({ measuredStatus: 'measuring' }));
+    expect(screen.getByTestId('engrave-cutter-line').textContent).toContain('choosing…');
+  });
+
+  it('names the simulation and the fidelity when the measured plan is the one applied', () => {
+    act(() => {
+      const ids = useEngraveJobStore.getState().job.labels.map((l) => l.id);
+      useEngraveJobStore.getState().applyCutterPlan([{ key: 'flat-1.0', items: ids }], 'computed');
+    });
+    render(<EngravePanel />);
+    const ids = useEngraveJobStore.getState().job.labels.map((l) => l.id);
+    act(() =>
+      useEngravePreviewStore.setState({
+        measuredStatus: 'ready',
+        measuredJob: 'test-job',
+        measured: {
+          jobKey: 'test-job',
+          cutters: [{ key: 'flat-1.0', items: ids, source: 'owned' }],
+          words: {
+            plan: '⌀1 mm flat end',
+            verdict: '',
+            fallback: null,
+            cutters: [],
+            runnerUp: null,
+            buyThis: null,
+            difference: null,
+            notes: [],
+          },
+          worstFidelity: 0.96,
+          toolChanges: 0,
+          seconds: null,
+          considered: 1,
+        },
+      }),
+    );
+    const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
+    expect(line).toContain('chosen by simulation');
+    expect(line).toContain('96 % fidelity');
+    // The collapsed group's own summary carries the same verdict.
+    expect(screen.getByTestId('engrave-group-cutter-summary').textContent).toContain('96 % fidelity');
+  });
+});
+
+// #803 — a ready rotary run cannot save until the module is measured; the Ready card says that as
+// one fact line instead of a paragraph under a disabled button.
+describe('#803 — the Ready card states why saving waits', () => {
+  beforeEach(() => {
+    useEngraveJobStore.getState().replace(defaultEngraveJob());
+    useEngraveRunStore.getState().reset();
+    resetCncMode();
+  });
+
+  it('a ready rotary run says saving waits for the bench check', () => {
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.getState().replace({
+        ...base,
+        labels: [{ ...base.labels[0]!, position: { x: 10, y: 10 }, size: 4 }],
+        shapes: [],
+        drills: [],
+        stock: { ...base.stock, length: 100, width: 20, thickness: 20, shape: 'cylinder', diameter: 20 },
+        workholding: {
+          kind: 'rotary-chuck',
+          rotary: { stickout: 60, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' },
+        },
+      });
+      useEngraveRunStore.setState({
+        generated: readyGenerated(';@MKR|BEGIN\nG21 G90\nM02'),
+        simStatus: 'ready',
+        simDiagnostics: [],
+        oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+        phase: 'ready',
+        acknowledged: true,
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-ready-rotary-bench').textContent).toBe(
+      'Saving waits for the rotary’s bench check.',
+    );
   });
 });

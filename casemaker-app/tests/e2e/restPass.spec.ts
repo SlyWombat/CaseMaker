@@ -6,7 +6,7 @@
 // leftover at its floor, and writes program 2 from that. The dev/web build ships the two built-in
 // flat cutters, so the pair is the 3.175 mm flat and the 1 mm flat.
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 /** #792 — Save .nc… / Run sheet… / Open run record… are File ▾ items now; open the menu first. */
 async function menuItem(page: import('@playwright/test').Page, testid: string) {
@@ -41,6 +41,7 @@ test('#667 — a region row pairs a rough and a rest cutter, and the run is two 
   // The rough cutter: the bigger built-in flat. It is Makera's METAL bit, and on the softwood
   // blank that pair is a blocking metal-line refusal until the operator says use it anyway — the
   // panel's own acknowledgement, exactly as a person answers it.
+  await openCutterGroup(page);
   await page.getByTestId('engrave-tool').selectOption('flat-3.175x12-metal');
   const findings = page.getByTestId('engrave-findings');
   await expect(page.getByTestId('metal-line-use-anyway')).toHaveCount(1, { timeout: 60_000 });
