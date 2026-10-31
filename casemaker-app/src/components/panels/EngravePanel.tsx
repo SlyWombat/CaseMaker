@@ -42,14 +42,17 @@ import { mountNameFor, probeNameFor } from '@/engine/cnc/registration/mountConte
 import { findingFix, type PanelFix } from './findingFix';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize } from '@/engine/cnc/tool';
+import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobSetups, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
-import { toolForJob } from '@/engine/cnc/toolRegistry';
+import { toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
+// #786 slice 6 — the simulator's own cutter resolver, the one `columnSweep` asks before it sweeps:
+// the panel reads the SAME answer to decide that a refused cutter must be substituted.
+import { columnCutterFor } from '@/workers/geometry/columnEngine';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import type { RestChoice } from '@/components/panels/RestCutterControl';
 import {
@@ -129,6 +132,7 @@ import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
 import { EngraveDrillRow, type BorePitchFacts, type DrillPeckFacts } from './EngraveDrillRow';
 import { EngraveChamferRow, type ChamferFacts, type ChamferRimOption } from './EngraveChamferRow';
+import { CutterGeometryAsk } from './CutterGeometryAsk';
 import { EngraveCutoutRow, type CutoutTarget } from './EngraveCutoutRow';
 import { EngraveThreadRow } from './EngraveThreadRow';
 import { EngravePrimitiveRow } from './EngravePrimitiveRow';
@@ -820,15 +824,15 @@ export function EngravePanel(): JSX.Element {
    * so the finding clears and the withheld hole is cut. Nothing here decides the answer — the
    * operator does.
    */
-  const answerCentreCutting = async (centreCutting: boolean): Promise<void> => {
+  const recordCutterField = async (patch: Partial<Tool>, note: string): Promise<void> => {
     const entry = tools.find((e) => e.key === job.toolKey);
     if (entry === undefined) return;
-    const toolWithAnswer = { ...entry.tool, centreCutting };
+    const toolWithAnswer = { ...entry.tool, ...patch };
     if (entry.key.startsWith('user:')) {
       const ok = await useHouseStore.getState().updateTool({
         ...entry,
         tool: toolWithAnswer,
-        provenance: `${entry.provenance} — centre-cutting stated by you`,
+        provenance: `${entry.provenance} — ${note}`,
       });
       if (ok) setTool(job.toolKey, job.sources?.tool ?? 'user');
       return;
@@ -838,10 +842,18 @@ export function EngravePanel(): JSX.Element {
     const ok = await useHouseStore.getState().updateItem({
       ...item,
       tool: toolWithAnswer,
-      notes: [item.notes, 'centre-cutting stated by you'].filter((n): n is string => n !== null && n !== '').join('; '),
+      notes: [item.notes, note].filter((n): n is string => n !== null && n !== '').join('; '),
     });
     if (ok) setTool(job.toolKey, job.sources?.tool ?? 'user');
   };
+  const answerCentreCutting = (centreCutting: boolean): Promise<void> =>
+    recordCutterField({ centreCutting }, 'centre-cutting stated by you');
+  // #786 slice 6 — the two numbers a finding can ask for, written the same way: a V-bit's tip
+  // (`tool-tip-unrecorded`/`tool-tip-assumed-point`) and a cone's base diameter
+  // (`chamfer-reach-unproven`). The note is the record's provenance for the claim.
+  const recordTip = (mm: number): Promise<void> => recordCutterField({ tipDiameter: mm }, `tip ⌀ ${fmt(mm)} mm stated by you`);
+  const recordDiameter = (mm: number): Promise<void> =>
+    recordCutterField({ diameter: mm }, `cutting diameter ${fmt(mm)} mm stated by you`);
   // #766 D — the measured plan's write-back. The rule's single-cutter answer still uses setTool.
   const applyCutterPlan = useEngraveJobStore((s) => s.applyCutterPlan);
   const setVise = useEngraveJobStore((s) => s.setVise);
@@ -1002,7 +1014,14 @@ export function EngravePanel(): JSX.Element {
   // catalogue row is the service's, so it is answered once the cutter is owned — the finding's
   // buttons appear only for a record this app can write.
   const inventoryItems = useToolRegistryStore((s) => s.items);
-  const tool = jobTool(job);
+  // #786 slice 6 — THE PANEL READS THE CUTTER THE RUN CUTS WITH. A blank tip, base diameter or
+  // reach filled from Makera's record of the same g_ID is part of the tool in `engraveGenerate`
+  // and `engravePreview`; reading the raw snapshot here made the chamfer row say "its reach is
+  // unknown" while the program cut with the catalogue's number. `catalogueFill.filled` is what
+  // the cutter line names, so the filled value is never shown without its source.
+  const namedTool = jobTool(job);
+  const catalogueFill = namedTool === null ? null : withCatalogueValues(namedTool, tools);
+  const tool = catalogueFill?.tool ?? null;
   const findings = dedupeFindings([
     ...withTargetBlobState(jobOnlyFindings, job, targetBlob),
     // #786 slice 4c-2 — a substitute for the operator's own cutter is stated as a finding too,
@@ -1018,7 +1037,7 @@ export function EngravePanel(): JSX.Element {
   const jobFindings = findings.filter((f) => f.labelId === undefined);
   // A cutter this app can write an answer to: a house definition or an owned cutter. A catalogue
   // row alone is the service's — the sentence stands without buttons until the cutter is owned.
-  const centreCutterWritable =
+  const cutterRecordWritable =
     (job.toolKey.startsWith('user:') && tools.some((e) => e.key === job.toolKey)) ||
     (job.toolKey.startsWith('inv:') && inventoryItems.some((i) => `inv:${i.id}` === job.toolKey));
   const findingsFor = (labelId: string): JobFinding[] => findings.filter((f) => f.labelId === labelId);
@@ -1286,7 +1305,9 @@ export function EngravePanel(): JSX.Element {
   // #434 — the point this drill is planned with, and where its angle came from: the same reading
   // the CAM (`planDrillBit`) and the simulation take — the drill's own record, else the shop's
   // `drill.pointAngleDeg`, with that reading's source.
-  const drillShop = drillSettings(shopDefaults ?? null);
+  // Memoised since #786 slice 6: the substitution effect reads the same point angle the run passes
+  // the simulator, and a fresh reading object each render would re-run it on every keystroke.
+  const drillShop = useMemo(() => drillSettings(shopDefaults ?? null), [shopDefaults]);
   const drillPoint =
     tool !== null && tool.shape === 'drill'
       ? drillPointAngle(tool, { deg: drillShop.settings.pointAngleDeg, source: drillShop.sources.pointAngleDeg })
@@ -1911,7 +1932,21 @@ export function EngravePanel(): JSX.Element {
     feeds !== null &&
     !feeds.ok &&
     feeds.cause !== 'values';
-  const substituteNamed = measuredNow !== null && (namedMissing || namedRefused);
+  // #786 slice 6 — `tool-refused` AND `setup-rest-unavailable` ANSWER THE SAME QUESTION AS A
+  // MISSING KEY. Both are computed here, in the effect, because both read `measuredNow` and the
+  // panel's own shop readings — a fresh object each render would otherwise re-run the effect on
+  // every keystroke.
+  //
+  //   - `tool-refused`: a record the CAM cannot model (a V with no tip or angle, a drill or thread
+  //     mill with no cutting diameter, a shape with no profile). The predicate is the simulator's
+  //     OWN resolver, `columnCutterFor` — the check `columnSweep` makes before it sweeps — handed
+  //     the run's own drill default, so the panel and the run cannot disagree about which records
+  //     are refused.
+  //   - `setup-rest-unavailable`'s "not on this bench": a setup's LATER cutter key that resolves to
+  //     nothing. `applyCutterPlanToJob` rewrites the FIRST setup's cutters, so only a missing key
+  //     there is answered here — one in a later setup keeps the finding's own sentence rather than
+  //     a half-fix — and the plan is applied only when it KEEPS the operator's cutter as program
+  //     1: a rest pass was missing, not the cutter they chose.
   useEffect(() => {
     const source = job.sources?.tool;
     // #743 P-8 — a BOARD ARRIVES WITH ITS PLAN. The import writes each role's cutter (§3.4) and
@@ -1919,8 +1954,22 @@ export function EngravePanel(): JSX.Element {
     // with one cutter chain and cannot express a board's engraver + drills + flat, so it must not
     // replace that plan. A person's or a measured plan is left alone for the same reason (#516) —
     // except that #786 4c's named split KEEPS the named cutter and adds the rest, so it may be
-    // applied over a user or measured pick, and 4c-2 substitutes a missing or refused one.
+    // applied over a user or measured pick, and 4c-2/slice 6 substitute a missing, refused or
+    // unmodellable one.
     if (source === 'catalogue') return;
+    const firstSetupTools = jobSetups(job)[0]?.tools ?? [];
+    const missingRestKey =
+      firstSetupTools.slice(1).find((key) => key !== job.toolKey && toolForIn(tools, key) === null) ?? null;
+    const simRefused =
+      namedNow !== null &&
+      !columnCutterFor(namedNow, { deg: drillShop.settings.pointAngleDeg, source: drillShop.sources.pointAngleDeg }).ok;
+    const restSubstitutable =
+      missingRestKey !== null &&
+      measuredNow !== null &&
+      (job.toolKey === '' || measuredNow.cutters[0]?.key === job.toolKey);
+    const restCase =
+      restSubstitutable && !namedMissing && !namedRefused && !simRefused;
+    const substituteNamed = measuredNow !== null && (namedMissing || namedRefused || simRefused || restCase);
     if ((source === 'user' || source === 'measured') && !namedSplit && !substituteNamed) return;
     // #516 item 5 — the first recommendation lands on the first edit or Generate, not on load: a
     // clean (just-opened or just-saved) tool-less document keeps its empty key, so opening a saved
@@ -1943,18 +1992,31 @@ export function EngravePanel(): JSX.Element {
       if (!measuredApplied) {
         // #786 slice 4c-2 — replacing a cutter the operator CHOSE is recorded, so the finding and
         // the cutter line can say whose cutter it was, why it could not cut, and what replaced it.
-        const said = substituteNamed && (source === 'user' || source === 'measured');
+        // #786 slice 6 — a setup's rest cutter is ALWAYS the operator's document fact (nothing
+        // computes a setup's key), so its replacement is recorded whatever the job's tool source.
+        const said = restCase || (substituteNamed && (source === 'user' || source === 'measured'));
         if (said) {
-          const toKey = measuredNow.cutters[0]!.key;
+          // A rest pass's missing key is answered by the plan's cutter that is not the job's own
+          // (or the first, when the plan is a single cutter); a refused or missing job cutter by
+          // the plan's first.
+          const toCutter = restCase
+            ? (measuredNow.cutters.find((c) => c.key !== job.toolKey) ?? measuredNow.cutters[0]!)
+            : measuredNow.cutters[0]!;
+          const toKey = toCutter.key;
           const toEntry = tools.find((e) => e.key === toKey);
-          const reason: EngraveJobSubstitution['reason'] = namedMissing
-            ? 'missing'
-            : feeds !== null && !feeds.ok && feeds.cause === 'no-feeds'
-              ? 'no-feeds'
-              : 'refused';
+          const reason: EngraveJobSubstitution['reason'] =
+            namedMissing || restCase
+              ? 'missing'
+              : feeds !== null && !feeds.ok && feeds.cause === 'no-feeds' && !simRefused
+                ? 'no-feeds'
+                : 'refused';
           applyCutterPlan(measuredNow.cutters, 'computed', 0, {
-            fromKey: job.toolKey,
-            fromName: namedNow !== null ? toolDisplayName(namedNow).split(' · ')[0]! : job.toolKey,
+            fromKey: restCase ? missingRestKey! : job.toolKey,
+            fromName: restCase
+              ? missingRestKey!
+              : namedNow !== null
+                ? toolDisplayName(namedNow).split(' · ')[0]!
+                : job.toolKey,
             reason,
             ...(reason === 'no-feeds' ? { material: job.stock.material } : {}),
             toKey,
@@ -1973,7 +2035,7 @@ export function EngravePanel(): JSX.Element {
     const key = rec?.key ?? null;
     if (key === null) return;
     if (job.toolKey !== key) setTool(key, 'computed');
-  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, job.substitution, namedSplit, substituteNamed, namedMissing, namedNow, feeds, tools, job.stock.material, applyCutterPlan, setTool]);
+  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, job.substitution, job.setups, namedSplit, namedMissing, namedRefused, namedNow, feeds, tools, drillShop, job.stock.material, applyCutterPlan, setTool]);
 
   // ---- #798 — THE CUTTER AS ONE LINE ------------------------------------------------------
   // What is in the spindle, where that answer came from, and — when the measured search chose it
@@ -1999,10 +2061,11 @@ export function EngravePanel(): JSX.Element {
   // toolpath is actually cutting with (the engine fills the blank before the CAM), not a footnote
   // beside it. Nothing is shown when the record states everything.
   const catalogueNote = (() => {
-    if (tool === null) return null;
-    const filled = withCatalogueValues(tool, tools).filled;
+    const filled = catalogueFill?.filled ?? [];
     if (filled.length === 0) return null;
-    const words = filled.map((f) => `${f.field === 'tip' ? 'tip' : 'reach'} ${fmt(f.mm)} mm`).join(' and ');
+    const words = filled
+      .map((f) => `${f.field === 'tip' ? 'tip' : f.field === 'diameter' ? 'diameter' : 'reach'} ${fmt(f.mm)} mm`)
+      .join(' and ');
     return `${words} from Makera's catalogue`;
   })();
   // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
@@ -2870,8 +2933,16 @@ export function EngravePanel(): JSX.Element {
     reachMm:
       chamferCone === null || chamferFlute === null ? null : chamferFlute * chamferCone.tanHalf,
     tipDiameterMm: chamferCone === null ? null : chamferCone.tipRadius * 2,
+    // #786 slice 6 — a tip the record leaves blank but the catalogue states is neither the
+    // operator's claim nor the kind's assumption: the row names the catalogue as its source.
     tipSource:
-      chamferCone === null || tool === null ? null : tool.tipDiameter !== null ? 'stated' : 'point, by kind',
+      chamferCone === null || tool === null
+        ? null
+        : namedTool !== null && namedTool.tipDiameter !== null
+          ? 'stated'
+          : (catalogueFill?.filled.some((f) => f.field === 'tip') ?? false)
+            ? 'from Makera’s catalogue'
+            : 'point, by kind',
   };
 
   const viseNum = (
@@ -3677,6 +3748,11 @@ export function EngravePanel(): JSX.Element {
           missingRimLabel={chamferRimIssue(chamfer)}
           facts={chamferFacts}
           findings={findingsFor(chamfer.id)}
+          findingAction={(f) =>
+            f.code === 'chamfer-reach-unproven' && cutterRecordWritable ? (
+              <CutterGeometryAsk label="cutting diameter" testid="chamfer-diameter-record" onRecord={recordDiameter} />
+            ) : null
+          }
           onChange={(patch) => updateChamfer(chamfer.id, patch)}
           onRemove={() => removeChamfer(chamfer.id)}
         />
@@ -4483,7 +4559,15 @@ export function EngravePanel(): JSX.Element {
                       </button>
                     </span>
                   )}
-                  {f.code === 'plunge-unproven' && centreCutterWritable && (
+                  {/* #786 slice 6 — THE TIP THE RECORD DOES NOT STATE, asked where the sentence is
+                      read: the error (an item judged by the cone has no width) and the warning (a
+                      carve assumes a point) both name the same field on the same record. */}
+                  {(f.code === 'tool-tip-unrecorded' || f.code === 'tool-tip-assumed-point') && cutterRecordWritable && (
+                    <span style={{ flexShrink: 0, marginLeft: 'auto' }}>
+                      <CutterGeometryAsk label="tip ⌀" allowZero testid="tool-tip-record" onRecord={recordTip} />
+                    </span>
+                  )}
+                  {f.code === 'plunge-unproven' && cutterRecordWritable && (
                     <span style={{ flexShrink: 0, marginLeft: 'auto', display: 'flex', gap: 6 }}>
                       <button type="button" data-testid="plunge-centre-yes" onClick={() => void answerCentreCutting(true)}>
                         Yes

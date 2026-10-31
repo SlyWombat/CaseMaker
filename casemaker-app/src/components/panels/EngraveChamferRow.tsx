@@ -1,4 +1,4 @@
-import type { CSSProperties, JSX } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { chamferOperationName } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -40,7 +40,12 @@ export interface ChamferFacts {
   reachMm: number | null;
   /** The cutter's tip diameter, mm, and where it came from — null with no cone. */
   tipDiameterMm: number | null;
-  tipSource: 'stated' | 'point, by kind' | null;
+  /**
+   * #786 slice 6 — `stated` is the operator's own record; `from Makera’s catalogue` is the vendor
+   * row for the same g_ID (a blank the app filled and the toolpath cuts with); `point, by kind` is
+   * a chamfer's own assumption when neither states one.
+   */
+  tipSource: 'stated' | 'from Makera’s catalogue' | 'point, by kind' | null;
 }
 
 export interface EngraveChamferRowProps {
@@ -61,6 +66,8 @@ export interface EngraveChamferRowProps {
   onRemove: () => void;
   /** Findings about THIS chamfer (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
+  /** #786 slice 6 — the in-place ask under a finding (`chamfer-reach-unproven`). */
+  findingAction?: (finding: JobFinding) => ReactNode;
 }
 
 export function EngraveChamferRow({
@@ -72,6 +79,7 @@ export function EngraveChamferRow({
   onChange,
   onRemove,
   findings,
+  findingAction,
 }: EngraveChamferRowProps): JSX.Element {
   const rim = rims.find((r) => r.id === chamfer.of) ?? null;
   const depth =
@@ -92,6 +100,7 @@ export function EngraveChamferRow({
       removeTitle="Remove this chamfer."
       removeNoun="chamfer"
       findings={findings}
+      findingAction={findingAction}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
     >

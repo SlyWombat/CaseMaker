@@ -1848,8 +1848,8 @@ export function engraveRegions(
             message:
               `The cutter "${tool.name}" records no tip ⌀ (mm). A V-bit cuts with its tip — for a ` +
               'chamfer or an engraver the diameter field is its shank — so the width it reaches the ' +
-              'design with is unknown. Record the tip ⌀ (mm) for this cutter in Manage → Tools or ' +
-              'in the inventory’s cutter record, then regenerate.',
+              'design with is unknown. Record the tip ⌀ (mm) on this cutter’s record, then Generate ' +
+              'again.',
           },
         ]
       : []),
@@ -1861,9 +1861,8 @@ export function engraveRegions(
             message:
               `The cutter "${tool.name}" records no tip ⌀ (mm). Its variable-depth, inlay and ` +
               'prism cuts follow the cone, so the plan assumes a SHARP POINT (0 mm tip) and will ' +
-              'cut slightly deeper than a cutter with a real tip. Record the tip ⌀ (mm) for this ' +
-              'cutter in Manage → Tools or in the inventory’s cutter record to plan the tip ' +
-              'itself, then regenerate.',
+              'cut slightly deeper than a cutter with a real tip. Record the tip ⌀ (mm) on this ' +
+              'cutter’s record to plan the tip itself, then Generate again.',
           },
         ]
       : []),
