@@ -33,7 +33,7 @@ import { statedCuttingSize as stated } from '@/engine/cnc/tool';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { faceCutterOptions, faceWorkOf, kindedWork, materialRefusal, planCutters, reachOf, type PlannedCutter } from './cutterPlan';
 import { goalNeedMm } from './goalReach';
-import { jobTargetObjects } from './jobSetup';
+import { jobHasItems, jobTargetObjects } from './jobSetup';
 
 export type { CandidatePlan, PinchFact } from '@/workers/sim/planEvaluate';
 
@@ -136,7 +136,12 @@ const byDiameter = (a: ToolLibraryEntry, b: ToolLibraryEntry): number =>
 
 /** The canonical identity of a plan, for dedupe and for the evaluator's cache. */
 export function planKey(plan: CandidatePlan): string {
-  return plan.cutters.map((c) => `${c.key}[${[...c.items].sort().join(',')}]`).join('|');
+  // #842 — the face cutter is part of a plan's identity: two plans that differ only there are two
+  // different runs, and they must not dedupe (nor share a cache row).
+  const cutters = plan.cutters.map((c) => `${c.key}[${[...c.items].sort().join(',')}]`).join('|');
+  // A plan with no face cutter keeps the pre-#842 canonical form byte for byte: the suffix is
+  // written only when a face program has a cutter of its own.
+  return plan.faceToolKey === undefined ? cutters : `${cutters}@face:${plan.faceToolKey}`;
 }
 
 /**
@@ -153,17 +158,21 @@ export function rulePlanOf(
 ): CandidatePlan | null {
   const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined);
   if (base.cutters.length === 0) return null;
-  return planFrom(base.cutters, tools);
+  return planFrom(base.cutters, tools, base.faceToolKey);
 }
 
 /** A plan from `planCutters`' output, with each cutter's source recorded. */
-function planFrom(cutters: readonly PlannedCutter[], tools: readonly ToolLibraryEntry[]): CandidatePlan {
+function planFrom(cutters: readonly PlannedCutter[], tools: readonly ToolLibraryEntry[], faceToolKey?: string): CandidatePlan {
   const source: Record<string, 'owned' | 'catalogue'> = {};
   for (const c of cutters) {
     const entry = tools.find((t) => t.key === c.key);
     source[c.key] = entry === undefined ? 'owned' : sourceOf(entry);
   }
-  return { cutters: cutters.map((c) => ({ key: c.key, items: [...c.items] })), source };
+  return {
+    cutters: cutters.map((c) => ({ key: c.key, items: [...c.items] })),
+    source,
+    ...(faceToolKey === undefined ? {} : { faceToolKey }),
+  };
 }
 
 /**
@@ -226,8 +235,22 @@ export function candidatePlans(
   // the rule-based answer; the search treats it as one candidate among the measured ones. A MIXED
   // NAMED job does not take it: that plan would replace the cutter the operator named.
   const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined);
-  const basePlan = planFrom(base.cutters, tools);
-  if (!mixedNamed && basePlan.cutters.length > 0) add(basePlan);
+  const basePlan = planFrom(base.cutters, tools, base.faceToolKey);
+  // #842 — A MIXED JOB'S FACE CUTTER IS PART OF THE PLAN. The face rule names one; the search
+  // also tries the other fitting face cutters, so a human finding a better one is a selector bug
+  // no more. Each face variant rides the rule's item plan.
+  const mixedFace = jobHasItems(job)
+    ? faceCutterOptions(job, tools, catalogue, conditions ?? undefined, table ?? undefined, true, true)
+    : null;
+  const defaultFaceKey = base.faceToolKey;
+  if (!mixedNamed && basePlan.cutters.length > 0) {
+    add(basePlan);
+    if (mixedFace !== null) {
+      for (const entry of mixedFace.candidates.slice(0, 4)) {
+        add({ ...basePlan, faceToolKey: entry.key });
+      }
+    }
+  }
   // The kind plan's NON-FLAT cutters other than the named one — what the split keeps for the thread
   // and cone work. A flat never comes from here: the split chooses its own clearance flat, and the
   // kind plan's flat would own the very items that flat is for.
@@ -417,7 +440,11 @@ export function candidatePlans(
       .slice(0, 2);
     for (const cone of textCones) add(withOthers([{ key: cone.key, items: flatItems }]));
   }
-  return out;
+  // #842 — every plan that did not choose a face cutter of its own rides the rule's, so the
+  // evaluator writes one to the setup either way.
+  return out.map((plan) =>
+    plan.faceToolKey === undefined && defaultFaceKey !== undefined ? { ...plan, faceToolKey: defaultFaceKey } : plan,
+  );
 }
 
 /**

@@ -107,6 +107,12 @@ export interface CutterPlan {
   /** Items no candidate could take, with the reason — the job refuses, and the pick says why. */
   unassigned: { id: string; name: string; reason: string }[];
   notes: string[];
+  /**
+   * #842 — a MIXED job's face-program cutter (the setup's `faceToolKey`), chosen by the face
+   * rule beside the item cutters. Absent when the job has no faces, or when the first item
+   * cutter serves them too.
+   */
+  faceToolKey?: string;
 }
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -219,12 +225,16 @@ export function faceCutterOptions(
   table?: readonly FeedsEntry[],
   /** Owned cutters vouch for themselves (#766's rule), as the search does. */
   ownedVouches = true,
+  /**
+   * #842 — a MIXED job (map items AND faces) has a face program of its own (#836), so the face
+   * cutter is still this rule's to pick. False keeps the face-only subject, where the item pick
+   * answers for the whole job.
+   */
+  allowMixed = false,
 ): FaceCutterOptions | null {
   const facts = faceWorkOf(job);
   if (facts === null) return null;
-  // A job that also carries map items is refused by Generate (a wrapped program and an indexed one
-  // are two programs); its pick is not this rule's to make.
-  if (jobHasItems(job)) return null;
+  if (jobHasItems(job) && !allowMixed) return null;
   const eligible = tools.filter(
     (entry) => materialRefusal(job, entry, catalogue, conditions, table, { ownedVouches }) === null,
   );
@@ -241,8 +251,9 @@ export function faceCutterPick(
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   ownedVouches = true,
+  allowMixed = false,
 ): FaceCutterPick | null {
-  const options = faceCutterOptions(job, tools, catalogue, conditions, table, ownedVouches);
+  const options = faceCutterOptions(job, tools, catalogue, conditions, table, ownedVouches, allowMixed);
   if (options === null) return null;
   const { facts, matchedHoles } = options;
   const pick = options.candidates[0];
@@ -467,6 +478,9 @@ export function planCutters(
       notes: [],
     };
   }
+  // #842 — a MIXED job's face program has its own cutter, chosen by the same face rule.
+  const mixedFace = jobHasItems(job) ? faceCutterPick(job, tools, catalogue, conditions, table, true, true) : null;
+  const faceToolKey = mixedFace === null ? undefined : mixedFace.entry.key;
 
   const work = kindedWork(job);
   const unassigned: CutterPlan['unassigned'] = [];
@@ -821,7 +835,14 @@ export function planCutters(
       ? 'one cutter takes all the work'
       : `${merged.length} cutters, one program each: ${merged.map((m) => `${m.key} (${m.items.length})`).join(', ')}`,
   );
-  return { cutters: merged, unassigned, notes };
+  // #842 — the mixed job's face program keeps its own cutter when the face rule names one that
+  // the item cutters do not already serve.
+  return {
+    cutters: merged,
+    unassigned,
+    notes,
+    ...(faceToolKey === undefined ? {} : { faceToolKey }),
+  };
 }
 
 /**

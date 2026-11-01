@@ -102,6 +102,8 @@ export interface PlanCutter {
 /** A candidate plan: cutters in cut order. */
 export interface CutterPlanLike {
   cutters: readonly PlanCutter[];
+  /** #842 — the mixed job's face-program cutter (the setup's `faceToolKey`). */
+  faceToolKey?: string;
   /**
    * #743 P-8 — WHICH setup the plan rewrites (0-based), defaulting to the first. A two-sided
    * board has one setup per face, and a fix applied to the bottom's cutter must not collapse the
@@ -140,15 +142,18 @@ export function applyCutterPlanToJob(job: EngraveJob, plan: CutterPlanLike): Eng
   const setups = jobSetups(applied);
   const setup = setups[index];
   if (setup === undefined) return applied;
-  applied.setups = setups.map((s, i) =>
-    i === index
-      ? {
-          ...s,
-          tools: plan.cutters.map((c) => c.key),
-          toolItems: Object.fromEntries(plan.cutters.map((c) => [c.key, [...c.items]])),
-        }
-      : s,
-  );
+  applied.setups = setups.map((s, i) => {
+    if (i !== index) return s;
+    // #842 — the face cutter rides the setup beside the item cutters; an absent key CLEARS a
+    // stale one, so re-choosing a single-cutter plan does not leave the old face cutter behind.
+    const { faceToolKey: _stale, ...rest } = s;
+    return {
+      ...rest,
+      ...(plan.faceToolKey === undefined ? {} : { faceToolKey: plan.faceToolKey }),
+      tools: plan.cutters.map((c) => c.key),
+      toolItems: Object.fromEntries(plan.cutters.map((c) => [c.key, [...c.items]])),
+    };
+  });
   return applied;
 }
 

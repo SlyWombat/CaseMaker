@@ -11,6 +11,7 @@ import { getTools } from '@/engine/cnc/toolRegistry';
 import { recommendTool } from '@/engine/cnc/engrave/recommendTool';
 import { planCutters, faceCutterPick, faceWorkOf } from '@/engine/cnc/engrave/cutterPlan';
 import { smartPick, candidatePlans } from '@/engine/cnc/engrave/smartPick';
+import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { clearPlanEvaluations, evaluatePlan, type EvalContext } from '@/workers/sim/planEvaluate';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -115,6 +116,31 @@ describe('#834 the face work and the cutters that fit it', () => {
     expect(out.items).toEqual([]);
     expect(out.seconds).toBeGreaterThan(0);
   }, 240_000);
+
+  it('#842 — a MIXED job’s plan carries a face cutter, and the search chooses it by time', async () => {
+    const job = faceJob([hex]);
+    job.shapes = [
+      { id: 's1', kind: 'circle', position: { x: 20, y: Math.PI * 10 }, rotation: 0, depth: 0.5, enabled: true, diameter: 8 },
+    ];
+    const plan = planCutters(job, null, LIB, []);
+    expect(plan.faceToolKey).toBe('inv:flat-3.175'); // the face rule's pick (widest fitting)
+    const plans = candidatePlans(job, LIB, []);
+    expect(new Set(plans.map((p) => p.faceToolKey))).toEqual(new Set(['inv:flat-3.175', 'inv:flat-1']));
+    // The evaluator prices the FACE cutter too: the finer one is faster here, so it must win.
+    const evaluate = (candidate: { faceToolKey?: string }) => ({
+      ok: true,
+      refusal: null,
+      items: [],
+      seconds: candidate.faceToolKey === 'inv:flat-1' ? 30 : 90,
+      toolChanges: 0,
+      risk: { reachMarginMm: null, holderClearanceMm: null, chipLoadRatio: null },
+    });
+    const pick = await smartPick(job, LIB, [], evaluate as never);
+    expect(pick.chosen.plan.faceToolKey).toBe('inv:flat-1');
+    // …and the plan is written where the face program reads it: the first setup's faceToolKey.
+    const applied = applyCutterPlanToJob(job, pick.chosen.plan);
+    expect(applied.setups?.[0]?.faceToolKey).toBe('inv:flat-1');
+  });
 
   it('the search measures every fitting cutter and chooses the fastest at equal fidelity', async () => {
     const job = faceJob([hex]);

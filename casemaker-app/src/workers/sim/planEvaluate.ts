@@ -75,6 +75,12 @@ export interface CandidatePlan {
   cutters: readonly CandidateCutter[];
   /** `owned` (the location's library) or `catalogue` (Makera's) per key. */
   source: Readonly<Record<string, 'owned' | 'catalogue'>>;
+  /**
+   * #842 — the cutter a MIXED job's face program runs (the setup's `faceToolKey`), when it
+   * differs from the plan's item cutters. The evaluator writes it into the applied job's first
+   * setup, so the face program is measured with the cutter it would really run.
+   */
+  faceToolKey?: string;
 }
 
 /**
