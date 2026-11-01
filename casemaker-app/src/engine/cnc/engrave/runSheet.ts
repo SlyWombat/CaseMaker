@@ -3668,6 +3668,9 @@ export function buildRunSheet(
   // this is even when the panel is showing a calibrated frame. Its rapid model is read from the same
   // profile (#281), so the note beside the estimate quotes the numbers the estimate was timed with.
   const machine = jobMachine(job);
+  // #845 — the lift a material scan is measured from, when the machine has a controller frame;
+  // a stated machine has none, and the step that would print it is not written at all.
+  const clearanceZ = clearanceZOf(machine);
   const header: RunSheetHeader = {
     jobName: job.name,
     machine: options.machineName ?? machine.name,
@@ -3978,8 +3981,8 @@ export function buildRunSheet(
     ...(registrationRefused
       ? []
       : surfaceSpreadSteps(job, margins.boundaryMargin, options.surfaceTouchCount, options.surfaceReadings, options.surfaceLevel)),
-    ...(options.materialScan === true && clearanceZOf(machine) !== null
-      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, clearanceZOf(machine) as number, options.scan, options.probeInstrument)
+    ...(options.materialScan === true && clearanceZ !== null
+      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, clearanceZ, options.scan, options.probeInstrument)
       : []),
   ];
 

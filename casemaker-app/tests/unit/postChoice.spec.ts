@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { postFor, postKey } from '@/engine/cnc/post';
+import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
 import { SHAPEOKO_4, Z1, type Mill, type MillModel } from '@/engine/cnc/machine';
 import type { CamMove, ToolpathIR } from '@/engine/cnc/cam/ir';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -66,6 +66,14 @@ describe('#845 the post a machine is written by', () => {
     expect(text.split('\n')[0]).toBe('; Case Maker — demo pocket');
     expect(text).toContain('; dialect: GRBL 1.1');
     expect(text).not.toContain(';@MKR');
+  });
+
+  it('writes the work-origin convention the machine states', () => {
+    // A framed profile is the Z1's own convention whatever its record says; a stated machine
+    // writes the one its owner chose, so the header sentence and the coordinates cannot disagree.
+    expect(postOriginFor(Z1)).toBe('topFrontLeft');
+    expect(postOriginFor(SHAPEOKO_4)).toBe('topFrontLeft');
+    expect(postOriginFor({ ...SHAPEOKO_4, workOrigin: 'top-centre' })).toBe('topCentre');
   });
 
   it('refuses a stated machine that names no post: it has no frame to write from', () => {

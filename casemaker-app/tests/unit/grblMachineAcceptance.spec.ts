@@ -8,11 +8,13 @@
  * session and the oracle. The only thing this spec fakes is having a machine: the preset IS the
  * machine, its stated values are the ones every gate reads.
  *
- * The three claims are the manager's acceptance line, one test each:
+ * The issue's acceptance lines, one test each:
  *   1. the file is the GRBL post's (its header, its `M0` pause, its ending — and none of the Z1's);
  *   2. the verifier passes it, judged in the GRBL dialect;
  *   3. the simulation matches the prediction (the oracle), and the run gates say Save may keep the
- *      `.nc` while Upload/Release refuse it by name — it is run from the operator's own sender.
+ *      `.nc` while Upload/Release refuse it by name — it is run from the operator's own sender;
+ *   4. a GRBL-incompatible feature is refused by name (a rotary job here).
+ * Plus the centre-zero setup, the other half of the work-origin convention the post writes.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -21,7 +23,7 @@ import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
-import { MACHINE_RUN_ELSEWHERE, SHAPEOKO_4 } from '@/engine/cnc/machine';
+import { MACHINE_RUN_ELSEWHERE, SHAPEOKO_4, type MillModel } from '@/engine/cnc/machine';
 import { createSimSession, type SimLoadOk } from '@/workers/sim/session';
 import { uploadBlocker, saveBlocker, releaseBlocker, type EngraveRunView } from '@/store/engraveRunGate';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -75,6 +77,23 @@ function readyRun(g: ReturnType<typeof generate>): EngraveRunView {
     machine: SHAPEOKO_4,
   };
 }
+
+// The other half of the centre-zero convention: the post shifts the coordinates, so the setup's
+// WCS has to be the stock's CENTRE or the verifier's envelope check would test the wrong positions.
+describe('#845 a centre-zero machine’s setup', () => {
+  it('puts the WCS on the stock’s centre and the blank inside the stated envelope', () => {
+    const centreZero: MillModel = { ...SHAPEOKO_4, workOrigin: 'top-centre' };
+    const job = demoJob();
+    const setup = toSetup(job, centreZero);
+    expect(setup.wcs.origin[0]).toBeCloseTo(838.2 / 2, 6);
+    expect(setup.wcs.origin[1]).toBeCloseTo(838.2 / 2, 6);
+    expect(setup.wcs.origin[2]).toBeCloseTo(job.stock.thickness, 6);
+    // The blank is centred in the work area, sitting on the bed.
+    expect(setup.placement.origin[0]).toBeCloseTo((838.2 - job.stock.length) / 2, 6);
+    expect(setup.placement.origin[1]).toBeCloseTo((838.2 - job.stock.width) / 2, 6);
+    expect(setup.placement.origin[2]).toBe(0);
+  });
+});
 
 describe('#845 a Shapeoko job: a pocket, text and holes (the slice-B acceptance)', () => {
   const job = demoJob();
