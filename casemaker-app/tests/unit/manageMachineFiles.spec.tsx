@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-// #772 — the card's files panel: what it lists, what it offers to delete, and what it refuses.
+// #772/#886 — the card's files panel: what it lists, what it offers to delete, and what it refuses.
+// #886 — any file can be deleted after ONE confirmation (its own uploads without one); a running
+// job and the program the machine holds stay blocked; 1980 stamps read "no date".
 //
 // The seam is the loader (`setMachineFilesLoader`), so the panel's real path runs against a fake
 // client. The safety clauses are pinned in `machineFiles.spec.ts` where the seam owns them; what
@@ -97,7 +99,7 @@ describe('#772 the card’s files panel', () => {
     expect(q('manage-files')).toBeNull();
   });
 
-  it('lists the card: folders, sizes and stamps; only this app’s upload gets a Delete', async () => {
+  it('lists the card: folders, sizes and stamps; every file gets a Delete, a folder none', async () => {
     setMachineFilesLoader(async () => fake().client);
     render(<MachineFiles host={HOST} port={2222} busy={false} />);
     fireEvent.click(screen.getByTestId('manage-files-refresh'));
@@ -107,12 +109,8 @@ describe('#772 the card’s files panel', () => {
     expect(screen.getByTestId('manage-files-table').textContent).toContain('2.0 kB');
     expect(screen.getByTestId('manage-files-table').textContent).toContain('2026-10-29 12:03');
     expect(screen.getByTestId('manage-files-table').textContent).toContain('(folder)');
-    // `studio.nc` was not uploaded here: the sentence, and no Delete button for it.
-    const foreign = screen.getAllByTestId('manage-files-foreign');
-    expect(foreign).toHaveLength(1); // only the studio file; the folder says "folder"
-    expect(foreign.map((el) => el.textContent)).toContain('not uploaded here');
-    // One Delete… for the uploaded file (the other non-folder row is read-only).
-    expect(screen.queryAllByTestId(/manage-files-delete-/)).toHaveLength(1);
+    // #886 — both non-folder rows offer a Delete (the folder does not).
+    expect(screen.queryAllByTestId(/manage-files-delete-/)).toHaveLength(2);
   });
 
   it('deletes on the SECOND press, naming the file in between', async () => {
@@ -133,6 +131,40 @@ describe('#772 the card’s files panel', () => {
     // The card is read again, and the deleted file is gone from it.
     await waitFor(() => expect(state.lists).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(screen.getByTestId('manage-files-table').textContent).not.toContain('job.nc'));
+  });
+
+  it('asks in its own words for a file this app did not upload (#886)', async () => {
+    const state = fake();
+    setMachineFilesLoader(async () => state.client);
+    render(<MachineFiles host={HOST} port={2222} busy={false} />);
+    fireEvent.click(screen.getByTestId('manage-files-refresh'));
+    await waitFor(() => expect(screen.getByTestId('manage-files-delete-2')).not.toBeNull());
+    fireEvent.click(screen.getByTestId('manage-files-delete-2'));
+    expect(q('manage-files-confirm')?.textContent).toContain(
+      'Case Maker didn’t upload “studio.nc”. Delete it from the card?',
+    );
+    expect(state.removed).toEqual([]);
+    fireEvent.click(screen.getByTestId('manage-files-confirm-2'));
+    await waitFor(() => expect(state.removed).toEqual(['studio.nc']));
+  });
+
+  it('never offers a delete for the program the machine holds (#886)', async () => {
+    const { useMachineRunStore } = await import('@/store/machineRunStore');
+    const original = useMachineRunStore.getState().runs;
+    useMachineRunStore.setState({
+      runs: { [`${HOST}:2222`]: { filename: 'job.nc' } as unknown as (typeof original)[string] },
+    });
+    try {
+      setMachineFilesLoader(async () => fake().client);
+      render(<MachineFiles host={HOST} port={2222} busy={false} />);
+      fireEvent.click(screen.getByTestId('manage-files-refresh'));
+      await waitFor(() => expect(screen.getByTestId('manage-files-table')).not.toBeNull());
+      expect(screen.getByTestId('manage-files-loaded').textContent).toBe('the program the machine holds');
+      // The other file still has its Delete; the held program does not.
+      expect(screen.getAllByTestId(/manage-files-delete-/)).toHaveLength(1);
+    } finally {
+      useMachineRunStore.setState({ runs: original });
+    }
   });
 
   it('Cancel sends nothing', async () => {
@@ -209,6 +241,9 @@ describe('#772 the card panel’s words', () => {
     expect(fileSizeWords(2048)).toBe('2.0 kB');
     expect(fileSizeWords(3 * 1024 * 1024)).toBe('3.0 MB');
     expect(fileStampWords('20261029120304')).toBe('2026-10-29 12:03');
+    // #886 — the card's no-clock stamp is not a 1980 file.
+    expect(fileStampWords('19800101000000')).toBe('no date');
+    expect(fileStampWords('19800101000000')).not.toContain('1980');
     expect(fileStampWords(null)).toBe('—');
     expect(fileStampWords('not-a-stamp')).toBe('not-a-stamp');
   });

@@ -10,16 +10,17 @@
  * <dir>` and `rm <file> -e` — and their reply types, escaping and listing format are recorded in
  * `platform/desktop/protocol.ts` beside the code that sends them.
  *
- * THE DELETE RULE HAS TWO CLAUSES, and both live here rather than only in the panel, because a
- * second caller must not be able to skip them:
+ * THE DELETE RULES, and all of them live here rather than only in the panel, because a second
+ * caller must not be able to skip them:
  *
- *   1. **Only a file this app uploaded.** There is no marker on the card: a `.nc`'s name is the
- *      job's own. So the app keeps a per-machine ledger of what it has uploaded (see
- *      {@link recordUploadedFile}) and refuses to delete anything else, naming the machine-side
- *      alternative. A ledger entry that is wrong can only ever refuse a delete; it can never
- *      delete a file the person did not upload here.
- *   2. **Never while a job runs.** The caller passes the machine's busy fact; a file the running
- *      program is about to play is not something to remove underneath it.
+ *   1. **Never while a job runs**, and never the program the machine holds or is playing (#886):
+ *      the caller passes the machine's busy fact and its loaded program's name.
+ *   2. **Any other file, after ONE confirmation** (#886, inform-don't-refuse). The app keeps a
+ *      per-machine ledger of what it uploaded ({@link recordUploadedFile}); its own uploads delete
+ *      without a question. For anything else the answer is `confirm` — "Case Maker didn't upload
+ *      <name>. Delete it from the card?" — and the caller repeats the call with `confirmed: true`
+ *      once the person has said yes. The ledger can no longer block a delete, only decide whether
+ *      a question is asked.
  *
  * The ledger is per-browser (localStorage): it is a convenience that survives a reload, never a
  * claim the app depends on — with no storage the panel simply offers fewer deletes.
@@ -53,6 +54,8 @@ export type ListFilesResult =
 /** What deleting one file did. */
 export type DeleteFileResult =
   | { kind: 'deleted'; name: string; detail: string }
+  /** #886 — the person has not confirmed a file this app did not upload; ask and call again. */
+  | { kind: 'confirm'; detail: string }
   | { kind: 'refused'; detail: string }
   | { kind: 'timeout'; detail: string }
   | { kind: 'error'; detail: string }
@@ -191,6 +194,10 @@ export function forgetUploadedFile(host: string, name: string | null = null): vo
 export interface DeleteFileOptions {
   /** The machine's own busy fact. A delete while a program runs is refused by name. */
   busy?: boolean;
+  /** #886 — the name of the program the machine holds (prepared or playing), if any. */
+  loadedProgram?: string | null;
+  /** #886 — the person has confirmed deleting a file this app did not upload. */
+  confirmed?: boolean;
 }
 
 /**
@@ -211,11 +218,14 @@ export async function deleteMachineFile(
   if (name.length === 0 || name.includes('/')) {
     return { kind: 'refused', detail: `refusing to delete ${JSON.stringify(name)}: one file's name, without a path` };
   }
-  if (!isUploadedFile(target.host, name)) {
+  if (opts.loadedProgram !== undefined && opts.loadedProgram !== null && opts.loadedProgram === name) {
     return {
       kind: 'refused',
-      detail: `"${name}" was not uploaded by Case Maker, so this view will not delete it — delete it at the machine or in Makera Studio.`,
+      detail: `"${name}" is the program the machine holds; delete it once it has finished or another program is loaded.`,
     };
+  }
+  if (!isUploadedFile(target.host, name) && opts.confirmed !== true) {
+    return { kind: 'confirm', detail: `Case Maker didn’t upload “${name}”. Delete it from the card?` };
   }
   let client: MachineFilesClient;
   try {

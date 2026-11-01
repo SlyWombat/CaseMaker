@@ -24,8 +24,8 @@ import {
   type ListFilesResult,
   type SdFileEntry,
 } from '@/platform/machineFiles';
-import { machineKey } from '@/store/machineRunStore';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import type { ReleasePhase } from '@/store/engraveReleaseStore';
 import { fileSizeWords, fileStampWords } from './machineFileWords';
 
@@ -56,6 +56,8 @@ function FilesPanel({ host, port, busy }: MachineFilesProps) {
   const target = { host, port };
   const phase = useEngraveReleaseStore((s) => s.records[machineKey({ host, port })]?.phase ?? null);
   const jobRunning = busy || (phase !== null && ACTIVE_PHASES.has(phase));
+  // #886 — the program the machine holds (prepared or playing): never deletable while it is that.
+  const loadedProgram = useMachineRunStore((s) => s.runs[machineKey({ host, port })]?.filename ?? null);
 
   const [listing, setListing] = useState<ListFilesResult | null>(null);
   const [reading, setReading] = useState(false);
@@ -74,17 +76,24 @@ function FilesPanel({ host, port, busy }: MachineFilesProps) {
     }
   }
 
-  async function remove(name: string): Promise<void> {
+  async function remove(name: string, confirmed = false): Promise<void> {
     if (deleting !== null) return;
     setDeleting(name);
     setNote(null);
     let result: DeleteFileResult;
     try {
-      result = await deleteMachineFile(target, name, { busy: jobRunning });
+      result = await deleteMachineFile(target, name, { busy: jobRunning, loadedProgram, confirmed });
+      // #886 — a file this app did not upload asks once, in its own words; the row's own press is
+      // the confirmation, so this path is only reached if a caller didn't ask.
+      if (result.kind === 'confirm') {
+        setNote(result.detail);
+        setConfirming(name);
+        return;
+      }
     } finally {
       setDeleting(null);
-      setConfirming(null);
     }
+    setConfirming(null);
     // The list is read again either way: a delete that went through is only believed once the
     // card says so, and a refusal may still have changed nothing the person needs to see. The
     // sentence is set AFTER the read, which does not touch it.
@@ -113,9 +122,8 @@ function FilesPanel({ host, port, busy }: MachineFilesProps) {
       </summary>
 
       <p className="hint" data-testid="manage-files-hint">
-        The SD card's job directory. This view deletes only a file Case Maker uploaded, and never
-        while a job is running; anything else is listed read-only — remove it at the machine or in
-        Makera Studio.
+        The SD card’s job directory. Any file here can be deleted once you confirm it — never while
+        a job is running, and never the program the machine holds.
       </p>
 
       <div className="btn-row">
@@ -170,18 +178,20 @@ function FilesPanel({ host, port, busy }: MachineFilesProps) {
                     <span className="dim" data-testid="manage-files-busy">
                       a job is running
                     </span>
-                  ) : !isUploadedFile(host, entry.name) ? (
-                    <span className="dim" data-testid="manage-files-foreign">
-                      not uploaded here
+                  ) : loadedProgram === entry.name ? (
+                    <span className="dim" data-testid="manage-files-loaded">
+                      the program the machine holds
                     </span>
                   ) : confirming === entry.name ? (
                     <span data-testid="manage-files-confirm">
-                      Delete “{entry.name}”? This cannot be undone.{' '}
+                      {isUploadedFile(host, entry.name)
+                        ? `Delete “${entry.name}”? This cannot be undone.`
+                        : `Case Maker didn’t upload “${entry.name}”. Delete it from the card?`}{' '}
                       <button
                         type="button"
                         className="btn btn--sm btn--danger"
                         data-testid={`manage-files-confirm-${i}`}
-                        onClick={() => void remove(entry.name)}
+                        onClick={() => void remove(entry.name, true)}
                         disabled={deleting === entry.name}
                       >
                         {deleting === entry.name ? 'Deleting…' : 'Delete the file'}

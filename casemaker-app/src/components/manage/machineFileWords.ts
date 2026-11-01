@@ -16,6 +16,8 @@ export function fileSizeWords(bytes: number): string {
 /** `2026-10-29 14:03` from the listing's `YYYYMMDDHHMMSS`, or the raw stamp when it is not one. */
 export function fileStampWords(stamp: string | null): string {
   if (stamp === null) return '—';
+  // #886 — the card writes 1980-01-01 when it has no clock; that is "no date", not a 1980 file.
+  if (stamp.startsWith('19800101')) return 'no date';
   const m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(stamp);
   return m === null ? stamp : `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
 }

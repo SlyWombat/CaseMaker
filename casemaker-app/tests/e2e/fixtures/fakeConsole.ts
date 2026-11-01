@@ -12,6 +12,11 @@
  * therefore reaches its running, paused and finished states with NO hardware — which is what makes
  * the #801 controls and the #806 Done card e2e-screenshot-able.
  *
+ * It also plays the CARD's own two commands (#886): `ls -e -s <dir>` answers the seeded listing in
+ * the Controller's `name size YYYYMMDDHHMMSS` form and ends with LOAD_FINISH, and `rm <path> -e`
+ * removes the named entry and answers `ok` — or the shell's `rm: cannot remove` line, which the
+ * app must read as a refusal. The Files panel is e2e-able against it without a card in the slot.
+ *
  * Testing surface only: nothing here ships.
  */
 import type { Page } from '@playwright/test';
@@ -20,6 +25,8 @@ const FRAME_HEADER = 0x8668;
 const FRAME_FOOTER = 0x55aa;
 /** A reply frame: a type ≥ 0x80 is text the console reads (the controller's own answer types). */
 const PTYPE_REPLY = 0x83;
+/** The controller's LOAD_FINISH: the answer to `ls`/`rm` is over (#886). */
+const PTYPE_LOAD_FINISH = 0x84;
 const PTYPE_CTRL_SINGLE = 0xa1;
 
 const UTF8 = new TextDecoder();
@@ -97,9 +104,20 @@ export interface FakeChuck {
 /** The 3D probe's measured effective ball radius, mm — the sideways-boss convention's offset. */
 const PROBE_R = 0.875;
 
+/** #886 — one entry of the seeded card listing, in the Controller's own three fields. */
+export interface FakeSdFile {
+  name: string;
+  size: number;
+  /** `YYYYMMDDHHMMSS`; absent means the epoch stamp a card with no clock reports. */
+  stamp?: string;
+  directory?: boolean;
+}
+
 export interface FakeConsoleOptions {
   /** Status polls from `play` to 100 %. Smaller finishes faster. Default 12. */
   steps?: number;
+  /** #886 — what the card holds; `ls -e -s` answers this, `rm` takes an entry away. */
+  files?: readonly FakeSdFile[];
 }
 
 /** #826 — the bench's own diagnostic line: probe open, cover closed, no limit, e-stop released. */
@@ -119,6 +137,8 @@ export interface FakeConsole {
   setFeature(feature: FakeFeature): void;
   /** #607 — the chuck the rotary tap touches from now on. */
   setChuck(chuck: FakeChuck): void;
+  /** #886 — what the card holds NOW, after any deletes the app sent. */
+  files(): FakeSdFile[];
 }
 
 /**
@@ -139,6 +159,8 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   let feature: FakeFeature | null = null;
   // #607 — the rotary module's chuck, when a spec seeds one.
   let chuck: FakeChuck | null = null;
+  // #886 — the card's own listing, seeded by the spec and changed by its deletes.
+  let files: FakeSdFile[] = [...(opts.files ?? [])];
   const pos = { x: 0, y: 0, z: -3 };
   let mode: 'G90' | 'G91' = 'G90';
   const dist = (x: number, y: number): number =>
@@ -290,6 +312,29 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
       phase = 'stopped';
       return frame(PTYPE_REPLY, 'ok\r\n');
     }
+    // #886 — the card's own two commands. `ls -e -s <dir>` answers the seeded listing in the
+    // Controller's `name size stamp` form and ends with LOAD_FINISH; `rm <path> -e` takes the
+    // named entry away. Both are the shapes `protocol.ts` parses.
+    if (lineText.startsWith('ls -e -s ')) {
+      const lines = files.map(
+        (f) => `${f.name}${f.directory === true ? '/' : ''} ${f.size} ${f.stamp ?? '19800101000000'}`,
+      );
+      return [...frame(PTYPE_REPLY, lines.length === 0 ? '' : `${lines.join('\r\n')}\r\n`), frame(PTYPE_LOAD_FINISH, '')];
+    }
+    m = /^rm (.+) -e$/.exec(lineText);
+    if (m !== null) {
+      // A path arrives with the Controller's escaping, where 0x01 is a space; the name is the
+      // last segment (`/sd/gcodes/<name>`), and removing a file the card does not hold answers
+      // the shell's own refusal, which the app must not read as a delete.
+      const path = m[1]!.replace(/\u0001/g, ' ');
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      const held = files.some((f) => f.name === name);
+      files = files.filter((f) => f.name !== name);
+      return [
+        ...frame(PTYPE_REPLY, held ? 'ok\r\n' : 'rm: cannot remove: no such file\r\n'),
+        frame(PTYPE_LOAD_FINISH, ''),
+      ];
+    }
     return frame(PTYPE_REPLY, 'ok\r\n');
   };
 
@@ -340,5 +385,6 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
     setDiagnose: (next: string) => (diagnoseLine = next),
     setFeature: (next: FakeFeature) => (feature = next),
     setChuck: (next: FakeChuck) => (chuck = next),
+    files: () => [...files],
   };
 }

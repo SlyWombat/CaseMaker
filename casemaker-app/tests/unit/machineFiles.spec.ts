@@ -1,10 +1,10 @@
 // #772 — the card's file list and delete, UI side.
 //
 // The seam is the client: `setMachineFilesLoader` swaps the socket half, so the real path
-// (guard → client → outcome) runs in every test. What these pin is the panel's two safety clauses
-// and the ledger that carries the first one: only a file THIS browser recorded uploading may be
-// deleted, and never while the machine is running a job — both refused here, before any client is
-// asked, so a future caller cannot skip them by forgetting to check.
+// (guard → client → outcome) runs in every test. What these pin is the delete rule: never while a
+// job runs, never the program the machine holds, and a file this app did not upload asks ONCE
+// (#886, inform-don't-refuse) before it goes — all decided here, before any client is asked, so a
+// future caller cannot skip them by forgetting to check.
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -83,12 +83,26 @@ describe('#772 deleting a file', () => {
     expect(isUploadedFile(HOST, 'job.nc')).toBe(false);
   });
 
-  it('refuses a file it did not upload, before asking the machine', async () => {
+  it('asks once before deleting a file it did not upload, and deletes it when confirmed (#886)', async () => {
     const client = fakeClient();
     setMachineFilesLoader(async () => client);
-    const result = await deleteMachineFile(TARGET, 'studio.nc');
+    const asked = await deleteMachineFile(TARGET, 'studio.nc');
+    expect(asked.kind).toBe('confirm');
+    if (asked.kind === 'confirm') {
+      expect(asked.detail).toBe('Case Maker didn’t upload “studio.nc”. Delete it from the card?');
+    }
+    expect(client.removed).toEqual([]);
+    const yes = await deleteMachineFile(TARGET, 'studio.nc', { confirmed: true });
+    expect(yes.kind).toBe('deleted');
+    expect(client.removed).toEqual(['studio.nc']);
+  });
+
+  it('refuses the program the machine holds, even with a confirmation (#886)', async () => {
+    const client = fakeClient();
+    setMachineFilesLoader(async () => client);
+    const result = await deleteMachineFile(TARGET, 'job.nc', { loadedProgram: 'job.nc', confirmed: true });
     expect(result.kind).toBe('refused');
-    if (result.kind === 'refused') expect(result.detail).toContain('was not uploaded by Case Maker');
+    if (result.kind === 'refused') expect(result.detail).toContain('program the machine holds');
     expect(client.removed).toEqual([]);
   });
 
