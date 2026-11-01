@@ -51,11 +51,24 @@ export interface AxisRange {
  */
 export type MachineProcess = 'fdm' | 'mill';
 
+/**
+ * #845 — WHICH POST WRITES THIS MACHINE'S FILES. `'z1'` is the Makera/Smoothie dialect this app
+ * has always written; `'grbl'` is a machine run from its owner's own sender. OPTIONAL and absent
+ * reads `'z1'`, so every stored record and literal written before the field existed is unchanged.
+ */
+export type MachinePost = 'z1' | 'grbl';
+
 /** The identity and process discriminator every machine shares. */
 export interface MachineIdentity {
   id: string;
   name: string;
   process: MachineProcess;
+  /**
+   * #845 — the POST that writes this machine's `.nc`; absent reads `'z1'`. Named `post`, not
+   * `dialect`: a profile's `dialect` is already the G-code FORMATTING table (arcs, precision),
+   * which every post reads — this is which post reads it.
+   */
+  post?: MachinePost;
 }
 
 /**
@@ -924,7 +937,12 @@ export const CARVERA_AIR: MillProfile = {
  */
 export interface MillModel extends MachineIdentity {
   process: 'mill';
-  frameState: 'unread';
+  /**
+   * #845 — `'unread'`: a vendor model whose controller frame has not been read yet (connect it
+   * once). `'stated'`: a GRBL machine whose values the OWNER stated and which this app never
+   * connects to — export only — so there is no frame to read and none is invented.
+   */
+  frameState: 'unread' | 'stated';
   materials: StockMaterial[];
   envelope: { x: AxisRange; y: AxisRange; z: AxisRange };
   maxCutFeed: number;
@@ -953,8 +971,16 @@ export type Mill = MillProfile | MillModel;
 export const MACHINE_FRAME_UNREAD =
   "This Carvera's frame has not been read from the machine yet; connect it once.";
 
+/**
+ * #845 — the refusal for a machine that is run from its owner's own sender: it has no frame this
+ * app can read or drive, so anything positional is not offered — the .nc is.
+ */
+export const MACHINE_RUN_ELSEWHERE =
+  'This machine is run from your own sender: Case Maker writes its .nc and does not drive it.';
+
 /** The refusal for a model with no frame, or null when the model carries one. */
 export function machineFrameProblem(model: Mill): string | null {
+  if (model.frameState === 'stated') return MACHINE_RUN_ELSEWHERE;
   return model.frameState === 'unread' ? MACHINE_FRAME_UNREAD : null;
 }
 
@@ -1357,6 +1383,8 @@ export const millProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   process: z.literal('mill'),
+  // #845 — absent reads 'z1'; a framed Makera machine writes the Z1's dialect.
+  post: z.enum(['z1', 'grbl']).optional(),
   frameState: z.literal('read'),
   // #347 — the profile's own material claim, parsed against the ONE vocabulary
   // (`engine/cnc/materials.ts`), so a profile's parse output is a `MillProfile` rather than a shape
@@ -1472,7 +1500,9 @@ export const millModelSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   process: z.literal('mill'),
-  frameState: z.literal('unread'),
+  // #845 — absent reads 'z1' (every record written before the field existed).
+  post: z.enum(['z1', 'grbl']).optional(),
+  frameState: z.enum(['unread', 'stated']),
   materials: z.array(z.enum(STOCK_MATERIALS)),
   envelope: z.object({
     x: z.object({ min: finite, max: finite }),

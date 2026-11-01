@@ -23,7 +23,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { MACHINE_FRAME_UNREAD, PRINTER_PROFILES, millModelById, type Mill } from '@/engine/cnc/machine';
+import { MACHINE_FRAME_UNREAD, MACHINE_RUN_ELSEWHERE, PRINTER_PROFILES, millModelById, type Mill } from '@/engine/cnc/machine';
 import { canReachMachine, NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
 import { controllerState } from '@/platform/machineUpload';
 import { probeMachine } from '@/platform/machineProbe';
@@ -684,12 +684,15 @@ function ProfileKv({ model }: { model: Mill | undefined }) {
   }
   // #773 — a vendor row with no frame: the envelope and limits are the row's, and every position
   // the app drives to stays absent until the machine is connected once.
-  if (model.frameState === 'unread') {
+  if (model.frameState !== 'read') {
+    // #845 — TWO NON-FRAMED CASES. `'unread'` is a vendor row whose controller has not been
+    // connected once; `'stated'` is a machine the owner states and runs from their own sender.
+    const stated = model.frameState === 'stated';
     const row = model.envelope;
     return (
-      <div className="kv" data-testid="manage-profile-unread">
+      <div className="kv" data-testid={stated ? 'manage-profile-stated' : 'manage-profile-unread'}>
         <Kv label="profile">
-          {model.name} — id “{model.id}”, vendor row only
+          {stated ? `${model.name} — values stated by you` : `${model.name} — id “${model.id}”, vendor row only`}
         </Kv>
         <Kv label="work envelope">
           X {row.x.min} → {row.x.max} · Y {row.y.min} → {row.y.max} · Z {row.z.min} → {row.z.max} mm
@@ -699,10 +702,13 @@ function ProfileKv({ model }: { model: Mill | undefined }) {
           {model.hasATC ? `${model.toolSlots}-slot tool changer` : 'manual tool change'}
         </Kv>
         <Kv label="frame">
-          <span data-testid="manage-profile-frame-unread">{MACHINE_FRAME_UNREAD}</span>{' '}
+          <span data-testid={stated ? 'manage-profile-frame-stated' : 'manage-profile-frame-unread'}>
+            {stated ? MACHINE_RUN_ELSEWHERE : MACHINE_FRAME_UNREAD}
+          </span>{' '}
           <span className="dim">
-            — anchors, toolrack, clearance and soft endstops are the controller’s, and none has
-            been read from a {model.name}.
+            {stated
+              ? '— the .nc is written for your own sender; Case Maker does not connect to this machine.'
+              : `— anchors, toolrack, clearance and soft endstops are the controller's, and none has been read from a ${model.name}.`}
           </span>
         </Kv>
       </div>
