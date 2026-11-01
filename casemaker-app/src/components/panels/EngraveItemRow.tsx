@@ -32,8 +32,8 @@ import {
  * pass wrote an error out under the head so that a row hiding the reason Generate refuses would not
  * leave the panel's error count pointing at nothing — but the whole point of this list is that a
  * person can see ten items at once, and a row that grows a paragraph whenever a number is wrong
- * takes that away. So the collapsed line carries ONE `⚠` whose tooltip holds every finding, error
- * or warning, and the full sentences are drawn when the row is opened — a count is visible, the
+ * takes that away. So the collapsed line carries ONE `⚠` whose tooltip holds every error and
+ * warning (a note gets the quiet `ⓘ` instead, #855), and the full sentences are drawn when the row is opened — a count is visible, the
  * text is one press away, and the line never moves.
  *
  * The shell draws those sentences, for the seven kinds alike: they had each grown their own copy
@@ -170,7 +170,13 @@ export function EngraveItemRow({
   const n = index + 1;
   const what = whatOf(name, removeNoun, n);
   const errors = findings.filter((f) => f.severity === 'error');
-  const warnings = findings.filter((f) => f.severity !== 'error');
+  const warnings = findings.filter((f) => f.severity === 'warning');
+  // #855 — A NOTE IS NOT A WARNING. An `info` finding (`thread-boss-raised`: "the boss is cut
+  // first") states a fact; drawn under the ⚠ it read as something wrong, which is the noise the
+  // maintainer's rule forbids. The ⚠ counts errors and warnings only; notes get the panel's quiet
+  // info mark (the findings list's `Note` colour), with their sentences in its tooltip.
+  const flagged = findings.filter((f) => f.severity !== 'info');
+  const notes = findings.filter((f) => f.severity === 'info');
 
   const caret = (
     <span className="engrave-item-row__caret" aria-hidden="true">
@@ -294,15 +300,26 @@ export function EngraveItemRow({
             {intent}
           </span>
         )}
-        {findings.length > 0 && (
+        {flagged.length > 0 && (
           <span
             className={`engrave-item-row__warn${errors.length > 0 ? ' engrave-item-row__warn--error' : ''}`}
             data-testid={`${prefix}-warn-${index}`}
             role="img"
             aria-label={findingsLabel(errors.length, warnings.length)}
-            title={findings.map((f) => f.message).join('\n')}
+            title={flagged.map((f) => f.message).join('\n')}
           >
             ⚠
+          </span>
+        )}
+        {notes.length > 0 && (
+          <span
+            className="engrave-item-row__note"
+            data-testid={`${prefix}-note-${index}`}
+            role="img"
+            aria-label={`${notes.length} note${notes.length === 1 ? '' : 's'}`}
+            title={notes.map((f) => f.message).join('\n')}
+          >
+            ⓘ
           </span>
         )}
       </div>

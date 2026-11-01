@@ -837,7 +837,8 @@ body, html, #root {
 .engrave-item-row__show,
 .engrave-item-row__summary,
 .engrave-item-row__intent,
-.engrave-item-row__warn {
+.engrave-item-row__warn,
+.engrave-item-row__note {
   flex: 0 0 auto;
 }
 .engrave-item-row__remove {
@@ -978,6 +979,15 @@ body, html, #root {
 }
 .engrave-item-row__finding--warning {
   color: #e0c07a;
+}
+/* #855 — a note states a fact; it is not a warning. The findings list's `Note` blue, quiet. */
+.engrave-item-row__note {
+  color: #7fa6c9;
+  cursor: help;
+  font-size: 11px;
+}
+.engrave-item-row__finding--info {
+  color: #7fa6c9;
 }
 .engrave-item-row__body {
   padding: 4px 0 2px 26px;

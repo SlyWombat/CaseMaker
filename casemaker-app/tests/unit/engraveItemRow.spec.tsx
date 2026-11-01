@@ -154,6 +154,63 @@ describe('EngraveItemRow (#411)', () => {
     expect(error.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  // #855 — ONE TEST PER SEVERITY. The ⚠ had been drawn for every finding that was not an error,
+  // so an information note (`thread-boss-raised`: "the boss is cut first") read as a warning.
+  describe('the line mark, per severity (#855)', () => {
+    it('an error: the red ⚠, counted as an error', () => {
+      row({ findings: [finding('error', 'depth-exceeds-stock', 'Too deep for this blank.')] });
+      const warn = screen.getByTestId('engrave-widget-warn-0');
+      expect(warn.textContent).toBe('⚠');
+      expect(warn.className).toContain('engrave-item-row__warn--error');
+      expect(warn.getAttribute('aria-label')).toBe('1 error');
+      expect(screen.queryByTestId('engrave-widget-note-0')).toBeNull();
+      fireEvent.click(screen.getByTestId('engrave-widget-expand-0'));
+      expect(screen.getByTestId('engrave-widget-finding-0-depth-exceeds-stock').className).toContain(
+        'engrave-item-row__finding--error',
+      );
+    });
+
+    it('a warning: the ⚠ without the error class, counted as a warning', () => {
+      row({ findings: [finding('warning', 'item-over-void', 'Crosses the magnet pocket.')] });
+      const warn = screen.getByTestId('engrave-widget-warn-0');
+      expect(warn.textContent).toBe('⚠');
+      expect(warn.className).not.toContain('engrave-item-row__warn--error');
+      expect(warn.getAttribute('aria-label')).toBe('1 warning');
+      expect(screen.queryByTestId('engrave-widget-note-0')).toBeNull();
+      fireEvent.click(screen.getByTestId('engrave-widget-expand-0'));
+      expect(screen.getByTestId('engrave-widget-finding-0-item-over-void').className).toContain(
+        'engrave-item-row__finding--warning',
+      );
+    });
+
+    it('an information note: no ⚠ — the quiet note mark, and the sentence in the note style', () => {
+      row({ findings: [finding('info', 'thread-boss-raised', 'The boss is cut first.')] });
+      expect(screen.queryByTestId('engrave-widget-warn-0')).toBeNull();
+      expect(screen.queryByText('⚠')).toBeNull();
+      const note = screen.getByTestId('engrave-widget-note-0');
+      expect(note.className).toBe('engrave-item-row__note');
+      expect(note.getAttribute('aria-label')).toBe('1 note');
+      expect(note.getAttribute('title')).toBe('The boss is cut first.');
+      fireEvent.click(screen.getByTestId('engrave-widget-expand-0'));
+      expect(screen.getByTestId('engrave-widget-finding-0-thread-boss-raised').className).toContain(
+        'engrave-item-row__finding--info',
+      );
+    });
+
+    it('a warning beside a note: the ⚠ counts and quotes only the warning', () => {
+      row({
+        findings: [
+          finding('info', 'thread-boss-raised', 'The boss is cut first.'),
+          finding('warning', 'item-over-void', 'Crosses the magnet pocket.'),
+        ],
+      });
+      const warn = screen.getByTestId('engrave-widget-warn-0');
+      expect(warn.getAttribute('aria-label')).toBe('1 warning');
+      expect(warn.getAttribute('title')).toBe('Crosses the magnet pocket.');
+      expect(screen.getByTestId('engrave-widget-note-0').getAttribute('title')).toBe('The boss is cut first.');
+    });
+  });
+
   it('has no ⚠ when the item has nothing to warn about', () => {
     row();
     expect(screen.queryByTestId('engrave-widget-warn-0')).toBeNull();
