@@ -272,14 +272,16 @@ describe('#685 — step 4, what are you cutting', () => {
   it('#721 — Surface a mesh can make a mold of the part instead', async () => {
     openOperationStep();
     fireEvent.click(screen.getByTestId('engrave-setup-what-surface'));
-    expect((screen.getByTestId('start-wizard-op-surface-make-part') as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(screen.getByTestId('start-wizard-op-surface-make-mold'));
-    expect(screen.getByTestId('start-wizard-op-surface-mold-note').textContent).toContain('two-part mould');
+    // #870 — part or mould is asked about a MESH, so only once one is read.
+    expect(screen.queryByTestId('start-wizard-op-surface-make-part')).toBeNull();
     const input = screen.getByTestId('start-wizard-op-surface-file') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([ASCII_STL], 'tet.stl')] } });
     await waitFor(() => {
       expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(false);
     }, { timeout: 15_000 });
+    expect((screen.getByTestId('start-wizard-op-surface-make-part') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByTestId('start-wizard-op-surface-make-mold'));
+    expect(screen.getByTestId('start-wizard-op-surface-mold-note').textContent).toContain('two-part mould');
     fireEvent.click(screen.getByTestId('start-wizard-create'));
     expect(useEngraveJobStore.getState().job.targetObject).toMatchObject({ role: 'goal', goalMode: 'mold' });
   });

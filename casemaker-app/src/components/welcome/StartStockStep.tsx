@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -39,6 +39,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { newStockId, useStockStore } from '@/store/stockStore';
 import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 import { fmt } from './holdingMounts';
+import { WizardFileField } from './WizardFileField';
 
 /**
  * Step 2 of the one cutting-job wizard (#683): **the stock, in one screen.**
@@ -115,17 +116,14 @@ const FORM_BUTTON_ON: CSSProperties = {
   border: '1px solid #5a8abf',
   background: 'rgba(90, 138, 191, 0.14)',
 };
-const DROP: CSSProperties = {
-  marginTop: 12,
-  padding: '12px 10px',
-  border: '1px dashed #4a5563',
-  borderRadius: 4,
-  color: '#9aa4b0',
-  fontSize: 12,
-  textAlign: 'center',
-  cursor: 'pointer',
-};
-const DROP_OVER: CSSProperties = { ...DROP, border: '1px dashed #5a8abf', color: '#cfe' };
+
+/** #870 — a stock file's one fact beside its name: the box (or rim) it measures. */
+function fileFact(read: StockFileRead): string | null {
+  if (read.kind !== 'mesh') return null;
+  return read.shape === 'disc'
+    ? `⌀${fmt(read.length)} × ${fmt(read.thickness)} mm`
+    : `${fmt(read.length)} × ${fmt(read.width)} × ${fmt(read.thickness)} mm`;
+}
 
 /** The finish as the step offers it: "as bought" first, because it is the default (#683, A8). */
 const FINISH_OPTIONS: readonly { value: JobStockFinish; label: string }[] = [
@@ -389,8 +387,6 @@ export function StartStockStep({
   const [save, setSave] = useState(false);
   const [fileRead, setFileRead] = useState<{ read: StockFileRead; file: File } | null>(null);
   const [reading, setReading] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
   // One id for the entry a kept piece becomes, drawn once — not on every recompute of the answer.
   const [newId] = useState(() => newStockId());
 
@@ -672,7 +668,7 @@ export function StartStockStep({
 
       {/* #713 — the stock's own refusal, at the size field it is about: a rod or tube outside the
           rotary's envelope, or a number that is not one. */}
-      {outcome.problem !== null && (
+      {outcome.problem !== null && fileRead === null && (
         <p style={REFUSED} data-testid="start-wizard-stock-problem">
           {outcome.problem}
         </p>
@@ -758,60 +754,28 @@ export function StartStockStep({
         </label>
       )}
 
-      <div
-        data-testid="start-wizard-load"
-        data-state={dragOver ? 'over' : reading ? 'reading' : 'idle'}
-        role="button"
-        tabIndex={0}
-        aria-label="Load an STL, 3MF, OBJ or STEP as the stock"
-        onClick={() => fileInput.current?.click()}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            fileInput.current?.click();
-          }
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          void pickFile(e.dataTransfer.files?.[0]);
-        }}
-        style={dragOver ? DROP_OVER : DROP}
+      <WizardFileField
+        drop
+        accept=".stl,.3mf,.obj,.step,.stp"
+        inputTestId="start-wizard-load-file"
+        inputLabel="Stock file"
+        testId="start-wizard-load"
+        nameTestId="start-wizard-load-name"
+        errorTestId="start-wizard-load-error"
+        chooseLabel="Load an STL, 3MF, OBJ or STEP as the stock…"
+        reading={reading}
+        chosen={fileRead === null ? null : { name: fileRead.read.name, fact: fileFact(fileRead.read) }}
+        // A loaded file's refusal is said at the file, once: the read's own reason, or the stock's.
+        error={fileRead === null ? null : fileRead.read.kind === 'refused' ? fileRead.read.reason : outcome.problem}
+        onFiles={(files) => void pickFile(files[0])}
       >
-        Load an STL, 3MF, OBJ or STEP as the stock…
-        <input
-          ref={fileInput}
-          type="file"
-          accept=".stl,.3mf,.obj,.step,.stp"
-          hidden
-          data-testid="start-wizard-load-file"
-          aria-label="Stock file"
-          onChange={(e) => {
-            void pickFile(e.target.files?.[0]);
-          }}
-        />
-        {fileRead !== null && (
-          <div data-testid="start-wizard-load-name" style={{ marginTop: 4 }}>
-            {fileRead.read.name}
-          </div>
-        )}
         {/* #825 — an OBJ states no unit of its own; the door says which reading it got. */}
         {fileRead?.read.kind === 'mesh' && fileRead.read.note !== undefined && (
-          <div data-testid="start-wizard-load-note" style={{ marginTop: 2 }}>
+          <p style={MUTED} data-testid="start-wizard-load-note">
             {fileRead.read.note}
-          </div>
+          </p>
         )}
-      </div>
-      {reading && (
-        <p style={MUTED} data-testid="start-wizard-load-reading">
-          Reading the file…
-        </p>
-      )}
+      </WizardFileField>
 
       {outcome.notes.length > 0 && (
         <div data-testid="start-wizard-stock-summary">

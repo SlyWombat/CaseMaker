@@ -27,6 +27,7 @@ import { FontPicker } from '@/components/panels/FontPicker';
 import { OperationPicker } from '@/components/panels/OperationPicker';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { RotaryOperationPicker } from './RotaryOperationPicker';
+import { WizardFileField } from './WizardFileField';
 import { operationCreateBlocked } from './operationCreate';
 import { isSideGoal, jobHasItems, jobSetups, jobTargetObjects, jobTool, sideSetupIdOf } from '@/engine/cnc/engrave/jobSetup';
 import { defaultFaceOperation } from '@/engine/cnc/rotary/faceOps';
@@ -37,7 +38,6 @@ import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
-const ERROR: CSSProperties = { ...MUTED, color: '#f0b4ad' };
 const FIELD_HEADING: CSSProperties = { fontSize: 12, fontWeight: 600, color: '#c8d3de' };
 const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, margin: '4px 0' };
 const FIELD: CSSProperties = { width: 72 };
@@ -49,6 +49,11 @@ function toolDiameterMm(job: EngraveJob): number {
   const tool = jobTool(job);
   const d = tool === null ? null : cuttingDiameter(tool);
   return d !== null && d > 0 ? d : 3.175;
+}
+/** #870 — a read mesh's one fact beside its name: the box it measures. */
+function boxFact(size: { x: number; y: number; z: number }): string {
+  const n = (v: number): string => String(Number(v.toFixed(2)));
+  return `${n(size.x)} × ${n(size.y)} × ${n(size.z)} mm`;
 }
 const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: '6px 0 0' };
 /** #723 P2-3 — one side of a part cut from several sides, as a choice. */
@@ -119,6 +124,8 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   /** #825 — the unit the picked OBJ's numbers were read as, stated beside the picker. */
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
   const [surfaceReading, setSurfaceReading] = useState(false);
+  /** #870 — the name of the file last picked, read or refused: the file field shows it either way. */
+  const [surfaceFileName, setSurfaceFileName] = useState<string | null>(null);
   // #721 — what the goal makes: the part itself, or a mold to cast it in.
   const [makeMold, setMakeMold] = useState(false);
   // #743 P-4b — the circuit-board door. The set writes its items through the store's one import
@@ -126,6 +133,9 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   // for it — the files ARE the design, and Create finishes without adding a placeholder).
   const [pcbReading, setPcbReading] = useState(false);
   const [pcbSummary, setPcbSummary] = useState<string | null>(null);
+  /** #870 — the picked set, named for the file field, and its refusal when the set did not read. */
+  const [pcbFilesName, setPcbFilesName] = useState<string | null>(null);
+  const [pcbError, setPcbError] = useState<string | null>(null);
   // #743 P-4b review — the board-on-a-non-PCB-blank fact and its one-click fix; never a refusal.
   const [pcbStockFix, setPcbStockFix] = useState<string | null>(null);
   // #743 P-6 — a board on a holding of the operator's (the vise): stated with its one-click fix.
@@ -194,13 +204,16 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
     setPcbStockFix(null);
     setPcbHoldingFix(null);
     setPcbAlignment(null);
+    setPcbError(null);
+    setPcbFilesName(files.length === 1 ? files[0]!.name : `${files.length} files · ${files[0]!.name}`);
     setPcbReading(true);
     try {
       const out = await useEngraveJobStore.getState().importPcbFiles(files);
+      if (!out.ok) setPcbError(out.reason);
       setPcbSummary(
         out.ok
           ? `The board is in: ${out.itemCount} items from ${out.fileCount} files${out.twoSided ? ', cut on both faces' : ''}${out.warnings.length > 0 ? ` — ${out.warnings.map((w) => w.message).join(' ')}` : ''}`
-          : out.reason,
+          : null,
       );
       if (out.ok) {
         setPcbStockFix(out.stockNotice);
@@ -215,14 +228,21 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   async function chooseGoal(file: File): Promise<void> {
     setSurfaceError(null);
     setSurfaceNote(null);
+    setSurfaceFileName(file.name);
     setSurfaceReading(true);
     try {
       const result = await readGoalObjectFile(file, newTargetObjectId(), job.stock);
       if (result.ok) {
         setSurface(result.target);
         setSurfaceNote(result.note ?? null);
-      } else setSurfaceError(result.error);
+      } else {
+        // The refused file is the one named in the field, so the mesh before it is no longer the
+        // answer: Create waits for a file that reads.
+        setSurface(null);
+        setSurfaceError(result.error);
+      }
     } catch (e) {
+      setSurface(null);
       setSurfaceError(e instanceof Error ? e.message : String(e));
     } finally {
       setSurfaceReading(false);
@@ -511,25 +531,34 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
       {surfaceField && (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
           <div style={FIELD_HEADING}>{rotary ? 'Relief from a mesh' : 'Surface a mesh'}</div>
-          <div style={FIELDS}>
-            <label style={FIELD_LABEL}>
-              <span>Mesh</span>
-              <input
-                type="file"
-                accept=".stl,.3mf,.obj,.step,.stp,.png,model/stl,model/3mf,model/step,image/png"
-                data-testid="start-wizard-op-surface-file"
-                aria-label="Mesh to surface"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = '';
-                  if (file) void chooseGoal(file);
-                }}
-              />
-            </label>
-            {surfaceReading && <span style={MUTED}>Reading the mesh…</span>}
-            {surface !== null && !surfaceReading && <span style={MUTED}>{surface.name}</span>}
-          </div>
-          {surface?.format !== 'png' && (
+          <WizardFileField
+            accept=".stl,.3mf,.obj,.step,.stp,.png,model/stl,model/3mf,model/step,image/png"
+            inputTestId="start-wizard-op-surface-file"
+            inputLabel="Mesh to surface"
+            testId="start-wizard-op-surface-picker"
+            nameTestId="start-wizard-op-surface-name"
+            errorTestId="start-wizard-op-surface-error"
+            kinds="STL, 3MF, OBJ, STEP or PNG"
+            reading={surfaceReading}
+            chosen={
+              surfaceFileName === null
+                ? null
+                : { name: surfaceFileName, fact: surface === null ? null : boxFact(surface.size) }
+            }
+            error={surfaceError}
+            onFiles={(files) => {
+              const file = files[0];
+              if (file !== undefined) void chooseGoal(file);
+            }}
+          >
+            {surfaceNote !== null && (
+              <p style={MUTED} data-testid="start-wizard-op-surface-note">
+                {surfaceNote}
+              </p>
+            )}
+          </WizardFileField>
+          {/* Part or mould is a question about a MESH: asked once one is read, never for a picture. */}
+          {surface !== null && surface.format !== 'png' && (
             <div style={FIELDS} role="radiogroup" aria-label="What to make">
               <label style={FIELD_LABEL}>
                 <input
@@ -553,20 +582,10 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
               </label>
             </div>
           )}
-          {makeMold && surface?.format !== 'png' && (
+          {makeMold && surface !== null && surface.format !== 'png' && (
             <p style={MUTED} data-testid="start-wizard-op-surface-mold-note">
               The part's shape is cut as a cavity from the top, turned over so a casting reads the
               right way round. One side only: a part with undercuts needs a two-part mould.
-            </p>
-          )}
-          {surfaceError !== null && (
-            <p style={ERROR} data-testid="start-wizard-op-surface-error">
-              {surfaceError}
-            </p>
-          )}
-          {surfaceNote !== null && (
-            <p style={MUTED} data-testid="start-wizard-op-surface-note">
-              {surfaceNote}
             </p>
           )}
         </div>
@@ -580,23 +599,21 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
             isolating it, the holes and the board cut-out. A board is cut from copper-clad PCB; on
             another blank the import says so and offers PCB stock, and can still be a practice cut.
           </p>
-          <div style={FIELDS}>
-            <label style={FIELD_LABEL}>
-              <span>Files</span>
-              <input
-                type="file"
-                multiple
-                accept=".gbr,.gtl,.gbl,.gko,.gm1,.gto,.gbo,.gts,.gbs,.gtp,.gbp,.drl,.xln,.zip"
-                data-testid="start-wizard-op-pcb-files"
-                aria-label="Gerber and drill files"
-                onChange={(e) => {
-                  const files = [...(e.target.files ?? [])];
-                  e.target.value = '';
-                  if (files.length > 0) void readPcbSet(files);
-                }}
-              />
-            </label>
-            {pcbReading && <span style={MUTED}>Reading the board…</span>}
+          <WizardFileField
+            accept=".gbr,.gtl,.gbl,.gko,.gm1,.gto,.gbo,.gts,.gbs,.gtp,.gbp,.drl,.xln,.zip"
+            multiple
+            inputTestId="start-wizard-op-pcb-files"
+            inputLabel="Gerber and drill files"
+            testId="start-wizard-op-pcb-picker"
+            nameTestId="start-wizard-op-pcb-name"
+            errorTestId="start-wizard-op-pcb-error"
+            kinds="Gerber and drill files, or the board's .zip"
+            reading={pcbReading}
+            chosen={pcbFilesName === null ? null : { name: pcbFilesName }}
+            error={pcbError}
+            onFiles={(files) => void readPcbSet(files)}
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {pcbSummary !== null && !pcbReading && (
               <span style={MUTED} data-testid="start-wizard-op-pcb-summary">
                 {pcbSummary}
