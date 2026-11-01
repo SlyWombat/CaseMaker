@@ -116,6 +116,11 @@ the firmware's source loop has no else branch, so an unknown source prints nothi
 and is the independent half of an upload check: the bridge verifies a \`.nc\` with its own handshake, and
 this is what the controller says it ended up with.
 
+\`read\` asks the controller's own \`cat\`, and on this machine \`cat\` answers \`File not found\` for files
+\`md5\` hashes on the same card (bench day 1, B7: docs/bench/2026-10-bench-day-1.md and
+Z1-Bridge-Protocol.md §5). A \`read\` that says not found therefore proves nothing about the file —
+\`md5\` is the command that says whether the file is there (#388).
+
 Sends nothing to the machine except the two identify queries, the status poll, the one \`cat\` line a
 read needs, one \`config-get\` line per key asked for and one \`md5sum\` line per path asked about.
 \`read\` and \`md5\` take an absolute path on the controller's card and nothing else; \`config\` takes
@@ -898,6 +903,15 @@ async function main() {
       if (asJson) console.log(JSON.stringify(res, null, 2));
       else if (res.ok) console.log(`read ok: ${res.text.length} chars in ${res.frames} frame(s)`);
       else console.error(`read failed (${res.reason}): ${res.detail}`);
+      // #388 — this firmware's `cat` answers "File not found" for files `md5sum` opens on the same
+      // card (bench day 1, B7), so a not-found here says nothing about the file. Name the command
+      // that does answer, so the next bench session does not read it as a missing file.
+      if (!res.ok && res.reason === 'not-found') {
+        console.error(
+          `note: this machine's \`cat\` answers "File not found" even for files \`md5sum\` can hash ` +
+            `(bench day 1, B7) — check the file exists with: z1.mjs md5 ${host} ${path}`,
+        );
+      }
       if (res.text.length > 0) process.stdout.write(res.text.endsWith('\n') ? res.text : `${res.text}\n`);
 
       // Only a complete read is written to disk. A partial one would look exactly like a whole file
