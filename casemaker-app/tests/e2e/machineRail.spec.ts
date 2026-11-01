@@ -27,9 +27,10 @@ test('#820 — the rail machine row opens Manage › Machines, and the web build
 
   // Manage › Machines, on the card a person adds a machine from…
   await expect(page.getByTestId('manage-machine-none')).toBeVisible();
-  // …and the web build's one sentence, in #821's words: this page has no machine relay.
+  // …and the web build's one sentence (#821's words: this page has no machine relay, so it cannot
+  // drive a machine). The unit spec asserts the constant itself; this asserts it reached the page.
   await expect(page.getByTestId('manage-machine-web-hint')).toContainText(
-    'This page was served without the machine relay — open Case Maker from a Case Maker server or the desktop app to connect a machine.',
+    'This page was served without the machine relay, so it cannot drive a machine',
   );
 
   await page.screenshot({ path: path.join(OUT, 'machine-rail.png') });
