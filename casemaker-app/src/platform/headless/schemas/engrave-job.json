@@ -6536,8 +6536,13 @@
       "items": {
         "properties": {
           "classFit": {
-            "const": "6H",
-            "description": "Tolerance class: 6H (the only one this build cuts).",
+            "description": "Zero-allowance class: 6H/6h metric internal/external, 3B/3A unified internal/external.",
+            "enum": [
+              "6H",
+              "6h",
+              "3B",
+              "3A"
+            ],
             "type": "string"
           },
           "depth": {
@@ -6556,7 +6561,7 @@
           },
           "kind": {
             "const": "thread",
-            "description": "A milled thread (a threaded hole).",
+            "description": "A milled thread (a threaded hole, or a threaded boss).",
             "type": "string"
           },
           "name": {
@@ -6564,7 +6569,7 @@
             "type": "string"
           },
           "position": {
-            "description": "Thread axis in work coordinates.",
+            "description": "Thread axis in work coordinates: the hole, or the boss.",
             "properties": {
               "x": {
                 "description": "X in millimetres from the stock's front-left corner.",
@@ -6581,21 +6586,54 @@
             ],
             "type": "object"
           },
+          "side": {
+            "const": "external",
+            "description": "'external' mills the outside of a boss at the axis; omit for an internal thread in a pilot.",
+            "type": "string"
+          },
           "size": {
-            "description": "ISO metric thread size.",
+            "description": "Thread size: ISO metric coarse (M2–M12) or unified UNC/UNF (#4-40 … 1/2-20, size-TPI).",
             "enum": [
               "M2",
               "M2.5",
               "M3",
               "M4",
               "M5",
-              "M6"
+              "M6",
+              "M8",
+              "M10",
+              "M12",
+              "#4-40",
+              "#4-48",
+              "#5-40",
+              "#5-44",
+              "#6-32",
+              "#6-40",
+              "#8-32",
+              "#8-36",
+              "#10-24",
+              "#10-32",
+              "#12-24",
+              "#12-28",
+              "1/4-20",
+              "1/4-28",
+              "5/16-18",
+              "5/16-24",
+              "3/8-16",
+              "3/8-24",
+              "7/16-14",
+              "7/16-20",
+              "1/2-13",
+              "1/2-20"
             ],
             "type": "string"
           },
           "standard": {
-            "const": "metric",
-            "description": "Thread standard: metric (the only one this build cuts).",
+            "description": "Thread system: metric (ISO 261) or imperial (UNC/UNF, ASME B1.1); must match the size.",
+            "enum": [
+              "metric",
+              "imperial"
+            ],
             "type": "string"
           },
           "through": {

@@ -139,6 +139,8 @@ import { EngraveChamferRow, type ChamferFacts, type ChamferRimOption } from './E
 import { CutterGeometryAsk } from './CutterGeometryAsk';
 import { EngraveCutoutRow, type CutoutTarget } from './EngraveCutoutRow';
 import { EngraveThreadRow } from './EngraveThreadRow';
+import { nearestThreadMill, threadBoss } from '@/engine/cnc/engrave/threadFit';
+import { fmtPitch, threadSpec } from '@/engine/cnc/threadTable';
 import { EngravePrimitiveRow } from './EngravePrimitiveRow';
 import { EngraveTargetObjectRow } from './EngraveTargetObjectRow';
 import { OperationPicker } from './OperationPicker';
@@ -179,6 +181,7 @@ import type {
   EngraveKeepOut,
   EngraveLabel,
   EngraveShape,
+  EngraveThread,
   FieldSource,
   JobStockFinish,
   Sacrificial,
@@ -1770,6 +1773,24 @@ export function EngravePanel(): JSX.Element {
     if (ball === undefined) plan.push({ key: cutterKey, items: [itemId] });
     else ball.items.push(itemId);
     useEngraveJobStore.getState().applyCutterPlan(plan.filter((c) => c.items.length > 0));
+  };
+
+  /**
+   * #841 — an external thread with no boss at its axis: state one in one press. The boss is a
+   * REFERENCE circle (`construction`), the major diameter across, centred on the thread — the fact
+   * that a boss stands there, made by a prior program, as the pilot is for an internal thread. It
+   * produces no cut, so the thread program keeps its one tool.
+   */
+  const addThreadBoss = (thread: EngraveThread): void => {
+    const spec = threadSpec(thread.size);
+    const id = addShape('circle');
+    updateShape(id, {
+      name: 'boss',
+      position: { ...thread.position },
+      diameter: spec.major,
+      depth: Number((thread.depth + spec.pitch).toFixed(3)),
+      construction: true,
+    });
   };
 
   const cutTopBand = (finding: JobFinding): void => {
@@ -3842,6 +3863,23 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(thread.id)}
+          {...(thread.side === 'external'
+            ? { boss: threadBoss(job, thread.position), onAddBoss: () => addThreadBoss(thread) }
+            : {})}
+          findingAction={(f) => {
+            // #841 — a fit, reach or pitch finding offers the nearest OWNED thread mill as one press.
+            const offered =
+              f.code === 'thread-pitch-mismatch' ||
+              ((f.code === 'thread-cutter-fit' || f.code === 'thread-too-deep') && f.severity === 'error');
+            if (!offered) return null;
+            const near = nearestThreadMill(thread, tools, tool, job.toolKey);
+            if (near === null) return null;
+            return (
+              <button type="button" data-testid={`engrave-thread-use-cutter-${i}`} onClick={() => setTool(near.key)}>
+                Use {near.name} (⌀{near.diameterMm} mm{near.pitchMm === null ? '' : `, ${fmtPitch(near.pitchMm)} mm pitch`})
+              </button>
+            );
+          }}
           onChange={(patch) => updateThread(thread.id, patch)}
           onRemove={() => removeThread(thread.id)}
         />

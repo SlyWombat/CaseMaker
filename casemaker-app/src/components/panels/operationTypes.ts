@@ -30,6 +30,8 @@
  *    `drill` / `drill-array` items with `mode: 'bore'` and a stated diameter, so a clearance
  *    hole wider than any bit in the box is one operation, not a circle pocket;
  *  - `thread` — a milled internal thread;
+ *  - `thread-external` — a milled thread on the outside of a boss or rod (#841): the same `thread`
+ *    item with `side: 'external'`;
  *  - `surface` — a goal mesh or a PNG relief (#672), roughed and ball-finished in 3D (#534). The
  *    engine posts it for a PURE goal job, so the picker offers it only while the list is empty,
  *    and picking it sets the imported object's `role: 'goal'` — the control the UI did not have
@@ -64,6 +66,7 @@ export type OperationTypeId =
   | 'hole'
   | 'bore'
   | 'thread'
+  | 'thread-external'
   | 'surface'
   | 'texture'
   | 'flute'
@@ -115,6 +118,7 @@ export const OPERATION_TYPES: readonly OperationTypeDef[] = [
   { id: 'hole', label: 'Hole', blurb: 'A hole, or a grid of them', addTestId: 'engrave-add-drill', group: 'holes' },
   { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, helixed down its wall', addTestId: 'engrave-add-bore', group: 'holes' },
   { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread', group: 'holes' },
+  { id: 'thread-external', label: 'Thread a boss (external)', blurb: 'A milled thread around the outside of a boss or rod', addTestId: 'engrave-add-thread-external', group: 'holes' },
   { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal mesh or picture', addTestId: 'engrave-add-surface', group: '3d' },
   { id: 'texture', label: 'Texture', blurb: 'A seeded pattern of short strokes over a region', addTestId: 'engrave-add-texture', group: 'engrave-carve' },
   { id: 'flute', label: 'Flute', blurb: 'A groove that ramps in and out along its ends', addTestId: 'engrave-add-flute', group: 'engrave-carve' },
@@ -251,6 +255,7 @@ export function operationTypeOfItem(
         texture?: { pattern: string };
         prism?: { baseMm?: number };
         flute?: { rampMm?: number };
+        side?: 'external';
       }
     | null
     | undefined,
@@ -277,7 +282,7 @@ export function operationTypeOfItem(
     case 'drill-array':
       return item.mode === 'bore' ? 'bore' : 'hole';
     case 'thread':
-      return 'thread';
+      return item.side === 'external' ? 'thread-external' : 'thread';
     case 'cutout':
       return 'profile';
     case 'chamfer':
@@ -376,6 +381,8 @@ export function addOperationOfType(type: Exclude<OperationTypeId, 'surface'>): s
       return store.addDrill('drill', { mode: 'bore' });
     case 'thread':
       return store.addThread();
+    case 'thread-external':
+      return store.addThread('external');
   }
 }
 

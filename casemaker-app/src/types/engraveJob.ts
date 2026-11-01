@@ -1,7 +1,7 @@
 import type { Mm } from './units';
 import type { TextFont, TextWeight, CustomFont } from './textLabel';
 import type { CutParams } from '@/engine/cnc/feeds';
-import type { FastenerSize } from '@/engine/compiler/fasteners';
+import type { ThreadClassFit, ThreadSize, ThreadStandard } from '@/engine/cnc/threadTable';
 import type { Tool } from '@/engine/cnc/tool';
 import type { Mount, MountSpec, Orientation, RemountStep } from '@/engine/cnc/setups/types';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
@@ -497,24 +497,30 @@ export type EngraveDrill = EngraveDrillItem | EngraveDrillArrayItem;
  * item: there is no array kind in phase 2.
  *
  * `position` is the hole's axis. There is no `rotation`: a round feature has no orientation, and
- * adding one now would be a field nothing reads. `standard` and `classFit` are single-valued on
- * purpose (D5): the repo has no UNC/UNF table and no 6G allowance table, so the CAM refuses those
- * by name rather than approximating them.
+ * adding one now would be a field nothing reads.
+ *
+ * #841 — the thread may be EXTERNAL (`side: 'external'`): it is milled on the outside of a boss
+ * whose axis is `position` — the round stock standing in the vise, or a circle shape centred there.
+ * And the size may be IMPERIAL (UNC/UNF, ASME B1.1). Both read from `engine/cnc/threadTable.ts`.
+ * `classFit` is the zero-allowance class for the system and side (6H/6h, 3B/3A); the store keeps it
+ * consistent. `side` is ABSENT for an internal thread, so every pre-#841 document round-trips.
  */
 export interface EngraveThreadItem {
   kind: 'thread';
   id: string;
   /** Optional human name, shown in operations and findings. */
   name?: string;
-  /** The hole's axis, work XY — one hole. */
+  /** The thread's axis, work XY — one hole, or one boss. */
   position: { x: Mm; y: Mm };
   enabled: boolean;
-  /** ISO metric coarse size; pitch and basic minor come from `FASTENERS`. */
-  size: FastenerSize;
-  /** One value: the repo's table is ISO 261. UNC/UNF are refused by the absent table. */
-  standard: 'metric';
-  /** One value: 6H is the basic internal thread (no allowance). 6G needs an allowance table. */
-  classFit: '6H';
+  /** The size; pitch, major and minors come from the thread table. */
+  size: ThreadSize;
+  /** `metric` (ISO 261) or `imperial` (UNC/UNF, ASME B1.1); must match `size`. */
+  standard: ThreadStandard;
+  /** The basic, zero-allowance class: 6H/6h metric, 3B/3A unified. */
+  classFit: ThreadClassFit;
+  /** #841 — `'external'` mills the outside of a boss; absent is an internal thread in a pilot. */
+  side?: 'external';
   /** Threaded length below the top face, mm. Positive; ignored when `through`. */
   depth: Mm;
   /** Through the blank. Gated like a drill: `thread-through-unavailable` until #213/#218. */

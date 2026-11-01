@@ -27,6 +27,7 @@ import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
 import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
 import { withSideGoal, withoutSideGoal } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter } from '@/engine/cnc/tool';
+import { isUnifiedSize, nearestThreadSize, threadClassFor, threadSpec } from '@/engine/cnc/threadTable';
 import { applyHoldAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { scaleJobAboutCentre } from '@/engine/cnc/engrave/scaleJob';
 import { getMeshBlob, putMeshBlob } from '@/platform/meshBlobs';
@@ -795,7 +796,26 @@ function newChamfer(job: EngraveJob): EngraveChamfer {
  * default (`engrave.newThreadDepthMm`), read in `addThread`: a thread that begins as deep as a
  * label shows a hole, not a thread, and the depth is the number the user is about to set anyway.
  */
-function newThread(job: EngraveJob, depth: number): EngraveThread {
+function newThread(job: EngraveJob, depth: number, side: 'internal' | 'external' = 'internal'): EngraveThread {
+  if (side === 'external') {
+    // #841 — an external thread is milled on a boss. Round stock standing in the vise IS the boss
+    // when there is one: the thread sits on its axis at the metric size nearest its diameter. Any
+    // other blank starts at M8 on the stock's centre, and the row says no boss is there yet.
+    const round = job.stock.diameter !== undefined && (job.stock.shape === 'cylinder' || job.stock.shape === 'disc');
+    const size = round ? nearestThreadSize('metric', job.stock.diameter!) : 'M8';
+    return {
+      kind: 'thread',
+      id: newEngraveThreadId(),
+      position: { x: job.stock.length / 2, y: job.stock.width / 2 },
+      enabled: true,
+      size,
+      standard: 'metric',
+      classFit: threadClassFor('metric', 'external'),
+      side: 'external',
+      depth,
+      through: false,
+    };
+  }
   return {
     kind: 'thread',
     id: newEngraveThreadId(),
@@ -806,6 +826,24 @@ function newThread(job: EngraveJob, depth: number): EngraveThread {
     classFit: '6H',
     depth,
     through: false,
+  };
+}
+
+/**
+ * #841 — a thread after a hand edit, kept CONSISTENT: a system switch keeps the thread about the
+ * same size in the other system, and the class is always the zero-allowance class for the system
+ * and side. An internal thread drops `side` rather than storing `'internal'`, so it reads as before.
+ */
+function normaliseThread(t: EngraveThread): EngraveThread {
+  const standard = t.standard;
+  const size = isUnifiedSize(t.size) === (standard === 'imperial') ? t.size : nearestThreadSize(standard, threadSpec(t.size).major);
+  const side = t.side === 'external' ? 'external' : 'internal';
+  const { side: _drop, ...rest } = t;
+  return {
+    ...rest,
+    size,
+    classFit: threadClassFor(standard, side),
+    ...(side === 'external' ? { side: 'external' as const } : {}),
   };
 }
 
@@ -1102,8 +1140,8 @@ export interface EngraveJobState {
   /** Merge a hand edit into one chamfer (#669). */
   updateChamfer: (id: string, patch: ChamferPatch) => void;
   removeChamfer: (id: string) => void;
-  /** Add a default milled thread (#445) and return its id. */
-  addThread: () => string;
+  /** Add a default milled thread (#445) and return its id; `'external'` threads a boss (#841). */
+  addThread: (side?: 'internal' | 'external') => string;
   /** Merge a hand edit into one thread (#445). A partial `position` is merged, not replaced. */
   updateThread: (id: string, patch: ThreadPatch) => void;
   removeThread: (id: string) => void;
@@ -2080,8 +2118,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       );
     },
 
-    addThread: () => {
-      const thread = newThread(get().job, newThreadDepthMm());
+    addThread: (side = 'internal') => {
+      const thread = newThread(get().job, newThreadDepthMm(), side);
       apply((job) => ({ ...job, threads: [...(job.threads ?? []), thread] }));
       return thread.id;
     },
@@ -2091,7 +2129,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         ...job,
         threads: (job.threads ?? []).map((thread) =>
           thread.id === id
-            ? ({
+            ? normaliseThread({
                 ...thread,
                 ...patch,
                 // Merge a partial position rather than replacing the whole object.

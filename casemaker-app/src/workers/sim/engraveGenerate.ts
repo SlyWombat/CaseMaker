@@ -6123,6 +6123,7 @@ function generateOneProgram(
           tool,
           position: item.position,
           size: item.size,
+          ...(item.side === 'external' ? { side: 'external' as const } : {}),
           depth: item.depth,
           through: item.through,
           settings: resolved.settings,

@@ -59,7 +59,7 @@ import type { FeedsResult } from '@/engine/cnc/feeds';
 // #445 — `ThreadPlanFacts` exists for THIS reader: the half of the CAM's thread plan the sheet
 // prints, with `moves`/the IR/the simulator's spec left out (see the type's own comment).
 import type { ThreadPlanFacts, ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
-import { FASTENERS } from '@/engine/compiler/fasteners';
+import { threadSpec } from '@/engine/cnc/threadTable';
 import {
   finerThan,
   reachTable,
@@ -3643,7 +3643,9 @@ export function buildRunSheet(
   // cleared by the shop's own `pilotTipClearanceMm`. The pilot DEPTH is not recomputed here —
   // `threadMillIR` owns that arithmetic — so the step states the threaded length and the clearance,
   // and an old generated object without `threadMachining` says the clearance was not recorded.
-  if (plan.threads.length > 0) {
+  const internalThreads = plan.threads.filter((t) => t.side !== 'external');
+  const externalThreads = plan.threads.filter((t) => t.side === 'external');
+  if (internalThreads.length > 0) {
     const clearance = generated.threadMachining?.settings.pilotTipClearanceMm ?? null;
     needSteps.push({
       text:
@@ -3652,8 +3654,20 @@ export function buildRunSheet(
         (clearance === null
           ? ' (the tip clearance was not recorded for this run).'
           : `, and the drill must clear the tool tip by ${fmtNum(clearance)} mm.`),
-      value: plan.threads
-        .map((t) => `${t.name}: ⌀${fmtNum(FASTENERS[t.size].minor)} mm pilot, ${fmtNum(t.depth)} mm of thread`)
+      value: internalThreads
+        .map((t) => `${t.name}: ⌀${fmtNum(threadSpec(t.size).minor)} mm pilot, ${fmtNum(t.depth)} mm of thread`)
+        .join(' · '),
+      bold: true,
+    });
+  }
+  // #841 — an external thread needs its BOSS, as an internal one needs its pilot.
+  if (externalThreads.length > 0) {
+    needSteps.push({
+      text:
+        'The boss — this program cuts the thread only and never the boss. Every boss below must ' +
+        'already stand at its major diameter, at least as tall as the thread, before this file runs.',
+      value: externalThreads
+        .map((t) => `${t.name}: ⌀${fmtNum(threadSpec(t.size).major)} mm boss, ${fmtNum(t.depth)} mm of thread`)
         .join(' · '),
       bold: true,
     });
@@ -3969,7 +3983,7 @@ export function buildRunSheet(
         text: `Spindle, helical feed and the entry. Vacuum ${(job.cutOverride?.air ?? true) ? 'on' : 'off'}.`,
         value:
           `${s.spindleRpm} RPM · ${fmtNum(s.feed)} mm/min helical feed · ${fmtNum(s.plungeFeed)} mm/min ` +
-          `down the pilot · ${threadPlans === null ? 'the radial pass count was not recorded' : `${threadPlans[0]?.passRadii.length ?? 0} radial pass(es) at ${fmtNum(s.radialStepoverMm)} mm inward`}`,
+          `${plan.threads.every((t) => t.side === 'external') ? 'on the radial entry' : 'down the pilot'} · ${threadPlans === null ? 'the radial pass count was not recorded' : `${threadPlans[0]?.passRadii.length ?? 0} radial pass(es) at ${fmtNum(s.radialStepoverMm)} mm inward`}`,
       });
       // The three placeholder keys say so in their own source sentence (`threadSettings`), so no
       // second wording is invented here.
@@ -3999,14 +4013,21 @@ export function buildRunSheet(
       const facts = threadPlans?.[i] ?? null;
       cutSteps.push({
         text:
-          `${t.name} — ${cutterText}, ⌀${fmtNum(FASTENERS[t.size].minor)} mm pilot` +
-          (facts === null
-            ? ', the pass count was not recorded'
-            : `, ${facts.passRadii.length} radial pass(es) landing the tooth on the ${t.size} major radius`),
+          (t.side === 'external'
+            ? `${t.name} — ${cutterText}, ⌀${fmtNum(threadSpec(t.size).major)} mm boss` +
+              (facts === null
+                ? ', the pass count was not recorded'
+                : `, ${facts.passRadii.length} radial pass(es) landing the tooth on the ⌀${fmtNum(threadSpec(t.size).externalMinor)} mm external minor`)
+            : `${t.name} — ${cutterText}, ⌀${fmtNum(threadSpec(t.size).minor)} mm pilot` +
+              (facts === null
+                ? ', the pass count was not recorded'
+                : `, ${facts.passRadii.length} radial pass(es) landing the tooth on the ${t.size} major radius`)),
         value: `${fmtNum(t.depth)} mm of thread`,
       });
     }
-    cutSteps.push({ text: `Check the thread with a ${plan.threads[0]!.size} screw.` });
+    cutSteps.push({
+      text: `Check the thread with a ${plan.threads[0]!.size} ${plan.threads[0]!.side === 'external' ? 'nut' : 'screw'}.`,
+    });
   } else if (params !== null) {
     // #405 — A TRACE-ONLY JOB DOES NOT STEP OVER. A trace puts the cutter ON the line: there are
     // no contour-parallel loops, so nothing is ever stepped over, and the `stepOverFraction` a V

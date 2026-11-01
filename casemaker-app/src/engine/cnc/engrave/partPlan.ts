@@ -39,7 +39,7 @@ import type {
   EngraveVectorShape,
 } from '@/types/engraveJob';
 import type { CustomFont } from '@/types/textLabel';
-import { FASTENERS } from '@/engine/compiler/fasteners';
+import { threadLabel, threadSpec } from '@/engine/cnc/threadTable';
 import type { Mm } from '@/types/units';
 import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
@@ -247,6 +247,8 @@ export interface PartPlan {
     name: string;
     position: [Mm, Mm];
     size: EngraveThread['size'];
+    /** #841 — present only on an external thread (a boss at `position`). */
+    side?: 'external';
     depth: Mm;
     through: boolean;
   }[];
@@ -1012,7 +1014,8 @@ export function drillOperationName(drill: EngraveDrill): string {
  */
 export function threadOperationName(thread: EngraveThread): string {
   const named = thread.name ? ` "${thread.name}"` : '';
-  return `Thread${named} ${thread.size}×${FASTENERS[thread.size].pitch}`;
+  // `M5×0.8` exactly as before #841 for metric; `1/4-20 UNC` for unified; an external thread says so.
+  return `Thread${named} ${threadLabel(thread.size)}${thread.side === 'external' ? ' external' : ''}`;
 }
 
 /**
@@ -1868,6 +1871,12 @@ export interface SweptCut {
    * several holes are a group, not one opening, so they do not carry it.
    */
   roundDiameterMm?: number;
+  /**
+   * #841 — how far below the top the cutter's TIP goes when that is deeper than `depth`: a thread's
+   * tip runs a pitch past its threaded length. The jaw rule reads it to tell a cut that works wholly
+   * above the jaw tops; absent, `depth` is the tip.
+   */
+  tipDepth?: Mm;
 }
 
 /** The box grown by `by` mm on every side. */
@@ -1968,15 +1977,23 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
   }
   for (const thread of plan.threads) {
     const [x, y] = thread.position;
-    const r = FASTENERS[thread.size].major / 2;
+    // #841 — an EXTERNAL thread's cutter orbits OUTSIDE the boss, so its disc is the major radius
+    // plus the cutter's whole diameter.
+    // #841 — an EXTERNAL thread's cutter orbits OUTSIDE the boss, so its disc for the jaws is the
+    // major radius plus the cutter's whole diameter; its REACH (the round-stock rule) stays the
+    // boss's major, because outside the boss the cutter is meant to be in air.
+    const spec = threadSpec(thread.size);
+    const outside = thread.side === 'external' ? 2 * sweepRadiusForJob(job, 0) : 0;
+    const r = spec.major / 2 + outside;
     add(
       thread.id,
       thread.name,
       thread.depth,
       { minX: x, maxX: x, minY: y, maxY: y },
       r,
-      Math.hypot(x - centre[0], y - centre[1]),
+      Math.hypot(x - centre[0], y - centre[1]) - outside,
     );
+    cuts[cuts.length - 1]!.tipDepth = thread.depth + spec.pitch;
   }
   // Cut-outs (#218) sweep the referenced outline plus the path offset (`inset`) and the cutter
   // radius. The outline's bounding box covers every point of the offset path, so growing it by
@@ -2386,6 +2403,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
       name: threadOperationName(item),
       position: [item.position.x, item.position.y],
       size: item.size,
+      ...(item.side === 'external' ? { side: 'external' as const } : {}),
       depth: item.depth,
       through: item.through,
     });

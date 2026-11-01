@@ -44,7 +44,7 @@
  */
 
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
-import { FASTENERS, type FastenerSize } from '@/engine/compiler/fasteners';
+import { threadDims, threadLabel, type ThreadSize } from '@/engine/cnc/threadTable';
 import { catalogueCoverageFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { clampToMachine, type ClampDiagnostic, type MillProfile } from '@/engine/cnc/machine';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
@@ -149,7 +149,7 @@ export function threadSettings(
   return { settings, sources, diagnostics };
 }
 
-/** The thread's ISO 261 coarse geometry: major `D`, pitch `P`, basic minor `D1`. */
+/** The thread's geometry: major `D`, pitch `P`, and the minor the side lands on (`D1` or `d3`). */
 export interface ThreadGeometry {
   major: number;
   pitch: number;
@@ -157,21 +157,17 @@ export interface ThreadGeometry {
 }
 
 /**
- * The geometry of a metric coarse thread, from the ONE table.
+ * The geometry of a thread, from the ONE table (`engine/cnc/threadTable.ts`, #841): ISO 261 metric
+ * and ASME B1.1 unified. `side` picks the minor: the basic internal minor `D1` (the pilot) or the
+ * external minor `d3` (the root an external thread's tooth tip lands on). Absent is internal.
  *
- * Only the table's metric coarse sizes exist here; UNC/UNF and a 6G allowance are refused by
- * their absence (D5), not approximated. `FastenerSize` is what makes the table total.
- *
- * #460 option (a), maintainer 2026-10-17: the CUTTER's pitch is still not on the wire, so a
- * cutter/thread pitch mismatch cannot be refused here. The run sheet prints the thread and the
- * cutter on one line so a person can catch a wrong pairing, and the load's `thread-cutter-fit`
- * checks the diameters. Revisit as option (b) — a served `pitch` field plus a
- * `thread-wrong-pitch` refusal — when a third thread mill arrives or the first wrong pairing is
- * seen. #460 is closed on that trigger, not on a silent assumption that it never happens.
+ * #460 option (a), maintainer 2026-10-17: the CUTTER's pitch is still not on the wire. Since #841
+ * the findings read it from the cutter's NAME (`threadMillPitchOf`) and INFORM on a mismatch with
+ * the nearest owned thread mill as the one-press change (`thread-pitch-mismatch`); the CAM still
+ * cuts the item's pitch, because the item states the thread.
  */
-export function threadGeometry(size: FastenerSize): ThreadGeometry {
-  const f = FASTENERS[size];
-  return { major: f.major, pitch: f.pitch, minor: f.minor };
+export function threadGeometry(size: ThreadSize, side: 'internal' | 'external' = 'internal'): ThreadGeometry {
+  return threadDims(size, side);
 }
 
 /**
@@ -189,13 +185,17 @@ export interface SimThreadSpec {
   /** The threaded length below the top face. */
   threadDepthMm: number;
   through: boolean;
+  /** #841 — an external thread on a boss: `minorMm` is then the external minor `d3`. */
+  external?: true;
 }
 
 export interface ThreadMillInput {
   tool: Tool;
-  /** The hole's axis, work XY. */
+  /** The hole's (or the boss's) axis, work XY. */
   position: readonly [number, number];
-  size: FastenerSize;
+  size: ThreadSize;
+  /** #841 — `'external'` mills the outside of a boss at `position`; absent is internal. */
+  side?: 'internal' | 'external';
   /** Threaded length below the top face, mm. Positive. */
   depth: number;
   through: boolean;
@@ -206,7 +206,9 @@ export interface ThreadMillInput {
 
 export interface ThreadMillPlan {
   position: [number, number];
-  size: FastenerSize;
+  size: ThreadSize;
+  /** #841 — present (true) only on an external thread, so an internal plan is unchanged. */
+  external?: true;
   major: number;
   pitch: number;
   minor: number;
@@ -284,6 +286,7 @@ export function planThreadMill(input: ThreadMillInput): ThreadMillResult {
     return { ok: false, reason: 'a through thread is unavailable until the through-cut gate lands' };
   }
   if (!(input.depth > 0)) return { ok: false, reason: 'the thread has no depth' };
+  if (input.side === 'external') return planExternalThread(input, d);
 
   const { major, pitch, minor } = threadGeometry(input.size);
   // D2's two physical checks, in the order that makes the message actionable: can it get in,
@@ -381,12 +384,123 @@ export function planThreadMill(input: ThreadMillInput): ThreadMillResult {
         { x: cx, y: cy, majorMm: major, minorMm: minor, pitchMm: pitch, threadDepthMm: input.depth, through: false },
       ],
       notes: [
-        `${input.size}×${pitch}: ⌀${major} major over ⌀${minor} basic minor, ${input.depth} mm of thread`,
+        `${threadLabel(input.size)}: ⌀${major} major over ⌀${minor} basic minor, ${input.depth} mm of thread`,
         `${passRadii.length} pass(es) at r = ${passRadii.map((r) => r3(r)).join(' / ')} mm, stepping ${s.radialStepoverMm} mm (thread.radialStepoverMm)`,
         `the tip runs ${runOut} mm below the last full thread (${s.bottomClearancePitches} × pitch, thread.bottomClearancePitches)`,
         `the helix is ${r3(turns)} turn(s) of G1 chords at ${s.chordToleranceMm} mm sagitta (thread.chordToleranceMm)`,
         `feed ${s.feed} mm/min and ${s.spindleRpm} rpm; the entry at ${s.plungeFeed} mm/min`,
         `the pilot at ⌀${minor} mm is assumed to exist and is not cut by this program (D1)`,
+      ],
+    },
+  };
+}
+
+/**
+ * #841 — an EXTERNAL thread: the helix runs OUTSIDE a boss whose axis is `position`.
+ *
+ * THE BOSS IS ASSUMED, like the pilot (D1): the round stock standing in the vise, or a boss a prior
+ * program left. The tooth tip lands on the external minor `d3 = d − 1.226869P` (ISO 965-1, see
+ * `threadTable.ts`), so the final pass orbits at `rFinal = (d3 + dc)/2` and the first clears the
+ * boss's own major at `(D + dc)/2`, stepping inward by `thread.radialStepoverMm`.
+ *
+ * CLIMB, as the internal thread is. A right-hand thread with an M3 (clockwise) spindle climbs
+ * inside a hole on a counter-clockwise orbit going UP; outside a boss the climbing orbit is
+ * CLOCKWISE, and a clockwise right-hand helix goes DOWN. So one pass is:
+ *
+ *   1. rapid to the approach point, `(D + dc)/2 + thread.pilotTipClearanceMm` out on +X, at `HOP_Z`,
+ *      then (pure Z) to the top `0` — beside the boss, never over it;
+ *   2. a flat radial feed in to the pass radius at `0`;
+ *   3. the helix DOWN, clockwise, one pitch per revolution, to `−tipDepth` (G1 chords);
+ *   4. a flat radial feed back out to the approach radius at `−tipDepth`;
+ *   5. a pure-Z rapid to `HOP_Z`, then an XY rapid to the approach point for the next pass.
+ *
+ * `pilotTipClearanceMm` is reused as the radial approach clearance: it is the shop's "clear the
+ * tool by" number for this operation, and an external thread has no pilot floor to spend it on.
+ */
+function planExternalThread(input: ThreadMillInput, d: number): ThreadMillResult {
+  const { tool, settings: s } = input;
+  const { major, pitch, minor } = threadGeometry(input.size, 'external');
+  const radialDepth = (major - minor) / 2;
+  if (d < radialDepth) {
+    return {
+      ok: false,
+      reason: `the ${d} mm cutting diameter spans only ${r3(d)} mm, less than the ${r3(radialDepth)} mm radial depth of the external ${threadLabel(input.size)} (⌀${major} over ⌀${minor})`,
+    };
+  }
+  const [cx, cy] = input.position;
+  const runOut = r3(s.bottomClearancePitches * pitch);
+  const tipDepth = r3(input.depth + runOut);
+  if (tool.fluteLength !== null && tool.fluteLength > 0 && tipDepth > tool.fluteLength) {
+    return {
+      ok: false,
+      reason: `the thread needs ${tipDepth} mm of flute (${input.depth} mm plus ${runOut} mm of run-out), past the ${tool.fluteLength} mm flute of ${tool.name}`,
+    };
+  }
+  if (!(s.radialStepoverMm > 0)) return { ok: false, reason: 'the thread.radialStepoverMm setting is not positive' };
+
+  const rOuter = (major + d) / 2;
+  const rFinal = (minor + d) / 2;
+  const rApproach = rOuter + Math.max(0, s.pilotTipClearanceMm);
+  const n = Math.max(1, Math.ceil(radialDepth / s.radialStepoverMm - 1e-9));
+  const passRadii: number[] = [];
+  for (let k = 1; k <= n; k++) passRadii.push(Math.min(rOuter, rFinal + (n - k) * s.radialStepoverMm));
+
+  const turns = tipDepth / pitch;
+  const totalAngle = 2 * Math.PI * turns;
+  const moves: CamMove[] = [];
+  for (const r of passRadii) {
+    moves.push({ kind: 'rapid', x: cx + rApproach, y: cy, z: HOP_Z });
+    moves.push({ kind: 'rapid', x: cx + rApproach, y: cy, z: 0 });
+    moves.push({ kind: 'feed', x: cx + r, y: cy, z: 0, f: s.plungeFeed });
+    const perTurn = chordsPerTurn(r, s.chordToleranceMm);
+    const segments = Math.max(1, Math.ceil(perTurn * turns));
+    const dTheta = totalAngle / segments;
+    for (let i = 1; i <= segments; i++) {
+      const theta = -i * dTheta;
+      moves.push({
+        kind: 'feed',
+        x: cx + r * Math.cos(theta),
+        y: cy + r * Math.sin(theta),
+        z: -(i / segments) * tipDepth,
+        f: s.feed,
+      });
+    }
+    const end = -totalAngle;
+    const ox = cx + rApproach * Math.cos(end);
+    const oy = cy + rApproach * Math.sin(end);
+    moves.push({ kind: 'feed', x: ox, y: oy, z: -tipDepth, f: s.plungeFeed });
+    moves.push({ kind: 'rapid', x: ox, y: oy, z: HOP_Z });
+    moves.push({ kind: 'rapid', x: cx + rApproach, y: cy, z: HOP_Z });
+  }
+  moves.push({ kind: 'rapid', x: cx + rApproach, y: cy, z: SAFE_Z });
+
+  return {
+    ok: true,
+    plan: {
+      position: [cx, cy],
+      size: input.size,
+      external: true,
+      major,
+      pitch,
+      minor,
+      cuttingDiameter: d,
+      threadDepth: input.depth,
+      tipDepth,
+      runOut,
+      passRadii,
+      chordsPerTurn: chordsPerTurn(passRadii[passRadii.length - 1]!, s.chordToleranceMm),
+      moves,
+      simThreads: [
+        { x: cx, y: cy, majorMm: major, minorMm: minor, pitchMm: pitch, threadDepthMm: input.depth, through: false, external: true },
+      ],
+      notes: [
+        `external ${threadLabel(input.size)}: ⌀${major} major over ⌀${minor} external minor (ISO 965-1 d3), ${input.depth} mm of thread`,
+        `${passRadii.length} pass(es) at r = ${passRadii.map((r) => r3(r)).join(' / ')} mm, stepping ${s.radialStepoverMm} mm inward (thread.radialStepoverMm)`,
+        `climb: clockwise and down from the top, one pitch per turn; the approach is ${r3(rApproach)} mm out (thread.pilotTipClearanceMm beside the boss)`,
+        `the tip runs ${runOut} mm below the last full thread (${s.bottomClearancePitches} × pitch, thread.bottomClearancePitches)`,
+        `the helix is ${r3(turns)} turn(s) of G1 chords at ${s.chordToleranceMm} mm sagitta (thread.chordToleranceMm)`,
+        `feed ${s.feed} mm/min and ${s.spindleRpm} rpm; the entry at ${s.plungeFeed} mm/min`,
+        `the ⌀${major} mm boss is assumed to exist and is not cut by this program`,
       ],
     },
   };

@@ -735,30 +735,53 @@ const drillSchema = z.discriminatedUnion('kind', [
 /**
  * A milled thread (#445, #434 phase 2), a sibling of a drill and never a region.
  *
- * The size enum is the `FastenerSize` union — the ISO 261 table in `engine/compiler/fasteners.ts`
- * is the one place those names live, and a size added there must be added here too (the same
- * type/schema trap this file's header documents for every field). `standard` and `classFit` are
- * literals, not enums: the CAM knows exactly the one value each may take in phase 2 (D5), and a
- * value outside it is a document this version does not understand rather than one to approximate.
+ * #841 — the size enum is the thread table's (`engine/cnc/threadTable.ts`): ISO 261 metric M2–M12
+ * and ASME B1.1 UNC/UNF #4 to 1/2". A size added there must be added here too (the type/schema trap
+ * this file's header documents for every field). `standard` must match the size's own system, and
+ * `side` is absent for an internal thread so every pre-#841 document round-trips byte-for-byte.
  */
-const threadSchema = z.object({
-  kind: z.literal('thread').describe('A milled thread (a threaded hole).'),
-  id: z.string().min(1).describe('Unique id for this thread within the job.'),
-  name: z.string().optional().describe('Optional human-readable name for the item list.'),
-  position: positionSchema.describe('Thread axis in work coordinates.'),
-  enabled: z.boolean().describe('False keeps the thread in the document but out of the program.'),
-  size: z
-    .enum(['M2', 'M2.5', 'M3', 'M4', 'M5', 'M6'])
-    .describe('ISO metric thread size.'),
-  standard: z.literal('metric').describe('Thread standard: metric (the only one this build cuts).'),
-  classFit: z.literal('6H').describe('Tolerance class: 6H (the only one this build cuts).'),
-  depth: z
-    .number()
-    .finite()
-    .positive()
-    .describe("Threaded depth below the stock's top face, in millimetres."),
-  through: z.boolean().describe('Mill the thread through the blank to the sacrificial board.'),
-});
+const threadSchema = z
+  .object({
+    kind: z.literal('thread').describe('A milled thread (a threaded hole, or a threaded boss).'),
+    id: z.string().min(1).describe('Unique id for this thread within the job.'),
+    name: z.string().optional().describe('Optional human-readable name for the item list.'),
+    position: positionSchema.describe('Thread axis in work coordinates: the hole, or the boss.'),
+    enabled: z.boolean().describe('False keeps the thread in the document but out of the program.'),
+    size: z
+      .enum([
+        'M2', 'M2.5', 'M3', 'M4', 'M5', 'M6', 'M8', 'M10', 'M12',
+        '#4-40', '#4-48', '#5-40', '#5-44', '#6-32', '#6-40', '#8-32', '#8-36', '#10-24', '#10-32',
+        '#12-24', '#12-28', '1/4-20', '1/4-28', '5/16-18', '5/16-24', '3/8-16', '3/8-24', '7/16-14',
+        '7/16-20', '1/2-13', '1/2-20',
+      ])
+      .describe('Thread size: ISO metric coarse (M2–M12) or unified UNC/UNF (#4-40 … 1/2-20, size-TPI).'),
+    standard: z
+      .enum(['metric', 'imperial'])
+      .describe('Thread system: metric (ISO 261) or imperial (UNC/UNF, ASME B1.1); must match the size.'),
+    classFit: z
+      .enum(['6H', '6h', '3B', '3A'])
+      .describe('Zero-allowance class: 6H/6h metric internal/external, 3B/3A unified internal/external.'),
+    side: z
+      .literal('external')
+      .optional()
+      .describe("'external' mills the outside of a boss at the axis; omit for an internal thread in a pilot."),
+    depth: z
+      .number()
+      .finite()
+      .positive()
+      .describe("Threaded depth below the stock's top face, in millimetres."),
+    through: z.boolean().describe('Mill the thread through the blank to the sacrificial board.'),
+  })
+  .superRefine((t, ctx) => {
+    const imperial = !t.size.startsWith('M');
+    if ((t.standard === 'imperial') !== imperial) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['standard'],
+        message: `size ${t.size} is ${imperial ? 'imperial' : 'metric'}, but standard says ${t.standard}`,
+      });
+    }
+  });
 
 /**
  * One 3D primitive (#435): a negative volume stated as a box, cylinder, cone or sphere. The

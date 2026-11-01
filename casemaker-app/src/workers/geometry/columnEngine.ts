@@ -1849,6 +1849,24 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     const d = resolved.cutter.radius * 2;
     for (const s of threadSpecs) {
       const radialDepth = (s.majorMm - s.minorMm) / 2;
+      // #841 — an EXTERNAL thread's cutter orbits outside a boss: there is no pilot to enter, so
+      // only the reach check applies, and the envelope sentence names the boss.
+      if (s.external === true) {
+        if (d < radialDepth) {
+          diagnostics.push({
+            severity: 'error',
+            code: 'thread-cutter-fit',
+            message: `external thread at (${s.x}, ${s.y}): the ${d} mm cutting diameter spans only ${d.toFixed(3)} mm, less than the ${radialDepth.toFixed(3)} mm radial depth of the ⌀${s.majorMm} over ⌀${s.minorMm} thread, so the cutter cannot reach the root`,
+          });
+        }
+        const band = (Math.PI / 4) * (s.majorMm ** 2 - s.minorMm ** 2) * s.threadDepthMm;
+        diagnostics.push({
+          severity: 'warning',
+          code: 'thread-envelope',
+          message: `external thread at (${s.x}, ${s.y}): ⌀${s.majorMm} × ${s.pitchMm} on a ⌀${s.majorMm} boss, ⌀${s.minorMm} root, ${s.threadDepthMm} mm; the cutter is simulated as its neck plus a tooth on the item's 60° form, swept along the helix outside the boss, so the floor follows the thread's pitch and flank; a column holds one height, so the crests between the grooves are not left — the picture over-removes by at most the annular band from ⌀${s.minorMm} to ⌀${s.majorMm} (${band.toFixed(2)} mm³). The neck traces a ring outside the boss in the solid blank; the shop leaves the boss standing first`,
+        });
+        continue;
+      }
       if (d >= s.minorMm) {
         diagnostics.push({
           severity: 'error',

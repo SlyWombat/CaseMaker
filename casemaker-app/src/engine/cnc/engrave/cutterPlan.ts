@@ -51,6 +51,7 @@ import { cuttingDiameter, flatEndMill, statedCuttingSize, type Tool } from '@/en
 import { catalogueCoverageFor, catalogueStandingFor, feedsFor, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { threadGeometry } from '@/engine/cnc/cam/threadMill';
+import { threadMillFit } from './threadFit';
 import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_FINISH_TIP_OPS, sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
@@ -568,20 +569,23 @@ export function planCutters(
   const threadWork = byKind('thread');
   if (threadWork.length > 0) {
     const threadItems = (job.threads ?? []).filter((t) => usable(t) && threadWork.some((w) => w.id === t.id));
+    // #841 — one fit rule (`threadFit.ts`): internal or external, metric or unified. The two-pitch
+    // run-out reach stays this module's own, stricter, rule.
     const fits = (c: Candidate): string | null => {
-      if (c.tool.shape !== 'thread') return 'not a thread mill';
-      const d = cuttingDiameter(c.tool);
-      if (d === null || !(d > 0)) return 'states no cutting diameter';
       for (const t of threadItems) {
-        const { major, minor, pitch } = threadGeometry(t.size);
-        if (d >= minor) return `too wide for the ⌀${minor} mm pilot of ${t.size}`;
-        if (d < (major - minor) / 2) return `too narrow for the radial depth of ${t.size}`;
+        const fit = threadMillFit(c.tool, t);
+        if (fit.refusal !== null) return fit.refusal;
+        const { pitch } = threadGeometry(t.size);
         if (c.tool.fluteLength !== null && t.depth + 2 * pitch > c.tool.fluteLength) return `flute does not reach ${t.size}`;
       }
       return null;
     };
-    const pick = bestOf(candidates.filter((c) => fits(c) === null), deeperFirst);
-    if (pick !== null) add(pick, threadWork, `a thread is cut by a thread mill — ${dia(cuttingDiameter(pick.tool) ?? 0)} fits the pilot and reaches`);
+    // A cutter NAMED for every thread's own pitch is preferred when one fits (the pitch finding's
+    // own rule); otherwise any fitting thread mill, and the finding informs.
+    const fitting = candidates.filter((c) => fits(c) === null);
+    const pitched = fitting.filter((c) => threadItems.every((t) => threadMillFit(c.tool, t).pitchMatches === true));
+    const pick = bestOf(pitched.length > 0 ? pitched : fitting, deeperFirst);
+    if (pick !== null) add(pick, threadWork, `a thread is cut by a thread mill — ${dia(cuttingDiameter(pick.tool) ?? 0)} fits the ${threadItems.every((t) => t.side === 'external') ? 'boss' : 'pilot'} and reaches`);
     else
       for (const w of threadWork) {
         unassigned.push({ id: w.id, name: w.name, reason: `no thread mill in the list fits this thread and its material${whyNoShape(['thread'])}` });

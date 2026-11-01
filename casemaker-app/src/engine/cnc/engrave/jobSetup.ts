@@ -37,7 +37,8 @@ import {
   traceSelfOverlapFindings,
   type SweptCut,
 } from '@/engine/cnc/engrave/partPlan';
-import { FASTENERS } from '@/engine/compiler/fasteners';
+import { fmtPitch, nearestThreadSize, threadDims } from '@/engine/cnc/threadTable';
+import { threadBoss, threadMillFit } from './threadFit';
 import { PCB_DRILL_SLACK_MM } from '@/engine/import/pcbCutters';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { orient } from '@/engine/cnc/setups/orient';
@@ -314,6 +315,11 @@ export type JobFindingCode =
   | 'thread-through-unavailable'
   | 'thread-pilot-unproven'
   | 'thread-flute-unproven'
+  // #841 — the cutter's named pitch, and an external thread's boss.
+  | 'thread-pitch-mismatch'
+  | 'thread-boss-missing'
+  | 'thread-boss-size'
+  | 'thread-boss-unproven'
   // 3D primitives (#435). A primitive is cut only where it reduces to a flat-floor region; the
   // other forms are refused BY NAME rather than approximated. Each sentence names the engine or
   // issue that can cut the shape, so the refusal is an instruction, not a dead end.
@@ -2617,7 +2623,8 @@ export function validateJob(
 
     for (const thread of enabledThreads) {
       const who = threadOperationName(thread);
-      const { major, pitch, minor } = FASTENERS[thread.size];
+      const external = thread.side === 'external';
+      const { major, pitch, minor } = threadDims(thread.size, external ? 'external' : 'internal');
       const runOut = pitch;
 
       if (thread.through) {
@@ -2663,8 +2670,9 @@ export function validateJob(
 
       // The two physical checks D2 says the planner can make from the item and the tool alone:
       // the cutter must enter the pilot, and its radius must span the thread's radial depth.
+      // #841 — an EXTERNAL thread has no pilot to enter; only the radial depth applies.
       if (threadTool !== null && threadTool.shape === 'thread' && threadDiameter !== null) {
-        if (threadDiameter >= minor) {
+        if (!external && threadDiameter >= minor) {
           findings.push({
             severity: 'error',
             code: 'thread-cutter-fit',
@@ -2681,7 +2689,61 @@ export function validateJob(
             message:
               `${who}: the ${threadDiameter} mm cutting diameter spans less than the ` +
               `${Number(((major - minor) / 2).toFixed(3))} mm radial depth of ${thread.size} ` +
-              `(⌀${major} over ⌀${minor}); the tooth cannot reach the major diameter.`,
+              `(⌀${major} over ⌀${minor}); the tooth cannot reach the ${external ? 'root' : 'major diameter'}.`,
+          });
+        }
+        // #841 — the cutter's tooth pitch, read from its name: a mismatch is INFORMED.
+        const fit = threadMillFit(threadTool, thread);
+        if (fit.pitchMatches === false && fit.cutterPitch !== null) {
+          findings.push({
+            severity: 'warning',
+            code: 'thread-pitch-mismatch',
+            labelId: thread.id,
+            message:
+              `${who} has a ${fmtPitch(pitch)} mm pitch, and "${threadTool.name}" is named for a ` +
+              `${fmtPitch(fit.cutterPitch)} mm pitch: its single tooth is ` +
+              (fit.cutterPitch < pitch ? 'too short for the deeper thread' : 'shaped for a finer thread') +
+              `, so the flanks will not be the ${thread.size} form. Generate cuts it as it is.`,
+          });
+        }
+      }
+
+      // #841 — an EXTERNAL thread is cut on a BOSS that must already stand, as an internal one needs
+      // its pilot. No boss is informed, with a one-press reference circle to state one.
+      if (external) {
+        const boss = threadBoss(job, thread.position);
+        if (boss === null) {
+          findings.push({
+            severity: 'warning',
+            code: 'thread-boss-missing',
+            labelId: thread.id,
+            message:
+              `${who} is an external thread, and nothing centred at (${thread.position.x}, ${thread.position.y}) mm ` +
+              `is a boss to cut it on: neither round stock nor a boss circle. Add a ⌀${major} mm boss here ` +
+              `(a reference circle this program leaves alone), or move the thread onto one. Generate cuts it as it is.`,
+          });
+        } else {
+          if (Math.abs(boss.diameterMm - major) > 0.05) {
+            findings.push({
+              severity: 'warning',
+              code: 'thread-boss-size',
+              labelId: thread.id,
+              message:
+                `${who} is cut on ${boss.what}, and the ${thread.size} major is ⌀${major} mm: ` +
+                (boss.diameterMm > major
+                  ? `the crests will stand at ⌀${boss.diameterMm} mm, ${fmt3(boss.diameterMm - major)} mm over. `
+                  : `the crests will be ${fmt3(major - boss.diameterMm)} mm short of full. `) +
+                `The size nearest the boss is ${nearestThreadSize(thread.standard, boss.diameterMm)}. Generate cuts it as it is.`,
+            });
+          }
+          findings.push({
+            severity: boss.source === 'stock' ? 'info' : 'warning',
+            code: 'thread-boss-unproven',
+            labelId: thread.id,
+            message:
+              `${who} is cut on ${boss.what}, which must stand at least ` +
+              `${Number((thread.depth + pitch).toFixed(3))} mm tall before this file runs. This program ` +
+              `cuts the thread only and never the boss.`,
           });
         }
       }
@@ -2711,7 +2773,7 @@ export function validateJob(
         });
       }
 
-      findings.push({
+      if (!external) findings.push({
         severity: 'warning',
         code: 'thread-pilot-unproven',
         labelId: thread.id,
@@ -2961,6 +3023,11 @@ export function validateJob(
   for (const cut of swept) {
     const { jaw, gap } = jawGapFor(job, cut.box);
     if (gap >= jawClearance) continue;
+    // #841 — a THREAD whose tip stays the clearance above the jaw tops works wholly above them: the
+    // jaws are below every point of the cutter, so nearness in plan is not contact. Threading the
+    // top of a rod standing proud of the jaws is the case. Only a cut that states its tip depth (a
+    // thread) is read this way; every other cut keeps the plan-view rule it shipped with.
+    if (cut.tipDepth !== undefined && cut.tipDepth + jawClearance <= jobVise(job).stockProud) continue;
     findings.push({
       severity: 'error',
       code: 'vise-jaw-collision',

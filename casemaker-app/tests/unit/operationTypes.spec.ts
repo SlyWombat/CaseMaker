@@ -30,6 +30,7 @@ describe('#662 the operation types', () => {
       'hole',
       'bore',
       'thread',
+      'thread-external',
       'surface',
       'texture',
       'flute',

@@ -116,7 +116,7 @@ describe('EngraveThreadRow — the editor', () => {
     open();
     const select = screen.getByTestId('engrave-thread-size-0') as HTMLSelectElement;
     const options = [...select.options].map((o) => o.textContent);
-    expect(options).toEqual(['M2 × 0.4 mm', 'M2.5 × 0.45 mm', 'M3 × 0.5 mm', 'M4 × 0.7 mm', 'M5 × 0.8 mm', 'M6 × 1 mm']);
+    expect(options).toEqual(['M2 × 0.4 mm', 'M2.5 × 0.45 mm', 'M3 × 0.5 mm', 'M4 × 0.7 mm', 'M5 × 0.8 mm', 'M6 × 1 mm', 'M8 × 1.25 mm', 'M10 × 1.5 mm', 'M12 × 1.75 mm']);
   });
 
   it('a size change patches only the size', () => {
@@ -196,5 +196,40 @@ describe('EngraveThreadRow — the shell controls', () => {
     expect(onRemove).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByTestId('engrave-thread-enabled-0'));
     expect(onChange).toHaveBeenCalledWith({ enabled: false });
+  });
+});
+
+describe('EngraveThreadRow — internal/external and metric/imperial (#841)', () => {
+  it('the side and the system each send their own patch', () => {
+    const { onChange } = row();
+    open();
+    fireEvent.change(screen.getByTestId('engrave-thread-side-0'), { target: { value: 'external' } });
+    expect(onChange).toHaveBeenCalledWith({ side: 'external' });
+    fireEvent.change(screen.getByTestId('engrave-thread-standard-0'), { target: { value: 'imperial' } });
+    expect(onChange).toHaveBeenCalledWith({ standard: 'imperial' });
+  });
+
+  it('an imperial thread lists UNC/UNF with the TPI converted to a pitch in mm', () => {
+    row({ thread: { size: '1/4-20', standard: 'imperial', classFit: '3B' } });
+    open();
+    const select = screen.getByTestId('engrave-thread-size-0') as HTMLSelectElement;
+    const options = [...select.options].map((o) => o.textContent);
+    expect(options[0]).toBe('#4-40 UNC (40 TPI, P 0.635 mm)');
+    expect(options).toContain('1/4-20 UNC (20 TPI, P 1.27 mm)');
+    expect(options).toContain('1/2-20 UNF (20 TPI, P 1.27 mm)');
+    expect(screen.getByTestId('engrave-thread-pitch-0').textContent).toContain('20 TPI = 1.27 mm pitch');
+    expect(screen.getByText(/ASME B1\.1 basic minor for 1\/4-20/)).toBeTruthy();
+  });
+
+  it('an external thread names its boss, or offers one press to state it', () => {
+    const onAddBoss = vi.fn();
+    const onChange = vi.fn();
+    const ext = { ...THREAD, size: 'M8' as const, classFit: '6h' as const, side: 'external' as const };
+    render(<EngraveThreadRow thread={ext} index={0} maxDepth={20} onChange={onChange} onRemove={vi.fn()} findings={[]} boss={null} onAddBoss={onAddBoss} />);
+    open();
+    expect(screen.getByTestId('engrave-thread-boss-note-0').textContent).toContain('⌀6.466 mm external minor');
+    fireEvent.click(screen.getByTestId('engrave-thread-add-boss-0'));
+    expect(onAddBoss).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('engrave-thread-add-boss-0').textContent).toBe('Add a ⌀8 mm boss here');
   });
 });
