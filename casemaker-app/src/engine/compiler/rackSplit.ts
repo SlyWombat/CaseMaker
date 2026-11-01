@@ -46,10 +46,13 @@ import { DEFAULT_SPLIT_SCREW, LUG_DROP, LUG_EMBED, LUG_LAP, lugSitesFor, type Lu
  * as long a seam as any case and would be under-screwed by two. The sites are
  * spread along the strap's WIDTH axis, which for a side panel is its height.
  *
- * SEAM KEEP-OUTS are the caller's, in the part's own assembly frame: the
- * rack's accessory screw columns and fan openings (which `rackFit.ts` already
- * knows about), and for a faceplate the slot pitches — a seam that cuts a slot
- * in half costs an accessory its fit.
+ * SEAM KEEP-OUTS are the caller's, in the part's own assembly frame. The rack's
+ * wiring derives the SIDE PANELS' from the same facts `validateRackFit`
+ * reports on — the accessory screw columns and the fan openings — so a panel
+ * seam can never slice a column or a fan hole. Plate and accessory seams carry
+ * none yet: their seams run mid-part and every piece keeps its own end rib
+ * (where the mounting screws are), and a face plate's slot pitch is a
+ * follow-up rather than a number this module can derive.
  *
  * WHAT IT COSTS (v1 — PROVISIONAL, pending a print, like every other joint
  * number here): the strap stands proud of the rack's face by {@link STRAP_DEPTH}

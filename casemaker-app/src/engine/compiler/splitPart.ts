@@ -2,7 +2,7 @@ import type { Facing, Vec3 } from '@/types';
 import type { PrinterVolume } from '@/types/printer';
 import type { Aabb, BuildOp } from './buildPlan';
 import { cube, intersection, translate } from './buildPlan';
-import { rectFitsBed } from './rackFit';
+import { rectFitsBed } from './bedFit';
 import {
   clearanceDiameter,
   pilotDiameter,

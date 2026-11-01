@@ -22,12 +22,16 @@ import {
   rotate,
   translate,
   union,
+  type Aabb,
   type BuildNode,
   type BuildOp,
   type Profile,
   aabbOfOp,
 } from './buildPlan';
 import { headHeight, screwHole, screwStarter } from './fasteners';
+import { buildRackPartSplit, planRackPartSplit, type StrapFace } from './rackSplit';
+import { DEFAULT_SPLIT_SCREW, LUG_LAP } from './shellSplit';
+import { partFitsBed } from './bedFit';
 
 /**
  * Parametric mini-rack assembly (emulates "Mini Rack" by Meuon, Printables
@@ -2016,19 +2020,7 @@ export function buildRackNodes(rack: RackParams, printer?: PrinterVolume): Build
     const n = accessorySlots(acc);
     const z0 = dims.slotZ(Math.min(cursor, Math.max(0, dims.slots - n))) + 0.25;
     cursor += n;
-    let op: BuildOp;
-    if (acc.type === 'blank') op = buildBlank(dims, n);
-    else if (acc.type === 'keystone') op = buildKeystone(dims, n).op;
-    else if (acc.type === 'shelf')
-      op = buildShelf(dims, n, resolveShelfDepth(acc.shelfDepth, dims.depth), {
-        frontPlate: acc.frontPlate,
-        vented: acc.vented,
-        // Only a full-depth shelf reaches the back and blocks the cable run.
-        rearNotches: acc.shelfDepth === 'full' ? (cableNotchGeometry(rack, dims) ?? undefined) : undefined,
-      });
-    else op = buildCableTray(dims);
-    // Recessed behind the sides' protective front columns (FRONT_RECESS).
-    const placed = translate([0, FRONT_RECESS, z0], op);
+    const placed = accessoryPlacedOp(rack, dims, acc, n, z0);
     accessoryOps.push(placed);
     nodes.push({ id: `rack-${acc.type}-${i}`, op: placed });
   });
@@ -2049,4 +2041,160 @@ export function buildRackNodes(rack: RackParams, printer?: PrinterVolume): Build
     });
   }
   return nodes;
+}
+
+/**
+ * One accessory's op, placed in assembly coordinates — shared by the node list
+ * and the split parts (#266) so the two can never build different accessories.
+ * Recessed behind the sides' protective front columns (FRONT_RECESS).
+ */
+function accessoryPlacedOp(rack: RackParams, dims: RackDims, acc: RackAccessory, n: number, z0: number): BuildOp {
+  let op: BuildOp;
+  if (acc.type === 'blank') op = buildBlank(dims, n);
+  else if (acc.type === 'keystone') op = buildKeystone(dims, n).op;
+  else if (acc.type === 'shelf')
+    op = buildShelf(dims, n, resolveShelfDepth(acc.shelfDepth, dims.depth), {
+      frontPlate: acc.frontPlate,
+      vented: acc.vented,
+      // Only a full-depth shelf reaches the back and blocks the cable run.
+      rearNotches: acc.shelfDepth === 'full' ? (cableNotchGeometry(rack, dims) ?? undefined) : undefined,
+    });
+  else op = buildCableTray(dims);
+  return translate([0, FRONT_RECESS, z0], op);
+}
+
+/** #266 — the free face each rack part's split strap stands on. */
+function strapFaceFor(id: string): StrapFace {
+  if (id === 'rack-top') return { axis: 2, sign: 1 };
+  if (id === 'rack-side-left') return { axis: 0, sign: -1 };
+  if (id === 'rack-side-right') return { axis: 0, sign: 1 };
+  // The bottom plate and every accessory: the underside is the outside face.
+  return { axis: 2, sign: -1 };
+}
+
+/**
+ * #266 — where a SIDE PANEL's seam may not run: the accessory screw columns
+ * (every hole up the height at these Y values) and the fan openings. Both are
+ * the same facts `validateRackFit` reports on, read here as regions instead of
+ * warnings. The X span covers the whole width so the same list serves both
+ * panels.
+ */
+function sidePanelKeepOuts(rack: RackParams, dims: RackDims): Aabb[] {
+  const out: Aabb[] = [];
+  for (const fan of rack.fans ?? []) {
+    const spec = FAN_SPECS[fan.size] ?? FAN_SPECS[80]!;
+    const { y, z } = fanCenter(fan, dims);
+    const half = spec.opening / 2;
+    out.push({ min: [-1, y - half, z - half], max: [dims.width + 1, y + half, z + half] });
+  }
+  const columns = [SIDE_FRONT_HOLE_Y, ...(dims.depth >= MID_BAR_MIN_DEPTH ? [REAR_HOLE_Y] : [])];
+  for (const colY of columns) {
+    out.push({ min: [-1, colY - SCREW_BOSS_D / 2, 0], max: [dims.width + 1, colY + SCREW_BOSS_D / 2, dims.totalH] });
+  }
+  return out;
+}
+
+/** The parts a split would work on, rebuilt from the same builders the node
+ *  list uses, each with the face its strap stands on and its seam keep-outs. */
+function rackSplitEntries(
+  rack: RackParams,
+  dims: RackDims,
+): { id: string; op: BuildOp; face: StrapFace; keepOut: Aabb[] }[] {
+  const out = frameParts(rack, dims).map((n) => ({
+    id: n.id,
+    op: n.op,
+    face: strapFaceFor(n.id),
+    keepOut: n.id.startsWith('rack-side') ? sidePanelKeepOuts(rack, dims) : [],
+  }));
+  let cursor = 0;
+  (rack.accessories ?? []).forEach((acc, i) => {
+    const n = accessorySlots(acc);
+    const z0 = dims.slotZ(Math.min(cursor, Math.max(0, dims.slots - n))) + 0.25;
+    cursor += n;
+    out.push({
+      id: `rack-${acc.type}-${i}`,
+      op: accessoryPlacedOp(rack, dims, acc, n, z0),
+      face: strapFaceOfAccessory(),
+      keepOut: [],
+    });
+  });
+  return out;
+}
+
+/** Accessories: the underside, the same face the bottom plate uses. */
+function strapFaceOfAccessory(): StrapFace {
+  return { axis: 2, sign: -1 };
+}
+
+/** #266 — one part's split offer, as the engine can deliver it. */
+export interface RackPartSplitOffer {
+  partId: string;
+  state: 'available' | 'tooTall' | 'blocked';
+  pieces?: number;
+  screws?: number;
+  screwLabel?: string;
+}
+
+/**
+ * #266 — what a split can do for every rack part over the bed, part by part.
+ *
+ * The offer is the ENGINE's answer (bounds and seam arithmetic — no Manifold
+ * evaluation), so the panel and the exporter can show what would be built
+ * before anything is. `tooTall` is reported on its own: a vertical seam cannot
+ * help a part over the bed's height, and saying "blocked" would hide the real
+ * reason.
+ */
+export function rackSplitOffers(rack: RackParams, printerOverride?: PrinterVolume): RackPartSplitOffer[] {
+  const printer = printerOverride ?? rack.printer;
+  if (!printer) return [];
+  const dims = computeRackDims(rack);
+  const offers: RackPartSplitOffer[] = [];
+  for (const part of rackSplitEntries(rack, dims)) {
+    const bounds = aabbOfOp(part.op);
+    if (!bounds) continue;
+    const w = bounds.max[0]! - bounds.min[0]!;
+    const d = bounds.max[1]! - bounds.min[1]!;
+    const h = bounds.max[2]! - bounds.min[2]!;
+    if (h > printer.z) {
+      offers.push({ partId: part.id, state: 'tooTall' });
+      continue;
+    }
+    if (partFitsBed(w, d, printer)) continue;
+    const plan = planRackPartSplit({ partOp: part.op, bounds, printer, face: part.face, keepOut: part.keepOut });
+    offers.push(
+      plan
+        ? {
+            partId: part.id,
+            state: 'available',
+            pieces: plan.pieces.length,
+            screws: plan.screwCount,
+            screwLabel: `${DEFAULT_SPLIT_SCREW}×${LUG_LAP * 2} socket cap`,
+          }
+        : { partId: part.id, state: 'blocked' },
+    );
+  }
+  return offers;
+}
+
+/**
+ * #266 — the split PIECES for every rack part over the bed, as alternatives to
+ * the whole parts. Only called when the project asks for the split: the
+ * builder's cuts and straps are real Manifold work.
+ */
+export function buildRackSplitNodes(rack: RackParams, printerOverride?: PrinterVolume): BuildNode[] {
+  const printer = printerOverride ?? rack.printer;
+  if (!printer) return [];
+  const dims = computeRackDims(rack);
+  const out: BuildNode[] = [];
+  for (const part of rackSplitEntries(rack, dims)) {
+    const bounds = aabbOfOp(part.op);
+    if (!bounds) continue;
+    const split = buildRackPartSplit(
+      { partOp: part.op, bounds, printer, face: part.face, keepOut: part.keepOut },
+      undefined,
+      part.id,
+    );
+    if (split) out.push(...split.nodes);
+  }
+  return out;
 }

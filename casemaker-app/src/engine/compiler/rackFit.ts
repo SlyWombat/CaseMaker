@@ -77,26 +77,9 @@ export function resolvePrinter(project: Project | null | undefined): PrinterVolu
   return project?.printer ?? project?.case?.rack?.printer;
 }
 
-/**
- * Does a p×q rectangle fit on an a×b bed, allowing 90° and diagonal
- * rotation? Straight placement first; otherwise the classic rotated-
- * rectangle bound: for p > a (long side over bed width), the rectangle
- * fits at some angle iff
- *   b ≥ (2·p·q·a + (p² − q²)·√(p² + q² − a²)) / (p² + q²).
- */
-export function rectFitsBed(p0: number, q0: number, a0: number, b0: number): boolean {
-  const p = Math.max(p0, q0);
-  const q = Math.min(p0, q0);
-  const a = Math.max(a0, b0);
-  const b = Math.min(a0, b0);
-  if (p <= a && q <= b) return true;
-  if (q > b) return false; // even the short part side exceeds the short bed side
-  // Here p > a (straight placement failed with q ≤ b), which guarantees the
-  // discriminant below is positive.
-  const d2 = p * p + q * q - a * a;
-  const need = (2 * p * q * a + (p * p - q * q) * Math.sqrt(d2)) / (p * p + q * q);
-  return need <= b + 1e-9;
-}
+import { rectFitsBed } from './bedFit';
+
+export { rectFitsBed };
 
 export interface PartFootprint {
   id: string;

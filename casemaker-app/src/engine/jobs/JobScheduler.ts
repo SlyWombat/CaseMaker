@@ -87,6 +87,7 @@ async function dispatch(project: Project, myGen: number): Promise<void> {
       connector: plan.connector,
       clashes: plan.clashes?.statements ?? [],
       lidSplitOffer: plan.lidSplitOffer,
+      rackSplitOffers: plan.rackSplitOffers,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

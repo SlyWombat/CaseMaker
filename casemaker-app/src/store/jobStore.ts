@@ -5,6 +5,7 @@ import type { SmartCutoutDecision } from '@/engine/compiler/smartCutoutLayout';
 import type { SplitOffer } from '@/engine/compiler/buildPlan';
 import type { StackConnectorReport } from '@/engine/compiler/stackConnector';
 import type { ClashStatement } from '@/engine/compiler/caseClashes';
+import type { RackPartSplitOffer } from '@/engine/compiler/rack';
 
 export type JobStatus = 'idle' | 'rebuilding' | 'error';
 
@@ -43,6 +44,8 @@ export interface JobState {
    * shell's. Both can be present: one over-bed part does not make the other.
    */
   lidSplitOffer: SplitOffer | null;
+  /** Issue #266 — the rack's per-part split offers, decided by the compiler. */
+  rackSplitOffers: RackPartSplitOffer[];
   setStatus: (status: JobStatus, error?: string | null) => void;
   applyResult: (
     generation: number,
@@ -57,6 +60,7 @@ export interface JobState {
       connector?: StackConnectorReport;
       clashes?: ClashStatement[];
       lidSplitOffer?: SplitOffer;
+      rackSplitOffers?: RackPartSplitOffer[];
     },
   ) => void;
 }
@@ -75,6 +79,7 @@ export const useJobStore = create<JobState>()((set) => ({
   connector: null,
   clashes: [],
   lidSplitOffer: null,
+  rackSplitOffers: [],
   setStatus: (status, error = null) => set({ status, error }),
   applyResult: (generation, nodes, combinedStats, durationMs, diag, diagnostics) =>
     set(() => {
@@ -94,6 +99,7 @@ export const useJobStore = create<JobState>()((set) => ({
         connector: diagnostics?.connector ?? null,
         clashes: diagnostics?.clashes ?? [],
         lidSplitOffer: diagnostics?.lidSplitOffer ?? null,
+        rackSplitOffers: diagnostics?.rackSplitOffers ?? [],
       };
     }),
 }));

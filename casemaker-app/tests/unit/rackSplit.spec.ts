@@ -141,3 +141,71 @@ describe('#266 — the strap joint on a rack part', () => {
     expect(rackPieceId('rack-bottom', [1, 1])).toBe('rack-bottom-split-b2');
   });
 });
+
+// ---------------------------------------------------------------------------
+// #266 — the rack's parts as the engine offers them (rack.ts wiring).
+// ---------------------------------------------------------------------------
+
+import { buildRackSplitNodes, rackSplitOffers } from '@/engine/compiler/rack';
+import { compileProject } from '@/engine/compiler/ProjectCompiler';
+import { createDefaultProject } from '@/store/projectStore';
+import type { RackParams } from '@/types';
+
+const SMALL = { x: 130, y: 130, z: 200 };
+
+const SAMPLE: RackParams = {
+  enabled: true,
+  width: 252,
+  depth: 250,
+  slots: 16,
+  accessories: [
+    { id: 'a', type: 'keystone' },
+    { id: 'b', type: 'blank', slots: 2 },
+    { id: 'c', type: 'cable-tray' },
+  ],
+};
+
+describe('#266 — the rack’s own parts, part by part', () => {
+  it('offers every part that overruns the bed, with its state', () => {
+    const offers = rackSplitOffers(SAMPLE, SMALL);
+    const ids = offers.map((o) => o.partId);
+    for (const id of ['rack-side-left', 'rack-side-right', 'rack-top', 'rack-bottom']) {
+      expect(ids).toContain(id);
+    }
+    const available = offers.filter((o) => o.state === 'available');
+    expect(available.length).toBeGreaterThan(0);
+    for (const o of available) {
+      expect(o.pieces).toBeGreaterThan(1);
+      expect(o.screws).toBeGreaterThanOrEqual(2);
+      expect(o.screwLabel).toBeDefined();
+    }
+  });
+
+  it('builds pieces as alternatives to the whole parts when asked', () => {
+    const nodes = buildRackSplitNodes(SAMPLE, SMALL);
+    expect(nodes.length).toBeGreaterThan(0);
+    for (const n of nodes) expect(n.id).toMatch(/-split-[a-z]\d+$/);
+    const top = nodes.find((n) => n.id.startsWith('rack-top-split-'));
+    expect(top?.variant?.replaces).toEqual(['rack-top']);
+  });
+
+  it('a rack on a big bed is offered nothing, and builds nothing', () => {
+    const big = { x: 300, y: 300, z: 300 };
+    expect(rackSplitOffers(SAMPLE, big)).toEqual([]);
+    expect(buildRackSplitNodes(SAMPLE, big)).toEqual([]);
+  });
+
+  it('compileProject puts the pieces and the offer on the plan when splitForPrint is on', () => {
+    const base = createDefaultProject();
+    const project = {
+      ...base,
+      printer: SMALL,
+      case: { ...base.case, rack: { ...SAMPLE, enabled: true }, splitForPrint: true },
+    };
+    const plan = compileProject(project);
+    expect(plan.rackSplitOffers?.length).toBeGreaterThan(0);
+    expect(plan.nodes.some((n) => n.id.startsWith('rack-top-split-'))).toBe(true);
+    // The whole parts stay on the list: the split is an offer, not a replacement.
+    expect(plan.nodes.some((n) => n.id === 'rack-top')).toBe(true);
+  });
+});

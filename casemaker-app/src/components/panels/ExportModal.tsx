@@ -174,6 +174,7 @@ export function ExportModal({ onClose }: ExportModalProps) {
 
         <PrintBedBlock />
         <PrintBedLidBlock />
+        <PrintBedRackBlock />
 
         {hardware.length > 0 && (
           <div
@@ -305,6 +306,92 @@ const NOTE_STYLE: CSSProperties = {
   fontSize: 11,
   lineHeight: 1.45,
 };
+
+
+/**
+ * Issue #266 — the bed, and the RACK's own split offer.
+ *
+ * The rack is an assembly of separate parts, so the offer is per part: a top
+ * plate can split while a keystone blank has no legal seam, and the panel says
+ * which is which. The offer is the compiler's (`rackSplitOffers`), decided from
+ * each part's own geometry and keep-outs.
+ *
+ * The same `splitForPrint` switch as the case's: it means "split the parts that
+ * do not fit", not "split the body".
+ */
+function PrintBedRackBlock(): ReactElement | null {
+  const project = useProjectStore((s) => s.project);
+  const patchCase = useProjectStore((s) => s.patchCase);
+  const offers = useJobStore((s) => s.rackSplitOffers);
+  const printer = resolvePrinter(project);
+  if (offers.length === 0 || !printer) return null;
+
+  const on = project.case?.splitForPrint === true;
+  const PART_NAMES: Record<string, string> = {
+    'rack-top': 'top plate',
+    'rack-bottom': 'bottom plate',
+    'rack-side-left': 'left side panel',
+    'rack-side-right': 'right side panel',
+  };
+  const name = (id: string): string =>
+    PART_NAMES[id] ?? id.replace(/^rack-/, '').replace(/-\d+$/, '').replace(/-/g, ' ');
+  const ready = offers.filter((o) => o.state === 'available');
+  const screws = ready.reduce((n, o) => Math.max(n, o.screws ?? 0), 0);
+  const screwLabel = ready[0]?.screwLabel ?? '';
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div
+        data-testid="export-rack-split-offer"
+        style={{
+          padding: '8px 10px',
+          background: '#1a1f25',
+          border: '1px solid #3a4a2a',
+          borderRadius: 4,
+          fontSize: 12,
+          lineHeight: 1.45,
+        }}
+      >
+        {ready.length > 0 ? (
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <input
+              type="checkbox"
+              data-testid="export-rack-split-toggle"
+              checked={on}
+              onChange={(e) => patchCase({ splitForPrint: e.target.checked })}
+              style={{ marginTop: 3 }}
+            />
+            <span>
+              Split the rack’s parts for this bed
+              <span style={NOTE_STYLE}>
+                Does not fit {printer.x} × {printer.y} mm:{' '}
+                {ready
+                  .map((o) => `${name(o.partId)} (${o.pieces} pieces)`)
+                  .join(', ')}
+                {screws > 0 ? ` — bolted back together through outside butt straps with ${screwLabel}` : ''}
+                . The uncut parts stay on the list.
+              </span>
+            </span>
+          </label>
+        ) : (
+          <span>No rack part can be split for this bed.</span>
+        )}
+        <ul style={{ ...NOTE_STYLE, margin: '4px 0 0', paddingLeft: 16 }}>
+          {offers.map((o) => (
+            <li key={o.partId} data-testid={`export-rack-split-${o.partId}`}>
+              {name(o.partId)}:{' '}
+              {o.state === 'available'
+                ? `${o.pieces} cut pieces`
+                : o.state === 'tooTall'
+                  ? 'taller than the bed — a vertical seam cannot help'
+                  : 'no legal seam clears its features'}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Issue #148 — the bed, and the split offer that follows from it.

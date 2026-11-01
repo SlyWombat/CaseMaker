@@ -27,7 +27,7 @@ import { buildCustomCutouts } from './customCutouts';
 import { buildMagnetOps, faceSizeForProject } from './magnets';
 import { boardFootprint, buildCaseDividerOps } from './caseDividers';
 import { buildStandNodes } from './stand';
-import { buildRackNodes } from './rack';
+import { buildRackNodes, buildRackSplitNodes, rackSplitOffers } from './rack';
 import { rectFitsBed, resolvePrinter } from './rackFit';
 import {
   DEFAULT_SPLIT_SCREW,
@@ -88,10 +88,20 @@ export function compileProject(project: Project): BuildPlan {
   // no PCB and no shell at all. Unlike the stand it needs no board data, so
   // this branch never falls through.
   if (kind === 'rack' && caseParams.rack) {
+    const rackPrinter = resolvePrinter(project);
+    const rackNodes = buildRackNodes(caseParams.rack, rackPrinter);
+    // #266 — the rack's own parts split through the same project switch as the
+    // case's. The offer is metadata arithmetic; the pieces are built only when
+    // the split is asked for.
+    const rackOffers = rackSplitOffers(caseParams.rack, rackPrinter);
+    if (caseParams.splitForPrint === true) {
+      rackNodes.push(...buildRackSplitNodes(caseParams.rack, rackPrinter));
+    }
     return {
-      nodes: buildRackNodes(caseParams.rack, resolvePrinter(project)),
+      nodes: rackNodes,
       placementReport: validatePlacements(project),
       smartCutoutDecisions: [],
+      rackSplitOffers: rackOffers,
     };
   }
 
