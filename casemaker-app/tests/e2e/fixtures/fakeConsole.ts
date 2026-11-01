@@ -84,6 +84,19 @@ export interface FakeFeature {
   topZ: number;
 }
 
+/** #607 — the bench's 4th-axis chuck: a cylinder about an axis parallel to X, in the YZ plane. */
+export interface FakeChuck {
+  /** The axis line's Y, machine Y. */
+  axisY: number;
+  /** The axis line's height, machine Z. */
+  axisZ: number;
+  /** The chuck body's radius, mm. */
+  radiusMm: number;
+}
+
+/** The 3D probe's measured effective ball radius, mm — the sideways-boss convention's offset. */
+const PROBE_R = 0.875;
+
 export interface FakeConsoleOptions {
   /** Status polls from `play` to 100 %. Smaller finishes faster. Default 12. */
   steps?: number;
@@ -104,6 +117,8 @@ export interface FakeConsole {
   setDiagnose(line: string): void;
   /** #827 — the round feature the probe touches from now on (a spec seeds it after the app starts). */
   setFeature(feature: FakeFeature): void;
+  /** #607 — the chuck the rotary tap touches from now on. */
+  setChuck(chuck: FakeChuck): void;
 }
 
 /**
@@ -122,6 +137,8 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   let diagnoseLine = DIAGNOSE_IDLE;
   // #827 — the round feature the centre routine is run against; null until a spec seeds it.
   let feature: FakeFeature | null = null;
+  // #607 — the rotary module's chuck, when a spec seeds one.
+  let chuck: FakeChuck | null = null;
   const pos = { x: 0, y: 0, z: -3 };
   let mode: 'G90' | 'G91' = 'G90';
   const dist = (x: number, y: number): number =>
@@ -129,6 +146,13 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   const trigger = (): number => (feature === null ? 0 : feature.kind === 'bore' ? feature.radiusMm - 0.875 : feature.radiusMm + 0.875);
   const materialAt = (x: number, y: number): boolean =>
     feature === null ? false : feature.kind === 'bore' ? dist(x, y) > feature.radiusMm : dist(x, y) <= feature.radiusMm;
+  /** #607 — the chuck's crown at this machine Y, or null beside the body (`Zc + sqrt(R² − dy²)`). */
+  const chuckTopAt = (y: number): number | null => {
+    if (chuck === null) return null;
+    const dy = y - chuck.axisY;
+    if (Math.abs(dy) >= chuck.radiusMm) return null;
+    return chuck.axisZ + Math.sqrt(chuck.radiusMm * chuck.radiusMm - dy * dy);
+  };
 
   const statusLine = (): string => {
     if (phase === 'running') {
@@ -165,6 +189,13 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
       pos.y = Number(m[2]);
       return frame(PTYPE_REPLY, 'ok\r\n');
     }
+    // #607 — the rotary tap moves in G53 machine coordinates.
+    m = /^G53 G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(lineText);
+    if (m) {
+      pos.x = Number(m[1]);
+      pos.y = Number(m[2]);
+      return frame(PTYPE_REPLY, 'ok\r\n');
+    }
     if (lineText.startsWith('G38.5 ')) {
       if (mode !== 'G91') return frame(PTYPE_REPLY, 'error:release in absolute mode\r\n');
       const r = /^G38\.5 ([XYZ])(-?[\d.]+)/.exec(lineText);
@@ -178,6 +209,16 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
     if (m) {
       if (mode !== 'G91') return frame(PTYPE_REPLY, 'error:probe in absolute mode\r\n');
       const target = pos.z - Number(m[1]);
+      // #607 — a seeded chuck's crown at this Y, if the descent reaches it.
+      if (chuck !== null) {
+        const crown = chuckTopAt(pos.y);
+        if (crown !== null && crown >= target && crown <= pos.z) {
+          pos.z = crown;
+          return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${crown.toFixed(3)}:1]\r\nok\r\n`);
+        }
+        pos.z = target;
+        return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\r\nok\r\n`);
+      }
       if (feature !== null && materialAt(pos.x, pos.y) && feature.topZ >= target && feature.topZ <= pos.z) {
         pos.z = feature.topZ;
         return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${feature.topZ.toFixed(3)}:1]\r\nok\r\n`);
@@ -191,6 +232,27 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
       const axis = m[1] === 'X' ? 'x' : 'y';
       const travel = Number(m[2]);
       const along = axis === 'x' ? pos.x : pos.y;
+      // #607 — a seeded chuck: the ±Y chord pair at this machine Z meets the body one probe radius
+      // outside each face (the app's sideways-boss convention). X touches beside it find nothing.
+      if (chuck !== null) {
+        let edge: number | undefined;
+        if (axis === 'y') {
+          const dz = pos.z - chuck.axisZ;
+          if (Math.abs(dz) <= chuck.radiusMm) {
+            const h = Math.sqrt(chuck.radiusMm * chuck.radiusMm - dz * dz) + PROBE_R;
+            const candidates = [chuck.axisY - h, chuck.axisY + h].sort((a, b) => (travel < 0 ? b - a : a - b));
+            edge = candidates.find((c) => (travel < 0 ? c <= along && c >= along + travel : c >= along && c <= along + travel));
+          }
+        }
+        if (edge === undefined) {
+          if (axis === 'x') pos.x += travel;
+          else pos.y += travel;
+          return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:0]\r\nok\r\n`);
+        }
+        if (axis === 'x') pos.x = edge;
+        else pos.y = edge;
+        return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:1]\r\nok\r\n`);
+      }
       const otherOffset = (axis === 'x' ? pos.y : pos.x) - (axis === 'x' ? feature!.centre.y : feature!.centre.x);
       const sq = trigger() * trigger() - otherOffset * otherOffset;
       const centreAlong = axis === 'x' ? feature!.centre.x : feature!.centre.y;
@@ -277,5 +339,6 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
     lines: () => [...seen],
     setDiagnose: (next: string) => (diagnoseLine = next),
     setFeature: (next: FakeFeature) => (feature = next),
+    setChuck: (next: FakeChuck) => (chuck = next),
   };
 }

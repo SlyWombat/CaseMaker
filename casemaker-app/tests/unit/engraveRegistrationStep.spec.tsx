@@ -3,7 +3,7 @@
 // margin verdict, write the origin only from a measurement inside the margin, and record the
 // outcome in #494's seam. The console is a fake client; nothing reaches a machine.
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import {
@@ -18,6 +18,7 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { surfaceSpreadPlan } from '@/engine/cnc/engrave/surfaceSpread';
@@ -36,6 +37,19 @@ import { defaultBadgeParams } from '@/types/badge';
 import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+// #607 — vitest runs the WEB target, where the machine rows are compiled out; the axis-tap test
+// flips the gate on just for itself (everything else in this file is the web build's behaviour).
+const caps = vi.hoisted(() => ({ canReachMachine: false }));
+vi.mock('@/platform/capabilities', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/platform/capabilities')>();
+  return {
+    ...actual,
+    get canReachMachine() {
+      return caps.canReachMachine;
+    },
+  };
+});
 
 const TARGET = { host: '192.0.2.10', port: 2222 };
 const STOCK = { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 };
@@ -1095,5 +1109,74 @@ describe('#797 follow-up — the Register card proposes the plan it runs', () =>
     expect(approved!.method).toBe('vise');
     expect(approved!.plan.scans.length).toBeGreaterThan(0);
     expect(approved!.expected.length).toBeGreaterThan(0);
+  });
+});
+
+describe('#607 — the Register step of a chuck job carries the axis tap', () => {
+  /** The target machine with an address, a measured surface and the measured 3D probe on it. */
+  function rotaryLocation(): void {
+    useLocationStore.setState({
+      status: 'present',
+      etag: '"e1"',
+      reason: null,
+      location: {
+        machines: [
+          {
+            id: 'm-rotary',
+            profileId: 'Z1',
+            address: { host: TARGET.host, port: TARGET.port },
+            bedProfiles: [
+              {
+                id: 'bp-rotary',
+                datums: {
+                  surfaceTopZ: { value: -76, measuredAt: '2026-10-31T00:00:00.000Z', by: 'fx-probe-3d', at: null },
+                  viseJawTopZ: null,
+                  bracketSeatZ: null,
+                  rotaryAxis: null,
+                },
+                placements: [],
+                surface: null,
+                history: [],
+              },
+            ],
+            activeBedProfileId: 'bp-rotary',
+            history: [],
+            notes: [],
+            observedAt: '2026-10-31T00:00:00.000Z',
+          },
+        ],
+        accessories: [
+          {
+            id: 'fx-probe-3d',
+            kind: 'probe',
+            product: 'Makera 3D Probe',
+            variant: '3d',
+            unit: { tipDiameterMm: 2, rimOffsetMm: 0.875, rimOffsetUncertaintyMm: 0.01 },
+            provenance: {},
+            history: [],
+            whereabouts: { kind: 'machine', machineId: 'm-rotary', since: '2026-10-31T00:00:00.000Z' },
+          },
+        ],
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+  }
+
+  it('offers the 4th-axis tap on a chuck job, plan or no plan', () => {
+    caps.canReachMachine = true;
+    const base = defaultEngraveJob();
+    const job: EngraveJob = { ...base, workholding: { kind: 'rotary-chuck', rotary: defaultRotaryChuck(base) } };
+    rotaryLocation();
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    expect(screen.getByTestId('engrave-rotary-tap')).toBeTruthy();
+  });
+
+  it('leaves the axis tap off a vise job', () => {
+    caps.canReachMachine = true;
+    const job = defaultEngraveJob();
+    rotaryLocation();
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    expect(screen.queryByTestId('engrave-rotary-tap')).toBeNull();
   });
 });

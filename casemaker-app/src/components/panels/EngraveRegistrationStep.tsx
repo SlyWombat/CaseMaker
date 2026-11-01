@@ -88,6 +88,7 @@ import { faceUpOf, planFromSetups, setupsSettings } from '@/engine/cnc/setups';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { planRegistrationAttempt } from './EngraveSetupsSection';
 import { EngraveCentreFind } from './EngraveCentreFind';
+import { RotaryAxisTap } from '@/components/manage/RotaryAxisTap';
 import type { RegistrationAttempt } from './EngraveSetupRow';
 import {
   viseFrameFromRegistration,
@@ -757,6 +758,16 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           No machine is connected. Reach it first, then come back to register.
         </p>
       )}
+
+      {/* #607 — A CHUCK JOB MEASURES ITS 4TH AXIS HERE. The axis is a datum of the MACHINE, not of
+          this job's registration plan (which a rotary holding has none of), so the row stands
+          beside the plan's own paths rather than inside them: the same shared tap the module's card
+          in Manage › Machines offers. Hidden while a registration run owns the machine. */}
+      {(phase === 'idle' || phase === 'failed' || phase === 'recorded') &&
+        machineRecord !== null &&
+        job.workholding.kind === 'rotary-chuck' && (
+          <RotaryAxisTap machine={machineRecord} testIdPrefix="engrave-rotary-tap" />
+        )}
 
       {plan === null && proposal !== null && proposal.kind === 'plan' && (
         <div

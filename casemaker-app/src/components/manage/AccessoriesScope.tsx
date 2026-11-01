@@ -26,6 +26,7 @@ import { useState } from 'react';
 import type { FixtureRecord, MachineRecord } from '@/platform/locationClient';
 import { useLocationStore } from '@/store/locationStore';
 import { accessoryNameFor, mountUnitReading, MOUNT_TAP_UNIT_KEY, MOUNT_TAP_WORD } from '@/engine/cnc/registration/mountContext';
+import { RotaryAxisTap } from './RotaryAxisTap';
 import { newId } from '@/utils/id';
 import { formatDay, mm } from './display';
 
@@ -590,6 +591,10 @@ function AccessoryDetail({
   // a mount that has no tapped reading of its own yet.
   const probeReadings = item.kind === 'probe' ? probeReadingsLine(item) : null;
   const machineDatum = item.kind === 'probe' ? null : machineMountDatum(item, machines);
+  // #607 — a rotary module checked out to a machine has its axis measured from its own card, with
+  // the same shared tap the Register step offers a chuck job.
+  const whereabouts = item.whereabouts;
+  const heldBy = whereabouts.kind === 'machine' ? (machines.find((m) => m.id === whereabouts.machineId) ?? null) : null;
 
   const productChanged = product !== (item.product ?? '');
   const variantChanged = variant !== (item.variant ?? '');
@@ -727,6 +732,12 @@ function AccessoryDetail({
             {accessoryNameFor(machineDatum.by)}.
           </p>
         </>
+      )}
+
+      {/* #607 — the module's own measuring door: hidden by the component itself where this build
+          cannot drive a machine, the machine has no read frame, or no measured probe is on it. */}
+      {item.kind === 'rotary-module' && heldBy !== null && (
+        <RotaryAxisTap machine={heldBy} testIdPrefix="manage-acc-rotary-tap" />
       )}
 
       <div className="panel-subhead">Where</div>

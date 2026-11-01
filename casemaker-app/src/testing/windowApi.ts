@@ -213,6 +213,12 @@ export interface CaseMakerTestApi {
    * spec can hand the fake machine the same feature centre.
    */
   centrePanelSeed(host: string, port: number): { x: number; y: number } | { reason: string } | null;
+  /**
+   * #607 e2e — SEED THE ROTARY TAP: a Z1 record with an address and an ACTIVE bed profile whose
+   * surface top is measured, the 3D probe and the 4th-axis module checked out to the same machine.
+   * Returns the module's id so a spec can open its card in Manage › Accessories.
+   */
+  rotaryTapSeed(): { machineId: string; moduleId: string };
   getEngraveRunState(): {
     phase: string;
     stale: boolean;
@@ -275,7 +281,7 @@ export interface CaseMakerTestApi {
    * person, and a spec drives that button too; this is for the cases where the button is not the
    * point (the compact layout hides it behind ⋯) and for getting to one scope in a single call.
    */
-  openManage(scope?: 'tools' | 'machines'): void;
+  openManage(scope?: 'tools' | 'accessories' | 'materials' | 'machines'): void;
   closeManage(): void;
 }
 
@@ -598,6 +604,68 @@ export function installCaseMakerTestApi(): void {
         },
       }));
       return { x: made.plan.surfacePoint.x, y: made.plan.surfacePoint.y };
+    },
+    rotaryTapSeed() {
+      const now = '2026-10-31T00:00:00.000Z';
+      // The bench's own shapes: the 3D probe's measured tip/rim (#789/#827), and the module checked
+      // out to the Z1 it is fitted to.
+      const probe = {
+        id: 'fx-probe-3d',
+        kind: 'probe',
+        product: 'Makera 3D Probe',
+        variant: '3d',
+        unit: { tipDiameterMm: 2, rimOffsetMm: 0.875, rimOffsetUncertaintyMm: 0.01 },
+        whereabouts: { kind: 'machine', machineId: 'e2e-machine', since: now },
+        provenance: {},
+        history: [],
+      };
+      const module = {
+        id: 'e2e-rotary',
+        kind: 'rotary-module',
+        product: 'Makera 4th-axis module',
+        variant: null,
+        constants: {},
+        unit: { axisXMm: -150 },
+        provenance: {},
+        whereabouts: { kind: 'machine', machineId: 'e2e-machine', since: now },
+        history: [],
+      };
+      const machine = {
+        id: 'e2e-machine',
+        name: 'QA Z1',
+        profileId: 'Z1',
+        // The tap resolves the record by the ADDRESS the check reached (`machineAt`).
+        address: { host: '192.0.2.10', port: 2222 },
+        whereabouts: { kind: 'bench' },
+        unit: {},
+        provenance: {},
+        activeBedProfileId: 'bed-e2e',
+        bedProfiles: [
+          {
+            id: 'bed-e2e',
+            name: 'QA bed',
+            createdAt: now,
+            basedOn: null,
+            surface: { kind: 'bare-bed' },
+            datums: {
+              surfaceTopZ: { value: -76, measuredAt: now, by: 'fx-probe-3d', at: null },
+              viseJawTopZ: null,
+              bracketSeatZ: null,
+              rotaryAxis: null,
+            },
+            placements: [],
+            preferredMounting: [],
+            consumables: null,
+            history: [],
+          },
+        ],
+      };
+      useLocationStore.setState({
+        status: 'ready',
+        location: { machines: [machine], accessories: [probe, module], stock: [], tools: [] } as never,
+        etag: '"e2e"',
+      } as never);
+      return { machineId: machine.id, moduleId: module.id };
     },
     getEngraveRunState() {
       const r = useEngraveRunStore.getState();

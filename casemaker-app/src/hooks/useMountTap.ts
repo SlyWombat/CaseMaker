@@ -10,11 +10,14 @@ import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
 import { runMountTap, type OperatorStep } from '@/engine/cnc/registration';
+import { runRotaryTap } from '@/engine/cnc/registration/execute';
+import { planRotaryTrial } from '@/engine/cnc/registration/rotaryTap';
+import { rotarySearchMm, rotaryTapPoint } from '@/engine/cnc/mounts/rotary';
 import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
 import type { PlanMountTap } from '@/engine/cnc/registration/plan';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type MachineUpdate } from '@/store/locationStore';
-import { withBracketSeatDatum, withViseJawTopDatum } from '@/platform/bedProfiles';
+import { withBracketSeatDatum, withRotaryAxisDatum, withViseJawTopDatum } from '@/platform/bedProfiles';
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
@@ -61,6 +64,33 @@ function mountKindOf(reference: PlanMountTap['reference']): 'vise' | 'bracket' {
   return reference === 'bracket-seat' ? 'bracket' : 'vise';
 }
 
+/**
+ * #607 — what the rotary tap needs to place its touches. The nominal axis only puts the chord pair
+ * and the crown where the chuck is expected; the reading is the datum.
+ */
+export interface RotaryAxisTapRequest {
+  /** The tap point's X along the chuck, machine X (the module's mid-length). */
+  atX: number;
+  /** The nominal axis Z, the axis-line Y and the body radius — the placement, never the reading. */
+  nominal: { axisZ: number; axisY: number; radiusMm: number };
+  /** The bed's clearance, machine Z (surface top + a probe body's margin); the trial refuses under it. */
+  bedClearanceZ: number;
+  /** The machine's travel height, machine Z. */
+  seekFromMachineZ: number;
+  /** The crown is accepted down to this height, machine Z. */
+  crownBand: { min: number; max: number };
+}
+
+/** #607 — the rotary tap's reading, shown beside the control that ran it. */
+export interface RotaryAxisReport {
+  axisZ: number;
+  axisY: number;
+  radiusMm: number;
+  residualMm: number;
+  /** The check chord's one-line note over the tolerance, else null. */
+  residualLine: string | null;
+}
+
 export interface MountTapInputs {
   /** The machine to talk to, or null when there is no live check to drive. */
   target: { host: string; port: number } | null;
@@ -82,6 +112,13 @@ export interface MountTapApi {
    * bracket height below the reading.
    */
   tapJaw: (tap: { x: number; y: number; fromMachineZ: number } & Pick<PlanMountTap, 'reference' | 'datumOffsetMm'>) => Promise<void>;
+  /**
+   * #607 — the rotary module's reference tap: one chord on the chuck body, the crown, a check
+   * chord; the fitted axis (Z, Y and R) is written to the bed profile's `rotaryAxis` datum.
+   */
+  tapAxis: (req: RotaryAxisTapRequest) => Promise<void>;
+  /** #607 — the last axis reading, or null before one has run this session. */
+  axis: RotaryAxisReport | null;
   /** The last outcome, shown beside the caller's control. */
   note: string | null;
   /** The fit-probe prompt awaiting a Continue/Cancel, or null. */
@@ -93,6 +130,7 @@ export interface MountTapApi {
 export function useMountTap(inputs: MountTapInputs): MountTapApi {
   const [note, setNote] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<OperatorStep | null>(null);
+  const [axis, setAxis] = useState<RotaryAxisReport | null>(null);
   const resolver = useRef<((ok: boolean) => void) | null>(null);
   const handleRef = useRef<ConsoleHandle | null>(null);
   /** The gate token this instance's tap holds, or null when it is not running one. */
@@ -239,5 +277,86 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
     }
   }
 
-  return { tapJaw, note, prompt, resolve };
+  /**
+   * #607 — THE ROTARY BRANCH: the 4th-axis module's reference tap through the same gate, prompt and
+   * transcript as the jaw taps. The trial's height is planned from the nominal radius against the
+   * bed clearance (refused by name when the sound band cannot clear the bed); the reading — axis Z,
+   * axis Y, radius — is what lands in `rotaryAxis`, with the check chord's residual said beside it.
+   */
+  async function tapAxis(req: RotaryAxisTapRequest): Promise<void> {
+    if (inputs.target === null) return;
+    const token = {};
+    if (!useMountTapGate.getState().begin(token)) return;
+    tokenRef.current = token;
+    setNote(null);
+    setAxis(null);
+    const handle = attachConsole(inputs.target);
+    handleRef.current = handle;
+    try {
+      const trial = planRotaryTrial({ axisZ: req.nominal.axisZ, radiusMm: req.nominal.radiusMm }, req.bedClearanceZ);
+      if (!trial.ok) {
+        noteNow(trial.reason);
+        return;
+      }
+      const record: { axisY: number; nominalRadiusMm: number } = {
+        axisY: req.nominal.axisY,
+        nominalRadiusMm: req.nominal.radiusMm,
+      };
+      const r = await runRotaryTap(
+        {
+          at: rotaryTapPoint(record, req.atX),
+          trial: { z1: trial.z1, z2: trial.z2 },
+          crownEstimateZ: trial.crownEstimateZ,
+          crownBandMm: req.crownBand,
+          probeRadiusMm: inputs.settings.tipRadiusMm,
+          searchMm: rotarySearchMm(record),
+          seekFromMachineZ: req.seekFromMachineZ,
+          touchFeed: inputs.settings.touchFeed,
+          surfaceFeed: inputs.settings.surfaceSlowFeed,
+          parkAboveSurfaceMm: inputs.settings.parkAboveSurfaceMm,
+        },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
+      );
+      useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
+      if (!r.ok) {
+        noteNow(r.reason);
+        return;
+      }
+      // The measurement stands on its own; the record write is reported separately.
+      setAxis({
+        axisZ: r.circle.axisZ,
+        axisY: r.circle.axisY,
+        radiusMm: r.circle.radiusMm,
+        residualMm: r.residualMm,
+        residualLine: r.residualLine,
+      });
+      const held = machineAt(inputs.target);
+      if (held !== null) {
+        const now = new Date().toISOString();
+        const bed = await createFirstBed(held, null, now);
+        const update: MachineUpdate = (current) =>
+          withRotaryAxisDatum(
+            bed(current),
+            { axisZ: r.circle.axisZ, axisY: r.circle.axisY, radiusMm: r.circle.radiusMm, atX: req.atX },
+            inputs.probeId,
+            now,
+          );
+        const outcome = await saveMachineWithRetry(held, update);
+        if (outcome !== 'ok') {
+          noteNow(
+            `the axis was tapped, but the machine record was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the tap again to write it.`,
+          );
+          return;
+        }
+      }
+      noteNow('the axis is recorded');
+    } finally {
+      tokenRef.current = null;
+      handleRef.current = null;
+      useMountTapGate.getState().end(token);
+      await handle.close();
+    }
+  }
+
+  return { tapJaw, tapAxis, axis, note, prompt, resolve };
 }
