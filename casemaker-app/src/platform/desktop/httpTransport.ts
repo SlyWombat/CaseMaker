@@ -10,9 +10,10 @@
 // this server served passes and a page on another site cannot forge it. Relative URLs keep it on
 // whatever origin the SPA was loaded from. No framing, no protocol — those live in `protocol.ts`.
 //
-// #821 — this is the transport for EVERY machine-carrying bundle opened outside the Tauri shell:
-// the desktop app's own LAN server, and the house bundle a Linux instance serves (k3). The relay
-// decides reach at runtime; the build target only decides whether the bridge is in the bundle.
+// #821/#867 — this is the transport for the ONE machine-carrying bundle opened outside the Tauri
+// shell: the desktop app's own LAN server, which is also what a headless install serves (k3). The
+// relay decides reach at runtime; the build target only decides whether the bridge is in the
+// bundle, and the window's own controls are a runtime `isTauri` question (capabilities.ts).
 
 import type { MachineTransport, UdpDatagram } from './protocol';
 

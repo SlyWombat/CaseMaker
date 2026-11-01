@@ -53,6 +53,13 @@
         "headerImage": "windows/installer-header.bmp",
         "sidebarImage": "windows/installer-sidebar.bmp"
       }
+    },
+    "linux": {
+      "deb": {
+        "files": {
+          "/lib/systemd/system/casemaker.service": "linux/casemaker.service"
+        }
+      }
     }
   }
 }

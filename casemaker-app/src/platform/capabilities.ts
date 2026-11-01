@@ -27,63 +27,79 @@
 // static deploy must not, so the import boundary above is what keeps its bundle clean.
 
 /**
- * #821 — the three bundles.
+ * #867 — ONE PACKAGE. There are two bundles, not three:
  *
  *  - `web`: the static deploy (electricrv.ca, CI's e2e build). No relay, no machine bridge.
- *  - `desktop`: the Tauri app. Its own socket, and the same bundle served to a LAN browser talks
- *    to the app's embedded relay (`httpTransport`).
- *  - `house`: what a local instance serves to LAN browsers (k3, `npm run build:house`). No Tauri
- *    runtime, so the machine is reached through that instance's relay, `/api/v1/machine/*`.
+ *  - `desktop`: the Tauri app — and the very same bundle when it is served to a LAN browser by
+ *    its own embedded server (the app run headless, `--bind-all`, a local install's systemd
+ *    unit). That page reaches the machine through the instance's relay (`httpTransport`).
  *
- * `house` is new in #821 precisely because "can this page drive a machine?" is not "is this the
- * Tauri shell?": it is "does the bundle carry the bridge, and is a relay or socket under it?".
+ * The old `house` target (#821) is gone: the desktop bundle serves LAN browsers fully. What a
+ * PAGE can do is then two separate questions — whether the bundle carries the bridge (compile
+ * time, this file's `canReachMachine`) and whether this page is the Tauri window (runtime,
+ * `isTauriWindow`). A LAN browser served the desktop bundle gets the bridge and not the window.
  */
-export type BuildTarget = 'web' | 'desktop' | 'house';
+export type BuildTarget = 'web' | 'desktop';
 
 /** What a build can do, straight from the line between "browsers can" and "only a desktop shell can". */
 export interface Capabilities {
   buildTarget: BuildTarget;
   /**
-   * The bundle carries the machine bridge (desktop and house): the Tauri shell's own socket, or
-   * the HTTP relay a local instance serves. The relay-less web deploy compiles it out.
+   * The bundle carries the machine bridge (desktop): the Tauri shell's own socket, or the HTTP
+   * relay the instance serves. The relay-less web deploy compiles it out. COMPILE TIME.
    */
   canReachMachine: boolean;
-  /** Local filesystem dialogs and Makera's feeds/speeds SQLite (#131) — the Tauri shell only. */
+  /**
+   * Local filesystem dialogs and Makera's feeds/speeds SQLite (#131) — the Tauri shell only.
+   * RUNTIME (#867): a LAN browser served the desktop bundle has the bridge but not the window.
+   */
   canReadLocalFiles: boolean;
-  /** The embedded HTTP server controls (port, LAN bind) that SettingsMenu shows — Tauri only. */
+  /** The embedded HTTP server controls (port, LAN bind) that SettingsMenu shows — Tauri only. RUNTIME (#867). */
   canRunLocalServer: boolean;
 }
 
 /**
- * Pure target → capabilities mapping. Kept separate from the exported constants so the whole
- * matrix is unit-testable for every target in a single run.
+ * Whether this page runs inside the Tauri window. The Tauri v2 runtime sets `globalThis.isTauri`
+ * (the documented flag `@tauri-apps/api`'s own `isTauri()` reads); a LAN browser served by the
+ * same bundle has it absent. Pure enough to map straight into {@link capabilitiesFor}.
  */
-export function capabilitiesFor(target: BuildTarget): Capabilities {
-  const desktop = target === 'desktop';
+export function isTauriWindow(): boolean {
+  return (globalThis as { isTauri?: unknown }).isTauri === true;
+}
+
+/**
+ * Pure target → capabilities mapping. Kept separate from the exported constants so the whole
+ * matrix is unit-testable for every target in a single run. `tauri` is the runtime question
+ * (#867): true only in the shell's own window.
+ */
+export function capabilitiesFor(target: BuildTarget, opts: { tauri?: boolean } = {}): Capabilities {
+  const tauri = target === 'desktop' && opts.tauri === true;
   return {
     buildTarget: target,
     canReachMachine: target !== 'web',
-    canReadLocalFiles: desktop,
-    canRunLocalServer: desktop,
+    canReadLocalFiles: tauri,
+    canRunLocalServer: tauri,
   };
 }
 
 // The exported constants reference `__BUILD_TARGET__` directly rather than going through
 // `capabilitiesFor`, because Vite's `define` substitutes the literal before any analysis and each
 // comparison then folds to a constant. Computing them indirectly would defeat the dead-code
-// elimination the dynamic-import boundary depends on.
+// elimination the dynamic-import boundary depends on. The two window capabilities keep the
+// compile-time factor AND add the runtime one (#867): the web build still folds them away
+// entirely, and the desktop bundle decides at page load whether it is the window or a LAN browser.
 export const BUILD_TARGET: BuildTarget = __BUILD_TARGET__;
 export const canReachMachine: boolean = __BUILD_TARGET__ !== 'web';
-export const canReadLocalFiles: boolean = __BUILD_TARGET__ === 'desktop';
-export const canRunLocalServer: boolean = __BUILD_TARGET__ === 'desktop';
+export const canReadLocalFiles: boolean = __BUILD_TARGET__ !== 'web' && isTauriWindow();
+export const canRunLocalServer: boolean = __BUILD_TARGET__ !== 'web' && isTauriWindow();
 
 /**
  * #821 — THE RELAY-LESS BUILD'S ONE SENTENCE. The web deploy has no machine relay, so its machine
- * surfaces say why instead of offering a check that could only ever answer "unavailable". The
- * house and desktop bundles never render this.
+ * surfaces say why instead of offering a check that could only ever answer "unavailable". Every
+ * machine-carrying page — the desktop window and the LAN browser it serves — never renders this.
  */
 export const NO_MACHINE_RELAY_SENTENCE =
-  'This page was served without the machine relay, so it cannot drive a machine — open Case Maker from the house server or the desktop app.';
+  'This page was served without the machine relay, so it cannot drive a machine — open Case Maker from the desktop app or from a local install.';
 
 /**
  * The dynamic-import boundary, carried by the one desktop-only module that exists ahead of its real
@@ -95,5 +111,5 @@ export async function loadMachineBridge(): Promise<typeof import('./desktop/mach
   if (canReachMachine) {
     return import('./desktop/machineBridge');
   }
-  throw new Error('Driving the machine requires a build that carries the machine bridge (BUILD_TARGET=desktop or house).');
+  throw new Error('Driving the machine requires a build that carries the machine bridge (BUILD_TARGET=desktop).');
 }

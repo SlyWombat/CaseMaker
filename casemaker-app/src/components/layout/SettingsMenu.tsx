@@ -257,8 +257,10 @@ export function SettingsMenu({ onClose }: Props) {
   const shownHome = marginsHome !== 'browser' || settled ? marginsHome : 'pending';
   const reset = useSettingsStore((s) => s.resetSettings);
   const ref = useRef<HTMLDivElement | null>(null);
-  // #181 — the embedded-server controls are a desktop capability, not a runtime property of the
-  // window. `canRunLocalServer` is a build-time constant, so the web build never even carries them.
+  // #181/#867 — the embedded-server controls belong to the TAURI WINDOW, not to the bundle: a LAN
+  // browser served the desktop bundle gets the page and the bridge, but it must not be offered
+  // controls for a server it does not own. `canRunLocalServer` is a runtime `isTauri` check (and a
+  // compile-time false in the web build, so that bundle never carries the controls at all).
   const showServerControls = canRunLocalServer;
 
   // #345 — a house margin the user has typed. Stamping the source here is what keeps the run sheet

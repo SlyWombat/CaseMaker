@@ -52,6 +52,45 @@ struct CliArgs {
     /// Print the config file this run would write, then exit.
     #[arg(long, default_value_t = false)]
     print_config: bool,
+
+    /// Serve only: no window, no webview (#867). The one package run as the house server — the
+    /// systemd unit the package ships uses this, with --bind-all so a LAN browser is served the
+    /// app and drives the machine through this instance's relay.
+    #[arg(long, default_value_t = false)]
+    headless: bool,
+}
+
+/// #867 — SERVE ONLY: the one package run headless as the house server.
+///
+/// The same binary as the desktop app, with no Tauri window and no webview: the embedded server
+/// and the house it serves, for a local install under systemd. The server owns its own thread and
+/// runtime (`server::start`), so this thread only has to hold the house lock and wait for the
+/// process to be stopped — systemd's SIGTERM ends it, and nothing is left running behind it.
+fn run_headless(server_cfg: server::ServerConfig) -> ! {
+    let lock = match HouseLock::acquire(&house_dir()) {
+        Ok(lock) => lock,
+        Err(why) => {
+            log::error!("{why}");
+            eprintln!("{why}");
+            std::process::exit(1);
+        }
+    };
+    match server::start(server_cfg, &lock, config::config_path()) {
+        Ok((handle, stop)) => {
+            // The journal (or a container's log) gets the one line that says what was bound.
+            println!(
+                "casemaker serving on http://{}:{} (headless; stop it with SIGTERM or systemctl stop)",
+                handle.bind_addr, handle.bound_port
+            );
+            let _ = stop.blocking_recv();
+            std::process::exit(0);
+        }
+        Err(e) => {
+            log::error!("failed to start http server: {e}");
+            eprintln!("Case Maker cannot start: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 /// The desktop window's permission list, as a document — `capabilities/default.json`, read here
@@ -203,6 +242,11 @@ pub fn run() {
         bind_to_all: cfg.bind_to_all,
         host: run_host,
     };
+
+    // #867 — one package, two ways to run it: the window (below), or the server alone.
+    if args.headless {
+        run_headless(server_cfg);
+    }
 
     tauri::Builder::default()
         // #312 — a second launch must not become a second ORIGIN. This plugin must be registered
@@ -454,7 +498,21 @@ mod tests {
             port,
             bind_all,
             print_config: false,
+            headless: false,
         }
+    }
+
+    /// #867 — the headless switch is a flag of its own, and absent by default (a bare launch is the
+    /// window the desktop user expects).
+    #[test]
+    fn headless_is_off_unless_asked_for() {
+        use clap::Parser;
+        let plain = CliArgs::try_parse_from(["casemaker"]).unwrap();
+        assert!(!plain.headless);
+        assert!(!plain.bind_all);
+        let server = CliArgs::try_parse_from(["casemaker", "--headless", "--bind-all"]).unwrap();
+        assert!(server.headless);
+        assert!(server.bind_all);
     }
 
     /// #399 — the decision this issue asks for: a one-off `--host` is this run's listen address and

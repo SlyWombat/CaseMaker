@@ -99,7 +99,8 @@ point:
 
 What exists at `aa1343b`. Paths are under `casemaker-app/src/`. The CNC sections sit behind
 `featureSim` (`?BETA=yes` on the web build); everything that touches the machine is in a
-machine-carrying bundle (the Tauri shell, or the house bundle a local instance serves — #821).
+machine-carrying bundle (the desktop bundle — the Tauri shell, or the same bundle a local install
+serves to a LAN browser — #821/#867).
 
 ### 2.1 The screens, in order
 

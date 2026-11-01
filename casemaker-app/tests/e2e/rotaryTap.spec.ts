@@ -1,4 +1,4 @@
-// #607 — THE ROTARY AXIS FROM THE MODULE'S CARD, end to end on the house bundle (#821: the build
+// #607 — THE ROTARY AXIS FROM THE MODULE'S CARD, end to end on the desktop bundle served headless (#821/#867: the build
 // that can reach a machine). The 4th-axis module is checked out to the Z1; its card in Manage ›
 // Accessories runs the shared tap against the fake console's chuck — a 40 mm body about the axis
 // Y −180, Z −50 — shows the measured Y, Z and R beside the check chord's residual, and writes the
@@ -9,11 +9,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
-import { houseServerPort } from '../../scripts/e2ePort';
+import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 
-test.use({ baseURL: `http://127.0.0.1:${houseServerPort()}` });
+test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 test.setTimeout(180_000);
 
 const OUT = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img', '2026-10-31-rotary-tap');

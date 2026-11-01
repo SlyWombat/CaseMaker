@@ -1,15 +1,15 @@
-// #827 — THE REGISTER STEP'S CENTRE PANEL, end to end on the house bundle: the fake console
+// #827 — THE REGISTER STEP'S CENTRE PANEL, end to end on the desktop bundle served headless: the fake console
 // carries a bore (the bench fixture's ⌀8.88 at the plan's own centre), the panel finds it, shows
 // the centre and ⌀, and the press writes the G10 origin. Screenshots under
 // docs/bench/img/2026-10-31-probe-centre/.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { houseServerPort } from '../../scripts/e2ePort';
+import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 
-test.use({ baseURL: `http://127.0.0.1:${houseServerPort()}` });
+test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 test.setTimeout(180_000);
 
 const OUT = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img', '2026-10-31-probe-centre');

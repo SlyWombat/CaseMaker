@@ -1,0 +1,24 @@
+[Unit]
+Description=Case Maker server (headless)
+Documentation=https://electricrv.ca/casemaker/
+# The page is served on the LAN and drives the machine through this instance's relay, so the
+# network is up before it binds.
+After=network-online.target
+Wants=network-online.target
+# A refused start (a port already bound, a house lock held) is not retried into a loop.
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+# #867 — ONE PACKAGE, run as the house server: no window, no webview, the app served to LAN
+# browsers and the machine driven through this instance's relay.
+#
+# Run it as the account that should own the app's data — the servers, the cutter library, the
+# run records. The unit ships without User=/Group= so a single-purpose box works as installed;
+# set them to the account you mean.
+ExecStart=/usr/bin/casemaker --headless --bind-all
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

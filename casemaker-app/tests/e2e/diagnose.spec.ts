@@ -1,16 +1,16 @@
-// #826 — THE DIAGNOSTIC SWITCHES, LIVE. The house-served bundle's status monitor shows what the
+// #826 — THE DIAGNOSTIC SWITCHES, LIVE. The desktop bundle served headless shows what the
 // controller's `diagnose` line carries: the probe input (the live companion to #788's diagram),
 // the cover, the endstops, the e-stop and the Wi-Fi signal. The heartbeat polls `?` and `diagnose`
 // on one connection; the store keeps a CHANGED reading only, so the monitor follows a press
 // instead of streaming identical polls. The fake console (fixtures/fakeConsole.ts) answers both.
 import type { Page } from '@playwright/test';
-import { houseServerPort } from '../../scripts/e2ePort';
+import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect } from './fixtures/caseMaker';
 import { DIAGNOSE_TOUCHED, installFakeConsole } from './fixtures/fakeConsole';
 
-// #821 — the diagnostic read is reachable in a machine-carrying bundle: the house target is the
-// bundle a local instance serves to a LAN browser (the k3 path).
-test.use({ baseURL: `http://127.0.0.1:${houseServerPort()}` });
+// #821/#867 — the diagnostic read is reachable in a machine-carrying bundle: the desktop bundle
+// served to a plain browser is what a local instance gives a LAN browser (the k3 path).
+test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 
 test.setTimeout(120_000);
 

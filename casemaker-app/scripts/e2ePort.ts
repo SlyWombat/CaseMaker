@@ -67,20 +67,21 @@ export function devServerPort(env: NodeJS.ProcessEnv = process.env, cwd: string 
 }
 
 /**
- * #816/#821 — THE HOUSE-TARGET DEV SERVER, one port above the web one.
+ * #816/#821/#867 — THE LAN-BROWSER DEV SERVER, one port above the web one.
  *
  * The machine console is reachable only in a bundle that carries the bridge: `loadMachineBridge()`
- * sits behind `canReachMachine`, which `vite.config.ts` folds from the build target (`--mode house`,
- * or `--mode desktop`). The spec that drives a fake controller over the house HTTP bridge
- * (`tests/e2e/runStates.spec.ts`) therefore needs a server serving that target beside the ordinary
- * web-target one. Both are derived from the checkout, so a worktree's two servers stay together and
- * apart from another worktree's pair — and `/__casemaker_checkout` judges each, since a +1 can land
- * on another checkout's web port.
+ * sits behind `canReachMachine`, which `vite.config.ts` folds from the build target (`--mode
+ * desktop`). The specs that drive a fake controller over the instance's HTTP relay
+ * (`tests/e2e/runStates.spec.ts` and its neighbours) therefore need a server serving the DESKTOP
+ * bundle to a plain browser beside the ordinary web-target one — exactly what a local install's
+ * headless server is. Both are derived from the checkout, so a worktree's two servers stay together
+ * and apart from another worktree's pair — and `/__casemaker_checkout` judges each, since a +1 can
+ * land on another checkout's web port.
  */
-export function houseServerPort(env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): number {
+export function lanServerPort(env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): number {
   const port = devServerPort(env, cwd) + 1;
   if (port > 65535) {
-    throw new Error(`The house-target e2e port would be ${port}; CASEMAKER_PORT must leave room for it.`);
+    throw new Error(`The LAN-browser e2e port would be ${port}; CASEMAKER_PORT must leave room for it.`);
   }
   return port;
 }

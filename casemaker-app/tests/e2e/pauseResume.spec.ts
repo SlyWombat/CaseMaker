@@ -1,4 +1,4 @@
-// #618 — PAUSE AND RESUME FROM THE CUT STEP, end to end on the house bundle with #816's fake
+// #618 — PAUSE AND RESUME FROM THE CUT STEP, end to end on the desktop bundle served headless, with #816's fake
 // console. The engine sends the firmware's own bare `suspend` / `resume` at the run's poll
 // boundary (Studio's words, RE 05). This proves what the operator sees: the strip reads Paused,
 // the run card is the same panel with Resume and Stop and the transcript names the paused line,
@@ -7,12 +7,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { houseServerPort } from '../../scripts/e2ePort';
+import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 
-// #821 — the machine console is reached in a bundle that carries the bridge: the house target.
-test.use({ baseURL: `http://127.0.0.1:${houseServerPort()}` });
+// #821/#867 — the machine console is reached in a bundle that carries the bridge: the desktop bundle served to a browser.
+test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 test.setTimeout(300_000);
 
 const OUT = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img', '2026-10-31-pause-resume');

@@ -1,8 +1,8 @@
-// #181/#821 — prove the RELAY-LESS web bundle carries no machine code, and that the HOUSE bundle
-// does. #821 split the capability: a bundle a local instance serves to LAN browsers (`--mode
-// house`) reaches the machine through that instance's relay, so it must carry the bridge; the
-// static web deploy has no relay, so it must not. The web half is the one that gates a leak; the
-// house half gates the opposite mistake (a split that compiles the bridge out of the relay build).
+// #181/#821/#867 — prove the RELAY-LESS web bundle carries no machine code, and that the ONE
+// machine-carrying bundle does. #867 is one package: the desktop bundle is both the Tauri app and
+// the page a local install serves to LAN browsers, so it must carry the bridge; the static web
+// deploy has no relay, so it must not. The web half gates a leak; the desktop half gates the
+// opposite mistake (a split that compiles the bridge out of the bundle a LAN browser is served).
 //
 // `__BUILD_TARGET__` is 'web' unless a build asks for 'desktop' (vite.config.ts). The seam's rule
 // is that desktop-only modules live under src/platform/desktop/ and are reached ONLY through an
@@ -10,9 +10,9 @@
 // builds the web target into a temp outDir and asserts the desktop module's marker string is
 // absent from every emitted file. It exits non-zero and names the offending file otherwise.
 //
-// It then builds the house target and FAILS if the marker is absent (#821): that bundle is what a
-// local instance serves to LAN browsers, and it must be able to drive the machine through the
-// instance's relay. The desktop build's half stays informational.
+// It then builds the desktop target and FAILS if the marker is absent: that single bundle is what
+// the app window, the headless server and a LAN browser all run, and it must be able to drive the
+// machine through the app's socket or the instance's relay.
 //
 // Not wired into `npm test`: a production build is slow. Run it with `npm run check:platform-gate`.
 
@@ -92,37 +92,21 @@ try {
   if (web) rmSync(web.outDir, { recursive: true, force: true });
 }
 
-// #821 — the house build is the relay-served bundle and MUST carry it.
-let house;
-try {
-  house = await buildTarget('house');
-  const present = filesContaining(house.files, MARKER).length > 0;
-  if (!present) {
-    console.error(
-      '\ncheck:platform-gate FAILED — the house build does not carry the machine bridge.\n' +
-        '  A local instance serves this bundle to LAN browsers, and they drive the machine through\n' +
-        '  its relay: `canReachMachine` must be true for the house target and the bridge must be in\n' +
-        '  the bundle.',
-    );
-    process.exit(1);
-  }
-  console.log(`check:platform-gate — house build carries "${MARKER}" (the relay-served bundle can drive a machine)`);
-} finally {
-  if (house) rmSync(house.outDir, { recursive: true, force: true });
-}
-
-// Informational: does the desktop build carry it? (Not a failure if not — see the header note.)
+// #867 — the desktop build is the ONE machine-carrying bundle and MUST carry it.
 let desktop;
 try {
   desktop = await buildTarget('desktop');
   const present = filesContaining(desktop.files, MARKER).length > 0;
-  console.log(
-    present
-      ? `check:platform-gate — desktop build carries "${MARKER}" (boundary exercised)`
-      : `check:platform-gate — NOTE: desktop build does not carry "${MARKER}". That is not a failure ` +
-        '(every caller may legitimately be behind a guard the desktop build also folds away), but it ' +
-        'does mean the informational half proved nothing this run.',
-  );
+  if (!present) {
+    console.error(
+      '\ncheck:platform-gate FAILED — the desktop build does not carry the machine bridge.\n' +
+        '  One package (#867): this bundle is the app window, the headless server and the page a\n' +
+        '  LAN browser is served. `canReachMachine` must be true for the desktop target and the\n' +
+        '  bridge must be in the bundle.',
+    );
+    process.exit(1);
+  }
+  console.log(`check:platform-gate — desktop build carries "${MARKER}" (the relay-served bundle can drive a machine)`);
 } finally {
   if (desktop) rmSync(desktop.outDir, { recursive: true, force: true });
 }

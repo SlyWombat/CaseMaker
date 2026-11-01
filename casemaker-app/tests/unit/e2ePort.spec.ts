@@ -8,7 +8,7 @@ import {
   E2E_PORT_LAST,
   devServerPort,
   fnv1a,
-  houseServerPort,
+  lanServerPort,
   portForCheckout,
 } from '../../scripts/e2ePort';
 
@@ -42,11 +42,11 @@ describe('#704 the dev-server port belongs to the checkout', () => {
     expect(fnv1a('a')).toBe(fnv1a('a'));
   });
 
-  // #816/#821 — the house-target server sits one above the web one, derived the same way.
-  it('the house-target server is one port above, and refuses to overflow', () => {
-    expect(houseServerPort({ CASEMAKER_PORT: '5393' }, '/one/tree')).toBe(5394);
-    expect(houseServerPort({ CI: 'true' }, '/one/tree')).toBe(DEFAULT_DEV_PORT + 1);
-    expect(houseServerPort({}, '/one/tree')).toBe(portForCheckout('/one/tree') + 1);
-    expect(() => houseServerPort({ CASEMAKER_PORT: '65535' }, '/one/tree')).toThrow(/CASEMAKER_PORT/);
+  // #816/#821/#867 — the LAN-browser server sits one above the web one, derived the same way.
+  it('the LAN-browser server is one port above, and refuses to overflow', () => {
+    expect(lanServerPort({ CASEMAKER_PORT: '5393' }, '/one/tree')).toBe(5394);
+    expect(lanServerPort({ CI: 'true' }, '/one/tree')).toBe(DEFAULT_DEV_PORT + 1);
+    expect(lanServerPort({}, '/one/tree')).toBe(portForCheckout('/one/tree') + 1);
+    expect(() => lanServerPort({ CASEMAKER_PORT: '65535' }, '/one/tree')).toThrow(/CASEMAKER_PORT/);
   });
 });

@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { devServerPort, houseServerPort } from './scripts/e2ePort';
+import { devServerPort, lanServerPort } from './scripts/e2ePort';
 
 const isCI = !!process.env.CI;
 // #704 — the port belongs to THIS checkout (derived from its path), so two worktrees' runs rarely
@@ -9,11 +9,12 @@ const isCI = !!process.env.CI;
 // stranger's (#728).
 const PORT = devServerPort();
 const BASE = `http://127.0.0.1:${PORT}`;
-// #816/#821 — the machine console is reachable only in a bundle that carries the bridge, so the one
-// spec that drives a fake controller gets a second server serving `--mode house` beside the
-// ordinary web one. Same checkout-derived band; the checkout tag judges both servers.
-const HOUSE_PORT = houseServerPort();
-const HOUSE_BASE = `http://127.0.0.1:${HOUSE_PORT}`;
+// #816/#821/#867 — the machine console is reachable only in a bundle that carries the bridge, so
+// the specs that drive a fake controller get a second server serving the DESKTOP bundle to a plain
+// browser beside the ordinary web one — the same page a local install's headless server gives a LAN
+// browser. Same checkout-derived band; the checkout tag judges both servers.
+const LAN_PORT = lanServerPort();
+const LAN_BASE = `http://127.0.0.1:${LAN_PORT}`;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -91,15 +92,16 @@ export default defineConfig({
       env: { VITE_E2E: '1', CASEMAKER_PORT: String(PORT) },
     },
     {
-      // #816/#821 — the HOUSE target, for the machine-console spec alone (`runStates.spec.ts` sets
-      // its baseURL to this). `--mode house` is what makes `canReachMachine` true, which is what
-      // lets the app open a console at all; with no Tauri runtime in the browser it then uses that
-      // instance's HTTP relay (`httpTransport`), which the spec's fake serves — the k3 path itself.
-      command: `npm run dev:house -- --port ${HOUSE_PORT} --strictPort`,
-      url: HOUSE_BASE,
+      // #816/#821/#867 — THE DESKTOP BUNDLE SERVED HEADLESS, for the machine-console specs
+      // (`runStates.spec.ts` and its neighbours set their baseURL to this). `--mode desktop` is
+      // what makes `canReachMachine` true, which lets the page open a console at all; with no Tauri
+      // runtime in a plain browser it then uses the instance's HTTP relay (`httpTransport`), which
+      // the specs' fakes serve — the k3 path itself.
+      command: `npm run dev:desktop -- --port ${LAN_PORT} --strictPort`,
+      url: LAN_BASE,
       reuseExistingServer: !isCI,
       timeout: 120_000,
-      env: { VITE_E2E: '1', CASEMAKER_PORT: String(HOUSE_PORT) },
+      env: { VITE_E2E: '1', CASEMAKER_PORT: String(LAN_PORT) },
     },
   ],
 });

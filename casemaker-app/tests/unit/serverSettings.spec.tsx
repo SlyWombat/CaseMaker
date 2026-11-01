@@ -2,8 +2,9 @@
 // #372 — the "App server" section of the settings dialog: the port and the LAN bind.
 //
 // WHY THIS SPEC EXISTS AT ALL, AND WHAT THE BROWSER RUN CANNOT DO. The controls are drawn only under
-// `canRunLocalServer`, which is a BUILD-TIME constant, so a Playwright run against the web build can
-// only ever prove that they are absent (which `tests/e2e/settings.spec.ts` does). Every rule about
+// `canRunLocalServer`, which is a runtime `isTauri` check (#867), so a Playwright run against the web
+// build or a LAN browser can only ever prove that they are absent (which `tests/e2e/settings.spec.ts`
+// does for both). Every rule about
 // what they do lives behind the seam instead: the capability is mocked on (the pattern #354/#346
 // established) and the house client is swapped for a fake, so the real `SettingsMenu` — and the real
 // `houseClient` calls it makes — run against a service that answers.
