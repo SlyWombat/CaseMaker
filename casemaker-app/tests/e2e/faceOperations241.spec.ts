@@ -81,11 +81,22 @@ test('a Flat turns the stock to its own angle and cuts a plane there', async ({ 
   await expect(page.getByTestId('engrave-face-summary-0')).toContainText('Flat 1 mm deep at A 30°');
   await generateToTicks(page);
 
-  const s = await simState(page);
+  let s = await simState(page);
   expect(s.status).toBe('ready');
   // A face is cut in several depth passes, so the sweep opens one checkpoint per pass — all at
   // the ONE angle the face was cut at.
   expect(s.runs.length).toBeGreaterThan(0);
+  expect(s.runs.every((r) => r.a !== null && Math.abs(r.a - 30) < 1e-6)).toBe(true);
+  expect(await turnAt(page, 30)).toBeCloseTo(30, 3);
+
+  // #833 — A CUT ON THE FACE, from the face's own row: a pocket at the shipped size, cut in the
+  // same program at the same index. Generate again and the face still matches the design.
+  await page.getByTestId('engrave-face-summary-0').click();
+  await page.getByTestId('engrave-face-add-pocket-0').click();
+  await expect(page.locator('[data-testid^="engrave-face-item-0-"]')).toContainText('Pocket');
+  await generateToTicks(page);
+  s = await simState(page);
+  expect(s.status).toBe('ready');
   expect(s.runs.every((r) => r.a !== null && Math.abs(r.a - 30) < 1e-6)).toBe(true);
   expect(await turnAt(page, 30)).toBeCloseTo(30, 3);
 

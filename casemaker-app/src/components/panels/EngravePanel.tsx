@@ -115,7 +115,7 @@ import {
 import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
-import { defaultFaceOperation } from '@/engine/cnc/rotary/faceOps';
+import { defaultFaceOperation, faceSpanMm } from '@/engine/cnc/rotary/faceOps';
 import { FaceOperationRow } from './FaceOperationRow';
 import { groupRejections, isActionableRejection, shouldGroupCatalogueRows } from './recommendationRejections';
 import { useShopDefaultsStore, shopDefault } from '@/store/shopDefaultsStore';
@@ -2987,7 +2987,13 @@ export function EngravePanel(): JSX.Element {
   // #241 slice 2 — the face operations' frame: the chuck's radius (what a flat's chord is measured
   // against), and whether this job can carry one at all.
   const rotaryChuck = roundStock && job.workholding.kind === 'rotary-chuck';
-  const faceRadiusMm = rotaryMapOf(job)?.radius ?? Math.max(job.stock.width, job.stock.thickness) / 2;
+  const rotaryFaceMap = rotaryMapOf(job);
+  const faceRadiusMm = rotaryFaceMap?.radius ?? Math.max(job.stock.width, job.stock.thickness) / 2;
+  // #833 — the face frame's two measures: the cuttable span (one cutter radius clear of each
+  // band) and the job cutter's diameter (a hole comes out at it).
+  const faceCutterTool = jobTool(job);
+  const faceCutterD = (faceCutterTool === null ? null : cuttingDiameter(faceCutterTool)) ?? 3.175;
+  const faceSpanLengthMm = rotaryFaceMap === null ? 0 : Math.max(0, faceSpanMm(rotaryFaceMap, faceCutterD / 2).to - faceSpanMm(rotaryFaceMap, faceCutterD / 2).from);
   const STOCK_FIELD_WORD: Record<string, string> = {
     length: 'length',
     width: 'width',
@@ -3736,8 +3742,12 @@ export function EngravePanel(): JSX.Element {
           face={face}
           index={i}
           radiusMm={faceRadiusMm}
+          lengthMm={faceSpanLengthMm}
+          cutterDiameterMm={faceCutterD}
           onChange={(patch) => useEngraveJobStore.getState().updateFaceOperation(face.id, patch)}
           onRemove={() => useEngraveJobStore.getState().removeFaceOperation(face.id)}
+          onAddItem={(item) => useEngraveJobStore.getState().addFaceItem(face.id, item)}
+          onRemoveItem={(itemId) => useEngraveJobStore.getState().removeFaceItem(face.id, itemId)}
         />
       ))}
       {job.labels.map((label, i) => (

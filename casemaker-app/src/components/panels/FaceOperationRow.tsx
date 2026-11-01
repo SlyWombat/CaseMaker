@@ -12,10 +12,10 @@
  * is a consequence of the depth, not a field — and a person setting a D-flat wants to see it.
  */
 
-import type { CSSProperties, JSX } from 'react';
-import type { EngraveFaceOp } from '@/types/engraveJob';
+import { useState, type CSSProperties, type JSX } from 'react';
+import type { EngraveFaceItem, EngraveFaceOp } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
-import { faceChordMm, faceOperationWords } from '@/engine/cnc/rotary/faceOps';
+import { defaultFaceItem, faceChordMm, faceItemWords, faceOperationWords } from '@/engine/cnc/rotary/faceOps';
 
 const ROW: CSSProperties = { borderTop: '1px solid #22272d', padding: '6px 2px', fontSize: 12, color: '#c8d3de' };
 const SUMMARY: CSSProperties = { cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'baseline' };
@@ -30,8 +30,15 @@ export interface FaceOperationRowProps {
   index: number;
   /** The stock's radius, mm — the flat's chord is stated against it. */
   radiusMm: Mm;
+  /** The face's cuttable length along X, mm — where its cuts' centres are measured from. */
+  lengthMm: Mm;
+  /** The job cutter's diameter, mm — a cross-hole and a hole come out at it. */
+  cutterDiameterMm: Mm;
   onChange: (patch: Partial<Omit<EngraveFaceOp, 'id' | 'kind'>>) => void;
   onRemove: () => void;
+  /** #833 — a cut added on this face (an engraving, a pocket or a hole). */
+  onAddItem: (item: Omit<EngraveFaceItem, 'id'>) => void;
+  onRemoveItem: (itemId: string) => void;
 }
 
 const num = (v: number): string => String(Number(v.toFixed(2)));
@@ -75,8 +82,22 @@ function NumberField({
   );
 }
 
-export function FaceOperationRow({ face, index, radiusMm, onChange, onRemove }: FaceOperationRowProps): JSX.Element {
+export function FaceOperationRow({
+  face,
+  index,
+  radiusMm,
+  lengthMm,
+  cutterDiameterMm,
+  onChange,
+  onRemove,
+  onAddItem,
+  onRemoveItem,
+}: FaceOperationRowProps): JSX.Element {
   const typeWord = face.kind === 'flat' ? 'Flat' : face.kind === 'faces-all-round' ? 'Faces all round' : 'Cross-hole';
+  // #833 — the flat picker's three operations, on this face. Text waits for its words: an
+  // engraving with no text is not a cut the CAM can make.
+  const [words, setWords] = useState('');
+  const [addingText, setAddingText] = useState(false);
   const chord = face.kind === 'flat' ? faceChordMm(radiusMm, face.depth ?? 0) : faceChordMm(radiusMm, radiusMm - (face.acrossFlats ?? 0) / 2);
   return (
     <details style={ROW} data-testid={`engrave-face-row-${index}`}>
@@ -142,6 +163,71 @@ export function FaceOperationRow({ face, index, radiusMm, onChange, onRemove }: 
           ? 'A cross-hole is drilled through the rod at this angle, in one plunge.'
           : `The face is ${num(chord)} mm wide at this depth on a ⌀${num(2 * radiusMm)} mm rod; the passes step across it while the stock is held at the angle.`}
       </p>
+      {face.kind !== 'cross-hole' && (
+        <div style={{ margin: '6px 0 0 2px' }} data-testid={`engrave-face-add-${index}`}>
+          <span style={{ ...UNIT }}>Add on this face</span>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 3, alignItems: 'center' }}>
+            <button
+              type="button"
+              data-testid={`engrave-face-add-text-${index}`}
+              title="Engrave text on the face at this angle. The words are cut below the face plane."
+              onClick={() => setAddingText((v) => !v)}
+            >
+              Engrave text
+            </button>
+            <button
+              type="button"
+              data-testid={`engrave-face-add-pocket-${index}`}
+              title="A pocket on the face at this angle."
+              onClick={() => onAddItem(defaultFaceItem('pocket', lengthMm, chord, cutterDiameterMm))}
+            >
+              Pocket
+            </button>
+            <button
+              type="button"
+              data-testid={`engrave-face-add-hole-${index}`}
+              title="A hole drilled at this angle, into the face — it comes out at the cutter's diameter."
+              onClick={() => onAddItem(defaultFaceItem('hole', lengthMm, chord, cutterDiameterMm))}
+            >
+              Hole
+            </button>
+            {addingText && (
+              <>
+                <input
+                  type="text"
+                  aria-label="Words on the face"
+                  data-testid={`engrave-face-text-words-${index}`}
+                  placeholder="the words"
+                  style={{ width: 140 }}
+                  value={words}
+                  onChange={(e) => setWords(e.target.value)}
+                />
+                <button
+                  type="button"
+                  data-testid={`engrave-face-text-add-${index}`}
+                  disabled={words.trim() === ''}
+                  title="Add the engraving to this face. An engraving with no words is not a cut."
+                  onClick={() => {
+                    onAddItem(defaultFaceItem('text', lengthMm, chord, cutterDiameterMm, words.trim()));
+                    setWords('');
+                    setAddingText(false);
+                  }}
+                >
+                  Add
+                </button>
+              </>
+            )}
+          </div>
+          {(face.items ?? []).map((item) => (
+            <div key={item.id} style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 3 }} data-testid={`engrave-face-item-${index}-${item.id}`}>
+              <span>{faceItemWords(item)}</span>
+              <button type="button" data-testid={`engrave-face-item-remove-${index}-${item.id}`} onClick={() => onRemoveItem(item.id)} title="Remove this cut from the face.">
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </details>
   );
 }
