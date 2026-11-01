@@ -173,7 +173,7 @@ describe('#873 the goal corpus: the import states what the file is', () => {
     const relief = await read('relief-plate.stl');
     expect(relief.size.x).toBeCloseTo(40, 1);
     expect(relief.size.y).toBeCloseTo(30, 1);
-    expect(relief.size.z).toBeCloseTo(14.8, 1); // 4 mm plate + the 0.9-scaled 12 mm dome
+    expect(relief.size.z).toBeCloseTo(7, 1); // a 4 mm plate and its 3 mm raised boss
     expect(relief.format).toBe('stl');
 
     const obj = await read('relief-plate.obj');
@@ -224,8 +224,8 @@ describe('#873 the goal corpus: generated, swept, and measured against the goal'
     expect(r.ok).toBe(true);
     expect(r.stage).toBe('done');
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.254, 2); // today: 0.2540
-    expect(r.seconds).toBeLessThan(21_000); // today: 20 021 s
+    expect(r.fraction).toBeCloseTo(0.382, 2); // today: 0.3822
+    expect(r.seconds).toBeLessThan(9_000); // today: 7 948 s
   }, 240_000);
 
   it('the near-sphere: the lower half faces away, and a 1 mm flat cannot hug the flanks', async () => {
@@ -241,7 +241,7 @@ describe('#873 the goal corpus: generated, swept, and measured against the goal'
     const r = await runFixture('figure.stl', { length: 100, width: 60, thickness: 40 });
     expect(r.ok).toBe(true);
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.111, 2); // today: 0.1107
+    expect(r.fraction).toBeCloseTo(0.116, 2); // today: 0.1162
     // Some of the unreached area faces away (legs, belly, tail underside) and some is shadowed.
     expect(r.facingAway).toBeGreaterThan(0);
     expect(r.seconds).toBeLessThan(97_000); // today: 92 828 s

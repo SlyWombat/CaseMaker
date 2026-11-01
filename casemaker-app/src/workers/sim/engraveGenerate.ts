@@ -77,6 +77,7 @@ import { cutterOnMetalLine, cutterRefusedOnMaterial } from '@/engine/cnc/engrave
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
+import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { primitiveHeightfield, surfacePrimitiveWord, surfacePrimitivesOf, type SurfacePrimitive } from '@/engine/cnc/engrave/primitiveSurface';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -4706,12 +4707,16 @@ export function generateGoalProgram(
   const ownedTools = [...(shop.tools ?? []).map((e) => e.tool), ...(tool === null ? [] : [tool])];
   const reachFindings = goalReachFindings(goal, tool, ownedTools, shop.tools ?? []);
   const reachBlocking = reachFindings.filter((f) => f.severity === 'error');
+  // #872 — WHAT THE TOP SETUP LEAVES UNREACHED. Measured geometrically here (faces pointing away,
+  // the shadow band) and paired with the flip plan that finishes it; inform-only, so it rides
+  // with the findings on every path that posts a program.
+  const coverageFindings = goalFlipFindings(job, goal);
   if (reachBlocking.length > 0) {
     return {
       ...base,
       ok: false,
       stage: 'findings',
-      findings: dedupeFindings([...reachFindings, ...goalFindings, ...documentFindings()]),
+      findings: dedupeFindings([...reachFindings, ...coverageFindings, ...goalFindings, ...documentFindings()]),
       feeds: null,
       cam: null,
       nc: null,
@@ -5508,6 +5513,7 @@ export function generateGoalProgram(
       ...reachFindings,
       ...restFindings,
       ...roughFindings,
+      ...coverageFindings,
       ...chamferFindings,
     ]),
     feeds: resolved,

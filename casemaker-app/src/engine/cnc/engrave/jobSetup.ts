@@ -1,6 +1,7 @@
 import { profileReachFrom, rectProfile } from '@/engine/compiler/profile';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import type { MillProfile } from '@/engine/cnc/machine';
+import type { Face } from '@/engine/cnc/setups/types';
 import { getTools, NO_TOOL_KEY, toolForJob } from '@/engine/cnc/toolRegistry';
 import {
   cuttingDiameter,
@@ -375,6 +376,10 @@ export type JobFindingCode =
   | 'goal-reach-short'
   | 'goal-reach-unrecorded'
   | 'goal-cut-top-band'
+  // #872 — THE TOP SETUP DOES NOT REACH THE WHOLE GOAL. The sentence states the share, the split
+  // (faces pointing away, the shadow band) and, when one is worth it, the flip plan that finishes
+  // it. Inform-only: it never refuses a program that posts and verifies.
+  | 'goal-unreached'
   // #785 — the goal's program would exceed the app's stated move budget: refused BY NAME with the
   // numbers and the fixes (a coarser grid, a bigger step-down, or two setups), never by dying.
   | 'goal-program-too-big'
@@ -532,6 +537,17 @@ export interface JobFinding {
    * panel's button names the number; absent when the band would be zero.
    */
   goalBandMm?: number;
+  /**
+   * #872 — on `goal-unreached`, the stock faces a flip plan would put up, in cut order (the FIRST
+   * is the job's own orientation). The panel's one press adds these as sides; absent when no flip
+   * is worth offering (the remainder is flat faces).
+   */
+  goalFlipSides?: Face[];
+  /**
+   * #872 — on `goal-unreached`, the share of the goal's surface the SIDES' union reaches
+   * geometrically (0…1). The sentence states it; the panel does not have to recompute it.
+   */
+  goalReachedFraction?: number;
   /**
    * #785 — on `goal-program-too-big`, the grid pitch that fits the move budget, mm. The panel's
    * one-click "Generate at N mm" writes it onto the goal's `surface.gridPitchMm` and presses

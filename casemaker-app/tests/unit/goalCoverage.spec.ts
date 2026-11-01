@@ -86,26 +86,26 @@ function overhang(): CoverageMesh {
 }
 
 describe('#872 the goal coverage measure', () => {
-  it('a cube: one face of six is reached from the top, the rest face away', () => {
+  it('a cube: the top and the four cliffs are reached, the bottom faces away', () => {
     const goal = fieldAt(5);
     const c = goalCoverage(cube(), goal, () => 5);
     expect(c.totalAreaMm2).toBeCloseTo(400, 6);
-    // The top face alone faces the tool; the four sides and the bottom are facing away.
-    expect(c.reachedAreaMm2).toBeCloseTo(100, 6);
-    expect(c.facingAwayAreaMm2).toBeCloseTo(300, 6);
-    expect(c.fraction).toBeCloseTo(0.25, 6);
+    // The vertical sides are the raster's own cliffs (reached); only the BOTTOM points down.
+    expect(c.reachedAreaMm2).toBeCloseTo(300, 6);
+    expect(c.facingAwayAreaMm2).toBeCloseTo(100, 6);
+    expect(c.fraction).toBeCloseTo(0.75, 6);
   });
 
   it('a cube the result left high is MISSED, not reached — the tolerance question', () => {
     const goal = fieldAt(5);
     const c = goalCoverage(cube(), goal, () => 6);
     expect(c.reachedAreaMm2).toBe(0);
-    expect(c.missedAreaMm2).toBeCloseTo(100, 6);
+    expect(c.missedAreaMm2).toBeCloseTo(300, 6);
   });
 
   it('the geometry-only pass scores the visible faces as reached (an upper bound)', () => {
     const c = goalCoverage(cube(), fieldAt(5), null);
-    expect(c.reachedAreaMm2).toBeCloseTo(100, 6);
+    expect(c.reachedAreaMm2).toBeCloseTo(300, 6);
   });
 
   it('an overhang shadows the floor under it', () => {
@@ -115,9 +115,10 @@ describe('#872 the goal coverage measure', () => {
     expect(c.totalAreaMm2).toBeCloseTo(320, 6);
     // The floor under the roof is shadowed (the roof's cell top is 2 above it).
     expect(c.shadowedAreaMm2).toBeCloseTo(100, 6);
-    // The underside faces away; the roof top is reached; the wall faces away.
-    expect(c.facingAwayAreaMm2).toBeCloseTo(120, 6);
-    expect(c.reachedAreaMm2).toBeCloseTo(100, 6);
+    // The underside faces away; the roof top AND the vertical wall are reached (the wall is the
+    // raster's own cliff).
+    expect(c.facingAwayAreaMm2).toBeCloseTo(100, 6);
+    expect(c.reachedAreaMm2).toBeCloseTo(120, 6);
   });
 
   it('turning the mesh over is the same surface with a different side up', () => {

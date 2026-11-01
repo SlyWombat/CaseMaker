@@ -86,14 +86,11 @@ function post(x: number, y: number, z0: number, z1: number, r: number, segments 
 // ── 1. The relief: a 40 × 30 × 4 plate with a raised dome, flat back ───────────────────────────
 {
   const plate = box(0, 0, 0, 40, 30, 4);
-  // Only the dome's UPPER half: intersected with the space above the plate before the union, so
-  // the relief's own bbox is the plate and the raised surface, and its back is the plate's.
-  const dome = Manifold.sphere(12, 64)
-    .scale([1, 0.7, 0.9])
-    .translate([20, 15, 4])
-    .intersect(box(-10, -10, 4, 50, 40, 40));
-  writeStl('relief-plate.stl', meshOf(plate.add(dome)));
-  writeObj('relief-plate.obj', meshOf(plate.add(dome)));
+  // A raised RECTANGULAR boss, not a dome: a relief's raised surface is its features, and two
+  // boxes union into an exact solid with no seam where a curved surface meets a plane.
+  const boss = box(10, 10, 4, 30, 20, 7);
+  writeStl('relief-plate.stl', meshOf(plate.add(boss)));
+  writeObj('relief-plate.obj', meshOf(plate.add(boss)));
 }
 
 // ── 2. The figure: a body with legs, a head and an overhanging tail ────────────────────────────

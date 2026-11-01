@@ -10,9 +10,11 @@
  *
  * THREE CLASSES, in the order they are decided (a face is counted once, by the first that applies):
  *
- *   1. FACING AWAY — its outward normal is at or past 90° from the tool axis (a downward face, an
- *      undercut, a vertical wall at the tolerance). A 3-axis machine cannot reach it from this side
- *      at ANY shape of cutter, so it is not a tolerance question.
+ *   1. FACING AWAY — its outward normal points DOWN: past 90° from the tool axis by more than the
+ *      facing tolerance (2°). A downward face and an undercut wall are surfaces no 3-axis cut from
+ *      this side can produce at ANY shape of cutter, so it is not a tolerance question. A
+ *      VERTICAL face is not facing away: the raster produces it as the cliff between two cells'
+ *      tops, so it belongs to the visible set (and a side setup can reach it as a cliff too).
  *   2. SHADOWED — it does face the tool, but the goal's own TOP surface at its cell stands higher
  *      than the face by more than `shadowMm`: something overhangs it, and the cutter would have to
  *      come through the material to reach it.
@@ -40,9 +42,9 @@ export interface CoverageMesh {
 
 export interface CoverageOptions {
   /**
-   * A face whose normal is at or below this angle to the tool axis counts as FACING AWAY, degrees.
-   * 6° keeps a near-vertical wall out of the tolerance judgement: the raster follows the top
-   * surface, and a wall that steep has no projected area to cut.
+   * Tilt DOWN past vertical, degrees, at which a face counts as FACING AWAY. 2° is an epsilon for
+   * a model's own slop around vertical, not a judgement about steepness: a vertical face is
+   * reachable as the raster's cliff, a downward one is not.
    */
   facingDeg?: number;
   /**
@@ -73,10 +75,126 @@ export interface GoalCoverage {
 
 /** #872's decided defaults: the "small amount" is 1 % of the goal area (the CALLER reads it). */
 export const COVERAGE_SMALL_FRACTION = 0.01;
-export const COVERAGE_DEFAULTS = { facingDeg: 6, shadowMm: 0.3, reachedMm: 0.05 } as const;
+export const COVERAGE_DEFAULTS = { facingDeg: 2, shadowMm: 0.3, reachedMm: 0.05 } as const;
 
 /** The swept result's top at a work XY, or null where nothing of the stock remains there. */
 export type ResultTop = (x: number, y: number) => number | null;
+
+/** What one triangle is, geometrically, from the tool's side. */
+export interface TriangleFacts {
+  /** Its area, mm². */
+  areaMm2: number;
+  /** Its centroid, in the setup frame. */
+  centre: [number, number, number];
+  /** Unit normal's Z — 1 for a face square to the tool, negative for one pointing down. */
+  nz: number;
+  /** The unit normal in the setup frame — the plan compares directions to spot one flat face. */
+  normal: [number, number, number];
+  /** The goal's own top at the centroid's cell, or null outside the grid. */
+  goalTop: number | null;
+  /** The first class that applies: facing away, or shadowed; otherwise visible (tolerance aside). */
+  cls: 'facingAway' | 'shadowed' | 'visible';
+}
+
+/**
+ * Every triangle's area and class — the plan's per-side bookkeeping (which area a candidate side
+ * ADDS) and the coverage sums both read this, so the two cannot disagree about a face.
+ */
+export function coverageTriangles(mesh: CoverageMesh, goal: GoalHeightfield, opts: CoverageOptions = {}): TriangleFacts[] {
+  const facingDeg = opts.facingDeg ?? COVERAGE_DEFAULTS.facingDeg;
+  const shadowMm = opts.shadowMm ?? COVERAGE_DEFAULTS.shadowMm;
+  const facingDown = -Math.sin((facingDeg * Math.PI) / 180);
+  const out: TriangleFacts[] = [];
+  const triangles = mesh.indices.length / 3;
+  for (let t = 0; t < triangles; t++) {
+    const tri = triangleAt(mesh, t);
+    const { area, nz, slope, normal } = areaAndNormalZ(tri);
+    const centre: [number, number, number] = [
+      (tri.ax + tri.bx + tri.cx) / 3,
+      (tri.ay + tri.by + tri.cy) / 3,
+      (tri.az + tri.bz + tri.cz) / 3,
+    ];
+    const goalTop = goalTopAt(goal, centre[0], centre[1]);
+    if (!(area > 0)) {
+      out.push({ areaMm2: 0, centre, nz, normal, goalTop, cls: 'facingAway' });
+      continue;
+    }
+    if (nz < facingDown) {
+      out.push({ areaMm2: area, centre, nz, normal, goalTop, cls: 'facingAway' });
+      continue;
+    }
+    // The face's own highest point over its cell: its top vertex, plus what its own slope adds
+    // across one cell. Only a surface ABOVE that is an overhang.
+    const high = Math.max(tri.az, tri.bz, tri.cz) + (Number.isFinite(slope) ? slope * goal.pitch : 0);
+    if (goalTop !== null && goalTop > high + shadowMm) {
+      out.push({ areaMm2: area, centre, nz, normal, goalTop, cls: 'shadowed' });
+      continue;
+    }
+    out.push({ areaMm2: area, centre, nz, normal, goalTop, cls: 'visible' });
+  }
+  return out;
+}
+
+/**
+ * The goal's own TOP field, rasterised from triangles — the plan's shadow reference for a rotated
+ * side. (`sampleGoalHeightfield` samples a TARGET's placement along +Z; a candidate side is the
+ * same mesh turned by an orientation matrix, which this reads directly.)
+ */
+export function sampleCoverageField(mesh: CoverageMesh, pitchMm = 0.25, topZ = 0): GoalHeightfield {
+  const p = mesh.positions;
+  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity, zMax = -Infinity;
+  for (let i = 0; i < p.length; i += 3) {
+    xMin = Math.min(xMin, p[i]!); xMax = Math.max(xMax, p[i]!);
+    yMin = Math.min(yMin, p[i + 1]!); yMax = Math.max(yMax, p[i + 1]!);
+    zMax = Math.max(zMax, p[i + 2]!);
+  }
+  const pitch = pitchMm > 0 ? pitchMm : 0.25;
+  const nx = Math.max(1, Math.ceil((xMax - xMin) / pitch) + 1);
+  const ny = Math.max(1, Math.ceil((yMax - yMin) / pitch) + 1);
+  const z = new Float32Array(nx * ny).fill(-Infinity);
+  const covered = new Uint8Array(nx * ny);
+  const tris = mesh.indices.length / 3;
+  for (let t = 0; t < tris; t++) {
+    const tri = triangleAt(mesh, t);
+    const tMinX = Math.min(tri.ax, tri.bx, tri.cx), tMaxX = Math.max(tri.ax, tri.bx, tri.cx);
+    const tMinY = Math.min(tri.ay, tri.by, tri.cy), tMaxY = Math.max(tri.ay, tri.by, tri.cy);
+    const i0 = Math.max(0, Math.floor((tMinX - xMin) / pitch));
+    const i1 = Math.min(nx - 1, Math.ceil((tMaxX - xMin) / pitch));
+    const j0 = Math.max(0, Math.floor((tMinY - yMin) / pitch));
+    const j1 = Math.min(ny - 1, Math.ceil((tMaxY - yMin) / pitch));
+    const den = (tri.by - tri.cy) * (tri.ax - tri.cx) + (tri.cx - tri.bx) * (tri.ay - tri.cy);
+    if (den === 0) continue;
+    for (let j = j0; j <= j1; j++) {
+      const cy = yMin + j * pitch;
+      for (let i = i0; i <= i1; i++) {
+        const cx = xMin + i * pitch;
+        const w1 = ((tri.by - tri.cy) * (cx - tri.cx) + (tri.cx - tri.bx) * (cy - tri.cy)) / den;
+        const w2 = ((tri.cy - tri.ay) * (cx - tri.cx) + (tri.ax - tri.cx) * (cy - tri.cy)) / den;
+        const w3 = 1 - w1 - w2;
+        if (w1 < -1e-9 || w2 < -1e-9 || w3 < -1e-9) continue;
+        const vz = w1 * tri.az + w2 * tri.bz + w3 * tri.cz;
+        const k = j * nx + i;
+        covered[k] = 1;
+        if (!(z[k]! >= vz)) z[k] = vz;
+      }
+    }
+  }
+  let minZ = zMax;
+  for (let k = 0; k < z.length; k++) if (!(z[k]! > -Infinity)) z[k] = topZ; else minZ = Math.min(minZ, z[k]!);
+  return {
+    nx,
+    ny,
+    x0: xMin,
+    y0: yMin,
+    pitch,
+    topZ,
+    minZ,
+    z,
+    covered,
+    coveredCount: covered.reduce((a, b) => a + b, 0),
+    resolutionNote: `${pitch} mm grid`,
+  };
+}
 
 interface Tri {
   ax: number; ay: number; az: number;
@@ -118,15 +236,24 @@ function triangleAt(mesh: CoverageMesh, t: number): Tri {
   };
 }
 
-/** Twice the triangle's area, and its unit normal's Z — the two numbers the classifier needs. */
-function areaAndNormalZ(t: Tri): { area: number; nz: number } {
+/**
+ * The triangle's area, its unit normal's Z, and the slope its own plane rises across a cell
+ * (`horizontal / vertical`, 0 for a face square to the tool). The slope is what the shadow test
+ * needs: a steep face's own cell top stands above its highest vertex by up to the pitch times
+ * that slope, and only a comparison that allows for it can tell a slope from an overhang.
+ */
+function areaAndNormalZ(t: Tri): { area: number; nz: number; slope: number; normal: [number, number, number] } {
   const ux = t.bx - t.ax, uy = t.by - t.ay, uz = t.bz - t.az;
   const vx = t.cx - t.ax, vy = t.cy - t.ay, vz = t.cz - t.az;
   const nx = uy * vz - uz * vy;
   const ny = uz * vx - ux * vz;
   const nz = ux * vy - uy * vx;
   const len = Math.hypot(nx, ny, nz);
-  return { area: len / 2, nz: len === 0 ? 0 : nz / len };
+  if (len === 0) return { area: 0, nz: 0, slope: 0, normal: [0, 0, 0] };
+  const nzUnit = nz / len;
+  const horizontal = Math.hypot(nx, ny) / len;
+  const slope = Math.abs(nzUnit) > 1e-9 ? horizontal / Math.abs(nzUnit) : Infinity;
+  return { area: len / 2, nz: nzUnit, slope, normal: [nx / len, ny / len, nz / len] };
 }
 
 /** The goal's sampled top at a work XY, or null outside the grid / an uncovered cell. */
@@ -154,56 +281,34 @@ export function goalCoverage(
   resultTop: ResultTop | null,
   opts: CoverageOptions = {},
 ): GoalCoverage {
-  const facingDeg = opts.facingDeg ?? COVERAGE_DEFAULTS.facingDeg;
-  const shadowMm = opts.shadowMm ?? COVERAGE_DEFAULTS.shadowMm;
   const reachedMm = opts.reachedMm ?? COVERAGE_DEFAULTS.reachedMm;
-  const facingSin = Math.sin((facingDeg * Math.PI) / 180);
-
   let total = 0;
   let reached = 0;
   let facingAway = 0;
   let shadowed = 0;
   let missed = 0;
-
-  const triangles = mesh.indices.length / 3;
-  for (let t = 0; t < triangles; t++) {
-    const tri = triangleAt(mesh, t);
-    const { area, nz } = areaAndNormalZ(tri);
-    if (!(area > 0)) continue;
-    total += area;
-
-    // 1. Facing away: the tool axis is +Z in this frame.
-    if (nz <= facingSin) {
-      facingAway += area;
+  for (const f of coverageTriangles(mesh, goal, opts)) {
+    if (!(f.areaMm2 > 0)) continue;
+    total += f.areaMm2;
+    if (f.cls === 'facingAway') {
+      facingAway += f.areaMm2;
       continue;
     }
-
-    // 2. Shadowed: the goal's own top at the face's cell stands higher than the face's HIGHEST
-    // point. Against the highest vertex rather than the centroid, a slope's own cell top (which is
-    // at its upslope edge) does not read as an overhang; only something really above the face does.
-    const mx = (tri.ax + tri.bx + tri.cx) / 3;
-    const my = (tri.ay + tri.by + tri.cy) / 3;
-    const mz = (tri.az + tri.bz + tri.cz) / 3;
-    const high = Math.max(tri.az, tri.bz, tri.cz);
-    const top = goalTopAt(goal, mx, my);
-    if (top !== null && top > high + shadowMm) {
-      shadowed += area;
+    if (f.cls === 'shadowed') {
+      shadowed += f.areaMm2;
       continue;
     }
-
-    // 3. Visible: judged by the simulation when one is given, otherwise assumed reached.
     if (resultTop === null) {
-      reached += area;
+      reached += f.areaMm2;
       continue;
     }
-    const result = resultTop(mx, my);
-    if (result !== null && Math.abs(result - (top ?? mz)) <= reachedMm) {
-      reached += area;
+    const result = resultTop(f.centre[0], f.centre[1]);
+    if (result !== null && Math.abs(result - (f.goalTop ?? f.centre[2])) <= reachedMm) {
+      reached += f.areaMm2;
     } else {
-      missed += area;
+      missed += f.areaMm2;
     }
   }
-
   return {
     totalAreaMm2: total,
     reachedAreaMm2: reached,
