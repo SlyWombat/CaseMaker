@@ -356,6 +356,12 @@ export type JobFindingCode =
   | 'goal-mold-no-draft'
   | 'goal-finish-finer-than-grid'
   | 'goal-object-no-toolpath'
+  // #829 — THE 3D CHAMFER THE GOAL ASKS FOR. `goal-chamfer-no-cutter` is the WARNING that names
+  // why no V program was posted (no V-bit chosen, one the library does not hold, or one with no
+  // cone/feeds), and `goal-chamfer-no-rim` the WARNING that the mesh has no top rim to bevel.
+  // Neither refuses the goal: it is surfaced either way, with its edges left square and said so.
+  | 'goal-chamfer-no-cutter'
+  | 'goal-chamfer-no-rim'
   // Facing (#432). The job's facing depth is taken off the same blank every item is measured
   // against, so the check is one number against the stock's minimum floor — not a per-item one.
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check

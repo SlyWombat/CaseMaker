@@ -6145,6 +6145,26 @@
           "additionalProperties": false,
           "description": "Reference mesh the primitives are positioned against; omit for none.",
           "properties": {
+            "chamfer": {
+              "additionalProperties": false,
+              "description": "Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.",
+              "properties": {
+                "toolKey": {
+                  "description": "The V-bit’s library key; omit while none is chosen (no chamfer program is posted).",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "widthMm": {
+                  "description": "The bevel’s width on the top face, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "widthMm"
+              ],
+              "type": "object"
+            },
             "cutWithinReach": {
               "description": "Cut only the top band the chosen cutter reaches when the goal is deeper than its reach; omit to refuse (the default).",
               "type": "boolean"
@@ -6380,6 +6400,26 @@
             "additionalProperties": false,
             "description": "An embedded mesh (STL/3MF, or a STEP the CAD kernel tessellated at import, #774): a reference the cutting volumes are positioned against, or a goal shape to make.",
             "properties": {
+              "chamfer": {
+                "additionalProperties": false,
+                "description": "Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.",
+                "properties": {
+                  "toolKey": {
+                    "description": "The V-bit’s library key; omit while none is chosen (no chamfer program is posted).",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "widthMm": {
+                    "description": "The bevel’s width on the top face, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "widthMm"
+                ],
+                "type": "object"
+              },
               "cutWithinReach": {
                 "description": "Cut only the top band the chosen cutter reaches when the goal is deeper than its reach; omit to refuse (the default).",
                 "type": "boolean"

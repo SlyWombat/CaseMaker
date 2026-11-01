@@ -1002,6 +1002,19 @@ const targetObjectSchema = z
       .strict()
       .optional()
       .describe('A PNG goal’s relief map: its depth and direction (#672); omit for defaults.'),
+    // #829 — a GOAL's 3D chamfer: the bevel's width, and the V-bit the search chose to cut it.
+    chamfer: z
+      .object({
+        widthMm: z.number().finite().positive().describe('The bevel’s width on the top face, in millimetres.'),
+        toolKey: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('The V-bit’s library key; omit while none is chosen (no chamfer program is posted).'),
+      })
+      .strict()
+      .optional()
+      .describe('Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.'),
   })
   .strict()
   .describe('An embedded mesh (STL/3MF, or a STEP the CAD kernel tessellated at import, #774): a reference the cutting volumes are positioned against, or a goal shape to make.');

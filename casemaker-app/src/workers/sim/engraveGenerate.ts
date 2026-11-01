@@ -150,6 +150,8 @@ import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughM
 import { tapeHoldFindings, type TapedPiece } from '@/engine/cnc/engrave/tapeHold';
 import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
 import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
+import { generateChamfer3d, type Chamfer3dCut } from '@/engine/cnc/cam/chamfer3d';
+import { targetRim } from '@/engine/cnc/engrave/targetRim';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStats, type CamMove, type CamOperation, type CamPassStep, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
@@ -4892,17 +4894,146 @@ export function generateGoalProgram(
     cam,
   };
 
+  // #829 — THE PART'S EDGES: a second program with the V-bit, along the mesh's top rim. The goal
+  // stays a pure goal (the chamfer is a property of the object, not an item), and the bevel's
+  // shortfalls are stated with the numbers the CAM cuts — the 2D chamfer's own codes.
+  const chamferFindings: JobFinding[] = [];
+  const chamferProgram = ((): EngraveProgram | null => {
+    const want = goal.chamfer;
+    if (want === undefined) return null;
+    const who = `The part's edges (“${goal.name}”)`;
+    const entry = (shop.tools ?? []).find((e) => e.key === want.toolKey);
+    if (want.toolKey === undefined || entry === undefined) {
+      chamferFindings.push({
+        severity: 'warning',
+        code: 'goal-chamfer-no-cutter',
+        labelId: goal.id,
+        message:
+          `${who} are not chamfered: ` +
+          (want.toolKey === undefined
+            ? 'no V-bit has been chosen for them'
+            : `the V-bit “${want.toolKey}” is not in the tool library`) +
+          '.',
+      });
+      return null;
+    }
+    const cone = vCone(entry.tool);
+    if (cone === null) {
+      chamferFindings.push({
+        severity: 'warning',
+        code: 'goal-chamfer-no-cutter',
+        labelId: goal.id,
+        message: `${who} are not chamfered: “${entry.tool.name}” is a ${entry.tool.shape} cutter with no cone to make a bevel.`,
+      });
+      return null;
+    }
+    const rim = targetRim(goal);
+    if (rim.chains.length === 0) {
+      chamferFindings.push({
+        severity: 'warning',
+        code: 'goal-chamfer-no-rim',
+        labelId: goal.id,
+        message: `${who} are not chamfered: ${rim.notes.join('; ') || 'no top rim was found on the mesh'}.`,
+      });
+      return null;
+    }
+    const num3 = (n: number): string => String(Number(n.toFixed(3)));
+    const flute = vFluteLength(entry.tool);
+    const reach = flute === null ? null : flute * cone.tanHalf;
+    // The part's base, in the work frame: a goal lives IN the stock, its top at `position.z` and
+    // its underside `placedSize.z` below it.
+    const baseZ = goal.position.z - placedSize(goal).z;
+    const cuts: Chamfer3dCut[] = [];
+    for (const chain of rim.chains) {
+      const lowest = Math.min(...chain.points.map((p) => p.z));
+      const wallDepth = lowest - baseZ;
+      let width = want.widthMm;
+      if (reach !== null && width > reach + 1e-9) {
+        chamferFindings.push({
+          severity: 'warning',
+          code: 'chamfer-too-wide',
+          labelId: goal.id,
+          message:
+            `${who} ask for a ${num3(width)} mm chamfer, but “${entry.tool.name}”’s cone reaches ` +
+            `${num3(reach)} mm in one pass (its ${num3(flute as number)} mm flute at ` +
+            `${num3(cone.halfAngleDeg * 2)}°). The cut is ${num3(reach)} mm wide, ` +
+            `${num3(width - reach)} mm short of the design — use a wider chamfer bit for the full width.`,
+        });
+        width = reach;
+      }
+      // The tip stops at the part's own base: a bevel deeper than the wall the part has under
+      // this edge would run off it, leaving no bevel at all.
+      if (wallDepth > 0 && width / cone.tanHalf >= wallDepth - 1e-9) {
+        const floor = Math.max(0, (wallDepth - 1e-6) * cone.tanHalf);
+        chamferFindings.push({
+          severity: 'warning',
+          code: 'chamfer-too-deep',
+          labelId: goal.id,
+          message:
+            `${who} would reach ${num3(width / cone.tanHalf)} mm below the top face, and the part is ` +
+            `only ${num3(wallDepth)} mm deep at its lowest edge; the tip stops at the part's base, so ` +
+            `the bevel is ${num3(floor)} mm wide instead of ${num3(want.widthMm)} — use a smaller chamfer.`,
+        });
+        width = floor;
+      }
+      if (!(width > 0)) continue;
+      cuts.push({ id: goal.id, name: 'the part’s edge', chain, depth: width / cone.tanHalf });
+    }
+    if (cuts.length === 0) return null;
+    const chamferFeeds = feedsFor(catalogue, job.stock.material, entry.tool, mill, job.cutOverride, shop.feeds ?? undefined);
+    if (!chamferFeeds.ok) {
+      chamferFindings.push({
+        severity: 'warning',
+        code: 'goal-chamfer-no-cutter',
+        labelId: goal.id,
+        message: `${who} are not chamfered: “${entry.tool.name}” cannot be fed for ${job.stock.material} — ${chamferFeeds.reason}.`,
+      });
+      return null;
+    }
+    const chamferIr = generateChamfer3d(cuts, entry.tool, chamferFeeds.params, mill.rapidEstimate);
+    const chamferPosted = postZ1(chamferIr, { ...ctx, toolKey: entry.key }, mill, { vacuum: 'whole' });
+    if (!chamferPosted.ok) {
+      chamferFindings.push({
+        severity: 'warning',
+        code: 'goal-chamfer-no-cutter',
+        labelId: goal.id,
+        message: `${who} are not chamfered: the post refused the V-bit’s program — ${chamferPosted.errors.join('; ')}.`,
+      });
+      return null;
+    }
+    return {
+      kind: 'engrave',
+      setupIndex: 1,
+      setupId: jobSetups(job)[0]!.id,
+      toolKey: entry.key,
+      nc: chamferPosted.text,
+      frame: 'flat',
+      verify: null,
+      surfaceCheck: null,
+      frameNc: null,
+      frameVerify: null,
+      programHash: programHash(chamferPosted.text),
+      cam: summarize(chamferIr),
+    };
+  })();
+
   onProgress?.({ stage: 'done', label: 'done' });
   return {
     ...base,
     ok: true,
     stage: 'done',
-    findings: dedupeFindings([...documentFindings(), ...moldFindings, ...gridFindings, ...reachFindings]),
+    findings: dedupeFindings([
+      ...documentFindings(),
+      ...moldFindings,
+      ...gridFindings,
+      ...reachFindings,
+      ...chamferFindings,
+    ]),
     feeds: resolved,
     cam,
     nc,
     verify: null,
-    programs: [program],
+    programs: chamferProgram === null ? [program] : [program, chamferProgram],
     // #535 — the operation's own facts, for its row and the run sheet: the numbers the CAM ran
     // with and the grid it sampled. A caller with no generated result has no facts to print.
     surface3d: {

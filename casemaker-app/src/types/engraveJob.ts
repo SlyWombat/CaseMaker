@@ -714,6 +714,22 @@ export interface EngraveTargetObject {
    * to and which end of the greys sits at the top face. Absent = the engine's labelled defaults.
    */
   relief?: EngraveReliefSettings;
+  /**
+   * #829 — CHAMFER THE PART'S EDGES. Present on a GOAL while its top rim is beveled by a V-bit
+   * after the surfacing program: `widthMm` is the bevel's width on the top face, and `toolKey`
+   * names the V-bit the measured search chose for the second program. Absent — or a goal with no
+   * `toolKey` — means the part is surfaced and its edges are left square, stated in the run's
+   * findings. Optional, so every document written before the field existed round-trips unchanged.
+   */
+  chamfer?: EngraveGoalChamfer;
+}
+
+/** #829 — the 3D chamfer a GOAL asks for: its bevel width, and the V-bit chosen to cut it. */
+export interface EngraveGoalChamfer {
+  /** The bevel's width on the top face, mm, before the cone and the part's height clamp it. */
+  widthMm: Mm;
+  /** The V-bit's library key; absent while none is chosen (no chamfer program is posted). */
+  toolKey?: string;
 }
 
 /**
