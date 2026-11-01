@@ -2214,18 +2214,24 @@ export function EngravePanel(): JSX.Element {
               : feeds !== null && !feeds.ok && feeds.cause === 'no-feeds' && !simRefused
                 ? 'no-feeds'
                 : 'refused';
-          applyCutterPlan(measuredNow.cutters, 'computed', 0, {
-            fromKey: restCase ? missingRestKey! : job.toolKey,
-            fromName: restCase
-              ? missingRestKey!
-              : namedNow !== null
-                ? toolDisplayName(namedNow).split(' · ')[0]!
-                : job.toolKey,
-            reason,
-            ...(reason === 'no-feeds' ? { material: job.stock.material } : {}),
-            toKey,
-            toName: toEntry !== undefined ? toolDisplayName(toEntry.tool).split(' · ')[0]! : toKey,
-          }, measuredNow.goalRoughKey);
+          applyCutterPlan(
+            measuredNow.cutters,
+            'computed',
+            0,
+            {
+              fromKey: restCase ? missingRestKey! : job.toolKey,
+              fromName: restCase
+                ? missingRestKey!
+                : namedNow !== null
+                  ? toolDisplayName(namedNow).split(' · ')[0]!
+                  : job.toolKey,
+              reason,
+              ...(reason === 'no-feeds' ? { material: job.stock.material } : {}),
+              toKey,
+              toName: toEntry !== undefined ? toolDisplayName(toEntry.tool).split(' · ')[0]! : toKey,
+            },
+            measuredNow.goalRoughKey,
+          );
         } else {
           applyCutterPlan(measuredNow.cutters, 'computed', 0, undefined, measuredNow.goalRoughKey);
         }
