@@ -12,6 +12,7 @@
 
 import type { LevelPlanRequest, LevelPlanResult, LevelPlanShared, LevelPlanner } from '@/engine/cnc/cam/rough3d';
 import type { PoolPlanReply } from '@/workers/adaptivePool.worker';
+import { unpackMoves } from '@/engine/cnc/cam/movePack';
 
 interface OutgoingPlan {
   kind: 'plan';
@@ -35,7 +36,11 @@ export function portLevelPlanner(port: MessagePort): LevelPlanner {
           // ids the planner handed out when it posted them.
           const slot = idToSlot.get(id);
           if (slot === undefined || results[slot] !== undefined) return;
-          results[slot] = result;
+          // #881 — the wire form is packed buffers (transferred); the CAM consumes moves until
+          // #889 moves its storage to the packed arrays themselves.
+          results[slot] = result.ok
+            ? { ok: true, moves: unpackMoves(result.moves), maxEngagementMm: result.maxEngagementMm }
+            : result;
           done++;
           onPlanned?.(done, requests.length);
           if (done === requests.length) {

@@ -4,10 +4,12 @@
  * A pool of these sits behind the main thread's `AdaptivePool`; the sim worker sends each level's
  * request down a MessagePort and gets the same plan `planLevel` produces in-process — the one
  * `planAdaptive` call, with the same settings — so a pooled plan cannot differ from a serial one.
- * Nothing wasm or stateful lives here: a request in, a plan out.
+ * The moves go back PACKED and TRANSFERRED (typed arrays, see `movePack.ts`), not as cloned
+ * objects: a level is tens of thousands of moves, and #889's storage is these buffers.
  */
 
-import { planLevel, type LevelPlanRequest, type LevelPlanShared, type LevelPlanResult } from '@/engine/cnc/cam/rough3d';
+import { planLevel, type LevelPlanRequest, type LevelPlanShared } from '@/engine/cnc/cam/rough3d';
+import { packMoves, packTransfers, type PackedMoves } from '@/engine/cnc/cam/movePack';
 
 export interface PoolPlanMessage {
   id: number;
@@ -15,17 +17,27 @@ export interface PoolPlanMessage {
   shared: LevelPlanShared;
 }
 
+export type PackedLevelPlanResult =
+  | { ok: true; moves: PackedMoves; maxEngagementMm: number }
+  | { ok: false; reason: string };
+
 export interface PoolPlanReply {
   id: number;
-  result: LevelPlanResult;
+  result: PackedLevelPlanResult;
 }
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<PoolPlanMessage>) => void) | null;
-  postMessage: (message: PoolPlanReply) => void;
+  postMessage: (message: PoolPlanReply, transfer?: ArrayBuffer[]) => void;
 };
 
 scope.onmessage = (event) => {
   const { id, request, shared } = event.data;
-  scope.postMessage({ id, result: planLevel(shared, request) });
+  const plan = planLevel(shared, request);
+  if (!plan.ok) {
+    scope.postMessage({ id, result: { ok: false, reason: plan.reason } });
+    return;
+  }
+  const packed = packMoves(plan.moves);
+  scope.postMessage({ id, result: { ok: true, moves: packed, maxEngagementMm: plan.maxEngagementMm } }, packTransfers(packed));
 };

@@ -205,7 +205,6 @@ describe('#881 — the level planner', () => {
     const hf = staircase();
     const refuse: LevelPlanner = {
       async planLevels(requests, shared, onPlanned) {
-        const first = requests[0]!;
         onPlanned?.(1, requests.length);
         return [{ ok: false, reason: 'the planner said no' }, ...requests.slice(1).map((r) => planLevel(shared, r))];
       },

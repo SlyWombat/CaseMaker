@@ -14,6 +14,7 @@
 
 import type { LevelPlanRequest, LevelPlanShared } from '@/engine/cnc/cam/rough3d';
 import type { PoolPlanReply } from '@/workers/adaptivePool.worker';
+import { packTransfers } from '@/engine/cnc/cam/movePack';
 
 /** One level's work, as it arrives from the sim worker. */
 export interface PoolPlanRequest {
@@ -103,7 +104,12 @@ export class AdaptivePool {
     if (this.out === null) return;
     // The id is the SIM WORKER's, so its replies can be matched back to its own request array.
     this.pending.set(message.id, message);
-    this.queue.push(message);
+    // #881 — LONGEST FIRST. Every level is independent and the pool assembles by index, so the
+    // order jobs leave this queue has no effect on the result — only on the makespan's tail. The
+    // level's cell count is the cost estimate, and the biggest levels start first.
+    let at = this.queue.length;
+    while (at > 0 && (this.queue[at - 1]!.request.cells ?? 0) < (message.request.cells ?? 0)) at--;
+    this.queue.splice(at, 0, message);
     this.pump();
   }
 
@@ -125,7 +131,9 @@ export class AdaptivePool {
     slot.busyWith = null;
     this.idle.push(index);
     this.pending.delete(reply.id);
-    this.out?.postMessage(reply);
+    // #881 — forward packed moves as TRANSFERRED buffers: the pool never copies a level's moves.
+    if (reply.result.ok) this.out?.postMessage(reply, packTransfers(reply.result.moves));
+    else this.out?.postMessage(reply);
     this.pump();
   }
 

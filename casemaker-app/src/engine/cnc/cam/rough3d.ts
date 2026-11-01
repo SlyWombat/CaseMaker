@@ -153,6 +153,11 @@ export interface LevelPlanRequest {
   levelZ: number;
   /** The distance the planner descends (the layer's thickness, at least 0.01 mm). */
   depth: number;
+  /**
+   * #881 — how many cells this level clears: the pool's cost estimate, so the longest levels
+   * start first and the makespan's tail shortens. Planning does not read it.
+   */
+  cells: number;
   /** The cells this level clears, as polygons in the work frame. */
   region: Polygons;
 }
@@ -288,7 +293,9 @@ export async function roughingAdaptiveMoves(
     }
     cachedHash = hash;
     cachedDepth = depth;
-    requests.push({ index: requests.length, levelZ: L, depth, region: polygonalizeMask(hf, mask) });
+    let cells = 0;
+    for (let k = 0; k < mask.length; k++) cells += mask[k] as number;
+    requests.push({ index: requests.length, levelZ: L, depth, cells, region: polygonalizeMask(hf, mask) });
     slots.push({ levelZ: L, thickness, cleared: true, requestIndex: requests.length - 1 });
   }
 
