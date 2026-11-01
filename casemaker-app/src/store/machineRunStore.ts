@@ -577,8 +577,11 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
         } finally {
           // The run is over BEFORE the end-of-run saves: the console is closed and the panel stops
           // reading "Running…" while the shelf and the inventory are written (#414 review).
+          // #618 — a run stopped WHILE PAUSED ends with `paused` cleared too: the strip's Paused
+          // word is the suspended RUN's, and nothing is suspended once the run is over (the
+          // machine's own state, Idle, is what it reads then).
           await session.close();
-          patch(machine, { running: false });
+          patch(machine, { running: false, paused: false });
         }
         // Once per run: this runs once per `start`, and `end` is cleared only by the next one.
         const outcome = get().runs[machine]?.outcome ?? null;

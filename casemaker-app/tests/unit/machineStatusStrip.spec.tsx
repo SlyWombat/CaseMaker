@@ -220,7 +220,8 @@ describe('#647 the DRO — state as connection', () => {
 
   it('reads Paused while the app holds a suspended run, even if the line says Idle', () => {
     remember('<Idle|MPos:-10,-10,-3|WPos:0,0,0>');
-    useMachineRunStore.setState({ runs: { '192.0.2.10:2222': { paused: true } as unknown as RunEntry } });
+    // #618 — the suspended RUN is still running (it watches); only then is its word the strip's.
+    useMachineRunStore.setState({ runs: { '192.0.2.10:2222': { running: true, paused: true } as unknown as RunEntry } });
     render(<MachineStatusStrip />);
     expect(screen.getByTestId('machine-status-state').textContent).toBe('Paused');
   });
@@ -479,6 +480,35 @@ describe('#652 the strip’s follow-ups', () => {
     render(<MachineStatusStrip />);
     expect(screen.getByTestId('machine-status-accessory-vacuum').getAttribute('data-mode')).toBe('on');
     expect(useStripAccessoryStore.getState().modes[target]).toBeUndefined();
+  });
+});
+
+// #618 — a run stopped WHILE suspended: the paused word belongs to the running run, so an ended
+// entry that still carried `paused` must not keep the strip Paused (or offer its Stop).
+describe('#618 the strip after a pause', () => {
+  it('reads the machine, not a stale Paused, once the run has ended', () => {
+    remember('<Idle|MPos:0,0,0|WPos:0,0,0>');
+    useMachineRunStore.setState({
+      runs: {
+        '192.0.2.10:2222': {
+          running: false,
+          filename: 'job.nc',
+          programHash: 'h',
+          progress: null,
+          lines: [],
+          outcome: null,
+          stopAsked: false,
+          paused: true,
+          toolWaiting: null,
+          context: null,
+          end: { kind: 'stopped', lines: [], offcut: null, stockQuestion: null },
+          pendingStock: null,
+        } as unknown as RunEntry,
+      },
+    });
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').getAttribute('data-state')).toBe('Idle');
+    expect(screen.queryByTestId('machine-status-stop')).toBeNull();
   });
 });
 

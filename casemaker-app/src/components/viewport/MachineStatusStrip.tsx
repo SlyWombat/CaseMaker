@@ -237,7 +237,14 @@ export function MachineStatusStrip(): JSX.Element | null {
   const vacuum = useEngraveReleaseStore((s) =>
     machine === null ? null : s.records[machineKey(machine)]?.vacuum ?? null,
   );
-  const runPaused = useMachineRunStore((s) => (machine === null ? false : s.runs[machineKey(machine)]?.paused === true));
+  // #618 — Paused is the SUSPENDED RUN's word: an entry that is no longer running cannot keep the
+  // strip paused (a run stopped while suspended used to leave it saying Paused, with a Stop, under
+  // a Stopped card).
+  const runPaused = useMachineRunStore((s) => {
+    if (machine === null) return false;
+    const run = s.runs[machineKey(machine)];
+    return run?.paused === true && run?.running === true;
+  });
   const requestStop = useMachineRunStore((s) => s.requestStop);
   // #647 — the tool slot states the tool the job runs with, by name (#646: no qualifier).
   const job = useEngraveJobStore((s) => s.job);
