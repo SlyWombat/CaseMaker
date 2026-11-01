@@ -1980,8 +1980,10 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
     // #841 — an EXTERNAL thread's cutter orbits OUTSIDE the boss, so its disc is the major radius
     // plus the cutter's whole diameter.
     // #841 — an EXTERNAL thread's cutter orbits OUTSIDE the boss, so its disc for the jaws is the
-    // major radius plus the cutter's whole diameter; its REACH (the round-stock rule) stays the
-    // boss's major, because outside the boss the cutter is meant to be in air.
+    // major radius plus the cutter's whole diameter. Its REACH (the round-stock rule) is its AXIS:
+    // the thread IS the boss's own rim, and outside it the cutter is meant to be in air, so "keep
+    // it inside the circle" would be a sentence on every external thread (the boss findings judge
+    // where the boss is instead).
     const spec = threadSpec(thread.size);
     const outside = thread.side === 'external' ? 2 * sweepRadiusForJob(job, 0) : 0;
     const r = spec.major / 2 + outside;
@@ -1991,7 +1993,7 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
       thread.depth,
       { minX: x, maxX: x, minY: y, maxY: y },
       r,
-      Math.hypot(x - centre[0], y - centre[1]) - outside,
+      Math.hypot(x - centre[0], y - centre[1]) - (thread.side === 'external' ? r : 0),
     );
     cuts[cuts.length - 1]!.tipDepth = thread.depth + spec.pitch;
   }

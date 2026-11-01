@@ -1155,7 +1155,12 @@ export function EngravePanel(): JSX.Element {
   // the ball itself refused every surfacing job with a ball nose — "cannot cut this job" — while
   // the CAM that would cut it proxies the row. An item job keeps the cutter's own row.
   const goalOnly = !jobHasItems(job) && (pureGoalObject(job) !== null || goalSides(job).length > 0);
-  const feeds = tool
+  // #841 — A THREAD MILL IS NOT ASKED `feedsFor`. The thread program resolves its own numbers
+  // (`threadSettings`: the shop's thread.* defaults, then the catalogue's row), and `feedsFor`
+  // refuses a thread mill by design, so asking it here blocked Generate on every thread job with
+  // "cannot cut this job" while the worker would have cut it. `thread-wrong-tool` and
+  // `thread-mixed-tools` already judge the pairing.
+  const feeds = tool && tool.shape !== 'thread'
     ? feedsFor(
         feedCatalogueSnapshot(),
         job.stock.material,

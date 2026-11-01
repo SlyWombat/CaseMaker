@@ -106,7 +106,7 @@ describe('#685 — step 4, what are you cutting', () => {
     // This run opened AT step 4, so it is a re-entry: the button adds to a job that exists.
     expect(screen.getByTestId('start-wizard-create').textContent).toBe('Add the operation');
 
-    // The four groups, and the fourteen operations in the mockup's words and grouped order
+    // The four groups, and the fifteen operations in the mockup's words and grouped order
     // (`first-job-flow-mockups.html`, station 4) — the same table the panel's picker reads.
     for (const group of ['engrave-carve', 'cut-away', 'holes', '3d']) {
       expect(screen.getByTestId(`operation-picker-group-${group}`)).toBeTruthy();
@@ -126,6 +126,7 @@ describe('#685 — step 4, what are you cutting', () => {
       'Hole',
       'Bore to size',
       'Thread',
+      'Thread a boss (external)',
       'Surface a mesh',
     ]);
     for (const type of OPERATION_TYPES) {

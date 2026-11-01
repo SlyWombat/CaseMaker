@@ -241,6 +241,8 @@ describe('#841 M8×1.25 external on an 8 mm boss', () => {
     expect(findings.filter((f) => f.code === 'thread-boss-missing')).toEqual([]);
     expect(findings.find((f) => f.code === 'thread-boss-unproven')?.severity).toBe('info');
     expect(findings.some((f) => f.code === 'thread-pilot-unproven')).toBe(false);
+    // The thread IS the rod's rim: no "keep it inside the circle" sentence on it.
+    expect(findings.some((f) => f.code === 'item-off-round-stock')).toBe(false);
 
     const g = generate(tl, job, null, [], undefined, { defaults: DEFAULTS });
     expect(g.ok, `${g.stage}: ${JSON.stringify(g.errors)} ${JSON.stringify(g.findings.filter((f) => f.severity === 'error'))}`).toBe(true);
