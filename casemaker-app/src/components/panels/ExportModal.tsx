@@ -333,8 +333,15 @@ function PrintBedRackBlock(): ReactElement | null {
     'rack-side-left': 'left side panel',
     'rack-side-right': 'right side panel',
   };
-  const name = (id: string): string =>
-    PART_NAMES[id] ?? id.replace(/^rack-/, '').replace(/-\d+$/, '').replace(/-/g, ' ');
+  const name = (id: string): string => {
+    // #261 — the U-mount parts say the standard's unit count, as the parts menu does.
+    const rail = /^umount-rail-(left|right)-(\d+)u$/.exec(id);
+    if (rail !== null) return `10″ rail — ${rail[1]!.toUpperCase()}, ${rail[2]}U`;
+    const deck = /^umount-deck-(\d+)u$/.exec(id);
+    if (deck !== null) return `10″ deck, ${deck[1]}U`;
+    if (id === 'umount-blank-1u') return '10″ 1U blank (210 mm body)';
+    return PART_NAMES[id] ?? id.replace(/^rack-/, '').replace(/-\d+$/, '').replace(/-/g, ' ');
+  };
   const ready = offers.filter((o) => o.state === 'available');
   const screws = ready.reduce((n, o) => Math.max(n, o.screws ?? 0), 0);
   const screwLabel = ready[0]?.screwLabel ?? '';

@@ -550,6 +550,27 @@ function describePart(
       id.startsWith('rack-side-') || id === 'rack-top' || id === 'rack-bottom' || isAssembledNodeId(id);
     return { displayName, material: 'rigid', category: structural ? 'case' : 'accessory' };
   }
+  // #261 — THE 10″ U-MOUNT PARTS, named as the standard's. The unit count rides the id
+  // (`umount-rail-left-6u`) because the name has to say it: a 6U rail and a 12U rail are
+  // different parts of the same family, and the export list is where the operator sees which.
+  if (id.startsWith('umount-')) {
+    const rail = /^umount-rail-(left|right)-(\d+)u$/.exec(id);
+    if (rail !== null) {
+      return {
+        displayName: `10″ rail — ${rail[1]!.toUpperCase()}, ${rail[2]}U`,
+        material: 'rigid',
+        category: 'case',
+      };
+    }
+    const deck = /^umount-deck-(\d+)u$/.exec(id);
+    if (deck !== null) {
+      return { displayName: `10″ deck, ${deck[1]}U`, material: 'rigid', category: 'case' };
+    }
+    if (id === 'umount-blank-1u') {
+      return { displayName: '10″ 1U blank (210 mm body)', material: 'rigid', category: 'accessory' };
+    }
+    return { displayName: id.slice('umount-'.length).replace(/-/g, ' '), material: 'rigid', category: 'accessory' };
+  }
   if (id.startsWith('bumper-')) {
     const suffix = id.slice('bumper-'.length);
     return { displayName: `Bumper ${suffix}`, material: 'flex', category: 'accessory' };
