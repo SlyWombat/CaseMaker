@@ -132,7 +132,10 @@ function rotaryFixture(): TemplateFixture {
     kind: 'rotary-module',
     variant: null,
     product: null,
-    constants: { chuck: '3-jaw, reverse jaws' },
+    // C15 (resolved 2026-10-30): the Z1's rotary chuck is a FOUR-jaw self-centring scroll. The
+    // earlier "three-jaw" wording was a slip no Z1 text supports; it is corrected here and pinned
+    // by `bedTemplates514.spec.ts`, so it cannot come back.
+    constants: { chuck: '4-jaw self-centring, reverse jaws' },
     unit: { jawReach: null },
     provenance: { chuck: 'default', jawReach: 'unmeasured' },
   };
@@ -175,6 +178,13 @@ export function templateFixtureFor(kind: AddableFixture): TemplateFixture {
       return clampFixture();
   }
 }
+
+/**
+ * #444's calipers list — what to measure, with the method for each. The templates' "to measure"
+ * lists link here from the wizard and the Machines card (#514), so the operator's next step is a
+ * press, not a hunt. One owner: both readers import this constant.
+ */
+export const CALIPERS_LIST_URL = 'https://github.com/SlyWombat/CaseMaker/issues/444';
 
 export const BED_TEMPLATES: readonly BedTemplate[] = [
   {

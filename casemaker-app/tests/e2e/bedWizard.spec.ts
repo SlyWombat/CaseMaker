@@ -156,6 +156,11 @@ test('#512 — the first-run wizard walks S0 → S6 with every measurement skipp
   await page.getByTestId('bed-wizard-template-default:z1-makera-kit').check();
   await expect(page.getByTestId('bed-wizard-to-measure')).toContainText('surface top');
   await expect(page.getByTestId('bed-wizard-to-measure')).toContainText('bracket seat');
+  // #514 — the list is wired to #444's calipers list: the operator's next step is a press.
+  await expect(page.getByTestId('bed-wizard-to-measure').getByRole('link')).toHaveAttribute(
+    'href',
+    'https://github.com/SlyWombat/CaseMaker/issues/444',
+  );
 
   // The draft resumes: close at S1, reopen, and the same step and template are back.
   await page.getByTestId('bed-wizard-close').click();

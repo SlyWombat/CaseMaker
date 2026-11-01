@@ -22,6 +22,7 @@ import { useState, type JSX } from 'react';
 import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import type { BedProfile, FixtureRecord, MachineRecord } from '@/platform/locationClient';
+import { CALIPERS_LIST_URL } from '@/platform/bedTemplates';
 import { formatDay, mm } from './display';
 import { BedScene } from '@/components/viewport/BedScene';
 import { accessoriesFor, useLocationStore } from '@/store/locationStore';
@@ -46,8 +47,7 @@ import { newId } from '@/utils/id';
 import { openMachineChange } from '@/components/machine-change';
 import { openBedWizard } from '@/store/bedWizardStore';
 
-/** The calipers list the unmeasured count links to (#444). */
-const CALIPERS_LIST_URL = 'https://github.com/SlyWombat/CaseMaker/issues/444';
+/** The calipers list the unmeasured count links to (#444) — the templates module owns the URL. */
 
 /** The surface's one-word kind, for the summary and the per-kind test. */
 function surfaceWords(surface: BedProfile['surface']): string {

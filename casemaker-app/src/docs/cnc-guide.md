@@ -216,6 +216,67 @@ app's own run and Stop use (`run.*`, `stop.*` in `location.json`), as are `tools
 `node tools/z1/z1.mjs defaults` lists them without talking to the machine (#449). The status poll is
 never faster than every 2 s, whatever a default says.
 
+### The bed — profiles, the wizard, and what the findings mean
+
+> **Status: Available** — the bed profiles (#510–#514), the wizard (#512), the bed mounts
+> (#707–#715) and the job findings (#513).
+
+**A bed profile is the machine's bed as it physically is.** Not a drawing: one recorded
+description of the surface (the bare aluminium bed, an MDF wasteboard, a fixture plate, a vacuum
+bed), what is mounted on it (the low-profile vise on its two pins, the L-bracket thin or thick at
+anchor 1 or 2, top clamps, the 4th-axis module — which shares the vise's pins, so only one of the
+two can be fitted at a time), how it holds each class of stock, and the numbers taken with a
+caliper or a probe: the **surface top**, the **jaw top**, the **bracket seat** and the **rotary
+axis**. Every number carries where it came from — `vendor` (the controller's own configuration),
+`default` (this app's choice) or `measured` with the day and the probe — and nothing is shown as
+measured that nobody measured.
+
+**A profile is dated and switched, never silently edited.** "I changed the bed" saves a NEW
+profile with the numbers that depend on the change cleared (a replaced wasteboard loses its
+surface top and its scars; a re-seated vise loses its jaw top), and the old one stays in the
+history with its own numbers. A job records **which profile, and which version of it**, it was
+set up on — so a bed that has moved under a saved job is said out loud rather than re-planned
+behind your back.
+
+**The five beds the app ships**, each a starting point in the wizard:
+
+| Bed | Surface | On it | To measure before the gates stop refusing |
+|---|---|---|---|
+| Makera kit | wasteboard | L-bracket thin at anchor 1, two top clamps | surface top, bracket seat, arm height, clamp sizes |
+| Low-profile vise | bare bed | the vise on its pins | surface top, jaw top, jaw bar height, body height, max opening |
+| Wasteboard with tape | wasteboard | nothing — stock taped down | surface top, board thickness |
+| 4th-axis module | bare bed | the rotary module on its pins | rotary axis, chuck body, jaw reach |
+| Vacuum bed | vacuum bed | nothing | surface top (listed only — the shop does not own one) |
+
+The vise's jaw bar (10 × 100 mm) and its ledge (3.1 / 1.9 mm) are the product's, measured on the
+unit; the bracket's arms (100 × 15 mm) and the anchors' positions are the controller's own
+configuration. Everything else on the list is for the calipers — the list links to the shop's
+[calipers list](https://github.com/SlyWombat/CaseMaker/issues/444) wherever it appears.
+
+**The wizard** (Machines → **Set up the bed…**) asks seven questions: your machine, the bed to
+start from, the surface, what is on the bed, how you hold each class of stock, the consumables,
+and a review with the to-measure list. It is resumable — closing it keeps the answers — and a
+first-run machine offers it before the first job. On the Machines card the bed block then offers
+three actions, none of which ever moves the machine: **Switch** makes another saved profile the
+active one (you physically swapped the bed), **I changed the bed** saves the new dated profile
+described above, and **Measure…** lists the four datums with how to take each.
+
+**The Start line** says what is on the machine now — "On the machine now: Vise on the pins ·
+wasteboard under" — and appends "· not measured yet" while nothing on the bed has been measured.
+That state is stated once, there and on the bed card, rather than as a warning on every job: a
+fresh bed is unmeasured by definition, and a warning that fires on every job is noise.
+
+**What the bed's findings mean** (each has its chapter 8 row): a **`bed-changed`** job was set up
+on a bed that is not the machine's now — a warning in Design, where the two presses sit
+(**Re-plan on the current bed**, or **Switch the bed back**), and an error before a cut, because
+no program is cut against a bed that moved. **`mount-not-on-bed`** says the job's vise or bracket
+is not on the active bed; **`stock-off-surface`** says the blank leaves the board, naming the edge
+and by how much when it knows where the blank sits; **`cut-leaves-board`** says the same for a job
+that cuts THROUGH — the breakthrough goes past the board and into the bed; **`fixture-overlap`**
+says two fixtures are placed on the same locating pins, which is physically impossible; and
+**`surface-top-unmeasured`** says a taped (or unbracketed) job needs the surface top and the
+active bed has not measured it. None of them refuses on a tolerance, and each names the fix.
+
 ---
 
 ## 3 · Ideas you need first

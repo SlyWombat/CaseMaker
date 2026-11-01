@@ -50,6 +50,7 @@ import {
 } from '@/platform/bedWizard';
 import {
   ALL_TEMPLATES,
+  CALIPERS_LIST_URL,
   STANDARD_MOUNTINGS,
   type BedTemplate,
   type MountManner,
@@ -383,7 +384,11 @@ function Wizard({ machineId, onClose }: { machineId: string; onClose: () => void
             ) : null}
             {selected !== null && selected.toMeasure.length > 0 ? (
               <span className="bw-meta" data-testid="bed-wizard-to-measure">
-                to measure later: {selected.toMeasure.join(', ')}
+                to measure later: {selected.toMeasure.join(', ')}{' '}
+                {/* #514 — the list is wired to #444's calipers list: what to measure, and how. */}
+                <a href={CALIPERS_LIST_URL} target="_blank" rel="noreferrer">
+                  ▸ calipers list
+                </a>
               </span>
             ) : null}
           </>
@@ -795,7 +800,12 @@ function Wizard({ machineId, onClose }: { machineId: string; onClose: () => void
                 </span>
                 {tally !== null ? <Tally tally={tally} /> : null}
                 <span className="bw-meta" data-testid="bed-wizard-unmeasured">
-                  to measure later: {toMeasure.length === 0 ? 'nothing' : toMeasure.join(', ')}
+                  to measure later: {toMeasure.length === 0 ? 'nothing' : toMeasure.join(', ')}{' '}
+                  {toMeasure.length > 0 ? (
+                    <a href={CALIPERS_LIST_URL} target="_blank" rel="noreferrer">
+                      ▸ calipers list
+                    </a>
+                  ) : null}
                 </span>
                 {skippedWords !== '' ? (
                   <span className="bw-meta" data-testid="bed-wizard-skipped">
