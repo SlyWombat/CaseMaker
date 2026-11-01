@@ -5208,7 +5208,18 @@ function generateSurfacePrimitiveProgram(
       feeds,
       rapid: mill.rapidEstimate,
       labelId: primitive.id,
-      opts: { stockToLeaveMm: shop.finish?.stockToLeaveMm.value },
+      opts: {
+        stockToLeaveMm: shop.finish?.stockToLeaveMm.value,
+        // #846 — how each roughing level is cleared, decided per job from the
+        // shop's two rough3d numbers and the job's material.
+        roughing: {
+          mode: 'auto',
+          material: job.stock.material,
+          depthRatio: readDefault(shop.defaults ?? null, 'rough3d.adaptiveDepthRatio').value,
+          cellBudget: readDefault(shop.defaults ?? null, 'rough3d.compareCellBudget').value,
+          adaptive: adaptiveSettings(shop.defaults ?? null).settings,
+        },
+      },
     });
   } catch (e) {
     return fail('cam', e instanceof Error ? e.message : String(e), resolved);

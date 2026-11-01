@@ -52,7 +52,11 @@ import {
   type ToolpathIR,
 } from './ir';
 import type { Tool } from '../tool';
-import { cuttingDiameter } from '../tool';
+import { cuttingDiameter, cuttingRadiusForSweep } from '../tool';
+import { adaptiveSettings, type AdaptiveSettings } from './adaptive';
+import { roughingAdaptiveMoves } from './rough3d';
+import { isMetalMaterial } from '../materials';
+import type { StockMaterial } from '@/types/engraveJob';
 
 /**
  * The FLAT grid's default pitch, mm — the LABELLED FALLBACK for the shop's `sim.columnFlatPitchYMm`
@@ -627,9 +631,33 @@ export interface SurfaceFeeds {
   finishStepOver: number;
 }
 
+/**
+ * #846 — HOW THE ROUGH IS CLEARED. Absent → the raster exactly as before (a
+ * legacy plan stays byte-identical). 'auto' measures both roughs when the goal
+ * is small enough to afford it and decides on simulated time and engagement;
+ * above the cell budget it decides by the stated rule and says the comparison
+ * was skipped. The two numbers are the shop's (`rough3d.adaptiveDepthRatio`,
+ * `rough3d.compareCellBudget`).
+ */
+export interface RoughingOptions {
+  mode?: 'auto' | 'raster' | 'adaptive';
+  /** The job's stock material, for the metal half of the rule. */
+  material?: StockMaterial | null;
+  /** Depth (× the cutter's ⌀) from which a goal counts as deep; absent → 1.5. */
+  depthRatio?: number;
+  /** Covered cells above which both roughs are not both planned; absent → 1,000,000. */
+  cellBudget?: number;
+  /** The adaptive planner's shop settings; absent → the shop fallbacks. */
+  adaptive?: AdaptiveSettings;
+  /** The rapid model, for the time comparison. */
+  rapid?: RapidEstimate;
+}
+
 export interface SurfaceOpts {
   /** Roughing allowance left on the goal surface, mm; absent → {@link DEFAULT_STOCK_TO_LEAVE_MM}. */
   stockToLeaveMm?: number;
+  /** #846 — raster or adaptive clearing of each roughing level (see {@link RoughingOptions}). */
+  roughing?: RoughingOptions;
   /** Sampling pitch ALONG a raster line, mm; absent → the heightfield pitch (tightest sim match). */
   alongStepMm?: number;
   /** Inter-pass retract above the stock top, mm; absent → {@link SAFE_Z}. */
@@ -743,6 +771,122 @@ export interface GoalSurfaceFacts {
 }
 
 /**
+ * #846 — the two roughing numbers' LABELLED FALLBACKS (the shop's `rough3d.*`
+ * defaults are the real source; these are what a caller with no location gets).
+ * `DEFAULT_ADAPTIVE_DEPTH_RATIO`: the goal is "deep" at 1.5× the cutter's ⌀.
+ * `DEFAULT_COMPARE_CELL_BUDGET`: below a million covered cells both roughs are
+ * planned and compared on simulated time; above it the rule decides and the
+ * line says the comparison was skipped.
+ */
+export const DEFAULT_ADAPTIVE_DEPTH_RATIO = 1.5;
+export const DEFAULT_COMPARE_CELL_BUDGET = 1_000_000;
+
+interface RoughChoice {
+  kind: 'raster' | 'adaptive';
+  moves: CamMove[];
+  layers: number;
+  /** The one line the run sheet carries: what was chosen and why. Null for a legacy raster. */
+  note: string | null;
+}
+
+const r3n = (n: number): string => String(Math.round(n * 100) / 100);
+
+/**
+ * #846 — CLEAR EACH ROUGHING LEVEL, and say how. The raster is always planned
+ * (it is the fallback and, when measured, half of the comparison); the adaptive
+ * rough is planned when the mode forces it, when the cell budget allows the
+ * comparison, or when the rule says a raster would be the wrong answer.
+ */
+function chooseRough(
+  hf: GoalHeightfield,
+  feeds: SurfaceFeeds,
+  allowance: number,
+  alongStep: number,
+  safeZ: number,
+  hopZ: number,
+  tool: Tool,
+  rapid: RapidEstimate,
+  opts: RoughingOptions | undefined,
+  onLayer: (done: number, total: number) => void,
+): RoughChoice {
+  const raster = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ, onLayer);
+  const mode = opts?.mode ?? 'raster';
+  if (mode === 'raster') return { kind: 'raster', moves: raster.moves, layers: raster.layers, note: null };
+  const flat = cuttingRadiusForSweep(tool);
+  const diameter = flat.ok ? 2 * flat.radius : (cuttingDiameter(tool) ?? 0);
+  const depth = Math.max(0, hf.topZ - hf.minZ);
+  const ratio = diameter > 0 ? depth / diameter : 0;
+  const metal = opts?.material != null && isMetalMaterial(opts.material);
+  const ruleLine = `the goal is ${r3n(ratio)}× the cutter’s ⌀ deep${metal ? ` in ${opts!.material}` : ''}`;
+  const settings = opts?.adaptive ?? adaptiveSettings(null).settings;
+  const runAdaptive = () => roughingAdaptiveMoves(hf, feeds, allowance, { tool, adaptive: settings, safeZ, hopZ, onLayer });
+  const mins = (seconds: number): string => `${(seconds / 60).toFixed(1)} min`;
+  const refusal = (reason: string): RoughChoice => ({
+    kind: 'raster',
+    moves: raster.moves,
+    layers: raster.layers,
+    note: `Adaptive roughing was not possible — ${reason}; the raster runs instead.`,
+  });
+
+  if (mode === 'adaptive') {
+    const a = runAdaptive();
+    if (!a.ok) return refusal(a.reason);
+    return {
+      kind: 'adaptive',
+      moves: a.result.moves,
+      layers: a.result.layers,
+      note: `Adaptive roughing: max engagement ${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap (${ruleLine}).`,
+    };
+  }
+
+  // 'auto' — measure both when the goal is small enough, otherwise decide by rule.
+  const budget = opts?.cellBudget ?? DEFAULT_COMPARE_CELL_BUDGET;
+  const depthRatio = opts?.depthRatio ?? DEFAULT_ADAPTIVE_DEPTH_RATIO;
+  const deep = ratio >= depthRatio;
+  if (hf.coveredCount <= budget) {
+    const a = runAdaptive();
+    if (!a.ok) return refusal(a.reason);
+    const tRaster = estimateCycleSeconds(raster.moves, rapid);
+    const tAdaptive = estimateCycleSeconds(a.result.moves, rapid);
+    // The rule (deep or metal) prefers the capped engagement; on a shallow
+    // woody goal the measured time decides.
+    const byRule = deep || metal;
+    const adaptive = byRule || tAdaptive < tRaster;
+    return {
+      kind: adaptive ? 'adaptive' : 'raster',
+      moves: adaptive ? a.result.moves : raster.moves,
+      layers: adaptive ? a.result.layers : raster.layers,
+      note:
+        `${adaptive ? 'Adaptive' : 'Raster'} roughing chosen: ${mins(adaptive ? tAdaptive : tRaster)} vs the ` +
+        `${adaptive ? 'raster’s' : 'adaptive'} ${mins(adaptive ? tRaster : tAdaptive)}` +
+        `${adaptive ? `, max engagement ${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap` : ''} ` +
+        `(${ruleLine}; ${byRule ? 'the depth and material rule prefers the capped engagement' : 'the shorter simulated time wins'}; both were measured at ${hf.coveredCount.toLocaleString('en')} covered cells).`,
+    };
+  }
+  if (deep || metal) {
+    const a = runAdaptive();
+    if (!a.ok) return refusal(a.reason);
+    return {
+      kind: 'adaptive',
+      moves: a.result.moves,
+      layers: a.result.layers,
+      note:
+        `Adaptive roughing chosen by rule: ${ruleLine} (rough3d.adaptiveDepthRatio ${depthRatio}×), max engagement ` +
+        `${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap; the comparison was skipped above ` +
+        `${budget.toLocaleString('en')} cells (rough3d.compareCellBudget).`,
+    };
+  }
+  return {
+    kind: 'raster',
+    moves: raster.moves,
+    layers: raster.layers,
+    note:
+      `Raster roughing chosen by rule: ${ruleLine} (rough3d.adaptiveDepthRatio ${depthRatio}×); the comparison was ` +
+      `skipped above ${budget.toLocaleString('en')} cells (rough3d.compareCellBudget).`,
+  };
+}
+
+/**
  * Generate the roughing + finishing surfacing IR for a goal heightfield (stage 2).
  *
  * The two operations share one machine state, so they post as one program. Roughing is operation
@@ -769,9 +913,21 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     );
   }
 
-  const rough = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ, (done, total) =>
-    opts.onProgress?.({ pass: 'rough', done, total }),
+  // #846 — the raster stays the default (a plan without `roughing` is unchanged);
+  // 'auto' chooses per job and STATES the choice in one line.
+  const rough = chooseRough(
+    hf,
+    feeds,
+    allowance,
+    alongStep,
+    safeZ,
+    hopZ,
+    args.toolObj,
+    args.rapid,
+    opts.roughing,
+    (done, total) => opts.onProgress?.({ pass: 'rough', done, total }),
   );
+  if (rough.note !== null) notes.push(rough.note);
   const roughMoves = rough.moves;
   // #671 — ONE tip field, four passes: the finishing raster, the scallop contours and the pencil
   // paths all ride the same gouge-safe drop, so no pass can promise a depth another one refuses.
@@ -783,7 +939,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
   const depth = Math.max(0, hf.topZ - hf.minZ);
   const roughing: CamOperation = {
     number: 1,
-    name: `[T${args.toolNumber}] 3D rough — ${allowance} mm to leave`,
+    name: `[T${args.toolNumber}] 3D rough${rough.kind === 'adaptive' ? ' (adaptive)' : ''} — ${allowance} mm to leave`,
     labelId: args.labelId,
     depth,
     passKind: 'rough',
