@@ -133,7 +133,8 @@ describe('the holding write (#240 §2)', () => {
     const job = useEngraveJobStore.getState().job;
     expect(job.workholding).toEqual({ kind: 'rotary-chuck', rotary: defaultRotaryChuck(standingRod()) });
     // LENGTH along X, the diameter across Y and Z — the frame every rotary Z is written in (R6).
-    expect(job.stock).toEqual({ length: 30, width: 10, thickness: 10, material: 'softwood', shape: 'cylinder', diameter: 10 });
+    // #879 — the rod is the default job's blank turned, so its material follows the default.
+    expect(job.stock).toEqual({ length: 30, width: 10, thickness: 10, material: 'hardwood', shape: 'cylinder', diameter: 10 });
     const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
     expect(parsed.ok).toBe(true);
     if (parsed.ok) expect(parsed.job).toEqual(job);
@@ -146,7 +147,7 @@ describe('the holding write (#240 §2)', () => {
 
     const job = useEngraveJobStore.getState().job;
     expect(job.workholding).toEqual({ kind: 'vise', vise: VISE });
-    expect(job.stock).toEqual({ length: 10, width: 10, thickness: 30, material: 'softwood' });
+    expect(job.stock).toEqual({ length: 10, width: 10, thickness: 30, material: 'hardwood' });
     expect('shape' in job.stock).toBe(false);
     expect('diameter' in job.stock).toBe(false);
     expect(job.sacrificial).toEqual(NONE);

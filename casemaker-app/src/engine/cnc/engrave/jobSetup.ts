@@ -13,6 +13,7 @@ import {
   type Tool,
 } from '@/engine/cnc/tool';
 import { jobVise, LEDGE_WIDTH, viseEnvelope } from '@/engine/cnc/fixture';
+import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { blankDepthCeiling } from '@/engine/cnc/engrave/depthBounds';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
@@ -406,6 +407,9 @@ export type JobFindingCode =
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
   // measures from the faced surface.
   | 'facing-too-deep'
+  // #879 — a printed-plastic blank (PLA or PETG) carries ONE info line saying it softens from
+  // cutting heat, with the ways to keep it cool. A fact, never a refusal, and never per program.
+  | 'printed-plastic-melts'
   // #473 — a material facingRefusal refuses is never faced (#474/#493). The worker refuses a job
   // that still carries the pass before any program is posted, because the engraving file's Z0 is
   // the faced top. `facing-plastic` is the class: every non-wood, non-metal material.
@@ -1696,6 +1700,20 @@ export function validateJob(
   // nothing, and an enabled one must name a rim the job really cuts.
   const enabledChamfers = (job.chamfers ?? []).filter((c) => c.enabled);
   const { thickness } = job.stock;
+
+  // #879 — PRINTED PLASTIC MELTS, AND THE JOB SAYS SO ONCE. The app's flagship material is
+  // hardwood now; PLA and PETG are still offered because they are sometimes what the person has in
+  // front of them (a badge import is printed PLA by definition). The line is a FACT, not a refusal:
+  // it appears once on the job — not once per program — and nothing stops the cut.
+  if (job.stock.material === 'pla' || job.stock.material === 'petg') {
+    findings.push({
+      severity: 'info',
+      code: 'printed-plastic-melts',
+      message:
+        `${MATERIAL_LABELS[job.stock.material]} softens from cutting heat. Use light step-downs, a sharp ` +
+        'single-flute cutter and air blast, and keep the cutter moving rather than dwelling in one place.',
+    });
+  }
 
   // #432 — the facing skim is material the items no longer have under them. Every item's depth is
   // measured from the FACED top (that is the frame the document is written in), so the floor an

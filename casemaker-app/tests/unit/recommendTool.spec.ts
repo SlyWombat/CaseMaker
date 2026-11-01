@@ -174,12 +174,12 @@ describe('recommendTool (#211)', () => {
     // The built-in metal cutter's id, with a spindle speed far past the Z1's ceiling: the number is
     // passed over field by field (`feedsFor`), so this candidate is NOT excluded.
     const cutter = tool('t', 1.0, { id: '112111313812' });
-    // The default job is softwood, and the row is a Softwood row — the catalogue LISTS this cutter
-    // for the job's material (#455 asks that question before feeds). The absurd RPM is what this
-    // case is about; the material only has to be one the catalogue-and-mapping rule accepts.
+    // The default job is hardwood (#879), and the row is a Hardwood row — the catalogue LISTS this
+    // cutter for the job's material (#455 asks that question before feeds). The absurd RPM is what
+    // this case is about; the material only has to be one the catalogue-and-mapping rule accepts.
     const absurd: FeedCatalogueRow = {
       cutterId: '112111313812',
-      material: 'Softwood',
+      material: 'Hardwood',
       rpm: 24000,
       feed: 500,
       plungeFeed: 200,

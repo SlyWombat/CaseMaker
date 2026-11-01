@@ -34,6 +34,14 @@
   ],
   "diagnostics": [
     {
+      "code": "printed-plastic-melts",
+      "guideRow": "printed-plastic-melts",
+      "severity": "info",
+      "message": "PLA softens from cutting heat. Use light step-downs, a sharp single-flute cutter and air blast, and keep the cutter moving rather than dwelling in one place.",
+      "source": "findings",
+      "program": "single barrel"
+    },
+    {
       "code": "trace-self-overlap",
       "guideRow": "trace-self-overlap",
       "severity": "warning",

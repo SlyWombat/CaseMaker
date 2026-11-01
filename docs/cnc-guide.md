@@ -2,8 +2,10 @@
 
 This is the user guide for Case Maker's CNC work, written for someone who owns a
 **Makera Z1** and has never driven a CNC before. It covers the whole workflow: simulating
-a G-code file, and engraving text into a printed PLA blank held in the vise — the two-colour
-badge is the first job. Chapter 5 says which parts of the job are in the app today.
+a G-code file, and carving a **hardwood name plate** held in the vise — the app's default job
+is that plate, three words engraved to different depths. A printed blank is still something you
+can cut (the two-colour badge is the guide's own example), and §6 says what a printed material
+asks of the cut. Chapter 5 says which parts of the job are in the app today.
 
 Two things to hold on to before you read on:
 
@@ -47,9 +49,10 @@ if a sentence says "will", it is not shipping yet. Everything is in millimetres.
 
 **What it is.** Case Maker can do two CNC things for a Makera Z1: **simulate** a G-code file
 you already have (so you can see what it cuts before risking a blank), and **write** a cutting
-job — the default is a job for a printed PLA blank, the two-colour badge, held
-in the vise. The job is one document, and it writes up to four files: the program, its frame
-file, a facing file when the job has one, and a run record (§5, step 8). The **desktop** build
+job — the default is a hardwood name plate held in the vise, and a printed blank such as the
+two-colour badge is a different job of your own. The job is one document, and it writes up to
+four files: the program, its frame file, its facing file when the job has one, and a run
+record (§5, step 8). The **desktop** build
 can upload and play them from the Cut panel — one program, or a whole multi-program list
 through the release step (§5, step 9).
 
@@ -498,10 +501,10 @@ flat cutter and press Simulate again.
 > it appears: #208's day-1 runbook, #176's Z-chain and auto-level measurement, and this issue's own
 > remaining facing and registration questions (#432).
 
-This is a walkthrough of the default job, start to finish: a printed two-colour PLA blank in
-the vise, with words engraved to different depths. It is written in the order the app asks the
-questions, because that is the order the answer is needed in — and every answer is also a
-section of the **same job document**, so a job can be put down and picked up at any point.
+This is a walkthrough of the default job, start to finish: a **hardwood blank** in the vise,
+with the name plate's three words engraved to different depths. It is written in the order the
+app asks the questions, because that is the order the answer is needed in — and every answer is
+also a section of the **same job document**, so a job can be put down and picked up at any point.
 
 A **new job starts with one question — what are you cutting?** — and the operation types are its
 answer: **Engrave** (text or single-stroke lines), **V-carve**, **Pocket**, **Profile**,
@@ -1282,6 +1285,28 @@ is 0.2 mm — colour split 0.8 mm plus the 0.2 mm house margin below, the magnet
 the CUT is not the fix (#176): the colour line is a plane under the dome, so levelling the surface
 would tilt the floor through it.
 
+### Cutting printed plastic
+
+> **Status: Available** — a statement of fact, shown once on a PLA or PETG job.
+
+A printed part is cut for a different reason from a wooden one — a badge is printed so it can be
+engraved, not bought as a blank — and the material behaves differently under the cutter. **PLA
+softens from cutting heat.** A warm chip welds itself back onto the cut, so the same feed that
+leaves a clean groove in hardwood can leave a smear of re-melted plastic on a printed part.
+
+Cut it light:
+
+- **A shallow step-down.** The cutter spends less time in contact and makes less heat per pass.
+- **A sharp, single-flute cutter.** One flute clears its chip on every turn instead of packing the
+  chips back into the groove.
+- **Air blast on**, so the chip leaves the cut rather than sitting in it and re-melting.
+- **Keep the cutter moving.** A dwell — a plunge left standing, a path that stops and restarts in
+  the same spot — is where a printed material burns or welds.
+
+The app says this once on a job whose blank is PLA or PETG, and does not stop the cut. The same
+materials also carry print error in their thickness, which is what the measurement steps above
+handle: a printed top is measured, not assumed.
+
 ---
 
 ## 7 · Your cutters — the house (CNC-6)
@@ -1581,6 +1606,7 @@ simulation does report about one is the sweep's own list, next:
 |---|---|---|---|
 | `depth-exceeds-stock` | warning | An item cuts deeper than the job's PREFERRED floor — the floor left under it is below the minimum, or it breaks through the blank when it already has (#786 slice 1). The sentence states the floor left, or the breakthrough, with numbers; on a rotary job the floor is a RADIUS above the axis, so the limit is the rod's radius — or a tube's wall, whichever is smaller — less the minimum floor, not the stock's thickness (#724). Generate cuts it as it is; the physical limit is the blank's bottom, and the board, fixture and sweep checks judge contact beneath. | Make it shallower, use thicker stock, or on a tube a thicker wall. |
 | `facing-too-deep` | warning | The job asks to face its stock's top, and the depth asked leaves less than the preferred minimum floor under the skim (#786 slice 1). The sentence states the floor left; Generate cuts the skim as it is. Facing also LOWERS every item's own floor, because it is measured from the faced surface — those items get their own `depth-exceeds-stock` warning. | Ask for a lighter skim, or use thicker stock. |
+| `printed-plastic-melts` | info | The blank is PLA or PETG, which softens from cutting heat: a warm chip can weld back into the cut. One line on the job says so and names the ways to keep it cool; it is a fact, not a refusal, and it does not repeat per program. | Use a shallow step-down, a sharp single-flute cutter and air blast, and keep the cutter moving rather than dwelling. The material is still fine to cut. |
 | `facing-plastic` | error | The job asks for a facing pass on a material that cannot take one — every non-wood, non-metal material, i.e. any plastic (PLA, PETG, ABS, acrylic and the rest), not only a printed blank (#474). A flat cutter smears a plastic top instead of cutting it, so no finish, depth or cutter choice makes the pass work. The job is refused before any program is written: every later program is posted from the top a skim would leave, and there will be no such top. | Turn facing off in the Cut panel and generate again. |
 | `item-off-round-stock` | warning | A cut's swept extent reaches outside the round face of a disc or a rod (#683, #786 slice 1 part 2). The job plans in the square around the round stock, and that square's corners are air: the sentence states how far past the face the cut reaches, and Generate cuts it as it is. The face is the circle of the stock's diameter, less the job's edge margin. | Move the cut inside the circle to cut the whole part, or start from square stock when a cut needs the corners. |
 | `item-off-board` | warning | A board's hole lies outside the outline its cut-out follows (#743): the sentence states how many holes and names the items, and the part off the board cuts air. The outline is read from the document (a vector, polygon, rectangle or circle); a reference-following outline is left to its own checks, and the check then says nothing. | Check the drill file's placement against the outline file, or widen the outline. |

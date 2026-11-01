@@ -253,9 +253,10 @@ function aroundLine(form: JobStockForm, dims: DimState): string | null {
 }
 
 /**
- * The house's material, as the step opens (#683, A4). A fresh profile must not open on the shipped
- * demo's softwood: the house's own material is PLA, and this house cuts a printed blank. A job the
- * person has actually made states the house's last material; the untouched demo does not.
+ * The house's material, as the step opens (#683, A4). A fresh profile must not open on some
+ * other shop's last choice: the house's own material is hardwood — the app's flagship blank is a
+ * hardwood name plate and cutting printed plastic is not where a person starts. A job the person
+ * has actually made states the house's last material; the untouched demo does not.
  */
 function houseMaterial(
   options: readonly { value: StockMaterial }[],
@@ -267,8 +268,8 @@ function houseMaterial(
   const shipped = defaultEngraveJob();
   const untouchedDemo = isShippedDemoLabelSet(job) && job.material === shipped.stock.material;
   if (!untouchedDemo && offered(job.material)) return job.material;
-  if (offered('pla')) return 'pla';
-  return options[0]?.value ?? 'softwood';
+  if (offered('hardwood')) return 'hardwood';
+  return options[0]?.value ?? shipped.stock.material;
 }
 
 interface MaterialGroup {

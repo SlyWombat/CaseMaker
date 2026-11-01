@@ -478,9 +478,10 @@ describe('the material-first start (#418)', () => {
   it("the material is grouped three ways, this house's own first (#683, A4, A5)", async () => {
     fakeShelf(SHELF);
     await toStockStep();
-    // A fresh house is PLA — never the shipped demo's softwood.
+    // #879 — A FRESH HOUSE IS HARDWOOD: the app's flagship blank is a hardwood name plate, and
+    // printed plastic (PLA/PETG) is a choice a job makes, with its cutting-heat line said once.
     const select = screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement;
-    expect(select.value).toBe('pla');
+    expect(select.value).toBe('hardwood');
     const groups = Array.from(select.querySelectorAll('optgroup'));
     expect(groups.map((g) => g.label)).toEqual(['Plastics', 'Woods', 'Metals', 'Circuit board']);
     const plastics = Array.from(groups[0]!.querySelectorAll('option')).map((o) => o.value);

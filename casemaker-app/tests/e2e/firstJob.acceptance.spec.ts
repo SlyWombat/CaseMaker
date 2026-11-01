@@ -226,6 +226,10 @@ test.describe('first job acceptance (§6)', () => {
     await page.getByTestId('start-wizard-make-length').fill('76.2');
     await page.getByTestId('start-wizard-make-width').fill('38.1');
     await page.getByTestId('start-wizard-make-thickness').fill('3.81');
+    // #879 — THE WALK PICKS ITS MATERIAL. The wizard offers hardwood first now (the app's
+    // flagship blank); this walk is about a PRINTED blank — a 3.81 mm badge-sized print — so it
+    // chooses PLA itself, and the Facing check below is about that material, not the default.
+    await page.getByTestId('start-wizard-stock-material').selectOption('pla');
     await expect(page.getByTestId('start-wizard-stock-next')).toBeEnabled();
     await capture(page, 'wizard-2-stock');
     await tap(page, 'start-wizard-stock-next');

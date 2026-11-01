@@ -175,7 +175,7 @@ describe('runSheet (#207)', () => {
     const job = dj();
     const sheet = sheetFor(job);
     const all = JSON.stringify(sheet);
-    expect(all).toContain('100 × 60 × 12 mm softwood');
+    expect(all).toContain('100 × 60 × 12 mm hardwood');
     expect(all).toContain('2 mm deep');
     expect(all).toContain('1 mm deep');
     expect(all).toContain('0.5 mm deep');
@@ -186,9 +186,10 @@ describe('runSheet (#207)', () => {
     expect(feeds.ok).toBe(true);
     if (feeds.ok) {
       expect(all).toContain(`${feeds.params.rpm} RPM`);
-      expect(all).toContain('500 mm/min feed');
-      expect(all).toContain('200 mm/min plunge');
-      // The 1 mm cutter takes the 0.8–1.6 mm softwood row, whose step-down is 0.5 mm.
+      // #879 — the numbers are the RESOLVED row's, not a material's literals: the default blank is
+      // hardwood now, and its 0.8–1.6 mm row (400 / 150 / 0.3) is what the sheet prints.
+      expect(all).toContain(`${feeds.params.feed} mm/min feed`);
+      expect(all).toContain(`${feeds.params.plungeFeed} mm/min plunge`);
       expect(all).toContain(`2 × ${feeds.params.stepDown} mm passes`);
       expect(all).toContain(`${feeds.params.stepOver} mm step-over`);
     }

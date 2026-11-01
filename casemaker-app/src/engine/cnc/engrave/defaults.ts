@@ -123,7 +123,10 @@ export function defaultEngraveJob(
       length: 100, // X — a common hobby blank, fits the Z1's 200 mm X with vise room.
       width: 60, // Y
       thickness: 12, // Z
-      material: 'softwood',
+      // #879 — THE FLAGSHIP IS HARDWOOD. This blank is a hardwood name plate cut with the three
+      // labels below: the app's default job is what a person makes first, and cutting printed
+      // plastic is not that (it softens from cutting heat — the job says so when one is chosen).
+      material: 'hardwood',
     },
     labels: [
       {

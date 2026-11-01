@@ -677,7 +677,7 @@ describe('EngravePanel — the clamp notice (#317)', () => {
   const VENDOR_ID = '112111313812';
   const ROW: FeedCatalogueRow = {
     cutterId: VENDOR_ID,
-    material: 'Softwood', // the default job's stock, through the vendor's own word
+    material: 'Hardwood', // the default job's stock, through the vendor's own word
     rpm: 15000,
     feed: 900,
     plungeFeed: 300,
@@ -688,7 +688,7 @@ describe('EngravePanel — the clamp notice (#317)', () => {
   const renderWithCatalogueCutter = (): void => {
     render(<EngravePanel />);
     // #407 — the only built-in row carrying this vendor id is the `(Metal)` one, and on the
-    // default softwood blank the worker refuses the pair (`tool-metal-line`). The clamp notice is
+    // default hardwood blank the worker refuses the pair (`tool-metal-line`). The clamp notice is
     // about the feed row, not the line; the panel's no-worker fallback does not run
     // `engraveRegions`, so the refusal is not rendered here — it is pinned in
     // `engravePreview.spec.ts` and `engraveGenerate.spec.ts`.

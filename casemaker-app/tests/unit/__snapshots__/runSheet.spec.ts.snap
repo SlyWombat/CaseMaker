@@ -109,7 +109,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "steps": [
         {
           "text": "The blank. Measure it. If it differs by more than 0.5 mm in any dimension, change the job and regenerate — do not run this file.",
-          "value": "100 × 60 × 12 mm softwood",
+          "value": "100 × 60 × 12 mm hardwood",
         },
         {
           "text": "The cutter — ⌀ 1 mm flat end.",
@@ -265,7 +265,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "steps": [
         {
           "text": "Spindle, feed, plunge, passes and step-down. Vacuum on.",
-          "value": "12000 RPM · 500 mm/min feed · 200 mm/min plunge · 2 × 0.5 mm passes · 0.45 mm step-over",
+          "value": "12000 RPM · 400 mm/min feed · 150 mm/min plunge · 2 × 0.3 mm passes · 0.45 mm step-over",
         },
         {
           "text": "Engrave "CASE"",
@@ -431,7 +431,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "steps": [
         {
           "text": "The blank. Measure it. If it differs by more than 0.5 mm in any dimension, change the job and regenerate — do not run this file.",
-          "value": "100 × 60 × 12 mm softwood",
+          "value": "100 × 60 × 12 mm hardwood",
         },
         {
           "text": "The cutter — ⌀ 1 mm flat end.",
@@ -579,7 +579,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "steps": [
         {
           "text": "Spindle, feed, plunge, passes and step-down. Vacuum on.",
-          "value": "12000 RPM · 500 mm/min feed · 200 mm/min plunge · 2 × 0.5 mm passes · 0.45 mm step-over",
+          "value": "12000 RPM · 400 mm/min feed · 150 mm/min plunge · 2 × 0.3 mm passes · 0.45 mm step-over",
         },
         {
           "text": "Engrave "CASE"",

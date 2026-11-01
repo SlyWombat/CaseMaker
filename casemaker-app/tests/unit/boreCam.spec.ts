@@ -52,7 +52,22 @@ const PARAMS = { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.5, stepOver
 /** A job whose only work is the given drills, on the default 100 × 60 × 12 softwood blank. */
 function boreJob(drills: EngraveDrill[], cutOverride?: EngraveJob['cutOverride']): EngraveJob {
   const base = defaultEngraveJob();
-  return { ...base, labels: [], shapes: [], traces: [], toolKey: TOOL_KEY, tool: DRILL_TOOL, drills, cutOverride };
+  // #879 — THE MATERIAL IS PART OF THE PITCH QUESTION, SO THE FIXTURE STATES IT. The default blank
+  // is hardwood now, whose 1.6–3.2 mm row steps down 0.6 mm a turn — below the 2° ramp's 0.75, so
+  // the STEP-DOWN would bind on the ⌀10 bore. These tests were written against the softwood row
+  // (1.0 mm a turn, above the ramp), which is the case where the ramp binds; pin it rather than
+  // hang the arithmetic on whatever the shipped default happens to be.
+  return {
+    ...base,
+    labels: [],
+    shapes: [],
+    traces: [],
+    stock: { ...base.stock, material: 'softwood' },
+    toolKey: TOOL_KEY,
+    tool: DRILL_TOOL,
+    drills,
+    cutOverride,
+  };
 }
 
 /** A bore at (50, 30): a ⌀`diameter` hole, `depth` deep, cut by the 3.175 mm cutter. */

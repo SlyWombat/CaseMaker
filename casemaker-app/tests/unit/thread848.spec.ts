@@ -230,11 +230,14 @@ describe('#848 existing thread outputs are byte-identical', () => {
   const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 
   // sha256 of the posted programs, computed on main at 376589b0 before #848.
+  // #879 — THE FIXTURE PINS ITS MATERIAL. These bytes were taken on a softwood blank; since #879
+  // the shipped default is hardwood, whose feeds row steps down and feeds differently. The pin is
+  // about the THREAD code being unchanged, so the material it was computed on is stated here.
   it('the #841 M8 rod and the #786 4c thread-plus-pocket split post the same bytes', () => {
     const b = defaultEngraveJob();
     const rod: EngraveJob = {
       ...b,
-      stock: { ...b.stock, length: 8, width: 8, thickness: 20, shape: 'cylinder', diameter: 8 },
+      stock: { ...b.stock, length: 8, width: 8, thickness: 20, shape: 'cylinder', diameter: 8, material: 'softwood' },
       workholding: b.workholding.kind === 'vise' ? { ...b.workholding, vise: { ...b.workholding.vise, stockProud: 12 } } : b.workholding,
       labels: [],
       shapes: [],
@@ -251,7 +254,7 @@ describe('#848 existing thread outputs are byte-identical', () => {
     // A thread mill beside a pocket that raises no boss keeps the named mill FIRST (#786 4c).
     const pocketJob: EngraveJob = {
       ...b,
-      stock: { ...b.stock, length: 60, width: 40, thickness: 20 },
+      stock: { ...b.stock, length: 60, width: 40, thickness: 20, material: 'softwood' },
       labels: [],
       traces: [],
       drills: [],
