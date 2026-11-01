@@ -384,6 +384,32 @@ function postRotary(
  * an error (#828). The manual dialect keeps its machine-frame `G53` lift (#384), which is the
  * answer to a different problem: a head the operator left anywhere.
  */
+/**
+ * #889 — lines gathered into joined chunks of {@link LineChunks.SIZE}, so a long program is held as
+ * a few hundred strings rather than one per line. `text()` is exactly `lines.join('\n')`.
+ */
+class LineChunks {
+  static readonly SIZE = 8192;
+  private readonly chunks: string[] = [];
+  private lines: string[] = [];
+  push(...lines: string[]): void {
+    for (const line of lines) {
+      this.lines.push(line);
+      if (this.lines.length >= LineChunks.SIZE) {
+        this.chunks.push(this.lines.join('\n'));
+        this.lines = [];
+      }
+    }
+  }
+  text(): string {
+    if (this.lines.length > 0) {
+      this.chunks.push(this.lines.join('\n'));
+      this.lines = [];
+    }
+    return this.chunks.join('\n');
+  }
+}
+
 export function postZ1(
   ir: ToolpathIR,
   ctx: PostContext,
@@ -533,7 +559,11 @@ export function postZ1(
   ];
 
   // ---- The body.
-  const body: string[] = ['G90 G21'];
+  // #889 — the body is joined in CHUNKS as it is written, never held as one string per line: a
+  // goal program of millions of lines held that way cost several times the text itself, and the
+  // worker ran out of memory posting it. The text is byte-identical either way.
+  const body = new LineChunks();
+  body.push('G90 G21');
 
   // Sticky modal state: the FORMATTED last-emitted axis words and feed. `null` means "not
   // established in this operation", which forces the next move to re-state the axis.
@@ -647,7 +677,7 @@ export function postZ1(
   // and without it. `thumbnailBlock` owns the format, the cap and the PNG check; a null answer
   // writes no block (a picture must never fail the program), and the block's three comment lines
   // are inert to the parser, the timeline and the verifier.
-  let text = [...header, '', ...body].join('\n') + '\n';
+  let text = `${header.join('\n')}\n\n${body.text()}\n`;
   if (opts.thumbnail !== undefined && opts.thumbnail !== null) {
     const block = thumbnailBlock(opts.thumbnail);
     if (block !== null) text += block;
