@@ -43,6 +43,12 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { useToolRegistryStore, type HouseStatus } from '@/store/toolRegistryStore';
 import { useManageModeStore } from '@/store/manageModeStore';
 import { useMachineStore } from '@/store/machineStore';
+import { machineRecordByProfile, useLocationStore } from '@/store/locationStore';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { planRegistration } from '@/engine/cnc/registration/plan';
+import { registrationSettings } from '@/engine/cnc/registration/settings';
+import { probeFor } from '@/engine/cnc/registration/mountContext';
+import { machineSize, materializeSetups, planFromSetups, setupsSettings } from '@/engine/cnc/setups';
 import type { MachineObservation } from '@/platform/machineProbe';
 import { releaseFileName } from '@/engine/cnc/engrave/release';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
@@ -200,6 +206,13 @@ export interface CaseMakerTestApi {
    * uses; testing surface only, no app code calls it.
    */
   machineRunPrepare(host: string, port: number, filename: string, nc: string): boolean;
+  /**
+   * #827 e2e — SEED THE REGISTER STEP'S CENTRE PANEL: a measured 3D probe checked out to the Z1's
+   * location record, and the open job's first setup planned through the app's OWN setup planner
+   * with an approved tape registration plan attached. Returns the plan's estimate (work XY) so a
+   * spec can hand the fake machine the same feature centre.
+   */
+  centrePanelSeed(host: string, port: number): { x: number; y: number } | { reason: string } | null;
   getEngraveRunState(): {
     phase: string;
     stale: boolean;
@@ -528,6 +541,63 @@ export function installCaseMakerTestApi(): void {
     },
     machineRunPrepare(host, port, filename, nc) {
       return useMachineRunStore.getState().prepare({ host, port }, filename, programHash(nc), { nc });
+    },
+    centrePanelSeed(host, port) {
+      void host;
+      void port;
+      const probe = {
+        id: 'fx-probe-3d',
+        kind: 'probe',
+        product: 'Makera 3D Probe',
+        variant: '3d',
+        unit: { tipDiameterMm: 2, rimOffsetMm: 0.875, rimOffsetUncertaintyMm: 0.01 },
+        whereabouts: { kind: 'machine', machineId: 'e2e-machine' },
+        provenance: {},
+      };
+      const machine = {
+        id: 'e2e-machine',
+        name: 'QA Z1',
+        profileId: 'Z1',
+        // The registration step resolves the record by the ADDRESS the check reached (`machineAt`).
+        address: { host: '192.0.2.10', port: 2222 },
+        whereabouts: { kind: 'bench' },
+        unit: {},
+        provenance: {},
+      };
+      useLocationStore.setState({
+        status: 'ready',
+        location: { machines: [machine], accessories: [probe], stock: [], tools: [] } as never,
+        etag: '"e2e"',
+      } as never);
+      const job = useEngraveJobStore.getState().job;
+      const defaults = useShopDefaultsStore.getState().defaults;
+      // Two of the app's own forms: the PLANNER's setup (rotation + stock states, for the stock's
+      // size as mounted) and the document's JobSetup (the full shape the Setups section writes).
+      const rich = planFromSetups(job, setupsSettings(useShopDefaultsStore.getState().defaults), undefined).setups[0];
+      const setups = materializeSetups(job);
+      const first = setups[0];
+      if (rich === undefined || first === undefined) return { reason: 'the open job has no setup to plan against' };
+      const dims = machineSize(rich.rotation, rich.stockBefore.bounds);
+      const probeSpec = probeFor(machineRecordByProfile('Z1'));
+      const made = planRegistration(
+        {
+          stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: 0 },
+          mount: 'tape',
+          expectedSurface: { machineZ: -8, from: 'the e2e fixture' },
+          seekFromMachineZ: -3,
+          stockThicknessMm: dims.z,
+          probe: probeSpec,
+        },
+        registrationSettings(defaults, probeSpec).settings,
+      );
+      if (!made.ok) return { reason: made.reason };
+      useEngraveJobStore.setState((state) => ({
+        job: {
+          ...state.job,
+          setups: [{ ...first, registration: { method: 'tape', plan: made.plan, expected: 'the e2e fixture' } }, ...setups.slice(1)],
+        },
+      }));
+      return { x: made.plan.surfacePoint.x, y: made.plan.surfacePoint.y };
     },
     getEngraveRunState() {
       const r = useEngraveRunStore.getState();

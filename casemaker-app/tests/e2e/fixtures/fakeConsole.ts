@@ -74,6 +74,16 @@ function framesIn(buffer: number[]): { type: number; text: string }[] {
   return out;
 }
 
+/** #827 — a round feature the fake can be probed against (a bore or a boss). */
+export interface FakeFeature {
+  kind: 'bore' | 'boss';
+  radiusMm: number;
+  /** The feature's centre, in the SAME frame the app's moves are sent in (G54 assumed 0). */
+  centre: { x: number; y: number };
+  /** The face's machine Z (the top touch reads it). */
+  topZ: number;
+}
+
 export interface FakeConsoleOptions {
   /** Status polls from `play` to 100 %. Smaller finishes faster. Default 12. */
   steps?: number;
@@ -92,6 +102,8 @@ export interface FakeConsole {
   lines(): string[];
   /** #826 — the `diagnose` answer from now on; a spec flips it to prove the monitor follows changes. */
   setDiagnose(line: string): void;
+  /** #827 — the round feature the probe touches from now on (a spec seeds it after the app starts). */
+  setFeature(feature: FakeFeature): void;
 }
 
 /**
@@ -108,6 +120,15 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   let line = 0;
   let elapsed = 0;
   let diagnoseLine = DIAGNOSE_IDLE;
+  // #827 — the round feature the centre routine is run against; null until a spec seeds it.
+  let feature: FakeFeature | null = null;
+  const pos = { x: 0, y: 0, z: -3 };
+  let mode: 'G90' | 'G91' = 'G90';
+  const dist = (x: number, y: number): number =>
+    feature === null ? Number.POSITIVE_INFINITY : Math.hypot(x - feature.centre.x, y - feature.centre.y);
+  const trigger = (): number => (feature === null ? 0 : feature.kind === 'bore' ? feature.radiusMm - 0.875 : feature.radiusMm + 0.875);
+  const materialAt = (x: number, y: number): boolean =>
+    feature === null ? false : feature.kind === 'bore' ? dist(x, y) > feature.radiusMm : dist(x, y) <= feature.radiusMm;
 
   const statusLine = (): string => {
     if (phase === 'running') {
@@ -126,6 +147,68 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
     if (lineText === '?') return frame(PTYPE_REPLY, `${statusLine()}\r\n`);
     // #826 — the diagnostic read the heartbeat sends alongside `?`.
     if (lineText === 'diagnose') return frame(PTYPE_REPLY, `${diagnoseLine}\r\n`);
+    // #827 — the probe session's lines, against the seeded feature.
+    if (lineText === 'M119') return frame(PTYPE_REPLY, 'X_max:0 Y_max:0 Z_max:0 Probe: 0\r\n');
+    if (lineText === 'M491') return frame(PTYPE_REPLY, '[PRB:0,0,-80.000:1]\r\nok\r\n');
+    if (lineText === 'G90' || lineText === 'G91') {
+      mode = lineText;
+      return frame(PTYPE_REPLY, 'ok\r\n');
+    }
+    let m = /^G53 G0 Z(-?[\d.]+)$/.exec(lineText);
+    if (m) {
+      pos.z = Number(m[1]);
+      return frame(PTYPE_REPLY, 'ok\r\n');
+    }
+    m = /^G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(lineText);
+    if (m) {
+      pos.x = Number(m[1]);
+      pos.y = Number(m[2]);
+      return frame(PTYPE_REPLY, 'ok\r\n');
+    }
+    if (lineText.startsWith('G38.5 ')) {
+      if (mode !== 'G91') return frame(PTYPE_REPLY, 'error:release in absolute mode\r\n');
+      const r = /^G38\.5 ([XYZ])(-?[\d.]+)/.exec(lineText);
+      if (r !== null) {
+        const axis = r[1]!.toLowerCase() as 'x' | 'y' | 'z';
+        pos[axis] += Number(r[2]!);
+      }
+      return frame(PTYPE_REPLY, 'ok\r\n');
+    }
+    m = /^G38\.3 Z-([\d.]+) F[\d.]+$/.exec(lineText);
+    if (m) {
+      if (mode !== 'G91') return frame(PTYPE_REPLY, 'error:probe in absolute mode\r\n');
+      const target = pos.z - Number(m[1]);
+      if (feature !== null && materialAt(pos.x, pos.y) && feature.topZ >= target && feature.topZ <= pos.z) {
+        pos.z = feature.topZ;
+        return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${feature.topZ.toFixed(3)}:1]\r\nok\r\n`);
+      }
+      pos.z = target;
+      return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\r\nok\r\n`);
+    }
+    m = /^G38\.3 ([XY])(-?[\d.]+) F[\d.]+$/.exec(lineText);
+    if (m) {
+      if (mode !== 'G91') return frame(PTYPE_REPLY, 'error:probe in absolute mode\r\n');
+      const axis = m[1] === 'X' ? 'x' : 'y';
+      const travel = Number(m[2]);
+      const along = axis === 'x' ? pos.x : pos.y;
+      const otherOffset = (axis === 'x' ? pos.y : pos.x) - (axis === 'x' ? feature!.centre.y : feature!.centre.x);
+      const sq = trigger() * trigger() - otherOffset * otherOffset;
+      const centreAlong = axis === 'x' ? feature!.centre.x : feature!.centre.y;
+      let hit: number | undefined;
+      if (sq >= 0) {
+        const half = Math.sqrt(sq);
+        const candidates = [centreAlong - half, centreAlong + half].sort((a, b) => (travel < 0 ? b - a : a - b));
+        hit = candidates.find((c) => (travel < 0 ? c <= along && c >= along + travel : c >= along && c <= along + travel));
+      }
+      if (hit === undefined) {
+        if (axis === 'x') pos.x += travel;
+        else pos.y += travel;
+        return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:0]\r\nok\r\n`);
+      }
+      if (axis === 'x') pos.x = hit;
+      else pos.y = hit;
+      return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:1]\r\nok\r\n`);
+    }
     if (lineText.startsWith('play ')) {
       phase = 'running';
       percent = 0;
@@ -190,5 +273,9 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
     return route.fulfill({ json: {} });
   });
 
-  return { lines: () => [...seen], setDiagnose: (next: string) => (diagnoseLine = next) };
+  return {
+    lines: () => [...seen],
+    setDiagnose: (next: string) => (diagnoseLine = next),
+    setFeature: (next: FakeFeature) => (feature = next),
+  };
 }
