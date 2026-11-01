@@ -10,6 +10,8 @@
  *   - a SHALLOW softwood goal keeps the raster by the rule, saying the comparison was skipped —
  *     the cell budget it quotes is the shop default handed in below, which is the wiring under
  *     test;
+ *   - over the planning budget the goal keeps the raster and quotes the budget — the adaptive
+ *     plan is one level at a time and costs minutes on a real goal;
  *   - a BALL goal states that the adaptive rough cannot run (the 2D engine sweeps a flat end
  *     mill only) and keeps the raster — the real j27 cutter's answer.
  *
@@ -109,7 +111,7 @@ const SMALL_BUDGET: EngraveShopOpts = {
 
 describe('#846 — the goal path chooses its rough, and says so', () => {
   it('a deep PLA goal on a flat cutter posts the adaptive rough, with both roughs measured', () => {
-    const job = jobFor(8, 'pla');
+    const job = jobFor(5, 'pla');
     const out = generateGoalProgram(job, job.targetObject!, FLAT, [], null, {});
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
@@ -136,8 +138,33 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
     expect(note!).toContain('rough3d.compareCellBudget');
   });
 
-  it('a ball goal states that the adaptive rough cannot run and keeps the raster', () => {
+  it('over the planning budget the goal keeps the raster, quoting the budget', () => {
     const job = jobFor(8, 'pla');
+    // The budget's own rule floor is 10,000 cell-levels; this goal plans more than that, so the
+    // adaptive rough is not planned at all.
+    const tight: EngraveShopOpts = {
+      defaults: {
+        'rough3d.planBudgetCellLevels': {
+          value: 10_000,
+          source: 'seeded',
+          setAt: '2026-11-01',
+          unit: 'cell-levels',
+          note: null,
+        },
+      },
+    };
+    const out = generateGoalProgram(job, job.targetObject!, FLAT, [], null, tight);
+    expect(out.ok, JSON.stringify(out.errors)).toBe(true);
+    expect(out.nc).not.toBeNull();
+    expect(out.nc!).not.toContain('(adaptive)');
+    const note = (out.surface3d?.notes ?? []).find((n) => n.includes('planBudgetCellLevels'));
+    expect(note, 'the budget must be stated, not silent').toBeDefined();
+    expect(note!).toContain('above the shop’s rough3d.planBudgetCellLevels of 10,000');
+    expect(note!).toContain('the raster runs instead');
+  });
+
+  it('a ball goal states that the adaptive rough cannot run and keeps the raster', () => {
+    const job = jobFor(5, 'pla');
     const out = generateGoalProgram(job, job.targetObject!, BALL, [], null, {});
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();

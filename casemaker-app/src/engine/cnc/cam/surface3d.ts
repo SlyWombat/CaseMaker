@@ -655,6 +655,12 @@ export interface RoughingOptions {
   depthRatio?: number;
   /** Covered cells above which both roughs are not both planned; absent → 1,000,000. */
   cellBudget?: number;
+  /**
+   * #846 — THE PLANNING BUDGET, in cell-levels (covered cells × roughing layers): the adaptive
+   * rough is planned one level at a time at roughly 100 µs per cell-level, so a real goal costs
+   * minutes. Above this the raster runs instead and the line says why. Absent → 500,000.
+   */
+  planBudget?: number;
   /** The adaptive planner's shop settings; absent → the shop fallbacks. */
   adaptive?: AdaptiveSettings;
   /** The rapid model, for the time comparison. */
@@ -815,15 +821,20 @@ export interface GoalSurfaceFacts {
 }
 
 /**
- * #846 — the two roughing numbers' LABELLED FALLBACKS (the shop's `rough3d.*`
+ * #846 — the roughing numbers' LABELLED FALLBACKS (the shop's `rough3d.*`
  * defaults are the real source; these are what a caller with no location gets).
  * `DEFAULT_ADAPTIVE_DEPTH_RATIO`: the goal is "deep" at 1.5× the cutter's ⌀.
  * `DEFAULT_COMPARE_CELL_BUDGET`: below a million covered cells both roughs are
  * planned and compared on simulated time; above it the rule decides and the
  * line says the comparison was skipped.
+ * `DEFAULT_PLAN_BUDGET_CELL_LEVELS`: the adaptive rough is planned ONE LEVEL AT A
+ * TIME at roughly 100 µs per cell-level, so a real goal costs minutes; above half
+ * a million cell-levels (covered cells × roughing layers) the raster runs instead
+ * and the line says why.
  */
 export const DEFAULT_ADAPTIVE_DEPTH_RATIO = 1.5;
 export const DEFAULT_COMPARE_CELL_BUDGET = 1_000_000;
+export const DEFAULT_PLAN_BUDGET_CELL_LEVELS = 500_000;
 
 interface RoughChoice {
   kind: 'raster' | 'adaptive';
@@ -880,6 +891,24 @@ function chooseRough(
       moves: a.result.moves,
       layers: a.result.layers,
       note: `Adaptive roughing: max engagement ${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap (${ruleLine}).`,
+    };
+  }
+
+  // 'auto' — THE PLANNING BUDGET FIRST. The adaptive plan costs one planAdaptive per roughing
+  // level (~100 µs per cell-level, measured), so a real goal would spend minutes here. Above the
+  // budget the goal keeps the raster, and this line is the reason the sheet quotes.
+  const planWork = hf.coveredCount * Math.max(1, raster.layers);
+  const planBudget = opts?.planBudget ?? DEFAULT_PLAN_BUDGET_CELL_LEVELS;
+  if (planWork > planBudget) {
+    return {
+      kind: 'raster',
+      moves: raster.moves,
+      layers: raster.layers,
+      note:
+        `Raster roughing chosen: the adaptive rough is planned one level at a time, and this goal would need ` +
+        `${planWork.toLocaleString('en')} cell-levels (${hf.coveredCount.toLocaleString('en')} covered cells × ` +
+        `${raster.layers} layer${raster.layers === 1 ? '' : 's'}) — above the shop’s rough3d.planBudgetCellLevels ` +
+        `of ${planBudget.toLocaleString('en')}; the raster runs instead.`,
     };
   }
 

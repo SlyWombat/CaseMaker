@@ -4911,6 +4911,9 @@ export function generateGoalProgram(
           material: job.stock.material,
           depthRatio: readDefault(shop.defaults ?? null, 'rough3d.adaptiveDepthRatio').value,
           cellBudget: readDefault(shop.defaults ?? null, 'rough3d.compareCellBudget').value,
+          // #846 — the planning budget: the adaptive is planned one level at a time, so above
+          // this much work the goal keeps the raster and the line says why.
+          planBudget: readDefault(shop.defaults ?? null, 'rough3d.planBudgetCellLevels').value,
           adaptive: adaptiveSettings(shop.defaults ?? null).settings,
         },
         // #785 — the CAM's own layer/scan-line counts, as Generate's progress words.
@@ -5556,6 +5559,9 @@ function generateSurfacePrimitiveProgram(
           material: job.stock.material,
           depthRatio: readDefault(shop.defaults ?? null, 'rough3d.adaptiveDepthRatio').value,
           cellBudget: readDefault(shop.defaults ?? null, 'rough3d.compareCellBudget').value,
+          // #846 — the planning budget: the adaptive is planned one level at a time, so above
+          // this much work the goal keeps the raster and the line says why.
+          planBudget: readDefault(shop.defaults ?? null, 'rough3d.planBudgetCellLevels').value,
           adaptive: adaptiveSettings(shop.defaults ?? null).settings,
         },
       },

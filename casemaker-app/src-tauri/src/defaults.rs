@@ -286,10 +286,11 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("adaptive.maxCells", 12000000.0, "cells", "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"),
     ("adaptive.residualShare", 0.005, "x", "chosen, not measured: the material adaptive clearing may leave as grid noise along the walls, as a share of the area to clear"),
     ("adaptive.neckAreaMm2", 0.05, "mm²", "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"),
-    // ── #846 3D roughing by adaptive clearing (begin) — the two numbers that pick
-    // the strategy. CHOSEN, not measured: no 3D rough has been cut with either yet.
+    // ── #846 3D roughing by adaptive clearing (begin) — the numbers that pick
+    // the strategy. CHOSEN, not measured: no 3D rough has been cut with any yet.
     ("rough3d.adaptiveDepthRatio", 1.5, "x", "chosen, not measured: how deep a goal must cut, as a multiple of the cutter's diameter, before the adaptive rough is preferred to the raster by rule"),
     ("rough3d.compareCellBudget", 1000000.0, "cells", "chosen, not measured: above this many covered cells the two roughs are not both planned; the depth rule chooses and the run sheet says the comparison was skipped"),
+    ("rough3d.planBudgetCellLevels", 500000.0, "cell-levels", "chosen, not measured: above this much planning work (covered cells x roughing layers) the goal keeps the raster, because the adaptive rough is planned one level at a time and costs about 100 us per cell-level — 13.8 minutes on a 2.4M cell-level goal, measured 2026-11-01"),
     // ── #451 adaptive settings (end)
     // ── #438 (begin) — the column engine's FLAT grid Y pitch: chosen, not measured.
     // ── #451 (begin) — the DXF arc chord error: chosen, not measured.
@@ -1139,6 +1140,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "rough3d.compareCellBudget" => Some(need(
             n.is_some_and(|v| (1000.0..=50000000.0).contains(&v)),
             "1000 to 50000000 cells",
+        )),
+        "rough3d.planBudgetCellLevels" => Some(need(
+            n.is_some_and(|v| (10000.0..=100000000.0).contains(&v)),
+            "10000 to 100000000 cell-levels",
         )),
         "adaptive.neckAreaMm2" => Some(need(
             n.is_some_and(|v| (0.0..=100.0).contains(&v)),
