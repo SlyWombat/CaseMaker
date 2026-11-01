@@ -2,11 +2,12 @@ import { useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { traceOperationName } from '@/engine/cnc/engrave/partPlan';
 import { fluteNumbers, fluteOperationName } from '@/engine/cnc/engrave/flute';
+import { slotOperationName, slotSentence, type SlotFacts } from '@/engine/cnc/engrave/slot';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import { STROKE_FONTS } from '@/engine/fonts/stroke/strokeFont';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { TracePatch } from '@/store/engraveJobStore';
-import { MAX_LINE_POINTS, type EngraveTraceItem } from '@/types/engraveJob';
+import { MAX_LINE_POINTS, MAX_SLOT_WIDTH_MM, type EngraveTraceItem } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
 /**
@@ -98,6 +99,13 @@ export interface EngraveTraceRowProps {
   onRemove: () => void;
   /** Findings about THIS trace (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
+  /**
+   * #840 — the slot width's facts (`slotFacts`, the plan's own predicate), or null/absent when the
+   * line states no slot width.
+   */
+  slot?: SlotFacts | null;
+  /** #840 — switch the job's cutter to an offered one (by registry key). */
+  onUseCutter?: (key: string) => void;
 }
 
 export function EngraveTraceRow({
@@ -108,6 +116,8 @@ export function EngraveTraceRow({
   onChange,
   onRemove,
   findings,
+  slot = null,
+  onUseCutter,
 }: EngraveTraceRowProps): JSX.Element {
   const depthInvalid = trace.depth > maxDepth;
   const kindLabel = trace.kind === 'line' ? 'Line' : 'Single-line text';
@@ -168,8 +178,14 @@ export function EngraveTraceRow({
       index={index}
       glyph={trace.kind === 'line' ? '∿' : '𝑡'}
       kindWord={kindLabel}
-      typeLabel={trace.kind === 'line' && trace.flute !== undefined ? 'Flute' : 'Engrave'}
-      name={trace.kind === 'line' && trace.flute !== undefined ? fluteOperationName(trace) : traceOperationName(trace)}
+      typeLabel={trace.kind === 'line' && trace.flute !== undefined ? 'Flute' : slot?.kind === 'region' ? 'Pocket' : 'Engrave'}
+      name={
+        trace.kind === 'line' && trace.flute !== undefined
+          ? fluteOperationName(trace)
+          : trace.kind === 'line' && slot?.kind === 'region'
+            ? slotOperationName(trace, slot.widthMm)
+            : traceOperationName(trace)
+      }
       summary={rowSummary(trace.depth)}
       enabled={trace.enabled}
       enabledTitle="A disabled trace is kept in the job but not cut."
@@ -374,6 +390,32 @@ export function EngraveTraceRow({
             <span>ramped ends</span>
           </label>
         )}
+        {/* #840 — a SLOT along the path: a width wider than the cutter turns the line into a
+            region the pocket clears; blank is the cutter-wide trace. A flute keeps its own path. */}
+        {trace.kind === 'line' && trace.flute === undefined && (
+          <label style={FIELD_LABEL}>
+            <span>slot width</span>
+            <input
+              type="number"
+              min={0}
+              max={MAX_SLOT_WIDTH_MM}
+              step="0.5"
+              value={trace.slotWidth ?? ''}
+              placeholder="cutter"
+              data-testid={`engrave-trace-slot-width-${index}`}
+              aria-label={`${kindLabel} ${index + 1} slot width`}
+              title={`Slot width, mm. Wider than the cutter, the path grows half of it to each side with round ends and is pocketed; at or below the cutter, the line is traced one cutter wide. Blank traces it one cutter wide. Up to ${MAX_SLOT_WIDTH_MM} mm.`}
+              style={NUM}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === '') return onChange({ slotWidth: undefined });
+                const v = Number(raw);
+                if (Number.isFinite(v) && v > 0 && v <= MAX_SLOT_WIDTH_MM) onChange({ slotWidth: v });
+              }}
+            />
+            <span>mm</span>
+          </label>
+        )}
         {positionNum('x')}
         {positionNum('y')}
         {numField('rotation', 'rot', `Degrees counter-clockwise about the ${trace.kind === 'line' ? 'origin' : 'text centre'}.`)}
@@ -406,6 +448,27 @@ export function EngraveTraceRow({
           <span>mm</span>
         </label>
       </div>
+
+      {/* #840 — THE SLOT, in one line: the derived region and its passes, or why it stays a
+          trace and the cutter that would make it a slot. */}
+      {trace.kind === 'line' && slot !== null && (
+        <p style={{ ...MUTED, ...(slot.kind === 'trace' ? { color: SEVERITY_COLOR.info } : null) }} data-testid={`engrave-trace-slot-note-${index}`}>
+          {slotSentence(slot)}
+          {slot.kind === 'trace' && slot.offer !== null && slot.offerFits && onUseCutter !== undefined && (
+            <>
+              {' '}
+              <button
+                type="button"
+                data-testid={`engrave-trace-slot-use-${index}`}
+                title="Make this the job's cutter. Every item is then cut with it."
+                onClick={() => onUseCutter(slot.offer!.key)}
+              >
+                Use ⌀{Number(slot.offer.diameterMm.toFixed(3))} mm
+              </button>
+            </>
+          )}
+        </p>
+      )}
 
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-trace-maxdepth-${index}`}>
         Max depth {maxDepth} mm here — {maxDepthWhy}.

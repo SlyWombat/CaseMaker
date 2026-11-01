@@ -7,7 +7,7 @@ import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
 import { FACING_DEPTH_MAX_MM, boxProblem } from '@/engine/cnc/stockStart';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import { FACES, type Face } from '@/engine/cnc/setups/types';
-import { MAX_LINE_POINTS, type EngraveJob } from '@/types/engraveJob';
+import { MAX_LINE_POINTS, MAX_SLOT_WIDTH_MM, type EngraveJob } from '@/types/engraveJob';
 import { newId } from '@/utils/id';
 
 /**
@@ -575,6 +575,17 @@ const traceKindsSchema = z.discriminatedUnion('kind', [
     flute: fluteMarkSchema
       .optional()
       .describe('Cut this line as a flute — a groove that ramps in and out along its ends (#674).'),
+    // #840 — a slot along the path. OPTIONAL (absent, not defaulted) so a job without it carries
+    // no key and round-trips byte-for-byte.
+    slotWidth: z
+      .number()
+      .finite()
+      .positive()
+      .max(MAX_SLOT_WIDTH_MM)
+      .optional()
+      .describe(
+        `Slot width in millimetres (#840). Wider than the cutter cuts at this depth, the path is buffered by half of it with round joins and ends and pocketed as a region; at or below the cutter, the line is traced one cutter wide. Up to ${MAX_SLOT_WIDTH_MM} mm.`,
+      ),
   }),
   traceBaseSchema.extend({
     kind: z.literal('stroke-label').describe('Single-stroke (engraving-style) text.'),

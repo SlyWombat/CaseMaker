@@ -127,6 +127,7 @@ export type OperationOptionId =
   | 'stroke-label'
   | 'circle'
   | 'slot'
+  | 'slot-path'
   | 'polygon'
   | 'border'
   | 'frame'
@@ -181,6 +182,7 @@ export const OPERATION_OPTIONS: readonly OperationOptionRow[] = [
     options: [
       { id: 'circle', label: 'Circle', testId: 'engrave-add-circle', title: 'Add a circle pocket.' },
       { id: 'slot', label: 'Slot', testId: 'engrave-add-slot', title: 'Add a slot pocket.' },
+      { id: 'slot-path', label: 'Slot along a path', testId: 'engrave-add-slot-path', title: 'Add a line with a slot width: a slot wider than the cutter follows the path and is pocketed.' },
       { id: 'polygon', label: 'Polygon', testId: 'engrave-add-polygon', title: 'Add a polygon pocket.' },
       { id: 'border', label: 'Border', testId: 'engrave-add-border', title: 'Add a border built from other items.' },
       { id: 'frame', label: 'Frame', testId: 'engrave-add-frame', title: 'Add a frame built from other items.', needsReference: true },

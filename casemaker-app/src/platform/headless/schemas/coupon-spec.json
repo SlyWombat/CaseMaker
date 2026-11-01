@@ -6902,6 +6902,12 @@
                   "rotation": {
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
+                  },
+                  "slotWidth": {
+                    "description": "Slot width in millimetres (#840). Wider than the cutter cuts at this depth, the path is buffered by half of it with round joins and ends and pocketed as a region; at or below the cutter, the line is traced one cutter wide. Up to 100 mm.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 100,
+                    "type": "number"
                   }
                 },
                 "required": [

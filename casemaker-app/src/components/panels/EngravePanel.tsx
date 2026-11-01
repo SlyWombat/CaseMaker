@@ -43,6 +43,7 @@ import { findingFix, type PanelFix } from './findingFix';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
+import { slotFacts, type SlotCutterOption } from '@/engine/cnc/engrave/slot';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
@@ -1161,6 +1162,12 @@ export function EngravePanel(): JSX.Element {
       )
     : null;
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;
+  // #840 — the flat cutters the shop owns, for a slot row's offer when the job's cutter is not
+  // narrower than the slot.
+  const slotCutters: SlotCutterOption[] = tools.flatMap((e) => {
+    const d = e.tool.shape === 'flat' ? statedCuttingSize(e.tool) : null;
+    return d === null || e.key === job.toolKey ? [] : [{ key: e.key, name: toolOptionLabel(e), diameterMm: d }];
+  });
   // #221 — the V-carve strategy's facts, all READ from the engine: the cone from the cutter, the
   // colour plane the preview resolved from the print (the same `colourBoundaryDepth` the sheet and
   // the CAM use), and the pass spacing from `vCarveRowStepover` at the feeds row's own fraction.
@@ -1632,6 +1639,15 @@ export function EngravePanel(): JSX.Element {
     const id = option.id;
     if (id === 'line' || id === 'stroke-label') {
       expandEngraveRow(addTrace(id));
+      return;
+    }
+    if (id === 'slot-path') {
+      // #840 — a line with a slot width: twice the job's cutter (a slot, not a trace), or 6 mm
+      // before a cutter is chosen. The row states the region and its passes.
+      const made = addTrace('line');
+      const cutter = tool === null ? null : statedCuttingSize(tool);
+      updateTrace(made, { slotWidth: cutter === null ? 6 : Math.round(cutter * 2 * 1000) / 1000 });
+      expandEngraveRow(made);
       return;
     }
     if (id === 'circle' || id === 'slot' || id === 'polygon') {
@@ -3771,6 +3787,8 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(trace.id)}
+          slot={slotFacts(trace, tool, params, slotCutters)}
+          onUseCutter={(key) => setTool(key)}
           onChange={(patch) => updateTrace(trace.id, patch)}
           onRemove={() => removeTrace(trace.id)}
         />

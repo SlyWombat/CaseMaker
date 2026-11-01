@@ -983,6 +983,9 @@ export interface EngraveTraceBase {
  */
 export const MAX_LINE_POINTS = 5000;
 
+/** #840 — the widest slot a line may state, mm: one number for the document schema and the row. */
+export const MAX_SLOT_WIDTH_MM = 100;
+
 /** A free polyline the cutter traces, its centre following the points (#219). */
 export interface EngraveLineItem extends EngraveTraceBase {
   kind: 'line';
@@ -996,6 +999,15 @@ export interface EngraveLineItem extends EngraveTraceBase {
    * trace's own `depth` is the groove's deepest point; this marker states the ramp.
    */
   flute?: FluteMark;
+  /**
+   * #840 — a SLOT ALONG THE PATH: the groove's stated width, mm. When it is wider than the cutter
+   * cuts at this line's depth, the plan buffers the path by `slotWidth / 2` (round joins, round
+   * ends) and the result is a REGION that rides the pocket funnel at `depth` — the same pocket CAM,
+   * findings and oracle as a drawn pocket (`engine/cnc/engrave/slot.ts`). At or below the cutter's
+   * width the line stays today's single trace. Absent is today's behaviour, byte for byte. A flute
+   * is a ramped trace and keeps its own path: a line carrying both is cut as the flute.
+   */
+  slotWidth?: Mm;
 }
 
 /**

@@ -2,6 +2,7 @@ import { glyphProfile } from '@/engine/compiler/glyphs';
 import { DEFAULT_INLAY_GLUE_GAP_MM } from './inlayDefaults';
 import { textureCarries, textureNumbers, textureOperationName, textureStrokes } from './texture';
 import { fluteNumbers, fluteOperationName, fluteProfile } from './flute';
+import { lineSlotWidth, slotOperationName } from './slot';
 import { prismNumbers, prismRingProfile } from './prism';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import {
@@ -1221,8 +1222,11 @@ export function traceSelfOverlapFindings(
   radiusAt: (depth: Mm) => number | null,
 ): { severity: 'warning'; code: TraceFindingCode; labelId: string; message: string }[] {
   const out: { severity: 'warning'; code: TraceFindingCode; labelId: string; message: string }[] = [];
+  const slotTool = toolForJob(job, getTools());
   for (const item of job.traces ?? []) {
     if (!item.enabled || item.construction) continue;
+    // #840 — a slot along the path is a REGION: its own walls are the width, not merged strokes.
+    if (lineSlotWidth(item, slotTool) !== null) continue;
     const radius = radiusAt(item.depth);
     if (radius === null) continue;
     const { paths, closed, groups } = tracePaths(item, job.tool);
@@ -2281,6 +2285,24 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     });
   }
 
+  // #840 — A SLOT ALONG A PATH: a line whose stated width is wider than the job's cutter cuts is
+  // buffered by half that width (round joins, round ends — the swept disc's own union) and joins
+  // the region funnel at the line's depth, after the item regions and before the derived ones.
+  // It is then a pocket in every reader; the trace loop below skips it by the same predicate.
+  const slotTool = toolForJob(job, getTools());
+  for (const item of job.traces ?? []) {
+    if (!item.enabled || item.construction || item.kind !== 'line') continue;
+    const width = lineSlotWidth(item, slotTool);
+    if (width === null) continue;
+    const { paths, closed } = tracePaths(item, job.tool);
+    engraves.push({
+      id: item.id,
+      name: slotOperationName(item, width),
+      profile: traceSweptProfile(paths, closed, width / 2),
+      depth: item.depth,
+    });
+  }
+
   // #677 — DERIVED regions (the variable V-carve's core) join the same funnel, after every item
   // region. They are cut by a program of their own, so their place here is only the CAM's
   // operation order within that program.
@@ -2292,6 +2314,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
   const traces: PartPlan['traces'] = [];
   for (const item of job.traces ?? []) {
     if (!item.enabled || item.construction) continue;
+    if (lineSlotWidth(item, slotTool) !== null) continue; // #840 — a slot is a region, above
     const { paths, closed } = tracePaths(item, job.tool);
     if (paths.length === 0) continue;
     // #674 — a FLUTE: the line's depth becomes a profile along its path, derived HERE so the CAM,

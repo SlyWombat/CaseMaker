@@ -330,7 +330,8 @@ export function kindedWork(job: EngraveJob): KindedItem[] {
   }
   for (const trace of job.traces ?? []) {
     if (!usable(trace)) continue;
-    push(trace.id, trace.id, 'flat', trace.depth, 'a trace follows a line with a flat cutter');
+    const slot = trace.kind === 'line' && trace.slotWidth !== undefined && trace.flute === undefined;
+    push(trace.id, trace.id, 'flat', trace.depth, slot ? 'a slot along a path is a flat pocket' : 'a trace follows a line with a flat cutter');
   }
   for (const primitive of (job.primitives ?? []).filter(primitiveReducesToRegion)) {
     if (!usable(primitive)) continue;

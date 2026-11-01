@@ -120,6 +120,8 @@ export function scaleJobAboutCentre(job: EngraveJob, factor: number): EngraveJob
           position: about(t.position, c, f),
           points: points(t.points, f),
           ...(t.flute?.rampMm !== undefined ? { flute: { ...t.flute, rampMm: len(t.flute.rampMm) } } : {}),
+          // #840 — a slot's width is a plan length like the path it follows.
+          ...(t.slotWidth !== undefined ? { slotWidth: len(t.slotWidth) } : {}),
         }
       : { ...t, position: about(t.position, c, f), size: len(t.size) };
 

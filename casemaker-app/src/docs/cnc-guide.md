@@ -526,6 +526,18 @@ shorter than its two ramps peaks short of the depth, and `flute-short` says so w
 ball or bull nose is refused (`flute-tool`): a ball flute needs a ball groove model this CAM does
 not have.
 
+**Slot along a path (#840)** cuts a groove of a stated width along any line, open or closed. Type
+the line row's **slot width** (or pick **Slot along a path** under Pocket, which starts at twice the
+cutter's diameter). When the width is wider than the cutter cuts at the line's depth, the path grows
+half the width to each side with round joins and round ends, and that region is pocketed at the
+line's depth — the same contour-parallel rings, region findings and oracle as any pocket. The row
+states the region and its passes in one line: the width, the path's length, the cutter, the rings
+and their step-over, and the depth levels. At or below the cutter's width the line is traced one
+cutter wide, exactly as without a width; the row says so and names the widest flat you own that is
+narrower than the slot (with a button to make it the job's cutter), or the nearest one when none
+is. A flute keeps its ramped trace and ignores a width. The three slot forms: the **Slot** shape (a
+straight stadium pocket), a slot along a path, and a plain line (a cutter-width slot).
+
 **Raise a prism (#674)** makes a shape stand. The shape's own depth is the standing height `H`, and
 the row's **base** is the flat floor around it (default 1 mm). A V-bit cuts a RING around the
 shape: its mouth runs from the shape's outline out to the **margin**, derived as
