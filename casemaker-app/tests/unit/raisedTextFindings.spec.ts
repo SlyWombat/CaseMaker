@@ -34,6 +34,8 @@ function detail(over: Partial<RaisedTextDetail> = {}): RaisedTextDetail {
     joined: pinches.some((p) => !p.separated),
     counterFilled: false,
     pinches,
+    counters: [],
+    counterStandingMm2: 0,
     fidelity: 0.9,
     ...over,
   };

@@ -72,6 +72,12 @@ export interface ScoredPlan {
    * little more time and leaves slighter touches.
    */
   raisedStandingMm2: number;
+  /**
+   * #857 — the part of `raisedStandingMm2` that stands inside the glyphs' enclosed counters, mm².
+   * A plan that keeps every letter apart can still fill an 'e'; this is that loss on its own.
+   * Ranked before the pinches. Absent reads as 0 (a hand-built verdict).
+   */
+  counterStandingMm2?: number;
   /** The number of pinches left joined across the raised labels. */
   raisedJoined: number;
   /** True when every cutter in the plan is an owned one. */
@@ -506,6 +512,7 @@ function toScored(plan: CandidatePlan, evaluation: PlanEvaluation, exactWhenEmpt
   const { worst, mean, worstItem } = fidelityOf(evaluation, exactWhenEmpty);
   let raisedStandingMm2 = 0;
   let raisedJoined = 0;
+  let counterStandingMm2 = 0;
   for (const item of evaluation.items) {
     for (const pinch of item.pinches) {
       if (!pinch.separated) {
@@ -513,13 +520,17 @@ function toScored(plan: CandidatePlan, evaluation: PlanEvaluation, exactWhenEmpt
         raisedJoined += 1;
       }
     }
+    // #857 — a counter left standing is field the eye reads as filled, exactly as a bridged pinch.
+    for (const counter of item.counters ?? []) counterStandingMm2 += counter.standingMm2;
   }
+  raisedStandingMm2 += counterStandingMm2;
   return {
     plan,
     evaluation,
     worstFidelity: worst,
     meanFidelity: mean,
     raisedStandingMm2: Math.round(raisedStandingMm2 * 1e6) / 1e6,
+    counterStandingMm2: Math.round(counterStandingMm2 * 1e6) / 1e6,
     raisedJoined,
     owned: plan.cutters.every((c) => plan.source[c.key] !== 'catalogue'),
     worstItem,
@@ -539,22 +550,54 @@ const round6 = (v: number): number => Math.round(v * 1e6) / 1e6;
 export const TOOL_CHANGE_SECONDS = 120;
 
 /**
+ * #857 — THE SMALLEST COUNTER DIFFERENCE THAT DECIDES, mm². A patch the visible ridge width on a
+ * side: `RAISED_RIB_VISIBLE_MM` (0.15 mm, #818's bench-derived width a ridge must reach before the
+ * eye reads it) squared. Below it two plans leave the same counters to the eye, and the difference
+ * is the sweep's own cusps — two programs cutting the same counter differ by about 0.01 mm² — which
+ * must not outrank a run several times faster.
+ */
+export const COUNTER_TIE_MM2 = 0.15 * 0.15;
+
+/**
+ * #857 — FIDELITY THAT TIES, as a share: 0.1 %. Two plans within it reproduce the same design to
+ * the precision the run sheet states (whole percent), and the measured difference is sweep noise
+ * (a counter's cusps move the scalar by about 0.0001); the run's cost then decides, which is the
+ * objective's own order ('rank by simulated time at equal fidelity').
+ */
+export const FIDELITY_TIE = 0.001;
+
+/**
+ * The fidelity half of the objective, 0 when two plans reproduce the design equally.
+ *
+ *  1. #857 — the COUNTERS left standing inside the raised glyphs, first: a filled counter changes
+ *     the letter itself (an 'e' reads as a blob, an 'a' as a 'd'), where a join between two
+ *     letters leaves both letterforms readable. Within {@link COUNTER_TIE_MM2} they tie.
+ *  2. #765 — the field standing in the joined PINCHES, so a plan that leaves the letters' gaps
+ *     bridged cannot win on a high field-area percentage; then how many stay joined.
+ *  3. The worst item's fidelity, then the mean, each within {@link FIDELITY_TIE}.
+ */
+export function byFidelity(a: ScoredPlan, b: ScoredPlan): number {
+  const ca = a.counterStandingMm2 ?? 0;
+  const cb = b.counterStandingMm2 ?? 0;
+  if (Math.abs(ca - cb) > COUNTER_TIE_MM2 + 1e-9) return ca - cb;
+  const pa = a.raisedStandingMm2 - ca;
+  const pb = b.raisedStandingMm2 - cb;
+  if (round6(pa) !== round6(pb)) return pa - pb;
+  if (a.raisedJoined !== b.raisedJoined) return a.raisedJoined - b.raisedJoined;
+  if (Math.abs(a.worstFidelity - b.worstFidelity) > FIDELITY_TIE + 1e-12) return b.worstFidelity - a.worstFidelity;
+  if (Math.abs(a.meanFidelity - b.meanFidelity) > FIDELITY_TIE + 1e-12) return b.meanFidelity - a.meanFidelity;
+  return 0;
+}
+
+/**
  * The objective: the most fidelity (worst item first, then mean), then the cost of the run —
  * its cutting seconds plus a stated allowance per tool change — then the plan key for
  * determinism. `ownedFirst` is applied by the caller: an owned plan within the margin outranks a
  * catalogue one.
  */
 function byObjective(a: ScoredPlan, b: ScoredPlan): number {
-  // #765 — A RAISED LABEL'S FIDELITY IS WHAT STANDS IN ITS PINCHES. Ranked first, so a plan that
-  // leaves the letters' gaps bridged cannot win on a high field-area percentage.
-  if (round6(a.raisedStandingMm2) !== round6(b.raisedStandingMm2)) return a.raisedStandingMm2 - b.raisedStandingMm2;
-  if (a.raisedJoined !== b.raisedJoined) return a.raisedJoined - b.raisedJoined;
-  const wa = round6(a.worstFidelity);
-  const wb = round6(b.worstFidelity);
-  if (wa !== wb) return wb - wa;
-  const ma = round6(a.meanFidelity);
-  const mb = round6(b.meanFidelity);
-  if (ma !== mb) return mb - ma;
+  const fidelity = byFidelity(a, b);
+  if (fidelity !== 0) return fidelity;
   const cost = (s: ScoredPlan): number =>
     (s.evaluation.seconds ?? Number.POSITIVE_INFINITY) + s.evaluation.toolChanges * TOOL_CHANGE_SECONDS;
   const ca = round6(cost(a));
@@ -618,6 +661,14 @@ export async function smartPick(
   // plus the best plan of each cutter-shape group as a fallback when the top tier does not post.
   const bestWorst = Math.max(...ordered().map((s) => s.worstFidelity));
   const fullList = ordered().filter((s) => s.worstFidelity >= bestWorst - 1e-9).slice(0, maxCandidates);
+  // #857 — and every plan that ties the BEST BY THE OBJECTIVE'S FIDELITY (counters, pinches,
+  // fidelity): the objective ranks counters before the worst fidelity, so the plan it would choose
+  // must be timed and posted even when its scalar is a few tenths of a percent lower.
+  const top = ordered()[0]!;
+  for (const s of ordered()) {
+    if (byFidelity(s, top) !== 0) break;
+    if (!fullList.includes(s)) fullList.push(s);
+  }
   const lastShape = (plan: CandidatePlan): string => {
     const last = plan.cutters[plan.cutters.length - 1];
     const entry = last === undefined ? undefined : tools.find((t) => t.key === last.key);

@@ -854,15 +854,40 @@ export function raisedTextMeasure(
   plan: PartPlan = toPartPlan(job),
 ): (tool: Tool) => RaisedTextMeasurement[] {
   if (plan.raisedTexts.length === 0) return () => [];
-  const floors = supportingFloors(tl, plan);
-  const boundary = colourBoundaryFor(plan, job);
-  const engraveById = new Map(plan.engraves.map((e) => [e.id, e] as const));
+  const radiusOf = raisedTextRadius(tl, job, plan);
   // The scan asks about a hundred cutters, and most share their width with a dozen others: a flat
   // row is a function of its radius (a V's, of the plane radii it cuts at), so each distinct
   // measurement is made once. The rows carry their own `cutterRadius`, so the cache key is the
   // radii themselves.
   const cache = new Map<string, RaisedTextMeasurement[]>();
   return (tool: Tool): RaisedTextMeasurement[] => {
+    const radiusFor = radiusOf(tool);
+    if (radiusFor === null) return [];
+    const key = plan.raisedTexts.map((raised) => radiusFor(raised.id)?.toFixed(6) ?? '-').join(',');
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const rows = measureRaisedTexts(tl, job, plan.raisedTexts, radiusFor);
+    cache.set(key, rows);
+    return rows;
+  };
+}
+
+/**
+ * The radius each raised-text cutaway is measured at for a cutter — the flat's own radius, or a
+ * cone's TOP-FACE opening (#760) — or null when the cutter cannot cut the cutaway at all. Shared by
+ * the measure above and the evaluator's per-cutter detail (#857), so both read the same width
+ * whether or not the letters fuse at it.
+ */
+export function raisedTextRadius(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  plan: PartPlan = toPartPlan(job),
+): (tool: Tool) => ((cutawayId: string) => number | null) | null {
+  if (plan.raisedTexts.length === 0) return () => null;
+  const floors = supportingFloors(tl, plan);
+  const boundary = colourBoundaryFor(plan, job);
+  const engraveById = new Map(plan.engraves.map((e) => [e.id, e] as const));
+  return (tool: Tool) => {
     const cone = vCone(tool);
     let radiusFor: (cutawayId: string) => number | null;
     if (cone !== null) {
@@ -879,16 +904,11 @@ export function raisedTextMeasure(
       };
     } else {
       const usable = cuttingForTrace(tool);
-      if (!usable.ok || usable.tool.shape !== 'flat') return [];
+      if (!usable.ok || usable.tool.shape !== 'flat') return null;
       const radius = usable.tool.radius;
       radiusFor = () => radius;
     }
-    const key = plan.raisedTexts.map((raised) => radiusFor(raised.id)?.toFixed(6) ?? '-').join(',');
-    const hit = cache.get(key);
-    if (hit !== undefined) return hit;
-    const rows = measureRaisedTexts(tl, job, plan.raisedTexts, radiusFor);
-    cache.set(key, rows);
-    return rows;
+    return radiusFor;
   };
 }
 

@@ -14,7 +14,7 @@ import { statedCuttingSize } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { vCone } from '@/engine/cnc/vProfile';
 import type { EvaluatedItem, PinchFact } from '@/workers/sim/planEvaluate';
-import { planKey, type CandidatePlan, type ScoredPlan, type SmartPick } from './smartPick';
+import { COUNTER_TIE_MM2, planKey, type CandidatePlan, type ScoredPlan, type SmartPick } from './smartPick';
 
 const dia = (entry: ToolLibraryEntry | undefined): string => {
   const d = entry === undefined ? null : statedCuttingSize(entry.tool);
@@ -45,8 +45,27 @@ export function joinedPinchWords(item: EvaluatedItem): string[] {
   return item.pinches.filter((p) => !p.separated).map((p) => `${p.between[0]}–${p.between[1]}`);
 }
 
-/** One item's raised quote: what separates, what stays joined, and any V edge loss. */
+/**
+ * #857 — the counters an item leaves visibly filled, as "the counters of e and a stay filled
+ * (0.39 mm² standing)"; '' when every counter opens. A counter is named once per character.
+ */
+export function filledCounterWords(items: readonly EvaluatedItem[]): string {
+  const filled = items.flatMap((item) => (item.counters ?? []).filter((c) => c.standingMm2 > COUNTER_TIE_MM2));
+  if (filled.length === 0) return '';
+  const chars = [...new Set(filled.map((c) => c.char))];
+  const area = filled.reduce((sum, c) => sum + c.standingMm2, 0);
+  const list = chars.length === 1 ? chars[0]! : `${chars.slice(0, -1).join(', ')} and ${chars[chars.length - 1]!}`;
+  return `the counter${filled.length === 1 ? '' : 's'} of ${list} stay${filled.length === 1 ? 's' : ''} filled (${Number(area.toFixed(2))} mm² standing)`;
+}
+
+/** One item's raised quote: what separates, what stays joined, any V edge loss, filled counters. */
 function raisedWords(item: EvaluatedItem): string {
+  const pinchPart = raisedPinchWords(item);
+  const counters = filledCounterWords([item]);
+  return [pinchPart, counters].filter((w) => w !== '').join('; ');
+}
+
+function raisedPinchWords(item: EvaluatedItem): string {
   const total = item.pinches.length;
   if (total === 0) return '';
   const joined = joinedPinchWords(item);
@@ -90,7 +109,7 @@ export function cutterLines(
     if (cutter.items.length === 0) {
       // A rest cutter: its sentence is the raised measurement at ITS width — the whole point of
       // the second program (#760/#765).
-      const raised = [...byId.values()].filter((i) => i.pinches.length > 0);
+      const raised = [...byId.values()].filter((i) => i.pinches.length > 0 || (i.counters ?? []).length > 0);
       const words = raised.map(raisedWords).filter((w) => w !== '');
       const what = index === 0 ? 'cuts first' : 'rest — re-cuts what the earlier cutter left';
       // #766 review/§6 — the operator's words, never the tool KEY: `flat-1.0` and `cat:…` are the
@@ -119,6 +138,11 @@ export function runnerUpLine(
   // reading the chosen plan.
   const name = (p: ScoredPlan): string =>
     cutterKeys ? p.plan.cutters.map((c) => c.key).join(' + ') : planLabel(p.plan, tools);
+  // #857 — counters rank first, so a runner-up that fills them says so first.
+  const runnerCounters = filledCounterWords(runner.evaluation.items);
+  if (runnerCounters !== '' && filledCounterWords(pick.chosen.evaluation.items) === '') {
+    return `The next-best plan (${name(runner)}) leaves ${runnerCounters} — where the chosen plan opens every counter.`;
+  }
   const joined = runner.evaluation.items.flatMap((item) => joinedPinchWords(item).map((w) => `${w} (${item.name})`));
   if (joined.length > 0) {
     return `The next-best plan (${name(runner)}) leaves ${joined.length} pinch${joined.length === 1 ? '' : 'es'} joined — ${joined.slice(0, 3).join(', ')}${joined.length > 3 ? ` and ${joined.length - 3} more` : ''} — so it measures ${pct(runner.worstFidelity)} where the chosen plan measures ${pct(pick.chosen.worstFidelity)}.`;

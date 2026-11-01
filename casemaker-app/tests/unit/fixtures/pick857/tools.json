@@ -1,0 +1,149 @@
+[
+ {
+  "key": "inv:kz-o-flute-3-175-25",
+  "provenance": "demo5 bench location (full Makera library as owned)",
+  "tool": {
+   "number": null,
+   "id": "111011313825",
+   "name": "Spiral 'O' Single Flute Bit - 1/8\" Shank 3.175mm * 25mm",
+   "typeText": "Flat End",
+   "shape": "flat",
+   "handleDiameter": 3.175,
+   "tipDiameter": 3.175,
+   "diameter": 3.175,
+   "cornerRadius": 0.0,
+   "angle": null,
+   "halfAngle": null,
+   "fluteLength": 25.0,
+   "shoulderLength": null,
+   "stickout": null,
+   "centreCutting": null
+  }
+ },
+ {
+  "key": "inv:kz-corn-0-6-3",
+  "provenance": "demo5 bench location (full Makera library as owned)",
+  "tool": {
+   "number": null,
+   "id": "111218063803",
+   "name": "TiN Coating Corn Bit - 1/8\" Shank 0.6mm * 3mm",
+   "typeText": "Flat End",
+   "shape": "flat",
+   "handleDiameter": 3.175,
+   "tipDiameter": 0.6,
+   "diameter": 0.6,
+   "cornerRadius": 0.0,
+   "angle": null,
+   "halfAngle": null,
+   "fluteLength": 3.0,
+   "shoulderLength": null,
+   "stickout": null,
+   "centreCutting": null
+  }
+ },
+ {
+  "key": "inv:kz-corn-1-7",
+  "provenance": "demo5 bench location (full Makera library as owned)",
+  "tool": {
+   "number": null,
+   "id": "111218103807",
+   "name": "TiN Coating Corn Bit - 1/8\" Shank 1mm * 7mm",
+   "typeText": "Flat End",
+   "shape": "flat",
+   "handleDiameter": 3.175,
+   "tipDiameter": 1.0,
+   "diameter": 1.0,
+   "cornerRadius": 0.0,
+   "angle": null,
+   "halfAngle": null,
+   "fluteLength": 7.0,
+   "shoulderLength": null,
+   "stickout": null,
+   "centreCutting": null
+  }
+ },
+ {
+  "key": "inv:lib-111011103803",
+  "provenance": "demo5 bench location (full Makera library as owned)",
+  "tool": {
+   "number": 1,
+   "id": "111011103803",
+   "name": "3.175*1*3mm Flat End",
+   "typeText": "Flat End",
+   "shape": "flat",
+   "handleDiameter": 3.175,
+   "tipDiameter": 1.0,
+   "diameter": 1.0,
+   "cornerRadius": null,
+   "angle": null,
+   "halfAngle": null,
+   "fluteLength": 3.0,
+   "shoulderLength": 3.0,
+   "stickout": null,
+   "centreCutting": null
+  }
+ },
+ {
+  "key": "inv:lib-111218193810",
+  "provenance": "demo5 bench location (full Makera library as owned)",
+  "tool": {
+   "number": 3,
+   "id": "111218193810",
+   "name": "3.175*1.9*9.5mm Corn",
+   "typeText": "Flat End",
+   "shape": "flat",
+   "handleDiameter": 3.175,
+   "tipDiameter": 1.9,
+   "diameter": 1.9,
+   "cornerRadius": null,
+   "angle": null,
+   "halfAngle": null,
+   "fluteLength": 9.5,
+   "shoulderLength": 9.5,
+   "stickout": null,
+   "centreCutting": null
+  }
+ },
+ {
+  "key": "inv:lib-111011313817",
+  "provenance": "demo5 bench location (full Makera library as owned)",
+  "tool": {
+   "number": 1,
+   "id": "111011313817",
+   "name": "3.175*17mm Flat End",
+   "typeText": "Flat End",
+   "shape": "flat",
+   "handleDiameter": 3.175,
+   "tipDiameter": 3.175,
+   "diameter": 3.175,
+   "cornerRadius": null,
+   "angle": null,
+   "halfAngle": null,
+   "fluteLength": 17.0,
+   "shoulderLength": 17.0,
+   "stickout": null,
+   "centreCutting": null
+  }
+ },
+ {
+  "key": "inv:lib-121032035020",
+  "provenance": "demo5 bench location (full Makera library as owned)",
+  "tool": {
+   "number": 3,
+   "id": "121032035020",
+   "name": "6*0.3mm*20\u00ba Engraving",
+   "typeText": "Engraving",
+   "shape": "engraving",
+   "handleDiameter": 6.0,
+   "tipDiameter": 0.3,
+   "diameter": 6.0,
+   "cornerRadius": null,
+   "angle": null,
+   "halfAngle": 10.0,
+   "fluteLength": 16.0,
+   "shoulderLength": null,
+   "stickout": null,
+   "centreCutting": null
+  }
+ }
+]

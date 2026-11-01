@@ -52,6 +52,8 @@ import { computeCopperTopology, type PcbCopperTopologyInput } from '@/engine/cnc
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import type { CarriedField } from '../geometry/carriedField';
+
+type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
 import { manifoldOfTriangles, meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
 import { boxSolid, isDenseForExactSweep, sweepTimeline, unliftTimeline, type SweepDiagnostic, type SweepOpts, type SweepResult, type SweepStats } from '../geometry/sweep';
@@ -484,6 +486,14 @@ export interface SimSession {
    * against a tilted blank is compared with the flat prediction that blank's design is.
    */
   oracle(predicted: readonly OraclePredicted[], pcb?: PcbCopperTopologyInput | null): OracleReport;
+  /**
+   * #857 — the region the CURRENT sweep has cut at or below `zSlice` (work frame), with the band
+   * the oracle would judge it in: the same slice the volumetric comparison reads, handed to a
+   * caller that measures something of its own on it (a raised glyph's counters). The caller owns
+   * and deletes `region`; `region` is null when nothing is cut at that level. Null when the live
+   * sweep is not a flat one (a rotary run's frame is not the work frame's XY).
+   */
+  levelCut(zSlice: number): { region: CrossSectionInstance | null; bandMm: number } | null;
   dispose(): void;
   readonly loaded: boolean;
 }
@@ -1115,6 +1125,21 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     return withCopper(computeOracle(tl, sliceAt, predicted, band), sliceAt, band, pcb);
   };
 
+  const levelCut = (zSlice: number): { region: CrossSectionInstance | null; bandMm: number } | null => {
+    const l = live;
+    if (l === null) return null;
+    if (l.kind === 'column') {
+      const grid = l.column.grid;
+      if (grid.kind !== 'flat') return null;
+      return { region: gridSliceAt(tl, grid)(zSlice), bandMm: columnOracleBand(worstContours(l.timeline), grid) };
+    }
+    if (l.kind !== 'swept' || l.timeline.summary.rotary) return null;
+    const removal = l.sweep.removal;
+    const bandMm = oracleBand(worstContours(l.timeline));
+    if (!removal) return { region: null, bandMm };
+    return { region: removalSliceAt(removal)(zSlice), bandMm };
+  };
+
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);
 
   /**
@@ -1228,6 +1253,6 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     };
   };
 
-  return { load, warmup, frameAt, stateAt, toolPath, simPath, oracle, dispose, get loaded() { return live !== null; } };
+  return { load, warmup, frameAt, stateAt, toolPath, simPath, oracle, levelCut, dispose, get loaded() { return live !== null; } };
 }
 

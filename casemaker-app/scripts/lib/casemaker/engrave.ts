@@ -1512,7 +1512,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           out.progress(`  debug     search ${searchMs} ms over ${pick.considered.length} plans`);
           for (const s of pick.considered) {
             out.progress(
-              `  debug     ${s.plan.cutters.map((c) => c.key).join('+')} worst=${s.worstFidelity.toFixed(2)} stand=${s.raisedStandingMm2} joined=${s.raisedJoined} ok=${s.evaluation.ok} sec=${String(s.evaluation.seconds)} changes=${s.evaluation.toolChanges}`,
+              `  debug     ${s.plan.cutters.map((c) => c.key).join('+')} worst=${s.worstFidelity.toFixed(5)} mean=${s.meanFidelity.toFixed(5)} stand=${s.raisedStandingMm2} counters=${s.counterStandingMm2}${s.evaluation.items.some((i) => i.countersFrom === 'swept') ? '(swept)' : ''} joined=${s.raisedJoined} ok=${s.evaluation.ok} sec=${String(s.evaluation.seconds)} changes=${s.evaluation.toolChanges}${s.evaluation.refusal === null ? '' : ` refusal=${s.evaluation.refusal}`}`,
             );
           }
         }

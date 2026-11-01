@@ -57,7 +57,7 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import {
   engraveGenerate,
   measureEngraving,
-  raisedTextMeasure,
+  raisedTextRadius,
   type EngraveGenerated,
   type EngraveShopOpts,
 } from './engraveGenerate';
@@ -100,6 +100,16 @@ export interface PinchFact {
   areaMm2: number;
 }
 
+/** #857 — one enclosed counter of a raised glyph, and what the plan leaves standing in it. */
+export interface CounterFact {
+  /** The glyph, by character (`'glyph 2'` when it cannot be named). */
+  char: string;
+  /** The counter's design area, mm². */
+  areaMm2: number;
+  /** The area left standing in it, mm² (0 when the plan opens it). */
+  standingMm2: number;
+}
+
 /** One item's evaluated fidelity. */
 export interface EvaluatedItem {
   id: string;
@@ -118,6 +128,16 @@ export interface EvaluatedItem {
   areaMismatchMm2: number | null;
   /** Raised text only: the pinches that stay joined or take edge (empty otherwise). */
   pinches: PinchFact[];
+  /**
+   * #857 — raised text only: each glyph's enclosed counter, with the area the plan leaves standing
+   * in it (empty or absent otherwise). Part of `fidelity`, and of the search's standing area.
+   */
+  counters?: CounterFact[];
+  /**
+   * #857 — where `counters` was measured: `'swept'` from the simulated programs (a full evaluation
+   * whose run could be swept), `'model'` from the cutter-width opening the coarse level uses.
+   */
+  countersFrom?: 'swept' | 'model';
   /** Why the item is at fidelity 0 / unassigned; absent when the item is cut as designed. */
   reason?: string;
 }
@@ -304,16 +324,16 @@ function measuresFor(
   const hit = cutterCache.get(key);
   if (hit !== undefined) return hit;
   const engravability = measureEngraving(ctx.tl, job, tool);
-  // The pinch detail rides the raised measure's OWN radius choice: take the rows the pick would
-  // see, and ask the detail for exactly the radius each row was measured at.
-  const rows = raisedTextMeasure(ctx.tl, job, part)(tool);
-  const radiusByCutaway = new Map(rows.map((row) => [row.cutawayId, row.cutterRadius]));
+  // The pinch detail rides the raised measure's OWN radius choice (a flat's radius, a cone's
+  // top-face opening). #857 — it is measured whether or not the letters fuse at that width: a
+  // cutter that keeps every letter apart can still leave a counter filled, and that is a loss the
+  // ranking must see.
+  const radiusFor = raisedTextRadius(ctx.tl, job, part)(tool);
   const cone = vCone(tool) !== null;
   const raisedDetails: RaisedTextDetail[] = [];
   for (const raised of part.raisedTexts) {
-    const radius = radiusByCutaway.get(raised.id);
-    // Nothing fuses this cutaway at the cutter's width: the letters read perfectly apart.
-    if (radius === undefined) continue;
+    const radius = radiusFor?.(raised.id) ?? null;
+    if (radius === null) continue;
     raisedDetails.push(...measureRaisedTextDetail(ctx.tl, job, [raised], () => radius, { cone }));
   }
   const built = { engravability, raisedDetails };
@@ -342,6 +362,7 @@ function measureItems(
   plan: CandidatePlan,
   ctx: EvalContext,
   tools: readonly ToolLibraryEntry[],
+  swept: SweptRaised | null = null,
 ): EvaluatedItem[] {
   const { part, raisedOf } = partOf(job);
   const work = kindedWork(job);
@@ -358,6 +379,7 @@ function measureItems(
         charsLost: 0,
         areaMismatchMm2: null,
         pinches: [],
+        counters: [],
         reason: `no cutter in the plan owns this item (${w.why})`,
       });
       continue;
@@ -366,7 +388,11 @@ function measureItems(
     if (tool === null) continue;
     const measures = measuresFor(job, part, tool, ctx);
     const raisedIds = new Set((raisedOf.get(w.id) ?? []).map((r) => r.id));
-    const raised = measures.raisedDetails.filter((d) => raisedIds.has(d.cutawayId));
+    const modelled = measures.raisedDetails.filter((d) => raisedIds.has(d.cutawayId));
+    // #857 — a swept run replaces the model's counters with what the programs really cut.
+    const raised = swept === null ? modelled : modelled.map((d) => swept.get(`${d.cutawayId}\u0000${d.labelId}`) ?? d);
+    const countersFrom: 'swept' | 'model' =
+      swept !== null && modelled.length > 0 && modelled.every((d) => swept.has(`${d.cutawayId}\u0000${d.labelId}`)) ? 'swept' : 'model';
     const row = measures.engravability.find((r) => r.labelId === w.id) ?? null;
     const pinches: PinchFact[] = raised.flatMap((d) =>
       d.pinches.map((p) => ({
@@ -383,7 +409,11 @@ function measureItems(
     const raisedFidelity = raised.length === 0 ? null : Math.min(...raised.map((d) => d.fidelity));
     const areaFidelity = row === null ? null : Math.min(1, Math.max(0, row.ratio));
     const fidelity = raisedFidelity ?? areaFidelity ?? 1;
-    const raisedSliver = raised.length === 0 ? null : raised.reduce((sum, d) => sum + d.sliverAreaMm2, 0);
+    const raisedSliver =
+      raised.length === 0 ? null : raised.reduce((sum, d) => sum + d.sliverAreaMm2 + d.counterStandingMm2, 0);
+    const counters: CounterFact[] = raised.flatMap((d) =>
+      d.counters.map((c) => ({ char: c.char, areaMm2: c.areaMm2, standingMm2: c.standingMm2 })),
+    );
     items.push({
       id: w.id,
       name: w.name,
@@ -392,6 +422,8 @@ function measureItems(
       charsLost: row?.emptyChars.length ?? 0,
       areaMismatchMm2: raisedSliver,
       pinches,
+      counters,
+      ...(raised.length === 0 ? {} : { countersFrom }),
     });
   }
   return items;
@@ -465,10 +497,25 @@ function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalContext): P
   const refusal = gen.ok
     ? null
     : (gen.errors[0]?.message ?? gen.findings.find((f) => f.severity === 'error')?.message ?? 'the plan does not post');
-  const { sweep, sweepNote } = gen.ok ? sweepPlan(ctx, applied, gen, shop) : { sweep: null, sweepNote: null };
+  const { part } = partOf(job);
+  const levels = raisedLevels(part);
+  const { sweep, sweepNote, raisedCuts } = gen.ok
+    ? sweepPlan(ctx, applied, gen, shop, levels)
+    : { sweep: null, sweepNote: null, raisedCuts: null };
+  // #857 — THE COUNTERS FROM THE SWEEP. When every program was swept, each raised glyph's counters
+  // are measured against what the run really cut, and the items are scored again from that.
+  let swept: SweptRaised | null = null;
+  if (raisedCuts !== null) {
+    try {
+      swept = sweptRaisedDetails(job, plan, ctx, part, raisedCuts);
+    } finally {
+      for (const cut of raisedCuts.values()) cut.region?.delete();
+    }
+  }
+  const measured = swept === null ? coarse.items : measureItems(job, plan, ctx, ctx.tools, swept);
   // A plan that does not post still carries its measured fidelity: the search may rank it and the
   // sentence can say what it would cut, but `ok` is false and `refusal` names why.
-  const items = coarse.items.map((item) =>
+  const items = measured.map((item) =>
     item.reason === undefined && !gen.ok ? { ...item, fidelity: Math.min(item.fidelity, 1) } : item,
   );
   return { ...coarse, ok: gen.ok, refusal, items, seconds, sweep, sweepNote };
@@ -486,7 +533,24 @@ function sweepPlan(
   applied: EngraveJob,
   gen: EngraveGenerated,
   shop: EngraveShopOpts,
-): { sweep: PlanSweep | null; sweepNote: string | null } {
+  levels: ReadonlyMap<string, number> = new Map(),
+): { sweep: PlanSweep | null; sweepNote: string | null; raisedCuts: Map<string, RaisedCut> | null } {
+  // #857 — the cut at each raised cutaway's half depth, unioned over the run's programs. Removal
+  // only grows, so the union of each program's cut is the run's cut even where a V program had to
+  // be swept from the blank (the chain's column limit): the counters can be read either way.
+  const raisedCuts = new Map<string, RaisedCut>();
+  let cutsComplete = levels.size > 0;
+  const addCut = (id: string, cut: { region: CrossSectionInstance | null; bandMm: number }): void => {
+    const had = raisedCuts.get(id);
+    if (had === undefined) {
+      raisedCuts.set(id, cut);
+      return;
+    }
+    const parts = [had.region, cut.region].filter((r): r is CrossSectionInstance => r !== null);
+    const region = parts.length === 0 ? null : parts.length === 1 ? parts[0]! : ctx.tl.CrossSection.union(parts);
+    if (parts.length === 2) for (const r of parts) r.delete();
+    raisedCuts.set(id, { region, bandMm: Math.max(had.bandMm, cut.bandMm) });
+  };
   let prior: NodeMeshOutput | null = null;
   let report: OracleReport | null = null;
   let note: string | null = null;
@@ -497,6 +561,7 @@ function sweepPlan(
     const tool = toolFor([...(shop.tools ?? [])], program.toolKey);
     if (tool === null) {
       note = `program ${i + 1} names ${program.toolKey}, which is not in the tool list`;
+      cutsComplete = false;
       break;
     }
     const session = createSimSession(ctx.tl);
@@ -511,17 +576,31 @@ function sweepPlan(
       }
       if (!load.ok) {
         note = `program ${i + 1} was refused by the simulation: ${load.diagnostics.map((d) => d.message).join('; ')}`;
+        cutsComplete = false;
         break;
       }
       const ok = load as SimLoadOk;
       prior = ok.meshes.removal;
+      for (const [id, z] of levels) {
+        const cut = session.levelCut(z);
+        if (cut === null) cutsComplete = false;
+        else addCut(id, cut);
+      }
       if (i === gen.programs.length - 1) report = session.oracle(gen.predicted);
     } finally {
       session.dispose();
     }
   }
-  if (note !== null || report === null) return { sweep: null, sweepNote: note ?? 'the run produced no sweep to compare' };
+  let cuts: Map<string, RaisedCut> | null = raisedCuts;
+  if (!cutsComplete) {
+    for (const cut of raisedCuts.values()) cut.region?.delete();
+    cuts = null;
+  }
+  if (note !== null || report === null) {
+    return { sweep: null, sweepNote: note ?? 'the run produced no sweep to compare', raisedCuts: cuts };
+  }
   return {
+    raisedCuts: cuts,
     sweep: {
       worstUnderMm2: report.worst.underCut,
       worstOverMm2: report.worst.overCut,
@@ -538,4 +617,59 @@ function shopTools(ctx: EvalContext): ToolLibraryEntry[] {
   for (const t of ctx.shop.tools ?? []) byKey.set(t.key, t);
   for (const t of ctx.tools) byKey.set(t.key, t);
   return [...byKey.values()];
+}
+
+type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
+
+/** #857 — one raised cutaway's swept cut at its half depth, and the band to read it in. */
+interface RaisedCut {
+  region: CrossSectionInstance | null;
+  bandMm: number;
+}
+
+/** #857 — the swept raised details, keyed `cutawayId\u0000labelId`. */
+type SweptRaised = Map<string, RaisedTextDetail>;
+
+/**
+ * #857 — THE LEVEL A COUNTER IS READ AT: half the relief's depth, as a work-frame slice height.
+ * A counter whose material stands above half the letters' height reads filled to the eye; a V's
+ * sloped wall that opens it at the top is open there.
+ */
+function raisedLevels(part: PartPlan): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const raised of part.raisedTexts) {
+    const engrave = part.engraves.find((e) => e.id === raised.id);
+    if (engrave === undefined || !(engrave.depth > 0)) continue;
+    out.set(raised.id, -engrave.depth / 2);
+  }
+  return out;
+}
+
+/** #857 — every raised label's detail with its counters measured against the swept cut. */
+function sweptRaisedDetails(
+  job: EngraveJob,
+  plan: CandidatePlan,
+  ctx: EvalContext,
+  part: PartPlan,
+  cuts: ReadonlyMap<string, RaisedCut>,
+): SweptRaised {
+  const out: SweptRaised = new Map();
+  // The pinch half of the detail stays the model's, at the effective cutter of each item.
+  for (const w of kindedWork(job)) {
+    const key = effectiveCutter(plan, w.id);
+    const tool = key === null ? null : toolFor(ctx.tools, key);
+    if (tool === null) continue;
+    const radiusFor = raisedTextRadius(ctx.tl, job, part)(tool);
+    const cone = vCone(tool) !== null;
+    for (const raised of part.raisedTexts) {
+      if (raised.id !== w.id) continue;
+      const cut = cuts.get(raised.id);
+      const radius = radiusFor?.(raised.id) ?? null;
+      if (cut === undefined || radius === null) continue;
+      for (const d of measureRaisedTextDetail(ctx.tl, job, [raised], () => radius, { cone, swept: { cut: cut.region, bandMm: cut.bandMm } })) {
+        out.set(`${d.cutawayId}\u0000${d.labelId}`, d);
+      }
+    }
+  }
+  return out;
 }

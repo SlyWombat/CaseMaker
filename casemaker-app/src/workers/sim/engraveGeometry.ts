@@ -704,7 +704,58 @@ export interface RaisedTextDetail {
   joined: boolean;
   counterFilled: boolean;
   pinches: RaisedTextPinch[];
+  /** #857 — every enclosed counter of the label's glyphs, with the area the cut leaves standing. */
+  counters: RaisedTextCounter[];
+  /** #857 — the counters' standing area summed, mm²; part of `fidelity`'s numerator. */
+  counterStandingMm2: number;
   fidelity: number;
+}
+
+/**
+ * #857 — ONE ENCLOSED COUNTER of a raised glyph (the eye of an 'e', the bowl of an 'a'): field the
+ * cut must open inside the letter, and how much of it the cutter leaves standing at full height.
+ */
+export interface RaisedTextCounter {
+  /** The glyph it belongs to, by character (`'glyph 2'` when the component cannot be named). */
+  char: string;
+  /** The counter's own area, mm² — what the design opens. */
+  areaMm2: number;
+  /** The part of it left standing, mm² (0 when the cutter opens it). */
+  standingMm2: number;
+}
+
+/**
+ * #857 — the enclosed counters of one glyph component, as one region the caller owns (null when the
+ * component has no hole). A component's holes are the contours wound against its outer edge; each
+ * is filled on its own, so the region is exactly the area the letter encloses and does not cover.
+ */
+export function counterRegion(
+  tl: ManifoldToplevel,
+  glyph: ReturnType<typeof executeProfile>,
+): ReturnType<typeof executeProfile> | null {
+  const contours = glyph.toPolygons() as [number, number][][];
+  const signed = (c: readonly [number, number][]): number => {
+    let a = 0;
+    for (let i = 0; i < c.length; i++) {
+      const [x0, y0] = c[i]!;
+      const [x1, y1] = c[(i + 1) % c.length]!;
+      a += x0 * y1 - x1 * y0;
+    }
+    return a / 2;
+  };
+  // The outer edge is the contour of largest absolute area; the holes are wound the other way.
+  let outerSign = 0;
+  let outerArea = 0;
+  for (const c of contours) {
+    const a = signed(c);
+    if (Math.abs(a) > outerArea) {
+      outerArea = Math.abs(a);
+      outerSign = Math.sign(a);
+    }
+  }
+  const holes = contours.filter((c) => Math.sign(signed(c)) === -outerSign && signed(c) !== 0);
+  if (holes.length === 0) return null;
+  return tl.CrossSection.ofPolygons(holes, 'EvenOdd');
 }
 
 /**
@@ -716,7 +767,17 @@ export function measureRaisedTextDetail(
   job: EngraveJob,
   raisedTexts: PartPlan['raisedTexts'],
   radiusFor: (cutawayId: string) => number | null,
-  opts: { cone?: boolean; edgeLossToleranceMm?: number } = {},
+  opts: {
+    cone?: boolean;
+    edgeLossToleranceMm?: number;
+    /**
+     * #857 — the SWEPT cut at the relief's half depth, when a simulation has run: the counters
+     * are then measured against what the programs really removed (shrunk by the oracle's band, so
+     * the sweep's own tolerance is not read as material) instead of the cutter-width model.
+     * `cut` is borrowed, not deleted; null means nothing was cut at that level.
+     */
+    swept?: { cut: ReturnType<typeof executeProfile> | null; bandMm: number };
+  } = {},
 ): RaisedTextDetail[] {
   if (raisedTexts.length === 0) return [];
   const tolerance = opts.edgeLossToleranceMm ?? RAISED_EDGE_LOSS_TOLERANCE_MM;
@@ -813,8 +874,60 @@ export function measureRaisedTextDetail(
       const leftover = CS.difference([field, opened]);
       opened.delete();
       const kept = CS.union([islands, leftover]);
-      leftover.delete();
       islands.delete();
+
+      // #857 — THE COUNTERS. A glyph's enclosed holes (the eye of an 'e', the bowl of an 'a') are
+      // field the cut must open, and a cutter too wide to enter one leaves it standing at full
+      // height — the letter reads filled even when no two letters touch. Each counter's own area
+      // and the part of it left standing are measured from the same kept region as the pinches.
+      // `modelMm2` is the cutter-width model's answer, kept beside a swept one: the pinch measure
+      // below is the model's, so it subtracts the model's own counters.
+      const counters: (RaisedTextCounter & { part: Part; modelMm2: number })[] = [];
+      /** The swept answer for one counter: the part the programs did not cut, past the band. */
+      const sweptStanding = (want: ReturnType<typeof executeProfile>): ReturnType<typeof executeProfile> | null => {
+        if (opts.swept === undefined) return null;
+        const inner = opts.swept.bandMm > 0 ? want.offset(-opts.swept.bandMm, 'Round', 2, 16) : CS.union([want]);
+        if (opts.swept.cut === null) return inner;
+        const left = CS.difference([inner, opts.swept.cut]);
+        inner.delete();
+        return left;
+      };
+      try {
+        for (const part of parts) {
+          if (part.holes <= 0) continue;
+          const region = counterRegion(tl, part.cs);
+          if (region === null) continue;
+          try {
+            for (const hole of region.decompose()) {
+              try {
+                const want = CS.intersection([hole, field]);
+                const modelled = CS.intersection([want, leftover]);
+                const swept = sweptStanding(want);
+                try {
+                  const areaMm2 = want.area();
+                  if (areaMm2 <= RAISED_TEXT_AREA_TOLERANCE_MM2) continue;
+                  const area = (cs: ReturnType<typeof executeProfile>): number => {
+                    const a = cs.area();
+                    return a <= RAISED_TEXT_AREA_TOLERANCE_MM2 ? 0 : a;
+                  };
+                  const modelMm2 = area(modelled);
+                  counters.push({ part, char: part.char, areaMm2, standingMm2: swept === null ? modelMm2 : area(swept), modelMm2 });
+                } finally {
+                  want.delete();
+                  modelled.delete();
+                  swept?.delete();
+                }
+              } finally {
+                hole.delete();
+              }
+            }
+          } finally {
+            region.delete();
+          }
+        }
+      } finally {
+        leftover.delete();
+      }
 
       type Group = { parts: Part[]; sliverArea: number };
       const groups: Group[] = [];
@@ -832,7 +945,10 @@ export function measureRaisedTextDetail(
             });
             if (inside.length > 1) {
               const letterArea = inside.reduce((sum, part) => sum + part.area, 0);
-              groups.push({ parts: inside, sliverArea: Math.max(0, comp.area() - letterArea) });
+              // A filled counter of a joined letter is inside the component too; it is counted
+              // once, as a counter, not again as the bridge between letters.
+              const filled = counters.filter((c) => inside.includes(c.part)).reduce((sum, c) => sum + c.modelMm2, 0);
+              groups.push({ parts: inside, sliverArea: Math.max(0, comp.area() - letterArea - filled) });
             } else if (inside.length === 1 && comp.numContour() - 1 < inside[0]!.holes) {
               counterFilled.add(inside[0]!.labelId);
             }
@@ -884,7 +1000,11 @@ export function measureRaisedTextDetail(
           }
         }
         const gapMm = pinches.length === 0 ? 0 : Math.min(...pinches.map((p) => p.gapMm));
-        const fidelity = Math.min(1, Math.max(0, 1 - (sliver + 0) / letterArea));
+        const myCounters = counters
+          .filter((c) => c.part.labelId === labelId)
+          .map(({ char, areaMm2, standingMm2 }) => ({ char, areaMm2, standingMm2 }));
+        const counterStanding = myCounters.reduce((sum, c) => sum + c.standingMm2, 0);
+        const fidelity = Math.min(1, Math.max(0, 1 - (sliver + counterStanding) / letterArea));
         out.push({
           cutawayId: raised.id,
           labelId,
@@ -898,6 +1018,8 @@ export function measureRaisedTextDetail(
           joined: pinches.some((p) => !p.separated),
           counterFilled: counterFilled.has(labelId),
           pinches,
+          counters: myCounters,
+          counterStandingMm2: counterStanding,
           fidelity,
         });
       }
