@@ -908,6 +908,13 @@
       "setAt": "2026-10-15T08:00:00.000Z",
       "unit": "%"
     },
+    "toolChange.seconds": {
+      "value": 91.4,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured as one number: what the measured cutter search charges a plan for each tool change. It is the run plan's own bit change: fitting the cutter by hand (plan.fitCutterSeconds, 60 s, chosen) plus the M491 tool-length touch (plan.toolLengthSeconds, 31.4 s, measured on 2026-10-15). The first timed bit change replaces it"
+    },
     "runSheet.blankToleranceMm": {
       "value": 0.5,
       "source": "seeded",

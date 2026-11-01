@@ -105,7 +105,18 @@ export async function runSmartPick(
   };
   let pick;
   try {
-    pick = await smartPick(job, tools, catalogue, guarded, { onProgress: request.onProgress }, conditions, table);
+    pick = await smartPick(
+      job,
+      tools,
+      catalogue,
+      guarded,
+      {
+        onProgress: request.onProgress,
+        ...(shop.toolChangeSeconds === undefined || shop.toolChangeSeconds === null ? {} : { toolChangeSeconds: shop.toolChangeSeconds }),
+      },
+      conditions,
+      table,
+    );
   } catch (e) {
     if (e instanceof SupersededError) return null;
     throw e;

@@ -211,6 +211,8 @@ function previewInputs(job: EngraveJob): PreviewInputs {
     shop: {
       tools,
       lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
+      // #858 — what the measured pick charges each tool change; the worker cannot read the location.
+      toolChangeSeconds: shopDefault('toolChange.seconds').value,
       // #434 — the drill point angle (and the other `drill.*` numbers) with their sources, so
       // the preview's depth findings are judged with the point the run would plan.
       drill: drillSettings(shopDefaults),

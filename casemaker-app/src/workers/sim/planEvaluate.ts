@@ -52,6 +52,7 @@ import {
 } from '@/engine/cnc/engrave/measuredPick';
 import { kindedWork } from '@/engine/cnc/engrave/cutterPlan';
 import { toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import { PRIOR_REFUSAL_CODES } from '@/engine/cnc/engrave/programSweep';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import {
@@ -568,10 +569,12 @@ function sweepPlan(
     try {
       const opts = { breakthroughMm: applied.breakthrough, ...(prior === null ? {} : { priorRemoval: prior }) };
       let load = session.load(program.nc, setup, tool, applied.machineId, opts);
-      if (!load.ok && prior !== null && load.diagnostics.some((d) => d.code === 'prior-removal-column')) {
+      if (!load.ok && prior !== null && load.diagnostics.some((d) => PRIOR_REFUSAL_CODES.has(d.code))) {
+        // #858 — a dense flat program (`dense-3d-refused`) goes to the column engine from the blank
+        // too, exactly as the multi-program walk retries it (#746).
         note =
-          'the column engine cannot start from an earlier program’s material; the V program was swept ' +
-          'from the blank, so the run’s swept comparison is not reported';
+          'the column engine cannot start from an earlier program’s material; program ' +
+          `${i + 1} was swept from the blank, so the run’s swept comparison is not reported`;
         load = session.load(program.nc, setup, tool, applied.machineId, { breakthroughMm: applied.breakthrough });
       }
       if (!load.ok) {

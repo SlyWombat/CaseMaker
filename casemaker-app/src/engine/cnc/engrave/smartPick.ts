@@ -107,6 +107,11 @@ export interface SmartPickOptions {
    * and the flight recorder has a crumb even if the tab dies in the next evaluation.
    */
   onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void;
+  /**
+   * #858 — the shop's `toolChange.seconds`, resolved by the caller: what each tool change adds to a
+   * plan's cost. Absent: the labelled fallback {@link TOOL_CHANGE_SECONDS}.
+   */
+  toolChangeSeconds?: number;
 }
 
 /** The search's answer: the plan to run, what was close, and what to buy. */
@@ -542,12 +547,15 @@ const round6 = (v: number): number => Math.round(v * 1e6) / 1e6;
 /**
  * #766 — WHAT A TOOL CHANGE COSTS, in run time. The issue's objective is fidelity, then the fewest
  * tool changes, then the shortest time; taken literally that chooses a 4.6-hour one-cutter run over
- * a 3-minute two-cutter one to save a single change (j02, measured). A change is not free — the
- * M6 plus the cutter's M491 is machine time — so it is counted at this stated allowance, and the
- * last two keys become one cost. The number is a LABELLED FALLBACK until a bench coupon measures
- * the real changeover; it is deliberately conservative so a real time difference decides.
+ * a 3-minute two-cutter one to save a single change (j02, measured). A change is not free, so it is
+ * counted at an allowance and the last two keys become one cost.
+ *
+ * #858 — the allowance is the SHOP'S, `toolChange.seconds` (seeded 91.4 s: the run plan's own bit
+ * change, fitting the cutter by hand plus the measured M491). The caller resolves it and hands it
+ * in as `SmartPickOptions.toolChangeSeconds`; this is the LABELLED FALLBACK for a caller with no
+ * location (the hosted web build, a direct-engine test), and it is the same number as the seed.
  */
-export const TOOL_CHANGE_SECONDS = 120;
+export const TOOL_CHANGE_SECONDS = 91.4;
 
 /**
  * #857 — THE SMALLEST COUNTER DIFFERENCE THAT DECIDES, mm². A patch the visible ridge width on a
@@ -590,16 +598,23 @@ export function byFidelity(a: ScoredPlan, b: ScoredPlan): number {
 }
 
 /**
+ * #858 — A PLAN'S COST, seconds: its simulated cutting time plus the shop's allowance for each tool
+ * change. Infinite when the plan has no time (a coarse verdict, or a plan that does not post).
+ */
+export function planCostSeconds(evaluation: PlanEvaluation, toolChangeSeconds: number = TOOL_CHANGE_SECONDS): number {
+  return (evaluation.seconds ?? Number.POSITIVE_INFINITY) + evaluation.toolChanges * toolChangeSeconds;
+}
+
+/**
  * The objective: the most fidelity (worst item first, then mean), then the cost of the run —
  * its cutting seconds plus a stated allowance per tool change — then the plan key for
  * determinism. `ownedFirst` is applied by the caller: an owned plan within the margin outranks a
  * catalogue one.
  */
-function byObjective(a: ScoredPlan, b: ScoredPlan): number {
+function byObjective(a: ScoredPlan, b: ScoredPlan, toolChangeSeconds: number = TOOL_CHANGE_SECONDS): number {
   const fidelity = byFidelity(a, b);
   if (fidelity !== 0) return fidelity;
-  const cost = (s: ScoredPlan): number =>
-    (s.evaluation.seconds ?? Number.POSITIVE_INFINITY) + s.evaluation.toolChanges * TOOL_CHANGE_SECONDS;
+  const cost = (s: ScoredPlan): number => planCostSeconds(s.evaluation, toolChangeSeconds);
   const ca = round6(cost(a));
   const cb = round6(cost(b));
   if (ca !== cb) return ca - cb;
@@ -653,7 +668,8 @@ export async function smartPick(
     fullDone.add(planKey(plan));
     return scoredFull;
   };
-  const ordered = (): ScoredPlan[] => [...verdicts.values()].sort(byObjective);
+  const toolChangeSeconds = opts.toolChangeSeconds ?? TOOL_CHANGE_SECONDS;
+  const ordered = (): ScoredPlan[] => [...verdicts.values()].sort((a, b) => byObjective(a, b, toolChangeSeconds));
   // FINALISTS. A coarse verdict has no time (slice A measures only), so the cost cannot tell a
   // single-cutter plan from a two-cutter one yet — and that difference is the whole question
   // (j02's 4½-hour single corn against a 3-minute pair). So every plan whose coarse fidelity ties

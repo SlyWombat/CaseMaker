@@ -14,7 +14,7 @@ import { statedCuttingSize } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { vCone } from '@/engine/cnc/vProfile';
 import type { EvaluatedItem, PinchFact } from '@/workers/sim/planEvaluate';
-import { COUNTER_TIE_MM2, planKey, type CandidatePlan, type ScoredPlan, type SmartPick } from './smartPick';
+import { COUNTER_TIE_MM2, FIDELITY_TIE, planKey, type CandidatePlan, type ScoredPlan, type SmartPick } from './smartPick';
 
 const dia = (entry: ToolLibraryEntry | undefined): string => {
   const d = entry === undefined ? null : statedCuttingSize(entry.tool);
@@ -148,8 +148,10 @@ export function runnerUpLine(
     return `The next-best plan (${name(runner)}) leaves ${joined.length} pinch${joined.length === 1 ? '' : 'es'} joined — ${joined.slice(0, 3).join(', ')}${joined.length > 3 ? ` and ${joined.length - 3} more` : ''} — so it measures ${pct(runner.worstFidelity)} where the chosen plan measures ${pct(pick.chosen.worstFidelity)}.`;
   }
   const lose = runner.evaluation.items.filter((i) => i.fidelity < 1).sort((a, b) => a.fidelity - b.fidelity)[0];
-  if (lose === undefined) {
-    return `The next-best plan (${name(runner)}) measures the same; the chosen one wins on ${pick.chosen.evaluation.toolChanges <= runner.evaluation.toolChanges ? 'tool changes' : 'time'}.`;
+  // #858 — within the fidelity tie the two reproduce the design alike, and the run's cost decided.
+  const tied = Math.abs(runner.worstFidelity - pick.chosen.worstFidelity) <= FIDELITY_TIE + 1e-12;
+  if (lose === undefined || tied) {
+    return `The next-best plan (${name(runner)}) measures the same; the chosen one wins on ${pick.chosen.evaluation.toolChanges < runner.evaluation.toolChanges ? 'tool changes' : 'run time'}.`;
   }
   return `The next-best plan (${name(runner)}) loses ${pct(1 - lose.fidelity)} of ${lose.name}, so the chosen plan measures ${pct(pick.chosen.worstFidelity)} against its ${pct(runner.worstFidelity)}.`;
 }

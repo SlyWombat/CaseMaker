@@ -438,6 +438,16 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0.1).max(50),
     fallback: REST_MACHINING_FALLBACK.thirdToolFraction * 100,
   },
+  // #858 — what the measured cutter search charges a plan for each tool change. CHOSEN, not
+  // measured as one number: the run plan's own bit change — `plan.fitCutterSeconds` (60 s, chosen)
+  // plus `plan.toolLengthSeconds` (31.4 s, measured). Fallback = `smartPick.ts`'s
+  // TOOL_CHANGE_SECONDS, the same seed.
+  'toolChange.seconds': {
+    label: 'time a tool change costs the cutter search (chosen)',
+    unit: 's',
+    rule: z.number().min(1).max(3600),
+    fallback: 91.4,
+  },
   // #250 — the finish pass's stock-to-leave. The maintainer's rule (2026-10-15) is the one the rest
   // pair follows: a tunable value lives in the location document. CHOSEN, not measured: about one
   // printed layer; the first bench cut that inspects a finished floor replaces it. 0 turns the

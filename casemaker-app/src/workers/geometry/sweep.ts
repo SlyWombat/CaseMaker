@@ -823,11 +823,12 @@ export function checkAirMoves(
   };
 
   const levels = SWEEP_TOLERANCES.simplifyLevels(checkpoints.reduce((a, cp) => Math.max(a, cp.steps.length * 3), 0));
+  // #858 — THE CAP COUNTS THE MOVES THAT NEED GEOMETRY. A move above the blank and the fixture, or
+  // a retract inside its own cut, is settled without a boolean and is not what the cap protects;
+  // counting it spent a large job's whole allowance on its clearance moves.
+  let tested = 0;
+  let unchecked = 0;
   for (const mv of moves) {
-    if (checked >= MAX_AIR_CHECKS) {
-      diagnostics.push({ severity: 'warning', code: 'air-moves-unchecked', message: `${moves.length - checked} air move(s) not checked: more than ${MAX_AIR_CHECKS} in the job` });
-      break;
-    }
     checked++;
     const spindleOff = mv.kind === 'feed-spindle-off';
     const margin = spindleOff ? proximityMm : 0;
@@ -868,6 +869,11 @@ export function checkAirMoves(
         continue;
       }
     }
+    if (tested >= MAX_AIR_CHECKS) {
+      unchecked++;
+      continue;
+    }
+    tested++;
     // The tool body (grown by the margin for the proximity rule) swept along the move.
     const body = sweptToolBody(
       tl,
@@ -992,6 +998,9 @@ export function checkAirMoves(
       budgetExceeded = true;
       break;
     }
+  }
+  if (unchecked > 0) {
+    diagnostics.push({ severity: 'warning', code: 'air-moves-unchecked', message: `${unchecked} air move(s) near the stock not checked: more than ${MAX_AIR_CHECKS} in the job` });
   }
   for (const pf of prefixes) {
     for (const g of pf.groups.values()) {

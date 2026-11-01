@@ -304,6 +304,12 @@ export interface EngraveShopOpts {
     thirdToolPct: { value: number; source: RestSettingSource };
   } | null;
   /**
+   * #858 — the shop's `toolChange.seconds`, resolved on the caller's side like `rest`: what the
+   * measured cutter search charges a plan for each tool change. Absent/null: the search's labelled
+   * fallback (`TOOL_CHANGE_SECONDS`).
+   */
+  toolChangeSeconds?: number | null;
+  /**
    * #250 — `finish.stockToLeaveMm`, resolved on the CALLER's side like `rest`: the location lives on
    * the main thread and the worker must not pull the defaults client in. The source travels with the
    * number so the run sheet prints where the allowance came from. Absent/null means the build has no
@@ -4192,24 +4198,34 @@ function generateRestPair(
     // dense program from the blank (#746). The rest GEOMETRY was measured against the first
     // program's removal above, so this is the safety check, not the rest's plan, and the note says
     // which of the two was done.
-    let sweptFromBlank = false;
+    //
+    // #858 — NOR CAN A DENSE FLAT REST. A flat rest program with more runs of cuts than the exact
+    // sweep takes on (`dense-3d-refused`, the ⌀1 mm rest of a tool tray's 36 pockets) goes to the
+    // column engine only from the blank — the same rule the multi-program walk applies
+    // (`PRIOR_REFUSAL_CODES`, #746). Refusing it here made every clear-plus-rest plan of a large
+    // job unpostable, so the search could only choose among one-cutter runs (the tray's ⌀1: 41 h).
+    let sweptFromBlank: 'v' | 'dense' | null = null;
     if (
       !p2.ok &&
       removal !== null &&
-      vCone(restTool) !== null &&
-      p2.diagnostics.some((d) => d.code === 'prior-removal-column')
+      p2.diagnostics.some((d) => d.code === 'dense-3d-refused' || (d.code === 'prior-removal-column' && vCone(restTool) !== null))
     ) {
+      const dense = p2.diagnostics.some((d) => d.code === 'dense-3d-refused');
       p2 = simulateProgram(tl, restJob, restOne.nc, restTool, calibration, shop);
       p2Problem = simRefusal(p2);
-      sweptFromBlank = true;
+      sweptFromBlank = dense ? 'dense' : 'v';
     }
-    if (sweptFromBlank) {
+    if (sweptFromBlank !== null) {
       findings.push({
         severity: 'info',
         code: 'rest-swept-from-blank',
         message:
-          `${restRef.toolKey} is a V-bit, and the column engine cannot start a program from the material an ` +
-          'earlier one left: its rest program was checked from the blank — its cuts, the fixture and the ' +
+          (sweptFromBlank === 'v'
+            ? `${restRef.toolKey} is a V-bit, and the column engine cannot start a program from the material an ` +
+              'earlier one left: '
+            : `${restRef.toolKey}'s rest program has more runs of cuts than the exact sweep takes on, and the ` +
+              'column engine that sweeps it cannot start from the material an earlier program left: ') +
+          'its rest program was checked from the blank — its cuts, the fixture and the ' +
           'stock were all checked, and the rest regions themselves were measured against the first ' +
           "program's removal.",
       });

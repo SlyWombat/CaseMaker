@@ -45,7 +45,7 @@ import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/
 import type { NodeMeshOutput } from './meshOutput';
 import { applyCarriedField, applyPriorTops, fieldOfGrid, type CarriedField } from './carriedField';
 import type { SweepDiagnostic, SweepStats } from './sweep';
-import { MAX_AIR_CHECKS, MAX_GOUGES, holderGate } from './sweep';
+import { MAX_GOUGES, holderGate } from './sweep';
 // Type-only (erased): the CAM module is not pulled into the worker graph (§4's plain-data rule).
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
@@ -1995,14 +1995,22 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const gouges: { step: number; line: number }[] = [];
   {
     let checked = 0;
+    // #858 — NO COUNT CAP HERE. `MAX_AIR_CHECKS` bounds the EXACT sweeper, where each check is a
+    // Manifold boolean; on this engine a check is a walk over the grid cells under the move, and
+    // the tool tray's ⌀1 program — 15 204 air moves, 14 644 of them below the stock top — checks
+    // in full in about 41 ms where the cap had left 11 204 unchecked to save 25 ms. The bound that
+    // remains is the sweep's own time budget: past it, the moves still to test are reported.
+    let unchecked = 0;
+    let outOfTime = false;
     for (const mv of timeline.airMoves) {
-      if (checked >= MAX_AIR_CHECKS) {
-        diagnostics.push({ severity: 'warning', code: 'air-moves-unchecked', message: `${timeline.airMoves.length - checked} air move(s) not checked: more than ${MAX_AIR_CHECKS} in the job` });
-        break;
-      }
       checked++;
       const tip = Math.min(mv.from[2], mv.to[2]);
       if (tip > grid.initial) continue; // wholly above the stock
+      if (!outOfTime && deadline !== null && checked % 256 === 0 && performance.now() > deadline) outOfTime = true;
+      if (outOfTime) {
+        unchecked++;
+        continue;
+      }
       const gouged = rotary
         ? (() => {
             const aEnd = timeline.stateAt(mv.step).a;
@@ -2013,6 +2021,9 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       if (gouged) {
         if (gouges.length < MAX_GOUGES) gouges.push({ step: mv.step, line: mv.line });
       }
+    }
+    if (unchecked > 0) {
+      diagnostics.push({ severity: 'warning', code: 'air-moves-unchecked', message: `${unchecked} air move(s) below the stock top not checked: the simulation's time budget ran out first` });
     }
     stats.airMovesChecked = checked;
     if (gouges.length > 0) diagnostics.push({ severity: 'error', code: 'rapid-through-stock', message: `${gouges.length} rapid${gouges.length === 1 ? '' : 's'} pass through material still present at that point in the program (first at line ${gouges[0]?.line})` });

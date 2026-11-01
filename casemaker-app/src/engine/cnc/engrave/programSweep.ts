@@ -273,7 +273,7 @@ export function refusalSummary(failure: ProgramSweepFailure): ProgramSweepSummar
  * to the column engine, exactly as the two codes above do; a genuinely 3D program stays refused
  * by that same cap, because the column route is flat-only.
  */
-const PRIOR_REFUSAL_CODES: ReadonlySet<string> = new Set([
+export const PRIOR_REFUSAL_CODES: ReadonlySet<string> = new Set([
   'prior-removal-column',
   'prior-removal-rotary',
   'dense-3d-refused',

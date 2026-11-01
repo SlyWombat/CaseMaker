@@ -546,7 +546,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // sheet that reads oddly can be traced back to the document (or to the absence of one) before the
     // program is run. Silent about a key the document simply has not set: `readDefault` falls back and
     // the seam sentence says so where it matters. The receipt carries the same numbers as provenance.
-    for (const key of [REST_OVERLAP_KEY, REST_THIRD_TOOL_KEY]) {
+    for (const key of [REST_OVERLAP_KEY, REST_THIRD_TOOL_KEY, 'toolChange.seconds']) {
       const d = shopDefaults?.[key];
       if (d !== undefined) out.progress(`  default ${key} = ${String(d.value)}${d.unit ?? ''} (${d.source})`);
     }
@@ -1499,7 +1499,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const searchStart = Date.now();
         // #766 D — `smartPick` is async: the evaluator may be (the Design panel's worker one
         // yields between plans so an edit can cancel the run); the CLI's is synchronous.
-        const pick = await smartPick(job, searchTools, catalogueRows, evaluate);
+        // #858 — a tool change costs the shop's `toolChange.seconds` (the seed, or the location's own).
+        const pick = await smartPick(job, searchTools, catalogueRows, evaluate, {
+          toolChangeSeconds: readDefault(shopDefaults, 'toolChange.seconds').value,
+        });
         const searchMs = Date.now() - searchStart;
         const words = explainSmartPick(pick, searchTools, { cutterKeys: true });
         out.progress(`  pick      ${words.verdict}`);
