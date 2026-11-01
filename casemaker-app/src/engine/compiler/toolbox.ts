@@ -604,8 +604,11 @@ export function buildToolboxNodes(p: ToolboxParams): BuildNode[] | null {
     );
     if (!op) continue;
     const { offset, spin } = pegPlacement(peg);
+    // #852 — the id carries the axis: the print table is id-keyed, and a
+    // Y-running divider must turn about Y for print (about X, the X-running
+    // divider's turn, would stand it on its end with its span as the height).
     nodes.push({
-      id: `divider-peg-${peg.id}`,
+      id: spin ? `divider-peg-y-${peg.id}` : `divider-peg-${peg.id}`,
       op: translate(offset, spin ? rotate([0, 0, 90], op) : op),
     });
   }

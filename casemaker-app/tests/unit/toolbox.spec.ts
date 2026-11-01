@@ -27,13 +27,15 @@ import {
   TOOLBOX_LID_NODE_ID,
 } from '@/engine/compiler/toolbox';
 import { HOLE_GRID_PITCH, HOLE_GRID_SOCKET } from '@/engine/compiler/holeGrid';
-import { PEG_WIDTH_EAR } from '@/engine/compiler/dividerPegs';
+import { PEG_TENON_FIT, PEG_WIDTH_EAR } from '@/engine/compiler/dividerPegs';
 import { derivedKind } from '@/engine/compiler/archetype';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { parseProject, serializeProject } from '@/store/persistence';
 import { createDefaultProject } from '@/store/projectStore';
 import { findTemplate } from '@/library/templates';
 import { exec } from './helpers/manifoldExec';
+import { applyLayoutToMeshes } from '@/engine/exportLayout';
+import type { MeshNode } from '@/types';
 import { cube, translate, intersection, union, type BuildOp } from '@/engine/compiler/buildPlan';
 
 /**
@@ -267,17 +269,21 @@ describe('toolbox dividers', () => {
   const withPegs = (pegs: ToolboxParams['pegs'], width = 300, depth = 200) =>
     defaultToolboxParams({ width, depth, pegs });
 
-  /** The peg's own solid, as `buildToolboxNodes` emits it. */
-  const pegOp = (n: number, p: ToolboxParams = P) =>
-    buildToolboxNodes(p)!.find((node) => node.id === `divider-peg-${n}`)!.op;
+  /**
+   * The peg's own solid, as `buildToolboxNodes` emits it. #852 — a Y-running
+   * divider's node id carries the axis (`divider-peg-y-<id>`), because the
+   * id-keyed print table is what turns it for print.
+   */
+  const pegOp = (n: number, p: ToolboxParams = P, axis: 'x' | 'y' = 'x') =>
+    buildToolboxNodes(p)!.find((node) => node.id === (axis === 'y' ? `divider-peg-y-${n}` : `divider-peg-${n}`))!
+      .op;
 
   const onePeg = (overrides: Partial<{ spans: number; height: number; axis: 'x' | 'y' }> = {}) => {
+    const axis = overrides.axis ?? 'x';
     const p = withPegs([
-      defaultToolboxPeg('1', overrides.spans ?? 5, overrides.height ?? 40, {
-        axis: overrides.axis ?? 'x',
-      }),
+      defaultToolboxPeg('1', overrides.spans ?? 5, overrides.height ?? 40, { axis }),
     ]);
-    return { p, op: pegOp(1, p) };
+    return { p, op: pegOp(1, p, axis) };
   };
 
   it('emits one free node per enabled divider, and none for a disabled one', () => {
@@ -333,7 +339,7 @@ describe('toolbox dividers', () => {
           );
           if (toolboxPegProblem(p.pegs![0]!, p) !== null) continue;
           const bin = buildToolboxModule(p, p.height, { grid: true })!;
-          const feet = overlap(bin, pegOp(1, p));
+          const feet = overlap(bin, pegOp(1, p, axis));
           expect(feet, `spans ${spans} on ${axis}, ${width}×${depth}`).toBeLessThan(1e-4);
         }
       }
@@ -421,6 +427,70 @@ describe('toolbox dividers', () => {
     const even = solid(onePeg({ spans: 6 }).op).boundingBox();
     expect((odd.min[0] + odd.max[0]) / 2).toBeCloseTo(0, 6);
     expect((even.min[0] + even.max[0]) / 2).toBeCloseTo(HOLE_GRID_PITCH / 2, 6);
+  });
+
+  it('every divider prints on its side: one body, and the bed height is its section, never its span (#852)', () => {
+    // The #852 defect: a divider that RUNS ALONG Y was turned about Z for
+    // assembly and then about X for print, so its SPAN became the height on
+    // the bed — a 60 mm divider stood 60 mm tall on a strip 4.7 mm wide. Laid
+    // on its side about the axis that suits it, the bed height is the wall's
+    // SECTION: its thickness, or the tenon that stands a little prouder of it
+    // (a 2.4 mm wall with 4.7 mm tenons prints 4.7 tall — the tenon, not the
+    // wall — which is the same on both axes and is why the invariant is the
+    // section and not the thickness alone). A wall thicker than its tenons
+    // makes the two the same number, and that case is pinned too.
+    const tenonSide = HOLE_GRID_SOCKET - PEG_TENON_FIT;
+    const pegs = [
+      defaultToolboxPeg('1', 5, 40, { axis: 'x', thickness: 3 }),
+      defaultToolboxPeg('2', 5, 40, { axis: 'y', thickness: 4 }),
+      defaultToolboxPeg('3', 7, 60, { axis: 'y', thickness: 2.4 }),
+      defaultToolboxPeg('4', 5, 40, { axis: 'y', thickness: 6 }),
+    ];
+    const p = withPegs(pegs);
+    const nodes = buildToolboxNodes(p)!;
+    const dividers = nodes.filter((n) => n.id.startsWith('divider-peg-'));
+    expect(dividers.map((n) => n.id)).toEqual([
+      'divider-peg-1',
+      'divider-peg-y-2',
+      'divider-peg-y-3',
+      'divider-peg-y-4',
+    ]);
+    for (const node of dividers) {
+      const spec = pegs.find((peg) => node.id.endsWith(`-${peg.id}`))!;
+      // Evaluate the part and lay it out through the PRODUCTION export path, so
+      // the rotation under test is the one the exporter applies.
+      const m = exec(node.op);
+      const mesh = m.getMesh();
+      const positions = new Float32Array(mesh.vertProperties);
+      const indices = new Uint32Array(mesh.triVerts);
+      const pieces = m.decompose().filter((c) => c.volume() > 0).length;
+      m.delete();
+      expect(pieces, `${node.id} is not one printed piece`).toBe(1);
+      const assembled: MeshNode = {
+        id: node.id,
+        buffer: { positions, indices },
+        stats: { vertexCount: positions.length / 3, triangleCount: indices.length / 3, bbox: { min: [-1, -1, -1], max: [1, 1, 1] } },
+      } as MeshNode;
+      const [laid] = applyLayoutToMeshes([assembled]);
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (let i = 0; i < laid!.positions.length; i += 3) {
+        minZ = Math.min(minZ, laid!.positions[i + 2]!);
+        maxZ = Math.max(maxZ, laid!.positions[i + 2]!);
+      }
+      const height = maxZ - minZ;
+      const section = Math.max(spec.thickness, tenonSide);
+      // 3 places: the laid buffer is float32, so these are float-noise tolerances.
+      expect(height, `${node.id}: the bed height is its section`).toBeCloseTo(section, 3);
+      if (spec.thickness >= tenonSide) {
+        expect(height, `${node.id}: a wall thicker than its tenons beds at its thickness`).toBeCloseTo(
+          spec.thickness,
+          3,
+        );
+      }
+      // The #852 symptom: the span must never be what stands on the bed.
+      expect(height).toBeLessThan(spec.spans * HOLE_GRID_PITCH);
+    }
   });
 
   it('carries the dividers through a round trip', () => {

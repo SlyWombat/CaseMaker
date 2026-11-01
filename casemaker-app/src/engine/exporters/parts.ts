@@ -314,6 +314,20 @@ const PRINT_PATTERNS: PrintPattern[] = [
     meta: flat('Lay flat — TPU 95A flexible bumper'),
   },
   {
+    // #852 — a divider that RUNS ALONG Y is turned a quarter about Z for
+    // assembly, so the X-print rotation below would stand it on its end: its
+    // span would become the height on the bed. Turn it about Y instead — the
+    // wall face lies on the bed and the bed height is the wall's thickness.
+    test: (id) => id.startsWith('divider-peg-y-'),
+    meta: flat(
+      'Lay it on its SIDE — wall face on the bed, tenons pointing sideways; it runs along Y in the bin, so it turns about Y to print and the bed height is its thickness',
+      {
+        rotation: [0, 90, 0],
+        exportedOrientationNote: 'the tenons point sideways, not down.',
+      },
+    ),
+  },
+  {
     // Issue #150 — the peg family. Printed in assembly orientation the tenons
     // hang below a wall that has nothing under most of itself, so it would need
     // supports the whole way along. On its side the wall is a flat plate and the
@@ -548,6 +562,10 @@ function describePart(
   if (id.startsWith('stack-key-')) {
     const suffix = id.slice('stack-key-'.length);
     return { displayName: `Stacking key ${suffix}`, material: 'rigid', category: 'fastener' };
+  }
+  if (id.startsWith('divider-peg-y-')) {
+    const suffix = id.slice('divider-peg-y-'.length);
+    return { displayName: `Divider peg ${suffix} (runs along Y)`, material: 'rigid', category: 'accessory' };
   }
   if (id.startsWith('divider-peg-')) {
     const suffix = id.slice('divider-peg-'.length);
