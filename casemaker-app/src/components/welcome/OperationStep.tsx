@@ -21,6 +21,7 @@ import { useLayoutEffect, useState, type CSSProperties, type JSX } from 'react';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
 import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
+import { pcbReHoldNote } from '@/engine/import/pcbHold';
 import { readGoalObjectFile } from '@/engine/import/targetObject';
 import { FontPicker } from '@/components/panels/FontPicker';
 import { OperationPicker } from '@/components/panels/OperationPicker';
@@ -608,8 +609,11 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
                   type="button"
                   data-testid="start-wizard-op-pcb-use-holding"
                   onClick={() => {
-                    useEngraveJobStore.getState().usePcbHolding();
+                    const reheld = useEngraveJobStore.getState().usePcbHolding();
                     setPcbHoldingFix(null);
+                    // #814 — say what the re-hold did to the turned-over side, if anything.
+                    const note = pcbReHoldNote(reheld);
+                    if (note !== null) setPcbSummary(note);
                   }}
                 >
                   Tape it to the bed

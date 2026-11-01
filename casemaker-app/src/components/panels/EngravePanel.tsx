@@ -118,6 +118,7 @@ import {
   stockSizeWords,
 } from '@/engine/cnc/stockStart';
 import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
+import { pcbReHoldNote } from '@/engine/import/pcbHold';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { defaultFaceOperation, faceSpanMm } from '@/engine/cnc/rotary/faceOps';
@@ -3800,8 +3801,11 @@ export function EngravePanel(): JSX.Element {
                   type="button"
                   data-testid="engrave-pcb-use-holding"
                   onClick={() => {
-                    useEngraveJobStore.getState().usePcbHolding();
+                    const reheld = useEngraveJobStore.getState().usePcbHolding();
                     setPcbHoldingFix(null);
+                    // #814 — say what the re-hold did to the turned-over side, if anything.
+                    const note = pcbReHoldNote(reheld);
+                    if (note !== null) setPcbMessage(note);
                   }}
                 >
                   Tape it to the bed

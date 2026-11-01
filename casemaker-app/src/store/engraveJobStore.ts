@@ -129,6 +129,7 @@ import { PCB_COPPER_MM, pcbBlankPatch, pcbStockNotice, type PcbBlankPatch } from
 import { pcbHoleAssignment, withPcbCutters } from '@/engine/import/pcbCutters';
 import { pcbSetupPlan } from '@/engine/import/pcbSetups';
 import { pcbAlignmentOffer, withAlignmentHoles, type PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
+import { alignmentHolesOf, pcbBoardBox, reHoldPcbJob, type AlignmentCarry } from '@/engine/import/pcbHold';
 import { registrationSettings } from '@/engine/cnc/registration';
 import { probeFor } from '@/engine/cnc/registration/mountContext';
 import { useMachineStore } from './machineStore';
@@ -980,6 +981,18 @@ function clearUndoWindow(): void {
   undoWindow = null;
 }
 
+/**
+ * #814 — what the board's one-click re-hold did, in the numbers the panel's sentence needs: how
+ * many setups were rebuilt to the tape, which were kept (and why), and the alignment holes'
+ * outcome. Present only on a board with setups; the plain one-click returns zeros.
+ */
+export interface PcbReHold {
+  moved: number;
+  kept: { setupId: string; reason: string }[];
+  alignment: 'none' | 'moved' | 'removed';
+  twoSided: boolean;
+}
+
 export interface EngraveJobState {
   job: EngraveJob;
   /**
@@ -1314,7 +1327,7 @@ export interface EngraveJobState {
    * numbers are the house defaults with their provenance; the operator can change them on the
    * Holding step.
    */
-  usePcbHolding: () => void;
+  usePcbHolding: () => PcbReHold;
   /**
    * #743 P-8 — the import's one-click double-sided practice: two through alignment holes of a
    * probeable ⌀ in the blank beside the board, on the turn's fixed line, drilled with setup 1 and
@@ -2773,13 +2786,58 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       );
     },
 
-    /** #743 P-6 — the board's own holding in one click: taped to the bed, over a board under it. */
-    usePcbHolding: () =>
-      apply((job) => ({
-        ...job,
+    /**
+     * #743 P-6 — the board's own holding in one click: taped to the bed, over a board under it.
+     * #814 — AND THE TURNED-OVER SIDE FOLLOWS. A two-sided board's setups were built through the
+     * OLD mount's flip (`orient('bottom', mount)`: about X in the vise, about Y on tape), so the
+     * change re-derives them — mounts, turns and the mirrored bottom items — through the same map.
+     * A setup held a person's own way keeps its mount and is stated once; the import's alignment
+     * holes move onto the tape flip's line, or are removed when it offers none.
+     */
+    usePcbHolding: () => {
+      const before = get().job;
+      const newMount = { kind: 'tape' as const };
+      // The holes a re-hold must carry: the ones the import actually added, and the ones the
+      // tape flip's offer places now (computed from the board as the outline item states it).
+      const added = alignmentHolesOf(before);
+      let alignment: AlignmentCarry | null = null;
+      const board = pcbBoardBox(before);
+      if (added.length > 0 && board !== null) {
+        const machine = useMachineStore.getState().machine;
+        const probe = machine === null ? null : probeFor(machineAt({ host: machine.host, port: machine.port }));
+        if (probe !== null) {
+          const settings = registrationSettings(useShopDefaultsStore.getState().defaults, probe).settings;
+          const largest = (before.drills ?? []).reduce((m, d) => Math.max(m, d.diameter ?? 0), 0);
+          const offer = pcbAlignmentOffer({
+            blank: { length: before.stock.length, width: before.stock.width, thickness: before.stock.thickness },
+            board,
+            mount: newMount,
+            probe: {
+              tipDiameterMm: settings.tipDiameterMm,
+              tipRadiusMm: settings.tipRadiusMm,
+              fineStepMm: settings.fineStepMm,
+              cornerClearanceMm: settings.cornerClearanceMm,
+              edgeMarginMm: settings.edgeMarginMm,
+              scanInsideMm: settings.scanInsideMm,
+            },
+            largestBoardHoleMm: largest,
+          });
+          alignment = { old: added, next: (offer?.holes ?? []).map((h): [number, number] => [h.x, h.y]) };
+        }
+      }
+      const reheld = reHoldPcbJob(before, newMount, alignment);
+      apply(() => ({
+        ...reheld.job,
         workholding: { kind: 'tape', tape: defaultTapeHold() },
-        sacrificial: { ...job.sacrificial, under: defaultSacrificialUnder(), source: 'default' },
-      })),
+        sacrificial: { ...reheld.job.sacrificial, under: defaultSacrificialUnder(), source: 'default' },
+      }));
+      return {
+        moved: reheld.moved,
+        kept: reheld.kept,
+        alignment: reheld.alignment,
+        twoSided: (reheld.job.setups ?? []).length > 1,
+      };
+    },
 
     /** #743 P-8 — the two alignment holes the offer computed, as ordinary drills of setup 1. */
     addPcbAlignmentHoles: (holes, diameterMm) =>
