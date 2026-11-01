@@ -591,7 +591,7 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect(next.textContent).toBe('Next: holding');
     // …and ONE sentence, in the step, says what to do — with the controls to do it right above.
     expect(screen.getByTestId('start-wizard-stock-unblock').textContent).toBe(
-      'Choose the stock above — a piece on the shelf, a size you type, or a file.',
+      'Choose the stock: a size you type, a piece on the shelf, or a file.',
     );
 
     typePiece();

@@ -18,6 +18,7 @@ import { useLocationStore } from '@/store/locationStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { NARROW_QUERY } from './wizardLayout';
+import './startWizard.css';
 import { useViewportStore } from '@/store/viewportStore';
 import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary';
 import { readDesignFile } from '@/engine/import/designImport';
@@ -31,7 +32,15 @@ import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/set
 import { facingSeed, facingShopFrom, jobItemCount, rodDimsOf } from '@/engine/cnc/stockStart';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import '@/store/stockEntryFollow';
-import { previousWizardStep, wizardNextLabel, wizardStep, wizardStepLine, type WizardStepId } from './wizardSteps';
+import {
+  WIZARD_STEPS,
+  previousWizardStep,
+  wizardNextLabel,
+  wizardStep,
+  wizardStepEyebrow,
+  wizardStepNumber,
+  type WizardStepId,
+} from './wizardSteps';
 import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
@@ -68,52 +77,16 @@ import type { PendingStock, StartStockSeed } from './StartStockStep';
  */
 
 /**
- * #726 P12 — a PLAIN backdrop. Opening the wizard hides the board library behind it, "so the
- * operator is in the cutting job and nowhere else" (first-job-flow §3.1). The usual translucent
- * scrim left the welcome library — or the job page, on a phone — legible and busy behind the
- * dialog; the app's own surface colour, opaque, is the plain one.
+ * #726 P12 — a PLAIN backdrop: the app's own surface colour, opaque, so the operator is in the
+ * cutting job and nowhere else. #870 — the overlay, the card and its three regions (a pinned header,
+ * the body as the ONE scroll region, a pinned footer) are drawn by `startWizard.css`; on a phone the
+ * card is a full-height sheet (`sw-overlay--sheet`). Holding draws a top-view picture beside the
+ * mount options, so that one step is wider (#684).
  */
-const OVERLAY: CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 'var(--cm-z-modal)', // the one stacking scale (#348), src/styles/tokens.css
-  background: 'var(--cm-color-surface)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: 16,
-};
-const BOX: CSSProperties = {
-  width: 'min(460px, 100%)',
-  maxHeight: 'calc(100vh - 32px)',
-  overflowY: 'auto',
-  background: '#141a21',
-  border: '1px solid #2a2f36',
-  borderRadius: 6,
-  padding: 12,
-  color: '#d1d5db',
-};
-/** #684 — Holding draws a top-view picture beside the mount options, so that one step is wider. */
-const BOX_WIDE: CSSProperties = { ...BOX, width: 'min(700px, 100%)' };
-
-/**
- * #726 W19/P12 — a phone. The dialog keeps the overlay's 16 px gutter and gains a 16 px content
- * edge (the desktop box is 12): at 390 px the message, fields and buttons read as one column with
- * the same margin all round. Holding also STACKS its picture under the options (HoldingStep).
- */
-const BOX_NARROW: CSSProperties = { ...BOX, padding: 16 };
-const BOX_WIDE_NARROW: CSSProperties = { ...BOX_NARROW, width: 'min(700px, 100%)' };
-
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
-const FOOTER: CSSProperties = {
-  display: 'flex',
-  gap: 6,
-  marginTop: 14,
-  paddingTop: 10,
-  borderTop: '1px solid #2a2f36',
-  flexWrap: 'wrap',
-};
-const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: '6px 0 0' };
+/** #870 — a fact or "nothing yet" is grey; amber is only for a step that cannot be left. */
+const ARRIVAL: CSSProperties = { fontSize: 11, color: '#9aa4b0', margin: 0 };
+const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: 0 };
 
 /** Take `stockEntry` off the job, if it carries one. */
 function clearStockEntry(): void {
@@ -826,108 +799,130 @@ export function StartWizard(): JSX.Element {
       ? rodViseProblem(answers.stock, roundStock)
       : null;
 
+  const stepNumber = wizardStepNumber(step);
+
   return createPortal(
-    <div style={OVERLAY} data-testid="start-wizard">
+    <div className={narrow ? 'sw-overlay sw-overlay--sheet' : 'sw-overlay'} data-testid="start-wizard">
       <div
-        style={step === 'holding' ? (narrow ? BOX_WIDE_NARROW : BOX_WIDE) : narrow ? BOX_NARROW : BOX}
+        className={step === 'holding' ? 'sw-card sw-card--wide' : 'sw-card'}
         role="dialog"
-        aria-label="New cutting job"
+        aria-modal="true"
+        aria-labelledby="start-wizard-title"
+        data-testid="start-wizard-dialog"
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* THE ONE COUNTER. No second numbering exists: this line is the whole of it (#681, A1). */}
-          <b style={{ flex: 1, fontSize: 13 }} data-testid="start-wizard-progress">
-            {wizardStepLine(step)}
-          </b>
-          <button type="button" data-testid="start-wizard-close" onClick={closeWizard}>
-            Close
-          </button>
+        <div className="sw-head">
+          <div className="sw-title-row">
+            {/* THE ONE COUNTER. No second numbering exists: this is the whole of it (#681, A1). Its
+                text stays `Step n of 4 · Title` — the separator is there for the text, not drawn. */}
+            <h2 className="sw-titles" id="start-wizard-title" data-testid="start-wizard-progress">
+              <span className="sw-eyebrow">{wizardStepEyebrow(step)}</span>
+              <span style={{ display: 'none' }}> · </span>
+              <span className="sw-title">{wizardStep(step).name}</span>
+            </h2>
+            <button
+              type="button"
+              className="sw-close"
+              aria-label="Close"
+              title="Close"
+              data-testid="start-wizard-close"
+              onClick={closeWizard}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="sw-progress" aria-hidden="true" data-testid="start-wizard-progress-strip">
+            {WIZARD_STEPS.map((s, i) => (
+              <span
+                key={s.id}
+                className={i < stepNumber ? 'sw-progress__seg sw-progress__seg--on' : 'sw-progress__seg'}
+              />
+            ))}
+          </div>
         </div>
 
-        {/* #490 — a throw in a step used to blank the hand-off; the body has its own boundary so a
-            broken step leaves the modal (and its Close) in place. */}
-        <PanelErrorBoundary name="Cut setup flow">{stepContent}</PanelErrorBoundary>
-
-        {stockUnblock && (
-          <p style={UNBLOCK} data-testid="start-wizard-stock-unblock">
-            Choose the stock above — a piece on the shelf, a size you type, or a file.
-          </p>
-        )}
-        {holdingBlock !== null && (
-          <p style={UNBLOCK} data-testid="start-wizard-holding-block">
-            {holdingBlock}.
-          </p>
-        )}
+        <div className="sw-body" data-testid="start-wizard-body">
+          {/* #490 — a throw in a step used to blank the hand-off; the body has its own boundary so a
+              broken step leaves the modal (and its Close) in place. */}
+          <PanelErrorBoundary name="Cut setup flow">{stepContent}</PanelErrorBoundary>
+        </div>
 
         {/* #348 — the actions are their own region, not a row tucked under the last field: a native
-            `<select>`'s popup paints over what is under it, so the buttons get clearance. */}
-        <div style={FOOTER}>
-          {/* #726 P10 — step 1 has no Back, and its footer Cancel repeated the header's Close:
-              two controls, one action. The header's Close is the one every step carries, so it
-              is the one that stays; the footer offers only what moves the flow. */}
-          {step !== 'machine' && (
-            <button type="button" data-testid="start-wizard-back" onClick={back}>
-              ← Back
-            </button>
+            `<select>`'s popup paints over what is under it, so the buttons get clearance. #870 — the
+            step-wide sentence sits directly above them, pinned with the footer. */}
+        <div className="sw-foot" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+          {stockUnblock && (
+            <p style={ARRIVAL} data-testid="start-wizard-stock-unblock">
+              Choose the stock: a size you type, a piece on the shelf, or a file.
+            </p>
           )}
+          {holdingBlock !== null && (
+            <p style={UNBLOCK} data-testid="start-wizard-holding-block">
+              {holdingBlock}.
+            </p>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* #726 P10 — step 1 has no Back, and no footer Cancel: the header's ✕ is the one way
+                out every step carries; the footer offers only what moves the flow. */}
+            {step !== 'machine' && (
+              <button type="button" className="sw-btn sw-btn--ghost" data-testid="start-wizard-back" onClick={back}>
+                ← Back
+              </button>
+            )}
+            <span className="sw-foot__spacer" />
+            {doneStep && (
+              // A re-entry may finish at the step it came to edit, so walking to step 4 is a choice
+              // rather than the price of closing the wizard (#681 follow-up).
+              <button
+                type="button"
+                className="sw-btn"
+                data-testid="start-wizard-done"
+                disabled={step === 'stock' && (pending === null || starting)}
+                onClick={done}
+              >
+                Done
+              </button>
+            )}
 
-          {step === 'machine' && (
-            // The SAME test id either way: it is the button that advances, whatever it says.
-            <button
-              type="button"
-              data-testid="start-wizard-next"
-              style={{ padding: '3px 12px' }}
-              title="A job does not need a machine."
-              onClick={next}
-            >
-              {canReachMachine ? wizardStep('machine').nextLabel : 'Continue without a machine'}
-            </button>
-          )}
-          {step === 'stock' && confirmReplace === null && (
-            <button
-              type="button"
-              data-testid="start-wizard-stock-next"
-              style={doneStep ? undefined : { padding: '3px 12px' }}
-              disabled={pending === null || starting}
-              onClick={next}
-            >
-              {starting ? 'Starting…' : wizardNextLabel('stock', reEntry)}
-            </button>
-          )}
-          {step === 'holding' && (
-            <button
-              type="button"
-              data-testid="engrave-setup-next"
-              style={doneStep ? undefined : { padding: '3px 12px' }}
-              disabled={holdingBlock !== null}
-              onClick={next}
-            >
-              {wizardNextLabel('holding', reEntry)}
-            </button>
-          )}
-          {step === 'operation' && (
-            <button
-              type="button"
-              data-testid="start-wizard-create"
-              style={{ padding: '3px 12px' }}
-              disabled={operationCreateBlocked(operationChoice) !== null || (operationChoice === null && !hasOperations)}
-              onClick={next}
-            >
-              {wizardNextLabel('operation', reEntry)}
-            </button>
-          )}
-          {doneStep && (
-            // The edited step's primary action on a re-entry: finish here, so walking to step 4 is
-            // a choice rather than the price of closing the wizard (#681 follow-up).
-            <button
-              type="button"
-              data-testid="start-wizard-done"
-              style={{ padding: '3px 12px' }}
-              disabled={step === 'stock' && (pending === null || starting)}
-              onClick={done}
-            >
-              Done
-            </button>
-          )}
+            {step === 'machine' && (
+              // The SAME test id either way: it is the button that advances, whatever it says.
+              <button type="button" className="sw-btn sw-btn--primary" data-testid="start-wizard-next" onClick={next}>
+                {canReachMachine ? wizardStep('machine').nextLabel : 'Continue without a machine'}
+              </button>
+            )}
+            {step === 'stock' && confirmReplace === null && (
+              <button
+                type="button"
+                className="sw-btn sw-btn--primary"
+                data-testid="start-wizard-stock-next"
+                disabled={pending === null || starting}
+                onClick={next}
+              >
+                {starting ? 'Starting…' : wizardNextLabel('stock', reEntry)}
+              </button>
+            )}
+            {step === 'holding' && (
+              <button
+                type="button"
+                className="sw-btn sw-btn--primary"
+                data-testid="engrave-setup-next"
+                disabled={holdingBlock !== null}
+                onClick={next}
+              >
+                {wizardNextLabel('holding', reEntry)}
+              </button>
+            )}
+            {step === 'operation' && (
+              <button
+                type="button"
+                className="sw-btn sw-btn--primary"
+                data-testid="start-wizard-create"
+                disabled={operationCreateBlocked(operationChoice) !== null || (operationChoice === null && !hasOperations)}
+                onClick={next}
+              >
+                {wizardNextLabel('operation', reEntry)}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>,

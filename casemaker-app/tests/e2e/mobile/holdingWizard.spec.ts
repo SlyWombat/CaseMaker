@@ -7,14 +7,15 @@
 //
 // P12: the wizard's backdrop was the usual translucent scrim, so the welcome library stayed
 // legible behind the dialog; the phone also got only the box's 12 px content edge. The backdrop
-// is plain (opaque, nothing behind it reads), the dialog keeps a 16 px gutter from the screen
-// edge, and on a phone its content gets the same 16 px edge.
+// is plain (opaque, nothing behind it reads), and on a phone its content gets a 16 px edge.
+// #870 — on a phone the dialog is a full-height SHEET, edge to edge: no gutter, no band above it;
+// the 16 px edge is the body's (the one scroll region) between its pinned header and footer.
 
 import { test, expect } from '../fixtures/caseMaker';
 
 type Box = { left: number; top: number; right: number; bottom: number } | null;
 
-test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain sheet with a 16 px gutter', async ({
+test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain full-height sheet', async ({
   cm,
   page,
 }) => {
@@ -22,7 +23,7 @@ test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain 
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
 
-  // P12 — a plain backdrop, a 16 px gutter either side, a 16 px content edge, no sideways scroll.
+  // P12 — a plain backdrop, a 16 px content edge, no sideways scroll; #870 — the sheet fills the screen.
   const sheet = await page.evaluate(() => {
     const overlay = document.querySelector('[data-testid="start-wizard"]') as HTMLElement;
     const box = overlay.querySelector('[role="dialog"]') as HTMLElement;
@@ -32,16 +33,20 @@ test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain 
       background: getComputedStyle(overlay).backgroundColor,
       left: Math.round(b.left - o.left),
       right: Math.round(o.right - b.right),
-      padding: getComputedStyle(box).padding,
+      top: Math.round(b.top - o.top),
+      bottom: Math.round(o.bottom - b.bottom),
+      padding: (() => {
+        const body = getComputedStyle(box.querySelector('[data-testid="start-wizard-body"]') as HTMLElement);
+        return `${body.paddingLeft} ${body.paddingRight}`;
+      })(),
       scrollW: document.documentElement.scrollWidth,
       vw: document.documentElement.clientWidth,
     };
   });
   // A plain backdrop has no alpha: the page behind the wizard cannot be read through it.
   expect(sheet.background).toMatch(/^rgb\(/);
-  expect(sheet.left, 'gutter left').toBeGreaterThanOrEqual(16);
-  expect(sheet.right, 'gutter right').toBeGreaterThanOrEqual(16);
-  expect(sheet.padding).toBe('16px');
+  expect([sheet.left, sheet.right, sheet.top, sheet.bottom], 'the sheet fills the screen').toEqual([0, 0, 0, 0]);
+  expect(sheet.padding).toBe('16px 16px');
   expect(sheet.scrollW).toBeLessThanOrEqual(sheet.vw);
 
   // Door → the wizard's Holding step, with the exercise's plate typed by hand.
@@ -96,7 +101,7 @@ test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain 
   await page.screenshot({ path: 'test-results/726-w19-holding-phone.png' });
 
   // The manager's own width (#726 review): 375 × 812, the narrower phone. Same two questions —
-  // no horizontal page scroll and the 16 px gutter — asked again on the Holding step.
+  // no horizontal page scroll, and the sheet still edge to edge — asked again on the Holding step.
   await page.setViewportSize({ width: 375, height: 812 });
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   const narrow = await page.evaluate(() => {
@@ -111,7 +116,7 @@ test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain 
       vw: document.documentElement.clientWidth,
     };
   });
-  expect(narrow.left, '375 px gutter left').toBeGreaterThanOrEqual(16);
-  expect(narrow.right, '375 px gutter right').toBeGreaterThanOrEqual(16);
+  expect(narrow.left, '375 px sheet left').toBe(0);
+  expect(narrow.right, '375 px sheet right').toBe(0);
   expect(narrow.scrollW, '375 px horizontal page scroll').toBe(narrow.vw);
 });

@@ -47,9 +47,14 @@ export function previousWizardStep(id: WizardStepId): WizardStepId | null {
   return i > 0 ? (WIZARD_STEPS[i - 1]?.id ?? null) : null;
 }
 
+/** `Step 1 of 4` — the header's grey eyebrow (#870); the title under it is the step's name. */
+export function wizardStepEyebrow(id: WizardStepId): string {
+  return `Step ${wizardStepNumber(id)} of ${WIZARD_STEP_COUNT}`;
+}
+
 /** `Step 1 of 4 · Machine` — the one counter, in the one form. */
 export function wizardStepLine(id: WizardStepId): string {
-  return `Step ${wizardStepNumber(id)} of ${WIZARD_STEP_COUNT} · ${wizardStep(id).name}`;
+  return `${wizardStepEyebrow(id)} · ${wizardStep(id).name}`;
 }
 
 /**
