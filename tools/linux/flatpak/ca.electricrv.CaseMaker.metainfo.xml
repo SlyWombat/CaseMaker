@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata for Case Maker (#866). This is what a software centre shows; the `desktop
+     file alone is not enough. A software centre's validators are run by the release workflow.
+
+     One file for every Linux channel: the Flatpak installs it as it is, and the tarball carries
+     it. <release> must name the version tauri.conf.json says — tools/linux/make-release-tarball.sh
+     refuses a tarball whose metainfo disagrees with the app it carries. -->
+<component type="desktop-application">
+  <id>ca.electricrv.CaseMaker</id>
+
+  <!-- The licence of THIS FILE, not of the app. CC0 is what Flathub asks for so listing text can
+       be reused; the app is Apache-2.0. -->
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+
+  <name>Case Maker</name>
+  <summary>Design 3D-printable enclosures around real boards</summary>
+
+  <developer id="ca.electricrv">
+    <name>Electric RV</name>
+  </developer>
+
+  <launchable type="desktop-id">ca.electricrv.CaseMaker.desktop</launchable>
+
+  <description>
+    <p>
+      Case Maker draws a 3D-printable enclosure around a board you actually have. Pick the board
+      from the library, or import its dimensions, and the case is generated around its real
+      connectors and mounting holes instead of being guessed from a photo.
+    </p>
+    <p>What it does:</p>
+    <ul>
+      <li>Thirty built-in boards, with the connector, hole and clearance data each one needs,
+      plus anything you import or enable from a community library.</li>
+      <li>Port cutouts that move with the board: toggle a USB or HDMI opening and the shell
+      rebuilds in a few milliseconds.</li>
+      <li>Joints, lids, dividers, magnets, mounting plates and rack shelves, all parametric.</li>
+      <li>Export to STL or 3MF for a slicer.</li>
+    </ul>
+    <p>
+      The same program can drive a Makera Z1 desktop CNC: it plans the job, simulates the stock it
+      removes, checks the program against the machine's own limits and posts a verified file.
+    </p>
+    <p>
+      It runs entirely on your own computer. No account, no cloud: the app serves its own interface
+      from its own embedded server, and a browser on the same network can open it and drive the
+      same machine.
+    </p>
+  </description>
+
+  <categories>
+    <category>Graphics</category>
+    <category>Development</category>
+  </categories>
+
+  <url type="homepage">https://electricrv.ca/casemaker/</url>
+  <url type="bugtracker">https://github.com/SlyWombat/CaseMaker/issues</url>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="1.0.0" date="2026-11-01">
+      <description>
+        <p>The first Case Maker release for Linux.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -6,8 +6,9 @@
 # two workflows (`ci.yml`, `playwright.yml`) are still there and still have never run: moving them
 # would start Actions minutes on every push, which is the maintainer's call, not this issue's.
 #
-# TRIGGERS. A `v*` tag is a release; a manual dispatch is a test build. Pushes to main do not run
-# this workflow — a release artifact is what it exists for, and minutes are the maintainer's.
+# TRIGGERS. A `windows-v*` tag is a release (#866 gives each platform series its own tag prefix,
+# like `linux-v*`); a manual dispatch is a test build. Pushes to main do not run this workflow — a
+# release artifact is what it exists for, and minutes are the maintainer's.
 #
 # SIGNING. The certificate and its password are the maintainer's secrets and are never created by
 # this repository. The signing step is clearly marked and SKIPPED when `WINDOWS_CERT_PFX_BASE64` is
@@ -23,7 +24,7 @@ name: Windows installer
 
 on:
   push:
-    tags: ['v*']
+    tags: ['windows-v*']
   workflow_dispatch:
 
 # `gh release create/upload` needs a token allowed to write releases.
@@ -114,6 +115,35 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # A build that exists proves nothing: this installs the installer for real, launches the app
+      # headless, and asks its own server for /api/v1/health (#866, #867 — the same proof the Linux
+      # release uses for its .deb). It runs before the release step so a broken package cannot be
+      # attached to a draft.
+      - name: Install it, serve headless from it, and remove it again
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem 'src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe' |
+            Select-Object -First 1
+          if ($null -eq $installer) { throw 'no NSIS installer was produced' }
+          $port = 18123
+          $p = Start-Process -FilePath $installer.FullName -ArgumentList '/S', "/PORT=$port" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "the installer exited $($p.ExitCode)" }
+          $dir = Join-Path $env:ProgramFiles 'Case Maker'
+          $exe = Get-ChildItem $dir -Filter '*.exe' | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1
+          if ($null -eq $exe) { throw "no app executable under $dir" }
+          $app = Start-Process -FilePath $exe.FullName -ArgumentList '--headless', '--bind-all', "--port=$port" -PassThru
+          $health = $null
+          for ($i = 0; $i -lt 60; $i++) {
+            try { $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/v1/health" -TimeoutSec 2; break } catch { Start-Sleep -Seconds 1 }
+          }
+          if ($null -eq $health -or -not $health.ok) { throw 'the installed app did not serve /api/v1/health' }
+          if ([string]::IsNullOrWhiteSpace($health.build) -or $health.build -eq 'unknown') { throw 'the installed app reports no build stamp' }
+          "health: ok=$($health.ok) build=$($health.build)"
+          Stop-Process -Id $app.Id -Force
+          $uninstaller = Get-ChildItem $dir -Filter 'uninstall*.exe' | Select-Object -First 1
+          if ($null -ne $uninstaller) { Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait }
+
       # #290's acceptance: never SILENTLY attach an unsigned installer to a release.
       - name: Refuse an unsigned installer for a release
         if: startsWith(github.ref, 'refs/tags/') && env.WINDOWS_CERT_PFX_BASE64 == ''
@@ -132,10 +162,13 @@ jobs:
           $installer = Get-ChildItem 'src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe' |
             Select-Object -First 1
           if ($null -eq $installer) { throw 'no NSIS installer was produced' }
-          # The release is created by whoever tags, or by this job when nobody did.
+          # Draft, always (#866): publishing is a person's click. --verify-tag refuses a tag that is
+          # not already pushed, and a re-run replaces the files rather than making a second release.
+          $version = $tag -replace '^windows-v', ''
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title "Case Maker $tag" --generate-notes
+            gh release create $tag --draft --verify-tag --title "Case Maker $version for Windows" `
+              --notes "Case Maker $version for Windows (x64). The installer is signed; Windows 10 1903+ or 11 with WebView2."
             if ($LASTEXITCODE -ne 0) { throw "gh release create $tag failed with exit code $LASTEXITCODE" }
           }
           gh release upload $tag $installer.FullName --clobber

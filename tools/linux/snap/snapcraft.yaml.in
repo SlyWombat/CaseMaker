@@ -1,0 +1,49 @@
+# The Snap as a template (#866): tools/linux/snap/make-snapcraft-yaml.py fills the version and
+# builds this file into snapcraft.yaml. Built by tools/linux/build-snap.sh with
+# `snapcraft pack --destructive-mode` on Ubuntu 24.04 — the release core24 is made from.
+name: casemaker
+base: core24
+version: '@VERSION@'
+summary: Design 3D-printable enclosures around real boards
+description: |
+  Case Maker draws a 3D-printable enclosure around a board you actually have.
+
+  Thirty built-in boards with their real connectors and mounting holes, ports that move with the
+  board, joints, lids, dividers, magnets and rack shelves, exported as STL or 3MF for a slicer.
+
+  The same program can drive a Makera Z1 desktop CNC: it plans the job, simulates the stock it
+  removes, and posts a verified file.
+
+  It runs on your own computer: the app serves its own interface from its embedded server, and a
+  browser on the same network can open it and drive the same machine. Run `casemaker --headless
+  --bind-all` to serve it without a window.
+grade: stable
+confinement: strict
+icon: casemaker.png
+
+apps:
+  casemaker:
+    command: bin/casemaker
+    extensions: [gnome]
+    # The app's job IS the network: it serves the page to LAN browsers and drives the machine over
+    # TCP 2222 and UDP 3333 (#866). home is there for the file pickers' chosen paths.
+    plugs:
+      - network
+      - network-bind
+      - home
+
+parts:
+  casemaker:
+    plugin: dump
+    source: tree
+    # The one binary (#867), the desktop entry and the metainfo the tarball carries.
+    stage:
+      - bin/casemaker
+      - casemaker.desktop
+      - ca.electricrv.CaseMaker.metainfo.xml
+      - LICENCE.txt
+    organize:
+      bin/casemaker: bin/casemaker
+      casemaker.desktop: share/applications/casemaker.desktop
+      ca.electricrv.CaseMaker.metainfo.xml: share/metainfo/ca.electricrv.CaseMaker.metainfo.xml
+      LICENCE.txt: share/doc/casemaker/LICENCE.txt

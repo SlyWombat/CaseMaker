@@ -1,0 +1,237 @@
+# The Linux release (#866, modelled on MegaPDF's pipeline): the release tarball, the .deb and the
+# signed APT repository built from it, each one proved by installing it and running the app
+# headless out of what it installed.
+#
+# Tag a commit `linux-v1.0.0` and the tarball, the .deb and their checksums go into a **draft**
+# GitHub release of that name. The Linux series has a tag prefix of its own, like `windows-v*`,
+# rather than a bare `v*`: a Linux release can never be mistaken for a Windows installer build.
+# `workflow_dispatch` and pull requests do everything except the release.
+#
+# NOTHING HERE PUBLISHES ANYTHING. The release is a draft until a person publishes it. The APT
+# repository is an artefact a deploy uploads to electricrv.ca when the maintainer says so
+# (tools/linux/Linux-Packaging.md, "Going live").
+#
+# The package is ONE (#867): the deb and the tarball carry the desktop app, which is also the
+# headless server, and the deb ships the systemd unit.
+name: Linux release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['linux-v*']
+  # The tag path cannot be rehearsed on a pull request, so everything up to it is rehearsed
+  # instead, whenever any of the pieces change.
+  pull_request:
+    paths:
+      - '.github/workflows/linux-release.yml'
+      - 'tools/linux/**'
+      - 'casemaker-app/src-tauri/linux/**'
+      - 'casemaker-app/src-tauri/tauri.conf.json'
+
+permissions:
+  contents: read
+
+jobs:
+  tarball:
+    name: Tarball, .deb and APT repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: casemaker-app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev build-essential file curl xz-utils patchelf dpkg-dev apt-utils gpg \
+            flatpak flatpak-builder appstream desktop-file-utils xvfb dbus dbus-x11
+
+      - name: Install npm deps
+        run: cd casemaker-app && npm ci
+
+      # The version a tag names is the version this tree builds. linux-v1.0.0 on a tree that says
+      # 1.0.1 would publish a release whose files contradict its name.
+      - name: The tag matches the version
+        if: startsWith(github.ref, 'refs/tags/linux-v')
+        run: |
+          built="$(tools/linux/package-version.sh "$(node -p "require('./casemaker-app/src-tauri/tauri.conf.json').version")")"
+          [ "linux-v$built" = "$GITHUB_REF_NAME" ] || {
+            echo "::error::tag $GITHUB_REF_NAME, but this tree builds $built"; exit 1; }
+
+      # One package (#867): the desktop bundle is also the server, and the .deb ships the systemd
+      # unit. CASEMAKER_BUILD stamps the commit into /api/v1/health.
+      - name: The .deb and its checksum
+        env:
+          CASEMAKER_BUILD: ${{ github.sha }}
+        run: tools/linux/build-deb.sh artifacts/release
+
+      - name: The release tarball and its checksum
+        env:
+          SKIP_LAUNCH_CHECK: '1'
+        run: tools/linux/make-release-tarball.sh artifacts/release
+
+      # Two manifests from one template: the one a Flathub pull request would contain, naming the
+      # release URL, and the same thing pointed at the file on disk so this run can build it
+      # before anything is published.
+      - name: The Flathub manifest
+        run: |
+          set -e
+          TARBALL=$(ls artifacts/release/casemaker-linux-x64-*.tar.gz)
+          tools/linux/make-flathub-manifest.sh "$TARBALL" artifacts/release/ca.electricrv.CaseMaker.yml
+          tools/linux/make-flathub-manifest.sh "$TARBALL" --local artifacts/release/ca.electricrv.CaseMaker.local.yml
+
+      - name: The runtime the manifest names
+        run: |
+          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          runtime=$(grep -E "^runtime-version:" artifacts/release/ca.electricrv.CaseMaker.yml | tr -d "' " | cut -d: -f2)
+          flatpak install -y --noninteractive --user flathub "org.gnome.Platform//$runtime" "org.gnome.Sdk//$runtime"
+
+      # The point of the whole job: the manifest Flathub will run, built from the tarball this run
+      # produced. Not the local references, which only exist in this repository.
+      - name: Build the Flatpak from the manifest, from the tarball
+        run: tools/linux/build-flathub-flatpak.sh artifacts/release/ca.electricrv.CaseMaker.local.yml artifacts/flathub
+
+      # A bundle that exists proves nothing: this installs it and asks the page's own server for
+      # health from inside the sandbox.
+      - name: Install the Flatpak and serve the page from inside its sandbox
+        run: tools/linux/check-flatpak.sh artifacts/flathub/ca.electricrv.CaseMaker.flatpak
+
+      - name: Flathub's linter, on the manifest that would be submitted
+        continue-on-error: true
+        run: |
+          flatpak install -y --noninteractive --user flathub org.flatpak.Builder
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest artifacts/release/ca.electricrv.CaseMaker.yml
+
+      # A package that exists proves nothing: this installs it on the runner, launches it headless
+      # and asks it for /api/v1/health (#867's own way of running).
+      - name: Install the .deb and serve headless from it
+        run: sudo tools/linux/check-deb.sh artifacts/release/casemaker_*_amd64.deb
+
+      # Every .deb already published stays in the repository, so the site can replace the
+      # repository wholesale without taking away a version someone pinned, and apt upgrade sees the
+      # path from each one to this one. Downloaded from the published (not draft) linux-v* releases;
+      # a pull-request rehearsal has no releases to fetch and starts empty.
+      - name: The .debs already published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          POOL=artifacts/apt/pool/main/c/casemaker
+          mkdir -p "$POOL"
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+                           --json tagName,isDraft --jq '.[] | select(.isDraft | not) | .tagName' \
+                         | grep '^linux-v' || true); do
+              [ "$tag" = "$GITHUB_REF_NAME" ] && continue
+              gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+                --pattern 'casemaker_*_amd64.deb' --dir "$POOL" --skip-existing
+            done
+          fi
+          ls -l "$POOL" || true
+
+      # Signed with the repository key, which the environment hands over and the script imports
+      # from stdin, never from a command line. A pull request from a fork has no secrets, so there
+      # this step says so and stops short.
+      - name: The signed APT repository
+        id: apt
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          if [ -z "$APT_SIGNING_KEY" ]; then
+            echo "::notice::no signing key here (a fork, or the maintainer has not created one), so no APT repository is built"
+            exit 0
+          fi
+          cp artifacts/release/casemaker_*_amd64.deb artifacts/apt/pool/main/c/casemaker/ 2>/dev/null || true
+          tools/linux/make-apt-repo.sh artifacts/apt artifacts/release/casemaker_*_amd64.deb
+          echo "built=1" >> "$GITHUB_OUTPUT"
+
+      # Proved the way a person meets it: subscribe, install, run headless, and see a newer version
+      # arrive through apt upgrade. The containers need the host's docker, which the runner has.
+      - name: Install from the APT repository and upgrade
+        if: steps.apt.outputs.built == '1'
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: tools/linux/check-apt-repo.sh artifacts/apt
+
+      - name: What this run produced
+        run: |
+          {
+            echo "### Linux release artefacts"
+            echo
+            echo '```'
+            ls -l artifacts/release
+            echo '```'
+            echo
+            echo "**sha256**:"
+            echo
+            echo '```'
+            cat artifacts/release/*.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CaseMaker-linux-release
+          path: |
+            artifacts/release/casemaker-linux-x64-*.tar.gz
+            artifacts/release/casemaker-linux-x64-*.tar.gz.sha256
+            artifacts/release/casemaker_*_amd64.deb
+            artifacts/release/casemaker_*_amd64.deb.sha256
+            artifacts/release/ca.electricrv.CaseMaker.yml
+            artifacts/flathub/ca.electricrv.CaseMaker.flatpak
+          if-no-files-found: error
+
+      # What a deploy uploads to electricrv.ca/casemaker/apt/ on the day: download it into the site
+      # and publish it (tools/linux/Linux-Packaging.md, "Going live").
+      - uses: actions/upload-artifact@v4
+        if: steps.apt.outputs.built == '1'
+        with:
+          name: CaseMaker-apt-repository
+          path: artifacts/apt
+          if-no-files-found: error
+
+  # A job of its own, so the write permission exists only on a tag run and never on the pull-request
+  # rehearsal above. It builds nothing: it puts what that job already made, and already installed and
+  # ran, into a DRAFT release. Publishing it is a person's click.
+  publish:
+    name: Draft the release
+    needs: tarball
+    if: startsWith(github.ref, 'refs/tags/linux-v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: CaseMaker-linux-release
+          path: artifacts
+
+      # Neither creates a tag nor touches any other release. `--verify-tag` refuses a tag that is
+      # not already pushed. A re-run of the same tag replaces the files in the draft rather than
+      # making a second release.
+      - name: The tarball, the .deb and their checksums, in a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          TAG="$GITHUB_REF_NAME"
+          VERSION="${TAG#linux-v}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --draft --verify-tag --title "Case Maker $VERSION for Linux" \
+              --notes "Case Maker $VERSION for Linux (x86-64). How to install it, including the APT repository that keeps it up to date: https://electricrv.ca/casemaker/linux/ — each file's sha256 is beside it."
+          gh release upload "$TAG" \
+            artifacts/casemaker-linux-x64-*.tar.gz \
+            artifacts/casemaker-linux-x64-*.tar.gz.sha256 \
+            artifacts/casemaker_*_amd64.deb \
+            artifacts/casemaker_*_amd64.deb.sha256 \
+            --clobber
+          gh release view "$TAG" --json isDraft,tagName,assets \
+            --jq '"draft=\(.isDraft) \(.tagName): \([.assets[].name] | join(", "))"'

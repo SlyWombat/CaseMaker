@@ -1,0 +1,12 @@
+# The Linux packaging revision: "<app version> <revision>".
+#
+# Bump the revision when the .deb, the tarball or the APT repository has to be rebuilt while the
+# app itself is unchanged (a dependency, an installed file, the metainfo, the systemd unit), so the
+# new package has a version of its own and never replaces the published files of the same name. It
+# applies only while the app version matches: once tauri.conf.json moves to a new version, packages
+# are that version again with no suffix, whatever this file says. tools/linux/package-version.sh
+# reads it, and build-deb.sh re-stamps the .deb's control Version with the result.
+#
+# Nothing is active yet. The first entry would look like:
+#
+#   1.0.0 2

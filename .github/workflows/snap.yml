@@ -1,0 +1,124 @@
+# The Case Maker snap (#866, modelled on MegaPDF's snap.yml): builds it, installs it, and runs the
+# app under strict confinement on a real Ubuntu 24.04 machine with snapd — a GitHub runner is a VM,
+# not a container, which is what makes the confinement here the real one.
+#
+# Nothing is uploaded unless all three hold: the run was started by hand, the `upload` input was
+# ticked, and the SNAPCRAFT_STORE_CREDENTIALS secret exists. It does not exist yet; creating it is
+# the maintainer's step (tools/linux/Linux-Packaging.md, "The Snap Store"). Even then the upload
+# goes to the edge channel, which no one is on unless they ask for it. Promotion to stable is a
+# click in the Snap Store dashboard, never this workflow.
+name: Snap
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: Upload to the Snap Store's edge channel (needs the SNAPCRAFT_STORE_CREDENTIALS secret)
+        required: true
+        default: false
+        type: boolean
+  push:
+    branches: [main]
+    paths:
+      - 'tools/linux/snap/**'
+      - 'tools/linux/build-snap.sh'
+      - 'tools/linux/check-snap.sh'
+      - 'tools/linux/make-release-tarball.sh'
+      - '.github/workflows/snap.yml'
+  pull_request:
+    paths:
+      - 'tools/linux/snap/**'
+      - 'tools/linux/build-snap.sh'
+      - 'tools/linux/check-snap.sh'
+      - 'tools/linux/make-release-tarball.sh'
+      - '.github/workflows/snap.yml'
+
+jobs:
+  snap:
+    name: Snap (build, strict confinement)
+    # 24.04 by name, not ubuntu-latest: `snapcraft pack --destructive-mode` builds a core24 snap
+    # only on the release core24 is made from.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: casemaker-app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev build-essential file curl xz-utils patchelf squashfs-tools desktop-file-utils
+
+      - name: Install npm deps
+        run: cd casemaker-app && npm ci
+
+      # The binary the snap carries, built on the same Ubuntu the base is.
+      - name: Build the app (no bundle)
+        env:
+          CASEMAKER_BUILD: ${{ github.sha }}
+        run: cd casemaker-app && npx tauri build --no-bundle
+
+      - name: The release tree and tarball the snap is packed from
+        env:
+          SKIP_LAUNCH_CHECK: '1'
+        run: tools/linux/make-release-tarball.sh
+
+      - name: Snapcraft
+        run: |
+          sudo snap install snapcraft --classic
+          snapcraft --version
+
+      # Built as root (the gnome extension installs its SDK through snapd), and then handed back:
+      # review-tools is itself a confined snap and cannot read a root-owned file.
+      - name: Build the snap
+        run: |
+          sudo tools/linux/build-snap.sh "$(ls artifacts/release/casemaker-linux-x64-*.tar.gz)" artifacts/snap
+          sudo chown -R "$USER" artifacts/snap
+
+      - name: Desktop session tools for the check
+        run: |
+          sudo apt-get install -y -qq dbus dbus-x11 dbus-user-session x11-utils curl
+
+      # A step is a child of the runner's system service, and snapd will not start a snap from
+      # there ("… is not a snap cgroup"): it tracks each snap process in a scope under the user's
+      # own systemd manager. Lingering starts that manager with no login.
+      - name: A user session for the check
+        run: |
+          sudo loginctl enable-linger "$USER"
+          for _ in $(seq 1 60); do
+            systemctl is-active --quiet "user@$(id -u).service" && break
+            sleep 1
+          done
+          systemctl is-active "user@$(id -u).service"
+
+      - name: Install the snap and run the app under strict confinement
+        run: |
+          sudo systemd-run --machine="$USER@.host" --user --pipe --wait --quiet --collect \
+            --working-directory="$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/tools/linux/check-snap.sh" \
+            "$(ls "$GITHUB_WORKSPACE"/artifacts/snap/casemaker_*_amd64.snap)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CaseMaker-snap
+          path: artifacts/snap/casemaker_*_amd64.snap
+          if-no-files-found: error
+
+      # Off unless asked for, and off without the credential.
+      - name: Upload to the edge channel
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload }}
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
+            echo "::error::no SNAPCRAFT_STORE_CREDENTIALS secret; see tools/linux/Linux-Packaging.md, \"The Snap Store\""
+            exit 1
+          fi
+          snapcraft upload --release=edge "$(ls artifacts/snap/casemaker_*_amd64.snap)"

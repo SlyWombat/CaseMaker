@@ -1,0 +1,57 @@
+# The manifest as Flathub would build it (#866). NOT SUBMITTED ANYWHERE.
+#
+# This is a template: tools/linux/make-flathub-manifest.sh fills in the @SOURCE@ line with a
+# release tarball's URL and sha256 (or, for a dry run, its local path), because neither exists
+# until the tag build has made one. The generated file is what a pull request against
+# flathub/flathub would contain, and tools/linux/build-flathub-flatpak.sh builds exactly it —
+# so the manifest Flathub runs is the one that has been run.
+#
+# The runtime is GNOME's, which is what Tauri's own Flatpak guide uses: it carries the Gtk/
+# WebKit stack a Tauri app links against. The app itself is ONE binary (#867): the window, the
+# embedded server and the headless server are the same program, so the sandbox runs the binary
+# directly and `casemaker --headless` works inside it too.
+app-id: ca.electricrv.CaseMaker
+
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+
+command: casemaker
+
+# What the app needs, and nothing else.
+#
+#   --socket=x11, --share=ipc, --device=dri   the Tauri window: X11 (a Wayland session runs it
+#                                             through XWayland), X11 shared memory, and the GPU
+#                                             surface (it falls back to the CPU without it).
+#   --share=network                           THE APP'S JOB IS THE NETWORK. It serves the app to
+#                                             LAN browsers and drives the machine over TCP 2222
+#                                             and UDP 3333; without this the sandbox could do
+#                                             neither, and the machine step — the reason the app
+#                                             exists — would fail with "no machine found".
+#
+# Deliberately absent: --filesystem. The app's own data lives under its home inside the sandbox;
+# anything a person opens or saves arrives through the desktop's file portal.
+finish-args:
+  - --socket=x11
+  - --share=ipc
+  - --device=dri
+  - --share=network
+
+modules:
+  - name: casemaker
+    buildsystem: simple
+    # The binary arrives already built and tested; there is no debuginfo to extract, and stripping
+    # it here would ship a binary that is not the one the release proved.
+    build-options:
+      strip: false
+      no-debuginfo: true
+    build-commands:
+      - install -Dm755 bin/casemaker /app/bin/casemaker
+      - install -Dm644 flatpak/casemaker.desktop /app/share/applications/ca.electricrv.CaseMaker.desktop
+      - install -Dm644 flatpak/ca.electricrv.CaseMaker.metainfo.xml /app/share/metainfo/ca.electricrv.CaseMaker.metainfo.xml
+      # Both names: the desktop entry says Icon=casemaker, Flathub's listing wants the app-id.
+      - install -Dm644 flatpak/casemaker.png /app/share/icons/hicolor/128x128/apps/casemaker.png
+      - cp /app/share/icons/hicolor/128x128/apps/casemaker.png /app/share/icons/hicolor/128x128/apps/ca.electricrv.CaseMaker.png
+      - install -Dm644 LICENCE.txt /app/share/doc/casemaker/LICENCE.txt
+    sources:
+@SOURCE@

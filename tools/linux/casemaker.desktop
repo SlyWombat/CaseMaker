@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Case Maker
+GenericName=Enclosure designer
+Comment=Parametric 3D-printable enclosure designer
+Exec=casemaker
+Icon=casemaker
+Terminal=false
+Categories=Development;Graphics;
+Keywords=3d;printing;enclosure;cnc;
+StartupWMClass=casemaker
