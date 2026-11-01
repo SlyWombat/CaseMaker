@@ -16,8 +16,12 @@
 //   • a bed the shell fits offers nothing at all, and neither does a project
 //     that never chose a bed.
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { test, expect } from './fixtures/caseMaker';
 import type { Page } from '@playwright/test';
+
+const OUT = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img', '2026-11-01-lid-split');
 
 async function openExportWithBed(
   page: Page,
@@ -62,6 +66,25 @@ test('a body with a legal seam is offered a split, and the pieces join the list'
   expect(await page.evaluate(() => window.__caseMaker!.getProject().case.splitForPrint)).toBe(
     true,
   );
+
+  // #265 — the LID is over the same bed and carries its own offer, with its
+  // own toggle (the switch is shared: it means "split what does not fit"). Its
+  // pieces join the list beside the whole lid, exactly as the body's do.
+  const lidOffer = page.getByTestId('export-lid-split-offer');
+  await expect(lidOffer).toBeVisible();
+  await page.getByTestId('export-lid-split-toggle').check();
+  await expect(page.locator('[data-testid^="export-row-lid-split-"]')).toHaveCount(2);
+  await expect(page.getByTestId('export-row-lid-split-a1')).toBeVisible();
+  await expect(page.getByTestId('export-row-lid-split-b1')).toBeVisible();
+  await expect(page.getByTestId('export-row-lid')).toBeVisible();
+  // Every lid piece says it replaces the whole lid.
+  const lidPieceNames = await page
+    .locator('[data-testid^="export-row-lid-split-"]')
+    .allTextContents();
+  for (const text of lidPieceNames) expect(text).toContain('piece');
+
+  fs.mkdirSync(OUT, { recursive: true });
+  await page.screenshot({ path: path.join(OUT, 'body-and-lid-offers.png') });
 });
 
 test('a body over the bed but with no legal seam is not offered a toggle', async ({ cm, page }) => {
@@ -89,6 +112,9 @@ test('a bed the body fits is offered nothing, and builds no pieces', async ({ cm
   await page.getByTestId('export-printer-preset').selectOption('prusa-mk4');
   await expect(page.getByTestId('export-split-offer')).toBeHidden();
   await expect(page.locator('[data-testid^="export-row-shell-split-"]')).toHaveCount(0);
+  // #265 — and the lid fits too, so it is offered nothing either.
+  await expect(page.getByTestId('export-lid-split-offer')).toBeHidden();
+  await expect(page.locator('[data-testid^="export-row-lid-split-"]')).toHaveCount(0);
 });
 
 test('a project that never chose a bed is not offered a split', async ({ cm, page }) => {

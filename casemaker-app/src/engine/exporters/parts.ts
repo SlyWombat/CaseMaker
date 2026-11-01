@@ -283,6 +283,24 @@ const PRINT_PATTERNS: PrintPattern[] = [
       },
     ),
   },
+  // Issue #265 — a split piece of the LID. It prints FLIPPED exactly as the
+  // whole lid does (its ceiling on the bed), so it joins PRINT_TABLE's `lid`
+  // in the flip set by the same reasoning, and the joint laps come out on the
+  // open side: cavity lugs print as studs standing in the cavity (no support),
+  // top pads become the feet the piece stands on (support under the lid's
+  // face, from the build plate).
+  {
+    test: (id) => id.startsWith('lid-split-'),
+    meta: flat(
+      'Print FLIPPED, exactly as the whole lid prints — its ceiling on the bed. Cavity laps then stand up inside the open cavity and need nothing; top-face pads become the feet the piece stands on, and the slicer supports the lid’s face around them',
+      {
+        flipForPrint: true,
+        supports: 'buildplate-only',
+        supportWhy:
+          'A top-pad piece stands on its pads, so the lid’s whole face is an overhang — all of it is reachable from the build plate, and nothing needs support on support. A cavity-lap piece has nothing bridging at all.',
+      },
+    ),
+  },
   {
     test: (id) => id.startsWith('latch-arm-'),
     meta: flat('Lay flat — knuckle and cam hook face up'),
@@ -436,6 +454,15 @@ function describePart(
   if (id.startsWith('shell-split-')) {
     return {
       displayName: `Case body — piece ${id.slice('shell-split-'.length).toUpperCase()} (split for the bed)`,
+      material: 'rigid',
+      category: 'case',
+    };
+  }
+  // Issue #265 — one printed piece of a lid split, bolted back together around
+  // the seam. Same cell naming as the body's pieces.
+  if (id.startsWith('lid-split-')) {
+    return {
+      displayName: `Lid — piece ${id.slice('lid-split-'.length).toUpperCase()} (split for the bed)`,
       material: 'rigid',
       category: 'case',
     };

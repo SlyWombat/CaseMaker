@@ -48,10 +48,10 @@ import {
  *    opens the gasket channel and gives away the drop resistance #107/#108
  *    were for.
  *
- * The lid is not offered a split yet: its underside faces the board, so the
- * same "which side is free" question has a different answer that depends on
- * the board's height, and guessing it is how a lid gets a lug through a USB
- * port. Tracked separately.
+ * The lid's joint is its own module (`lidSplit.ts`, #265): its underside faces
+ * the board, so "which side is free" has a different answer — one that depends
+ * on the lid's own mode, not on the board's height. `lugSitesFor` here is the
+ * shared arithmetic both splits use; only the Z band a lap occupies differs.
  */
 
 /** How far the lug hangs below the floor's underside, mm.
@@ -194,7 +194,7 @@ export function planShellJoint(req: ShellSplitRequest): ShellJointPlan | null {
  * Shared by the planner and the builder so the offer and the geometry can never
  * disagree about where a screw goes.
  */
-function lugSitesFor(
+export function lugSitesFor(
   piece: number,
   piece_: SplitPiece,
   seam: SplitSeam,

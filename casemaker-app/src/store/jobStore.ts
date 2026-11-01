@@ -38,6 +38,11 @@ export interface JobState {
   connector: StackConnectorReport | null;
   /** The compiler's clash statements for magnets and dividers (empty when none). */
   clashes: ClashStatement[];
+  /**
+   * Issue #265 — the LID's split offer, decided by the compiler alongside the
+   * shell's. Both can be present: one over-bed part does not make the other.
+   */
+  lidSplitOffer: SplitOffer | null;
   setStatus: (status: JobStatus, error?: string | null) => void;
   applyResult: (
     generation: number,
@@ -51,6 +56,7 @@ export interface JobState {
       splitOffer?: SplitOffer;
       connector?: StackConnectorReport;
       clashes?: ClashStatement[];
+      lidSplitOffer?: SplitOffer;
     },
   ) => void;
 }
@@ -68,6 +74,7 @@ export const useJobStore = create<JobState>()((set) => ({
   splitOffer: null,
   connector: null,
   clashes: [],
+  lidSplitOffer: null,
   setStatus: (status, error = null) => set({ status, error }),
   applyResult: (generation, nodes, combinedStats, durationMs, diag, diagnostics) =>
     set(() => {
@@ -86,6 +93,7 @@ export const useJobStore = create<JobState>()((set) => ({
         splitOffer: diagnostics?.splitOffer ?? null,
         connector: diagnostics?.connector ?? null,
         clashes: diagnostics?.clashes ?? [],
+        lidSplitOffer: diagnostics?.lidSplitOffer ?? null,
       };
     }),
 }));

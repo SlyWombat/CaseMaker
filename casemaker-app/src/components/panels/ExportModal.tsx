@@ -173,6 +173,7 @@ export function ExportModal({ onClose }: ExportModalProps) {
         </div>
 
         <PrintBedBlock />
+        <PrintBedLidBlock />
 
         {hardware.length > 0 && (
           <div
@@ -392,6 +393,89 @@ function PrintBedBlock(): ReactElement {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Issue #265 — the bed, and the LID's own split offer.
+ *
+ * The body's offer (`PrintBedBlock`) answers for the shell; a lid can overrun a
+ * bed on its own, or the lid and the body can each need their own split. The
+ * offer is the compiler's (`lidSplitOffer`), worked out from the lid's own
+ * geometry and keep-outs — hinges, latches, snap arms, lid bosses — so the box
+ * the user ticks is one the engine can actually deliver.
+ *
+ * The same `splitForPrint` switch gates both joints: it means "split the parts
+ * that do not fit", not "split the body".
+ */
+function PrintBedLidBlock(): ReactElement | null {
+  const project = useProjectStore((s) => s.project);
+  const patchCase = useProjectStore((s) => s.patchCase);
+  const nodes = useJobStore((s) => s.nodes);
+  const offer = useJobStore((s) => s.lidSplitOffer);
+  const printer = resolvePrinter(project);
+
+  const box = nodes.get('lid')?.stats.bbox;
+  if (!offer || !printer || !box) return null;
+  const w = box.max[0]! - box.min[0]!;
+  const d = box.max[1]! - box.min[1]!;
+  const h = box.max[2]! - box.min[2]!;
+  const on = project.case?.splitForPrint === true;
+  const size = `${Math.round(w)} × ${Math.round(d)} mm`;
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div
+        data-testid="export-lid-split-offer"
+        style={{
+          padding: '8px 10px',
+          background: '#1a1f25',
+          border: '1px solid #3a4a2a',
+          borderRadius: 4,
+          fontSize: 12,
+          lineHeight: 1.45,
+        }}
+      >
+        {offer.state === 'tooTall' ? (
+          <span>
+            The lid is {Math.round(h)} mm tall and this bed is {Math.round(printer.z)} mm — a split
+            seam is vertical, so it cannot help. Make the cavity shallower or print on a bigger
+            machine.
+          </span>
+        ) : offer.state === 'sealed' ? (
+          <span>
+            The lid does not fit this bed, but it is SEALED: a seam would cut straight through the
+            gasket tongue and channel. Turn the seal off if you would rather have the split.
+          </span>
+        ) : offer.state === 'blocked' ? (
+          <span>
+            The lid measures {size} and does not fit this bed, and no seam clears its own features —
+            the hinge knuckles, latch strikers, snap arms and lid bosses leave no line across it
+            that can be cut.
+          </span>
+        ) : (
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <input
+              type="checkbox"
+              data-testid="export-lid-split-toggle"
+              checked={on}
+              onChange={(e) => patchCase({ splitForPrint: e.target.checked })}
+              style={{ marginTop: 3 }}
+            />
+            <span>
+              Split the lid for this bed
+              <span style={NOTE_STYLE}>
+                {size} does not fit {printer.x} × {printer.y} mm. Adds {offer.pieces} cut{' '}
+                {offer.pieces === 1 ? 'piece' : 'pieces'}
+                {offer.screws ? `, bolted back together with ${offer.screws}× ${offer.screwLabel}` : ''}
+                . The laps hang inside the lid’s cavity where it has one; on a plate lid they stand
+                proud of its top face. The uncut lid stays on the list.
+              </span>
+            </span>
+          </label>
+        )}
+      </div>
     </div>
   );
 }

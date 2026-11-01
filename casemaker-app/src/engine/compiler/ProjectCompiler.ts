@@ -8,6 +8,7 @@ import { buildLatchOps } from './latches';
 import { buildAlignmentFlange } from './alignmentFlange';
 import { buildRuggedOps } from './rugged';
 import { buildFullLidFrictionLip, buildLid, computeLidDims } from './lid';
+import { lidCavityHeight } from './lidMode';
 import { buildPortCutoutOp, buildPortCutoutsForProject } from './ports';
 import { applySmartCutoutLayout } from './smartCutoutLayout';
 import { buildVentilationCutouts } from './ventilation';
@@ -35,6 +36,7 @@ import {
   canSplitShell,
   planShellJoint,
 } from './shellSplit';
+import { buildLidSplit, canSplitLid, lidJointSide, planLidJoint } from './lidSplit';
 import { buildBadgeNodes } from './badge';
 import { buildInsertNodes } from './insert';
 import { buildBlankNodes } from './blank';
@@ -670,6 +672,69 @@ export function compileProject(project: Project): BuildPlan {
     op: translate([0, 0, lidDims.zPosition], lidOp),
   });
 
+  // #265 — THE LID'S OWN SPLIT, the same offer/report contract as the shell's
+  // (#148): decided on every over-bed compile, built only when `splitForPrint`
+  // is on. Planned in LID-LOCAL coordinates (the lid op as built), because the
+  // keep-outs below are local; the pieces are lifted to the lid's assembled Z
+  // exactly as the whole lid is, so they replace it in the scene.
+  //
+  // Keep-outs are the lid's LOCALISED features only: hinge knuckles, latch
+  // strikers and snap arms. The gasket tongue, flange brim, vents, labels and
+  // rugged ribs cross the whole lid and are NOT keep-outs — a seam must cross
+  // them (the #148 rule), and a sealed lid is refused anyway.
+  let lidSplitOffer: SplitOffer | undefined;
+  if (splitPrinter) {
+    const lidLocalBounds = aabbOfOp(lidOp);
+    if (lidLocalBounds) {
+      const lidW = lidLocalBounds.max[0]! - lidLocalBounds.min[0]!;
+      const lidD = lidLocalBounds.max[1]! - lidLocalBounds.min[1]!;
+      const lidHgt = lidLocalBounds.max[2]! - lidLocalBounds.min[2]!;
+      const lidKeepOut: Aabb[] = [
+        ...snapOps.lidAdd,
+        ...hingeOps.lidAdditive,
+        ...latchOps.lidAdditive.map((op) => translate([0, 0, -lidDims.zPosition], op)),
+        ...lidBossOps.map((op) => translate([0, 0, -lidDims.zPosition], op)),
+      ]
+        .map(aabbOfOp)
+        .filter((b): b is Aabb => b !== null);
+      if (lidHgt > splitPrinter.z) {
+        lidSplitOffer = { state: 'tooTall' };
+      } else if (!rectFitsBed(lidW, lidD, splitPrinter.x, splitPrinter.y)) {
+        const request = {
+          lidOp,
+          bounds: lidLocalBounds,
+          printer: splitPrinter,
+          side: lidJointSide(caseParams),
+          cavityHeightMm: lidCavityHeight(caseParams),
+          keepOut: lidKeepOut,
+        };
+        if (!canSplitLid(caseParams.seal?.enabled === true)) {
+          lidSplitOffer = { state: 'sealed' };
+        } else {
+          const joint = planLidJoint(request);
+          if (!joint) {
+            lidSplitOffer = { state: 'blocked' };
+          } else {
+            lidSplitOffer = {
+              state: 'available',
+              pieces: joint.pieces.length,
+              screws: joint.screwCount,
+              screwLabel: `${DEFAULT_SPLIT_SCREW}×${LUG_LAP * 2} socket cap`,
+            };
+            if (caseParams.splitForPrint === true) {
+              const split = buildLidSplit(request, joint);
+              if (split !== null) {
+                for (const n of split.nodes) {
+                  nodes.push({ ...n, op: translate([0, 0, lidDims.zPosition], n.op) });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   // Issue #92 — print-in-place pin lives as its own top-level node so the
   // shell's cutoutOps difference can't drill it back out. Slicers print it
   // as a free body captured by the surrounding knuckles (the bore is wider
@@ -764,5 +829,6 @@ export function compileProject(project: Project): BuildPlan {
     splitOffer,
     ...(connector.report ? { connector: connector.report } : {}),
     ...(statements.length > 0 ? { clashes: { statements } } : {}),
+    lidSplitOffer,
   };
 }

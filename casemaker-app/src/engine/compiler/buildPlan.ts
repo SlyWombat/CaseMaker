@@ -145,6 +145,8 @@ export interface BuildPlan {
   nodes: BuildNode[];
   /** Issue #148 — the shell split this bed can (or cannot) have. */
   splitOffer?: SplitOffer;
+  /** Issue #265 — the LID's split offer, the same contract as the shell's. */
+  lidSplitOffer?: SplitOffer;
   /** Issue #37 — placement validator findings; consumers may show a banner. */
   placementReport?: import('./placementValidator').PlacementReport;
   /**
