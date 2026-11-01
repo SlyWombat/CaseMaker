@@ -143,6 +143,9 @@ async function fakeHouse(page: Page, view: unknown): Promise<void> {
 async function typePlate(page: Page, dims: [number, number, number]): Promise<void> {
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
+  // #897 — the question comes before the blank; a pocket is the item these walks then cut.
+  await page.getByTestId('engrave-setup-what-pocket').click();
+  await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-plate').click();
   await page.getByTestId('start-wizard-make-length').fill(String(dims[0]));
   await page.getByTestId('start-wizard-make-width').fill(String(dims[1]));
@@ -166,9 +169,8 @@ test('#725 B4/W1 — a clamp in the Tray’s path is named at Generate, and its 
 
   // The bed's default mount for a 6 mm plate on a bed carrying the bracket: the bracket.
   await expect(page.getByTestId('engrave-setup-mount-bed-bracket')).toBeChecked();
+  // The last step's button is the create (#897); the pocket was the answer at step 2.
   await page.getByTestId('engrave-setup-next').click();
-  await page.getByTestId('engrave-setup-what-pocket').click();
-  await page.getByRole('button', { name: /Create the job/ }).click();
 
   // W1 — the panel's Hold line is the mount's (§3.7), not "Vise — shipped".
   await expect(page.getByTestId('engrave-group-hold')).toContainText(
@@ -198,7 +200,7 @@ test('#725 B4/W1 — a clamp in the Tray’s path is named at Generate, and its 
 
   await page.getByTestId('engrave-run-blocker-fix').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Holding');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
   await expect(page.getByTestId('engrave-setup-holding-picture-clamp').first()).toBeVisible();
 });
 
@@ -210,9 +212,8 @@ test('#725 B7/W11 — a through cut taped on the wasteboard generates; a bare be
   // The taped default is written on arrival, with the wasteboard as what is under it.
   await expect(page.getByTestId('engrave-setup-mount-bed-tape')).toBeChecked();
   await expect(page.getByTestId('engrave-setup-bed-fields-bed-tape')).toContainText('wasteboard');
+  // The last step's button is the create (#897); the pocket was the answer at step 2.
   await page.getByTestId('engrave-setup-next').click();
-  await page.getByTestId('engrave-setup-what-pocket').click();
-  await page.getByRole('button', { name: /Create the job/ }).click();
 
   // A 40 × 30 cut-out through the 2 mm sheet, INSIDE the blank (design fixture 2c).
   await page.getByTestId('engrave-shape-name-0').fill('Tag');
@@ -271,9 +272,8 @@ test('#725 W11 — a bare bed with no board under it says what to put there', as
   // The bare bed is what it says; the wizard's job has no through cut yet, so no board is offered
   // there and none is under the part.
   await expect(page.getByTestId('engrave-setup-bed-fields-bed-tape')).toContainText('bare bed');
+  // The last step's button is the create (#897); the pocket was the answer at step 2.
   await page.getByTestId('engrave-setup-next').click();
-  await page.getByTestId('engrave-setup-what-pocket').click();
-  await page.getByRole('button', { name: /Create the job/ }).click();
 
   await page.getByTestId('engrave-shape-name-0').fill('Tag');
   await page.getByTestId('engrave-shape-width-0').fill('40');

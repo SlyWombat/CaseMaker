@@ -14,7 +14,11 @@ test.setTimeout(120_000);
 async function reachHolding(page: Page): Promise<void> {
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
+  // #897 — the question comes before the blank; a pocket needs no field and is the walk's stand-in.
+  await page.getByTestId('engrave-setup-what-pocket').click();
+  await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-plate').click();
+
   await page.getByTestId('start-wizard-make-length').fill('100');
   await page.getByTestId('start-wizard-make-width').fill('60');
   await page.getByTestId('start-wizard-make-thickness').fill('6');

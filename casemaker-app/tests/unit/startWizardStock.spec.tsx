@@ -79,7 +79,11 @@ function WizardHost() {
   return open ? <StartWizard /> : <></>;
 }
 
-async function toStockStep(): Promise<void> {
+/**
+ * Walk to the stock step. #897 put the question before it, so the walk answers it: an engrave text
+ * by default, or the chip a test wants to make (`pocket`).
+ */
+async function toStockStep(pick: 'engrave' | 'pocket' = 'engrave'): Promise<void> {
   act(() => {
     useStartWizardStore.getState().openWizard();
   });
@@ -87,6 +91,12 @@ async function toStockStep(): Promise<void> {
   await act(async () => {
     fireEvent.click(screen.getByTestId('start-wizard-next'));
   });
+  if (pick === 'pocket') {
+    fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
+  } else {
+    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'A block' } });
+  }
+  fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
   expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
 }
 
@@ -132,7 +142,7 @@ function boxStl(name = 'blank.stl'): File {
 describe('the material-first start (#418)', () => {
   it('shelf stock → mount → an empty design, the part sized to the stock, nothing reserved', async () => {
     const svc = fakeShelf(SHELF);
-    await toStockStep();
+    await toStockStep('pocket');
     chooseMaterial('aluminium-6061');
     const plate = await screen.findByTestId('start-wizard-shelf-item-stock-plate1');
     expect(plate.getAttribute('data-state')).toBe('ok');
@@ -152,7 +162,7 @@ describe('the material-first start (#418)', () => {
     // Step 3 of the SAME wizard. The hand-off seeds an EMPTY job and the shelf already answered
     // the material and the blank, so the mount is the next question — one modal, one counter.
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 4 of 4 · Holding');
     expect(screen.queryByTestId('engrave-setup-flow')).toBeNull();
 
     const job = useEngraveJobStore.getState().job;
@@ -179,13 +189,8 @@ describe('the material-first start (#418)', () => {
     // Named, not reserved: Cut mode (#419) reserves.
     expect(svc.calls.filter((c) => !c.startsWith('GET'))).toEqual([]);
 
-    // Step 4 — the grouped picker; Create makes the one operation asked for and lands in Design.
+    // The last step's Create makes the one operation asked for at the question and lands in Design.
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
-      'Step 4 of 4 · What are you cutting?',
-    );
-    fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
-    fireEvent.click(screen.getByTestId('start-wizard-create'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();
 
     // The design holds only the operation step 4 asked for, never a label from the project, and
@@ -226,7 +231,9 @@ describe('the material-first start (#418)', () => {
     expect(blank.getAttribute('data-state')).toBe('refused');
     expect((blank as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-shelf-item-stock-blank1-reason').textContent).toBe('none left — consumed by job-12');
-    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
+    // #897 — a refused shelf row is not the step's answer: the proposed blank still is, so Next
+    // is ready. The refusal lives on the row that is refused.
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('no service: no shelf block and no tick; a typed piece still starts the job', async () => {
@@ -349,7 +356,7 @@ describe('the material-first start (#418)', () => {
     );
     fireEvent.click(screen.getByTestId('start-wizard-form-rod'));
     expect(screen.getByTestId('start-wizard-form-sentence').textContent).toBe(
-      'Rod — round stock: a dowel, a rod. A rod up to 20 mm long stands on its end in the vise; a longer one is held in the rotary chuck and cut around (step 3 offers it).',
+      'Rod — round stock: a dowel, a rod. A rod up to 20 mm long stands on its end in the vise; a longer one is held in the rotary chuck and cut around (step 4 offers it).',
     );
     // The rod's own fields: its diameter and its length, and no invented width or thickness.
     expect(screen.getByTestId('start-wizard-make-diameter')).toBeDefined();
@@ -477,7 +484,9 @@ describe('the material-first start (#418)', () => {
 
   it("the material is grouped three ways, this house's own first (#683, A4, A5)", async () => {
     fakeShelf(SHELF);
-    await toStockStep();
+    // #897 — a pocket sizes no blank, so the step opens on the house material itself rather
+    // than a proposal's material.
+    await toStockStep('pocket');
     // #879 — A FRESH HOUSE IS HARDWOOD: the app's flagship blank is a hardwood name plate, and
     // printed plastic (PLA/PETG) is a choice a job makes, with its cutting-heat line said once.
     const select = screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement;

@@ -11,12 +11,15 @@ import { test, expect } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 400, height: 900 } });
 
-/** Welcome → step 2, with a plate of known numbers. */
+/** Welcome → the stock step, with a plate of known numbers. */
 async function toStock(page: Page): Promise<void> {
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · Stock');
+  // #897 — the question comes before the blank; a pocket needs no field.
+  await page.getByTestId('engrave-setup-what-pocket').click();
+  await page.getByTestId('start-wizard-operation-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
   await page.getByTestId('start-wizard-form-plate').click();
   await page.getByTestId('start-wizard-make-length').fill('76.2');
   await page.getByTestId('start-wizard-make-width').fill('38.1');

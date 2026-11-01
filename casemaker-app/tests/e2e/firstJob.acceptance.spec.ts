@@ -221,8 +221,18 @@ test.describe('first job acceptance (§6)', () => {
     await capture(page, 'wizard-1-machine');
     await tap(page, 'start-wizard-next');
 
-    // The operator's own stock, typed. No default is changed; the three size fields are the answer.
-    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · Stock');
+    // Step 2 — the question, first since #897: what is being cut is what the blank is sized from.
+    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+    await tap(page, 'engrave-setup-what-engrave');
+    await page.getByTestId('start-wizard-op-text').fill('Zoomba');
+    await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
+    await capture(page, 'wizard-2-operation');
+    await tap(page, 'start-wizard-operation-next');
+
+    // The operator's own stock, typed. The material is the house's PLA (this walk's later checks
+    // are about its facing line); the three size fields are the answer.
+    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
+    await page.getByTestId('start-wizard-stock-material').selectOption('pla');
     await page.getByTestId('start-wizard-make-length').fill('76.2');
     await page.getByTestId('start-wizard-make-width').fill('38.1');
     await page.getByTestId('start-wizard-make-thickness').fill('3.81');
@@ -231,21 +241,15 @@ test.describe('first job acceptance (§6)', () => {
     // chooses PLA itself, and the Facing check below is about that material, not the default.
     await page.getByTestId('start-wizard-stock-material').selectOption('pla');
     await expect(page.getByTestId('start-wizard-stock-next')).toBeEnabled();
-    await capture(page, 'wizard-2-stock');
+    await capture(page, 'wizard-3-stock');
     await tap(page, 'start-wizard-stock-next');
 
-    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Holding');
-    await capture(page, 'wizard-3-holding');
+    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+    await capture(page, 'wizard-4-holding');
+    // The last step's button is the create (#897); it offers the job only when the hold is one the
+    // wizard can leave.
+    await expect(page.getByTestId('engrave-setup-next')).toBeEnabled();
     await tap(page, 'engrave-setup-next');
-
-    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
-    await tap(page, 'engrave-setup-what-engrave');
-    await page.getByTestId('start-wizard-op-text').fill('Zoomba');
-    // #745 — typing is the operation here; its terminal state is Create being offered. The capture
-    // waits for that state, never scanning the beat between the field's commit and the footer's.
-    await expect(page.getByTestId('start-wizard-create')).toBeEnabled();
-    await capture(page, 'wizard-4-operation');
-    await tap(page, 'start-wizard-create');
     await expect(page.getByTestId('start-wizard')).toHaveCount(0);
     await expect(page.getByTestId('engrave-panel')).toBeVisible();
     // #745 — the panel settles before the screen is scanned: Generate is the next action, so the
@@ -499,20 +503,19 @@ test.describe('first job acceptance (§6)', () => {
     await page.getByTestId('welcome-start-cnc').click();
     await expect(page.getByTestId('start-wizard')).toBeVisible();
     await page.getByTestId('start-wizard-next').click();
-    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · Stock');
+    // Step 2 — the question (#897), answered with the line this rod job cuts.
+    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+    await page.getByTestId('start-wizard-op-text').fill('Zoomba');
+    await page.getByTestId('start-wizard-operation-next').click();
+    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
     await page.getByTestId('start-wizard-form-rod').click();
     await page.getByTestId('start-wizard-make-diameter').fill('10');
     await page.getByTestId('start-wizard-make-length').fill('15');
     await expect(page.getByTestId('start-wizard-stock-next')).toBeEnabled();
     await page.getByTestId('start-wizard-stock-next').click();
-    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Holding');
+    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
     await expect(page.getByTestId('engrave-setup-next')).toBeEnabled();
     await page.getByTestId('engrave-setup-next').click();
-    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
-    await page.getByTestId('engrave-setup-what-engrave').click();
-    await page.getByTestId('start-wizard-op-text').fill('Zoomba');
-    await expect(page.getByTestId('start-wizard-create')).toBeEnabled();
-    await page.getByTestId('start-wizard-create').click();
     await expect(page.getByTestId('start-wizard')).toHaveCount(0);
     await expect(page.getByTestId('engrave-panel')).toBeVisible();
     await expect(page.getByTestId('engrave-stock-line')).toContainText('Stock · rod');

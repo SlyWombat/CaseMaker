@@ -1,10 +1,10 @@
 /**
- * #681 — step 2 of the one cutting-job wizard: the stock.
+ * #681 — the stock step of the one cutting-job wizard.
  *
  * The step's questions and every rule stay with `StartStockStep` (and the engine behind it); this
  * wrapper is the seam wave 2's stock-step slice (#683) rewrote. It holds no template list: #680
  * put the starters on the welcome door, and a starter opens this wizard with its blank already the
- * stock — step 2 is only the stock the job will be cut from.
+ * stock — this step is only the stock the job will be cut from.
  */
 
 import type { JSX } from 'react';

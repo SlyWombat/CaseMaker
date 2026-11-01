@@ -244,7 +244,8 @@ describe('#682 — step 1 is the house’s machine', () => {
     );
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
-    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+    // #897 — the work comes before the blank: step 2 is the question.
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
   });
 
   it('no machine anywhere: Offline, no invented last-seen, and the job continues', async () => {
@@ -258,7 +259,8 @@ describe('#682 — step 1 is the house’s machine', () => {
     expect(screen.queryByTestId('start-wizard-machine-offline-note')).not.toBeNull();
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
-    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+    // #897 — the work comes before the blank: step 2 is the question.
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
   });
 
   it('with no location record, a found machine names itself and its address', async () => {
@@ -350,7 +352,8 @@ describe('#682 — step 1 is the house’s machine', () => {
     expect(stateLine().textContent).toBe('Checking…');
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
-    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+    // #897 — the work comes before the blank: step 2 is the question.
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
 
     await act(async () => {
       release!();

@@ -1,5 +1,5 @@
 /**
- * #681/#685 — step 4 of the one cutting-job wizard: the operation.
+ * #681/#685 — the question step of the one cutting-job wizard: the operation.
  *
  * The picker is the SHARED grouped one (`OperationPicker`, `operationTypes.ts`): the fourteen
  * operations in the mockup's four groups, the same words the panel's "+ Add operation" uses. The
@@ -87,7 +87,12 @@ export type OperationChoice =
    * READ: the files write the job's items themselves, so Create adds nothing and waits only for
    * them to be in.
    */
-  | { type: 'pcb'; imported: boolean }
+  | {
+      type: 'pcb';
+      imported: boolean;
+      /** #897 — the board's outline, when the set read: the stock step sizes a blank from it. */
+      board?: { length: number; width: number };
+    }
   /** #241 slice 2 — a flat on a face: the index and the depth. */
   | { type: 'flat'; a: number; depth: number }
   /** #241 slice 2 — evenly spaced flats: the first index, the count, and the across-flats. */
@@ -100,55 +105,155 @@ export interface OperationStepProps {
   job: EngraveJob;
   /** Whether the job already has an operation: a template's seeded line, or an imported design. */
   hasOperations: boolean;
+  /**
+   * #897 — this run has not started its job yet: the shipped demo lines are not this job's work,
+   * and the stock step replaces them. The step opens on Engrave text and offers Surface a mesh,
+   * exactly as it did when it came after the stock step.
+   */
+  fresh?: boolean;
+  /**
+   * #897 — the answer the shell already holds, when the step is re-mounted (Back from the stock
+   * step). Its fields seed the step, so going back to change one does not lose the rest — the
+   * picked file, the typed text, or the board already read into the job.
+   */
+  initial?: OperationChoice | null;
   /** The step's current answer; the SHELL owns the footer, so the step reports rather than acts. */
   onChoiceChange: (choice: OperationChoice | null) => void;
 }
 
-export function OperationStep({ job, hasOperations, onChoiceChange }: OperationStepProps): JSX.Element {
+/** A flat-job picker id, or null for a choice only the rotary picker draws (or no choice). */
+function flatPickOf(choice: OperationChoice | null): OperationTypeId | null {
+  if (choice === null) return null;
+  switch (choice.type) {
+    case 'engrave':
+    case 'surface':
+    case 'pcb':
+    case 'v-carve':
+    case 'pocket':
+    case 'flute':
+    case 'v-carve-variable':
+    case 'inlay':
+    case 'profile':
+    case 'chamfer':
+    case 'hole':
+    case 'bore':
+    case 'thread':
+    case 'thread-external':
+    case 'texture':
+    case 'prism':
+      return choice.type;
+    default:
+      return null;
+  }
+}
+
+export function OperationStep({
+  job,
+  hasOperations,
+  fresh = false,
+  initial = null,
+  onChoiceChange,
+}: OperationStepProps): JSX.Element {
+  // #897 — a re-mounted step starts from the answer the shell holds: Back is an edit, not a reset.
+  const seed = initial;
+  // #897 — on a run that has not started its job, the job's shipped demo lines are not its work:
+  // the step opens the way it did when it came after the stock step, on Engrave text.
+  const workExists = hasOperations && !fresh;
   // The mockup's default: Engrave text is on for a job that has nothing to cut yet. A job that
   // already has an operation starts with nothing selected, so Create finishes without adding a
-  // duplicate — a template's seeded line IS the item step 4 would otherwise make.
-  const [picked, setPicked] = useState<OperationTypeId | null>(hasOperations ? null : 'engrave');
+  // duplicate — a template's seeded line IS the item the last step would otherwise make.
+  const [picked, setPicked] = useState<OperationTypeId | null>(() =>
+    seed === null ? (workExists ? null : 'engrave') : flatPickOf(seed),
+  );
   // #752 R-UI-4 — on a rod in the chuck the step is the rotary one (§3.6): its own three groups,
   // and each operation's one field. `rotaryPicked` is null on a job that already has work, so
   // Create finishes without adding a duplicate — the same rule the flat picker follows.
   const rotary = rotaryMapOf(job) !== null;
-  const [rotaryPicked, setRotaryPicked] = useState<RotaryOperationId | null>(hasOperations ? null : 'engrave');
-  const [reads, setReads] = useState<'along' | 'around'>('along');
-  const [vcarveText, setVcarveText] = useState('');
-  const [fluteLengthMm, setFluteLengthMm] = useState(20);
+  const rotaryPickOf = (choice: OperationChoice | null): RotaryOperationId | null => {
+    if (choice === null) return null;
+    switch (choice.type) {
+      case 'engrave':
+      case 'v-carve':
+      case 'pocket':
+      case 'flute':
+      case 'flat':
+      case 'faces-all-round':
+      case 'cross-hole':
+        return choice.type;
+      case 'surface':
+        return 'relief';
+      default:
+        return null;
+    }
+  };
+  const [rotaryPicked, setRotaryPicked] = useState<RotaryOperationId | null>(() =>
+    seed === null ? (workExists ? null : 'engrave') : rotaryPickOf(seed),
+  );
+  const [reads, setReads] = useState<'along' | 'around'>(
+    seed?.type === 'engrave' && seed.reads !== undefined ? seed.reads : 'along',
+  );
+  const [vcarveText, setVcarveText] = useState(seed?.type === 'v-carve' ? (seed.text ?? '') : '');
+  const [fluteLengthMm, setFluteLengthMm] = useState(
+    seed?.type === 'flute' && seed.lengthMm !== undefined ? seed.lengthMm : 20,
+  );
   // #241 slice 2 — THE FACE GROUP'S one field each, seeded by `defaultFaceOperation` (§5): a Flat
   // at 0° and 1 mm; a hex whose across-flats is the largest inside the stock; a cross-hole at 0°
   // on the job's own cutter. The angle is the FIRST face for a ring.
   const faceRadiusMm = rotaryMapOf(job)?.radius ?? 0;
   const faceDefaults = defaultFaceOperation('flat', faceRadiusMm, toolDiameterMm(job));
-  const [faceAngle, setFaceAngle] = useState(0);
-  const [faceDepth, setFaceDepth] = useState(faceDefaults.depth ?? 1);
-  const [facesCount, setFacesCount] = useState(6);
-  const [facesAcross, setFacesAcross] = useState(() => defaultFaceOperation('faces-all-round', faceRadiusMm, toolDiameterMm(job)).acrossFlats ?? 0);
-  const [holeDiameter, setHoleDiameter] = useState(() => defaultFaceOperation('cross-hole', faceRadiusMm, toolDiameterMm(job)).diameter ?? 0);
-  const [text, setText] = useState('');
+  const faceAngleOf = (choice: OperationChoice | null): number =>
+    choice !== null && (choice.type === 'flat' || choice.type === 'faces-all-round' || choice.type === 'cross-hole')
+      ? choice.a
+      : 0;
+  const [faceAngle, setFaceAngle] = useState(() => faceAngleOf(seed));
+  const [faceDepth, setFaceDepth] = useState(seed?.type === 'flat' ? seed.depth : (faceDefaults.depth ?? 1));
+  const [facesCount, setFacesCount] = useState(seed?.type === 'faces-all-round' ? seed.count : 6);
+  const [facesAcross, setFacesAcross] = useState(() =>
+    seed?.type === 'faces-all-round'
+      ? seed.acrossFlats
+      : (defaultFaceOperation('faces-all-round', faceRadiusMm, toolDiameterMm(job)).acrossFlats ?? 0),
+  );
+  const [holeDiameter, setHoleDiameter] = useState(() =>
+    seed?.type === 'cross-hole'
+      ? seed.diameter
+      : (defaultFaceOperation('cross-hole', faceRadiusMm, toolDiameterMm(job)).diameter ?? 0),
+  );
+  const [text, setText] = useState(seed?.type === 'engrave' ? seed.text : '');
   // The blank's recommended depth (the stock kind decides it), editable here; never a hidden 0.5.
-  const [depth, setDepth] = useState(() => newItemDepthFor(job));
-  const [font, setFont] = useState<TextFont>(DEFAULT_FONT_ID);
+  const [depth, setDepth] = useState(seed?.type === 'engrave' ? seed.depth : newItemDepthFor(job));
+  const [font, setFont] = useState<TextFont>(seed?.type === 'engrave' ? seed.font : DEFAULT_FONT_ID);
   // The Surface a mesh pick's one field: the file, read here into the job's GOAL (#685).
-  const [surface, setSurface] = useState<EngraveTargetObject | null>(null);
+  const [surface, setSurface] = useState<EngraveTargetObject | null>(seed?.type === 'surface' ? seed.target : null);
   const [surfaceError, setSurfaceError] = useState<string | null>(null);
   /** #825 — the unit the picked OBJ's numbers were read as, stated beside the picker. */
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
   const [surfaceReading, setSurfaceReading] = useState(false);
   /** #870 — the name of the file last picked, read or refused: the file field shows it either way. */
-  const [surfaceFileName, setSurfaceFileName] = useState<string | null>(null);
+  const [surfaceFileName, setSurfaceFileName] = useState<string | null>(
+    seed?.type === 'surface' && seed.target !== null ? seed.target.name : null,
+  );
   // #721 — what the goal makes: the part itself, or a mold to cast it in.
-  const [makeMold, setMakeMold] = useState(false);
+  const [makeMold, setMakeMold] = useState(
+    seed?.type === 'surface' && seed.target !== null && seed.target.goalMode === 'mold',
+  );
   // #743 P-4b — the circuit-board door, a chip in "From a file" since #874. The set writes its
   // items through the store's one import action; the step reads the files, reports the outcome,
   // and its `pcb` choice blocks Create only until the set has read (the files ARE the design, so
   // Create adds no placeholder).
   const [pcbReading, setPcbReading] = useState(false);
   /** Whether the last picked set READ; the summary may be replaced by a notice, this may not. */
-  const [pcbImported, setPcbImported] = useState(false);
-  const [pcbSummary, setPcbSummary] = useState<string | null>(null);
+  const [pcbImported, setPcbImported] = useState(seed?.type === 'pcb' ? seed.imported : false);
+  /** #897 — the board's outline the set read, for the stock step's proposal. */
+  const [pcbBoard, setPcbBoard] = useState<{ length: number; width: number } | null>(
+    seed?.type === 'pcb' && seed.board !== undefined ? seed.board : null,
+  );
+  const [pcbSummary, setPcbSummary] = useState<string | null>(
+    // #897 — coming Back to the step keeps the board's own fact; the file names it came from are
+    // the import's to keep, and they are in the job's source files.
+    seed?.type === 'pcb' && seed.board !== undefined
+      ? `The board is in: ${String(Number(seed.board.length.toFixed(2)))} × ${String(Number(seed.board.width.toFixed(2)))} mm.`
+      : null,
+  );
   /** #870 — the picked set, named for the file field, and its refusal when the set did not read. */
   const [pcbFilesName, setPcbFilesName] = useState<string | null>(null);
   const [pcbError, setPcbError] = useState<string | null>(null);
@@ -197,7 +302,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
       : picked === 'surface'
         ? surfaceChoice
         : picked === 'pcb'
-          ? { type: 'pcb', imported: pcbImported }
+          ? { type: 'pcb', imported: pcbImported, ...(pcbBoard === null ? {} : { board: pcbBoard }) }
           : picked === null
             ? null
             : { type: picked };
@@ -223,7 +328,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   useLayoutEffect(() => {
     onChoiceChange(choice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked, text, depth, font, surface, makeMold, pcbImported, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, onChoiceChange]);
+  }, [picked, text, depth, font, surface, makeMold, pcbImported, pcbBoard, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, onChoiceChange]);
 
   async function readPcbSet(files: File[]): Promise<void> {
     setPcbSummary(null);
@@ -236,8 +341,13 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
     setPcbReading(true);
     try {
       const out = await useEngraveJobStore.getState().importPcbFiles(files);
-      if (!out.ok) setPcbError(out.reason);
-      else setPcbImported(true);
+      if (!out.ok) {
+        setPcbError(out.reason);
+        setPcbBoard(null);
+      } else {
+        setPcbImported(true);
+        setPcbBoard({ length: out.board.width, width: out.board.height });
+      }
       setPcbSummary(
         out.ok
           ? `The board is in: ${out.itemCount} items from ${out.fileCount} files${out.twoSided ? ', cut on both faces' : ''}${out.warnings.length > 0 ? ` — ${out.warnings.map((w) => w.message).join(' ')}` : ''}`
@@ -328,7 +438,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
           mode="select"
           testidFor={(id) => `engrave-setup-what-${id}`}
           onPick={setPicked}
-          surfaceAllowed={!jobHasItems(job)}
+          surfaceAllowed={fresh || !jobHasItems(job)}
           selected={picked}
         />
       )}

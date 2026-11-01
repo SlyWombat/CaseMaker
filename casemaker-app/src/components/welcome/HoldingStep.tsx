@@ -1,5 +1,5 @@
 /**
- * #681/#684 — step 3 of the one cutting-job wizard: Holding.
+ * #681/#684 — the last step of the one cutting-job wizard: Holding.
  *
  * The step opens on WHAT IS ON THE MACHINE NOW (the location's active bed profile), then asks how
  * THIS stock sits in that mechanism. The options are computed from the stock's numbers by

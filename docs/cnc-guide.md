@@ -770,8 +770,11 @@ the question can have. The **location** behind the job — its machines, tools, 
 consumables — is managed under **Manage** (chapter 7), and a job binds to it by reference with
 snapshots.
 
-**2. What stock?** The wizard asks **material first**, then where the piece comes from. Three
-doors are open today:
+**2. What stock?** The wizard asks **what you are cutting** first, because the work sizes the
+blank: a mesh gives its box, a board its outline, a line its measured width — each plus a stated
+margin — and the stock step opens on those numbers. They are a starting point, not a rule: change
+any of them and the sentence that said where they came from goes with the first edit. The stock
+itself is asked **material first**, then where the piece comes from. Three doors are open today:
 
 - **Off the shelf** — the location's own stock for that material: purchased sizes, offcuts with
   the job they came from, quantity and reservations. A piece is consumed by the job that takes
@@ -836,10 +839,10 @@ the catalogue you synced (#310). With no catalogue row for that cutter and mater
 (Delrin, polycarbonate, PCB and the rest of the vendor's list) is not offered at all, rather
 than offered and then refused.
 
-**3. How is it held, and which way round?** The wizard's third step hands over to **Set up this
-job…**, the guided flow that asks workholding, material and blank in order (#254). The cutter is
-not one of its questions — the tool is the software's **recommendation**, made once the work is
-defined (step 6), and a fresh job starts with none chosen (#516). Only
+**3. How is it held, and which way round?** The wizard's **Holding** step asks how the stock is
+held and which way round it sits, and its answers write as they are made. The cutter is not one of
+its questions — the tool is the software's **recommendation**, made once the work is defined
+(step 6), and a fresh job starts with none chosen (#516). Only
 the **low-profile vise** is selectable today (the rotary is written and disabled, CNC-5). The
 vise holds the stock in X and in rotation, with the **fixed jaw on the left**; X runs between
 the jaws, and the stock's front-left corner is the work origin. A turned badge blank has its

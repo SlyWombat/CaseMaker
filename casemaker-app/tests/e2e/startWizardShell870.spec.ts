@@ -74,13 +74,6 @@ async function expectSameRow(a: Locator, b: Locator, what: string): Promise<void
   expect(Math.abs(ba.y + ba.height / 2 - (bb.y + bb.height / 2)), what).toBeLessThan(12);
 }
 
-async function toStock(page: Page): Promise<void> {
-  await page.getByTestId('welcome-start-cnc').click();
-  await expect(page.getByTestId('start-wizard')).toBeVisible();
-  await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
-}
-
 for (const vp of VIEWPORTS) {
   test.describe(`${vp.name} ${vp.width}×${vp.height}`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height } });
@@ -121,18 +114,28 @@ for (const vp of VIEWPORTS) {
       await expectOnScreen(page, page.getByTestId('start-wizard-next'), 'step 1 primary');
       await page.getByTestId('start-wizard-next').click();
 
-      // Step 2: the arrival sentence is a grey fact, not an amber refusal.
-      await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · Stock');
+      // Step 2 — the question (#897): its primary on the screen, Back to its left.
+      await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+      await expect(page.getByTestId('start-wizard-progress-strip').locator('.sw-progress__seg--on')).toHaveCount(2);
+      await expectOnScreen(page, page.getByTestId('start-wizard-operation-next'), 'step 2 primary');
+      await expectOnScreen(page, page.getByTestId('start-wizard-back'), 'step 2 Back');
+      const back = (await page.getByTestId('start-wizard-back').boundingBox())!;
+      const primary = (await page.getByTestId('start-wizard-operation-next').boundingBox())!;
+      expect(back.x).toBeLessThan(primary.x);
+      expect(primary.x + primary.width).toBeGreaterThan(box.x + box.width - 40);
+
+      // A pocket needs no field: the blank step opens with nothing proposed, and so with its
+      // arrival sentence — a grey fact, not an amber refusal.
+      await page.getByTestId('engrave-setup-what-pocket').click();
+      await page.getByTestId('start-wizard-operation-next').click();
+
+      // Step 3 — the blank.
+      await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
       const arrival = page.getByTestId('start-wizard-stock-unblock');
       await expect(arrival).toBeVisible();
       await expect(arrival).toHaveCSS('color', 'rgb(154, 164, 176)');
-      await expectOnScreen(page, page.getByTestId('start-wizard-stock-next'), 'step 2 primary');
-      await expectOnScreen(page, page.getByTestId('start-wizard-back'), 'step 2 Back');
-      // Back on the left, the primary on the right.
-      const back = (await page.getByTestId('start-wizard-back').boundingBox())!;
-      const primary = (await page.getByTestId('start-wizard-stock-next').boundingBox())!;
-      expect(back.x).toBeLessThan(primary.x);
-      expect(primary.x + primary.width).toBeGreaterThan(box.x + box.width - 40);
+      await expectOnScreen(page, page.getByTestId('start-wizard-stock-next'), 'step 3 primary');
+      await expectOnScreen(page, page.getByTestId('start-wizard-back'), 'step 3 Back');
 
       await page.getByTestId('start-wizard-form-plate').click();
       await page.getByTestId('start-wizard-make-length').fill('76.2');
@@ -141,18 +144,12 @@ for (const vp of VIEWPORTS) {
       await expect(arrival).toHaveCount(0);
       await page.getByTestId('start-wizard-stock-next').click();
 
-      // Step 3: the tallest step — its primary is still on the screen without a scroll.
+      // Step 4 — the tallest step — its primary is still on the screen without a scroll.
       await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
-      await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Holding');
-      await expect(page.getByTestId('start-wizard-progress-strip').locator('.sw-progress__seg--on')).toHaveCount(3);
-      await expectOnScreen(page, page.getByTestId('engrave-setup-next'), 'step 3 primary');
+      await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+      await expect(page.getByTestId('start-wizard-progress-strip').locator('.sw-progress__seg--on')).toHaveCount(4);
+      await expectOnScreen(page, page.getByTestId('engrave-setup-next'), 'step 4 primary');
       await page.screenshot({ path: `test-results/870-shell-${vp.name}-holding.png` });
-      await page.getByTestId('engrave-setup-next').click();
-
-      // Step 4.
-      await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
-      await expectOnScreen(page, page.getByTestId('start-wizard-create'), 'step 4 primary');
-      await page.screenshot({ path: `test-results/870-shell-${vp.name}-operation.png` });
 
       await page.getByTestId('start-wizard-close').click();
       await expect(page.getByTestId('start-wizard')).toHaveCount(0);
@@ -160,26 +157,12 @@ for (const vp of VIEWPORTS) {
 
     test('slice 2 — the file field: a name with Change, never "No file chosen"', async ({ cm, page }) => {
       await cm.ready();
-      await toStock(page);
+      await page.getByTestId('welcome-start-cnc').click();
+      await expect(page.getByTestId('start-wizard')).toBeVisible();
+      await page.getByTestId('start-wizard-next').click();
       const dialog = page.getByTestId('start-wizard-dialog');
 
-      // Step 2's drop target: the stock file's name, in the row with Change.
-      await page.getByTestId('start-wizard-load-file').setInputFiles({
-        name: 'cube.stl',
-        mimeType: 'model/stl',
-        buffer: cubeStl(),
-      });
-      await expect(page.getByTestId('start-wizard-load-name')).toHaveText('cube.stl');
-      await expect(page.getByTestId('start-wizard-load-change')).toBeVisible();
-      await expectSameRow(page.getByTestId('start-wizard-load-name'), page.getByTestId('start-wizard-load-change'), 'step 2 name and Change');
-      await expect(dialog).not.toContainText('No file chosen');
-      await expect(page.getByTestId('start-wizard-stock-next')).toBeEnabled();
-      await page.getByTestId('start-wizard-stock-next').click();
-      await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
-      await page.getByTestId('engrave-setup-next').click();
-      await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
-
-      // Step 4's mesh: part/mould is not asked before a mesh is read.
+      // Step 2's mesh: part/mould is not asked before a mesh is read.
       await page.getByTestId('engrave-setup-what-surface').click();
       const makePart = page.getByTestId('start-wizard-op-surface-make-part');
       await expect(makePart).toHaveCount(0);
@@ -192,7 +175,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByTestId('start-wizard-op-surface-error')).toHaveCSS('color', 'rgb(240, 180, 173)');
       await expect(page.getByTestId('start-wizard-op-surface-picker-choose')).toHaveText('Choose another…');
       await expect(makePart).toHaveCount(0);
-      await expect(page.getByTestId('start-wizard-create')).toBeDisabled();
+      await expect(page.getByTestId('start-wizard-operation-next')).toBeDisabled();
 
       // A picture: read, named, and no part/mould question.
       await surfaceInput.setInputFiles({ name: 'relief.png', mimeType: 'image/png', buffer: await smallPng(page) });
@@ -208,16 +191,16 @@ for (const vp of VIEWPORTS) {
       await expectSameRow(surfaceName, page.getByTestId('start-wizard-op-surface-picker-change'), 'mesh name and Change');
       await expect(makePart).toBeVisible();
       await expect(dialog).not.toContainText('No file chosen');
-      await expect(page.getByTestId('start-wizard-create')).toBeEnabled();
+      await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
 
       // #874 — the circuit board is a chip in "From a file". Picking it REPLACES the mesh choice,
-      // and its Gerber set is the one field: Create is blocked until the set reads (B.3's bug —
-      // an import used to leave the engrave choice on, so Create stayed disabled with a sentence
-      // about text nobody had been asked for).
+      // and its Gerber set is the one field: the walk is blocked until the set reads (B.3's bug —
+      // an import used to leave the engrave choice on, so the button stayed disabled with a
+      // sentence about text nobody had been asked for).
       await page.getByTestId('engrave-setup-what-pcb').click();
       await expect(page.getByTestId('engrave-setup-what-pcb')).toHaveAttribute('aria-pressed', 'true');
       await expect(page.getByTestId('start-wizard-op-surface-file')).toHaveCount(0);
-      await expect(page.getByTestId('start-wizard-create')).toBeDisabled();
+      await expect(page.getByTestId('start-wizard-operation-next')).toBeDisabled();
       await expect(page.getByTestId('start-wizard-create-unblock')).toHaveText(
         "Choose the board's Gerber and drill files.",
       );
@@ -235,11 +218,30 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByTestId('start-wizard-op-pcb-summary')).toContainText('The board is in');
       await expectSameRow(pcbName, page.getByTestId('start-wizard-op-pcb-picker-change'), 'Gerber set and Change');
       await expect(dialog).not.toContainText('No file chosen');
-      await expect(page.getByTestId('start-wizard-create')).toBeEnabled();
+      await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
+
+      // The board sizes its own blank: on to the stock step, whose proposal is the board's outline.
+      await page.getByTestId('start-wizard-operation-next').click();
+      await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
+      await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('board');
+
+      // Step 3's drop target: the stock file's name, in the row with Change.
+      await page.getByTestId('start-wizard-load-file').setInputFiles({
+        name: 'cube.stl',
+        mimeType: 'model/stl',
+        buffer: cubeStl(),
+      });
+      await expect(page.getByTestId('start-wizard-load-name')).toHaveText('cube.stl');
+      await expect(page.getByTestId('start-wizard-load-change')).toBeVisible();
+      await expectSameRow(page.getByTestId('start-wizard-load-name'), page.getByTestId('start-wizard-load-change'), 'step 3 name and Change');
+      await expect(dialog).not.toContainText('No file chosen');
+      await expect(page.getByTestId('start-wizard-stock-next')).toBeEnabled();
+      await page.getByTestId('start-wizard-stock-next').click();
+      await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
       await page.screenshot({ path: `test-results/870-file-field-${vp.name}.png` });
 
-      // Create adds no extra item: the files ARE the job's items, and there is nothing on the
-      // picker's `pcb` choice for the shell to make.
+      // The last step adds no extra item: the files ARE the job's items, and there is nothing on
+      // the picker's `pcb` choice for the shell to make.
       const items = (): Promise<number> =>
         page.evaluate(() => {
           const job = JSON.parse(localStorage.getItem('casemaker.engraveJob.v3') ?? '{}') as Record<string, { length?: number } | undefined>;
@@ -248,7 +250,7 @@ for (const vp of VIEWPORTS) {
         });
       const before = await items();
       expect(before).toBeGreaterThan(0);
-      await page.getByTestId('start-wizard-create').click();
+      await page.getByTestId('engrave-setup-next').click();
       await expect(page.getByTestId('start-wizard')).toHaveCount(0);
       expect(await items()).toBe(before);
     });

@@ -20,7 +20,7 @@
  * rotary module's chuck (#240), which holds ROUND stock only; or on the bed, taped or in the
  * bracket (#709/#715). The three VISE options are always writable; the rotary option is writable
  * when the machine carries it and the stock is round, and says why not when the stock is not
- * (`the rotary holds round stock — say a rod in step 2`). The bed options are writable when
+ * (`the rotary holds round stock — say a rod in the stock step`). The bed options are writable when
  * NOTHING IS ON THE PINS, and each writes the job's own `workholding` (`tape`, or `bracket` with
  * its clamp places) and the board under it — the model below is what that write and its picture
  * are made of. The top-line Change the machine… is the way out of any other state.
@@ -461,7 +461,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
           ...base,
           hint: null,
           disabled: true,
-          reason: 'the rotary holds round stock — say a rod in step 2',
+          reason: 'the rotary holds round stock — say a rod in the stock step',
           escape: null,
         });
         continue;

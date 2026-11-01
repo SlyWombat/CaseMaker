@@ -3251,7 +3251,7 @@ export function EngravePanel(): JSX.Element {
       const src = (stockSources as Record<string, FieldSource | undefined>)[key];
       return src === undefined ? [] : [`${word} ${SOURCE_LABEL[src]}`];
     });
-    return words.length === 0 ? 'The stock is stated in the wizard’s step 2.' : `Stock — ${words.join(' · ')}.`;
+    return words.length === 0 ? 'The stock is stated in the wizard’s stock step.' : `Stock — ${words.join(' · ')}.`;
   })();
   // #686, design §2 — a typed value's provenance is not a chip beside it (audit D2): the fields the
   // operator typed are named in ONE sentence in the Cutter group's Technical fold.

@@ -277,14 +277,14 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     fireEvent.click(screen.getByTestId('engrave-hold-edit'));
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeTruthy();
     // One wizard, one counter — the panel's edit names a step of the SAME modal.
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 4 of 4 · Holding');
     expect(screen.queryByTestId('engrave-setup-progress')).toBeNull();
 
     // A 3.81 mm blank under the shipped 4 mm-proud vise is #231. The blank is step 2 now, and
     // `setStock` makes the vise follow the thickness (#344), so the disagreement this step catches
     // is the one a SAVED vise states: put the shipped value back and re-open at holding.
     fireEvent.click(screen.getByTestId('start-wizard-back'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 2 of 4 · Stock');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Stock');
     fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '3.81' } });
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
@@ -308,12 +308,8 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     fireEvent.click(screen.getByTestId('engrave-setup-fix-proud'));
     expect(screen.queryByTestId('engrave-setup-step-finding-vise-stock-proud-exceeds-thickness')).toBeNull();
 
-    // Step 4 creates nothing new for a job that already has its operation, and the wizard closes.
+    // Done closes the step it came to edit and adds nothing (#681, #897).
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
-      'Step 4 of 4 · What are you cutting?',
-    );
-    fireEvent.click(screen.getByTestId('start-wizard-create'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();
 
     const job = useEngraveJobStore.getState().job;
@@ -342,12 +338,12 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     renderPanel();
 
     fireEvent.click(screen.getByTestId('engrave-stock-edit'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 2 of 4 · Stock');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Stock');
     expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
     fireEvent.click(screen.getByTestId('start-wizard-close'));
 
     fireEvent.click(screen.getByTestId('engrave-hold-edit'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 4 of 4 · Holding');
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
     // There is no second numbering anywhere in the modal.
     expect(screen.queryByTestId('engrave-setup-progress')).toBeNull();
@@ -363,13 +359,13 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     renderPanel();
 
     fireEvent.click(screen.getByTestId('engrave-hold-edit')); // openWizard('holding')
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 4 of 4 · Holding');
 
     // The edited step's answer is applied as it is made; Done leaves without a walk to step 4, so
     // no second item can be made by accident. The 12 mm default blank is taller than the jaws, so
     // the block mount is the one its numbers call for — no board under it, the sides free.
     fireEvent.click(screen.getByTestId('engrave-setup-mount-block'));
-    fireEvent.click(screen.getByTestId('start-wizard-done'));
+    fireEvent.click(screen.getByTestId('engrave-setup-next'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();
     expect(jobItemCount(useEngraveJobStore.getState().job)).toBe(1);
     expect(useEngraveJobStore.getState().job.labels).toHaveLength(1);
@@ -377,14 +373,13 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     expect(jobVise(useEngraveJobStore.getState().job).stockProud).toBeCloseTo(-8, 6);
     expect(useEngraveJobStore.getState().job.sacrificial.under).toBeNull();
 
-    // Walking on is still offered; at step 4 with nothing picked the primary FINISHES (#874), and
-    // picking a chip is what turns it into the add it really is.
+    // Back through the blank to the question: a re-entry may add an operation there, and with
+    // nothing picked its primary still FINISHES (#874, #897).
     fireEvent.click(screen.getByTestId('engrave-hold-edit'));
-    fireEvent.click(screen.getByTestId('engrave-setup-next'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
-      'Step 4 of 4 · What are you cutting?',
-    );
-    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Done');
+    fireEvent.click(screen.getByTestId('start-wizard-back'));
+    fireEvent.click(screen.getByTestId('start-wizard-back'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
+    expect(screen.getByTestId('start-wizard-operation-next').textContent).toBe('Done');
   });
 
   it('lets the sacrificial and material answers through to the job', async () => {
@@ -404,10 +399,10 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 4 of 4 · Holding');
 
+    // The run came back to the step it came to edit, so Done is its finish (#897).
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
-    fireEvent.click(screen.getByTestId('start-wizard-create'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();
 
     const job = useEngraveJobStore.getState().job;

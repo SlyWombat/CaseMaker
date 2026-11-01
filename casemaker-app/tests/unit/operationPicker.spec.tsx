@@ -103,12 +103,22 @@ function WizardHost() {
   return open ? <StartWizard /> : <></>;
 }
 
-/** Open the one wizard at its step 4, the way the panel's operation door does. */
+/** Open the one wizard at the question, the way the panel's operation door does. */
 function openOperationStep(): void {
   act(() => {
     useStartWizardStore.getState().openWizard('operation');
   });
   render(<WizardHost />);
+}
+
+/**
+ * Answer the question through the rest of the flow the way the operator does (#897): the blank
+ * it sized, the hold, then the last step's button — which is what makes the operation.
+ */
+function finish(): void {
+  fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
+  fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+  fireEvent.click(screen.getByTestId('engrave-setup-next'));
 }
 
 beforeEach(() => {
@@ -128,10 +138,10 @@ describe('#685 — step 4, what are you cutting', () => {
     openOperationStep();
 
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
-      'Step 4 of 4 · What are you cutting?',
+      'Step 2 of 4 · What are you cutting?',
     );
-    // This run opened AT step 4, so it is a re-entry: the button adds to a job that exists.
-    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Add the operation');
+    // #897 — the question walks on to the blank it sizes; the add is the last step's button.
+    expect(screen.getByTestId('start-wizard-operation-next').textContent).toBe('Next: stock');
 
     // The four groups, and the sixteen operations in the mockup's words and grouped order
     // (`first-job-flow-mockups.html`, station 4) — the same table the panel's picker reads.
@@ -169,7 +179,7 @@ describe('#685 — step 4, what are you cutting', () => {
     // An empty job starts on Engrave text, with the one field that operation needs.
     expect(screen.getByTestId('engrave-setup-what-engrave').getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByTestId('start-wizard-op-field')).toBeTruthy();
-    const create = screen.getByTestId('start-wizard-create') as HTMLButtonElement;
+    const create = screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement;
     expect(create.disabled).toBe(true);
     // The ONE sentence that unblocks it, and the way to act on it is the field above.
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
@@ -184,9 +194,9 @@ describe('#685 — step 4, what are you cutting', () => {
     fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
     expect(screen.queryByTestId('start-wizard-op-field')).toBeNull();
     expect(screen.queryByTestId('start-wizard-create-unblock')).toBeNull();
-    expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement).disabled).toBe(false);
 
-    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    finish();
     expect(screen.queryByTestId('start-wizard')).toBeNull();
     expect(useEngraveJobStore.getState().job.shapes).toHaveLength(1);
     expect(useEngraveJobStore.getState().job.labels).toHaveLength(0);
@@ -194,7 +204,7 @@ describe('#685 — step 4, what are you cutting', () => {
 
   it('#745 — typing the text turns Create on in the same task; no beat with a wordless disabled Create', () => {
     openOperationStep();
-    const create = screen.getByTestId('start-wizard-create') as HTMLButtonElement;
+    const create = screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement;
     const text = screen.getByTestId('start-wizard-op-text') as HTMLInputElement;
     expect(create.disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
@@ -226,7 +236,7 @@ describe('#685 — step 4, what are you cutting', () => {
 
     fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Hello' } });
     fireEvent.change(screen.getByTestId('start-wizard-op-depth'), { target: { value: '1.25' } });
-    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    finish();
 
     const job = useEngraveJobStore.getState().job;
     expect(job.labels).toHaveLength(1);
@@ -244,9 +254,9 @@ describe('#685 — step 4, what are you cutting', () => {
 
     // The template's seeded line IS the item step 4 would otherwise make.
     expect(screen.getByTestId('engrave-setup-what-engrave').getAttribute('aria-pressed')).toBe('false');
-    const create = screen.getByTestId('start-wizard-create') as HTMLButtonElement;
+    const create = screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement;
     expect(create.disabled).toBe(false);
-    // #874 — with nothing picked the primary FINISHES: it says Done, not "Add the operation",
+    // #874 — with nothing picked the primary FINISHES: it says Done, not a walk it cannot make,
     // which would promise an item the press does not make.
     expect(create.textContent).toBe('Done');
 
@@ -274,7 +284,7 @@ describe('#685 — step 4, what are you cutting', () => {
     expect(within(surfaceBox).getByTestId('start-wizard-op-surface-file')).toBeTruthy();
     const input = screen.getByTestId('start-wizard-op-surface-file') as HTMLInputElement;
     expect(input.getAttribute('accept')).toContain('.stl');
-    expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
       'Choose the mesh to surface.',
     );
@@ -289,7 +299,7 @@ describe('#685 — step 4, what are you cutting', () => {
     expect((await screen.findByTestId('start-wizard-op-surface-error', undefined, WAIT)).textContent).toBe(
       'notes.txt is not an STL, 3MF, OBJ, STEP or PNG file.',
     );
-    expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement).disabled).toBe(true);
 
     // The mesh it needs: read once, embedded, and made the job's whole goal. The name paints in
     // the step before the effect that reports the choice to the shell, whose footer owns Create —
@@ -297,11 +307,11 @@ describe('#685 — step 4, what are you cutting', () => {
     fireEvent.change(input, { target: { files: [new File([ASCII_STL], 'tet.stl')] } });
     await waitFor(() => {
       expect(screen.queryByTestId('start-wizard-op-surface-error')).toBeNull();
-      expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement).disabled).toBe(false);
     }, WAIT);
     expect(screen.getByText('tet.stl')).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    finish();
     expect(screen.queryByTestId('start-wizard')).toBeNull();
     const job = useEngraveJobStore.getState().job;
     expect(job.targetObject).toMatchObject({ name: 'tet.stl', format: 'stl', role: 'goal' });
@@ -319,23 +329,24 @@ describe('#685 — step 4, what are you cutting', () => {
     const input = screen.getByTestId('start-wizard-op-surface-file') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([ASCII_STL], 'tet.stl')] } });
     await waitFor(() => {
-      expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement).disabled).toBe(false);
     }, { timeout: 15_000 });
     expect((screen.getByTestId('start-wizard-op-surface-make-part') as HTMLInputElement).checked).toBe(true);
     fireEvent.click(screen.getByTestId('start-wizard-op-surface-make-mold'));
     expect(screen.getByTestId('start-wizard-op-surface-mold-note').textContent).toContain('two-part mould');
-    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    finish();
     expect(useEngraveJobStore.getState().job.targetObject).toMatchObject({ role: 'goal', goalMode: 'mold' });
   });
 
-  it('#874 — picking a chip turns Done back into the operation it adds', () => {
+  it('#874 — picking a chip turns Done back into the walk it makes', () => {
     act(() => {
       useEngraveJobStore.setState({ job: defaultEngraveJob() });
     });
     openOperationStep();
-    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Done');
+    expect(screen.getByTestId('start-wizard-operation-next').textContent).toBe('Done');
     fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
-    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Add the operation');
+    // #897 — the operation is made at the last step now, so this one walks to the blank.
+    expect(screen.getByTestId('start-wizard-operation-next').textContent).toBe('Next: stock');
   });
 
   it('#874 — the circuit board is a chip: its Gerber set unblocks Create, which adds nothing', async () => {
@@ -343,14 +354,14 @@ describe('#685 — step 4, what are you cutting', () => {
     // The engrave default still blocks Create; picking the board's chip REPLACES it (B.3's bug —
     // an import used to leave `picked` on Engrave text, so Create stayed disabled with a sentence
     // about text nobody had been asked to type).
-    expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('engrave-setup-what-pcb'));
     expect(screen.getByTestId('engrave-setup-what-pcb').getAttribute('aria-pressed')).toBe('true');
 
     // The chosen chip's one field is the Gerber set, its sentence inside the same box.
     const box = screen.getByTestId('start-wizard-op-pcb');
     expect(within(box).getByTestId('start-wizard-op-pcb-files')).toBeTruthy();
-    const create = (): HTMLButtonElement => screen.getByTestId('start-wizard-create') as HTMLButtonElement;
+    const create = (): HTMLButtonElement => screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement;
     expect(create().disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
       "Choose the board's Gerber and drill files.",
@@ -361,8 +372,8 @@ describe('#685 — step 4, what are you cutting', () => {
     await waitFor(() => expect(create().disabled).toBe(false), { timeout: 15_000 });
     expect(screen.getByTestId('start-wizard-op-pcb-summary').textContent).toContain('The board is in');
 
-    // Create adds no item: the files already ARE the job's items.
-    fireEvent.click(create());
+    // The last step adds no item: the files already ARE the job's items.
+    finish();
     expect(screen.queryByTestId('start-wizard')).toBeNull();
     const job = useEngraveJobStore.getState().job;
     expect(job.labels).toHaveLength(0);

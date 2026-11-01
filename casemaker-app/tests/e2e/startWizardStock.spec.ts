@@ -42,7 +42,11 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
 
-  // Step 2 — the material first, then the shelf for it.
+  // Step 2 — the question first (#897); a pocket needs no field, and it is what this walk makes.
+  await page.getByTestId('engrave-setup-what-pocket').click();
+  await page.getByTestId('start-wizard-operation-next').click();
+
+  // Step 3 — the material first, then the shelf for it.
   await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
   await page.getByTestId('start-wizard-stock-material').selectOption('aluminium-6061');
   const plate = page.getByTestId('start-wizard-shelf-item-stock-long1');
@@ -54,17 +58,11 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   await expect(page.getByTestId('start-wizard-make-thickness')).toHaveValue('8');
   await page.getByTestId('start-wizard-stock-next').click();
 
-  // Step 3 — the same wizard, on the mount. A fresh job has nothing to cut yet, so the operation
-  // is step 4 (#681); the mount question is the one the hand-off already knew it needed.
+  // Step 4 — the same wizard, on the mount; its button is the create (#897).
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Holding');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
   await expect(page.getByTestId('engrave-setup-flow')).toHaveCount(0);
   await page.getByTestId('engrave-setup-next').click();
-
-  // Step 4 — the grouped picker; Create makes the pocket and lands in Design.
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
-  await page.getByTestId('engrave-setup-what-pocket').click();
-  await page.getByTestId('start-wizard-create').click();
   await expect(page.getByTestId('start-wizard')).toHaveCount(0);
 
   // The design: the panel on the shelf's piece, with the one pocket the wizard asked for and no

@@ -155,7 +155,11 @@ test('#782 the Holding front view shows the module and a rod in the four-jaw chu
   await cm.ready();
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
+  // #897 — the question comes before the blank; a pocket needs no field and is the walk's stand-in.
+  await page.getByTestId('engrave-setup-what-pocket').click();
+  await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-rod').click();
+
   await page.getByTestId('start-wizard-make-diameter').fill('20');
   await page.getByTestId('start-wizard-make-length').fill('100');
   await page.getByTestId('start-wizard-stock-next').click();

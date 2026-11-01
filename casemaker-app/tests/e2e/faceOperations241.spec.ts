@@ -34,12 +34,25 @@ const simState = (page: Page): Promise<SimInfo> =>
     return { status: s.status, step: s.step, turningDeg: s.turningDeg, runs: s.runs };
   });
 
-/** Door → the dowel starter → the wizard's step 4 on a rod in the chuck. */
+/** Door → the dowel starter → the wizard's question on a rod in the chuck. */
 async function toStep4(page: Page): Promise<void> {
   await page.getByTestId('welcome-starter-dowel').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
+  // #897 — the starter lands on Holding; the question is two steps back (through the blank).
+  await page.getByTestId('start-wizard-back').click();
+  await page.getByTestId('start-wizard-back').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+}
+
+/**
+ * Make the face operation the question asked for: walk the blank (the job's own, passed through)
+ * and the hold, then the last step's button — which is the create (#897).
+ */
+async function createOperation(page: Page): Promise<void> {
+  await page.getByTestId('start-wizard-operation-next').click();
+  await page.getByTestId('start-wizard-stock-next').click();
   await page.getByTestId('engrave-setup-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
 }
 
 /** Generate and wait for the four ticks: cut, verified, simulated, judged against the design. */
@@ -74,9 +87,8 @@ test('a Flat turns the stock to its own angle and cuts a plane there', async ({ 
   await page.getByTestId('start-wizard-op-rotary-flat').click();
   await page.getByTestId('start-wizard-op-face-angle').fill('30');
   await page.getByTestId('start-wizard-op-face-depth').fill('1');
-  await expect(page.getByTestId('start-wizard-create')).toBeEnabled();
-  await page.getByTestId('start-wizard-create').click();
-  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
+  await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
+  await createOperation(page);
 
   // The operation is a row of the job, in its own words.
   await expect(page.getByTestId('engrave-face-summary-0')).toContainText('Flat 1 mm deep at A 30°');
@@ -112,8 +124,7 @@ test('Faces all round turns the stock at every index, one face each', async ({ c
   await page.getByTestId('start-wizard-op-rotary-faces-all-round').click();
   await expect(page.getByTestId('start-wizard-op-faces-count')).toHaveValue('6');
   await expect(page.getByTestId('start-wizard-op-faces-across')).toHaveValue('17.321');
-  await page.getByTestId('start-wizard-create').click();
-  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
+  await createOperation(page);
 
   await expect(page.getByTestId('engrave-face-summary-0')).toContainText('6 flats 17.32 mm across at A 0°');
   await generateToTicks(page);
@@ -138,8 +149,7 @@ test('a Cross-hole is one plunge at its angle, turned to before it cuts', async 
   await page.getByTestId('start-wizard-op-rotary-cross-hole').click();
   await page.getByTestId('start-wizard-op-face-angle').fill('90');
   await expect(page.getByTestId('start-wizard-op-hole-diameter')).toHaveValue('3.175');
-  await page.getByTestId('start-wizard-create').click();
-  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
+  await createOperation(page);
 
   await expect(page.getByTestId('engrave-face-summary-0')).toContainText('Cross-hole ⌀3.17 mm at A 90°');
   await generateToTicks(page);
@@ -168,12 +178,13 @@ test('a mixed job with a neck cuts the map work, the face, then the neck', async
   // The Holding step: leave the part on the default neck (chuck side, ⌀7 mm on the ⌀20 mm rod).
   await page.getByTestId('engrave-setup-rotary-neck').check();
   await expect(page.getByTestId('engrave-setup-rotary-neck-diameter')).toBeVisible();
-  await page.getByTestId('engrave-setup-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
+  // #897 — the question is two steps back from the starter's Holding (through the blank).
+  await page.getByTestId('start-wizard-back').click();
+  await page.getByTestId('start-wizard-back').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
   await page.getByTestId('start-wizard-op-text').fill('Zoomba');
-  await expect(page.getByTestId('start-wizard-create')).toBeEnabled();
-  await page.getByTestId('start-wizard-create').click();
-  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
+  await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
+  await createOperation(page);
 
   // A flat on the stock's faces, from the panel's own add menu (A 0°, 1 mm deep).
   await page.getByTestId('engrave-add-summary').click();

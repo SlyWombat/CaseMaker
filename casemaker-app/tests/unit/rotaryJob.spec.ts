@@ -398,7 +398,7 @@ describe('the Holding step’s rotary option (#240 §2)', () => {
     const rotary = options.find((o) => o.mount === 'rotary');
     expect(rotary).toBeDefined();
     expect(rotary!.disabled).toBe(true);
-    expect(rotary!.reason).toBe('the rotary holds round stock — say a rod in step 2');
+    expect(rotary!.reason).toBe('the rotary holds round stock — say a rod in the stock step');
     // The stock's own refusal: no machine change can fix it, so there is no escape to offer.
     expect(rotary!.escape).toBeNull();
   });

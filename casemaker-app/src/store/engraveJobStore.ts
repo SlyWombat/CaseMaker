@@ -20,6 +20,7 @@ import {
 import { jobVise, proudForSeat, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { chuckStockOf, cylinderFrameOf, rodDimsOf, rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
 import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { rotaryNeckOf, rotaryNeckSpan } from '@/engine/cnc/rotary/neck';
 import { faceOperationWords } from '@/engine/cnc/rotary/faceOps';
 import { defaultSacrificialUnder, sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
@@ -145,6 +146,8 @@ export type PcbImportOutcome =
       itemCount: number;
       /** The set had copper on both faces, so the job is two setups (#743 P-8). */
       twoSided: boolean;
+      /** #897 — the board's outline, so the wizard's stock step can size a blank from it. */
+      board: { width: number; height: number };
       notes: string[];
       warnings: PcbWarning[];
       /** The board-on-a-non-PCB-blank fact (#743 P-4b review): stated, with a one-click fix. */
@@ -1775,10 +1778,35 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // circumference. Laying a line out on the rod's diameter box put it in a 20 mm band; the map
       // is what the operator places text against (`rotary-flow.md` §3.7), so the seed reads it.
       const map = rotaryMapOf(job);
+      // #724 B3 — A ROTARY LAYOUT LIVES ON THE FREE SPAN, the keep-out bands at either end of the
+      // stick-out, not the stock's own middle: a line fitted to the whole stick-out always reaches
+      // into the jaws' 3 mm or the tailstock's 10 mm, and the findings refuse it. The frame change
+      // re-states an EXISTING layout on this span (`rotaryFreeSpan`); a line made here is laid on
+      // the same span from the start, one definition for both.
+      const free = map === null ? null : rotaryFreeSpan(map);
+      // A NECK NARROWS THE LAYOUT: the operator has reserved a parting band at one end, and a line
+      // laid through it is refused by name. The line takes whatever span is left, read from the
+      // neck's own span (one reader for the placement and the finding).
+      const neck = rotaryNeckOf(job);
+      const neckSpan = map !== null && neck !== null ? rotaryNeckSpan(map, neck) : null;
+      const span =
+        free === null
+          ? null
+          : {
+              from:
+                neckSpan !== null && neck !== null && neck.end === 'chuck'
+                  ? Math.max(free.from, neckSpan.toMm)
+                  : free.from,
+              to:
+                neckSpan !== null && neck !== null && neck.end === 'tailstock'
+                  ? Math.min(free.to, neckSpan.fromMm)
+                  : free.to,
+            };
+      const avoid = labelAvoidBoxes(others, measure);
       const fit = blankLabelSeed({
         blank:
-          map !== null
-            ? { length: map.stickout, width: map.circumference, pocket: null }
+          map !== null && span !== null
+            ? { length: span.to - span.from, width: map.circumference, pocket: null }
             : {
                 length: job.stock.length,
                 width: job.stock.width,
@@ -1796,13 +1824,21 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // The shop's band fill (#451), read here because `blankLabelSeed` is pure.
         bandFill: shopDefault('engrave.blankBandFill').value,
         measure,
-        // A second line takes the next free band rather than printing over the first.
-        avoid: labelAvoidBoxes(others, measure),
+        // A second line takes the next free band rather than printing over the first. The boxes are
+        // in the JOB's frame; the blank is the span, so they move with it (the along-Y turn reads
+        // their X range).
+        avoid: span === null ? avoid : avoid.map((box) => ({ ...box, x0: box.x0 - span.from, x1: box.x1 - span.from })),
       });
+      // The span's own frame back in the job's: the line is placed on the span, then moved out to
+      // where the span sits on the stick-out.
+      const placed =
+        fit !== null && span !== null
+          ? { ...fit, position: { ...fit.position, x: fit.position.x + span.from } }
+          : fit;
       // Nothing at 1 mm fits, or the text is empty: keep the placeholder's own placement (or the
       // generic centre placement when there was none); the job's findings say why it is refused.
       const label =
-        fit ??
+        placed ??
         (placeholder !== null
           ? { ...placeholder, text, font: opts.font, depth: opts.depth }
           : { ...newLabel(job, opts.depth), text, font: opts.font });
@@ -3055,6 +3091,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           ok: true,
           fileCount: plan.files.length,
           twoSided: plan.twoSided,
+          board: { width: plan.board.width, height: plan.board.height },
           itemCount:
             plan.items.vectors.length +
             plan.items.frames.length +

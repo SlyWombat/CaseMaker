@@ -51,6 +51,9 @@ test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain 
 
   // Door → the wizard's Holding step, with the exercise's plate typed by hand.
   await page.getByTestId('start-wizard-next').click();
+  // #897 — the question comes before the blank; a pocket needs no field and is the walk's stand-in.
+  await page.getByTestId('engrave-setup-what-pocket').click();
+  await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-plate').click();
   await page.getByTestId('start-wizard-make-length').fill('76.2');
   await page.getByTestId('start-wizard-make-width').fill('38.1');

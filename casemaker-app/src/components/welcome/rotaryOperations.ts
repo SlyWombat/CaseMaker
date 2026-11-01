@@ -3,7 +3,7 @@
  *
  * The three groups are named for where the cut lands, not for the machine's mode: operations on
  * the map's surface (`wrapped`), on a face (`indexed` — turn, hold, cut flat), and in 3D
- * (`relief`). The flat picker is unchanged; this table is what the wizard's step 4 draws when the
+ * (`relief`). The flat picker is unchanged; this table is what the question step draws when the
  * job is a rod in the rotary chuck.
  *
  * THE FACE GROUP IS AUTHORABLE SINCE #241 SLICE 2. A Flat, a ring of flats and a Cross-hole each

@@ -138,9 +138,14 @@ afterEach(() => {
   useEngravePreviewStore.getState().dispose();
 });
 
-/** Click through step 1 without checking for a machine. */
+/**
+ * Walk to the stock step: step 1 without checking for a machine, then step 2's question, answered
+ * with a short line — the blank is sized from what is being cut (#897).
+ */
 function skipToStockStep(): void {
   fireEvent.click(screen.getByTestId('start-wizard-next'));
+  fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'A block' } });
+  fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 }
 
 /**
@@ -250,7 +255,8 @@ describe('#280/#682 — step 1, the machine check', () => {
     // Next is enabled with no machine at all.
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
-    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+    // #897 — the work comes before the blank: step 2 is the question.
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
   });
 
   it('a build with no socket does not ask to connect one: the note, Close, Continue (#346)', () => {
@@ -271,7 +277,8 @@ describe('#280/#682 — step 1, the machine check', () => {
       // Continue is the advancing button, and it says what it does.
       expect(screen.getByTestId('start-wizard-next').textContent).toBe('Continue without a machine');
       fireEvent.click(screen.getByTestId('start-wizard-next'));
-      expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+      // #897 — the work comes before the blank: step 2 is the question.
+      expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
     } finally {
       caps.drive = true;
     }
@@ -339,7 +346,7 @@ describe('#280 — step 2, the stock', () => {
     // The SAME modal, now on step 3: one wizard, one counter — no second dialog (#681).
     expect(screen.getByTestId('start-wizard')).toBeDefined();
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 4 of 4 · Holding');
     expect(screen.queryByTestId('engrave-setup-flow')).toBeNull();
   });
 
@@ -371,7 +378,7 @@ describe('#280 — step 2, the stock', () => {
     );
     await openStarter('badge-blank');
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeTruthy();
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 4 of 4 · Holding');
     // The blank the hand-off seeded raises no #231 refusal (the vise followed the badge).
     expect(screen.queryByTestId('engrave-setup-step-finding-vise-stock-proud-exceeds-thickness')).toBeNull();
 
@@ -395,7 +402,7 @@ describe('#280 — step 2, the stock', () => {
     // numbers came from rather than letting 3.81 look typed (#352).
     fireEvent.click(screen.getByTestId('start-wizard-back'));
     expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 2 of 4 · Stock');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Stock');
     // …and it is the badge's blank the step is asking about, not the 12 mm default it seeded before.
     expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('3.81');
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('the template');
@@ -519,17 +526,28 @@ describe('#681 — the wizard with nothing to lean on', () => {
     fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '8' } });
   }
 
-  /** Stock → holding → operation, the middle of the one wizard. */
-  async function toOperationStep(): Promise<void> {
+  /** Step 1 → step 2, the question — the work comes before the blank (#897). */
+  function toQuestion(): void {
+    fireEvent.click(screen.getByTestId('start-wizard-next'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
+  }
+
+  /** The question answered → stock → holding: the rest of the one wizard. */
+  async function throughStockToHolding(): Promise<void> {
+    fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('Stock');
+    typePiece();
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
+    // A job with items on it asks before it is replaced.
+    const yes = screen.queryByTestId('start-wizard-replace-yes');
+    if (yes !== null) {
+      await act(async () => {
+        fireEvent.click(yes);
+      });
+    }
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
-    fireEvent.click(screen.getByTestId('engrave-setup-next'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
-      'Step 4 of 4 · What are you cutting?',
-    );
   }
 
   it('no machine on the network: the check says so, Next is never gated, and the item is still made', async () => {
@@ -544,13 +562,12 @@ describe('#681 — the wizard with nothing to lean on', () => {
     );
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
 
-    fireEvent.click(screen.getByTestId('start-wizard-next'));
-    typePiece();
-    await toOperationStep();
-    // A run that began here CREATES the job; only a re-entry adds an operation (#681/#685).
-    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Create the job');
+    toQuestion();
     fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Bench free' } });
-    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    await throughStockToHolding();
+    // A run that began here CREATES the job; only a re-entry adds an operation (#681/#685).
+    expect(screen.getByTestId('engrave-setup-next').textContent).toBe('Create the job');
+    fireEvent.click(screen.getByTestId('engrave-setup-next'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();
 
     const job = useEngraveJobStore.getState().job;
@@ -563,14 +580,13 @@ describe('#681 — the wizard with nothing to lean on', () => {
       useStartWizardStore.getState().openWizard();
     });
     render(<WizardHost />);
-    skipToStockStep();
-    typePiece();
-    await toOperationStep();
+    toQuestion();
+    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'No bit yet' } });
+    await throughStockToHolding();
     // The default job names no cutter (#516), and this path added none.
     expect(useEngraveJobStore.getState().job.toolKey ?? '').toBe('');
 
-    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'No bit yet' } });
-    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    fireEvent.click(screen.getByTestId('engrave-setup-next'));
 
     const job = useEngraveJobStore.getState().job;
     expect(job.toolKey ?? '').toBe('');
@@ -578,7 +594,7 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect(job.labels[0]!.text).toBe('No bit yet');
   });
 
-  it('nothing chosen on the stock step: Next waits, says what step it leads to, and how to unblock it', () => {
+  it('the stock step arrives with the blank the work asks for, and says where it came from', () => {
     act(() => {
       useStartWizardStore.getState().openWizard();
     });
@@ -586,9 +602,30 @@ describe('#681 — the wizard with nothing to lean on', () => {
     skipToStockStep();
 
     const next = screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement;
-    expect(next.disabled).toBe(true);
-    // The button that leaves step 2 says what step 3 is.
+    expect(next.disabled).toBe(false);
+    // The button that leaves the stock step says what it leads to.
     expect(next.textContent).toBe('Next: holding');
+    // #897 — a line of text proposes its measured extent plus the margin, and the sentence says so.
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('Sized from the text');
+
+    // …and the sentence goes the moment a number is the operator's own.
+    typePiece();
+    expect(screen.queryByTestId('engrave-setup-stock-provenance')).toBeNull();
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('nothing for the work to size: Next waits, and one sentence says how to unblock it', () => {
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+    fireEvent.click(screen.getByTestId('start-wizard-next'));
+    // A pocket needs no field, so the question is a valid answer that sizes no blank.
+    fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
+    fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
+
+    const next = screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement;
+    expect(next.disabled).toBe(true);
     // …and ONE sentence, in the step, says what to do — with the controls to do it right above.
     expect(screen.getByTestId('start-wizard-stock-unblock').textContent).toBe(
       'Choose the stock: a size you type, a piece on the shelf, or a file.',

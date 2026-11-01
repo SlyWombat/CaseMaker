@@ -7,11 +7,12 @@
  * in the app counts wizard steps: the panel's Stock and Hold `edit` controls re-open the SAME
  * wizard at the step they name, through the store's `openWizard(step)`.
  *
- * The names are the mockup's own (`docs/design/first-job-flow-mockups.html`, stations 1–4); step 4
- * is named by the question it asks, as the mockup's heading is.
+ * The names are the mockup's own (`docs/design/first-job-flow-mockups.html`, stations 1–4); the
+ * question step is named by the question it asks, as the mockup's heading is. #897 put that
+ * question second, ahead of the blank it sizes.
  */
 
-export type WizardStepId = 'machine' | 'stock' | 'holding' | 'operation';
+export type WizardStepId = 'machine' | 'operation' | 'stock' | 'holding';
 
 export interface WizardStepDef {
   id: WizardStepId;
@@ -21,11 +22,16 @@ export interface WizardStepDef {
   nextLabel: string;
 }
 
+/**
+ * #897 — THE WORK COMES BEFORE THE BLANK. The blank is sized from what is being cut (a mesh's
+ * box, a board's outline, a line's measured extent), so the wizard asks for the work first and
+ * then proposes the stock it needs; Holding follows, because how it is held follows from both.
+ */
 export const WIZARD_STEPS: readonly WizardStepDef[] = [
-  { id: 'machine', name: 'Machine', nextLabel: 'Next: stock' },
+  { id: 'machine', name: 'Machine', nextLabel: 'Next: what are you cutting' },
+  { id: 'operation', name: 'What are you cutting?', nextLabel: 'Next: stock' },
   { id: 'stock', name: 'Stock', nextLabel: 'Next: holding' },
-  { id: 'holding', name: 'Holding', nextLabel: 'Next: operation' },
-  { id: 'operation', name: 'What are you cutting?', nextLabel: 'Create the job' },
+  { id: 'holding', name: 'Holding', nextLabel: 'Create the job' },
 ];
 
 export const WIZARD_STEP_COUNT = WIZARD_STEPS.length;
@@ -60,13 +66,19 @@ export function wizardStepLine(id: WizardStepId): string {
 /**
  * The label of the button that LEAVES `id` on this run.
  *
- * A run that began as a re-entry is editing a job that already exists, so walking on to step 4
- * ADDS an operation to it; only a run that started at step 1 creates a job (#681 follow-up).
+ * A run that began as a re-entry is editing a job that already exists, so the last step ADDS an
+ * operation to it; only a run that started at step 1 creates a job (#681 follow-up).
  *
- * #874 — a job that already has work opens step 4 with nothing picked, and the button then adds
- * nothing: it FINISHES, so it says Done until a chip is picked, when it becomes the add again.
+ * #874 — a job that already has work opens the question with nothing picked, and the button then
+ * adds nothing: it FINISHES, so it says Done until a chip is picked, when it becomes the add again.
+ *
+ * #897 — the question now comes BEFORE the blank, so the button that leaves it only walks on to
+ * the stock; the creating button is Holding's. `idle` is "this run has nothing to add": it makes
+ * the question's button Done, and on a re-entry's Holding the same press finishes rather than
+ * adding an operation nobody asked for.
  */
-export function wizardNextLabel(id: WizardStepId, reEntry: boolean, operationIdle = false): string {
-  if (id === 'operation' && operationIdle) return 'Done';
-  return id === 'operation' && reEntry ? 'Add the operation' : wizardStep(id).nextLabel;
+export function wizardNextLabel(id: WizardStepId, reEntry: boolean, idle = false): string {
+  if (id === 'holding' && reEntry) return idle ? 'Done' : 'Add the operation';
+  if (id === 'operation') return idle ? 'Done' : wizardStep(id).nextLabel;
+  return wizardStep(id).nextLabel;
 }

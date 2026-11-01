@@ -45,7 +45,7 @@ import { NARROW_QUERY } from './wizardLayout';
 import { WizardFileField } from './WizardFileField';
 
 /**
- * Step 2 of the one cutting-job wizard (#683): **the stock, in one screen.**
+ * The stock step of the one cutting-job wizard (#683): **the stock, in one screen.**
  *
  * Material first — the house's own by default, grouped Plastics / Woods / Metals. The form is a
  * picture with one defining sentence; the size is the panel's `length X · width Y · thickness Z`,
@@ -58,7 +58,7 @@ import { WizardFileField } from './WizardFileField';
  *
  * Copy is the mockup's (`docs/design/first-job-flow-mockups.html`, station 2), including the
  * wording correction of 2026-10-26: a sheet is thin stock held on a waste board between the jaws or
- * taped to the bed — how it is held is step 3's answer, worked out from the numbers.
+ * taped to the bed — how it is held is Holding's answer, worked out from the numbers.
  */
 
 /** What the wizard applies when the stock step is left. */
@@ -92,6 +92,12 @@ export interface StartStockSeed {
    * template hand-off's stamp. The step says so until one of them is edited (#352's sentence).
    */
   computed?: boolean;
+  /**
+   * #897 — where a proposed blank came from, in the work's own terms ("Sized from the mesh: …").
+   * Shown where the template sentence is, and gone the moment a number is edited, for the same
+   * reason: after that the numbers are the operator's.
+   */
+  sentence?: string;
 }
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -179,9 +185,9 @@ function formSentence(form: JobStockForm, machine: Mill): string {
     case 'printed-blank':
       return 'Printed blank — from a printer; layers known.';
     case 'disc':
-      return 'Disc — round stock. A short disc sits in the vise or on tape for a face job; a disc cut around needs the rotary (step 3 will offer it).';
+      return 'Disc — round stock. A short disc sits in the vise or on tape for a face job; a disc cut around needs the rotary (step 4 will offer it).';
     case 'rod':
-      return `Rod — round stock: a dowel, a rod. A rod up to ${fmt(ROD_VISE_MAX_LENGTH_MM)} mm long stands on its end in the vise; a longer one is held in the rotary chuck and cut around (step 3 offers it).`;
+      return `Rod — round stock: a dowel, a rod. A rod up to ${fmt(ROD_VISE_MAX_LENGTH_MM)} mm long stands on its end in the vise; a longer one is held in the rotary chuck and cut around (step 4 offers it).`;
     case 'tube':
       return 'Tube — round stock with a bore. Held in the rotary chuck and cut around; no cut goes deeper than its wall.';
   }
@@ -679,11 +685,12 @@ export function StartStockStep({
         </p>
       )}
       {/* #352 — where seeded numbers came from. It goes the moment one of them is edited, because
-          then the number IS the operator's and the sentence would be a lie. */}
+          then the number IS the operator's and the sentence would be a lie. #897 — a blank the
+          work proposed says what it was sized from, in the same place and under the same rule. */}
       {seededNumbers && (
         <p style={MUTED} data-testid="engrave-setup-stock-provenance">
-          These numbers came from the template you picked, not from a bench measurement — change any you
-          measured.
+          {seed?.sentence ??
+            'These numbers came from the template you picked, not from a bench measurement — change any you measured.'}
         </p>
       )}
 

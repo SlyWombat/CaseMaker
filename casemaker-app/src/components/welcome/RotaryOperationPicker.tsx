@@ -1,7 +1,7 @@
 /**
  * #752 R-UI-4 — THE ROTARY OPERATION PICKER (design `rotary-flow.md` §3.6).
  *
- * The wizard's step 4 on a rod in the rotary chuck draws these three groups instead of the flat
+ * The wizard's question step on a rod in the rotary chuck draws these three groups instead of the flat
  * ones. Each chip is one operation; the step asks for the one field the operation needs (the
  * fields live in `OperationStep`, which owns the answer the shell's Create reads).
  *

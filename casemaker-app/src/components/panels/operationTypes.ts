@@ -79,7 +79,7 @@ export type OperationTypeId =
   | 'prism';
 
 /**
- * #681 — the four groups the wizard's step 4 draws the operations in, in the mockup's order and
+ * #681 — the four groups the wizard's question step draws the operations in, in the mockup's order and
  * words (`docs/design/first-job-flow-mockups.html`, station 4). The panel's "Add operation" will
  * read the same table (#685), so the picker has one shape wherever it appears.
  */

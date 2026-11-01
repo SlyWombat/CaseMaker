@@ -27,7 +27,7 @@ export interface StartWizardState {
   initialStep: WizardStepId;
   /**
    * #680 — a starter template the welcome door asked for (`badge-blank`, `blank`). The wizard's
-   * first act is the step 2 template path with this id: the blank becomes the stock and the job
+   * first act is the stock step's template path with this id: the blank becomes the stock and the job
    * opens on Holding. Null for every other entry.
    */
   starter: string | null;

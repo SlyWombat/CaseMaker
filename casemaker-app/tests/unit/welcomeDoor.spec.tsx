@@ -141,7 +141,7 @@ describe('#680 the cutting door', () => {
     render(<StartWizard />);
 
     await waitFor(() =>
-      expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding'),
+      expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 4 of 4 · Holding'),
     );
     const stock = useEngraveJobStore.getState().job.stock;
     // The badge's blank, turned a quarter turn for the vise (#383): 38.1 across X, 76.2 along Y.

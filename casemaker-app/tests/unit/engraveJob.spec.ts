@@ -1517,15 +1517,42 @@ describe('#752 — Engrave text on a rotary job reads the map', () => {
 
     const along = s().addEngraveText('Zoomba', { depth: 0.5, font: 'sans-default', reads: 'along' });
     const lineAlong = s().job.labels.find((l) => l.id === along)!;
-    // The map is stick-out × circumference, and the line sits in its middle band — not in the
-    // rod's 20 mm diameter box, which is what the flat blank would have said.
-    expect(lineAlong.position.x).toBeCloseTo(17.5, 1);
+    // The map is the FREE SPAN × circumference (#724 B3): jaws 0–3 and, with the tailstock in,
+    // 25–35 are keep-outs, so the span is 3–25 and its centre is 14 — not the rod's 20 mm
+    // diameter box, and not the stick-out's own middle, where a fitted line would meet the bands.
+    expect(lineAlong.position.x).toBeCloseTo(14, 1);
     expect(lineAlong.position.y).toBeCloseTo(Math.PI * 10, 1);
     expect(lineAlong.rotation).toBe(0);
 
     const around = s().addEngraveText('Zoomba', { depth: 0.5, font: 'sans-default', reads: 'around' });
     const lineAround = s().job.labels.find((l) => l.id === around)!;
     expect(lineAround.rotation).toBe(90);
+  });
+
+  it('a parting neck takes its band out of the line’s span', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    s().reset();
+    s().setStock({ shape: 'cylinder', diameter: 20, length: 20, width: 20, thickness: 50 }, 'computed');
+    s().setRotaryHolding(
+      {
+        stickout: 35,
+        gripDiameter: null,
+        jawMode: 'reverse-inner',
+        tailstock: true,
+        source: 'test',
+        // The neck grows inward from the jaws' keep-out edge (X 3) and runs 5 mm, so the line is
+        // laid on what is left: 8–25, centred at 16.5 — clear of the band that would cut it.
+        neck: { end: 'chuck', diameter: 14, length: 5 },
+      },
+      jobVise(s().job),
+    );
+    s().replace({ ...s().job, labels: [], shapes: [] });
+
+    const id = s().addEngraveText('Zoomba', { depth: 0.5, font: 'sans-default', reads: 'along' });
+    const line = s().job.labels.find((l) => l.id === id)!;
+    expect(line.position.x).toBeCloseTo(16.5, 1);
   });
 });
 

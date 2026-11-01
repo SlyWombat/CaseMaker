@@ -35,7 +35,7 @@ test('#723 P2-3 — the wizard names the sides of a two-side job, and the operat
   await chooser.setFiles(jobPath);
   await expect(page.getByTestId('engrave-job-notice')).toContainText('Opened mouse-shell-two-sides.cutjob.json.');
 
-  // Design › Hold edit opens the same 4-step wizard at Holding; the sides are above its controls.
+  // Design › Hold edit opens the same 4-step wizard at Holding; its sides are named there too.
   await page.getByTestId('engrave-hold-edit').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   await expect(page.getByTestId('engrave-setup-holding-sides')).toBeVisible();
@@ -44,8 +44,10 @@ test('#723 P2-3 — the wizard names the sides of a two-side job, and the operat
   await expect(page.getByTestId('engrave-setup-holding-side-1')).toContainText('turned over about X on the two pins');
   await page.screenshot({ path: testInfo.outputPath('wizard-holding-sides.png'), fullPage: true });
 
-  // Next → the operation step: the sides are a choice, and Side 2 can be selected.
-  await page.getByTestId('engrave-setup-next').click();
+  // #897 — the question is before the blank: Back through the stock step reaches it, and the
+  // sides are a choice there; Side 2 can be selected.
+  await page.getByTestId('start-wizard-back').click();
+  await page.getByTestId('start-wizard-back').click();
   await expect(page.getByTestId('engrave-setup-step-what')).toBeVisible();
   await expect(page.getByTestId('start-wizard-op-sides')).toBeVisible();
   await expect(page.getByTestId('start-wizard-op-side-0')).toContainText('mouse-shell.stl');

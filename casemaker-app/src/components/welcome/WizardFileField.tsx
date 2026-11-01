@@ -1,5 +1,5 @@
 /**
- * #870 — the wizard's ONE file control: step 2's stock file, step 4's mesh and step 4's Gerbers.
+ * #870 — the wizard's ONE file control: the stock step's stock file, the question's mesh and Gerbers.
  *
  * The browser's own `<input type="file">` is never shown. Its label reads "No file chosen" the
  * moment a step clears it (so the same file can be picked twice), and that sentence sat next to the
@@ -33,7 +33,7 @@ export interface WizardFileFieldProps {
   /** Why the pick was refused, in a sentence; drawn red. */
   error: string | null;
   onFiles: (files: File[]) => void;
-  /** Step 2's variant: the dashed box it has always drawn. */
+  /** The stock step's variant: the dashed box it has always drawn. */
   drop?: boolean;
   testId?: string;
   nameTestId?: string;

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
-import { DEFAULT_FONT_ID, ensureSeedFontsLoaded } from '@/engine/fonts/registry';
+import { DEFAULT_FONT_ID, ensureLabelFontsLoaded, ensureSeedFontsLoaded } from '@/engine/fonts/registry';
 import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
 import { jobVise } from '@/engine/cnc/fixture';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
@@ -48,6 +48,8 @@ import { currentMount, mechanismOf, rodViseProblem } from './holdingMounts';
 import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
+import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
+import { proposedMaterialFor, workShapeFor } from './workShape';
 
 /**
  * #681 — the ONE cutting-job wizard.
@@ -56,10 +58,14 @@ import type { PendingStock, StartStockSeed } from './StartStockStep';
  *
  * ```
  * Step 1 of 4 · Machine      the machine the job is written for, and a check (never a gate)
- * Step 2 of 4 · Stock        material, then where the piece comes from
- * Step 3 of 4 · Holding      how it is held, and what that does to the blank
- * Step 4 of 4 · What are you cutting?   the grouped picker and the field the pick needs
+ * Step 2 of 4 · What are you cutting?   the grouped picker and the field the pick needs
+ * Step 3 of 4 · Stock        the blank the work is sized from, then where the piece comes from
+ * Step 4 of 4 · Holding      how it is held, and what that does to the blank
  * ```
+ *
+ * #897 — THE WORK COMES BEFORE THE BLANK: the stock step is seeded with a blank proposed from what
+ * is being cut (`stockProposal.ts`), and Holding follows from both. The operator can change every
+ * proposed number; the sentence over the size fields says where it came from.
  *
  * THE SHELL owns the step index, the counter and the transitions; each step's body is its own file
  * (`MachineStep`, `StockStep`, `HoldingStep`, `OperationStep`) so a wave-2 slice can rewrite one
@@ -67,12 +73,12 @@ import type { PendingStock, StartStockSeed } from './StartStockStep';
  * controls re-open this same wizard at the step they name (`openWizard('stock' | 'holding')`), with
  * the same counter — not a second modal with a second numbering (A1, B3, A10, E1).
  *
- * The old second modal (`EngraveSetupFlow`) is gone: its material and blank questions are step 2,
- * its holding question step 3, and its "What are you cutting?" step 4. Nothing is handed off to a
- * second overlay; the wizard lands in Design with the item made, its row open.
+ * The old second modal (`EngraveSetupFlow`) is gone: its "What are you cutting?" question is step
+ * 2, its material and blank questions step 3, and its holding question step 4. Nothing is handed
+ * off to a second overlay; the wizard lands in Design with the item made, its row open.
  *
  * Portal'd to `document.body` at the modal layer of the one stacking scale (`--cm-z-modal`, #348)
- * and mounted from `AppShell` rather than the welcome overlay — step 2 can create the project,
+ * and mounted from `AppShell` rather than the welcome overlay — the stock step can create the project,
  * which flips `welcomeMode` off and unmounts that overlay, and this has to survive it.
  */
 
@@ -135,7 +141,7 @@ async function seedStockFromProject(project: Project): Promise<void> {
   job.takeBlankStock(blank);
 }
 
-/** A job's own stock as step 2's starting answers, when the step is re-opened to edit it (#681). */
+/** A job's own stock as the stock step's starting answers, when it is re-opened to edit it (#681). */
 function seedFromJob(job: EngraveJob): StartStockSeed {
   const entry = job.stockEntry;
   const computed = (['length', 'width', 'thickness'] as const).every(
@@ -197,12 +203,50 @@ function sameStockChoice(p: PendingStock, job: EngraveJob): boolean {
   );
 }
 
+/**
+ * #897 — does the stock step report exactly the blank the work proposed?
+ *
+ * A match means the operator has not changed the proposed numbers, so leaving the question step
+ * and coming back RE-PROPOSES from the (possibly changed) work. Any other answer is the
+ * operator's own and is kept: the proposal never overwrites an edit.
+ */
+function stockMatchesProposal(
+  p: PendingStock,
+  proposal: StockProposal,
+  material: StockProposal['material'],
+): boolean {
+  if (p.kind !== 'choice' || p.saveToShelf !== null) return false;
+  const s = p.choice.stock;
+  return (
+    p.choice.entry.form === proposal.form &&
+    s.material === material &&
+    s.length === proposal.length &&
+    s.width === proposal.width &&
+    s.thickness === proposal.thickness
+  );
+}
+
+/** #897 — the operator's own answer, back in the step's own terms when they return to it. */
+function seedFromPending(p: PendingStock): StartStockSeed | undefined {
+  if (p.kind !== 'choice') return undefined;
+  const s = p.choice.stock;
+  return {
+    form: p.choice.entry.form,
+    material: s.material,
+    length: s.length,
+    width: s.width,
+    thickness: s.thickness,
+    ...(s.wall === undefined ? {} : { wall: s.wall }),
+    finish: p.choice.entry.finish,
+  };
+}
+
 export function StartWizard(): JSX.Element {
   const closeWizard = useStartWizardStore((s) => s.closeWizard);
   const initialStep = useStartWizardStore((s) => s.initialStep);
   // #680 — a starter job on the welcome door opens this wizard with its blank already the stock.
   // The template id is the door's word for it; `chooseJob` (the one template path since #683 took
-  // the cards out of step 2) does the rest: project, seeded stock, step 3, and the counters move
+  // the cards out of the stock step) does the rest: project, seeded stock, Holding, and the counters move
   // as they always have.
   const starter = useStartWizardStore((s) => s.starter);
   const starterRan = useRef(false);
@@ -224,20 +268,17 @@ export function StartWizard(): JSX.Element {
   // the same query for its own grid, so the two never disagree at the breakpoint).
   const narrow = useMediaQuery(NARROW_QUERY);
   // Re-entry is an EDIT: it opens on an existing job and must not reset it. A new job becomes an
-  // edit the moment step 2 creates it, so Back to Stock asks about the stock the job now has.
+  // edit the moment the stock step creates it, so Back to Stock asks about the stock the job now has.
   const [jobStarted, setJobStarted] = useState(initialStep !== 'machine');
   // HOW this run was opened, captured at mount: a run that did not start at step 1 was opened by
   // the panel's Stock/Hold `edit` on an existing job, so it finishes at the step it came to edit.
-  // `jobStarted` cannot answer this later — a new job turns it true when step 2 creates the project.
+  // `jobStarted` cannot answer this later — a new job turns it true when the stock step makes the project.
   const [reEntry] = useState(initialStep !== 'machine');
-  // Whether THIS run made the project. Step 2 after a Back must keep the drawn part equal to the
+  // Whether THIS run made the project. The stock step after a Back must keep the drawn part equal to the
   // stock it wrote; a panel re-entry edits a job beside a project someone else owns.
   const [projectCreatedHere, setProjectCreatedHere] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingStock | null>(null);
-  const onStockPending = useCallback((next: PendingStock | null) => {
-    setPending(next);
-  }, []);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [confirmReplace, setConfirmReplace] = useState<{ pending: PendingStock; items: number } | null>(null);
@@ -247,6 +288,54 @@ export function StartWizard(): JSX.Element {
   );
   const [operationChoice, setOperationChoice] = useState<OperationChoice | null>(null);
   const onOperationChoice = useCallback((choice: OperationChoice | null) => setOperationChoice(choice), []);
+  // #897 — THE BLANK THE WORK ASKS FOR. The question step comes first, so its answer sizes the
+  // stock step's starting numbers. `stockEdited` records that the operator has changed them, so a
+  // return to the step keeps their answer and only an untouched proposal is re-derived.
+  const [stockEdited, setStockEdited] = useState(false);
+  // #897 — a line's extent is MEASURED where its face is up, and the estimate until then: ask for
+  // the face as the line changes, and re-derive once it is parsed.
+  const [fontEpoch, setFontEpoch] = useState(0);
+  useEffect(() => {
+    if (operationChoice?.type !== 'engrave') return;
+    let live = true;
+    ensureLabelFontsLoaded(
+      [{ text: operationChoice.text, font: operationChoice.font, weight: 'bold' }],
+      job.customFonts ?? [],
+    )
+      .then(() => {
+        if (live) setFontEpoch((n) => n + 1);
+      })
+      .catch(() => {
+        // The estimate is the documented answer when no face is available.
+      });
+    return () => {
+      live = false;
+    };
+  }, [operationChoice, job.customFonts]);
+  const work = useMemo(() => {
+    void fontEpoch; // a parsed face changes the MEASUREMENT, not the choice or the job
+    return workShapeFor(operationChoice, job);
+  }, [operationChoice, job, fontEpoch]);
+  const proposal = useMemo(() => proposeStock(work), [work]);
+  // The material the proposal's blank opens on: the house's, the job's own, or the board's.
+  const proposalMaterial = useMemo(
+    () => (proposal === null ? null : proposedMaterialFor(proposal, job)),
+    [proposal, job],
+  );
+  const onStockPending = useCallback(
+    (next: PendingStock | null) => {
+      setPending(next);
+      if (
+        next !== null &&
+        proposal !== null &&
+        proposalMaterial !== null &&
+        !stockMatchesProposal(next, proposal, proposalMaterial)
+      ) {
+        setStockEdited(true);
+      }
+    },
+    [proposal, proposalMaterial],
+  );
 
   // Declared before the opening-starter effect that calls it: a function declaration hoists, but
   // the hooks lint (react-hooks/immutability) needs the binding textual before its use so the
@@ -276,7 +365,7 @@ export function StartWizard(): JSX.Element {
       const ready = useEngraveJobStore.getState();
       const grip = readDefault(liveShopDefaults(), 'rotary.gripMm').value;
       ready.setRotaryHolding(defaultRotaryChuck(ready.job, grip), jobVise(ready.job));
-      // #716 — the wizard's own empty-design rule (step 2): a starter seeds the stock and the
+      // #716 — the wizard's own empty-design rule (the stock step): a starter seeds the stock and the
       // mount, not items. Without this the demo lines would be cut into the rod.
       const seeded = useEngraveJobStore.getState().job;
       useEngraveJobStore.getState().replace({ ...seeded, labels: [], shapes: [] });
@@ -318,16 +407,23 @@ export function StartWizard(): JSX.Element {
 
   const hasOperations = jobHasOperations(job);
   const seed = jobStarted ? seedFromJob(job) : undefined;
-  // The step this re-entry came to edit: its primary action is Done, not the next step. While a
-  // stock replacement is being confirmed, the confirmation owns the footer.
-  const doneStep =
-    reEntry &&
-    step === initialStep &&
-    (step === 'holding' || (step === 'stock' && confirmReplace === null));
-  // #874 — a job that already has work opens step 4 with nothing picked, and pressing the primary
-  // then adds nothing: it FINISHES, so it says Done until a chip is picked. A chip picked turns it
-  // back into "Add the operation" (`wizardNextLabel`).
-  const operationIdle = step === 'operation' && hasOperations && operationChoice === null;
+  // #897 — the stock step's starting point: the blank the work asks for on a run that has not
+  // started its job yet; an edited answer or a re-entry's job keeps what it has.
+  const proposedSeed: StartStockSeed | null =
+    !jobStarted && proposal !== null && proposalMaterial !== null
+      ? { ...proposal, material: proposalMaterial, computed: true }
+      : null;
+  const stockSeed = stockEdited && pending !== null ? (seedFromPending(pending) ?? seed) : (proposedSeed ?? seed);
+  // The step this re-entry came to edit: Done applies it and returns. The stock step keeps its own
+  // Done (a stock edit finishes at the stock when asked); Holding's primary IS its finish — it
+  // says Done while this run is finishing the step it came to edit, and the holding block gates
+  // it like every other exit (#713 review, #897).
+  const doneStep = reEntry && step === initialStep && step === 'stock' && confirmReplace === null;
+  // #874 — a job that already has work opens the question with nothing picked, and pressing the
+  // primary then adds nothing: it FINISHES, so it says Done until a chip is picked. A chip picked
+  // turns it back into the add. #897 — a run that has not started its job yet is NOT idle on the
+  // shipped demo lines the stock step will replace.
+  const operationIdle = step === 'operation' && hasOperations && jobStarted && operationChoice === null;
 
   // `probeMachine` resolves every failure into one of its four outcomes, so there is nothing to
   // catch here: a thrown probe would be a bug in the probe, not an error to swallow.
@@ -347,7 +443,7 @@ export function StartWizard(): JSX.Element {
     }
   }
 
-  /** Step 3 is always seeded from the job as it now stands, so Back and forth cannot go stale. */
+  /** Holding is always seeded from the job as it now stands, so Back and forth cannot go stale. */
   function enterHolding(): void {
     setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
     setStep('holding');
@@ -355,7 +451,7 @@ export function StartWizard(): JSX.Element {
 
   /**
    * Holding answers write as they change: there is no later Finish to collect them. The write is
-   * the holding's own — the stock and its provenance belong to step 2 and are left untouched
+   * the holding's own — the stock and its provenance belong to the stock step and are left untouched
    * (#684 review: a laminate's assumed cap has no answer field to carry it through a whole-setup
    * write, so writing the stock dropped it).
    */
@@ -401,7 +497,7 @@ export function StartWizard(): JSX.Element {
     setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
   }
   /**
-   * Step 2, new job (#418): start from the settled stock with an empty design.
+   * The stock step, new job (#418): start from the settled stock with an empty design.
    *
    * A new project is a new job: the job store is `reset` (the machine chosen in step 1 is kept),
    * then the stock goes through `setStock` — so the vise's `stockProud` follows the thickness
@@ -507,7 +603,7 @@ export function StartWizard(): JSX.Element {
   }
 
   /**
-   * Step 2, re-opened from the panel's Stock `edit`: change THIS job's stock and keep its items.
+   * The stock step, re-opened from the panel's Stock `edit`: change THIS job's stock, keep its items.
    *
    * A design file is the exception — it carries its own stock AND its own items, so it is a new job
    * and goes through the new-job route (with the same replace confirmation, raised on the way in).
@@ -521,14 +617,37 @@ export function StartWizard(): JSX.Element {
       await startFromStock(p);
       return;
     }
+    // #897 — a board's set was imported in the question step and IS the job, so this is that
+    // run's FIRST blank applied to work that already exists: the project's drawn blank is made
+    // from it, as the new-job route makes one, but the items are kept.
+    const firstStock = !jobStarted;
+    const settled = (): void => {
+      if (!firstStock) {
+        if (closeAfter) closeWizard();
+        else enterHolding();
+        return;
+      }
+      const stock = useEngraveJobStore.getState().job.stock;
+      const project = blankProjectForStock(stock);
+      if (project === null) {
+        setStartError('the blank template is missing from this build');
+        return;
+      }
+      setProject(project); // also flips welcomeMode off
+      clearHistory();
+      setSection('cnc-engrave');
+      setJobStarted(true);
+      setProjectCreatedHere(true);
+      enterHolding();
+      void scheduleImmediate(project);
+    };
     setStarting(true);
     setStartError(null);
     try {
       // Passing THROUGH the step is not an edit: only a changed answer is written.
       const current = useEngraveJobStore.getState().job;
       if (sameStockChoice(p, current)) {
-        if (closeAfter) closeWizard();
-        else enterHolding();
+        settled();
         return;
       }
       if (p.saveToShelf !== null) {
@@ -564,14 +683,19 @@ export function StartWizard(): JSX.Element {
         facingShopFrom(useShopDefaultsStore.getState().defaults),
       );
       store.replace({ ...after, stockEntry: p.choice.entry, facing });
-      if (closeAfter) closeWizard();
-      else enterHolding();
+      settled();
     } finally {
       setStarting(false);
     }
   }
 
   function applyStock(p: PendingStock, closeAfter = false): void {
+    // #897 — a circuit board's set wrote the job's items in the question step; sizing its blank is
+    // an edit of that job. Starting over here would throw the Gerber items away.
+    if (p.kind === 'choice' && operationChoice?.type === 'pcb' && hasOperations) {
+      void editStock(p, closeAfter);
+      return;
+    }
     if (!jobStarted) {
       void startFromStock(p);
       return;
@@ -591,11 +715,14 @@ export function StartWizard(): JSX.Element {
   function leaveStock(closeAfter = false): void {
     if (pending === null) return;
     const current = useEngraveJobStore.getState().job;
+    // #897 — a board's set is the work this run already wrote, not a job to be replaced: the
+    // blank it was imported onto is sized, not thrown away.
+    const keepBoardItems = pending.kind === 'choice' && operationChoice?.type === 'pcb' && hasOperations;
     // #418 review — starting from stock replaces the job open now, so a job with items is asked
     // first. A design FILE carries its own items and stock, so it replaces on re-entry too; a
     // size/material edit of a job beside someone else's project keeps the items and asks nothing.
     const replaces =
-      !jobStarted ||
+      (!jobStarted && !keepBoardItems) ||
       pending.kind === 'design' ||
       (projectCreatedHere && !sameStockChoice(pending, current));
     if (replaces) {
@@ -621,7 +748,7 @@ export function StartWizard(): JSX.Element {
     if (step === 'holding') closeWizard();
   }
 
-  /** Step 4's Create: make the operation, open its row and land in Design. */
+  /** The last step's Create: make the operation, open its row and land in Design. */
   function createOperation(choice: OperationChoice | null): void {
     let id: string | null = null;
     if (choice !== null) {
@@ -646,7 +773,14 @@ export function StartWizard(): JSX.Element {
           if (choice.setupId !== undefined) {
             useEngraveJobStore.getState().setSideGoal(choice.setupId, choice.target);
           } else {
-            useEngraveJobStore.getState().setTargetObject(choice.target);
+            // #897 — the mesh was read BEFORE the blank existed, so its centre is the centre of
+            // whatever stock the job held then. The goal is seated on the blank the stock step
+            // settled: the file's x/y place it on the blank the job will cut.
+            const stock = useEngraveJobStore.getState().job.stock;
+            useEngraveJobStore.getState().setTargetObject({
+              ...choice.target,
+              position: { ...choice.target.position, x: stock.length / 2, y: stock.width / 2 },
+            });
           }
           id = choice.target.id;
         }
@@ -693,15 +827,19 @@ export function StartWizard(): JSX.Element {
     switch (step) {
       case 'machine':
         setPending(null);
-        setStep('stock');
+        // #897 — the question next, because its answer is what the blank is sized from.
+        setStep('operation');
+        break;
+      case 'operation':
+        // A job that already has work and nothing newly picked: the button says Done and finishes.
+        if (operationIdle) createOperation(null);
+        else setStep('stock');
         break;
       case 'stock':
         leaveStock();
         break;
       case 'holding':
-        setStep('operation');
-        break;
-      case 'operation':
+        // The last step creates the operation (or, on a re-entry, adds it or finishes).
         createOperation(operationChoice);
         break;
     }
@@ -733,7 +871,7 @@ export function StartWizard(): JSX.Element {
 
       {step === 'stock' && (
         <>
-          <StockStep seed={seed} onPending={onStockPending} />
+          <StockStep seed={stockSeed} onPending={onStockPending} />
           {confirmReplace !== null && (
             <div
               data-testid="start-wizard-replace-confirm"
@@ -783,7 +921,13 @@ export function StartWizard(): JSX.Element {
       )}
 
       {step === 'operation' && (
-        <OperationStep job={job} hasOperations={hasOperations} onChoiceChange={onOperationChoice} />
+        <OperationStep
+          job={job}
+          hasOperations={hasOperations}
+          fresh={!jobStarted}
+          initial={operationChoice}
+          onChoiceChange={onOperationChoice}
+        />
       )}
     </>
   );
@@ -882,8 +1026,8 @@ export function StartWizard(): JSX.Element {
             )}
             <span className="sw-foot__spacer" />
             {doneStep && (
-              // A re-entry may finish at the step it came to edit, so walking to step 4 is a choice
-              // rather than the price of closing the wizard (#681 follow-up).
+              // A re-entry finishes at the step it came to edit (#681 follow-up); #897 put the
+              // question before the blank, so there is no later step for this press to walk to.
               <button
                 type="button"
                 className="sw-btn"
@@ -917,17 +1061,21 @@ export function StartWizard(): JSX.Element {
                 type="button"
                 className="sw-btn sw-btn--primary"
                 data-testid="engrave-setup-next"
-                disabled={holdingBlock !== null}
+                disabled={holdingBlock !== null || operationCreateBlocked(operationChoice) !== null}
                 onClick={next}
               >
-                {wizardNextLabel('holding', reEntry)}
+                {doneStep
+                  ? 'Done'
+                  : wizardNextLabel('holding', reEntry, operationChoice === null)}
               </button>
             )}
             {step === 'operation' && (
+              // #897 — the question only walks on to the blank it sizes; the creating button is
+              // the last step's. A job with work and nothing picked still finishes here (Done).
               <button
                 type="button"
                 className="sw-btn sw-btn--primary"
-                data-testid="start-wizard-create"
+                data-testid="start-wizard-operation-next"
                 disabled={operationCreateBlocked(operationChoice) !== null || (operationChoice === null && !hasOperations)}
                 onClick={next}
               >

@@ -4118,7 +4118,7 @@ describe('EngravePanel — the Design main path (#686)', () => {
     expect(screen.getByTestId('engrave-stock-edit').textContent).toContain('edit');
     // The facts the inline fields carried survive in the line's hover (and, for the fields the
     // operator typed, in Technical's one sentence).
-    expect(screen.getByTestId('engrave-stock-line').getAttribute('title')).toContain('wizard’s step 2');
+    expect(screen.getByTestId('engrave-stock-line').getAttribute('title')).toContain('wizard’s stock step');
     act(() => {
       const base = useEngraveJobStore.getState().job;
       useEngraveJobStore.setState({ job: { ...base, sources: { stock: { length: 'computed' } } } });
