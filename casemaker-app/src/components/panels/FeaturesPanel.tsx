@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import * as opentype from 'opentype.js';
 import { FontPicker, WeightPicker } from '@/components/panels/FontPicker';
 import { useProjectStore } from '@/store/projectStore';
@@ -11,6 +11,9 @@ import type { TextLabel } from '@/types/textLabel';
 import type { BarbType } from '@/types/snap';
 import { BARB_TYPES } from '@/types/snap';
 import type { DisplayFraming } from '@/types/display';
+import { MAGNET_SIZES, type MagnetPocket, type MagnetRetention, type MagnetSize, type NameplateParams } from '@/types';
+import { MAGNETS } from '@/engine/compiler/fasteners';
+import { FACE_NAME, faceSizeForProject, magnetFactsForProject } from '@/engine/compiler/magnets';
 
 /**
  * Issue #49 — combined panel exposing the six engine domains that previously
@@ -47,6 +50,21 @@ const EMPTY_CATCHES: import('@/types/snap').SnapCatch[] = [];
 const EMPTY_CUTOUTS: import('@/types').CustomCutout[] = [];
 const CUTOUT_FACES: import('@/types').CutoutFace[] = ['top', 'bottom', 'front', 'back', 'left', 'right'];
 const CUTOUT_SHAPES: import('@/types').CustomCutoutShape[] = ['rect', 'round', 'slot'];
+const EMPTY_MAGNETS: MagnetPocket[] = [];
+const RETENTIONS: { id: MagnetRetention; label: string; hint: string }[] = [
+  { id: 'glue', label: 'glue', hint: 'Open pocket at the table’s glue fit (disc + 0.5 mm)' },
+  { id: 'press', label: 'press', hint: 'Open pocket at a light press fit (disc + 0.1 mm, provisional)' },
+  {
+    id: 'captured',
+    label: 'captured',
+    hint: 'Closed by a 0.6 mm skin; the print pauses to drop the magnet in (floor and lid only)',
+  },
+];
+const sizeLabel = (s: MagnetSize): string => {
+  const m = MAGNETS[s];
+  return `${m.d} × ${m.h} mm`;
+};
+const faceLabel = (f: CaseFace): string => `${FACE_NAME[f]} (${f})`;
 
 export function FeaturesPanel() {
   return (
@@ -58,6 +76,9 @@ export function FeaturesPanel() {
       <TextLabelsSection />
       <MountingSection />
       <CustomCutoutsSection />
+      <MagnetPocketsSection />
+      <NameplateSection />
+      <MagnetNotes />
       <SnapCatchesSection />
     </div>
   );
@@ -642,6 +663,358 @@ function CustomCutoutsSection() {
             ✕
           </button>
         </div>
+      ))}
+    </section>
+  );
+}
+
+function MagnetPocketsSection() {
+  // Issue #152 — disc-magnet pockets cut into a case face.
+  const pockets = useProjectStore((s) => s.project.case.magnetPockets) ?? EMPTY_MAGNETS;
+  const patchCase = useProjectStore((s) => s.patchCase);
+  const set = (next: MagnetPocket[]) => patchCase({ magnetPockets: next });
+  const patch = (id: string, p: Partial<MagnetPocket>) =>
+    set(pockets.map((m) => (m.id === id ? { ...m, ...p } : m)));
+
+  const onAdd = () => {
+    const project = useProjectStore.getState().project;
+    const [fw, fh] = faceSizeForProject(project, '-y');
+    set([
+      ...pockets,
+      {
+        id: newId('magnet'),
+        face: '-y',
+        u: Math.round(fw / 2),
+        v: Math.round(fh / 2),
+        size: '6x2',
+        retention: 'glue',
+        count: 1,
+        enabled: true,
+      },
+    ]);
+  };
+
+  return (
+    <section className="features-section" data-testid="magnet-pockets-section">
+      <h4>Magnet pockets</h4>
+      <div className="features-row">
+        <button
+          onClick={onAdd}
+          data-testid="add-magnet-pocket"
+          title="Add a 6 × 2 mm magnet pocket at the centre of the front face — edit size, count and position below."
+        >
+          + Add magnet pocket
+        </button>
+      </div>
+      {pockets.length === 0 && <p className="features-empty">No magnet pockets.</p>}
+      {pockets.map((m) => (
+        <div key={m.id} className="features-row" data-testid={`magnet-pocket-${m.id}`}>
+          <input
+            type="checkbox"
+            checked={m.enabled}
+            onChange={(e) => patch(m.id, { enabled: e.target.checked })}
+            aria-label={`Magnet pocket ${m.id} enabled`}
+            title="Toggle this magnet pocket on/off."
+          />
+          <select
+            value={m.face}
+            onChange={(e) => patch(m.id, { face: e.target.value as CaseFace })}
+            data-testid={`magnet-pocket-face-${m.id}`}
+            aria-label={`Magnet pocket ${m.id} face`}
+            title="Which case face the pocket is cut into. Top pockets go into the lid."
+          >
+            {CASE_FACES.map((f) => (
+              <option key={f} value={f}>
+                {faceLabel(f)}
+              </option>
+            ))}
+          </select>
+          <select
+            value={m.size}
+            onChange={(e) => patch(m.id, { size: e.target.value as MagnetSize })}
+            data-testid={`magnet-pocket-size-${m.id}`}
+            aria-label={`Magnet pocket ${m.id} magnet size`}
+            title="Disc magnet size, diameter × thickness. Pocket fits are provisional until the magnet coupon is printed."
+          >
+            {MAGNET_SIZES.map((s) => (
+              <option key={s} value={s}>
+                {sizeLabel(s)}
+              </option>
+            ))}
+          </select>
+          <select
+            value={m.retention ?? 'glue'}
+            onChange={(e) => patch(m.id, { retention: e.target.value as MagnetRetention })}
+            data-testid={`magnet-pocket-retention-${m.id}`}
+            aria-label={`Magnet pocket ${m.id} retention`}
+            title="How the magnet is held: glued in an open pocket, pressed in, or captured mid-print under a skin."
+          >
+            {RETENTIONS.map((r) => (
+              <option key={r.id} value={r.id} title={r.hint}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          <label title="Pockets in a row along the face, centred on the position.">
+            Count{' '}
+            <input
+              type="number"
+              value={m.count ?? 1}
+              min={1}
+              max={12}
+              step={1}
+              onChange={(e) => patch(m.id, { count: Math.max(1, Math.min(12, Math.round(Number(e.target.value)) || 1)) })}
+              style={{ width: 48 }}
+              data-testid={`magnet-pocket-count-${m.id}`}
+              aria-label={`Magnet pocket ${m.id} count`}
+              title="Pockets in a row along the face, centred on U and V."
+            />
+          </label>
+          <label title="The row's centre along the face, in mm from the face corner.">
+            U (mm){' '}
+            <input
+              type="number"
+              value={m.u}
+              step={1}
+              onChange={(e) => patch(m.id, { u: Number(e.target.value) })}
+              style={{ width: 56 }}
+              data-testid={`magnet-pocket-u-${m.id}`}
+              aria-label={`Magnet pocket ${m.id} U position (mm)`}
+              title="U position (mm) — the row's centre along the face."
+            />
+          </label>
+          <label title="The row's centre across the face, in mm from the face corner.">
+            V (mm){' '}
+            <input
+              type="number"
+              value={m.v}
+              step={1}
+              onChange={(e) => patch(m.id, { v: Number(e.target.value) })}
+              style={{ width: 56 }}
+              data-testid={`magnet-pocket-v-${m.id}`}
+              aria-label={`Magnet pocket ${m.id} V position (mm)`}
+              title="V position (mm) — the row's centre across the face."
+            />
+          </label>
+          <button
+            onClick={() => set(pockets.filter((x) => x.id !== m.id))}
+            data-testid={`magnet-pocket-remove-${m.id}`}
+            title="Remove this magnet pocket"
+            aria-label={`Remove magnet pocket ${m.id}`}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function NameplateSection() {
+  // Issue #152 — a separate plate carrying text, held on by magnets.
+  const plate = useProjectStore((s) => s.project.case.nameplate);
+  const patchCase = useProjectStore((s) => s.patchCase);
+  const put = (p: Partial<NameplateParams>) => {
+    if (!plate) return;
+    patchCase({ nameplate: { ...plate, ...p } });
+  };
+  const centreOn = (face: CaseFace): { u: number; v: number } => {
+    const [fw, fh] = faceSizeForProject(useProjectStore.getState().project, face);
+    return { u: Math.round(fw / 2), v: Math.round(fh / 2) };
+  };
+
+  const onAdd = () => {
+    patchCase({
+      nameplate: {
+        enabled: true,
+        face: '-y',
+        ...centreOn('-y'),
+        width: 50,
+        height: 16,
+        thickness: 4,
+        cornerRadius: 2,
+        text: 'NAME',
+        textSize: 7,
+        textMode: 'engrave',
+        textDepth: 0.6,
+        magnetSize: '6x2',
+        magnetCount: 2,
+        retention: 'glue',
+      },
+    });
+  };
+
+  const num = (
+    key: 'width' | 'height' | 'thickness' | 'textSize' | 'textDepth' | 'u' | 'v',
+    label: string,
+    hint: string,
+    min?: number,
+  ) =>
+    plate && (
+      <label title={hint}>
+        {label}{' '}
+        <input
+          type="number"
+          value={plate[key]}
+          step={key === 'textDepth' ? 0.1 : 1}
+          min={min}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (min !== undefined && !(v >= min)) return;
+            put({ [key]: v });
+          }}
+          style={{ width: 56 }}
+          data-testid={`nameplate-${key}`}
+          aria-label={`Nameplate ${label}`}
+          title={hint}
+        />
+      </label>
+    );
+
+  return (
+    <section className="features-section" data-testid="nameplate-section">
+      <h4>Nameplate</h4>
+      {!plate ? (
+        <div className="features-row">
+          <button
+            onClick={onAdd}
+            data-testid="add-nameplate"
+            title="Add a swappable nameplate to the front face, held on by two 6 × 2 mm magnets."
+          >
+            + Add nameplate
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="features-row">
+            <input
+              type="checkbox"
+              checked={plate.enabled}
+              onChange={(e) => put({ enabled: e.target.checked })}
+              data-testid="nameplate-enabled"
+              aria-label="Nameplate enabled"
+              title="Toggle the nameplate and its case pockets on/off."
+            />
+            <input
+              type="text"
+              value={plate.text}
+              onChange={(e) => put({ text: e.target.value })}
+              style={{ flex: 1, minWidth: 60 }}
+              data-testid="nameplate-text"
+              aria-label="Nameplate text"
+              title="Text on the plate's front face."
+            />
+            <select
+              value={plate.face}
+              onChange={(e) => {
+                const face = e.target.value as CaseFace;
+                put({ face, ...centreOn(face) });
+              }}
+              data-testid="nameplate-face"
+              aria-label="Nameplate face"
+              title="Which case face the plate sits on. Changing it re-centres the plate on that face."
+            >
+              {CASE_FACES.map((f) => (
+                <option key={f} value={f}>
+                  {faceLabel(f)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={plate.textMode}
+              onChange={(e) => put({ textMode: e.target.value as NameplateParams['textMode'] })}
+              data-testid="nameplate-text-mode"
+              aria-label="Nameplate text mode"
+              title="Engrave the text into the plate or raise it off the plate."
+            >
+              <option value="engrave">engrave</option>
+              <option value="emboss">emboss</option>
+            </select>
+            <button
+              onClick={() => patchCase({ nameplate: undefined })}
+              data-testid="nameplate-remove"
+              title="Remove the nameplate"
+              aria-label="Remove nameplate"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="features-row">
+            {num('width', 'Width (mm)', 'Plate width along the face, in mm.', 5)}
+            {num('height', 'Height (mm)', 'Plate height across the face, in mm.', 5)}
+            {num('thickness', 'Thickness (mm)', 'Plate thickness, in mm. It must hold the magnet pocket plus a skin under the text.', 1)}
+          </div>
+          <div className="features-row">
+            {num('u', 'Centre U (mm)', 'Plate centre along the face, in mm from the face corner.')}
+            {num('v', 'Centre V (mm)', 'Plate centre across the face, in mm from the face corner.')}
+            {num('textSize', 'Text height (mm)', 'Cap height of the text, in mm.', 1)}
+            {num('textDepth', 'Text depth (mm)', 'Engraving depth or emboss height of the text, in mm.', 0.1)}
+          </div>
+          <div className="features-row">
+            <select
+              value={plate.magnetSize}
+              onChange={(e) => put({ magnetSize: e.target.value as MagnetSize })}
+              data-testid="nameplate-magnet-size"
+              aria-label="Nameplate magnet size"
+              title="Disc magnet size, diameter × thickness. One magnet in the plate and one in the case per position."
+            >
+              {MAGNET_SIZES.map((s) => (
+                <option key={s} value={s}>
+                  {sizeLabel(s)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={plate.magnetCount}
+              onChange={(e) => put({ magnetCount: Number(e.target.value) })}
+              data-testid="nameplate-magnet-count"
+              aria-label="Nameplate magnet count"
+              title="Magnets along the plate's width."
+            >
+              {[1, 2, 3, 4].map((n) => (
+                <option key={n} value={n}>
+                  {n} magnet{n > 1 ? 's' : ''}
+                </option>
+              ))}
+            </select>
+            <select
+              value={plate.retention ?? 'glue'}
+              onChange={(e) => put({ retention: e.target.value as MagnetRetention })}
+              data-testid="nameplate-retention"
+              aria-label="Nameplate case-side retention"
+              title="How the case-side magnets are held. The plate's own pockets are always open for glue."
+            >
+              {RETENTIONS.map((r) => (
+                <option key={r.id} value={r.id} title={r.hint}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function MagnetNotes() {
+  const project = useProjectStore((s) => s.project);
+  const notes = useMemo(() => {
+    const c = project.case;
+    if (!(c.magnetPockets ?? []).some((m) => m.enabled) && !c.nameplate?.enabled) return [];
+    try {
+      return magnetFactsForProject(project).notes;
+    } catch {
+      return [];
+    }
+  }, [project]);
+  if (notes.length === 0) return null;
+  return (
+    <section className="features-section" data-testid="magnet-notes">
+      {notes.map((n) => (
+        <p key={n} className="features-note">
+          {n}
+        </p>
       ))}
     </section>
   );
