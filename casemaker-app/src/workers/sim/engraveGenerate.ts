@@ -5363,7 +5363,9 @@ export function generateGoalProgram(
         ],
       };
       onProgress?.({ stage: 'post', label: 'posting the rest pass' });
-      const postedRest = postZ1(restIr, { ...ctx, toolKey: restPick.entry.key }, mill, { vacuum: 'whole' });
+      // #845 — the rest program goes through the machine's own chooser like every other file
+      // this run posts: a stated GRBL machine writes it in its dialect, the Z1 in its own.
+      const postedRest = postFor(mill)(restIr, { ...ctx, toolKey: restPick.entry.key }, { vacuum: 'whole' });
       if (!postedRest.ok) {
         restFindings.push({
           severity: 'warning',
