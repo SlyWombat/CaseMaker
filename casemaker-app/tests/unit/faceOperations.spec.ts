@@ -150,7 +150,8 @@ describe('#241 slice 2 — the face model', () => {
     });
     expect(faceJobRefusal(mixed)?.code).toBe('face-items-mixed');
 
-    const vise = rod([flat('f', 0, 1)], { workholding: { kind: 'vise', vise: defaultEngraveJob().workholding.vise } as EngraveJob['workholding'] });
+    const viseArm = defaultEngraveJob().workholding as Extract<EngraveJob['workholding'], { kind: 'vise' }>;
+    const vise = rod([flat('f', 0, 1)], { workholding: viseArm });
     expect(faceJobRefusal(vise)?.code).toBe('face-needs-chuck');
   });
 
@@ -287,7 +288,8 @@ describe('#241 slice 2 — the narrowed Y contract', () => {
       setup,
       machine: Z1,
       tool: TOOL,
-      depthLimit: { thickness: 20 } as never,
+      depthLimit: () => 20,
+      minRapidZ: 1,
       rotary: { radius: 10, stickout: 40, tailstock: false },
     });
     expect(w.findings.some((f) => f.code === 'rotary-y-off-axis')).toBe(true);
@@ -297,7 +299,8 @@ describe('#241 slice 2 — the narrowed Y contract', () => {
       setup,
       machine: Z1,
       tool: TOOL,
-      depthLimit: { thickness: 20 } as never,
+      depthLimit: () => 20,
+      minRapidZ: 1,
       rotary: { radius: 10, stickout: 40, tailstock: false },
     });
     expect(x.findings.some((f) => f.code === 'rotary-y-off-axis'), JSON.stringify(x.findings)).toBe(false);
