@@ -629,7 +629,9 @@ export function MachinesScope() {
                   <th>sensor</th>
                   <td>
                     X {profile.toolChange.sensor[0]} · Y {profile.toolChange.sensor[1]}{' '}
-                    <span className="dim">(anchor + 181)</span>
+                    <span className="dim">
+                      (anchor + {profile.sensorOffsetFromAnchor1[0]} · +{profile.sensorOffsetFromAnchor1[1]})
+                    </span>
                   </td>
                 </tr>
                 <tr>
@@ -709,7 +711,7 @@ function ProfileKv({ model }: { model: Mill | undefined }) {
   const profile = model;
   const { x, y, z } = profile.envelope;
   return (
-    <div className="kv">
+    <div className="kv" data-testid="manage-profile">
       <Kv label="profile">{profile.name} — the controller's identity resolved to id “{profile.id}”</Kv>
       <Kv label="work envelope">
         X {x.min} → {x.max} · Y {y.min} → {y.max} · Z {z.min} → {z.max} mm
@@ -726,6 +728,18 @@ function ProfileKv({ model }: { model: Mill | undefined }) {
         X {profile.toolChange.clearanceXY[0]} · Y {profile.toolChange.clearanceXY[1]} · Z{' '}
         {profile.toolChange.clearanceZ}
       </Kv>
+      <Kv label="tool change">
+        {profile.hasATC ? `${profile.toolSlots}-slot automatic tool changer` : 'manual tool change'}
+      </Kv>
+      {/* #828 — an ATC's rack is STATED, not commanded: our post writes `Tn M6` and the controller
+          drives its own slots, so the positions are here to be read, with their source. */}
+      {profile.toolRack !== undefined && (
+        <Kv label="tool rack">
+          {profile.toolSlots} slot{profile.toolSlots === 1 ? '' : 's'} · Z {mm(profile.toolRack.z)} ·{' '}
+          tool 1 X {mm(profile.toolRack.slots[0]?.[0] ?? 0)} · Y {mm(profile.toolRack.slots[0]?.[1] ?? 0)}{' '}
+          <span className="dim">{profile.toolRack.source}</span>
+        </Kv>
+      )}
       <Kv label="collet nut">
         {profile.holder === null
           ? 'not modelled — asked about only for an obstacle above the stock top'
