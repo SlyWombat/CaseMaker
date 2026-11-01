@@ -153,6 +153,12 @@ export interface BuildPlan {
    * stays in sync with the project that produced it.
    */
   smartCutoutDecisions?: import('./smartCutoutLayout').SmartCutoutDecision[];
+  /**
+   * Issue #149 — the stacking connector's placed sockets, fit numbers and
+   * statements (clashes with offers to move). Absent when the project asks
+   * for no connector, so an unconnected plan is unchanged.
+   */
+  connector?: import('./stackConnector').StackConnectorReport;
 }
 
 export function cube(size: Vec3, center = false): BuildOp {

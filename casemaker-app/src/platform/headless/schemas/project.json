@@ -2163,6 +2163,67 @@
           "description": "Split the shell into bed-sized pieces; omit for no split.",
           "type": "boolean"
         },
+        "stackConnector": {
+          "description": "Stacking connector sockets and keys; omit for none.",
+          "properties": {
+            "fit": {
+              "description": "Key print-fit variant; omit to inherit case.fit.",
+              "enum": [
+                "tight",
+                "standard",
+                "loose"
+              ],
+              "type": "string"
+            },
+            "key": {
+              "description": "Key length: short joins two touching parts, long bridges a 16 mm gap.",
+              "enum": [
+                "short",
+                "long"
+              ],
+              "type": "string"
+            },
+            "keys": {
+              "description": "How many printed keys to add to the export (0 to 8).",
+              "maximum": 8,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sockets": {
+              "description": "Dovetail sockets, at most one per side wall; empty cuts none.",
+              "items": {
+                "properties": {
+                  "face": {
+                    "description": "Side wall the socket is cut into.",
+                    "enum": [
+                      "+x",
+                      "-x",
+                      "+y",
+                      "-y"
+                    ],
+                    "type": "string"
+                  },
+                  "offset": {
+                    "description": "Shift of the socket centre along the wall from its centre, in millimetres.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "face",
+                  "offset"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "sockets",
+            "key",
+            "keys"
+          ],
+          "type": "object"
+        },
         "stand": {
           "description": "Desk-stand archetype settings; omit or disable for a normal shell and lid.",
           "properties": {

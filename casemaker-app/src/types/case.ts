@@ -5,6 +5,7 @@ import type { BadgeParams } from './badge';
 import type { InsertParams } from './insert';
 import type { BlankParams } from './blank';
 import type { ToolboxParams } from './toolbox';
+import type { StackConnectorParams } from './stackConnector';
 
 /**
  * Issue #153 — `FitVariant` lives with the snap types (`types/snap.ts`)
@@ -502,6 +503,13 @@ export interface CaseParameters {
    * geometry emitted, no envelope growth.
    */
   hinge?: HingeFeature;
+  /**
+   * Issue #149 — the stacking connector: dovetail sockets on chosen side walls
+   * and printed double-ended keys that lock two finished parts together (see
+   * types/stackConnector.ts). Optional; absent, or no sockets and no keys,
+   * builds nothing and leaves the plan byte-identical.
+   */
+  stackConnector?: StackConnectorParams;
   /**
    * Desk-stand archetype. When enabled, the project compiles to a STAND
    * instead of a shell+lid box: a picture frame the finished display module

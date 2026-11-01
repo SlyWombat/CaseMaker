@@ -48,6 +48,15 @@ import {
 import { FIT_VARIANTS, SNAP_DEFAULTS, fitRelief } from '@/types/snap';
 import { buildSnapCatch, defaultSnapCatchesForCase } from './snapCatches';
 import { computeShellDims } from './caseShell';
+import { buildStackKeyPrint, socketSolids, socketZLayout } from './stackConnector';
+import {
+  STACK_END_PLAY,
+  STACK_PAD_PROUD,
+  STACK_PAD_W,
+  STACK_SLIDE_CLEARANCE,
+  STACK_STOP,
+  stackKeyLength,
+} from '@/types/stackConnector';
 import { lidIsRecessed } from './lidMode';
 import {
   aabbOfOp,
@@ -1260,6 +1269,91 @@ export function buildInsertPocketCoupon(label?: Labeler): FitCouponBuild {
 }
 
 // ---------------------------------------------------------------------------
+// Stacking connector (#149)
+// ---------------------------------------------------------------------------
+
+/** Column pitch of the socket ladder, mm (pad width + a gap). */
+export const STACK_COUPON_PITCH = STACK_PAD_W + 8;
+/** Solid behind the wall plane, where the labels go, mm. */
+const STACK_COUPON_BACK = 9;
+const STACK_COUPON_ENGRAVE = 0.6;
+/** Gap between the bar and the key lying in front of it, mm. */
+const STACK_COUPON_KEY_GAP = 6;
+
+/**
+ * The coupon's bar height: a storage channel one short key deep over the stop,
+ * and no receiving pocket — the open top is where the key enters, parks and
+ * clicks, which is the half of the joint worth printing first.
+ */
+export function stackCouponHeight(): number {
+  return stackKeyLength('short') + STACK_END_PLAY + STACK_STOP;
+}
+
+/**
+ * Three sockets side by side, one per fit rung (the socket opened by the rung's
+ * relief), and ONE key at the shipped 'tight' size lying in front of them.
+ *
+ * The case ladders the KEY, not the socket (types/stackConnector.ts says why),
+ * but every face's gap is the same sum either way — sliding gap + relief — so
+ * the rung whose socket the printed key slides in cleanly IS the rung to pick.
+ * One key against three sockets is also the pattern every other laddered
+ * coupon here uses (one tab, a socket ladder).
+ */
+export function buildStackConnectorCoupon(label?: Labeler): FitCouponBuild {
+  const H = stackCouponHeight();
+  const layout = socketZLayout(H, 'short');
+  if (!layout) throw new Error('stack coupon: the bar is too short for a socket');
+  const n = FIT_VARIANTS.length;
+  const barX = n * STACK_COUPON_PITCH;
+  const parts: BuildOp[] = [];
+  const cuts: BuildOp[] = [];
+  const columns: CouponColumn[] = [];
+  FIT_VARIANTS.forEach((fit, i) => {
+    const cx = (i + 0.5) * STACK_COUPON_PITCH;
+    const relief = fitRelief(fit);
+    const solids = socketSolids(layout, 0, relief);
+    cuts.push(...solids.cuts.map((op) => translate([cx, 0, 0], op)));
+    const text = String(Math.round(relief * 100));
+    if (label) cuts.push(...label(text, cx, -STACK_COUPON_BACK + 1, H, STACK_COUPON_ENGRAVE));
+    columns.push({ x: cx, value: relief, label: text, shipped: fit === 'tight' });
+  });
+  parts.push(
+    difference([
+      translate([0, -STACK_COUPON_BACK, 0], cube([barX, STACK_COUPON_BACK + STACK_PAD_PROUD, H])),
+      ...cuts,
+    ]),
+  );
+  const keyLen = stackKeyLength('short');
+  parts.push(
+    translate(
+      [barX / 2, -STACK_COUPON_BACK - STACK_COUPON_KEY_GAP - keyLen, 0],
+      buildStackKeyPrint('short', 'tight'),
+    ),
+  );
+  return {
+    op: union(parts),
+    dims: {
+      x: barX,
+      y: STACK_COUPON_BACK + STACK_PAD_PROUD + STACK_COUPON_KEY_GAP + keyLen,
+      z: H,
+    },
+    columns,
+    bodies: 2,
+    settles:
+      `types/stackConnector.ts STACK_SLIDE_CLEARANCE (currently ${STACK_SLIDE_CLEARANCE}) — the ` +
+      'gap per face between the dovetail key and its socket; the rungs add the fit ladder ' +
+      `(${FIT_VARIANTS.map((f) => fitRelief(f)).join(' / ')} mm) on top of it`,
+    provenance:
+      'PROVISIONAL — the sliding gap is our default, not a measurement, and no connector has been ' +
+      'printed here. Labels are the rung relief ×100. Print the bar standing as it is (channels ' +
+      'vertical, as on a case wall) and the key flat; the key should slide down the chosen socket ' +
+      'by hand without rocking off the wall, park half-proud with a click at the top, and push ' +
+      'home flush. The detent on a relieved SOCKET clicks a little shallower than on a relieved ' +
+      'KEY (which gets a taller bump); read the slide here, not the click.',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -1294,6 +1388,11 @@ export const FIT_COUPONS: readonly FitCouponSpec[] = [
     id: 'rack-tab',
     title: 'Rack plate tab + ledge ladder, with the plate tab',
     build: (label) => buildRackTabCoupon(label),
+  },
+  {
+    id: 'stack-connector',
+    title: 'Stacking connector: three-rung socket ladder + key',
+    build: (label) => buildStackConnectorCoupon(label),
   },
   {
     id: 'insert-pocket',

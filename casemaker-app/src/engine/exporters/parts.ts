@@ -328,6 +328,15 @@ const PRINT_PATTERNS: PrintPattern[] = [
     ),
   },
   {
+    // Issue #149 — the stacking-connector key is built in print orientation:
+    // its flat web face is the bed face, the dovetail flanks lean OUT going up
+    // at 45°, and the spring beam bridges its window on the top layers.
+    test: (id) => id.startsWith('stack-key-'),
+    meta: flat(
+      'Already lying flat — the flat grip face on the bed, the spring beam and its bump on top. No supports: the flanks lean out at 45° and the beam bridges its window',
+    ),
+  },
+  {
     test: (id) => /^rack-(blank|keystone)-\d+$/.test(id),
     meta: flat(
       'Front face DOWN on the bed — the end ribs and keystone bosses rise behind it, no supports needed',
@@ -508,6 +517,10 @@ function describePart(
   if (id.startsWith('case-divider-')) {
     const axis = id.slice('case-divider-'.length, 'case-divider-'.length + 1).toUpperCase();
     return { displayName: `Divider (along ${axis})`, material: 'rigid', category: 'accessory' };
+  }
+  if (id.startsWith('stack-key-')) {
+    const suffix = id.slice('stack-key-'.length);
+    return { displayName: `Stacking key ${suffix}`, material: 'rigid', category: 'fastener' };
   }
   if (id.startsWith('divider-peg-')) {
     const suffix = id.slice('divider-peg-'.length);

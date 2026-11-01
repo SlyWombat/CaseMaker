@@ -39,6 +39,9 @@ import { buildBadgeNodes } from './badge';
 import { buildInsertNodes } from './insert';
 import { buildBlankNodes } from './blank';
 import { buildToolboxNodes } from './toolbox';
+import { buildStackConnector, stackConnectorWanted, type ConnectorKeepOut } from './stackConnector';
+import { computeShellDims } from './caseShell';
+import { lidIsRecessed } from './lidMode';
 import { derivedKind } from './archetype';
 import { validatePlacements } from './placementValidator';
 import { getBuiltinHat } from '@/library/hats';
@@ -281,6 +284,7 @@ export function compileProject(project: Project): BuildPlan {
 
   // Issue #107 — gasket channel cut into the rim top face (waterproof seal).
   const sealChannel = buildSealChannel(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  const customCutOps = buildCustomCutouts(caseParams.customCutouts, board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   const cutoutOps: BuildOp[] = [
     ...portCutOps,
     ...ventCuts.shellCuts,
@@ -295,10 +299,65 @@ export function compileProject(project: Project): BuildPlan {
     ...snapOps.shellSubtract,
     ...hingeOps.subtractive,
     ...latchOps.caseSubtract,
-    ...buildCustomCutouts(caseParams.customCutouts, board, caseParams, hats ?? [], resolveHat, display, resolveDisplay),
+    ...customCutOps,
     ...magnetOps.shellCut,
     ...dividerOps.floorCut,
   ];
+
+  // Issue #149 — the stacking connector's sockets. Everything it returns is
+  // empty when the project asks for no connector, and every splice below is
+  // guarded, so an unconnected project's plan stays byte-identical.
+  const connector = (() => {
+    if (!stackConnectorWanted(caseParams.stackConnector)) {
+      return buildStackConnector(undefined, { outerX: 0, outerY: 0, shellTop: 0, top: 0, wall: 0, cornerRadius: 0 });
+    }
+    const dims = computeShellDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+    const recessed = lidIsRecessed(caseParams);
+    const lidDimsEarly = computeLidDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+    const lidZ = lidDimsEarly.zPosition;
+    const toWorld = (ops: BuildOp[]): BuildOp[] => ops.map((op) => translate([0, 0, lidZ], op));
+    const named = (what: string, ops: BuildOp[]): ConnectorKeepOut[] =>
+      ops
+        .map(aabbOfOp)
+        .filter((b): b is Aabb => b !== null)
+        .map((box) => ({ what, box }));
+    const keepOuts: ConnectorKeepOut[] = [
+      ...named('a port cutout', portCutOps),
+      ...named('a vent', [...ventCuts.shellCuts, ...toWorld(ventCuts.lidCuts)]),
+      ...named('a board boss', bossOps),
+      ...named('the hinge', [...hingeOps.caseAdditive, ...hingeOps.subtractive, ...toWorld(hingeOps.lidAdditive)]),
+      ...named('a latch', [...latchOps.caseAdditive, ...latchOps.caseSubtract, ...latchOps.lidAdditive]),
+      ...named('a mounting feature', [...featureOps.additive, ...featureOps.subtractive]),
+      ...named('a fan mount', [...fanOps.additive, ...fanOps.subtractive]),
+      ...named('the display opening', [...displayOps.additive, ...displayOps.subtractive]),
+      ...named('a label', [...textOps.additive, ...textOps.subtractive]),
+      ...named('an antenna', antennaOps.subtractive),
+      ...named('a snap catch', [...snapOps.shellAdd, ...snapOps.shellSubtract]),
+      ...named('the rugged ribbing', [...ruggedOps.caseAdditive, ...toWorld(ruggedOps.lidAdditive)]),
+      ...named('the alignment brim', [
+        ...(flangeOps.caseAdditive ? [flangeOps.caseAdditive] : []),
+        ...(flangeOps.lidAdditive ? toWorld([flangeOps.lidAdditive]) : []),
+      ]),
+      ...named('a custom cutout', customCutOps),
+      ...named('the board-snap clips', boardSnapOps.caseAdditive),
+      ...named('a secondary-board mount', secondaryMountOps.caseAdditive),
+    ];
+    return buildStackConnector(
+      caseParams.stackConnector,
+      {
+        outerX: dims.outerX,
+        outerY: dims.outerY,
+        shellTop: dims.outerZ,
+        top: recessed ? dims.outerZ : lidZ + lidDimsEarly.z,
+        wall: caseParams.wallThickness,
+        cornerRadius: caseParams.cornerRadius,
+        caseFit: caseParams.fit,
+      },
+      keepOuts,
+    );
+  })();
+  additive.push(...connector.shellAdd);
+  cutoutOps.push(...connector.shellCut);
 
   let shellOp: BuildOp = additive.length > 1 ? union(additive) : shellOuter;
   if (cutoutOps.length > 0) {
@@ -364,6 +423,7 @@ export function compileProject(project: Project): BuildPlan {
         ...assetOps.unionOps,
         ...magnetOps.shellAdd,
         ...magnetOps.shellCut,
+        ...connector.shellAdd,
       ]
         .map(aabbOfOp)
         .filter((b): b is Aabb => b !== null);
@@ -482,6 +542,12 @@ export function compileProject(project: Project): BuildPlan {
   if (flangeOps.lidSubtract) {
     lidOp = difference([lidOp, flangeOps.lidSubtract]);
   }
+  // Issue #149 — the lid's share of a socket that spans the shell/lid seam.
+  // Built in world coordinates, so shifted to lid-local like the latch parts.
+  if (connector.lidAdd.length > 0) {
+    const toLid = (op: BuildOp): BuildOp => translate([0, 0, -lidDims.zPosition], op);
+    lidOp = difference([union([lidOp, ...connector.lidAdd.map(toLid)]), ...connector.lidCut.map(toLid)]);
+  }
   // Issue #91 — lid is emitted at its ASSEMBLED Z position. The scene layer
   // (SceneMeshes) applies the exploded lift dynamically based on viewMode,
   // so toggling Complete / Exploded doesn't require a full recompile.
@@ -526,6 +592,8 @@ export function compileProject(project: Project): BuildPlan {
   for (const b of ruggedOps.bumperNodes) {
     nodes.push(b);
   }
+  // Issue #149 — the connector keys print as their own flat parts.
+  nodes.push(...connector.keyNodes);
 
   // Issue #150 — each divider is a free part, dropped into the finished case.
   for (const d of dividerOps.nodes) {
@@ -538,5 +606,6 @@ export function compileProject(project: Project): BuildPlan {
     placementReport,
     smartCutoutDecisions: smartLayout.decisions,
     splitOffer,
+    ...(connector.report ? { connector: connector.report } : {}),
   };
 }

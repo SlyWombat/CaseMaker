@@ -405,6 +405,35 @@ export const caseParamsSchema = z.object({
     .boolean()
     .optional()
     .describe('Split the shell into bed-sized pieces; omit for no split.'),
+  // Issue #149 — the stacking connector (types/stackConnector.ts). Optional and
+  // needing NO version bump, like `rack`/`stand`/`latches`/`rugged` before it:
+  // a project saved without it has no `stackConnector` key, which reads back
+  // as `undefined`, which builds nothing.
+  stackConnector: z
+    .object({
+      sockets: z
+        .array(
+          z.object({
+            face: z.enum(['+x', '-x', '+y', '-y']).describe('Side wall the socket is cut into.'),
+            offset: z
+              .number()
+              .describe('Shift of the socket centre along the wall from its centre, in millimetres.'),
+          }),
+        )
+        .describe('Dovetail sockets, at most one per side wall; empty cuts none.'),
+      key: z
+        .enum(['short', 'long'])
+        .describe('Key length: short joins two touching parts, long bridges a 16 mm gap.'),
+      keys: z
+        .number()
+        .int()
+        .min(0)
+        .max(8)
+        .describe('How many printed keys to add to the export (0 to 8).'),
+      fit: fitVariantSchema.optional().describe("Key print-fit variant; omit to inherit case.fit."),
+    })
+    .optional()
+    .describe('Stacking connector sockets and keys; omit for none.'),
   // Issue #152 — magnet pockets cut into a face for magnetic retention.
   // Optional so legacy projects load with no migration (v7 hinge precedent);
   // a missing field is treated as an empty list. Geometry lives in

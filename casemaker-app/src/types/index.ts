@@ -6,6 +6,7 @@ export * from './badge';
 export * from './insert';
 export * from './blank';
 export * from './toolbox';
+export * from './stackConnector';
 export * from './port';
 export * from './mesh';
 export * from './project';

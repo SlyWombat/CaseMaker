@@ -636,7 +636,7 @@ describe('tool-insert pocket coupon (#158 / #262 item 5)', () => {
 });
 
 describe('registry', () => {
-  it('lists every magnet size, the three laddered interfaces, and the insert coupon', () => {
+  it('lists every magnet size, the laddered interfaces, the stacking connector, and the insert coupon', () => {
     const ids = FIT_COUPONS.map((c) => c.id);
     expect(ids).toEqual([
       'magnet-6x2',
@@ -646,6 +646,7 @@ describe('registry', () => {
       'board-snap',
       'snap-catch',
       'rack-tab',
+      'stack-connector',
       'insert-pocket',
     ]);
   });
