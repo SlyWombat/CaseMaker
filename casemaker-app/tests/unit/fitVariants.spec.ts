@@ -118,6 +118,58 @@ describe('Issue #153 — snap-catch relief grows the CUT, not the tab', () => {
   });
 });
 
+describe('Issue #153 — every barb design takes the ladder', () => {
+  const board = makeBoard(60, 50);
+  const catchX = defaultSnapCatchesForCase(board, baseCase).find((c) => c.wall === '-x')!;
+  const relief = fitRelief('loose');
+  type Aabb = { min: number[]; max: number[] };
+  const span = (a: Aabb, axis: number): number => a.max[axis]! - a.min[axis]!;
+
+  for (const barbType of ['asymmetric-ramp', 'symmetric-ramp', 'half-round'] as const) {
+    it(`${barbType}: the lip backs off the cavity by the relief; its faces and the click height stay`, () => {
+      const tight = buildSnapCatch({ ...catchX, barbType, fit: 'tight' }, board, baseCase)!;
+      const loose = buildSnapCatch({ ...catchX, barbType, fit: 'loose' }, board, baseCase)!;
+      const t = aabbOfOp(tight.lip!)!;
+      const l = aabbOfOp(loose.lip!)!;
+      // The -x wall's lip runs along X: its cavity-side tip retreats by the
+      // relief, so the protrusion span shrinks by exactly that much.
+      expect(span(t, 0) - span(l, 0)).toBeCloseTo(relief, 5);
+      // The wall-side face is embedded, never moved — the lip cannot come loose.
+      const wallSide = (a: Aabb): number => Math.min(a.min[0]!, a.max[0]!);
+      expect(wallSide(l)).toBeCloseTo(wallSide(t), 5);
+      // Every Z face is the click geometry: untouched.
+      expect(l.min[2]).toBeCloseTo(t.min[2]!, 5);
+      expect(l.max[2]).toBeCloseTo(t.max[2]!, 5);
+      // The lid half is never relieved — relief on both printed halves cancels.
+      expect(aabbOfOp(loose.armBarb)).toEqual(aabbOfOp(tight.armBarb));
+    });
+  }
+
+  it('ball-socket: the socket widens about its centre by the relief, and the detent Z stays', () => {
+    const tight = buildSnapCatch({ ...catchX, barbType: 'ball-socket', fit: 'tight' }, board, baseCase)!;
+    const loose = buildSnapCatch({ ...catchX, barbType: 'ball-socket', fit: 'loose' }, board, baseCase)!;
+    expect(tight.lip).toBeNull();
+    const t = aabbOfOp(tight.wallPocket!)!;
+    const l = aabbOfOp(loose.wallPocket!)!;
+    const centre = (a: Aabb): number => (a.min[2]! + a.max[2]!) / 2;
+    expect(centre(l)).toBeCloseTo(centre(t), 5);
+    // A circle's diameter grows by twice the radius relief.
+    expect(span(l, 2) - span(t, 2)).toBeCloseTo(2 * relief, 4);
+    expect(aabbOfOp(loose.armBarb)).toEqual(aabbOfOp(tight.armBarb));
+  });
+
+  it('an absent fit compiles exactly like tight on every barb design', () => {
+    for (const barbType of ['hook', 'asymmetric-ramp', 'symmetric-ramp', 'half-round', 'ball-socket'] as const) {
+      const legacy = buildSnapCatch({ ...catchX, barbType }, board, baseCase)!;
+      const tight = buildSnapCatch({ ...catchX, barbType, fit: 'tight' }, board, baseCase)!;
+      expect(aabbOfOp(legacy.armBarb)).toEqual(aabbOfOp(tight.armBarb));
+      const box = (op: BuildOp | null): Aabb | null => (op === null ? null : aabbOfOp(op));
+      expect(box(legacy.lip)).toEqual(box(tight.lip));
+      expect(box(legacy.wallPocket)).toEqual(box(tight.wallPocket));
+    }
+  });
+});
+
 describe('Issue #153 — board-snap clip relief widens the lateral gap', () => {
   // COUPON-style board: bare snap-retention shell.
   const board = makeBoard(60, 40);

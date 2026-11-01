@@ -814,14 +814,21 @@ function embedInWall(frame: WallFrame): {
   };
 }
 
-function buildHookLip(frame: WallFrame, height: number): BuildOp {
+/**
+ * Issue #153 — `reliefMm` is taken off the lip's CAVITY-side protrusion, never
+ * off its height: the wedge tip moves back toward the wall by the relief, so
+ * the barb passes it with less flex while every Z face — the catch face that
+ * sets where the click lands — stays exactly where it was. The wall-side embed
+ * (`extraProtrusion`) is untouched for the same reason #81 put it there.
+ */
+function buildHookLip(frame: WallFrame, height: number, reliefMm: number): BuildOp {
   const { barbProtrusion, pocketWidth } = SNAP_DEFAULTS;
   const { origin, extraProtrusion } = embedInWall(frame);
   return buildLipWedge(
     origin,
     frame.wallAxis,
     frame.wallNormalSign,
-    barbProtrusion + extraProtrusion,
+    barbProtrusion + extraProtrusion - reliefMm,
     pocketWidth,
     height,
   );
@@ -948,14 +955,18 @@ interface BarbBuilders {
   /**
    * Lip on the case wall (additive). Returns null when the barb design
    * doesn't use a lip — e.g. ball-socket relies on a wall pocket instead.
+   * Issue #153 — `reliefMm` comes off the cavity-side protrusion only; the
+   * lip's Z extents (the click height) never move.
    */
-  buildLip(frame: WallFrame, lipHeight: number): BuildOp | null;
+  buildLip(frame: WallFrame, lipHeight: number, reliefMm: number): BuildOp | null;
   /**
    * Optional pocket cut INTO the case wall (subtractive). Used by detent
    * designs (ball-socket) where the barb snaps into a recess rather than
-   * past a lip. Returns null for lip-based designs.
+   * past a lip. Returns null for lip-based designs. Issue #153 — `reliefMm`
+   * widens the socket about its own centre, so the detent still seats at the
+   * same Z.
    */
-  buildWallPocket?(frame: WallFrame): BuildOp | null;
+  buildWallPocket?(frame: WallFrame, reliefMm: number): BuildOp | null;
 }
 
 /**
@@ -979,7 +990,7 @@ const BARB_REGISTRY: Record<BarbType, BarbBuilders> = {
   'asymmetric-ramp': { buildBarb: buildAsymmetricRampBarb, buildLip: buildHookLip },
   'symmetric-ramp': {
     buildBarb: buildSymmetricRampBarb,
-    buildLip: (frame, lipHeight) => {
+    buildLip: (frame, lipHeight, reliefMm) => {
       const { barbProtrusion, pocketWidth } = SNAP_DEFAULTS;
       // Issue #81 — embed wall-side into the wall so manifold's union doesn't
       // leave the lip as a loose component (same fix as buildHookLip).
@@ -988,7 +999,7 @@ const BARB_REGISTRY: Record<BarbType, BarbBuilders> = {
         origin,
         frame.wallAxis,
         frame.wallNormalSign,
-        barbProtrusion + extraProtrusion,
+        barbProtrusion + extraProtrusion - reliefMm,
         pocketWidth,
         lipHeight,
       );
@@ -1007,13 +1018,16 @@ const BARB_REGISTRY: Record<BarbType, BarbBuilders> = {
  * The cylinder axis runs along the wall outward normal so it bores INTO the
  * wall; depth is chosen so the ball seats flush with the inside surface.
  */
-function buildBallSocketWallPocket(frame: WallFrame): BuildOp {
+function buildBallSocketWallPocket(frame: WallFrame, reliefMm: number): BuildOp {
   const { barbLength, armWidth, barbProtrusion } = SNAP_DEFAULTS;
   // Pocket radius matches the ball detent radius computed in
   // buildBallSocketBarb (frame.barbSize.t and .z chosen from armWidth /
   // barbLength). Add a tiny margin so the ball clicks in without grinding.
+  // Issue #153 — the fit's relief widens the socket ABOUT ITS OWN CENTRE, so
+  // a looser fit seats the ball at the same Z with less grip (the radius, not
+  // the centre, carries the ladder).
   const ballRadius = Math.min(armWidth, barbLength) / 3;
-  const radius = ballRadius + 0.1;
+  const radius = ballRadius + 0.1 + reliefMm;
   const depth = ballRadius + 0.4; // slightly deeper than the ball's protrusion
   // Seated ball center: lipBottomZ - barbLength/2 (derived from the existing
   // seated-arm geometry — the barb's vertical center sits half a barbLength
@@ -1065,15 +1079,17 @@ export function buildSnapCatch(
   if (!c.enabled) return null;
   const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
   const barbType: BarbType = c.barbType ?? 'hook';
+  // Issue #153 — per-catch fit overrides the case-level fit; absent on both
+  // = 'tight' (0 relief), so legacy geometry is unchanged. Every barb design
+  // takes the ladder: the CUT (tab hole, lip protrusion, socket) is what
+  // moves; the lid-side barb and every click height stay put.
+  const relief = fitRelief(c.fit ?? params.fit);
   // 'hook' uses the new subtract-tab design (per-user followup): arm hugs
   // inner wall surface, barb extends OUTWARD into wall material with a
   // tapered insertion bottom + flat 90° top, and the seated barb volume
   // is SUBTRACTED from the shell to create the snap hole. No additive lip.
   if (barbType === 'hook') {
     const tabFrame = computeHookTabFrame(c, params, dims);
-    // Issue #153 — per-catch fit overrides the case-level fit; absent on both
-    // = 'tight' (0 relief), so legacy geometry is unchanged.
-    const relief = fitRelief(c.fit ?? params.fit);
     return {
       lip: null,
       armBarb: buildHookTab(tabFrame),
@@ -1090,10 +1106,10 @@ export function buildSnapCatch(
   const lipBottomZ = lipTopZ - LIP_HEIGHT;
   const frame = computeWallFrame(c, params, dims.outerX, dims.outerY, lipBottomZ);
   const builders = BARB_REGISTRY[barbType];
-  const lip = builders.buildLip(frame, LIP_HEIGHT);
+  const lip = builders.buildLip(frame, LIP_HEIGHT, relief);
   const arm = buildArm(frame);
   const barb = builders.buildBarb(frame);
-  const wallPocket = builders.buildWallPocket?.(frame) ?? null;
+  const wallPocket = builders.buildWallPocket?.(frame, relief) ?? null;
   return { lip, armBarb: union([arm, barb]), wallPocket };
 }
 
