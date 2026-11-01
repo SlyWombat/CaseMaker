@@ -71,6 +71,9 @@ export const DECK_LIP = 6;
 export const BLANK_EAR = 10;
 export const BLANK_T = 2.5;
 
+/** The default unit count a new u-mount rack starts at; the standard fixes the pitch, not sizes. */
+export const UMOUNT_DEFAULT_U = 6;
+
 /** The params the U-mount mode reads: the unit count and the depth. The pitch is not a parameter. */
 export interface UMountParams {
   /** Rack units, 1–12. The standard fixes the pitch, not the sizes. */

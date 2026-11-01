@@ -1826,6 +1826,14 @@
               "description": "True adds ribs to the rack floor.",
               "type": "boolean"
             },
+            "mode": {
+              "description": "The rack family: omit for the printed-shelf rack ('rack-16.5'), or 'u-mount' for the 10″ standard's rails.",
+              "enum": [
+                "rack-16.5",
+                "u-mount"
+              ],
+              "type": "string"
+            },
             "printer": {
               "description": "Deprecated home of the printer bed; the project-level printer takes precedence.",
               "properties": {
@@ -1860,6 +1868,12 @@
               "description": "Number of rack units (2–40).",
               "maximum": 40,
               "minimum": 2,
+              "type": "integer"
+            },
+            "u": {
+              "description": "U-mount mode: rack units, 1–12. The standard fixes the 44.45 mm pitch, not the sizes. Ignored in printed-shelf mode.",
+              "maximum": 12,
+              "minimum": 1,
               "type": "integer"
             },
             "wallMount": {

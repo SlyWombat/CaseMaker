@@ -135,6 +135,19 @@ export const caseParamsSchema = z.object({
   rack: z
     .object({
       enabled: z.boolean().describe('True builds the rack assembly instead of a box.'),
+      // #261 — which rack family. Absent reads 'rack-16.5' (the printed-shelf rack every saved
+      // project has); 'u-mount' is the 10″ standard's rails.
+      mode: z
+        .enum(['rack-16.5', 'u-mount'])
+        .optional()
+        .describe("The rack family: omit for the printed-shelf rack ('rack-16.5'), or 'u-mount' for the 10″ standard's rails."),
+      u: z
+        .number()
+        .int()
+        .min(1)
+        .max(12)
+        .optional()
+        .describe('U-mount mode: rack units, 1–12. The standard fixes the 44.45 mm pitch, not the sizes. Ignored in printed-shelf mode.'),
       width: z.number().positive().describe('Rack width (front-to-back panel span), in millimetres.'),
       depth: z.number().positive().describe('Rack depth, in millimetres.'),
       slots: z.number().int().min(2).max(40).describe('Number of rack units (2–40).'),

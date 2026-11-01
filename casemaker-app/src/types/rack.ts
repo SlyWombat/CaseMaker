@@ -23,6 +23,26 @@ import type { PrinterVolume } from './printer';
  */
 export interface RackParams {
   enabled: boolean;
+  /**
+   * #261 — WHICH RACK FAMILY this project builds.
+   *
+   *   - `'rack-16.5'` (absent reads this): the printed-shelf rack this archetype has always
+   *     generated — 16.5 mm side-column clamp pitch (Meuon's Mini Rack, Printables 1307276),
+   *     printed shelves clamped between side panels.
+   *   - `'u-mount'`: a 10″ STANDARD rack — 44.45 mm per U, the 236.525 mm mounting-hole pair,
+   *     gear within ~210 mm (Project Mini Rack, mini-rack.jeffgeerling.com), so ecosystem
+   *     shelves, blanks and drawers bolt in. Export only for the ecosystem's gear; the
+   *     printed-shelf accessories do not apply to it.
+   *
+   * A DIFFERENT GEOMETRY FAMILY, not a variant: the two modes share this one archetype and
+   * nothing else, which is why the mode is explicit and their parts are named separately.
+   */
+  mode?: 'rack-16.5' | 'u-mount';
+  /**
+   * #261 — the U-mount mode's rack units, 1–12. The standard fixes the pitch (44.45 mm), not
+   * the sizes; absent reads 6. Ignored in printed-shelf mode.
+   */
+  u?: number;
   /** Exterior width across the front — the faceplate span. Sample: 252. */
   width: Mm;
   /** Front-to-back depth of the side panels. Sample: 250. */

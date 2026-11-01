@@ -127,6 +127,78 @@ export function RackPanel() {
   const update = (partial: Partial<RackParams>): void => {
     patchCase({ rack: { ...rack, ...partial } });
   };
+  // #261 — WHICH FAMILY. The printed-shelf rack (16.5 mm clamp pitch) and the 10″ U-mount rack
+  // (44.45 mm per U) are different products sharing this archetype, so the choice is explicit and
+  // each mode shows only its own controls. Switching keeps the other mode's values in the
+  // document; nothing is thrown away.
+  const mode = rack.mode ?? 'rack-16.5';
+  const modeRow = (
+    <fieldset data-testid="rack-mode" style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: '6px 8px', margin: '0 0 8px' }}>
+      <legend style={{ fontSize: 12, color: '#9aa4b0' }}>Rack family</legend>
+      <label style={{ display: 'block', fontSize: 12 }}>
+        <input
+          type="radio"
+          name="rack-mode"
+          data-testid="rack-mode-printed"
+          checked={mode === 'rack-16.5'}
+          onChange={() => update({ mode: 'rack-16.5' })}
+        />{' '}
+        Printed-shelf — 16.5 mm side-column pitch (Meuon&apos;s Mini Rack)
+      </label>
+      <label style={{ display: 'block', fontSize: 12 }}>
+        <input
+          type="radio"
+          name="rack-mode"
+          data-testid="rack-mode-umount"
+          checked={mode === 'u-mount'}
+          onChange={() => update({ mode: 'u-mount' })}
+        />{' '}
+        10″ U-mount — 44.45 mm per U (Project Mini Rack standard)
+      </label>
+    </fieldset>
+  );
+  if (mode === 'u-mount') {
+    // The U-mount mode's own controls: the unit count and the depth. The WIDTH is the standard's
+    // (the 236.525 mm hole pair), never a slider — that is what makes ecosystem gear fit.
+    return (
+      <div className="panel-stack" data-testid="rack-panel-umount">
+        {modeRow}
+        <LabelledField label="Rack units" unit="U" hint="1–12. The standard fixes the 44.45 mm pitch, not the sizes.">
+          <input
+            type="number"
+            min={1}
+            max={12}
+            step={1}
+            data-testid="rack-u"
+            value={rack.u ?? 6}
+            onChange={(e) => {
+              const u = Math.min(12, Math.max(1, Math.trunc(Number(e.target.value))));
+              if (Number.isFinite(u)) update({ u });
+            }}
+          />
+        </LabelledField>
+        <LabelledField label="Depth" unit="mm" hint="Front-to-back depth of the rails and deck.">
+          <input
+            type="number"
+            min={100}
+            max={400}
+            step={1}
+            data-testid="rack-depth-umount"
+            value={rack.depth}
+            onChange={(e) => {
+              const depth = Number(e.target.value);
+              if (Number.isFinite(depth) && depth > 0) update({ depth });
+            }}
+          />
+        </LabelledField>
+        <p style={{ fontSize: 12, lineHeight: 1.5, color: '#9aa4b0' }}>
+          10″ standard: 44.45 mm per U, 236.525 mm between the mounting holes, gear within 210 mm.
+          The frame takes the ecosystem&apos;s shelves, blanks and drawers; Case Maker writes their
+          parts and the printed-shelf accessories do not apply here.
+        </p>
+      </div>
+    );
+  }
   const dims = computeRackDims(rack);
   const spaces = accessorySpaces(rack);
   const usedSlots = (rack.accessories ?? []).reduce((s, a) => s + accessorySlots(a), 0);
@@ -162,6 +234,7 @@ export function RackPanel() {
 
   return (
     <div className="panel-stack" data-testid="rack-panel">
+      {modeRow}
       <LabelledField
         label="Width"
         unit="mm"

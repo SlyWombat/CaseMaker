@@ -30,6 +30,7 @@ import {
 } from './buildPlan';
 import { headHeight, screwHole, screwStarter } from './fasteners';
 import { buildRackPartSplit, planRackPartSplit, type StrapFace } from './rackSplit';
+import { buildUMountNodes, UMOUNT_DEFAULT_U } from './rackUMount';
 import { DEFAULT_SPLIT_SCREW, LUG_LAP } from './shellSplit';
 import { partFitsBed } from './bedFit';
 
@@ -2027,6 +2028,13 @@ function frameParts(rack: RackParams, dims: RackDims, fused = false): BuildNode[
 /** Compile the whole rack to one BuildNode per printable part, positioned in
  *  assembly space so the viewport previews the assembled rack. */
 export function buildRackNodes(rack: RackParams, printer?: PrinterVolume): BuildNode[] {
+  // #261 — THE MODE IS EXPLICIT. A 'u-mount' rack is the 10″ standard's family (rails, deck, its
+  // own gear), not a variant of the printed-shelf rack: its parts are built by `rackUMount.ts`
+  // and named as the standard's, and none of this file's shelves/faceplates apply to it. An
+  // absent mode is the printed-shelf rack, byte for byte as it always was.
+  if (rack.mode === 'u-mount') {
+    return buildUMountNodes({ u: rack.u ?? UMOUNT_DEFAULT_U, depth: rack.depth }, printer);
+  }
   const dims = computeRackDims(rack);
   const nodes: BuildNode[] = frameParts(rack, dims);
 
