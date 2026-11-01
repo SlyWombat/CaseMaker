@@ -12,12 +12,16 @@ Two things to hold on to before you read on:
   after it — each of those a separate press of yours, with the machine named before anything is
   written. The **web** build cannot reach a machine at all: it ends at the file, which you
   upload with **Makera Studio**. The **work origin is set by hand** either way.
-- **Case Maker supports the Z1 and the Carvera Air.** Both carry Makera's own controller
-  configuration — the Z1's from this repository's firmware defaults and the bench's own reads,
-  the Air's from the Controller Makera publishes — so a job can be written for either. The
-  **Carvera** is known as a vendor row only: no Carvera's controller configuration has ever been
-  read, so a job naming it refuses by name ("this Carvera's frame has not been read from the
-  machine yet; connect it once") rather than borrowing the Z1's positions.
+- **Case Maker supports the Z1, the Carvera Air and the Carvera.** Each carries Makera's own
+  controller configuration — the Z1's from this repository's firmware defaults and the bench's own
+  reads, the Air's from the Controller Makera publishes, the Carvera's from the Carvera Community
+  Firmware's shipped `config.default` (its `wifi.machine_name CARVERA_01001` names the model), and
+  the machine's database row for its travel and its six-slot changer — so a job can be written for
+  any of them. None of those is a measurement of YOUR machine: a controller calibrated away from
+  the shipped values reports its own on the first connection, and the profile says which frame is
+  in force. **A Carvera job uses the automatic tool changer:** the file says `Tn M6` and the
+  controller drives its own rack, so the program states no slot position — the rack is the
+  machine's, and the profile lists the firmware's default slot arrangement only so it can be read.
 - **On the public site the CNC side is a beta switch.** [electricrv.ca/casemaker](https://electricrv.ca/casemaker)
   hides the Cut and Simulate sections, the cutting-job door, Manage and this guide
   unless the address carries `?BETA=yes`:
@@ -114,8 +118,9 @@ Every limit a screen acts on — the work envelope, the spindle ceiling, the saf
 the laser lift read, the rapid model — comes from that machine **profile**, never from a number
 hard-coded in a screen (#448). The profiles are the Z1, the **Carvera Air** (300 × 200 × 130 mm,
 13 000 RPM, no changer, ⌀92 × 200 mm rotary module) and the **Carvera** (320 × 240 × 140 mm,
-15 000 RPM, a six-slot changer, ⌀92 × 240 mm) — the last as a vendor row with no frame, as the
-opening note says (#773). The vise and every other accessory are the same story: their
+15 000 RPM, a six-slot changer with its rack stated from the firmware's default slot list,
+⌀92 × 240 mm). Each frame field carries where it came from; a value no source states stays unread
+rather than borrowed from another machine (#773, #828). The vise and every other accessory are the same story: their
 geometry lives on the machine's **fixture records** and bed **datums**, each with a source and a
 "measured when" (#451). The one exception to "nothing is hard-coded" is stated wherever it stands:
 a few PROVISIONAL numbers (the vise body's floor depth, the finishing step-over for 3D) are still
@@ -1441,7 +1446,7 @@ simulation does report about one is the sweep's own list, next:
 | `stock-unsupported` | error | The stock model is a rectangular (prism) block or, for an indexed rotary job, a cylinder; the setup's part is neither. | Use a rectangular blank, or a round one for rotary work. |
 | `stock-invalid` | error | Stock thickness is not positive. | Type a real thickness. |
 | `machine-unknown` | error | The simulation was asked for a machine id it has no profile for; the message lists the ids it knows. Nothing is swept, because a frame it cannot find is a frame it would have to guess. | Pick the machine in the Start wizard, or re-run the machine check. |
-| `machine-frame-unread` | error | The simulation was asked for a machine the app knows as a vendor row but whose controller frame has never been read (the Carvera, #773). Its anchors, toolrack, clearance and soft endstops are the machine's own, and none has been read, so nothing is swept. | Connect the machine once: the configuration read fills its frame. |
+| `machine-frame-unread` | error | The simulation was asked for a machine the app knows as a vendor row but whose controller frame has never been read. Every framed model this build ships (the Z1, the Carvera Air and the Carvera) carries one; the refusal stays for a model added without it (#773, #828). Its anchors, toolrack, clearance and soft endstops are the machine's own, and none has been read, so nothing is swept. | Connect the machine once: the configuration read fills its frame. |
 | `prior-removal-invalid` | error | A rest pass was told what material a previous program left (#410), and that material is not a closed solid — so the sweep has no starting material to subtract from. | Simulate the first program and pass ITS result. |
 | `prior-removal-column` | error | A rest pass was asked for on a job the COLUMN engine sweeps — a rotary job, a V-bit (whose cutting width changes with depth), a drill or a thread mill (#382). Only the exact 2.5D sweep can start from the material a previous program left, so the pair is refused by name rather than swept from the blank (#410). | Measure the rest with a flat cutter, or cut the second program as a program of its own. |
 | `air-moves-unchecked` | warning | Some air moves that pass near the stock were not verified. The exact sweep tests at most 4000 such moves one by one (each test is a solid boolean); moves above the stock or straight up out of their own cut are settled without a test and do not count. The column sweep tests every one, and stops only when the simulation's time budget runs out (#858). | Split a very long job, or raise the simulation budget. |
