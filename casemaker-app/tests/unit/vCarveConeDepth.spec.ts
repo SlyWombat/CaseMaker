@@ -205,17 +205,17 @@ describe('#741 the depth limit is the cutter’s own cone, not a table', () => {
 });
 
 describe('#786 slice 3 — an over-deep V-carve is CUT TO THE CONE and stated', () => {
-  const depthFinding = (job: EngraveJob, tool: Tool) => {
-    const gen = generate(job, tool);
+  const depthFinding = async (job: EngraveJob, tool: Tool) => {
+    const gen = await generate(job, tool);
     return {
       gen,
       finding: gen.findings.find((f) => f.code === 'vcarve-depth-beyond-cone'),
     };
   };
 
-  it('the star recipe’s 5.1 mm female pocket on a cone 1.5375 mm tall', () => {
+  it('the star recipe’s 5.1 mm female pocket on a cone 1.5375 mm tall', async () => {
     const job = benchJob('j11-v1-star-female-90.json');
-    const { gen, finding } = depthFinding(job, CHAMFER_90);
+    const { gen, finding } = await depthFinding(job, CHAMFER_90);
     expect(finding, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBeDefined();
     // #786 slice 3 — the cut runs to the height the cone reaches; the sentence states the rest.
     expect(finding!.severity).toBe('warning');
@@ -229,9 +229,9 @@ describe('#786 slice 3 — an over-deep V-carve is CUT TO THE CONE and stated', 
     expect(gen.programs.length).toBeGreaterThan(0);
   });
 
-  it('the derived 3.8 mm male plug on the same 1.5375 mm cone', () => {
+  it('the derived 3.8 mm male plug on the same 1.5375 mm cone', async () => {
     const job = benchJob('j11-v1-star-male-90.json');
-    const { gen, finding } = depthFinding(job, CHAMFER_90);
+    const { gen, finding } = await depthFinding(job, CHAMFER_90);
     expect(finding).toBeDefined();
     expect(finding!.severity).toBe('warning');
     expect(finding!.message).toContain('3.8 mm');
@@ -241,11 +241,11 @@ describe('#786 slice 3 — an over-deep V-carve is CUT TO THE CONE and stated', 
     expect(gen.programs.length).toBeGreaterThan(0);
   });
 
-  it('the 30v inlay female sits inside the 4.9916 mm cone, and a 5.1 mm cut is cut to it and stated', () => {
+  it('the 30v inlay female sits inside the 4.9916 mm cone, and a 5.1 mm cut is cut to it and stated', async () => {
     // #742 moved the real bench job from 5.1 mm to 4.8 mm when it gained its female inlay mark,
     // so the fixture no longer exercises the 30° cone's bound — it must generate.
     const job = benchJob('j11-inlay-female-30v.json');
-    const { gen } = depthFinding(job, ENGRAVER_30);
+    const { gen } = await depthFinding(job, ENGRAVER_30);
     expect(
       gen.findings.filter((f) => f.code === 'vcarve-depth-beyond-cone'),
       JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`)),
@@ -255,7 +255,7 @@ describe('#786 slice 3 — an over-deep V-carve is CUT TO THE CONE and stated', 
 
     // The 30° cone's own bound stays pinned on a constructed 5.1 mm cut — the depth the bench
     // recipe asked for before #742 — so the 4.9916 mm sentence cannot regress unseen.
-    const over = depthFinding(shallowJob(5.1, ENGRAVER_30), ENGRAVER_30);
+    const over = await depthFinding(shallowJob(5.1, ENGRAVER_30), ENGRAVER_30);
     expect(over.finding).toBeDefined();
     expect(over.finding!.severity).toBe('warning');
     expect(over.finding!.message).toContain('5.1 mm');
@@ -278,29 +278,29 @@ describe('#786 slice 3 — an over-deep V-carve is CUT TO THE CONE and stated', 
     expect(finding!.severity).toBe('warning');
   });
 
-  it('a plain V-carve inside the limit is unaffected', () => {
+  it('a plain V-carve inside the limit is unaffected', async () => {
     const job = shallowJob(1, CHAMFER_90);
-    const gen = generate(job, CHAMFER_90);
+    const gen = await generate(job, CHAMFER_90);
     expect(gen.findings.filter((f) => f.code === 'vcarve-depth-beyond-cone')).toEqual([]);
     expect(gen.ok, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
   });
 
-  it('the prediction carries the cone’s body, so its region stops where the flank does (#741)', () => {
+  it('the prediction carries the cone’s body, so its region stops where the flank does (#741)', async () => {
     // The oracle grows a V region's floor by the flank's rise at each level above it; `maxGrow`
     // is the radial run from the tip's edge to the body, and without it the oracle would predict
     // a mouth the bit cannot cut. This is the same `VCone.outerRadius` the column engine reads.
-    const gen = generate(shallowJob(1, CHAMFER_90), CHAMFER_90);
+    const gen = await generate(shallowJob(1, CHAMFER_90), CHAMFER_90);
     const region = gen.predicted.find((p) => p.vRegion !== undefined);
     expect(region).toBeDefined();
     expect(region!.vRegion!.tanHalf).toBeCloseTo(Math.tan(Math.PI / 4), 9);
     expect(region!.vRegion!.maxGrow).toBeCloseTo(3.175 / 2 - 0.05, 9);
   });
 
-  it('states no maxGrow when the record states no body — the pre-#741 open flank', () => {
+  it('states no maxGrow when the record states no body — the pre-#741 open flank', async () => {
     // The degenerate-record rule: a diameter not wider than the tip is no body, so there is no
     // radius at which the prediction may stop growing.
     const noBody: Tool = { ...CHAMFER_90, diameter: 0.1 };
-    const gen = generate(shallowJob(1, noBody), noBody);
+    const gen = await generate(shallowJob(1, noBody), noBody);
     const region = gen.predicted.find((p) => p.vRegion !== undefined);
     expect(region).toBeDefined();
     expect(region!.vRegion!.maxGrow).toBeUndefined();
@@ -320,9 +320,9 @@ describe('#741 review — a cutter with no cone is not judged as a V-carve', () 
     expect(vDepthLimit(CHAMFER_90)).not.toBeNull();
   });
 
-  it('generates the 4 mm pocket on a 1 mm flat with a 3 mm flute', () => {
+  it('generates the 4 mm pocket on a 1 mm flat with a 3 mm flute', async () => {
     const job = { ...shallowJob(4, FLAT_1MM), cutOverride: { stepDown: 0.4, stepOver: 0.4 } };
-    const gen = generate(job, FLAT_1MM);
+    const gen = await generate(job, FLAT_1MM);
     const vCodes = gen.findings.filter((f) => f.code.startsWith('vcarve-')).map((f) => f.code);
     expect(vCodes).toEqual([]);
     expect(gen.ok, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
@@ -338,8 +338,8 @@ describe('#741 review — a cutter with no cone is not judged as a V-carve', () 
  * so the warning must not stop a program.
  */
 describe('#741 review — a V trace deeper than the cone, or the flute', () => {
-  it('warns above the cone and inside the stated flute, and still writes the program', () => {
-    const gen = generate(traceJob(1.55, CHAMFER_90), CHAMFER_90);
+  it('warns above the cone and inside the stated flute, and still writes the program', async () => {
+    const gen = await generate(traceJob(1.55, CHAMFER_90), CHAMFER_90);
     const warn = gen.findings.find((f) => f.code === 'vcarve-trace-beyond-cone');
     expect(warn, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBeDefined();
     expect(warn!.severity).toBe('warning');
@@ -352,8 +352,8 @@ describe('#741 review — a V trace deeper than the cone, or the flute', () => {
     expect(gen.programs.length).toBeGreaterThan(0);
   });
 
-  it('refuses past the stated flute — there is no cutting edge below it', () => {
-    const gen = generate(traceJob(1.7, CHAMFER_90), CHAMFER_90);
+  it('refuses past the stated flute — there is no cutting edge below it', async () => {
+    const gen = await generate(traceJob(1.7, CHAMFER_90), CHAMFER_90);
     const err = gen.findings.find((f) => f.code === 'vcarve-trace-beyond-flute');
     expect(err, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBeDefined();
     expect(err!.severity).toBe('error');
@@ -363,8 +363,8 @@ describe('#741 review — a V trace deeper than the cone, or the flute', () => {
     expect(gen.programs).toEqual([]);
   });
 
-  it('leaves a trace inside the cone alone', () => {
-    const gen = generate(traceJob(1, CHAMFER_90), CHAMFER_90);
+  it('leaves a trace inside the cone alone', async () => {
+    const gen = await generate(traceJob(1, CHAMFER_90), CHAMFER_90);
     expect(gen.findings.filter((f) => f.code.startsWith('vcarve-trace-'))).toEqual([]);
     expect(gen.programs.length).toBeGreaterThan(0);
   });

@@ -23,7 +23,7 @@ import type { Tool } from '@/engine/cnc/tool';
 
 /** A square heightfield with a wide, FLAT-BOTTOMED pocket: every level's region
  *  is the same wide disc, so the cutter can always enter it. */
-function bowlHeightfield(depthMm: number, pitch = 0.5, cells = 60): GoalHeightfield {
+async function bowlHeightfield(depthMm: number, pitch = 0.5, cells = 60): Promise<GoalHeightfield> {
   const z = new Float32Array(cells * cells);
   const covered = new Uint8Array(cells * cells);
   const centre = ((cells - 1) * pitch) / 2;
@@ -34,7 +34,7 @@ function bowlHeightfield(depthMm: number, pitch = 0.5, cells = 60): GoalHeightfi
       const k = j * cells + i;
       const x = i * pitch - centre;
       const y = j * pitch - centre;
-      const r = Math.hypot(x, y);
+      const r = await Math.hypot(x, y);
       covered[k] = 1;
       z[k] = r <= bowlR ? -depthMm : 0;
       if (z[k]! < minZ) minZ = z[k]!;
@@ -57,8 +57,8 @@ const RAPID = { xyMmPerMin: 5000, zMmPerMin: 2500, accelMmPerS2: 1000, source: '
 
 /** The same square with a CONE: the surface falls from the rim to the centre, so
  *  a deeper layer's region is genuinely smaller (the region test's shape). */
-function coneHeightfield(depthMm: number, pitch = 0.5, cells = 60): GoalHeightfield {
-  const hf = bowlHeightfield(depthMm, pitch, cells);
+async function coneHeightfield(depthMm: number, pitch = 0.5, cells = 60): Promise<GoalHeightfield> {
+  const hf = await bowlHeightfield(depthMm, pitch, cells);
   const centre = ((cells - 1) * pitch) / 2;
   const bowlR = cells * pitch * 0.3;
   let minZ = 0;
@@ -86,8 +86,8 @@ describe('#846 — the layer region follows the heightfield', () => {
     expect(loops).toHaveLength(2);
   });
 
-  it('a shallow layer skips the bowl; the deepest layer includes it', () => {
-    const hf = coneHeightfield(8);
+  it('a shallow layer skips the bowl; the deepest layer includes it', async () => {
+    const hf = await coneHeightfield(8);
     const allowance = 0.3;
     const shallow = roughLevelRegion(hf, -1, allowance);
     const mid = roughLevelRegion(hf, -5, allowance);
@@ -114,10 +114,10 @@ describe('#846 — the layer region follows the heightfield', () => {
 });
 
 describe('#846 — the adaptive rough holds the engagement cap', () => {
-  it('a deep goal plans under the cap, with entries that descend', () => {
-    const hf = bowlHeightfield(8);
+  it('a deep goal plans under the cap, with entries that descend', async () => {
+    const hf = await bowlHeightfield(8);
     const settings = adaptiveSettings(null).settings;
-    const r = roughingAdaptiveMoves(hf, FEEDS, 0.3, {
+    const r = await roughingAdaptiveMoves(hf, FEEDS, 0.3, {
       tool: MILL,
       adaptive: settings,
       safeZ: 6,
@@ -136,8 +136,8 @@ describe('#846 — the adaptive rough holds the engagement cap', () => {
 });
 
 describe('#846 — the choice, stated', () => {
-  const run = (hf: GoalHeightfield, roughing: RoughingOptions) => {
-    const r = generateSurface3dIR({
+  const run = async (hf: GoalHeightfield, roughing: RoughingOptions) => {
+    const r = await generateSurface3dIR({
       heightfield: hf,
       tool: SURFACE_TOOL,
       toolObj: MILL,
@@ -152,8 +152,8 @@ describe('#846 — the choice, stated', () => {
     return r;
   };
 
-  it('a deep aluminium goal posts an adaptive rough, and the note measures both', () => {
-    const r = run(bowlHeightfield(8), {
+  it('a deep aluminium goal posts an adaptive rough, and the note measures both', async () => {
+    const r = await run(await bowlHeightfield(8), {
       mode: 'auto',
       material: 'aluminium-6061',
       adaptive: adaptiveSettings(null).settings,
@@ -167,8 +167,8 @@ describe('#846 — the choice, stated', () => {
     expect(note!).toContain('both were measured');
   });
 
-  it('a shallow wooden goal keeps the raster and says why', () => {
-    const r = run(bowlHeightfield(1), {
+  it('a shallow wooden goal keeps the raster and says why', async () => {
+    const r = await run(await bowlHeightfield(1), {
       mode: 'auto',
       material: 'pla',
       // Force the rule path so the wording is the rule's.
@@ -181,9 +181,9 @@ describe('#846 — the choice, stated', () => {
     expect(note!).toContain('skipped above 100 cells');
   });
 
-  it('a legacy plan (no roughing option) is the raster, with no new note', () => {
-    const hf = bowlHeightfield(8);
-    const plain = generateSurface3dIR({
+  it('a legacy plan (no roughing option) is the raster, with no new note', async () => {
+    const hf = await bowlHeightfield(8);
+    const plain = await generateSurface3dIR({
       heightfield: hf,
       tool: SURFACE_TOOL,
       toolObj: MILL,
@@ -199,11 +199,11 @@ describe('#846 — the choice, stated', () => {
     expect(plain.notes.some((n) => n.includes('roughing chosen'))).toBe(false);
   });
 
-  it('the finishing passes are the same moves either way', () => {
-    const hf = bowlHeightfield(8);
-    const adaptive = run(hf, { mode: 'adaptive', material: 'pla', adaptive: adaptiveSettings(null).settings });
-    const raster = run(hf, { mode: 'raster' });
-    const finishing = (ir: ReturnType<typeof run>['ir']) =>
+  it('the finishing passes are the same moves either way', async () => {
+    const hf = await bowlHeightfield(8);
+    const adaptive = await run(hf, { mode: 'adaptive', material: 'pla', adaptive: adaptiveSettings(null).settings });
+    const raster = await run(hf, { mode: 'raster' });
+    const finishing = (ir: Awaited<ReturnType<typeof run>>['ir']) =>
       ir.operations.slice(1).map((op) => ({ name: op.name, moves: op.moves }));
     expect(finishing(adaptive.ir)).toEqual(finishing(raster.ir));
   });

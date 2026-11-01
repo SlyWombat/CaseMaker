@@ -234,7 +234,7 @@ describe('#841 M8×1.25 external on an 8 mm boss', () => {
     expect(posted.text).not.toMatch(/G0?2\b|G0?3\b/);
   });
 
-  it('the boss is the round stock; the job generates, and the oracle passes on the profile the simulator swept', () => {
+  it('the boss is the round stock; the job generates, and the oracle passes on the profile the simulator swept', async () => {
     const job = bossJob();
     expect(threadBoss(job, { x: 4, y: 4 })?.source).toBe('stock');
     const findings = validateJob(job);
@@ -244,7 +244,7 @@ describe('#841 M8×1.25 external on an 8 mm boss', () => {
     // The thread IS the rod's rim: no "keep it inside the circle" sentence on it.
     expect(findings.some((f) => f.code === 'item-off-round-stock')).toBe(false);
 
-    const g = generate(tl, job, null, [], undefined, { defaults: DEFAULTS });
+    const g = await generate(tl, job, null, [], undefined, { defaults: DEFAULTS });
     expect(g.ok, `${g.stage}: ${JSON.stringify(g.errors)} ${JSON.stringify(g.findings.filter((f) => f.severity === 'error'))}`).toBe(true);
     expect(g.threads?.[0]?.external).toBe(true);
     const session = createSimSession(tl);
@@ -271,7 +271,7 @@ describe('#841 M8×1.25 external on an 8 mm boss', () => {
 });
 
 describe('#841 1/4-20 UNC internal', () => {
-  it('pitch 1.27 mm, pilot ⌀4.975 mm, and it posts', () => {
+  it('pitch 1.27 mm, pilot ⌀4.975 mm, and it posts', async () => {
     const r = planThreadMill({ tool: UNC_MILL, position: [15, 12], size: '1/4-20', depth: 6, through: false, settings: S });
     if (!r.ok) throw new Error(r.reason);
     expect(r.plan.pitch).toBeCloseTo(1.27, 12);
@@ -292,7 +292,7 @@ describe('#841 1/4-20 UNC internal', () => {
         { kind: 'thread', id: 'thr-unc', position: { x: 50, y: 30 }, enabled: true, size: '1/4-20', standard: 'imperial', classFit: '3B', depth: 6, through: false },
       ],
     };
-    const g = generate(tl, job, null, [], undefined, { defaults: DEFAULTS });
+    const g = await generate(tl, job, null, [], undefined, { defaults: DEFAULTS });
     expect(g.ok, `${g.stage}: ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.threads?.[0]?.pitch).toBeCloseTo(1.27, 12);
     expect(validateJob(job).some((f) => f.code === 'thread-pitch-mismatch')).toBe(false);
@@ -364,12 +364,12 @@ describe('#841 the internal metric thread is byte-identical to before', () => {
     expect(createHash('sha256').update(posted.text + JSON.stringify(ir.plan.notes)).digest('hex')).toBe(BEFORE[size]);
   });
 
-  it('the bench’s j18 thread job generates the same program through the whole pipeline', () => {
+  it('the bench’s j18 thread job generates the same program through the whole pipeline', async () => {
     const parsed = parseEngraveJob(JSON.parse(readFileSync(resolve(HERE, '../../../docs/bench/2026-10-27-z1-typical-jobs/jobs/j18-thread-b-mill-proxy.json'), 'utf8')));
     if (!parsed.ok) throw new Error('the bench fixture no longer parses');
     // The cutter `threadCatalogue735.spec.ts` pins for this fixture.
     const tool = flatEndMill(2.4, { id: null, name: M3_MILL.name, typeText: 'Thread mill', shape: 'thread', tipDiameter: 2.4, diameter: 3.175, fluteLength: 9, cornerRadius: null });
-    const g = generate(tl, { ...parsed.job, tool });
+    const g = await generate(tl, { ...parsed.job, tool });
     expect(g.ok).toBe(true);
     expect(createHash('sha256').update(g.nc!).digest('hex')).toBe('2eaae63301a15e91792e114d8968b5a3b0cf9b62d8e88fdef9ac5b733ce9d7ec');
   });

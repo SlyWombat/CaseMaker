@@ -134,8 +134,70 @@ export interface AdaptiveRoughOptions {
   hopZ: number;
   /** #666 — where the cut numbers came from, when the job supplies them. */
   provenance?: AdaptiveProvenance;
-  /** Per-level progress: (layer done, layers total). */
+  /** Per-level progress: (levels done, levels total). */
   onLayer?: (done: number, total: number) => void;
+  /**
+   * #881 — WHERE THE LEVELS ARE PLANNED. A pool on the other side of a MessagePort (the browser)
+   * or worker_threads (Node) plans them in parallel; absent, every level is planned in this
+   * thread, exactly as before. The reuse and the assembly below do not know which side computed
+   * a plan, which is what makes a parallel plan byte-identical to the serial one.
+   */
+  planner?: LevelPlanner;
+}
+
+/** #881 — one level's planning request: plain data, so it can cross to a pool worker. */
+export interface LevelPlanRequest {
+  /** This level's position among the requests, so the plans can be laid back in order. */
+  index: number;
+  /** The level the cut lands on, mm. */
+  levelZ: number;
+  /** The distance the planner descends (the layer's thickness, at least 0.01 mm). */
+  depth: number;
+  /** The cells this level clears, as polygons in the work frame. */
+  region: Polygons;
+}
+
+export type LevelPlanResult =
+  | { ok: true; moves: CamMove[]; maxEngagementMm: number }
+  | { ok: false; reason: string };
+
+/** The arguments every level shares — the same ones `planAdaptive` takes. */
+export interface LevelPlanShared {
+  tool: Tool;
+  settings: AdaptiveSettings;
+  feed: number;
+  plungeFeed: number;
+  provenance?: AdaptiveProvenance;
+}
+
+/**
+ * #881 — WHERE LEVELS ARE PLANNED. `planLevels` returns one result per request, in request
+ * order; `onPlanned` reports how many have finished, for the step's progress line.
+ */
+export interface LevelPlanner {
+  planLevels(
+    requests: readonly LevelPlanRequest[],
+    shared: LevelPlanShared,
+    onPlanned?: (done: number, total: number) => void,
+  ): Promise<readonly LevelPlanResult[]>;
+}
+
+/**
+ * Plan ONE level. The pool workers call this, and so does the in-process path — one function, so
+ * a parallel plan cannot differ from a serial one.
+ */
+export function planLevel(shared: LevelPlanShared, request: LevelPlanRequest): LevelPlanResult {
+  const planned = planAdaptive({
+    tool: shared.tool,
+    region: request.region,
+    depth: request.depth,
+    // One level per call: the planner's own step-down is the layer's thickness,
+    // so it cannot subdivide it; its feeds come from the job's.
+    settings: { ...shared.settings, stepDownMm: request.depth, cutFeed: shared.feed, entryFeed: shared.plungeFeed },
+    ...(shared.provenance !== undefined ? { provenance: shared.provenance } : {}),
+  });
+  if (!planned.ok) return { ok: false, reason: planned.reason };
+  return { ok: true, moves: planned.plan.moves, maxEngagementMm: planned.plan.stats.maxStepEngagement };
 }
 
 export interface AdaptiveRoughResult {
@@ -149,17 +211,33 @@ export interface AdaptiveRoughResult {
   reusedLevels: number;
 }
 
+/** One layer as the assembly sees it: where it lands, what it clears, and whose plan it uses. */
+interface LevelSlot {
+  levelZ: number;
+  /** The distance from the level above it (the stock top for the first), which the planner descends. */
+  thickness: number;
+  /** False when nothing stands above this level (no mask): it is skipped, but still counted. */
+  cleared: boolean;
+  /** The request this level planned, or null when it reuses the level above's plan. */
+  requestIndex: number | null;
+}
+
 /**
  * Clear every roughing level adaptively, or refuse with the planner's own
  * reason when a level has no honest 2D plan (too tight a neck, no room for the
  * cutter). A refusal is the CALLER's to state — the chooser keeps the raster.
+ *
+ * #881 — ASYNC: the levels are independent, so a `planner` can compute them in parallel. Each
+ * level is still `planLevel` (the same `planAdaptive` call), the reuse and the Z-shifted assembly
+ * are unchanged, and the results are laid back in level order — so the parallel plan is
+ * byte-identical to the serial one (the adaptiveReuse reference test pins it).
  */
-export function roughingAdaptiveMoves(
+export async function roughingAdaptiveMoves(
   hf: GoalHeightfield,
   feeds: SurfaceFeeds,
   allowance: number,
   opts: AdaptiveRoughOptions,
-): { ok: true; result: AdaptiveRoughResult } | { ok: false; reason: string } {
+): Promise<{ ok: true; result: AdaptiveRoughResult } | { ok: false; reason: string }> {
   if (!(feeds.stepDown > 0)) {
     return { ok: false, reason: `3D roughing needs a positive step-down; the feeds gave ${feeds.stepDown} mm` };
   }
@@ -174,61 +252,118 @@ export function roughingAdaptiveMoves(
 
   const flat = cuttingRadiusForSweep(opts.tool);
   const capMm = flat.ok ? opts.adaptive.engagementFraction * 2 * flat.radius : 0;
-  const moves: CamMove[] = [];
-  let maxEngagementMm = 0;
+  const shared: LevelPlanShared = {
+    tool: opts.tool,
+    settings: opts.adaptive,
+    feed: feeds.feed,
+    plungeFeed: feeds.plungeFeed,
+    ...(opts.provenance !== undefined ? { provenance: opts.provenance } : {}),
+  };
+
+  // ── THE SLOTS, in level order ────────────────────────────────────────────────────────────────
+  // A level is EMPTY (no mask — nothing stands above it), REUSED (its mask and thickness repeat
+  // the last planned level's, #868), or PLANNED (one request for the pool, or for this thread).
+  const slots: LevelSlot[] = [];
+  const requests: LevelPlanRequest[] = [];
   let lastLevel = levels[0] ?? topZ;
-
-  // #868 — EXACT-REGION REUSE. A level whose mask is byte-identical to the level above's (a
-  // vertical wall, a flat-sided goal) clears the same cells at the same thickness, and
-  // `planAdaptive` is a pure function of both — so its plan is reused, shifted to the new Z,
-  // instead of walking again. The reuse is therefore BYTE-IDENTICAL to planning afresh (the
-  // test pins that), and it costs a hash per level.
-  let cached: { hash: number; thickness: number; moves: CamMove[]; maxEngagement: number } | null = null;
+  // The #868 cache: the last PLANNED level's mask hash and thickness. A reused level does not
+  // move it, so a run of identical levels all share the one plan.
+  let cachedHash: number | null = null;
+  let cachedDepth: number | null = null;
   let reusedLevels = 0;
-
   for (const [index, L] of levels.entries()) {
-    opts.onLayer?.(index + 1, levels.length);
     const mask = roughLevelMask(hf, L, allowance);
-    if (mask === null) continue;
-    // The layer's own thickness: the distance from the level above it (or the
-    // stock top for the first), which is the depth the planner descends.
+    if (mask === null) {
+      slots.push({ levelZ: L, thickness: 0, cleared: false, requestIndex: null });
+      continue;
+    }
     const thickness = index === 0 ? topZ - L : lastLevel - L;
     lastLevel = L;
     const depth = Math.max(thickness, 0.01);
     const hash = maskHash(mask);
-    let planMoves: CamMove[];
-    let planMax: number;
-    if (cached !== null && cached.hash === hash && cached.thickness === depth) {
-      planMoves = cached.moves;
-      planMax = cached.maxEngagement;
+    if (cachedHash !== null && cachedHash === hash && cachedDepth === depth) {
       reusedLevels++;
-    } else {
-      const planned = planAdaptive({
-        tool: opts.tool,
-        region: polygonalizeMask(hf, mask),
-        depth,
-        // One level per call: the planner's own step-down is the layer's thickness,
-        // so it cannot subdivide it; its feeds come from the job's.
-        settings: { ...opts.adaptive, stepDownMm: depth, cutFeed: feeds.feed, entryFeed: feeds.plungeFeed },
-        ...(opts.provenance !== undefined ? { provenance: opts.provenance } : {}),
-      });
-      if (!planned.ok) return { ok: false, reason: `adaptive level at Z ${Math.round(L * 100) / 100}: ${planned.reason}` };
-      planMoves = planned.plan.moves;
-      planMax = planned.plan.stats.maxStepEngagement;
-      cached = { hash, thickness: depth, moves: planMoves, maxEngagement: planMax };
+      slots.push({ levelZ: L, thickness, cleared: true, requestIndex: null });
+      continue;
     }
-    maxEngagementMm = Math.max(maxEngagementMm, planMax);
-    // Shift the plan's Zs: its single level (−thickness) lands on L; its 0-plane
-    // (the material's top at that layer) becomes the level above. Hops and safe
-    // retracts map to the 3D job's own heights.
-    const shift = L + thickness;
-    for (let i = 0; i < planMoves.length; i++) {
-      const m = planMoves[i]!;
+    cachedHash = hash;
+    cachedDepth = depth;
+    requests.push({ index: requests.length, levelZ: L, depth, region: polygonalizeMask(hf, mask) });
+    slots.push({ levelZ: L, thickness, cleared: true, requestIndex: requests.length - 1 });
+  }
+
+  // ── THE PLANS ─────────────────────────────────────────────────────────────────────────────────
+  const total = levels.length;
+  let done = 0;
+  const report = (): void => opts.onLayer?.(done, total);
+  // Progress for the levels that need no planning (empty and reused), so the pool's count starts
+  // from the right place.
+  const settled = slots.filter((s) => !s.cleared || s.requestIndex === null).length;
+
+  let pooledPlans: readonly LevelPlanResult[] | null = null;
+  if (opts.planner !== undefined && requests.length > 1) {
+    done = settled;
+    report();
+    pooledPlans = await opts.planner.planLevels(requests, shared, (planned) => {
+      done = settled + planned;
+      report();
+    });
+    if (pooledPlans.length !== requests.length) {
+      return { ok: false, reason: `the level pool returned ${pooledPlans.length} plans for ${requests.length} levels` };
+    }
+  }
+
+  // ── THE ASSEMBLY, in level order ─────────────────────────────────────────────────────────────
+  const moves: CamMove[] = [];
+  let maxEngagementMm = 0;
+  // The last planned level's plan, which the reused levels share (#868).
+  let lastPlanMoves: CamMove[] = [];
+  let lastPlanMax = 0;
+  for (const slot of slots) {
+    if (!slot.cleared) {
+      if (pooledPlans === null) {
+        done++;
+        report();
+      }
+      continue;
+    }
+    let plan: LevelPlanResult;
+    if (slot.requestIndex === null) {
+      plan = { ok: true, moves: lastPlanMoves, maxEngagementMm: lastPlanMax };
+    } else if (pooledPlans !== null) {
+      plan = pooledPlans[slot.requestIndex]!;
+      if (plan.ok) {
+        lastPlanMoves = plan.moves;
+        lastPlanMax = plan.maxEngagementMm;
+      }
+    } else {
+      plan = planLevel(shared, requests[slot.requestIndex]!);
+      if (plan.ok) {
+        lastPlanMoves = plan.moves;
+        lastPlanMax = plan.maxEngagementMm;
+      }
+      done++;
+      report();
+    }
+    if (!plan.ok) {
+      return { ok: false, reason: `adaptive level at Z ${Math.round(slot.levelZ * 100) / 100}: ${plan.reason}` };
+    }
+    maxEngagementMm = Math.max(maxEngagementMm, plan.maxEngagementMm);
+    // Shift the plan's Zs: its single level (−thickness) lands on the slot's level; its 0-plane
+    // (the material's top at that layer) becomes the level above. Hops and safe retracts map to
+    // the 3D job's own heights.
+    const shift = slot.levelZ + slot.thickness;
+    for (let i = 0; i < plan.moves.length; i++) {
+      const m = plan.moves[i]!;
       moves.push(
         m.kind === 'rapid' && m.z >= HOP_Z - EPS
           ? { ...m, z: m.z >= SAFE_Z - EPS ? opts.safeZ : opts.hopZ }
           : { ...m, z: m.z + shift },
       );
+    }
+    if (slot.requestIndex === null && pooledPlans === null) {
+      done++;
+      report();
     }
   }
   if (moves.length > 0) {

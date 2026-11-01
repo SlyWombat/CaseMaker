@@ -75,8 +75,8 @@ const codes = (gen: EngraveGenerated): string[] => gen.findings.map((f) => f.cod
 const SHANK_READ_AS_CUTTER = /3\.175 mm 90° V-bit/;
 
 describe('#740 — an unrecorded tip is asked for, not invented', () => {
-  it('asks for j10’s tip instead of refusing its strokes and hole against the 3.175 mm shank', () => {
-    const gen = generate(tl, benchJob('j10-plaque-90v.json', null));
+  it('asks for j10’s tip instead of refusing its strokes and hole against the 3.175 mm shank', async () => {
+    const gen = await generate(tl, benchJob('j10-plaque-90v.json', null));
 
     const ask = gen.findings.filter((f) => f.code === 'tool-tip-unrecorded');
     expect(ask).toHaveLength(1);
@@ -102,8 +102,8 @@ describe('#740 — an unrecorded tip is asked for, not invented', () => {
     expect(gen.programs).toEqual([]);
   }, 180_000);
 
-  it('asks for j11’s tip in place of the same wrong sentences', () => {
-    const gen = generate(tl, benchJob('j11-inlay-female-90v.json', null));
+  it('asks for j11’s tip in place of the same wrong sentences', async () => {
+    const gen = await generate(tl, benchJob('j11-inlay-female-90v.json', null));
 
     const ask = gen.findings.filter((f) => f.code === 'tool-tip-unrecorded');
     expect(ask).toHaveLength(1);
@@ -116,7 +116,7 @@ describe('#740 — an unrecorded tip is asked for, not invented', () => {
     expect(gen.programs).toEqual([]);
   }, 180_000);
 
-  it('does not ask where the plane model never judges the item (the variable carve’s own rule)', () => {
+  it('does not ask where the plane model never judges the item (the variable carve’s own rule)', async () => {
     // #665 — a variable-depth region's width is its own design at every level; the plane model's
     // reach finding is deliberately not computed for it, so an absent tip is not a blocker there.
     // Keeping the ask to the plane-model items is what stops it from refusing #665's established
@@ -125,14 +125,14 @@ describe('#740 — an unrecorded tip is asked for, not invented', () => {
     job.labels = job.labels.map((l) => ({ ...l, vCarveDepth: 'variable' as const }));
     job.shapes = job.shapes.map((s) => ({ ...s, vCarveDepth: 'variable' as const }));
 
-    const gen = generate(tl, job);
+    const gen = await generate(tl, job);
     expect(codes(gen)).not.toContain('tool-tip-unrecorded');
   }, 180_000);
 });
 
 describe('#740 — the Makera row’s 0.1 mm tip V-carves what the shank refused', () => {
-  it('generates j10 with the tip stated', () => {
-    const gen = generate(tl, benchJob('j10-plaque-90v.json', 0.1));
+  it('generates j10 with the tip stated', async () => {
+    const gen = await generate(tl, benchJob('j10-plaque-90v.json', 0.1));
 
     expect(codes(gen)).not.toContain('tool-tip-unrecorded');
     expect(codes(gen)).not.toContain('item-empty');
@@ -145,12 +145,12 @@ describe('#740 — the Makera row’s 0.1 mm tip V-carves what the shank refused
     expect(gen.programs.length).toBeGreaterThan(0);
   }, 180_000);
 
-  it('cuts j11 to its cone and states the shortfall, not its 0.1 mm tip (#741, #786 slice 3)', () => {
+  it('cuts j11 to its cone and states the shortfall, not its 0.1 mm tip (#741, #786 slice 3)', async () => {
     // #740's subject is the TIP: with the Makera row's 0.1 mm stated, none of the shank-width
     // sentences may come back. #741/#786 slice 3 — the job's 5.1 mm inlay pocket is deeper than
     // this bit's 1.5375 mm cone, so the cut STOPS at the cone and the shortfall is stated; the
     // depth warnings are the only complaint, and they are the job's depth talking, not its tip.
-    const gen = generate(tl, benchJob('j11-inlay-female-90v.json', 0.1));
+    const gen = await generate(tl, benchJob('j11-inlay-female-90v.json', 0.1));
 
     expect(codes(gen)).not.toContain('tool-tip-unrecorded');
     expect(codes(gen)).not.toContain('item-empty');
@@ -252,8 +252,8 @@ describe('#740 — an unrecorded tip on a cone carve is a warning, not a silent 
     return job;
   }
 
-  it('warns that j10’s variable-depth carve is planned as a sharp point, without the plane error', () => {
-    const gen = generate(tl, variableJ10(null));
+  it('warns that j10’s variable-depth carve is planned as a sharp point, without the plane error', async () => {
+    const gen = await generate(tl, variableJ10(null));
     const warning = assumedPoint(gen);
     expect(warning).toHaveLength(1);
     expect(warning[0]!.severity).toBe('warning');
@@ -268,13 +268,13 @@ describe('#740 — an unrecorded tip on a cone carve is a warning, not a silent 
     expect(codes(gen)).not.toContain('tool-tip-unrecorded');
   }, 180_000);
 
-  it('drops the warning when j10’s tip is stated', () => {
-    const gen = generate(tl, variableJ10(0.1));
+  it('drops the warning when j10’s tip is stated', async () => {
+    const gen = await generate(tl, variableJ10(0.1));
     expect(codes(gen)).not.toContain('tool-tip-assumed-point');
   }, 180_000);
 
-  it('warns for j11’s inlay while its plane-model label keeps the error', () => {
-    const gen = generate(tl, benchJob('j11-inlay-female-90v.json', null));
+  it('warns for j11’s inlay while its plane-model label keeps the error', async () => {
+    const gen = await generate(tl, benchJob('j11-inlay-female-90v.json', null));
     expect(assumedPoint(gen)).toHaveLength(1);
     expect(assumedPoint(gen)[0]!.message).toContain('C1-BIT-CHAMFER-90');
     // Distinct items, distinct findings: the FF label is judged at the plane (error), the inlay
@@ -283,11 +283,11 @@ describe('#740 — an unrecorded tip on a cone carve is a warning, not a silent 
     expect(error).toHaveLength(1);
     expect(error[0]!.severity).toBe('error');
 
-    const stated = generate(tl, benchJob('j11-inlay-female-90v.json', 0.1));
+    const stated = await generate(tl, benchJob('j11-inlay-female-90v.json', 0.1));
     expect(codes(stated)).not.toContain('tool-tip-assumed-point');
   }, 180_000);
 
-  it('warns for a prism with an unrecorded tip, and not once the tip is stated', () => {
+  it('warns for a prism with an unrecorded tip, and not once the tip is stated', async () => {
     // j10 has no prism fixture; its one shape is marked as one (#674). Labels are removed so no
     // item is judged at a colour plane and the warning is the prism's own.
     const prismJob = (tip: number | null): EngraveJob => {
@@ -296,10 +296,10 @@ describe('#740 — an unrecorded tip on a cone carve is a warning, not a silent 
       job.shapes = [{ ...job.shapes[0]!, prism: {} }];
       return job;
     };
-    const gen = generate(tl, prismJob(null));
+    const gen = await generate(tl, prismJob(null));
     expect(assumedPoint(gen)).toHaveLength(1);
     expect(codes(gen)).not.toContain('tool-tip-unrecorded');
-    const stated = generate(tl, prismJob(0.1));
+    const stated = await generate(tl, prismJob(0.1));
     expect(codes(stated)).not.toContain('tool-tip-assumed-point');
   }, 180_000);
 });

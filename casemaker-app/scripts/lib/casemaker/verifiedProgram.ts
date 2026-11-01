@@ -167,7 +167,8 @@ export async function prepareVerifiedProgram(
   const catalogue: never[] = [];
   // Generate even with no cutter: the bench script prints the `stage`/`verify` report before it
   // says "no usable cutter", so the refusal below must carry what `engraveGenerate` produced.
-  const generated = engraveGenerate(tl, job, tool, catalogue, calibration, margins);
+  // #881 — async now (a pool can plan the roughing levels); headless runs it with no pool.
+  const generated = await engraveGenerate(tl, job, tool, catalogue, calibration, margins);
   if (tool === null) {
     return {
       ok: false,

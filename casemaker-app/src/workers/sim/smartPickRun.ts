@@ -74,8 +74,12 @@ export interface SmartPickRequest {
   onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void;
 }
 
-/** Slice A's evaluator, as the worker binds it (one job, one context). */
-export type PickEvaluator = (plan: CandidatePlan, level: 'coarse' | 'full') => PlanEvaluation;
+/**
+ * Slice A's evaluator, as the worker binds it (one job, one context). #881 — a full evaluation may
+ * be asynchronous (it runs the real generator, whose roughing levels a pool can plan), so the
+ * evaluator may answer with a promise; `smartPick` already awaits either form.
+ */
+export type PickEvaluator = (plan: CandidatePlan, level: 'coarse' | 'full') => PlanEvaluation | Promise<PlanEvaluation>;
 
 /** Thrown out of the evaluator when the run has been superseded; caught here, never escapes. */
 class SupersededError extends Error {

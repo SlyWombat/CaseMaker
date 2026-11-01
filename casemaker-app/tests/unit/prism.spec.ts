@@ -287,9 +287,9 @@ describe('findings — what a prism cannot be cut with, or on', () => {
 });
 
 describe('the program and the oracle', () => {
-  it('cuts the ring outside-in and passes the oracle', () => {
+  it('cuts the ring outside-in and passes the oracle', async () => {
     const job = prismJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
 
@@ -320,9 +320,9 @@ describe('the program and the oracle', () => {
     }
   }, 120_000);
 
-  it('clears the base outward and cuts the walls LAST, and the tip never reaches the shape', () => {
+  it('clears the base outward and cuts the walls LAST, and the tip never reaches the shape', async () => {
     const job = prismJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const n = prismNumbers(CONE, 1.4, {}).numbers;
     // The distance from a point to the shape's own outline (a 20×10 rect at 20,15).
@@ -361,9 +361,9 @@ describe('the program and the oracle', () => {
     }
   }, 60_000);
 
-  it('states the height, the base and the margin on the run sheet', () => {
+  it('states the height, the base and the margin on the run sheet', async () => {
     const job = prismJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const texts = buildRunSheet(job, g, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const step = texts.find((t) => t.includes('raised prism'));

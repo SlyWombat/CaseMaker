@@ -87,7 +87,7 @@ describe('#700 the wizard’s engrave text', () => {
     insideMargin(job, job.labels[0]!);
   });
 
-  it('leaves the k3 job with no blocking finding, and generating with the recommended cutter', () => {
+  it('leaves the k3 job with no blocking finding, and generating with the recommended cutter', async () => {
     badgeStarter();
     useEngraveJobStore.getState().addEngraveText('Zoomba', { depth: 0.5, font: DEFAULT_FONT_ID });
     // The recommendation lands on the 1 mm flat end (#699's fixture); the engine needs the job to
@@ -100,7 +100,7 @@ describe('#700 the wizard’s engrave text', () => {
     expect(findings.filter((f) => f.code === 'vise-jaw-collision')).toEqual([]);
     expect(findings.filter((f) => f.severity === 'error')).toEqual([]);
 
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.nc).not.toBeNull();

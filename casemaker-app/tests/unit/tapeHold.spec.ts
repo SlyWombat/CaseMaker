@@ -203,26 +203,26 @@ function tapedJob(over: Partial<EngraveJob> = {}): EngraveJob {
 }
 
 describe('#711 the rule in the pipeline', () => {
-  it('a taped job that holds generates, with no tape findings', () => {
-    const g = generate(tl, tapedJob());
+  it('a taped job that holds generates, with no tape findings', async () => {
+    const g = await generate(tl, tapedJob());
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.findings.filter((f) => f.code.startsWith('tape-'))).toEqual([]);
   });
 
-  it('#727 F9 — the freed piece is judged at the PROFILE pass, so the Star’s 64 mm² holds', () => {
+  it('#727 F9 — the freed piece is judged at the PROFILE pass, so the Star’s 64 mm² holds', async () => {
     // ⌀1 with the pocket step-down overridden to 1 mm: the pocket rule would ask 100 mm², but the
     // pass that FREES the Star is the profile slot at half that — 50 mm² — and the Star's 64 mm²
     // holds. It used to be refused for a pass that never cut it.
-    const g = generate(tl, tapedJob({ cutOverride: { stepDown: 1 }, shapes: [STAR], cutouts: [STAR_CUT] }));
+    const g = await generate(tl, tapedJob({ cutOverride: { stepDown: 1 }, shapes: [STAR], cutouts: [STAR_CUT] }));
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.findings.some((x) => x.code === 'tape-hold-piece')).toBe(false);
     expect(g.findings.some((x) => x.code === 'tape-hold-stock')).toBe(false);
   });
 
-  it('a piece too small even at the profile pass is refused, and the piece is measured', () => {
+  it('a piece too small even at the profile pass is refused, and the piece is measured', async () => {
     const small: EngraveJob['shapes'][number] = { ...STAR, id: 'shape-small', name: 'Small', width: 10, height: 10 };
     const smallCut: EngraveCutout = { ...STAR_CUT, id: 'cut-small', name: 'Small', of: 'shape-small' };
-    const g = generate(tl, tapedJob({ cutOverride: { stepDown: 1 }, shapes: [small], cutouts: [smallCut] }));
+    const g = await generate(tl, tapedJob({ cutOverride: { stepDown: 1 }, shapes: [small], cutouts: [smallCut] }));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     const f = g.findings.filter((x) => x.code === 'tape-hold-piece');
@@ -233,26 +233,26 @@ describe('#711 the rule in the pipeline', () => {
     expect(g.findings.some((x) => x.code === 'tape-hold-stock')).toBe(false);
   });
 
-  it('the same piece with two tabs is not cut free, so the tape rule does not judge it', () => {
+  it('the same piece with two tabs is not cut free, so the tape rule does not judge it', async () => {
     const tabbed: EngraveCutout = { ...STAR_CUT, tabs: { count: 2, width: 4, height: 1 } };
-    const g = generate(tl, tapedJob({ cutOverride: { stepDown: 1 }, shapes: [STAR], cutouts: [tabbed] }));
+    const g = await generate(tl, tapedJob({ cutOverride: { stepDown: 1 }, shapes: [STAR], cutouts: [tabbed] }));
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.findings.some((x) => x.code === 'tape-hold-piece')).toBe(false);
   });
 
-  it('a VISE job is not judged by the tape rule at all', () => {
-    const g = generate(tl, { ...tapedJob({ cutOverride: { stepDown: 1 }, shapes: [STAR], cutouts: [STAR_CUT] }), workholding: defaultEngraveJob().workholding });
+  it('a VISE job is not judged by the tape rule at all', async () => {
+    const g = await generate(tl, { ...tapedJob({ cutOverride: { stepDown: 1 }, shapes: [STAR], cutouts: [STAR_CUT] }), workholding: defaultEngraveJob().workholding });
     expect(g.findings.some((x) => x.code.startsWith('tape-'))).toBe(false);
   });
 
-  it('a taped block taller than its narrowest width is warned, not blocked', () => {
+  it('a taped block taller than its narrowest width is warned, not blocked', async () => {
     const base = defaultEngraveJob();
     const label = { ...base.labels[0]!, text: 'A', size: 4, depth: 0.5, position: { x: 12.5, y: 15 } };
     const tall: EngraveJob = {
       ...tapedJob({ stock: { ...base.stock, length: 25, width: 30, thickness: 30 } }),
       labels: [label],
     };
-    const g = generate(tl, tall);
+    const g = await generate(tl, tall);
     // The note is a WARNING: the job still generates.
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.findings.find((f) => f.code === 'tape-tall-stock')?.severity).toBe('warning');

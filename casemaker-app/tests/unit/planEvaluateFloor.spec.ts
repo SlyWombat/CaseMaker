@@ -64,17 +64,17 @@ function planWith(rest: ToolLibraryEntry): CandidatePlan {
   return { cutters, source: Object.fromEntries(cutters.map((c) => [c.key, 'owned' as const])) };
 }
 
-function raisedRow(out: ReturnType<typeof evaluatePlan>) {
+function raisedRow(out: Awaited<ReturnType<typeof evaluatePlan>>) {
   const row = out.items.find((i) => i.id === 'rest-clear');
   if (row === undefined) throw new Error(`no 'rest-clear' row; items: ${out.items.map((i) => i.id).join(', ')}`);
   return row;
 }
 
 describe('#864 the floor a V rest leaves', () => {
-  it('j20: the 90° chamfer reaches 1.5375 of the 6 mm floor, and the score says so', () => {
+  it('j20: the 90° chamfer reaches 1.5375 of the 6 mm floor, and the score says so', async () => {
     clearPlanEvaluations();
     const job = j20();
-    const out = evaluatePlan(job, planWith(C), CTX);
+    const out = await evaluatePlan(job, planWith(C), CTX);
     const row = raisedRow(out);
     // The cone's height over the design's depth — the share of the floor the rest reaches.
     const share = 1.5375 / 6;
@@ -85,24 +85,24 @@ describe('#864 the floor a V rest leaves', () => {
     expect(notch?.floorShare).toBeCloseTo(share, 4);
   }, 120_000);
 
-  it('a flat rest reaches the whole floor, and the plan scores better than the V’s', () => {
+  it('a flat rest reaches the whole floor, and the plan scores better than the V’s', async () => {
     clearPlanEvaluations();
     const job = j20();
-    const flat = evaluatePlan(job, planWith(F), CTX);
+    const flat = await evaluatePlan(job, planWith(F), CTX);
     const row = raisedRow(flat);
     expect(row.floorShare).toBeUndefined();
     // The raised measure may keep a hair of a pinch at the 1 mm flat's width; the floor is whole.
     expect(row.fidelity).toBeGreaterThan(0.99);
     // The whole-plan worst, which the ranking compares, is the V plan's to lose.
-    const worst = (out: ReturnType<typeof evaluatePlan>): number => Math.min(...out.items.map((i) => i.fidelity));
-    const v = evaluatePlan(job, planWith(C), CTX);
+    const worst = (out: Awaited<ReturnType<typeof evaluatePlan>>): number => Math.min(...out.items.map((i) => i.fidelity));
+    const v = await evaluatePlan(job, planWith(C), CTX);
     expect(worst(v)).toBeLessThan(worst(flat) - 1e-9);
   }, 180_000);
 
   it('the measured pick no longer rests j20 with the V — whatever wins reaches the floor', async () => {
     clearPlanEvaluations();
     const job = j20();
-    const pick = await smartPick(job, [O, C, F], [], (plan) => evaluatePlan(job, plan, CTX));
+    const pick = await smartPick(job, [O, C, F], [], async (plan) => await evaluatePlan(job, plan, CTX));
     // The chamfer as a rest leaves 74 % of the floor's depth standing; the plan with it scores
     // 0.256 on the raised cutaway and cannot win once the floor is in the score.
     expect(pick.chosen.plan.cutters.every((c) => c.key !== C.key)).toBe(true);

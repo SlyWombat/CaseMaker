@@ -166,9 +166,9 @@ describe('the engine is handed the cone’s body (#741)', () => {
 });
 
 describe('a posted deep V trace sweeps the capped cone (#741)', () => {
-  it('removes the body-capped stroke, not the unbounded flank', () => {
+  it('removes the body-capped stroke, not the unbounded flank', async () => {
     const job = traceJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     if (g.nc === null) return;

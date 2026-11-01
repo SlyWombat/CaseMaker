@@ -109,14 +109,14 @@ function expectItemsFacesNeck(job: EngraveJob, g: EngraveGenerated): void {
 }
 
 describe('#849 — a mixed job with a neck cuts items, faces, then the neck', () => {
-  it('a legacy document posts three programs, each verified and each passing its own oracle', () => {
+  it('a legacy document posts three programs, each verified and each passing its own oracle', async () => {
     const job = rod([FLAT], NECK);
-    const g = engraveGenerate(tl, job, TOOL, [], null);
+    const g = await engraveGenerate(tl, job, TOOL, [], null);
     expectItemsFacesNeck(job, g);
     // The wrapped CAM is unchanged: the items file's cuts followed by the neck file's are exactly
     // the cuts of the same job without its faces, whose one file ends on the neck.
     const cuts = (nc: string): string[] => nc.split('\n').filter((line) => /^G1\b/.test(line));
-    const whole = engraveGenerate(tl, rod([], NECK), TOOL, [], null);
+    const whole = await engraveGenerate(tl, rod([], NECK), TOOL, [], null);
     expect(whole.programs).toHaveLength(1);
     expect([...cuts(g.programs[0]!.nc), ...cuts(g.programs[2]!.nc)]).toEqual(cuts(whole.programs[0]!.nc));
     judgeEach(job, g);
@@ -130,21 +130,21 @@ describe('#849 — a mixed job with a neck cuts items, faces, then the neck', ()
     expect(cut1.steps.some((step) => /Saw the part off/.test(step.text))).toBe(false);
   }, 600_000);
 
-  it('a setup’d document posts the same three files', () => {
+  it('a setup’d document posts the same three files', async () => {
     const job = withSetup(rod([FLAT], NECK));
-    const g = engraveGenerate(tl, job, TOOL, [], null);
+    const g = await engraveGenerate(tl, job, TOOL, [], null);
     expectItemsFacesNeck(job, g);
-    const legacy = engraveGenerate(tl, rod([FLAT], NECK), TOOL, [], null);
+    const legacy = await engraveGenerate(tl, rod([FLAT], NECK), TOOL, [], null);
     expect(g.programs.map((p) => p.programHash)).toEqual(legacy.programs.map((p) => p.programHash));
   }, 600_000);
 });
 
 describe('#849 — a face cut into the neck’s section is refused by name', () => {
-  it('a flat deeper than the neck’s floor', () => {
+  it('a flat deeper than the neck’s floor', async () => {
     // The neck's floor is 6.5 mm below the surface; a 7 mm flat leaves less than ⌀7 mm through it.
     const job = rod([{ id: 'deep', kind: 'flat', a: 0, depth: 7 }], NECK);
     for (const doc of [job, withSetup(job)]) {
-      const g = engraveGenerate(tl, doc, TOOL, [], null);
+      const g = await engraveGenerate(tl, doc, TOOL, [], null);
       expect(g.ok).toBe(false);
       expect(g.programs).toEqual([]);
       const f = g.findings.find((x) => x.code === 'face-cuts-neck');
@@ -155,16 +155,16 @@ describe('#849 — a face cut into the neck’s section is refused by name', () 
     }
   });
 
-  it('a cross-hole through the neck’s span', () => {
-    const g = engraveGenerate(tl, rod([FLAT, { id: 'x', kind: 'cross-hole', a: 0, diameter: 3.175, atX: 6 }], NECK), TOOL, [], null);
+  it('a cross-hole through the neck’s span', async () => {
+    const g = await engraveGenerate(tl, rod([FLAT, { id: 'x', kind: 'cross-hole', a: 0, diameter: 3.175, atX: 6 }], NECK), TOOL, [], null);
     expect(g.ok).toBe(false);
     const f = g.findings.find((x) => x.code === 'face-cuts-neck');
     expect(f?.labelId).toBe('x');
     expect(f?.message).toMatch(/^The cross-hole at A 0° cuts into the neck for parting/);
   });
 
-  it('a cross-hole clear of the neck is not refused by it', () => {
-    const g = engraveGenerate(tl, rod([{ id: 'x', kind: 'cross-hole', a: 0, diameter: 3.175, atX: 30 }], NECK), TOOL, [], null);
+  it('a cross-hole clear of the neck is not refused by it', async () => {
+    const g = await engraveGenerate(tl, rod([{ id: 'x', kind: 'cross-hole', a: 0, diameter: 3.175, atX: 30 }], NECK), TOOL, [], null);
     expect(g.findings.some((x) => x.code === 'face-cuts-neck')).toBe(false);
     expect(g.ok, JSON.stringify(g.findings.filter((f) => f.severity === 'error'))).toBe(true);
     expect(g.programs).toHaveLength(3);
@@ -180,8 +180,8 @@ describe('#849 — a job without faces, or without a neck, posts exactly what it
     ['neck, no faces, setups', () => withSetup(rod([], NECK)), ['a25333d7']],
   ];
   for (const [name, make, want] of cases) {
-    it(name, () => {
-      const g = engraveGenerate(tl, make(), TOOL, [], null);
+    it(name, async () => {
+      const g = await engraveGenerate(tl, make(), TOOL, [], null);
       expect(g.ok).toBe(true);
       expect(hashes(g)).toEqual(want);
       // #844 gives every program its own `predicted` on main, so only the neck flag is pinned absent.

@@ -167,8 +167,8 @@ function rectJob(): EngraveJob {
 }
 
 /** Generate, verify and load a job through the real session; every error gate must be clean. */
-function run(job: EngraveJob, shop: EngraveShopOpts = {}): { g: EngraveGenerated; session: SimSession; load: SimLoadOk } {
-  const g = generate(tl, job, null, [], undefined, shop);
+async function run(job: EngraveJob, shop: EngraveShopOpts = {}): Promise<{ g: EngraveGenerated; session: SimSession; load: SimLoadOk }> {
+  const g = await generate(tl, job, null, [], undefined, shop);
   expect(g.errors).toEqual([]);
   expect(g.ok).toBe(true);
   expect(g.nc).not.toBeNull();
@@ -227,8 +227,8 @@ describe('combined shapes, simulated (#215)', () => {
   // timeout than vitest's 5 s default — the point is a REAL slice, not a small one.
   it(
     'leaves the island of a cut-away standing, at full height (#215)',
-    () => {
-      const { g, session, load } = run(islandJob());
+    async () => {
+      const { g, session, load } = await run(islandJob());
       try {
         // The plan is one cut-away: a 10 × 6 panel with a ⌀3 island removed.
         expect(g.predicted).toHaveLength(1);
@@ -260,8 +260,8 @@ describe('combined shapes, simulated (#215)', () => {
 
   it(
     'generates, verifies, simulates and passes the oracle for raised text (#215)',
-    () => {
-      const { g, session, load } = run(raisedTextJob());
+    async () => {
+      const { g, session, load } = await run(raisedTextJob());
       try {
         // One cut-away region; its opened outline is the cleared panel with the glyphs as holes.
         expect(g.predicted).toHaveLength(1);
@@ -284,8 +284,8 @@ describe('combined shapes, simulated (#215)', () => {
     30_000,
   );
 
-  it('puts the overlap of two pockets at the deeper floor (#215)', () => {
-    const { g, session, load } = run(overlapJob());
+  it('puts the overlap of two pockets at the deeper floor (#215)', async () => {
+    const { g, session, load } = await run(overlapJob());
     try {
       // At Z = −1.5 the depth-1 pocket (`a`) is not yet cut, but the depth-2 pocket (`b`) is, so
       // the overlap the two share is VOID...
@@ -312,8 +312,8 @@ describe('combined shapes, simulated (#215)', () => {
   // 0.2 mm inside the design; at the finishing checkpoint the removal reaches full depth.
   it(
     'shows the roughing removal, then the finishing removal at full depth (#250)',
-    () => {
-      const { g, session, load } = run(rectJob(), {
+    async () => {
+      const { g, session, load } = await run(rectJob(), {
         finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
       });
       try {

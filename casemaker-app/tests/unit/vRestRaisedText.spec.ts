@@ -112,9 +112,9 @@ describe('#765 — a V-bit takes the raised-text rest', () => {
     expect(vBitRestRefusal(coinJob(false), V)).toMatch(/V-bit is not a rest cutter/);
   });
 
-  it('the coin’s ⌀2 + 0.1 mm V plan posts two programs, the second cut by the V', () => {
+  it('the coin’s ⌀2 + 0.1 mm V plan posts two programs, the second cut by the V', async () => {
     const job = withPlan(coinJob(true));
-    const gen = engraveGenerate(tl, job, O2, [], null, undefined, { tools: [O2_ENTRY, V_ENTRY], feeds: [...FEEDS_TABLE, V_FEEDS] });
+    const gen = await engraveGenerate(tl, job, O2, [], null, undefined, { tools: [O2_ENTRY, V_ENTRY], feeds: [...FEEDS_TABLE, V_FEEDS] });
     expect(gen.errors).toEqual([]);
     expect(gen.ok).toBe(true);
     expect(gen.programs).toHaveLength(2);
@@ -130,7 +130,7 @@ describe('#765 — a V-bit takes the raised-text rest', () => {
     expect(gen.findings.some((f) => f.severity === 'error' && /V-bit is not a rest cutter/.test(f.message))).toBe(false);
   });
 
-  it('without raised text the same rest is refused with #486’s sentence', () => {
+  it('without raised text the same rest is refused with #486’s sentence', async () => {
     // A plain region job — one dish cut by the flat, the V named as its rest. There is no
     // raised text for the V to open, so #486's rule stands and the run stops with its sentence.
     const base: EngraveJob = {
@@ -155,7 +155,7 @@ describe('#765 — a V-bit takes the raised-text rest', () => {
       toolKey: O2_KEY,
       setups: [{ ...setup, tools: [O2_KEY, V_KEY], toolItems: { [O2_KEY]: ['dish'], [V_KEY]: [] } }],
     };
-    const gen = engraveGenerate(tl, job, O2, [], null, undefined, { tools: [O2_ENTRY, V_ENTRY], feeds: [...FEEDS_TABLE, V_FEEDS] });
+    const gen = await engraveGenerate(tl, job, O2, [], null, undefined, { tools: [O2_ENTRY, V_ENTRY], feeds: [...FEEDS_TABLE, V_FEEDS] });
     expect(gen.ok).toBe(false);
     expect(gen.findings.some((f) => /V-bit is not a rest cutter/.test(f.message))).toBe(true);
   });

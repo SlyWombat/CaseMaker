@@ -10,10 +10,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  planLevel,
   polygonalizeMask,
   roughingAdaptiveMoves,
   roughLevelMask,
   roughLevelRegion,
+  type LevelPlanResult,
+  type LevelPlanner,
 } from '@/engine/cnc/cam/rough3d';
 import { adaptiveSettings, planAdaptive } from '@/engine/cnc/cam/adaptive';
 import { HOP_Z, SAFE_Z, type CamMove } from '@/engine/cnc/cam/ir';
@@ -98,16 +101,16 @@ function serialReference(hf: GoalHeightfield, allowance: number): CamMove[] {
   return moves;
 }
 
-function adaptive(hf: GoalHeightfield, allowance = 0.3) {
-  const r = roughingAdaptiveMoves(hf, FEEDS, allowance, { tool: MILL, adaptive: adaptiveSettings(null).settings, safeZ: SAFE_Z, hopZ: HOP_Z });
+async function adaptive(hf: GoalHeightfield, allowance = 0.3) {
+  const r = await roughingAdaptiveMoves(hf, FEEDS, allowance, { tool: MILL, adaptive: adaptiveSettings(null).settings, safeZ: SAFE_Z, hopZ: HOP_Z });
   if (!r.ok) throw new Error(r.reason);
   return r.result;
 }
 
 describe('#868 — a repeated region reuses the level above’s plan', () => {
-  it('a plateau reuses every level and is byte-identical to planning each one', () => {
+  it('a plateau reuses every level and is byte-identical to planning each one', async () => {
     const hf = plateau();
-    const result = adaptive(hf);
+    const result = await adaptive(hf);
     // Five layers: four at the 0.5 mm step and the floor layer riding the allowance at a 0.2 mm
     // thickness. The first three that repeat the step reuse (the floor plans afresh, its thickness
     // differs — the same region at a different depth is a different plan).
@@ -116,9 +119,9 @@ describe('#868 — a repeated region reuses the level above’s plan', () => {
     expect(result.moves).toEqual(serialReference(hf, 0.3));
   });
 
-  it('a staircase mixes both, and the plan is still exactly the serial one', () => {
+  it('a staircase mixes both, and the plan is still exactly the serial one', async () => {
     const hf = staircase();
-    const result = adaptive(hf);
+    const result = await adaptive(hf);
     // The upper terrace is the same region from −1 down to −4.5, so those levels repeat; the floor
     // level adds the lower terrace and plans afresh.
     expect(result.reusedLevels).toBeGreaterThan(0);
@@ -140,12 +143,75 @@ describe('#868 — a repeated region reuses the level above’s plan', () => {
     expect(top).not.toEqual(below);
   });
 
-  it('the reuse keeps the engagement cap it was planned under', () => {
+  it('the reuse keeps the engagement cap it was planned under', async () => {
     const hf = plateau();
-    const result = adaptive(hf);
+    const result = await adaptive(hf);
     const flat = cuttingRadiusForSweep(MILL);
     const cap = flat.ok ? adaptiveSettings(null).settings.engagementFraction * 2 * flat.radius : 0;
     expect(result.capMm).toBeCloseTo(cap, 9);
     expect(result.maxEngagementMm).toBeLessThanOrEqual(cap + 1e-9);
+  });
+});
+
+// #881 — THE POOL IS INVISIBLE TO THE ASSEMBLY. A planner is just the same `planLevel` calls made
+// somewhere else; these pin that the caller consumes its results in level order — including out of
+// completion order — and that a pool refusal is the CAM's own refusal.
+describe('#881 — the level planner', () => {
+  /** A planner that answers asynchronously, in REVERSE completion order, and counts its calls. */
+  function reversePlanner(): { planner: LevelPlanner; asked: () => number } {
+    let asked = 0;
+    return {
+      asked: () => asked,
+      planner: {
+        async planLevels(requests, shared, onPlanned) {
+          asked += requests.length;
+          const results = await Promise.all(
+            requests.map(
+              async (request, i) =>
+                await new Promise<LevelPlanResult>((resolve) => setTimeout(() => resolve(planLevel(shared, request)), (requests.length - i) % 3)),
+            ),
+          );
+          onPlanned?.(results.length, results.length);
+          return results;
+        },
+      },
+    };
+  }
+
+  const run = (hf: GoalHeightfield, planner?: LevelPlanner) =>
+    roughingAdaptiveMoves(hf, FEEDS, 0.3, {
+      tool: MILL,
+      adaptive: adaptiveSettings(null).settings,
+      safeZ: SAFE_Z,
+      hopZ: HOP_Z,
+      ...(planner === undefined ? {} : { planner }),
+    });
+
+  it('a planner plans every non-reused level, and the moves are byte-identical to the serial run', async () => {
+    const hf = staircase();
+    const serial = await run(hf);
+    if (!serial.ok) throw new Error(serial.reason);
+    const { planner, asked } = reversePlanner();
+    const pooled = await run(hf, planner);
+    if (!pooled.ok) throw new Error(pooled.reason);
+    // Every level that was not reused went to the planner, and no reused one did.
+    expect(asked()).toBe(serial.result.layers - serial.result.reusedLevels);
+    expect(pooled.result.moves).toEqual(serial.result.moves);
+    expect(pooled.result.reusedLevels).toBe(serial.result.reusedLevels);
+    expect(pooled.result.maxEngagementMm).toBe(serial.result.maxEngagementMm);
+  });
+
+  it('a pool refusal refuses the CAM with the level it failed on', async () => {
+    const hf = staircase();
+    const refuse: LevelPlanner = {
+      async planLevels(requests, shared, onPlanned) {
+        const first = requests[0]!;
+        onPlanned?.(1, requests.length);
+        return [{ ok: false, reason: 'the planner said no' }, ...requests.slice(1).map((r) => planLevel(shared, r))];
+      },
+    };
+    const out = await run(hf, refuse);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toMatch(/adaptive level at Z .*the planner said no/);
   });
 });

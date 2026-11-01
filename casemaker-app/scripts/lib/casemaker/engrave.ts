@@ -908,7 +908,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // crash there is caught (never a bare throw) and answered as a stopped run at `cam`.
     let generated: EngraveGenerated;
     try {
-      generated = engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
+      // #881 — the pipeline is async (a pool can plan the roughing levels); the CLI runs it with
+      // no pool, so this is the same serial plan it always was.
+      generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
     } catch (e) {
       if (isCliExit(e)) throw e;
       return {
@@ -1524,7 +1526,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // slice A simulates each one: fidelity, pinches, time, risk. The chosen plan and its
         // reasons are printed here; the run writes the plan the search chose.
         const searchTools = searchToolsFor(job);
-        const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
+        const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation | Promise<PlanEvaluation> =>
           evaluatePlan(job, plan, { tl, tools: searchTools, catalogue: catalogueRows, shop, calibration: null }, { level });
         const searchStart = Date.now();
         // #766 D — `smartPick` is async: the evaluator may be (the Design panel's worker one
@@ -1670,7 +1672,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const setup = jobSetups(parsed.job)[setupIndex]!;
         const sub = setupWorkJob(parsed.job, tools, setupIndex);
         if (sub === null) continue;
-        const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
+        const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation | Promise<PlanEvaluation> =>
           evaluatePlan(sub, plan, { tl, tools, catalogue: catalogueRows, shop, calibration: null }, { level });
         const pick = await smartPick(sub, tools, catalogueRows, evaluate);
         const chosen = pick.runnable;

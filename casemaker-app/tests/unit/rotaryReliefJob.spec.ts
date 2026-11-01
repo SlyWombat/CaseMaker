@@ -88,9 +88,9 @@ function rotaryJob(target: EngraveTargetObject): EngraveJob {
 const CONE = (x: number): number => 4 + ((x + 15) / 30) * 5; // 4 → 9 mm over 30 mm
 
 describe('#723 R-3 — a goal on a rod generates the relief program', () => {
-  it('posts a rotary program and says what it is on the sheet facts', () => {
+  it('posts a rotary program and says what it is on the sheet facts', async () => {
     const job = rotaryJob(goal(CONE));
-    const out = engraveGenerate(tl, job, BALL, [], null, undefined, {});
+    const out = await engraveGenerate(tl, job, BALL, [], null, undefined, {});
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(1);
@@ -102,9 +102,9 @@ describe('#723 R-3 — a goal on a rod generates the relief program', () => {
     expect(out.surface3d?.resolutionNote).toContain('rod');
   });
 
-  it('#786 slice 2 — a part wider than the rod is cut clipped to the rod, and says what is lost', () => {
+  it('#786 slice 2 — a part wider than the rod is cut clipped to the rod, and says what is lost', async () => {
     const wide = goal(() => 12);
-    const out = engraveGenerate(tl, rotaryJob(wide), BALL, [], null, undefined, {});
+    const out = await engraveGenerate(tl, rotaryJob(wide), BALL, [], null, undefined, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     const short = out.findings.find((f) => f.code === 'goal-rotary-oversize');
     expect(short?.severity).toBe('warning');
@@ -112,14 +112,14 @@ describe('#723 R-3 — a goal on a rod generates the relief program', () => {
     expect(out.programs).toHaveLength(1);
   });
 
-  it('refuses a part that reaches the axis with the design’s sentence', () => {
-    const out = engraveGenerate(tl, rotaryJob(goal((x) => Math.max(0, 4 + (x / 15) * -4))), BALL, [], null, undefined, {});
+  it('refuses a part that reaches the axis with the design’s sentence', async () => {
+    const out = await engraveGenerate(tl, rotaryJob(goal((x) => Math.max(0, 4 + (x / 15) * -4))), BALL, [], null, undefined, {});
     expect(out.ok).toBe(false);
     expect(out.findings.some((f) => f.code === 'axis-crossing')).toBe(true);
   });
 
-  it('informs a part outside the free span and cuts what the rod holds (#786 slice 1 part 2)', () => {
-    const out = engraveGenerate(tl, rotaryJob(goal(CONE, { position: { x: 80, y: 0, z: 0 } })), BALL, [], null, undefined, {});
+  it('informs a part outside the free span and cuts what the rod holds (#786 slice 1 part 2)', async () => {
+    const out = await engraveGenerate(tl, rotaryJob(goal(CONE, { position: { x: 80, y: 0, z: 0 } })), BALL, [], null, undefined, {});
     // With the tailstock out, past the stick-out the field cuts air: the finding says so and the
     // program posts. (With it in, the same reach is the band's and stays an error.)
     expect(out.ok).toBe(true);
@@ -128,9 +128,9 @@ describe('#723 R-3 — a goal on a rod generates the relief program', () => {
     expect(f!.severity).toBe('warning');
   });
 
-  it('refuses a V-bit as the relief’s cutter', () => {
+  it('refuses a V-bit as the relief’s cutter', async () => {
     const v = flatEndMill(0.3, { shape: 'engraving', name: '0.3 mm V', tipDiameter: 0.3, halfAngle: 15 });
-    const out = engraveGenerate(tl, rotaryJob(goal(CONE)), v, [], null, undefined, {});
+    const out = await engraveGenerate(tl, rotaryJob(goal(CONE)), v, [], null, undefined, {});
     expect(out.ok).toBe(false);
     expect(out.errors[0]?.message).toMatch(/cannot finish a rotary relief/);
   });

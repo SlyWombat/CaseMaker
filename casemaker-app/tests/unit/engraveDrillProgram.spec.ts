@@ -77,8 +77,8 @@ function drillJob(drills: EngraveDrill[], overrides: Partial<EngraveJob> = {}): 
 const POINT = pointLength(3, 118);
 
 describe('a drill bit is its own program (#434)', () => {
-  it('posts, verifies, and states the point in the plan and the file', () => {
-    const g = generate(tl, drillJob([hole(4)]), null, [], undefined, SHOP);
+  it('posts, verifies, and states the point in the plan and the file', async () => {
+    const g = await generate(tl, drillJob([hole(4)]), null, [], undefined, SHOP);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
@@ -118,8 +118,8 @@ describe('a drill bit is its own program (#434)', () => {
     expect(g.programs[0]!.drill?.plans).toHaveLength(1);
   }, 30_000);
 
-  it('hands the plan the labelled fallback when the caller sends no drill settings', () => {
-    const g = generate(tl, drillJob([hole(2)]));
+  it('hands the plan the labelled fallback when the caller sends no drill settings', async () => {
+    const g = await generate(tl, drillJob([hole(2)]));
     expect(g.ok).toBe(true);
     expect(g.drill!.settings.pointAngleDeg).toBe(118);
     expect(g.drill!.sources.pointAngleDeg).toBe('fallback');
@@ -184,7 +184,7 @@ describe('the drill geometry in validateJob (#434)', () => {
     expect(reach).toContain('through-tool-reach');
   });
 
-  it('drills a through hole into the board and verifies clean (#218)', () => {
+  it('drills a through hole into the board and verifies clean (#218)', async () => {
     const long = flatEndMill(3, {
       name: '3 mm drill',
       typeText: 'Drill',
@@ -200,7 +200,7 @@ describe('the drill geometry in validateJob (#434)', () => {
     const through = { ...(hole(2) as Extract<EngraveDrill, { kind: 'drill' }>), through: true };
     const job = drillJob([through], { sacrificial: presetPartOnBoard(), tool: long });
 
-    const g = generate(tl, job, null, [], undefined, SHOP);
+    const g = await generate(tl, job, null, [], undefined, SHOP);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
@@ -218,9 +218,9 @@ describe('the drill geometry in validateJob (#434)', () => {
     expect(finding?.message).toContain('drill bit');
   });
 
-  it('stops a mixed legacy job at findings, before any program is posted', () => {
+  it('stops a mixed legacy job at findings, before any program is posted', async () => {
     const base = defaultEngraveJob();
-    const g = generate(tl, drillJob([hole(2)], { labels: [base.labels[0]!] }), null, [], undefined, SHOP);
+    const g = await generate(tl, drillJob([hole(2)], { labels: [base.labels[0]!] }), null, [], undefined, SHOP);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.nc).toBeNull();
@@ -237,7 +237,7 @@ describe('the drill is one more (setup, tool) entry (#434 × #472)', () => {
     back: 'back',
   } as const;
 
-  it('splits an engrave + drill setup into two programs, and the drills leave program 1', () => {
+  it('splits an engrave + drill setup into two programs, and the drills leave program 1', async () => {
     const base = defaultEngraveJob();
     base.toolKey = 'flat-1.0'; // #516 item 5 — the default job no longer seeds a cutter
     const label = { ...base.labels[0]!, id: 'title' };
@@ -266,7 +266,7 @@ describe('the drill is one more (setup, tool) entry (#434 × #472)', () => {
       [DRILL_KEY, [port.id]],
     ]);
 
-    const g = engraveGenerate(tl, job, jobTool(job), [], null, undefined, SHOP_WITH_DRILL);
+    const g = await engraveGenerate(tl, job, jobTool(job), [], null, undefined, SHOP_WITH_DRILL);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(2);
@@ -352,7 +352,7 @@ describe('#786 slice 1 part 2 — a hole off the edge informs and still drills',
   beforeEach(() => setInventoryEntries([DRILL_ENTRY]));
   afterEach(() => resetRegistry());
 
-  it('names the edge and the overhang, and the drill program verifies', () => {
+  it('names the edge and the overhang, and the drill program verifies', async () => {
     // A 3 mm drill at x = 1: the rim reaches 0.5 mm past the left edge.
     const job = drillJob([hole(2, { x: 1, y: 30 })]);
     const outside = validateJob(job).find((f) => f.code === 'drill-outside-stock');
@@ -361,7 +361,7 @@ describe('#786 slice 1 part 2 — a hole off the edge informs and still drills',
     expect(outside!.message).toContain('0.5 mm past the stock’s left edge');
     expect(outside!.message).toContain('Generate cuts it as it is');
 
-    const g = engraveGenerate(tl, job, jobTool(job), [], null, undefined, SHOP_WITH_DRILL);
+    const g = await engraveGenerate(tl, job, jobTool(job), [], null, undefined, SHOP_WITH_DRILL);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(1);

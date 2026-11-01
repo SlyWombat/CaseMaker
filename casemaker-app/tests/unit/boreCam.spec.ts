@@ -241,9 +241,9 @@ describe('bore CAM (#668)', () => {
     );
   });
 
-  it('cuts the same hole blind and through', () => {
+  it('cuts the same hole blind and through', async () => {
     const blind = boreJob([bore(10)]);
-    const gBlind = generate(tl, blind);
+    const gBlind = await generate(tl, blind);
     expect(gBlind.errors).toEqual([]);
     expect(gBlind.ok).toBe(true);
     // A 6 mm blank keeps the through cut inside the tool's 12 mm flute: throughDepth = 6 + 0.3.
@@ -256,16 +256,16 @@ describe('bore CAM (#668)', () => {
         under: { thickness: blind.breakthrough + 1, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'tape' },
       },
     };
-    const gThrough = generate(tl, through);
+    const gThrough = await generate(tl, through);
     expect(gThrough.errors).toEqual([]);
     expect(gThrough.ok).toBe(true);
     expect(gThrough.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
   });
 
   it('states the pitch and both its sources on the run sheet, naming the one that binds', () => {
-    const sheetFor = (diameter: number) => {
+    const sheetFor = async (diameter: number) => {
       const job = boreJob([bore(diameter, 4)]);
-      const g = generate(tl, job);
+      const g = await generate(tl, job);
       expect(g.ok).toBe(true);
       expect(g.bore?.items).toHaveLength(1);
       const texts = buildRunSheet(job, g, null)
@@ -285,11 +285,11 @@ describe('bore CAM (#668)', () => {
     expect(wide).toMatch(/step-down is the tighter/);
   });
 
-  it('passes the oracle on a hole narrow enough to need no floor spiral', () => {
+  it('passes the oracle on a hole narrow enough to need no floor spiral', async () => {
     // ⌀5 against a 3.175 cutter: the wall lap already sweeps the whole disc, so the path is the
     // ramp and the lap only — and the predicted cylinder must still be true at the floor.
     const job = boreJob([bore(5, 3)]);
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const tool = jobTool(job);
     if (tool === null) throw new Error(`${TOOL_KEY} is not in the tool library`);
@@ -303,9 +303,9 @@ describe('bore CAM (#668)', () => {
     }
   }, 60_000);
 
-  it('removes the cylinder it promises: π r² × depth, blind', () => {
+  it('removes the cylinder it promises: π r² × depth, blind', async () => {
     const job = boreJob([bore(10, 4)]);
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const tool = jobTool(job);
     if (tool === null) throw new Error(`${TOOL_KEY} is not in the tool library`);
@@ -426,7 +426,7 @@ describe('bore document (#668)', () => {
 });
 
 describe('bore oracle in-process (#668)', () => {
-  it('passes on a MIXED job: a pocket, a peck drill, a trace and a bore, swept together', () => {
+  it('passes on a MIXED job: a pocket, a peck drill, a trace and a bore, swept together', async () => {
     const base = defaultEngraveJob();
     const job: EngraveJob = {
       ...base,
@@ -464,7 +464,7 @@ describe('bore oracle in-process (#668)', () => {
       ],
       drills: [peckDrill(), bore(10, 4)],
     };
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);

@@ -35,13 +35,13 @@ function postCtx(job: EngraveJob): Parameters<typeof postZ1>[1] {
 }
 
 describe('repro #577 — sim+oracle determinism', () => {
-  it('sweeps the single-barrel job 20 times and reports oracle stability', () => {
+  it('sweeps the single-barrel job 20 times and reports oracle stability', async () => {
     const raw = readFileSync(new URL('../../../docs/bench/single-barrel.job.json', import.meta.url), 'utf8');
     const parsed = parseEngraveJob(JSON.parse(raw));
     if (!parsed.ok) throw new Error(parsed.errors.join('; '));
     const job = parsed.job;
     const tool = jobTool(job)!;
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.nc).not.toBeNull();
 
     const results: string[] = [];

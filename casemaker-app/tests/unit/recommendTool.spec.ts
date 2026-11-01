@@ -825,12 +825,12 @@ describe('recommendTool — the computed pick states its size and its material r
       expect(rec.compromise).toBe(false);
     });
 
-    it('leaves the badge + text job generating with no blocking finding', () => {
+    it('leaves the badge + text job generating with no blocking finding', async () => {
       const rec = recommendTool(badgeJob(), [metalFlat(), plainFlat()], gateCatalogue, (_key) => [
         row('name', 1),
       ]);
       const job: EngraveJob = { ...badgeJob(), toolKey: rec.key!, tool: plainFlat().tool };
-      const g = generate(tl, job, null, gateCatalogue);
+      const g = await generate(tl, job, null, gateCatalogue);
       expect(g.ok).toBe(true);
       expect(g.stage).toBe('done');
       expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -838,11 +838,11 @@ describe('recommendTool — the computed pick states its size and its material r
       expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
     });
 
-    it('the gate is the job’s own: Generate refuses the metal flat on the same job', () => {
+    it('the gate is the job’s own: Generate refuses the metal flat on the same job', async () => {
       // The other half of the claim: the cutter the old rule picked is not merely a preference —
       // the program will not run it on PLA.
       const job: EngraveJob = { ...badgeJob(), toolKey: 'inv:kz-metal-flat-1', tool: metalFlat().tool };
-      const g = generate(tl, job, null, gateCatalogue);
+      const g = await generate(tl, job, null, gateCatalogue);
       expect(g.ok).toBe(false);
       expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(true);
     });
@@ -908,7 +908,7 @@ describe('recommendTool — the computed pick states its size and its material r
       diameter: 4,
     });
 
-    it('a bore refuses the larger V-bit; the flat is picked and the job generates', () => {
+    it('a bore refuses the larger V-bit; the flat is picked and the job generates', async () => {
       const job: EngraveJob = { ...jobWithLabel('l1', 'CASE', 1), drills: [bore()] };
       const rec = recommendTool(job, [vBit(2), flat()], [], (_key) => [row('l1', 1)]);
       const v = candidate(rec, 'inv:v-30');
@@ -918,7 +918,7 @@ describe('recommendTool — the computed pick states its size and its material r
       expect(rec.key).toBe('inv:kz-flat-1');
 
       const withPick: EngraveJob = { ...job, toolKey: rec.key!, tool: flat().tool };
-      const g = generate(tl, withPick, null, []);
+      const g = await generate(tl, withPick, null, []);
       expect(g.ok).toBe(true);
       expect(g.stage).toBe('done');
       expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);

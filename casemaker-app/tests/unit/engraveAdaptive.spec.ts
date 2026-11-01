@@ -81,10 +81,10 @@ function defaults(map: ShopDefaults): ShopDefaults {
 }
 
 describe('the adaptive-clearing route a metal pocket takes (#666)', () => {
-  it('cuts a metal SHAPE pocket with adaptive clearing, and the run says so (#666)', () => {
+  it('cuts a metal SHAPE pocket with adaptive clearing, and the run says so (#666)', async () => {
     // No finish block: the strategy IS the whole cut. The `.nc` must name the operation, and the
     // run must carry the plan's own sentence — the engagement, the entry and the feeds row it ran.
-    const g = generate(tl, metalJob(), null, [CUT_ROW]);
+    const g = await generate(tl, metalJob(), null, [CUT_ROW]);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     const clearing = g.findings.find((f) => f.code === 'adaptive-clearing');
@@ -106,12 +106,12 @@ describe('the adaptive-clearing route a metal pocket takes (#666)', () => {
     expect(g.nc).toContain('(adaptive)');
   });
 
-  it('takes the ROUGH half of #250’s split and leaves the finishing rings alone (#666)', () => {
+  it('takes the ROUGH half of #250’s split and leaves the finishing rings alone (#666)', async () => {
     // What the app always asks for: `engraveRunStore` passes the finish allowance on every run, so
     // an adaptive route that only ran when nothing was split would never run at all. The roughing
     // pass is the plan (region eroded by the allowance, levels stopping above the floor); the
     // finishing pass stays the ideal outline in contour-parallel rings.
-    const g = generate(tl, metalJob(), null, [CUT_ROW], undefined, {
+    const g = await generate(tl, metalJob(), null, [CUT_ROW], undefined, {
       finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
     });
     expect(g.ok).toBe(true);
@@ -127,11 +127,11 @@ describe('the adaptive-clearing route a metal pocket takes (#666)', () => {
     expect(g.cam!.passes).toBe(3);
   });
 
-  it('falls back to contour-parallel rings when the planner declines, and the job still cuts (#666)', () => {
+  it('falls back to contour-parallel rings when the planner declines, and the job still cuts (#666)', async () => {
     // A grid cap of 1 000 cells cannot hold a 10 × 10 pocket at this engagement, so the planner
     // refuses `adaptive-region-too-large`. That is an engine limitation: the pocket keeps the rings
     // (and the straight plunge) it always had, and the run states why — a warning, never a refusal.
-    const g = generate(tl, metalJob(), null, [CUT_ROW], undefined, {
+    const g = await generate(tl, metalJob(), null, [CUT_ROW], undefined, {
       finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
       defaults: defaults({
         'adaptive.maxCells': { value: 1000, source: 'chosen', setAt: null, unit: null, note: null },

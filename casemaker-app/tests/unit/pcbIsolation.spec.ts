@@ -171,7 +171,7 @@ describe('the isolation reaches Generate (#743 P-5)', () => {
     if (!built.ok) return;
     const job = built.job;
     job.toolKey = ENGRAVER.key;
-    const gen = engraveGenerate(tl, job, ENGRAVER.tool, ROWS, null, undefined, { tools: [ENGRAVER, CORN] });
+    const gen = await engraveGenerate(tl, job, ENGRAVER.tool, ROWS, null, undefined, { tools: [ENGRAVER, CORN] });
     // #743 P-5 review — INFORM: the board still generates; the short is a warning on the run.
     expect(gen.errors).toEqual([]);
     expect(gen.ok).toBe(true);
@@ -190,7 +190,7 @@ describe('the isolation reaches Generate (#743 P-5)', () => {
     if (!built.ok) return;
     const job = built.job;
     job.toolKey = ENGRAVER.key;
-    const gen = engraveGenerate(tl, job, ENGRAVER.tool, ROWS, null, undefined, { tools: [ENGRAVER, CORN] });
+    const gen = await engraveGenerate(tl, job, ENGRAVER.tool, ROWS, null, undefined, { tools: [ENGRAVER, CORN] });
     expect(gen.errors).toEqual([]);
     expect(gen.ok).toBe(true);
     expect(gen.findings.some((f) => f.code === 'isolation-short')).toBe(false);

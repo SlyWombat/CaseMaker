@@ -244,9 +244,9 @@ describe('#785 — a rotary relief keeps its own judges', () => {
 });
 
 describe('#785 — Generate', () => {
-  it('refuses a known-short reach EARLY: the sentence, no CAM, no program', () => {
+  it('refuses a known-short reach EARLY: the sentence, no CAM, no program', async () => {
     const target = rampGoal();
-    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {});
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
     const refusal = out.findings.find((f) => f.code === 'goal-reach-short');
@@ -257,10 +257,10 @@ describe('#785 — Generate', () => {
     expect(out.programs).toEqual([]);
   }, 120_000);
 
-  it('cutWithinReach cuts the stock’s top band and says what is left', () => {
+  it('cutWithinReach cuts the stock’s top band and says what is left', async () => {
     const target = rampGoal({ cutWithinReach: true });
     const tool = flat({ fluteLength: 12 });
-    const out = generateGoalProgram(tallJob(target), target, tool, [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, tool, [], null, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.nc).not.toBeNull();
     const warning = out.findings.find((f) => f.code === 'goal-cut-top-band');
@@ -274,9 +274,9 @@ describe('#785 — Generate', () => {
     expect(out.surface3d?.notes.some((n) => n.includes("Cut only the stock's top 11 mm"))).toBe(true);
   }, 120_000);
 
-  it('an unrecorded reach does not stop Generate — the assumption is stated, the cut proceeds', () => {
+  it('an unrecorded reach does not stop Generate — the assumption is stated, the cut proceeds', async () => {
     const target = rampGoal();
-    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: null, id: null }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: null, id: null }), [], null, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.nc).not.toBeNull();
     const note = out.findings.find((f) => f.code === 'goal-reach-unrecorded');
@@ -284,10 +284,10 @@ describe('#785 — Generate', () => {
     expect(out.findings.some((f) => f.code === 'goal-reach-short')).toBe(false);
   }, 120_000);
 
-  it('#785 the goal CAM reports its stages, and the level and row counts reach the end', () => {
+  it('#785 the goal CAM reports its stages, and the level and row counts reach the end', async () => {
     const target = rampGoal({}, 8);
     const events: EngraveProgress[] = [];
-    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {}, (p) => events.push(p));
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {}, (p) => events.push(p));
     expect(out.ok).toBe(true);
     const stages = events.map((e) => e.stage);
     // `prepare` is the top-level `engraveGenerate`'s first event; the goal program itself starts
@@ -304,11 +304,11 @@ describe('#785 — Generate', () => {
     expect(finish.at(-1)?.label).toMatch(/^finishing row \d+ of \d+$/);
   });
 
-  it('#785 a goal whose program would exceed the stated memory budget is refused by name, with the numbers', () => {
+  it('#785 a goal whose program would exceed the stated memory budget is refused by name, with the numbers', async () => {
     // #889 — a fine grid alone no longer costs a level per cell (a level costs what it removes,
     // and the ramp's rows merge), so the oversized job is a finish at a 0.02 mm step-over too.
     const target = rampGoal({ surface: { gridPitchMm: 0.02, finishStepOverMm: 0.02 } }, 30);
-    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
@@ -339,7 +339,7 @@ describe('#785 — Generate', () => {
     // #785 follow-up — the suggested pitch IS the one-click fix: written onto the goal's grid, the
     // same job generates.
     const pitched = { ...target, surface: { ...(target.surface ?? {}), gridPitchMm: refusal!.suggestedPitchMm } };
-    const retry = generateGoalProgram(tallJob(pitched), pitched, flat({ fluteLength: 40 }), [], null, {});
+    const retry = await generateGoalProgram(tallJob(pitched), pitched, flat({ fluteLength: 40 }), [], null, {});
     expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(retry.findings.some((f) => f.code === 'goal-program-too-big')).toBe(false);
   }, 120_000);
@@ -354,7 +354,7 @@ describe('#785 — Generate', () => {
     const target = pitGoal(90, {
       surface: { gridPitchMm: 0.1, roughStepDownMm: 0.1, roughStepOverMm: 0.04, finishStepOverMm: 0.3 },
     });
-    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 150, shoulderLength: 150 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 150, shoulderLength: 150 }), [], null, {});
     expect(out.ok).toBe(false);
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
     expect(refusal?.budgetMb).toBeGreaterThan(640);
@@ -378,32 +378,32 @@ describe('#785 — Generate', () => {
     expect(built.goals[1]!.setupId).toBe(built.setups[1]!.id);
   }, 120_000);
 
-  it('#889 a deep goal at a fine grid plans: a roughing level costs what it removes, not every cell', () => {
+  it('#889 a deep goal at a fine grid plans: a roughing level costs what it removes, not every cell', async () => {
     // The pre-#889 estimate was (levels + 1) × covered cells: 30 mm at a 0.15 mm step-down on a
     // 0.1 mm grid is 200 levels over ~81,000 cells, some 16 million moves, refused.
     const target = rampGoal({ surface: { gridPitchMm: 0.1, roughStepDownMm: 0.15 } }, 30);
-    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.findings.some((f) => f.code === 'goal-program-too-big')).toBe(false);
     expect(out.cam!.cuttingMoves).toBeLessThan(200_000);
   }, 120_000);
 
-  it('#889 a step-down too fine for the budget is refused, and the step-down press is the one that fits', () => {
+  it('#889 a step-down too fine for the budget is refused, and the step-down press is the one that fits', async () => {
     const target = rampGoal({ surface: { gridPitchMm: 0.1, roughStepDownMm: 0.002 } }, 30);
-    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
     // #888/#889 — the sentence is the plain one; the step-down press is a NUMBER on the finding,
     // found by trying it (the panel draws it as "Thicker layers (N mm step-down, rougher walls)").
     expect(refusal?.message).toContain('This goal is too detailed to plan');
     expect(refusal?.suggestedStepDownMm).toBeGreaterThan(0.002);
     const stepped = { ...target, surface: { ...(target.surface ?? {}), roughStepDownMm: refusal!.suggestedStepDownMm } };
-    const retry = generateGoalProgram(tallJob(stepped), stepped, flat({ fluteLength: 40 }), [], null, {});
+    const retry = await generateGoalProgram(tallJob(stepped), stepped, flat({ fluteLength: 40 }), [], null, {});
     expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
   }, 120_000);
 
-  it('a goal within reach generates with no reach finding at all', () => {
+  it('a goal within reach generates with no reach finding at all', async () => {
     const target = rampGoal({}, 8);
-    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {});
     expect(out.ok).toBe(true);
     expect(out.findings.some((f) => f.code.startsWith('goal-reach') || f.code === 'goal-cut-top-band')).toBe(false);
   }, 120_000);

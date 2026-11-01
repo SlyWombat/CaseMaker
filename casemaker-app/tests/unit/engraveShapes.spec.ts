@@ -318,7 +318,7 @@ describe('⌀6 circle end to end (#214): generate → verify → simulate → or
   // the cutter CAN clear the whole shape — its centre is confined to ⌀2.825 and the tool's own
   // disc then reaches ⌀6 — so unlike a rectangle there is no unreachable corner, and the only gap
   // between the plan and π·3² is the polygonisation both the plan and the sweep share.
-  it('removes the opened area to a flat floor at the asked depth, and the oracle agrees', () => {
+  it('removes the opened area to a flat floor at the asked depth, and the oracle agrees', async () => {
     const job = shapeJob(circle({ id: 'c6', diameter: 6, depth: 2, name: 'port' }), {
       toolKey: 'flat-3.175x12-metal',
       // The built-in row's `(Metal)` name is on Makera's metal line and a PLA job carrying it is
@@ -332,7 +332,7 @@ describe('⌀6 circle end to end (#214): generate → verify → simulate → or
       }),
     });
 
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();

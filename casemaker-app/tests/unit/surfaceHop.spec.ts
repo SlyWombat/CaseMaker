@@ -84,16 +84,16 @@ function hopOf(nc: string): number {
 }
 
 describe('#649 the hop clears the fitted surface', () => {
-  it('keeps the flat program’s Z1 hop when there is no fitted frame', () => {
-    const g = generate(tl, job());
+  it('keeps the flat program’s Z1 hop when there is no fitted frame', async () => {
+    const g = await generate(tl, job());
     if (g.nc === null) throw new Error(`generate refused at ${g.stage}`);
     expect(hopOf(g.nc)).toBe(1);
     expect(g.findings.some((f) => f.code === 'surface-hop-raised')).toBe(false);
   });
 
-  it('raises the hop by the higher of Z0 and the plane’s lift over the stock', () => {
+  it('raises the hop by the higher of Z0 and the plane’s lift over the stock', async () => {
     expect(Math.max(0, surfaceLift(GENTLE.plane, GENTLE.z0, 100, 60))).toBeCloseTo(0.84, 9);
-    const g = generate(tl, job(), null, [], undefined, { surface: GENTLE });
+    const g = await generate(tl, job(), null, [], undefined, { surface: GENTLE });
     if (g.nc === null) throw new Error(`generate refused at ${g.stage}`);
     // Every rapid sits at 1 + 0.84: the same 1 mm clearance over the LOCAL top.
     expect(hopOf(g.nc)).toBe(1.84);
@@ -101,9 +101,9 @@ describe('#649 the hop clears the fitted surface', () => {
     expect(g.findings.some((f) => f.code === 'surface-hop-raised')).toBe(false);
   });
 
-  it('warns, naming G32, when the tilt lifts the blank more than the hop', () => {
+  it('warns, naming G32, when the tilt lifts the blank more than the hop', async () => {
     expect(surfaceLift(STEEP.plane, STEEP.z0, 100, 0)).toBeCloseTo(2, 9);
-    const g = generate(tl, job(), null, [], undefined, { surface: STEEP });
+    const g = await generate(tl, job(), null, [], undefined, { surface: STEEP });
     if (g.nc === null) throw new Error(`generate refused at ${g.stage}`);
     expect(hopOf(g.nc)).toBe(3);
     // No rapid is left at the old hop: every one of them was raised with the program.

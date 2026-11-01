@@ -181,10 +181,10 @@ describe('#848 the plan cuts the boss first, then the thread', () => {
     );
   });
 
-  it('an ⌀8 mm boss threaded M8×1.25 posts two programs, and both verify and pass their own oracle', () => {
+  it('an ⌀8 mm boss threaded M8×1.25 posts two programs, and both verify and pass their own oracle', async () => {
     const job = bossJob(M8);
     const applied = applyCutterPlanToJob(job, candidatePlans(job, TOOLS, [])[0]!);
-    const g = generate(tl, applied, null, [], undefined, { tools: TOOLS, defaults: DEFAULTS });
+    const g = await generate(tl, applied, null, [], undefined, { tools: TOOLS, defaults: DEFAULTS });
     expect(g.errors).toEqual([]);
     expect(g.ok, JSON.stringify(g.findings.filter((f) => f.severity === 'error'))).toBe(true);
     expect(g.programs.map((p) => p.toolKey)).toEqual([FLAT.key, M8.key]);
@@ -233,7 +233,7 @@ describe('#848 existing thread outputs are byte-identical', () => {
   // #879 — THE FIXTURE PINS ITS MATERIAL. These bytes were taken on a softwood blank; since #879
   // the shipped default is hardwood, whose feeds row steps down and feeds differently. The pin is
   // about the THREAD code being unchanged, so the material it was computed on is stated here.
-  it('the #841 M8 rod and the #786 4c thread-plus-pocket split post the same bytes', () => {
+  it('the #841 M8 rod and the #786 4c thread-plus-pocket split post the same bytes', async () => {
     const b = defaultEngraveJob();
     const rod: EngraveJob = {
       ...b,
@@ -247,7 +247,7 @@ describe('#848 existing thread outputs are byte-identical', () => {
       toolKey: M8.key,
       threads: [{ kind: 'thread', id: 'thr-ext', position: { x: 4, y: 4 }, enabled: true, size: 'M8', standard: 'metric', classFit: '6h', side: 'external', depth: 6, through: false }],
     };
-    const g1 = generate(tl, rod, null, [], undefined, { defaults: DEFAULTS });
+    const g1 = await generate(tl, rod, null, [], undefined, { defaults: DEFAULTS });
     expect(g1.ok).toBe(true);
     expect(sha(g1.nc!)).toBe('b2a740f275be6175fa41f092d31c1922fb6d925a6aa863c48e028a4e34c33fd8');
 
@@ -266,7 +266,7 @@ describe('#848 existing thread outputs are byte-identical', () => {
     };
     const plan = candidatePlans(pocketJob, TOOLS, [])[0]!;
     expect(plan.cutters.map((c) => c.key)).toEqual([M8.key, FLAT.key]);
-    const g2 = generate(tl, applyCutterPlanToJob(pocketJob, plan), null, [], undefined, { tools: TOOLS, defaults: DEFAULTS });
+    const g2 = await generate(tl, applyCutterPlanToJob(pocketJob, plan), null, [], undefined, { tools: TOOLS, defaults: DEFAULTS });
     expect(g2.programs.map((p) => sha(p.nc))).toEqual([
       'b8590983e6746fd5c95ea00a1540642fca17ab9ff2a1b9fe48684008f8ad1962',
       '570812a4b165d00e4bdb81009676dbcbea6ca36cee310a59099d18f4e1bbb5d7',

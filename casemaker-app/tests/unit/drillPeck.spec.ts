@@ -130,10 +130,10 @@ describe('planDrillBit — the item’s peck, or the shop’s, and which bound',
 });
 
 describe('the drill-bit program — the document’s peck reaches the file and the sheet', () => {
-  it('cuts the ladder the item states, and the sheet names the source', () => {
+  it('cuts the ladder the item states, and the sheet names the source', async () => {
     setInventoryEntries([DRILL_ENTRY]);
     const job = drillJob([hole({ peckMm: 1.5 })]);
-    const g = generate(tl, job, null, [], undefined, SHOP);
+    const g = await generate(tl, job, null, [], undefined, SHOP);
     expect(g.ok).toBe(true);
     expect(g.drill).not.toBeNull();
     expect(g.drill!.plans[0]!.peck).toBe(1.5);
@@ -152,10 +152,10 @@ describe('the drill-bit program — the document’s peck reaches the file and t
     expect(provenance).toContain('unless a hole states its own peck');
   }, 60_000);
 
-  it('states the shop’s source when the hole does not override', () => {
+  it('states the shop’s source when the hole does not override', async () => {
     setInventoryEntries([DRILL_ENTRY]);
     const job = drillJob([hole()]);
-    const g = generate(tl, job, null, [], undefined, SHOP);
+    const g = await generate(tl, job, null, [], undefined, SHOP);
     expect(g.ok).toBe(true);
     const texts = buildRunSheet(job, g, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const planLine = texts.find((t) => t.includes('port'));
@@ -164,7 +164,7 @@ describe('the drill-bit program — the document’s peck reaches the file and t
 });
 
 describe('the milling cutter’s plunge drill — the same override, the feeds row beside it', () => {
-  it('pecks at the item’s length and the sheet states both numbers', () => {
+  it('pecks at the item’s length and the sheet states both numbers', async () => {
     // #786 slice 4c-2 — the fixture's record answers the plunge question: this describe is
     // about a MILLING cutter that plunges, so `plunge-unproven`'s withholding must not be what
     // these assertions measure.
@@ -172,7 +172,7 @@ describe('the milling cutter’s plunge drill — the same override, the feeds r
     const job = drillJob([hole({ depth: 2, peckMm: 0.5 })], false);
     job.toolKey = 'flat-1.0';
     job.tool = flat;
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.drill).toBeNull();
 
@@ -189,7 +189,7 @@ describe('the milling cutter’s plunge drill — the same override, the feeds r
     expect(step).toContain('the feeds row would peck every 1 mm');
   }, 60_000);
 
-  it('leaves a drill with no override to the feeds row alone', () => {
+  it('leaves a drill with no override to the feeds row alone', async () => {
     // #786 slice 4c-2 — the fixture's record answers the plunge question: this describe is
     // about a MILLING cutter that plunges, so `plunge-unproven`'s withholding must not be what
     // these assertions measure.
@@ -197,7 +197,7 @@ describe('the milling cutter’s plunge drill — the same override, the feeds r
     const job = drillJob([hole({ depth: 2 })], false);
     job.toolKey = 'flat-1.0';
     job.tool = flat;
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const zs = feedZWords(g.nc as string);
     expect(zs).toContain(-1);

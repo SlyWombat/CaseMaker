@@ -111,7 +111,7 @@ describe('the board’s run sheet (§3.7)', () => {
     job.tool = engraver.tool;
     // The roles ride the sources (and survive the schema), which is what the sheet reads.
     expect(job.sourceFiles?.map((s) => s.role)).toEqual(['top-copper', 'outline', 'drills']);
-    const gen = engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
+    const gen = await engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
     expect(gen.ok).toBe(true);
     const sheet = buildRunSheet(job, gen, null, new Date('2026-10-31T00:00:00Z'));
 

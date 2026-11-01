@@ -397,9 +397,9 @@ describe('the column engine’s slice and band (#408 items 2 and 3)', () => {
 });
 
 describe('the oracle refuses a V trace cut short (#408 acceptance 2)', () => {
-  it('passes the CAM’s own program and refuses a truncated sweep of the same trace', () => {
+  it('passes the CAM’s own program and refuses a truncated sweep of the same trace', async () => {
     const job = traceJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     // The prediction is the groove, not the mouth's polygons: an entry of the trace's own depth
@@ -492,9 +492,9 @@ describe('the oracle refuses a V trace cut short (#408 acceptance 2)', () => {
 });
 
 describe('the oracle refuses a program the plan does not describe (#408 review 4)', () => {
-  it('catches a trace cut 0.5 mm too deep, as an over-cut at both levels', () => {
+  it('catches a trace cut 0.5 mm too deep, as an over-cut at both levels', async () => {
     const job = traceJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     const deep = load(job, posted(job, 40, 1.5), bit30());
     try {
       const report = deep.session.oracle(g.predicted);
@@ -535,9 +535,9 @@ describe('the oracle refuses a program the plan does not describe (#408 review 4
     }
   });
 
-  it('catches a trace cut 0.1 mm to the side of the planned stroke', () => {
+  it('catches a trace cut 0.1 mm to the side of the planned stroke', async () => {
     const job = traceJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     // The program's own Y is 20.1 where the job's trace is at 20 — ONE cell of the flat grid's
     // 0.1 mm across-stroke pitch (#438; under half a cell at #408's 0.25 mm), and only 0.017 mm
     // more than the 0.083 mm band, so it is about the smallest shift the oracle can promise to see.
@@ -572,7 +572,7 @@ describe('the oracle refuses a program the plan does not describe (#408 review 4
 });
 
 describe('the committed bench job passes the oracle in the panel (#408 acceptance 1)', () => {
-  it('takes docs/bench/single-barrel.job.json through generate → simulate → check', () => {
+  it('takes docs/bench/single-barrel.job.json through generate → simulate → check', async () => {
     // The issue's first acceptance line, and the reason it exists: this job generates and
     // simulates today, but the app refuses to SAVE or UPLOAD it because the oracle had no
     // grooved-cut path. Every number below comes off the committed document, as the panel reads it.
@@ -581,7 +581,7 @@ describe('the committed bench job passes the oracle in the panel (#408 acceptanc
     if (!parsed.ok) throw new Error(parsed.errors.join('; '));
     const job = parsed.job;
 
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     // One groove entry per trace — the two strokes of the badge, both at 1 mm.

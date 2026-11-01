@@ -78,30 +78,30 @@ describe('engraveGenerate with a saved machine frame (#297)', () => {
   });
   if (!read.ok) throw new Error('the fixture should read');
 
-  it('still produces a clean program, and the same .nc, under the saved frame', () => {
+  it('still produces a clean program, and the same .nc, under the saved frame', async () => {
     // The frame moves where M6, G28 and the probe go IN MACHINE COORDINATES. It must not move a
     // single work-coordinate cut, so the text a user saves is the same bytes either way.
-    const without = generate(tl, dj());
-    const withFrame = generate(tl, dj(), read.calibration);
+    const without = await generate(tl, dj());
+    const withFrame = await generate(tl, dj(), read.calibration);
     expect(withFrame.ok).toBe(true);
     expect(withFrame.nc).toBe(without.nc);
     expect(withFrame.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
   });
 
-  it('ignores a frame saved for a different machine, exactly as the simulation does', () => {
+  it('ignores a frame saved for a different machine, exactly as the simulation does', async () => {
     const other = { ...read.calibration, machineId: 'Z1-other' };
-    const g = generate(tl, dj(), other);
+    const g = await generate(tl, dj(), other);
     expect(g.ok).toBe(true);
-    expect(g.nc).toBe(generate(tl, dj()).nc);
+    expect(g.nc).toBe((await generate(tl, dj())).nc);
   });
 
   // #828 — A CARVERA JOB IS GENERATED, NOT REFUSED. #773 refused it by name for want of a frame;
   // the frame is now the Carvera Community Firmware's shipped configuration, and the machine has
   // an ATC, so the program opens with the change and the program's own absolute Z and verifies
   // clean against the C1's own numbers.
-  it('#828 a Carvera job generates and verifies, with the ATC start', () => {
+  it('#828 a Carvera job generates and verifies, with the ATC start', async () => {
     const job: EngraveJob = { ...dj(), machineId: 'C1' };
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok, JSON.stringify(g.errors ?? [])).toBe(true);
     const nc = g.nc ?? '';
     expect(nc).toContain('T1 M6');
@@ -128,8 +128,8 @@ describe('engraveGenerate with a saved machine frame (#297)', () => {
 });
 
 describe('engraveGenerate (#206)', () => {
-  it('takes the default job all the way to a clean .nc', () => {
-    const g = generate(tl, dj());
+  it('takes the default job all the way to a clean .nc', async () => {
+    const g = await generate(tl, dj());
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.nc).not.toBeNull();
@@ -151,29 +151,29 @@ describe('engraveGenerate (#206)', () => {
     expect(g.cam!.cuttingMoves).toBeGreaterThan(0);
   });
 
-  it('stamps the real package version into the CAM header, never dev (#231 item 4)', () => {
-    const g = generate(tl, dj());
+  it('stamps the real package version into the CAM header, never dev (#231 item 4)', async () => {
+    const g = await generate(tl, dj());
     expect(g.nc).not.toBeNull();
     // The exact header line the app writes; a headless run must match it byte for byte.
     expect(g.nc).toContain(`;@MKR|CAM|id=${CAM_ID}|name=${CAM_NAME}|v=${APP_VERSION}`);
     expect(g.nc).not.toContain('v=dev');
   });
 
-  it('is pure: the same job produces byte-identical nc', () => {
+  it('is pure: the same job produces byte-identical nc', async () => {
     const job = dj();
-    const a = generate(tl, job);
-    const b = generate(tl, structuredClone(job) as EngraveJob);
+    const a = await generate(tl, job);
+    const b = await generate(tl, structuredClone(job) as EngraveJob);
     expect(a.nc).not.toBeNull();
     expect(a.nc).toBe(b.nc);
   });
 
-  it('#786 slice 1 — a cut deeper than the floor allows is INFORMED and posted, inside the blank', () => {
+  it('#786 slice 1 — a cut deeper than the floor allows is INFORMED and posted, inside the blank', async () => {
     const job = dj();
     const deep: EngraveJob = {
       ...job,
       labels: job.labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
     };
-    const g = generate(tl, deep);
+    const g = await generate(tl, deep);
     expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(g.nc).not.toBeNull();
     const finding = g.findings.find((f) => f.code === 'depth-exceeds-stock');
@@ -182,9 +182,9 @@ describe('engraveGenerate (#206)', () => {
     expect(finding?.message).toContain('Generate cuts it as it is');
   });
 
-  it('stops at feeds for a step-over past the cutter radius (#191)', () => {
+  it('stops at feeds for a step-over past the cutter radius (#191)', async () => {
     const job: EngraveJob = { ...dj(), cutOverride: { stepOver: 0.6 } }; // radius is 0.5
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('feeds');
     expect(g.nc).toBeNull();
@@ -192,7 +192,7 @@ describe('engraveGenerate (#206)', () => {
     expect(g.errors.some((e) => e.stage === 'feeds')).toBe(true);
   });
 
-  it('stops at findings when the cutter is too large for the text', () => {
+  it('stops at findings when the cutter is too large for the text', async () => {
     // The built-in row is Makera's `(Metal)` cutter, refused on a softwood blank (#407) — so the
     // job carries the same cutter under a plain name, and this case is about the SIZE that fails
     // the text rather than about a refusal it did not ask for.
@@ -207,7 +207,7 @@ describe('engraveGenerate (#206)', () => {
       }),
     };
     // #786 slice 5 — lost characters INFORM: the rest of the text and the rest of the job post.
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     const lost = g.findings.find((f) => f.code === 'item-chars-lost');
@@ -217,14 +217,14 @@ describe('engraveGenerate (#206)', () => {
 
   // #213 — `validateVise` has accepted the sacrificial stack since `454110a`, but this call never
   // passed it, so the generate path's `vise-grip-shallow` still judged the raw stock.
-  it('judges vise-grip-shallow on what the jaws actually grip (#213)', () => {
+  it('judges vise-grip-shallow on what the jaws actually grip (#213)', async () => {
     const base = dj();
     // 10 mm proud on a 12 mm blank leaves 2 mm of raw stock in the jaws — under GRIP_MIN (3).
     const shallow: EngraveJob = {
       ...base,
       workholding: { kind: 'vise', vise: { ...jobVise(base), stockProud: 10 } },
     };
-    const without = regions(tl, shallow).findings.map((f) => f.code);
+    const without = await regions(tl, shallow).findings.map((f) => f.code);
     expect(without).toContain('vise-grip-shallow');
 
     // A 12 mm under-board with 10 mm overhang is what the jaws bear on, so the grip is the
@@ -238,7 +238,7 @@ describe('engraveGenerate (#206)', () => {
   // ≤ 0. Every consumer downstream must take it without throwing, note it by name (#488 — the
   // height alone is no longer a refusal), and print the figure without a float tail
   // (3 − 3.1 = -0.10000000000000009).
-  it('takes a 3 mm default job through the pipeline: noted by name, nothing thrown, no float tails (#406, #488)', () => {
+  it('takes a 3 mm default job through the pipeline: noted by name, nothing thrown, no float tails (#406, #488)', async () => {
     const base = dj();
     const thin: EngraveJob = {
       ...base,
@@ -246,7 +246,7 @@ describe('engraveGenerate (#206)', () => {
       workholding: { kind: 'vise', vise: viseForNewJob(undefined, { thickness: 3 }) },
     };
     expect(jobVise(thin).stockProud).toBeLessThanOrEqual(0);
-    for (const findings of [regions(tl, thin).findings, generate(tl, thin).findings]) {
+    for (const findings of [regions(tl, thin).findings, (await generate(tl, thin)).findings]) {
       const codes = findings.map((f) => f.code);
       expect(codes).toContain('vise-stock-not-proud');
       for (const f of findings) {
@@ -307,8 +307,8 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     ...(keepOuts ? { keepOuts } : {}),
   });
 
-  it('refuses a cut past the membrane, flagged at verify on the TEXT', () => {
-    const g = generate(tl, job(2.0, [pocket]));
+  it('refuses a cut past the membrane, flagged at verify on the TEXT', async () => {
+    const g = await generate(tl, job(2.0, [pocket]));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('verify');
     // The text existed — it is the verifier, re-reading the posted bytes, that refused it.
@@ -319,19 +319,19 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
   });
 
-  it('passes the same cut when it stays within the membrane', () => {
+  it('passes the same cut when it stays within the membrane', async () => {
     // 1.0 mm is exactly the limit and passes: the bound is a plane to stay clear of, not a
     // thickness to reach. The limit MOVED from 1.8 when #345 decision A gave a no-print blank's
     // void the job's 1 mm minimum floor instead of the 0.2 mm boundary margin — with no layer grid
     // the structural floor is the only number with a basis — so 2 − 1.0 = 1.0.
-    const g = generate(tl, job(1.0, [pocket]));
+    const g = await generate(tl, job(1.0, [pocket]));
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.verify!.findings.some((f) => f.code === 'cut-too-deep')).toBe(false);
   });
 
-  it('passes the same cut when the job carries no void', () => {
-    const g = generate(tl, job(1.5));
+  it('passes the same cut when the job carries no void', async () => {
+    const g = await generate(tl, job(1.5));
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
@@ -339,8 +339,8 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
 
   // #171: the warning is about OVERLAP, not depth, so a cut well within the membrane still gets
   // it — the blank is printed flipped, so there is nothing under that material at any depth.
-  it('warns over the void at a safe depth, and names only the cut that covers it (#171)', () => {
-    const g = generate(tl, job(0.8, [pocket]));
+  it('warns over the void at a safe depth, and names only the cut that covers it (#171)', async () => {
+    const g = await generate(tl, job(0.8, [pocket]));
     expect(g.ok).toBe(true); // a warning is not a refusal
     const warnings = g.findings.filter((f) => f.code === 'item-over-void');
     expect(warnings).toHaveLength(1);
@@ -350,7 +350,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     expect(warnings[0]!.message).toContain('2 mm membrane');
   });
 
-  it('does not object to the same depth clear of the void (#171)', () => {
+  it('does not object to the same depth clear of the void (#171)', async () => {
     // The acceptance pair: 2 mm over the membrane is refused, and the same 2 mm cut on solid
     // stock is not — the depth alone is never the problem.
     const clear: EngraveJob = {
@@ -359,13 +359,13 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
       shapes: [shapeB(2.0)],
       keepOuts: [pocket],
     };
-    const g = generate(tl, clear);
+    const g = await generate(tl, clear);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
   });
 
-  it('warns for a LABEL over the void too — the item kind makes no difference (#171)', () => {
+  it('warns for a LABEL over the void too — the item kind makes no difference (#171)', async () => {
     const jobWithLabel: EngraveJob = {
       ...dj(),
       labels: [
@@ -384,7 +384,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
       shapes: [],
       keepOuts: [pocket],
     };
-    const g = generate(tl, jobWithLabel);
+    const g = await generate(tl, jobWithLabel);
     const over = g.findings.find((f) => f.code === 'item-over-void');
     expect(over).toBeTruthy();
     expect(over!.labelId).toBe('over');
@@ -420,9 +420,9 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     enabled: true,
   };
 
-  it('warns for a TRACE crossing the void (#270)', () => {
+  it('warns for a TRACE crossing the void (#270)', async () => {
     // x 35…65 across the pocket's 35…65, at its centreline.
-    const g = generate(tl, {
+    const g = await generate(tl, {
       ...dj(),
       labels: [],
       shapes: [],
@@ -438,9 +438,9 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     expect(over[0]!.message).toContain('Trace line');
   });
 
-  it('leaves the same trace unwarned when it is clear of the void (#270)', () => {
+  it('leaves the same trace unwarned when it is clear of the void (#270)', async () => {
     // Moved to y 52, behind the pocket's 20…40 — the only difference is where the line sits.
-    const g = generate(tl, {
+    const g = await generate(tl, {
       ...dj(),
       labels: [],
       shapes: [],
@@ -450,10 +450,10 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
   });
 
-  it('does NOT warn for a drill over the void — the #220 exemption, pinned (#270)', () => {
+  it('does NOT warn for a drill over the void — the #220 exemption, pinned (#270)', async () => {
     // A drill into the pocket is a breach the VERIFIER owns (`cut-too-deep`); this warning is about
     // the finish of a pocketed floor, and a drilled hole has none. #270 asked for this to stay.
-    const g = generate(tl, {
+    const g = await generate(tl, {
       ...dj(),
       labels: [],
       shapes: [],
@@ -471,9 +471,9 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     shoulderLength: 20,
   });
 
-  it('refuses a through REGION over the void, naming the membrane (#218)', () => {
+  it('refuses a through REGION over the void, naming the membrane (#218)', async () => {
     const throughA = { ...shapeA(1.0), through: true };
-    const g = generate(tl, {
+    const g = await generate(tl, {
       ...job(1.0, [pocket]),
       toolKey: 'inv:reach',
       tool: REACH,
@@ -489,10 +489,10 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     expect(over?.message).toContain('only thing holding the piece');
   });
 
-  it('refuses a cut-out whose KERF crosses the void, naming the membrane (#218)', () => {
+  it('refuses a cut-out whose KERF crosses the void, naming the membrane (#218)', async () => {
     // Shape A (10 × 10 at 50, 30) is wholly over the pocket, and its outside kerf is wider still:
     // every point of the profile leaves the blank inside the cavity.
-    const g = generate(tl, {
+    const g = await generate(tl, {
       ...job(1.0, [pocket]),
       toolKey: 'inv:reach',
       tool: REACH,
@@ -568,8 +568,8 @@ describe('a job that states its print limits on the printer’s layer grid (#285
     };
   }
 
-  it('refuses 1.6 mm over the pocket, naming the void the stack found', () => {
-    const g = generate(tl, badgeJob(true, 1.6));
+  it('refuses 1.6 mm over the pocket, naming the void the stack found', async () => {
+    const g = await generate(tl, badgeJob(true, 1.6));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('verify');
     // The text existed — it is the verifier, re-reading the posted bytes, that refused it.
@@ -584,33 +584,33 @@ describe('a job that states its print limits on the printer’s layer grid (#285
     expect(deep!.message).toContain("the magnet pocket's ceiling");
   });
 
-  it('passes 1.2 mm over the same pocket — the layer grid’s own floor, to the margin', () => {
-    const g = generate(tl, badgeJob(true, 1.2));
+  it('passes 1.2 mm over the same pocket — the layer grid’s own floor, to the margin', async () => {
+    const g = await generate(tl, badgeJob(true, 1.2));
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
   });
 
-  it('refuses 1 mm on a blank that states no print and permits it on one that does (#345 A)', () => {
+  it('refuses 1 mm on a blank that states no print and permits it on one that does (#345 A)', async () => {
     // The two limits. With a print the grid's 1.4 mm solid span less #345's 0.2 mm boundary margin
     // is 1.2. With NO print there is no grid, so #345 decision A keeps the job's 1 mm STRUCTURAL
     // floor over the design's 1.51 mm membrane — 1.51 − 1.0 = 0.51, which is byte-identical to what
     // the analytic limit returned before #345 existed. 1 mm sits between the two, so the same cut is
     // refused on the plain blank and permitted on the printed one: with the layers unknown, the
     // floor is the only number with a basis, and it is the stricter of the two.
-    const without = generate(tl, badgeJob(false, 1.0));
+    const without = await generate(tl, badgeJob(false, 1.0));
     expect(without.ok).toBe(false);
     expect(without.stage).toBe('verify');
     const deep = without.verify!.findings.find((f) => f.code === 'cut-too-deep');
     expect(deep).toBeDefined();
     expect(deep!.message).toContain('0.510 mm permitted there');
 
-    const withPrint = generate(tl, badgeJob(true, 1.0));
+    const withPrint = await generate(tl, badgeJob(true, 1.0));
     expect(withPrint.ok).toBe(true);
     expect(withPrint.stage).toBe('done');
   });
 
-  it('generates the same program with and without a print — the print moves the gate, not the toolpath', () => {
+  it('generates the same program with and without a print — the print moves the gate, not the toolpath', async () => {
     // The print changes what the verifier permits; it never changes a coordinate. So a cut within
     // BOTH limits produces the same bytes either way.
     //
@@ -619,8 +619,8 @@ describe('a job that states its print limits on the printer’s layer grid (#285
     // for that one is `ncSnapshot.spec.ts`, which compares the default job's posted program against
     // the committed golden `tests/unit/fixtures/default-job.nc` — a real file that fails until a
     // human deliberately regenerates it.
-    const withPrint = generate(tl, badgeJob(true, 0.5));
-    const without = generate(tl, badgeJob(false, 0.5));
+    const withPrint = await generate(tl, badgeJob(true, 0.5));
+    const without = await generate(tl, badgeJob(false, 0.5));
     expect(withPrint.ok).toBe(true);
     expect(without.ok).toBe(true);
     expect(withPrint.nc).toBe(without.nc);
@@ -747,8 +747,8 @@ describe('a trace item reaches the program (#287)', () => {
     return { ...base, labels: [base.labels[0]!], shapes: [], traces: [traceLine(10)] };
   };
 
-  it('emits an operation for the trace, appended after the region operations', () => {
-    const g = generate(tl, jobWithTrace());
+  it('emits an operation for the trace, appended after the region operations', async () => {
+    const g = await generate(tl, jobWithTrace());
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     // One label region + one trace: the trace is not silently dropped.
@@ -762,8 +762,8 @@ describe('a trace item reaches the program (#287)', () => {
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
   });
 
-  it('predicts the trace cutter SWEEP, or the oracle would read its own groove as an over-cut', () => {
-    const g = generate(tl, jobWithTrace());
+  it('predicts the trace cutter SWEEP, or the oracle would read its own groove as an over-cut', async () => {
+    const g = await generate(tl, jobWithTrace());
     // A 30 mm capsule on a 1.0 mm cutter: 30 + π·0.5² ≈ 30.785 mm², minus the polygonisation of
     // the two round caps — so a band, not a closed form to the last digit.
     const trace = g.predicted.find((p) => Math.abs(p.depth - 0.8) < 1e-9);
@@ -777,10 +777,10 @@ describe('a trace item reaches the program (#287)', () => {
     expect(g.predicted.some((p) => Math.abs(p.depth - 2.0) < 1e-9)).toBe(true);
   });
 
-  it('leaves a job with no traces alone', () => {
+  it('leaves a job with no traces alone', async () => {
     // The identity the byte-identity of every pre-#287 program rests on: no trace, no extra
     // operation, no extra predicted level.
-    const g = generate(tl, dj());
+    const g = await generate(tl, dj());
     expect(g.cam!.operations).toBe(3);
     expect(g.predicted).toHaveLength(3);
     expect(g.nc).not.toContain('Trace');
@@ -790,8 +790,8 @@ describe('a trace item reaches the program (#287)', () => {
   // own parse of the posted text gives the program's depth and move count, so this pins WHERE the
   // cut lands: a trace-only job (no region items at all — which the post used to refuse outright)
   // must carry the trace's own endpoints at the item's depth, negative Z.
-  it('cuts the trace where the item says, at the item depth', () => {
-    const g = generate(tl, {
+  it('cuts the trace where the item says, at the item depth', async () => {
+    const g = await generate(tl, {
       ...dj(),
       labels: [],
       shapes: [],
@@ -873,8 +873,8 @@ describe('the feed catalogue reaches the worker (#324)', () => {
     };
   }
 
-  it('posts the catalogue’s S and F into the .nc, not the starting table’s', () => {
-    const g = generate(tl, job(), null, [HARDWOOD_ROW]);
+  it('posts the catalogue’s S and F into the .nc, not the starting table’s', async () => {
+    const g = await generate(tl, job(), null, [HARDWOOD_ROW]);
     expect(g.ok).toBe(true);
     expect(g.feeds?.ok).toBe(true);
     if (!g.feeds?.ok) throw new Error('feeds should resolve');
@@ -893,8 +893,8 @@ describe('the feed catalogue reaches the worker (#324)', () => {
     expect(nc).not.toContain(`F${starting.params.plungeFeed}`);
   });
 
-  it('prints those same numbers on the run sheet the operator reads', () => {
-    const g = generate(tl, job(), null, [HARDWOOD_ROW]);
+  it('prints those same numbers on the run sheet the operator reads', async () => {
+    const g = await generate(tl, job(), null, [HARDWOOD_ROW]);
     const cut = buildRunSheet(job(), g, null).sections.find((s) => s.id === 'cut');
     expect(cut).toBeTruthy();
     const value = cut!.steps.map((s) => s.value ?? '').join(' ');
@@ -904,10 +904,10 @@ describe('the feed catalogue reaches the worker (#324)', () => {
     expect(value).toContain(`${HARDWOOD_ROW.stepDown} mm passes`);
   });
 
-  it('with no rows handed over, is exactly what the worker used to produce', () => {
+  it('with no rows handed over, is exactly what the worker used to produce', async () => {
     // The control, and the defect itself: `[]` is the worker's own module state, which is why the
     // panel and the program disagreed before #324.
-    const g = generate(tl, job(), null, []);
+    const g = await generate(tl, job(), null, []);
     expect(g.ok).toBe(true);
     expect(g.nc).toContain(`S${starting.params.rpm} M3`);
     expect(g.nc).toContain(`F${starting.params.feed}`);
@@ -951,8 +951,8 @@ describe('the frame file (#244)', () => {
     expect(frameCorners(miniIr([]), 0.5, 20)).toBeNull();
   });
 
-  it('produces a verified frame program beside a clean job', () => {
-    const g = generate(tl, dj());
+  it('produces a verified frame program beside a clean job', async () => {
+    const g = await generate(tl, dj());
     expect(g.ok).toBe(true);
     expect(g.frameNc).not.toBeNull();
     expect(g.frameNc!.startsWith(';@MKR|BEGIN')).toBe(true);
@@ -1079,10 +1079,10 @@ describe('the frame file (#244)', () => {
     }
   });
 
-  it('offers no frame when the job is refused', () => {
+  it('offers no frame when the job is refused', async () => {
     // #786 slice 1 — a deep cut is no longer a refusal; the FEEDS gate still is (a 0.6 mm step-over
     // on a 0.5 mm radius).
-    const g = generate(tl, { ...dj(), cutOverride: { stepOver: 0.6 } });
+    const g = await generate(tl, { ...dj(), cutOverride: { stepOver: 0.6 } });
     expect(g.ok).toBe(false);
     expect(g.frameNc).toBeNull();
     expect(g.frameVerify).toBeNull();
@@ -1190,11 +1190,11 @@ describe('a V-bit trace job (#405)', () => {
   const title = (x = 13.69): EngraveTraceItem =>
     label('title', 'Single Barrel', 8.6, x, 1, { widthScale: 0.78, weight: 1.5, spacing: 'cut-width' });
 
-  it('cuts the COMMITTED bench job end to end and regenerates its motion lines byte-for-byte', () => {
+  it('cuts the COMMITTED bench job end to end and regenerates its motion lines byte-for-byte', async () => {
     // The plain V-bit path, against the real document. `docs/bench/single-barrel.job.json` states
     // none of the #409 fields, so it must produce exactly the .nc committed beside it — the default
     // identity the #409 review asked for, pinned on the MOTION lines.
-    const g = generate(tl, benchJob());
+    const g = await generate(tl, benchJob());
     expect(g.ok).toBe(true);
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
     // Two operations, one per trace (#219's CAM appends after the region CAM's — here there is none).
@@ -1214,12 +1214,12 @@ describe('a V-bit trace job (#405)', () => {
     expect(motionLines(g.nc!)).toEqual(motionLines(committed));
   });
 
-  it('cuts two BOLD, condensed, spaced stroke-label traces with the same bit (#409 fields)', () => {
+  it('cuts two BOLD, condensed, spaced stroke-label traces with the same bit (#409 fields)', async () => {
     const job = traceJob([
       title(),
       label('sub', '(Like the Whiskey)', 5.4, 25.64, 1, { widthScale: 0.94, spacing: 'cut-width' }),
     ]);
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(g.cam!.operations).toBe(2);
@@ -1258,13 +1258,13 @@ describe('a V-bit trace job (#405)', () => {
     expect(cuttingForTrace(flatEndMill(1.0))).toMatchObject({ ok: true, tool: { shape: 'flat', radius: 0.5 } });
   });
 
-  it('accepts a REGION cut with a V-bit, and takes its offset from the colour plane (#221)', () => {
+  it('accepts a REGION cut with a V-bit, and takes its offset from the colour plane (#221)', async () => {
     // The same job that was refused before #221, now with the colour-plane model: no film, so the
     // plane IS the floor and the offset is the 0.15 mm tip radius.
     const job = traceJob([], {
       labels: [regionLabel()],
     });
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.cam!.operations).toBe(1);
@@ -1370,17 +1370,17 @@ describe('a V-bit trace job (#405)', () => {
     expect(r.findings.filter((f) => f.code === 'vcarve-surface-merge')).toEqual([]);
   });
 
-  it('does NOT refuse the 30° engraving bit on PLA — the (Metal) name is a false signal (#575)', () => {
+  it('does NOT refuse the 30° engraving bit on PLA — the (Metal) name is a false signal (#575)', async () => {
     // The 30° engraver is dual-use (the maintainer's 2026-10-22 bench ruling). Its "(Metal)" name
     // does not make it metal-ONLY, so a PLA job with it generates on the starting table's PLA V row.
     const metal = bit30({ name: 'Engraving V-bit 30 x 0.5 (Metal)', tipDiameter: 0.5, diameter: 3.175 });
-    const g = generate(tl, traceJob([title()], { tool: metal }));
+    const g = await generate(tl, traceJob([title()], { tool: metal }));
     expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
   });
 
-  it('does not metal-refuse an engraving bit however the line is stated — the feeds gate stands (#575)', () => {
+  it('does not metal-refuse an engraving bit however the line is stated — the feeds gate stands (#575)', async () => {
     // Box code (`-M-`) and owned-label ("for Metal") both name the line, but neither refuses a
     // V-profile bit now. The feeds resolution is the gate that stops a genuinely-no-row tip: 0.1 mm
     // is outside the starting table's 0.3–0.5 V band.
@@ -1391,7 +1391,7 @@ describe('a V-bit trace job (#405)', () => {
       angle: 60,
       halfAngle: 30,
     });
-    const g = generate(tl, traceJob([title()], { tool: byCode }));
+    const g = await generate(tl, traceJob([title()], { tool: byCode }));
     expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
     expect(g.ok).toBe(false); // feeds: no V row for a 0.1 mm tip
 
@@ -1402,7 +1402,7 @@ describe('a V-bit trace job (#405)', () => {
       angle: 60,
       halfAngle: 30,
     });
-    const g2 = generate(tl, traceJob([title()], { tool: owned }));
+    const g2 = await generate(tl, traceJob([title()], { tool: owned }));
     expect(g2.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
   });
 
@@ -1420,10 +1420,10 @@ describe('a V-bit trace job (#405)', () => {
       ...over,
     });
 
-  it('REFUSES Makera’s metal FLAT end mill on PLA — the check is not V-scoped (#407)', () => {
+  it('REFUSES Makera’s metal FLAT end mill on PLA — the check is not V-scoped (#407)', async () => {
     const flat = metalFlat();
     const job = traceJob([title()], { toolKey: 'flat-3.175x12-metal', tool: flat });
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.nc).toBeNull();
@@ -1435,16 +1435,16 @@ describe('a V-bit trace job (#405)', () => {
     expect(refusal!.message).toContain('PLA');
   });
 
-  it('downgrades a FLAT metal cutter refusal to a warning and unblocks when overridden (#572)', () => {
+  it('downgrades a FLAT metal cutter refusal to a warning and unblocks when overridden (#572)', async () => {
     // A FLAT cutter's "(Metal)" name still refuses (its geometry IS ground for metal). This bit's
     // 1.0 mm diameter sits inside the starting table's 0.8–1.6 flat band, so the feeds resolve; the
     // double-confirmed override is what lets it cut PLA.
     const flat = metalFlat({ name: '1.0mm Flat End(Metal)', tipDiameter: 1.0, diameter: 1.0 });
-    const refused = generate(tl, traceJob([title()], { toolKey: 'flat-1.0-metal', tool: flat }));
+    const refused = await generate(tl, traceJob([title()], { toolKey: 'flat-1.0-metal', tool: flat }));
     expect(refused.ok).toBe(false);
     expect(refused.findings.find((f) => f.code === 'tool-metal-line')!.severity).toBe('error');
 
-    const overridden = generate(tl, traceJob([title()], { toolKey: 'flat-1.0-metal', tool: flat, metalLineOverride: true }));
+    const overridden = await generate(tl, traceJob([title()], { toolKey: 'flat-1.0-metal', tool: flat, metalLineOverride: true }));
     expect(overridden.ok).toBe(true);
     const finding = overridden.findings.find((f) => f.code === 'tool-metal-line');
     expect(finding).toBeDefined();
@@ -1452,18 +1452,18 @@ describe('a V-bit trace job (#405)', () => {
     expect(finding!.message).toContain('chosen despite the material mismatch');
   });
 
-  it('does not refuse the same metal FLAT on a metal blank (#407)', () => {
+  it('does not refuse the same metal FLAT on a metal blank (#407)', async () => {
     // The pair is what the finding judges: the same cutter is exactly the one aluminium wants.
     const job = traceJob([title()], {
       toolKey: 'flat-3.175x12-metal',
       tool: metalFlat(),
       stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'aluminium-6061' },
     });
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
   });
 
-  it('refuses a `-M-`-coded FLAT end mill on WOOD too (#407)', () => {
+  it('refuses a `-M-`-coded FLAT end mill on WOOD too (#407)', async () => {
     // The code half of `isMetalTool` was already correct; the reach is what #407 fixes. A flat whose
     // NAME says nothing about the line is still refused when its box code carries the segment.
     const coded = flatEndMill(3.175, { id: 'C1-BIT-FLAT-M-3.175-12', name: 'Flat End 3.175' });
@@ -1472,7 +1472,7 @@ describe('a V-bit trace job (#405)', () => {
       tool: coded,
       stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'hardwood' },
     });
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
@@ -1481,9 +1481,9 @@ describe('a V-bit trace job (#405)', () => {
     expect(refusal!.message).toContain(toolDisplayName(coded));
   });
 
-  it('is swept by the COLUMN engine, and the run sheet says so (#405)', () => {
+  it('is swept by the COLUMN engine, and the run sheet says so (#405)', async () => {
     const job = traceJob([title()]);
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const session = createSimSession(tl);
     try {
@@ -1573,10 +1573,10 @@ describe('engraveGenerate with a milled thread (#445)', () => {
     tool: MILL,
     threads,
   });
-  const gen = (threads: EngraveThreadItem[]) => engraveGenerate(tl, job(threads), MILL, [], null, undefined, { defaults: DEFAULTS });
+  const gen = async (threads: EngraveThreadItem[]) => await engraveGenerate(tl, job(threads), MILL, [], null, undefined, { defaults: DEFAULTS });
 
-  it('takes a thread-only job all the way to a clean .nc', () => {
-    const g = gen([THREAD()]);
+  it('takes a thread-only job all the way to a clean .nc', async () => {
+    const g = await gen([THREAD()]);
     expect(g.stage).toBe('done');
     expect(g.ok).toBe(true);
     // The thread's plan is what the panel and the sim's load read — not a fabricated disc.
@@ -1610,18 +1610,18 @@ describe('engraveGenerate with a milled thread (#445)', () => {
     expect(Math.max(...firstTurn.map((m) => m.z)) - Math.min(...firstTurn.map((m) => m.z))).toBeCloseTo(0.8, 2);
   });
 
-  it('two threads are ONE program, one tool, and operations renumbered', () => {
-    const g = gen([THREAD(), THREAD({ id: 'thr-b', position: { x: 70, y: 30 } })]);
+  it('two threads are ONE program, one tool, and operations renumbered', async () => {
+    const g = await gen([THREAD(), THREAD({ id: 'thr-b', position: { x: 70, y: 30 } })]);
     expect(g.ok).toBe(true);
     expect(g.threads).toHaveLength(2);
     expect(g.cam!.operations).toBe(2);
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
   });
 
-  it('a thread beside another cut is refused by the findings gate before any CAM', () => {
-    const g = gen([THREAD()]);
+  it('a thread beside another cut is refused by the findings gate before any CAM', async () => {
+    const g = await gen([THREAD()]);
     const mixed: EngraveJob = { ...job([THREAD()]), labels: dj().labels };
-    const out = engraveGenerate(tl, mixed, MILL, [], null, undefined, { defaults: DEFAULTS });
+    const out = await engraveGenerate(tl, mixed, MILL, [], null, undefined, { defaults: DEFAULTS });
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
     expect(out.threads).toBeNull();
@@ -1630,8 +1630,8 @@ describe('engraveGenerate with a milled thread (#445)', () => {
     expect(g.ok).toBe(true); // the thread alone still passes — the refusal is the mixing
   });
 
-  it('a tool that is not a thread mill is refused before the branch is taken', () => {
-    const out = engraveGenerate(tl, { ...job([THREAD()]), tool: flatEndMill(4) }, flatEndMill(4), [], null, undefined, { defaults: DEFAULTS });
+  it('a tool that is not a thread mill is refused before the branch is taken', async () => {
+    const out = await engraveGenerate(tl, { ...job([THREAD()]), tool: flatEndMill(4) }, flatEndMill(4), [], null, undefined, { defaults: DEFAULTS });
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
     expect(out.findings.some((f) => f.code === 'thread-wrong-tool')).toBe(true);
@@ -1676,9 +1676,9 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     );
   }
 
-  it('emits the facing pass as its own verified program and leaves the engraving byte-identical', () => {
-    const plain = generate(tl, dj());
-    const g = generate(tl, faced(), null, [], undefined, SHOP);
+  it('emits the facing pass as its own verified program and leaves the engraving byte-identical', async () => {
+    const plain = await generate(tl, dj());
+    const g = await generate(tl, faced(), null, [], undefined, SHOP);
     expect(
       g.ok,
       JSON.stringify(
@@ -1752,15 +1752,15 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   // follows switches it off. The mode therefore stays on across the bit change between them.
   const vacuumWords = (nc: string): string[] => [...nc.matchAll(/\bM33[12]\b/g)].map((m) => m[0]);
 
-  it('gives the facing file the run’s first vacuum word and the engraving the last', () => {
-    const g = generate(tl, faced(), null, [], undefined, SHOP);
+  it('gives the facing file the run’s first vacuum word and the engraving the last', async () => {
+    const g = await generate(tl, faced(), null, [], undefined, SHOP);
     expect(g.ok, JSON.stringify({ errors: g.errors, facingError: g.facingError })).toBe(true);
     expect(g.facingNc, g.facingError ?? '').not.toBeNull();
     expect(vacuumWords(g.facingNc!)).toEqual(['M331']);
     expect(vacuumWords(g.nc!)).toEqual(['M332']);
   });
 
-  it('leaves the engraving as the run’s only program, carrying BOTH words, when the facing file is withheld', () => {
+  it('leaves the engraving as the run’s only program, carrying BOTH words, when the facing file is withheld', async () => {
     // The skim is refused by the verifier — it would run into the clamp — so no facing file exists.
     // The engraving is then the whole run, and it must write both words itself: a share worked out
     // for a file that was never produced would leave the vacuum on for ever.
@@ -1782,7 +1782,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
         uncertainty: 0.1,
       },
     };
-    const g = generate(tl, faced(), null, [], undefined, { ...SHOP, mount });
+    const g = await generate(tl, faced(), null, [], undefined, { ...SHOP, mount });
     expect(g.ok).toBe(true);
     expect(g.facingNc).toBeNull();
     expect(g.facingError).toContain('could not be faced');
@@ -1792,12 +1792,12 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   // #432 review — `job.cutOverride` is the hand-entered S/F for the job's ENGRAVING cutter (#205).
   // Someone who typed numbers for a 1 mm flat has said nothing about the mill that skims the top,
   // so the facing file resolves its own row and the override never reaches it.
-  it('resolves the facing file’s S/F from the facing cutter’s row, not the job’s cut override', () => {
+  it('resolves the facing file’s S/F from the facing cutter’s row, not the job’s cut override', async () => {
     const words = (nc: string, letter: 'S' | 'F'): string[] =>
       [...nc.matchAll(new RegExp(`\\b${letter}(\\d+)`, 'g'))].map((m) => m[1]!);
 
-    const plain = generate(tl, faced(), null, [], undefined, SHOP);
-    const overridden = generate(
+    const plain = await generate(tl, faced(), null, [], undefined, SHOP);
+    const overridden = await generate(
       tl,
       faced({ cutOverride: { rpm: 9000, feed: 300, plungeFeed: 150 } }),
       null,
@@ -1823,14 +1823,14 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(words(overridden.facingNc!, 'F')).not.toContain('300');
   });
 
-  it('emits no facing file when facing is off or its depth is zero', () => {
-    const plain = generate(tl, dj());
+  it('emits no facing file when facing is off or its depth is zero', async () => {
+    const plain = await generate(tl, dj());
     for (const facing of [
       undefined,
       { enabled: false, depth: 0.5 },
       { enabled: true, depth: 0 },
     ]) {
-      const g = generate(tl, { ...dj(), facing }, null, [], undefined, SHOP);
+      const g = await generate(tl, { ...dj(), facing }, null, [], undefined, SHOP);
       expect(g.ok).toBe(true);
       expect(g.nc).toBe(plain.nc);
       expect(g.facingNc).toBeNull();
@@ -1848,9 +1848,9 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   // before the setups and the CAM, and the finding names the material, the rule and the way out.
   // The worker case runs PLA because it is the one plastic the starting feed table covers — an
   // acrylic job is refused earlier for feeds, which would mask the facing half under test.
-  it('refuses the whole run on a material facing is not offered for, and keeps facing for wood', () => {
+  it('refuses the whole run on a material facing is not offered for, and keeps facing for wood', async () => {
     const plastic = faced({ stock: { ...dj().stock, material: 'pla' } });
-    const g = generate(tl, plastic, null, [], undefined, SHOP);
+    const g = await generate(tl, plastic, null, [], undefined, SHOP);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     const finding = g.findings.find((f) => f.code === 'facing-plastic');
@@ -1866,23 +1866,23 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.programs).toEqual([]);
 
     // The material is the rule, not the plastic job: with facing OFF the same stock generates.
-    const off = generate(tl, { ...plastic, facing: undefined }, null, [], undefined, SHOP);
+    const off = await generate(tl, { ...plastic, facing: undefined }, null, [], undefined, SHOP);
     expect(off.ok, JSON.stringify(off.errors)).toBe(true);
     expect(off.nc).not.toBeNull();
     expect(off.facingNc).toBeNull();
 
     // A wood job with the same facing choice still gets its file, first in the run.
-    const wood = generate(tl, faced(), null, [], undefined, SHOP);
+    const wood = await generate(tl, faced(), null, [], undefined, SHOP);
     expect(wood.facingNc).not.toBeNull();
     expect(wood.programs[0]!.kind).toBe('facing');
   });
 
-  it('#786 slice 1 — a facing depth that eats the minimum floor is INFORMED, and the run posts', () => {
+  it('#786 slice 1 — a facing depth that eats the minimum floor is INFORMED, and the run posts', async () => {
     // An 8 mm blank the vise can hold, skimmed 7.5 mm: 0.5 mm left where the job asks for 1. (A
     // 3 mm blank would be refused by the VISE — a 3 mm part cannot sit proud in the shipped jaws —
     // which is a holding refusal of its own, not this rule.)
     const thickness = 8;
-    const g = generate(tl, faced({ stock: { ...dj().stock, thickness }, minFloor: 1, facing: { enabled: true, depth: 7.5 } }));
+    const g = await generate(tl, faced({ stock: { ...dj().stock, thickness }, minFloor: 1, facing: { enabled: true, depth: 7.5 } }));
     expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
     const finding = g.findings.find((f) => f.code === 'facing-too-deep');
     expect(finding?.severity).toBe('warning');
@@ -1900,9 +1900,9 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(parsed.job.facing).toEqual({ enabled: true, depth: 0.5, toolKey: 'user:facing-3.175' });
   });
 
-  it('refuses the facing FILE, not the run, when no flat cutter can face the blank', () => {
-    const plain = generate(tl, dj());
-    const g = generate(tl, faced(), null, [], undefined, { tools: [] });
+  it('refuses the facing FILE, not the run, when no flat cutter can face the blank', async () => {
+    const plain = await generate(tl, dj());
+    const g = await generate(tl, faced(), null, [], undefined, { tools: [] });
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     // The engraving is what the run produced: it is untouched, and still savable.
@@ -1913,11 +1913,11 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.facingError).toMatch(/no flat end mill/);
   });
 
-  it('will not default to a metal-line cutter on a non-metal blank', () => {
+  it('will not default to a metal-line cutter on a non-metal blank', async () => {
     // The built-in 3.175 flat is `3.175*12mm Flat End(Metal)` — bigger than the 1 mm, and still not
     // the facing default on softwood. With it as the ONLY flat, the file is refused by name.
     const metalOnly = TOOL_LIBRARY.filter((e) => e.key === 'flat-3.175x12-metal');
-    const g = generate(tl, faced(), null, [], undefined, { tools: metalOnly });
+    const g = await generate(tl, faced(), null, [], undefined, { tools: metalOnly });
     expect(g.ok).toBe(true);
     expect(g.facingNc).toBeNull();
     expect(g.facingError).toMatch(/for Metal/);
@@ -1926,8 +1926,8 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   // #432 review R10 — the condition table reaches the pick THROUGH the shop options. The store
   // reads `inventoryConditions()` on the main thread (the worker's map is empty), so these cases
   // pass it the way `engraveRunStore` does and read the file the worker actually posted.
-  it('skips the facing cutter the bench marks broken, through `shop.conditions`', () => {
-    const g = generate(tl, faced(), null, [], undefined, {
+  it('skips the facing cutter the bench marks broken, through `shop.conditions`', async () => {
+    const g = await generate(tl, faced(), null, [], undefined, {
       tools: [FACING, ...TOOL_LIBRARY],
       conditions: conditionsOf(['user:facing-3.175', 'broken']),
     });
@@ -1938,8 +1938,8 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.facingError).toBeNull();
   });
 
-  it('still faces with a worn cutter — the condition is not a priority', () => {
-    const g = generate(tl, faced(), null, [], undefined, {
+  it('still faces with a worn cutter — the condition is not a priority', async () => {
+    const g = await generate(tl, faced(), null, [], undefined, {
       ...SHOP,
       conditions: conditionsOf(['user:facing-3.175', 'worn']),
     });
@@ -1948,8 +1948,8 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.facingToolKey).toBe('user:facing-3.175');
   });
 
-  it('withholds the facing file, naming broken, when every flat has no usable copy', () => {
-    const g = generate(tl, faced(), null, [], undefined, {
+  it('withholds the facing file, naming broken, when every flat has no usable copy', async () => {
+    const g = await generate(tl, faced(), null, [], undefined, {
       tools: [FACING],
       conditions: conditionsOf(['user:facing-3.175', 'broken']),
     });
@@ -1962,7 +1962,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.facingError).toContain('3.175 mm flat (facing)');
   });
 
-  it('faces a thread job with its own flat, and leaves the thread program to the thread mill', () => {
+  it('faces a thread job with its own flat, and leaves the thread program to the thread mill', async () => {
     const MILL: Tool = flatEndMill(4, { name: '4 mm thread mill', typeText: 'Thread Mill', shape: 'thread', tipDiameter: 4, diameter: 4, fluteLength: 20 });
     const job: EngraveJob = {
       ...dj(),
@@ -1976,7 +1976,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
       ],
       facing: { enabled: true, depth: 0.5 },
     };
-    const g = engraveGenerate(tl, job, MILL, [], null, undefined, { tools: [FACING, ...TOOL_LIBRARY] });
+    const g = await engraveGenerate(tl, job, MILL, [], null, undefined, { tools: [FACING, ...TOOL_LIBRARY] });
     expect(g.ok).toBe(true);
     expect(g.facingNc, `${g.facingError} ${JSON.stringify(g.facingVerify?.findings.slice(0, 3))}`).not.toBeNull();
     expect(g.facingToolKey).toBe('user:facing-3.175');
@@ -2017,18 +2017,18 @@ describe('the mount reaches the verifier and the facing pass (#442)', () => {
     },
   });
 
-  it('a cut over the clamp is refused, and the same job without the mount passes', () => {
-    expect(generate(tl, dj()).ok).toBe(true);
-    const g = generate(tl, dj(), null, [], undefined, { mount: mountOf(OVER_LABELS) });
+  it('a cut over the clamp is refused, and the same job without the mount passes', async () => {
+    expect((await generate(tl, dj())).ok).toBe(true);
+    const g = await generate(tl, dj(), null, [], undefined, { mount: mountOf(OVER_LABELS) });
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('verify');
     const f = g.verify!.findings.find((x) => x.code === 'clamp-in-path');
     expect(f?.message).toContain('the clamp on the back edge');
   });
 
-  it('a skim that would run into the mount is refused, and names the band it could not face', () => {
+  it('a skim that would run into the mount is refused, and names the band it could not face', async () => {
     const faced: EngraveJob = { ...dj(), facing: { enabled: true, depth: 0.5 } };
-    const g = generate(tl, faced, null, [], undefined, { tools: [FACING_TOOL, ...TOOL_LIBRARY], mount: mountOf(OVER_BACK_EDGE) });
+    const g = await generate(tl, faced, null, [], undefined, { tools: [FACING_TOOL, ...TOOL_LIBRARY], mount: mountOf(OVER_BACK_EDGE) });
     // The engraving is untouched and the run still succeeded — only the skim is withheld (#432).
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.facingNc).toBeNull();
@@ -2079,11 +2079,11 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
   });
   const vacuumWords = (nc: string): string[] => [...nc.matchAll(/\bM33[12]\b/g)].map((m) => m[0]);
 
-  it('posts one program per setup, with the vacuum spanning the run and not each file', () => {
+  it('posts one program per setup, with the vacuum spanning the run and not each file', async () => {
     const job = dj();
     const [a, b] = job.labels.map((l) => l.id);
     const two = setUp(job, [[a!], [b!]], [job.toolKey, TOOL_B.key]);
-    const g = generate(tl, two, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
+    const g = await generate(tl, two, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
     expect(g.ok, JSON.stringify({ errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error').map((f) => f.code) })).toBe(true);
     expect(g.programs).toHaveLength(2);
 
@@ -2111,10 +2111,10 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(last!.cam!.operations).toBe(1);
   });
 
-  it('keeps the single-program fields pointing at the first program', () => {
+  it('keeps the single-program fields pointing at the first program', async () => {
     const job = dj();
     const [a, b] = job.labels.map((l) => l.id);
-    const g = generate(tl, setUp(job, [[a!], [b!]], [job.toolKey, TOOL_B.key]), null, [], undefined, {
+    const g = await generate(tl, setUp(job, [[a!], [b!]], [job.toolKey, TOOL_B.key]), null, [], undefined, {
       tools: [TOOL_B, ...TOOL_LIBRARY],
     });
     expect(g.nc).toBe(g.programs[0]!.nc);
@@ -2122,19 +2122,19 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(g.cam).toBe(g.programs[0]!.cam);
   });
 
-  it('writes both vacuum words when the job is one program, whatever the setups say', () => {
+  it('writes both vacuum words when the job is one program, whatever the setups say', async () => {
     const job = dj();
     const ids = job.labels.map((l) => l.id);
-    const g = generate(tl, setUp(job, [ids], [job.toolKey]));
+    const g = await generate(tl, setUp(job, [ids], [job.toolKey]));
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(1);
     expect(vacuumWords(g.programs[0]!.nc)).toEqual(['M331', 'M332']);
   });
 
-  it('cuts a middle program with neither vacuum word', () => {
+  it('cuts a middle program with neither vacuum word', async () => {
     const job = dj();
     const [a, b, c] = job.labels.map((l) => l.id);
-    const g = generate(tl, setUp(job, [[a!], [b!], [c!]], [job.toolKey, TOOL_B.key, job.toolKey]), null, [], undefined, {
+    const g = await generate(tl, setUp(job, [[a!], [b!], [c!]], [job.toolKey, TOOL_B.key, job.toolKey]), null, [], undefined, {
       tools: [TOOL_B, ...TOOL_LIBRARY],
     });
     expect(g.ok, JSON.stringify({ errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error').map((f) => f.code) })).toBe(true);
@@ -2144,7 +2144,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(vacuumWords(g.programs[2]!.nc)).toEqual(['M332']);
   });
 
-  it('cuts a setup naming two cutters as a clearing program and a measured rest program', () => {
+  it('cuts a setup naming two cutters as a clearing program and a measured rest program', async () => {
     // PLA: the 0.6 mm cutter's feeds row (#410) is plastic, and this case is about the rest pass,
     // not about a material's feed table.
     const job: EngraveJob = {
@@ -2157,7 +2157,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
       ...base,
       setups: [{ ...base.setups![0]!, tools: [job.toolKey, TOOL_REST.key] }],
     };
-    const g = generate(tl, two, null, [], undefined, { tools: [TOOL_REST, ...TOOL_LIBRARY] });
+    const g = await generate(tl, two, null, [], undefined, { tools: [TOOL_REST, ...TOOL_LIBRARY] });
     expect(
       g.ok,
       JSON.stringify({
@@ -2188,11 +2188,11 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(g.restPass!.rest.nc).toMatch(/\.nc$/);
   });
 
-  it('splits a single-cutter setup into rough and finish operations in one program (#250)', () => {
+  it('splits a single-cutter setup into rough and finish operations in one program (#250)', async () => {
     const job = dj();
     const ids = job.labels.map((l) => l.id);
     const one = setUp(job, [ids], [job.toolKey]);
-    const g = generate(tl, one, null, [], undefined, {
+    const g = await generate(tl, one, null, [], undefined, {
       finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
     });
     expect(g.ok, JSON.stringify({ stage: g.stage, errors: g.errors })).toBe(true);
@@ -2217,7 +2217,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(g.cam!.operations).toBe(program.cam!.operations);
   });
 
-  it('roughs with the first cutter and finishes with the rest cutter (#250)', () => {
+  it('roughs with the first cutter and finishes with the rest cutter (#250)', async () => {
     const job: EngraveJob = {
       ...dj(),
       stock: { ...dj().stock, material: 'pla' },
@@ -2228,7 +2228,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
       ...base,
       setups: [{ ...base.setups![0]!, tools: [job.toolKey, TOOL_REST.key] }],
     };
-    const g = generate(tl, two, null, [], undefined, {
+    const g = await generate(tl, two, null, [], undefined, {
       tools: [TOOL_REST, ...TOOL_LIBRARY],
       finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
     });
@@ -2265,7 +2265,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(rest!.nc).not.toContain('(rough)');
   });
 
-  it('#667 — the rough-only file’s prediction is what the run’s oracle sweeps', () => {
+  it('#667 — the rough-only file’s prediction is what the run’s oracle sweeps', async () => {
     // The app's preflight compares PROGRAM 1's removal against the top-level prediction before
     // anything may be saved or sent. For a rest pair that program leaves the allowance on every
     // split item, so the prediction has to be the rough region at the rough floor — not the item's
@@ -2280,7 +2280,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
       ...base,
       setups: [{ ...base.setups![0]!, tools: [job.toolKey, TOOL_REST.key] }],
     };
-    const g = generate(tl, two, null, [], undefined, {
+    const g = await generate(tl, two, null, [], undefined, {
       tools: [TOOL_REST, ...TOOL_LIBRARY],
       finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
     });
@@ -2303,7 +2303,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     }
   });
 
-  it('#667 — a rest pair mixed with a drill, a trace and a cut-out passes the run’s oracle', () => {
+  it('#667 — a rest pair mixed with a drill, a trace and a cut-out passes the run’s oracle', async () => {
     // The motivating job: a pocket job with holes and a profile cut with the same flat cutter, then
     // finished with a smaller one. Only the flat REGIONS are split by the rough pass; the drill
     // disc, the trace kerf and the cut-out kerf run at full geometry in the rough-only program, so
@@ -2363,7 +2363,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
       ...one,
       setups: [{ ...one.setups![0]!, tools: [job.toolKey, TOOL_REST.key] }],
     };
-    const g = generate(tl, two, null, [], undefined, {
+    const g = await generate(tl, two, null, [], undefined, {
       tools: [TOOL_REST, ...TOOL_LIBRARY],
       finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
     });
@@ -2411,7 +2411,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     }
   });
 
-  it('a later cutter cuts the item assigned to it, as itself, and is not a rest pass (#746)', () => {
+  it('a later cutter cuts the item assigned to it, as itself, and is not a rest pass (#746)', async () => {
     const job: EngraveJob = {
       ...dj(),
       stock: { ...dj().stock, material: 'pla' },
@@ -2428,7 +2428,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
         },
       ],
     };
-    const g = generate(tl, two, null, [], undefined, { tools: [TOOL_REST, ...TOOL_LIBRARY] });
+    const g = await generate(tl, two, null, [], undefined, { tools: [TOOL_REST, ...TOOL_LIBRARY] });
     expect(
       g.ok,
       JSON.stringify({
@@ -2449,7 +2449,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(g.programs[1]!.nc).not.toContain('rest of');
   });
 
-  it('refuses an assignment that names an item twice, or leaves one unassigned', () => {
+  it('refuses an assignment that names an item twice, or leaves one unassigned', async () => {
     const job = dj();
     const [a, b] = job.labels.map((l) => l.id);
     const base = setUp(job, [[a!, b!]], [job.toolKey]);
@@ -2463,7 +2463,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
         },
       ],
     };
-    const g = generate(tl, duplicated, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
+    const g = await generate(tl, duplicated, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.programs).toEqual([]);
@@ -2479,22 +2479,22 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
         },
       ],
     };
-    const u = generate(tl, unassigned, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
+    const u = await generate(tl, unassigned, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
     expect(u.ok).toBe(false);
     expect(u.findings.some((f) => f.code === 'setup-items-unassigned' && f.severity === 'error')).toBe(true);
   });
 
-  it('refuses a setup naming no cutter', () => {
+  it('refuses a setup naming no cutter', async () => {
     const job = dj();
     const ids = job.labels.map((l) => l.id);
-    const g = generate(tl, setUp(job, [ids], []), null, [], undefined, { tools: [TOOL_B] });
+    const g = await generate(tl, setUp(job, [ids], []), null, [], undefined, { tools: [TOOL_B] });
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.findings.some((f) => f.code === 'setup-no-tool')).toBe(true);
   });
 
-  it('a legacy job is one program, and its frame file still carries no vacuum word', () => {
-    const g = generate(tl, dj());
+  it('a legacy job is one program, and its frame file still carries no vacuum word', async () => {
+    const g = await generate(tl, dj());
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(1);
     expect(g.programs[0]!.nc).toBe(g.nc);
@@ -2683,9 +2683,9 @@ describe('through-cuts and cut-outs (#218)', () => {
   /** A small rect pocket, for a cut-out to follow. */
   const RECT = { kind: 'rect' as const, id: 'rect-1', enabled: true, position: { x: 50, y: 30 }, rotation: 0, cornerRadius: 0, depth: 1 };
 
-  it('cuts a tabbed cut-out through the blank and reports its facts on the program and the sheet', () => {
+  it('cuts a tabbed cut-out through the blank and reports its facts on the program and the sheet', async () => {
     const job = cutoutJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -2725,13 +2725,13 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(text).toContain('Cut out "Badge" inside stock inset 5 mm: 4 tabs, 4 mm wide and 1 mm high');
   });
 
-  it('the oracle predicts the material an interrupted pass LEAVES, not a square tab (#218)', () => {
+  it('the oracle predicts the material an interrupted pass LEAVES, not a square tab (#218)', async () => {
     // The sweep stops with the cutter's CENTRE at the span ends, so at a deep pass the standing
     // tab is the span band less the two round end discs. Predicting the plain kerf-wide band
     // (which is what the void scan and the run sheet describe) leaves the disc-overhang as an
     // under-cut and refuses the save with "the simulation does not match the prediction".
     const job = cutoutJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const session = createSimSession(tl);
     try {
@@ -2754,9 +2754,9 @@ describe('through-cuts and cut-outs (#218)', () => {
     }
   });
 
-  it('frees a tabless cut-out onto the board without calling the released part loose', () => {
+  it('frees a tabless cut-out onto the board without calling the released part loose', async () => {
     const job = cutoutJob({ tabs: { count: 0, width: 4, height: 1 } });
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true); // `released-onto-board` is a warning, not a refusal.
     expect(g.findings.some((f) => f.code === 'released-onto-board' && f.severity === 'warning')).toBe(true);
     // The operator ASKED for the part to be freed, so the loose-piece check excludes it.
@@ -2810,7 +2810,7 @@ describe('through-cuts and cut-outs (#218)', () => {
   }
 
   /** Run the oracle over a generated job: the sweep must match the prediction at every level. */
-  function expectOracleMatches(job: EngraveJob, g: ReturnType<typeof generate>): void {
+  function expectOracleMatches(job: EngraveJob, g: Awaited<ReturnType<typeof generate>>): void {
     const session = createSimSession(tl);
     try {
       const load = session.load(g.nc as string, toSetup(job, Z1), jobTool(job)!, Z1.id);
@@ -2823,14 +2823,14 @@ describe('through-cuts and cut-outs (#218)', () => {
     }
   }
 
-  it('places four tabs on j12’s round cut-out and generates the job (#736)', () => {
+  it('places four tabs on j12’s round cut-out and generates the job (#736)', async () => {
     // A 70 mm square of 6.35 mm stock holding a 60 mm circle cut-out with four 3 mm tabs. Every
     // joint on the circle turns ~2°, so the outline is ONE smooth edge; before #736 each short
     // segment was treated as an edge, none could hold a 5 mm centre-path span, and generation
     // stopped at `tab-unplaceable`. The proxy is the runnable variant: the alu job's cutter has
     // no row in the metal feeds table here (#732).
     const job = j12Job('j12-alu-medallion-proxy.json');
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -2849,14 +2849,14 @@ describe('through-cuts and cut-outs (#218)', () => {
     expectOracleMatches(job, g);
   });
 
-  it('j12’s aluminium original no longer refuses on its round tabs (#736)', () => {
+  it('j12’s aluminium original no longer refuses on its round tabs (#736)', async () => {
     // The alu job stops at `feeds` here (its cutter is not in the test's metal table, #732), but
     // the tab question is answered before that stage: the refusal must be gone.
-    const g = generate(tl, j12Job('j12-alu-medallion.json'));
+    const g = await generate(tl, j12Job('j12-alu-medallion.json'));
     expect(g.findings.some((f) => f.code === 'tab-unplaceable')).toBe(false);
   });
 
-  it('places four tabs on a traced diamond side and generates the job (#736)', () => {
+  it('places four tabs on a traced diamond side and generates the job (#736)', async () => {
     // The j23 sign: a 78 mm square rotated 45°, 4 mm fillets, each 70 mm straight side traced as
     // 14 five-mm collinear pieces. The artwork is licensed and not committed, so the outline is
     // built here from its own dimensions (the bench README records the trace; the manifest its
@@ -2881,7 +2881,7 @@ describe('through-cuts and cut-outs (#218)', () => {
         ],
       },
     );
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -2892,7 +2892,7 @@ describe('through-cuts and cut-outs (#218)', () => {
     expectOracleMatches(job, g);
   });
 
-  it('cuts with the tabs that fit, and says which were dropped and where the rest sit (#736)', () => {
+  it('cuts with the tabs that fit, and says which were dropped and where the rest sit (#736)', async () => {
     // A 3 × 3 rect's outside path is offset 1.5875 mm with ROUND joins, so no joint turns anywhere
     // near the 20° corner: the whole outline is ONE smooth edge of 4 × 3 + 2πr = 21.96 mm. Four
     // 4 mm tabs need four 7.175 mm spans — 28.7 mm of path — so only two fit. Since #736 that is a
@@ -2902,7 +2902,7 @@ describe('through-cuts and cut-outs (#218)', () => {
       { of: 'rect-1', side: 'outside', inset: 0, tabs: { count: 4, width: 4, height: 1 } },
       { shapes: [{ ...RECT, width: 3, height: 3, construction: true }] },
     );
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok, JSON.stringify(g.findings)).toBe(true);
     const f = g.findings.find((x) => x.code === 'tab-unplaceable');
     expect(f).toBeDefined();
@@ -2914,7 +2914,7 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(f!.message).toContain('held by the tabs that fit');
   });
 
-  it('refuses only a cut-out with no tab at all, because the part would be released (#736)', () => {
+  it('refuses only a cut-out with no tab at all, because the part would be released (#736)', async () => {
     // The 3 × 3 path is 21.96 mm long, so a 40 mm tab's 43.175 mm span cannot fit anywhere: none
     // of the requested tabs can be placed, and the part would be released during the cut.
     const job = cutoutJob(
@@ -2923,7 +2923,7 @@ describe('through-cuts and cut-outs (#218)', () => {
     );
     // #786 slice 5 — the cut proceeds with the tabs that fit, and the sentence says how many did
     // not; the loose-piece check (not this one) is what judges a part left free.
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     const f = g.findings.find((x) => x.code === 'tab-unplaceable');
@@ -2933,14 +2933,14 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(f!.message).toContain('released during the cut');
   });
 
-  it('#786 slice 5 — when NO tab fits the part is still refused: nothing holds it', () => {
+  it('#786 slice 5 — when NO tab fits the part is still refused: nothing holds it', async () => {
     // A 10 x 10 outline with four 60 mm tabs: not one can be placed on a ~40 mm path. The cut is
     // a SAFETY refusal (and the loose-piece check names the freed part), not an informed warning.
     const job = cutoutJob(
       { of: 'rect-1', side: 'outside', inset: 0, tabs: { count: 4, width: 60, height: 1 } },
       { shapes: [{ ...RECT, width: 10, height: 10 }] },
     );
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.nc).toBeNull();
@@ -2950,10 +2950,10 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(g.findings.some((x) => x.code === 'loose-piece' && x.severity === 'error')).toBe(true);
   }, 120_000);
 
-  it('refuses a through cut the cutter cannot reach above its shank', () => {
+  it('refuses a through cut the cutter cannot reach above its shank', async () => {
     // 12 mm of blank plus the 0.3 mm breakthrough is 12.3 mm; this cutter states 5 mm of shoulder.
     const short = flatEndMill(3.175, { name: 'short flat end', fluteLength: 20, shoulderLength: 5 });
-    const g = generate(tl, cutoutJob({}, { tool: short, toolKey: 'inv:short' }));
+    const g = await generate(tl, cutoutJob({}, { tool: short, toolKey: 'inv:short' }));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     const f = g.findings.find((x) => x.code === 'through-tool-reach');
@@ -2963,13 +2963,13 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(f!.message).toContain('12.3');
   });
 
-  it('refuses a through cut that leaves a piece of the blank disconnected', () => {
+  it('refuses a through cut that leaves a piece of the blank disconnected', async () => {
     // A 100 × 4 through slot spanning the blank edge to edge severs the front strip.
     const job = cutoutJob(
       {},
       { cutouts: [], shapes: [{ ...RECT, width: 100, height: 4, id: 'slit', through: true }] },
     );
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.nc).toBeNull();
@@ -3007,9 +3007,9 @@ describe('through-cuts and cut-outs (#218)', () => {
   }
 
   for (const file of ['fx-hex-svg-import.json', 'fx-hexv.json'] as const) {
-    it(`${file}: four tabs keep the part on the blank, so no piece is loose (#750)`, () => {
+    it(`${file}: four tabs keep the part on the blank, so no piece is loose (#750)`, async () => {
       const job = benchJob(file);
-      const g = generate(tl, job);
+      const g = await generate(tl, job);
       const loose = g.findings.filter((f) => f.code === 'loose-piece');
       expect(loose, JSON.stringify(loose)).toEqual([]);
       expect(g.ok, JSON.stringify(g.findings)).toBe(true);
@@ -3020,7 +3020,7 @@ describe('through-cuts and cut-outs (#218)', () => {
     });
   }
 
-  it('still refuses a piece a separate through cut really frees, tabs and all (#750)', () => {
+  it('still refuses a piece a separate through cut really frees, tabs and all (#750)', async () => {
     // The tabbed cut-out's own tabs must not be cancelled against the slot's removal: a tab keeps
     // material only the kerf it belongs to passed over. This passes on the pre-#750 analysis too —
     // it is a guard that the per-contour difference did not weaken the check, not a regression
@@ -3029,7 +3029,7 @@ describe('through-cuts and cut-outs (#218)', () => {
       {},
       { shapes: [{ ...RECT, width: 100, height: 4, id: 'slit', through: true }] },
     );
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     const f = g.findings.find((x) => x.code === 'loose-piece');
@@ -3117,8 +3117,8 @@ describe('through-cuts and cut-outs (#218)', () => {
   }
 
   for (const gap of [3.5, 4.0, 4.5]) {
-    it(`holds the original rectangle pair, ${gap} mm apart: B's tab survives the neighbour's kerf (#736, #750)`, () => {
-      const g = generate(tl, rectanglePairJob(gap));
+    it(`holds the original rectangle pair, ${gap} mm apart: B's tab survives the neighbour's kerf (#736, #750)`, async () => {
+      const g = await generate(tl, rectanglePairJob(gap));
       expect(g.ok, JSON.stringify(g.findings)).toBe(true);
       expect(g.stage).toBe('done');
       expect(g.findings.filter((f) => f.code === 'loose-piece')).toEqual([]);
@@ -3168,8 +3168,8 @@ describe('through-cuts and cut-outs (#218)', () => {
   }
 
   for (const gap of [3.5, 4.0, 4.5]) {
-    it(`refuses a part whose only tab the neighbouring contour's pass cuts away, ${gap} mm apart (#750)`, () => {
-      const g = generate(tl, twoPartJob(gap));
+    it(`refuses a part whose only tab the neighbouring contour's pass cuts away, ${gap} mm apart (#750)`, async () => {
+      const g = await generate(tl, twoPartJob(gap));
       expect(g.ok).toBe(false);
       expect(g.stage).toBe('findings');
       const f = g.findings.find((x) => x.code === 'loose-piece');
@@ -3183,10 +3183,10 @@ describe('through-cuts and cut-outs (#218)', () => {
     });
   }
 
-  it('refuses a cut-out whose inset leaves no path, instead of silently dropping it (#218)', () => {
+  it('refuses a cut-out whose inset leaves no path, instead of silently dropping it (#218)', async () => {
     // A 100 mm inset on the 100 × 60 blank shrinks the profile past the cutter radius: the old
     // behaviour was `profilePath` returning [] and the cut-out simply vanishing from the program.
-    const g = generate(tl, cutoutJob({ inset: 100 }));
+    const g = await generate(tl, cutoutJob({ inset: 100 }));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.nc).toBeNull();
@@ -3252,10 +3252,10 @@ describe('a setup’s cut-outs and uncut items stay safe across cutters (#746)',
     toolItems,
   });
 
-  const engravePrograms = (g: ReturnType<typeof generate>) =>
+  const engravePrograms = (g: Awaited<ReturnType<typeof generate>>) =>
     g.programs.filter((p) => (p.kind ?? 'engrave') === 'engrave');
 
-  it('cuts a cut-out after every other cutter’s work, splitting its owner into a final program (#746)', () => {
+  it('cuts a cut-out after every other cutter’s work, splitting its owner into a final program (#746)', async () => {
     const base = dj();
     const cut: EngraveCutout = {
       kind: 'cutout',
@@ -3284,7 +3284,7 @@ describe('a setup’s cut-outs and uncut items stay safe across cutters (#746)',
         }),
       ],
     };
-    const g = generate(tl, job, null, [], undefined, { tools: CUTTERS });
+    const g = await generate(tl, job, null, [], undefined, { tools: CUTTERS });
     expect(
       g.ok,
       JSON.stringify({
@@ -3308,7 +3308,7 @@ describe('a setup’s cut-outs and uncut items stay safe across cutters (#746)',
     expect(programs[2]!.nc).not.toContain('"Inset"');
   }, 120_000);
 
-  it('refuses by name when the first cutter cannot enter an item and no later cutter rests (#746)', () => {
+  it('refuses by name when the first cutter cannot enter an item and no later cutter rests (#746)', async () => {
     const base = dj();
     // A 2 mm slot cannot be entered by the 3.175 mm cutter that owns it. The fine cutter owns a
     // different item, so NO rest pass exists — the slot must refuse by name, not vanish.
@@ -3331,7 +3331,7 @@ describe('a setup’s cut-outs and uncut items stay safe across cutters (#746)',
       ],
     };
     // #786 slice 5 — the slot INFORMS that it cuts nothing; the rim and the small block post.
-    const g = generate(tl, job, null, [], undefined, { tools: CUTTERS });
+    const g = await generate(tl, job, null, [], undefined, { tools: CUTTERS });
     expect(g.ok, JSON.stringify(g.findings.filter((f) => f.severity === 'error'))).toBe(true);
     expect(g.nc).not.toBeNull();
     const empty = g.findings.find((f) => f.code === 'item-empty' && f.labelId === 'slot');
@@ -3340,7 +3340,7 @@ describe('a setup’s cut-outs and uncut items stay safe across cutters (#746)',
     expect(empty!.message).toContain('"Narrow"');
   }, 120_000);
 
-  it('cuts every assigned item exactly once across the cutters (#746)', () => {
+  it('cuts every assigned item exactly once across the cutters (#746)', async () => {
     const base = dj();
     // The narrow slot is the fine cutter's: no item is unreachable, and none may be dropped.
     const job: EngraveJob = {
@@ -3361,7 +3361,7 @@ describe('a setup’s cut-outs and uncut items stay safe across cutters (#746)',
         }),
       ],
     };
-    const g = generate(tl, job, null, [], undefined, { tools: CUTTERS });
+    const g = await generate(tl, job, null, [], undefined, { tools: CUTTERS });
     expect(
       g.ok,
       JSON.stringify({
@@ -3406,15 +3406,15 @@ describe('the fitted surface plane is posted against (#608)', () => {
     return out;
   }
 
-  it('lifts every feed move by the plane at its XY, and leaves the flat program unchanged', () => {
+  it('lifts every feed move by the plane at its XY, and leaves the flat program unchanged', async () => {
     const job = dj();
     const margins = effectiveMargins(job, MARGIN_DEFAULTS);
     // A realistic tilt: bounded by the depth band (≤ ~0.4 mm over the stock), so even the shallowest
     // 0.5 mm cut stays below the top face once the lift is applied.
     const plane = { offset: -55, slopeX: 0.002, slopeY: -0.003 };
     const z0 = -55; // the reference reading, so the lift at the origin is 0
-    const flat = engraveGenerate(tl, job, jobTool(job), [], null, margins, {});
-    const fitted = engraveGenerate(tl, job, jobTool(job), [], null, margins, { surface: { plane, z0 } });
+    const flat = await engraveGenerate(tl, job, jobTool(job), [], null, margins, {});
+    const fitted = await engraveGenerate(tl, job, jobTool(job), [], null, margins, { surface: { plane, z0 } });
 
     expect(flat.ok).toBe(true);
     expect(fitted.ok).toBe(true);
@@ -3433,7 +3433,7 @@ describe('the fitted surface plane is posted against (#608)', () => {
     const zs = new Set<number>();
     for (let i = 0; i < fitMoves.length; i++) {
       const f = flatMoves[i]!;
-      const g = fitMoves[i]!;
+      const g = await fitMoves[i]!;
       expect(g.x).toBeCloseTo(f.x, 6);
       expect(g.y).toBeCloseTo(f.y, 6);
       expect(g.z).toBeCloseTo(f.z + lift(g.x, g.y), 2);
@@ -3451,7 +3451,7 @@ describe('the fitted surface plane is posted against (#608)', () => {
 // air there: the finding states the area, Generate posts the program, and the verifier no longer
 // refuses the move for leaving the stock — the sweep's fixture and bed checks judge real contact.
 describe('#786 slice 1 part 2 — an item hanging off the blank still generates', () => {
-  it('informs with the area, posts the program and verifies it', () => {
+  it('informs with the area, posts the program and verifies it', async () => {
     const base = dj();
     const first = base.labels[0]!;
     // Off the FRONT edge, not the left: a cut at X 0 is the fixed jaw's own face, and that
@@ -3462,7 +3462,7 @@ describe('#786 slice 1 part 2 — an item hanging off the blank still generates'
       labels: [{ ...first, position: { ...first.position, y: 0 } }, ...base.labels.slice(1)],
     };
 
-    const g = engraveGenerate(tl, job, jobTool(job), [], null, undefined, {});
+    const g = await engraveGenerate(tl, job, jobTool(job), [], null, undefined, {});
     const outside = g.findings.find((f) => f.code === 'item-outside-stock');
     expect(outside).toBeDefined();
     expect(outside!.severity).toBe('warning');

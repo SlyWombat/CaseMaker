@@ -215,10 +215,10 @@ describe('#724 B2 — a rapid never passes through material', () => {
    * stroke's own end disc read as material the cutter never reaches and each stroke's retract
    * was called a gouge. At every default text size the program now loads clean.
    */
-  it('loads the dowel program with no rapid through material, at every default text size', () => {
+  it('loads the dowel program with no rapid through material, at every default text size', async () => {
     for (const size of [5, 6, 8, 10]) {
       const job = dowel({}, { size });
-      const g = generate(tl, job);
+      const g = await generate(tl, job);
       expect(g.ok, `size ${size}`).toBe(true);
       const tool = jobTool(job) ?? THIN_TOOL;
       const session = createSimSession(tl);
@@ -240,14 +240,14 @@ describe('#724 B2 — a rapid never passes through material', () => {
     }
   }, 120_000);
 
-  it('still calls a rapid that descends into the stock a gouge', () => {
+  it('still calls a rapid that descends into the stock a gouge', async () => {
     // The check must keep its teeth: send the cutter down to Z 5 (the surface is at 10) over
     // uncut stock, and back to the position the program expected. The detour starts from the
     // first position the program establishes (X, A and Z all known, so the timeline keeps the
     // move — a rapid whose start it cannot place is not checked at all) and ends there too, so
     // every later move runs exactly where it did before and the stock is cut as designed.
     const job = dowel();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const anchor = g.nc?.match(/^G0 X[^\n]* Z15 A[^\n]*$/m)?.[0] ?? '';
     expect(anchor).toMatch(/^G0 X[\d.]+ Z15 A[\d.]+$/);
@@ -279,7 +279,7 @@ describe('#724 B3 — the shipped layout lands on the free span', () => {
    * write now places the layout on the free span's centre (39), so the default job its own
    * defaults produce is a cuttable one.
    */
-  it('refuses the shipped layout at X 50, and cuts it once the write places it on the span', () => {
+  it('refuses the shipped layout at X 50, and cuts it once the write places it on the span', async () => {
     const base = defaultEngraveJob();
     const rod: EngraveJob = {
       ...base,
@@ -302,7 +302,7 @@ describe('#724 B3 — the shipped layout lands on the free span', () => {
       workholding: { kind: 'rotary-chuck', rotary: chuck },
       labels,
     });
-    const refused = generate(tl, inChuck(rod.labels));
+    const refused = await generate(tl, inChuck(rod.labels));
     expect(refused.ok).toBe(false);
     const band = refused.findings.filter((f) => f.severity === 'error' && f.message.includes("tailstock's band"));
     expect(band).toHaveLength(1);
@@ -323,7 +323,7 @@ describe('#724 B3 — the shipped layout lands on the free span', () => {
     expect(map).not.toBeNull();
     expect(rotaryFreeSpan(map!)).toEqual({ from: 3, to: 75, centre: 39 });
 
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect([...g.findings, ...(g.verify?.findings ?? [])].filter((f) => f.severity === 'error')).toEqual([]);
   }, 120_000);
@@ -365,10 +365,10 @@ describe('Name on a dowel (#240 slice 2, design §7 W)', () => {
   // One generation for the whole block: the pipeline is the thing under test, and its five
   // readings below are five questions about ONE result, not five runs.
   let cached: EngraveGenerated | null = null;
-  const gen = (): EngraveGenerated => (cached ??= generate(tl, job));
+  const gen = async (): Promise<EngraveGenerated> => (cached ??= await generate(tl, job));
 
-  it('generates, verifies and posts one rotary program', () => {
-    const g = gen();
+  it('generates, verifies and posts one rotary program', async () => {
+    const g = await gen();
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
@@ -380,8 +380,8 @@ describe('Name on a dowel (#240 slice 2, design §7 W)', () => {
     expect(g.nc).not.toBeNull();
   });
 
-  it('states the material’s real surface speed on the run sheet, as a fact (#759)', () => {
-    const sheet = buildRunSheet(job, gen(), null);
+  it('states the material’s real surface speed on the run sheet, as a fact (#759)', async () => {
+    const sheet = buildRunSheet(job, await gen(), null);
     const section = sheet.sections.find((s) => s.id === 'rotary');
     expect(section?.title).toContain('The rotary feed');
     const text = section!.steps.map((step) => step.text).join(' ');
@@ -396,7 +396,7 @@ describe('Name on a dowel (#240 slice 2, design §7 W)', () => {
   // #763 — R-UI-12's second half: a 30° V's CONE is the rotary footprint now, so a wrapped V text
   // sweeps on the column engine and matches its own oracle (the glyph's region grown by the cone's
   // opening at each level).
-  it('#763 — a 30° V wrapped text sweeps and matches its oracle', () => {
+  it('#763 — a 30° V wrapped text sweeps and matches its oracle', async () => {
     const V30 = flatEndMill(3.175, {
       name: '30° V 0.3',
       typeText: 'Engraving',
@@ -409,7 +409,7 @@ describe('Name on a dowel (#240 slice 2, design §7 W)', () => {
     });
     const base = dowel();
     const job: EngraveJob = { ...base, name: 'V on a dowel', toolKey: 'v30', tool: V30 };
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok, JSON.stringify(g.errors)).toBe(true);
     expect(g.nc).not.toBeNull();
     const session = createSimSession(tl);
@@ -426,8 +426,8 @@ describe('Name on a dowel (#240 slice 2, design §7 W)', () => {
     }
   });
 
-  it('is the map’s frame: radius in the header, Y always 0, A from the surface arc', () => {
-    const g = gen();
+  it('is the map’s frame: radius in the header, Y always 0, A from the surface arc', async () => {
+    const g = await gen();
     const nc = g.nc ?? '';
     expect(nc.startsWith('%\nG17 G21 G54 G90\n')).toBe(true);
     expect(nc).toContain(';@CM|ROTARY|radius=10');
@@ -446,8 +446,8 @@ describe('Name on a dowel (#240 slice 2, design §7 W)', () => {
     expect(Math.max(...w.cutA.map(Math.abs))).toBeLessThan(360); // unwound, one turn at most
   });
 
-  it('cuts floors at R − d = 9.5 and keeps the CAM’s own feeds (R12)', () => {
-    const g = gen();
+  it('cuts floors at R − d = 9.5 and keeps the CAM’s own feeds (R12)', async () => {
+    const g = await gen();
     const w = readNc(g.nc ?? '');
     // Every cutting Z is at or above the floor a 0.5 mm engraving on a ⌀20 rod leaves (9.5);
     // the 9.7 entries are the entry ramps, and 9.5 is the floor the pocket cuts at.
@@ -458,14 +458,14 @@ describe('Name on a dowel (#240 slice 2, design §7 W)', () => {
     expect(new Set(w.cutF)).toEqual(new Set([200, 500]));
   });
 
-  it('ends the way the rotary dialect ends', () => {
-    const g = gen();
+  it('ends the way the rotary dialect ends', async () => {
+    const g = await gen();
     const tail = (g.nc ?? '').trimEnd().split('\n').slice(-5);
     expect(tail).toEqual(['G0 Z15', 'G92.4A0S0', 'M9', 'M5', 'M30']);
   });
 
-  it('simulates on the column engine and matches the design, at the derived band', () => {
-    const g = gen();
+  it('simulates on the column engine and matches the design, at the derived band', async () => {
+    const g = await gen();
     const { load, report } = loadAndOracle(job, g);
     expect(load.summary.rotary).toBe(true);
     expect(load.stats.engine).toBe('column');
@@ -510,10 +510,10 @@ describe('Name on a dowel (#240 slice 2, design §7 W)', () => {
 describe('a band across the seam is ONE continuous unwrapped A', () => {
   const job = dowel({}, { position: { x: 42.5, y: 0 } });
   let cached: EngraveGenerated | null = null;
-  const gen = (): EngraveGenerated => (cached ??= generate(tl, job));
+  const gen = async (): Promise<EngraveGenerated> => (cached ??= await generate(tl, job));
 
-  it('generates a region on both sides of A = 0 and posts both signs', () => {
-    const g = gen();
+  it('generates a region on both sides of A = 0 and posts both signs', async () => {
+    const g = await gen();
     expect(g.ok).toBe(true);
     expect(g.verify?.ok).toBe(true);
 
@@ -534,8 +534,8 @@ describe('a band across the seam is ONE continuous unwrapped A', () => {
     }
   });
 
-  it('matches the design across the seam — no column changed outside the region', () => {
-    const g = gen();
+  it('matches the design across the seam — no column changed outside the region', async () => {
+    const g = await gen();
     const { report } = loadAndOracle(job, g);
     expect(report.ok).toBe(true);
     expect(report.levels[0]!.underCut).toBe(0);
@@ -546,10 +546,10 @@ describe('a band across the seam is ONE continuous unwrapped A', () => {
 // ---- The two end bands ----------------------------------------------------------
 
 describe('an item that reaches a band is refused at its row', () => {
-  it('runs into the jaws at the map’s left end', () => {
+  it('runs into the jaws at the map’s left end', async () => {
     // The label is 25.14 mm wide; at X = 14 its opening starts at X ≈ 1.43, inside the 3 mm
     // keep-out past the jaw face.
-    const g = generate(tl, dowel({}, { position: { x: 14, y: 0 } }));
+    const g = await generate(tl, dowel({}, { position: { x: 14, y: 0 } }));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     const f = g.findings.find((x) => x.code === 'wrap-into-clamp');
@@ -562,9 +562,9 @@ describe('an item that reaches a band is refused at its row', () => {
     expect(f!.message).not.toMatch(CODE);
   });
 
-  it('runs into the tailstock’s band only while the tailstock is in', () => {
+  it('runs into the tailstock’s band only while the tailstock is in', async () => {
     // At X = 63 the opening ends at X ≈ 75.57, past the tailstock's X 75–85 mm.
-    const inBand = generate(tl, dowel({}, { position: { x: 63, y: 0 } }));
+    const inBand = await generate(tl, dowel({}, { position: { x: 63, y: 0 } }));
     const f = inBand.findings.find((x) => x.code === 'wrap-into-clamp');
     expect(f).toBeDefined();
     expect(f!.message).toContain("runs into the tailstock's band");
@@ -576,18 +576,18 @@ describe('an item that reaches a band is refused at its row', () => {
     // The same item with the tailstock out is inside the map: nothing to run into.
     const outJob = dowel({}, { position: { x: 63, y: 0 } });
     outJob.workholding = { kind: 'rotary-chuck', rotary: { ...CHUCK, tailstock: false } };
-    const out = generate(tl, outJob);
+    const out = await generate(tl, outJob);
     expect(out.findings.some((x) => x.code === 'wrap-into-clamp')).toBe(false);
     expect(out.ok).toBe(true);
   });
 
-  it('runs off the free end with the tailstock out — its own sentence, and the cut posts (#786 slice 1 part 2)', () => {
+  it('runs off the free end with the tailstock out — its own sentence, and the cut posts (#786 slice 1 part 2)', async () => {
     // At X 75 the opening ends past the 85 mm stick-out. With the tailstock out there is no band
     // to name — past the stick-out the cut passes over air, which is INFORMED: the sentence has
     // the reach, and the program still posts. With the tailstock in the band is an error.
     const outJob = dowel({}, { position: { x: 75, y: 0 } });
     outJob.workholding = { kind: 'rotary-chuck', rotary: { ...CHUCK, tailstock: false } };
-    const out = generate(tl, outJob);
+    const out = await generate(tl, outJob);
     expect(out.ok).toBe(true);
     expect(out.findings.some((x) => x.code === 'wrap-into-clamp')).toBe(false);
     const f = out.findings.find((x) => x.code === 'wrap-off-free-end');
@@ -600,7 +600,7 @@ describe('an item that reaches a band is refused at its row', () => {
     expect(f!.message).not.toMatch(CODE);
 
     // The same item with the tailstock IN is the band's, at its row, as before.
-    const band = generate(tl, dowel({}, { position: { x: 75, y: 0 } })).findings.find((x) => x.code === 'wrap-into-clamp');
+    const band = (await generate(tl, dowel({}, { position: { x: 75, y: 0 } }))).findings.find((x) => x.code === 'wrap-into-clamp');
     expect(band?.message).toContain("runs into the tailstock's band");
   });
 
@@ -609,8 +609,8 @@ describe('an item that reaches a band is refused at its row', () => {
 // ---- The axis -------------------------------------------------------------------
 
 describe('a depth at or past the axis is refused before any toolpath', () => {
-  it('says how far past the centre it reaches', () => {
-    const g = generate(tl, dowel({}, { depth: 12 }));
+  it('says how far past the centre it reaches', async () => {
+    const g = await generate(tl, dowel({}, { depth: 12 }));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.nc).toBeNull();
@@ -622,8 +622,8 @@ describe('a depth at or past the axis is refused before any toolpath', () => {
     expect(f!.message).not.toMatch(CODE);
   });
 
-  it('has its own sentence for the exact depth — the axis is not “0 mm past”', () => {
-    const g = generate(tl, dowel({}, { depth: 10 }));
+  it('has its own sentence for the exact depth — the axis is not “0 mm past”', async () => {
+    const g = await generate(tl, dowel({}, { depth: 10 }));
     const f = g.findings.find((x) => x.code === 'axis-crossing');
     expect(f).toBeDefined();
     expect(f!.message).toContain('reaches the axis exactly');
@@ -635,7 +635,7 @@ describe('a depth at or past the axis is refused before any toolpath', () => {
 // ---- Classes the wrap does not cut ----------------------------------------------
 
 describe('a cut class the wrap does not cut is refused by name', () => {
-  it('names the cut-out and gives the action', () => {
+  it('names the cut-out and gives the action', async () => {
     const job = dowel();
     job.cutouts = [
       {
@@ -648,7 +648,7 @@ describe('a cut class the wrap does not cut is refused by name', () => {
         tabs: { count: 4, width: 4, height: 1 },
       },
     ];
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(false);
     const f = g.findings.find((x) => x.code === 'rotary-unsupported');
     expect(f).toBeDefined();
@@ -661,7 +661,7 @@ describe('a cut class the wrap does not cut is refused by name', () => {
 // ---- The V-bit ------------------------------------------------------------------
 
 describe('a cutter the rotary engine has no body for stays refused (#763)', () => {
-  it('a cone sweeps now; a bull nose is the refusal that remains', () => {
+  it('a cone sweeps now; a bull nose is the refusal that remains', async () => {
     const job = dowel();
     const vBit = flatEndMill(0.3, {
       name: '30° engraving bit',
@@ -671,7 +671,7 @@ describe('a cutter the rotary engine has no body for stays refused (#763)', () =
       halfAngle: 15,
       angle: 30,
     });
-    const g = engraveGenerate(tl, job, vBit, [], null);
+    const g = await engraveGenerate(tl, job, vBit, [], null);
     expect(g.frame).toBe('rotary');
     expect(g.nc).not.toBeNull();
 
@@ -683,7 +683,7 @@ describe('a cutter the rotary engine has no body for stays refused (#763)', () =
 
     // A bull nose's rounded corner about a turntable axis is still not modelled: refused by name.
     const bull = flatEndMill(3.175, { name: '3.175 bull 0.5', shape: 'bull', cornerRadius: 0.5, diameter: 3.175 });
-    const refused = createSimSession(tl);
+    const refused = await createSimSession(tl);
     const r = refused.load(g.nc ?? '', toSetup(job, Z1), bull, Z1.id);
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -700,8 +700,8 @@ describe('a cutter the rotary engine has no body for stays refused (#763)', () =
 describe('⌀6 rod under the 3.175 mm flat — the oracle passes because the facet is derived', () => {
   const job = thinRod();
 
-  it('generates, verifies and cuts floors at R − d = 2.5', () => {
-    const g = engraveGenerate(tl, job, THIN_TOOL, [], null);
+  it('generates, verifies and cuts floors at R − d = 2.5', async () => {
+    const g = await engraveGenerate(tl, job, THIN_TOOL, [], null);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.verify?.ok).toBe(true);
@@ -768,8 +768,8 @@ describe('⌀6 rod under the 3.175 mm flat — the oracle passes because the fac
     expect(Math.atan2(1.5875, 2.5) * (180 / Math.PI)).toBeCloseTo(32.4155, 3); // φ_max
   });
 
-  it('matches the design only because the oracle’s band carries that facet term', () => {
-    const g = engraveGenerate(tl, job, THIN_TOOL, [], null);
+  it('matches the design only because the oracle’s band carries that facet term', async () => {
+    const g = await engraveGenerate(tl, job, THIN_TOOL, [], null);
     const tool = THIN_TOOL;
     const session = createSimSession(tl);
     const r = session.load(g.nc ?? '', toSetup(job, Z1), tool, Z1.id);

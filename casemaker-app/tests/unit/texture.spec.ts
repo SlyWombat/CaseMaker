@@ -137,16 +137,16 @@ describe('the stipple — deterministic, seeded, anchored to the grid', () => {
   const shape = rect();
   const numbers = textureNumbers(shape.texture, shape.depth);
 
-  it('derives the same paths every time', () => {
-    const a = textureStrokes(shape, numbers);
-    const b = textureStrokes(shape, numbers);
+  it('derives the same paths every time', async () => {
+    const a = await textureStrokes(shape, numbers);
+    const b = await textureStrokes(shape, numbers);
     expect(b).toEqual(a);
     expect(a.paths.length).toBeGreaterThan(20);
   });
 
-  it('is a different pattern for a different seed', () => {
-    const a = textureStrokes(shape, textureNumbers({ pattern: 'stipple', seed: 1 }, shape.depth));
-    const b = textureStrokes(shape, textureNumbers({ pattern: 'stipple', seed: 2 }, shape.depth));
+  it('is a different pattern for a different seed', async () => {
+    const a = await textureStrokes(shape, textureNumbers({ pattern: 'stipple', seed: 1 }, shape.depth));
+    const b = await textureStrokes(shape, textureNumbers({ pattern: 'stipple', seed: 2 }, shape.depth));
     expect(b.paths).not.toEqual(a.paths);
     expect(b.paths.length).toBeGreaterThan(10);
   });
@@ -179,10 +179,10 @@ describe('the stipple — deterministic, seeded, anchored to the grid', () => {
 });
 
 describe('the scallop — regular rows, no randomness', () => {
-  it('is identical for any seed and clips to the region', () => {
+  it('is identical for any seed and clips to the region', async () => {
     const shape = rect('scallop', { texture: { pattern: 'scallop', pitchMm: 2 } });
-    const a = textureStrokes(shape, textureNumbers({ pattern: 'scallop', pitchMm: 2, seed: 1 }, shape.depth));
-    const b = textureStrokes(shape, textureNumbers({ pattern: 'scallop', pitchMm: 2, seed: 99 }, shape.depth));
+    const a = await textureStrokes(shape, textureNumbers({ pattern: 'scallop', pitchMm: 2, seed: 1 }, shape.depth));
+    const b = await textureStrokes(shape, textureNumbers({ pattern: 'scallop', pitchMm: 2, seed: 99 }, shape.depth));
     expect(b.paths).toEqual(a.paths);
     expect(a.paths.length).toBeGreaterThan(2);
     expect(allInsideRect(a.paths, 15, 10, 10, 6)).toBe(true);
@@ -397,9 +397,9 @@ describe('findings — a marked region that cannot cut, named', () => {
 });
 
 describe('the program and the oracle', () => {
-  it('posts the strokes as a trace operation, cuts no deeper than the depth, and repeats byte for byte', () => {
+  it('posts the strokes as a trace operation, cuts no deeper than the depth, and repeats byte for byte', async () => {
     const job = textureJob(rect('t', { texture: { pattern: 'stipple', pitchMm: 2, strokeMm: 1 } }));
-    const a = generate(tl, job);
+    const a = await generate(tl, job);
     expect(a.ok).toBe(true);
     expect(a.nc).not.toBeNull();
     const nc = a.nc as string;
@@ -413,13 +413,13 @@ describe('the program and the oracle', () => {
     expect(zs.length).toBeGreaterThan(10);
     expect(Math.min(...zs)).toBeGreaterThanOrEqual(-0.8 - 1e-6);
     // The same document posts the same program.
-    const b = generate(tl, job);
+    const b = await generate(tl, job);
     expect(b.nc).toBe(nc);
   }, 60_000);
 
-  it('predicts a V texture as the strokes\' groove envelope', () => {
+  it('predicts a V texture as the strokes\' groove envelope', async () => {
     const job = textureJob(rect('t', { texture: { pattern: 'stipple', pitchMm: 2, strokeMm: 1 } }));
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     // THE PREDICTION IS THE GROOVES: one entry carrying every stroke's path and the cone, not the
@@ -445,7 +445,7 @@ describe('the program and the oracle', () => {
     }
   }, 120_000);
 
-  it('removes far less than a flat pocket — the flat cutter\'s own prediction and removal', () => {
+  it('removes far less than a flat pocket — the flat cutter\'s own prediction and removal', async () => {
     // A FLAT texture takes the other side of the trace funnel: `traceCutRegions`' swept polygons
     // instead of a groove. Its removal is a solid, so this is also the test that can weigh the
     // cut against the pocket it is NOT.
@@ -457,7 +457,7 @@ describe('the program and the oracle', () => {
       toolKey: 'flat-1.0',
       tool: flatEndMill(1, { id: null, name: '1 mm flat end', typeText: 'Flat End' }),
     });
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     const predicted = g.predicted.filter((p) => p.itemId === 't');
@@ -486,9 +486,9 @@ describe('the program and the oracle', () => {
     }
   }, 120_000);
 
-  it('states the pattern and the stroke count in the run sheet', () => {
+  it('states the pattern and the stroke count in the run sheet', async () => {
     const job = textureJob(rect('t', { texture: { pattern: 'stipple', pitchMm: 2, strokeMm: 1, seed: 3 } }));
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const texts = buildRunSheet(job, g, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const step = texts.find((t) => t.includes('Texture stipple'));

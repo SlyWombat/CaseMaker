@@ -307,9 +307,9 @@ describe('cameraFiducialJob (#189)', () => {
     expect(job.shapes[1]!.kind).toBe('rect');
   });
 
-  it('generates: the app accepts the job and writes a clean .nc', () => {
+  it('generates: the app accepts the job and writes a clean .nc', async () => {
     const job = cameraFiducialJob(cameraTargetFor(), dj());
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.nc).not.toBeNull();

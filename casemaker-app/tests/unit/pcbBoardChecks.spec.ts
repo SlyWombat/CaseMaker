@@ -181,7 +181,7 @@ describe('a hole no cutter makes does not block the board (#743 P-5 review)', ()
     const assigned = Object.values(job.setups?.[0]?.toolItems ?? {}).flat();
     for (const hole of job.drills ?? []) expect(assigned).not.toContain(hole.id);
     // … and the run still posts, with the hole stated as a warning.
-    const gen = engraveGenerate(tl, job, engraver.tool, rows as never, null, undefined, { tools: [engraver, corn] });
+    const gen = await engraveGenerate(tl, job, engraver.tool, rows as never, null, undefined, { tools: [engraver, corn] });
     expect(gen.findings.some((f) => f.code === 'setup-items-unassigned')).toBe(false);
     expect(gen.errors).toEqual([]);
     expect(gen.ok).toBe(true);

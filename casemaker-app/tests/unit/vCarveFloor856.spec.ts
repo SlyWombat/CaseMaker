@@ -80,7 +80,7 @@ function floorJob(innerDepth: number, innerSize = { width: 8, height: 4 }): Engr
 const generate = (job: EngraveJob) => generateJob(tl, { ...job, tool: ENGRAVER_30 });
 
 describe('#856 a V-carve on a floor is measured from the floor', () => {
-  it('the coaster’s letters (14 mm deep, on a 10 mm floor) are not clamped: they cut their 4 mm', () => {
+  it('the coaster’s letters (14 mm deep, on a 10 mm floor) are not clamped: they cut their 4 mm', async () => {
     const job = floorJob(14);
     const regions = engraveRegions(tl, job, ENGRAVER_30);
     // The synthetic job runs ONE cutter for both items (the demo splits the pocket onto the flat),
@@ -93,7 +93,7 @@ describe('#856 a V-carve on a floor is measured from the floor', () => {
     expect(inner.depth).toBe(14);
     // And the run does not stop at the CAM: this constructed bit has no feed row, which is the
     // stage it reaches — the depth rule (a `findings`/CAM stage error) is not the one that stops it.
-    const gen = generate(job);
+    const gen = await generate(job);
     expect(gen.stage).toBe('feeds');
     expect(gen.errors.some((e) => e.message.includes('cuts no material'))).toBe(false);
   });
@@ -113,7 +113,7 @@ describe('#856 a V-carve on a floor is measured from the floor', () => {
     expect(inner.depth).toBeCloseTo(10 + REACH_30, 9);
   });
 
-  it('an item AT its container’s depth is no deeper than the pocket, and the no-throw path is the CAM’s', () => {
+  it('an item AT its container’s depth is no deeper than the pocket, and the no-throw path is the CAM’s', async () => {
     // Containment gives a floor only to an item DEEPER than its container (supportingFloors), so a
     // document cannot express "at the floor" through the plan — the material-at-or-under-the-floor
     // case reaches the CAM only as a defensive path, which the block below calls directly. What
@@ -122,7 +122,7 @@ describe('#856 a V-carve on a floor is measured from the floor', () => {
     const job = floorJob(10);
     const regions = engraveRegions(tl, job, ENGRAVER_30);
     expect(regions.findings.some((f) => f.code === 'item-left-uncut')).toBe(false);
-    const gen = generate(job);
+    const gen = await generate(job);
     expect(gen.stage).toBe('feeds');
     expect(gen.errors.some((e) => e.message.includes('cuts no material'))).toBe(false);
   });

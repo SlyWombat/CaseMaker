@@ -130,21 +130,21 @@ describe('#435 — refusals are by name, never an approximation', () => {
     expect(named?.message).toContain("Setup 2 has the stock's right face up");
   });
 
-  it('GENERATES the rest of the job with a side-opening primitive left in the stock (#786 slice 4a)', () => {
+  it('GENERATES the rest of the job with a side-opening primitive left in the stock (#786 slice 4a)', async () => {
     const job = jobWith([
       primitive({ id: 'side', kind: 'box', width: 10, height: 10, axis: 'x' }),
       primitive({ id: 'top', kind: 'box', width: 8, height: 8 }),
     ]);
     job.toolKey = 'flat-1.0';
     job.tool = flatEndMill(1);
-    const out = engraveGenerate(tl, job, flatEndMill(1), [], null);
+    const out = await engraveGenerate(tl, job, flatEndMill(1), [], null);
     expect(out.errors, JSON.stringify(out.errors)).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.programs.length).toBeGreaterThan(0);
     expect(out.findings.find((f) => f.code === 'primitive-not-vertical')?.severity).toBe('warning');
   }, 60_000);
 
-  it('CUTS a cone as a 3D surface program — the #435 refusal is gone (#786 4a-2)', () => {
+  it('CUTS a cone as a 3D surface program — the #435 refusal is gone (#786 4a-2)', async () => {
     const job = jobWith([primitive({ kind: 'cone', diameter: 8, tipDiameter: 1 })], {
       toolKey: 'flat-1.0',
       tool: flatEndMill(1, { fluteLength: 20, centreCutting: true }),
@@ -152,20 +152,20 @@ describe('#435 — refusals are by name, never an approximation', () => {
     const found = codes(job);
     expect(found).not.toContain('primitive-cone-needs-cam');
     expect(found).not.toContain('primitive-sphere-needs-3d');
-    const out = engraveGenerate(tl, job, job.tool!, [], null);
+    const out = await engraveGenerate(tl, job, job.tool!, [], null);
     expect(out.ok, JSON.stringify(out.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
     const surface = out.programs.find((p) => p.surfaceCheck != null);
     expect(surface).toBeDefined();
     expect(out.findings.some((f) => f.code === 'primitive-surface-program' && f.severity === 'info')).toBe(true);
   }, 60_000);
 
-  it('CUTS a sphere the same way, as the surface it is (#786 4a-2)', () => {
+  it('CUTS a sphere the same way, as the surface it is (#786 4a-2)', async () => {
     const job = jobWith([primitive({ kind: 'sphere', diameter: 8 })], {
       toolKey: 'flat-1.0',
       tool: flatEndMill(1, { fluteLength: 20, centreCutting: true }),
     });
     expect(codes(job)).not.toContain('primitive-sphere-needs-3d');
-    const out = engraveGenerate(tl, job, job.tool!, [], null);
+    const out = await engraveGenerate(tl, job, job.tool!, [], null);
     expect(out.ok, JSON.stringify(out.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
     expect(out.programs.some((p) => p.surfaceCheck != null)).toBe(true);
   }, 60_000);

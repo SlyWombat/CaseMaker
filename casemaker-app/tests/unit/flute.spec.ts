@@ -211,9 +211,9 @@ describe('findings — the cutter and the short path', () => {
 });
 
 describe('the program and the oracle', () => {
-  it('walks one continuous ramped feed: no plunge to depth, no retract from it', () => {
+  it('walks one continuous ramped feed: no plunge to depth, no retract from it', async () => {
     const job = fluteJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     const nc = g.nc as string;
@@ -224,13 +224,13 @@ describe('the program and the oracle', () => {
     // The ramps are in the file: some cut is between the surface and the floor.
     expect(zs.some((z) => z < -0.5 && z > -1.9)).toBe(true);
     // Determinism: the same document posts the same program.
-    const again = generate(tl, job);
+    const again = await generate(tl, job);
     expect(again.nc).toBe(nc);
   }, 60_000);
 
-  it('predicts one groove per segment at the segment’s end depth, and passes the oracle', () => {
+  it('predicts one groove per segment at the segment’s end depth, and passes the oracle', async () => {
     const job = fluteJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const entries = g.predicted.filter((p) => p.itemId === 'flute');
     expect(entries.length).toBeGreaterThan(10);
@@ -258,14 +258,14 @@ describe('the program and the oracle', () => {
     }
   }, 120_000);
 
-  it('removes less than the same line cut flat — the ramps take nothing at the ends', () => {
+  it('removes less than the same line cut flat — the ramps take nothing at the ends', async () => {
     // A FLAT cutter, so both loads report a removal solid (a cone's removal is a column grid, not
     // a solid). The ramps are what the volumes differ by.
     const flat = flatEndMill(1, { id: null, name: '1 mm flat end', typeText: 'Flat End' });
     const fluted = fluteJob(line(), { toolKey: 'flat-1.0', tool: flat });
     const plain = fluteJob(line({ flute: undefined }), { toolKey: 'flat-1.0', tool: flat });
-    const gf = generate(tl, fluted);
-    const gp = generate(tl, plain);
+    const gf = await generate(tl, fluted);
+    const gp = await generate(tl, plain);
     expect(gf.ok).toBe(true);
     expect(gp.ok).toBe(true);
     const tool = jobTool(fluted);
@@ -292,9 +292,9 @@ describe('the program and the oracle', () => {
     expect(vf).toBeLessThan(vp * 0.9);
   }, 180_000);
 
-  it('states the ramp, the step and the peak on the run sheet', () => {
+  it('states the ramp, the step and the peak on the run sheet', async () => {
     const job = fluteJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const texts = buildRunSheet(job, g, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const step = texts.find((t) => t.includes('Flute line'));

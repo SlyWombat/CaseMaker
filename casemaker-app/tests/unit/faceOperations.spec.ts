@@ -183,11 +183,11 @@ describe('#241 slice 2 — the face model', () => {
 });
 
 describe('#241 slice 2 — a face program, generated and swept', () => {
-  it('a flat on ⌀20: the post writes Y only while A is held, the verifier passes, and the face matches the chord', () => {
+  it('a flat on ⌀20: the post writes Y only while A is held, the verifier passes, and the face matches the chord', async () => {
     const job = rod([flat('f1', 0, 1)], { stock: { length: 100, width: 20, thickness: 20, material: 'pla', shape: 'cylinder', diameter: 20 } });
     // A short stick-out keeps the exact sweep quick.
     job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
-    const g = engraveGenerate(tl, job, TOOL, [], null);
+    const g = await engraveGenerate(tl, job, TOOL, [], null);
     expect(g.errors, JSON.stringify({ findings: g.findings, verify: g.verify?.findings })).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.frame).toBe('rotary');
@@ -218,10 +218,10 @@ describe('#241 slice 2 — a face program, generated and swept', () => {
     expect(report.levels[0]!.overCut).toBe(0);
   }, 240_000);
 
-  it('a hex all round, generated from the wizard’s numbers: six faces, each judged at its own A', () => {
+  it('a hex all round, generated from the wizard’s numbers: six faces, each judged at its own A', async () => {
     const job = rod([{ id: 'hex', kind: 'faces-all-round', a: 0, count: 6, acrossFlats: 17.321 }]);
     job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
-    const g = engraveGenerate(tl, job, TOOL, [], null);
+    const g = await engraveGenerate(tl, job, TOOL, [], null);
     expect(g.ok, JSON.stringify(g.findings)).toBe(true);
     expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
     const session = createSimSession(tl);
@@ -234,19 +234,19 @@ describe('#241 slice 2 — a face program, generated and swept', () => {
     expect(report.levels.map((l) => l.a)).toEqual([0, 60, 120, 180, 240, 300]);
   }, 300_000);
 
-  it('the run sheet builds for a face job', () => {
+  it('the run sheet builds for a face job', async () => {
     const job = rod([flat('f1', 0, 1)]);
     job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
-    const g = engraveGenerate(tl, job, TOOL, [], null);
+    const g = await engraveGenerate(tl, job, TOOL, [], null);
     expect(g.ok).toBe(true);
     const sheet = buildRunSheet(job, g, null);
     expect(sheet).toBeTruthy();
   }, 120_000);
 
-  it('a cross-hole through at 90° is one plunge, judged on the face it was drilled from', () => {
+  it('a cross-hole through at 90° is one plunge, judged on the face it was drilled from', async () => {
     const job = rod([{ id: 'h', kind: 'cross-hole', a: 90, diameter: 3.175 }]);
     job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
-    const g = engraveGenerate(tl, job, TOOL, [], null);
+    const g = await engraveGenerate(tl, job, TOOL, [], null);
     expect(g.ok, JSON.stringify(g.findings)).toBe(true);
     expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
     const session = createSimSession(tl);
@@ -294,9 +294,9 @@ describe('#833 — cuts ON a face', () => {
     if (!b.ok) expect(b.findings.map((f) => f.code)).toContain('face-item-too-deep');
   });
 
-  it('an engraving on a face is cut at that face’s A, on the face plane, and matches the design', () => {
+  it('an engraving on a face is cut at that face’s A, on the face plane, and matches the design', async () => {
     const job = faceWith([text], 2);
-    const g = engraveGenerate(tl, job, THIN1, [], null);
+    const g = await engraveGenerate(tl, job, THIN1, [], null);
     expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -312,12 +312,12 @@ describe('#833 — cuts ON a face', () => {
     expect(report.levels.every((l) => l.a === 30)).toBe(true);
   }, 300_000);
 
-  it('a pocket and a hole on the face are cut in the same program', () => {
+  it('a pocket and a hole on the face are cut in the same program', async () => {
     const job = faceWith([
       { id: 'p', kind: 'pocket', x: 14, y: 0, depth: 1, width: 6, height: 4 },
       { id: 'h', kind: 'hole', x: 28, y: 0, depth: 2, diameter: 4 },
     ]);
-    const g = engraveGenerate(tl, job, TOOL, [], null);
+    const g = await engraveGenerate(tl, job, TOOL, [], null);
     expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
     expect(g.ok).toBe(true);
     const session = createSimSession(tl);
@@ -344,9 +344,9 @@ describe('#842 — a cut too fine for the face’s cutter', () => {
     return job;
   };
 
-  it('a 3 mm text and the ⌀3.175 cutter: the text is stated uncut, and the face still posts', () => {
+  it('a 3 mm text and the ⌀3.175 cutter: the text is stated uncut, and the face still posts', async () => {
     const job = faceJob([{ id: 't', kind: 'text', x: 20, y: 0, depth: 0.5, text: 'HI', font: DEFAULT_FONT_ID, size: 3 }]);
-    const g = engraveGenerate(tl, job, TOOL, [], null, undefined, { tools: lib });
+    const g = await engraveGenerate(tl, job, TOOL, [], null, undefined, { tools: lib });
     expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(1);
@@ -356,10 +356,10 @@ describe('#842 — a cut too fine for the face’s cutter', () => {
     expect(warning?.message).toContain('left uncut');
   }, 240_000);
 
-  it('a pocket the face’s cutter cannot make is cut by a finer owned cutter, in its own program', () => {
+  it('a pocket the face’s cutter cannot make is cut by a finer owned cutter, in its own program', async () => {
     // 4 × 1.5 mm: the ⌀3.175 cutter cannot open 1.5 mm, and the ⌀1 can.
     const job = faceJob([{ id: 'p', kind: 'pocket', x: 20, y: 0, depth: 1, width: 4, height: 1.5 }]);
-    const g = engraveGenerate(tl, job, TOOL, [], null, undefined, { tools: lib });
+    const g = await engraveGenerate(tl, job, TOOL, [], null, undefined, { tools: lib });
     expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(2);
@@ -376,9 +376,9 @@ describe('#842 — a cut too fine for the face’s cutter', () => {
     expect(fineA.every((a) => Math.abs(a - 30) < 1e-6)).toBe(true);
   }, 300_000);
 
-  it('with no owned finer cutter known, the cut is stated uncut and the face still posts', () => {
+  it('with no owned finer cutter known, the cut is stated uncut and the face still posts', async () => {
     const job = faceJob([{ id: 'p', kind: 'pocket', x: 20, y: 0, depth: 1, width: 4, height: 1.5 }]);
-    const g = engraveGenerate(tl, job, TOOL, [], null);
+    const g = await engraveGenerate(tl, job, TOOL, [], null);
     expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(1);
@@ -387,7 +387,7 @@ describe('#842 — a cut too fine for the face’s cutter', () => {
 });
 
 describe('#836 — a mixed job cuts two programs in cut order', () => {
-  it('the map work first (wrapped), then the faces (indexed), in one mounting', () => {
+  it('the map work first (wrapped), then the faces (indexed), in one mounting', async () => {
     const job = rod([{ id: 'f', kind: 'flat', a: 30, depth: 1 }]);
     job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
     // A ⌀8 circle pocket on the map, cut by the same ⌀3.175 flat end.
@@ -402,7 +402,7 @@ describe('#836 — a mixed job cuts two programs in cut order', () => {
         diameter: 8,
       },
     ];
-    const g = engraveGenerate(tl, job, TOOL, [], null);
+    const g = await engraveGenerate(tl, job, TOOL, [], null);
     expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(2);
@@ -416,7 +416,7 @@ describe('#836 — a mixed job cuts two programs in cut order', () => {
 });
 
 describe('#836 — a setup’d mixed job names the face program’s own cutter', () => {
-  it('the face file runs the setup’s faceToolKey, and the map file its own cutter', () => {
+  it('the face file runs the setup’s faceToolKey, and the map file its own cutter', async () => {
     const job = rod([{ id: 'f', kind: 'flat', a: 30, depth: 1 }]);
     job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
     job.shapes = [
@@ -433,7 +433,7 @@ describe('#836 — a setup’d mixed job names the face program’s own cutter',
         faceToolKey: 'flat-1.0',
       } as never,
     ];
-    const g = engraveGenerate(tl, job, TOOL, [], null, undefined, { tools: getTools() });
+    const g = await engraveGenerate(tl, job, TOOL, [], null, undefined, { tools: getTools() });
     expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.programs.map((p) => p.toolKey)).toEqual([job.toolKey, 'flat-1.0']);

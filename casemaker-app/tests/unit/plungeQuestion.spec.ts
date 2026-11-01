@@ -83,11 +83,11 @@ describe('#786 4c-2 the plunge question', () => {
     expect(plungeWord(bore)).toBeUndefined();
   });
 
-  it('an UNKNOWN cutter cuts the plunge hole; only an ANSWERED no withholds it', () => {
+  it('an UNKNOWN cutter cuts the plunge hole; only an ANSWERED no withholds it', async () => {
     // UNKNOWN: the question is asked AND the hole is cut — the regression this pins. The first
     // version of this slice withheld it, which deleted every drill's own operation from jobs whose
     // cutter had never been asked (the engrave e2e's seven operations became six).
-    const unknown = generate(tl, job(FLAT));
+    const unknown = await generate(tl, job(FLAT));
     expect(unknown.errors).toEqual([]);
     expect(unknown.ok, JSON.stringify(unknown.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
     expect(unknown.findings.some((f) => f.code === 'plunge-unproven')).toBe(true);
@@ -95,13 +95,13 @@ describe('#786 4c-2 the plunge question', () => {
     expect(unknown.predicted.some((p) => p.itemId === POCKET.id)).toBe(true);
 
     // ANSWERED YES: no question, the hole still cut.
-    const proven = generate(tl, job(PROVEN));
+    const proven = await generate(tl, job(PROVEN));
     expect(proven.ok).toBe(true);
     expect(proven.findings.some((f) => f.code === 'plunge-unproven')).toBe(false);
     expect(proven.predicted.some((p) => p.itemId === HOLE.id)).toBe(true);
 
     // ANSWERED NO: the hole is withheld (everything else posts) and the sentence says so.
-    const refused = generate(tl, job({ ...FLAT, centreCutting: false }));
+    const refused = await generate(tl, job({ ...FLAT, centreCutting: false }));
     expect(refused.ok).toBe(true);
     expect(refused.predicted.some((p) => p.itemId === HOLE.id)).toBe(false);
     expect(refused.predicted.some((p) => p.itemId === POCKET.id)).toBe(true);

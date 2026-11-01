@@ -133,8 +133,8 @@ interface Cut {
 }
 
 /** Generate, verify and sweep one rotary relief job. */
-function cutAndSweep(job: EngraveJob): Cut {
-  const out = engraveGenerate(tl, job, BALL, [], null, undefined, {});
+async function cutAndSweep(job: EngraveJob): Promise<Cut> {
+  const out = await engraveGenerate(tl, job, BALL, [], null, undefined, {});
   if (!out.ok) throw new Error(out.errors.join('; '));
   const program = out.programs[0]!;
   expect(program.frame).toBe('rotary');
@@ -191,13 +191,13 @@ function worstOff(
 }
 
 describe('#723 R-4 acceptance — the relief is cut to its closed form', () => {
-  it('a barrel of revolution: swept radius follows r(x) along the rod', () => {
+  it('a barrel of revolution: swept radius follows r(x) along the rod', async () => {
     // r(x) = 7 + 2·sin(π·t), t = (x − x0)/L, over 30 mm centred at map X 30.
     const LENGTH = 30;
     const X0 = 30;
     const rOf = (x: number): number => 7 + 2 * Math.sin(((x - (X0 - LENGTH / 2)) / LENGTH) * Math.PI);
     const job = rotaryJob(goal(ringedSide((_a, x) => rOf(X0 + x), LENGTH, 60, 144), LENGTH, 9));
-    const cut = cutAndSweep(job);
+    const cut = await cutAndSweep(job);
     expect(cut.verifyErrors).toEqual([]);
     expect(cut.sweptCount, 'the relief actually removed material').toBeGreaterThan(1000);
     // The ball's scallop at the finishing step-over is ~0.02 mm; the 0.5 mm sweep grid adds a
@@ -207,13 +207,13 @@ describe('#723 R-4 acceptance — the relief is cut to its closed form', () => {
     expect(excess, 'no material left above the part').toBeLessThan(0.15);
   });
 
-  it('a lobed shaft: swept radius follows r(θ) around the rod', () => {
+  it('a lobed shaft: swept radius follows r(θ) around the rod', async () => {
     // r(θ) = 8 + 1.2·cos(3θ), equal along 20 mm of X — the around-the-rod axis and its seam.
     const LENGTH = 20;
     const X0 = 30;
     const rOf = (theta: number): number => 8 + 1.2 * Math.cos(3 * theta);
     const job = rotaryJob(goal(ringedSide((a) => rOf(a), LENGTH, 20, 144), LENGTH, 9.2));
-    const cut = cutAndSweep(job);
+    const cut = await cutAndSweep(job);
     expect(cut.verifyErrors).toEqual([]);
     expect(cut.sweptCount).toBeGreaterThan(1000);
     const { gouge, excess } = worstOff(
@@ -228,7 +228,7 @@ describe('#723 R-4 acceptance — the relief is cut to its closed form', () => {
     expect(excess, 'no material left above the part').toBeLessThan(0.15);
   });
 
-  it('a part that only occupies one side is left standing where the goal says nothing', () => {
+  it('a part that only occupies one side is left standing where the goal says nothing', async () => {
     // The design's sentinel on a rod: an uncovered cell keeps the stock at r = R, and the CAM does
     // not cut there. A quarter shaft (θ ∈ [0°, 90°]) is the case that shows it.
     const LENGTH = 20;
@@ -249,7 +249,7 @@ describe('#723 R-4 acceptance — the relief is cut to its closed form', () => {
       }
     }
     const job = rotaryJob(goal(half, LENGTH, 8));
-    const cut = cutAndSweep(job);
+    const cut = await cutAndSweep(job);
     expect(cut.verifyErrors).toEqual([]);
     // Cut side: the quarter at θ ∈ [0°, 90°] is at 8 mm.
     const cutSide = worstOff(cut.at, () => 8, X0 - LENGTH / 2 + 2, X0 + LENGTH / 2 - 2, 1, 5, 0, 85);
@@ -264,7 +264,7 @@ describe('#723 R-4 acceptance — the relief is cut to its closed form', () => {
     expect(untouched, 'the uncovered half of the rod is left standing').toBe(true);
   });
 
-  it('a goal reaching past the rod is clipped to it, warns, and posts no cut above the rod (#808)', () => {
+  it('a goal reaching past the rod is clipped to it, warns, and posts no cut above the rod (#808)', async () => {
     // r(θ) = 8 + 4·cos(3θ): the crests reach 12 mm on a ⌀20 rod, so the outermost 2 mm of the
     // part has no material. #786 slice 2 demoted this to a warning; before #808 the field kept the
     // reach above the surface, the finishing tip rode at z ≈ +2 and the post refused the air cut.
@@ -276,7 +276,7 @@ describe('#723 R-4 acceptance — the relief is cut to its closed form', () => {
     const job = rotaryJob(target);
     const flat = flatEndMill(1, { name: '1 mm flat end', fluteLength: 12, shoulderLength: 20 });
 
-    const out = engraveGenerate(tl, job, flat, [], null, undefined, {});
+    const out = await engraveGenerate(tl, job, flat, [], null, undefined, {});
     expect(out.errors.filter((e) => /above the stock/i.test(e.message)), 'no air-cut refusal').toEqual([]);
     expect(out.ok).toBe(true);
     if (!out.ok) return;

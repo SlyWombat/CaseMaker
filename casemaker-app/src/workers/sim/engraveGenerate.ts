@@ -60,6 +60,7 @@ import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsR
 import { drillBitIR, drillSettings, type DrillBitPlan, type DrillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { itemLeftUncutMessage, vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
@@ -3497,7 +3498,7 @@ type OneProgram = Omit<EngraveGenerated, 'programs'> & {
 interface PostedProgram {
   ref: JobProgramRef;
   one: OneProgram;
-  make: (span: VacuumSpan) => OneProgram;
+  make: (span: VacuumSpan) => Promise<OneProgram>;
   span: VacuumSpan;
 }
 
@@ -3746,7 +3747,7 @@ function coreTooNarrowFindings(
  * setup's own tool order. The V's items and every later cutter's items are still cut as themselves
  * (#746); the core is the only geometry handed between cutters.
  */
-function generateRestPair(
+async function generateRestPair(
   tl: ManifoldToplevel,
   job: EngraveJob,
   group: readonly JobProgramRef[],
@@ -3768,12 +3769,12 @@ function generateRestPair(
   findings: JobFinding[],
   /** #748 — the document's supporting floors, for every program this pair generates. */
   floors?: ReadonlyMap<string, number>,
-): {
+): Promise<{
   attempts: OneProgram[];
   posted: PostedProgram[];
   link: RestPairLink | null;
   cursor: number;
-} {
+}> {
   const roughRef = group[0]!;
   const attempts: OneProgram[] = [];
   const posted: PostedProgram[] = [];
@@ -3787,9 +3788,9 @@ function generateRestPair(
 
   if (roughTool === null || group.length < 2) {
     const roughJob = jobForSetup(job, roughRef, roughTool);
-    const makeRough = (span: VacuumSpan): OneProgram =>
-      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', withNeck, undefined, floors);
-    const roughOne = makeRough(roughSpan);
+    const makeRough = async (span: VacuumSpan): Promise<OneProgram> =>
+      await generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', withNeck, undefined, floors);
+    const roughOne = await makeRough(roughSpan);
     attempts.push(roughOne);
     if (roughOne.ok && roughOne.nc !== null && roughOne.verify !== null) {
       posted.push({ ref: roughRef, one: roughOne, make: makeRough, span: roughSpan });
@@ -3803,10 +3804,10 @@ function generateRestPair(
   // core is handed to the first flat after the V, whether or not that flat owns items of its own.
   const roughJob = jobForSetup(job, roughRef, roughTool);
   if (vCone(roughTool) !== null) {
-    const makeV = (span: VacuumSpan): OneProgram =>
+    const makeV = async (span: VacuumSpan): Promise<OneProgram> =>
       // The V is never the run's last cut: the later program is (#737).
-      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', false, undefined, floors);
-    const vOne = makeV(roughSpan);
+      await generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', false, undefined, floors);
+    const vOne = await makeV(roughSpan);
     attempts.push(vOne);
     if (!vOne.ok || vOne.nc === null || vOne.verify === null) {
       return { attempts, posted, link: null, cursor: nextCursor };
@@ -3897,8 +3898,8 @@ function generateRestPair(
         const coreSpan = spanAt(nextCursor);
         nextCursor += 1;
         const coreJob = jobForSetup(job, restRef, restTool);
-        const makeCore = (span: VacuumSpan): OneProgram =>
-          generateOneProgram(
+        const makeCore = async (span: VacuumSpan): Promise<OneProgram> =>
+          await generateOneProgram(
             tl,
             coreJob,
             restTool,
@@ -3914,7 +3915,7 @@ function generateRestPair(
             cuttable,
             floors,
           );
-        const coreOne = makeCore(coreSpan);
+        const coreOne = await makeCore(coreSpan);
         attempts.push(coreOne);
         if (coreOne.ok && coreOne.nc !== null && coreOne.verify !== null) {
           posted.push({ ref: restRef, one: coreOne, make: makeCore, span: coreSpan });
@@ -3929,8 +3930,8 @@ function generateRestPair(
       const ownJob = jobForSetup(job, restRef, restTool);
       const ownSpan = spanAt(nextCursor);
       nextCursor += 1;
-      const makeOwn = (span: VacuumSpan): OneProgram =>
-        generateOneProgram(
+      const makeOwn = async (span: VacuumSpan): Promise<OneProgram> =>
+        await generateOneProgram(
           tl,
           ownJob,
           restTool,
@@ -3946,7 +3947,7 @@ function generateRestPair(
           derived.length === 0 ? undefined : derived,
           floors,
         );
-      const ownOne = makeOwn(ownSpan);
+      const ownOne = await makeOwn(ownSpan);
       attempts.push(ownOne);
       if (!ownOne.ok || ownOne.nc === null || ownOne.verify === null) break;
       posted.push({ ref: restRef, one: ownOne, make: makeOwn, span: ownSpan });
@@ -4017,8 +4018,8 @@ function generateRestPair(
     return best;
   };
   const roughCoFlat = laterRestFlat(0);
-  const makeRoughKept = (span: VacuumSpan): OneProgram =>
-    generateOneProgram(
+  const makeRoughKept = async (span: VacuumSpan): Promise<OneProgram> =>
+    await generateOneProgram(
       tl,
       roughJobKept,
       roughTool,
@@ -4035,7 +4036,7 @@ function generateRestPair(
       floors,
       roughCoFlat,
     );
-  const keptOne = makeRoughKept(roughSpan);
+  const keptOne = await makeRoughKept(roughSpan);
   attempts.push(keptOne);
   if (!keptOne.ok || keptOne.nc === null || keptOne.verify === null) {
     return { attempts, posted, link: null, cursor: nextCursor };
@@ -4110,8 +4111,8 @@ function generateRestPair(
       const ownJob = jobForSetup(job, restRef, restTool);
       const ownSpan = spanAt(nextCursor);
       nextCursor += 1;
-      const makeOwn = (span: VacuumSpan): OneProgram =>
-        generateOneProgram(
+      const makeOwn = async (span: VacuumSpan): Promise<OneProgram> =>
+        await generateOneProgram(
           tl,
           ownJob,
           restTool,
@@ -4129,7 +4130,7 @@ function generateRestPair(
           // #760 — a later rest pass re-cuts this program's leftovers at its own width.
           laterRestFlat(r + 1),
         );
-      const ownOne = makeOwn(ownSpan);
+      const ownOne = await makeOwn(ownSpan);
       attempts.push(ownOne);
       if (!ownOne.ok || ownOne.nc === null || ownOne.verify === null) break;
       posted.push({ ref: restRef, one: ownOne, make: makeOwn, span: ownSpan });
@@ -4247,8 +4248,8 @@ function generateRestPair(
     // cutter through `job.tool` or the WORKER's registry, which is empty. The rest job names a key
     // the route resolved on this realm's side, so it is materialised exactly as `jobForSetup` does.
     const restJob: EngraveJob = { ...restJobBase, tool: restTool };
-    const makeRest = (span: VacuumSpan): OneProgram =>
-      generateOneProgram(
+    const makeRest = async (span: VacuumSpan): Promise<OneProgram> =>
+      await generateOneProgram(
         tl,
         restJob,
         restTool,
@@ -4266,7 +4267,7 @@ function generateRestPair(
         // #760 — an even later rest pass re-cuts this one's leftovers.
         laterRestFlat(r + 1),
       );
-    const restOneBase = makeRest(restSpan);
+    const restOneBase = await makeRest(restSpan);
     const restOne =
       restDepthFindings.length === 0
         ? restOneBase
@@ -4652,7 +4653,7 @@ export function generateRotaryGoalProgram(
  */
 export const MOLD_DRAFT_LIMIT_DEG = 85;
 
-export function generateGoalProgram(
+export async function generateGoalProgram(
   job: EngraveJob,
   goal: EngraveTargetObject,
   tool: Tool | null,
@@ -4660,7 +4661,9 @@ export function generateGoalProgram(
   calibration: MachineCalibration | null,
   shop: EngraveShopOpts,
   onProgress?: EngraveProgressFn,
-): EngraveGenerated {
+  /** #881 — where the adaptive rough's levels are planned; absent, in this thread. */
+  planner?: LevelPlanner,
+): Promise<EngraveGenerated> {
   const base = emptyGoalResult();
   const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null): EngraveGenerated => ({
     ...base,
@@ -5060,9 +5063,9 @@ export function generateGoalProgram(
     };
   }
 
-  type Surfaced = ReturnType<typeof generateSurface3dForGoal>;
-  const surfaceAt = (pitchMm: number): Surfaced =>
-    generateSurface3dForGoal({
+  type Surfaced = Awaited<ReturnType<typeof generateSurface3dForGoal>>;
+  const surfaceAt = async (pitchMm: number): Promise<Surfaced> =>
+    await generateSurface3dForGoal({
       target: goal,
       tool,
       toolNumber: toolNumberFor(tool),
@@ -5084,7 +5087,7 @@ export function generateGoalProgram(
         // numbers and the job's material — the same wiring a surface primitive gets. A mesh goal
         // is where most 3D roughing happens, so the chooser's one stated line lands in this run's
         // notes and its sheet; a goal with no roughing option (a caller of the CAM directly) keeps
-        // the raster byte for byte.
+        // the raster byte for byte. #881 — its levels go to the pool when one is attached.
         roughing: {
           mode: 'auto',
           material: job.stock.material,
@@ -5094,6 +5097,7 @@ export function generateGoalProgram(
           // this much work the goal keeps the raster and the line says why.
           planBudget: readDefault(shop.defaults ?? null, 'rough3d.planBudgetCellLevels').value,
           adaptive: adaptiveSettings(shop.defaults ?? null).settings,
+          ...(planner === undefined ? {} : { planner }),
         },
         // #785 — the CAM's own layer/scan-line counts, as Generate's progress words.
         onProgress: (p) =>
@@ -5109,7 +5113,7 @@ export function generateGoalProgram(
   let budgetBound = false;
   onProgress?.({ stage: 'sample', label: 'sampling the goal' });
   try {
-    surfaced = surfaceAt(cutPitchMm);
+    surfaced = await surfaceAt(cutPitchMm);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     // The finishing tip field's own cap (#540) is a cost limit, not a fault: settle at the grid
@@ -5117,7 +5121,7 @@ export function generateGoalProgram(
     const budget = refinedPitchMm !== basePitchMm && /tip evaluations/.test(message) && /budget/.test(message);
     if (!budget) return fail('cam', message, resolved);
     try {
-      surfaced = surfaceAt(basePitchMm);
+      surfaced = await surfaceAt(basePitchMm);
       budgetBound = true;
     } catch (e2) {
       return fail('cam', e2 instanceof Error ? e2.message : String(e2), resolved);
@@ -5687,7 +5691,7 @@ export function generateGoalProgram(
  * The top-level fields describe the first program, exactly as every multi-program result does.
  * A side that fails stops the run and is returned with the programs generated before it.
  */
-function generateGoalPrograms(
+async function generateGoalPrograms(
   job: EngraveJob,
   sides: readonly GoalSide[],
   tool: Tool | null,
@@ -5695,7 +5699,9 @@ function generateGoalPrograms(
   calibration: MachineCalibration | null,
   shop: EngraveShopOpts,
   onProgress?: EngraveProgressFn,
-): EngraveGenerated {
+  /** #881 — the roughing level pool, handed to each side's goal program. */
+  planner?: LevelPlanner,
+): Promise<EngraveGenerated> {
   // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
   // path already builds each program with it — so each side's programs are those programs with the
   // side's setup on them, never a field-by-field copy that could drop the check. A side can be
@@ -5711,12 +5717,12 @@ function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = generateGoalProgram(job, firstSide.goal, tool, catalogue, calibration, shop, onProgress);
+  const first = await generateGoalProgram(job, firstSide.goal, tool, catalogue, calibration, shop, onProgress, planner);
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
   for (const side of sides.slice(1)) {
-    const one = generateGoalProgram(job, side.goal, tool, catalogue, calibration, shop, onProgress);
+    const one = await generateGoalProgram(job, side.goal, tool, catalogue, calibration, shop, onProgress, planner);
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
@@ -5731,7 +5737,7 @@ function generateGoalPrograms(
  * program's own — the same `generateSurface3dIR`, the same feeds resolution (a ball through its
  * flat proxy), the same check shape — so a primitive and a goal are cut and checked the same way.
  */
-function generateSurfacePrimitiveProgram(
+async function generateSurfacePrimitiveProgram(
   job: EngraveJob,
   primitive: SurfacePrimitive,
   tool: Tool,
@@ -5739,7 +5745,9 @@ function generateSurfacePrimitiveProgram(
   calibration: MachineCalibration | null,
   shop: EngraveShopOpts,
   span: VacuumSpan,
-): OneProgram {
+  /** #881 — the roughing level pool, when one is attached. */
+  planner?: LevelPlanner,
+): Promise<OneProgram> {
   const base: OneProgram = {
     ok: false,
     stage: 'findings',
@@ -5784,7 +5792,7 @@ function generateSurfacePrimitiveProgram(
   const radius = (cuttingDiameter(tool) ?? 0) / 2;
   let surfaced: Surface3dResult;
   try {
-    surfaced = generateSurface3dIR({
+    surfaced = await generateSurface3dIR({
       heightfield: field,
       tool: { radius, ball: isRound },
       toolObj: tool,
@@ -5807,6 +5815,7 @@ function generateSurfacePrimitiveProgram(
           // this much work the goal keeps the raster and the line says why.
           planBudget: readDefault(shop.defaults ?? null, 'rough3d.planBudgetCellLevels').value,
           adaptive: adaptiveSettings(shop.defaults ?? null).settings,
+          ...(planner === undefined ? {} : { planner }),
         },
       },
     });
@@ -5969,7 +5978,7 @@ export type EngraveProgressFn = (progress: EngraveProgress) => void;
  * floor. The predictions are re-stated the same way and tagged with the face's A, so the per-face
  * oracle judges them where they were cut.
  */
-function faceItemProgram(args: {
+async function faceItemProgram(args: {
   tl: ManifoldToplevel;
   frame: FaceFrame;
   job: EngraveJob;
@@ -5979,7 +5988,7 @@ function faceItemProgram(args: {
   margins: EngraveMargins;
   shop: EngraveShopOpts;
   radius: number;
-}): { operations: CamOperation[]; predicted: OraclePredicted[]; findings: JobFinding[]; errored: boolean } {
+}): Promise<{ operations: CamOperation[]; predicted: OraclePredicted[]; findings: JobFinding[]; errored: boolean }> {
   const { tl, frame, job, tool, catalogue, calibration, margins, shop, radius } = args;
   const chord = frame.chord;
   const yIn = (y: number): number => y + chord / 2;
@@ -6044,7 +6053,7 @@ function faceItemProgram(args: {
   sub.primitives = [];
   sub.keepOuts = [];
   sub.chamfers = [];
-  const one = generateOneProgram(
+  const one = await generateOneProgram(
     tl,
     sub,
     tool,
@@ -6106,7 +6115,7 @@ function faceItemProgram(args: {
  * clear. The result carries `frame: 'rotary'`, the predictions and a `verify` report, so the
  * simulation, the oracle and the run gates read it exactly as they read a wrapped program.
  */
-function generateFaceProgram(
+async function generateFaceProgram(
   tl: ManifoldToplevel,
   job: EngraveJob,
   tool: Tool | null,
@@ -6116,7 +6125,7 @@ function generateFaceProgram(
   shop: EngraveShopOpts,
   /** #419 decision 4 — this file's share of the RUN's vacuum words (a mixed job's face program). */
   span: VacuumSpan = 'whole',
-): EngraveGenerated {
+): Promise<EngraveGenerated> {
   const base = emptyGoalResult();
   const fail = (
     stage: EngraveStage,
@@ -6187,12 +6196,12 @@ function generateFaceProgram(
   // program at the same indices; when no owned cutter makes it, the cut is named as left uncut
   // and the rest of the job posts.
   type CutBuild = { operations: CamOperation[]; predicted: OraclePredicted[] };
-  const buildCut = (
+  const buildCut = async (
     frame: FaceFrame,
     cutTool: Tool,
     items: readonly EngraveFaceItem[],
-  ): { ok: true; built: CutBuild; findings: JobFinding[] } | { ok: false; findings: JobFinding[]; failedIds: string[]; hard: boolean } => {
-    const built = faceItemProgram({ tl, frame: { ...frame, items }, job, tool: cutTool, catalogue, calibration, margins, shop, radius: map.radius });
+  ): Promise<{ ok: true; built: CutBuild; findings: JobFinding[] } | { ok: false; findings: JobFinding[]; failedIds: string[]; hard: boolean }> => {
+    const built = await faceItemProgram({ tl, frame: { ...frame, items }, job, tool: cutTool, catalogue, calibration, margins, shop, radius: map.radius });
     if (!built.errored) {
       return { ok: true, built: { operations: built.operations, predicted: built.predicted }, findings: built.findings };
     }
@@ -6219,7 +6228,7 @@ function generateFaceProgram(
   for (let i = 0; i < frames.length; i++) {
     const frame = frames[i]!;
     if (frame.items.length === 0) continue;
-    const r = buildCut(frame, tool, frame.items);
+    const r = await buildCut(frame, tool, frame.items);
     // The failed attempt's own warnings are replaced by the fine/uncut sentences below: what the
     // job states is the DECISION (a finer cutter, or left uncut), not the coarse attempt's notes.
     if (r.ok) allFindings = dedupeFindings([...allFindings, ...r.findings]);
@@ -6238,7 +6247,7 @@ function generateFaceProgram(
       const frame = frames[i]!;
       const keep = frame.items.filter((it) => !ids.includes(it.id));
       if (keep.length === 0) continue;
-      const r = buildCut(frame, tool, keep);
+      const r = await buildCut(frame, tool, keep);
       if (r.ok) {
         if (r.built.operations.length > 0) faceCuts.set(i, r.built);
       } else if (r.hard) {
@@ -6267,7 +6276,7 @@ function generateFaceProgram(
       const items = frame.items.filter((it) => ids.includes(it.id));
       let taken = false;
       for (const cand of candidates) {
-        const r = buildCut(frame, cand.tool, items);
+        const r = await buildCut(frame, cand.tool, items);
         if (!r.ok) continue;
         const group = byCutter.get(cand.key) ?? { entry: cand, faces: new Map<number, CutBuild>(), cuts: [] };
         group.faces.set(i, r.built);
@@ -6454,7 +6463,7 @@ function generateFaceProgram(
   return { ...one, programs: [programOf(one, ref), ...finePrograms] };
 }
 
-export function engraveGenerate(
+export async function engraveGenerate(
   tl: ManifoldToplevel,
   job: EngraveJob,
   tool: Tool | null,
@@ -6463,7 +6472,13 @@ export function engraveGenerate(
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
   onProgress?: EngraveProgressFn,
-): EngraveGenerated {
+  /**
+   * #881 — WHERE THE ROUGHING LEVELS ARE PLANNED. A pool when the app runs (its workers live on
+   * the main thread, reached over a MessagePort); absent, every level is planned in this thread,
+   * exactly as before. The plans and the assembly are the same either way.
+   */
+  planner?: LevelPlanner,
+): Promise<EngraveGenerated> {
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
   // #786 slice 4c-2 — the same catalogue fill as `engraveRegions`, applied HERE as well so the
   // CAM (which reads the tool after the regions step) and every sub-job cutter use the values the
@@ -6577,7 +6592,7 @@ export function engraveGenerate(
           ],
         };
       }
-      return { ...generateGoalPrograms(job, sides, tool, catalogue, calibration, shop, onProgress), surface: null };
+      return { ...(await generateGoalPrograms(job, sides, tool, catalogue, calibration, shop, onProgress, planner)), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
@@ -6590,7 +6605,7 @@ export function engraveGenerate(
     }
     // #623 — the surface-3D goal path posts flat (it never lifts feeds), so its package claims no
     // surface: the caller judges it in the work frame, which is the frame it was posted in.
-    return { ...generateGoalProgram(job, goal, tool, catalogue, calibration, shop, onProgress), surface: null };
+    return { ...(await generateGoalProgram(job, goal, tool, catalogue, calibration, shop, onProgress, planner)), surface: null };
   }
 
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.
@@ -6619,10 +6634,12 @@ export function engraveGenerate(
     // the whole run; one with both returns the surfaces first, then the item program.
     const legacySurfaces = surfacePrimitivesOf(job);
     const itemWork = jobHasNonSurfaceWork(job);
-    const surfaceOnes =
+    const surfaceOnes: OneProgram[] =
       tool === null || legacySurfaces.length === 0
         ? []
-        : legacySurfaces.map((p) => generateSurfacePrimitiveProgram(job, p, tool, catalogue, calibration, shop, 'whole'));
+        : await Promise.all(
+            legacySurfaces.map((p) => generateSurfacePrimitiveProgram(job, p, tool, catalogue, calibration, shop, 'whole', planner)),
+          );
     // #836 — A LEGACY MIXED JOB (no `setups[]`, map items AND faces): the wrapped program is cut
     // as it always was, then the face program after it, in the same mounting. The vacuum words
     // split across the files.
@@ -6649,7 +6666,7 @@ export function engraveGenerate(
     // its one program (the rest are appended below); one with item work cuts its item program.
     const one =
       itemWork || legacySurfaces.length === 0
-        ? generateOneProgram(
+        ? await generateOneProgram(
             tl,
             job,
             tool,
@@ -6686,7 +6703,7 @@ export function engraveGenerate(
       itemProgramHere && oneReady.ok && oneReady.nc !== null && oneReady.verify !== null ? [programOf(oneReady, ref)] : [];
     // #836 — the face program, cut after the map work with the setup's face cutter.
     if (faceRef !== null) {
-      const faceOne = generateFaceProgram(
+      const faceOne = await generateFaceProgram(
         tl,
         jobForSetup(job, faceRef, faceTool),
         faceTool,
@@ -6833,13 +6850,13 @@ export function engraveGenerate(
         const span = spanAt(cursor);
         const subTool = toolForProgram(ref, job, tool, shop);
         const sub = jobForSetup(job, ref, subTool);
-        const faceResult = generateFaceProgram(tl, sub, subTool, catalogue, calibration, margins, shop, span);
+        const faceResult = await generateFaceProgram(tl, sub, subTool, catalogue, calibration, margins, shop, span);
         const { programs: facePrograms, ...faceBuilt } = faceResult;
         // #849 — between the items file and the neck file, the face file carries its own predictions.
         const faceOne: OneProgram = neckApart ? { ...faceBuilt, ownPredicted: true } : faceBuilt;
         attempts.push(faceOne);
         if (faceOne.ok && faceOne.nc !== null && faceOne.verify !== null) {
-          posted.push({ ref, one: faceOne, make: () => faceOne, span });
+          posted.push({ ref, one: faceOne, make: async () => faceOne, span });
           extraFacePrograms.push(...facePrograms.slice(1));
         }
         cursor += 1;
@@ -6853,8 +6870,8 @@ export function engraveGenerate(
         // while the rest pass decides how many files the run really has; `posted` settles them below.
         const span = spanAt(cursor);
         const subTool = toolForProgram(ref, job, tool, shop);
-        const make = (nextSpan: VacuumSpan): OneProgram =>
-          generateOneProgram(
+        const make = async (nextSpan: VacuumSpan): Promise<OneProgram> =>
+          await generateOneProgram(
             tl,
             jobForSetup(job, ref, subTool),
             subTool,
@@ -6869,7 +6886,7 @@ export function engraveGenerate(
             undefined,
             documentFloors,
           );
-        const one = make(span);
+        const one = await make(span);
         attempts.push(one);
         // #786 slice 4a-2 — a surface program posts on its `surfaceCheck`; it has no verifier.
         if (one.ok && one.nc !== null && (one.verify !== null || one.surfaceCheck != null)) posted.push({ ref, one, make, span });
@@ -6886,7 +6903,7 @@ export function engraveGenerate(
       const roughTool = toolForProgram(segmentRefs[0]!, job, tool, shop);
       const restTools = segmentRefs.slice(1).map((ref) => toolForProgram(ref, job, tool, shop));
       const base = posted.length;
-      const pair = generateRestPair(
+      const pair = await generateRestPair(
         tl,
         job,
         segmentRefs,
@@ -6922,10 +6939,11 @@ export function engraveGenerate(
   // it was.
   // #849 — the neck file posted apart is the run's last file, after every face file.
   const total = posted.length + posted.filter((program) => program.one.neckApart != null).length;
-  posted.forEach((program, i) => {
+  // #881 — a for loop, not `forEach`: re-making a program is async now (the generator is).
+  for (const [i, program] of posted.entries()) {
     const want: VacuumSpan = total === 1 ? 'whole' : i === 0 ? 'first' : i === total - 1 ? 'last' : 'middle';
-    if (want === program.span) return;
-    const next = program.make(want);
+    if (want === program.span) continue;
+    const next = await program.make(want);
     if (next.ok && next.nc !== null && next.verify !== null) {
       // #865 — the settled program replaces its attempt, so `attempts` still names every posted
       // file (the unposted ones carry their findings untagged).
@@ -6934,7 +6952,7 @@ export function engraveGenerate(
       program.one = next;
       program.span = want;
     }
-  });
+  }
 
   const neckFiles = posted.flatMap((program) => (program.one.neckApart != null ? [{ ref: program.ref, one: program.one.neckApart }] : []));
   const restPass = restLink === null ? null : assembleRestFacts(restLink, posted);
@@ -7185,7 +7203,7 @@ function spanAfterFacing(span: VacuumSpan): VacuumSpan {
  * cut. That file is the run's FIRST program and takes the first word; this program's own span is
  * then moved along by `spanAfterFacing`.
  */
-function generateOneProgram(
+async function generateOneProgram(
   tl: ManifoldToplevel,
   job: EngraveJob,
   tool: Tool | null,
@@ -7225,7 +7243,7 @@ function generateOneProgram(
    * `engraveRegions` so `raised-text-fused` is judged at the width the letters finally see.
    */
   raisedCoFlat?: Tool | null,
-): OneProgram {
+): Promise<OneProgram> {
   // #786 slice 4a-2 — A CONE OR SPHERE IS ITS OWN SURFACE PROGRAM. `setupPrograms` splits the
   // primitive out of its owner's ordinary ref, so a sub-job whose only work is surfaces lands
   // here; the region pipeline has nothing to plan for a sloped wall or a curved floor.

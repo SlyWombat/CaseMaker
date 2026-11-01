@@ -75,12 +75,12 @@ const lengthOf = (pts: readonly [number, number][], closed: boolean): number => 
 };
 
 /** Shortest distance from `p` to the (open or closed) polyline. */
-function distanceToPath(p: readonly [number, number], pts: readonly [number, number][], closed: boolean): number {
+async function distanceToPath(p: readonly [number, number], pts: readonly [number, number][], closed: boolean): Promise<number> {
   let best = Infinity;
   const n = closed ? pts.length : pts.length - 1;
   for (let i = 0; i < n; i++) {
-    const a = pts[i]!;
-    const b = pts[(i + 1) % pts.length]!;
+    const a = await pts[i]!;
+    const b = await pts[(i + 1) % pts.length]!;
     const dx = b[0] - a[0];
     const dy = b[1] - a[1];
     const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy)));
@@ -164,9 +164,9 @@ describe('the plan — the buffered path is a region in the pocket funnel', () =
 });
 
 describe('the program and the oracle', () => {
-  it('posts the S slot as a pocket, deterministically, and the oracle predicts the region', () => {
+  it('posts the S slot as a pocket, deterministically, and the oracle predicts the region', async () => {
     const job = slotJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const nc = g.nc as string;
     expect(nc).toContain('Slot 6 mm along line');
@@ -176,7 +176,7 @@ describe('the program and the oracle', () => {
     const work = nc.split('\n').filter((l) => !l.includes('G53'));
     const zs = work.flatMap((l) => [...l.matchAll(/Z(-?\d+(?:\.\d+)?)/g)].map((m) => Number(m[1])));
     expect(Math.min(...zs)).toBeCloseTo(-1, 6);
-    expect(generate(tl, job).nc).toBe(nc);
+    expect((await generate(tl, job)).nc).toBe(nc);
 
     // The prediction for the slot is the region: same area as the plan's buffered path.
     const entries = g.predicted.filter((p) => p.itemId === 'slot');
@@ -205,9 +205,9 @@ describe('the program and the oracle', () => {
     }
   }, 180_000);
 
-  it('posts a closed ring slot and passes the oracle', () => {
+  it('posts a closed ring slot and passes the oracle', async () => {
     const job = slotJob(line({ points: RING_POINTS, closed: true, slotWidth: 4 }));
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).toContain('Slot 4 mm along line');
     const tool = jobTool(job)!;
@@ -221,12 +221,12 @@ describe('the program and the oracle', () => {
     }
   }, 180_000);
 
-  it('absent and width ≤ the cutter post exactly today’s trace program', () => {
+  it('absent and width ≤ the cutter post exactly today’s trace program', async () => {
     const absent = slotJob(line({ slotWidth: undefined }));
     delete (absent.traces![0] as Partial<EngraveLineItem>).slotWidth;
     const atCutter = slotJob(line({ slotWidth: 3 }));
-    const a = generate(tl, absent);
-    const b = generate(tl, atCutter);
+    const a = await generate(tl, absent);
+    const b = await generate(tl, atCutter);
     expect(a.ok).toBe(true);
     expect(a.nc).toContain('Trace line "groove" (41 points)');
     expect(b.nc).toBe(a.nc);

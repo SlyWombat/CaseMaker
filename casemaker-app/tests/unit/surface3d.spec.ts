@@ -213,9 +213,9 @@ describe('sampleGoalHeightfield', () => {
   });
 });
 
-describe('generateSurface3dIR — finishing tracks the goal', () => {
+describe('generateSurface3dIR — finishing tracks the goal', async () => {
   const hf = sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.1 });
-  const { ir, finishing, notes } = generateSurface3dIR({
+  const { ir, finishing, notes } = await generateSurface3dIR({
     heightfield: hf,
     tool: BALL,
     toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
@@ -265,9 +265,9 @@ describe('generateSurface3dIR — finishing tracks the goal', () => {
 });
 
 describe('generateSurface3dIR — dexel sim reproduces the goal (A + C + D)', () => {
-  it('a ball sweep of the finishing IR matches the ramp within the step-over + grid', () => {
+  it('a ball sweep of the finishing IR matches the ramp within the step-over + grid', async () => {
     const hf = sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.1 });
-    const { finishing } = generateSurface3dIR({
+    const { finishing } = await generateSurface3dIR({
       heightfield: hf,
       tool: BALL,
       toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
@@ -288,10 +288,10 @@ describe('generateSurface3dIR — dexel sim reproduces the goal (A + C + D)', ()
     }
   });
 
-  it('reproduces a hemisphere within the step-over + grid at the interior', () => {
+  it('reproduces a hemisphere within the step-over + grid at the interior', async () => {
     const R = 5;
     const hf = sampleGoalHeightfield(goal(domeTris(R)), { pitchMm: 0.1 });
-    const { finishing } = generateSurface3dIR({
+    const { finishing } = await generateSurface3dIR({
       heightfield: hf,
       tool: BALL,
       toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
@@ -318,7 +318,7 @@ describe('generateSurface3dIR — dexel sim reproduces the goal (A + C + D)', ()
 });
 
 describe('generateGoalProgram — the worker dispatches a pure goal job', () => {
-  it('samples, surfaces and posts a goal job, leaving verify to the dexel (slice E)', () => {
+  it('samples, surfaces and posts a goal job, leaving verify to the dexel (slice E)', async () => {
     const job: EngraveJob = {
       ...defaultEngraveJob(),
       labels: [],
@@ -326,7 +326,7 @@ describe('generateGoalProgram — the worker dispatches a pure goal job', () => 
       // Default stock is 100 x 60 x 12 mm; place the ramp over the middle, top-flush.
       targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 } }),
     };
-    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
     expect(out.stage).toBe('done');
     expect(out.ok).toBe(true);
     expect(out.nc).not.toBeNull();
@@ -374,9 +374,9 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
     };
   }
 
-  it('reports the defaults it ran with: the feeds row’s step-down, the shop’s grid pitch and allowance', () => {
+  it('reports the defaults it ran with: the feeds row’s step-down, the shop’s grid pitch and allowance', async () => {
     const job = goalJob();
-    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {
       finish: { stockToLeaveMm: { value: 0.25, source: 'chosen' } },
       surfaceGrid: { pitchMm: { value: 0.2, source: 'chosen' } },
     });
@@ -399,7 +399,7 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
     expect(facts.notes.some((n) => n.startsWith('Resolution:'))).toBe(true);
   });
 
-  it('the operation’s block overrides each default, and the facts report the numbers it ran', () => {
+  it('the operation’s block overrides each default, and the facts report the numbers it ran', async () => {
     const job = goalJob({
       surface: {
         roughStepDownMm: 0.25,
@@ -409,7 +409,7 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
         stockToLeaveMm: 0,
       },
     });
-    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {
       // The shop's own numbers are handed in too: the operation's block must win over both.
       finish: { stockToLeaveMm: { value: 0.25, source: 'chosen' } },
       surfaceGrid: { pitchMm: { value: 0.2, source: 'chosen' } },
@@ -429,9 +429,9 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
     expect(facts.roughingLayers).toBe(4);
   });
 
-  it('a round cutter roughs and finishes, and the IR names both operations', () => {
+  it('a round cutter roughs and finishes, and the IR names both operations', async () => {
     const job = goalJob({ surface: { roughStepDownMm: 0.5, gridPitchMm: 0.4 } });
-    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175, { shape: 'ball' }), [], null, {});
     expect(out.ok).toBe(true);
     expect(out.cam?.operations).toBe(2);
     expect(out.cam?.roughOperations).toBe(1);
@@ -588,10 +588,10 @@ describe('#889 — the roughing removes exactly what the cell-by-cell ride remov
 });
 
 describe('generateSurface3dIR — roughing never breaches the goal', () => {
-  it('leaves at least the allowance above the heightfield everywhere it cuts', () => {
+  it('leaves at least the allowance above the heightfield everywhere it cuts', async () => {
     const hf = sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.1 });
     const allowance = 0.3;
-    const { roughing } = generateSurface3dIR({
+    const { roughing } = await generateSurface3dIR({
       heightfield: hf,
       tool: FLAT_TOOL,
       toolObj: flatEndMill(2, { name: 'flat' }),
@@ -624,7 +624,7 @@ describe('generateSurface3dIR — roughing never breaches the goal', () => {
 describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539)', () => {
   // The pure-goal dispatch runs before the item pipeline's validateJob, so it must gate on the same
   // goal-object-oversize/zero-volume check itself rather than sampling and posting an unmakeable goal.
-  it('#784 cuts a goal larger than the stock CLIPPED to the blank and says what lies outside', () => {
+  it('#784 cuts a goal larger than the stock CLIPPED to the blank and says what lies outside', async () => {
     const job: EngraveJob = {
       ...defaultEngraveJob(),
       labels: [],
@@ -632,7 +632,7 @@ describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539
       // Default stock is 100 x 60 x 12 mm; a 200 mm-wide goal overhangs both X edges by 50 mm.
       targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 }, size: { x: 200, y: 30, z: 5 } }),
     };
-    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     const warn = out.findings.find((f) => f.code === 'goal-object-oversize');
     expect(warn?.severity).toBe('warning');
@@ -645,14 +645,14 @@ describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539
     expect(Math.max(...xs)).toBeLessThanOrEqual(100.001);
   });
 
-  it('returns a blocking finding for a zero-volume (flat) goal', () => {
+  it('returns a blocking finding for a zero-volume (flat) goal', async () => {
     const job: EngraveJob = {
       ...defaultEngraveJob(),
       labels: [],
       shapes: [],
       targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 }, size: { x: 20, y: 20, z: 0 } }),
     };
-    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
     expect(out.ok).toBe(false);
     expect(out.findings.some((f) => f.code === 'goal-object-oversize')).toBe(true);
     expect(out.nc).toBeNull();
@@ -660,8 +660,8 @@ describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539
 });
 
 describe('generateSurface3dIR — the finishing pass has a compute budget (#540)', () => {
-  const buildIr = (opts: Record<string, unknown>) =>
-    generateSurface3dIR({
+  const buildIr = async (opts: Record<string, unknown>) =>
+    await generateSurface3dIR({
       heightfield: sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.1 }),
       tool: BALL,
       toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
@@ -674,20 +674,20 @@ describe('generateSurface3dIR — the finishing pass has a compute budget (#540)
       opts,
     });
 
-  it('refuses honestly rather than running the billions of ops when over budget', () => {
-    expect(() => buildIr({ maxFinishTipOps: 1 })).toThrow(/budget/i);
+  it('refuses honestly rather than running the billions of ops when over budget', async () => {
+    await expect(buildIr({ maxFinishTipOps: 1 })).rejects.toThrow(/budget/i);
   });
 
-  it('produces the finishing pass under a generous budget', () => {
-    const { finishing } = buildIr({ maxFinishTipOps: 1_000_000_000 });
+  it('produces the finishing pass under a generous budget', async () => {
+    const { finishing } = await buildIr({ maxFinishTipOps: 1_000_000_000 });
     expect(finishing.moves.length).toBeGreaterThan(0);
   });
 });
 
 describe('generateSurface3dIR — roughing refuses a non-positive step-down (#541)', () => {
-  it.each([0, -0.5])('throws rather than infinite-looping when stepDown is %s', (stepDown) => {
+  it.each([0, -0.5])('throws rather than infinite-looping when stepDown is %s', async (stepDown) => {
     const hf = sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.1 });
-    expect(() =>
+    await expect(
       generateSurface3dIR({
         heightfield: hf,
         tool: FLAT_TOOL,
@@ -699,7 +699,7 @@ describe('generateSurface3dIR — roughing refuses a non-positive step-down (#54
         rapid: RAPID,
         labelId: 'goal-1',
       }),
-    ).toThrow(/step-down/i);
+    ).rejects.toThrow(/step-down/i);
   });
 });
 
@@ -743,11 +743,11 @@ function rampTrisK(k: number): Tri[] {
 }
 
 describe('generateSurface3dIR — the scallop and pencil passes (#671)', () => {
-  function build(
+  async function build(
     heightfield: ReturnType<typeof sampleGoalHeightfield>,
     opts: Parameters<typeof generateSurface3dIR>[0]['opts'],
   ) {
-    return generateSurface3dIR({
+    return await generateSurface3dIR({
       heightfield,
       tool: BALL,
       toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
@@ -761,14 +761,14 @@ describe('generateSurface3dIR — the scallop and pencil passes (#671)', () => {
     });
   }
 
-  it('appends scallop then pencil AFTER the parallel finish, and off is the old two-pass program', () => {
+  it('appends scallop then pencil AFTER the parallel finish, and off is the old two-pass program', async () => {
     const hf = sampleGoalHeightfield(goal(stepTris()), { pitchMm: 0.4 });
-    const off = build(hf, {});
+    const off = await build(hf, {});
     expect(off.ir.operations.map((o) => o.name)).toEqual(['[T1] 3D rough — 0.3 mm to leave', '[T1] 3D finish']);
     expect(off.scallop).toBeNull();
     expect(off.pencil).toBeNull();
 
-    const on = build(hf, { scallop: true, pencil: true });
+    const on = await build(hf, { scallop: true, pencil: true });
     expect(on.ir.operations.map((o) => o.name)).toEqual([
       '[T1] 3D rough — 0.3 mm to leave',
       '[T1] 3D finish',
@@ -788,19 +788,19 @@ describe('generateSurface3dIR — the scallop and pencil passes (#671)', () => {
     expect(on.notes.join(' ')).toContain('pencil pass');
   });
 
-  it('spaces the scallop contours by the slope’s secant: a steep face needs more of them', () => {
-    const gentle = build(sampleGoalHeightfield(goal(rampTrisK(0.05)), { pitchMm: 0.4 }), { scallop: true });
-    const steep = build(sampleGoalHeightfield(goal(rampTrisK(1)), { pitchMm: 0.4 }), { scallop: true });
+  it('spaces the scallop contours by the slope’s secant: a steep face needs more of them', async () => {
+    const gentle = await build(sampleGoalHeightfield(goal(rampTrisK(0.05)), { pitchMm: 0.4 }), { scallop: true });
+    const steep = await build(sampleGoalHeightfield(goal(rampTrisK(1)), { pitchMm: 0.4 }), { scallop: true });
     // Same footprint, same step-over: the 45° face's surface step-over needs sqrt(2) more contours.
     expect(gentle.scallop!.facts.contours).toBeGreaterThan(1);
     expect(steep.scallop!.facts.contours).toBeGreaterThan(gentle.scallop!.facts.contours);
     expect(steep.scallop!.facts.clamped).toBe(false);
   });
 
-  it('projects every scallop point onto the surface: a convex dome is followed, never cut through', () => {
+  it('projects every scallop point onto the surface: a convex dome is followed, never cut through', async () => {
     const R = 5;
     const hf = sampleGoalHeightfield(goal(domeTris(R)), { pitchMm: 0.2 });
-    const on = build(hf, { scallop: true });
+    const on = await build(hf, { scallop: true });
     const dome = (x: number, y: number): number => {
       const r2 = (x - 10) ** 2 + (y - 10) ** 2;
       return r2 >= R * R ? -R : -(R - Math.sqrt(R * R - r2));
@@ -818,8 +818,8 @@ describe('generateSurface3dIR — the scallop and pencil passes (#671)', () => {
     expect(checked).toBeGreaterThan(20);
   });
 
-  it('the pencil follows the step’s crease and leaves a dome and a ramp alone', () => {
-    const step = build(sampleGoalHeightfield(goal(stepTris()), { pitchMm: 0.4 }), { pencil: true });
+  it('the pencil follows the step’s crease and leaves a dome and a ramp alone', async () => {
+    const step = await build(sampleGoalHeightfield(goal(stepTris()), { pitchMm: 0.4 }), { pencil: true });
     expect(step.pencil!.facts.paths).toBeGreaterThan(0);
     const feeds = step.pencil!.operation.moves.filter((m) => m.kind === 'feed');
     const xs = feeds.map((m) => m.x);
@@ -835,17 +835,17 @@ describe('generateSurface3dIR — the scallop and pencil passes (#671)', () => {
       expect(m.z).toBeGreaterThan(stepH(m.x) + 0.1);
     }
 
-    const dome = build(sampleGoalHeightfield(goal(domeTris(5)), { pitchMm: 0.4 }), { pencil: true });
+    const dome = await build(sampleGoalHeightfield(goal(domeTris(5)), { pitchMm: 0.4 }), { pencil: true });
     expect(dome.pencil).toBeNull();
-    const ramp = build(sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.4 }), { pencil: true });
+    const ramp = await build(sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.4 }), { pencil: true });
     expect(ramp.pencil).toBeNull();
   });
 
-  it('the new passes cut on the dexel grid, and the full program never gouges the goal', () => {
+  it('the new passes cut on the dexel grid, and the full program never gouges the goal', async () => {
     // The heightfield's top-Z model is conservative at a vertical face (the boundary cell reads the
     // plateau's top), so the foot cell that gets the pencil path is one cell out from the wall.
     const hf = sampleGoalHeightfield(goal(stepTris()), { pitchMm: 0.4 });
-    const full = build(hf, { scallop: true, pencil: true });
+    const full = await build(hf, { scallop: true, pencil: true });
     const setup = prism(40, 40, 10);
     expect(full.ir.operations).toHaveLength(4);
 
@@ -877,9 +877,9 @@ describe('generateGoalProgram — the extra finishing passes reach the program a
     };
   }
 
-  it('carries the pass list on the surface check and the facts on the operation', () => {
+  it('carries the pass list on the surface check and the facts on the operation', async () => {
     const job = stepJob({ scallop: true, pencil: true });
-    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.programs[0]!.surfaceCheck?.passes).toEqual([
       '[T1] 3D rough — 0.3 mm to leave',
@@ -896,9 +896,9 @@ describe('generateGoalProgram — the extra finishing passes reach the program a
     expect(surface).toContain('pencil pass');
   });
 
-  it('absent means off: the old two-pass program, and its check says two passes', () => {
+  it('absent means off: the old two-pass program, and its check says two passes', async () => {
     const job = stepJob();
-    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
     expect(out.ok).toBe(true);
     expect(out.programs[0]!.surfaceCheck?.passes).toHaveLength(2);
     expect(out.surface3d?.scallop ?? null).toBeNull();
@@ -946,13 +946,13 @@ describe('generateSurface3dIR — every hop out of a cut is two moves (#738)', (
     return bad;
   }
 
-  it('the dome’s roughing gaps retract Z-only first — and none of the four passes combines axes', () => {
+  it('the dome’s roughing gaps retract Z-only first — and none of the four passes combines axes', async () => {
     // The dome makes the defect's site inescapable: at a roughing layer the material still to
     // remove is an ANNULUS, so a raster row cuts, crosses the apex where there is nothing to
     // remove, and cuts again. That gap is where roughing used to emit `G0 X.. Z..` straight out
     // of a cut. (A ramp or a step opens at most one gap per row and never re-enters it.)
     const hf = sampleGoalHeightfield(goal(domeTris(5)), { pitchMm: 0.2 });
-    const { ir, roughing } = generateSurface3dIR({
+    const { ir, roughing } = await generateSurface3dIR({
       heightfield: hf,
       tool: BALL,
       toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),

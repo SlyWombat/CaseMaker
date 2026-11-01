@@ -186,14 +186,14 @@ describe('EngraveVectorShape (#217): the fill rule, read by Manifold', () => {
 });
 
 describe('EngraveVectorShape (#217): end to end', () => {
-  it('a job that is only an imported outline generates, simulates and passes the oracle', () => {
+  it('a job that is only an imported outline generates, simulates and passes the oracle', async () => {
     const job: EngraveJob = {
       ...dj(),
       labels: [],
       shapes: [],
       vectors: [vector([squareRing(0, 0, 10)], 'NonZero', { depth: 1 })],
     };
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(
       g.nc,
       JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings }),

@@ -53,8 +53,8 @@ function benchJob(name: string): EngraveJob {
 }
 
 /** Generate the fixture and return the cut section's parameter step's value. */
-function cutParams(job: EngraveJob): { generated: EngraveGenerated; value: string } {
-  const generated = generate(tl, job);
+async function cutParams(job: EngraveJob): Promise<{ generated: EngraveGenerated; value: string }> {
+  const generated = await generate(tl, job);
   expect(generated.ok, `${generated.stage}: ${JSON.stringify(generated.errors)}`).toBe(true);
   const sheet = buildRunSheet(job, generated, null);
   const cut = sheet.sections.find((s) => s.id === 'cut');
@@ -63,9 +63,9 @@ function cutParams(job: EngraveJob): { generated: EngraveGenerated; value: strin
 }
 
 describe('#735 item 1 — the sheet counts depth passes, not helix chords', () => {
-  it('j18’s bore: 2 × 92 turns at the 0.066 mm pitch, not 3648 chords', () => {
+  it('j18’s bore: 2 × 92 turns at the 0.066 mm pitch, not 3648 chords', async () => {
     const job = benchJob('j18-thread-a-bore-proxy');
-    const { generated, value } = cutParams(job);
+    const { generated, value } = await cutParams(job);
     // The bore is plain (⌀2.6 hole, ⌀2.0 cutter): a continuous helix at
     // min(0.5 mm step-down, 2π·0.3·tan 2°) = 0.0658 mm per turn, 6 mm deep → 92 depth passes a
     // bore. The feed Z changes on every one of the 1824 chords; a chord is not a pass.
@@ -74,9 +74,9 @@ describe('#735 item 1 — the sheet counts depth passes, not helix chords', () =
     expect(value).not.toContain('3648');
   });
 
-  it('j01’s two-step-down program: 33 depth passes, at 0.5 mm and 0.25 mm — not "33 × 0.5 mm"', () => {
+  it('j01’s two-step-down program: 33 depth passes, at 0.5 mm and 0.25 mm — not "33 × 0.5 mm"', async () => {
     const job = benchJob('j01-topclamp-alu-proxy-adjusted');
-    const { generated, value } = cutParams(job);
+    const { generated, value } = await cutParams(job);
     // 5.3 mm deep: the pocket at the row's 0.5 mm (11 passes) and the cut-out slot at the
     // profile row's halved 0.25 mm (22 passes). The total was right; the one step-down beside it
     // was not.
@@ -85,9 +85,9 @@ describe('#735 item 1 — the sheet counts depth passes, not helix chords', () =
     expect(value).not.toContain('33 × 0.5 mm passes');
   });
 
-  it('j18’s thread: 2 threads × 11 helix turns × 2 radial passes = 44, not 530 chords', () => {
+  it('j18’s thread: 2 threads × 11 helix turns × 2 radial passes = 44, not 530 chords', async () => {
     const job = benchJob('j18-thread-b-mill-proxy');
-    const generated = generate(tl, job);
+    const generated = await generate(tl, job);
     expect(generated.ok, `${generated.stage}: ${JSON.stringify(generated.errors)}`).toBe(true);
     // The fixture holds two M3 threads. Each is one operation of 11 pitch-turns (5 mm of thread +
     // one pitch of run-out, M3 pitch 0.5 mm) at 2 radial passes — 22 depth passes a thread, 44 the

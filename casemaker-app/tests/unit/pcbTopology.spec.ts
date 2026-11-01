@@ -138,7 +138,7 @@ describe('the copper topology through the real sweep (#743 P-5)', () => {
     if (!built.ok) return;
     const job = built.job;
     job.toolKey = engraver.key;
-    const gen = engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: [engraver, corn] });
+    const gen = await engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: [engraver, corn] });
     expect(gen.ok).toBe(true);
     const pcb = pcbCopperTopologyInput(job);
     expect(pcb).not.toBeNull();
@@ -175,7 +175,7 @@ describe('the copper topology through the real sweep (#743 P-5)', () => {
     if (!built.ok) return;
     const job = built.job;
     job.toolKey = engraver.key;
-    const gen = engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: [engraver, corn] });
+    const gen = await engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: [engraver, corn] });
     expect(gen.ok).toBe(true);
     const pcb = pcbCopperTopologyInput(job);
     expect(pcb).not.toBeNull();

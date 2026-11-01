@@ -57,7 +57,7 @@ const keys = (s: ScoredPlan): string => s.plan.cutters.map((c) => c.key).join('+
 async function pickFor(job: EngraveJob) {
   clearPlanEvaluations();
   const ctx = { tl, tools: TOOLS, catalogue: [], shop: { tools: TOOLS }, calibration: null };
-  return smartPick(job, TOOLS, [], (p: CandidatePlan, level) => evaluatePlan(job, p, ctx, { level }), {
+  return smartPick(job, TOOLS, [], async (p: CandidatePlan, level) => await evaluatePlan(job, p, ctx, { level }), {
     toolChangeSeconds: SEED.value,
   });
 }

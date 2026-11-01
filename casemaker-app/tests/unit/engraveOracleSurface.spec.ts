@@ -160,16 +160,16 @@ function load(job: EngraveJob, nc: string, tool: Tool, surface: SurfaceFrame | n
 }
 
 /** Generate flat, generate against the tilt, judge both — the package, the sweep and the verdict. */
-function verdicts(job: EngraveJob, tilt: SurfaceFrame = TILT): {
+async function verdicts(job: EngraveJob, tilt: SurfaceFrame = TILT): Promise<{
   flatGen: EngraveGenerated;
   liftGen: EngraveGenerated;
   flat: OracleReport;
   lifted: OracleReport;
   blind: OracleReport;
-} {
+}> {
   const tool = jobTool(job)!;
-  const flatGen = generate(tl, job);
-  const liftGen = generate(tl, job, null, [], undefined, { surface: tilt });
+  const flatGen = await generate(tl, job);
+  const liftGen = await generate(tl, job, null, [], undefined, { surface: tilt });
   if (flatGen.nc === null || liftGen.nc === null) {
     const why = (g: EngraveGenerated): string => `${g.stage}: ${g.errors.map((e) => e.message).join('; ')}`;
     throw new Error(`generate refused — flat ${why(flatGen)} | lifted ${why(liftGen)}`);
@@ -213,9 +213,9 @@ function expectSameVerdict(flat: OracleReport, lifted: OracleReport): void {
 }
 
 describe('the surface-frame oracle (#623)', () => {
-  it('judges a lifted V-trace post exactly as the flat one — same numbers, surface frame', () => {
+  it('judges a lifted V-trace post exactly as the flat one — same numbers, surface frame', async () => {
     const job = traceJob();
-    const { flat, lifted, blind } = verdicts(job);
+    const { flat, lifted, blind } = await verdicts(job);
 
     // Both posts pass, and a groove job's shallow level is the one the seat exists for: with the
     // stock left flat, the mouth's outer flank is cut out of air the flat stock does not have.
@@ -230,10 +230,10 @@ describe('the surface-frame oracle (#623)', () => {
     expect(blind.worst.underCut).toBeGreaterThan(1);
   });
 
-  it('sweeps the surface-frame image on the FLAT stock — the program is un-lifted, not the stock seated', () => {
+  it('sweeps the surface-frame image on the FLAT stock — the program is un-lifted, not the stock seated', async () => {
     const job = traceJob();
     const tool = jobTool(job)!;
-    const liftGen = generate(tl, job, null, [], undefined, { surface: TILT });
+    const liftGen = await generate(tl, job, null, [], undefined, { surface: TILT });
     if (liftGen.nc === null) throw new Error('generate refused');
 
     const flat = createSimSession(tl);
@@ -253,7 +253,7 @@ describe('the surface-frame oracle (#623)', () => {
     framed.dispose();
   });
 
-  it('a plane with a NON-ZERO z0 and offset: the column engine still reproduces the flat post (#628)', () => {
+  it('a plane with a NON-ZERO z0 and offset: the column engine still reproduces the flat post (#628)', async () => {
     // #623's fixtures used offset 0 / z0 0, where a per-cell lift and a seated stock both happen
     // to reproduce the work frame; a real registration's do not. The plane really does rise
     // 0.7265 mm over the blank's corner (0.72653 − 0.013348·x − 0.005035·y at (0,0)): the non-zero
@@ -263,14 +263,14 @@ describe('the surface-frame oracle (#623)', () => {
 
     const job = traceJob();
     const tool = jobTool(job)!;
-    const { flat, lifted, blind } = verdicts(job, BENCH_TILT);
+    const { flat, lifted, blind } = await verdicts(job, BENCH_TILT);
     expect(flat.ok).toBe(true);
     expectSameVerdict(flat, lifted);
     expect(blind.ok).toBe(false);
 
     const framed = createSimSession(tl);
     const loadResult = framed.load(
-      generate(tl, job, null, [], undefined, { surface: BENCH_TILT }).nc as string,
+      (await generate(tl, job, null, [], undefined, { surface: BENCH_TILT })).nc as string,
       toSetup(job, Z1),
       tool,
       Z1.id,
@@ -280,7 +280,7 @@ describe('the surface-frame oracle (#623)', () => {
     framed.dispose();
   });
 
-  it('#642 a plane that DIPS below z0 under part of the cut: the exact engine matches the flat post', () => {
+  it('#642 a plane that DIPS below z0 under part of the cut: the exact engine matches the flat post', async () => {
     // The least friendly shape the fit can take: the offset is 0.5 mm BELOW the reference touch, and
     // the plane rises in +X, so the lift changes sign inside the pocket itself. The un-lift is a
     // per-move subtraction in either direction, so the sweep must reproduce the flat removal on both
@@ -289,16 +289,16 @@ describe('the surface-frame oracle (#623)', () => {
     expect(surfaceLift(dipping.plane, dipping.z0, 42, 30)).toBeLessThan(0);
     expect(surfaceLift(dipping.plane, dipping.z0, 58, 30)).toBeGreaterThan(0);
 
-    const { flat, lifted } = verdicts(pocketJob(), dipping);
+    const { flat, lifted } = await verdicts(pocketJob(), dipping);
     expect(flat.ok).toBe(true);
     expectSameVerdict(flat, lifted);
   });
 
-  it('judges a lifted FLAT-REGION post exactly as the flat one — the exact sweeper, sheared', () => {
+  it('judges a lifted FLAT-REGION post exactly as the flat one — the exact sweeper, sheared', async () => {
     // A pocket on a flat end mill stays on the EXACT sweeper when lifted (its run count is well
     // under the 2.5D cap), so this is the shear's own case: the removal is a union of 2.5D tool
     // columns, and a shear of it is the surface-frame removal — the numbers agree to ~1e-6 mm².
-    const { flat, lifted, blind } = verdicts(pocketJob(), TILT_SMALL);
+    const { flat, lifted, blind } = await verdicts(pocketJob(), TILT_SMALL);
 
     expect(flat.ok).toBe(true);
     expectSameVerdict(flat, lifted);
@@ -306,12 +306,12 @@ describe('the surface-frame oracle (#623)', () => {
     expect(blind.worst.underCut).toBeGreaterThan(1);
   });
 
-  it('#628 the REAL bench badge job, re-posted against the 0.817° plane, reads 0/0 in the surface frame', () => {
+  it('#628 the REAL bench badge job, re-posted against the 0.817° plane, reads 0/0 in the surface frame', async () => {
     // The bench's acceptance after #628: "the badge re-post must read 0/0". The job is the badge
     // itself, the plane is the run 6 fit, and the tool routes to the column engine — the exact
     // combination that read 1.6602 mm² under / 75.4995 mm² over through the old seat path.
     const job = benchBadgeJob();
-    const { flat, lifted, blind } = verdicts(job, BENCH_TILT);
+    const { flat, lifted, blind } = await verdicts(job, BENCH_TILT);
 
     expect(flat.ok).toBe(true);
     expectSameVerdict(flat, lifted);
@@ -322,9 +322,9 @@ describe('the surface-frame oracle (#623)', () => {
     expect(blind.worst.underCut).toBeGreaterThan(100);
   }, 120_000);
 
-  it('reports the frame on the run view: Upload enables, and the row says which frame judged it', () => {
+  it('reports the frame on the run view: Upload enables, and the row says which frame judged it', async () => {
     const job = traceJob();
-    const { flatGen, liftGen, flat, lifted } = verdicts(job);
+    const { flatGen, liftGen, flat, lifted } = await verdicts(job);
     const view = (generated: EngraveGenerated, oracle: OracleReport): EngraveRunView => ({
       generated,
       oracle,

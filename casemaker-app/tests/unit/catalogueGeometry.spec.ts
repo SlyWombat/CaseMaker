@@ -269,10 +269,10 @@ describe('#786 slice 6 the catalogue states the cone’s body', () => {
     expect(note?.message).toContain(CAT_CHAMFER.name);
   });
 
-  it('Generate posts the chamfer program with the catalogue’s body', () => {
+  it('Generate posts the chamfer program with the catalogue’s body', async () => {
     const entries = [USER_CHAMFER_ENTRY, CAT_CHAMFER_ENTRY, FLAT_ENTRY];
     const job = chamferJob();
-    const generated = engraveGenerate(tl, job, USER_CHAMFER, [], null, undefined, { tools: entries });
+    const generated = await engraveGenerate(tl, job, USER_CHAMFER, [], null, undefined, { tools: entries });
     const codes = generated.findings.map((f) => f.code);
     expect(codes).not.toContain('chamfer-reach-unproven');
     expect(generated.ok, JSON.stringify(generated.errors ?? [])).toBe(true);

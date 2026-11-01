@@ -118,11 +118,11 @@ function reliefJob(coarse: boolean): EngraveJob {
 }
 
 /** Generate the relief program and hand back the timeline the sweep reads. */
-function reliefTimeline(coarse: boolean) {
+async function reliefTimeline(coarse: boolean) {
   const job = reliefJob(coarse);
   const tool = jobTool(job);
   if (tool === null) throw new Error('the lobed shaft names a tool the registry cannot resolve');
-  const gen = engraveGenerate(tl, job, tool, [], null, undefined, {});
+  const gen = await engraveGenerate(tl, job, tool, [], null, undefined, {});
   expect(gen.ok, gen.errors.join('; ')).toBe(true);
   const nc = gen.programs[0]?.nc;
   if (nc === undefined) throw new Error('the relief posted no program');
@@ -139,8 +139,8 @@ function swept(outcome: ColumnOutcome): ColumnSweepOk {
 }
 
 describe('#776 — the lobed-shaft relief', () => {
-  it('the coarse case removes EXACTLY what the per-column sweep removed', { timeout: 120_000 }, () => {
-    const { timeline, tool, setup } = reliefTimeline(true);
+  it('the coarse case removes EXACTLY what the per-column sweep removed', { timeout: 120_000 }, async () => {
+    const { timeline, tool, setup } = await reliefTimeline(true);
     const legacy = swept(columnSweep(timeline, tool, setup, { noSpanSweep: true }));
     const fast = swept(columnSweep(timeline, tool, setup, {}));
 
@@ -160,8 +160,8 @@ describe('#776 — the lobed-shaft relief', () => {
     expect(diff).toBe(-1);
   });
 
-  it('the cut-resolution case sweeps inside a 30 s budget, reporting every checkpoint', { timeout: 120_000 }, () => {
-    const { timeline, tool, setup } = reliefTimeline(false);
+  it('the cut-resolution case sweeps inside a 30 s budget, reporting every checkpoint', { timeout: 120_000 }, async () => {
+    const { timeline, tool, setup } = await reliefTimeline(false);
     let lastDone = 0;
     let total = 0;
     const out = swept(
@@ -181,8 +181,8 @@ describe('#776 — the lobed-shaft relief', () => {
     expect(lastDone).toBe(out.count);
   });
 
-  it('a budget it cannot meet refuses by name rather than running on', { timeout: 120_000 }, () => {
-    const { timeline, tool, setup } = reliefTimeline(true);
+  it('a budget it cannot meet refuses by name rather than running on', { timeout: 120_000 }, async () => {
+    const { timeline, tool, setup } = await reliefTimeline(true);
     const out = columnSweep(timeline, tool, setup, { stallMs: 0 });
     expect(out.ok).toBe(false);
     if (out.ok) return;

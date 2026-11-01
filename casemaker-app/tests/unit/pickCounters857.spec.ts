@@ -55,8 +55,8 @@ const CORN_PLAN = plan(CORN_19, CORN_06);
 const V_PLAN = plan(FLAT_3175, V_03);
 
 const ctx = { tl, tools: TOOLS, catalogue: [], shop: { tools: TOOLS }, calibration: null };
-const evaluate = (job: EngraveJob, p: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
-  evaluatePlan(job, p, ctx, { level });
+const evaluate = async (job: EngraveJob, p: CandidatePlan, level: 'coarse' | 'full'): Promise<PlanEvaluation> =>
+  await evaluatePlan(job, p, ctx, { level });
 
 const counterOf = (e: PlanEvaluation, char: string) => {
   const item = e.items.find((i) => i.id === 'clear')!;
@@ -66,11 +66,11 @@ const standing = (e: PlanEvaluation): number =>
   e.items.reduce((sum, i) => sum + (i.counters ?? []).reduce((s, c) => s + c.standingMm2, 0), 0);
 
 describe('#857 a raised glyph’s counters count in the pick', () => {
-  it('the corn rest leaves the e of "Software" filled; the V opens it — and the number is the sweep’s', { timeout: 300_000 }, () => {
+  it('the corn rest leaves the e of "Software" filled; the V opens it — and the number is the sweep’s', { timeout: 300_000 }, async () => {
     clearPlanEvaluations();
     const job = coin();
-    const corn = evaluate(job, CORN_PLAN, 'full');
-    const v = evaluate(job, V_PLAN, 'full');
+    const corn = await evaluate(job, CORN_PLAN, 'full');
+    const v = await evaluate(job, V_PLAN, 'full');
     expect(corn.ok, corn.refusal ?? '').toBe(true);
     expect(v.ok, v.refusal ?? '').toBe(true);
     const cornItem = corn.items.find((i) => i.id === 'clear')!;
@@ -94,7 +94,7 @@ describe('#857 a raised glyph’s counters count in the pick', () => {
     // each program from the blank (removal only grows, so their union is the run's cut), slice at
     // half the 0.4 mm relief, and measure the e's counter less the oracle's band against it.
     const applied = applyCutterPlan(job, CORN_PLAN);
-    const gen = engraveGenerate(tl, applied, TOOLS.find((t) => t.key === CORN_19)!.tool, [], null, undefined, { tools: TOOLS });
+    const gen = await engraveGenerate(tl, applied, TOOLS.find((t) => t.key === CORN_19)!.tool, [], null, undefined, { tools: TOOLS });
     expect(gen.ok).toBe(true);
     const setup = toSetup(applied, jobMachine(applied, null));
     const cuts: { region: ReturnType<typeof executeProfile> | null; bandMm: number }[] = [];

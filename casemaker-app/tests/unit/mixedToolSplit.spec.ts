@@ -198,12 +198,12 @@ describe('#786 4b — the applied split posts two programs, and the sentence say
     );
   });
 
-  it('the drill job generates and verifies BOTH programs, each with its own cutter', () => {
+  it('the drill job generates and verifies BOTH programs, each with its own cutter', async () => {
     const job = mixedDrillJob();
     const plan = candidatePlans(job, [DRILL_ENTRY, FLAT_ENTRY], [])[0]!;
     const applied = applyCutterPlanToJob(job, plan);
 
-    const g = generate(tl, applied, null, [], undefined, SHOP);
+    const g = await generate(tl, applied, null, [], undefined, SHOP);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
@@ -220,11 +220,11 @@ describe('#786 4b — the applied split posts two programs, and the sentence say
     expect(g.drill?.plans[0]?.id).toBe(HOLE.id);
   }, 60_000);
 
-  it('the thread job generates and verifies BOTH programs, each with its own cutter', () => {
+  it('the thread job generates and verifies BOTH programs, each with its own cutter', async () => {
     const job = mixedThreadJob();
     const plan = candidatePlans(job, [THREAD_ENTRY, FLAT_ENTRY], [])[0]!;
     const applied = applyCutterPlanToJob(job, plan);
-    const g = generate(tl, applied, null, [], undefined, { ...SHOP, defaults: THREAD_DEFAULTS });
+    const g = await generate(tl, applied, null, [], undefined, { ...SHOP, defaults: THREAD_DEFAULTS });
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');

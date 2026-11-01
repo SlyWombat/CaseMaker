@@ -358,9 +358,9 @@ describe('the thin fixture as a V-carve job (#221)', () => {
     expect(groove).toBeCloseTo(0.40396, 5);
   });
 
-  it('cuts the whole design with ONE V-bit and no error finding', () => {
+  it('cuts the whole design with ONE V-bit and no error finding', async () => {
     const job = vCarveJob(design);
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
@@ -375,8 +375,8 @@ describe('the thin fixture as a V-carve job (#221)', () => {
 
   // Slice D — the operator reads the pitch the CAM RUNS, with the requested number beside it, and
   // the sentence is a warning-worded note rather than a fault: the cut is correct either way.
-  it('states the clamped pitch beside the requested one, per item', () => {
-    const g = generate(tl, vCarveJob(design));
+  it('states the clamped pitch beside the requested one, per item', async () => {
+    const g = await generate(tl, vCarveJob(design));
     expect(g.ok).toBe(true);
     const notes = g.findings.filter((f) => f.code === 'vcarve-stepover-clamped');
     expect(notes).toHaveLength(3);
@@ -388,10 +388,10 @@ describe('the thin fixture as a V-carve job (#221)', () => {
     expect(title!.message).toMatch(/ridge of the top colour/);
   });
 
-  it('raises no note when the override asks for less than the tip radius', () => {
+  it('raises no note when the override asks for less than the tip radius', async () => {
     const job = vCarveJob(design);
     const gentle = { ...job, cutOverride: { ...job.cutOverride, stepOver: 0.09 } };
-    const g = generate(tl, gentle);
+    const g = await generate(tl, gentle);
     expect(g.ok).toBe(true);
     expect(g.findings.filter((f) => f.code === 'vcarve-stepover-clamped')).toEqual([]);
   });
@@ -401,7 +401,7 @@ describe('the thin fixture as a V-carve job (#221)', () => {
   // material left at the FLOOR with the geometry's floor polygons (the design inset by e·tan).
   // Slice C — the cone's other two outlines are judged the same way: the colour plane and a level
   // up the wall are each an oracle level, against the same real swept grid.
-  it('simulates on the column cone and the oracle accepts the floor, the plane and the wall', () => {
+  it('simulates on the column cone and the oracle accepts the floor, the plane and the wall', async () => {
     const job = vCarveJob(design);
     const cone = coneOf(job);
     const r = regions(tl, job);
@@ -412,7 +412,7 @@ describe('the thin fixture as a V-carve job (#221)', () => {
     // The three outlines, through the cone's own depth arithmetic.
     expectConeOutlines(r, cone, film);
 
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const tool = jobTool(job);
     expect(tool).not.toBeNull();
@@ -497,8 +497,8 @@ describe('the thick fixture as a V-carve job (#221)', () => {
     expect(jobVise(job).stockProud).toBeLessThan(job.stock.thickness);
   });
 
-  it('generates one program with the same one V-bit and no error finding', () => {
-    const g = generate(tl, vCarveJob(design));
+  it('generates one program with the same one V-bit and no error finding', async () => {
+    const g = await generate(tl, vCarveJob(design));
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
@@ -509,7 +509,7 @@ describe('the thick fixture as a V-carve job (#221)', () => {
     expect(g.cam!.operations).toBe(3);
   });
 
-  it('simulates on the column cone; the oracle accepts the two floors, the plane and the wall', () => {
+  it('simulates on the column cone; the oracle accepts the two floors, the plane and the wall', async () => {
     const job = vCarveJob(design);
     const cone = coneOf(job);
     const r = regions(tl, job);
@@ -519,7 +519,7 @@ describe('the thick fixture as a V-carve job (#221)', () => {
 
     expectConeOutlines(r, cone, film);
 
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const tool = jobTool(job);
     expect(tool).not.toBeNull();
@@ -742,12 +742,12 @@ describe('the thin fixture end to end (#221 acceptance)', () => {
 
   // The two finding cases, in ONE generated job. Both are warnings: the colour line at the plane
   // is still correct, so neither refuses the cut.
-  it('raises the surface-merge warning and the clamped-pitch note, with both pitches stated', () => {
+  it('raises the surface-merge warning and the clamped-pitch note, with both pitches stated', async () => {
     const job = thinJob();
     const r = regions(tl, job);
     const film = filmFrom(r);
     const cone = coneOf(job);
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
 
@@ -781,11 +781,11 @@ describe('the thin fixture end to end (#221 acceptance)', () => {
     }
   });
 
-  it('sweeps the program on the column cone and the oracle accepts every floor', () => {
+  it('sweeps the program on the column cone and the oracle accepts every floor', async () => {
     const job = thinJob();
     const r = regions(tl, job);
     const film = filmFrom(r);
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
 
     const tool = jobTool(job);
@@ -963,8 +963,8 @@ describe('the thick fixture acceptance gates (#221)', () => {
     expect(jobVise(job).stockProud).toBeLessThan(job.stock.thickness);
   });
 
-  it('generates one program with the same one V-bit and no error finding', () => {
-    const g = generate(tl, thickJob());
+  it('generates one program with the same one V-bit and no error finding', async () => {
+    const g = await generate(tl, thickJob());
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
@@ -975,7 +975,7 @@ describe('the thick fixture acceptance gates (#221)', () => {
     expect(g.cam!.operations).toBe(3);
   });
 
-  it('sweeps the cone and the oracle accepts both floors with zero under- and over-cut', () => {
+  it('sweeps the cone and the oracle accepts both floors with zero under- and over-cut', async () => {
     const job = thickJob();
     const cone = coneOf(job);
     const r = regions(tl, job);
@@ -998,7 +998,7 @@ describe('the thick fixture acceptance gates (#221)', () => {
       expect(area(v.plane)).toBeGreaterThan(area(v.floor));
     }
 
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const tool = jobTool(job);
     expect(tool).not.toBeNull();

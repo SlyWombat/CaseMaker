@@ -129,7 +129,7 @@ describe('#720 a 12 MB-class 3MF is an ordinary goal', () => {
         expect(useEngraveJobStore.getState().job.targetObject?.data).toBe(imported.data);
 
         // And it generates: a pure-goal job's roughing and finishing program.
-        const out = generateGoalProgram(
+        const out = await generateGoalProgram(
           useEngraveJobStore.getState().job,
           useEngraveJobStore.getState().job.targetObject!,
           flatEndMill(3.175),

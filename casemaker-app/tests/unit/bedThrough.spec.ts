@@ -173,8 +173,8 @@ describe('#712 through the pipeline: the tag on each surface (§6 fixture 2)', (
     return deepest;
   };
 
-  it('no board on the bare bed is refused at Generate', () => {
-    const g = generate(tl, sheet(), null, [], undefined, { bed: BARE_BED });
+  it('no board on the bare bed is refused at Generate', async () => {
+    const g = await generate(tl, sheet(), null, [], undefined, { bed: BARE_BED });
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     const f = g.findings.find((x) => x.code === 'through-needs-board');
@@ -182,20 +182,20 @@ describe('#712 through the pipeline: the tag on each surface (§6 fixture 2)', (
     expect(f?.message).toContain('only the bed is under it');
   });
 
-  it('with the 2 mm board it generates, and the cut’s floor is 0.3 mm into the board (Z −2.3)', () => {
+  it('with the 2 mm board it generates, and the cut’s floor is 0.3 mm into the board (Z −2.3)', async () => {
     const board = {
       under: { thickness: 2, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'tape' as const },
       sides: { left: null, right: null, front: null, back: null },
       source: 'saved' as const,
     };
-    const g = generate(tl, sheet({ sacrificial: board }), null, [], undefined, { bed: BARE_BED });
+    const g = await generate(tl, sheet({ sacrificial: board }), null, [], undefined, { bed: BARE_BED });
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.nc).not.toBeNull();
     expect(deepestCutZ(g.nc ?? '')).toBeCloseTo(-2.3, 6);
   });
 
-  it('on the wasteboard it generates with no board of its own', () => {
-    const g = generate(tl, sheet(), null, [], undefined, { bed: WASTEBOARD });
+  it('on the wasteboard it generates with no board of its own', async () => {
+    const g = await generate(tl, sheet(), null, [], undefined, { bed: WASTEBOARD });
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.nc).not.toBeNull();
     expect(deepestCutZ(g.nc ?? '')).toBeCloseTo(-2.3, 6);
@@ -271,7 +271,7 @@ describe('#712 through the pipeline: the tag on each surface (§6 fixture 2)', (
     expect(codes).not.toContain('wasteboard-depth');
   });
 
-  it('a cut-out that frees a piece on a bare bed is refused like any through cut', () => {
+  it('a cut-out that frees a piece on a bare bed is refused like any through cut', async () => {
     const cut: EngraveCutout = {
       kind: 'cutout',
       id: 'cut-tag',
@@ -284,7 +284,7 @@ describe('#712 through the pipeline: the tag on each surface (§6 fixture 2)', (
     };
     // The shape is only REFERENCED (a construction item cuts nothing of its own), so the cut-out
     // is the job's one through cut and its own sentence names it.
-    const g = generate(tl, sheet({ shapes: [{ ...TAG, construction: true }], cutouts: [cut] }), null, [], undefined, { bed: BARE_BED });
+    const g = await generate(tl, sheet({ shapes: [{ ...TAG, construction: true }], cutouts: [cut] }), null, [], undefined, { bed: BARE_BED });
     expect(g.ok).toBe(false);
     expect(g.findings.find((x) => x.code === 'through-needs-board')?.message).toContain('Cut-out "Tag"');
   });

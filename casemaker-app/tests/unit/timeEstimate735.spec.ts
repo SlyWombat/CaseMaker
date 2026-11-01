@@ -51,9 +51,9 @@ function benchJob(): EngraveJob {
 }
 
 describe('#735 item 4 — j02’s predicted time is the toolpath’s cycle time', () => {
-  it('pins the measured breakdown: 792 mm cutting, 88 mm rapid, 120.391 s = the sheet’s 2 min 0 s', () => {
+  it('pins the measured breakdown: 792 mm cutting, 88 mm rapid, 120.391 s = the sheet’s 2 min 0 s', async () => {
     const job = benchJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok, `${g.stage}: ${JSON.stringify(g.errors)}`).toBe(true);
     const cam = g.cam!;
 
@@ -90,13 +90,13 @@ describe('#735 item 4 — j02’s predicted time is the toolpath’s cycle time'
     expect(sheet.header.estimatedTimeNote).toContain('a planning estimate, not a measured cycle time');
   });
 
-  it('the source band implies 4.4–6.3× this cutting path at its own 500 mm/min — not like-for-like', () => {
+  it('the source band implies 4.4–6.3× this cutting path at its own 500 mm/min — not like-for-like', async () => {
     // 7 min at 500 mm/min is 3500 mm of path; 10 min is 5000 mm. The fixture's whole XY cutting is
     // 792.246 mm. The shortest quoted run therefore covers at least 4.4× our path, and 4× is the
     // margin this pin keeps: if the CAM ever produces a path that long, the conclusion changes from
     // "different programs" to "our path is missing something", and this test must be revisited.
     // (The sign is not affected by the 28 mm of plunge the XY figure excludes.)
-    const g = generate(tl, benchJob());
+    const g = await generate(tl, benchJob());
     const cutMm = g.cam!.cutMm!;
     expect(cutMm).toBeCloseTo(792.2462876250668, 6);
     expect(cutMm * 4).toBeLessThan((7 * 60 * 500) / 60);

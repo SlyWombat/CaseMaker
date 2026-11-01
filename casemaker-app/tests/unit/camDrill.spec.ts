@@ -129,16 +129,16 @@ describe('drill CAM (#220)', () => {
     expect(rapids(-1)).toEqual(expected);
   });
 
-  it('posts no canned cycle: no G81, G82 or G83 anywhere in the file', () => {
-    const g = generate(tl, singleHole());
+  it('posts no canned cycle: no G81, G82 or G83 anywhere in the file', async () => {
+    const g = await generate(tl, singleHole());
     expect(g.errors).toEqual([]);
     expect(g.nc).not.toBeNull();
     expect(/\bG8[123]\b/.test(g.nc as string)).toBe(false);
   });
 
-  it('simulates removal equal to π r² × 4, and the peck re-entries raise no rapid-through-stock', () => {
+  it('simulates removal equal to π r² × 4, and the peck re-entries raise no rapid-through-stock', async () => {
     const job = singleHole();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);

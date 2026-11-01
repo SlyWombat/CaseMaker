@@ -71,9 +71,9 @@ function benchJob(tool: Tool): EngraveJob {
 }
 
 describe('#735 item 2 — the thread program’s S/F come from the catalogue row', () => {
-  it('without a Makera id the program posts the labelled placeholders — the bench set’s j18 failure', () => {
+  it('without a Makera id the program posts the labelled placeholders — the bench set’s j18 failure', async () => {
     const job = benchJob(threadMill(null));
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok, `${g.stage}: ${JSON.stringify(g.errors)}`).toBe(true);
     // No id: `catalogueCoverageFor` answers `no-vendor-id`, no row can name this cutter, and the
     // thread.* placeholders (10000 RPM / 300 mm/min) are the program's own numbers.
@@ -85,10 +85,10 @@ describe('#735 item 2 — the thread program’s S/F come from the catalogue row
     expect(g.nc).toContain('F300');
   });
 
-  it('a Makera id with no catalogue loaded is still the placeholders — the CLI’s state until #732', () => {
+  it('a Makera id with no catalogue loaded is still the placeholders — the CLI’s state until #732', async () => {
     // The other half of the bench failure: the id is carried, but the CLI loads no catalogue, so
     // there is nothing to answer with. The row is the only fix; a seeded speed is not evidence.
-    const g = generate(tl, benchJob(threadMill(MAKERA_ID)));
+    const g = await generate(tl, benchJob(threadMill(MAKERA_ID)));
     expect(g.ok, `${g.stage}: ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.threadMachining?.sources.feed).toBe('fallback');
     expect(g.threadMachining?.settings.feed).toBe(300);
@@ -96,9 +96,9 @@ describe('#735 item 2 — the thread program’s S/F come from the catalogue row
     expect(g.nc).toContain('S10000');
   });
 
-  it('id + catalogue row: the row’s 60 mm/min, and its 15 000 RPM clamped to the Z1’s 13 000', () => {
+  it('id + catalogue row: the row’s 60 mm/min, and its 15 000 RPM clamped to the Z1’s 13 000', async () => {
     const job = benchJob(threadMill(MAKERA_ID));
-    const g = generate(tl, job, null, [ROW]);
+    const g = await generate(tl, job, null, [ROW]);
     expect(g.ok, `${g.stage}: ${JSON.stringify(g.errors)}`).toBe(true);
     const s = g.threadMachining!.settings;
     // The feed is the row's, unchanged.
@@ -130,14 +130,14 @@ describe('#735 item 2 — the thread program’s S/F come from the catalogue row
     expect(cutValue).not.toContain('10000 RPM');
   });
 
-  it('the missing-pilot warning is STATED, not a block — the shipped #445 decision, kept', () => {
+  it('the missing-pilot warning is STATED, not a block — the shipped #445 decision, kept', async () => {
     // The fixture's blank has no pilot cut anywhere, so `thread-pilot-unproven` fires. #445
     // decided this is the operator's precondition, said out loud: a thread mill cannot cut the
     // pilot itself, and the pilot may already exist from an earlier run or another job, which no
     // document in this app can prove either way. The warning names the diameter and depth; the
     // program is written. Blocking would refuse a job whose pilot exists, and could not make one
     // that does not. Nothing in the bench evidence shows a pilot-present program unsafe.
-    const g = generate(tl, benchJob(threadMill(MAKERA_ID)), null, [ROW]);
+    const g = await generate(tl, benchJob(threadMill(MAKERA_ID)), null, [ROW]);
     expect(g.ok, `${g.stage}: ${JSON.stringify(g.errors)}`).toBe(true);
     const pilot = g.findings.find((f) => f.code === 'thread-pilot-unproven');
     expect(pilot?.severity).toBe('warning');

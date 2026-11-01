@@ -151,8 +151,8 @@ function heightAt(grid: ReturnType<typeof FLAT.buildGrid>, x: number, y: number)
   return grid.h[j * grid.nu + i] as number;
 }
 
-function finishingOf(hf: GoalHeightfield) {
-  return generateSurface3dIR({
+async function finishingOf(hf: GoalHeightfield) {
+  const result = await generateSurface3dIR({
     heightfield: hf,
     tool: BALL,
     toolObj: BALL_TOOL,
@@ -162,7 +162,8 @@ function finishingOf(hf: GoalHeightfield) {
     feeds: FEEDS,
     rapid: RAPID,
     labelId: 'shell',
-  }).finishing;
+  });
+  return result.finishing;
 }
 
 function job(target: EngraveTargetObject): EngraveJob {
@@ -176,7 +177,7 @@ function job(target: EngraveTargetObject): EngraveJob {
 }
 
 describe('#764 — the item goal is cleared around itself', () => {
-  it('the default samples a ring at the goal’s base plane, and the finish leaves it at the rim Z', () => {
+  it('the default samples a ring at the goal’s base plane, and the finish leaves it at the rim Z', async () => {
     const target = goal(zOut);
     const hf = sampleGoalHeightfield(target, {
       pitchMm: PITCH,
@@ -205,12 +206,12 @@ describe('#764 — the item goal is cleared around itself', () => {
     expect(hf.x0 + (hf.nx - 1) * hf.pitch).toBeGreaterThanOrEqual(CX + A + RING_WIDTH - 1e-6);
 
     // The finishing pass over that field leaves the ring's floor at the rim Z.
-    const grid = sweep(finishingOf(hf).moves);
+    const grid = sweep((await finishingOf(hf)).moves);
     const midRing = CX + A + 1.15; // > one ball radius from both walls
     expect(heightAt(grid, midRing, CY)).toBeCloseTo(BASE_Z, 1);
   });
 
-  it('“nothing” keeps the pre-#764 cut: the stock outside the footprint stands', () => {
+  it('“nothing” keeps the pre-#764 cut: the stock outside the footprint stands', async () => {
     // The pre-#764 grid is the footprint's own bounding box, so the probe is a corner of that box
     // outside the ellipse — in the grid, uncovered, and left at the stock top by the finish.
     const hf = sampleGoalHeightfield(goal(zOut), { pitchMm: PITCH });
@@ -219,7 +220,7 @@ describe('#764 — the item goal is cleared around itself', () => {
     const i = Math.round((px - hf.x0) / hf.pitch);
     const j = Math.round((py - hf.y0) / hf.pitch);
     expect(hf.covered[j * hf.nx + i]!).toBe(0);
-    const grid = sweep(finishingOf(hf).moves);
+    const grid = sweep((await finishingOf(hf)).moves);
     expect(heightAt(grid, px, py)).toBeCloseTo(0, 1);
   });
 
@@ -241,26 +242,26 @@ describe('#764 — the item goal is cleared around itself', () => {
 });
 
 describe('#764 — the goal row wires it, and a mold is unchanged', () => {
-  function generate(surface: EngraveTargetObject['surface'], goalMode?: 'item' | 'mold') {
+  async function generate(surface: EngraveTargetObject['surface'], goalMode?: 'item' | 'mold') {
     const target = goal(zOut, { surface, ...(goalMode === undefined ? {} : { goalMode }) });
     const j = job(target);
-    return generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
   }
 
-  it('the default clears a ring one cutter diameter plus a step-over wide, and says so', () => {
-    const out = generate({ finishStepOverMm: FINISH_STEP });
+  it('the default clears a ring one cutter diameter plus a step-over wide, and says so', async () => {
+    const out = await generate({ finishStepOverMm: FINISH_STEP });
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.surface3d!.resolutionNote).toContain(`cleared a ${RING_WIDTH} mm band`);
     expect(out.surface3d!.notes.some((n) => n.startsWith('Cleared a 2.3 mm band'))).toBe(true);
   });
 
-  it('“nothing” and a mold carry no clear note', () => {
-    const none = generate({ clearAround: 'none' });
+  it('“nothing” and a mold carry no clear note', async () => {
+    const none = await generate({ clearAround: 'none' });
     expect(none.ok).toBe(true);
     expect(none.surface3d!.resolutionNote).not.toContain('cleared');
     expect(none.surface3d!.notes.some((n) => n.startsWith('Cleared'))).toBe(false);
-    const mold = generate({ clearAround: 'ring' }, 'mold');
+    const mold = await generate({ clearAround: 'ring' }, 'mold');
     expect(mold.ok).toBe(true);
     expect(mold.surface3d!.resolutionNote).not.toContain('cleared');
     expect(mold.surface3d!.notes.some((n) => n.startsWith('Cleared'))).toBe(false);

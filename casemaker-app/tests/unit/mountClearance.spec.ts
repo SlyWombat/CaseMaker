@@ -169,8 +169,8 @@ function mountWith(topZ: number): MountObstacles {
 describe('#710 a bracket program travels above the clamps', () => {
   const job = (): EngraveJob => ({ ...defaultEngraveJob(), toolKey: 'flat-1.0' });
 
-  it('every work-frame rapid stands at the clamps’ top + fit + clearance, and the program verifies clean', () => {
-    const g = generate(tl, job(), null, [], undefined, { mount: mountWith(12) });
+  it('every work-frame rapid stands at the clamps’ top + fit + clearance, and the program verifies clean', async () => {
+    const g = await generate(tl, job(), null, [], undefined, { mount: mountWith(12) });
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.nc).not.toBeNull();
     const rapidZs = parseGcode(g.nc ?? '')
@@ -182,8 +182,8 @@ describe('#710 a bracket program travels above the clamps', () => {
     expect(rapidZs.some((z) => Math.abs(z - (12 + B.settings.fitMm + CLEARANCE)) < 1e-6)).toBe(true);
   });
 
-  it('without a mount standing above the stock the CAM’s own hop and safe heights stand', () => {
-    const g = generate(tl, job(), null, [], undefined, { mount: mountWith(0.5) });
+  it('without a mount standing above the stock the CAM’s own hop and safe heights stand', async () => {
+    const g = await generate(tl, job(), null, [], undefined, { mount: mountWith(0.5) });
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.nc).not.toBeNull();
     const rapidZs = parseGcode(g.nc ?? '')
@@ -195,13 +195,13 @@ describe('#710 a bracket program travels above the clamps', () => {
 });
 
 describe('#727 F2 — a tilted top lifts the clamp with it', () => {
-  it('the travel height and the verifier both add the fitted top’s highest lift', () => {
+  it('the travel height and the verifier both add the fitted top’s highest lift', async () => {
     // A blank whose top is fitted with a 0.01 slope along X: the far edge stands 1 mm above the
     // reference. The clamps sit on the REAL top, so their tops are 12 + 1 mm in the program's
     // frame — travel must clear that, and the verifier's top must include it.
     const surface = { plane: { offset: 0, slopeX: 0.01, slopeY: 0 }, z0: 0 };
     const job: EngraveJob = { ...defaultEngraveJob(), toolKey: 'flat-1.0' };
-    const g = generate(tl, job, null, [], undefined, { mount: mountWith(12), surface });
+    const g = await generate(tl, job, null, [], undefined, { mount: mountWith(12), surface });
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     const rapidZs = parseGcode(g.nc ?? '')
       .events.filter((e) => e.kind === 'move' && e.frame === 'work' && e.mode === 'rapid')
@@ -225,7 +225,7 @@ describe('#727 F2 — a tilted top lifts the clamp with it', () => {
 });
 
 describe('#727 F4 — a drill’s chip-clear peck is not travel', () => {
-  it('the peck stays at the CAM’s hop while the hops between holes are raised over the clamps', () => {
+  it('the peck stays at the CAM’s hop while the hops between holes are raised over the clamps', async () => {
     // A pecking hole at X 50, Y 20 — clear of the back clamp, so its own path is not refused. Its
     // chip-clear retracts are the drill's, not travel: raising them to 13.1 would turn every peck
     // into a full retract (the comment on `raiseTravelOver` promises it does not).
@@ -250,7 +250,7 @@ describe('#727 F4 — a drill’s chip-clear peck is not travel', () => {
         } as NonNullable<EngraveJob['drills']>[number],
       ],
     };
-    const g = generate(tl, job, null, [], undefined, { mount: mountWith(12) });
+    const g = await generate(tl, job, null, [], undefined, { mount: mountWith(12) });
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     const rapidZs = parseGcode(g.nc ?? '')
       .events.filter((e) => e.kind === 'move' && e.frame === 'work' && e.mode === 'rapid')

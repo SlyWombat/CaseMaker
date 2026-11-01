@@ -175,7 +175,7 @@ describe('a two-sided board (#743 P-8)', () => {
       [2, engraver.key, 1],
       [2, corn.key, 1],
     ]);
-    const gen = engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
+    const gen = await engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
     expect(gen.errors).toEqual([]);
     expect(gen.ok).toBe(true);
     expect(gen.programs.map((p) => p.setupIndex)).toEqual([1, 1, 1, 2, 2]);
@@ -314,7 +314,7 @@ describe('a two-sided board’s checks and sheet (#743 P-8)', () => {
   it('names both faces and the turn between the setups on the run sheet', async () => {
     const { job } = await twoSided();
     const { buildRunSheet } = await import('@/engine/cnc/engrave/runSheet');
-    const gen = engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
+    const gen = await engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
     expect(gen.ok).toBe(true);
     const sheet = buildRunSheet(job, gen, null, new Date('2026-10-31T00:00:00Z'));
     const board = sheet.sections.find((s) => s.title.endsWith('· The board'))!;
@@ -343,7 +343,7 @@ describe('the copper oracle on both faces (#743 P-8)', () => {
       [1, 'top'],
       [2, 'bottom'],
     ]);
-    const gen = engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
+    const gen = await engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
     expect(gen.ok).toBe(true);
     const isolationOf = (setupIndex: number): number =>
       gen.programs.findIndex((p) => p.setupIndex === setupIndex && p.toolKey === engraver.key);
@@ -544,7 +544,7 @@ describe('a board’s through drills sweep on the column engine (#743 P-8)', () 
     const { createSimSession } = await import('@/workers/sim/session');
     const { toSetup } = await import('@/engine/cnc/engrave/jobSetup');
     const { Z1 } = await import('@/engine/cnc/machine');
-    const gen = engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
+    const gen = await engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: TOOLS });
     expect(gen.ok).toBe(true);
     const drill = gen.programs.find((p) => p.toolKey === 'inv:d08')!;
     // The app's run hands the session the job's breakthrough, so the grid reaches below the blank.

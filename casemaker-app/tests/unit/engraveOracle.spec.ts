@@ -61,9 +61,9 @@ const under = (p: OracleReport) => p.worst.underCut;
 const over = (p: OracleReport) => p.worst.overCut;
 
 describe('engraveOracle (#206 §3)', () => {
-  it('passes the default job, every level inside the band', () => {
+  it('passes the default job, every level inside the band', async () => {
     const job = dj();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.nc).not.toBeNull();
     const tool = jobTool(job)!;
     const session = load(job, g.nc!, tool);
@@ -147,9 +147,9 @@ describe('engraveOracle (#206 §3)', () => {
     }
   });
 
-  it('catches an over-cut: shifting every X by +0.5 mm', () => {
+  it('catches an over-cut: shifting every X by +0.5 mm', async () => {
     const job = dj();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.nc).not.toBeNull();
     // Only the emitted X words: every header field is lowercase (`x=`), so this cannot touch the
     // header. A move that omits X keeps the modal value, so the whole path shifts together.
@@ -180,7 +180,7 @@ describe('engraveOracle (#206 §3)', () => {
   // where a shallower item sets the level, unaccounted for). The second half of this test is the
   // proof the entry is load-bearing — the same program, judged against the prediction WITHOUT the
   // trace, is refused with the whole groove reported as over-cut.
-  it('passes a single-line trace, and would refuse it if the trace were not predicted (#287)', () => {
+  it('passes a single-line trace, and would refuse it if the trace were not predicted (#287)', async () => {
     // The trace is the DEEPEST item in the job, so its floor is a level of its own — the level the
     // control below removes.
     const base = dj();
@@ -204,7 +204,7 @@ describe('engraveOracle (#206 §3)', () => {
         },
       ],
     };
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     expect(g.nc).toContain('Trace line (2 points) 1.5mm');
@@ -236,7 +236,7 @@ describe('engraveOracle (#206 §3)', () => {
   // `threadCutter`/`surfaceAboveTip` on this run's grid, so the two sides are two readings of one
   // model; the levels include the threaded depth and a shallow flank level, where a cylinder (or a
   // wrong pitch) would disagree across the annulus.
-  it('passes a milled thread on the profile the simulator swept (#445)', () => {
+  it('passes a milled thread on the profile the simulator swept (#445)', async () => {
     const MILL: Tool = flatEndMill(4, {
       name: '4 mm thread mill',
       typeText: 'Thread Mill',
@@ -277,7 +277,7 @@ describe('engraveOracle (#206 §3)', () => {
         },
       ],
     };
-    const g = generate(tl, job, null, [], undefined, { defaults });
+    const g = await generate(tl, job, null, [], undefined, { defaults });
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     expect(g.threads).toHaveLength(1);
@@ -339,7 +339,7 @@ describe('engraveOracle (#206 §3)', () => {
   // 0.4 mm). Its upper segments then sit above the first revolution's top, and the simulator sweeps
   // them; a prediction that kept only the first revolution would leave those columns untouched and
   // report an over-cut on a correct program. This is the permanent regression for that filter.
-  it('passes an M2 thread whose entry ramp is longer than its pitch (#445)', () => {
+  it('passes an M2 thread whose entry ramp is longer than its pitch (#445)', async () => {
     const MILL: Tool = flatEndMill(1.2, {
       name: '1.2 mm thread mill',
       typeText: 'Thread Mill',
@@ -380,7 +380,7 @@ describe('engraveOracle (#206 §3)', () => {
         },
       ],
     };
-    const g = generate(tl, job, null, [], undefined, { defaults });
+    const g = await generate(tl, job, null, [], undefined, { defaults });
     expect(g.ok).toBe(true);
     expect(g.threads).toHaveLength(1);
     const plan = g.threads![0]!;

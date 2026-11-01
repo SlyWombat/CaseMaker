@@ -141,10 +141,10 @@ describe('#584 a V region’s floor is only what the toolpath reaches', () => {
     }
   });
 
-  it('hands the same job to the column engine and the oracle without an under-cut', () => {
+  it('hands the same job to the column engine and the oracle without an under-cut', async () => {
     const job = plusJob();
     const tool = jobTool(job)!;
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok, JSON.stringify({ errors: g.errors })).toBe(true);
     if (g.nc === null) throw new Error(g.errors.map((e) => e.message).join('; '));
 

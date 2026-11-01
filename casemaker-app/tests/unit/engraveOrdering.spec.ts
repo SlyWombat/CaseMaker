@@ -53,11 +53,11 @@ function ncRapidMm(text: string): number {
 }
 
 /** Generate a fixture job with the cutter its file says it was cut with. */
-function generate(job: EngraveJob, tool: Tool): EngraveGenerated {
+async function generate(job: EngraveJob, tool: Tool): Promise<EngraveGenerated> {
   // The pipeline refuses a job whose named cutter is not in the registry (`tool-missing`) before it
   // looks at the `tool` argument, so the fixture's own entry is registered for the run.
   setRegistry([{ key: job.toolKey, provenance: 'bench fixture', tool }]);
-  return engraveGenerate(tl, job, tool, []);
+  return await engraveGenerate(tl, job, tool, []);
 }
 
 /** mm³ the program's sweep removed, simulated from a blank. */
@@ -77,10 +77,10 @@ afterAll(() => {
 });
 
 describe('the bench pair, ordered (#487)', () => {
-  it('the rest pass cuts the same material with at least half the air travel', () => {
+  it('the rest pass cuts the same material with at least half the air travel', async () => {
     const job = jobOf('single-barrel-rest.job.json');
     const tool = flatEndMill(0.6);
-    const generated = generate(job, tool);
+    const generated = await generate(job, tool);
     expect(generated.ok, JSON.stringify(generated.errors)).toBe(true);
     expect(generated.nc).not.toBeNull();
     const before = fixture('single-barrel-rest.before.nc');
@@ -98,10 +98,10 @@ describe('the bench pair, ordered (#487)', () => {
     expect(Math.abs(newVolume - oldVolume)).toBeLessThan(oldVolume * 1e-4);
   }, 180_000);
 
-  it('the rough pass does not spend more air than before', () => {
+  it('the rough pass does not spend more air than before', async () => {
     const job = jobOf('single-barrel.job.json');
     const tool = flatEndMill(2);
-    const generated = generate(job, tool);
+    const generated = await generate(job, tool);
     expect(generated.ok, JSON.stringify(generated.errors)).toBe(true);
     expect(generated.nc).not.toBeNull();
     const before = fixture('single-barrel.before.nc');
@@ -113,11 +113,11 @@ describe('the bench pair, ordered (#487)', () => {
     expect(Math.abs(newVolume - oldVolume)).toBeLessThan(oldVolume * 1e-4);
   }, 180_000);
 
-  it('posts the same file twice (the order is deterministic)', () => {
+  it('posts the same file twice (the order is deterministic)', async () => {
     const job = jobOf('single-barrel-rest.job.json');
     const tool = flatEndMill(0.6);
-    const first = generate(job, tool);
-    const second = generate(job, tool);
+    const first = await generate(job, tool);
+    const second = await generate(job, tool);
     expect(first.ok).toBe(true);
     expect(second.nc).toBe(first.nc);
   }, 180_000);

@@ -96,8 +96,8 @@ describe('an item may run over an edge onto sacrificial material (#213 §3)', ()
     };
   };
 
-  it('informs it on bare stock with the area; the JAW is what still refuses the cut (#786 slice 1 part 2)', () => {
-    const g = generate(tl, overEdge());
+  it('informs it on bare stock with the area; the JAW is what still refuses the cut (#786 slice 1 part 2)', async () => {
+    const g = await generate(tl, overEdge());
     // The edge margin is a preference now: the sentence states the area and the cut would post.
     expect(
       g.findings.some((f) => f.code === 'item-outside-stock' && f.severity === 'warning' && /mm²/.test(f.message)),
@@ -109,8 +109,8 @@ describe('an item may run over an edge onto sacrificial material (#213 §3)', ()
     expect(g.stage).toBe('findings');
   });
 
-  it('generates and verifies it cleanly with 6 mm strips between the jaws', () => {
-    const g = generate(tl, overEdge({ sacrificial: presetJawStrips() }));
+  it('generates and verifies it cleanly with 6 mm strips between the jaws', async () => {
+    const g = await generate(tl, overEdge({ sacrificial: presetJawStrips() }));
     expect(g.errors).toEqual([]);
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(g.ok).toBe(true);
@@ -121,8 +121,8 @@ describe('an item may run over an edge onto sacrificial material (#213 §3)', ()
     expect(g.findings.some((f) => f.code === 'item-outside-stock')).toBe(false);
   });
 
-  it('informs it when it runs past the strip too; the jaw refuses that reach (#786 slice 1 part 2)', () => {
-    const g = generate(tl, overEdge({ sacrificial: presetJawStrips(), labels: [
+  it('informs it when it runs past the strip too; the jaw refuses that reach (#786 slice 1 part 2)', async () => {
+    const g = await generate(tl, overEdge({ sacrificial: presetJawStrips(), labels: [
       { ...overEdge().labels[0]!, position: { x: 110, y: 30 } },
     ] }));
     expect(g.findings.some((f) => f.code === 'item-outside-stock' && f.severity === 'warning')).toBe(true);

@@ -165,9 +165,9 @@ function shared(a: readonly (readonly (readonly [number, number])[])[], b: typeo
 }
 
 describe('the clearance pair (#677)', () => {
-  it('posts the V program first and the core program second, with the core on its own facts', () => {
+  it('posts the V program first and the core program second, with the core on its own facts', async () => {
     const job = pairJob();
-    const g = run(job);
+    const g = await run(job);
     expect(
       g.ok,
       JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error') }),
@@ -223,13 +223,13 @@ describe('the clearance pair (#677)', () => {
     }
   }, 60_000);
 
-  it('sweeps the core program and the oracle passes on its own prediction', () => {
+  it('sweeps the core program and the oracle passes on its own prediction', async () => {
     // The V program is a CONE load: the column engine records no removal mesh for it, so the two
     // files cannot be chained through `priorRemoval` here. The seam between them is the geometry
     // the test above pins (ring ∪ core = the floor at the cap); this one proves the pocket the
     // core program posts cuts exactly the region it predicts.
     const job = pairJob();
-    const g = run(job);
+    const g = await run(job);
     expect(g.ok).toBe(true);
     const programs = g.programs.filter((p) => (p.kind ?? 'engrave') === 'engrave');
     const coreNc = programs[1]!.nc;
@@ -259,9 +259,9 @@ describe('the clearance pair (#677)', () => {
     }
   }, 120_000);
 
-  it('warns when the flat cutter is wider than the core at every point, and cuts nothing', () => {
+  it('warns when the flat cutter is wider than the core at every point, and cuts nothing', async () => {
     // A core ~11 × 0.9 mm: above the 1 mm² bar, but nowhere wider than the 1.5 mm cutter.
-    const g = run(pairJob(rect('plate', 12, 1.9)));
+    const g = await run(pairJob(rect('plate', 12, 1.9)));
     expect(g.ok).toBe(true);
     const programs = g.programs.filter((p) => (p.kind ?? 'engrave') === 'engrave');
     expect(programs).toHaveLength(1);
@@ -271,9 +271,9 @@ describe('the clearance pair (#677)', () => {
     expect(f?.message).toContain('Use a smaller flat end mill');
   }, 90_000);
 
-  it('states the core program on the run sheet, after the V-carve', () => {
+  it('states the core program on the run sheet, after the V-carve', async () => {
     const job = pairJob();
-    const g = run(job);
+    const g = await run(job);
     const sheet = buildRunSheet(job, g, null);
     const texts = sheet.sections.flatMap((s) => s.steps.map((st) => st.text));
     const vStep = texts.find((t) => t.includes('VARIABLE depth'));
@@ -290,7 +290,7 @@ describe('the clearance pair (#677)', () => {
 });
 
 describe('the unchanged document (#677)', () => {
-  it('round-trips a MIXED, non-happy job and stores nothing derived', () => {
+  it('round-trips a MIXED, non-happy job and stores nothing derived', async () => {
     // Two variable regions of different sizes (two cores, one program), a two-cutter setup, and a
     // schema value no build knows — the document is the job's, the cores are the run's.
     const second = rect('plate2', 12, 8);
@@ -301,7 +301,7 @@ describe('the unchanged document (#677)', () => {
       setups: [setup('setup-1', ['plate', 'plate2'], [TOOL_KEY, FLAT_TOOL.key])],
     };
     // Generate first: the derived core exists only in the run, never in the document.
-    const runResult = run(job);
+    const runResult = await run(job);
     expect(
       runResult.ok,
       JSON.stringify({
@@ -386,9 +386,9 @@ describe('a V-bit followed by a flat that owns its own items (#746)', () => {
     };
   }
 
-  it('cuts the flat’s cut-out as a cut-out, after the V-carve, and the V’s core in the same file', () => {
+  it('cuts the flat’s cut-out as a cut-out, after the V-carve, and the V’s core in the same file', async () => {
     const job = signJob();
-    const g = run(job);
+    const g = await run(job);
     expect(
       g.ok,
       JSON.stringify({
@@ -429,10 +429,10 @@ describe('a rest-only cutter after a V-bit (#472)', () => {
     ...parts,
   });
 
-  const engravePrograms = (g: ReturnType<typeof generate>) =>
+  const engravePrograms = (g: Awaited<ReturnType<typeof generate>>) =>
     g.programs.filter((p) => (p.kind ?? 'engrave') === 'engrave');
 
-  const expectNoRefusal = (g: ReturnType<typeof generate>): void => {
+  const expectNoRefusal = (g: Awaited<ReturnType<typeof generate>>): void => {
     expect(
       g.ok,
       JSON.stringify({
@@ -445,7 +445,7 @@ describe('a rest-only cutter after a V-bit (#472)', () => {
     expect(g.findings.filter((f) => f.message.includes('but null'))).toEqual([]);
   };
 
-  it('lets a flat follow a V that owns only a trace and has no core to clear (#472)', () => {
+  it('lets a flat follow a V that owns only a trace and has no core to clear (#472)', async () => {
     const line = lineTrace('line');
     const job = base({
       traces: [line],
@@ -456,13 +456,13 @@ describe('a rest-only cutter after a V-bit (#472)', () => {
         },
       ],
     });
-    const g = generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL] });
+    const g = await generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL] });
     expectNoRefusal(g);
     // The V program is the whole job; the flat has nothing to add, so no empty file is posted.
     expect(engravePrograms(g)).toHaveLength(1);
   }, 120_000);
 
-  it('does not refuse a third, rest-only flat after a V and a flat that owns its items (#472)', () => {
+  it('does not refuse a third, rest-only flat after a V and a flat that owns its items (#472)', async () => {
     const plate = rect('plate', 20, 10);
     const pocket = { ...rect('pocket', 30, 15, false), name: 'pocket' };
     const job = base({
@@ -478,7 +478,7 @@ describe('a rest-only cutter after a V-bit (#472)', () => {
         },
       ],
     });
-    const g = generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL, FLAT2_TOOL] });
+    const g = await generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL, FLAT2_TOOL] });
     expectNoRefusal(g);
     const programs = engravePrograms(g);
     // The V posts first and the owning flat second; the rest-only flat has nothing to clean.
@@ -486,7 +486,7 @@ describe('a rest-only cutter after a V-bit (#472)', () => {
     expect(programs[1]!.toolKey).toBe(FLAT_TOOL.key);
   }, 120_000);
 
-  it('does not refuse a third, rest-only flat after a V trace and an owning flat (#472)', () => {
+  it('does not refuse a third, rest-only flat after a V trace and an owning flat (#472)', async () => {
     const line = lineTrace('line');
     const pocket = { ...rect('pocket', 30, 15, false), name: 'pocket' };
     const job = base({
@@ -503,7 +503,7 @@ describe('a rest-only cutter after a V-bit (#472)', () => {
         },
       ],
     });
-    const g = generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL, FLAT2_TOOL] });
+    const g = await generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL, FLAT2_TOOL] });
     expectNoRefusal(g);
     expect(engravePrograms(g).map((p) => p.toolKey)).toEqual([TOOL_KEY, FLAT_TOOL.key]);
   }, 120_000);

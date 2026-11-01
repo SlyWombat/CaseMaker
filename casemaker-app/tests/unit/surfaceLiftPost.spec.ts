@@ -162,8 +162,8 @@ describe('the post air-cut rule against the fitted surface (#624)', () => {
     if (!fitted.ok) expect(fitted.errors.join(' ')).toMatch(/cut in the air/);
   });
 
-  it('posts a lifted trace end to end: the worker hands the post the fitted frame (#624)', () => {
-    const gen = generate(tl, liftedTraceJob(), null, [], undefined, { surface: TILT });
+  it('posts a lifted trace end to end: the worker hands the post the fitted frame (#624)', async () => {
+    const gen = await generate(tl, liftedTraceJob(), null, [], undefined, { surface: TILT });
     if (gen.nc === null) {
       throw new Error(`generate refused at ${gen.stage}: ${gen.errors.map((e) => e.message).join('; ')}`);
     }

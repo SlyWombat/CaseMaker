@@ -83,11 +83,11 @@ describe('#834 the face work and the cutters that fit it', () => {
     expect(pick.reason).toContain('⌀3.175 mm');
   });
 
-  it('the ⌀3.175 program is several times faster than the ⌀1 one, and both cut the same faces', () => {
+  it('the ⌀3.175 program is several times faster than the ⌀1 one, and both cut the same faces', async () => {
     const job = faceJob([hex]);
     job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
-    const thin = engraveGenerate(tl, job, thinTool, [], null);
-    const wide = engraveGenerate(tl, job, wideTool, [], null);
+    const thin = await engraveGenerate(tl, job, thinTool, [], null);
+    const wide = await engraveGenerate(tl, job, wideTool, [], null);
     expect(thin.ok).toBe(true);
     expect(wide.ok).toBe(true);
     const tThin = thin.cam!.estimatedSeconds;
@@ -96,22 +96,22 @@ describe('#834 the face work and the cutters that fit it', () => {
     expect(tThin / tWide).toBeGreaterThan(2);
   }, 240_000);
 
-  it('a metal-line cutter on wood is refused by the face program too', () => {
+  it('a metal-line cutter on wood is refused by the face program too', async () => {
     const job = faceJob([hex]);
     job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
     const metal = getTools().find((t) => t.key === 'flat-3.175x12-metal')!.tool;
-    const g = engraveGenerate(tl, job, metal, [], null);
+    const g = await engraveGenerate(tl, job, metal, [], null);
     expect(g.ok).toBe(false);
     expect(g.findings.some((f) => f.code === 'tool-metal-line' && f.severity === 'error')).toBe(true);
   });
 
-  it('a full evaluation of a face plan posts and prices the program', () => {
+  it('a full evaluation of a face plan posts and prices the program', async () => {
     clearPlanEvaluations();
     const job = faceJob([hex]);
     job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
     const ctx: EvalContext = { tl, tools: LIB, catalogue: [], shop: {}, calibration: null };
     const plan = { cutters: [{ key: 'inv:flat-3.175', items: [] }], source: { 'inv:flat-3.175': 'owned' as const } };
-    const out = evaluatePlan(job, plan, ctx, { level: 'full' });
+    const out = await evaluatePlan(job, plan, ctx, { level: 'full' });
     expect(out.ok, out.refusal ?? '').toBe(true);
     expect(out.items).toEqual([]);
     expect(out.seconds).toBeGreaterThan(0);

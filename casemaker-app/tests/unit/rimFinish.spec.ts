@@ -55,8 +55,8 @@ const MILL: Tool = flatEndMill(3);
 const SURFACE_TOOL: SurfaceTool = { radius: 1.5, ball: true };
 const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'fixture' };
 
-function run(hf: GoalHeightfield, rim: { floorZ: number } | undefined) {
-  return generateSurface3dIR({
+async function run(hf: GoalHeightfield, rim: { floorZ: number } | undefined) {
+  return await generateSurface3dIR({
     heightfield: hf,
     tool: SURFACE_TOOL,
     toolObj: MILL,
@@ -71,9 +71,9 @@ function run(hf: GoalHeightfield, rim: { floorZ: number } | undefined) {
 }
 
 describe('#862 — the rim pass finishes the band wall', () => {
-  it('laps the covered boundary from the stock top to the band floor', () => {
+  it('laps the covered boundary from the stock top to the band floor', async () => {
     const hf = bandHeightfield(-5);
-    const r = run(hf, { floorZ: -5 });
+    const r = await run(hf, { floorZ: -5 });
     expect(r.rim).not.toBeNull();
     // One lap per step-down, from the first layer below the stock top down to the floor.
     expect(r.rim!.laps).toBe(10);
@@ -95,22 +95,22 @@ describe('#862 — the rim pass finishes the band wall', () => {
     expect(rimPrefix.length).toBeGreaterThan(0);
   });
 
-  it('keeps the finishing raster byte for byte when no band is stated', () => {
+  it('keeps the finishing raster byte for byte when no band is stated', async () => {
     const hf = bandHeightfield(-5);
-    const plain = run(hf, undefined);
+    const plain = await run(hf, undefined);
     expect(plain.rim).toBeNull();
-    const withRim = run(hf, { floorZ: -5 });
+    const withRim = await run(hf, { floorZ: -5 });
     // The raster rides the floor after the laps: the tail is exactly the plain finish.
     const tail = withRim.finishing.moves.slice(withRim.finishing.moves.length - plain.finishing.moves.length);
     expect(tail).toEqual(plain.finishing.moves);
   });
 
-  it('does not gouge a boundary cell whose own surface stands above the lap', () => {
+  it('does not gouge a boundary cell whose own surface stands above the lap', async () => {
     const hf = bandHeightfield(-5);
     // A part's own rim at the stock edge: one boundary cell is a surface at -1, not the band floor.
     const raised = 20 * hf.nx + 0; // cell (i=0, j=20), its centre at (0, 10)
     hf.z[raised] = -1;
-    const r = run(hf, { floorZ: -5 });
+    const r = await run(hf, { floorZ: -5 });
     // #889 — the laps' straight stretches are merged, so the path is read along each feed (every
     // 0.05 mm), not only at its ends.
     const moves = [...r.finishing.moves];
@@ -137,8 +137,8 @@ describe('#862 — the rim pass finishes the band wall', () => {
     // the raster's alone: the ball rests on the stock top at the band's edge, so the whole wall
     // reads as material the finish could not take. The laps cut it, and the field says so.
     const hf = bandHeightfield(-5);
-    const plain = run(hf, undefined);
-    const rimmed = run(hf, { floorZ: -5 });
+    const plain = await run(hf, undefined);
+    const rimmed = await run(hf, { floorZ: -5 });
     const plainRes = surfaceResidual(hf, plain.finishTip, 0, 0.01);
     const rimRes = surfaceResidual(hf, rimmed.finishTip, 0, 0.01);
     expect(plainRes.cells).toBeGreaterThan(0);
@@ -150,9 +150,9 @@ describe('#862 — the rim pass finishes the band wall', () => {
     expect(rimmed.finishTip[edge]!).toBeLessThanOrEqual(-4);
   });
 
-  it('the wall stays on the covered boundary and the passes retract clear', () => {
+  it('the wall stays on the covered boundary and the passes retract clear', async () => {
     const hf = bandHeightfield(-5);
-    const r = run(hf, { floorZ: -5 });
+    const r = await run(hf, { floorZ: -5 });
     const rimEnd = r.finishing.moves.findIndex(
       (m, i) => i > 0 && m.kind === 'rapid' && Math.abs(m.z - SAFE_Z) <= 1e-9,
     );

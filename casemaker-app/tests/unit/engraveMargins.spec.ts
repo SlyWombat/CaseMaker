@@ -354,10 +354,10 @@ describe('the run sheet prints the margins (#345)', () => {
 });
 
 describe('the margins reach the program only where a bound does (#345)', () => {
-  it('posts byte-identical nc for a job with no bound, whatever margin is in force', () => {
+  it('posts byte-identical nc for a job with no bound, whatever margin is in force', async () => {
     const job = dj();
-    const absent = generate(tl, job);
-    const stated = generate(tl, job, null, [], { boundaryMargin: 0.5, zTolerance: 0.4, source: 'user' });
+    const absent = await generate(tl, job);
+    const stated = await generate(tl, job, null, [], { boundaryMargin: 0.5, zTolerance: 0.4, source: 'user' });
     expect(absent.ok).toBe(true);
     expect(stated.nc).toBe(absent.nc);
   });
@@ -388,40 +388,40 @@ describe('the margins reach the program only where a bound does (#345)', () => {
 
   const LOOSE = { boundaryMargin: 0.05, zTolerance: 0.05, source: 'user' } as const;
 
-  it('moves the verdict on a PRINTED blank — the margin comes off the layer-aligned ceiling', () => {
+  it('moves the verdict on a PRINTED blank — the margin comes off the layer-aligned ceiling', async () => {
     // #345 A: with a print, the layer grid carries the Z-error, so the margin in force is the
     // boundary margin and the raw limit is the layer-aligned ceiling. The ceiling is 12 − 10 = 2 mm
     // of membrane and 2 mm is a layer line (0.2 × 10), so it is 2.0 exactly.
     const job = deepCutOverVoid({ kind: 'printed', capMm: 9, layerHeight: 0.2, firstLayerHeight: 0.2 });
     // 2.0 − 0.2 = 1.8, so 1.9 is out — and #345 B says the ITEM is what gets named, against the
     // plane it crossed, rather than a move the operator never typed.
-    const f = generate(tl, job).findings.find((x) => x.code === 'item-depth-bound');
+    const f = (await generate(tl, job)).findings.find((x) => x.code === 'item-depth-bound');
     expect(f?.message).toContain("the magnet pocket's ceiling");
     expect(f?.message).toContain('0.2 mm above it');
     // …and 2.0 − 0.05 = 1.95, so the same cut is in and the job runs through. The user has to
     // regenerate to see it, which is the whole reason this number is on the run sheet.
-    const loose = generate(tl, job, null, [], LOOSE);
+    const loose = await generate(tl, job, null, [], LOOSE);
     expect(loose.ok).toBe(true);
     expect(loose.findings.some((x) => x.code === 'item-depth-bound')).toBe(false);
   });
 
-  it('does NOT move it on a blank that states no print — the floor is the number there (#345 A)', () => {
+  it('does NOT move it on a blank that states no print — the floor is the number there (#345 A)', async () => {
     // Same job, no print. The ceiling keeps `max(boundaryMargin, minFloor)` = 1.0, so the limit is
     // 2 − 1.0 = 1.0 and 1.9 stays refused however small the boundary margin gets. This is the
     // decision: with no layer grid there is nothing to align a 0.2 to, the structural floor is the
     // only number with a basis, and a setting must not talk the least-known blank into a thinner
     // membrane.
     const job = deepCutOverVoid();
-    const tight = generate(tl, job).findings.find((x) => x.code === 'item-depth-bound');
+    const tight = (await generate(tl, job)).findings.find((x) => x.code === 'item-depth-bound');
     expect(tight?.message).toContain("the magnet pocket's ceiling");
     // `1` mm, not `0.2`: the sentence quotes the margin the ceiling actually kept.
     expect(tight?.message).toContain('1 mm above it');
-    expect(generate(tl, job, null, [], LOOSE).findings.some((x) => x.code === 'item-depth-bound')).toBe(
+    expect((await generate(tl, job, null, [], LOOSE)).findings.some((x) => x.code === 'item-depth-bound')).toBe(
       true,
     );
   });
 
-  it('refuses a `reveal` floor over a void, though its intent is the deeper one (#345 review)', () => {
+  it('refuses a `reveal` floor over a void, though its intent is the deeper one (#345 review)', async () => {
     // A `reveal` is the one item that WANTS a deep floor — below the colour split. A void under it
     // is a plane it still may not cross, and the per-move limit knows nothing about intent: it is
     // the material's own number (`jobDepthLimit`), so an item whose intent is satisfied can still
@@ -457,11 +457,11 @@ describe('the margins reach the program only where a bound does (#345)', () => {
     // #345 B — the item is refused against the void's ceiling, at the findings stage, and the
     // finding names the item, the plane and the side. The intent's own bound is NOT what fired:
     // the same job with the pocket removed cuts, which is what makes this the void's doing.
-    const item = generate(tl, job).findings.find((f) => f.code === 'item-depth-bound');
+    const item = (await generate(tl, job)).findings.find((f) => f.code === 'item-depth-bound');
     expect(item?.message).toContain("the magnet pocket's ceiling");
     expect(item?.message).toContain('cuts to 1.9 mm');
     const without: EngraveJob = { ...job, keepOuts: [] };
-    expect(generate(tl, without).findings.some((f) => f.code === 'item-depth-bound')).toBe(false);
+    expect((await generate(tl, without)).findings.some((f) => f.code === 'item-depth-bound')).toBe(false);
   });
 });
 
@@ -579,7 +579,7 @@ describe('the label depth a blank allows (#362)', () => {
     expect(checkBounds(0.7, [splitBound('surface', splitDepthOf(job))!], 0.2)).not.toBeNull();
   });
 
-  it('recommends a demotion the checker accepts, on a margin that floats the other way (#362 review)', () => {
+  it('recommends a demotion the checker accepts, on a margin that floats the other way (#362 review)', async () => {
     // The same demotion on a margin whose float tail rounds DOWN. The peer review's case: the colour
     // boundary lands 1.2 mm down on the grid, and the job runs a 0.28 mm boundary margin — a number
     // a job states for itself (#345), not necessarily one printed layer. `1.2 − 0.28` is
@@ -620,7 +620,7 @@ describe('the label depth a blank allows (#362)', () => {
     expect(checkBounds(rec.depth, [bound], margin)).toBeNull();
     expect(itemDepthBoundFindings(applied, splitDepthOf(job), margin)).toEqual([]);
     // …and through the real generate path, which is where the operator would have met the finding.
-    expect(generate(tl, applied).findings.some((f) => f.code === 'item-depth-bound')).toBe(false);
+    expect((await generate(tl, applied)).findings.some((f) => f.code === 'item-depth-bound')).toBe(false);
   });
 
   it('leaves the intent OFF where the split is out of reach — the jaws win and say so', () => {
@@ -745,7 +745,7 @@ describe('the label depth a blank allows (#362)', () => {
     expect(voidLimitForItem(job, { ...upright, rotation: 90 }, undefined, measure)?.name).toBe('Magnet pocket');
   });
 
-  it('takes the JAWs when they are the tightest floor, and asks for no intent there', () => {
+  it('takes the JAWs when they are the tightest floor, and asks for no intent there', async () => {
     const job = badgeJob({ keepOuts: [] });
     // 1.905 mm proud less the job's own 1 mm clearance. The blank's underside (3.81 − 1 = 2.81)
     // is nowhere near binding: this is the jaw check's own budget, said before the wizard opens.
@@ -759,7 +759,7 @@ describe('the label depth a blank allows (#362)', () => {
     expect(rec.basis[0]).toContain('stands 1.905 mm above the jaw tops');
     // #345's rule: the recommendation may be STRICTER than the setting. A domed blank keeps its
     // 0.5 mm boundary margin over the jaws, not the house 1 mm... which is the looser of the two.
-    const loose = badgeJob({ keepOuts: [], jawClearance: 0.1 });
+    const loose = await badgeJob({ keepOuts: [], jawClearance: 0.1 });
     expect(
       recommendLabelDepth(loose, nearJaw(), inputsFor(loose, nearJaw(), { boundaryMargin: 0.5 }))!.depth,
     ).toBe(1.405);
@@ -925,7 +925,7 @@ describe('the label depth a blank allows (#362)', () => {
     expect(labelJawReach(job, turned).gap).toBeCloseTo(15.004, 3);
   });
 
-  it('hands the seeded badge line over clean through the real generate path (#369)', () => {
+  it('hands the seeded badge line over clean through the real generate path (#369)', async () => {
     // What `takeBadgeBlank` leaves behind for the badge the template makes (#363, #369): one 'Name'
     // line, 8 mm tall, running along Y on the TURNED blank (#383) — (31.325, 38.1) at 90°, the
     // badge's own 6.775 mm front-edge inset now measured from the moving jaw — re-depth-ed by the
@@ -952,7 +952,7 @@ describe('the label depth a blank allows (#362)', () => {
         },
       ],
     };
-    const gen = generate(tl, job);
+    const gen = await generate(tl, job);
     const found = gen.findings;
     expect(found.filter((f) => f.severity === 'error')).toEqual([]);
     expect(found.map((f) => f.code)).not.toContain('item-depth-bound');

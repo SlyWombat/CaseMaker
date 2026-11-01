@@ -87,8 +87,8 @@ const shop: EngraveShopOpts = { tools: TOOLS };
 describe('#765/#766 the coin’s raised "Software"', () => {
   it('the search chooses a posting plan that separates the word better than a ⌀1 rest', { timeout: 240_000 }, async () => {
     const job = coin();
-    const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
-      evaluatePlan(job, plan, { tl, tools: TOOLS, catalogue: [], shop, calibration: null }, { level });
+    const evaluate = async (plan: CandidatePlan, level: 'coarse' | 'full'): Promise<PlanEvaluation> =>
+      await evaluatePlan(job, plan, { tl, tools: TOOLS, catalogue: [], shop, calibration: null }, { level });
     const pick = await smartPick(job, TOOLS, [], evaluate, { maxCandidates: 8, fullFinalists: 2 });
 
     expect(pick.runnable, 'a posting plan is handed over').not.toBeNull();
@@ -99,7 +99,7 @@ describe('#765/#766 the coin’s raised "Software"', () => {
     // The 0.6 corn is the finest cutter the old rule stopped before: the chosen plan must use it,
     // alone or as the rest, and it must leave fewer pinches joined than the ⌀1-only plan.
     const joined = software!.pinches.filter((p) => !p.separated).length;
-    const oneMillimetre = evaluate({ cutters: [{ key: FLAT_1.key, items: ['clear'] }], source: { [FLAT_1.key]: 'owned' } }, 'coarse');
+    const oneMillimetre = await evaluate({ cutters: [{ key: FLAT_1.key, items: ['clear'] }], source: { [FLAT_1.key]: 'owned' } }, 'coarse');
     const oneJoined = oneMillimetre.items.find((i) => i.id === 'clear')!.pinches.filter((p) => !p.separated).length;
     expect(run.plan.cutters.some((c) => c.key === CORN_06.key), 'the 0.6 mm corn is in the chosen plan').toBe(true);
     expect(joined, 'fewer pinches stay joined than with a ⌀1 cutter').toBeLessThan(oneJoined);

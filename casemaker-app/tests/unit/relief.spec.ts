@@ -250,10 +250,10 @@ describe('the relief rides the goal pipeline (#672)', () => {
     };
   }
 
-  it('generates the same goal program a mesh would: the surface check, the passes, the bbox', () => {
+  it('generates the same goal program a mesh would: the surface check, the passes, the bbox', async () => {
     const target = reliefTarget(rampPng(), { x: 25.6, y: 8 }, { maxDepthMm: 2 });
     const job = reliefJob(target);
-    const out = generateGoalProgram(job, target, BALL, [], null, {
+    const out = await generateGoalProgram(job, target, BALL, [], null, {
       surfaceGrid: { pitchMm: { value: 0.4, source: 'chosen' } },
     });
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
@@ -272,7 +272,7 @@ describe('the relief rides the goal pipeline (#672)', () => {
     // darkest at the middle — is a concave crease, so the pencil pass has a corner to follow.
     const valley = new Uint8Array(64 * 4);
     for (let y = 0; y < 4; y++) for (let x = 0; x < 64; x++) valley[y * 64 + x] = Math.min(255, Math.abs(x - 32) * 16);
-    const withPasses = generateSurface3dForGoal({
+    const withPasses = await generateSurface3dForGoal({
       target: reliefTarget(greyPng(64, 4, valley), { x: 16, y: 1 }, { maxDepthMm: 2 }),
       tool: BALL,
       toolNumber: 1,
@@ -291,13 +291,13 @@ describe('the relief rides the goal pipeline (#672)', () => {
     ]);
   }, 90_000);
 
-  it('the sweep meets the picture on the dexel grid', () => {
+  it('the sweep meets the picture on the dexel grid', async () => {
     // The same end-to-end check the mesh goal has: sweep the posted operations and read the
     // relief back off the grid, against the fixture's own ramp.
     const size = { x: 25.6, y: 8 };
     const target = reliefTarget(rampPng(), size, { maxDepthMm: 2 });
     const job = reliefJob(target);
-    const out = generateGoalProgram(job, target, BALL, [], null, {
+    const out = await generateGoalProgram(job, target, BALL, [], null, {
       surfaceGrid: { pitchMm: { value: 0.2, source: 'chosen' } },
     });
     expect(out.ok).toBe(true);
@@ -311,7 +311,7 @@ describe('the relief rides the goal pipeline (#672)', () => {
     // lower endpoint, and #758's end tips so a sloped move is swept along its slope (#889 — a
     // merged row is one long sloped move).
     const moves: CamMove[] = [];
-    const ncOps = generateSurface3dForGoal({
+    const ncOps = await generateSurface3dForGoal({
       target,
       tool: BALL,
       toolNumber: 1,

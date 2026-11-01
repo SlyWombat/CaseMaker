@@ -297,17 +297,19 @@ export function planEvaluationKey(job: EngraveJob, plan: CandidatePlan, ctx: Eva
 }
 
 /** Score one plan. Pure given `ctx`; memoised on {@link planEvaluationKey}. */
-export function evaluatePlan(
+export async function evaluatePlan(
   job: EngraveJob,
   plan: CandidatePlan,
   ctx: EvalContext,
   opts: EvalOptions = {},
-): PlanEvaluation {
+): Promise<PlanEvaluation> {
   const key = planEvaluationKey(job, plan, ctx, opts);
   const hit = planCache.get(key);
   if (hit !== undefined) return hit;
   const level = opts.level ?? 'coarse';
-  const verdict = level === 'full' ? evaluateFull(job, plan, ctx) : evaluateCoarse(job, plan, ctx);
+  // #881 — the full evaluation runs the real generator, which is async now that a roughing level
+  // can be planned by a pool; the search already awaits its evaluator (`Evaluate` allows a promise).
+  const verdict = level === 'full' ? await evaluateFull(job, plan, ctx) : evaluateCoarse(job, plan, ctx);
   planCache.set(key, verdict);
   return verdict;
 }
@@ -556,7 +558,7 @@ function evaluateCoarse(job: EngraveJob, plan: CandidatePlan, ctx: EvalContext):
 }
 
 /** FULL — the coarse measures, then the real generator and (when it posts) the swept comparison. */
-function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalContext): PlanEvaluation {
+async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalContext): Promise<PlanEvaluation> {
   const coarse = evaluateCoarse(job, plan, ctx);
   if (!coarse.ok) return coarse;
   const applied = applyCutterPlan(job, plan);
@@ -566,7 +568,7 @@ function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalContext): P
     conditions: ctx.conditions ?? ctx.shop.conditions ?? null,
     ...(ctx.table === undefined ? {} : { feeds: ctx.table }),
   };
-  const gen = engraveGenerate(
+  const gen = await engraveGenerate(
     ctx.tl,
     applied,
     toolFor(ctx.tools, plan.cutters[0]!.key),

@@ -157,7 +157,7 @@ function plan(rest?: ToolLibraryEntry): CandidatePlan {
   };
 }
 
-function clearRow(out: ReturnType<typeof evaluatePlan>) {
+function clearRow(out: Awaited<ReturnType<typeof evaluatePlan>>) {
   const row = out.items.find((i) => i.id === 'clear');
   if (row === undefined) throw new Error(`no 'clear' row; items: ${out.items.map((i) => i.id).join(', ')}`);
   return row;
@@ -166,8 +166,8 @@ function clearRow(out: ReturnType<typeof evaluatePlan>) {
 beforeEach(() => clearPlanEvaluations());
 
 describe('#766 A — the coin’s three rest choices, scored by what they leave', () => {
-  it('the ⌀1 rest leaves Software fused: joined pinches at the tightest gap', () => {
-    const out = evaluatePlan(coinJob(), plan(F1), CTX);
+  it('the ⌀1 rest leaves Software fused: joined pinches at the tightest gap', async () => {
+    const out = await evaluatePlan(coinJob(), plan(F1), CTX);
     const clear = clearRow(out);
     expect(clear.pinches.length).toBeGreaterThan(0);
     const joined = clear.pinches.filter((p) => !p.separated);
@@ -180,9 +180,9 @@ describe('#766 A — the coin’s three rest choices, scored by what they leave'
     expect(clear.fidelity).toBeLessThan(0.99);
   });
 
-  it('the 0.6 corn reads better: the joined field is smaller than the ⌀1’s', () => {
-    const f1 = clearRow(evaluatePlan(coinJob(), plan(F1), CTX));
-    const corn = clearRow(evaluatePlan(coinJob(), plan(CORN), CTX));
+  it('the 0.6 corn reads better: the joined field is smaller than the ⌀1’s', async () => {
+    const f1 = clearRow(await evaluatePlan(coinJob(), plan(F1), CTX));
+    const corn = clearRow(await evaluatePlan(coinJob(), plan(CORN), CTX));
     const sliver = (row: typeof f1): number => row.pinches.reduce((sum, p) => sum + p.areaMm2, 0);
     expect(sliver(corn)).toBeLessThan(sliver(f1));
     expect(corn.fidelity).toBeGreaterThan(f1.fidelity);
@@ -190,8 +190,8 @@ describe('#766 A — the coin’s three rest choices, scored by what they leave'
     expect(corn.pinches.some((p) => !p.separated)).toBe(true);
   });
 
-  it('the 0.1 mm V is separated by its flank, at 0.016 mm a side of edge loss', () => {
-    const out = evaluatePlan(coinJob(), plan(VENTRY), CTX);
+  it('the 0.1 mm V is separated by its flank, at 0.016 mm a side of edge loss', async () => {
+    const out = await evaluatePlan(coinJob(), plan(VENTRY), CTX);
     const clear = clearRow(out);
     expect(clear.pinches.length).toBeGreaterThan(0);
     const tightest = clear.pinches.reduce((a, b) => (a.gapMm <= b.gapMm ? a : b));
@@ -204,14 +204,14 @@ describe('#766 A — the coin’s three rest choices, scored by what they leave'
     // with #765's engine half a V rest posts; on one without it, #486 refuses it — either way the
     // full level answers with a verdict, and the MEASURE above is the evaluator's own.
     expect(out.ok).toBe(true);
-    const full = evaluatePlan(coinJob(), plan(VENTRY), CTX, { level: 'full' });
+    const full = await evaluatePlan(coinJob(), plan(VENTRY), CTX, { level: 'full' });
     expect(typeof full.ok).toBe('boolean');
   });
 
-  it('the fidelity order the bench found by hand: ⌀1 < 0.6 corn ≤ V', () => {
-    const f1 = clearRow(evaluatePlan(coinJob(), plan(F1), CTX)).fidelity;
-    const corn = clearRow(evaluatePlan(coinJob(), plan(CORN), CTX)).fidelity;
-    const v = clearRow(evaluatePlan(coinJob(), plan(VENTRY), CTX)).fidelity;
+  it('the fidelity order the bench found by hand: ⌀1 < 0.6 corn ≤ V', async () => {
+    const f1 = clearRow(await evaluatePlan(coinJob(), plan(F1), CTX)).fidelity;
+    const corn = clearRow(await evaluatePlan(coinJob(), plan(CORN), CTX)).fidelity;
+    const v = clearRow(await evaluatePlan(coinJob(), plan(VENTRY), CTX)).fidelity;
     expect(f1).toBeLessThan(corn);
     expect(corn).toBeLessThanOrEqual(v);
   });
@@ -233,37 +233,37 @@ describe('#766 A — the plan is a document change, and the verdict is cached', 
     expect(coinJob().toolKey).toBe('');
   });
 
-  it('a repeated call returns the memoised verdict; clearing re-evaluates', () => {
+  it('a repeated call returns the memoised verdict; clearing re-evaluates', async () => {
     // One document, evaluated twice: the key is the job's CONTENT hash, so two freshly minted
     // jobs (different ids) are deliberately different keys.
     const job = coinJob();
-    const a = evaluatePlan(job, plan(F1), CTX);
-    const b = evaluatePlan(job, plan(F1), CTX);
+    const a = await evaluatePlan(job, plan(F1), CTX);
+    const b = await evaluatePlan(job, plan(F1), CTX);
     expect(b).toBe(a);
     clearPlanEvaluations();
-    const c = evaluatePlan(job, plan(F1), CTX);
+    const c = await evaluatePlan(job, plan(F1), CTX);
     expect(c).not.toBe(a);
   });
 
-  it('a plan naming a cutter outside the list is refused, not thrown', () => {
+  it('a plan naming a cutter outside the list is refused, not thrown', async () => {
     const bad: CandidatePlan = {
       cutters: [{ key: 'inv:not-there', items: ['clear'] }],
       source: { 'inv:not-there': 'owned' },
     };
-    const out = evaluatePlan(coinJob(), bad, CTX);
+    const out = await evaluatePlan(coinJob(), bad, CTX);
     expect(out.ok).toBe(false);
     expect(out.refusal).toContain('not in the tool list');
   });
 
-  it('the coarse level is measure-only: no run time; full adds the CAM and its time', () => {
+  it('the coarse level is measure-only: no run time; full adds the CAM and its time', async () => {
     const job = coinJob();
-    const coarse = evaluatePlan(job, plan(CORN), CTX);
+    const coarse = await evaluatePlan(job, plan(CORN), CTX);
     expect(coarse.toolChanges).toBe(1);
     expect(coarse.seconds).toBeNull();
     expect(coarse.risk.reachMarginMm).not.toBeNull();
     expect(coarse.risk.holderClearanceMm).toBe(coarse.risk.reachMarginMm);
     expect(coarse.risk.chipLoadRatio).toBeNull();
-    const full = evaluatePlan(job, plan(CORN), CTX, { level: 'full' });
+    const full = await evaluatePlan(job, plan(CORN), CTX, { level: 'full' });
     expect(full.ok).toBe(true);
     expect(full.seconds).toBeGreaterThan(0);
     // Every program was seeded on the stock the last one left, so the run has a swept verdict.
@@ -272,12 +272,12 @@ describe('#766 A — the plan is a document change, and the verdict is cached', 
     expect(full.sweep?.bandMm).toBeGreaterThan(0);
   });
 
-  it('a plan that does not post says so at full, while its measures still stand', () => {
+  it('a plan that does not post says so at full, while its measures still stand', async () => {
     // The generator refuses this job before the rest rules: the SHIPPED default vise cannot hold a
     // 3 mm blank (its top stands above the jaw tops). A stable refusal on every build, unlike the
     // V-rest rule, which #765's engine half changes.
     const job: EngraveJob = { ...coinJob(), workholding: defaultEngraveJob().workholding };
-    const out = evaluatePlan(job, plan(CORN), CTX, { level: 'full' });
+    const out = await evaluatePlan(job, plan(CORN), CTX, { level: 'full' });
     expect(out.ok).toBe(false);
     expect(out.refusal).toBeTruthy();
     expect(clearRow(out).pinches.length).toBeGreaterThan(0);

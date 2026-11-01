@@ -219,8 +219,8 @@ describe('chamfer geometry and findings (#669)', () => {
     expect(plan.chamfers.find((c) => c.id === 'ch-part')!.width).toBe(0.5);
   });
 
-  it('runs the part bevel in program 1 and the cut-out that frees it in program 2', () => {
-    const g = generate(tl, partEdgeJob(), null, [], undefined, { tools: [FLAT_TOOL] });
+  it('runs the part bevel in program 1 and the cut-out that frees it in program 2', async () => {
+    const g = await generate(tl, partEdgeJob(), null, [], undefined, { tools: [FLAT_TOOL] });
     expect(
       g.ok,
       JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error').map((f) => f.code) }),
@@ -234,8 +234,8 @@ describe('chamfer geometry and findings (#669)', () => {
     expect(operationNames(g).some((n) => n.startsWith('[T1]Chamfer'))).toBe(true);
   }, 90_000);
 
-  it('places the pocket program, the bevels and the cut-out in that order', () => {
-    const g = generate(tl, bothRimsJob(), null, [], undefined, { tools: [FLAT_TOOL] });
+  it('places the pocket program, the bevels and the cut-out in that order', async () => {
+    const g = await generate(tl, bothRimsJob(), null, [], undefined, { tools: [FLAT_TOOL] });
     expect(
       g.ok,
       JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error').map((f) => f.code) }),
@@ -258,9 +258,9 @@ describe('chamfer geometry and findings (#669)', () => {
     }
   });
 
-  it('states the width, the derived depth and the order on the run sheet', () => {
+  it('states the width, the derived depth and the order on the run sheet', async () => {
     const job = bothRimsJob();
-    const g = generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL] });
+    const g = await generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL] });
     // The bevels are program 2, so their facts travel on that program and the sheet prints them in
     // its own section.
     const facts = g.programs.find((p) => p.chamfer != null)?.chamfer;
@@ -286,16 +286,16 @@ describe('chamfer geometry and findings (#669)', () => {
       halfAngle: null,
     });
     const pointJob: EngraveJob = { ...partEdgeJob(), tool: pointTool };
-    const gp = generate(tl, pointJob, null, [], undefined, { tools: [FLAT_TOOL] });
+    const gp = await generate(tl, pointJob, null, [], undefined, { tools: [FLAT_TOOL] });
     const pointStep = buildRunSheet(pointJob, gp, null)
       .sections.flatMap((sec) => sec.steps.map((st) => st.text))
       .find((t) => t.startsWith('Chamfer "lid edge"') && t.includes('cuts a'));
     expect(pointStep).toContain('Tip 0 mm (point, by kind)');
   }, 90_000);
 
-  it('passes the oracle on the part bevel, swept from the blank its program starts on', () => {
+  it('passes the oracle on the part bevel, swept from the blank its program starts on', async () => {
     const job = partEdgeJob();
-    const g = generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL] });
+    const g = await generate(tl, job, null, [], undefined, { tools: [FLAT_TOOL] });
     expect(g.ok).toBe(true);
     const tool = jobTool(job);
     if (tool === null) throw new Error(`${TOOL_KEY} is not in the tool library`);

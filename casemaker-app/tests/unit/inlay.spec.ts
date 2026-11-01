@@ -264,10 +264,10 @@ describe('the male document — its own job, its own blank, the design mirrored'
     expect(parsed.ok, parsed.ok ? '' : parsed.errors.join('; ')).toBe(true);
   });
 
-  it('generates and verifies as an ordinary job', () => {
+  it('generates and verifies as an ordinary job', async () => {
     const male = inlayMaleJob(femaleJob(), CONE);
     if (!male.ok) throw new Error(male.reason);
-    const g = generate(tl, male.job);
+    const g = await generate(tl, male.job);
     expect(
       g.ok,
       JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error') }),
@@ -653,9 +653,9 @@ describe('the documents round-trip, and say nothing more (#673)', () => {
 });
 
 describe('the run sheet names each half (#673)', () => {
-  it('says FEMALE on one job and MALE on the other, with the numbers', () => {
+  it('says FEMALE on one job and MALE on the other, with the numbers', async () => {
     const female = femaleJob();
-    const gF = generate(tl, female);
+    const gF = await generate(tl, female);
     expect(gF.ok).toBe(true);
     const femaleTexts = buildRunSheet(female, gF, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const femaleStep = femaleTexts.find((t) => t.includes('FEMALE blank'));
@@ -665,7 +665,7 @@ describe('the run sheet names each half (#673)', () => {
 
     const male = inlayMaleJob(female, CONE);
     if (!male.ok) throw new Error(male.reason);
-    const gM = generate(tl, male.job);
+    const gM = await generate(tl, male.job);
     expect(gM.ok).toBe(true);
     const maleTexts = buildRunSheet(male.job, gM, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const maleStep = maleTexts.find((t) => t.includes('MALE blank'));

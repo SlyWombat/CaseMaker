@@ -170,10 +170,10 @@ describe('#721 — the mold heightfield', () => {
 });
 
 describe('#721 — generate → simulate → match', () => {
-  it('the mold’s finishing pass, swept, reproduces the bowl at the interior', () => {
+  it('the mold’s finishing pass, swept, reproduces the bowl at the interior', async () => {
     const item = sampleGoalHeightfield(goal(domeTris(R)), { pitchMm: 0.1 });
     const mold = moldHeightfield(item, 10, -R);
-    const { finishing } = generateSurface3dIR({
+    const { finishing } = await generateSurface3dIR({
       heightfield: mold,
       tool: BALL,
       toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
@@ -202,12 +202,12 @@ describe('#721 — generate → simulate → match', () => {
     };
   }
 
-  it('the same hemisphere generates as the item (a dome) and as the mold (a bowl)', () => {
+  it('the same hemisphere generates as the item (a dome) and as the mold (a bowl)', async () => {
     const asItem = job();
-    const item = generateGoalProgram(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const item = await generateGoalProgram(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
     expect(item.ok).toBe(true);
     const asMold = job({ goalMode: 'mold' });
-    const mold = generateGoalProgram(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const mold = await generateGoalProgram(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
     expect(mold.ok).toBe(true);
     expect(mold.programs).toHaveLength(1);
     expect(mold.programs[0]!.surfaceCheck?.kind).toBe('surface');
@@ -221,7 +221,7 @@ describe('#721 — generate → simulate → match', () => {
     expect(item.findings.some((f) => f.code.startsWith('goal-mold'))).toBe(false);
   });
 
-  it('a box-shaped part has vertical walls and is warned; the hemisphere is not', () => {
+  it('a box-shaped part has vertical walls and is warned; the hemisphere is not', async () => {
     const box: Tri[] = [];
     const c: V[] = [
       [0, 0, -4], [10, 0, -4], [10, 10, -4], [0, 10, -4],
@@ -232,14 +232,14 @@ describe('#721 — generate → simulate → match', () => {
     };
     q(4, 5, 6, 7); q(0, 3, 2, 1); q(0, 1, 5, 4); q(2, 3, 7, 6); q(1, 2, 6, 5); q(3, 0, 4, 7);
     const boxJob = { ...job(), targetObject: goal(box, { goalMode: 'mold', size: { x: 10, y: 10, z: 4 }, position: { x: 50, y: 30, z: 0 } }) };
-    const out = generateGoalProgram(boxJob, boxJob.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(boxJob, boxJob.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
     expect(out.ok).toBe(true);
     const warn = out.findings.find((f) => f.code === 'goal-mold-no-draft');
     expect(warn?.severity).toBe('warning');
     expect(warn?.message).toMatch(/a wall at 8\d(\.\d)?°/);
     // A hemisphere's wall curves away from vertical within a cell of the rim: no warning.
     const dome = job({ goalMode: 'mold' });
-    const domeOut = generateGoalProgram(dome, dome.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const domeOut = await generateGoalProgram(dome, dome.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
     expect(domeOut.findings.some((f) => f.code === 'goal-mold-no-draft')).toBe(false);
   });
 });
@@ -283,7 +283,7 @@ describe('#721 — a mold needs a rim and a floor', () => {
 });
 
 describe('#721 review — placement', () => {
-  it('#786 slice 2 — a mold that would break out of the blank side is INFORMED and still cut', () => {
+  it('#786 slice 2 — a mold that would break out of the blank side is INFORMED and still cut', async () => {
     const STOCK = { length: 100, width: 60, thickness: 12 };
     const t = goal(domeTris(R), { goalMode: 'mold', size: { x: 20, y: 20, z: 5 }, position: { x: 8, y: 30, z: 0 } });
     const f = validateGoalObject(t, STOCK, { edgeMargin: 1, minFloor: 1 });
@@ -293,14 +293,14 @@ describe('#721 review — placement', () => {
     expect(validateGoalObject({ ...t, position: { x: 50, y: 30, z: 0 } }, STOCK, { edgeMargin: 1, minFloor: 1 })).toEqual([]);
     // And Generate proceeds: the cavity is cut clipped to the blank, saying what broke out.
     const j = { ...defaultEngraveJob(), labels: [], shapes: [], stock: { ...defaultEngraveJob().stock, ...STOCK }, targetObject: t };
-    const out = generateGoalProgram(j, t, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(j, t, flatEndMill(1, { shape: 'ball' }), [], null, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.findings.some((x) => x.code === 'goal-mold-rim' && x.severity === 'warning')).toBe(true);
   });
 
-  it('a mold run says it is a mold in its facts', () => {
+  it('a mold run says it is a mold in its facts', async () => {
     const j: EngraveJob = { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal(domeTris(R), { goalMode: 'mold', position: { x: 50, y: 30, z: 0 } }) };
-    const out = generateGoalProgram(j, j.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
     expect(out.surface3d?.notes.some((n) => n.startsWith('Made as a mould'))).toBe(true);
   });
 });

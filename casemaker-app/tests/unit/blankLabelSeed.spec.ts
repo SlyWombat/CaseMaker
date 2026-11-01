@@ -611,7 +611,7 @@ describe('#363 — the store hand-off', () => {
     const s = () => useEngraveJobStore.getState();
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
 
-    const g = generate(tl, s().job);
+    const g = await generate(tl, s().job);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -644,7 +644,7 @@ describe('#364 — the bare-blank hand-off', () => {
   const blank = (over: Partial<BlankParams> = {}) => defaultBlankParams(over);
 
   /** The codes of every error-severity finding, which is the bar the issue set: generate clean. */
-  function errorCodes(g: ReturnType<typeof generate>): string[] {
+  function errorCodes(g: Awaited<ReturnType<typeof generate>>): string[] {
     return [
       ...g.findings.filter((f) => f.severity === 'error'),
       ...(g.verify?.findings.filter((f) => f.severity === 'error') ?? []),
@@ -695,7 +695,7 @@ describe('#364 — the bare-blank hand-off', () => {
     expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', seed: true, depth: 'computed' } });
 
     // The bar #363 set, on the real pipeline: the job the wizard hands over generates clean.
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     expect(errorCodes(g)).toEqual([]);
     expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
@@ -716,7 +716,7 @@ describe('#364 — the bare-blank hand-off', () => {
     expect(line.position.y).toBeCloseTo(50, 6);
     // 60 × 100 is NOT the 100 × 60 footprint, so it is not the demo plank: the three words go even
     // though the two blanks hold the same 6000 mm².
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(errorCodes(g)).toEqual([]);
   }, 60_000);
 
@@ -747,7 +747,7 @@ describe('#364 — the bare-blank hand-off', () => {
     expect(job.labels.map((l) => l.depth)).toEqual([2, 1, 0.5]);
     expect(jobVise(job).stockProud).toBeCloseTo(0.9, 9);
 
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(errorCodes(g)).toEqual([]);
     // No jaw collision, for the measurement reason above: the deepest cut is 2 mm, which
     // a 4 mm blank's 1 mm floor allows (2 mm left under it), and which no jaw is under in fact.
@@ -808,7 +808,7 @@ describe('#364 — the bare-blank hand-off', () => {
     const s = () => useEngraveJobStore.getState();
 
     s().takeBlankStock(blank({ width: 60, height: 40 }));
-    const g = generate(tl, s().job);
+    const g = await generate(tl, s().job);
     expect(g.stage).toBe('done');
     expect(errorCodes(g)).toEqual([]);
     // The three `item-outside-stock` errors the issue measured are exactly what this rules out.

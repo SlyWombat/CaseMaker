@@ -202,7 +202,7 @@ describe('the board’s cutters are assigned at import (#743 §3.4)', () => {
     if (!out.ok) return;
     const job = out.job;
     job.toolKey = 'inv:engrave-60';
-    const gen = engraveGenerate(tl, job, engraver.tool, rows, null, undefined, { tools });
+    const gen = await engraveGenerate(tl, job, engraver.tool, rows, null, undefined, { tools });
     expect(gen.errors).toEqual([]);
     expect(gen.ok).toBe(true);
     expect(gen.programs.map((p) => p.toolKey)).toEqual([

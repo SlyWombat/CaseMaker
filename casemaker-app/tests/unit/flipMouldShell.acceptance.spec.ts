@@ -186,8 +186,8 @@ function heightAt(grid: ReturnType<typeof FLAT.buildGrid>, x: number, y: number)
   return grid.h[j * grid.nu + i] as number;
 }
 
-function finishOf(hf: GoalHeightfield) {
-  return generateSurface3dIR({
+async function finishOf(hf: GoalHeightfield) {
+  return await generateSurface3dIR({
     heightfield: hf,
     tool: BALL,
     toolObj: BALL_TOOL,
@@ -232,9 +232,9 @@ function job(target: EngraveTargetObject): EngraveJob {
 
 // ── Side 1 ──────────────────────────────────────────────────────────────────────────────────────
 describe('#754 side 1 — the outside of the shell, roughed and ball-finished', () => {
-  it('generates as one job: roughing, then the ball finish and its scallop pass', () => {
+  it('generates as one job: roughing, then the ball finish and its scallop pass', async () => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: FINISH_STEP, scallop: true } }));
-    const out = generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     // Three operations: the roughing, the parallel ball finish and the scallop pass.
@@ -246,9 +246,9 @@ describe('#754 side 1 — the outside of the shell, roughed and ball-finished', 
     expect(deepest).toBeCloseTo(-crownOf(zOut), 0);
   });
 
-  it('the finished surface, swept, matches the shell within a scallop — never below it', () => {
+  it('the finished surface, swept, matches the shell within a scallop — never below it', async () => {
     const hf = sampleGoalHeightfield(goal(zOut), { pitchMm: PITCH });
-    const { finishing } = finishOf(hf);
+    const { finishing } = await finishOf(hf);
     const grid = sweep(finishing.moves);
     const top = crownOf(zOut);
     for (const [lx, ly] of PROBES) {
@@ -266,13 +266,13 @@ describe('#754 side 1 — the outside of the shell, roughed and ball-finished', 
 });
 
 describe('#754 the mirror finish — a 0.05 mm step-over', () => {
-  const fine = () => {
+  const fine = async () => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: 0.05, scallop: true } }));
-    return generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
   };
 
-  it('generates: the scallop pass steps 0.05 mm along the surface (a 0.0002 mm cusp for a ⌀3 ball)', () => {
-    const out = fine();
+  it('generates: the scallop pass steps 0.05 mm along the surface (a 0.0002 mm cusp for a ⌀3 ball)', async () => {
+    const out = await fine();
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.surface3d?.finishStepOverMm).toBe(0.05);
@@ -284,8 +284,8 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   // #755 — the grid follows the finish when it can: a 0.05 mm finish on a ⌀3 ball would need more
   // finishing tip-field evaluations than the run's budget allows, so the job settles at the grid it
   // would have used and STATES that pitch and the cap that bound — never refusing the job.
-  it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', () => {
-    const out = fine();
+  it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', async () => {
+    const out = await fine();
     expect(out.ok).toBe(true);
     const grid = out.surface3d!.gridPitchMm;
     const stated = out.findings.find((f) => f.code === 'goal-finish-finer-than-grid');
@@ -303,9 +303,9 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
 
   // #755 — and when the heightfield's cell cap binds, the run STATES the pitch it settled on rather
   // than refusing the job (the maintainer's rule: inform, don't refuse).
-  it('#755 — a cap-bound grid is stated with the pitch it settled on, not refused', () => {
+  it('#755 — a cap-bound grid is stated with the pitch it settled on, not refused', async () => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: 0.005, scallop: false } }));
-    const out = generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
     expect(out.ok).toBe(true);
     const f = out.findings.find((x) => x.code === 'goal-finish-finer-than-grid');
     expect(f).toBeDefined();
@@ -348,18 +348,18 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
    */
   const innerTop = crownOf(zIn);
 
-  it('generates the hollow as a mold of the inside form', () => {
+  it('generates the hollow as a mold of the inside form', async () => {
     const j = job(goal(zIn, { goalMode: 'mold', surface: { finishStepOverMm: FINISH_STEP } }));
-    const out = generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.findings.find((f) => f.code === 'goal-mold-one-sided')?.severity).toBe('info');
   });
 
-  it('leaves at least the wall between the side-1 surface and the side-2 hollow, and not much more', () => {
+  it('leaves at least the wall between the side-1 surface and the side-2 hollow, and not much more', async () => {
     const inner = sampleGoalHeightfield(goal(zIn), { pitchMm: PITCH });
     const cavity = moldHeightfield(inner, CY, -innerTop);
-    const { finishing } = finishOf(cavity);
+    const { finishing } = await finishOf(cavity);
     const grid = sweep(finishing.moves);
     for (const [lx, ly] of PROBES) {
       // Side 2's surface is the rim plane: the hollow's depth below it at the FLIPPED point.
@@ -438,7 +438,7 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     return f.top[j * f.nu + i] as number;
   }
 
-  it('one job carries both sides with the pins as their datum, and the app does the flip transform', () => {
+  it('one job carries both sides with the pins as their datum, and the app does the flip transform', async () => {
     const job = oneJob();
     // The document reads as two sides, in setup order, one goal each.
     expect(goalSides(job).map((s) => [s.setupIndex, s.setup.id, s.goal.id])).toEqual([
@@ -447,7 +447,7 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     ]);
 
     // ONE job, TWO programs: side 1's outside, then side 2's mold, each on its own setup.
-    const out = engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
+    const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.programs.map((p) => [p.setupIndex, p.setupId])).toEqual([

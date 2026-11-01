@@ -54,7 +54,7 @@ import {
 import type { Tool } from '../tool';
 import { cuttingDiameter, cuttingRadiusForSweep } from '../tool';
 import { adaptiveSettings, type AdaptiveSettings } from './adaptive';
-import { roughingAdaptiveMoves } from './rough3d';
+import { roughingAdaptiveMoves, type LevelPlanner } from './rough3d';
 import { isMetalMaterial } from '../materials';
 import { GOAL_MERGE_TOLERANCE_MM, MoveStore } from './moveStore';
 import type { StockMaterial } from '@/types/engraveJob';
@@ -731,6 +731,11 @@ export interface RoughingOptions {
   adaptive?: AdaptiveSettings;
   /** The rapid model, for the time comparison. */
   rapid?: RapidEstimate;
+  /**
+   * #881 — where the adaptive rough's levels are planned (a pool); absent → in this thread. Only
+   * the adaptive rough uses it: the raster and the finishing passes have no independent levels.
+   */
+  planner?: LevelPlanner;
 }
 
 export interface SurfaceOpts {
@@ -952,7 +957,7 @@ const r3n = (n: number): string => String(Math.round(n * 100) / 100);
  * rough is planned when the mode forces it, when the cell budget allows the
  * comparison, or when the rule says a raster would be the wrong answer.
  */
-function chooseRough(
+async function chooseRough(
   hf: GoalHeightfield,
   feeds: SurfaceFeeds,
   allowance: number,
@@ -963,7 +968,7 @@ function chooseRough(
   rapid: RapidEstimate,
   opts: RoughingOptions | undefined,
   onLayer: (done: number, total: number) => void,
-): RoughChoice {
+): Promise<RoughChoice> {
   const raster = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ, onLayer);
   const mode = opts?.mode ?? 'raster';
   if (mode === 'raster') return { kind: 'raster', moves: raster.moves, layers: raster.layers, note: null };
@@ -974,7 +979,17 @@ function chooseRough(
   const metal = opts?.material != null && isMetalMaterial(opts.material);
   const ruleLine = `the goal is ${r3n(ratio)}× the cutter’s ⌀ deep${metal ? ` in ${opts!.material}` : ''}`;
   const settings = opts?.adaptive ?? adaptiveSettings(null).settings;
-  const runAdaptive = () => roughingAdaptiveMoves(hf, feeds, allowance, { tool, adaptive: settings, safeZ, hopZ, onLayer });
+  // #881 — the levels go to the planner when there is one; the plans and the assembly are the
+  // same either way, so the choice, its notes and the moves do not depend on where they ran.
+  const runAdaptive = () =>
+    roughingAdaptiveMoves(hf, feeds, allowance, {
+      tool,
+      adaptive: settings,
+      safeZ,
+      hopZ,
+      onLayer,
+      ...(opts?.planner !== undefined ? { planner: opts.planner } : {}),
+    });
   // #868 — levels whose region repeated were not walked again; say so when it happened.
   const reuseWords = (reused: number): string =>
     reused > 0 ? `, ${reused} level${reused === 1 ? '' : 's'} reusing the level above’s identical region` : '';
@@ -987,7 +1002,7 @@ function chooseRough(
   });
 
   if (mode === 'adaptive') {
-    const a = runAdaptive();
+    const a = await runAdaptive();
     if (!a.ok) return refusal(a.reason);
     return {
       kind: 'adaptive',
@@ -1020,7 +1035,7 @@ function chooseRough(
   const depthRatio = opts?.depthRatio ?? DEFAULT_ADAPTIVE_DEPTH_RATIO;
   const deep = ratio >= depthRatio;
   if (hf.coveredCount <= budget) {
-    const a = runAdaptive();
+    const a = await runAdaptive();
     if (!a.ok) return refusal(a.reason);
     const tRaster = estimateCycleSeconds(raster.moves, rapid);
     const tAdaptive = estimateCycleSeconds(a.result.moves, rapid);
@@ -1040,7 +1055,7 @@ function chooseRough(
     };
   }
   if (deep || metal) {
-    const a = runAdaptive();
+    const a = await runAdaptive();
     if (!a.ok) return refusal(a.reason);
     return {
       kind: 'adaptive',
@@ -1088,7 +1103,7 @@ export interface GoalRestFacts {
  * The two operations share one machine state, so they post as one program. Roughing is operation
  * 1, finishing operation 2 — rough the bulk, then finish the surface.
  */
-export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
+export async function generateSurface3dIR(args: Surface3dArgs): Promise<Surface3dResult> {
   const { heightfield: hf, tool, feeds, opts = {} } = args;
   const allowance = opts.stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM;
   const alongStep = positive(opts.alongStepMm) ? (opts.alongStepMm as number) : hf.pitch;
@@ -1124,7 +1139,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
 
   // #846 — the raster stays the default (a plan without `roughing` is unchanged);
   // 'auto' chooses per job and STATES the choice in one line.
-  const rough = chooseRough(
+  const rough = await chooseRough(
     hf,
     roughFeeds,
     allowance,
@@ -1396,7 +1411,7 @@ export function steepestWallDeg(hf: GoalHeightfield): number {
  * convenience entry). Returns `null` when the field covers nothing — a goal entirely at or above
  * the stock top has no surface to cut.
  */
-export function generateSurface3dForGoal(args: {
+export async function generateSurface3dForGoal(args: {
   target: Pick<
     EngraveTargetObject,
     'id' | 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief' | 'scale' | 'goalMode'
@@ -1415,7 +1430,7 @@ export function generateSurface3dForGoal(args: {
     feeds: SurfaceFeeds;
   };
   opts?: SurfaceOpts;
-}): (Surface3dResult & { heightfield: GoalHeightfield }) | null {
+}): Promise<(Surface3dResult & { heightfield: GoalHeightfield }) | null> {
   const sampled = sampleGoalHeightfield(args.target, args.sample);
   if (sampled.coveredCount === 0) return null;
   // #721 — a MOLD is the same part turned over and sunk from the stock top. The part's base is its
@@ -1429,7 +1444,7 @@ export function generateSurface3dForGoal(args: {
     const radius = d !== null && d > 0 ? d / 2 : 0;
     return { radius, ball: tool.shape === 'ball' || tool.shape === 'bull' };
   };
-  const result = generateSurface3dIR({
+  const result = await generateSurface3dIR({
     heightfield,
     tool: surfaceToolOf(args.tool),
     toolObj: args.tool,

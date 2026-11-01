@@ -231,7 +231,7 @@ describe('a job with its sources (#425 §4)', () => {
     expect(sourceRefusal(checks, new Set())).toBeNull();
     expect(await jobSourceRefusal(parsed.job)).toBeNull();
 
-    const generated = generate(tl, parsed.job);
+    const generated = await generate(tl, parsed.job);
     expect(
       generated.nc,
       JSON.stringify({

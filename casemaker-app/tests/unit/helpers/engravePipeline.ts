@@ -31,7 +31,7 @@ import type { EngravePreview, EngravePreviewer } from '@/workers/sim/engravePrev
  * `catalogue` defaults to no Makera rows — the state a build with no house service is in. A spec
  * exercising the catalogue tier (#310/#324) passes rows, exactly as the app hands them to the worker.
  */
-export function generate(
+export async function generate(
   tl: ManifoldToplevel,
   job: EngraveJob,
   calibration: MachineCalibration | null = null,
@@ -40,8 +40,8 @@ export function generate(
   // #432 — the shop options, for the halves of the pipeline that read the location: the facing
   // pass's tool list (`shop.tools`) and its feeds table. Absent is the no-location build.
   shop: EngraveShopOpts = {},
-): EngraveGenerated {
-  return engraveGenerate(tl, job, jobTool(job), catalogue, calibration, margins, shop);
+): Promise<EngraveGenerated> {
+  return await engraveGenerate(tl, job, jobTool(job), catalogue, calibration, margins, shop);
 }
 
 /** `engraveRegions` for a job, with the cutter that job names. */

@@ -81,8 +81,8 @@ function cutsBelowTheSurface(nc: string, primitive: SurfacePrimitive): { count: 
 }
 
 describe('#786 4a-2 the cone posts its own surface program', () => {
-  it('posts, carries a surfaceCheck, and no cut goes below the field', () => {
-    const g = generate(tl, job([CONE]));
+  it('posts, carries a surfaceCheck, and no cut goes below the field', async () => {
+    const g = await generate(tl, job([CONE]));
     expect(g.errors).toEqual([]);
     expect(g.ok, JSON.stringify(g.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
     expect(g.programs).toHaveLength(1);
@@ -107,8 +107,8 @@ describe('#786 4a-2 the cone posts its own surface program', () => {
     expect(below).toBe(0);
   }, 60_000);
 
-  it('the sphere posts the same way, and its refusal is gone too', () => {
-    const g = generate(tl, job([SPHERE]));
+  it('the sphere posts the same way, and its refusal is gone too', async () => {
+    const g = await generate(tl, job([SPHERE]));
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(1);
     expect(g.programs[0]!.surfaceCheck).toBeTruthy();
@@ -118,12 +118,12 @@ describe('#786 4a-2 the cone posts its own surface program', () => {
     expect(below).toBe(0);
   }, 60_000);
 
-  it('beside a pocket the surface is its own program, cut first', () => {
+  it('beside a pocket the surface is its own program, cut first', async () => {
     const j = job([CONE]);
     j.shapes = [
       { id: 'pocket', name: 'pocket', kind: 'circle', position: { x: 20, y: 20 }, rotation: 0, depth: 2, enabled: true, diameter: 8 },
     ];
-    const g = generate(tl, j);
+    const g = await generate(tl, j);
     expect(g.ok, JSON.stringify(g.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
     expect(g.programs).toHaveLength(2);
     expect(g.programs[0]!.surfaceCheck).toBeTruthy();
@@ -131,11 +131,11 @@ describe('#786 4a-2 the cone posts its own surface program', () => {
     expect(g.programs[1]!.verify).toBeTruthy();
   }, 60_000);
 
-  it('names a ball that fits, one click away, instead of leaving the search to the operator', () => {
+  it('names a ball that fits, one click away, instead of leaving the search to the operator', async () => {
     // The owner is a FLAT cutter (that is when the offer exists); a 2 mm ball fits the cone's
     // 1 mm tip curvature and a 4 mm one does not.
     const j = job([CONE]);
-    const g = generate(tl, j, null, [], undefined, {
+    const g = await generate(tl, j, null, [], undefined, {
       tools: [
         { key: 'inv:ball-small', tool: flatEndMill(2, { name: '2 mm ball', typeText: 'Ball End', shape: 'ball', tipDiameter: 2, diameter: 2, fluteLength: 20 }), provenance: 'test' },
         { key: 'inv:ball-big', tool: flatEndMill(4, { name: '4 mm ball', typeText: 'Ball End', shape: 'ball', tipDiameter: 4, diameter: 4, fluteLength: 20 }), provenance: 'test' },
@@ -146,9 +146,9 @@ describe('#786 4a-2 the cone posts its own surface program', () => {
     expect(offer?.suggestedCutterKey).toBe('inv:ball-small');
   }, 60_000);
 
-  it('validateJob no longer refuses the primitives, and a plain job is untouched', () => {
+  it('validateJob no longer refuses the primitives, and a plain job is untouched', async () => {
     expect(validateJob(job([CONE, SPHERE])).filter((f) => f.severity === 'error')).toEqual([]);
-    const plain = generate(tl, { ...job([]), shapes: [
+    const plain = await generate(tl, { ...job([]), shapes: [
       { id: 'p', name: 'p', kind: 'circle', position: { x: 20, y: 20 }, rotation: 0, depth: 2, enabled: true, diameter: 8 },
     ] });
     expect(plain.ok).toBe(true);

@@ -104,11 +104,11 @@ describe('variable-depth V-carve (#665)', () => {
     expect(validateJob(plane).map((x) => x.code)).not.toContain('vcarve-variable-needs-cone');
   });
 
-  it('cuts the ladder shallowest first, one Z per level, and never deeper than the row allows', () => {
+  it('cuts the ladder shallowest first, one Z per level, and never deeper than the row allows', async () => {
     const job = variableJob();
     const { chamfers: _c, ...regions } = cutRegions(tl, job);
     expect(regions.regions).toHaveLength(1);
-    const ir = generate(tl, job);
+    const ir = await generate(tl, job);
     expect(
       ir.ok,
       JSON.stringify({ stage: ir.stage, errors: ir.errors, findings: ir.findings.filter((f) => f.severity === 'error').map((f) => f.code) }),
@@ -135,9 +135,9 @@ describe('variable-depth V-carve (#665)', () => {
     expect(Math.max(...zs.map(Math.abs))).toBeCloseTo(0.5, 6);
   }, 90_000);
 
-  it('predicts the ring at the cap — the core is what the V does NOT cut', () => {
+  it('predicts the ring at the cap — the core is what the V does NOT cut', async () => {
     const job = variableJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const cap = g.predicted.filter((p) => Math.abs(p.depth - 0.5) < 1e-9);
     expect(cap).toHaveLength(1);
@@ -169,9 +169,9 @@ describe('variable-depth V-carve (#665)', () => {
     expect(area(shallow!.polygons)).toBeCloseTo(outer - inner, 1);
   }, 60_000);
 
-  it('passes the oracle on the ladder, with the core standing', () => {
+  it('passes the oracle on the ladder, with the core standing', async () => {
     const job = variableJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     expect(g.ok).toBe(true);
     const tool = jobTool(job);
     if (tool === null) throw new Error(`${TOOL_KEY} is not in the tool library`);
@@ -189,11 +189,11 @@ describe('variable-depth V-carve (#665)', () => {
     }
   }, 90_000);
 
-  it('names the standing core when the setup carries no flat cutter to clear it', () => {
+  it('names the standing core when the setup carries no flat cutter to clear it', async () => {
     // #677 — one cutter in the setup means no core program: the warning states the area and the
     // depth and says which cutter to add. With a flat end mill after the V the engine clears the
     // core itself and raises nothing (see `vCarveCore.spec.ts`).
-    const g = generate(tl, variableJob());
+    const g = await generate(tl, variableJob());
     const f = g.findings.find((x) => x.code === 'vcarve-variable-core');
     expect(f?.severity).toBe('warning');
     expect(f?.message).toContain('Add a flat end mill after');
@@ -203,9 +203,9 @@ describe('variable-depth V-carve (#665)', () => {
     expect(f?.message).toContain('is not reached by the V');
   }, 60_000);
 
-  it('states the ladder and the flat bottom on the run sheet', () => {
+  it('states the ladder and the flat bottom on the run sheet', async () => {
     const job = variableJob();
-    const g = generate(tl, job);
+    const g = await generate(tl, job);
     const texts = buildRunSheet(job, g, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const step = texts.find((t) => t.includes('VARIABLE depth'));
     expect(step).toBeDefined();

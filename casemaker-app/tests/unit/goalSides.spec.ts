@@ -147,11 +147,11 @@ describe('#723 P2-1b — the sides reading', () => {
 });
 
 describe('#723 P2-1b — one program per side', () => {
-  it('generates a surface program for each side, in setup order, with its setup on the program', () => {
+  it('generates a surface program for each side, in setup order, with its setup on the program', async () => {
     const job = twoSideJob();
     expect(jobHasItems(job), 'the fixture must be a pure-goal job').toBe(false);
     expect(goalSides(job)).toHaveLength(2);
-    const out = engraveGenerate(tl, job, BALL, [], null, undefined, {});
+    const out = await engraveGenerate(tl, job, BALL, [], null, undefined, {});
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(2);
@@ -189,10 +189,10 @@ describe('#723 P2-1b — one program per side', () => {
     expect(validateJob(job, null, { tool: BALL }).some((f) => f.code === 'tool-missing')).toBe(false);
   });
 
-  it('a single goal on a job with setups is cut in the first setup — the one-goal compatibility path', () => {
+  it('a single goal on a job with setups is cut in the first setup — the one-goal compatibility path', async () => {
     const job = twoSideJob();
     job.targetObjects = [goal('goal-out', 10)];
-    const out = engraveGenerate(tl, job, BALL, [], null, undefined, {});
+    const out = await engraveGenerate(tl, job, BALL, [], null, undefined, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.programs).toHaveLength(1);
     expect(out.programs[0]!.setupId).toBe('setup-1');
