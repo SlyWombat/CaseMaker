@@ -251,6 +251,10 @@ export function MaterialsScope() {
           </div>
         </div>
 
+        {/* #885 — the shelf scrolls: `.mmain` hides its overflow, so without this wrapper the
+            table and the form below the header could not be reached. */}
+        <div className="mscroll">
+
         {notice !== null && (
           <div className={`mnotice mnotice--${notice.kind}`} data-testid="manage-stock-notice" data-kind={notice.kind}>
             <span>{notice.text}</span>
@@ -317,6 +321,7 @@ export function MaterialsScope() {
             </tbody>
           </table>
         )}
+        </div>
       </section>
 
       {open === null || gone ? (

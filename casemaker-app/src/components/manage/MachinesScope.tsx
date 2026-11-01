@@ -292,6 +292,11 @@ export function MachinesScope() {
           )}
         </div>
 
+        {/* #885 — THE BODY SCROLLS. `.mmain` is an overflow:hidden flex column, so without this
+            wrapper the card's lower half (Console, then the files) could not be reached at all;
+            Tools and Accessories already wrapped theirs. The header stays put. */}
+        <div className="mscroll">
+
         {/* #821 — the relay-less deploy says why in one sentence, and where a machine can be
             driven from. */}
         {!canReachMachine && (
@@ -552,6 +557,7 @@ export function MachinesScope() {
           <div className="kv">
             <Kv label="profiles">{PRINTER_PROFILES.map((p) => p.name).join(' · ')}</Kv>
           </div>
+        </div>
         </div>
       </section>
 
