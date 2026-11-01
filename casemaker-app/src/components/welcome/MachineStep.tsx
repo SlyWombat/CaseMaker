@@ -309,7 +309,12 @@ export function MachineStep({
                   Address
                   <input
                     type="text"
-                    inputMode="decimal"
+                    // #875 — a hostname (`zoomba.local`) is letters: the phone's keypad must offer
+                    // them, and nothing here should be auto-capitalized or spell-checked.
+                    inputMode="url"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
                     data-testid="start-wizard-address"
                     aria-label="Machine address"
                     title="For a machine the search cannot hear."
@@ -327,11 +332,9 @@ export function MachineStep({
                   Connect
                 </button>
               </div>
-              {address.trim().length === 0 && (
-                <p style={MUTED} data-testid="start-wizard-machine-address-unblock">
-                  Type the machine’s address to connect to it.
-                </p>
-              )}
+              {/* #875 — Connect is disabled while the field is empty, and that IS the unblock: the
+                  sentence that repeated it appeared the instant the fold opened, before anything
+                  was wrong, so it is gone. */}
             </>
           )}
         </>

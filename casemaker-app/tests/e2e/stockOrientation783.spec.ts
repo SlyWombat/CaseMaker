@@ -27,9 +27,13 @@ test('#783 the hold is asked, and a pressed hold restates the box', async ({ cm,
   await cm.ready();
   await reachHolding(page);
 
-  // The hold fold is open by default, with every block hold on offer.
+  // #875 — the hold fold opens CLOSED, its summary carrying the chosen hold; a person opens it to
+  // choose another, and then every block hold is on offer.
   const fold = page.getByTestId('engrave-setup-hold-fold');
   await expect(fold).toBeVisible();
+  await expect(fold.locator('summary')).toContainText('Which way round the part sits —');
+  await expect(page.getByTestId('engrave-setup-hold-length-width-thickness')).not.toBeVisible();
+  await fold.locator('summary').click();
   const holds = page.getByTestId('engrave-setup-orientation-holds');
   await expect(holds).toBeVisible();
   await expect(holds.locator('button[aria-pressed]')).toHaveCount(6);

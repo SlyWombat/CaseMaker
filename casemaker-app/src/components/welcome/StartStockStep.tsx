@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type JSX } from 'react';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -40,6 +41,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { newStockId, useStockStore } from '@/store/stockStore';
 import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 import { fmt } from './holdingMounts';
+import { NARROW_QUERY } from './wizardLayout';
 import { WizardFileField } from './WizardFileField';
 
 /**
@@ -95,14 +97,15 @@ export interface StartStockSeed {
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const NOTE: CSSProperties = { ...MUTED, borderLeft: '2px solid #3a5a7a', paddingLeft: 6 };
 const REFUSED: CSSProperties = { ...MUTED, color: '#f0b4ad' };
-const ROW: CSSProperties = { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '6px 0' };
 const NUM: CSSProperties = { width: 72 };
-const FORMS: CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', margin: '4px 0' };
+// #875 — equal-width form buttons: four columns on the phone (4 + 3), one row on a desktop.
+const FORMS: CSSProperties = { display: 'grid', gap: 6, margin: '4px 0', alignItems: 'stretch' };
 const FORM_BUTTON: CSSProperties = {
   display: 'grid',
   justifyItems: 'center',
   gap: 2,
-  width: 62,
+  width: '100%',
+  boxSizing: 'border-box',
   padding: '5px 2px 4px',
   fontSize: 10,
   lineHeight: 1.2,
@@ -117,6 +120,12 @@ const FORM_BUTTON: CSSProperties = {
 };
 // #874 — the same ON fill every selected chip uses; the button keeps its own icon-and-word shape.
 const FORM_BUTTON_ON: CSSProperties = { ...FORM_BUTTON, ...SELECTED_FILL };
+// #875 — the size fields: label above the field, three columns on a desktop; on the phone two
+// columns with the thickness spanning the row, so every field and its `mm` is fully visible.
+const SIZE_FIELDS: CSSProperties = { display: 'grid', gap: 10, margin: '6px 0', alignItems: 'end' };
+const SIZE_FIELD: CSSProperties = { ...MUTED, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 2 };
+const SIZE_UNIT_ROW: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4 };
+const SIZE_INPUT: CSSProperties = { width: '100%', boxSizing: 'border-box' };
 
 /** #870 — a stock file's one fact beside its name: the box (or rim) it measures. */
 function fileFact(read: StockFileRead): string | null {
@@ -134,8 +143,6 @@ const FINISH_OPTIONS: readonly { value: JobStockFinish; label: string }[] = [
   { value: 'unknown', label: 'not known' },
 ];
 const FINISH_HINT = 'plastic is cut as it is; wood and metal are faced first';
-// #743 P-1 — the circuit board is its own family, so the hint names four.
-const MATERIAL_HINT = "Plastics · Woods · Metals · Circuit board, this house's first";
 
 interface FormDef {
   id: JobStockForm;
@@ -363,6 +370,8 @@ export function StartStockStep({
   /** The job's own stock when the step is re-opened to edit it (#681); absent for a new job. */
   seed?: StartStockSeed;
 }): JSX.Element {
+  // #875 — the step's phone layout: four form columns and the thickness on its own size row.
+  const narrow = useMediaQuery(NARROW_QUERY);
   const machineId = useEngraveJobStore((s) => s.job.machineId);
   const jobMaterial = useEngraveJobStore((s) => s.job.stock.material);
   const jobLabels = useEngraveJobStore((s) => s.job.labels);
@@ -582,13 +591,15 @@ export function StartStockStep({
             </optgroup>
           ))}
         </select>
-        <span data-testid="start-wizard-stock-material-hint" style={{ display: 'block', marginTop: 2 }}>
-          {MATERIAL_HINT}
-        </span>
       </label>
 
       <p style={{ ...MUTED, margin: '8px 0 0' }}>Form</p>
-      <div data-testid="start-wizard-make-form" role="group" aria-label="Stock form" style={FORMS}>
+      <div
+        data-testid="start-wizard-make-form"
+        role="group"
+        aria-label="Stock form"
+        style={{ ...FORMS, gridTemplateColumns: narrow ? 'repeat(4, 1fr)' : `repeat(${FORM_DEFS.length}, minmax(0, 1fr))` }}
+      >
         {FORM_DEFS.map((f) => (
           <button
             key={f.id}
@@ -608,22 +619,30 @@ export function StartStockStep({
       </p>
 
       <p style={{ ...MUTED, margin: '8px 0 0' }}>Size</p>
-      <div style={ROW} data-testid="start-wizard-make">
+      <div
+        style={{ ...SIZE_FIELDS, gridTemplateColumns: narrow ? '1fr 1fr' : 'repeat(3, minmax(0, 1fr))' }}
+        data-testid="start-wizard-make"
+      >
         {visibleSizeKeys.map((key) => (
-          <label key={key} style={{ ...MUTED, display: 'flex', gap: 4, alignItems: 'center' }}>
+          <label
+            key={key}
+            style={narrow && key === 'thickness' ? { ...SIZE_FIELD, gridColumn: '1 / -1' } : SIZE_FIELD}
+          >
             {SIZE_LABELS[key]}
-            <input
-              type="number"
-              min={0}
-              step="any"
-              placeholder="0"
-              style={NUM}
-              data-testid={`start-wizard-make-${key}`}
-              aria-label={`Stock ${SIZE_LABELS[key]}`}
-              value={dims[key]}
-              onChange={(e) => editDim(key, e.target.value)}
-            />
-            mm
+            <span style={SIZE_UNIT_ROW}>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                placeholder="0"
+                style={SIZE_INPUT}
+                data-testid={`start-wizard-make-${key}`}
+                aria-label={`Stock ${SIZE_LABELS[key]}`}
+                value={dims[key]}
+                onChange={(e) => editDim(key, e.target.value)}
+              />
+              mm
+            </span>
           </label>
         ))}
       </div>
@@ -676,8 +695,10 @@ export function StartStockStep({
         </p>
       )}
 
-      <label style={{ ...MUTED, display: 'flex', gap: 4, alignItems: 'center', marginTop: 6 }}>
-        Finish
+      {/* #875 — Finish on its own row, its hint on the line below in grey: beside the select the
+          sentence wrapped mid-phrase. */}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
+        <span style={MUTED}>Finish</span>
         <select
           data-testid="start-wizard-stock-finish"
           aria-label="Stock finish"
@@ -693,8 +714,10 @@ export function StartStockStep({
             </option>
           ))}
         </select>
-        <span data-testid="start-wizard-stock-finish-hint">— {FINISH_HINT}</span>
-      </label>
+      </div>
+      <p style={MUTED} data-testid="start-wizard-stock-finish-hint">
+        {FINISH_HINT}
+      </p>
 
       {shelfOk && shelf.length > 0 && (
         <div data-testid="start-wizard-shelf" style={{ marginTop: 8 }}>

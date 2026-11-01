@@ -487,9 +487,8 @@ describe('the material-first start (#418)', () => {
     const plastics = Array.from(groups[0]!.querySelectorAll('option')).map((o) => o.value);
     expect(plastics[plastics.length - 1]).toBe('plastic'); // "plastic (unspecified)" is last
     expect(plastics).not.toContain('softwood');
-    expect(screen.getByTestId('start-wizard-stock-material-hint').textContent).toContain(
-      "Plastics · Woods · Metals · Circuit board, this house's first",
-    );
+    // #875 — the hint that restated the optgroups is gone: what the select shows is the answer.
+    expect(screen.queryByTestId('start-wizard-stock-material-hint')).toBeNull();
   });
 
   it('a job that states its material is the house material a new job opens on', async () => {

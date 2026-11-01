@@ -389,7 +389,8 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
   it('no machine record: the app’s three vise mounts still work, with no dead escape', () => {
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
-    expect(screen.getByTestId('engrave-setup-machine-none').textContent).toContain('Not read from a machine record');
+    // #875 — no record, no band: a line that fired on every such job said nothing.
+    expect(screen.queryByTestId('engrave-setup-machine-now')).toBeNull();
     expect(radio('ledge').checked).toBe(true);
     expect(screen.queryByTestId('engrave-setup-mount-bed-tape')).toBeNull();
     expect(screen.queryByTestId('engrave-setup-change-machine')).toBeNull();
@@ -867,12 +868,19 @@ describe('#783 the hold choice', () => {
     ...job,
     labels: [{ ...job.labels[0]!, id: 'l1', position: { x: 10, y: 20 }, rotation: 0 }],
   });
+  /** #875 — the fold opens CLOSED; a test that presses a card opens it first, as a person does. */
+  function openFold(): void {
+    (screen.getByTestId('engrave-setup-hold-fold') as HTMLDetailsElement).open = true;
+  }
 
   it('offers all six block holds and restates the box when one is pressed', () => {
     seedLocation(machineWith(null));
     openHolding(dj({ length: 100, width: 60, thickness: 12 }));
     const fold = screen.getByTestId('engrave-setup-hold-fold') as HTMLDetailsElement;
-    expect(fold.open).toBe(true);
+    expect(fold.open).toBe(false);
+    // The summary carries the answer, so the shut fold still says which way the part sits.
+    expect(fold.querySelector('summary')!.textContent).toContain('Which way round the part sits —');
+    openFold();
     // Six permutations, each a picture and its words.
     const buttons = screen.getByTestId('engrave-setup-orientation-holds').querySelectorAll('button[aria-pressed]');
     expect(buttons).toHaveLength(6);
@@ -886,6 +894,7 @@ describe('#783 the hold choice', () => {
   it('keeps a label on its part face when the face stays up, turning it with the part', () => {
     seedLocation(machineWith(null));
     openHolding(oneLabel(dj({ length: 100, width: 60, thickness: 12 })));
+    openFold();
     fireEvent.click(screen.getByTestId('engrave-setup-hold-width-length-thickness'));
     const label = useEngraveJobStore.getState().job.labels.find((l) => l.id === 'l1')!;
     // The same physical corner of the part, now expressed in the swapped plan.
@@ -898,6 +907,7 @@ describe('#783 the hold choice', () => {
   it('states where the items\' face points when it is turned to a side, and moves them on one press', () => {
     seedLocation(machineWith(null));
     openHolding(oneLabel(dj({ length: 100, width: 60, thickness: 12 })));
+    openFold();
     fireEvent.click(screen.getByTestId('engrave-setup-hold-width-thickness-length'));
     // Length up: the items' thickness face is now a side. NOT moved automatically.
     expect(useEngraveJobStore.getState().job.stock).toMatchObject({ length: 60, width: 12, thickness: 100 });

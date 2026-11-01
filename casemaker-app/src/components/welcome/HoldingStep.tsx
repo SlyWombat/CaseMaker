@@ -1446,7 +1446,9 @@ function HoldChoice({
   const faceWords = itemsOnTop(selected) ? null : itemsFaceWords(selected);
   return (
     <div data-testid="engrave-setup-orientation-holds" style={{ marginTop: 8, display: 'grid', gap: 6 }}>
-      <p style={{ ...MUTED, margin: 0 }}>Which way round the part sits — every hold this stock offers:</p>
+      {/* #875 — the fold's summary already says which way round the part sits; the line inside
+          names what the cards are, without repeating it. */}
+      <p style={{ ...MUTED, margin: 0 }}>Every hold this stock offers:</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(136px, 1fr))', gap: 6 }}>
         {holds.map((hold) => {
           const isSelected = hold.x === selected.x && hold.y === selected.y && hold.z === selected.z;
@@ -1509,10 +1511,13 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
   const tapeInsetMm = readDefault(shopDefaults ?? null, 'tape.insetMm').value;
   // #714 — the grip's default is the shop's own number (Makera publishes no jaw depth).
   const shopGrip = readDefault(shopDefaults ?? null, 'rotary.gripMm');
-  // #726 W19 — a phone stacks the picture UNDER the options instead of beside them: at 390 px the
+  // #726 W19 — a phone stacks the picture instead of placing it beside the options: at 390 px the
   // two-column grid left the options an 86 px column whose text ran under the picture, and the
   // caption printed on top of it. The same query the wizard shell reads for its own 16 px edge.
+  // #875 — the stacked picture now comes FIRST (the step is about it), collapsed to a short
+  // preview that a press enlarges.
   const narrow = useMediaQuery(NARROW_QUERY);
+  const [pictureOpen, setPictureOpen] = useState(false);
   const now = useMemo(() => machineNow(machine), [machine]);
   const profile = now?.profile ?? null;
   // #845 — a stated machine has no module this app has read; `rotaryOf` answers the same `undefined`
@@ -2335,46 +2340,48 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
     jawMode: rotaryChuck.jawMode,
     tailstock: rotaryChuck.tailstock,
   };
+  // #875 — the folded orientation's summary line: the hold the job is actually in, in the same
+  // words its card uses.
+  const chosenHold = stockHoldOf(job);
+  const holdSummary = holdWordsFor(form ?? 'plate', chosenHold, partDimsOf(job.stock, chosenHold));
 
   return (
     <div data-testid="engrave-setup-step-holding" style={{ marginTop: 8 }}>
-      {/* ── What is on the machine now ─────────────────────────────────────────────────────── */}
-      <div
-        data-testid="engrave-setup-machine-now"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          flexWrap: 'wrap',
-          border: '1px solid #2a2f36',
-          background: '#10151b',
-          borderRadius: 4,
-          padding: '6px 8px',
-          fontSize: 12,
-          marginBottom: 10,
-        }}
-      >
-        <span style={MUTED}>On the machine now</span>
-        {now === null ? (
-          <span data-testid="engrave-setup-machine-none">Not read from a machine record.</span>
-        ) : (
-          <>
-            <b>{now.parts[0]}</b>
-            {now.parts.length > 1 && <span>· {now.parts.slice(1).join(' · ')}</span>}
-          </>
-        )}
-        {canReachMachine && now !== null && (
-          <button
-            type="button"
-            className="btn btn--sm"
-            style={{ marginLeft: 'auto' }}
-            data-testid="engrave-setup-change-machine"
-            onClick={() => changeMachine(null, HOLDING_MOUNT_WORDS[current])}
-          >
-            Change the machine…
-          </button>
-        )}
-      </div>
+      {/* ── What is on the machine now ───────────────────────────────────────────────────────
+          #875 — shown only when a machine record exists: a band on every job without one said
+          nothing, and a line that fires on every such job is noise under the warnings rule. */}
+      {now !== null && (
+        <div
+          data-testid="engrave-setup-machine-now"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            flexWrap: 'wrap',
+            border: '1px solid #2a2f36',
+            background: '#10151b',
+            borderRadius: 4,
+            padding: '6px 8px',
+            fontSize: 12,
+            marginBottom: 10,
+          }}
+        >
+          <span style={MUTED}>On the machine now</span>
+          <b>{now.parts[0]}</b>
+          {now.parts.length > 1 && <span>· {now.parts.slice(1).join(' · ')}</span>}
+          {canReachMachine && (
+            <button
+              type="button"
+              className="btn btn--sm"
+              style={{ marginLeft: 'auto' }}
+              data-testid="engrave-setup-change-machine"
+              onClick={() => changeMachine(null, HOLDING_MOUNT_WORDS[current])}
+            >
+              Change the machine…
+            </button>
+          )}
+        </div>
+      )}
 
       {savedSides.length > 1 && (
         <div
@@ -2398,6 +2405,11 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
         </div>
       )}
 
+      {/* #875 — the step's heading sits above BOTH columns, so the phone's order is heading, then
+          the picture, then the mount question. */}
+      <span style={{ fontSize: 12, fontWeight: 500 }} data-testid="engrave-setup-holding-heading">
+        {heading}
+      </span>
       <div
         data-testid="engrave-setup-holding-columns"
         style={{
@@ -2405,21 +2417,10 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
           gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(190px, 230px)',
           gap: narrow ? 12 : 16,
           alignItems: 'start',
+          marginTop: 8,
         }}
       >
         <div style={{ display: 'grid', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 500 }} data-testid="engrave-setup-holding-heading">
-            {heading}
-          </span>
-          {/* #809 — the unmeasured vise is a FACT here, not a warning. It used to be a finding row
-              on every vise job; now it is one line, and `vise-default` speaks only where an
-              unmeasured figure could decide the job (a grip or proud height inside the band). */}
-          {answers.workholding === 'vise' && answers.vise.source === 'default' && (
-            <p style={MUTED} data-testid="engrave-setup-holding-vise-provenance">
-              Vise: the shipped dimensions, not measured on this machine.
-            </p>
-          )}
-
           <div data-testid="engrave-setup-holding-vise" style={{ display: 'grid', gap: 7 }}>
             {rows.map((option) => (
               <MountRow
@@ -2473,11 +2474,24 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
             ))}
           </div>
 
+          {/* #809 — the unmeasured vise is a FACT here, not a warning. It used to be a finding row
+              on every vise job; now it is one line under the radios, and `vise-default` speaks
+              only where an unmeasured figure could decide the job (a grip or proud height inside
+              the band). #875 — moved under the radios: above them it read as a warning between
+              the question and its answers. */}
+          {answers.workholding === 'vise' && answers.vise.source === 'default' && (
+            <p style={MUTED} data-testid="engrave-setup-holding-vise-provenance">
+              Vise: the shipped dimensions, not measured on this machine.
+            </p>
+          )}
+
           {/* #783 — WHICH WAY ROUND is ASKED for every form, beside the mount: every hold this
-              stock offers, as a plan and its words. A suggestion is pre-pressed; nothing decides. */}
-          <details open data-testid="engrave-setup-hold-fold" style={{ marginTop: 8 }}>
+              stock offers, as a plan and its words. A suggestion is pre-pressed; nothing decides.
+              #875 — the fold opens CLOSED, its summary carrying the chosen hold's own words, so
+              the six cards no longer push the step's next button off a phone. */}
+          <details data-testid="engrave-setup-hold-fold" style={{ marginTop: 8 }}>
             <summary style={{ fontSize: 12, cursor: 'pointer', color: '#d1d5db' }}>
-              Which way round the part sits
+              Which way round the part sits — {holdSummary} · change
             </summary>
             <HoldChoice
               form={form ?? 'plate'}
@@ -2583,10 +2597,11 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
           style={{
             position: 'relative',
             alignSelf: 'stretch',
-            // #726 W19 — a stacked slot has no options column to take its height from, and the
-            // picture inside is absolutely placed: without a height of its own the row would
-            // collapse to nothing. 260 px shows the top view and its caption whole.
-            minHeight: narrow ? 260 : 0,
+            // #875 — on the phone the picture is the first thing on the step; a stacked slot has
+            // no options column to take its height from, so it gets a short preview height of its
+            // own and a press on Enlarge gives it room for the whole top view and its caption.
+            order: narrow ? -1 : 0,
+            minHeight: narrow ? (pictureOpen ? 420 : 170) : 0,
           }}
         >
           <div style={{ position: 'absolute', inset: 0, overflowY: 'auto' }}>
@@ -2602,6 +2617,27 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
               rotary={drawnMount === 'rotary' ? rotaryPicture : null}
             />
           </div>
+          {narrow && (
+            <button
+              type="button"
+              data-testid="engrave-setup-holding-picture-enlarge"
+              onClick={() => setPictureOpen((open) => !open)}
+              style={{
+                position: 'absolute',
+                right: 6,
+                bottom: 6,
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 4,
+                border: '1px solid #2a2f36',
+                background: '#10151b',
+                color: '#c2c6d6',
+                cursor: 'pointer',
+              }}
+            >
+              {pictureOpen ? 'Shrink the picture' : 'Enlarge the picture'}
+            </button>
+          )}
         </div>
       </div>
 

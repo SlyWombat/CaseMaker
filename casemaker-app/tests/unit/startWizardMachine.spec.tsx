@@ -287,14 +287,16 @@ describe('#682 — step 1 is the house’s machine', () => {
     const input = screen.getByTestId('start-wizard-address');
     expect(input.getAttribute('placeholder')).toBeNull();
     const connect = screen.getByTestId('start-wizard-connect-address') as HTMLButtonElement;
-    // Principle 4: the disabled Connect says what unblocks it, with the field right there.
+    // #875 — the empty field disables Connect, and that IS the unblock; the sentence that repeated
+    // it appeared the instant the fold opened, before anything was wrong, so it is gone.
     expect(connect.disabled).toBe(true);
-    expect(screen.getByTestId('start-wizard-machine-address-unblock').textContent).toBe(
-      'Type the machine’s address to connect to it.',
-    );
+    expect(screen.queryByTestId('start-wizard-machine-address-unblock')).toBeNull();
     fireEvent.change(input, { target: { value: '10.0.0.7' } });
     expect(connect.disabled).toBe(false);
-    expect(screen.queryByTestId('start-wizard-machine-address-unblock')).toBeNull();
+    // A hostname is letters: the phone's keypad offers them.
+    expect(input.getAttribute('inputmode')).toBe('url');
+    expect(input.getAttribute('autocapitalize')).toBe('off');
+    expect(input.getAttribute('spellcheck')).toBe('false');
 
     // One fold: the same control closes it, and the field goes with it.
     fireEvent.click(screen.getByTestId('start-wizard-machine-another'));

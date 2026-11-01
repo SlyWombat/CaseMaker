@@ -92,10 +92,11 @@ test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain 
   expect(layout.options).not.toBeNull();
   expect(layout.picture).not.toBeNull();
   expect(layout.caption).not.toBeNull();
-  // The picture and its caption sit BELOW the options — W19 was the opposite: an 86 px options
-  // column with the picture over it and the caption printed across the option text.
-  expect(layout.picture!.top).toBeGreaterThanOrEqual(layout.options!.bottom);
-  expect(layout.caption!.top).toBeGreaterThanOrEqual(layout.picture!.bottom);
+  // #875 — the picture comes FIRST on the phone, above the options: the step is about it. W19's
+  // failure (an 86 px options column with the picture over it) was in the two-column grid, which
+  // the phone no longer uses. The caption follows the picture.
+  expect(layout.picture!.top).toBeLessThanOrEqual(layout.options!.top);
+  expect(layout.caption!.top).toBeGreaterThanOrEqual(layout.picture!.top);
   expect(layout.scrollW).toBeLessThanOrEqual(layout.vw);
 
   await page.screenshot({ path: 'test-results/726-w19-holding-phone.png' });
