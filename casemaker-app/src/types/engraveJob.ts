@@ -2067,6 +2067,13 @@ export interface EngraveJob {
    */
   setups?: JobSetup[];
   /**
+   * #848 — TRANSIENT, written only by `jobForSetup` for ONE PROGRAM'S sub-job: the items carried in
+   * as construction copies because an EARLIER program of the run cuts them (the cut that raises the
+   * boss an external thread is milled on). It is how the sub-job tells "cut before this file runs"
+   * from "a reference nobody cuts". Never in a saved document; the schema does not carry it.
+   */
+  cutEarlier?: string[];
+  /**
    * The bed profile this job was set up on (#513, folded into #707 BM-1). OPTIONAL and absent on
    * every document that predates it: an older job keeps its exact shape and round-trips
    * byte-for-byte. Its readers (the `bed-changed` findings, the receipt) are BM-11's; the field is

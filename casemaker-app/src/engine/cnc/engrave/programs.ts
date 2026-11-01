@@ -38,6 +38,7 @@
  */
 
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
+import { threadBoss } from './threadFit';
 import type { Tool } from '@/engine/cnc/tool';
 import { jobHasItems, jobSetups, setupTools, toolItemsFor } from './jobSetup';
 import { surfacePrimitivesOf } from './primitiveSurface';
@@ -216,6 +217,24 @@ export function jobForSetup(job: EngraveJob, ref: JobProgramRef, tool?: Tool | n
       for (const island of c.islands) referenced.add(island);
     }
   }
+  // #848 — A BOSS AN EARLIER PROGRAM RAISES. An external thread this program owns may stand on a
+  // boss another program cuts (a cutaway around a reference circle, a frame on it, a raised prism).
+  // When that program runs EARLIER, its item arrives here as a construction copy and is listed in
+  // `cutEarlier`, so the thread's own check knows the boss stands before this file runs.
+  const cutEarlier: string[] = [];
+  const ownThreads = (job.threads ?? []).filter((t) => ids.has(t.id) && t.enabled && t.side === 'external');
+  if (ownThreads.length > 0) {
+    const refs = setupPrograms(job);
+    const here = refs.findIndex((r) => r.setupId === ref.setupId && r.toolKey === ref.toolKey && r.itemIds.some((id) => ids.has(id)));
+    for (const t of ownThreads) {
+      const by = threadBoss(job, t.position)?.raisedBy;
+      if (by == null || ids.has(by.id)) continue;
+      const there = refs.findIndex((r) => r.itemIds.includes(by.id));
+      if (there < 0 || here < 0 || there >= here) continue;
+      referenced.add(by.id);
+      cutEarlier.push(by.id);
+    }
+  }
   // #766 fix — THE REFERENCES ARE TRANSITIVE. A cutaway that arrives as a CONSTRUCTION COPY
   // (another program owns it; this one only names it) keeps its OWN references with it: an inlay's
   // male plug is a cutaway whose islands name further cutaways and rings, and dropping the outer
@@ -273,6 +292,7 @@ export function jobForSetup(job: EngraveJob, ref: JobProgramRef, tool?: Tool | n
     // #669 — a chamfer rides with the cut whose edge it breaks; the finding `chamfer-order`
     // compares the programs' order for one.
     ...(job.chamfers !== undefined ? { chamfers: keep(job.chamfers) } : {}),
+    ...(cutEarlier.length > 0 ? { cutEarlier } : {}),
   } as EngraveJob;
 }
 

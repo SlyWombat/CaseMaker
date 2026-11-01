@@ -104,6 +104,26 @@ export interface ThreadBoss {
   what: string;
   /** `stock` when the boss is the blank itself; the circle's id otherwise. */
   source: 'stock' | string;
+  /**
+   * #848 — the job item that RAISES the boss, or null when the boss is the stock or a reference
+   * circle nothing in the job cuts (it must already stand before the file runs).
+   */
+  raisedBy: BossRaiser | null;
+}
+
+/** #848 — the cut that leaves a boss standing: a cutaway around it, a frame on it, or its own prism. */
+export interface BossRaiser {
+  /** The item that cuts the material around the boss. */
+  id: string;
+  /** `the cutaway "ring"`, `the frame "rim"`, `its own prism`. */
+  what: string;
+  /** How tall the boss stands once that cut is made: the cut's own depth, mm. */
+  heightMm: number;
+  /**
+   * true in ONE PROGRAM'S sub-job (`jobForSetup`) when an EARLIER program of the run cuts it: the
+   * item then arrives as a construction copy listed in `job.cutEarlier`.
+   */
+  earlier: boolean;
 }
 
 const AXIS_EPS = 0.05;
@@ -115,6 +135,10 @@ const AXIS_EPS = 0.05;
  *     axis is the thread's — the box's centre;
  *   - or a circle shape centred on the thread's axis that is a reference (`construction`) or a
  *     raised prism — the boss a prior program left. A plain circle POCKET is a hole, not a boss.
+ *
+ * #848 — A BOSS THE JOB CUTS. The reference circle may be the island of a cutaway or the outline a
+ * frame follows: that cut leaves it standing, as tall as the cut is deep, and `raisedBy` names it.
+ * A raised prism raises itself. A frame's gap widens the standing boss by the gap on each side.
  */
 export function threadBoss(job: EngraveJob, position: { x: number; y: number }): ThreadBoss | null {
   const near = (a: number, b: number) => Math.abs(a - b) <= AXIS_EPS;
@@ -125,13 +149,74 @@ export function threadBoss(job: EngraveJob, position: { x: number; y: number }):
     near(position.x, st.length / 2) &&
     near(position.y, st.width / 2)
   ) {
-    return { diameterMm: st.diameter, what: `the ⌀${st.diameter} mm round stock`, source: 'stock' };
+    return { diameterMm: st.diameter, what: `the ⌀${st.diameter} mm round stock`, source: 'stock', raisedBy: null };
   }
+  const earlier = new Set(job.cutEarlier ?? []);
+  // A cut this job makes, or one an earlier program of the run made (a construction copy the
+  // sub-job carries for exactly that reason). Any other construction item is a reference only.
+  const cuts = (item: { id: string; construction?: boolean }): { cut: boolean; earlier: boolean } =>
+    item.construction !== true ? { cut: true, earlier: false } : { cut: earlier.has(item.id), earlier: earlier.has(item.id) };
   for (const sh of job.shapes) {
     if (sh.kind !== 'circle' || !sh.enabled) continue;
     if (sh.construction !== true && sh.prism === undefined) continue;
     if (!near(sh.position.x, position.x) || !near(sh.position.y, position.y)) continue;
-    return { diameterMm: sh.diameter, what: `circle${sh.name ? ` "${sh.name}"` : ''} (⌀${sh.diameter} mm)`, source: sh.id };
+    const name = `circle${sh.name ? ` "${sh.name}"` : ''}`;
+    let diameterMm = sh.diameter;
+    let raisedBy: BossRaiser | null = null;
+    if (sh.prism !== undefined) {
+      const c = cuts(sh);
+      if (c.cut) raisedBy = { id: sh.id, what: 'its own prism', heightMm: sh.depth, earlier: c.earlier };
+    }
+    if (raisedBy === null) {
+      for (const cb of job.combined ?? []) {
+        if (!cb.enabled) continue;
+        const holds = (cb.kind === 'cutaway' && cb.islands.includes(sh.id)) || (cb.kind === 'frame' && cb.around === sh.id);
+        if (!holds) continue;
+        const c = cuts(cb);
+        if (!c.cut) continue;
+        const label = `the ${cb.kind}${cb.name ? ` "${cb.name}"` : ''}`;
+        if (cb.kind === 'frame') diameterMm = sh.diameter + 2 * Math.max(0, cb.gap);
+        raisedBy = { id: cb.id, what: label, heightMm: cb.depth, earlier: c.earlier };
+        break;
+      }
+    }
+    const d = diameterMm === sh.diameter ? sh.diameter : Number(diameterMm.toFixed(3));
+    return { diameterMm: d, what: `${name} (⌀${d} mm)`, source: sh.id, raisedBy };
   }
   return null;
+}
+
+/**
+ * #848 — THE BOSS IS CUT BEFORE ITS THREAD. Reorders a plan's cutters so that a thread mill whose
+ * external threads stand on a boss ANOTHER cutter of the plan raises comes after that cutter. Every
+ * other plan is returned as it was (the same array), so a job with no raised boss is unchanged.
+ */
+export function bossBeforeThread<C extends { key: string; items: readonly string[] }>(job: EngraveJob, cutters: readonly C[]): readonly C[] {
+  const raiserOf = new Map<string, string>();
+  for (const t of job.threads ?? []) {
+    if (!t.enabled || t.side !== 'external') continue;
+    const by = threadBoss(job, t.position)?.raisedBy;
+    if (by != null && !by.earlier) raiserOf.set(t.id, by.id);
+  }
+  if (raiserOf.size === 0) return cutters;
+  const order = [...cutters];
+  for (let guard = 0; guard < cutters.length; guard++) {
+    let moved = false;
+    for (let i = 0; i < order.length; i++) {
+      const raisers = order[i]!.items.flatMap((id) => {
+        const r = raiserOf.get(id);
+        return r === undefined ? [] : [r];
+      });
+      if (raisers.length === 0) continue;
+      const last = order.reduce((at, c, j) => (c.items.some((id) => raisers.includes(id)) ? Math.max(at, j) : at), -1);
+      if (last > i) {
+        const [mill] = order.splice(i, 1);
+        order.splice(last, 0, mill!);
+        moved = true;
+        break;
+      }
+    }
+    if (!moved) break;
+  }
+  return order.every((c, i) => c === cutters[i]) ? cutters : order;
 }

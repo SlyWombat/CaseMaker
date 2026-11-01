@@ -34,6 +34,7 @@ import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { faceCutterOptions, faceWorkOf, kindedWork, materialRefusal, planCutters, reachOf, type PlannedCutter } from './cutterPlan';
 import { goalNeedMm } from './goalReach';
 import { jobHasItems, jobTargetObjects, pureGoalObject } from './jobSetup';
+import { bossBeforeThread } from './threadFit';
 
 export type { CandidatePlan, PinchFact } from '@/workers/sim/planEvaluate';
 
@@ -188,7 +189,10 @@ export function candidatePlans(
 ): CandidatePlan[] {
   const out: CandidatePlan[] = [];
   const seen = new Set<string>();
-  const add = (plan: CandidatePlan): void => {
+  const add = (given: CandidatePlan): void => {
+    // #848 — a thread mill whose boss another cutter of the plan raises is cut AFTER that cutter.
+    const ordered = bossBeforeThread(job, given.cutters);
+    const plan = ordered === given.cutters ? given : { ...given, cutters: [...ordered] };
     const key = planKey(plan);
     if (seen.has(key)) return;
     seen.add(key);

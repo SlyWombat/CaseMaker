@@ -717,8 +717,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const copperSides: CopperSideReport[] = [];
     // #445 §4 — the thread facts belong to the first engraving program, the one
     // `generated.threads` describes; a facing pass or a later program states none.
-    const threadsFor = (index: number) =>
-      index === firstEngravingIndex ? (generated.threads?.flatMap((t) => t.simThreads) ?? []) : [];
+    // #848 — a program that carries its OWN thread plans is swept with them: a boss cut before its
+    // thread makes the thread mill program 2. A result stored before the field keeps the old rule.
+    const threadsFor = (index: number) => {
+      const own = generated.programs[index]?.threads;
+      if (own !== undefined) return own === null ? [] : own.flatMap((t) => t.simThreads);
+      return index === firstEngravingIndex ? (generated.threads?.flatMap((t) => t.simThreads) ?? []) : [];
+    };
     // #844 — ONE VERDICT PER PROGRAM, collected by the walk's `afterLoad` while each program is
     // still the session's live one. `copperReport` is the board's own combined check, which spans
     // several programs and stays the run-level verdict it was.

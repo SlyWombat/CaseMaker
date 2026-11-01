@@ -321,6 +321,9 @@ export type JobFindingCode =
   | 'thread-boss-missing'
   | 'thread-boss-size'
   | 'thread-boss-unproven'
+  | 'thread-boss-raised'
+  | 'thread-boss-short'
+  | 'thread-boss-order'
   // 3D primitives (#435). A primitive is cut only where it reduces to a flat-floor region; the
   // other forms are refused BY NAME rather than approximated. Each sentence names the engine or
   // issue that can cut the shape, so the refusal is an instruction, not a dead end.
@@ -2697,7 +2700,20 @@ export function validateJob(
   // thread itself; the CAM's plan and the verifier's `cut-too-deep` carry the exact number when
   // the setting says otherwise. The floor check therefore errs toward the user, not away.
   if (enabledThreads.length > 0) {
-    const threadTool = jobTool(job);
+    // #848 — on a SETUP job the thread is cut by the cutter that OWNS it, which need not be the
+    // first: a boss raised by a flat comes before its thread mill. The legacy job has one cutter.
+    const threadTool = ((): Tool | null => {
+      if (job.setups === undefined) return jobTool(job);
+      const id = enabledThreads[0]!.id;
+      for (const setup of jobSetups(job)) {
+        const tools = setupTools(setup, job);
+        const at = tools.findIndex((key, i) => toolItemsFor(setup, key, i).includes(id));
+        if (at < 0) continue;
+        const key = tools[at]!;
+        return toolForJob({ toolKey: key, ...(key === job.toolKey && job.tool != null ? { tool: job.tool } : {}) }, getTools());
+      }
+      return jobTool(job);
+    })();
     const threadDiameter = threadTool === null ? null : cuttingDiameter(threadTool);
     if (threadTool !== null && threadTool.shape !== 'thread') {
       findings.push({
@@ -2850,15 +2866,60 @@ export function validateJob(
                 `The size nearest the boss is ${nearestThreadSize(thread.standard, boss.diameterMm)}. Generate cuts it as it is.`,
             });
           }
-          findings.push({
-            severity: boss.source === 'stock' ? 'info' : 'warning',
-            code: 'thread-boss-unproven',
-            labelId: thread.id,
-            message:
-              `${who} is cut on ${boss.what}, which must stand at least ` +
-              `${Number((thread.depth + pitch).toFixed(3))} mm tall before this file runs. This program ` +
-              `cuts the thread only and never the boss.`,
-          });
+          const tall = Number((thread.depth + pitch).toFixed(3));
+          const by = boss.raisedBy;
+          if (by === null) {
+            findings.push({
+              severity: boss.source === 'stock' ? 'info' : 'warning',
+              code: 'thread-boss-unproven',
+              labelId: thread.id,
+              message:
+                `${who} is cut on ${boss.what}, which must stand at least ` +
+                `${tall} mm tall before this file runs. This program ` +
+                `cuts the thread only and never the boss.`,
+            });
+          } else {
+            // #848 — THE JOB RAISES THE BOSS ITSELF. Its cut is its own program, before the thread
+            // mill's (the plan orders them; `thread-boss-order` states a hand-built order that
+            // does not), so the boss is proven by the run rather than assumed.
+            const h = fmt3(by.heightMm);
+            findings.push({
+              severity: 'info',
+              code: 'thread-boss-raised',
+              labelId: thread.id,
+              message:
+                `${who} is cut on ${boss.what}, which ${by.what} raises ${h} mm tall ` +
+                `${by.earlier ? 'in an earlier program' : 'in its own program, before the thread'}.`,
+            });
+            if (by.heightMm + 1e-6 < tall) {
+              findings.push({
+                severity: 'warning',
+                code: 'thread-boss-short',
+                labelId: thread.id,
+                message:
+                  `${who} reaches ${tall} mm with its run-out, and ${by.what} raises the boss ${h} mm: ` +
+                  `the tooth cuts ${fmt3(tall - by.heightMm)} mm into the floor around it. Generate cuts it as it is.`,
+              });
+            }
+            if (job.setups !== undefined) {
+              const programs = jobSetups(job).flatMap((setup) =>
+                setupTools(setup, job).map((toolKey, toolIndex) => new Set(toolItemsFor(setup, toolKey, toolIndex))),
+              );
+              const here = programs.findIndex((items) => items.has(thread.id));
+              const there = programs.findIndex((items) => items.has(by.id));
+              // The SAME program is `thread-mixed-tools`' (one cutter cannot do both); a LATER one is this.
+              if (here >= 0 && there > here) {
+                findings.push({
+                  severity: 'warning',
+                  code: 'thread-boss-order',
+                  labelId: thread.id,
+                  message:
+                    `${who} is program ${here + 1}, and ${by.what} that raises its boss is program ${there + 1}: ` +
+                    `the thread would be cut into stock that is not a boss yet. Put the thread mill after the cutter that raises the boss.`,
+                });
+              }
+            }
+          }
         }
       }
 
@@ -3608,11 +3669,15 @@ export function setupProgramFindings(
   for (const drill of job.drills ?? []) if (drill.enabled) nameById.set(drill.id, drillOperationName(drill));
   for (const chamfer of job.chamfers ?? []) if (chamfer.enabled) nameById.set(chamfer.id, chamfer.name ?? chamfer.id);
   /** The cutter a setup key names, with the job's own snapshot when the key is the job's own. */
+  // #848 — then the caller's own cutters: a worker realm's registry does not hold a house or owned
+  // key, and the split sentence and the per-cutter checks must see the cutter's shape there too.
   const resolvedFor = (toolKey: string): Tool | null =>
     toolForJob(
       { toolKey, ...(toolKey === job.toolKey && job.tool !== undefined && job.tool !== null ? { tool: job.tool } : {}) },
       getTools(),
-    );
+    ) ??
+    ownedTools?.find((e) => e.key === toolKey)?.tool ??
+    null;
   const shortName = (entry: Tool): string => toolDisplayName(entry).split(' · ')[0]!;
 
   jobSetups(job).forEach((setup, i) => {
@@ -3785,7 +3850,17 @@ export function setupProgramFindings(
         }
         if (entry?.shape === 'thread') {
           hasBit = true;
-          parts.push(`the thread mill for the ${ids.length === 1 ? 'thread' : 'threads'}`);
+          // #848 — a thread on a boss an EARLIER cutter of this setup raises names that cut, so the
+          // order of the two programs is explained by the sentence that states the split.
+          const earlierItems = new Set(tools.slice(0, toolIndex).flatMap((k, j) => toolItemsFor(setup, k, j)));
+          const raiser = (job.threads ?? [])
+            .filter((t) => ids.includes(t.id) && t.enabled && t.side === 'external')
+            .map((t) => threadBoss(job, t.position)?.raisedBy ?? null)
+            .find((by) => by != null && earlierItems.has(by.id));
+          parts.push(
+            `the thread mill for the ${ids.length === 1 ? 'thread' : 'threads'}` +
+              (raiser == null ? '' : ` on the boss ${raiser.what} raises`),
+          );
           return;
         }
         const what = entry === null ? `the cutter "${toolKey}"` : `the ${shortName(entry)}`;

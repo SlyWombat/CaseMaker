@@ -481,6 +481,12 @@ export interface EngraveProgram {
    */
   bore?: BoreProgramFacts | null;
   /**
+   * #848 — the thread plans when THIS program is the thread mill's, so the run hands the simulator
+   * THIS file's `simThreads` (a boss cut before its thread makes the thread program 2, and the
+   * top-level `threads` describe program 1). Null/absent on every other file.
+   */
+  threads?: ThreadMillPlan[] | null;
+  /**
    * #669 — the chamfer facts when THIS program cuts a bevel. Null on every other file: the run
    * sheet's bevel step belongs to the program that cuts the edge.
    */
@@ -6374,6 +6380,8 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     core: one.core ?? null,
     neck: one.neck ?? null,
     surfaceCheck: one.surfaceCheck ?? null,
+    // #848 — this file's own thread plans (null on a program that mills none).
+    threads: one.threads ?? null,
   };
 }
 

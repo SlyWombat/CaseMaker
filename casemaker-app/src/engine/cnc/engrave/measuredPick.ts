@@ -128,7 +128,13 @@ export function applyCutterPlanToJob(job: EngraveJob, plan: CutterPlanLike): Eng
   if (first === undefined) return applied;
   const index = plan.setupIndex ?? 0;
   // The job's cutter is the FIRST program's; a plan for a later setup leaves it alone.
-  if (index === 0) applied.toolKey = first.key;
+  if (index === 0) {
+    // #848 — a materialised `tool` belongs to the key it was written for. A plan whose first cutter
+    // is another one (a boss raised by a flat before the named thread mill) must not leave the old
+    // cutter's record answering for the new key.
+    if (applied.toolKey !== first.key && applied.tool != null) delete applied.tool;
+    applied.toolKey = first.key;
+  }
   // #766 fix — A PURE GOAL JOB GETS NO SETUP. Its derived setup is empty BY DESIGN (#535): the
   // goal mesh is the setup's one program, and `pureGoalObject` only recognises the job while it
   // states NO setups. Writing one made the generator validate the goal as an ordinary item that
