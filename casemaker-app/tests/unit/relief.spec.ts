@@ -307,7 +307,9 @@ describe('the relief rides the goal pipeline (#672)', () => {
       { kind: 'tape-down', contact: rectProfile(60, 40) },
     );
     const cutter: ColumnCutter = { radius: 0, tanHalf: null, cornerRadius: 0.5, outerRadius: 0.5 };
-    // The posted moves, resolved into the column engine's segments (z = the lower endpoint).
+    // The posted moves, resolved into the column engine's segments as `flatMovesOf` does: z = the
+    // lower endpoint, and #758's end tips so a sloped move is swept along its slope (#889 — a
+    // merged row is one long sloped move).
     const moves: CamMove[] = [];
     const ncOps = generateSurface3dForGoal({
       target,
@@ -326,7 +328,7 @@ describe('the relief rides the goal pipeline (#672)', () => {
       const a = moves[k - 1]!;
       const b = moves[k]!;
       if (b.kind !== 'feed') continue;
-      cut.push({ step: k, line: k, u0: a.x, u1: b.x, v0: a.y, v1: b.y, z: Math.min(a.z, b.z) });
+      cut.push({ step: k, line: k, u0: a.x, u1: b.x, v0: a.y, v1: b.y, z: Math.min(a.z, b.z), z0: a.z, z1: b.z });
     }
     const grid = FLAT.buildGrid(setup, cutter, cut, { dx: hf.pitch, dThetaDeg: hf.pitch });
     for (const m of cut) FLAT.applyMove(grid, m, cutter);
