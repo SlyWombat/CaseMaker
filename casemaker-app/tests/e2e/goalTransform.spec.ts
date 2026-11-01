@@ -193,3 +193,98 @@ test('a 75 mm goal on a 43 × 32 blank: Lay it flat, a quarter turn on the X rin
   await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
   await shoot(page, 'goal-laid-flat-generated.png');
 });
+// #876 — THE RING'S GRADUATED SCALE AND ZONE SNAP. The cursor's radius picks the precision, as
+// the maintainer asked (PrusaSlicer's model): a drag whose pointer stays on the scale band tracks
+// the ticks and lands exactly on a major line; the same angular drag with the pointer outside the
+// band is free. No modifier key either way.
+test('#876 — a ring drag in the scale band snaps; the same drag outside it does not', async ({ cm, page }) => {
+  await cm.ready();
+  await openJob(page, tallJob());
+  await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
+  // #876 — THE DISCOVERABILITY FIX. A job from a file arrives with its rows closed (#411), and
+  // selecting the mesh needs the Select tool (the default is orbit), so the old "selected or row
+  // open" gate left the handles undrawn — the maintainer's "I don't have axis controls" on a
+  // phone. Fold the row closed if it is open, and the goal's handles must still be there.
+  if ((await page.getByTestId('engrave-target-layflat-0').count()) > 0) {
+    await page.getByTestId('engrave-target-expand-0').click();
+  }
+  await expect.poll(() => page.evaluate(() => window.__caseMaker!.engraveGoalHandleCentre())).not.toBeNull();
+  if ((await page.getByTestId('engrave-target-layflat-0').count()) === 0) {
+    await page.getByTestId('engrave-target-expand-0').click();
+  }
+  // #876 — LAY IT FLAT FIRST. Turning the 75 mm column changes the scene's diagonal by more than
+  // the 35 % AutoFrame threshold, so the camera reframes MID-DRAG and the probe pixels go stale
+  // (the drag then reads a free angle off the ring). A flat part's quarter turn barely changes its
+  // bounding size, so the view holds still — the same reason the #831 drag above works.
+  await page.getByTestId('engrave-target-layflat-0').click();
+  await expect(page.getByTestId('engrave-target-layflat-said-0')).toBeVisible();
+  await page.getByTestId('viewport-fit').click();
+  await page.waitForTimeout(600);
+
+  const pt = (deg: number) => page.evaluate((d) => window.__caseMaker!.engraveGoalHandlePoint('ring', 'x', d), deg);
+  const centre = () => page.evaluate(() => window.__caseMaker!.engraveGoalHandleCentre());
+  await expect.poll(() => pt(0)).not.toBeNull();
+
+  // The clearest point on the X ring: the farthest, on screen, from the other rings and the arrows
+  // (they cross it in projection, and the nearest handle under the pointer takes the press).
+  const others: { x: number; y: number }[] = [];
+  for (let d = 0; d < 360; d += 5) {
+    others.push((await page.evaluate((a) => window.__caseMaker!.engraveGoalHandlePoint('ring', 'y', a), d))!);
+    others.push((await page.evaluate((a) => window.__caseMaker!.engraveGoalHandlePoint('ring', 'z', a), d))!);
+  }
+  for (const axis of ['x', 'y'] as const) {
+    for (let mm = 0; mm <= 60; mm += 2) {
+      const p = await page.evaluate(([ax, v]) => window.__caseMaker!.engraveGoalHandlePoint('arrow', ax, v), [axis, mm] as const);
+      if (p !== null) others.push(p);
+    }
+  }
+  let start = 0;
+  let clearest = -1;
+  for (let d = 0; d < 360; d += 5) {
+    const p = (await pt(d))!;
+    const gap = Math.min(...others.map((o) => Math.hypot(o.x - p.x, o.y - p.y)));
+    if (gap > clearest) {
+      clearest = gap;
+      start = d;
+    }
+  }
+  const readout = page.getByTestId('engrave-goal-handle-readout');
+  const before = (await placement(page))!;
+
+  // IN THE BAND: press on the ring and drag along it to 90° after the start. The 90° major line
+  // absorbs the pixel quantisation (mouse events carry INTEGER client pixels; on this ring a pixel
+  // is worth more than a degree), and the drag lands on it exactly.
+  const p0 = (await pt(start))!;
+  await page.mouse.move(p0.x, p0.y);
+  await page.mouse.down();
+  for (let d = start + 5; d <= start + 90; d += 5) {
+    const p = (await pt(d))!;
+    await page.mouse.move(p.x, p.y, { steps: 2 });
+  }
+  await expect(readout).toHaveText('X +90°');
+  await page.mouse.up();
+  expect((await placement(page))!.turns).not.toEqual(before.turns);
+  await page.getByTestId('engrave-target-turn-undo-0').click();
+  expect((await placement(page))!.turns).toEqual(before.turns);
+
+  // OUTSIDE THE BAND: the same ring, but the pointer is pushed 40 px outward from it (the
+  // fine-pointer band is 24 px deep, half of it outside the line), so the drag is free. The target
+  // is 62.5° — deliberately between ticks: a snap would land on 60 or 65, the free value does not.
+  const c = (await centre())!;
+  const rim = (await pt(start + 62.5))!;
+  const len = Math.hypot(rim.x - c.x, rim.y - c.y);
+  const out = { x: c.x + ((rim.x - c.x) * (len + 40)) / len, y: c.y + ((rim.y - c.y) * (len + 40)) / len };
+  const p0b = (await pt(start))!;
+  await page.mouse.move(p0b.x, p0b.y);
+  await page.mouse.down();
+  await page.mouse.move(out.x, out.y, { steps: 3 });
+  const text = (await readout.textContent()) ?? '';
+  const m = /^X \+(\d+(?:\.\d)?)°$/.exec(text);
+  expect(m, `the free readout is a plain angle: "${text}"`).not.toBeNull();
+  const freeDeg = Number(m![1]);
+  expect(Math.abs(freeDeg - 62.5)).toBeLessThan(2.5);
+  // Not on the 5° grid: the free drag did not snap.
+  expect(Math.abs(freeDeg - Math.round(freeDeg / 5) * 5)).toBeGreaterThan(0.3);
+  await page.mouse.up();
+  expect((await placement(page))!.turns).not.toEqual(before.turns);
+});

@@ -309,7 +309,12 @@ export function EngravePrimitives() {
     (s) => target !== undefined && isEngraveItemSelected(s.selection, target.id),
   );
   const rowOpen = useEngraveRowStore((s) => target !== undefined && s.open.has(target.id));
-  const handlesOn = target !== undefined && target.format !== 'png' && (selectedTarget || rowOpen);
+  // #831/#876 — the compass shows while the mesh is selected or its row is open, AND always for the
+  // job's own GOAL mesh: the maintainer, holding a goal on a phone, reported "no axis controls" —
+  // selecting needs the Select tool and the row open needs a tap, so neither happened. A goal is
+  // the thing the job exists to place; its handles are always on.
+  const handlesOn =
+    target !== undefined && target.format !== 'png' && (goalTarget || selectedTarget || rowOpen);
   // #876 — the place-on-face picker, armed from the goal row's Face down / Face up press.
   const placeFace = useViewportStore((s) => s.placeFace);
   const facePickOn =

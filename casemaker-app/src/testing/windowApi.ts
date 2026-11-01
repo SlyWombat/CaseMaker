@@ -27,7 +27,7 @@ import { useViewportStore } from '@/store/viewportStore';
 import { useSimStore, type SimLayers, type SimState } from '@/store/simStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { placedSize, targetTurns } from '@/engine/cnc/engrave/targetScale';
-import { goalHandleClientPoint } from '@/components/viewport/goalHandleFrame';
+import { goalHandleCentreClientPoint, goalHandleClientPoint } from '@/components/viewport/goalHandleFrame';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveRunStore, gateViewFor, saveBlocker, runErrorCodes } from '@/store/engraveRunStore';
 import { useMachineRunStore } from '@/store/machineRunStore';
@@ -188,6 +188,8 @@ export interface CaseMakerTestApi {
     scale: { x: number; y: number; z: number } | null;
   } | null;
   engraveGoalHandlePoint(kind: 'ring' | 'arrow', axis: 'x' | 'y' | 'z', value: number): { x: number; y: number } | null;
+  /** #876 e2e — the goal compass centre's client pixel; the scale band is measured from it. */
+  engraveGoalHandleCentre(): { x: number; y: number } | null;
   /** #723 R-4 e2e — the open job's target object as the stores hold it (bytes included?). */
   engraveTargetState(): { role: string | null; enabled: boolean; format: string; hasData: boolean } | null;
   /**
@@ -554,6 +556,9 @@ export function installCaseMakerTestApi(): void {
     },
     engraveGoalHandlePoint(kind, axis, value) {
       return goalHandleClientPoint(kind, axis, value);
+    },
+    engraveGoalHandleCentre() {
+      return goalHandleCentreClientPoint();
     },
     engraveGoalDrawing() {
       const goal = useEngravePreviewStore.getState().preview?.goal ?? null;

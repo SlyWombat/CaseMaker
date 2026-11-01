@@ -11,6 +11,7 @@ import { SimLegend } from './SimLegend';
 import { SimTransport } from './SimTransport';
 import { MachineDock } from './MachineDock';
 import { ViewportToolbar } from './ViewportToolbar';
+import { isGoalHandleDragActive } from './goalHandleFrame';
 import {
   activeSceneBounds,
   shouldReframe,
@@ -219,6 +220,10 @@ function AutoFrame() {
   const lastSimSolids = useRef<unknown>(null);
   const lastEngraveScene = useRef<string | null>(null);
   useEffect(() => {
+    // #876 — a goal handle is held: the camera must not move under the pointer. Turning a tall goal
+    // changes the scene's diagonal by more than the 35 % threshold below, and reframing mid-drag
+    // would yank the view out from under the hand (and its probe pixels).
+    if (isGoalHandleDragActive()) return;
     // A LOAD of a program, the END of a simulation, and the engrave section opening (or its
     // first preview arriving) all change what is on screen and are framed once whatever the
     // size: the size rule alone would skip a stock whose diagonal happens to be close to the

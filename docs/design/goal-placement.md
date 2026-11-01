@@ -36,7 +36,11 @@ One document object, one arithmetic module, one write path.
 - **The scene.** react-three-fiber (`components/viewport`). `EngravePrimitives` draws, in order:
   the stock (ghosted while a goal is stated), the goal — the preview worker's compiled volumes
   when it has them, otherwise the raw target mesh, both placed by `targetPlacement` — and then
-  `GoalTransformHandles` (#831) while the mesh is selected or its row is open.
+  `GoalTransformHandles` (#831) while the mesh is selected or its row is open. **#876: always for
+  the job's own goal mesh.** The maintainer, holding a goal on a phone, reported "I don't have
+  axis controls": a job from a file lands with its rows closed (#411), and selecting the mesh
+  needs the Select tool (the default is orbit), so neither gate ever opened and no handles were
+  drawn at all. A goal is what the job exists to place; its handles are always on.
 - **The handle group.** A plain r3f group in **stock** coordinates, centred on the placed bbox
   centre (`goalHandleFrame.handleFrame`, from `placedSize` and the top at `position.z`), with
   `radius = max(6, half the largest extent + 4)` mm. Three torus rings (X red, Y green, Z blue)
@@ -46,9 +50,12 @@ One document object, one arithmetic module, one write path.
 - **The drag.** Press → ray/plane (ring) or ray/line (arrow) parameter; move → the angle or the
   line parameter; up → write the document. **Rings use the graduated-scale zone model below;
   arrows snap to 1 mm (Shift 0.1 mm).** The first write of a drag calls
-  `rememberGoalPlacement`, so undo is one entry per drag. The orbit control is disabled only while
-  a drag is live. A live readout (`<Html>`) sits by the dragged handle and states the angle or the
-  displacement.
+  `rememberGoalPlacement`, so undo is one entry per drag. From the press to the release the drag
+  is captured by the WINDOW — a fast hand leaves the ring at once, and the ring used to stop
+  updating when it did — and `AutoFrame` is held off the camera while a handle is held (turning a
+  tall goal changes the scene diagonal past its 35 % threshold and would reframe mid-drag). The
+  orbit control is disabled only while a drag is live. A live readout (`<Html>`) sits by the
+  dragged handle and states the angle or the displacement.
 - **Testing surface.** `goalHandleFrame.setGoalHandleProbe` exposes the **client pixel** of any
   point on a ring or arrow, and the existing walk `tests/e2e/goalTransform.spec.ts` drags the X
   ring along its own circle, asserts the readout, and reads the stored transform. #876's walk
