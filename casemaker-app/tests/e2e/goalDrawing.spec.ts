@@ -189,7 +189,7 @@ test('the goal on flat stock: item draws the part in the cleared blank, mold dra
   // mold: the part becomes the cavity — the same volume, clipped to the blank, nothing standing.
   await page.getByTestId('engrave-target-goal-mode-0').selectOption('mold');
   await waitForMode(page, 'mold');
-  await expect(page.getByTestId('engrave-legend-goal')).toContainText('Goal: a mold of the part');
+  await expect(page.getByTestId('engrave-legend-goal')).toContainText('Goal: a mould of the part');
   const mold = await goalDrawing(page);
   expect(mold!.partVolumeMm3).toBeNull();
   expect(mold!.removedVolumeMm3).toBeCloseTo(PART_MM3, 0);
