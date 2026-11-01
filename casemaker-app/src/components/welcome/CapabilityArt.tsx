@@ -315,39 +315,69 @@ export function RacksArt({ title }: { title: string }) {
 }
 
 export function ToolboxesArt({ title }: { title: string }) {
-  const iso = projector(120, 88);
-  const w = 110;
-  const d = 80;
-  const t = 6;
-  const lowH = 22;
-  const binH = 36;
-  const trayZ = lowH + 18;
+  const iso = projector(104, 90);
+  // A cantilever toolbox: a chest, a stepped-in drawer tier on it, and the top tray swung out
+  // over the front with its tools, under a carry handle. Nothing about it is a box with a lid.
+  const w = 104;
+  const d = 64;
+  const chestH = 30;
+  const tierIn = 7;
+  const tierH = 20;
+  const tierZ = chestH;
+  const trayZ = tierZ + tierH + 7;
+  const trayH = 16;
+  const trayX = 26; // swung out: the tray hangs past the chest's right face
+  const t = 4;
+  const handleY = d / 2 - tierIn + 4;
+  const hz0 = tierZ + tierH;
+  const hz1 = hz0 + 44;
+  const handle = [
+    [14, handleY, hz0],
+    [14, handleY, hz1 - 8],
+    [20, handleY, hz1],
+    [84, handleY, hz1],
+    [90, handleY, hz1 - 8],
+    [90, handleY, hz0],
+  ] as const;
   return (
     <svg className="wb-art wb-art--toolboxes" viewBox={VIEW} role="img" aria-label={title} focusable="false">
-      <Glow cx={128} cy={122} />
-      {/* The module below: closed by the bin sitting in it, so only its walls show. */}
-      <Box iso={iso} at={[0, 0, 0]} size={[w, d, lowH]} faces="lr" />
-      <polygon className="a-seam" points={iso.pts(onLeft(d, 0, w, lowH - 0.5, lowH + 0.5))} />
-      <polygon className="a-seam" points={iso.pts(onRight(w, 0, d, lowH - 0.5, lowH + 0.5))} />
-      {/* The open bin, with its divided tray dropped in. */}
-      <Tray iso={iso} at={[0, 0, lowH]} size={[w, d, binH]} t={t} floor={4}>
-        <Box iso={iso} at={[t, t, trayZ]} size={[w - 2 * t, d - 2 * t, 2.5]} cls="a-tray" />
-        {/* Dividers: two across, one along in the left bay. */}
-        <Box iso={iso} at={[t + 32, t, trayZ + 2.5]} size={[1.8, d - 2 * t, 9]} cls="a-tray" />
-        <Box iso={iso} at={[t + 66, t, trayZ + 2.5]} size={[1.8, d - 2 * t, 9]} cls="a-tray" />
-        <Box iso={iso} at={[t, d / 2 - 0.9, trayZ + 2.5]} size={[32, 1.8, 9]} cls="a-tray" />
-        {/* Tools in the bays: three sockets and a couple of bits. */}
-        <Cylinder iso={iso} x={t + 44} y={t + 16} z0={trayZ + 2.5} z1={trayZ + 12} r={5} cls="a-metal" />
-        <Cylinder iso={iso} x={t + 55} y={t + 36} z0={trayZ + 2.5} z1={trayZ + 12} r={5} cls="a-metal" />
-        <Cylinder iso={iso} x={t + 44} y={t + 54} z0={trayZ + 2.5} z1={trayZ + 12} r={5} cls="a-metal" />
-        <Box iso={iso} at={[t + 74, t + 10, trayZ + 2.5]} size={[6, 42, 4]} cls="a-accent" />
-        <Box iso={iso} at={[t + 84, t + 18, trayZ + 2.5]} size={[6, 42, 4]} cls="a-accent" />
-        <Box iso={iso} at={[t + 10, t + 12, trayZ + 2.5]} size={[8, 8, 6]} cls="a-dark" />
-      </Tray>
-      {/* The lid, lifted, its registration ridge on top. */}
-      <g className="a-lid">
-        <Box iso={iso} at={[-10, -2, lowH + binH + 18]} size={[w, d, 5]} />
-        <Box iso={iso} at={[t - 8, t, lowH + binH + 23]} size={[w - 2 * t - 4, d - 2 * t - 4, 2.5]} />
+      <Glow cx={126} cy={124} />
+      {/* The chest, with its two latches on the front. */}
+      <Box iso={iso} at={[0, 0, 0]} size={[w, d, chestH]} cls="a-tier" />
+      {[22, 72].map((x) => (
+        <g key={x}>
+          <Box iso={iso} at={[x, d - 1.5, chestH - 9]} size={[9, 1.5, 11]} cls="a-latch" />
+          <polygon className="a-hole" points={iso.pts(onLeft(d, x + 3, x + 6, chestH - 6, chestH - 4))} />
+        </g>
+      ))}
+      <polygon className="a-seam" points={iso.pts(onLeft(d, 0, w, chestH - 0.6, chestH + 0.4))} />
+      <polygon className="a-seam" points={iso.pts(onRight(w, 0, d, chestH - 0.6, chestH + 0.4))} />
+      {/* The drawer tier, stepped in, with a drawer pull. */}
+      <Box iso={iso} at={[0, tierIn, tierZ]} size={[w, d - 2 * tierIn, tierH]} cls="a-tier" />
+      <Box iso={iso} at={[w / 2 - 12, d - tierIn - 1.5, tierZ + 7]} size={[24, 1.5, 4]} cls="a-latch" />
+      {/* The carry handle, rooted in the tier's top. */}
+      <path className="a-handle" d={`M${iso.pts(handle).replace(/ /g, 'L')}`} />
+      <polyline className="a-handle-grip" points={iso.pts([[32, handleY, hz1], [72, handleY, hz1]])} />
+      {/* The tray, swung out over the front, divided, with the tools in their bays. */}
+      <g className="a-tray-open">
+        <Tray iso={iso} at={[trayX, tierIn + 2, trayZ]} size={[w - 10, d - 2 * tierIn - 4, trayH]} t={t} floor={3}>
+          {/* Dividers: one along, two across the right half. */}
+          <Box iso={iso} at={[trayX + 44, tierIn + 2 + t, trayZ + 3]} size={[1.6, d - 2 * tierIn - 4 - 2 * t, 10]} cls="a-tray" />
+          <Box iso={iso} at={[trayX + 44, tierIn + 2 + (d - 2 * tierIn - 4) / 2, trayZ + 3]} size={[w - 10 - 44 - t, 1.6, 10]} cls="a-tray" />
+          {/* A screwdriver and a wrench along the long bay. */}
+          <Box iso={iso} at={[trayX + 6, tierIn + 10, trayZ + 3]} size={[14, 5, 5]} cls="a-accent" />
+          <Box iso={iso} at={[trayX + 20, tierIn + 11.5, trayZ + 3]} size={[20, 2, 2]} cls="a-metal" />
+          <Box iso={iso} at={[trayX + 6, tierIn + 24, trayZ + 3]} size={[34, 3.5, 2.5]} cls="a-metal" />
+          <Cylinder iso={iso} x={trayX + 8} y={tierIn + 25.7} z0={trayZ + 3} z1={trayZ + 5.5} r={4.2} cls="a-metal" />
+          <Cylinder iso={iso} x={trayX + 38} y={tierIn + 25.7} z0={trayZ + 3} z1={trayZ + 5.5} r={3.4} cls="a-metal" />
+          {/* Sockets in the near-right bay, bits in the far-right one. */}
+          {[0, 1, 2].map((i) => (
+            <Cylinder key={i} iso={iso} x={trayX + 53 + i * 12} y={tierIn + 36} z0={trayZ + 3} z1={trayZ + 11} r={4.4} cls="a-metal" />
+          ))}
+          {[0, 1, 2, 3].map((i) => (
+            <Cylinder key={i} iso={iso} x={trayX + 52 + i * 9} y={tierIn + 14} z0={trayZ + 3} z1={trayZ + 9} r={1.8} cls="a-accent" />
+          ))}
+        </Tray>
       </g>
     </svg>
   );
