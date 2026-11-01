@@ -142,6 +142,31 @@ describe('#382 columnCutterFor — the simulator\'s resolver, not the CAM\'s', (
     expect(sweepsOnColumn(CHAMFER)).toBe(true);
     expect(sweepsOnColumn(flatEndMill(2))).toBe(false);
   });
+
+  // #835 — THE ROTARY PARAMETERISATION IS PART OF THE PREDICATE. The panel's substitution must ask
+  // the same question the sweep asks, and a turntable column holds only a flat, a ball and a V.
+  it('refuses the rotary parameterisation’s shapes here, so the panel and the sweep share one answer', () => {
+    const BULL = { ...flatEndMill(3.175), name: '3.175 bull 0.5', shape: 'bull' as const, cornerRadius: 0.5, diameter: 3.175 };
+    for (const [tool, word] of [
+      [DRILL, 'a drill'],
+      [BULL, 'a bull nose'],
+      [THREAD, 'a thread mill'],
+    ] as const) {
+      // Admitted on the flat engine…
+      expect(columnCutterFor(tool, SHOP).ok).toBe(true);
+      // …and refused on a wrapped job, in the sweep's own sentence.
+      const r = columnCutterFor(tool, SHOP, { rotary: true });
+      expect(r.ok).toBe(false);
+      if (r.ok) continue;
+      expect(r.reason).toContain('the rotary column engine sweeps a flat end mill, a ball nose or a V-bit only');
+      expect(r.reason).toContain(word);
+      expect(r.reason).toContain(tool.name);
+    }
+    // The three the wrapped grid models are still admitted.
+    for (const tool of [flatEndMill(2), { ...flatEndMill(2), shape: 'ball' as const, typeText: 'Ball' }, CHAMFER]) {
+      expect(columnCutterFor(tool, SHOP, { rotary: true }).ok).toBe(true);
+    }
+  });
 });
 
 describe('#382 known volumes on the flat column engine', () => {

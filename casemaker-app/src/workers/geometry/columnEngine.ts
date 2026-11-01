@@ -293,8 +293,35 @@ export type ColumnCutterResult =
  *     corner radius up to `R`, so a move leaves a filleted corner. Refused if it states no corner.
  *
  * A tapered ball, an unknown shape: refused, as before (#222).
+ *
+ * #835 — THE ROTARY PARAMETERISATION IS PART OF THE PREDICATE, not a check bolted onto the sweep.
+ * A turntable column holds ONE radius per (θ, X), so only a flat, a ball and a V have a profile
+ * about the axis (#763); a drill's cone point, a bull's corner and a thread mill's envelope are
+ * not modelled and are refused with the sentence `columnSweep` used to raise on its own. The
+ * panel's substitution predicate asks this same function with `rotary`, so the app and the sweep
+ * cannot disagree about which records a wrapped job can run.
  */
-export function columnCutterFor(tool: Tool, drillDefault?: DrillPointDefault | null): ColumnCutterResult {
+export function columnCutterFor(
+  tool: Tool,
+  drillDefault?: DrillPointDefault | null,
+  opts?: { rotary?: boolean },
+): ColumnCutterResult {
+  const resolved = columnCutterForShape(tool, drillDefault);
+  if (!resolved.ok || opts?.rotary !== true) return resolved;
+  if (resolved.kind === 'flat' || resolved.kind === 'ball' || resolved.kind === 'v') return resolved;
+  const what =
+    resolved.kind === 'drill'
+      ? 'a drill, whose cone point about a turntable axis is not modelled'
+      : resolved.kind === 'bull'
+        ? 'a bull nose, whose rounded corner about a turntable axis is not modelled'
+        : 'a thread mill, whose envelope about a turntable axis is not modelled';
+  return {
+    ok: false,
+    reason: `the rotary column engine sweeps a flat end mill, a ball nose or a V-bit only; tool "${tool.name}" is ${what}`,
+  };
+}
+
+function columnCutterForShape(tool: Tool, drillDefault?: DrillPointDefault | null): ColumnCutterResult {
   if (tool.shape === 'drill') {
     const d = cuttingDiameter(tool);
     if (d === null || !(d > 0)) {
@@ -1694,23 +1721,10 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   // drill's bounded point and a thread mill's envelope (#382); ROTARY takes a flat end mill only, and
   // refuses the rest by name rather than sweeping them as one — a V-bit on a turntable is #221's
   // chamfer-profile work, and a drill or a thread mill about the A axis has no model here.
-  const resolved = columnCutterFor(tool, opts?.drillPointDefault);
+  // #763/#835 — the rotary engine sweeps a FLAT, a BALL and a V (R-UI-12); the refusal for the
+  // rest is the RESOLVER's own (#835 moved it there), so the panel reads the same predicate.
+  const resolved = columnCutterFor(tool, opts?.drillPointDefault, { rotary });
   if (!resolved.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: resolved.reason }] };
-  // #763 — the rotary engine sweeps a FLAT, a BALL and a V now: each is a profile above the tip
-  // over the same arc-plane columns (R-UI-12). Drills, bull noses and thread mills stay refused —
-  // their bodies about a turntable axis are not modelled.
-  if (rotary && resolved.kind !== 'flat' && resolved.kind !== 'ball' && resolved.kind !== 'v') {
-    const what =
-      resolved.kind === 'drill'
-        ? 'a drill, whose cone point about a turntable axis is not modelled'
-        : resolved.kind === 'bull'
-          ? 'a bull nose, whose rounded corner about a turntable axis is not modelled'
-          : 'a thread mill, whose envelope about a turntable axis is not modelled';
-    return {
-      ok: false,
-      diagnostics: [{ severity: 'error', code: 'tool-refused', message: `the rotary column engine sweeps a flat end mill, a ball nose or a V-bit only; tool "${tool.name}" is ${what}` }],
-    };
-  }
   const param: ColumnParameterisation = rotary ? ROTARY : FLAT;
   if (rotary && setup.part.kind !== 'cylinder') {
     return { ok: false, diagnostics: [{ severity: 'error', code: 'rotary-stock', message: `the rotary column engine sweeps a cylinder stock; the setup's part is a ${setup.part.kind}` }] };

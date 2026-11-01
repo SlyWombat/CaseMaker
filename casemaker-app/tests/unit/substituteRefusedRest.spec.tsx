@@ -134,6 +134,19 @@ function drillJob(toolKey: string, tool: Tool): EngraveJob {
   };
 }
 
+/** The same job on a wrapped rod: `rotaryMapOf` reads the stock shape and the chuck. */
+function rotaryJob(toolKey: string, tool: Tool): EngraveJob {
+  const job = drillJob(toolKey, tool);
+  return {
+    ...job,
+    stock: { ...job.stock, shape: 'cylinder', diameter: 20, width: 20 },
+    workholding: {
+      kind: 'rotary-chuck',
+      rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' },
+    },
+  };
+}
+
 /** The measured answer: the cutters the search chose, in program order. */
 function measuredPlan(cutters: { key: string; items: string[] }[]): EngravePickSummary {
   return {
@@ -239,6 +252,36 @@ describe('#786 slice 6 — a refused cutter and a missing rest cutter are substi
     const after = useEngraveJobStore.getState().job;
     expect(after.toolKey).toBe(KEY_DRILL);
     expect(after.substitution).toBeUndefined();
+  });
+
+  // #835 — THE SAME DRILL IS REFUSED ON A WRAPPED JOB. A turntable column holds one radius per
+  // (θ, X), so a drill's cone point has no profile there; the substitution predicate asks the
+  // simulator's resolver WITH the job's frame, and the sentence names the cutter that sweeps it.
+  it('#835 — a drill the rotary engine cannot model is substituted, and the sentence names the flat', () => {
+    const job = rotaryJob(KEY_DRILL, DRILL);
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    useEngravePreviewStore.setState({
+      preview: barePreview(),
+      status: 'ready',
+      measured: measuredPlan([{ key: KEY_FLAT, items: ['hole'] }]),
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+
+    render(<EngravePanel />);
+
+    const after = useEngraveJobStore.getState().job;
+    expect(after.toolKey).toBe(KEY_FLAT);
+    expect(after.substitution).toMatchObject({
+      fromKey: KEY_DRILL,
+      reason: 'refused',
+      toKey: KEY_FLAT,
+    });
+    const note = screen.getByTestId('engrave-cutter-line').textContent ?? '';
+    expect(note).toContain('cannot cut this job');
+    expect(note).toContain('is used instead');
   });
 
   it('`setup-rest-unavailable`: a setup’s missing later cutter is replaced, keeping the operator’s program-1 cutter', () => {

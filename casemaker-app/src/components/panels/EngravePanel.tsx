@@ -1932,16 +1932,20 @@ export function EngravePanel(): JSX.Element {
     feeds !== null &&
     !feeds.ok &&
     feeds.cause !== 'values';
+  // #835 — THE JOB'S FRAME, as the sweep reads it: a wrapped job's column grid has one radius per
+  // (θ, X) column, so the rotary parameterisation is part of the cutter's own predicate.
+  const rotaryHeld = rotaryMapOf(job) !== null;
   // #786 slice 6 — `tool-refused` AND `setup-rest-unavailable` ANSWER THE SAME QUESTION AS A
   // MISSING KEY. Both are computed here, in the effect, because both read `measuredNow` and the
   // panel's own shop readings — a fresh object each render would otherwise re-run the effect on
   // every keystroke.
   //
   //   - `tool-refused`: a record the CAM cannot model (a V with no tip or angle, a drill or thread
-  //     mill with no cutting diameter, a shape with no profile). The predicate is the simulator's
-  //     OWN resolver, `columnCutterFor` — the check `columnSweep` makes before it sweeps — handed
-  //     the run's own drill default, so the panel and the run cannot disagree about which records
-  //     are refused.
+  //     mill with no cutting diameter, a shape with no profile), and — #835 — a shape the ROTARY
+  //     parameterisation has no profile for (a drill, a bull nose or a thread mill on a wrapped
+  //     job). The predicate is the simulator's OWN resolver, `columnCutterFor` — the check
+  //     `columnSweep` makes before it sweeps — handed the run's own drill default and the job's
+  //     frame, so the panel and the run cannot disagree about which records are refused.
   //   - `setup-rest-unavailable`'s "not on this bench": a setup's LATER cutter key that resolves to
   //     nothing. `applyCutterPlanToJob` rewrites the FIRST setup's cutters, so only a missing key
   //     there is answered here — one in a later setup keeps the finding's own sentence rather than
@@ -1960,9 +1964,16 @@ export function EngravePanel(): JSX.Element {
     const firstSetupTools = jobSetups(job)[0]?.tools ?? [];
     const missingRestKey =
       firstSetupTools.slice(1).find((key) => key !== job.toolKey && toolForIn(tools, key) === null) ?? null;
+    // #835 — the ROTARY frame is part of the question: a drill, bull or thread on a wrapped job is
+    // refused by the sweep exactly as a shapeless record is on a flat one, so it is substituted by
+    // the same measured answer and the sentence names the cutter that now sweeps it.
     const simRefused =
       namedNow !== null &&
-      !columnCutterFor(namedNow, { deg: drillShop.settings.pointAngleDeg, source: drillShop.sources.pointAngleDeg }).ok;
+      !columnCutterFor(
+        namedNow,
+        { deg: drillShop.settings.pointAngleDeg, source: drillShop.sources.pointAngleDeg },
+        { rotary: rotaryHeld },
+      ).ok;
     const restSubstitutable =
       missingRestKey !== null &&
       measuredNow !== null &&
@@ -2035,7 +2046,7 @@ export function EngravePanel(): JSX.Element {
     const key = rec?.key ?? null;
     if (key === null) return;
     if (job.toolKey !== key) setTool(key, 'computed');
-  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, job.substitution, job.setups, namedSplit, namedMissing, namedRefused, namedNow, feeds, tools, drillShop, job.stock.material, applyCutterPlan, setTool]);
+  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, job.substitution, job.setups, namedSplit, namedMissing, namedRefused, namedNow, feeds, tools, drillShop, rotaryHeld, job.stock.material, applyCutterPlan, setTool]);
 
   // ---- #798 — THE CUTTER AS ONE LINE ------------------------------------------------------
   // What is in the spindle, where that answer came from, and — when the measured search chose it
