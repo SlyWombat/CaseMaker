@@ -4874,6 +4874,68 @@ describe('#805 — the rotary oversize warning’s two answers', () => {
     expect(setup?.tools).toContain('inv:engrave-fine');
   });
 
+  it('#860 offers the inlay pair’s own V-bit, one press, when the male is cut with another', () => {
+    const base = useEngraveJobStore.getState().job;
+    const blank: EngraveShape = {
+      id: 'inlay-blank',
+      kind: 'rect',
+      position: { x: 40, y: 40 },
+      rotation: 0,
+      depth: 3.5,
+      width: 70,
+      height: 70,
+      cornerRadius: 0,
+      enabled: true,
+      construction: true,
+    };
+    const island: EngraveShape = { ...blank, id: 'inlay-plug-1', name: 'plug', width: 20, height: 20 };
+    const tanHalf = Math.tan(Math.PI / 12);
+    const male: EngraveCombinedShape = {
+      id: 'inlay-male-1',
+      kind: 'cutaway',
+      name: 'male plugs',
+      position: { x: 0, y: 0 },
+      rotation: 0,
+      depth: 3.5,
+      enabled: true,
+      outer: 'inlay-blank',
+      islands: ['inlay-plug-1'],
+      inlay: { role: 'male', glueGapMm: 1.3, pocketDepthMm: 4.8, tanHalf, islandInsetMm: 4.8 * tanHalf },
+    };
+    const job: EngraveJob = {
+      ...base,
+      labels: [],
+      shapes: [blank, island],
+      combined: [male],
+      vectors: [],
+      toolKey: 'inv:wrong-v',
+      setups: undefined,
+    };
+    act(() => useEngraveJobStore.setState({ job }));
+    const preview = {
+      colourBoundaryDepth: null,
+      recommendation: null,
+      findings: [
+        {
+          severity: 'warning',
+          code: 'inlay-cone-mismatch',
+          labelId: 'inlay-male-1',
+          message: 'Pocket cutaway "male plugs" was built for a 30° V, but the job’s cutter …',
+          suggestedCutterKey: 'inv:kz-engrave-30-0-5',
+          suggestedCutterDeg: 30,
+        },
+      ],
+    } as unknown as EngravePreview;
+    act(() => useEngravePreviewStore.setState({ preview, status: 'ready' }));
+    render(<EngravePanel />);
+
+    fireEvent.click(screen.getByTestId('engrave-combined-expand-0'));
+    const button = screen.getByTestId('engrave-inlay-use-pair-cutter');
+    expect(button.textContent).toBe('Use the 30° bit');
+    fireEvent.click(button);
+    expect(useEngraveJobStore.getState().job.toolKey).toBe('inv:kz-engrave-30-0-5');
+  });
+
 
   // #830 — the run's progress line names the SIMULATION too: a sweep of several programs used to
   // show a bare "Working…", which is the hang the maintainer saw; and a stopped run says why and

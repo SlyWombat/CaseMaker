@@ -270,6 +270,11 @@ export type JobFindingCode =
   // erosion removes and the measured offers. INFO while the visible face keeps the shop's detail
   // bar; WARNING when it loses more.
   | 'inlay-plug-face'
+  // #860 — the male's cutter is not the cone the pair was built for. A WARNING, not a refusal
+  // (inform, don't refuse): the job cuts as it stands, the sentence states which way the plug's
+  // flank misses (a gap inside her wall, or too large to enter), and the fit correction is offered
+  // one press away when the library still holds the pair's bit.
+  | 'inlay-cone-mismatch'
   | 'inlay-gap'
   | 'inlay-plane-depth'
   // Surface textures (#670). A texture is a pattern of stroke TRACES over one simple region:
@@ -550,6 +555,11 @@ export interface JobFinding {
    */
   suggestedCutterKey?: string;
   suggestedCutterDiameterMm?: number;
+  /**
+   * #860 — on `inlay-cone-mismatch`, the included angle (degrees) of the V-bit the inlay pair was
+   * built for: the panel's one-press fix names it ("Use the 30° bit") and assigns its key.
+   */
+  suggestedCutterDeg?: number;
   /**
    * #786 slice 5 — on `bore-narrow`, the cutter's own diameter, mm: the hole a plunge with this
    * cutter would make. The panel's one-click "Plunge it at ⌀X" turns the bore into that drill.
@@ -2471,23 +2481,43 @@ export function validateJob(
     // The male's numbers are the ones it was BUILT for: its cut depth is the plug's, and its
     // island's erosion is what keeps the plug inside the female's wall.
     //
-    // #860 — AND THE CONE MUST BE THE ONE THE PAIR WAS BUILT FOR. The plug mates with the female's
-    // wall because both are the SAME flank; cutting the male with a different V is a plug that
-    // cannot close, whatever its stored numbers say. The marker stores the tangent it was derived
-    // with, so the job's own cutter is judged against it.
-    if (mark.tanHalf !== undefined && Math.abs(mark.tanHalf - inlayCone.tanHalf) > 1e-6) {
-      const included = (tan: number): string => `${Number(((2 * Math.atan(tan) * 180) / Math.PI).toFixed(1))}°`;
+    // #860 — AND THE CONE IS JUDGED AGAINST THE ONE THE PAIR WAS BUILT FOR. The plug mates with
+    // the female's wall because both are the SAME flank; cutting the male with a different V is a
+    // plug that cannot close, whatever its stored numbers say. Inform, don't refuse: the job cuts
+    // as it stands, the sentence states which way the flank misses, and the pair's own bit is
+    // offered one press away when the library still holds it.
+    const pairTan = mark.tanHalf;
+    if (pairTan !== undefined && Math.abs(pairTan - inlayCone.tanHalf) > 1e-6) {
+      const includedDeg = (tan: number): number => Number(((2 * Math.atan(tan) * 180) / Math.PI).toFixed(1));
+      const plugDepthMm =
+        mark.pocketDepthMm !== undefined && mark.glueGapMm !== undefined
+          ? mark.pocketDepthMm - mark.glueGapMm
+          : item.depth;
+      // Positive: the male's flank cuts INSIDE the female's wall (a gap); negative: outside it
+      // (the plug would not enter). One number, the horizontal miss at the plug's base, mm a side.
+      const mismatchMm = plugDepthMm * (pairTan - inlayCone.tanHalf);
+      const pair = (options.tools ?? []).find((entry) => {
+        const cone = vCone(entry.tool);
+        return cone !== null && Math.abs(cone.tanHalf - pairTan) <= 1e-6 && entry.key !== job.toolKey;
+      });
       findings.push({
-        severity: 'error',
-        code: 'inlay-gap',
+        severity: 'warning',
+        code: 'inlay-cone-mismatch',
         labelId: item.id,
         message:
-          `${who} was built for a ${included(mark.tanHalf)} V, but the job's cutter ` +
-          `"${inlayTool.name}" is ${included(inlayCone.tanHalf)}: its plug's flank would not mate ` +
-          'with the female’s wall. Choose the V-bit the pair was built for, or save the male ' +
-          'blank from the female’s job again.',
+          `${who} was built for a ${fmt3(includedDeg(pairTan))}° V, but the job's cutter ` +
+          `"${inlayTool.name}" is ${fmt3(includedDeg(inlayCone.tanHalf))}°: at its base the plug's ` +
+          `flank would ` +
+          (mismatchMm >= 0
+            ? `sit ${fmt3(mismatchMm)} mm a side inside the female's wall, leaving that as a gap`
+            : `stand ${fmt3(-mismatchMm)} mm a side outside her pocket and would not enter`) +
+          `. The job cuts as it stands; choose the ${fmt3(includedDeg(pairTan))}° bit the pair ` +
+          'was built for, or save the male blank from the female’s job again.' +
+          (pair === undefined ? ' The tool library holds no such bit.' : ''),
+        ...(pair === undefined
+          ? {}
+          : { suggestedCutterKey: pair.key, suggestedCutterDeg: includedDeg(pairTan) }),
       });
-      continue;
     }
     if (mark.islandInsetMm === undefined) {
       findings.push({

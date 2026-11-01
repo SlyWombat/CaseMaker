@@ -531,17 +531,35 @@ describe('#860 the male plug, judged against the pocket it fills', () => {
     expect(f.message).toContain('above the floor');
   }, 120_000);
 
-  it('a male cut with a different V is refused: its flank would not mate with the female’s wall', () => {
+  it('a male cut with a different V warns, states the miss, and offers the pair’s bit', () => {
     const male = inlayMaleJob(j11(), J11_CONE);
     if (!male.ok) throw new Error(male.reason);
+    // The pair's own bit, as the library would hold it; and a steeper 90° V in the spindle.
+    const pairEntry = { key: 'inv:kz-engrave-30-0-5', tool: j11Cutter(), provenance: 'test' };
     const ninety: Tool = { ...j11Cutter(), name: '90° V', angle: 90, halfAngle: 45 };
     const changed: EngraveJob = { ...male.job, toolKey: '', tool: ninety };
-    const finding = validateJob(changed).find((f) => f.code === 'inlay-gap' && /would not mate/.test(f.message));
-    expect(finding?.severity).toBe('error');
+    const finding = validateJob(changed, null, { tools: [pairEntry] }).find((f) => f.code === 'inlay-cone-mismatch');
+    // INFORM, DON'T REFUSE: a warning, the job cuts as it stands, and the miss is stated with its
+    // direction — a steeper V leaves the plug too large to enter the pocket.
+    expect(finding?.severity).toBe('warning');
     expect(finding?.message).toContain('30°');
     expect(finding?.message).toContain('90°');
-    // The male it was built for passes the same check: no cone-mismatch sentence.
-    expect(validateJob(male.job).some((f) => /would not mate/.test(f.message))).toBe(false);
+    expect(finding?.message).toContain('would not enter');
+    expect(finding?.message).toContain('The job cuts as it stands');
+    expect(finding?.suggestedCutterKey).toBe(pairEntry.key);
+    expect(finding?.suggestedCutterDeg).toBe(30);
+    // A SHALLOWER V misses the other way: the plug sits inside the wall and leaves a gap.
+    const twenty: Tool = { ...j11Cutter(), name: '20° V', angle: 20, halfAngle: 10 };
+    const shallow = validateJob({ ...male.job, toolKey: '', tool: twenty }, null, { tools: [pairEntry] }).find(
+      (f) => f.code === 'inlay-cone-mismatch',
+    );
+    expect(shallow?.message).toContain('leaving that as a gap');
+    // Without the pair's bit in the library the warning stands, with no one-press offer.
+    const alone = validateJob(changed).find((f) => f.code === 'inlay-cone-mismatch');
+    expect(alone?.suggestedCutterKey).toBeUndefined();
+    expect(alone?.message).toContain('holds no such bit');
+    // The male it was built for passes the same check.
+    expect(validateJob(male.job).some((f) => f.code === 'inlay-cone-mismatch')).toBe(false);
   }, 120_000);
 
   it('the measured pick scores the male by the plug’s visible face, not by its cutaway’s cut', () => {

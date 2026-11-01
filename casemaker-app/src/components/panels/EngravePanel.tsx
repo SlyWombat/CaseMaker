@@ -3978,6 +3978,15 @@ export function EngravePanel(): JSX.Element {
               <button type="button" data-testid="engrave-pcb-finer-engraver" onClick={() => giveIsolationToFinerEngraver(f)}>
                 Use the ⌀{f.suggestedCutterDiameterMm} mm engraver
               </button>
+            ) : f.code === 'inlay-cone-mismatch' && f.suggestedCutterKey !== undefined ? (
+              // #860 — a male inlay half cut with the wrong V: the pair's own bit, one press away.
+              <button
+                type="button"
+                data-testid="engrave-inlay-use-pair-cutter"
+                onClick={() => setTool(f.suggestedCutterKey!)}
+              >
+                Use the {f.suggestedCutterDeg === undefined ? '' : `${f.suggestedCutterDeg}° `}bit
+              </button>
             ) : null)
           }
           rest={shape.construction === true ? null : restFor(shape.id)}
