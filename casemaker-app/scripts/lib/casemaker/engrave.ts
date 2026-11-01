@@ -963,8 +963,12 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // the blank instead — still checked for fixture, stock and rapid collisions — and the receipt
     // carries an info note naming the program, rather than refusing a good drill or V job over a
     // limitation of the sweep.
-    const sweptIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
-    if (sweptIndex < 0 || generated.programs[sweptIndex]!.nc !== nc) {
+    // #869 — THE TOP-LEVEL ADAPTER IS THE PROGRAM `nc` DESCRIBES. Usually that is the first
+    // ENGRAVING program; a goal split into a flat rough and the ball's finish posts the rough
+    // first, and `nc` (with `cam`, `verify` and the run sheet) is the FINISH — the part — which is
+    // the second file. Find it by its text, not by its position.
+    const sweptIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing' && p.nc === nc);
+    if (sweptIndex < 0) {
       fail('the generator did not list the program this run swept');
     }
     /** A program's sweep stopped the run, in the same words program 1 has always used (#393). */
@@ -1190,10 +1194,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // as `<stem>.nc` and `<stem>-rest.nc` and a collision is a defect rather than a silent overwrite.
     const stem = stemFor(job);
     const names = programFileNames(job.name, generated.programs);
-    // The program `prepare` swept is the first ENGRAVING program: the top-level adapter is that
-    // program, and the face file, when there is one, precedes it in the list.
-    const sweptIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
-    if (sweptIndex < 0 || generated.programs[sweptIndex]!.nc !== nc) {
+    // #869 — THE SHEET IS NAMED FOR THE FIRST ENGRAVING PROGRAM (cut order), while the top-level
+    // adapter `nc` is the program the generator's summary describes — the FINISHING program when a
+    // goal is split, else the first. Both indices are real: the header check reads one, the
+    // receipt's `sim` and file entry the other.
+    const firstEngraving = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
+    if (firstEngraving < 0) {
+      fail('the generator did not list the program this run swept');
+    }
+    const sweptIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing' && p.nc === nc);
+    if (sweptIndex < 0) {
       fail('the generator did not list the program this run swept');
     }
     // One sweep per program, in the same order (`prepare` walks `generated.programs`).
@@ -1230,8 +1240,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       MARGIN_DEFAULTS,
       opts.sheetOptions ?? {},
     );
-    if (sheet.header.fileName !== names[sweptIndex]!.ncFile) {
-      fail(`run sheet file name drifted: expected ${names[sweptIndex]!.ncFile}, got ${sheet.header.fileName}`);
+    if (sheet.header.fileName !== names[firstEngraving]!.ncFile) {
+      fail(`run sheet file name drifted: expected ${names[firstEngraving]!.ncFile}, got ${sheet.header.fileName}`);
     }
 
     // #733 — WRITE THE RUN, IN CUT ORDER. Every program carries its OWN sweep result (#733 item 4):

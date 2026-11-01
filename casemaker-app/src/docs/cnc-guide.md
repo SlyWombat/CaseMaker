@@ -916,9 +916,27 @@ Both are off unless the fold says otherwise, so a job written before #671 cuts e
 did. The program's check (the material sweep on the flat dexel) records the passes it judged as
 well as the grid it ran on, and the run sheet states the contour and crease counts.
 
-The goal row's **Technical** fold carries the operation's own numbers: the **cutter** (one cutter
-cuts both passes — a ball or bull nose finishes the surface round; a flat cutter finishes it
-faceted), the **roughing step-down** and **step-over**, the **finishing step-over**, the
+**Two cutters, two programs (#869).** A goal may rough with a **flat end mill** and finish with
+the ball — real 3D practice, and the only way the adaptive clearing engine (#846), which sweeps
+flat end mills only, reaches a goal at all. The measured cutter search offers both shapes for the
+goal's plan — the ball alone, and the same ball after a flat (each candidate sized nearest the
+ball's diameter first) — and the run's own measured cost, plus a stated allowance per tool change,
+decides. When the split is chosen the goal posts **two programs**: program 1 is the flat's rough,
+with its own feeds row (a flat takes a deeper step-down and a wider step-over than the ball),
+its own `surfaceCheck`, and its own `T`/`M6` — it is swept and judged like every file; program 2
+is the ball's finish, unchanged — the rim laps (#862), the parallel raster and the scallop and
+pencil passes ride the FINISHING cutter. The rough leaves the roughing allowance above the
+surface, which is what the finish (and a later rest pass, #847) lifts. The goal row and the run
+sheet state both cutters, the tool change, and which roughing pass ran and why — adaptive with
+its engagement cap, or the raster with the reason the adaptive route was not taken. A stated
+rough the shop cannot use (not in the library, not a flat end mill, or not feedable for the
+material) leaves the goal cut by one cutter and a warning says which. Surface **primitives**
+(#786 4a-2) stay on a single cutter: the split is the goal's.
+
+The goal row's **Technical** fold carries the operation's own numbers: the **cutter** (unless the
+goal is split into a flat rough and the ball's finish, above, one cutter cuts both passes — a ball
+or bull nose finishes the surface round; a flat cutter finishes it faceted), the **roughing
+step-down** and **step-over**, the **finishing step-over**, the
 **heightfield grid pitch** and the **stock to leave**. Each is prefilled from the default the
 engine would otherwise use — the feeds row's step-down and step-over for the passes, the shop's
 `finish.stockToLeaveMm` for the allowance and `sim.columnFlatPitchYMm` for the grid — and the row
@@ -1598,7 +1616,7 @@ simulation does report about one is the sweep's own list, next:
 | `primitive-not-vertical` | warning | A 3D primitive opens along X or Y instead of Z, so it is a side-opening undercut. The top-face CAM does not cut it: **that part of the stock stays**, and the sentence names the setup face that could reach it (or says no setup has it up). The rest of the job is generated (#435, #786 slice 4a). | Set its axis to Z, or add a setup with that face up. |
 | ~~`primitive-cone-needs-cam`~~ | — | Removed in #786 slice 4a-2; a cone is an analytic heightfield cut by its own 3D surface program (`primitive-surface-program`). | — |
 | ~~`primitive-sphere-needs-3d`~~ | — | Removed in #786 slice 4a-2; a sphere is an analytic heightfield cut by its own 3D surface program. | — |
-| `primitive-surface-program` | info | A cone or sphere primitive is cut by a 3D surface program of its own: the shape becomes an analytic top-Z field on the shop grid, and the 3D CAM's roughing and finishing passes cut it. The program carries a `surfaceCheck` (grid pitch, roughing layers, passes, bbox) instead of a 2.5D verifier report. With a flat cutter the finish is a stepped approximation; a ball follows the curve. | Nothing: the program is cut and checked. Use a ball nose for a true finish (the app offers the largest one that fits). |
+| `primitive-surface-program` | info | A cone or sphere primitive is cut by a 3D surface program of its own: the shape becomes an analytic top-Z field on the shop grid, and the 3D CAM's roughing and finishing passes cut it. The program carries a `surfaceCheck` (grid pitch, roughing layers, passes, bbox) instead of a 2.5D verifier report. With a flat cutter the finish is a stepped approximation; a ball follows the curve. A primitive is always ONE cutter: the goal's flat-rough/ball-finish split (#869) is the goal's, not the primitive's. | Nothing: the program is cut and checked. Use a ball nose for a true finish (the app offers the largest one that fits). |
 | `primitive-surface-ball-offer` | info | A cone or sphere is being cut by a flat end mill, whose finish is stepped, and the shop owns a ball cutter whose radius fits the surface's smallest curvature (the cone's tip radius, the sphere's own radius). The app proposes the LARGEST that fits, so the better cutter is one press away rather than something the operator has to search for (#786 4a-2). | Press "Cut the surface with …" on the primitive's row; it assigns the primitive to the ball and leaves every other item on its cutter. |
 | `target-object-not-cut` | warning | The job carries a target object — an imported STL, 3MF or STEP that the cut-aways are positioned against. It is a REFERENCE and is never removed from the stock: no program cuts around it, and the simulation draws no material taken away for it (#435). | Nothing if you only need the reference. Cutting the stock out around the object is the profile cut-out work (#218). |
 | `target-mesh-missing` | error (goal) · warning (reference) | The job names an imported mesh whose BYTES this browser no longer holds. The open job persists to localStorage, whose quota is small, so a mesh's bytes live in the app's IndexedDB store keyed by the file's SHA-256 and the document keeps only the hash, the size and the name; clearing site data, a different browser profile, or a mesh store write that failed leaves the job without them (#720). | Import the mesh file again — the SHA-256 will match and the job picks the bytes back up. |
@@ -1617,8 +1635,12 @@ simulation does report about one is the sweep's own list, next:
 | `goal-object-no-toolpath` | info | A target object is marked as the shape to MAKE and fits the blank, but this job is the **mixed** path — a goal beside ordinary items — so only the item program cuts. The goal is validated and previewed; the roughing and ball-nose finishing passes are generated only for a **pure-goal** job, whose only work is the goal mesh (#534). | Cut the goal in a job of its own (no items): the goal's row then carries the surfacing operation and its own controls (#535). |
 | `goal-chamfer-no-cutter` | warning | A goal asks for its edges to be chamfered (`chamfer` on the target object, #829) and no V program was posted: no V-bit has been chosen for it, the chosen key is not in the tool library, the record has no cone, or the V cannot be fed for this material. The goal is still surfaced; its edges are left square, and the sentence names which of those it is. | Choose a V-bit for the chamfer on the part’s row — the measured search fills this in when the library holds one. |
 | `goal-chamfer-no-rim` | warning | A goal asks for a 3D chamfer and the mesh has no TOP RIM to bevel — no edge where an up-facing top meets a wall (an open sheet, or a mesh whose edges are all between walls). The goal is surfaced; the edges are square, and the sentence carries the extractor’s own note. | Use a closed part mesh: the rim is the boundary of the surface the part stands on. |
+<<<<<<< HEAD
 | `goal-rest-pass` | info | A 3D goal’s finish left material where the finishing ball could not enter a concavity tighter than itself, and a smaller OWNED ball cuts it as its own program after the finish (#847). The pass is the same finishing raster over just the residual region, cut with that ball; the sentence names the ball, the volume the finish left, the moves and time, and the material the rest still leaves. | Nothing — the rest program follows the finish and loads its own cutter. |
 | `goal-rest-uncut` | info / warning | A 3D goal’s finish left material in a concavity tighter than the finishing ball, and no rest program was posted: no owned ball is smaller than the finishing one, or the post refused the rest pass (#847). INFO when the leftover would not show — no deeper than the shop’s `rest.visibleDepthMm` (0.1 mm seeded) and no more than `rest.thirdToolPct` (2 % seeded) of the material the goal removes; WARNING when either is past that (a ridge that reads as a step), or when a planned rest pass was refused by the post. The goal still posts; the sentence states the volume left, its depth and the ball diameter that would reach it. | Add a smaller ball to the tool library (Manage › Tools), or accept the finish as it is. |
+=======
+| `goal-rough-no-cutter` | warning | The goal names a flat roughing cutter (`roughToolKey`, #869) and it was not used: the key is not in the tool library, the record is not a flat end mill, it cannot be fed for this material, or it states no usable tool station. The goal is cut by one cutter — the ball both roughs and finishes, as before — and the sentence names which of those it is. | Pick a flat end mill the shop holds for the goal’s material; the measured search fills this in when one qualifies. |
+>>>>>>> d27c254e (fix(cli): the swept program is found by its text, not its position (#869))
 | `setup-no-tool` | error | A saved setup names no cutter, so there is no program to write for it (#419). Every setup is one program, and a program is one tool. | Name a cutter on that setup. |
 | `setup-items-unassigned` | error | A saved setup states a per-cutter item assignment, but an item in the setup is not assigned to any of its cutters — so that item would not be cut at all (#472). | Assign the item to a cutter, or remove it from the setup. |
 | `setup-items-duplicated` | error | A saved setup assigns one item to more than one cutter. An item is cut once; two programs would both cut it (#472). | Give the item to one cutter. |
