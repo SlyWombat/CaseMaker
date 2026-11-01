@@ -21,7 +21,7 @@
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob } from '@/types/engraveJob';
 import { copperSentence } from '@/engine/cnc/engrave/pcbWords';
-import type { MillProfile } from '@/engine/cnc/machine';
+import { MACHINE_RUN_ELSEWHERE, type MachinePost, type MillProfile } from '@/engine/cnc/machine';
 import type { OracleBbox, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
@@ -74,6 +74,18 @@ export interface ProgramOracle {
   report: OracleReport;
 }
 
+/**
+ * #845 — THE MACHINE FACTS THE RUN GATE READS. `rotary` is the module (a framed profile's); a
+ * stated machine carries none, and structurally it need not carry the field at all. `frameState`
+ * and `post` are here so the upload and release gates can state the export-only refusal
+ * (`MACHINE_RUN_ELSEWHERE`) rather than sending a file to a machine this app never connects to.
+ */
+export interface RunMachine {
+  rotary?: MillProfile['rotary'];
+  frameState?: MillProfile['frameState'] | 'unread' | 'stated';
+  post?: MachinePost;
+}
+
 export interface EngraveRunView {
   generated: EngraveGenerated | null;
   oracle: OracleReport | null;
@@ -103,7 +115,7 @@ export interface EngraveRunView {
    * `rotary.sources`. Optional: a caller with no machine (a script, a test) still gets every other
    * rule, and a rotary-held job with no machine is refused rather than assumed measured.
    */
-  machine?: Pick<MillProfile, 'rotary'> | null;
+  machine?: RunMachine | null;
   /**
    * #240/#545 — the job is held in the rotary chuck. The Save .nc / Upload / Release refusal is
    * about the JOB's workholding as well as the program's frame: in this slice the CAM still writes
@@ -359,7 +371,7 @@ export const ROTARY_NO_MODULE_REFUSAL =
  * block is a different refusal entirely ({@link ROTARY_NO_MODULE_REFUSAL}) and is decided by the
  * caller BEFORE this function, because "nothing to measure" is not "measured".
  */
-export function rotaryUnmeasured(machine: Pick<MillProfile, 'rotary'> | null | undefined): boolean {
+export function rotaryUnmeasured(machine: RunMachine | null | undefined): boolean {
   if (machine === undefined || machine === null) return true;
   const rotary = machine.rotary;
   if (rotary === undefined) return true;
@@ -447,6 +459,19 @@ export function saveBlocker(v: EngraveRunView): string | null {
 }
 
 /**
+ * #845 — WHY A STATED MACHINE'S FILE IS NEVER SENT FROM HERE. Its `.nc` is the deliverable: Case
+ * Maker writes it for the operator's own sender and never connects to the machine. Save is NOT
+ * blocked (the file is the point) — uploading and the release step are, and the sentence is the
+ * machine's own (`MACHINE_RUN_ELSEWHERE`) so the Cut panel, the run sheet and the Manage card
+ * cannot word it differently.
+ */
+export function runElsewhereBlocker(v: EngraveRunView): string | null {
+  const machine = v.machine;
+  if (machine === undefined || machine === null) return null;
+  return machine.frameState === 'stated' || machine.post === 'grbl' ? MACHINE_RUN_ELSEWHERE : null;
+}
+
+/**
  * Why uploading to the machine is disabled, or null when it is allowed (#255).
  *
  * **Never weaker than {@link saveBlocker}** — every reason Save is blocked is a reason Upload is
@@ -471,6 +496,8 @@ export function saveBlocker(v: EngraveRunView): string | null {
 export function uploadBlocker(v: EngraveRunView): string | null {
   const save = saveBlocker(v);
   if (save !== null) return save;
+  const elsewhere = runElsewhereBlocker(v);
+  if (elsewhere !== null) return elsewhere;
   const count = (v.generated?.programs ?? []).length;
   if (count > 1) return `this job is ${count} programs; the app plays one`;
   // #535 — a surface program carries no 2.5D report; its check is the dexel sweep, which
@@ -502,6 +529,8 @@ export function uploadBlocker(v: EngraveRunView): string | null {
 export function releaseBlocker(v: EngraveRunView): string | null {
   const save = saveBlocker(v);
   if (save !== null) return save;
+  const elsewhere = runElsewhereBlocker(v);
+  if (elsewhere !== null) return elsewhere;
   const programs = v.generated?.programs ?? [];
   if (programs.length === 0) return 'no program was produced';
   if (programs.some((p) => !(p.verify?.ok === true || p.surfaceCheck != null))) {

@@ -26,7 +26,7 @@
 import { aabbOfProfile, type Profile } from '@/engine/compiler/profile';
 import type { Mm, Vec2, Vec3 } from '@/types/units';
 import type { Sacrificial } from '@/types/engraveJob';
-import type { AxisRange, MillProfile } from './machine';
+import { workOriginOf, type AxisRange, type Mill } from './machine';
 
 export type Degrees = number;
 
@@ -198,9 +198,30 @@ function modelBounds(part: PartSpec): { min: Vec2; max: Vec2 } | null {
  * program reaching past it, that is genuinely larger than the envelope still reports
  * `outside-envelope`.
  */
-function machinePlacement(part: PartSpec, machine: MillProfile, zTop: Mm): Vec3 {
+function machinePlacement(part: PartSpec, machine: Mill, zTop: Mm): Vec3 {
   const centre = (r: AxisRange): Mm => (r.min + r.max) / 2;
   const b = modelBounds(part);
+  if (machine.frameState !== 'read') {
+    // #845 — A STATED MACHINE HAS NO TOOL-CHANGE SAFE HEIGHT TO HANG THE BLANK FROM, and it is
+    // never driven from here: the .nc goes to the operator's own sender. The stub's job is only
+    // to keep the emulator, the verifier and the oracle self-consistent, so the blank sits on the
+    // stated work area — its front-left corner on the envelope's when the machine states the
+    // corner convention (X0 Y0 at the stock's corner, so work and machine coordinates agree), and
+    // its centre on the envelope's when it states the centre convention (the WCS is then the
+    // stock's centre, and the post writes the shift).
+    if (workOriginOf(machine) === 'top-centre') {
+      return [
+        b ? centre(machine.envelope.x) - (b.min[0] + b.max[0]) / 2 : centre(machine.envelope.x),
+        b ? centre(machine.envelope.y) - (b.min[1] + b.max[1]) / 2 : centre(machine.envelope.y),
+        machine.envelope.z.min,
+      ];
+    }
+    return [
+      b ? machine.envelope.x.min - b.min[0] : machine.envelope.x.min,
+      b ? machine.envelope.y.min - b.min[1] : machine.envelope.y.min,
+      machine.envelope.z.min,
+    ];
+  }
   const x = b ? centre(machine.envelope.x) - (b.min[0] + b.max[0]) / 2 : centre(machine.envelope.x);
   const y = b ? centre(machine.envelope.y) - (b.min[1] + b.max[1]) / 2 : centre(machine.envelope.y);
   // The top face goes to the profile's safe Z — a height that is, by the firmware's own
@@ -221,7 +242,7 @@ function machinePlacement(part: PartSpec, machine: MillProfile, zTop: Mm): Vec3 
  * the cylinder's origin Z is the axis Z. Y ≡ 0 on the axis is the same statement in Y, and the
  * placed `at[1]` is already it.
  */
-export function stubSetup(part: PartSpec, workholding: Workholding, overrides: Partial<Setup> = {}, machine?: MillProfile): Setup {
+export function stubSetup(part: PartSpec, workholding: Workholding, overrides: Partial<Setup> = {}, machine?: Mill): Setup {
   const zTop = part.kind === 'prism' ? part.thickness : part.kind === 'cylinder' ? part.diameter / 2 : 0;
   // Without a machine the stub sits at the machine origin, which is fine for the frame
   // maths and useless on a real Z1, whose origin is the far top corner of a NEGATIVE
@@ -229,13 +250,21 @@ export function stubSetup(part: PartSpec, workholding: Workholding, overrides: P
   // envelope (see `machinePlacement`). It is still a stub: a real placement comes from probing
   // (decisions 26 and 28).
   const at: Vec3 = machine ? machinePlacement(part, machine, zTop) : [0, 0, 0];
+  // #845 — A CENTRE-ZERO MACHINE'S WCS IS THE STOCK'S CENTRE, not its corner: the post writes
+  // every X/Y about the centre, so the work offset that maps the program to the machine has to be
+  // the centre too, or the verifier's envelope check would test the wrong positions.
+  const b = modelBounds(part);
+  const centreZero =
+    machine !== undefined && machine.frameState !== 'read' && workOriginOf(machine) === 'top-centre';
+  const wx = centreZero && b ? at[0] + (b.min[0] + b.max[0]) / 2 : at[0];
+  const wy = centreZero && b ? at[1] + (b.min[1] + b.max[1]) / 2 : at[1];
   return {
     part,
     workholding,
     placement: { origin: at, rotationZ: 0, source: 'stub' },
     // The work origin: on the axis for a cylinder (#237), on the top face for a prism.
     wcs: {
-      origin: [at[0], at[1], part.kind === 'cylinder' ? at[2] : at[2] + zTop],
+      origin: [wx, wy, part.kind === 'cylinder' ? at[2] : at[2] + zTop],
       source: 'stub',
       uncertainty: 0.05,
     },

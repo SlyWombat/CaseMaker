@@ -55,6 +55,11 @@ function pauseMessage(p: PausePoint): string {
   if (p.kind === 'tool-change') {
     return `Tool change: ${toolLabel(p.fromTool)} → ${toolLabel(p.toTool)}. Press play to continue.`;
   }
+  if (p.kind === 'M0') {
+    // #845 — the GRBL machine's own pause: the file names the tool in its comment, the operator
+    // swaps the bit and re-zeroes Z, and the run continues from the same line.
+    return `Program pause at line ${p.line}: change the cutter if the file says to, re-zero Z, then press play to continue.`;
+  }
   return `${p.kind} pause at line ${p.line}. Press play to continue.`;
 }
 

@@ -1809,4 +1809,18 @@ describe('#773 a job names its own machine', () => {
     expect(long.ok).toBe(false);
     if (!long.ok) expect(long.errors.join(' ')).toMatch(/320/);
   });
+
+  // #845 — A STATED GRBL MACHINE IS A MACHINE A JOB MAY NAME. It carries no controller frame and
+  // none is needed: the `.nc` is written for the operator's own sender.
+  it('takes a Shapeoko job, with stock the Z1 could not hold', () => {
+    const parsed = parseEngraveJob(withPatch({ machineId: 'grbl:shapeoko-4', stock: stockOf({ length: 400, width: 300 }) }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.job.machineId).toBe('grbl:shapeoko-4');
+  });
+
+  it('still bounds a Shapeoko job by the Shapeoko’s own work area', () => {
+    const parsed = parseEngraveJob(withPatch({ machineId: 'grbl:shapeoko-4', stock: stockOf({ length: 900 }) }));
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.errors.join(' ')).toContain("900 mm long is more than the Shapeoko 4 XXL's 838.2 mm X travel");
+  });
 });

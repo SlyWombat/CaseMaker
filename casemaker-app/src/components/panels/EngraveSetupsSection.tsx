@@ -28,6 +28,7 @@ import { machineAt, useLocationStore } from '@/store/locationStore';
 import { newId } from '@/utils/id';
 import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements, type BracketSeatDatum } from '@/engine/cnc/mounts/bracket';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { clearanceZOf, rotaryOf } from '@/engine/cnc/machine';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
 import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
@@ -146,7 +147,9 @@ export function planRegistrationAttempt(args: {
   settings: ReturnType<typeof registrationSettings>['settings'];
 }): RegistrationAttempt {
   const { job, setup, mount, defaults, calibration } = args;
-  const seekFromMachineZ = jobMachine(job, calibration).toolChange.clearanceZ;
+  // #845 — a stated machine has no clearance to seek from; the preview it places a tap with is
+  // only run where a connected Makera machine exists, and the 0 is never used to place a touch.
+  const seekFromMachineZ = clearanceZOf(jobMachine(job, calibration)) ?? 0;
   let input: Parameters<typeof registrationFor>[2];
 
   if (mount.kind === 'bracket') {
@@ -308,7 +311,7 @@ export function EngraveSetupsSection({
   const bracketSeat = useMemo(() => bracketSeatDatumFor(machineRecord), [machineRecord]);
   // #599 — the mount tap point (machine XY), from the placement frame or the newest usable registration.
   const registrations = useEngraveRegistrationStore((s) => s.records);
-  const seekFromMachineZ = useMemo(() => jobMachine(job, calibration).toolChange.clearanceZ, [job, calibration]);
+  const seekFromMachineZ = useMemo(() => clearanceZOf(jobMachine(job, calibration)) ?? 0, [job, calibration]);
   const mountTap = useMemo(
     () => mountTapFor(machineRecord, Object.values(registrations), seekFromMachineZ, jobVise(job).jawStartY),
     [machineRecord, registrations, seekFromMachineZ, job],
@@ -330,7 +333,7 @@ export function EngraveSetupsSection({
     // #607 — the tap may be the bracket's or the rotary's now, so the note names neither.
     successNote: 'the mount reference is recorded — plan the registration again',
   });
-  const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
+  const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
   const suggested = useMemo(() => suggestedPlan(job, settings, rotaryEnvelope), [job, settings, rotaryEnvelope]);
   const savedPlan = useMemo(() => (job.setups !== undefined ? planFromSetups(job, settings, rotaryEnvelope) : null), [job, settings, rotaryEnvelope]);
   const offer = useMemo(() => addSetupOffer(job, settings, rotaryEnvelope), [job, settings, rotaryEnvelope]);

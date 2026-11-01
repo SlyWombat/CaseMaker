@@ -37,7 +37,9 @@ import {
   Z1,
   deriveCoordinateFrame,
   machineFrameProblemById,
+  millModelById,
   type CoordinateFrame,
+  type Mill,
   type MillProfile,
   type SoftEndstop,
 } from './machine';
@@ -344,7 +346,13 @@ export function resolvedMachineById(
 export function jobMachine(
   job: { machineId: string },
   calibration?: MachineCalibration | null,
-): MillProfile {
+): Mill {
+  // #845 — A STATED MACHINE IS ITS OWN ANSWER. A GRBL preset is a `MillModel` whose values the
+  // owner stated and which the app never connects to: there is no controller frame to resolve and
+  // none is invented. The generator reads its stated limits, rapid model and formatting precision
+  // exactly as it reads a profile's; the GRBL post writes no frame-derived position.
+  const model = millModelById(job.machineId);
+  if (model !== undefined && model.frameState === 'stated') return model;
   // #773 — a machine whose controller frame has never been read must not be answered with the
   // Z1's: its positions are exactly the numbers that would be wrong for a Carvera. A parsed job
   // can never name one (`engraveJobSchema` refuses it by name when it loads), so this throw is the

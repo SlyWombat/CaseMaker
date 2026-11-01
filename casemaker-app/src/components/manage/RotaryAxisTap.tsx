@@ -15,7 +15,7 @@ import { canReachMachine } from '@/platform/capabilities';
 import { probeFor } from '@/engine/cnc/registration/mountContext';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { machineFrameProblemById } from '@/engine/cnc/machine';
+import { clearanceZOf, machineFrameProblemById } from '@/engine/cnc/machine';
 import { useMountTap, useMountTapBusyFlag } from '@/hooks/useMountTap';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -47,6 +47,9 @@ export function RotaryAxisTap({ machine, testIdPrefix = 'rotary-tap' }: RotaryAx
   const probe = probeFor(machine);
   const frameProblem = machineFrameProblemById(machine.profileId);
   const profile = jobMachine({ machineId: machine.profileId ?? 'Z1' }, calibration);
+  // #845 — a stated machine has no clearance to seek from; the row is not offered for it (the
+  // `frameProblem` guard below returns null), so the 0 never places a touch.
+  const seekFromMachineZ = clearanceZOf(profile) ?? 0;
   const bedProfile = machine.bedProfiles?.find((p) => p.id === machine.activeBedProfileId) ?? null;
   const datum = bedProfile?.datums.rotaryAxis ?? null;
   const surfaceTop = bedProfile?.datums.surfaceTopZ ?? null;
@@ -84,7 +87,7 @@ export function RotaryAxisTap({ machine, testIdPrefix = 'rotary-tap' }: RotaryAx
       atX: nominal.x,
       nominal: { axisZ: nominal.axisZ, axisY: nominal.axisY, radiusMm: nominal.radiusMm },
       bedClearanceZ,
-      seekFromMachineZ: profile.toolChange.clearanceZ,
+      seekFromMachineZ,
       crownBand: {
         min: Math.max(nominal.axisZ - 5, bedClearanceZ),
         max: nominal.axisZ + nominal.radiusMm + 10,

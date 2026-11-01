@@ -95,7 +95,7 @@ import { cuttingDiameter, cuttingForTrace, feedRowDiameter, flatEndMill, unambig
 import type { Tool, ToolShape } from './tool';
 import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
 import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
-import type { ClampDiagnostic, MillProfile } from './machine';
+import type { ClampDiagnostic, Mill } from './machine';
 import { MATERIAL_LABELS, STOCK_MATERIALS } from './materials';
 import type { FieldSource, StockMaterial } from '@/types/engraveJob';
 
@@ -1108,7 +1108,7 @@ export type FeedsDiagnostic = ClampDiagnostic | CatalogueDiagnostic;
 function catalogueRefusal(
   field: CatalogueField,
   value: number,
-  machine: MillProfile,
+  machine: Mill,
   refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
 ): string | null {
   if (!Number.isFinite(value) || value <= 0) return 'it is not a positive number';
@@ -1273,7 +1273,7 @@ function entryFor(
   material: StockMaterial,
   tool: Tool,
   diameter: number,
-  machine: MillProfile,
+  machine: Mill,
   table: readonly FeedsEntry[],
   edge: 'flat' | 'v',
   refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
@@ -1487,7 +1487,7 @@ export function feedsFor(
   catalogue: readonly FeedCatalogueRow[] | FeedCatalogue,
   material: StockMaterial,
   tool: Tool,
-  machine: MillProfile,
+  machine: Mill,
   override?: Partial<CutParams>,
   table: readonly FeedsEntry[] = resolvedFeedsTable().table,
   /**

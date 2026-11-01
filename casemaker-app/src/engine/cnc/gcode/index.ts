@@ -1,5 +1,5 @@
 // Public surface of the G-code parser (#174, #182). See interpreter.ts for the design.
-export { parseGcode } from './interpreter';
+export { parseGcode, type GcodeDialect } from './interpreter';
 export { hasErrors } from './types';
 export type {
   CmHeader,

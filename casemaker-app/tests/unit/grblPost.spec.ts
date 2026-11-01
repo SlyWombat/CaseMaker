@@ -110,4 +110,20 @@ describe('#845 the GRBL post', () => {
     if (out.ok) return;
     expect(out.errors.join(' ')).toContain('a cut in the air');
   });
+
+  // #845 — THE WORK ORIGIN the machine's record states. `topCentre` writes every X/Y about the
+  // stock's centre (the convention most GRBL senders offer), and the header says so; the Zs do not
+  // move, because both origins put Z0 on the probed top face.
+  it('shifts every X/Y by half the stock for a centre-zero machine, and says centre', () => {
+    const out = postGrbl(ir(), { ...CTX, origin: 'topCentre' }, MACHINE);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    // Stock 20 × 10: (2, 2) posts as (-8, -3); (6, 2) as (-4, -3).
+    expect(out.text).toContain("; origin: topCentre — X0 Y0 at the stock's centre, Z0 on the probed top face");
+    expect(out.text).toMatch(/^G0 X-8 Y-3$/m);
+    expect(out.text).toMatch(/^G1 Z-0\.5 F300$/m);
+    expect(out.text).toMatch(/^G1 X-4 F600$/m);
+    // The Zs are untouched: the safe height is still 3, not shifted.
+    expect(out.text).toMatch(/^G0 Z3$/m);
+  });
 });

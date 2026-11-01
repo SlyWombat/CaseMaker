@@ -41,7 +41,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 // fall back to `dev`, so a generated-then-committed `.nc` was not byte-identical to the app's
 // own save (#231 item 4). package.json is the single source in every environment.
 import { version as CAM_VERSION } from '../../../package.json';
-import type { MillProfile } from '@/engine/cnc/machine';
+import { dialectOf, type Mill } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { catalogueCoverageFor, feedsFor, feedsToolForSurface, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import {
@@ -182,7 +182,8 @@ import {
   type Surface3dResult,
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
-import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
+import { type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
+import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
 import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
 import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
@@ -1440,7 +1441,7 @@ function vCarveFindings(
   plan: PartPlan,
   tool: Tool,
   cone: VCone,
-  machine: MillProfile,
+  machine: Mill,
   planeById: ReadonlyMap<string, VCarvePlane>,
   designById: ReadonlyMap<string, Polygons>,
   surfaceById: ReadonlyMap<string, Polygons>,
@@ -1743,7 +1744,7 @@ export function engraveRegions(
   tool: Tool | null,
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
-  machine: MillProfile | null = null,
+  machine: Mill | null = null,
   catalogue: readonly FeedCatalogueRow[] = [],
   /**
    * #677 — regions the DOCUMENT does not hold: the variable V-carve's cores, handed to the flat
@@ -3120,7 +3121,7 @@ function mountCtx(
  */
 export function frameTraceZ(
   setup: Setup,
-  machine: MillProfile,
+  machine: Mill,
   mount: MountObstacles | null | undefined,
   /** The job's fixture clearance, mm (the same number the mount's verifier gets). */
   clearanceMm: number,
@@ -3132,10 +3133,8 @@ export function frameTraceZ(
   // The POST's own precision, not a remembered three: the value must survive `formatFixed` to the
   // machine's decimals. A profile that wrote two would round 19.999 up to 20.000 and put the
   // breach straight back.
-  const decimals =
-    Number.isInteger(machine.dialect.axisPrecision) && machine.dialect.axisPrecision > 0
-      ? machine.dialect.axisPrecision
-      : 3;
+  const precision = dialectOf(machine).axisPrecision;
+  const decimals = Number.isInteger(precision) && precision > 0 ? precision : 3;
   const scale = 10 ** decimals;
   const step = 1 / scale;
   const round = (v: number): number => Math.round(v * scale) / scale;
@@ -3176,7 +3175,7 @@ export function frameTraceZ(
 function frameProgram(
   ir: ToolpathIR,
   ctx: PostContext,
-  machine: MillProfile,
+  machine: Mill,
   setup: Setup,
   tool: Tool,
   limit: DepthLimit,
@@ -3231,9 +3230,9 @@ function frameProgram(
       },
     ],
   };
-  const posted = postZ1(frameIr, ctx, machine, { vacuum: 'none' });
+  const posted = postFor(machine)(frameIr, ctx, { vacuum: 'none' });
   if (!posted.ok) return { error: posted.errors.join('; ') };
-  const verify = verifyProgram(posted.text, { setup, machine, tool, depthLimit: limit, minRapidZ: frameIr.hopZ, ...mountCtx(mount, clearanceMm, topLiftMm) });
+  const verify = verifyProgram(posted.text, { setup, machine, tool, dialect: postKey(machine), depthLimit: limit, minRapidZ: frameIr.hopZ, ...mountCtx(mount, clearanceMm, topLiftMm) });
   return { nc: posted.text, verify, z };
 }
 
@@ -3257,7 +3256,7 @@ function facingProgram(
   job: EngraveJob,
   depth: Mm,
   ctx: PostContext,
-  machine: MillProfile,
+  machine: Mill,
   setup: Setup,
   limit: DepthLimit,
   mount: MountObstacles | null | undefined,
@@ -3351,7 +3350,7 @@ function facingProgram(
       travelHeightOver(mount?.obstacles ?? [], job.jawClearance + topLiftMm, mount?.uncertainty ?? 0),
       machine.rapidEstimate,
     );
-    const posted = postZ1(ir, { ...ctx, toolKey }, machine, { vacuum: span });
+    const posted = postFor(machine)(ir, { ...ctx, toolKey }, { vacuum: span });
     if (!posted.ok) {
       return { nc: null, verify: null, toolKey, error: posted.errors.join('; '), cam: null };
     }
@@ -3359,6 +3358,7 @@ function facingProgram(
       setup,
       machine,
       tool,
+      dialect: postKey(machine),
       depthLimit: limit,
       minRapidZ: ir.hopZ,
       ...mountCtx(mount, job.jawClearance, topLiftMm),
@@ -4561,13 +4561,13 @@ export function generateRotaryGoalProgram(
     stock: { length: job.stock.length, width: diameter, thickness: diameter },
     materialName: job.stock.material,
     zDatum: 'rotary-axis',
-    origin: 'topFrontLeft',
+    origin: postOriginFor(mill),
     camVersion: CAM_VERSION,
     toolKey: job.toolKey,
   };
   let nc: string;
   try {
-    const posted = postZ1(relief.ir, ctx, mill, { vacuum: 'whole' });
+    const posted = postFor(mill)(relief.ir, ctx, { vacuum: 'whole' });
     if (!posted.ok) return fail('post', posted.errors.join('; '), resolved);
     nc = posted.text;
   } catch (e) {
@@ -5123,7 +5123,7 @@ export function generateGoalProgram(
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
     materialName: job.stock.material,
     zDatum: 'probed-top-face',
-    origin: 'topFrontLeft',
+    origin: postOriginFor(mill),
     camVersion: CAM_VERSION,
     toolKey: job.toolKey,
   };
@@ -5152,14 +5152,15 @@ export function generateGoalProgram(
   onProgress?.({ stage: 'post', label: 'posting the program' });
   try {
     if (roughIr !== null) {
-      const postedRough = postZ1(roughIr, { ...ctx, toolKey: goal.roughToolKey! }, mill, { vacuum: 'whole' });
+      // #845 — the rough program posts through the machine's own chooser like every other file.
+      const postedRough = postFor(mill)(roughIr, { ...ctx, toolKey: goal.roughToolKey! }, { vacuum: 'whole' });
       if (!postedRough.ok) return fail('post', postedRough.errors.join('; '), resolved);
       roughNc = postedRough.text;
     }
     // #771 — the goal's design preview is its own sampled heightfield, drawn in the blank's
     // frame. It is the same grid the toolpath was generated over (no second sampling), and the
     // post writes it as the same after-M02 comment block as an engrave program.
-    const posted = postZ1(finishIr, ctx, mill, {
+    const posted = postFor(mill)(finishIr, ctx, {
       vacuum: 'whole',
       thumbnail: heightfieldTopViewPng(job.stock, surfaced.heightfield),
     });
@@ -5511,7 +5512,7 @@ export function generateGoalProgram(
       return null;
     }
     const chamferIr = generateChamfer3d(cuts, entry.tool, chamferFeeds.params, mill.rapidEstimate);
-    const chamferPosted = postZ1(chamferIr, { ...ctx, toolKey: entry.key }, mill, { vacuum: 'whole' });
+    const chamferPosted = postFor(mill)(chamferIr, { ...ctx, toolKey: entry.key }, { vacuum: 'whole' });
     if (!chamferPosted.ok) {
       chamferFindings.push({
         severity: 'warning',
@@ -5760,13 +5761,13 @@ function generateSurfacePrimitiveProgram(
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
     materialName: job.stock.material,
     zDatum: 'probed-top-face',
-    origin: 'topFrontLeft',
+    origin: postOriginFor(mill),
     camVersion: CAM_VERSION,
     toolKey: job.toolKey,
   };
   let nc: string;
   try {
-    const posted = postZ1(surfaced.ir, ctx, mill, {
+    const posted = postFor(mill)(surfaced.ir, ctx, {
       vacuum: span,
       thumbnail: heightfieldTopViewPng(job.stock, field),
     });
@@ -6251,11 +6252,11 @@ function generateFaceProgram(
         stock: { length: job.stock.length, width: 2 * map.radius, thickness: 2 * map.radius },
         materialName: job.stock.material,
         zDatum: 'rotary-axis',
-        origin: 'topFrontLeft',
+        origin: postOriginFor(mill),
         camVersion: CAM_VERSION,
         toolKey: candKey,
       };
-      const postedFine = postZ1(fineIr, fineCtx, mill, { vacuum: 'none' });
+      const postedFine = postFor(mill)(fineIr, fineCtx, { vacuum: 'none' });
       if (!postedFine.ok) {
         uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
         continue;
@@ -6265,6 +6266,8 @@ function generateFaceProgram(
         setup: fineSetup,
         machine: mill,
         tool: group.entry.tool,
+        // A rest pass is cut on the same machine, in the same post's words.
+        dialect: postKey(mill),
         depthLimit: jobDepthLimit(job, margins.boundaryMargin),
         minRapidZ: fineIr.hopZ,
         rotary: { radius: map.radius, stickout: map.stickout, tailstock: map.tailstock },
@@ -6335,13 +6338,13 @@ function generateFaceProgram(
     stock: { length: job.stock.length, width: 2 * map.radius, thickness: 2 * map.radius },
     materialName: job.stock.material,
     zDatum: 'rotary-axis',
-    origin: 'topFrontLeft',
+    origin: postOriginFor(mill),
     camVersion: CAM_VERSION,
     toolKey: job.toolKey,
   };
   let nc: string;
   try {
-    const posted = postZ1(ir, ctx, mill, { vacuum: span });
+    const posted = postFor(mill)(ir, ctx, { vacuum: span });
     if (!posted.ok) return fail('post', posted.errors.join('; '), { findings: allFindings, feeds });
     nc = posted.text;
   } catch (e) {
@@ -6354,6 +6357,7 @@ function generateFaceProgram(
     setup,
     machine: mill,
     tool,
+    dialect: postKey(mill),
     depthLimit: limit,
     minRapidZ: ir.hopZ,
     rotary: { radius: map.radius, stickout: map.stickout, tailstock: map.tailstock },
@@ -7935,7 +7939,7 @@ function generateOneProgram(
     // #240 — the rotary frame measures every Z from the AXIS (R6); the post refuses the wrong
     // datum rather than writing a file whose heights mean something else.
     zDatum: rotaryMap === null ? 'probed-top-face' : 'rotary-axis',
-    origin: 'topFrontLeft',
+    origin: postOriginFor(mill),
     camVersion: CAM_VERSION,
     // #332: the key the JOB names, not anything off the `Tool` — a clone's rendered cutter carries
     // no identity of its own, and this is the line that lets the file say which cutter it was for.
@@ -7994,7 +7998,7 @@ function generateOneProgram(
     // the local top `lift(x, y)` rather than the flat work Z0.
     // #771 — the thumbnail rides in `PostOptions`, not the IR: it is a comment block after `M02`
     // and must never move a motion byte.
-    const posted = postZ1(postIr, { ...ctx, surface: surfaceFrame }, mill, {
+    const posted = postFor(mill)(postIr, { ...ctx, surface: surfaceFrame }, {
       vacuum: facing.nc !== null ? spanAfterFacing(span) : span,
       thumbnail: thumbnailPng,
     });
@@ -8014,6 +8018,7 @@ function generateOneProgram(
       setup,
       machine: mill,
       tool,
+      dialect: postKey(mill),
       depthLimit: limit,
       minRapidZ,
       ...(limitReasonAt ? { limitReasonAt } : {}),
@@ -8046,12 +8051,13 @@ function generateOneProgram(
     // carry it.
     let neckApartOne: OneProgram | null = null;
     if (neckIr !== null && typeof withNeck === 'object') {
-      const postedNeck = postZ1(neckIr, ctx, mill, { vacuum: withNeck.apart, thumbnail: null });
+      const postedNeck = postFor(mill)(neckIr, ctx, { vacuum: withNeck.apart, thumbnail: null });
       if (!postedNeck.ok) return stop('post', { feeds, message: `the neck file: ${postedNeck.errors.join('; ')}`, facing });
       const neckVerify = verifyProgram(postedNeck.text, {
         setup,
         machine: mill,
         tool,
+        dialect: postKey(mill),
         depthLimit: limit,
         minRapidZ: neckIr.hopZ,
         ...(limitReasonAt ? { limitReasonAt } : {}),

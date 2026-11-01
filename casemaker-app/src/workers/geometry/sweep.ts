@@ -30,7 +30,7 @@ import type { Timeline, Checkpoint, AirMove } from '@/engine/cnc/emulator/timeli
 import { DIAGNOSTIC_CAP } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
 import type { ObstacleBox, Setup } from '@/engine/cnc/setup';
-import type { MillProfile } from '@/engine/cnc/machine';
+import { holderOf, type Mill } from '@/engine/cnc/machine';
 import { inflate } from '@/engine/cnc/fixture';
 import { hasSacrificial, sacrificialBoxes } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
@@ -369,7 +369,7 @@ export interface SweepOpts {
    * guessing a cylinder — but only where that is actually the question: an obstacle rising ABOVE
    * the stock top. Below it the shoulder gate has already proven the shank clear (#314).
    */
-  machine?: MillProfile;
+  machine?: Mill;
   /**
    * The material a PREVIOUS program left, as a mesh (#410, the rest pass). Subtracted from the
    * stock before the sweep begins, so this program is simulated on the part the machine will
@@ -1272,7 +1272,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   const fixtureDiag = new DiagnosticFolder();
   // Cuts made with the probe active fold the same way (#191 item 9).
   const probeDiag = new DiagnosticFolder();
-  const holder = opts?.machine?.holder ?? null;
+  const holder = opts?.machine === undefined ? null : holderOf(opts.machine);
   // Where the nut sits is a property of the CUTTER, not of the fitting (#314). The collet grips
   // the shank and never the flutes, so the shank cannot enter past the point where it stops being
   // shank: the nut face is at least `shoulderLength` above the tip at ANY seating, and the depth

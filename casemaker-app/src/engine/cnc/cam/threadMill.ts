@@ -46,7 +46,7 @@
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { threadDims, threadLabel, type ThreadSize } from '@/engine/cnc/threadTable';
 import { catalogueCoverageFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { clampToMachine, type ClampDiagnostic, type MillProfile } from '@/engine/cnc/machine';
+import { clampToMachine, type ClampDiagnostic, type Mill } from '@/engine/cnc/machine';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { StockMaterial } from '@/types/engraveJob';
 import {
@@ -119,7 +119,7 @@ export function threadSettings(
   catalogue: readonly FeedCatalogueRow[],
   material: StockMaterial,
   tool: Tool,
-  machine: MillProfile,
+  machine: Mill,
 ): ThreadSettingsResult {
   const settings = {} as ThreadSettings;
   const sources = {} as Record<keyof ThreadSettings, string>;

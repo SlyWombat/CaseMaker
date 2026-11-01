@@ -125,9 +125,11 @@ export interface ToolChangeEvent extends BaseEvent {
 
 export interface PauseEvent extends BaseEvent {
   kind: 'pause';
-  // Only codes with evidence in the firmware or the corpus. `M0`/`M1` are deliberately
-  // absent: nothing read so far shows the Z1 implements them, so they are unknown codes.
-  reason: 'M490.1' | 'M490.2' | 'M600';
+  // Only codes with evidence in the firmware or the corpus. `M0`/`M1` are deliberately absent for
+  // the Z1 model: nothing read so far shows that firmware implements them, so they are unknown
+  // codes there. `M0` IS here because a GRBL 1.1 file is now read too (#845), where it is the
+  // program pause our GRBL post writes as the manual tool change.
+  reason: 'M490.1' | 'M490.2' | 'M600' | 'M0';
 }
 
 export interface SpindleEvent extends BaseEvent {

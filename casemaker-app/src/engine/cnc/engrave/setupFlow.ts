@@ -21,7 +21,7 @@
 import { defaultStockProud, jobVise, validateVise } from '@/engine/cnc/fixture';
 import { FEEDS_TABLE } from '@/engine/cnc/feeds';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
-import type { MillProfile } from '@/engine/cnc/machine';
+import type { Mill } from '@/engine/cnc/machine';
 import {
   hasSacrificial,
   noneSacrificial,
@@ -74,7 +74,7 @@ export interface MaterialOption {
  * options are built from whatever machine object a caller hands in, and a blank `<option>` is a
  * worse answer than a material that is simply not offered.
  */
-export function materialOptionsFor(machine?: MillProfile): MaterialOption[] {
+export function materialOptionsFor(machine?: Mill): MaterialOption[] {
   const options: MaterialOption[] = [];
   const seen = new Set<string>();
   const add = (material: StockMaterial): void => {

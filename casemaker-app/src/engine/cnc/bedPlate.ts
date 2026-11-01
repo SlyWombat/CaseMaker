@@ -31,7 +31,7 @@
  * feeds a gate; it is a picture.
  */
 
-import type { MillProfile } from './machine';
+import type { SizedMachine } from './machine';
 import type { Sacrificial, ViseParams } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 import { VISE_FLOOR_DEPTH, Z1_VISE } from './fixture';
@@ -66,7 +66,7 @@ export const VISE_JAW_CENTER_MACHINE_Y: Mm =
 export function machineBedPlate(
   vise: ViseParams,
   sacrificial: Sacrificial,
-  machine: MillProfile,
+  machine: SizedMachine,
   frame: ViseBedFrame | null = null,
 ): BedPlateBox {
   const shift = viseJawShift(sacrificial);

@@ -75,8 +75,12 @@ export interface PostContext {
   materialName: string;
   /** The datum every Z in the file is measured from. Two legal values; see above. */
   zDatum: 'probed-top-face' | 'rotary-axis';
-  /** Where X0 Y0 is. V1 supports one. */
-  origin: 'topFrontLeft';
+  /**
+   * Where X0 Y0 is. `topFrontLeft` is the Z1's own convention (X0 Y0 on the stock's front-left
+   * corner); `topCentre` is a stated GRBL machine's chosen convention, and only the GRBL post
+   * writes the shift (it moves every X/Y by half the stock).
+   */
+  origin: 'topFrontLeft' | 'topCentre';
   /** package.json version. */
   camVersion: string;
   /**

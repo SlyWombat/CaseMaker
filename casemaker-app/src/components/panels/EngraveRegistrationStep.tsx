@@ -87,6 +87,7 @@ import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { registrationTouches } from '@/engine/cnc/plan';
 import { faceUpOf, planFromSetups, setupsSettings } from '@/engine/cnc/setups';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { clearanceZOf, rotaryOf } from '@/engine/cnc/machine';
 import { planRegistrationAttempt } from './EngraveSetupsSection';
 import { EngraveCentreFind } from './EngraveCentreFind';
 import { RotaryAxisTap } from '@/components/manage/RotaryAxisTap';
@@ -211,7 +212,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   // #509 — the bracket's seat from the ACTIVE bed profile (bracket seat, else surface top).
   const bracketSeat = useMemo(() => bracketSeatDatumFor(machineRecord), [machineRecord]);
   const registrations = useEngraveRegistrationStore((s) => s.records);
-  const seekFromMachineZ = useMemo(() => jobMachine(job, calibration).toolChange.clearanceZ, [job, calibration]);
+  // #845 — a stated machine holds no probe and has no clearance to seek from: this step's actions
+  // need a connected Makera machine, which is null for one (`MACHINE_RUN_ELSEWHERE` on its card).
+  const seekFromMachineZ = useMemo(() => clearanceZOf(jobMachine(job, calibration)) ?? 0, [job, calibration]);
   const mountTap = useMemo(
     () => mountTapFor(machineRecord, Object.values(registrations), seekFromMachineZ, jobVise(job).jawStartY),
     [machineRecord, registrations, seekFromMachineZ, job],
@@ -219,7 +222,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
   const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
   const setupSettings = useMemo(() => setupsSettings(defaults), [defaults]);
-  const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
+  const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
   const proposal = useMemo<RegistrationAttempt | null>(() => {
     if (plan !== null || job.setups === undefined || job.setups.length === 0) return null;
     const savedPlan = planFromSetups(job, setupSettings, rotaryEnvelope);

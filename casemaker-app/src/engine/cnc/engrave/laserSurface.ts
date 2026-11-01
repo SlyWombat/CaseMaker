@@ -28,6 +28,7 @@ import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { LaserLift } from '@/platform/machineLaser';
 import type { EngraveJob } from '@/types/engraveJob';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { clearanceZOf, softEndstopOf } from '@/engine/cnc/machine';
 import { jobVise } from '@/engine/cnc/fixture';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
 import { clampPlacementsFor, jobMount } from './jobSetup';
@@ -116,9 +117,13 @@ export function laserLiftFor(
   setupIndex = 0,
 ): LaserLift {
   const resolved = jobMachine(job);
+  // #845 — A STATED MACHINE HAS NO LIFT THIS APP DRIVES. Its post writes no G53 and no probe, and
+  // the upload is refused by name (`MACHINE_RUN_ELSEWHERE`), so the two Zs the Makera laser motions
+  // are built from are simply not known — NaN, which `liftProblem` already answers as "not known"
+  // rather than inventing a height for a machine we never connect to.
   const base: LaserLift = {
-    zMachine: resolved.toolChange.clearanceZ,
-    zFloorMachine: resolved.softEndstop.zMin,
+    zMachine: clearanceZOf(resolved) ?? Number.NaN,
+    zFloorMachine: softEndstopOf(resolved)?.zMin ?? Number.NaN,
   };
   if (registration === null) return base;
   const bound = laserSurfaceBound(job, registration.surfaceMachineZ, defaults, setupIndex);

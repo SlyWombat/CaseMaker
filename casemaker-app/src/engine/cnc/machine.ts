@@ -210,6 +210,21 @@ export interface ToolRack {
   z: Mm;
   /** Where those positions come from — never left silent, because none of them is a measurement. */
   source: string;
+
+/**
+ * #845 — THE CONTROLLER'S G-CODE FORMATTING: what a POST writes to. `dialect` on a framed profile
+ * is the controller's own table; a stated GRBL machine carries {@link GRBL_FORMATTING}, the one
+ * constants GRBL 1.1 itself defines. Both are machine data, so the posts read one field through
+ * {@link dialectOf} rather than each deciding what precision to write.
+ */
+export interface MachineDialect {
+  /** The controller takes `G2`/`G3`; other CAM emits them. */
+  acceptsArcs: boolean;
+  /** It does NOT take canned cycles; the vendor's own post translates drill cycles. */
+  cannedCycles: boolean;
+  grblMode: boolean;
+  axisPrecision: number;
+  feedPrecision: number;
 }
 
 export interface MillProfile extends MachineIdentity {
@@ -362,15 +377,7 @@ export interface MillProfile extends MachineIdentity {
      */
     antistatic: boolean;
   };
-  dialect: {
-    /** The controller takes `G2`/`G3`; other CAM emits them. */
-    acceptsArcs: boolean;
-    /** It does NOT take canned cycles; the vendor's own post translates drill cycles. */
-    cannedCycles: boolean;
-    grblMode: boolean;
-    axisPrecision: number;
-    feedPrecision: number;
-  };
+  dialect: MachineDialect;
   /** Machine coordinates of the two anchor positions, the bed's native XY datum. */
   anchor1: Vec2;
   anchor2: Vec2;
@@ -1027,6 +1034,63 @@ export function workOriginOf(model: MillModel): WorkOrigin {
   return model.workOrigin ?? 'top-front-left';
 }
 
+/**
+ * #845 — THE FORMATTING A POST WRITES TO. A framed profile carries its controller's own table
+ * (`dialect`); a stated model's controller is GRBL 1.1, whose formatting the post's own constants
+ * state, because there is no controller configuration to read one from and no record field to
+ * carry one. Named here so both posts and the frame-height rule read one function.
+ */
+export function dialectOf(machine: Mill): MachineDialect {
+  return 'dialect' in machine ? machine.dialect : GRBL_FORMATTING;
+}
+
+/**
+ * #845 — GRBL 1.1's formatting: three axis decimals and two feed decimals, the same grid the Z1's
+ * post writes. Stated HERE because a stated machine has no controller configuration to read a table
+ * from: this is Case Maker's choice for the files it writes, not a vendor figure, and it is what the
+ * GRBL post's golden file pins. `acceptsArcs`/`cannedCycles` are GRBL 1.1's own capabilities; this
+ * app's CAM emits neither today.
+ */
+export const GRBL_FORMATTING: MachineDialect = {
+  acceptsArcs: true,
+  cannedCycles: true,
+  grblMode: true,
+  axisPrecision: 3,
+  feedPrecision: 2,
+};
+
+/**
+ * #845 — the collet nut a sweep or a verifier may model. A stated machine's holder has never been
+ * measured — nothing here drives it — and `null` is the profile's own word for "not measured", so
+ * every reader degrades to "cannot be proven" exactly as it does on an unmeasured Z1.
+ */
+export function holderOf(machine: Mill): HolderProfile | null {
+  return machine.frameState === 'read' ? machine.holder : null;
+}
+
+/**
+ * #845 — the rotary module a machine carries, if any. A stated machine states three axes
+ * (`RotaryProfile` is a framed profile's), so it answers none: `undefined` is the same word a Z1
+ * without the module uses, and every rotary reader already handles it.
+ */
+export function rotaryOf(machine: Mill): RotaryProfile | undefined {
+  return machine.frameState === 'read' ? machine.rotary : undefined;
+}
+
+/**
+ * #845 — the clearance Z a framed machine's tool-change macro lifts to, or null for a stated machine:
+ * it has no controller macro and this app never drives it. A caller that needs a number uses it only
+ * where it also refuses the stated case by name (`MACHINE_RUN_ELSEWHERE`).
+ */
+export function clearanceZOf(machine: Mill): number | null {
+  return machine.frameState === 'read' ? machine.toolChange.clearanceZ : null;
+}
+
+/** #845 — the soft-endstop model, or null when the machine carries no read controller frame. */
+export function softEndstopOf(machine: Mill): SoftEndstop | null {
+  return machine.frameState === 'read' ? machine.softEndstop : null;
+}
+
 /** The frame refusal for an id: null for a framed or UNKNOWN id, the sentence for an unread one. */
 export function machineFrameProblemById(id: string | null | undefined): string | null {
   const model = millModelById(id);
@@ -1428,7 +1492,10 @@ export const MILL_MODELS: Readonly<Record<string, Mill>> = {
  * MACHINE RECORD's `axisSteps`, so a second machine (or a real read of this one) changes the V
  * groove bound by changing one field, and no shop setting can move it.
  */
-export function minimumXyStepMm(machine: MillProfile): number | null {
+export function minimumXyStepMm(machine: Mill): number | null {
+  // #845 — a stated machine states no steps-per-mm (there is no controller configuration to read
+  // one from), so a check that needs one answers null — "unknown", exactly as an unread profile does.
+  if (machine.frameState !== 'read') return null;
   const steps = machine.axisSteps;
   return steps === null ? null : 1 / steps.xyPerMm;
 }
@@ -1491,6 +1558,16 @@ export interface ClampResult {
 export const CLAMP_REFUSE_FRACTION_FALLBACK = 0.5;
 
 /**
+ * #845 — the machine facts the clamp reads: its name and its two ceilings. A framed profile and a
+ * stated model both satisfy it, so nothing that only clamps a number has to care which frame —
+ * or whether there is one — the values came from.
+ */
+export type ClampMachine = Pick<MillProfile, 'name' | 'maxCutFeed' | 'maxRpm'>;
+
+/** The machine facts an envelope test reads: a name and a work area. See {@link insideEnvelope}. */
+export type SizedMachine = Pick<MillProfile, 'name' | 'envelope'>;
+
+/**
  * The single choke point every feed and spindle value passes through before it reaches a
  * toolpath. Clamps a modest overage and says so; refuses a gross one; passes `null` through
  * untouched (an unset value is the caller's problem, not a limit violation).
@@ -1503,7 +1580,7 @@ export const CLAMP_REFUSE_FRACTION_FALLBACK = 0.5;
 export function clampToMachine(
   feed: number | null,
   rpm: number | null,
-  machine: MillProfile,
+  machine: ClampMachine,
   refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
 ): ClampResult {
   const diagnostics: ClampDiagnostic[] = [];
@@ -1535,7 +1612,7 @@ export function clampToMachine(
 }
 
 /** Is a MACHINE-coordinate point inside the envelope? Unknown axes are not checked. */
-export function insideEnvelope(machine: MillProfile, p: [number | null, number | null, number | null]): boolean {
+export function insideEnvelope(machine: SizedMachine, p: [number | null, number | null, number | null]): boolean {
   const e = machine.envelope;
   const ok = (v: number | null, r: AxisRange): boolean => v === null || (v >= r.min && v <= r.max);
   return ok(p[0], e.x) && ok(p[1], e.y) && ok(p[2], e.z);

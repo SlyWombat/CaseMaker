@@ -2830,7 +2830,10 @@ export function parseEngraveJob(json: unknown): ParseEngraveJobResult {
     // agree.
     const model = MILL_MODELS[result.data.machineId];
     if (model !== undefined) {
-      if (machineFrameProblem(model) !== null) return { ok: false, errors: [MACHINE_FRAME_UNREAD] };
+      // #845 — A STATED MACHINE IS A MACHINE A JOB MAY NAME. Its `.nc` is written for the
+      // operator's own sender; nothing here needs a controller frame. Only an UNREAD model
+      // refuses (its positions would be the Z1's if we pretended), and that sentence is its own.
+      if (model.frameState === 'unread') return { ok: false, errors: [machineFrameProblem(model) ?? MACHINE_FRAME_UNREAD] };
       const stock = result.data.stock;
       const travel = boxProblem({ length: stock.length, width: stock.width, thickness: stock.thickness }, model);
       if (travel !== null) return { ok: false, errors: [`stock: ${travel}`] };

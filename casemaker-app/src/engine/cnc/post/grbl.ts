@@ -23,7 +23,7 @@
 
 import type { CamMove, ToolpathIR } from '../cam/ir';
 import { estimateIRCycleSeconds } from '../cam/ir';
-import type { MillProfile } from '../machine';
+import { dialectOf, type Mill } from '../machine';
 import { surfaceLift } from '../engrave/surfacePlane';
 import { formatFixed } from './format';
 import type { PostContext, PostOptions, PostResult } from './z1';
@@ -36,7 +36,7 @@ export const GRBL_FINAL_RETRACT_Z = 10;
  * machine can run, the spindle ceiling, no A in a flat frame) plus this dialect's refusals: a
  * rotary frame, or an automatic changer the machine does not have.
  */
-export function postGrbl(ir: ToolpathIR, ctx: PostContext, machine: MillProfile, opts: PostOptions = {}): PostResult {
+export function postGrbl(ir: ToolpathIR, ctx: PostContext, machine: Mill, opts: PostOptions = {}): PostResult {
   const errors: string[] = [];
   const ops = ir.operations.filter((op) => op.moves.length > 0);
   if (ops.length === 0) errors.push('the toolpath IR has no operation with any moves: nothing to post');
@@ -77,13 +77,23 @@ export function postGrbl(ir: ToolpathIR, ctx: PostContext, machine: MillProfile,
   }
   if (errors.length > 0) return { ok: false, errors };
 
-  const axis = (v: number): string => formatFixed(v, machine.dialect.axisPrecision);
-  const feed = (v: number): string => formatFixed(v, machine.dialect.feedPrecision);
+  // #845 — the formatting is the machine's own table through `dialectOf`: a framed Makera run in
+  // GRBL mode and a stated GRBL machine both read one function, so the grid cannot differ.
+  const dialect = dialectOf(machine);
+  const axis = (v: number): string => formatFixed(v, dialect.axisPrecision);
+  const feed = (v: number): string => formatFixed(v, dialect.feedPrecision);
   const span = opts.vacuum ?? 'whole';
   const coolantOn = ir.air && (span === 'whole' || span === 'first');
   const coolantOff = ir.air && (span === 'whole' || span === 'last');
   const { length: L, width: W, thickness: T } = ctx.stock;
   const rapid = machine.rapidEstimate;
+  // #845 — THE WORK ORIGIN the file is written against. `topFrontLeft` writes the IR's own work
+  // coordinates (X0 Y0 at the stock's front-left corner); `topCentre` writes them about the stock's
+  // centre, which is the convention most GRBL senders offer, so every X/Y moves by half the stock.
+  // The Zs are untouched: both origins put Z0 on the probed top face.
+  const centre = ctx.origin === 'topCentre';
+  const dx = centre ? -L / 2 : 0;
+  const dy = centre ? -W / 2 : 0;
 
   // ---- The header: a `;` comment block, the dialect's own words (no `;@MKR`). ----
   const header: string[] = [
@@ -92,7 +102,7 @@ export function postGrbl(ir: ToolpathIR, ctx: PostContext, machine: MillProfile,
     `; machine: ${machine.name}`,
     `; tool: T${ir.toolNumber} ${ir.tool.name} (${ctx.toolKey})`,
     `; stock: ${axis(L)} x ${axis(W)} x ${axis(T)} mm, ${ctx.materialName}`,
-    `; origin: ${ctx.origin} — X0 Y0 at the stock's front-left, Z0 on the probed top face`,
+    `; origin: ${ctx.origin} — X0 Y0 at the stock's ${centre ? 'centre' : 'front-left'}, Z0 on the probed top face`,
     `; estimated cycle time: ${Math.round(estimateIRCycleSeconds(ir, rapid))} s`,
     ...ops.map((op, i) => `; toolpath ${i + 1}: ${op.name}`),
   ];
@@ -104,8 +114,8 @@ export function postGrbl(ir: ToolpathIR, ctx: PostContext, machine: MillProfile,
   let lastZ: string | null = null;
   let lastF: string | null = null;
   const emit = (move: CamMove): void => {
-    const fx = axis(move.x);
-    const fy = axis(move.y);
+    const fx = axis(move.x + dx);
+    const fy = axis(move.y + dy);
     const fz = axis(move.z);
     const code = move.kind === 'rapid' ? 'G0' : 'G1';
     const words: string[] = [];
@@ -138,9 +148,9 @@ export function postGrbl(ir: ToolpathIR, ctx: PostContext, machine: MillProfile,
         '',
       );
       if (coolantOn) body.push('M8');
-      body.push(`G0 Z${axis(ir.safeZ)}`, `G0 X${axis(first.x)} Y${axis(first.y)}`, `M3 S${axis(ir.spindleRpm)}`);
-      lastX = axis(first.x);
-      lastY = axis(first.y);
+      body.push(`G0 Z${axis(ir.safeZ)}`, `G0 X${axis(first.x + dx)} Y${axis(first.y + dy)}`, `M3 S${axis(ir.spindleRpm)}`);
+      lastX = axis(first.x + dx);
+      lastY = axis(first.y + dy);
       lastZ = axis(ir.safeZ);
       lastF = null;
     } else {

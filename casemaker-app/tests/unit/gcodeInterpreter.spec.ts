@@ -599,6 +599,14 @@ describe('codes the machine does not know', () => {
     expect(errors(parseGcode('M0\nM1\nM8\n'))).toEqual(['unknown-code', 'unknown-code', 'unknown-code']);
   });
 
+  // #845 — A GRBL 1.1 FILE IS READ AS ITS OWN CONTROLLER. Its post writes `M0` where the operator
+  // changes the bit and `M8` for coolant; both are that dialect's words, and neither moves an axis.
+  it('a GRBL file’s M0 is the program pause, and M8 is accepted', () => {
+    const r = parseGcode('M0\nM8\nG1 X1 F100\nM9\n', { dialect: 'grbl' });
+    expect(errors(r)).toEqual([]);
+    expect(r.events.filter((e) => e.kind === 'pause').map((e) => (e as { reason: string }).reason)).toEqual(['M0']);
+  });
+
   it('collects EVERY diagnostic rather than stopping at the first', () => {
     const r = parseGcode('G999\nM777\nG1 X1e5\n');
     expect(new Set(r.diagnostics.map((d) => d.line))).toEqual(new Set([1, 2, 3]));

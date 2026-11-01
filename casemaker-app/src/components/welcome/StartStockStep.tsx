@@ -3,7 +3,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
-import type { MillProfile } from '@/engine/cnc/machine';
+import type { Mill } from '@/engine/cnc/machine';
 import {
   MATERIAL_LABELS,
   isCompositeMaterial,
@@ -158,7 +158,7 @@ const FORM_DEFS: readonly FormDef[] = [
  * character (`docs/design/rotary-flow.md` §3.3). The block and the envelope refusals carry the
  * module's OWN numbers, so a different rotary states its own; the Z1's ⌀80 × 150 is the profile's.
  */
-function formSentence(form: JobStockForm, machine: MillProfile): string {
+function formSentence(form: JobStockForm, machine: Mill): string {
   switch (form) {
     case 'plate':
       return 'Plate — flat stock cut from the top; thicker than a sheet, lower than it is wide. How it is held is worked out in the next step from its numbers.';

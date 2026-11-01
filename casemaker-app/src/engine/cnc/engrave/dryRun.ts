@@ -34,7 +34,8 @@ import { FINAL_RETRACT_Z } from '../post/z1';
 import { HOP_Z } from '../cam/ir';
 import { verifyProgram, type VerifyReport } from '../verify';
 import type { Setup } from '../setup';
-import type { MillProfile } from '../machine';
+import type { Mill } from '../machine';
+import { postKey } from '../post';
 import type { Tool } from '../tool';
 import { programHash } from '../programHash';
 
@@ -128,7 +129,7 @@ export function liftForDryRun(nc: string, safeZ: number = DRY_RUN_SAFE_Z): strin
 /** The context `verifyDryRun` needs, minus the parts a dry run makes moot. */
 export interface DryRunVerifyDeps {
   setup: Setup;
-  machine: MillProfile;
+  machine: Mill;
   tool: Tool;
 }
 
@@ -146,6 +147,8 @@ export function verifyDryRun(nc: string, deps: DryRunVerifyDeps): VerifyReport {
     setup: deps.setup,
     machine: deps.machine,
     tool: deps.tool,
+    // #845 — the lifted file is the same post's text with the Zs raised: same words, same dialect.
+    dialect: postKey(deps.machine),
     depthLimit: () => Number.POSITIVE_INFINITY,
     minRapidZ: HOP_Z,
   });

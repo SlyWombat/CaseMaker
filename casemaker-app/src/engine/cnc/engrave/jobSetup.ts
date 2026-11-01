@@ -1,6 +1,6 @@
 import { profileReachFrom, rectProfile } from '@/engine/compiler/profile';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
-import type { MillProfile } from '@/engine/cnc/machine';
+import type { Mill } from '@/engine/cnc/machine';
 import type { Face } from '@/engine/cnc/setups/types';
 import { getTools, NO_TOOL_KEY, toolForJob } from '@/engine/cnc/toolRegistry';
 import {
@@ -1159,7 +1159,7 @@ export function defaultBracketHold(stock: StockSize, defaults: ShopDefaults | nu
  */
 export function toSetup(
   job: EngraveJob,
-  machine: MillProfile,
+  machine: Mill,
   fixture?: FixtureEnvelope,
   bed?: BedUnderFacts | null,
 ): Setup {

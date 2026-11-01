@@ -94,6 +94,7 @@ import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { clearanceZOf, rotaryOf } from '@/engine/cnc/machine';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
 import { NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
@@ -3977,8 +3978,8 @@ export function buildRunSheet(
     ...(registrationRefused
       ? []
       : surfaceSpreadSteps(job, margins.boundaryMargin, options.surfaceTouchCount, options.surfaceReadings, options.surfaceLevel)),
-    ...(options.materialScan === true
-      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, machine.toolChange.clearanceZ, options.scan, options.probeInstrument)
+    ...(options.materialScan === true && clearanceZOf(machine) !== null
+      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, clearanceZOf(machine) as number, options.scan, options.probeInstrument)
       : []),
   ];
 
@@ -4542,7 +4543,7 @@ export function buildRunSheet(
       const r = rotary.radius;
       const perimeter = r > 1 ? 2 * Math.PI * r + 30 : 2 * Math.PI + 30;
       const askedDegPerSec = (feedMmMin / 60 / perimeter) * 360;
-      const capDegPerSec = (machine.rotary?.maxRate ?? 3600) / 60;
+      const capDegPerSec = (rotaryOf(machine)?.maxRate ?? 3600) / 60;
       const allowedDegPerSec = Math.min(askedDegPerSec, capDegPerSec);
       const surfaceMmMin = Math.round(allowedDegPerSec * (Math.PI / 180) * r * 60);
       const r1 = Math.round(r * 10) / 10;

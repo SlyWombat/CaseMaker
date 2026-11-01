@@ -28,7 +28,8 @@
  * moves).
  */
 
-import { applyEvent, buildTimeline, parseGcode, resolveMachine, MACHINES, MILL_MODELS, machineFrameProblemById, type FixtureEnvelope, type MachineCalibration, type MachineState, type PausePoint, type Segment, type Setup, type Timeline } from '@/engine/cnc';
+import { postKey } from '@/engine/cnc/post';
+import { applyEvent, buildTimeline, parseGcode, resolveMachine, MACHINES, MILL_MODELS, machineFrameProblemById, type FixtureEnvelope, type MachineCalibration, type MachineState, type Mill, type PausePoint, type Segment, type Setup, type Timeline } from '@/engine/cnc';
 import { moveSeconds, rapidRate, type RapidEstimate } from '@/engine/cnc/cam/ir';
 
 import type { Mm } from '@/types/units';
@@ -744,24 +745,36 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const hasPrior = priorList.length > 0;
     const routingOpts: SimLoadOpts | undefined =
       opts === undefined ? undefined : { ...opts, priorRemoval: hasPrior ? priorList : undefined };
-    let machine;
+    let machine: Mill | undefined;
     if (machineId !== null) {
       const base = MACHINES[machineId];
-      if (!base) {
+      if (base !== undefined) {
+        // The saved read of THIS machine's frame, if there is one (#279). The lookup above is by
+        // the CALLER's id, so an unknown id still refuses by name rather than falling back to a
+        // profile with the machine's calibration quietly laid over it.
+        machine = resolveMachine(base, opts?.calibration);
+      } else {
+        const model = MILL_MODELS[machineId];
+        if (model === undefined) {
+          return refuse('machine-unknown', `unknown machine "${machineId}"; known: ${Object.keys(MILL_MODELS).join(', ')}`);
+        }
         // #773 — a model the app KNOWS but whose controller frame has never been read is not an
         // unknown machine: it is the Carvera sentence, so the two facts cannot be confused.
-        const frameProblem = machineFrameProblemById(machineId);
-        return frameProblem !== null
-          ? refuse('machine-frame-unread', frameProblem)
-          : refuse('machine-unknown', `unknown machine "${machineId}"; known: ${Object.keys(MILL_MODELS).join(', ')}`);
+        if (model.frameState !== 'stated') {
+          return refuse('machine-frame-unread', machineFrameProblemById(machineId) ?? 'this machine carries no frame');
+        }
+        // #845 — A STATED MACHINE IS SIMULATED, NOT DRIVEN. Its stated values are its model, with
+        // no controller configuration to resolve and no calibration to lay over it; the simulation
+        // and the oracle are predictions of the file, which is exactly what an export-only machine
+        // still needs (the acceptance runs them). What it never gets is a probe, a park or a
+        // machine-frame move — none of which its post writes.
+        machine = model;
       }
-      // The saved read of THIS machine's frame, if there is one (#279). The lookup above is by
-      // the CALLER's id, so an unknown id still refuses by name rather than falling back to a
-      // profile with the machine's calibration quietly laid over it.
-      machine = resolveMachine(base, opts?.calibration);
       rapid = machine.rapidEstimate;
     }
-    const parse = parseGcode(gcodeText);
+    // #845 — READ THE FILE AS ITS MACHINE'S POST WROTE IT: a GRBL file's `M0` pause and `M8`
+    // coolant are its own dialect, and the Z1 firmware model refuses them as unknown codes.
+    const parse = parseGcode(gcodeText, { dialect: machine === undefined ? 'z1' : postKey(machine) });
     // The LIFTED timeline (the file as posted) and, when the package speaks the surface frame, its
     // surface-frame image: the same program with the lift taken back out, re-bucketed — the flat
     // program a flat post would have produced. The SWEEP takes the image; the viewport draws the

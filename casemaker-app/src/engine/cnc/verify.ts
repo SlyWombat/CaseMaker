@@ -36,7 +36,7 @@ import { parseGcode } from './gcode';
 import { classifyLine, stripComment } from './gcode/lexer';
 import type { MoveEvent, ParseResult, Pos } from './gcode/types';
 import { applyEvent, buildTimeline, initialState, type MachineState } from './emulator/timeline';
-import type { MillProfile } from './machine';
+import { holderOf, rotaryOf, type Mill } from './machine';
 import { sacrificialBoxes, type SacrificialBox } from './sacrificial';
 import type { Setup } from './setup';
 // inPath only (types from bracket): the verifier runs in workers and must not pull in the defaults client.
@@ -73,7 +73,7 @@ export interface VerifyContext {
   dialect?: 'z1' | 'grbl';
   /** `toSetup(job, machine)` — #200. Carries the G54 origin and the starting tool. */
   setup: Setup;
-  machine: MillProfile;
+  machine: Mill;
   tool: Tool;
   depthLimit: DepthLimit;
   /** Z at or above which XY rapids are allowed, work frame. The IR's hopZ. */
@@ -393,7 +393,11 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     findings.push({ severity, code, line, message });
   };
 
-  const parse: ParseResult = parseGcode(text);
+  // #845 — THE FILE IS READ AS ITS POST'S DIALECT. A GRBL file carries `M0` (the pause) and
+  // `M8` (coolant), which the Z1 firmware model refuses as unknown codes; a rotary file is the
+  // Z1 rotary dialect's whatever the machine.
+  const fileDialect: 'z1' | 'grbl' = ctx.rotary != null ? 'z1' : (ctx.dialect ?? 'z1');
+  const parse: ParseResult = parseGcode(text, { dialect: fileDialect });
 
   // ---- 1. parse-error. The verifier never passes a file it could not fully parse.
   for (const d of parse.diagnostics) {
@@ -475,7 +479,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     const stock = ctx.setup.part;
     // #773 — the MODULE's envelope is the machine's, not the Z1's: the Carvera Air's is ⌀92 × 200.
     // The published Z1 figures stand in only for a profile that states no rotary block.
-    const module = ctx.machine.rotary?.envelope ?? { diameter: ROTARY_MAX_DIAMETER_MM, length: ROTARY_MAX_LENGTH_MM };
+    const module = rotaryOf(ctx.machine)?.envelope ?? { diameter: ROTARY_MAX_DIAMETER_MM, length: ROTARY_MAX_LENGTH_MM };
     if (stock.diameter > module.diameter || stock.length > module.length) {
       push('stock-exceeds-module', null, envelopeSentence(stock.diameter, stock.length, module));
     }
@@ -752,7 +756,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
             const radiusMm = Math.abs(toW[2]);
             const perimeter = radiusMm > 1 ? 2 * Math.PI * radiusMm + 30 : 2 * Math.PI + 30;
             const askedDegPerSec = (m.feed / 60 / perimeter) * 360;
-            const capDegPerSec = (ctx.machine.rotary?.maxRate ?? 3600) / 60;
+            const capDegPerSec = (rotaryOf(ctx.machine)?.maxRate ?? 3600) / 60;
             const allowedDegPerSec = Math.min(askedDegPerSec, capDegPerSec);
             const surfaceMmMin = allowedDegPerSec * (Math.PI / 180) * radiusMm * 60;
             const dA = Math.abs(m.a - lastA);
@@ -999,7 +1003,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       if (stickout !== null && stickout > 0 && segments.length > 0) {
         const lowestTip = Math.min(...segments.map((sg) => Math.min(sg.from[2], sg.to[2])));
         if (lowestTip + stickout < highest) {
-          const nut = ctx.machine.holder;
+          const nut = holderOf(ctx.machine);
           if (nut === null) {
             push(
               'clamp-unchecked',

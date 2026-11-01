@@ -31,7 +31,7 @@ import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { StockItem } from '@/platform/stockClient';
 import { isShippedDemoLabelSet } from './engrave/blankLabelSeed';
 import { VISE_FLOOR_DEPTH } from './fixture';
-import type { MillProfile } from './machine';
+import { rotaryOf, type Mill, type SizedMachine } from './machine';
 import { isConductiveMaterial, isMetalMaterial, isWoodMaterial, MATERIAL_LABELS } from './materials';
 import { ROTARY_MAX_DIAMETER_MM, ROTARY_MAX_LENGTH_MM } from './rotary/wrap';
 import type { EngraveFacing, EngraveJob, FieldSource, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
@@ -242,9 +242,9 @@ export interface RotaryEnvelope {
  * (`machine.rotary.envelope`, the Makera database's ⌀80 × 150 on the Z1); a machine with no rotary
  * block falls back to the published constants, so the sentence always has a number to say.
  */
-export function rotaryEnvelopeOf(machine: MillProfile): RotaryEnvelope {
+export function rotaryEnvelopeOf(machine: Mill): RotaryEnvelope {
   return (
-    machine.rotary?.envelope ?? { diameter: ROTARY_MAX_DIAMETER_MM, length: ROTARY_MAX_LENGTH_MM }
+    rotaryOf(machine)?.envelope ?? { diameter: ROTARY_MAX_DIAMETER_MM, length: ROTARY_MAX_LENGTH_MM }
   );
 }
 
@@ -254,7 +254,7 @@ export function rotaryEnvelopeOf(machine: MillProfile): RotaryEnvelope {
  * `⌀90 mm does not fit the rotary's ⌀80 × 150 mm.` A block is never refused this way: it stays a
  * vise job, and its sentence says when the chuck takes it by its diagonal.
  */
-export function rotaryEnvelopeProblem(size: StockSize, machine: MillProfile): string | null {
+export function rotaryEnvelopeProblem(size: StockSize, machine: Mill): string | null {
   const env = rotaryEnvelopeOf(machine);
   const fit = `⌀${mm(env.diameter)} × ${mm(env.length)} mm.`;
   const diameter = size.diameter;
@@ -414,10 +414,10 @@ export function formProblem(form: string): string | null {
 }
 
 /**
- * The machine facts the size checks read: a name and a work envelope. A framed profile and an
- * unframed vendor row (#773) both satisfy it — the checks never touch a position.
+ * The machine facts the size checks read ({@link SizedMachine} in `machine.ts`, where the envelope
+ * test that shares it lives): a name and a work envelope. A framed profile, a stated GRBL model
+ * and an unframed vendor row (#773) all satisfy it — the checks never touch a position.
  */
-export type SizedMachine = Pick<MillProfile, 'name' | 'envelope'>;
 
 /** The machine's travel on each axis, mm. */
 function travel(machine: SizedMachine): StockBox {
@@ -468,7 +468,7 @@ function free(item: StockItem): number {
  * rod is not one of its own: {@link rodGripProblem} is the sentence under the picture. A disc is a
  * face job and a rectangle is a vise job, so both keep `boxProblem`.
  */
-export function formSizeProblem(form: JobStockForm, size: StockSize, machine: MillProfile): string | null {
+export function formSizeProblem(form: JobStockForm, size: StockSize, machine: Mill): string | null {
   for (const key of STOCK_SIZE_FIELDS[form]) {
     const v = size[key];
     if (v === null || v === undefined || !Number.isFinite(v) || v <= 0) {
@@ -487,7 +487,7 @@ export function formSizeProblem(form: JobStockForm, size: StockSize, machine: Mi
  * A shelf rod or tube is judged by the rotary's envelope, like a typed one (#713): the grip
  * sentence is the picture's, and it does not refuse the row.
  */
-export function shelfPickProblem(item: StockItem, machine: MillProfile): string | null {
+export function shelfPickProblem(item: StockItem, machine: Mill): string | null {
   if (item.quantity === 0) {
     const last = item.consumed[item.consumed.length - 1];
     return last ? `none left — consumed by ${last.jobId}` : 'none left on the shelf';
@@ -506,7 +506,7 @@ export function shelfPickProblem(item: StockItem, machine: MillProfile): string 
 }
 
 /** A shelf entry as this job's stock, or why not. */
-export function stockFromShelf(item: StockItem, machine: MillProfile): StockChoiceResult {
+export function stockFromShelf(item: StockItem, machine: Mill): StockChoiceResult {
   const problem = shelfPickProblem(item, machine);
   if (problem !== null) return { ok: false, reason: problem };
   const form = item.form as JobStockForm;
@@ -589,7 +589,7 @@ function madeStockSize(made: MadeStock): StockSize {
 }
 
 /** A typed piece as this job's stock, or why not. `shelfId` is the entry it was also saved as. */
-export function stockFromMade(made: MadeStock, machine: MillProfile, shelfId: string | null = null): StockChoiceResult {
+export function stockFromMade(made: MadeStock, machine: Mill, shelfId: string | null = null): StockChoiceResult {
   const problem = formProblem(made.form) ?? formSizeProblem(made.form, madeStockSize(made), machine);
   if (problem !== null) return { ok: false, reason: problem };
   // #713 — a rod or tube writes the cylinder stock with the standing box `D × D × L` and its outer
@@ -695,7 +695,7 @@ export interface FileStock extends StockBox {
  * A mesh's box as this job's stock, or why not. Its form is a disc when its outline is a circle,
  * a block otherwise (a printed one when printed).
  */
-export function stockFromFile(file: FileStock, machine: MillProfile): StockChoiceResult {
+export function stockFromFile(file: FileStock, machine: Mill): StockChoiceResult {
   const problem = boxProblem(file, machine);
   if (problem !== null) return { ok: false, reason: problem };
   const disc = file.shape === 'disc';

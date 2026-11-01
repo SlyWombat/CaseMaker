@@ -57,7 +57,27 @@ const NO_EFFECT_G = new Set([40, 80, 94]);
 
 const AXIS_INDEX: Record<string, 0 | 1 | 2> = { X: 0, Y: 1, Z: 2 };
 
+/**
+ * #845 — the controller a file is READ AS. `z1` is the Makera firmware model this app has always
+ * parsed (the default); `grbl` admits GRBL 1.1's `M0` pause and `M8` coolant, which the Z1 model
+ * refuses because nothing read shows that firmware implements them.
+ */
+export type GcodeDialect = 'z1' | 'grbl';
+
 class Interp {
+  /**
+   * #845 — THE CONTROLLER THIS FILE IS READ AS. `z1` models the Makera firmware this app drives
+   * (the default, so every caller written before the field existed reads exactly as it did);
+   * `grbl` reads a GRBL 1.1 file, whose post writes `M0` (a program pause) and `M8`/`M9` (coolant).
+   * The difference is small on purpose: only the codes the Z1 model deliberately refuses are
+   * admitted, and they add no motion.
+   */
+  private readonly dialect: GcodeDialect;
+
+  constructor(dialect: GcodeDialect = 'z1') {
+    this.dialect = dialect;
+  }
+
   readonly events: GcodeEvent[] = [];
   readonly diagnostics: Diagnostic[] = [];
   readonly headerRecords: MkrRecord[] = [];
@@ -723,6 +743,18 @@ class Interp {
 
   private handleM(mw: Word, words: Word[], line: number): void {
     const { code, sub } = codeParts(mw.text);
+    if (this.dialect === 'grbl') {
+      // #845 — GRBL 1.1's own two words, neither of which moves an axis: `M0` is the PROGRAM PAUSE
+      // (our GRBL post writes it where the operator changes the bit and re-zeroes Z), and `M8` is
+      // coolant on. The pause is an event the timeline stops at; coolant changes nothing this
+      // interpreter models, and no check reads it. The Z1 model below keeps refusing both as
+      // unknown codes — nothing read shows that firmware implements them.
+      if (sub === 0 && code === 0) {
+        this.events.push({ kind: 'pause', line, reason: 'M0' });
+        return;
+      }
+      if (sub === 0 && code === 8) return;
+    }
     switch (code) {
       case 2:
       case 30:
@@ -851,8 +883,8 @@ class Interp {
 }
 
 /** Lower a G-code program to events, collecting every diagnostic. Never throws. */
-export function parseGcode(source: string): ParseResult {
-  const it = new Interp();
+export function parseGcode(source: string, opts: { dialect?: GcodeDialect } = {}): ParseResult {
+  const it = new Interp(opts.dialect);
   const lines = splitLines(source);
   for (let i = 0; i < lines.length; i++) it.handleLine(lines[i] as string, i + 1);
   // A `;@CM|` line is header data too (#332), so a file carrying only ours still has a header.

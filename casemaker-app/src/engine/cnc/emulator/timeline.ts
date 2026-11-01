@@ -25,7 +25,7 @@
  */
 
 import type { GcodeEvent, HomeEvent, MoveEvent, ParseResult, Pos, ProbeEvent, TloCalibrateEvent, ToolChangeEvent } from '../gcode/types';
-import { insideEnvelope, type MillProfile } from '../machine';
+import { insideEnvelope, type Mill, type MillProfile } from '../machine';
 import type { Setup, StartingTool } from '../setup';
 
 export type ToolState = number | 'unknown';
@@ -65,7 +65,7 @@ export interface MachineState {
   a: number | null;
 }
 
-export type PauseKind = 'tool-change' | 'M490.1' | 'M600';
+export type PauseKind = 'tool-change' | 'M490.1' | 'M600' | 'M0';
 
 export interface PausePoint {
   /** Index of the event the machine stops at. */
@@ -588,7 +588,7 @@ export function g28Clearance(ev: HomeEvent, before: MachineState, m: MillProfile
   ];
 }
 
-export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillProfile): Timeline {
+export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Mill): Timeline {
   const events: GcodeEvent[] = [];
   const diagnostics: TimelineDiagnostic[] = [];
   const segments: Segment[] = [];
@@ -794,15 +794,21 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
     if ((i + 1) % SNAPSHOT_EVERY === 0) snapshots.push(state);
   };
 
+  // #845 — THE MACROS ARE A FRAMED PROFILE'S. A tool change, a length calibration and `G28` are
+  // expanded into the moves the CONTROLLER makes from its own configuration; a stated machine has
+  // no such configuration in this app, and its post writes none of those words (no `M6`, no `G28`,
+  // no `M490.2`). Its events run as parsed, and any position they touch that only a frame could
+  // supply is the timeline's own "unknown" — the honest answer, not the Z1's numbers.
+  const framed: MillProfile | undefined = machine !== undefined && machine.frameState === 'read' ? machine : undefined;
   for (const src of parse.events) {
-    if (!machine) {
+    if (framed === undefined) {
       process(src);
-    } else if (src.kind === 'tool-change' && !machine.hasATC && isRealToolChange(state, src.tool) !== false) {
-      for (const step of toolChangeMacro(src, state, machine)) process(step);
+    } else if (src.kind === 'tool-change' && !framed.hasATC && isRealToolChange(state, src.tool) !== false) {
+      for (const step of toolChangeMacro(src, state, framed)) process(step);
     } else if (src.kind === 'tlo-calibrate') {
-      for (const step of tloCalibrateMacro(src, state, machine)) process(step);
+      for (const step of tloCalibrateMacro(src, state, framed)) process(step);
     } else if (src.kind === 'home') {
-      for (const step of g28Clearance(src, state, machine)) process(step);
+      for (const step of g28Clearance(src, state, framed)) process(step);
     } else {
       process(src);
     }

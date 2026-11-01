@@ -52,6 +52,7 @@ import { LEDGE_STEP, VISE_FLOOR_DEPTH } from '@/engine/cnc/fixture';
 import { drawnVise } from '@/engine/cnc/drawnVise';
 import { drawnRotary } from '@/engine/cnc/drawnRotary';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { rotaryOf } from '@/engine/cnc/machine';
 import { chuckStockOf } from '@/engine/cnc/stockStart';
 import { formLabel } from '@/engine/cnc/stockStart';
 import {
@@ -1514,7 +1515,9 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
   const narrow = useMediaQuery(NARROW_QUERY);
   const now = useMemo(() => machineNow(machine), [machine]);
   const profile = now?.profile ?? null;
-  const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
+  // #845 — a stated machine has no module this app has read; `rotaryOf` answers the same `undefined`
+  // a Z1 without the accessory answers, so the chuck stays off the list for it.
+  const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
   // #723 P2-3 — THE WIZARD'S SIDES SURFACE, on the step that used to describe one holding. A job
   // cut from more than one saved setup lists them here, each with the goal it cuts and how it is
   // held/turned; the step's own controls still set the job's holding, and each side's mount and

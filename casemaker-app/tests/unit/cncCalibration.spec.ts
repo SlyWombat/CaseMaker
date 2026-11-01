@@ -233,7 +233,9 @@ describe('the mill a JOB runs on (#347)', () => {
   it('reads the job’s own id, resolved against the saved calibration', () => {
     const job = { machineId: 'Z1' };
     // The job's frame, not the shipped one: the resolved profile is what the consumers clamp to.
-    expectAt(jobMachine(job, readMachine()).toolChange.sensor, [-9.89, -12.83]);
+    const resolved = jobMachine(job, readMachine());
+    if (resolved.frameState !== 'read') throw new Error('a Z1 job must resolve to a framed profile');
+    expectAt(resolved.toolChange.sensor, [-9.89, -12.83]);
     expect(jobMachine(job)).toEqual(MACHINES.Z1);
   });
 
