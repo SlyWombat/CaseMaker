@@ -802,7 +802,12 @@ export function StartWizard(): JSX.Element {
   const stepNumber = wizardStepNumber(step);
 
   return createPortal(
-    <div className={narrow ? 'sw-overlay sw-overlay--sheet' : 'sw-overlay'} data-testid="start-wizard">
+    <div
+      className={narrow ? 'sw-overlay sw-overlay--sheet' : 'sw-overlay'}
+      // The one stacking scale (#348), inline as the change wizard's is, so the order is readable.
+      style={{ zIndex: 'var(--cm-z-modal)' }}
+      data-testid="start-wizard"
+    >
       <div
         className={step === 'holding' ? 'sw-card sw-card--wide' : 'sw-card'}
         role="dialog"
