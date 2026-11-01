@@ -243,6 +243,39 @@ export function withBracketSeatDatum(
 }
 
 /**
+ * #607 — write the measured ROTARY AXIS onto the active bed profile's `rotaryAxis` datum: the axis
+ * height in `value`, the axis line's Y in `at`, and the chuck body's measured radius beside it.
+ * The datum is the fitted circle (`solveRotaryCircle`), never a typed offset.
+ */
+export function withRotaryAxisDatum(
+  machine: MachineRecord,
+  axis: { axisZ: number; axisY: number; radiusMm: number; atX: number },
+  probeId: string | null,
+  now: string,
+): MachineRecord {
+  const profileId = machine.activeBedProfileId;
+  if (profileId === undefined) return machine;
+  const by = probeId ?? 'wired-probe';
+  const what = probeId === null ? 'rotary axis measured; no probe accessory registered' : 'rotary axis measured from the chuck body';
+  return {
+    ...machine,
+    bedProfiles: machine.bedProfiles?.map((p) =>
+      p.id === profileId
+        ? {
+            ...p,
+            datums: {
+              ...p.datums,
+              rotaryAxis: { value: axis.axisZ, measuredAt: now, by, at: [axis.atX, axis.axisY], radiusMm: axis.radiusMm },
+            },
+            history: [...p.history, { at: now, what }],
+          }
+        : p,
+    ),
+    updatedAt: now,
+  };
+}
+
+/**
  * The new keys for a machine that has not been migrated, or null when there is nothing to migrate
  * (no wasteboard, no vise, no measured bracket seat) or the bed is already described. Nothing is
  * deleted: every legacy key stays exactly where it was.

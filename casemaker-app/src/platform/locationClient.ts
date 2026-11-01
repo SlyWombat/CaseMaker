@@ -154,6 +154,12 @@ export const MeasuredDatumSchema = z
     measuredAt: bedText,
     by: bedText.refine((v) => v.trim().toLowerCase() !== 'typed', 'a datum is measured, never typed'),
     at: z.tuple([bedNumber, bedNumber]).nullable().default(null),
+    /**
+     * #607 — the RADIUS the datum was measured with, when the measurement knows one (the rotary
+     * chuck's body: axis Z in `value`, the axis line's Y in `at`, and this radius). Null for the
+     * one-point datums (a surface top, a jaw top, a bracket seat).
+     */
+    radiusMm: bedNumber.nullable().optional(),
   })
   .strict();
 

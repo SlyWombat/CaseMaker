@@ -1,0 +1,137 @@
+// #607 — the rotary reference tap against a fake bench chuck. The fake models the app's own
+// sideways-boss convention: at a chord's height the ball's centre triggers one probe radius
+// outside the face (the same rule #827's centre find uses), and the crown is the cylinder's top
+// above the axis. Machine coordinates throughout — the tap runs beside the chuck, in G53.
+
+import { describe, expect, it } from 'vitest';
+import type { ConsoleSendResult } from '@/platform/machineConsole';
+import { runRotaryTap, type RotaryTapOptions } from '@/engine/cnc/registration/execute';
+import { planRotaryTrial } from '@/engine/cnc/registration/rotaryTap';
+
+const AXIS = { y: -180, z: -50 };
+const NOMINAL_R = 40;
+const PROBE_R = 0.875;
+const BED_CLEARANCE_Z = -56;
+
+function fakeChuck(radius = NOMINAL_R) {
+  let mode: 'G90' | 'G91' = 'G90';
+  const pos = { x: -1, y: -1, z: -3 };
+  const lines: string[] = [];
+  const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
+  /** The crown's machine Z above the axis at this Y, or null beside the body. */
+  const crownAt = (y: number): number | null => {
+    const dy = y - AXIS.y;
+    if (Math.abs(dy) >= radius) return null;
+    return AXIS.z + Math.sqrt(radius * radius - dy * dy);
+  };
+  const console = {
+    async send(line: string): Promise<ConsoleSendResult> {
+      lines.push(line);
+      if (line === '?') return reply('<Idle|MPos:0,0,0|WPos:0,0,0>');
+      if (line === '$H') return (pos.x = -1), (pos.y = -1), (pos.z = -3), reply('ok');
+      if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
+      if (line === 'M491') return reply('[PRB:0,0,-80.000:1]\nok');
+      if (line === 'M831' || line === 'M832') return reply('ok');
+      if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
+      let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
+      if (m) return (pos.z = Number(m[1])), reply('ok');
+      m = /^G53 G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
+      if (m) return (pos.x = Number(m[1])), (pos.y = Number(m[2])), reply('ok');
+      m = /^G38\.3 Z-([\d.]+) F[\d.]+$/.exec(line);
+      if (m) {
+        if (mode !== 'G91') throw new Error('a probe in absolute mode');
+        const target = pos.z - Number(m[1]);
+        const crown = crownAt(pos.y);
+        if (crown !== null && crown >= target && crown <= pos.z) {
+          pos.z = crown;
+          return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${crown.toFixed(3)}:1]\nok`);
+        }
+        pos.z = target;
+        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nok`);
+      }
+      m = /^G38\.3 Y(-?[\d.]+) F[\d.]+$/.exec(line);
+      if (m) {
+        if (mode !== 'G91') throw new Error('a sideways probe in absolute mode');
+        const travel = Number(m[1]);
+        // The app's sideways-boss convention: at any chord height the ball's centre triggers one
+        // probe radius outside the face (the drill/edge rule every sideways touch uses).
+        const dz = pos.z - AXIS.z;
+        let hit: number | undefined;
+        if (Math.abs(dz) <= radius) {
+          // The face width at this height, plus one probe radius for the ball's centre.
+          const h = Math.sqrt(radius * radius - dz * dz) + PROBE_R;
+          const candidates = [AXIS.y - h, AXIS.y + h].sort((a, b) => (travel < 0 ? b - a : a - b));
+          hit = candidates.find((c) => (travel < 0 ? c <= pos.y && c >= pos.y + travel : c >= pos.y && c <= pos.y + travel));
+        }
+        if (hit === undefined) {
+          pos.y += travel;
+          return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:0]\nok`);
+        }
+        pos.y = hit;
+        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:1]\nok`);
+      }
+      if (line.startsWith('G38.5 ')) {
+        if (mode !== 'G91') throw new Error('a release in absolute mode');
+        const r = /^G38\.5 ([XYZ])(-?[\d.]+)/.exec(line);
+        if (r !== null) {
+          const axis = r[1]!.toLowerCase() as 'x' | 'y' | 'z';
+          pos[axis] += Number(r[2]!);
+        }
+        return reply('ok');
+      }
+      return reply(`error:unexpected line ${line}`);
+    },
+  };
+  return { console, lines };
+}
+
+function options(radius = NOMINAL_R): RotaryTapOptions {
+  const trial = planRotaryTrial({ axisZ: AXIS.z, radiusMm: NOMINAL_R }, BED_CLEARANCE_Z);
+  if (!trial.ok) throw new Error(trial.reason);
+  return {
+    at: { x: -150, y: AXIS.y },
+    trial: { z1: trial.z1, z2: trial.z2 },
+    crownEstimateZ: trial.crownEstimateZ,
+    crownBandMm: { min: AXIS.z - 5, max: AXIS.z + radius + 10 },
+    probeRadiusMm: PROBE_R,
+    searchMm: radius + 10,
+    seekFromMachineZ: -3,
+    touchFeed: 150,
+    surfaceFeed: 150,
+    parkAboveSurfaceMm: 2,
+  };
+}
+
+const yes = async () => true;
+
+describe('#607 runRotaryTap on a bench-shaped chuck', () => {
+  it('writes the axis Z, axis Y and radius from one chord and the crown, with a clean check chord', async () => {
+    const fake = fakeChuck();
+    const result = await runRotaryTap(options(), { console: fake.console, operator: yes });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.circle.axisY).toBeCloseTo(AXIS.y, 2);
+    expect(result.circle.radiusMm).toBeCloseTo(NOMINAL_R, 1);
+    expect(result.circle.axisZ).toBeCloseTo(AXIS.z, 1);
+    expect(result.residualLine).toBeNull();
+    // Every side touch that triggered is released with G38.5 before the next G53/G0.
+    const lines = fake.lines;
+    for (let i = 0; i < lines.length; i++) {
+      if (/^G38\.3 Y/.test(lines[i]!)) {
+        let released = false;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (/^G53 G0 /.test(lines[j]!)) break;
+          if (/^G38\.5 /.test(lines[j]!)) released = true;
+        }
+        expect(released, `release after ${lines[i]}`).toBe(true);
+      }
+    }
+  });
+
+  it('measures an off-nominal chuck: R 41 is read, not the record’s 40', async () => {
+    const fake = fakeChuck(41);
+    const result = await runRotaryTap(options(), { console: fake.console, operator: yes });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.circle.radiusMm).toBeCloseTo(41, 1);
+    expect(result.circle.axisZ).toBeCloseTo(AXIS.z, 1);
+  });
+});

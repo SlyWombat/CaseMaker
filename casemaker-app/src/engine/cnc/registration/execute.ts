@@ -69,6 +69,13 @@ import { type EdgeScan, type RegistrationPlan, probeInstrumentOf } from './plan'
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { sideCentreWork, sideTouchAllowed, sideTouchSetup } from './probe3d';
 import { centrePair, readCentrePair, type CentreFindPlan, type CentrePairReading } from './centreFind';
+import {
+  chordResidualMm,
+  solveRotaryCircle,
+  ROTARY_CHORD_TOLERANCE_MM,
+  type ChordReading,
+  type RotaryCircle,
+} from './rotaryTap';
 import type { LiveTouch } from './liveTouch';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
 import { referenceOutcome } from './references';
@@ -973,6 +980,175 @@ export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Pr
       notes,
     };
     return { ok: true, centreMachine, centreWork, pairs, surfaceZ, probeRefZ: r3(refPrb.z), outcome, transcript: io.transcript };
+  } catch (e) {
+    if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
+    throw e;
+  } finally {
+    // #789 — the supply goes OFF whatever happened.
+    if (powered) await io.trySend(PROBE_SUPPLY_OFF);
+  }
+}
+
+export type RotaryTapResult =
+  | {
+      ok: true;
+      /** The fitted chuck circle: axis Z, axis Y (machine), radius. */
+      circle: RotaryCircle;
+      /** The check chord's residual against the fitted circle, mm. */
+      residualMm: number;
+      /** The one-line note when the residual is over the tolerance, else null. */
+      residualLine: string | null;
+      transcript: Transcript[];
+    }
+  | { ok: false; reason: string; transcript: Transcript[] };
+
+/** Where the rotary tap runs, in the machine's terms. All XY here is MACHINE coordinates. */
+export interface RotaryTapOptions {
+  /** The tap point on the chuck: X along the chuck, Y the axis estimate — MACHINE XY. */
+  at: { x: number; y: number };
+  /** The trial chord's height and the check chord's height, machine Z (`rotaryTap.planRotaryTrial`). */
+  trial: { z1: number; z2: number };
+  /** The crown's expected machine Z (the trial's estimate; the touch is bounded by the band below). */
+  crownEstimateZ: number;
+  /** The band the crown is accepted in, machine Z. */
+  crownBandMm: { min: number; max: number };
+  /** The probe's measured effective radius, mm. */
+  probeRadiusMm: number;
+  /** How far outside the chuck each side touch starts, mm — the nominal radius plus a margin. */
+  searchMm: number;
+  /** The machine's travel height, machine Z. */
+  seekFromMachineZ: number;
+  touchFeed: number;
+  surfaceFeed: number;
+  parkAboveSurfaceMm: number;
+  /** How far a release backs the ball off before any G0, mm. */
+  releaseMm?: number;
+}
+
+const f4r = (n: number): string => String(Math.round(n * 1000) / 1000);
+
+/**
+ * #607 — THE 4TH-AXIS REFERENCE TAP: the chuck body's circle in the YZ plane, with the 3D probe.
+ *
+ * The maintainer's geometry (#607, 2026-10-31): ONE ±Y chord pair at a trial height gives the axis
+ * line's Y and the width there; the CROWN touched from above at that Y gives Ztop; the circle
+ * through them solves `R = (w²/4 + d²)/(2d)` and `Zc = Ztop − R`. #626's "crown plus an unmeasured
+ * radius" is answered by the chord. A SECOND chord at another height is the CHECK: its residual
+ * against the fitted circle is reported, and over `ROTARY_CHORD_TOLERANCE_MM` it is said in one
+ * line — the datum stays the fitted circle. Every side touch is released with G38.5 before any G0
+ * (#790) and the probe's supply brackets the session (#789).
+ *
+ * ALL XY IS MACHINE: the tap happens beside the chuck, where the work frame means nothing yet.
+ */
+export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Promise<RotaryTapResult> {
+  const io = session(deps, opts.seekFromMachineZ);
+  const release = opts.releaseMm ?? 3;
+  let powered = false;
+  try {
+    const status = await io.send('?');
+    if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
+    await io.send('$H');
+    if (
+      !(await deps.operator({
+        kind: 'fit-probe',
+        text: 'Fit the 3D probe in the spindle — the ball on its cable — then continue.',
+      }))
+    ) {
+      throw new Stop('stopped: the probe was not fitted');
+    }
+    powered = true;
+    await io.send(PROBE_SUPPLY_ON);
+    const rest = await io.send('M119');
+    if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
+    const refPrb = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
+    if (refPrb === null || !refPrb.touched) throw new Stop('M491 answered no tool-length reading');
+
+    /** One ±Y chord pair at `zMachine`; returns the chord (MACHINE Y and face width). */
+    const chordAt = async (zMachine: number): Promise<ChordReading> => {
+      const balls: number[] = [];
+      for (const sign of [-1, 1] as const) {
+        const side = sign < 0 ? '−Y' : '+Y';
+        const startY = r3(opts.at.y + sign * opts.searchMm);
+        await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
+        await io.send(`G53 G0 X${f(opts.at.x)} Y${f(startY)}`);
+        await io.send(`G53 G0 Z${f(r3(zMachine + opts.parkAboveSurfaceMm))}`);
+        await io.idle();
+        // A guarded descent: the start beside the chuck must be air above the bed.
+        await io.send('G91');
+        const down = await io.send(`G38.3 Z-${f(opts.parkAboveSurfaceMm)} F${f(opts.touchFeed)}`, { missOk: true });
+        const downPrb = lastPrb(down);
+        if (downPrb !== null && downPrb.touched) {
+          await io.send(`G38.5 Z${f4r(release)} F100`);
+          await io.send('G90');
+          throw new Stop(`the descent beside the chuck at Y ${f(startY)} met material — the search starts inside something; check the module's position`);
+        }
+        await io.send('G90');
+        await io.idle();
+        await io.at(`sideways toward the chuck from ${side}, at machine Z ${f(zMachine)}`);
+        await io.send('G91');
+        const reply = await io.send(`G38.3 Y${f4r(-sign * opts.searchMm)} F${f(opts.touchFeed)}`, { missOk: true });
+        const prb = lastPrb(reply);
+        await io.send('G90');
+        if (prb === null || !prb.touched) {
+          await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
+          throw new Stop(`the ${side} touch found no chuck wall within ${f(opts.searchMm)} mm of the tap point — check the tap point and the search`);
+        }
+        // #790 — PROBE-AWAY before any G0.
+        await io.send('G91');
+        await io.send(`G38.5 Y${f4r(sign * release)} F100`);
+        await io.send('G90');
+        balls.push(r3(prb.y));
+        io.saw({
+          source: 'mount-tap',
+          label: `the chuck wall ${side}`,
+          x: opts.at.x,
+          y: r3(prb.y),
+          z: zMachine,
+          touched: true,
+          kind: 'stock',
+        });
+        await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
+      }
+      // The app's sideways-boss convention: the ball centres stand one probe radius outside each face.
+      return { y: r3((balls[0]! + balls[1]!) / 2), widthMm: r3(Math.abs(balls[1]! - balls[0]!) - 2 * opts.probeRadiusMm), zMachine };
+    };
+
+    const chord = await chordAt(opts.trial.z1);
+
+    // THE CROWN at the chord's own Y.
+    const bandBottom = r3(opts.crownBandMm.min);
+    const descentMm = r3(opts.seekFromMachineZ - bandBottom);
+    if (!(descentMm > 0)) {
+      throw new Stop(`the crown's band floor (machine Z ${f(bandBottom)}) is not below the travel height ${f(opts.seekFromMachineZ)}`);
+    }
+    await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
+    await io.send(`G53 G0 X${f(opts.at.x)} Y${f(chord.y)}`);
+    await io.idle();
+    await io.at(`down to the chuck's crown at Y ${f(chord.y)}, from machine Z ${f(opts.seekFromMachineZ)}`);
+    await io.send('G91');
+    const crownReply = await io.send(`G38.3 Z-${f(descentMm)} F${f(opts.surfaceFeed)}`, { missOk: true });
+    const crownPrb = lastPrb(crownReply);
+    if (crownPrb === null || !crownPrb.touched) {
+      await io.send('G90');
+      throw new Stop(`the crown touch found nothing down to machine Z ${f(bandBottom)} above the chuck's axis — check the module's position`);
+    }
+    await io.send(`G38.5 Z${f4r(release)} F100`);
+    await io.send('G90');
+    const crownZ = r3(crownPrb.z);
+    await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
+
+    const solved = solveRotaryCircle(chord, crownZ);
+    if (!solved.ok) throw new Stop(solved.reason);
+
+    // THE CHECK chord at its own height: information, never a refusal.
+    const check = await chordAt(opts.trial.z2);
+    const residualMm = chordResidualMm(check, solved.circle);
+    const residualLine =
+      residualMm > ROTARY_CHORD_TOLERANCE_MM
+        ? `the check chord at machine Z ${f(opts.trial.z2)} measured ${f(check.widthMm)} mm wide, ${f(residualMm)} mm off the fitted circle (tolerance ${ROTARY_CHORD_TOLERANCE_MM} mm) — the chuck may not be round, or a wall may have been touched in the wrong place`
+        : null;
+
+    return { ok: true, circle: solved.circle, residualMm, residualLine, transcript: io.transcript };
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
     throw e;
