@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   generateSurface3dIR,
+  surfaceResidual,
   type GoalHeightfield,
   type SurfaceFeeds,
   type SurfaceTool,
@@ -116,6 +117,24 @@ describe('#862 — the rim pass finishes the band wall', () => {
     // The laps cut at -1 there, and never below the surface they stand beside.
     expect(near.some((m) => Math.abs(m.z + 1) <= 1e-9)).toBe(true);
     expect(near.every((m) => m.z >= -1 - 1e-9)).toBe(true);
+  });
+
+  it('#847 — the finish’s tip field includes the laps, and the measured residual drops', () => {
+    // The rest pass (#847) is planned from the finish's tip field. Without the laps that field is
+    // the raster's alone: the ball rests on the stock top at the band's edge, so the whole wall
+    // reads as material the finish could not take. The laps cut it, and the field says so.
+    const hf = bandHeightfield(-5);
+    const plain = run(hf, undefined);
+    const rimmed = run(hf, { floorZ: -5 });
+    const plainRes = surfaceResidual(hf, plain.finishTip, 0, 0.01);
+    const rimRes = surfaceResidual(hf, rimmed.finishTip, 0, 0.01);
+    expect(plainRes.cells).toBeGreaterThan(0);
+    expect(rimRes.cells).toBeLessThan(plainRes.cells);
+    expect(rimRes.volumeMm3).toBeLessThan(plainRes.volumeMm3 * 0.5);
+    // The field itself is what changed: a boundary cell's tip is lower with the laps.
+    const edge = 0;
+    expect(rimmed.finishTip[edge]!).toBeLessThan(plain.finishTip[edge]!);
+    expect(rimmed.finishTip[edge]!).toBeLessThanOrEqual(-4);
   });
 
   it('the wall stays on the covered boundary and the passes retract clear', () => {

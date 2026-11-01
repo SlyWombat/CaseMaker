@@ -744,8 +744,9 @@ export interface Surface3dResult {
    * #847 — the finish's gouge-safe tip field, the surface its program cuts. Returned so the goal
    * path measures the residual from the SAME field rather than a second model of the cut. It is a
    * tall array (one Float32 per grid cell): never store it on a program, a fact or a result that
-   * is serialized — the caller's own measurement is what leaves this call. The rim laps ride this
-   * field (they are the finishing operation's opening moves), so the field is the whole finish.
+   * is serialized — the caller's own measurement is what leaves this call. When the #862 rim laps
+   * run, this is the LOWER of the raster's field and the laps' swept underside, because the laps
+   * cut the clear band's wall the raster cannot: the field is the whole finish's surface.
    */
   finishTip: Float32Array;
   /** Labelled placeholders and limitations for the run sheet (feeds, undercuts, flat finish). */
@@ -1001,8 +1002,20 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
   // #862 — THE RIM PASS OPENS THE FINISH: the clear band's wall as contour laps from the stock
   // top down to its floor, then the raster rides the floor beside it.
   const rim =
-    opts.rim != null ? rimMoves(hf, feeds, opts.rim.floorZ, alongStep, safeZ, hopZ) : { moves: [], laps: 0 };
+    opts.rim != null
+      ? rimMoves(hf, tool, feeds, opts.rim.floorZ, alongStep, safeZ, hopZ)
+      : { moves: [], laps: 0, tip: null };
   const finishMoves = rim.moves.length > 0 ? [...rim.moves, ...finishRaster] : finishRaster;
+  // #847 — THE FINISH'S CUT SURFACE IS THE RASTER'S, LOWERED BY THE RIM LAPS WHERE THEY RUN. The
+  // laps take the clear band's wall down to its floor; measured from the raster's tip field alone
+  // that wall would read as residual the finish has already removed. The returned field is the
+  // lower of the two, cell for cell, so the rest pass is planned over what is really left.
+  const finishTip = ((): Float32Array => {
+    if (rim.tip === null) return tip;
+    const combined = new Float32Array(tip.length);
+    for (let k = 0; k < tip.length; k++) combined[k] = Math.min(tip[k] as number, rim.tip[k] as number);
+    return combined;
+  })();
 
   const depth = Math.max(0, hf.topZ - hf.minZ);
   const roughing: CamOperation = {
@@ -1110,7 +1123,17 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     operations,
   };
 
-  return { ir, roughing, finishing, roughingLayers: rough.layers, scallop, pencil, rim: rimFacts, finishTip: tip, notes };
+  return {
+    ir,
+    roughing,
+    finishing,
+    roughingLayers: rough.layers,
+    scallop,
+    pencil,
+    rim: rimFacts,
+    finishTip,
+    notes,
+  };
 }
 
 /** #721 — true for a goal MESH marked as a mold (a PNG relief and an item are never molds). */
@@ -2070,14 +2093,15 @@ function decimateLoop(loop: [number, number][], alongStep: number): [number, num
  */
 function rimMoves(
   hf: GoalHeightfield,
+  tool: SurfaceTool,
   feeds: SurfaceFeeds,
   floorZ: number,
   alongStep: number,
   safeZ: number,
   hopZ: number,
-): { moves: CamMove[]; laps: number } {
+): { moves: CamMove[]; laps: number; tip: Float32Array | null } {
   const moves: CamMove[] = [];
-  if (hf.coveredCount === 0 || !(feeds.stepDown > 0)) return { moves, laps: 0 };
+  if (hf.coveredCount === 0 || !(feeds.stepDown > 0)) return { moves, laps: 0, tip: null };
   const D = distanceField(hf);
   // Decimated at the finishing step-over: the rim's own chord facets are then the size of the
   // finish's, so the wall carries no coarser a pattern than the floor beside it.
@@ -2089,7 +2113,7 @@ function rimMoves(
   const paths = contourLoops(hf, D, boundaryLevel)
     .map((loop) => decimateLoop(loop, along))
     .filter((loop) => loop.length >= 2);
-  if (paths.length === 0) return { moves, laps: 0 };
+  if (paths.length === 0) return { moves, laps: 0, tip: null };
   // The wall's foot at a contour point: the highest covered cell around it (the boundary cell the
   // contour runs through, and its neighbours if a rounded corner puts the point between cells).
   const footAt = (x: number, y: number): number => {
@@ -2160,11 +2184,38 @@ function rimMoves(
       }
     }
   }
+  // #847 — WHAT THE LAPS LEAVE, cell for cell. Their deepest level is the band floor, so around
+  // every path point the cutter's underside cuts to `floorZ + rise(d)` within its radius; the rest
+  // of the grid is untouched (Infinity). Distances are to the sampled POINTS, never shorter than to
+  // the chord between them, so the field cannot claim a cut the laps did not make.
+  let lapTip: Float32Array | null = null;
+  const radius = tool.radius;
+  if (radius > 0) {
+    lapTip = new Float32Array(hf.nx * hf.ny);
+    lapTip.fill(Infinity);
+    for (const pts of paths) {
+      for (const [x, y] of pts) {
+        const i0 = Math.max(0, Math.ceil((x - radius - hf.x0) / hf.pitch));
+        const i1 = Math.min(hf.nx - 1, Math.floor((x + radius - hf.x0) / hf.pitch));
+        const j0 = Math.max(0, Math.ceil((y - radius - hf.y0) / hf.pitch));
+        const j1 = Math.min(hf.ny - 1, Math.floor((y + radius - hf.y0) / hf.pitch));
+        for (let j = j0; j <= j1; j++) {
+          for (let i = i0; i <= i1; i++) {
+            const d = Math.hypot(hf.x0 + i * hf.pitch - x, hf.y0 + j * hf.pitch - y);
+            if (!(d < radius)) continue;
+            const cut = floorZ + ballRise(tool.ball, radius, d);
+            const k = j * hf.nx + i;
+            if (cut < (lapTip[k] as number)) lapTip[k] = cut;
+          }
+        }
+      }
+    }
+  }
   if (moves.length > 0) {
     const last = moves[moves.length - 1]!;
     moves.push({ kind: 'rapid', x: last.x, y: last.y, z: safeZ });
   }
-  return { moves, laps: levels.length };
+  return { moves, laps: levels.length, tip: lapTip };
 }
 
 
