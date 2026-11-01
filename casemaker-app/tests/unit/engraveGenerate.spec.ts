@@ -1691,6 +1691,11 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.programs[1]!.programHash).not.toBe(g.programs[0]!.programHash);
     expect(vacuumWords(g.programs[0]!.nc)).toEqual(['M331']);
     expect(vacuumWords(g.programs[1]!.nc)).toEqual(['M332']);
+
+    // #844 — EACH PROGRAM CARRIES ITS OWN PREDICTIONS. The face file's skim has none to compare;
+    // the engraving program carries exactly the list the run judged before this field existed.
+    expect(g.programs[0]!.predicted).toBeUndefined();
+    expect(g.programs[1]!.predicted).toEqual(g.predicted);
   });
 
   // #432 review R3 — the vacuum words belong to the RUN (#419 decision 4), and the facing file is

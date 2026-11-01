@@ -61,9 +61,24 @@ export type EngraveRunPhase = 'idle' | 'generating' | 'simulating' | 'checking' 
  * Everything the two gates read, for a caller that has no store. `EngraveRunState` satisfies this
  * structurally, so the store hands its own state straight to the gates.
  */
+/**
+ * #844 — ONE PROGRAM'S OWN ORACLE VERDICT, with the words that name it ("program 2 (flat-1)"),
+ * so a run whose second file did not match says WHICH file. The run's combined `oracle` is the
+ * tick; this list is the evidence behind it.
+ */
+export interface ProgramOracle {
+  /** Index into `generated.programs`. */
+  index: number;
+  /** The run's own numbering (`programLabel`): "program 2 (flat-3.175x12)". */
+  label: string;
+  report: OracleReport;
+}
+
 export interface EngraveRunView {
   generated: EngraveGenerated | null;
   oracle: OracleReport | null;
+  /** #844 — every program's own verdict, in cut order; absent on a stored result from before it. */
+  oraclePrograms?: readonly ProgramOracle[];
   simDiagnostics: SimDiagnostic[];
   simStatus: SimStatus | null;
   phase: EngraveRunPhase;
@@ -418,7 +433,14 @@ export function saveBlocker(v: EngraveRunView): string | null {
   if (v.generated.nc === null) return 'no program was produced';
   if (v.simStatus !== 'ready') return 'the simulation did not finish';
   if (!v.oracle) return 'the prediction has not been checked';
-  if (!v.oracle.ok) return 'the simulation does not match the prediction';
+  if (!v.oracle.ok) {
+    // #844 — WHICH FILE. A rest pair's second program or a board's later cutter that did not
+    // match is named, not the run; a result with no per-program list keeps the old sentence.
+    const failed = (v.oraclePrograms ?? []).find((p) => !p.report.ok);
+    return failed === undefined
+      ? 'the simulation does not match the prediction'
+      : `${failed.label}: the simulation does not match the prediction`;
+  }
   const missing = requiredAckCodes(v);
   if (missing.length > 0 && !v.acknowledged) return 'tick the statement in Cut, step 1';
   return null;

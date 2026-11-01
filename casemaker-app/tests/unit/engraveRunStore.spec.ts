@@ -129,6 +129,99 @@ function swept(over: Partial<SimLoadOk> = {}): SimLoadOk {
 }
 
 describe('engraveRunStore (#206)', () => {
+  // #844 — EVERY PROGRAM'S ORACLE JUDGES ITS OWN FILE. A multi-program run (a rest pair, a
+  // board's several drill cutters) simulates each file; before this, only program 1's match was
+  // judged. Now every program is compared with its OWN predictions, the run's tick is all of
+  // them, and a failure names the file.
+  describe('#844 every program’s own oracle', () => {
+    const PREDICTED = (itemId: string): { depth: number; itemId: string; polygons: [] } => ({
+      depth: 0.5,
+      itemId,
+      polygons: [],
+    });
+
+    /** Two programs, each with its own predictions (or none, like a stored result). */
+    function twoPrograms(first: ReturnType<typeof PREDICTED>[] | undefined, second: ReturnType<typeof PREDICTED>[] | undefined): EngraveGenerated {
+      const base = clean();
+      return {
+        ...base,
+        predicted: [PREDICTED('top-level')],
+        programs: [
+          { ...base.programs[0]!, programHash: 'p1', ...(first === undefined ? {} : { predicted: first }) },
+          { ...base.programs[0]!, programHash: 'p2', ...(second === undefined ? {} : { predicted: second }) },
+        ],
+      };
+    }
+
+    async function runWith(
+      generated: EngraveGenerated,
+      answer: (predicted: readonly { itemId?: string }[]) => { ok: boolean },
+    ): Promise<{ seen: (readonly { itemId?: string }[])[] }> {
+      // The job carries its own cutter, so the run does not depend on a registry another test
+      // populated. `toolKey` stays `flat-1.0` (the program labels read it).
+      const jobNow = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({ job: { ...jobNow, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+      const realLoad = useSimStore.getState().loadProgram;
+      useSimStore.setState({
+        loadProgram: async () => {
+          useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+          return swept();
+        },
+      });
+      const seen: (readonly { itemId?: string }[])[] = [];
+      setEngraveRunClientLoader(async () => ({
+        engraveGenerate: async () => generated,
+        simOracle: async (predicted) => {
+          seen.push(predicted);
+          const ok = answer(predicted).ok;
+          return { ok, band: 0.016, levels: [], worst: { underCut: ok ? 0 : 0.5, overCut: 0 } } as never;
+        },
+      }));
+      try {
+        await useEngraveRunStore.getState().generate();
+      } finally {
+        useSimStore.setState({ loadProgram: realLoad });
+      }
+      return { seen };
+    }
+
+    it('judges each program against its own list, and the gate names the one that did not match', async () => {
+      const { seen } = await runWith(twoPrograms([PREDICTED('first')], [PREDICTED('second')]), (predicted) => ({
+        ok: predicted[0]?.itemId !== 'second',
+      }));
+      // One call per program, each with ITS OWN predictions.
+      expect(seen).toHaveLength(2);
+      expect(seen[0]![0]!.itemId).toBe('first');
+      expect(seen[1]![0]!.itemId).toBe('second');
+      const s = useEngraveRunStore.getState();
+      expect(s.oracle?.ok).toBe(false);
+      expect(s.oraclePrograms.map((o) => o.label)).toEqual(['program 1 (flat-1.0)', 'program 2 (flat-1.0)']);
+      expect(s.oraclePrograms.map((o) => o.report.ok)).toEqual([true, false]);
+      // The gate's sentence names the file, not the run.
+      const sentence = saveBlocker(gate.gateViewFor(s, null, false));
+      expect(sentence).toContain('program 2 (flat-1.0)');
+      expect(sentence).toContain('the simulation does not match the prediction');
+    });
+
+    it('a stored result with no per-program predictions uses the top-level list for program 1 and does not re-judge later files', async () => {
+      const { seen } = await runWith(twoPrograms(undefined, undefined), () => ({ ok: true }));
+      expect(seen).toHaveLength(1);
+      expect(seen[0]![0]!.itemId).toBe('top-level');
+      const s = useEngraveRunStore.getState();
+      expect(s.oracle?.ok).toBe(true);
+      expect(s.oraclePrograms.map((o) => o.index)).toEqual([0]);
+    });
+
+    it('all programs passing is the run’s tick, and the totals are the sum of their worsts', async () => {
+      const { seen } = await runWith(twoPrograms([PREDICTED('first')], [PREDICTED('second')]), () => ({ ok: true }));
+      expect(seen).toHaveLength(2);
+      const s = useEngraveRunStore.getState();
+      expect(s.oracle?.ok).toBe(true);
+      expect(s.oraclePrograms).toHaveLength(2);
+      expect(saveBlocker(gate.gateViewFor(s, null, false))).toBeNull();
+    });
+  });
+
   beforeEach(() => {
     useEngraveRunStore.getState().reset();
     setEngraveRunClientLoader(null);

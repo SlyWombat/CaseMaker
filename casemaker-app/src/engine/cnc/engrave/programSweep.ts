@@ -26,6 +26,7 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { SimDiagnostic, SimLoadOk, SimLoadResult } from '@/workers/sim/session';
 import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
+import type { OraclePredicted } from './oracle';
 
 /** The part of a generated program this walk reads. `EngraveProgram` satisfies it structurally. */
 export interface SweepProgram {
@@ -34,6 +35,12 @@ export interface SweepProgram {
   nc: string;
   /** The point angle the CAM planned for THIS program, when it is the drill bit's (#434). */
   drill?: { simDrillPoint: { deg: number; source: string } | null } | null;
+  /**
+   * #844 — THIS PROGRAM'S OWN PREDICTIONS, so the caller can judge the file it just swept against
+   * what it was planned to cut. Absent on a stored result from before the field, and on a file
+   * with nothing to predict.
+   */
+  predicted?: readonly OraclePredicted[];
 }
 
 export interface SweepDrillPoint {

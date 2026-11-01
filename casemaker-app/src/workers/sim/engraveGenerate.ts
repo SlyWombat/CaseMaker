@@ -449,6 +449,14 @@ export interface EngraveProgram {
   programHash: string;
   cam: EngraveCamSummary | null;
   /**
+   * #844 — THIS PROGRAM'S OWN PREDICTIONS, the ones its generation produced (`OneProgram.predicted`).
+   * The run judges every program against its own list: a rest pair's second file, a board's drill
+   * cutters and a mixed wrapped-plus-face job each compare what THEY were planned to cut. Absent on
+   * a result stored before the field existed — the run then falls back to the top-level `predicted`
+   * for program 1 — and on a file with nothing to predict (a surface program's empty list).
+   */
+  predicted?: OraclePredicted[];
+  /**
    * #434 — the drill facts when THIS program is the drill bit's, so a caller describing program N
    * (the run plan, a per-program sheet) can name its `drill.*` numbers. Null on every other file.
    */
@@ -6225,6 +6233,8 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     frameError: one.frameError ?? null,
     programHash: programHash(nc),
     cam: one.cam,
+    // #844 — the program's own predictions, so the run judges its own file.
+    predicted: one.predicted,
     drill: one.drill ?? null,
     finish: one.finish ?? null,
     through: one.through ?? null,

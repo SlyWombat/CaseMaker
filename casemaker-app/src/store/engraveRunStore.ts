@@ -29,6 +29,7 @@ import {
   type WorkFacts,
 } from '@/platform/flightRecorder';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { ProgramOracle } from './engraveRunGate';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SimStatus } from './simStore';
@@ -217,10 +218,46 @@ export function rampThresholdMm(predicted: readonly OraclePredicted[], tool: Too
   return smallest / 2;
 }
 
+/**
+ * #844 — THE RUN'S COMBINED ORACLE. Every program's own verdict must pass; the run's tick is all
+ * of them. The numbers are the run's totals (each program's worst summed — the files cut
+ * different material), the band the widest tolerance any of them used, and the first failing
+ * report's location. A board's copper verdict is carried and must pass too.
+ */
+export function combineOracles(reports: readonly OracleReport[], copper: OracleReport | null): OracleReport {
+  const all = copper === null ? reports : [...reports, copper];
+  const first = reports[0] ?? copper;
+  if (first === null || all.length === 0) throw new Error('no oracle report to combine');
+  const failing = reports.filter((r) => !r.ok);
+  const locus = failing[0] ?? first;
+  return {
+    ok: failing.length === 0 && (copper === null || copper.ok),
+    band: Math.max(...all.map((r) => r.band)),
+    // The levels the picture and the per-level sentence read: one coherent set, from the report
+    // that decided the verdict (the first failing, else the first program's).
+    levels: locus.levels,
+    worst: {
+      underCut: reports.reduce((sum, r) => sum + r.worst.underCut, 0),
+      overCut: reports.reduce((sum, r) => sum + r.worst.overCut, 0),
+      underAt: locus.worst.underAt ?? null,
+      overAt: locus.worst.overAt ?? null,
+    },
+    ...(locus.areaFloor === undefined ? {} : { areaFloor: locus.areaFloor }),
+    ...(locus.frame === undefined ? {} : { frame: locus.frame }),
+    ...(copper?.copper === undefined ? {} : { copper: copper.copper }),
+  };
+}
+
 export interface EngraveRunState {
   /** The last generated result — kept on screen while a newer run builds. */
   generated: EngraveGenerated | null;
   oracle: OracleReport | null;
+  /**
+   * #844 — EVERY PROGRAM'S OWN VERDICT, in cut order, with the words that name it. `oracle` is the
+   * run's combined tick; this is the evidence behind it, and the gate's sentence reads it to name
+   * the file that did not match.
+   */
+  oraclePrograms: ProgramOracle[];
   /** The diagnostics of the simulation load this run performed (#193, #204). */
   simDiagnostics: SimDiagnostic[];
   /** The terminal status of that load, or null before it ran. */
@@ -335,6 +372,7 @@ let lastStage: string | null = null;
 export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
   const empty = {
     oracle: null,
+    oraclePrograms: [] as ProgramOracle[],
     simDiagnostics: [] as SimDiagnostic[],
     simStatus: null as SimStatus | null,
     pathOnly: false,
@@ -681,9 +719,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // `generated.threads` describes; a facing pass or a later program states none.
     const threadsFor = (index: number) =>
       index === firstEngravingIndex ? (generated.threads?.flatMap((t) => t.simThreads) ?? []) : [];
-    // A holder, not a `let`: the assignment happens inside the walk's `afterLoad` callback, which
-    // TypeScript's control-flow analysis cannot see through.
-    const oracleBox: { report: OracleReport | null } = { report: null };
+    // #844 — ONE VERDICT PER PROGRAM, collected by the walk's `afterLoad` while each program is
+    // still the session's live one. `copperReport` is the board's own combined check, which spans
+    // several programs and stays the run-level verdict it was.
+    const oracles: { index: number; report: OracleReport }[] = [];
+    let copperReport: OracleReport | null = null;
     let outcome: ProgramSweepOutcome;
     try {
       outcome = await sweepPrograms<SweepProgram & { setupIndex: number }>({
@@ -785,22 +825,31 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
             throw e instanceof SimulationStopped ? e : new SimulationStopped(e instanceof Error ? e.message : String(e));
           }
         },
-        afterLoad: async ({ index }) => {
-          // THE PREDICTION IS THE FIRST ENGRAVING PROGRAM'S. The oracle compares it against the
-          // sweep of THAT program, so it runs while that program is still the session's live one —
-          // the walk awaits this hook before loading the next.
+        afterLoad: async ({ index, program }) => {
+          // THE ORACLE RUNS WHILE THE PROGRAM IT JUDGES IS STILL THE SESSION'S LIVE ONE — the walk
+          // awaits this hook before loading the next.
           if (pcbSides.length > 0) {
             // #743 P-5 — the board's own check, on the sweep that has finished drawing this side.
             const side = pcbSides.find((s) => isolationIndexOf(s) === index);
-            if (side === undefined) return;
-            const report = await client.simOracle([], side.input);
-            if (report.copper === undefined) return;
-            copperSides.push({ face: side.faceUp, ...report.copper });
-            const copper = combineCopperSides(copperSides);
-            oracleBox.report = { ...report, copper, ok: report.ok && copper.ok };
-            return;
+            if (side !== undefined) {
+              const report = await client.simOracle([], side.input);
+              if (report.copper !== undefined) {
+                copperSides.push({ face: side.faceUp, ...report.copper });
+                const copper = combineCopperSides(copperSides);
+                copperReport = { ...report, copper, ok: report.ok && copper.ok };
+              }
+            }
           }
-          if (index === firstEngravingIndex) oracleBox.report = await client.simOracle(generated.predicted);
+          // #844 — EVERY PROGRAM JUDGES ITS OWN FILE. A result stored before the field existed
+          // carries no per-program list: program 1 then falls back to the top-level `predicted`
+          // (exactly what today did), and a later program with nothing predicted is not compared.
+          const isFirst = index === firstEngravingIndex;
+          const predicted = program.predicted ?? (isFirst ? generated.predicted : undefined);
+          if (predicted === undefined) return;
+          if (!isFirst && predicted.length === 0) return;
+          const report = await client.simOracle([...predicted]);
+          if (mine !== seq) return;
+          oracles.push({ index, report });
         },
         aborted: () => mine !== seq,
       });
@@ -892,13 +941,18 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     }
 
     try {
-      // The walk ran the oracle while program 1 was live. A run with no first engraving program
-      // cannot reach here (`generated.nc` IS that program), but say so rather than compare the
-      // wrong session.
-      if (oracleBox.report === null) throw new Error('the prediction was not checked');
-      const oracle = oracleBox.report;
+      // The walk ran each program's oracle while that program was live. A run with no first
+      // engraving program cannot reach here (`generated.nc` IS that program), but say so rather
+      // than compare the wrong session.
+      if (oracles.length === 0 && copperReport === null) throw new Error('the prediction was not checked');
+      const oracle = combineOracles(oracles.map((o) => o.report), copperReport);
+      const oraclePrograms: ProgramOracle[] = oracles.map((o) => ({
+        index: o.index,
+        label: programLabel(generated.programs, o.index),
+        report: o.report,
+      }));
       if (mine !== seq) return;
-      set({ oracle, phase: oracle.ok ? 'ready' : 'blocked' });
+      set({ oracle, oraclePrograms, phase: oracle.ok ? 'ready' : 'blocked' });
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
     }
@@ -909,6 +963,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
   return {
     generated: null,
     oracle: null,
+    oraclePrograms: [],
     simDiagnostics: [],
     simStatus: null,
     pathOnly: false,
