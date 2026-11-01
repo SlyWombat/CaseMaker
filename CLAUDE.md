@@ -12,8 +12,16 @@ The app lives in `casemaker-app/` (React + Vite + TypeScript, **Tauri** desktop 
   Visual Studio Build Tools with the **Desktop development with C++** workload, and the
   WebView2 runtime (present). Recommended checkout: `C:\Dev\CaseMaker` (not OneDrive).
   Then `cd casemaker-app && npm ci && npm run tauri build`.
-- A Linux build, if ever wanted, needs a **separate** clone in WSL (`~/projects/CaseMaker`)
-  plus webkit2gtk system packages — never point both OSes at one checkout.
+- **The Linux build runs on kdocker3 (192.168.10.38), not WSL.** IT's rig at
+  `/data/builds/casemaker-src/cm_build.sh <sha>` builds **two .debs** from a pinned commit in a
+  throwaway `rust:1.90-bookworm` container: the house bundle first (`--config
+  '{"build":{"beforeBuildCommand":"npm run build:house"}}'`, kept as `house.deb`) then the desktop
+  bundle, both with `--bundles deb`. `cm_house.sh` publishes the house deb to `:8000`;
+  `cm_swap.sh` puts the desktop deb into the Xvfb/tauri-driver test container. The full recipe —
+  packages, Node, the rolldown-binding workaround, the two-bundle order, `CASEMAKER_BUILD` — is in
+  `casemaker-app/src/docs/deployment.md` §3. A WSL clone (`~/projects/CaseMaker`) can still build,
+  but **never point both OSes at one checkout**. Allow inbound UDP 3333 for discovery on Linux; the
+  deb installs no firewall rule.
 - **Pick one side per checkout.** `node_modules` holds OS-specific native binaries
   (esbuild, rolldown, @tauri-apps/cli) and `.bin` links.
 - **Never `npm install` from WSL inside the OneDrive folder.** On 2026-09-14 WSL-created
