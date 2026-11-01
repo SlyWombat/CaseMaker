@@ -33,6 +33,7 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import type { EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { CandidatePlan, EvalContext } from '@/workers/sim/planEvaluate';
 import { evaluatePlan } from '@/workers/sim/planEvaluate';
 import { candidatePlans, planKey, rulePlanOf } from '@/engine/cnc/engrave/smartPick';
@@ -128,7 +129,7 @@ describe('#869 the goal’s split, generated', () => {
     const out = generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(2);
-    const [rough, finish] = out.programs as [typeof out.programs[0], typeof out.programs[0]];
+    const [rough, finish] = out.programs as [EngraveProgram, EngraveProgram];
 
     // TWO CUTTERS, IN CUT ORDER: the flat roughs, the ball finishes.
     expect(rough.toolKey).toBe(ROUGH.key);
@@ -144,12 +145,14 @@ describe('#869 the goal’s split, generated', () => {
     expect(finish.nc).toMatch(/T\d+ ?M6/);
 
     // EACH PROGRAM CARRIES ITS OWN CHECK (#535/#844) — the rough is a judged file, not a prefix.
+    const roughPasses = rough.surfaceCheck?.passes ?? [];
+    const finishPasses = finish.surfaceCheck?.passes ?? [];
     expect(rough.surfaceCheck?.kind).toBe('surface');
-    expect(rough.surfaceCheck?.passes).toHaveLength(1);
-    expect(rough.surfaceCheck!.passes[0]).toContain('3D rough');
+    expect(roughPasses).toHaveLength(1);
+    expect(roughPasses[0] ?? '').toContain('3D rough');
     expect(rough.surfaceCheck?.roughingLayers).toBeGreaterThan(0);
     expect(finish.surfaceCheck?.kind).toBe('surface');
-    expect(finish.surfaceCheck!.passes.every((p) => !p.includes('3D rough'))).toBe(true);
+    expect(finishPasses.every((p) => !p.includes('3D rough'))).toBe(true);
     expect(finish.surfaceCheck?.roughingLayers).toBe(0);
     expect(rough.surfaceCheck?.bbox).not.toEqual(finish.surfaceCheck?.bbox);
 

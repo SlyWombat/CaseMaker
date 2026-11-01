@@ -1560,6 +1560,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           );
         }
         job.toolKey = chosen.plan.cutters[0]!.key;
+        // #869 — a goal's flat rough is part of the plan the search MEASURED, so it is written
+        // into the goal before generation (and cleared when the plan has none): the run posts
+        // exactly the programs its verdict was scored on.
+        if (job.targetObject !== undefined && (chosen.plan.goalRoughKey !== undefined || job.targetObject.roughToolKey !== undefined)) {
+          const { roughToolKey: _stale, ...rest } = job.targetObject;
+          job.targetObject =
+            chosen.plan.goalRoughKey === undefined ? rest : { ...rest, roughToolKey: chosen.plan.goalRoughKey };
+        }
         if (chosen.plan.cutters.length > 1) {
           const setup = jobSetups(job)[0]!;
           job.setups = [
