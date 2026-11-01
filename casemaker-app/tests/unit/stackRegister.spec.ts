@@ -133,3 +133,35 @@ describe('#854 — registration, separate from retention', () => {
     expect(probeMaterial(lid, [f.ringMidX, y, f.lidTopZ + h / 2])).toBeGreaterThan(0.5);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #854 item 3 — the toolbox archetype uses the same connector.
+// ---------------------------------------------------------------------------
+
+import { findTemplate } from '@/library/templates';
+import { TOOLBOX_BIN_NODE_ID } from '@/engine/compiler/toolbox';
+
+describe('#854 — the toolbox module joins through the same connector', () => {
+  const toolboxWith = (connector: CaseParameters['stackConnector']) => {
+    const p = findTemplate('toolbox')!.build();
+    return { ...p, case: { ...p.case, stackConnector: connector } };
+  };
+
+  it('cuts sockets on the bin’s own walls and exports the keys', () => {
+    const plain = compileProject(toolboxWith(undefined));
+    const wired = compileProject(
+      toolboxWith({ sockets: [{ face: '+y', offset: 0 }], key: 'short', keys: 1 }),
+    );
+    const ids = wired.nodes.map((n) => n.id);
+    // The key is its own print, as with the case.
+    expect(ids).toContain('stack-key-1');
+    // The socket reaches the BIN (its walls are the module's outside)…
+    const binOf = (plan: ReturnType<typeof compileProject>) =>
+      plan.nodes.find((n) => n.id === TOOLBOX_BIN_NODE_ID)!.op;
+    expect(volume(binOf(wired))).not.toBeCloseTo(volume(binOf(plain)), 1);
+    // …and the report feeds the same connector section.
+    expect(wired.connector?.sockets).toHaveLength(1);
+    expect(plain.connector).toBeUndefined();
+    expect(plain.nodes.some((n) => n.id.startsWith('stack-key-'))).toBe(false);
+  });
+});

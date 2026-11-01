@@ -1,4 +1,5 @@
 import type { Project, HatProfile } from '@/types';
+import { TOOLBOX_WALL_T } from '@/types';
 import type { Aabb, BuildPlan, BuildNode, BuildOp, SplitOffer } from './buildPlan';
 import { union, difference, translate, aabbOfOp, cube } from './buildPlan';
 import { buildOuterShell } from './caseShell';
@@ -40,7 +41,7 @@ import { buildLidSplit, canSplitLid, lidJointSide, planLidJoint } from './lidSpl
 import { buildBadgeNodes } from './badge';
 import { buildInsertNodes } from './insert';
 import { buildBlankNodes } from './blank';
-import { buildToolboxNodes } from './toolbox';
+import { buildToolboxNodes, TOOLBOX_BIN_NODE_ID } from './toolbox';
 import { buildStackConnector, stackConnectorWanted, stackPadCutouts } from './stackConnector';
 import { buildStackGroove, buildStackRidge, stackRegisterWanted } from './stackRegister';
 import { ClashEnv, dividerClashStatements, hatBeyondHost, magnetClashStatements, type ClashStatement } from './caseClashes';
@@ -131,10 +132,34 @@ export function compileProject(project: Project): BuildPlan {
   if (kind === 'toolbox' && caseParams.toolbox) {
     const toolboxNodes = buildToolboxNodes(caseParams.toolbox);
     if (toolboxNodes) {
+      // #854 item 3 — the toolbox uses the same stacking connector: its bin's
+      // own walls ARE the module's outside, so the sockets go on them, the
+      // keys ride in the export as their own parts, and the same report feeds
+      // the connector section. The lid is a separate module and carries none:
+      // a socket spans one part's height.
+      const toolbox = caseParams.toolbox;
+      const toolboxConnector = buildStackConnector(caseParams.stackConnector, {
+        outerX: toolbox.width,
+        outerY: toolbox.depth,
+        shellTop: toolbox.height,
+        top: toolbox.height,
+        wall: TOOLBOX_WALL_T,
+        cornerRadius: 0,
+        caseFit: caseParams.fit,
+      });
+      const bin = toolboxNodes.find((n) => n.id === TOOLBOX_BIN_NODE_ID);
+      if (bin && (toolboxConnector.shellAdd.length > 0 || toolboxConnector.shellCut.length > 0)) {
+        let op = bin.op;
+        if (toolboxConnector.shellAdd.length > 0) op = union([op, ...toolboxConnector.shellAdd]);
+        if (toolboxConnector.shellCut.length > 0) op = difference([op, ...toolboxConnector.shellCut]);
+        bin.op = op;
+      }
+      toolboxNodes.push(...toolboxConnector.keyNodes);
       return {
         nodes: toolboxNodes,
         placementReport: validatePlacements(project),
         smartCutoutDecisions: [],
+        ...(toolboxConnector.report ? { connector: toolboxConnector.report } : {}),
       };
     }
   }
