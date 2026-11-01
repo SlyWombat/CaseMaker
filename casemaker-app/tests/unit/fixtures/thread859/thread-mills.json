@@ -1,0 +1,393 @@
+{
+ "_note": "#859 \u2014 the thread mills of the 2026-11-01 demo re-run (demo5 bench location + Makera catalogue synced 2026-10-18), trimmed to thread mills and their 6061 rows.",
+ "catalogue": [
+  {
+   "key": "cat:019c049a-8169-7a0b-8af9-79990a7366ba",
+   "tool": {
+    "number": 6,
+    "id": "152111073803",
+    "name": "3.175*M1*3mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 0.73,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.5,
+    "shoulderLength": 3.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-736d-8518-2e737fba7962",
+   "tool": {
+    "number": 6,
+    "id": "152111153806",
+    "name": "3.175*M2*6mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 1.54,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 6.5,
+    "shoulderLength": 6.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7868-af7c-d783fc6371ee",
+   "tool": {
+    "number": 6,
+    "id": "152111193808",
+    "name": "3.175*M2.5*7.5mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 1.96,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.0,
+    "shoulderLength": 7.5,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7347-8e3f-2e34168cf68f",
+   "tool": {
+    "number": 6,
+    "id": "152111243809",
+    "name": "3.175*M3*9mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 2.42,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": 9.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7662-8352-1e5aeb5618c1",
+   "tool": {
+    "number": 6,
+    "id": "152111313812",
+    "name": "3.175*M4*12mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 3.15,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 13.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-71f8-952f-fac929c81602",
+   "tool": {
+    "number": 6,
+    "id": "152111403815",
+    "name": "3.175*M5*15mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 16.0,
+    "shoulderLength": 15.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7474-8f9c-33beb704f2fc",
+   "tool": {
+    "number": 6,
+    "id": "152131485018",
+    "name": "6*M6*18mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 6.0,
+    "tipDiameter": null,
+    "diameter": 4.75,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 20.0,
+    "shoulderLength": 18.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-736f-ad8e-0933a639d94c",
+   "tool": {
+    "number": 6,
+    "id": "152131605024",
+    "name": "6*M8*24mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 6.0,
+    "tipDiameter": null,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 26.0,
+    "shoulderLength": 24.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  }
+ ],
+ "feeds": [
+  {
+   "cutterId": "152111073803",
+   "material": "6061 Aluminum",
+   "rpm": 15000.0,
+   "feed": 50.0,
+   "plungeFeed": 50.0,
+   "stepDown": 0.25
+  },
+  {
+   "cutterId": "152111153806",
+   "material": "6061 Aluminum",
+   "rpm": 15000.0,
+   "feed": 50.0,
+   "plungeFeed": 50.0,
+   "stepDown": 0.4
+  },
+  {
+   "cutterId": "152111193808",
+   "material": "6061 Aluminum",
+   "rpm": 15000.0,
+   "feed": 60.0,
+   "plungeFeed": 60.0,
+   "stepDown": 0.45
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "6061 Aluminum",
+   "rpm": 15000.0,
+   "feed": 60.0,
+   "plungeFeed": 60.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111313812",
+   "material": "6061 Aluminum",
+   "rpm": 15000.0,
+   "feed": 70.0,
+   "plungeFeed": 70.0,
+   "stepDown": 0.7
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "6061 Aluminum",
+   "rpm": 15000.0,
+   "feed": 80.0,
+   "plungeFeed": 80.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152131485018",
+   "material": "6061 Aluminum",
+   "rpm": 15000.0,
+   "feed": 100.0,
+   "plungeFeed": 100.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "152131605024",
+   "material": "6061 Aluminum",
+   "rpm": 15000.0,
+   "feed": 100.0,
+   "plungeFeed": 100.0,
+   "stepDown": 1.25
+  }
+ ],
+ "inventory": [
+  {
+   "key": "inv:kz-thread-m5-15",
+   "tool": {
+    "number": null,
+    "id": "152111403815",
+    "name": "Thread Milling Bit - 1/8\" Shank M5(d4) * 15mm",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": 4.0,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 15.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-thread-m3-9",
+   "tool": {
+    "number": null,
+    "id": "152111243809",
+    "name": "Thread Milling Bit - 1/8\" Shank M3(d2.4mm) * 9mm",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.4,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 9.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:lib-152111073803",
+   "tool": {
+    "number": 6,
+    "id": "152111073803",
+    "name": "3.175*M1*3mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 0.73,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.5,
+    "shoulderLength": 3.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:lib-152111153806",
+   "tool": {
+    "number": 6,
+    "id": "152111153806",
+    "name": "3.175*M2*6mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 1.54,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 6.5,
+    "shoulderLength": 6.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:lib-152111193808",
+   "tool": {
+    "number": 6,
+    "id": "152111193808",
+    "name": "3.175*M2.5*7.5mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 1.96,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.0,
+    "shoulderLength": 7.5,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:lib-152111313812",
+   "tool": {
+    "number": 6,
+    "id": "152111313812",
+    "name": "3.175*M4*12mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 3.15,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 13.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:lib-152131485018",
+   "tool": {
+    "number": 6,
+    "id": "152131485018",
+    "name": "6*M6*18mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 6.0,
+    "tipDiameter": null,
+    "diameter": 4.75,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 20.0,
+    "shoulderLength": 18.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:lib-152131605024",
+   "tool": {
+    "number": 6,
+    "id": "152131605024",
+    "name": "6*M8*24mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 6.0,
+    "tipDiameter": null,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 26.0,
+    "shoulderLength": 24.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  }
+ ]
+}

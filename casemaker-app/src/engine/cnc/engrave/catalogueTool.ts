@@ -17,7 +17,8 @@
  * same order `knownReach` uses). A catalogue row that states none fills nothing.
  */
 
-import { vendorId, type Tool } from '@/engine/cnc/tool';
+import { threadMillUnambiguousDiameter, vendorId, type Tool } from '@/engine/cnc/tool';
+import { THREAD_LABEL_TOLERANCE_MM } from '@/engine/cnc/feeds';
 import { isVShape } from '@/engine/cnc/vProfile';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 
@@ -28,6 +29,11 @@ export interface CatalogueValue {
   mm: number;
   /** The catalogue cutter's own name — the record the number comes from. */
   cutterName: string;
+  /**
+   * #859 — the record's own, coarser statement of the same size the catalogue replaced (a thread
+   * mill label's `d2.4` for the catalogue's 2.42), or absent when the record stated none.
+   */
+  replaced?: number;
 }
 
 export interface ToolWithCatalogueValues {
@@ -96,6 +102,26 @@ export function withCatalogueValues(
     }
   }
 
+  // #859 — A THREAD MILL'S CUTTING DIAMETER IS THE CATALOGUE'S. Makera's row for the same g_ID
+  // states it in its cutting column (`diameter`, 2.42 mm for the M3 mill); a house record put the
+  // 3.175 mm SHANK in `diameter` and the label's rounded `d2.4` in the tip. When the record states
+  // nothing that disagrees (a tip or a named size within the label's 0.1 mm printing, or nothing
+  // but a shank-sized `diameter`), the catalogue's number is the cutter's, in both fields, so no
+  // reader can take the shank for the cut. A record that disagrees is left alone: the coverage
+  // rule (`catalogueCoverageFor`) names it a different cutter.
+  if (tool.shape === 'thread') {
+    const cut = positive(twin.tool.tipDiameter) ?? positive(twin.tool.diameter);
+    const own = threadMillUnambiguousDiameter(tool);
+    if (
+      cut !== null &&
+      (own === null || Math.abs(own - cut) <= THREAD_LABEL_TOLERANCE_MM) &&
+      (tool.diameter !== cut || tool.tipDiameter !== cut)
+    ) {
+      next = { ...next, diameter: cut, tipDiameter: cut };
+      filled.push({ field: 'diameter', mm: cut, cutterName: twin.tool.name, ...(own === null || own === cut ? {} : { replaced: own }) });
+    }
+  }
+
   // THE REACH — a cutter that states neither a shoulder nor a flute. The shoulder wins when the
   // catalogue states one, because it is the shank-collision limit the holder rule reads first.
   if (positive(tool.shoulderLength) === null && positive(tool.fluteLength) === null) {
@@ -148,6 +174,20 @@ function mm3(v: number): string {
 /** The info finding's sentence, one line for each blank the catalogue filled. */
 export function catalogueValueSentence(tool: Tool, filled: readonly CatalogueValue[]): string | null {
   if (filled.length === 0) return null;
+  // #859 — a size the record DID state, coarser than the catalogue's: say both numbers.
+  const refined = filled.filter((f) => f.replaced !== undefined);
+  const blanks = filled.filter((f) => f.replaced === undefined);
+  const refinedWords = refined.map(
+    (f) =>
+      `The cutter "${tool.name}" states its cutting diameter as ${mm3(f.replaced!)} mm; this run uses ` +
+      `${mm3(f.mm)} mm, the size Makera's catalogue record for "${f.cutterName}" states.`,
+  );
+  if (blanks.length === 0) return refinedWords.join(' ');
+  const blankWords = blankSentence(tool, blanks);
+  return [blankWords, ...refinedWords].join(' ');
+}
+
+function blankSentence(tool: Tool, filled: readonly CatalogueValue[]): string {
   const parts = filled.map((f) =>
     f.field === 'tip'
       ? `its tip ⌀ (${mm3(f.mm)} mm) from Makera's catalogue record for "${f.cutterName}"`

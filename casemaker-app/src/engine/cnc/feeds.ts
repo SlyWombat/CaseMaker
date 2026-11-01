@@ -91,7 +91,7 @@
  */
 
 import { z } from 'zod';
-import { cuttingDiameter, cuttingForTrace, feedRowDiameter, flatEndMill, vendorId } from './tool';
+import { cuttingDiameter, cuttingForTrace, feedRowDiameter, flatEndMill, threadMillUnambiguousDiameter, vendorId } from './tool';
 import type { Tool, ToolShape } from './tool';
 import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
 import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
@@ -824,6 +824,9 @@ function sizeChanged(
   return { owned: a, catalogue: b };
 }
 
+/** #859 — half the 0.1 mm step a thread mill's label prints its cutting diameter to (`d2.4`). */
+export const THREAD_LABEL_TOLERANCE_MM = 0.05 + 1e-9;
+
 /**
  * The catalogue's coverage of a cutter for a material (#455). `catalogue` is the caller's rows,
  * never the module state: `feedsFor`'s docs say why (a worker is a separate module realm, #324).
@@ -848,7 +851,19 @@ export function catalogueCoverageFor(
   // row about a different cutter. The geometry is on the row (`withCatalogueGeometry`); a row that
   // carries none — the service's own rows, before the join — says nothing and falls through.
   const stated = rows.find((row) => row.cutter !== undefined)?.cutter;
-  if (stated !== undefined) {
+  if (stated !== undefined && tool.shape === 'thread') {
+    // #859 — A THREAD MILL IS COMPARED ON ITS CUTTING DIAMETER, never its shank. The catalogue's
+    // `diameter` for a thread mill is the cutting one (2.42 mm for the M3 mill); a house record
+    // carried the 3.175 mm shank there and the label's `d2.4` as its tip, and the shank-vs-cutting
+    // comparison called Makera's own M3 mill "a different cutter". A label prints the cutting
+    // diameter to 0.1 mm (`d2.4` for 2.42), so the two agree within half that step. A `diameter`
+    // that is only the shank's own number proves nothing either way.
+    const owned = threadMillUnambiguousDiameter(tool);
+    const catalogue = statedSize(stated.tipDiameter) ?? statedSize(stated.diameter);
+    if (owned !== null && catalogue !== null && Math.abs(owned - catalogue) > THREAD_LABEL_TOLERANCE_MM) {
+      return { kind: 'mismatched', cutterId, field: 'diameter', owned, catalogue };
+    }
+  } else if (stated !== undefined) {
     const diameter = sizeChanged(tool.diameter, stated.diameter);
     if (diameter !== null) return { kind: 'mismatched', cutterId, field: 'diameter', ...diameter };
     const tip = sizeChanged(tool.tipDiameter, stated.tipDiameter);

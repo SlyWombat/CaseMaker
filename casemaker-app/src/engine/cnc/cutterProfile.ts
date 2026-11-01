@@ -260,8 +260,13 @@ function nonNegative(v: number | null | undefined): number | null {
   return v !== null && v !== undefined && Number.isFinite(v) && v >= 0 ? v : null;
 }
 
-/** A shape whose `diameter=` is the SHANK, not the cutting tip (`Tool.diameter`). */
-const SHANK_DIAMETER_SHAPES: readonly ToolShape[] = ['engraving', 'chamfer', 'drill', 'thread'];
+/**
+ * A shape whose `diameter=` is the SHANK, not the cutting tip (`Tool.diameter`). Not a thread mill
+ * (#859): Makera's catalogue puts its CUTTING diameter in `diameter`, and a record that states a tip
+ * (the label's `d2.4`) cuts with that tip — the tip-first order below is the one `cuttingDiameter`
+ * keeps for it, so the drawing's DC is never the shank.
+ */
+const SHANK_DIAMETER_SHAPES: readonly ToolShape[] = ['engraving', 'chamfer', 'drill'];
 
 /**
  * The record's `DC` — the cutting diameter — and the field it came from.

@@ -204,7 +204,50 @@ export type RadiusResult = { ok: true; radius: number } | { ok: false; reason: s
  * cutter at all.
  */
 export function cuttingDiameter(tool: Tool): number | null {
+  if (tool.shape === 'thread') return threadMillCuttingDiameter(tool);
   return tool.tipDiameter ?? tool.diameter;
+}
+
+/**
+ * #859 — the cutting diameter a THREAD MILL's own name states, mm, or null: Makera's store names
+ * print it beside the thread (`M3(d2.4mm)`, `M5(d4)`), and a shop's own name may too
+ * (`1/4-20 UNC (d4.0mm)`). The box code never carries it (#380).
+ */
+export function threadMillNamedDiameter(name: string): number | null {
+  const m = /\(\s*d\s*(\d+(?:\.\d+)?)\s*(?:mm)?\s*\)/i.exec(name);
+  if (m === null) return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/**
+ * #859 — A THREAD MILL'S CUTTING DIAMETER, never its shank. Two conventions write a thread mill's
+ * record: Makera's catalogue puts the cutting diameter in `diameter` (`max_diameter`, catalogue.rs)
+ * and states no tip, while the house inventory (`houseDocument.ts`, before #859) put the 3.175 mm
+ * SHANK in `diameter` and the label's `d2.4` in `tipDiameter`. Reading `diameter` first made
+ * Makera's M3 mill a ⌀3.175 cutter — too wide for the ⌀2.459 M3 pilot. So the order is: a stated
+ * tip, then the size the name prints, then `diameter` — the catalogue's cutting column.
+ */
+export function threadMillCuttingDiameter(tool: Tool): number | null {
+  return threadMillUnambiguousDiameter(tool) ?? positiveSize(tool.diameter);
+}
+
+/**
+ * #859 — the cutting diameter a thread mill's record states BEYOND DOUBT, or null: a tip, the size
+ * its name prints, or a `diameter` that is not the shank's own number. A `diameter` equal to
+ * `handleDiameter` may be the shank (the house convention) or a full-shank cutter (Makera's
+ * ⌀6 mm M8 mill), so it cannot contradict the catalogue's cutting column, nor stand against it.
+ */
+export function threadMillUnambiguousDiameter(tool: Tool): number | null {
+  const stated = positiveSize(tool.tipDiameter) ?? threadMillNamedDiameter(tool.name);
+  if (stated !== null) return stated;
+  const d = positiveSize(tool.diameter);
+  const shank = positiveSize(tool.handleDiameter);
+  return d !== null && (shank === null || Math.abs(d - shank) >= 1e-3) ? d : null;
+}
+
+function positiveSize(v: number | null): number | null {
+  return v !== null && Number.isFinite(v) && v > 0 ? v : null;
 }
 
 /**
@@ -248,6 +291,7 @@ export function feedRowDiameter(tool: Tool): number | null {
 export const SHANK_DIAMETER_KINDS: ReadonlySet<ToolShape> = new Set(['engraving', 'chamfer', 'drill']);
 
 export function statedCuttingSize(tool: Tool): number | null {
+  if (tool.shape === 'thread') return threadMillCuttingDiameter(tool);
   const diameter = SHANK_DIAMETER_KINDS.has(tool.shape) ? tool.tipDiameter : (tool.tipDiameter ?? tool.diameter);
   return diameter === null || diameter <= 0 ? null : diameter;
 }

@@ -160,7 +160,9 @@ export function buildHouseInventory({ records }: { records: readonly LabelRecord
       handleDiameter: SHANK,
       tipDiameter: tip,
       // Makera's convention (`Tool.diameter`, catalogue.rs): a flat's diameter is its cut, others' the shank.
-      diameter: shape === 'flat' ? tip : SHANK,
+      // #859 — a thread mill's is its CUTTING diameter (catalogue.rs's `max_diameter`, 2.42 mm for
+      // the M3 mill), never the shank: the shank made Makera's own M3 mill "a different cutter".
+      diameter: shape === 'flat' || (shape === 'thread' && tip !== null) ? tip : SHANK,
       // As catalogue.rs states them: a flat's corner is 0, a ball's is the ball radius.
       cornerRadius: shape === 'flat' ? 0 : shape === 'ball' && tip !== null ? tip / 2 : null,
       // The label prints the INCLUDED angle: a chamfer keeps it in `angle`, an engraver halves it into `halfAngle`.
