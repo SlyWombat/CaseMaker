@@ -384,7 +384,10 @@ pub struct HeardDatagram {
 /// Discovery is passive: the machine broadcasts, we listen (`Z1-Bridge-Protocol.md` §2). Nothing
 /// is sent. The window resets only in the sense that we keep listening until the deadline; each
 /// datagram is collected. A port already bound (for example by Makera Studio) is reported clearly
-/// rather than mistaken for "no machines found".
+/// rather than mistaken for "no machines found". Silence is not evidence of absence, either: a
+/// host firewall (ufw, firewalld) or a bridged container drops the broadcast with no error and an
+/// empty window comes back — on Linux that is the first thing to check, and the `.deb` installs
+/// no firewall rule (#323).
 #[tauri::command(rename_all = "snake_case")]
 pub async fn machine_udp_listen(port: u16, window_ms: u64) -> Result<Vec<UdpDatagram>, String> {
     udp_listen(port, window_ms).await

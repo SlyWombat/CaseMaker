@@ -1,8 +1,8 @@
 # Deployment & supported hardware
 
-## Three deployment surfaces
+## Deployment surfaces
 
-Case Maker ships in three runtime forms; each has a different hardware / OS floor.
+Case Maker ships in four runtime forms; each has a different hardware / OS floor.
 
 ### 1. Web SPA in a modern browser
 
@@ -61,12 +61,43 @@ casemaker_setup.exe /S /PORT=9000 /HOST=192.168.10.16
 
 **USB serial (#775):** a controller on its USB cable, with no network at all, is reached from **Manage › Machines › USB serial** — pick the COM port and Connect. The link carries the same protocol as TCP 2222 (same framing, same commands), because serial is a second connection kind behind the same transport, not a second protocol. It is offered only in the desktop app window on Windows: the web build has no ports, and a LAN browser served by the desktop app is not offered the pane either. Discovery is a LAN broadcast, so a serial machine cannot be found — it is always chosen by hand. Nothing on the link announces the model, so the machine's envelope and limits stay unknown and it is not recorded as the network machine. Program uploads are still network-only; sending a job over the serial link is not wired into the Cut flow yet (bench check: #767).
 
-### 3. CLI / sample-export script
+### 3. Tauri desktop app (Linux .deb)
+
+The same Tauri shell builds on Linux as a `.deb` (`Case Maker_1.0.0_amd64.deb`) with the same embedded Axum server. It is **x86_64 only** today — no arm64 Linux target is wired up — and Debian/Ubuntu-family hosts install it with `dpkg -i` (or `apt install ./Case\ Maker_1.0.0_amd64.deb`), which pulls WebKitGTK 4.1, the AppIndicator library and the rest of the runtime.
+
+**Build prerequisites (Debian/Ubuntu):**
+- Rust stable ≥ 1.90 and Node 22.12+ (24 LTS recommended) in the build environment.
+- `libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev build-essential file curl xz-utils patchelf`.
+- `npm ci` in `casemaker-app/`. The lockfile is generated on Windows, so `npm ci` on Linux skips the Linux-native rolldown binding; add it once with `npm install --no-save "@rolldown/binding-linux-x64-gnu@$(node -p "require('rolldown/package.json').version")"` (#565).
+
+**The two bundles are different programs, built from one checkout.** The Rust server embeds `dist/` at compile time, so the bundle is fixed per binary: the **house** bundle (`npm run build:house` — the browser drives the machine through the instance relay, #821) is the house service on `:8000`, and the **desktop** bundle is a normal desktop install. Build each with the bundle type named explicitly — `tauri.conf.json` keeps `targets: ["nsis"]` so the Windows release path never meets a Linux target, and `--bundles` is the bundle the host builds:
+
+```sh
+# 1. the house bundle (relay mode), kept as house.deb
+touch src-tauri/src/main.rs   # make the embed macro re-expand for the second build
+npx tauri build --bundles deb --config '{"build":{"beforeBuildCommand":"npm run build:house"}}'
+cp "src-tauri/target/release/bundle/deb/Case Maker_1.0.0_amd64.deb" house.deb
+# 2. the desktop bundle at the usual path
+touch src-tauri/src/main.rs
+npx tauri build --bundles deb
+```
+
+`CASEMAKER_BUILD=<short sha>` stamps the binary when the build tree has no usable git (a container build does not), so `/api/v1/health` names the commit it came from (#566).
+
+**Floor:** the same hardware floor as the Windows app (≥ 4 GB RAM, ~150 MB disk); WebKitGTK 4.1 is the webview.
+
+**Discovery:** the Z1 announces itself by UDP broadcast to port 3333. On Linux a host firewall such as ufw or firewalld **silently drops it**, and the app reports no machine found; allow inbound UDP 3333 on the interface that reaches the LAN. The Windows installer adds its own rule; the `.deb` changes no firewall setting. The same silence appears if the app runs in a bridged container, because Docker's bridge does not forward the broadcast — run it with host networking to test discovery.
+
+**Makera Studio's library:** Studio does not ship for Linux, so there is no `~/.local/share/MakeraStudio/makera_library.db`; `studio_db_path()` reports "no Studio install", which is the correct answer, and the catalogue tier starts empty. Fill it by enabling an online source or by importing a library export; the house-file import (`/api/v1/import`) carries the house, **not** the catalogue (#212).
+
+**Where it has run:** the house rig on kdocker3 builds both `.deb`s from a pinned commit in a `rust:1.90-bookworm` container and runs them on a Debian x86_64 host: the house one as the house service on `:8000`, the desktop one installed in a test container that opens it under Xvfb, where it serves `/api/v1/health` and its inventory API accepts a cutter. The test container is bridged, so it cannot receive the Z1's discovery broadcast — LAN discovery is the check that needs a host-networked or native install. This is a build-and-run proof, not a released channel: the Windows NSIS installer remains the released desktop build.
+
+### 4. CLI / sample-export script
 
 `scripts/export-sample.ts` (and the export-sample npm script) compiles a `.caseproj.json` to STL/3MF without launching a UI. Useful for batch jobs and CI.
 
 **Runtime floor:**
-- Node 20.19+ or Node 22.12+ (matches Vite 8's engine requirement).
+- Node 22.12+ (24 LTS recommended). Vite 8 itself accepts 20.19+, but this repo's `engines` floor is 22.12 (#565).
 - Headless on Linux / macOS / Windows / Docker.
 
 ## What Case Maker cannot run on
@@ -80,7 +111,7 @@ casemaker_setup.exe /S /PORT=9000 /HOST=192.168.10.16
 The Vite dev server defaults to `127.0.0.1`. To make it reachable from other machines on the same LAN:
 
 ```bash
-# from inside the casemaker-app directory, with Node 20.19+ in PATH
+# from inside the casemaker-app directory, with Node 22.12+ in PATH
 npx vite --host 192.168.10.16 --port 8000 --strictPort
 ```
 
