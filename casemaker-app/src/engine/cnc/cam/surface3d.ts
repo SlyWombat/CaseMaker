@@ -146,14 +146,76 @@ export interface GoalHeightfield {
 }
 
 /**
- * #785 — THE GOAL PROGRAM'S STATED MOVE BUDGET. The CAM holds every move of the program at once,
- * and a goal's cost is roughly (roughing levels + one finishing pass) × the covered cells — each
- * move a JS object of some hundred bytes, so 12 000 000 moves is already hundreds of megabytes.
+ * #785, #889 — THE GOAL PROGRAM'S STATED MEMORY BUDGET, in MB. A goal program is held whole at
+ * every stage after the CAM: its moves (packed, 33 bytes each), its posted text, and then the
+ * simulation that checks it — which reads the text back into its own per-line records and is by
+ * far the largest cost. Measured on the 50 mm panther (Node, 2026-11-01): about 1 KB of heap per
+ * posted line through the simulation, against 33 bytes for the packed move and some 16 for its
+ * line of text. {@link GOAL_BYTES_PER_MOVE} is that whole cost, so the budget is the memory the
+ * program will really take, and Chrome's worker heap (1120 MB on the maintainer's desktop) keeps
+ * room for the page and the goal's own mesh.
+ *
  * `engraveGenerate` samples the goal first (cheap, and the same grid the CAM will cut), estimates
- * the moves, settles on the coarser base pitch when that fits, and otherwise REFUSES BY NAME with
- * the numbers and the fixes. A dead tab is never the outcome.
+ * the moves from what each roughing level really removes ({@link estimateGoalMoves}), settles on
+ * the coarser base pitch when that fits, and otherwise REFUSES BY NAME with the numbers and the
+ * fixes. A dead tab is never the outcome. A phone gets the smaller budget.
  */
-export const GOAL_MOVE_BUDGET = 12_000_000;
+export const GOAL_MEMORY_BUDGET_MB = { desktop: 640, phone: 256 } as const;
+
+/** #889 — the heap one goal move costs from the CAM through the simulation, bytes (see above). */
+export const GOAL_BYTES_PER_MOVE = 1100;
+
+/**
+ * #889 — the budget this device gets, MB: the phone figure where the browser says it is a phone
+ * (`userAgentData.mobile`, else a mobile user agent), the desktop one everywhere else (Node too).
+ */
+export function goalMemoryBudgetMb(nav: { userAgent?: string; userAgentData?: { mobile?: boolean } } | null | undefined =
+  (globalThis as { navigator?: { userAgent?: string; userAgentData?: { mobile?: boolean } } }).navigator): number {
+  const mobile =
+    nav?.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(nav?.userAgent ?? '');
+  return mobile ? GOAL_MEMORY_BUDGET_MB.phone : GOAL_MEMORY_BUDGET_MB.desktop;
+}
+
+/** #889 — a goal program's size before it is built: its passes' moves and what they cost. */
+export interface GoalMoveEstimate {
+  /** The roughing's moves, counted exactly (the levels, merged as the CAM merges them). */
+  rough: number;
+  /** The finishing raster's moves, at most (one per sample, before any merge). */
+  finish: number;
+  /** Both. */
+  moves: number;
+  /** What they cost through the simulation, MB ({@link GOAL_BYTES_PER_MOVE}). */
+  mb: number;
+}
+
+/**
+ * #889 — ESTIMATE A GOAL PROGRAM FROM WHAT IT REALLY CUTS. The roughing is counted by running its
+ * own planner without holding the moves: each level is cut only where it removes material, so a
+ * deep goal costs its levels' real work, not every level across every cell. The finish is bounded
+ * by its raster's samples. A rest pass is a separate, smaller program over the finish's own rows,
+ * planned after; it is not part of this one.
+ */
+export function estimateGoalMoves(
+  hf: GoalHeightfield,
+  feeds: SurfaceFeeds,
+  allowanceMm: number,
+  alongStepMm?: number | null,
+): GoalMoveEstimate {
+  const alongStep = positive(alongStepMm) ? (alongStepMm as number) : hf.pitch;
+  // A step-down the roughing cannot layer is the CAM's own named refusal; it is not counted here.
+  const rough = hf.coveredCount === 0 || !(feeds.stepDown > 0)
+    ? 0
+    : roughingMoves(hf, feeds, allowanceMm, alongStep, SAFE_Z, HOP_Z, undefined, true).count;
+  let finish = 0;
+  if (hf.coveredCount > 0) {
+    for (const j of rasterRows(hf, feeds.finishStepOver)) {
+      for (const [iS, iE] of coveredRuns(hf, j)) finish += alongColumns(hf, iS, iE, alongStep).length + 2;
+    }
+    finish += 1;
+  }
+  const moves = rough + finish;
+  return { rough, finish, moves, mb: (moves * GOAL_BYTES_PER_MOVE) / (1024 * 1024) };
+}
 
 export interface SampleGoalOpts {
   /** The shop's `sim.columnFlatPitchYMm`; absent → {@link DEFAULT_GRID_PITCH_MM}. */
@@ -1405,6 +1467,22 @@ function ballRise(ball: boolean, radius: number, d: number): number {
  * pass on the first (or last) row is not lifted to the stock's surface by the seam. The COLUMN
  * axis keeps the flat rule — beyond the sampled X range the stock really does continue.
  */
+/**
+ * #889 — how many stencil cells the finishing tip field runs per covered cell for a cutter of
+ * `radius` on a `pitch` grid: the same disc {@link finishTipField} builds, so a budget check
+ * before the CAM counts exactly what the CAM would.
+ */
+export function tipStencilCells(radius: number, pitch: number): number {
+  const span = Math.max(0, Math.floor(radius / pitch));
+  let n = 0;
+  for (let dj = -span; dj <= span; dj++) {
+    for (let di = -span; di <= span; di++) {
+      if (Math.hypot(di * pitch, dj * pitch) <= radius) n++;
+    }
+  }
+  return Math.max(1, n);
+}
+
 export function finishTipField(
   hf: GoalHeightfield,
   tool: SurfaceTool,

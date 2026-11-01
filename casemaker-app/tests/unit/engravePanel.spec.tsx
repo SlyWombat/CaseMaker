@@ -4499,7 +4499,8 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
       suggestedStepDownMm: 1.55,
       budgetMoves: 58_994_858,
       budgetCells: 349_082,
-      budgetLimit: 12_000_000,
+      budgetMb: 61_890,
+      budgetLimitMb: 640,
       budgetPitchMm: 0.1,
       budgetStepDownMm: 0.3,
       message: 'This goal is too detailed to plan at 0.1 mm in one go (50 mm deep).',
@@ -4539,7 +4540,9 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     const technical = screen.getByTestId('engrave-run-budget-technical');
     expect(technical.textContent).toContain('58,994,858');
     expect(technical.textContent).toContain('349,082');
-    expect(technical.textContent).toContain('12,000,000');
+    // #889 — the budget is stated in MB: what the run estimates and what it may take.
+    expect(technical.textContent).toContain('61,890 MB');
+    expect(technical.textContent).toContain('640 MB');
     // No split fits this goal, so the press is not shown at all.
     expect(screen.queryByTestId('engrave-split-goal')).toBeNull();
   });
@@ -4569,7 +4572,8 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
       suggestedStepDownMm: 1.55,
       budgetMoves: 20_000_000,
       budgetCells: 100_000,
-      budgetLimit: 12_000_000,
+      budgetMb: 2_700,
+      budgetLimitMb: 640,
       budgetPitchMm: 0.05,
       budgetStepDownMm: 0.3,
       suggestedSplit: { firstMm: 2.5, secondMm: 2.5, movesEach: 9_000_000 },
@@ -4715,7 +4719,8 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
       suggestedStepDownMm: 0.42,
       budgetMoves: 22_000_000,
       budgetCells: 10_000,
-      budgetLimit: 12_000_000,
+      budgetMb: 2308,
+      budgetLimitMb: 640,
       budgetPitchMm: 0.02,
       budgetStepDownMm: 0.3,
       message: 'This goal is too detailed to plan at 0.02 mm in one go (30 mm deep).',

@@ -25,6 +25,10 @@ import {
   DEFAULT_GRID_PITCH_MM,
   generateSurface3dIR,
   sampleGoalHeightfield,
+  estimateGoalMoves,
+  goalMemoryBudgetMb,
+  GOAL_MEMORY_BUDGET_MB,
+  GOAL_BYTES_PER_MOVE,
   type SurfaceFeeds,
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
@@ -435,6 +439,39 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
     expect(out.programs).toHaveLength(1);
     expect(out.programs[0]!.verify).toBeNull();
     expect(out.programs[0]!.surfaceCheck?.gridPitchMm).toBe(0.4);
+  });
+});
+
+describe('#889 — the goal estimate counts what the CAM will write', () => {
+  it('counts the roughing exactly and bounds the finishing from above', () => {
+    for (const tris of [domeTris(5), rampTris()]) {
+      const hf = sampleGoalHeightfield(goal(tris), { pitchMm: 0.1 });
+      const allowance = 0.3;
+      const { roughing, finishing } = generateSurface3dIR({
+        heightfield: hf,
+        tool: FLAT_TOOL,
+        toolObj: flatEndMill(2, { name: 'flat' }),
+        toolNumber: 1,
+        spindleRpm: 12000,
+        air: true,
+        feeds: FEEDS,
+        rapid: RAPID,
+        labelId: 'goal-1',
+        opts: { stockToLeaveMm: allowance },
+      });
+      const e = estimateGoalMoves(hf, FEEDS, allowance);
+      expect(e.rough).toBe(roughing.moves.length);
+      expect(e.finish).toBeGreaterThanOrEqual(finishing.moves.length);
+      expect(e.moves).toBe(e.rough + e.finish);
+      expect(e.mb).toBeCloseTo((e.moves * GOAL_BYTES_PER_MOVE) / 1048576, 6);
+    }
+  });
+
+  it('a phone gets the smaller budget', () => {
+    expect(goalMemoryBudgetMb({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/156.0.0.0' })).toBe(GOAL_MEMORY_BUDGET_MB.desktop);
+    expect(goalMemoryBudgetMb({ userAgent: 'Mozilla/5.0 (Linux; Android 14) Mobile Safari/537.36' })).toBe(GOAL_MEMORY_BUDGET_MB.phone);
+    expect(goalMemoryBudgetMb({ userAgent: 'x', userAgentData: { mobile: true } })).toBe(GOAL_MEMORY_BUDGET_MB.phone);
+    expect(goalMemoryBudgetMb(null)).toBe(GOAL_MEMORY_BUDGET_MB.desktop);
   });
 });
 

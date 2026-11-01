@@ -4,9 +4,11 @@
 // is drawn as INFORM, and every press is named by what it does: "Coarser detail (X mm)", "Thicker
 // layers (Y mm step-down, rougher walls)", and — only when a two-band depth split actually fits —
 // "Split into two setups". These drive the real panel against the chamfered-block goal, set the
-// grid fine enough to exceed the app's move budget, and press each action in its own test. The
-// split press BUILDS the two setups (its bands read back through the test API) and its run is
-// cancelled at once: a program at the budget edge is the one thing an e2e must not actually cut.
+// goal's grid and finishing fine enough to exceed the app's MEMORY budget (#889 — a roughing level
+// costs what it removes, so it is the finish and the cell count that blow it), and press each
+// action in its own test. The split press BUILDS the two setups (its bands read back through the
+// test API) and its run is cancelled at once: a program at the budget edge is the one thing an e2e
+// must not actually cut.
 import { fileURLToPath } from 'node:url';
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
@@ -14,9 +16,9 @@ const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.
 test.setTimeout(240_000);
 
 /**
- * The empty job with the block as its goal and a grid fine enough to exceed the move budget.
- * `stepDown` writes the goal's own step-down (the feeds row's softwood 0.5 is otherwise in force);
- * a finer step makes even half the depth too big, which is the "no split possible" case.
+ * The empty job with the block as its goal and a grid and finish fine enough to exceed the app's
+ * memory budget. `stepDown` writes the goal's own step-down; a fine step makes even half the depth
+ * too big, which is the "no split possible" case.
  */
 async function budgetBlocker(page: import('@playwright/test').Page, stepDown?: string): Promise<void> {
   await page.evaluate(async () => {
@@ -42,9 +44,10 @@ async function budgetBlocker(page: import('@playwright/test').Page, stepDown?: s
   await (await chooser).setFiles(STL);
   await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
 
-  // The goal's own grid: fine enough that the move estimate is over the app's budget.
+  // The goal's own roughing: fine enough that the estimate is over the app's budget.
   await page.getByTestId('engrave-target-technical-0').click();
   await page.getByTestId('engrave-target-surface-gridPitchMm-0').fill('0.02');
+  await page.getByTestId('engrave-target-surface-finishStepOverMm-0').fill('0.02');
   if (stepDown !== undefined) await page.getByTestId('engrave-target-surface-roughStepDownMm-0').fill(stepDown);
 
   await page.getByTestId('engrave-generate').click();

@@ -569,11 +569,14 @@ export interface JobFinding {
   /**
    * #888 — on `goal-program-too-big`, the MOVES the run estimated, the cells it counted and the
    * budget it broke. The panel folds these under its Technical line; the sentence the operator
-   * reads does not count them.
+   * reads does not count them. #889 — the budget is kept in MB (the memory the CAM, the post and
+   * the simulation will really take), so `budgetMb` is what the run estimates and `budgetLimitMb`
+   * what it breaks; `budgetMoves` stays as the exact move count behind it.
    */
   budgetMoves?: number;
   budgetCells?: number;
-  budgetLimit?: number;
+  budgetMb?: number;
+  budgetLimitMb?: number;
   budgetPitchMm?: number;
   budgetStepDownMm?: number;
   /**

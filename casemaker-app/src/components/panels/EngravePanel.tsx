@@ -5486,11 +5486,13 @@ export function EngravePanel(): JSX.Element {
               <details data-testid="engrave-run-budget-technical" style={{ margin: '0 0 6px' }}>
                 <summary style={{ ...MUTED, cursor: 'pointer', listStyle: 'none' }}>Technical</summary>
                 <p style={{ ...MUTED, margin: '2px 0 0', lineHeight: 1.45 }}>
-                  About {runPitchFinding.budgetMoves.toLocaleString('en-US')} moves on{' '}
+                  About {Math.round(runPitchFinding.budgetMb ?? 0).toLocaleString('en-US')} MB to
+                  build, post and simulate —{' '}
+                  {runPitchFinding.budgetMoves.toLocaleString('en-US')} moves on{' '}
                   {runPitchFinding.budgetCells?.toLocaleString('en-US') ?? '—'} cells at{' '}
                   {runPitchFinding.budgetPitchMm ?? runPitchFinding.suggestedPitchMm} mm,{' '}
                   {runPitchFinding.budgetStepDownMm ?? '—'} mm step-down; the app’s budget is{' '}
-                  {runPitchFinding.budgetLimit?.toLocaleString('en-US') ?? '—'} moves.
+                  {runPitchFinding.budgetLimitMb?.toLocaleString('en-US') ?? '—'} MB.
                   {runPitchFinding.suggestedSplit !== undefined
                     ? ` A two-setup split takes ${runPitchFinding.suggestedSplit.firstMm} mm from the top and ${runPitchFinding.suggestedSplit.secondMm} mm from the flipped side — about ${runPitchFinding.suggestedSplit.movesEach.toLocaleString('en-US')} moves each.`
                     : ' No two-setup depth split puts both programs under the budget.'}

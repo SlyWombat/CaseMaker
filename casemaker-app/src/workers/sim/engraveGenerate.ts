@@ -164,7 +164,12 @@ import {
   DEFAULT_STOCK_TO_LEAVE_MM,
   generateSurface3dForGoal,
   generateSurface3dIR,
-  GOAL_MOVE_BUDGET,
+  estimateGoalMoves,
+  goalMemoryBudgetMb,
+  GOAL_BYTES_PER_MOVE,
+  tipStencilCells,
+  type GoalMoveEstimate,
+  moldHeightfield,
   REST_TOLERANCE_MM,
   planSurfaceRest,
   restResidualVisible,
@@ -4906,62 +4911,103 @@ export function generateGoalProgram(
     depthLimitZ,
   });
 
-  // #785 — THE STATED MOVE BUDGET, BEFORE THE CAM BUILDS A SINGLE MOVE. The CAM holds the whole
-  // program at once, and a goal's cost is about (roughing levels + one finishing pass) × the
-  // covered cells. Sample first — cheap, and the same grid the CAM will cut — and settle on the
-  // coarser base pitch when that fits; if even that is over budget, refuse BY NAME with the
-  // numbers and the fixes. A dead tab is never the outcome.
+  // #785, #889 — THE STATED MEMORY BUDGET, BEFORE THE CAM BUILDS A SINGLE MOVE. The program is
+  // held whole through the post and the simulation, so its size is known first: sample the goal —
+  // cheap, and the same grid the CAM will cut — and count what each roughing level really removes
+  // and what the finishing raster samples. Settle on the coarser base pitch when that fits; if
+  // even that is over, refuse BY NAME with the numbers and the fixes. A dead tab is never the
+  // outcome.
   const allowanceMm = stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM;
-  const movesAt = (pitchMm: number): { moves: number; depth: number; cells: number; pitch: number } => {
-    const hf = sampleGoalHeightfield(goal, sampleAt(pitchMm));
-    if (hf.coveredCount === 0) return { moves: 0, depth: 0, cells: 0, pitch: hf.pitch };
-    // #869 — the levels are the ROUGH's: a flat's deeper step-down is fewer levels than the ball's.
-    const stepDown = rough === null ? feeds.stepDown : rough.feeds.stepDown;
-    const levels = Math.max(1, Math.ceil((hf.topZ - hf.minZ + allowanceMm) / stepDown));
-    return { moves: hf.coveredCount * (levels + 1), depth: hf.topZ - hf.minZ, cells: hf.coveredCount, pitch: hf.pitch };
+  const budgetMb = goalMemoryBudgetMb();
+  type MoveEstimate = GoalMoveEstimate & { depth: number; cells: number; pitch: number };
+  const movesAt = (pitchMm: number, stepDown = feeds.stepDown): MoveEstimate => {
+    const sampled = sampleGoalHeightfield(goal, sampleAt(pitchMm));
+    if (sampled.coveredCount === 0) return { rough: 0, finish: 0, moves: 0, mb: 0, depth: 0, cells: 0, pitch: sampled.pitch };
+    // The mould's field, as the CAM will cut it (`generateSurface3dForGoal`).
+    const hf = isMold(goal)
+      ? moldHeightfield(sampled, goal.position.y, goal.position.z - placedSize(goal).z)
+      : sampled;
+    // #862's rim laps are part of the finish when the run clears a band.
+    const rim =
+      bandFloorZ === null
+        ? null
+        : {
+            floorZ: bandFloorZ,
+            tool: { radius: (cuttingDiameter(tool) ?? 0) / 2, ball: tool.shape === 'ball' || tool.shape === 'bull' },
+          };
+    // #869/#889 — THE SPLIT IS ESTIMATED AS THE TWO PROGRAMS IT IS. Without a flat rough the one
+    // call is the whole program (its rough and finish at this budget's step-down, plus the rim).
+    // With one, the ROUGH is counted from the FLAT's own feeds (the step-down press still moves
+    // it) and the finish from the ball's, rim included; the two are summed.
+    const estimate: GoalMoveEstimate =
+      rough === null
+        ? estimateGoalMoves(hf, { ...feeds, stepDown }, allowanceMm, null, rim)
+        : {
+            ...(() => {
+              const r = rough === null ? 0 : estimateGoalMoves(hf, { ...rough.feeds, stepDown }, allowanceMm, null, null).rough;
+              const f = estimateGoalMoves(hf, feeds, allowanceMm, null, rim).finish;
+              const moves = r + f;
+              return { rough: r, finish: f, moves, mb: (moves * GOAL_BYTES_PER_MOVE) / (1024 * 1024) };
+            })(),
+          };
+    return { ...estimate, depth: hf.topZ - hf.minZ, cells: hf.coveredCount, pitch: hf.pitch };
   };
   let cutPitchMm = refinedPitchMm;
   let moveEstimate = movesAt(cutPitchMm);
   let moveBudgetBound = false;
-  if (moveEstimate.moves > GOAL_MOVE_BUDGET && cutPitchMm !== basePitchMm) {
+  if (moveEstimate.mb > budgetMb && cutPitchMm !== basePitchMm) {
     const coarser = movesAt(basePitchMm);
-    if (coarser.moves <= GOAL_MOVE_BUDGET) {
+    if (coarser.mb <= budgetMb) {
       cutPitchMm = basePitchMm;
       moveEstimate = coarser;
       moveBudgetBound = true;
     }
   }
-  if (moveEstimate.moves > GOAL_MOVE_BUDGET) {
-    // The pitch that fits BOTH budgets the CAM holds: the move array (∝ 1/pitch²) and the finishing
-    // tip field (∝ 1/pitch⁴ — the cells AND the stencil grow). Cells fall with the square of the
-    // pitch and the stencil with the square too, so each ratio has its own root; 5 % of margin and
-    // a hundredth's rounding keep the suggestion under both.
-    const radius = (cuttingDiameter(tool) ?? 0) / 2;
-    const stencil = Math.max(1, (Math.PI * radius * radius) / (moveEstimate.pitch * moveEstimate.pitch));
-    const tipOps = moveEstimate.cells * stencil;
-    const tipScale = tipOps > DEFAULT_MAX_FINISH_TIP_OPS ? Math.pow(tipOps / DEFAULT_MAX_FINISH_TIP_OPS, 0.25) : 1;
-    const scale = Math.max(Math.sqrt(moveEstimate.moves / GOAL_MOVE_BUDGET), tipScale) * 1.05;
-    const suggestedPitch = Math.max(
-      moveEstimate.pitch + 0.01,
-      Math.ceil(moveEstimate.pitch * scale * 100) / 100,
-    );
-    // #832 — THE OTHER PRESS: at the pitch the run settled on, the step-down that fits the same
-    // budget. Both are stated, so the sentence names two numbers rather than one and a verb.
-    const suggestedStepDown =
-      Math.ceil(feeds.stepDown * (moveEstimate.moves / GOAL_MOVE_BUDGET) * 1.05 * 100) / 100;
+  // The finishing tip field's own cap (#540) is the other budget the CAM holds. When the run
+  // has no coarser grid to settle on, it is refused here too, by name with the same presses,
+  // rather than failing inside the CAM.
+  const radius = (cuttingDiameter(tool) ?? 0) / 2;
+  const tipOpsOf = (e: MoveEstimate): number => e.cells * tipStencilCells(radius, e.pitch);
+  const tipFits = (e: MoveEstimate): boolean => tipOpsOf(e) <= DEFAULT_MAX_FINISH_TIP_OPS;
+  const tipOver = cutPitchMm === basePitchMm && !tipFits(moveEstimate);
+  if (moveEstimate.mb > budgetMb || tipOver) {
+    // The two presses, each found by trying it: the pitch that fits BOTH budgets — this one and
+    // the tip field's — and, at the pitch the run settled on, the step-down that fits. The counts
+    // are not proportional to either number any more (a level costs what it removes), so each is
+    // stepped up by a quarter until the estimate fits; a press that never fits within a dozen
+    // steps, or cannot help, is not offered.
+    const round2Up = (v: number): number => Math.ceil(v * 100) / 100;
+    let suggestedPitch: number | undefined;
+    for (let p = round2Up(moveEstimate.pitch * 1.25), n = 0; n < 12; p = round2Up(p * 1.25), n++) {
+      const e = movesAt(p);
+      if (e.mb <= budgetMb && tipFits(e)) {
+        suggestedPitch = p;
+        break;
+      }
+    }
+    let suggestedStepDown: number | undefined;
+    // The step-down changes the roughing only: no help when the tip field is what is over.
+    for (let d = round2Up(feeds.stepDown * 1.25), n = 0; n < 12 && !tipOver; d = round2Up(d * 1.25), n++) {
+      if (movesAt(cutPitchMm, d).mb <= budgetMb) {
+        suggestedStepDown = d;
+        break;
+      }
+    }
     // #888 — THE DEPTH SPLIT, IF TWO BANDS FIT. The budget is a per-PROGRAM limit (the CAM holds
     // every move at once), so a goal cut as a top band and a bottom band — each from its own side
     // of the stock — is two programs, each at half the levels. The two halves meet wherever they
     // meet; each side's band is stated on its own goal copy (`bandMm`). Offered only when BOTH
     // bands fit the budget and the chosen cutter can reach the deeper half, so the press never
     // builds a job that refuses again. A goal already cutting a band (a split side, or the
-    // #785 top-band cut) is not split.
+    // #785 top-band cut) is not split. The band arithmetic is the #888 model (levels across every
+    // cell); #889's exact per-level count estimates the RUN, not a hypothetical half-depth one.
     const levelsForBand = (bandMm: number): number =>
       Math.max(1, Math.ceil((bandMm + allowanceMm) / feeds.stepDown));
     const movesForBand = (bandMm: number): number => moveEstimate.cells * (levelsForBand(bandMm) + 1);
     const firstBandMm = Number((moveEstimate.depth / 2).toFixed(3));
     const secondBandMm = Number((moveEstimate.depth - firstBandMm).toFixed(3));
     const splitMoves = Math.max(movesForBand(firstBandMm), movesForBand(secondBandMm));
+    const splitMb = (splitMoves * GOAL_BYTES_PER_MOVE) / (1024 * 1024);
     const splitReachFits =
       cutterReach === null || Math.max(firstBandMm, secondBandMm) <= cutterReach.mm - GOAL_BAND_CLEARANCE_MM + 1e-9;
     const suggestedSplit =
@@ -4969,24 +5015,26 @@ export function generateGoalProgram(
       goal.cutWithinReach !== true &&
       moveEstimate.depth > 0 &&
       splitReachFits &&
-      splitMoves <= GOAL_MOVE_BUDGET
+      splitMb <= budgetMb
         ? { firstMm: firstBandMm, secondMm: secondBandMm, movesEach: splitMoves }
         : undefined;
     const finding: JobFinding = {
       severity: 'error',
       code: 'goal-program-too-big',
       targetId: goal.id,
-      suggestedPitchMm: suggestedPitch,
-      suggestedStepDownMm: suggestedStepDown,
-      // #888 — the numbers the operator does not count, folded under Technical.
+      ...(suggestedPitch === undefined ? {} : { suggestedPitchMm: suggestedPitch }),
+      ...(suggestedStepDown === undefined ? {} : { suggestedStepDownMm: suggestedStepDown }),
+      // #888 — the numbers the operator does not count, folded under Technical. #889 — the budget
+      // itself is stated in MB, the unit the run is refused in.
       budgetMoves: moveEstimate.moves,
       budgetCells: moveEstimate.cells,
-      budgetLimit: GOAL_MOVE_BUDGET,
+      budgetMb: moveEstimate.mb,
+      budgetLimitMb: budgetMb,
       budgetPitchMm: moveEstimate.pitch,
       budgetStepDownMm: feeds.stepDown,
       ...(suggestedSplit === undefined ? {} : { suggestedSplit }),
       // #888 — the plain sentence (the panel adds " Choose one:" and its presses): what the goal
-      // is, in the operator's units. Moves, cells and the budget are the Technical line's.
+      // is, in the operator's units. Moves, MB and the budget are the Technical line's.
       message:
         `This goal is too detailed to plan at ${Number(moveEstimate.pitch.toFixed(4))} mm in one go ` +
         `(${Number(moveEstimate.depth.toFixed(3))} mm deep).`,
@@ -5083,7 +5131,7 @@ export function generateGoalProgram(
   if (finishStepOverMm > 0 && settledPitchMm > finishStepOverMm + 1e-9) {
     const trim = (n: number): string => String(Number(n.toFixed(4)));
     const why = moveBudgetBound
-      ? `the program would exceed the app's ${GOAL_MOVE_BUDGET.toLocaleString('en-US')}-move budget at that spacing`
+      ? `the program would exceed the app's ${budgetMb} MB memory budget at that spacing`
       : budgetBound
         ? `a ball at that spacing would ask the finishing tip field for more than its ${DEFAULT_MAX_FINISH_TIP_OPS.toLocaleString('en-US')} evaluations`
         : `the heightfield's ${DEFAULT_MAX_CELLS.toLocaleString('en-US')} cells settle the grid there`;

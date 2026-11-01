@@ -276,31 +276,35 @@ describe('#785 — Generate', () => {
     expect(finish.at(-1)?.label).toMatch(/^finishing row \d+ of \d+$/);
   });
 
-  it('#785 a goal whose program would exceed the stated move budget is refused by name, with the numbers', () => {
-    const target = rampGoal({ surface: { gridPitchMm: 0.02 } }, 30);
+  it('#785 a goal whose program would exceed the stated memory budget is refused by name, with the numbers', () => {
+    // #889 — a fine grid alone no longer costs a level per cell (a level costs what it removes,
+    // and the ramp's rows merge), so the oversized job is a finish at a 0.02 mm step-over too.
+    const target = rampGoal({ surface: { gridPitchMm: 0.02, finishStepOverMm: 0.02 } }, 30);
     const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
     expect(refusal?.severity).toBe('error');
-    // #888 — the sentence is the operator's: the goal, the pitch and the depth. Moves, cells and
-    // the budget ride the finding's own fields (the panel's Technical line).
+    // #888/#889 — the sentence is the operator's (the goal, the pitch and the depth); moves, MB
+    // and the budget ride the finding's own fields (the panel's Technical line).
     expect(refusal?.message).toContain('This goal is too detailed to plan at 0.02 mm in one go');
     expect(refusal?.message).toContain('30 mm deep');
     expect(refusal?.message).not.toContain('moves');
-    expect(refusal?.budgetMoves).toBeGreaterThan(12_000_000);
+    expect(refusal?.budgetMoves).toBeGreaterThan(0);
     expect(refusal?.budgetCells).toBeGreaterThan(0);
-    expect(refusal?.budgetLimit).toBe(12_000_000);
+    expect(refusal?.budgetMb).toBeGreaterThan(640);
+    expect(refusal?.budgetLimitMb).toBe(640);
     expect(refusal?.budgetPitchMm).toBeCloseTo(0.02, 4);
     // The feeds row's own step-down, as the solver resolved it — 0.6 mm for a 3 mm flat in the
     // default blank's material (hardwood since #879; it was softwood's 1.0 before).
     expect(refusal?.budgetStepDownMm).toBeCloseTo(0.6, 6);
-    // #888 — no two-band split fits a goal this large: 1 M cells over 30 mm is ~52 M moves even
-    // at half the depth, so the finding offers no split and the panel draws no press.
+    // No two-band split fits a goal this large — 30 mm deep over a fine grid is over the budget
+    // even at half the depth — so the finding offers no split and the panel draws no press.
     expect(refusal?.suggestedSplit).toBeUndefined();
-    // #832 — the two other presses are still stated, as numbers the panel names.
+    // #889 — this job's size is its FINISH, which no step-down changes: the step-down press is
+    // found by trying it and cannot fit, so it is not offered, and the pitch press is.
+    expect(refusal?.suggestedStepDownMm).toBeUndefined();
     expect(refusal?.suggestedPitchMm).toBeGreaterThan(0.02);
-    expect(refusal?.suggestedStepDownMm).toBeGreaterThan(0.3);
     expect(out.nc).toBeNull();
     expect(out.programs).toEqual([]);
 
@@ -342,6 +346,27 @@ describe('#785 — Generate', () => {
     expect(built.goals[1]!.bandMm).toBeCloseTo(split.secondMm, 6);
     expect(built.goals[0]!.setupId).toBe(built.setups[0]!.id);
     expect(built.goals[1]!.setupId).toBe(built.setups[1]!.id);
+  }, 120_000);
+
+  it('#889 a deep goal at a fine grid plans: a roughing level costs what it removes, not every cell', () => {
+    // The pre-#889 estimate was (levels + 1) × covered cells: 30 mm at a 0.15 mm step-down on a
+    // 0.1 mm grid is 200 levels over ~81,000 cells, some 16 million moves, refused.
+    const target = rampGoal({ surface: { gridPitchMm: 0.1, roughStepDownMm: 0.15 } }, 30);
+    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
+    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
+    expect(out.findings.some((f) => f.code === 'goal-program-too-big')).toBe(false);
+    expect(out.cam!.cuttingMoves).toBeLessThan(200_000);
+  }, 120_000);
+
+  it('#889 a step-down too fine for the budget is refused, and the step-down press is the one that fits', () => {
+    const target = rampGoal({ surface: { gridPitchMm: 0.1, roughStepDownMm: 0.002 } }, 30);
+    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
+    const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
+    expect(refusal?.message).toContain('raise the step-down to about');
+    expect(refusal?.suggestedStepDownMm).toBeGreaterThan(0.002);
+    const stepped = { ...target, surface: { ...(target.surface ?? {}), roughStepDownMm: refusal!.suggestedStepDownMm } };
+    const retry = generateGoalProgram(tallJob(stepped), stepped, flat({ fluteLength: 40 }), [], null, {});
+    expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
   }, 120_000);
 
   it('a goal within reach generates with no reach finding at all', () => {
