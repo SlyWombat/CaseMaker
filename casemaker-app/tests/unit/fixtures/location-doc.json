@@ -908,6 +908,12 @@
       "setAt": "2026-10-15T08:00:00.000Z",
       "unit": "%"
     },
+    "rest.visibleDepthMm": {
+      "value": 0.1,
+      "source": "chosen",
+      "setAt": "2026-11-01T08:00:00.000Z",
+      "unit": "mm"
+    },
     "toolChange.seconds": {
       "value": 91.4,
       "source": "seeded",

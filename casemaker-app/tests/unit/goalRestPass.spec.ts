@@ -185,4 +185,31 @@ describe('#847 the goal follows its finish with a rest pass', () => {
     expect(warning?.message).toMatch(/a ball of about ⌀\d+(?:\.\d+)? mm would reach it/);
     expect(out.surface3d?.rest).toBeNull();
   }, 180_000);
+
+  it('is information when the leftover would not show: a shallow ridge under the shop’s depth', () => {
+    // The same part, judged against a shop whose visibility thresholds sit at the tops of their
+    // own rules (a 5 mm depth, a 50 % share): the leftover — the ring's fillet, 4.96 mm deep and
+    // just under half of what the goal removes — holds under both, so the run still states it, its
+    // depth and the ball that would reach it, but as information rather than a warning.
+    const target = goalTarget();
+    // Clear the WHOLE blank: the leftover (the fillet where the ball meets the part's wall) is then
+    // a small share of the far more material the goal removes.
+    target.surface = { gridPitchMm: 0.5, clearAround: 'whole' };
+    const quiet = {
+      tools: [] as ToolLibraryEntry[],
+      feeds: SHOP_FEEDS,
+      rest: {
+        overlap: { value: 0.5, source: 'chosen' as const },
+        thirdToolPct: { value: 50, source: 'chosen' as const },
+        visibleDepth: { value: 5, source: 'chosen' as const },
+      },
+    };
+    const out = generateGoalProgram(goalJob(target), target, BALL6, [], null, quiet);
+    expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
+    const note = out.findings.find((f) => f.code === 'goal-rest-uncut');
+    expect(note?.severity).toBe('info');
+    expect(note?.message).toContain('under the 5 mm');
+    expect(note?.message).toContain('marks a leftover visible');
+    expect(note?.message).toMatch(/a ball of about ⌀\d+(?:\.\d+)? mm would reach it/);
+  }, 180_000);
 });

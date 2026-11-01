@@ -410,7 +410,8 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // 2026-10-16: "That type of setting should be something we keep in our own database and not
     // compiled in"). Both chosen, not measured (Q19); the first two-tool cut replaces them.
     ("rest.overlapMm", 0.5, "mm", "chosen, not measured: the LEAST the band both programs cut at the seam may be. The band itself is worked out per job from that job's own two cutters, and this is the floor under it — a 2 mm cutter at a 0.9 mm step-over leaves slivers 0.107 mm wide and a 0.6 mm rest cutter closes anything narrower, so the badge's pair needs about 0.493 mm. The first two-tool cut replaces this"),
-    ("rest.thirdToolPct", 2.0, "%", "chosen, not measured: the share of a job's own removal area that may still be standing after both programs have run before a third cutter is suggested"),
+    ("rest.thirdToolPct", 2.0, "%", "chosen, not measured: the share of a job's own removal area that may still be standing after both programs have run before a third cutter is suggested. The same share decides whether a 3D finish's leftover is a real part of what the goal removes"),
+    ("rest.visibleDepthMm", 0.1, "mm", "chosen, not measured: how deep a 3D finish's leftover may stand above the goal before the run calls it visible. A ridge shallower than 0.1 mm reads as a witness mark, one past it as a step. The first inspected rest-pass surface replaces this"),
     // #858 — what a tool change costs the measured cutter search, in run time. Chosen, not measured
     // as one number: the run plan's own bit change (fit by hand + M491). A plan with one more cutter
     // must save at least this much cutting time before it is chosen.
@@ -611,6 +612,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "rest.thirdToolPct" => Some(need(
             n.is_some_and(|v| (0.1..=50.0).contains(&v)),
             "0.1 to 50 percent",
+        )),
+        // #847 — a leftover's visibility depth. Zero is allowed: every rise is then visible.
+        "rest.visibleDepthMm" => Some(need(
+            n.is_some_and(|v| (0.0..=5.0).contains(&v)),
+            "0 to 5 mm",
         )),
         // #858 — a bit change is never free, and an hour is far past any the bench has seen.
         "toolChange.seconds" => Some(need(

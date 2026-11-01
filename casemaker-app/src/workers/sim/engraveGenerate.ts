@@ -164,6 +164,7 @@ import {
   GOAL_MOVE_BUDGET,
   REST_TOLERANCE_MM,
   planSurfaceRest,
+  restResidualVisible,
   sampleGoalHeightfield,
   suggestedRestRadiusMm,
   surfaceResidual,
@@ -300,15 +301,21 @@ export interface EngraveShopOpts {
    */
   mount?: MountObstacles | null;
   /**
-   * #472 — the location's two rest-machining numbers, resolved on the CALLER's side for the same
-   * reason `defaults` is: the worker must not pull the defaults client (and its house transport)
-   * into this realm. `engraveRunStore` reads them from `rest.overlapMm` and `rest.thirdToolPct`
-   * through `readDefault`, so the source travels with the number exactly as it does on the CLI route.
-   * Absent/null is no location: the labelled `REST_MACHINING_FALLBACK` pair is used.
+   * #472 — the location's rest-machining numbers, resolved on the CALLER's side for the same reason
+   * `defaults` is: the worker must not pull the defaults client (and its house transport) into this
+   * realm. `engraveRunStore` reads them from `rest.overlapMm`, `rest.thirdToolPct` and (since #847)
+   * `rest.visibleDepthMm` through `readDefault`, so the source travels with the number exactly as it
+   * does on the CLI route. Absent/null is no location: the labelled `REST_MACHINING_FALLBACK`
+   * numbers are used.
    */
   rest?: {
     overlap: { value: number; source: RestSettingSource };
     thirdToolPct: { value: number; source: RestSettingSource };
+    /**
+     * #847 — `rest.visibleDepthMm`: how deep a 3D finish's leftover may stand before the run calls
+     * it visible. Absent: the labelled fallback, as the two above.
+     */
+    visibleDepth: { value: number; source: RestSettingSource };
   } | null;
   /**
    * #858 — the shop's `toolChange.seconds`, resolved on the caller's side like `rest`: what the
@@ -5025,6 +5032,15 @@ export function generateGoalProgram(
     ball: tool.shape === 'ball' || tool.shape === 'bull',
   };
   const finishResidual = surfaceResidual(surfaced.heightfield, surfaced.finishTip, 0, REST_TOLERANCE_MM);
+  // #847 follow-up — THE NOISE RULE. Nearly every organic goal leaves some material where its ball
+  // could not enter, so "nothing owned takes it" is INFORMATION unless the leftover would show: a
+  // ridge deeper than the shop's `rest.visibleDepthMm`, or a leftover that is a real share of what
+  // the goal removes (`rest.thirdToolPct`, the same share the 2D rest pair uses for a third cutter).
+  const visibleDepthMm = shop.rest?.visibleDepth.value ?? REST_MACHINING_FALLBACK.visibleDepth;
+  const visibleShare =
+    (shop.rest?.thirdToolPct.value ?? REST_MACHINING_FALLBACK.thirdToolFraction * 100) / 100;
+  const visibility = restResidualVisible(finishResidual, visibleDepthMm, visibleShare);
+  const pct = (v: number): string => String(Number((v * 100).toFixed(v * 100 < 1 ? 2 : 1)));
   // The ball that finished, as the run's sentences name it.
   const finishName = finishTool.radius > 0 ? `${Number((finishTool.radius * 2).toFixed(2))} mm ${tool.shape === 'ball' || tool.shape === 'bull' ? 'ball' : 'cutter'}` : tool.name;
   const mm3 = (v: number): string => String(Number(v.toFixed(v >= 10 ? 1 : v >= 1 ? 2 : 3)));
@@ -5097,6 +5113,11 @@ export function generateGoalProgram(
     const left =
       `The finish leaves ${mm3(finishResidual.volumeMm3)} mm³ up to ${mm2(finishResidual.deepestMm)} mm ` +
       `above the goal where the ${finishName} cannot enter`;
+    // The visibility clause states the thresholds whichever way it comes out, so the severity is
+    // never a judgement the sentence hides; the depth and the volume are already above.
+    const look = visibility.visible
+      ? ` — past the ${mm2(visibleDepthMm)} mm or ${pct(visibleShare)} % that marks a leftover visible —`
+      : ` — under the ${mm2(visibleDepthMm)} mm and ${pct(visibleShare)} % that marks a leftover visible —`;
     if (restPick === null) {
       const suggestion = suggestedRestRadiusMm(
         surfaced.heightfield,
@@ -5107,11 +5128,12 @@ export function generateGoalProgram(
         DEFAULT_MAX_FINISH_TIP_OPS,
       );
       restFindings.push({
-        severity: 'warning',
+        // Information unless the leftover would show: the noise rule above.
+        severity: visibility.visible ? 'warning' : 'info',
         code: 'goal-rest-uncut',
         labelId: goal.id,
         message:
-          `${left}, and no owned ball cuts it` +
+          `${left}${look} and no owned ball cuts it` +
           (suggestion === null
             ? '.'
             : ` — a ball of about ⌀${mm2(suggestion * 2)} mm would reach it.`),

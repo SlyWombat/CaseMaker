@@ -448,6 +448,16 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(1).max(3600),
     fallback: 91.4,
   },
+  // #847 — a 3D finish's leftover is INFORMATION until it is deep enough to see: a ridge shallower
+  // than this reads as a witness mark, one past it as a step. The share half of the same judgement
+  // is `rest.thirdToolPct` above — a leftover that big is a real part of what the goal removes.
+  // CHOSEN, not measured; the first inspected rest-pass surface replaces it.
+  'rest.visibleDepthMm': {
+    label: 'a finish leftover this deep is visible (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(5),
+    fallback: REST_MACHINING_FALLBACK.visibleDepth,
+  },
   // #250 — the finish pass's stock-to-leave. The maintainer's rule (2026-10-15) is the one the rest
   // pair follows: a tunable value lives in the location document. CHOSEN, not measured: about one
   // printed layer; the first bench cut that inspects a finished floor replaces it. 0 turns the

@@ -1,5 +1,5 @@
 /**
- * #436 — the two numbers rest machining runs on, where each came from, and what the job's own
+ * #436 — the numbers rest machining runs on, where each came from, and what the job's own
  * geometry says about them.
  *
  * PURE, like `restPass.ts` beside it, and for the same reason: these are JUDGEMENTS about how a
@@ -47,6 +47,13 @@ export type RestSettingSource = 'seeded' | 'chosen' | 'measured' | 'fallback' | 
 /** The keys these two numbers are stored under, in the location's shop `defaults` section. */
 export const REST_OVERLAP_KEY = 'rest.overlapMm';
 export const REST_THIRD_TOOL_KEY = 'rest.thirdToolPct';
+/**
+ * #847 — how deep a leftover from a 3D finish may stand before the run calls it visible. A shop
+ * default like the two above: a ridge shallower than this reads as a witness mark on the part, and
+ * one past it reads as a step. CHOSEN, not measured — the first inspected rest-pass surface
+ * replaces it.
+ */
+export const REST_VISIBLE_DEPTH_KEY = 'rest.visibleDepthMm';
 
 export interface RestMachiningSettings {
   /**
@@ -61,6 +68,12 @@ export interface RestMachiningSettings {
    * without being re-typed.
    */
   thirdToolFraction: number;
+  /**
+   * #847 — the rise above a goal a 3D finish may leave before it is VISIBLE, mm. Past this (or past
+   * {@link thirdToolFraction} of what the goal removes) a rest pass nobody could cut is a warning
+   * rather than information. Chosen, not measured.
+   */
+  visibleDepth: Mm;
   source: RestSettingSource;
 }
 
@@ -79,6 +92,7 @@ export interface RestMachiningSettings {
 export const REST_MACHINING_FALLBACK: RestMachiningSettings = {
   overlap: 0.5,
   thirdToolFraction: 0.02,
+  visibleDepth: 0.1,
   source: 'fallback',
 };
 

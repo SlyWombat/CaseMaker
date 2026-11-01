@@ -4533,7 +4533,7 @@ mod tests {
         assert_eq!(d["rest.overlapMm"]["unit"], serde_json::json!("mm"));
         assert_eq!(d["rest.thirdToolPct"]["value"], serde_json::json!(2.0), "the threshold");
         assert_eq!(d["rest.thirdToolPct"]["unit"], serde_json::json!("%"));
-        for k in ["rest.overlapMm", "rest.thirdToolPct"] {
+        for k in ["rest.overlapMm", "rest.thirdToolPct", "rest.visibleDepthMm"] {
             assert_eq!(d[k]["source"], serde_json::json!("seeded"), "{k}");
             // A seeded value says what it is, which is the whole point of the provenance (#436).
             assert!(d[k]["note"].as_str().is_some_and(|n| n.contains("not measured")), "{k}");
@@ -4552,6 +4552,8 @@ mod tests {
         assert!(crate::defaults::validate_one("rest.thirdToolPct", &chosen(60.0)).is_err());
         crate::defaults::validate_one("rest.overlapMm", &chosen(1.0)).unwrap();
         crate::defaults::validate_one("rest.thirdToolPct", &chosen(5.0)).unwrap();
+        assert!(crate::defaults::validate_one("rest.visibleDepthMm", &chosen(6.0)).is_err());
+        crate::defaults::validate_one("rest.visibleDepthMm", &chosen(0.0)).unwrap();
     }
 
     #[tokio::test]

@@ -482,6 +482,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       rest: {
         overlap: shopDefault('rest.overlapMm'),
         thirdToolPct: shopDefault('rest.thirdToolPct'),
+        // #847 — the depth past which a 3D finish's leftover is a visible ridge rather than a
+        // witness mark; the share half is `rest.thirdToolPct` above.
+        visibleDepth: shopDefault('rest.visibleDepthMm'),
       },
       // #250 — the finish pass's allowance, from the SAME snapshot and for the same worker-realm
       // reason. The worker splits each flat region into a roughing pass that leaves this much on the

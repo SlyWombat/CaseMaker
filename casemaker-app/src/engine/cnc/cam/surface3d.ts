@@ -1323,6 +1323,12 @@ export interface SurfaceResidual {
   volumeMm3: number;
   /** The largest tip-above-goal rise, mm — 0 when the finish reaches everything. */
   deepestMm: number;
+  /**
+   * #847 — THE DENOMINATOR: the material the goal asks to remove, mm³ — every covered cell's rise
+   * from its own surface up to the stock top, summed. A leftover's share of this is what says
+   * whether it is a real part of the part or a mark on it.
+   */
+  removedMm3: number;
 }
 
 /**
@@ -1336,17 +1342,22 @@ export function surfaceResidual(
   stockToLeaveMm: number,
   toleranceMm: number,
 ): SurfaceResidual {
-  const { nx, ny, z, covered, pitch } = hf;
+  const { nx, ny, z, covered, pitch, topZ } = hf;
   const mask = new Uint8Array(nx * ny);
   const leave = Number.isFinite(stockToLeaveMm) && stockToLeaveMm > 0 ? stockToLeaveMm : 0;
   const tol = Number.isFinite(toleranceMm) && toleranceMm > 0 ? toleranceMm : 0;
   let cells = 0;
   let volume = 0;
   let deepest = 0;
+  let removed = 0;
   const area = pitch * pitch;
   for (let idx = 0; idx < nx * ny; idx++) {
     if (covered[idx] === 0) continue;
-    const rise = (tip[idx] as number) - (z[idx] as number);
+    const here = z[idx] as number;
+    // The goal's own removal: how much stock stands above its surface at this cell (#847).
+    const cut = topZ - here;
+    if (cut > 0) removed += cut * area;
+    const rise = (tip[idx] as number) - here;
     if (!(rise > 0)) continue;
     if (rise > deepest) deepest = rise;
     const over = rise - leave;
@@ -1355,7 +1366,25 @@ export function surfaceResidual(
     cells += 1;
     volume += over * area;
   }
-  return { mask, cells, volumeMm3: volume, deepestMm: deepest };
+  return { mask, cells, volumeMm3: volume, deepestMm: deepest, removedMm3: removed };
+}
+
+/**
+ * #847 — IS THE LEFTOVER VISIBLE? A run that states every leftover would cry wolf on any organic
+ * goal: every concave detail tighter than the ball leaves some material. So the sentence is
+ * INFORMATION until the leftover would show — a rise deeper than the stated depth, or a leftover
+ * that is a real share of what the goal removes. The share is the same judgement the 2D rest pair
+ * uses for a third cutter (`rest.thirdToolPct`).
+ */
+export function restResidualVisible(
+  residual: SurfaceResidual,
+  depthMm: number,
+  shareFraction: number,
+): { visible: boolean; share: number } {
+  const share = residual.removedMm3 > 0 ? residual.volumeMm3 / residual.removedMm3 : 0;
+  const depth = Number.isFinite(depthMm) && depthMm >= 0 ? depthMm : 0;
+  const fraction = Number.isFinite(shareFraction) && shareFraction > 0 ? shareFraction : 0;
+  return { visible: residual.deepestMm > depth + 1e-9 || share > fraction + 1e-9, share };
 }
 
 /**

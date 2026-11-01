@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   finishTipField,
   planSurfaceRest,
+  restResidualVisible,
   suggestedRestRadiusMm,
   surfaceResidual,
   type GoalHeightfield,
@@ -103,6 +104,20 @@ describe('#847 planSurfaceRest', () => {
       toleranceMm: 1e-6,
     });
     expect(plan.residual.volumeMm3).toBeCloseTo(finishResidual.volumeMm3, 9);
+  });
+});
+
+describe('#847 restResidualVisible', () => {
+  it('the leftover is visible past the depth the shop states, or past its stated share', () => {
+    const hf = valley();
+    const res = surfaceResidual(hf, finishTipField(hf, { ball: true, radius: 3 }, 1e9), 0, 1e-6);
+    // The valley leaves material 1.5 mm up: past a 0.1 mm depth, under a 10 mm one.
+    expect(res.removedMm3).toBeGreaterThan(0);
+    expect(restResidualVisible(res, 0.1, 1).visible).toBe(true);
+    expect(restResidualVisible(res, 10, 1).visible).toBe(false);
+    // The share clause alone: a 10 mm depth that hides any ridge, a 0 % share that any leftover beats.
+    expect(restResidualVisible(res, 10, 0).visible).toBe(true);
+    expect(restResidualVisible(res, 10, 1).share).toBeGreaterThan(0);
   });
 });
 

@@ -84,6 +84,7 @@ import { restJobFor, roughPick, restToolPick, unroughedItems, vBitRestRefusal, t
 import {
   REST_OVERLAP_KEY,
   REST_THIRD_TOOL_KEY,
+  REST_VISIBLE_DEPTH_KEY,
   restSeamFacts,
   thirdToolAdvice,
   type RestSettingSource,
@@ -539,7 +540,18 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * `drillSettings(shopDefaults)` in `engraveRunStore`); this side did not, so every drill job
    * stopped at `tool-refused` or planned at the 118° fallback whatever the location said.
    */
-  const shop: EngraveShopOpts = { tools: getTools(), drill: drillSettings(shopDefaults) };
+  const shop: EngraveShopOpts = {
+    tools: getTools(),
+    drill: drillSettings(shopDefaults),
+    // #847 — the goal path's rest numbers, from the location in the same way the app's run store
+    // reads them. The 2D pair's own band is derived in `restSeamFacts`; these are the values a 3D
+    // goal's rest pass (and the visibility of a leftover it cannot cut) runs with.
+    rest: {
+      overlap: readDefault(shopDefaults, REST_OVERLAP_KEY),
+      thirdToolPct: readDefault(shopDefaults, REST_THIRD_TOOL_KEY),
+      visibleDepth: readDefault(shopDefaults, REST_VISIBLE_DEPTH_KEY),
+    },
+  };
   if (boot.location !== null) {
     const where = boot.location;
     recordInput(where.path);
@@ -552,7 +564,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // sheet that reads oddly can be traced back to the document (or to the absence of one) before the
     // program is run. Silent about a key the document simply has not set: `readDefault` falls back and
     // the seam sentence says so where it matters. The receipt carries the same numbers as provenance.
-    for (const key of [REST_OVERLAP_KEY, REST_THIRD_TOOL_KEY, 'toolChange.seconds']) {
+    for (const key of [REST_OVERLAP_KEY, REST_THIRD_TOOL_KEY, REST_VISIBLE_DEPTH_KEY, 'toolChange.seconds']) {
       const d = shopDefaults?.[key];
       if (d !== undefined) out.progress(`  default ${key} = ${String(d.value)}${d.unit ?? ''} (${d.source})`);
     }
