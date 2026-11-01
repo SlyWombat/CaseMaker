@@ -156,15 +156,30 @@ export function runErrorCodes(v: EngraveRunView): string[] {
  * with "N errors outstanding", which names none of them: the refusal has to carry the finding's
  * own sentence (with its move or line where it has one), the same rule every other blocker
  * follows. The count remains only as the fallback for a view that named an error with no text.
+ * #871 — a simulation error keeps the sweep's own projection facts (`projectedMs`,
+ * `suggestedBudgetMs`), so the Cut step can offer the limit that covers it instead of doubling
+ * blind.
  */
-export function firstRunError(v: EngraveRunView): { code: string; message: string } | null {
+export function firstRunError(v: EngraveRunView): {
+  code: string;
+  message: string;
+  projectedMs?: number;
+  suggestedBudgetMs?: number;
+} | null {
   for (const f of v.generated?.findings ?? []) {
     if (f.severity === 'error') return { code: f.code, message: f.message };
   }
   for (const f of v.generated?.verify?.findings ?? []) {
     if (f.severity === 'error') return { code: f.code, message: f.message };
   }
-  for (const d of simErrors(v.simDiagnostics)) return { code: d.code, message: d.message };
+  for (const d of simErrors(v.simDiagnostics)) {
+    return {
+      code: d.code,
+      message: d.message,
+      ...(d.projectedMs === undefined ? null : { projectedMs: d.projectedMs }),
+      ...(d.suggestedBudgetMs === undefined ? null : { suggestedBudgetMs: d.suggestedBudgetMs }),
+    };
+  }
   return null;
 }
 

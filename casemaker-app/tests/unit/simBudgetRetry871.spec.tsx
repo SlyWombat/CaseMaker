@@ -17,10 +17,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  suggestedBudgetFor,
   sweepProjectionMessage,
   sweepProjectionMs,
   sweepProjectionOverLimit,
 } from '@/engine/jobs/simClient';
+import { SIM_BUDGET_MAX_MS } from '@/platform/defaultsClient';
 import { useSimStore } from '@/store/simStore';
 
 describe('#871 the sweep’s own projection', () => {
@@ -51,31 +53,66 @@ describe('#871 the sweep’s own projection', () => {
   });
 
   it('states its sample, its projection and the limit in one sentence', () => {
-    expect(sweepProjectionMessage(10, 100, 100_000, 60_000)).toBe(
+    // Within the maximum: the sentence keeps the ordinary "try a longer limit" instruction; the
+    // press beside it names the projected limit.
+    expect(sweepProjectionMessage(10, 100, 100_000, 60_000, 180_000)).toBe(
       'the simulation is too slow to finish: at the rate it has run (10 of 100 checkpoints) it ' +
         'projects about 1 min 40 s, and the limit is 60 s. Try again with a longer limit',
     );
     // A huge projection is in the words the program's own cut estimate uses ("78 h 53 min"), not
     // in raw seconds: the maintainer's job was shown "about 78 h 56 min" before the run.
-    expect(sweepProjectionMessage(10, 100, 284_000_000, 60_000)).toContain('projects about 78 h 53 min');
+    expect(sweepProjectionMessage(10, 100, 284_000_000, 60_000, 180_000)).toContain('projects about 78 h 53 min');
+  });
+
+  it('points at the program when no limit within the maximum can cover the projection', () => {
+    // `suggestedBudgetFor` says this one is beyond 10 minutes, so there is no press to offer and
+    // the sentence must not tell the operator to retry.
+    const projected = 284_000_000; // 78 h 53 min
+    expect(suggestedBudgetFor(projected)).toBeNull();
+    const message = sweepProjectionMessage(10, 100, projected, 60_000, null);
+    expect(message).toBe(
+      'this program would take about 78 h 53 min to simulate, beyond the 10 min it can be given. ' +
+        'The program is what has to change, not the limit',
+    );
+  });
+
+  it('offers a projected limit that fits: headroom, rounded up to a whole minute', () => {
+    // 192 s × 1.25 = 240 s, exactly the 4 min the press will name.
+    expect(suggestedBudgetFor(192_000)).toBe(240_000);
+    // 100 s × 1.25 = 125 s, rounded up to 3 min — never a limit that lands on the estimate.
+    expect(suggestedBudgetFor(100_000)).toBe(180_000);
+    // Past the session's maximum there is nothing to offer.
+    expect(suggestedBudgetFor(SIM_BUDGET_MAX_MS / 1.25 + 1)).toBeNull();
+    expect(suggestedBudgetFor(SIM_BUDGET_MAX_MS / 1.25)).toBe(SIM_BUDGET_MAX_MS);
+    // Nonsense projects nothing.
+    expect(suggestedBudgetFor(0)).toBeNull();
+    expect(suggestedBudgetFor(Number.NaN)).toBeNull();
   });
 });
 
 describe('#871 raising the session’s limit', () => {
   it('doubles the limit the next load uses, and returns it', () => {
-    const before = useSimStore.getState().budgetMs;
-    const next = useSimStore.getState().raiseBudget();
-    expect(next).toBe(before * 2);
+    useSimStore.getState().setBudgetMs(60_000);
+    expect(useSimStore.getState().raiseBudget()).toBe(120_000);
     // The state is what `loadProgram` reads for a session that has already loaded once.
-    expect(useSimStore.getState().budgetMs).toBe(before * 2);
+    expect(useSimStore.getState().budgetMs).toBe(120_000);
   });
 
-  it('honours a caller’s factor, and a nonsense one falls back to the double', () => {
-    const before = useSimStore.getState().budgetMs;
-    expect(useSimStore.getState().raiseBudget(1.5)).toBe(Math.round(before * 1.5));
-    const after = useSimStore.getState().budgetMs;
-    expect(useSimStore.getState().raiseBudget(0)).toBe(after * 2);
-    expect(useSimStore.getState().raiseBudget(Number.NaN)).toBe(after * 4);
-    expect(useSimStore.getState().raiseBudget(-3)).toBe(after * 8);
+  it('honours a caller’s factor, a nonsense one falls back to the double, and the maximum holds', () => {
+    useSimStore.getState().setBudgetMs(60_000);
+    expect(useSimStore.getState().raiseBudget(1.5)).toBe(90_000);
+    expect(useSimStore.getState().raiseBudget(0)).toBe(180_000);
+    expect(useSimStore.getState().raiseBudget(Number.NaN)).toBe(360_000);
+    // 360 s doubled is 720 s, past the 10 min rule: the maximum holds.
+    expect(useSimStore.getState().raiseBudget(-3)).toBe(SIM_BUDGET_MAX_MS);
+    // And a further raise cannot go past it either.
+    expect(useSimStore.getState().raiseBudget()).toBe(SIM_BUDGET_MAX_MS);
+  });
+
+  it('sets a stated limit for a projection, clamped to the shop rule', () => {
+    expect(useSimStore.getState().setBudgetMs(240_000)).toBe(240_000);
+    expect(useSimStore.getState().budgetMs).toBe(240_000);
+    expect(useSimStore.getState().setBudgetMs(1)).toBe(5_000);
+    expect(useSimStore.getState().setBudgetMs(900_000)).toBe(SIM_BUDGET_MAX_MS);
   });
 });

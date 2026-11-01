@@ -21,6 +21,7 @@ import { MACHINES } from '@/engine/cnc/machine';
 import { simulationProblem } from '@/engine/cnc/simGate';
 import { useSettingsStore } from '@/store/settingsStore';
 import { shopDefault } from '@/store/shopDefaultsStore';
+import { SIM_BUDGET_MAX_MS } from '@/platform/defaultsClient';
 import { stepAtTime, timeAtStep, totalTime } from '@/engine/cnc/playbackClock';
 import { generateRestart as buildRestart, stockFromSetup, type RestartResult } from '@/engine/cnc/restart';
 import type { Tool } from '@/engine/cnc/tool';
@@ -192,9 +193,16 @@ export interface SimState {
   /**
    * #871 — raise this session's limit for a caller that will re-run something itself (the Cut
    * step's retry re-generates and re-simulates; it needs the new limit, not a re-load of one
-   * program). Returns the limit the next load will use, ms.
+   * program). Clamped to the shop rule's maximum ({@link SIM_BUDGET_MAX_MS}); returns the limit
+   * the next load will use, ms.
    */
   raiseBudget(factor?: number): number;
+  /**
+   * #871 — set this session's limit to a stated value (the Cut step's retry from a sweep's own
+   * projection names the limit it needs). Clamped to the shop rule's 5 s–10 min; returns what the
+   * next load will use, ms.
+   */
+  setBudgetMs(ms: number): number;
   /**
    * `calibration` is the saved frame the caller already resolved its OWN machine with (#297). Omit it
    * and the store reads the settings itself, once; pass it (including `null`, meaning "none") and that
@@ -538,13 +546,18 @@ export const useSimStore = create<SimState>()((set, get) => {
     },
     async retryWithLongerBudget() {
       if (!lastLoad) return;
-      await run(lastLoad, get().budgetMs * 2);
+      await run(lastLoad, Math.min(get().budgetMs * 2, SIM_BUDGET_MAX_MS));
     },
     raiseBudget(factor = 2) {
       const by = Number.isFinite(factor) && factor > 0 ? factor : 2;
-      const next = Math.round(get().budgetMs * by);
+      const next = Math.min(SIM_BUDGET_MAX_MS, Math.round(get().budgetMs * by));
       set({ budgetMs: next });
       return next;
+    },
+    setBudgetMs(ms) {
+      const clamped = Math.min(SIM_BUDGET_MAX_MS, Math.max(5_000, Math.round(ms)));
+      set({ budgetMs: clamped });
+      return clamped;
     },
     generateRestart(opts) {
       const s = get();

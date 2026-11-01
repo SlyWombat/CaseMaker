@@ -51,7 +51,7 @@ import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type 
 import { slotFacts, type SlotCutterOption } from '@/engine/cnc/engrave/slot';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
-import { readDefault } from '@/platform/defaultsClient';
+import { readDefault, SIM_BUDGET_MAX_MS } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTargetObjects, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 // #835 — one setup's own work, measured and written back into that setup only.
@@ -2653,6 +2653,19 @@ export function EngravePanel(): JSX.Element {
   // sentence that says so: raise the limit and run again (Generate's own path).
   const retryWithLongerSimulation = useEngraveRunStore((s) => s.retryWithLongerSimulation);
   const simBudgetMs = useSimStore((s) => s.budgetMs);
+  // #871 — THE LIMIT THE PRESS OFFERS, from what the stop knew:
+  //   a projection — the limit that covers it (the sweep's own rate said what it needs), or none
+  //     when even the session's maximum cannot, because a press that must fail again is not an
+  //     offer (the sentence then points at the program);
+  //   a plain timer stop — the doubled limit, up to the same maximum.
+  const simRetryLimitMs: number | null =
+    currentRunError?.code === 'sweep-budget-exceeded'
+      ? currentRunError.projectedMs !== undefined
+        ? (currentRunError.suggestedBudgetMs ?? null)
+        : Math.min(simBudgetMs * 2, SIM_BUDGET_MAX_MS) > simBudgetMs
+          ? Math.min(simBudgetMs * 2, SIM_BUDGET_MAX_MS)
+          : null
+      : null;
   const runPitchFinding =
     run.staleSince === null
       ? (run.generated?.findings.find((f) => f.code === 'goal-program-too-big' && f.suggestedPitchMm !== undefined) ?? null)
@@ -5406,18 +5419,20 @@ export function EngravePanel(): JSX.Element {
                     )}
                   </>
                 )}
-                {/* #871 — the budget's own press. The sentence said "raise the limit" with no
-                    control on this screen; this raises the session's limit (doubled, as the
-                    Simulate panel's retry does) and runs the job again from here. */}
-                {currentRunError?.code === 'sweep-budget-exceeded' && (
+                {/* #871 — the budget's own press, naming the limit it will use. From a sweep's
+                    projection that is THE limit that covers its rate (never a blind double); from
+                    a plain timer stop it is the doubled one. No press when the projection is past
+                    the session's 10 min maximum — the sentence then says the program is the
+                    answer, and a retry would only fail again. */}
+                {simRetryLimitMs !== null && (
                   <>
                     {' '}
                     <button
                       type="button"
                       data-testid="engrave-run-retry-sim"
-                      onClick={() => void retryWithLongerSimulation()}
+                      onClick={() => void retryWithLongerSimulation(simRetryLimitMs)}
                     >
-                      Simulate with a {Math.round((simBudgetMs * 2) / 1000)} s limit
+                      Simulate with a {formatDuration(simRetryLimitMs / 1000)} limit
                     </button>
                   </>
                 )}

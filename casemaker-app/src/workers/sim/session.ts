@@ -74,6 +74,18 @@ export interface SimDiagnostic {
   line?: number;
   step?: number;
   checkpoint?: number;
+  /**
+   * #871 — THE SWEEP'S OWN PROJECTION, when the budget stop came from one (the load's measured
+   * rate said the run could not finish): the projected total wall clock, ms. Absent on the plain
+   * timer stop, where nothing was measured about the run itself.
+   */
+  projectedMs?: number;
+  /**
+   * #871 — THE LIMIT THAT WOULD COVER THE PROJECTION (its headroom included, rounded up to a
+   * whole minute), ms; absent when even the session's maximum cannot cover it — then the program,
+   * not the limit, is what has to change.
+   */
+  suggestedBudgetMs?: number;
 }
 
 /** A checkpoint without its geometry-sized arrays (`xy`, `zs`, `steps`). */

@@ -42,6 +42,13 @@ export type DefaultSource = (typeof DEFAULT_SOURCES)[number];
 /** `segment(.segment)+`, each lowerCamel ASCII — `defaults.rs`'s `valid_key`. */
 export const DEFAULT_KEY = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)+$/;
 
+/**
+ * #871 — THE MOST A SIMULATION SESSION'S LIMIT MAY BE (ms): the `sim.budgetMs` rule's maximum, ten
+ * minutes. The shop seed and every retry share it, so "raise the limit" always has a stated top;
+ * `simClient` offers the projected limit up to this and says the program is the answer past it.
+ */
+export const SIM_BUDGET_MAX_MS = 600_000;
+
 const filled = z.string().refine((v) => v.trim().length > 0, 'is empty');
 
 export const ShopDefaultSchema = z
@@ -339,7 +346,7 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'sim.defaultStockLengthMm': { label: 'simulation stock length when the file states none (chosen)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 100 },
   'sim.defaultStockWidthMm': { label: 'simulation stock width when the file states none (chosen)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 100 },
   'sim.defaultStockThicknessMm': { label: 'simulation stock thickness when the file states none (chosen)', unit: 'mm', rule: z.number().min(0.1).max(100), fallback: 10 },
-  'sim.budgetMs': { label: 'simulation load budget (chosen)', unit: 'ms', rule: z.number().min(5000).max(600000), fallback: 60_000 },
+  'sim.budgetMs': { label: 'simulation load budget (chosen)', unit: 'ms', rule: z.number().min(5000).max(SIM_BUDGET_MAX_MS), fallback: 60_000 },
   'sim.stallMs': { label: 'how long Generate may be silent before the worker is presumed stopped (chosen)', unit: 'ms', rule: z.number().min(10_000).max(1_800_000), fallback: 180_000 },
   // ── #451 sim starting values (end)
   // ── #451 new-item starting depths (begin) — where an item the panel just added begins. CHOSEN,

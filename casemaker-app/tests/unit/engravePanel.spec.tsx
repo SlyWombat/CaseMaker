@@ -5463,14 +5463,43 @@ describe('EngravePanel (#893) — the run row names its stop and offers the next
 // #871 — THE CUT STEP'S SIMULATION BUDGET. The red line said "Try again with a longer limit" and
 // the only control that did so lived in the Simulate panel (which the Cut step is not): on the Cut
 // screen, and from a phone, the instruction named a press that was not there. The retry now sits
-// beside the sentence, raises the session's limit (the same doubling the Simulate panel's own
-// retry uses) and runs the job again from here.
+// beside the sentence and names the limit it will use: the sweep's own projected limit when the
+// stop came from a projection, the doubled one for a plain timer stop, and NO press when even the
+// 10 min maximum cannot cover the projection (then the program, not the limit, is the answer).
 describe('EngravePanel — the Cut step’s simulation budget (#871)', () => {
-  it('puts the retry beside the budget sentence, and pressing it raises the limit and re-runs', async () => {
-    let generatedCalls = 0;
+  /** The run's blocked shape, with the one simulation diagnostic under test. */
+  function blockedBy(diagnostic: {
+    message: string;
+    projectedMs?: number;
+    suggestedBudgetMs?: number;
+  }): void {
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: false,
+          stage: 'findings',
+          findings: [],
+          feeds: null,
+          cam: null,
+          nc: null,
+          verify: null,
+          programs: [],
+          errors: [{ stage: 'simulate', message: diagnostic.message }],
+        } as unknown as EngraveGenerated,
+        simDiagnostics: [
+          { source: 'sweep', severity: 'error', code: 'sweep-budget-exceeded', line: 1, ...diagnostic },
+        ],
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+  }
+
+  function fakeGenerate(): () => number {
+    let calls = 0;
     setEngraveRunClientLoader(async () => ({
       engraveGenerate: async () => {
-        generatedCalls += 1;
+        calls += 1;
         return {
           ok: false,
           stage: 'findings',
@@ -5485,40 +5514,60 @@ describe('EngravePanel — the Cut step’s simulation budget (#871)', () => {
       },
       simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
     }));
-    const before = useSimStore.getState().budgetMs;
-    const message =
-      'the simulation was stopped after 60 s: this program is too slow to simulate at this size. Try again with a longer limit';
-    act(() => {
-      useEngraveRunStore.setState({
-        generated: {
-          ok: false,
-          stage: 'findings',
-          findings: [],
-          feeds: null,
-          cam: null,
-          nc: null,
-          verify: null,
-          programs: [],
-          errors: [{ stage: 'simulate', message }],
-        } as unknown as EngraveGenerated,
-        simDiagnostics: [
-          { source: 'sweep', severity: 'error', code: 'sweep-budget-exceeded', message, line: 1 },
-        ],
-        phase: 'blocked',
-        staleSince: null,
-      });
+    return () => calls;
+  }
+
+  it('a plain timer stop doubles the limit, and the press names the doubled one', async () => {
+    act(() => useSimStore.getState().setBudgetMs(60_000));
+    const calls = fakeGenerate();
+    blockedBy({
+      message:
+        'the simulation was stopped after 60 s: this program is too slow to simulate at this size. Try again with a longer limit',
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-run-errors').textContent).toContain('Try again with a longer limit');
+    const retry = screen.getByTestId('engrave-run-retry-sim');
+    expect(retry.textContent).toBe('Simulate with a 2 min limit');
+    fireEvent.click(retry);
+    await waitFor(() => expect(calls()).toBe(1));
+    expect(useSimStore.getState().budgetMs).toBe(120_000);
+    setEngraveRunClientLoader(null);
+  });
+
+  it('a projection offers the limit that covers it, not a blind double', async () => {
+    act(() => useSimStore.getState().setBudgetMs(60_000));
+    const calls = fakeGenerate();
+    blockedBy({
+      message:
+        'the simulation is too slow to finish: at the rate it has run (10 of 100 checkpoints) it projects ' +
+        'about 3 min 12 s, and the limit is 60 s. Try again with a longer limit',
+      projectedMs: 192_000,
+      suggestedBudgetMs: 240_000,
+    });
+    render(<EngravePanel />);
+    const retry = screen.getByTestId('engrave-run-retry-sim');
+    expect(retry.textContent).toBe('Simulate with a 4 min limit');
+    fireEvent.click(retry);
+    await waitFor(() => expect(calls()).toBe(1));
+    // The suggested limit exactly — a doubling would have been 120 s, which the projection says
+    // cannot finish.
+    expect(useSimStore.getState().budgetMs).toBe(240_000);
+    setEngraveRunClientLoader(null);
+  });
+
+  it('a projection past the maximum offers no press at all, and says the program is the answer', () => {
+    act(() => useSimStore.getState().setBudgetMs(60_000));
+    blockedBy({
+      message:
+        'this program would take about 78 h 53 min to simulate, beyond the 10 min it can be given. ' +
+        'The program is what has to change, not the limit',
+      projectedMs: 284_000_000,
     });
     render(<EngravePanel />);
     const line = screen.getByTestId('engrave-run-errors');
-    expect(line.textContent).toContain('Try again with a longer limit');
-    // The press names the limit it will run with: the session's, doubled — the same rule the
-    // Simulate panel's own retry (`sim-retry`) applies.
-    const retry = screen.getByTestId('engrave-run-retry-sim');
-    expect(retry.textContent).toBe(`Simulate with a ${Math.round((before * 2) / 1000)} s limit`);
-    fireEvent.click(retry);
-    await waitFor(() => expect(generatedCalls).toBe(1));
-    expect(useSimStore.getState().budgetMs).toBe(before * 2);
-    setEngraveRunClientLoader(null);
+    expect(line.textContent).toContain('beyond the 10 min it can be given');
+    expect(line.textContent).toContain('The program is what has to change, not the limit');
+    expect(screen.queryByTestId('engrave-run-retry-sim')).toBeNull();
   });
 
   it('states the limit in the progress line while the sweep is running', () => {

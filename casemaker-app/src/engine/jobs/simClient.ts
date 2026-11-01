@@ -25,7 +25,7 @@ import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
-import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
+import { liveShopDefaults, readDefault, SIM_BUDGET_MAX_MS } from '@/platform/defaultsClient';
 import { recordCrumb } from '@/platform/flightRecorder';
 import { formatDuration } from '@/engine/cnc/plan/format';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
@@ -196,10 +196,39 @@ export function sweepProjectionOverLimit(
   return ms;
 }
 
-/** #871 — the sentence a projection-based early stop reports, naming its own sample. The
+/**
+ * #871 — THE LIMIT THE PROJECTION ASKS FOR: its headroom, rounded UP to a whole minute, or null
+ * when even the session's maximum ({@link SIM_BUDGET_MAX_MS}) cannot cover it. Rounding up is
+ * deliberate — the estimate is a rate, not a promise, and a limit that lands exactly on it fails
+ * on the next tick.
+ */
+export function suggestedBudgetFor(projectedMs: number): number | null {
+  if (!(projectedMs > 0)) return null;
+  const ms = Math.ceil((projectedMs * SIM_PROJECTION_MARGIN) / 60_000) * 60_000;
+  return ms <= SIM_BUDGET_MAX_MS ? ms : null;
+}
+
+/**
+ * #871 — the sentence a projection-based early stop reports, naming its own sample. The
  * projection uses the app's duration words ("78 h 56 min"), the vocabulary the program's cut
- * estimate is already shown in; the limit keeps the plain seconds the timer's own sentence uses. */
-export function sweepProjectionMessage(done: number, total: number, projectedMs: number, budgetMs: number): string {
+ * estimate is already shown in; the limit keeps the plain seconds the timer's own sentence uses.
+ * When no limit within the session's maximum covers it, the sentence says so and points at the
+ * program — offering a retry that must fail again would be a lie with a button on it.
+ */
+export function sweepProjectionMessage(
+  done: number,
+  total: number,
+  projectedMs: number,
+  budgetMs: number,
+  suggestedBudgetMs: number | null,
+): string {
+  if (suggestedBudgetMs === null) {
+    return (
+      `this program would take about ${formatDuration(projectedMs / 1000)} to simulate, beyond the ` +
+      `${formatDuration(SIM_BUDGET_MAX_MS / 1000)} it can be given. ` +
+      'The program is what has to change, not the limit'
+    );
+  }
   return (
     `the simulation is too slow to finish: at the rate it has run (${done} of ${total} checkpoints) it ` +
     `projects about ${formatDuration(projectedMs / 1000)}, and the limit is ${Math.round(budgetMs / 1000)} s. ` +
@@ -346,6 +375,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
           if (ms === null) return;
           settled = true;
           terminateSim();
+          const suggested = suggestedBudgetFor(ms);
           projectionDone({
             ok: false,
             pathOnly: false,
@@ -354,7 +384,9 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
                 source: 'sweep',
                 severity: 'error',
                 code: 'sweep-budget-exceeded',
-                message: sweepProjectionMessage(done, total, ms, budgetMs),
+                message: sweepProjectionMessage(done, total, ms, budgetMs, suggested),
+                projectedMs: ms,
+                ...(suggested === null ? null : { suggestedBudgetMs: suggested }),
               },
             ],
           });
