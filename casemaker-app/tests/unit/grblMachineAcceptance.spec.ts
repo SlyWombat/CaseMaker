@@ -128,4 +128,29 @@ describe('#845 a Shapeoko job: a pocket, text and holes (the slice-B acceptance)
     expect(uploadBlocker(run)).toBe(MACHINE_RUN_ELSEWHERE);
     expect(releaseBlocker(run)).toBe(MACHINE_RUN_ELSEWHERE);
   }, 60_000);
+
+  // The issue's second acceptance line: a GRBL-incompatible feature is REFUSED BY NAME, not by a
+  // crash or a silently wrong file. A rotary job needs a fourth axis this machine states it has not.
+  it('refuses a rotary job by name: this GRBL machine states three axes', () => {
+    // A rotary job that is legal ON A Z1 — one label in the free span, no drills — so the refusal
+    // this test reads is the MACHINE's (no fourth axis), not a rotary-design finding.
+    const rotaryJob: EngraveJob = {
+      ...job,
+      stock: { length: 100, width: 20, thickness: 20, material: 'pla', shape: 'cylinder', diameter: 20 },
+      shapes: [],
+      drills: [],
+      labels: [
+        { id: 'wrap-label', text: 'CASE', font: job.labels[0]!.font, weight: 'bold', size: 5, position: { x: 42.5, y: Math.PI * 10 }, rotation: 0, depth: 0.5, enabled: true },
+      ],
+      workholding: {
+        kind: 'rotary-chuck',
+        rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: true, source: 'test' },
+      },
+    };
+    const refused = generate(tl, rotaryJob);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    const posted = refused.errors.find((e) => e.stage === 'post');
+    expect(posted?.message).toContain('fourth axis');
+  }, 60_000);
 });

@@ -1050,8 +1050,11 @@ describe('#395 one gate, two ways to reach it', () => {
     // as `simGate` does. A browser import (`platform/features`, a client, a worker) still fails here.
     // #743 P-6 added `pcbWords`: one exported sentence builder whose only import is `import type`,
     // so it loads in a node script exactly as the other two do.
+    // #845 added `machineWords`: two sentences and NO imports at all (the refusal a stated machine's
+    // upload prints), pulled out of `machine.ts` — which imports zod — for exactly this reason.
     expect(runtimeImports).toEqual([
       '@/engine/cnc/engrave/pcbWords',
+      '@/engine/cnc/machineWords',
       '@/engine/cnc/simGate',
       '@/engine/cnc/engrave/runInputs',
     ]);

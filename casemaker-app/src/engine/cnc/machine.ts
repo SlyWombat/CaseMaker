@@ -27,6 +27,7 @@
  */
 
 import { z } from 'zod';
+import { MACHINE_FRAME_UNREAD, MACHINE_RUN_ELSEWHERE } from './machineWords';
 import type { Mm, Vec2 } from '@/types/units';
 import type { StockMaterial } from '@/types/engraveJob';
 import type { RapidEstimate } from './cam/ir';
@@ -999,20 +1000,9 @@ export interface MillModel extends MachineIdentity {
 /** A mill: a framed {@link MillProfile}, or a {@link MillModel} with no frame yet. */
 export type Mill = MillProfile | MillModel;
 
-/**
- * The refusal every frame-dependent path gives a machine whose controller frame has not been read
- * (#773). It names the fix — one connection, which runs the same `config-get sd` read the Z1's
- * #279 calibration runs — rather than a generic "unsupported".
- */
-export const MACHINE_FRAME_UNREAD =
-  "This Carvera's frame has not been read from the machine yet; connect it once.";
-
-/**
- * #845 — the refusal for a machine that is run from its owner's own sender: it has no frame this
- * app can read or drive, so anything positional is not offered — the .nc is.
- */
-export const MACHINE_RUN_ELSEWHERE =
-  'This machine is run from your own sender: Case Maker writes its .nc and does not drive it.';
+// #845 — the two sentences live in their own module (no imports) so the run gate can print one
+// without loading this one; every importer of this module still gets them from here.
+export { MACHINE_FRAME_UNREAD, MACHINE_RUN_ELSEWHERE } from './machineWords';
 
 /** The refusal for a model with no frame, or null when the model carries one. */
 export function machineFrameProblem(model: Mill): string | null {

@@ -21,7 +21,8 @@
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob } from '@/types/engraveJob';
 import { copperSentence } from '@/engine/cnc/engrave/pcbWords';
-import { MACHINE_RUN_ELSEWHERE, type MachinePost, type MillProfile } from '@/engine/cnc/machine';
+import { MACHINE_RUN_ELSEWHERE } from '@/engine/cnc/machineWords';
+import type { MachinePost, MillProfile } from '@/engine/cnc/machine';
 import type { OracleBbox, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
