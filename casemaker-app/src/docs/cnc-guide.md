@@ -388,7 +388,7 @@ The **Simulate** entry sits in the sidebar under a **CNC** divider, below Export
 program — this job’s, or any `.nc` file you open — and it is
 present in rack mode too.
 
-![The sidebar with the two CNC entries](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-sidebar.png)
+![The sidebar with the two CNC entries](img/cnc-mockup-sidebar.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -396,7 +396,7 @@ present in rack mode too.
 are `.nc`, `.gcode`, `.cnc` and `.tap`, up to 64 MB. The file is parsed, run and swept **in
 the app** — nothing is uploaded, and nothing is sent to a machine.
 
-![The Simulate panel with no file open](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-sim-idle.png)
+![The Simulate panel with no file open](img/cnc-mockup-sim-idle.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -413,7 +413,7 @@ type the three stock numbers yourself. Whatever you have already chosen — a st
 typed, the cutter in your spindle — survives opening a file; **Reset** is the way back to the
 file's own numbers (#315).
 
-![The Simulate panel asking for a tool](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-sim-tool-required.png)
+![The Simulate panel asking for a tool](img/cnc-mockup-sim-tool-required.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -428,7 +428,7 @@ the cuts at each checkpoint — is the slow part, a few seconds on a dense job. 
 shows `sweeping n / m checkpoints`, and **Cancel** terminates the worker and disposes the
 session.
 
-![The Simulate panel sweeping](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-sim-running.png)
+![The Simulate panel sweeping](img/cnc-mockup-sim-running.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -440,7 +440,7 @@ program has not removed yet — in the alarm colour. The toolbar's **Layers** co
 each one. The vise jaws and the sacrificial stack draw as translucent grey, labelled with their
 source.
 
-![The viewport with the stock, ghost, gouge and tool drawn](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-viewport-ready.png)
+![The viewport with the stock, ghost, gouge and tool drawn](img/cnc-mockup-viewport-ready.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -454,11 +454,11 @@ reaches a tool change, playback **stops at the pause**, names the change and wai
 tool swap is a pause, not an error, unless you said the starting tool was unknown. The default
 speed is the shop's `sim.playbackSpeed` (20×).
 
-![The transport bar](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-transport.png)
+![The transport bar](img/cnc-mockup-transport.png)
 
 *Design mockup — not the shipped screen.*
 
-![Playback stopped at a tool-change pause](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-sim-paused.png)
+![Playback stopped at a tool-change pause](img/cnc-mockup-sim-paused.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -466,7 +466,7 @@ When the run is done — or refused — the panel reports the result: volume rem
 checkpoint count, sweep time, a **placement: stub** badge, and the **diagnostics**, grouped
 by source (parser / runner / sweep) with errors first and true per-code counts.
 
-![The Simulate result with diagnostics](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-sim-ready.png)
+![The Simulate result with diagnostics](img/cnc-mockup-sim-ready.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -487,7 +487,7 @@ instead of guessing:
 
 Every refusal and warning has a short code. Chapter 8 lists all of them.
 
-![The refused state with a path-only viewport](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-sim-refused.png)
+![The refused state with a path-only viewport](img/cnc-mockup-sim-refused.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -1382,7 +1382,7 @@ shoulder, stick-out, quantity and its tier. A length nobody stated prints as **�
 search box and one chip per tier narrow the list, and the counts line says how many definitions
 there are and how many fall in each tier.
 
-![Manage, House → Tools, with a service present](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc-mockup-manage-tools.png)
+![Manage, House → Tools, with a service present](img/cnc-mockup-manage-tools.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -1433,7 +1433,7 @@ says why, in the service's own words, and reminds you that the two built-ins nee
 **Check again** asks the origin a second time. This is the same treatment the Start wizard gives a
 machine it cannot find.
 
-![No house service — Tools is absent, not broken](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc-mockup-manage-absent.png)
+![No house service — Tools is absent, not broken](img/cnc-mockup-manage-absent.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -1456,7 +1456,7 @@ listed to re-measure; **Measure…** lists the four datums (surface top, jaw top
 rotary axis) with their state. This is where the vise's and the bed's *measured* numbers live — the
 same ones the job's Hold group and the run sheet read (§2).
 
-![Machines — the Z1's card](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc-mockup-manage-machines.png)
+![Machines — the Z1's card](img/cnc-mockup-manage-machines.png)
 
 *Design mockup — not the shipped screen.*
 
