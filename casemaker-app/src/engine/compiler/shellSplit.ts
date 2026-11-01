@@ -122,6 +122,13 @@ export interface LugSite {
   /** Index into `ShellJointPlan.pieces`. */
   piece: number;
   axis: 0 | 1;
+  /**
+   * The axis the lug's WIDTH runs along — the axis the screw sites are spread
+   * over. Horizontal for the shell's and the lid's laps; #266's rack straps
+   * may run their width up a side panel's height, so it is carried here rather
+   * than assumed.
+   */
+  widthAxis: 0 | 1 | 2;
   /** The lug's extent along the seam — it straddles the cut. */
   band: [number, number];
   /** The lug's extent across the seam — the screw's neighbourhood. */
@@ -199,19 +206,22 @@ export function lugSitesFor(
   piece_: SplitPiece,
   seam: SplitSeam,
   bounds: Aabb,
+  /** Where the lug's width runs; defaults to the other horizontal axis (the shell's and lid's laps). */
+  widthAxis?: 0 | 1 | 2,
 ): LugSite[] {
   const axis = seam.axis;
-  const otherAxis: 0 | 1 = axis === 0 ? 1 : 0;
+  const otherAxis: 0 | 1 | 2 = widthAxis ?? (axis === 0 ? 1 : 0);
+  if (otherAxis === axis) return [];
   const along = trueRange(
     axis === 0 ? piece_.ranges.x : piece_.ranges.y,
     bounds.min[axis],
     bounds.max[axis],
   );
-  const other = trueRange(
-    axis === 0 ? piece_.ranges.y : piece_.ranges.x,
-    bounds.min[otherAxis],
-    bounds.max[otherAxis],
-  );
+  // The grid cells span the full Z of the part, so a vertical width axis reads
+  // the BOUNDS, not the cell.
+  const otherRange: [number, number] =
+    otherAxis === 0 ? piece_.ranges.x : otherAxis === 1 ? piece_.ranges.y : [bounds.min[2], bounds.max[2]];
+  const other = trueRange(otherRange, bounds.min[otherAxis], bounds.max[otherAxis]);
   const low = piece_.cell[axis] === 0;
 
   // This piece's lap of the seam: the low piece laps back to the head's end
@@ -235,6 +245,7 @@ export function lugSitesFor(
     out.push({
       piece,
       axis,
+      widthAxis: otherAxis,
       band: [bandLo, bandHi],
       width: [wLo, wHi],
       at: site,

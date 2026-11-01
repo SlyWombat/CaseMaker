@@ -1,0 +1,143 @@
+// Issue #266 — the RACK's own parts and their split joint.
+//
+// A rack part has no floor to hang a lap under, and a 5 mm plate cannot take a
+// screw across its own thickness. So the archetype's half of the joint is an
+// OUTSIDE BUTT STRAP on the part's free face: band across the seam, width along
+// the strap's width axis, STRAP_DEPTH proud of the face, with the screws running
+// along the seam through it. These specs run the real evaluator: a piece that
+// would print as loose parts, or a strap that does not exist where it says,
+// fails here rather than on the plate.
+
+import { describe, it, expect } from 'vitest';
+
+import {
+  STRAP_DEPTH,
+  buildRackPartSplit,
+  planRackPartSplit,
+  rackPieceId,
+  type RackPartSplitRequest,
+} from '@/engine/compiler/rackSplit';
+import { LUG_EMBED, LUG_LAP } from '@/engine/compiler/shellSplit';
+import { cube, intersection, translate, type Aabb, type BuildOp } from '@/engine/compiler/buildPlan';
+import type { PrinterVolume } from '@/types/printer';
+import { exec } from './helpers/manifoldExec';
+
+const BED: PrinterVolume = { x: 160, y: 160, z: 250 };
+
+function boundsOf(op: BuildOp): Aabb {
+  const m = exec(op);
+  const b = m.boundingBox();
+  m.delete();
+  return { min: [...b.min], max: [...b.max] } as Aabb;
+}
+
+function bodies(op: BuildOp): number {
+  const m = exec(op);
+  const n = m.decompose().filter((c) => c.volume() > 0).length;
+  m.delete();
+  return n;
+}
+
+function probeMaterial(op: BuildOp, p: [number, number, number]): number {
+  const box = translate(p, cube([1, 1, 1], true));
+  const hit = exec(intersection([op, box]));
+  const v = hit.volume();
+  hit.delete();
+  return v;
+}
+
+function slab(w: number, d: number, h: number): BuildOp {
+  return cube([w, d, h]);
+}
+
+/** A side-panel-like slab: 15 thick in X, 300 deep in Y, 200 tall. */
+function request(faceAxis: 0 | 1 | 2, sign: 1 | -1, op: BuildOp = slab(15, 300, 200)): RackPartSplitRequest {
+  return { partOp: op, bounds: boundsOf(op), printer: BED, face: { axis: faceAxis, sign } };
+}
+
+describe('#266 — the strap joint on a rack part', () => {
+  it('cuts the part on its over-bed axis and straps the OUTSIDE face', () => {
+    // Side panel: over the bed in Y only; the seam runs up its depth, and the
+    // width axis is its height, so the screws climb the panel.
+    const req = request(0, -1);
+    const plan = planRackPartSplit(req)!;
+    expect(plan).not.toBeNull();
+    expect(plan.seams).toEqual([{ axis: 1, at: 150 }]);
+    expect(plan.widthAxis).toBe(2);
+    // 200 mm of strap: the shared seam rule, floored at two.
+    expect(plan.screwCount).toBe(5);
+    const split = buildRackPartSplit(req, plan, 'rack-side-left')!;
+    // The seam runs on Y, so the pieces number along Y: a1 and a2.
+    expect(split.nodes.map((n) => n.id)).toEqual(['rack-side-left-split-a1', 'rack-side-left-split-a2']);
+    for (const n of split.nodes) expect(n.variant?.replaces).toEqual(['rack-side-left']);
+  });
+
+  it('each piece is ONE printed body', () => {
+    const req = request(0, -1);
+    const split = buildRackPartSplit(req, planRackPartSplit(req)!, 'rack-side-left')!;
+    for (const n of split.nodes) expect(bodies(n.op)).toBe(1);
+  });
+
+  it('the strap stands OUTSIDE the face it was given, and nowhere else', () => {
+    const req = request(0, -1);
+    const plan = planRackPartSplit(req)!;
+    const split = buildRackPartSplit(req, plan, 'rack-side-left')!;
+    const strap = plan.straps.find((l) => l.piece === 0)!;
+    // 4 mm off the screw's axis along the band, and 4 mm off the site along the
+    // width, so the probe is in strap material, not the holes.
+    const at: [number, number, number] = [
+      LUG_EMBED - STRAP_DEPTH / 2,
+      strap.mouth + LUG_LAP / 2,
+      strap.at + 4,
+    ];
+    expect(probeMaterial(split.nodes[0]!.op, at)).toBeGreaterThan(0.5);
+    // Nothing on the part's other side.
+    expect(probeMaterial(split.nodes[0]!.op, [15 + 3, at[1], at[2]])).toBeLessThan(0.01);
+    // The strap protrudes by exactly STRAP_DEPTH − the embed.
+    const b = boundsOf(split.nodes[0]!.op);
+    expect(b.min[0]).toBeCloseTo(-(STRAP_DEPTH - LUG_EMBED), 3);
+  });
+
+  it('a plate lid-style strap sits above the top face for a +Z face', () => {
+    const op = slab(300, 200, 5);
+    const req = request(2, 1, op);
+    const plan = planRackPartSplit(req)!;
+    const split = buildRackPartSplit(req, plan, 'rack-top')!;
+    const strap = plan.straps.find((l) => l.piece === 0)!;
+    const at: [number, number, number] = [strap.mouth + LUG_LAP / 2, strap.at + 4, 5 + 3];
+    expect(probeMaterial(split.nodes[0]!.op, at)).toBeGreaterThan(0.5);
+    expect(probeMaterial(split.nodes[0]!.op, [at[0], at[1], -2])).toBeLessThan(0.01);
+  });
+
+  it('both halves carry a hole at every screw site', () => {
+    const req = request(0, -1);
+    const plan = planRackPartSplit(req)!;
+    const split = buildRackPartSplit(req, plan, 'rack-side-left')!;
+    for (const lug of plan.straps) {
+      const node = split.nodes[lug.piece]!;
+      const mid = lug.mouth + lug.reach / 2;
+      const at: [number, number, number] = [0, 0, 0];
+      at[lug.axis] = mid;
+      at[lug.widthAxis] = lug.at;
+      at[req.face.axis] = LUG_EMBED - STRAP_DEPTH / 2;
+      expect(probeMaterial(node.op, at), `hole ${lug.screwKey} piece ${lug.piece}`).toBeLessThan(0.05);
+    }
+  });
+
+  it('refuses a seam on the strap’s own face axis — a strap along the cut is not a butt joint', () => {
+    // Over the bed in X only, with the strap on the X face.
+    const op = slab(300, 100, 200);
+    const req: RackPartSplitRequest = { partOp: op, bounds: boundsOf(op), printer: BED, face: { axis: 0, sign: -1 } };
+    expect(planRackPartSplit(req)).toBeNull();
+  });
+
+  it('a part that fits the bed is offered nothing', () => {
+    const op = slab(15, 120, 100);
+    expect(planRackPartSplit(request(0, -1, op))).toBeNull();
+  });
+
+  it('names pieces for the part they came from', () => {
+    expect(rackPieceId('rack-bottom', [0, 0])).toBe('rack-bottom-split-a1');
+    expect(rackPieceId('rack-bottom', [1, 1])).toBe('rack-bottom-split-b2');
+  });
+});
