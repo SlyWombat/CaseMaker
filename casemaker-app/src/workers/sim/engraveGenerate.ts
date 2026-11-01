@@ -31,7 +31,8 @@
  *     but not for a CAM or POST refusal, and a refusal with no reason is useless in the panel.
  */
 
-import type { EngraveItem, EngraveJob, EngraveMargins, EngraveTargetObject } from '@/types/engraveJob';
+import type { EngraveItem, EngraveJob, EngraveMargins, EngraveRectShape, EngraveShape, EngraveTargetObject } from '@/types/engraveJob';
+import type { TextFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 // package.json version for the post's `;@MKR|CAM|v=` header. Read from package.json directly
@@ -87,6 +88,7 @@ import {
   jobHasItems,
   jobSetups,
   pureGoalObject,
+  defaultTapeHold,
   setupProgramFindings,
   toSetup,
   validateGoalObject,
@@ -149,7 +151,7 @@ import { tapeHoldFindings, type TapedPiece } from '@/engine/cnc/engrave/tapeHold
 import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
 import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { concatToolpathIR, estimateCycleSeconds, HOP_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStats, type CamMove, type CamPassStep, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, estimateCycleSeconds, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStats, type CamMove, type CamOperation, type CamPassStep, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
   DEFAULT_GRID_PITCH_MM,
   DEFAULT_MAX_CELLS,
@@ -207,12 +209,14 @@ import {
   type RotaryNeckFacts,
 } from '@/engine/cnc/rotary/neck';
 import { generateIndexed } from '@/engine/cnc/cam/indexed';
+import type { FaceFrame } from '@/engine/cnc/rotary/faceOps';
+import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { faceJobRefusal, planFaceCuts } from '@/engine/cnc/rotary/faceOps';
 import { rotaryMapOf, toRotaryIR } from '@/engine/cnc/rotary/wrap';
 import { rotaryFreeSpan, freeEndSentence, jawsSentence, tailstockSentence, throughCentreSentence } from '@/engine/cnc/rotary/wrap';
 import { generateRotaryReliefIR, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
-import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
+import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePoint, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
@@ -231,6 +235,13 @@ export type EngraveStage = 'findings' | 'feeds' | 'cam' | 'post' | 'verify' | 'd
  */
 export interface EngraveShopOpts {
   lostDetailWarnRatio?: number | null;
+  /**
+   * #833 — this program is a SUB-PROGRAM of a face cut: its stock is a model of the face plane,
+   * not a blank the operator mounts, so the holding findings (the tape's coverage, the vise's
+   * grip) are not facts about anything and are not raised. The face program's own holding is the
+   * JOB's — the rotary chuck — and its checks live in the face generator.
+   */
+  syntheticHolding?: boolean;
   peckClearanceMm?: number | null;
   /**
    * #450 slice 3 — the table `feedsFor` resolves against, resolved on the caller's side
@@ -3305,6 +3316,12 @@ type OneProgram = Omit<EngraveGenerated, 'programs'> & {
   cores?: readonly CoreCut[];
   /** #677 — the cores THIS program cleared: the core-clearance program's own sheet facts. */
   core?: CoreProgramFacts | null;
+  /**
+   * #833 — the CAM's IR this program posted, in the frame its CAM wrote it in (a flat job's is
+   * the flat frame). A face's cut is built as an ordinary flat program and re-framed into the
+   * indexed one, so its program hands the IR out rather than only its posted text.
+   */
+  camIr?: ToolpathIR;
 };
 
 /**
@@ -5142,6 +5159,144 @@ export interface EngraveProgress {
 export type EngraveProgressFn = (progress: EngraveProgress) => void;
 
 /**
+ * #833 — ONE FACE'S CUTS, BUILT AS AN ORDINARY FLAT PROGRAM AND LIFTED INTO THE INDEXED FRAME.
+ *
+ * A face is a PLANE once the stock is turned to its A, so a text line, a pocket or a hole on it
+ * is an ordinary 2.5D cut. The sub-job is a prism the size of the face — `x` along the face from
+ * its left end, `y` across it from the centrelines, depth below the FACE PLANE — with the face's
+ * items re-stated in it; the ordinary item pipeline (the same CAM, findings and predictions every
+ * flat job gets) generates it, and its IR is re-framed here: X shifted to the face's span, Y
+ * centred on the face, Z lifted to `R − face depth + z`, and the face's A on every move. A is
+ * held for the whole cut, so Y is an ordinary axis and the CAM's own XY paths survive the turn.
+ *
+ * Rapids are lifted to the ROTARY safe height (`R + SAFE_Z`), because an X or Y traverse at the
+ * face's own hop would be inside the clearance the verifier requires. Feed moves keep the face's
+ * floor. The predictions are re-stated the same way and tagged with the face's A, so the per-face
+ * oracle judges them where they were cut.
+ */
+function faceItemProgram(args: {
+  tl: ManifoldToplevel;
+  frame: FaceFrame;
+  job: EngraveJob;
+  tool: Tool;
+  catalogue: readonly FeedCatalogueRow[];
+  calibration: MachineCalibration | null;
+  margins: EngraveMargins;
+  shop: EngraveShopOpts;
+  radius: number;
+}): { operations: CamOperation[]; predicted: OraclePredicted[]; findings: JobFinding[]; errored: boolean } {
+  const { tl, frame, job, tool, catalogue, calibration, margins, shop, radius } = args;
+  const chord = frame.chord;
+  const yIn = (y: number): number => y + chord / 2;
+  const deepest = frame.items.reduce((m, it) => Math.max(m, it.depth), 0);
+  const sub: EngraveJob = structuredClone(job);
+  delete sub.faces;
+  delete sub.setups;
+  delete sub.targetObject;
+  delete sub.targetObjects;
+  delete sub.facing;
+  delete sub.package;
+  delete sub.runLog;
+  delete sub.hold;
+  delete sub.itemsHold;
+  sub.stock = {
+    length: frame.to - frame.from,
+    width: chord,
+    thickness: Math.max(1, deepest + 2),
+    material: job.stock.material,
+  };
+  sub.workholding = { kind: 'tape', tape: defaultTapeHold() };
+  sub.sacrificial = { under: null, sides: { left: null, right: null, front: null, back: null }, source: job.sacrificial.source };
+  const labels = frame.items
+    .filter((it) => it.kind === 'text')
+    .map((it) => ({
+      id: it.id,
+      text: it.text ?? '',
+      font: (it.font ?? DEFAULT_FONT_ID) as TextFont,
+      weight: 'bold' as const,
+      size: it.size ?? 3,
+      position: { x: it.x, y: yIn(it.y) },
+      rotation: 0,
+      depth: it.depth,
+      enabled: true,
+    }));
+  // A HOLE is not here: it is a PLUNGE at the face's index (`planFaceCuts` puts it in the
+  // program's hole list), not a pocketed circle this CAM would cut.
+  const shapes: EngraveShape[] = frame.items
+    .filter((it) => it.kind === 'pocket')
+    .map(
+      (it) =>
+        ({
+          id: it.id,
+          kind: 'rect',
+          position: { x: it.x, y: yIn(it.y) },
+          rotation: 0,
+          depth: it.depth,
+          enabled: true,
+          width: it.width ?? 5,
+          height: it.height ?? 3,
+          cornerRadius: 0,
+        }) satisfies EngraveRectShape,
+    );
+  sub.labels = labels;
+  sub.shapes = shapes;
+  sub.drills = [];
+  sub.traces = [];
+  sub.vectors = [];
+  sub.combined = [];
+  sub.cutouts = [];
+  sub.threads = [];
+  sub.primitives = [];
+  sub.keepOuts = [];
+  sub.chamfers = [];
+  const one = generateOneProgram(
+    tl,
+    sub,
+    tool,
+    catalogue,
+    calibration,
+    margins,
+    // The face's own program is a flat one: no fitted surface plane is lifted into it (a lift
+    // belongs to the JOB's registration, and the face's plane is the CAM's own statement).
+    { ...shop, surface: null, syntheticHolding: true },
+    'whole',
+    false,
+    'rough-and-finish',
+    false,
+  );
+  const findings = one.findings;
+  if (!one.ok || one.camIr === undefined) {
+    return { operations: [], predicted: [], findings, errored: findings.some((f) => f.severity === 'error') || !one.ok };
+  }
+  const floorZ = radius - frame.depth;
+  const safe = radius + SAFE_Z;
+  const rapid = jobMachine(job, calibration).rapidEstimate;
+  const operations: CamOperation[] = one.camIr.operations.map((op) => {
+    const moves: CamMove[] = op.moves.map((m) => ({
+      ...m,
+      x: frame.from + m.x,
+      y: m.y - chord / 2,
+      z: m.kind === 'rapid' ? Math.max(floorZ + m.z, safe) : floorZ + m.z,
+      a: frame.a,
+    }));
+    // The post re-states A on each operation's first move, and a move carrying an A word must be
+    // at Y 0: the operation opens over the axis at the safe height, then moves across the face.
+    const first = moves[0];
+    if (first !== undefined) {
+      moves.unshift({ kind: 'rapid', x: first.x, y: 0, z: Math.max(first.z, safe), a: frame.a });
+    }
+    return { ...op, moves, estimatedSeconds: estimateCycleSeconds(moves, rapid) };
+  });
+  const predicted: OraclePredicted[] = one.predicted.map((p) => ({
+    ...p,
+    a: frame.a,
+    depth: frame.depth + p.depth,
+    polygons: p.polygons.map((pts) => pts.map(([x, y]) => [frame.from + x, y - chord / 2] as OraclePoint)),
+  }));
+  return { operations, predicted, findings, errored: false };
+}
+
+/**
  * #241 slice 2 — A JOB WHOSE WORK IS ON THE STOCK'S FACES, GENERATED.
  *
  * `job.faces` is the operation list the wizard's step 4 makes (flats, rings of flats, cross-holes,
@@ -5157,6 +5312,7 @@ export type EngraveProgressFn = (progress: EngraveProgress) => void;
  * simulation, the oracle and the run gates read it exactly as they read a wrapped program.
  */
 function generateFaceProgram(
+  tl: ManifoldToplevel,
   job: EngraveJob,
   tool: Tool | null,
   catalogue: readonly FeedCatalogueRow[],
@@ -5206,8 +5362,8 @@ function generateFaceProgram(
       feeds,
     });
   }
-  const { faces, holes, predicted } = planned.plan;
-  const allFindings = dedupeFindings([...documentFindings, ...planned.findings]);
+  const { faces, holes, frames } = planned.plan;
+  let allFindings = dedupeFindings([...documentFindings, ...planned.findings]);
 
   let ir: ToolpathIR;
   try {
@@ -5221,6 +5377,36 @@ function generateFaceProgram(
     });
   } catch (e) {
     return fail('cam', e instanceof Error ? e.message : String(e), { findings: allFindings, feeds });
+  }
+
+  // #833 — THE CUTS ON EACH FACE. Each is an ordinary flat program on a prism the size of the
+  // face, lifted into the indexed frame at that face's A (`faceItemProgram`); its operations
+  // follow the face's pocket, so the plane is cut before the work on it. A sub-program that
+  // refuses (a text too large for the face, a pocket off its edges) refuses the job with its own
+  // sentences — they name the item.
+  const faceCuts = new Map<number, { operations: CamOperation[]; predicted: OraclePredicted[] }>();
+  for (let i = 0; i < frames.length; i++) {
+    const frame = frames[i]!;
+    if (frame.items.length === 0) continue;
+    const built = faceItemProgram({ tl, frame, job, tool, catalogue, calibration, margins, shop, radius: map.radius });
+    allFindings = dedupeFindings([...allFindings, ...built.findings]);
+    if (built.errored) {
+      return fail('findings', 'a cut on a face cannot be made as it is', { findings: allFindings, feeds });
+    }
+    if (built.operations.length > 0) faceCuts.set(i, { operations: built.operations, predicted: built.predicted });
+  }
+  let predicted: OraclePredicted[] = planned.plan.predicted;
+  if (faceCuts.size > 0) {
+    const operations: CamOperation[] = [];
+    ir.operations.forEach((op, idx) => {
+      operations.push(op);
+      const more = faceCuts.get(idx);
+      if (more !== undefined) operations.push(...more.operations);
+    });
+    let n = 1;
+    for (const op of operations) op.number = n++;
+    ir = { ...ir, operations };
+    predicted = [...planned.plan.predicted, ...[...faceCuts.values()].flatMap((v) => v.predicted)];
   }
 
   const ctx: PostContext = {
@@ -5367,7 +5553,7 @@ export function engraveGenerate(
   // one indexed program carries every face and hole in cut order. A job with faces AND map items
   // is refused there, by name, because a wrapped program and an indexed one are two programs.
   if ((job.faces ?? []).length > 0) {
-    return generateFaceProgram(job, tool, catalogue, calibration, margins, shop);
+    return generateFaceProgram(tl, job, tool, catalogue, calibration, margins, shop);
   }
 
   // #534 slice D — A PURE 3D-SURFACING JOB. A job whose only work is a `role: 'goal'` mesh is
@@ -6159,7 +6345,7 @@ function generateOneProgram(
     // cutter's bite` under the stock and under every piece a through cut frees. Judged HERE
     // because the bite needs the resolved step-down, and a taped job's pieces were measured with
     // the geometry. Any refusal blocks Generate like the document findings above.
-    if (job.workholding.kind === 'tape') {
+    if (job.workholding.kind === 'tape' && shop.syntheticHolding !== true) {
       // The cutter's own width at the deepest cut: a flat end's radius all the way down, a V-bit's
       // groove wider with depth (#405) — the same function the frame and the trace CAM read.
       const deepest = Math.max(
@@ -6735,6 +6921,8 @@ function generateOneProgram(
       threadMachining,
       drill: drillFacts,
       finish: finishFacts,
+      // #833 — the CAM's own IR, for a caller that re-frames the program (a face's cut).
+      camIr: ir,
       through: cutoutFacts,
       bore: boreFacts,
       chamfer: chamferFacts,

@@ -1280,6 +1280,50 @@ export interface EngraveFaceOp {
    * the one field list §3.6 gives it; a blind hole is a later operation, not this one.
    */
   atX?: Mm;
+  /**
+   * #833 — THE WORK CUT ON THIS FACE: engraving, a pocket, or a hole, each an operation of the
+   * flat picker reused at this index. On a Flat they are cut on that face; on a Faces-all-round
+   * ring they are cut on EVERY face of the ring. Absent is a bare face.
+   *
+   * The items live HERE, not in the job's map lists, because their coordinates are the FACE's,
+   * not the map's — see {@link EngraveFaceItem}. The CAM builds them as an ordinary flat program
+   * on a prism the size of the face and lifts that program into the indexed frame at this A.
+   */
+  items?: EngraveFaceItem[];
+}
+
+/**
+ * #833 — ONE CUT ON A FACE, in the FACE's own coordinates.
+ *
+ * The face frame: `x` runs along the stock from the face's LEFT end (the jaws' side of the
+ * cuttable span, one cutter radius clear of the jaws' band), `y` is measured from the face's
+ * CENTRELINES (± the chord's half-width), and `depth` is below the FACE PLANE (the flat's floor),
+ * never below the rod's surface. The face plane is horizontal once the stock is turned to the
+ * operation's A, so these are ordinary 2.5D cuts on that plane.
+ *
+ * The three kinds are the flat picker's — Engrave text, Pocket, Hole — because those are the
+ * operations §3.6 offers on a face. A hole is a circular pocket: a flat end mill can make it, and
+ * it comes out at the cutter's own diameter (the same rule a cross-hole follows).
+ */
+export interface EngraveFaceItem {
+  /** Stable within the job; minted with `newId('face-item')`. */
+  id: string;
+  kind: 'text' | 'pocket' | 'hole';
+  /** Centre in the face frame: mm from the face's left end, along the axis. */
+  x: Mm;
+  /** Centre in the face frame: mm from the face's centreline, across it. */
+  y: Mm;
+  /** How deep below the face plane, mm — a positive cut depth. */
+  depth: Mm;
+  /** `text`: what it says, its font and its cap size, mm. */
+  text?: string;
+  font?: string;
+  size?: Mm;
+  /** `pocket`: its size across the face frame, mm. */
+  width?: Mm;
+  height?: Mm;
+  /** `hole`: the diameter asked for, mm — the cutter decides what comes out. */
+  diameter?: Mm;
 }
 
 /**

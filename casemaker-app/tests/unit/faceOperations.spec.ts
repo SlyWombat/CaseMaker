@@ -30,7 +30,8 @@ import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { engraveJobSchema } from '@/store/engraveJobSchema';
-import type { EngraveFaceOp, EngraveJob } from '@/types/engraveJob';
+import type { EngraveFaceItem, EngraveFaceOp, EngraveJob } from '@/types/engraveJob';
+import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 
 const TOOL = flatEndMill(3.175, { name: '3.175 mm flat end', handleDiameter: 3.175 });
 
@@ -255,6 +256,78 @@ describe('#241 slice 2 — a face program, generated and swept', () => {
     expect(report.ok, JSON.stringify(report.levels)).toBe(true);
     expect(report.levels.map((l) => l.a)).toEqual([90]);
   }, 240_000);
+});
+
+describe('#833 — cuts ON a face', () => {
+  const faceWith = (items: EngraveFaceItem[], depth = 1): EngraveJob => {
+    const job = rod([{ id: 'f', kind: 'flat', a: 30, depth, items }]);
+    job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
+    return job;
+  };
+  // A 3 mm text's strokes are thinner than a flat end can make at any diameter a ⌀20 face allows
+  // (a V-bit is the engraver's tool); the flat-end text this CAM can cut is chunkier: size 9 on a
+  // 2 mm-deep face (12 mm chord), whose ~1.1 mm strokes a ⌀1 mm flat end keeps.
+  const text: EngraveFaceItem = { id: 't', kind: 'text', x: 20, y: 0, depth: 0.5, text: 'HI', font: DEFAULT_FONT_ID, size: 9 };
+  const THIN1 = flatEndMill(1, { name: '1 mm flat end', handleDiameter: 3.175, fluteLength: 12, shoulderLength: 12 });
+
+  it('round-trips through the schema, and a cross-hole cannot carry them', () => {
+    const job = faceWith([text]);
+    const parsed = engraveJobSchema.safeParse(job);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.faces?.[0]?.items).toEqual([text]);
+    const bad = rod([{ id: 'h', kind: 'cross-hole', a: 0, diameter: 3.175, items: [text] }]);
+    expect(engraveJobSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('refuses a cut off the face, and one that reaches the axis', () => {
+    const feeds = feedsFor([], 'softwood', TOOL, Z1);
+    if (!feeds.ok) throw new Error(feeds.reason);
+    const off = faceWith([{ ...text, x: 1 }]);
+    const a = planFaceCuts(off, rotaryMapOf(off)!, TOOL, feeds.params);
+    expect(a.ok).toBe(false);
+    if (!a.ok) expect(a.findings.map((f) => f.code)).toContain('face-item-off-face');
+    const deep = faceWith([{ ...text, depth: 9.5 }]);
+    const b = planFaceCuts(deep, rotaryMapOf(deep)!, TOOL, feeds.params);
+    expect(b.ok).toBe(false);
+    if (!b.ok) expect(b.findings.map((f) => f.code)).toContain('face-item-too-deep');
+  });
+
+  it('an engraving on a face is cut at that face’s A, on the face plane, and matches the design', () => {
+    const job = faceWith([text], 2);
+    const g = engraveGenerate(tl, job, THIN1, [], null);
+    expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    const session = createSimSession(tl);
+    const loaded = session.load(g.nc ?? '', toSetup(job, Z1), THIN1, Z1.id);
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.stats.engine).toBe('exact');
+    const report = session.oracle(g.predicted);
+    session.dispose();
+    expect(report.ok, JSON.stringify(report.levels)).toBe(true);
+    // The face pocket and the engraving share the face's index.
+    expect(report.levels.every((l) => l.a === 30)).toBe(true);
+  }, 300_000);
+
+  it('a pocket and a hole on the face are cut in the same program', () => {
+    const job = faceWith([
+      { id: 'p', kind: 'pocket', x: 14, y: 0, depth: 1, width: 6, height: 4 },
+      { id: 'h', kind: 'hole', x: 28, y: 0, depth: 2, diameter: 4 },
+    ]);
+    const g = engraveGenerate(tl, job, TOOL, [], null);
+    expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
+    expect(g.ok).toBe(true);
+    const session = createSimSession(tl);
+    const loaded = session.load(g.nc ?? '', toSetup(job, Z1), TOOL, Z1.id);
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    const report = session.oracle(g.predicted);
+    session.dispose();
+    expect(report.ok, JSON.stringify(report.levels)).toBe(true);
+    // One face's levels: the face pocket, the pocket cut and the hole all at A 30°.
+    expect([...new Set(report.levels.map((l) => l.a))]).toEqual([30]);
+  }, 300_000);
 });
 
 describe('#241 slice 2 — the narrowed Y contract', () => {

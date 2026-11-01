@@ -67,6 +67,7 @@ import type {
   EngraveCutout,
   EngraveCylinderPrimitive,
   EngraveDrill,
+  EngraveFaceItem,
   EngraveFaceOp,
   EngraveDrillArrayItem,
   EngraveDrillItem,
@@ -1135,6 +1136,11 @@ export interface EngraveJobState {
   /** Merge a hand edit into one face operation (#241 slice 2). */
   updateFaceOperation: (id: string, patch: Partial<Omit<EngraveFaceOp, 'id' | 'kind'>>) => void;
   removeFaceOperation: (id: string) => void;
+  /** #833 — add a cut ON one face operation (an engraving, a pocket or a hole) and return its id. */
+  addFaceItem: (opId: string, item: Omit<EngraveFaceItem, 'id'>) => string;
+  /** Merge a hand edit into one face cut (#833). */
+  updateFaceItem: (opId: string, itemId: string, patch: Partial<Omit<EngraveFaceItem, 'id' | 'kind'>>) => void;
+  removeFaceItem: (opId: string, itemId: string) => void;
   /** Add a chamfer on the job's first rim (#669) and return its id. */
   addChamfer: () => string;
   /** Merge a hand edit into one chamfer (#669). */
@@ -2089,6 +2095,50 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         (job) => ({ ...job, faces: (job.faces ?? []).filter((f) => f.id !== id) }),
         faceOperationWords(face),
         (job) => ({ ...job, faces: insertAt(job.faces ?? [], at, face) }),
+      );
+    },
+
+    addFaceItem: (opId, item) => {
+      const id = newId('face-item');
+      const made: EngraveFaceItem = { ...item, id };
+      apply((job) => ({
+        ...job,
+        faces: (job.faces ?? []).map((face) =>
+          face.id === opId ? { ...face, items: [...(face.items ?? []), made] } : face,
+        ),
+      }));
+      return id;
+    },
+
+    updateFaceItem: (opId, itemId, patch) =>
+      apply((job) => ({
+        ...job,
+        faces: (job.faces ?? []).map((face) =>
+          face.id === opId
+            ? { ...face, items: (face.items ?? []).map((it) => (it.id === itemId ? { ...it, ...patch } : it)) }
+            : face,
+        ),
+      })),
+
+    removeFaceItem: (opId, itemId) => {
+      const op = (get().job.faces ?? []).find((f) => f.id === opId);
+      const at = (op?.items ?? []).findIndex((it) => it.id === itemId);
+      const item = (op?.items ?? [])[at];
+      if (!item) return;
+      removeWithUndo(
+        (job) => ({
+          ...job,
+          faces: (job.faces ?? []).map((face) =>
+            face.id === opId ? { ...face, items: (face.items ?? []).filter((it) => it.id !== itemId) } : face,
+          ),
+        }),
+        item.kind === 'text' ? `engraving “${item.text ?? ''}”` : item.kind === 'pocket' ? 'pocket on a face' : 'hole on a face',
+        (job) => ({
+          ...job,
+          faces: (job.faces ?? []).map((face) =>
+            face.id === opId ? { ...face, items: insertAt(face.items ?? [], at, item) } : face,
+          ),
+        }),
       );
     },
 

@@ -1590,6 +1590,51 @@ const stockHoldSchema = z
   });
 
 /**
+ * #833 — one cut ON A FACE, in the face's own frame (see `EngraveFaceItem`): a text line, a
+ * pocket, or a hole. STRUCTURAL only, like the face operation around it: the kind's own fields
+ * must be the ones stated, and a depth below 0 or a text with no words is a JOB finding in
+ * operator words, not a load failure.
+ */
+const faceItemSchema = z
+  .object({
+    id: z.string().min(1).describe('Id of this face cut, unique within the job.'),
+    kind: z.enum(['text', 'pocket', 'hole']).describe('What is cut on the face.'),
+    x: z.number().finite().describe("Centre, millimetres from the face's left end along the axis."),
+    y: z.number().finite().describe("Centre, millimetres from the face's centreline across it."),
+    depth: z.number().finite().describe('How deep below the face plane, millimetres.'),
+    text: z.string().describe('The words an engraving says.').optional(),
+    font: z.string().describe('The font id an engraving uses.').optional(),
+    size: z.number().finite().describe('The cap size of an engraving, millimetres.').optional(),
+    width: z.number().finite().describe('A pocket’s extent along the axis, millimetres.').optional(),
+    height: z.number().finite().describe('A pocket’s extent across the face, millimetres.').optional(),
+    diameter: z.number().finite().describe('A hole’s diameter, millimetres.').optional(),
+  })
+  .strict()
+  .superRefine((item, ctx) => {
+    const require_ = (key: 'text' | 'width' | 'height' | 'diameter', why: string): void => {
+      if (item[key] === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: why });
+    };
+    const forbid = (keys: readonly ('text' | 'font' | 'size' | 'width' | 'height' | 'diameter')[]): void => {
+      for (const key of keys) {
+        if (item[key] !== undefined) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `a ${item.kind} has no \`${key}\`` });
+        }
+      }
+    };
+    if (item.kind === 'text') {
+      require_('text', 'an engraving on a face states its text');
+      forbid(['width', 'height', 'diameter']);
+    } else if (item.kind === 'pocket') {
+      require_('width', 'a pocket on a face states its width');
+      require_('height', 'a pocket on a face states its height');
+      forbid(['text', 'font', 'size', 'diameter']);
+    } else {
+      require_('diameter', 'a hole on a face states its diameter');
+      forbid(['text', 'font', 'size', 'width', 'height']);
+    }
+  });
+
+/**
  * #241 slice 2 — one cut ON A FACE of a round stock, with its index (see `EngraveFaceOp`).
  *
  * STRUCTURAL ONLY: the fields the kind needs must be present and no other kind's may be, because
@@ -1608,6 +1653,9 @@ const faceOpSchema = z
     acrossFlats: z.number().finite().positive().describe('The across-flats a ring leaves, millimetres.').optional(),
     diameter: z.number().finite().positive().describe("A cross-hole's diameter, millimetres.").optional(),
     atX: z.number().finite().nonnegative().describe('Where along the stock a cross-hole is drilled, millimetres from the jaw face.').optional(),
+    // #833 — the cuts on the face, in the face's own frame. OPTIONAL and not defaulted, so every
+    // document written before this field keeps its exact shape; a ring's items are cut on each face.
+    items: z.array(faceItemSchema).optional().describe('Cuts on this face (engraving, pocket, hole); omit for a bare face.'),
   })
   .strict()
   .superRefine((op, ctx) => {
@@ -1633,6 +1681,9 @@ const faceOpSchema = z
     } else {
       require_('diameter', 'a cross-hole states its diameter, in millimetres');
       forbid(['depth', 'count', 'acrossFlats']);
+      if (op.items !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['items'], message: 'a cross-hole has no face to cut items on' });
+      }
     }
   });
 

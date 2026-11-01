@@ -25,7 +25,7 @@
  */
 
 import type { Mm } from '@/types/units';
-import type { EngraveFaceOp, EngraveFaceOpKind, EngraveJob } from '@/types/engraveJob';
+import type { EngraveFaceItem, EngraveFaceOp, EngraveFaceOpKind, EngraveJob } from '@/types/engraveJob';
 import type { IndexedFace, IndexedHole } from '@/engine/cnc/cam/indexed';
 import { facePassYs } from '@/engine/cnc/cam/indexed';
 import type { CutParams } from '@/engine/cnc/feeds';
@@ -117,9 +117,28 @@ function holePrediction(hole: IndexedHole, cutterRadiusMm: Mm): OraclePredicted 
   return { a: hole.a, depth: hole.depth, polygons: [disc] };
 }
 
+/**
+ * #833 — ONE FACE as the CAM sees it: the index, the plane's depth, its span and chord, and the
+ * cuts on it. `faces[i]` and `frames[i]` are the same face; a ring expands to one of each per face.
+ */
+export interface FaceFrame {
+  a: number;
+  /** The face plane's depth below the rod's surface, mm. */
+  depth: Mm;
+  /** The face's X span in the rotary frame, mm (one cutter radius clear of each band). */
+  from: Mm;
+  to: Mm;
+  /** The face's width across Y, mm — its chord at `depth`. */
+  chord: Mm;
+  /** The cuts on the face, in the face's own frame (see `EngraveFaceItem`). */
+  items: readonly EngraveFaceItem[];
+}
+
 export interface FaceCutPlan {
   /** The indexed CAM's face list, in cut order. */
   faces: IndexedFace[];
+  /** The same faces as frames — `faces[i]` is `frames[i]`. */
+  frames: FaceFrame[];
   /** Its holes, after the faces, in cut order. */
   holes: IndexedHole[];
   /** What each cut should leave, for the per-face oracle. */
@@ -129,6 +148,63 @@ export interface FaceCutPlan {
 export type FacePlanResult = { ok: true; plan: FaceCutPlan; findings: JobFinding[] } | { ok: false; findings: JobFinding[] };
 
 const num = (v: number): string => String(Number(v.toFixed(2)));
+
+/**
+ * #833 — the cut a new face operation starts as, at the face's centre: an engraving 0.5 mm into
+ * the face with the words the operator typed, a 1 mm pocket about a third of the face long, or a
+ * 2 mm hole at the cutter's own diameter. The caller states the text (an engraving with no words
+ * is not a cut); `faceLengthMm` and `chordMm` size the defaults to the face they land on.
+ */
+export function defaultFaceItem(
+  kind: EngraveFaceItem['kind'],
+  faceLengthMm: Mm,
+  chordMm: Mm,
+  cutterDiameterMm: Mm,
+  text?: string,
+): Omit<EngraveFaceItem, 'id'> {
+  const x = round3(faceLengthMm / 2);
+  if (kind === 'text') {
+    return {
+      kind,
+      x,
+      y: 0,
+      depth: 0.5,
+      text: text ?? '',
+      size: Math.max(1.5, Math.min(3, round3(chordMm / 2.5))),
+    };
+  }
+  if (kind === 'pocket') {
+    // A pocket narrower than the cutter has nothing to cut (#201's own finding): the default is
+    // at least twice the cutter wide and tall, held inside the face — and a face too small for
+    // that is NAMED by the finding rather than silently made uncuttable.
+    const d = cutterDiameterMm > 0 ? cutterDiameterMm : 3.175;
+    const width = Math.max(2 * d, Math.min(6, round3(faceLengthMm / 3)));
+    const height = Math.max(2 * d, Math.min(3, round3(chordMm / 2)));
+    return {
+      kind,
+      x,
+      y: 0,
+      depth: 1,
+      width: round3(Math.min(width, Math.max(1, faceLengthMm - 2))),
+      height: round3(Math.min(height, Math.max(1, chordMm - 2))),
+    };
+  }
+  // A hole is a PLUNGE (like a cross-hole): it comes out at the cutter's own diameter, so the
+  // default states that diameter — the seed is a hole the machine can make.
+  return { kind, x, y: 0, depth: 2, diameter: round3(cutterDiameterMm > 0 ? cutterDiameterMm : 3.175) };
+}
+
+/** One cut on a face in the panel's words, with its numbers and units (#833). */
+export function faceItemWords(item: EngraveFaceItem): string {
+  if (item.kind === 'text') return `Engrave “${item.text ?? ''}” · ${num(item.depth)} mm deep`;
+  if (item.kind === 'pocket') return `Pocket ${num(item.width ?? 0)} × ${num(item.height ?? 0)} mm · ${num(item.depth)} mm deep`;
+  return `Hole ⌀${num(item.diameter ?? 0)} mm · ${num(item.depth)} mm deep`;
+}
+
+/** An operator's word for one face cut: "engraving", "pocket", "hole". */
+function faceItemWord(item: EngraveFaceItem): string {
+  return item.kind === 'text' ? 'engraving' : item.kind === 'pocket' ? 'pocket' : 'hole';
+}
 
 /** The operation in the panel's words, with its numbers and units: `Flat 1 mm deep at A 0°`. */
 export function faceOperationWords(op: EngraveFaceOp): string {
@@ -164,14 +240,60 @@ export function planFaceCuts(
   const span = faceSpanMm(map, cutterRadius);
   const spanMm = span.to - span.from;
   const faces: IndexedFace[] = [];
+  const frames: FaceFrame[] = [];
   const holes: IndexedHole[] = [];
   const predicted: OraclePredicted[] = [];
 
-  const addFace = (a: number, depth: Mm): void => {
+  const addFace = (a: number, depth: Mm, items: readonly EngraveFaceItem[]): void => {
     const width = faceChordMm(radius, depth);
     const face: IndexedFace = { a, fromX: span.from, toX: span.to, depth, ...(width > 0 ? { width } : {}) };
     faces.push(face);
+    // #833 — A HOLE is a PLUNGE at the face's index, like a cross-hole but stopping at its depth
+    // below the plane: the program's hole list carries it, and the cutter decides its size.
+    const surfaceItems = items.filter((it) => it.kind !== 'hole');
+    frames.push({ a, depth, from: span.from, to: span.to, chord: width, items: surfaceItems });
     predicted.push(facePrediction(face, cutterRadius, params.stepOver));
+    for (const item of items) {
+      if (item.kind === 'hole') {
+        const hole: IndexedHole = { a, x: span.from + item.x, depth: depth + item.depth };
+        holes.push(hole);
+        predicted.push(holePrediction(hole, cutterRadius));
+        const asked = item.diameter ?? 0;
+        if (asked > 0 && Math.abs(asked - 2 * cutterRadius) > 1e-6) {
+          findings.push({
+            severity: 'warning',
+            code: 'face-hole-cutter',
+            labelId: item.id,
+            message: `The hole on the face at A ${num(a)}° asks for ⌀${num(asked)} mm and the job's cutter is ⌀${num(2 * cutterRadius)} mm, so the hole comes out at ⌀${num(2 * cutterRadius)} mm. Use a ⌀${num(asked)} mm cutter for the hole you asked for.`,
+          });
+        }
+      }
+    }
+    // A CUT ON THE FACE HAS TO FIT IT: its centre within the face's span and chord, its
+    // own extent inside them, and its floor above the axis (the face's depth plus the cut's).
+    for (const item of items) {
+      const halfW = (item.kind === 'pocket' ? (item.width ?? 0) / 2 : item.kind === 'hole' ? (item.diameter ?? 0) / 2 : (item.size ?? 0) / 2);
+      const halfH = (item.kind === 'pocket' ? (item.height ?? 0) / 2 : item.kind === 'hole' ? (item.diameter ?? 0) / 2 : (item.size ?? 0) / 2);
+      const along = item.x;
+      const across = Math.abs(item.y);
+      if (!(item.depth > 0) || depth + item.depth >= radius) {
+        findings.push({
+          severity: 'error',
+          code: 'face-item-too-deep',
+          labelId: item.id,
+          message: `The ${faceItemWord(item)} on the face at A ${num(a)}° is ${num(item.depth)} mm below the face, and the face is ${num(depth)} mm deep: together they reach the ${num(radius)} mm radius the rod turns on. Make the cut shallower.`,
+        });
+        continue;
+      }
+      if (along - halfW < 0 || along + halfW > span.to - span.from || across + halfH > width / 2 + 1e-6 || across - halfH < -width / 2 - 1e-6) {
+        findings.push({
+          severity: 'error',
+          code: 'face-item-off-face',
+          labelId: item.id,
+          message: `The ${faceItemWord(item)} on the face at A ${num(a)}° does not fit the face: the face is ${num(span.to - span.from)} mm along and ${num(width)} mm across, and the cut reaches past one of its edges. Move it onto the face, or make it smaller.`,
+        });
+      }
+    }
   };
 
   for (const op of ops) {
@@ -195,7 +317,7 @@ export function planFaceCuts(
         });
         continue;
       }
-      addFace(op.a, depth);
+      addFace(op.a, depth, op.items ?? []);
     } else if (op.kind === 'faces-all-round') {
       const count = op.count ?? 0;
       const acrossFlats = op.acrossFlats ?? 0;
@@ -218,7 +340,7 @@ export function planFaceCuts(
         });
         continue;
       }
-      for (let k = 0; k < count; k++) addFace(op.a + (k * 360) / count, depth);
+      for (let k = 0; k < count; k++) addFace(op.a + (k * 360) / count, depth, op.items ?? []);
     } else {
       const diameter = op.diameter ?? 0;
       const cutterDiameter = cuttingDiameter(tool) ?? 2 * cutterRadius;
@@ -248,7 +370,7 @@ export function planFaceCuts(
   }
 
   if (findings.some((f) => f.severity === 'error')) return { ok: false, findings };
-  return { ok: true, plan: { faces, holes, predicted }, findings };
+  return { ok: true, plan: { faces, frames, holes, predicted }, findings };
 }
 
 /**

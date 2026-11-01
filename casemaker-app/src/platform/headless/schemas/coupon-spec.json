@@ -1048,6 +1048,73 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "items": {
+                "description": "Cuts on this face (engraving, pocket, hole); omit for a bare face.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "depth": {
+                      "description": "How deep below the face plane, millimetres.",
+                      "type": "number"
+                    },
+                    "diameter": {
+                      "description": "A hole’s diameter, millimetres.",
+                      "type": "number"
+                    },
+                    "font": {
+                      "description": "The font id an engraving uses.",
+                      "type": "string"
+                    },
+                    "height": {
+                      "description": "A pocket’s extent across the face, millimetres.",
+                      "type": "number"
+                    },
+                    "id": {
+                      "description": "Id of this face cut, unique within the job.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "description": "What is cut on the face.",
+                      "enum": [
+                        "text",
+                        "pocket",
+                        "hole"
+                      ],
+                      "type": "string"
+                    },
+                    "size": {
+                      "description": "The cap size of an engraving, millimetres.",
+                      "type": "number"
+                    },
+                    "text": {
+                      "description": "The words an engraving says.",
+                      "type": "string"
+                    },
+                    "width": {
+                      "description": "A pocket’s extent along the axis, millimetres.",
+                      "type": "number"
+                    },
+                    "x": {
+                      "description": "Centre, millimetres from the face's left end along the axis.",
+                      "type": "number"
+                    },
+                    "y": {
+                      "description": "Centre, millimetres from the face's centreline across it.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "x",
+                    "y",
+                    "depth"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "kind": {
                 "description": "The kind of cut taken on the face.",
                 "enum": [

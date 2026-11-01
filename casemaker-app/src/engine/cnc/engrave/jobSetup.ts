@@ -439,6 +439,10 @@ export type JobFindingCode =
   | 'face-no-room'
   | 'face-items-mixed'
   | 'cross-hole-cutter'
+  // #833 — a cut ON a face that does not fit it, or reaches the axis with the face's own depth.
+  | 'face-item-off-face'
+  | 'face-item-too-deep'
+  | 'face-hole-cutter'
   // #666 — THE ADAPTIVE-CLEARING STRATEGY a metal pocket is cut with (see `cam/adaptive.ts`).
   // `adaptive-clearing` (info) states the plan the file was cut from — engagement, levels, entry,
   // feed owner — in the plan's own words. `adaptive-fallback` (warning) says the planner declined a
