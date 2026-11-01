@@ -288,13 +288,17 @@ test('#876 — a ring drag in the scale band snaps; the same drag outside it doe
   await page.mouse.up();
   expect((await placement(page))!.turns).not.toEqual(before.turns);
 
-  // #876 — THE Z ARROW: depth in the stock, the same 1 mm snap. Press 20 mm along it (clear of the
-  // X/Y arrows' pick tubes, which share the compass centre), drag to 25 mm, and the stored top
-  // moves +5 mm.
+  // #876 — THE Z ARROW: depth in the stock, the same 1 mm snap. Press at HALF the compass radius
+  // along it — the rings pass the +Z axis at the full radius and the X/Y arrows lie along their
+  // own axes, so half the radius is the point farthest from every other pick tube. Drag to +5 mm
+  // and the stored top moves by exactly that.
   const zAt = (mm: number) => page.evaluate((v) => window.__caseMaker!.engraveGoalHandlePoint('arrow', 'z', v), mm);
   const beforeZ = (await placement(page))!.position.z;
-  const za = (await zAt(20))!;
-  const zb = (await zAt(25))!;
+  const placed = (await placement(page))!.placed;
+  const handleR = Math.max(6, 0.5 * Math.max(placed.x, placed.y, placed.z) + 4);
+  const h0 = 0.5 * handleR;
+  const za = (await zAt(h0))!;
+  const zb = (await zAt(h0 + 5))!;
   await page.mouse.move(za.x, za.y);
   await page.mouse.down();
   await page.mouse.move(zb.x, zb.y, { steps: 3 });
