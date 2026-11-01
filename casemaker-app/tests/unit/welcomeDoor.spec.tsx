@@ -108,7 +108,7 @@ describe('#680 the cutting door', () => {
     const cnc = screen.getByTestId('welcome-door-cnc');
     expect(print).toBeTruthy();
     expect(cnc).toBeTruthy();
-    expect(cnc.textContent).toContain('Cut something on the CNC — a badge, a plate, a pocket, an engraving.');
+    expect(cnc.textContent).toContain('Carve hardwood on the CNC — a name plate, a coaster, a pocket, an engraving.');
     expect(within(cnc).getByTestId('welcome-start-cnc').textContent).toContain('Start a cutting job');
 
     fireEvent.click(screen.getByTestId('welcome-start-cnc'));

@@ -110,7 +110,7 @@ test('a starter on the welcome door opens the wizard with its blank as the stock
 
   const door = page.getByTestId('welcome-door-cnc');
   await expect(door).toBeVisible();
-  await expect(door).toContainText('Cut something on the CNC — a badge, a plate, a pocket, an engraving.');
+  await expect(door).toContainText('Carve hardwood on the CNC — a name plate, a coaster, a pocket, an engraving.');
   // A fresh browser has no saved job files, and the card says nothing about that.
   await expect(page.getByTestId('welcome-recent-jobs')).toHaveCount(0);
   await expect(page.getByTestId('welcome-starters')).toContainText('Name badge');
