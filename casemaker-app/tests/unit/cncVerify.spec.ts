@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { verifyProgram, stockDepthLimit, sacrificialDepthLimit, type VerifyContext } from '@/engine/cnc/verify';
 import { flatEndMill } from '@/engine/cnc/tool';
-import { Z1 } from '@/engine/cnc/machine';
+import { CARVERA, Z1 } from '@/engine/cnc/machine';
 import { stubSetup } from '@/engine/cnc/setup';
 import { rectProfile, aabbOfProfile } from '@/engine/compiler/profile';
 import { HOP_Z } from '@/engine/cnc/cam/ir';
@@ -656,5 +656,24 @@ describe('#845 the GRBL dialect', () => {
     expect(m8.findings.some((f) => f.code === 'not-our-dialect' && f.message.includes("'M8'"))).toBe(true);
     const m331 = verifyProgram(`${GRBL_FILE.replace('M8', 'M331').replace('M9', 'M332')}`, ctxFor());
     expect(m331.findings.filter((f) => f.code === 'not-our-dialect' && f.message.includes("'M0'"))).toHaveLength(1);
+  });
+});
+
+// #828 — AN ATC CHANGE IS Z EVIDENCE ONLY WITH THE PROGRAM'S OWN Z. The controller's `M6`
+// exchanges the tool and returns the head to a height it chooses; our post follows it with an
+// absolute Z rapid in the work frame. That pair establishes the tool in Z — and a file that
+// changes tools and spins up without it is exactly the unknown-height start the verifier refuses.
+describe('#828 an ATC tool change and the work-frame Z that follows it', () => {
+  const PROLOGUE = 'G90 G54 G0 X0 Y0\n';
+  const CUT = 'G1 Z-1 F200\nG1 X4 F500\nG0 Z5\nM05\nG28\nM02\n';
+
+  it('accepts the change followed by an absolute Z rapid before the spindle', () => {
+    const text = `${PROLOGUE}T1 M6\nG0 Z5\nG0 X2 Y2\nS12000 M3\n${CUT}`;
+    expect(codes(ctxFor({ machine: CARVERA }), text)).not.toContain('spindle-at-unknown-z');
+  });
+
+  it('refuses the change with no Z placed before the spindle', () => {
+    const text = `${PROLOGUE}T1 M6\nG0 X2 Y2\nS12000 M3\nG0 Z5\n${CUT}`;
+    expect(codes(ctxFor({ machine: CARVERA }), text)).toContain('spindle-at-unknown-z');
   });
 });

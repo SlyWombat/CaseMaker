@@ -35,7 +35,7 @@ import {
 import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
 import { jobTool, setupProgramFindings, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup, setupPrograms } from '@/engine/cnc/engrave/programs';
-import { Z1 } from '@/engine/cnc/machine';
+import { CARVERA, Z1 } from '@/engine/cnc/machine';
 import {
   itemConditionSummary,
   type Condition,
@@ -94,6 +94,37 @@ describe('engraveGenerate with a saved machine frame (#297)', () => {
     expect(g.ok).toBe(true);
     expect(g.nc).toBe(generate(tl, dj()).nc);
   });
+
+  // #828 — A CARVERA JOB IS GENERATED, NOT REFUSED. #773 refused it by name for want of a frame;
+  // the frame is now the Carvera Community Firmware's shipped configuration, and the machine has
+  // an ATC, so the program opens with the change and the program's own absolute Z and verifies
+  // clean against the C1's own numbers.
+  it('#828 a Carvera job generates and verifies, with the ATC start', () => {
+    const job: EngraveJob = { ...dj(), machineId: 'C1' };
+    const g = generate(tl, job);
+    expect(g.ok, JSON.stringify(g.errors ?? [])).toBe(true);
+    const nc = g.nc ?? '';
+    expect(nc).toContain('T1 M6');
+    // The ATC start: the change, then the program's own Z — no machine-frame clearance lift.
+    const lines = nc.split('\n');
+    const at = lines.findIndex((line) => line.trim() === 'T1 M6');
+    expect(lines[at + 1]).toMatch(/^G0 Z/);
+    expect(nc).not.toContain('G53');
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+
+    // And it SIMULATES: the session resolves the C1's own frame (the #773 refusal is gone) and the
+    // timeline passes the change through as the controller's business rather than expanding a
+    // manual macro.
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(nc, toSetup(job, CARVERA), jobTool(job)!, job.machineId, {
+        breakthroughMm: job.breakthrough,
+      });
+      expect(load.ok, JSON.stringify(load.ok ? [] : load.diagnostics)).toBe(true);
+    } finally {
+      session.dispose();
+    }
+  }, 180_000);
 });
 
 describe('engraveGenerate (#206)', () => {

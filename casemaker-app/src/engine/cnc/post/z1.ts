@@ -367,9 +367,18 @@ function postRotary(
  * refuses the `'probed-top-face'` datum, a move with no `a`, a non-zero Y and an IR with no
  * stock radius. Both refuse an IR with no non-empty operation, a move with a non-finite
  * coordinate, a feed outside `(0, machine.maxCutFeed]`, the spindle speed above
- * `machine.maxRpm`, a cutting move above the stock but below `hopZ` (a cut in the air is a CAM
- * bug), and a machine with an automatic tool changer (this post writes the manual-change
- * dialect only).
+ * `machine.maxRpm`, and a cutting move above the stock but below `hopZ` (a cut in the air is a
+ * CAM bug).
+ *
+ * #828 — A MACHINE WITH AN AUTOMATIC TOOL CHANGER GETS ITS OWN START. `Tn M6` is the whole
+ * change on a Carvera: the controller drives its own rack, releases and clamps the tool and
+ * returns to a height of its own choosing, so there is no manual-park sequence to write. What the
+ * program still must do is PLACE THE TOOL IN Z itself, because the machine does not tell us the
+ * height it returned at: the first move after the change is an absolute Z rapid (in the WORK
+ * frame) to the program's own safe height, then XY, then the spindle. The verifier reads that
+ * pair — an ATC change followed by an absolute Z — as Z evidence, and a change without it stays
+ * an error (#828). The manual dialect keeps its machine-frame `G53` lift (#384), which is the
+ * answer to a different problem: a head the operator left anywhere.
  */
 export function postZ1(
   ir: ToolpathIR,
@@ -385,12 +394,6 @@ export function postZ1(
   const ops = ir.operations.filter((op) => op.moves.length > 0);
   if (ops.length === 0) {
     errors.push('the toolpath IR has no operation with any moves: nothing to post');
-  }
-
-  if (machine.hasATC) {
-    errors.push(
-      `the ${machine.name} has an automatic tool changer (hasATC = true); this post writes the manual-change dialect only`,
-    );
   }
 
   if (!Number.isFinite(ir.spindleRpm) || ir.spindleRpm > machine.maxRpm) {
@@ -575,32 +578,49 @@ export function postZ1(
         '',
         `T${ir.toolNumber} M6`,
       );
-      // #283 — THE PROGRAM'S ACCESSORY IS THE VACUUM, AND THE FILE TURNS IT ON ITSELF. `M7` is
-      // answered `ok` by this controller and blows nothing (never mind that no `M7`/`M9` appeared
-      // in the 2026-10-07 traffic read at all): air via `M7` is a no-op on a Z1. What clears chips
-      // is bare `M331`, "turning extend out mode on" — the code Studio's own Vacuum switch sends,
-      // which the bench drove from our console around both 2026-10-12 first-chips runs
-      // (`docs/bench/traces/2026-10-12-cut-rowA.log`) and which the maintainer runs for every real
-      // cut. The switches are off at power-up and a file cannot assume where the last job left
-      // them, so the program states this itself — which is why it belongs in the file. WHICH file
-      // says it is the run's first (#419 decision 4): `vacuumOn` is false in a middle or last
-      // program, because the mode is already on, and switching it off and back on across a bit
-      // change is exactly what that decision avoids.
-      if (vacuumOn) body.push('M331');
-      // #384 — THE FILE LIFTS THE HEAD ITSELF, IN THE MACHINE FRAME. After a manual `M6` the
-      // head's Z is wherever the last job left it, so an XY rapid at "whatever Z the head is
-      // at" is the move that drives a tool through the work. `G53` is absolute in MACHINE
-      // coordinates, which is the frame the clearance is known in: the controller can execute
-      // this from an unknown work position, where a work-frame Z could not be trusted.
-      // Studio covers this OUTSIDE the file (its "Goto path origin first" buffer runs
-      // `G53 G0 Z-3` then `G90 G0 X Y`, #302 item 5); our app starts a job with `play` alone,
-      // so the program has to be safe on its own. The verifier refuses a file that is not.
-      body.push(`G53 G0 Z${axis(machine.toolChange.clearanceZ)}`);
-      body.push(`G0 X${x0} Y${y0}`, `S${axis(ir.spindleRpm)} M3`, `G0 Z${safe}`);
-      lastX = x0;
-      lastY = y0;
-      lastZ = safe;
-      lastF = null;
+      if (machine.hasATC) {
+        // #828 — AN ATC MACHINE'S FIRST MOVE IS THE PROGRAM'S OWN Z, IN THE WORK FRAME. The
+        // controller's change returns the head to a height IT chose; we hold no number for it
+        // and the program does not need one — an absolute Z rapid places the tool where the
+        // job's own safe height is, and the verifier reads the change plus this rapid as Z
+        // evidence. XY follows at that height, then the spindle. No accessory word: the vacuum
+        // codes are the Z1's (`capabilities.vacuum`), and this post does not speak them here.
+        const zSafe = axis(ir.safeZ);
+        body.push(`G0 Z${zSafe}`, `G0 X${x0} Y${y0}`, `S${axis(ir.spindleRpm)} M3`);
+        lastX = x0;
+        lastY = y0;
+        lastZ = zSafe;
+        lastF = null;
+      } else {
+        // #283 — THE PROGRAM'S ACCESSORY IS THE VACUUM, AND THE FILE TURNS IT ON ITSELF. `M7` is
+        // answered `ok` by this controller and blows nothing (never mind that no `M7`/`M9` appeared
+        // in the 2026-10-07 traffic read at all): air via `M7` is a no-op on a Z1. What clears chips
+        // is bare `M331`, "turning extend out mode on" — the code Studio's own Vacuum switch sends,
+        // which the bench drove from our console around both 2026-10-12 first-chips runs
+        // (`docs/bench/traces/2026-10-12-cut-rowA.log`) and which the maintainer runs for every real
+        // cut. The switches are off at power-up and a file cannot assume where the last job left
+        // them, so the program states this itself — which is why it belongs in the file. WHICH file
+        // says it is the run's first (#419 decision 4): `vacuumOn` is false in a middle or last
+        // program, because the mode is already on, and switching it off and back on across a bit
+        // change is exactly what that decision avoids.
+        // #828 — only the Z1's dialect has these words (`machine.capabilities.vacuum`); the post
+        // must not speak the Z1's accessory codes at a Carvera.
+        if (vacuumOn && machine.capabilities.vacuum) body.push('M331');
+        // #384 — THE FILE LIFTS THE HEAD ITSELF, IN THE MACHINE FRAME. After a manual `M6` the
+        // head's Z is wherever the last job left it, so an XY rapid at "whatever Z the head is
+        // at" is the move that drives a tool through the work. `G53` is absolute in MACHINE
+        // coordinates, which is the frame the clearance is known in: the controller can execute
+        // this from an unknown work position, where a work-frame Z could not be trusted.
+        // Studio covers this OUTSIDE the file (its "Goto path origin first" buffer runs
+        // `G53 G0 Z-3` then `G90 G0 X Y`, #302 item 5); our app starts a job with `play` alone,
+        // so the program has to be safe on its own. The verifier refuses a file that is not.
+        body.push(`G53 G0 Z${axis(machine.toolChange.clearanceZ)}`);
+        body.push(`G0 X${x0} Y${y0}`, `S${axis(ir.spindleRpm)} M3`, `G0 Z${safe}`);
+        lastX = x0;
+        lastY = y0;
+        lastZ = safe;
+        lastF = null;
+      }
     } else {
       // Every operation is readable on its own: the first move re-states X, Y and Z in full.
       lastX = null;
@@ -615,7 +635,7 @@ export function postZ1(
   // The other end of #283's `M331`: an explicit off. A mode left on would keep running after the
   // job — the bench rule is vacuum on for the cut, off when it is finished. Only the RUN's last
   // program writes it (#419 decision 4); a `'none'` frame file never does.
-  if (vacuumOff) body.push('M332');
+  if (vacuumOff && machine.capabilities.vacuum) body.push('M332');
   body.push('M05', 'G28', 'M02');
 
   // #771 — Studio's thumbnail comes AFTER the program's `M02` (not before it), so it is appended

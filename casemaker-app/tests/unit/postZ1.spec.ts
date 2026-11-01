@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { estimateSeconds, type CamMove, type CamOperation, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { flatEndMill, cuttingRadiusForSweep } from '@/engine/cnc/tool';
-import { Z1, type MillProfile } from '@/engine/cnc/machine';
+import { CARVERA, Z1 } from '@/engine/cnc/machine';
 import { postZ1, FINAL_RETRACT_Z, type PostContext } from '@/engine/cnc/post/z1';
 import { formatFixed, sanitizeMkrValue } from '@/engine/cnc/post/format';
 import { parseMkrRecord } from '@/engine/cnc/gcode/mkrHeader';
@@ -344,12 +344,8 @@ describe('postZ1 (#173)', () => {
     expect(nan.ok).toBe(false);
     if (!nan.ok) expect(nan.errors.join(' ')).toMatch(/non-finite/i);
 
-    // `hasATC` is the profile's literal `false`; this post only writes the manual dialect.
-    const atc = { ...Z1, hasATC: true } as unknown as MillProfile;
-    const atcResult = postZ1(TWO_OP, CTX, atc);
-    expect(atcResult.ok).toBe(false);
-    if (!atcResult.ok) expect(atcResult.errors.join(' ')).toMatch(/tool changer/i);
-
+    // #828 — `hasATC` is no longer a refusal: a machine with a changer gets the ATC start (the
+    // block above), so the manual-dialect-only sentence this case used to pin is gone.
     // A "cut" above the stock but below the hop height is cutting air.
     const airCut = postZ1(makeIr([operation(1, 'a', 'a', 1, [rapid(0, 0, 1), cut(0, 0, 0.5, 200)])]), CTX, Z1);
     expect(airCut.ok).toBe(false);
@@ -497,5 +493,39 @@ describe('the file names its cutter, and the Simulate form reads it back (#332)'
       setRegistry([]);
       useSimSetupStore.getState().reset();
     }
+  });
+});
+
+// #828 — THE AUTOMATIC TOOL CHANGER'S START. A Carvera's change is the controller's own rack
+// exchange, so the post writes `Tn M6` and then the program's own absolute Z, in the WORK frame,
+// as the first move: nothing commands a rack position, there is no machine-frame lift, and the
+// Z1's accessory words are not spoken at a machine that has no such controls.
+describe('#828 the ATC start on a Carvera', () => {
+  it('writes T M6, then an absolute Z rapid to the safe height, then XY and the spindle', () => {
+    const posted = postZ1(TWO_OP, CTX, CARVERA, { vacuum: 'whole' });
+    expect(posted.ok, posted.ok ? '' : posted.errors.join('; ')).toBe(true);
+    if (!posted.ok) return;
+    const lines = posted.text.split('\n');
+    const at = lines.findIndex((line) => line.trim() === 'T1 M6');
+    expect(at).toBeGreaterThan(-1);
+    // The change, then the tool placed in Z at the job's own safe height, then XY, then the
+    // spindle — the verifier reads that pair as Z evidence and nothing here needs a clearance.
+    expect(lines[at + 1]).toBe('G0 Z5');
+    expect(lines[at + 2]).toBe('G0 X2 Y2');
+    expect(lines[at + 3]).toBe('S12000 M3');
+    // No machine-frame clearance lift (that is the manual dialect's answer) and no Z1 accessory.
+    expect(posted.text).not.toContain('G53');
+    expect(posted.text).not.toContain('M331');
+    expect(posted.text).not.toContain('M332');
+  });
+
+  it('the manual dialect is unchanged: the Z1 keeps its G53 lift and its vacuum words', () => {
+    const posted = postZ1(TWO_OP, CTX, Z1, { vacuum: 'whole' });
+    expect(posted.ok).toBe(true);
+    if (!posted.ok) return;
+    const lines = posted.text.split('\n');
+    const at = lines.findIndex((line) => line.trim() === 'T1 M6');
+    expect(lines[at + 1]).toBe('M331');
+    expect(lines[at + 2]).toBe('G53 G0 Z-3');
   });
 });
