@@ -2166,6 +2166,10 @@
         "stackConnector": {
           "description": "Stacking connector sockets and keys; omit for none.",
           "properties": {
+            "basePlate": {
+              "description": "Issue #854 — export a base plate carrying the same sockets, for a case to drop onto; omit for none.",
+              "type": "boolean"
+            },
             "fit": {
               "description": "Key print-fit variant; omit to inherit case.fit.",
               "enum": [
@@ -2188,6 +2192,14 @@
               "maximum": 8,
               "minimum": 0,
               "type": "integer"
+            },
+            "matchShifts": {
+              "description": "Issue #854 — use the first socket's shift on every wall, so two projects set the same way line up; omit for per-wall shifts.",
+              "type": "boolean"
+            },
+            "register": {
+              "description": "Issue #854 — a ridge on the lid top and a groove in the floor underside, so stacked cases register square with no key; omit for none.",
+              "type": "boolean"
             },
             "sockets": {
               "description": "Dovetail sockets, at most one per side wall; empty cuts none.",
