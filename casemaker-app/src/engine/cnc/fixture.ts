@@ -249,6 +249,18 @@ export function defaultStockProud(
 }
 
 /**
+ * #891 — THE PROUD A SEAT GIVES, for ANY vise, from the blank and the board under it: the stock's
+ * thickness plus the board it rests on, less how far that seat sits below the jaw tops. This is
+ * the derivation a SAVED vise follows too — its chosen fact is the SEAT, not the proud number the
+ * seat produced once (`applyMount` already writes this value; the store re-derives it on every
+ * thickness or seat change). A person who TYPES a proud states a number instead
+ * (`ViseParams.proudSource: 'stated'`) and it is left alone.
+ */
+export function proudForSeat(thickness: Mm, seat: ViseParams['seat'], boardMm: Mm = 0): Mm {
+  return thickness + boardMm - seatDepth(seat);
+}
+
+/**
  * The shipped default `ViseParams` for the Z1 low-profile vise, for a job that has no saved
  * measurement. The vise is identical on every Z1 (maintainer, 2026-10-13), so these are the
  * product's own numbers — measured once on the reference unit, not per-user values. `source` stays

@@ -1190,14 +1190,23 @@ export interface ViseParams {
   /** How far the stock's top face stands above the jaw tops, mm. */
   stockProud: Mm;
   /**
+   * #891 — WHERE THE PROUD NUMBER CAME FROM. `'seat'` (and absent, the reading every document
+   * written before this key gets) means the SEAT produced it: `proudForSeat(thickness, seat,
+   * board)` is re-derived whenever the stock's thickness or the seat changes, so a blank that got
+   * thinner does not keep the proud its old thickness gave. `'stated'` is a number a person typed
+   * into the vise card: it stays exactly as typed, and an impossible one is stated with a
+   * "Re-seat on the ledge" offer rather than silently rewritten.
+   */
+  proudSource?: 'seat' | 'stated';
+  /**
    * What the blank's underside rests on (#508). `ledge` is the soft jaws' shelf, `LEDGE_STEP`
    * below the jaw tops — the shipped default; `floor` is the body's own top for taller parts
    * ("clamp directly against the bottom of the jaws"), `VISE_FLOOR_DEPTH` below the jaw tops.
    *
-   * The seat is a MECHANISM, not a measurement: it says where the stock's underside is, and for a
-   * shipped-default vise it is what `stockProud` is derived from (`defaultStockProud`). A saved
-   * or measured vise keeps its own `stockProud`; the seat then only names where the app believes
-   * the stock rests.
+   * The seat is a MECHANISM, not a measurement: it says where the stock's underside is, and it is
+   * what `stockProud` is derived from (`proudForSeat`) — for a shipped-default vise, a saved one
+   * and a measured one alike (#891). Only a TYPED proud (`proudSource: 'stated'`) stands apart
+   * from it, exactly as typed.
    */
   seat: 'ledge' | 'floor';
   /** Thickness of each jaw in X, mm. */

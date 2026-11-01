@@ -1839,6 +1839,9 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
       : {
           ...answers.vise,
           stockProud: seatedProud(answers),
+          // #891 — this value is the SEAT's derivation (the board and the ledge decide it), so a
+          // later thickness change keeps it true rather than keeping this blank's number.
+          proudSource: 'seat',
           source: 'saved',
         };
   const seatPhrase = answers.vise.seat === 'floor' ? 'on the vise body' : 'on the jaws’ ledge';

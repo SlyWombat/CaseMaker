@@ -987,7 +987,12 @@ describe('engraveJobStore (#200)', () => {
     seeded.labels[0] = { ...seeded.labels[0]!, depth: 0.6, depthIntent: 'surface' };
     // As above: the blank is seated at a stand that keeps the jaws out of this line's question, so
     // this test stays about the intent and the void rather than about the seated default (#391).
-    seeded.workholding = { kind: 'vise', vise: { ...jobVise(seeded), stockProud: 1.905, source: 'saved' } };
+    // #891 — a NUMBER a person stated (`proudSource: 'stated'`), so the badge route's stock edit
+    // leaves it alone; this spec is about the label's depth, not the vise's seat.
+    seeded.workholding = {
+      kind: 'vise',
+      vise: { ...jobVise(seeded), stockProud: 1.905, proudSource: 'stated', source: 'saved' },
+    };
     // The `layout` claim is what stands the badge route aside here, and it is the only thing that
     // can: an app-computed `depth`/`depthIntent` is a past answer of the app's own and no longer
     // keeps a job out of the seed (#363 review follow-up — `demoShape` stopped comparing the intent
@@ -1120,7 +1125,7 @@ describe('engraveJobStore (#200)', () => {
     expect(jobVise(s().job)).toMatchObject({ seat: 'floor', stockProud: 10 });
   });
 
-  it('a seat change never re-derives a saved or measured vise’s numbers', async () => {
+  it('a seat change never re-derives a TYPED proud (a person’s own number)', async () => {
     backing.clear();
     const { useEngraveJobStore } = await freshStore();
     const s = () => useEngraveJobStore.getState();
@@ -1128,6 +1133,73 @@ describe('engraveJobStore (#200)', () => {
     s().setVise({ stockProud: 6 });
     s().setVise({ seat: 'floor' });
     expect(jobVise(s().job)).toMatchObject({ source: 'saved', seat: 'floor', stockProud: 6 });
+  });
+
+  // #891 — THE MAINTAINER'S BUG: a vise saved through the wizard keeps the SEAT as the fact, and
+  // its proud was derived from the 50 mm blank. Making the stock 32 mm left 46.9 behind — taller
+  // than the blank — so the blank floated above the jaws and Generate refused.
+  it('a saved ledge-seated vise re-derives its proud from the new thickness (#891)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().setStock({ thickness: 50 }, 'user');
+    // The wizard's save: the seat is the choice, the proud its derivation (`proudSource: 'seat'`).
+    useEngraveJobStore.setState({
+      job: { ...s().job, workholding: { kind: 'vise', vise: { ...jobVise(s().job), source: 'saved', proudSource: 'seat', stockProud: 46.9 } } },
+    });
+    expect(jobVise(s().job).stockProud).toBe(46.9);
+
+    s().setStock({ thickness: 32 }, 'user');
+    // 32 − the 3.1 mm ledge: the number the seat gives the thinner blank.
+    expect(jobVise(s().job).stockProud).toBeCloseTo(28.9, 6);
+    // The blank no longer floats: nothing is left above the jaw tops past the blank's own height.
+    const { stock, workholding } = s().job;
+    if (workholding.kind !== 'vise') throw new Error('expected a vise-held job');
+    expect(stock.thickness).toBe(32);
+    expect(
+      validateVise(stock, workholding.vise).some((f) => f.code === 'vise-stock-proud-exceeds-thickness'),
+    ).toBe(false);
+    // Still the operator's saved vise, not the shipped default.
+    expect(workholding.vise.source).toBe('saved');
+  });
+
+  it('a TYPED proud stays when the stock gets thinner, and the refusal names it (#891)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().setStock({ thickness: 50 }, 'user');
+    // Typed into the vise card: a person's number, not the seat's derivation.
+    s().setVise({ stockProud: 46.9 });
+    expect(jobVise(s().job).proudSource).toBe('stated');
+
+    s().setStock({ thickness: 32 }, 'user');
+    expect(jobVise(s().job).stockProud).toBe(46.9);
+    const { stock, workholding } = s().job;
+    if (workholding.kind !== 'vise') throw new Error('expected a vise-held job');
+    expect(
+      validateVise(stock, workholding.vise).some((f) => f.code === 'vise-stock-proud-exceeds-thickness'),
+    ).toBe(true);
+    // The panel's re-seat press: the seat re-derives, whatever the source.
+    s().setVise({ seat: 'ledge', proudSource: 'seat' });
+    expect(jobVise(s().job).stockProud).toBeCloseTo(28.9, 6);
+  });
+
+  it('a seat change re-derives a saved vise’s proud from the current thickness (#891)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    // The saved, seat-derived vice the maintainer toggled: 12 mm stock on the ledge → 8.9.
+    useEngraveJobStore.setState({
+      job: { ...s().job, workholding: { kind: 'vise', vise: { ...jobVise(s().job), source: 'saved', proudSource: 'seat' } } },
+    });
+    s().setVise({ seat: 'floor' });
+    expect(jobVise(s().job)).toMatchObject({ source: 'saved', seat: 'floor' });
+    expect(jobVise(s().job).stockProud).toBeCloseTo(12 - 20, 6);
+    s().setVise({ seat: 'ledge' });
+    expect(jobVise(s().job).stockProud).toBeCloseTo(12 - 3.1, 6);
   });
 
   // #345 — the job's own depth margins, and the two states the panel's row moves between.

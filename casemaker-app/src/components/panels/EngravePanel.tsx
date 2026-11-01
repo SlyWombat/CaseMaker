@@ -4800,6 +4800,21 @@ export function EngravePanel(): JSX.Element {
             {viseNum('jawStartY', 'jaw start Y', 'Where the jaws start relative to the stock’s front edge, mm.')}
             {viseNum('uncertainty', 'uncertainty', 'How far the real jaws may differ, mm. Obstacles are grown by it.')}
           </div>
+          {/* #891 — A TYPED PROUD THAT THE BLANK CANNOT HOLD. It is a person's number, so it is not
+              rewritten behind their back; the fact is stated, and one press re-seats it on the
+              ledges from the stock's own thickness (the seat is what was chosen). */}
+          {vise.stockProud >= job.stock.thickness && (
+            <p data-testid="engrave-vise-proud-impossible" style={{ ...MUTED, color: SEVERITY_COLOR.warning, margin: '6px 0 0' }}>
+              The stock stands {fmt(vise.stockProud)} mm proud on a {fmt(job.stock.thickness)} mm stock — nothing is left in the jaws.{' '}
+              <button
+                type="button"
+                data-testid="engrave-vise-reseat"
+                onClick={() => setVise({ seat: 'ledge', proudSource: 'seat' })}
+              >
+                Re-seat on the ledge
+              </button>
+            </p>
+          )}
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             <button type="button" data-testid="engrave-vise-save" onClick={() => saveAsMyVise('saved')}>
               Save as my vise

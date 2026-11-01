@@ -178,7 +178,10 @@ export function applyMount(
     vise: {
       ...a.vise,
       seat,
+      // #891 — the proud is the SEAT's derivation (`proudForSeat`'s rule), so a later thickness
+      // change re-derives it instead of keeping this blank's number.
       stockProud: thickness + (board?.thickness ?? 0) - seatDepth(seat),
+      proudSource: 'seat',
       source: 'saved',
     },
   };

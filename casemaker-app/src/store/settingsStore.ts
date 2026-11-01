@@ -143,6 +143,9 @@ function parseVise(raw: unknown): ViseParams | undefined {
   // #508 — a vise saved before the seat existed holds no `seat`. The seat is a setup choice rather
   // than a fact about the hardware, so an old record reads as the default instead of being refused.
   const seat: ViseParams['seat'] = o.seat === 'floor' ? 'floor' : 'ledge';
+  // #891 — a TYPED proud keeps its marker across the settings round trip; absent (or anything
+  // else) is the seat's derivation, as an old record reads.
+  const proudSource: ViseParams['proudSource'] = o.proudSource === 'stated' ? 'stated' : undefined;
   return {
     stockProud: o.stockProud as number,
     fixedJawThickness: o.fixedJawThickness as number,
@@ -152,6 +155,7 @@ function parseVise(raw: unknown): ViseParams | undefined {
     source: source as ViseParams['source'],
     uncertainty: o.uncertainty as number,
     seat,
+    ...(proudSource !== undefined ? { proudSource } : {}),
     ...(measuredAt !== undefined ? { measuredAt } : {}),
   };
 }

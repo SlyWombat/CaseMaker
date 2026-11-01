@@ -291,6 +291,53 @@ export function planFlipSetups(
 }
 
 /**
+ * #891 — THE SIDES FOLLOW THE BLANK. A flip plan's later goals were placed through the stock box
+ * the plan was built for; a THICKNESS change moves a flipped side's work frame (its origin is the
+ * turned stock's top), so the goal that side cuts is re-derived from setup 1's own goal through
+ * the same isometry `planFlipSetups` used. `bandMm` and the setup ids carry over, so a budget
+ * split's bands survive the edit too. A side whose turn the new box cannot hold is left exactly as
+ * it was — its own finding states the refusal — and so is a goal whose mesh cannot be read.
+ * Null when there is nothing to re-hold (no saved list, one setup, no later goal) or nothing moved.
+ */
+export function reholdSetupGoals(job: EngraveJob, stock: { x: number; y: number; z: number }): EngraveTargetObject[] | null {
+  const targets = job.targetObjects;
+  const setups = job.setups;
+  if (targets === undefined || setups === undefined || setups.length < 2) return null;
+  const first = setups[0]!;
+  const base = targets.find((t) => t.setupId === first.id);
+  if (base === undefined) return null;
+  let changed = false;
+  const next = targets.map((goal) => {
+    if (goal.setupId === undefined || goal.setupId === first.id) return goal;
+    const setup = setups.find((s) => s.id === goal.setupId);
+    if (setup === undefined) return goal;
+    const faceUp = setup.orientation.top;
+    if (faceUp === 'top') return goal;
+    try {
+      const turned = orient(faceUp, setup.mount, stock);
+      if (!turned.ok) return goal;
+      const R = turned.matrix.flat() as unknown as Mat3;
+      const placed = goalForSetup(base, stock, R);
+      const moved: EngraveTargetObject = { ...placed, id: goal.id, setupId: setup.id };
+      if (goal.bandMm !== undefined) moved.bandMm = goal.bandMm;
+      const same =
+        Math.abs(moved.position.x - goal.position.x) < 1e-9 &&
+        Math.abs(moved.position.y - goal.position.y) < 1e-9 &&
+        Math.abs(moved.position.z - goal.position.z) < 1e-9 &&
+        Math.abs(moved.rotation - goal.rotation) < 1e-9 &&
+        Math.abs((moved.rotationX ?? 0) - (goal.rotationX ?? 0)) < 1e-9 &&
+        Math.abs((moved.rotationY ?? 0) - (goal.rotationY ?? 0)) < 1e-9;
+      if (same) return goal;
+      changed = true;
+      return moved;
+    } catch {
+      return goal;
+    }
+  });
+  return changed ? next : null;
+}
+
+/**
  * #888 — THE BUDGET'S SPLIT, as setups: the goal cut as a top band and a bottom band, each from
  * its own side of the stock (the bottom band with the stock turned over, registered on the same
  * dowel holes #872 uses). Each side's goal copy states its band (`bandMm`), and the generator

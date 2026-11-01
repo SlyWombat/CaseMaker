@@ -421,6 +421,25 @@ describe('the saved vise round-trips through settings (#203)', () => {
     expect(viseEnvelope(STOCK, restored!).measuredAt).toBe('2026-09-01');
   });
 
+  it('a TYPED proud keeps its marker across the settings round trip (#891)', async () => {
+    backing.clear();
+    // A number a person stated is not re-derived by a later stock edit; the saved record must
+    // remember that, or the next job would silently treat it as the seat's derivation.
+    const typed: ViseParams = {
+      ...DEFAULT_VISE,
+      source: 'saved',
+      stockProud: 46.9,
+      proudSource: 'stated',
+      measuredAt: '2026-09-01',
+    };
+    const first = await freshSettings();
+    first.useSettingsStore.getState().setVise(typed);
+    const second = await freshSettings();
+    expect(second.useSettingsStore.getState().fixtures.vise).toEqual(typed);
+    // An old record (no key) reads as the seat's derivation, which is what re-seats it.
+    expect(second.useSettingsStore.getState().fixtures.vise?.proudSource).toBe('stated');
+  });
+
   it('stamps today when a saved vise is persisted without a date', async () => {
     backing.clear();
     const { useSettingsStore } = await freshSettings();

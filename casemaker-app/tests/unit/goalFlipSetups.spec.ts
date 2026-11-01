@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clearTargetObjectMeshCache, readTargetObjectFile, targetObjectMesh } from '@/engine/import/targetObject';
-import { goalForSetup, planFlipSetups, turnsOfMatrix } from '@/engine/cnc/engrave/goalFlipSetups';
+import { goalForSetup, planFlipSetups, reholdSetupGoals, turnsOfMatrix } from '@/engine/cnc/engrave/goalFlipSetups';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -146,5 +146,53 @@ describe('#872 the flip setup conversion', () => {
     const { job, goal } = await sphereJob();
     const result = planFlipSetups({ ...job, setups: [] }, goal, ['top', 'bottom'], [DRILL]);
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('#891 — the sides follow the blank', () => {
+  /** A two-side job from the sphere, as the one press would write it. */
+  async function twoSideJob(): Promise<EngraveJob> {
+    const { job, goal } = await sphereJob();
+    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [DRILL]);
+    if (!plan.ok) throw new Error(plan.reason);
+    return { ...job, targetObject: undefined, targetObjects: plan.goals, setups: plan.setups };
+  }
+
+  it('a thickness change re-places the flipped side, and the first side stays put', async () => {
+    const job = await twoSideJob();
+    const before = job.targetObjects!;
+    const thinner = reholdSetupGoals(job, { x: STOCK.length, y: STOCK.width, z: STOCK.thickness - 5 });
+    expect(thinner).not.toBeNull();
+    // The top side's goal is the job's own placement and does not move with the thickness.
+    expect(thinner![0]).toEqual(before[0]);
+    // The flipped side's work frame has the stock's top at z = 0 and its physical bottom at
+    // z = −thickness (that is the face that side cuts). Losing 5 mm of blank moves the goal's own
+    // top, which sits on that bottom face, UP by the same 5 mm in that frame — and the re-hold is
+    // exactly what keeps the second side cutting the part it cut before.
+    expect(thinner![1]!.position.z).toBeCloseTo(before[1]!.position.z + 5, 6);
+    expect(thinner![1]!.position.x).toBeCloseTo(before[1]!.position.x, 6);
+    expect(thinner![1]!.position.y).toBeCloseTo(before[1]!.position.y, 6);
+    // Identity and side are the side's own, not the original's.
+    expect(thinner![1]!.id).toBe(before[1]!.id);
+    expect(thinner![1]!.setupId).toBe(before[1]!.setupId);
+  });
+
+  it('a budget split’s bands survive the re-hold', async () => {
+    const job = await twoSideJob();
+    const banded: EngraveJob = {
+      ...job,
+      targetObjects: job.targetObjects!.map((g, i) => (i === 0 ? { ...g, bandMm: 8 } : { ...g, bandMm: 12 })),
+    };
+    const thinner = reholdSetupGoals(banded, { x: STOCK.length, y: STOCK.width, z: STOCK.thickness - 5 });
+    expect(thinner![0]!.bandMm).toBe(8);
+    expect(thinner![1]!.bandMm).toBe(12);
+  });
+
+  it('nothing to re-hold: one setup, no saved list, or no change', async () => {
+    const job = await twoSideJob();
+    expect(reholdSetupGoals({ ...job, setups: [job.setups![0]!] }, BOX)).toBeNull();
+    expect(reholdSetupGoals({ ...job, setups: undefined }, BOX)).toBeNull();
+    // The same box: the side does not move, so nothing is rewritten.
+    expect(reholdSetupGoals(job, BOX)).toBeNull();
   });
 });

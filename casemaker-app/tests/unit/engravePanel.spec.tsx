@@ -28,6 +28,7 @@ import {
   type EngravePreviewClient,
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { jobVise, proudForSeat } from '@/engine/cnc/fixture';
 import { MARGIN_DEFAULTS, checkBounds, splitBound } from '@/engine/cnc/engrave/depthBounds';
 import { assessSurfaceSpread } from '@/engine/cnc/engrave/surfaceSpread';
 import { itemOperationName, jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
@@ -59,6 +60,7 @@ import type {
   EngraveThread,
   EngraveTraceItem,
   EngraveVectorShape,
+  ViseParams,
 } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
@@ -2774,6 +2776,65 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
     expect(screen.queryByTestId('engrave-facing-depth')).toBeNull();
     fireEvent.click(screen.getByTestId('engrave-facing-off'));
     expect(job().facing).toEqual({ enabled: false, depth: 0.5, source: 'user' });
+  });
+});
+
+// #891 — A SAVED VISE FOLLOWS ITS SEAT. The maintainer saved a ledge-seated vise on a 50 mm
+// blank, made the stock 32 mm, and the blank floated at the old 46.9 mm proud: the saved vise kept
+// a number its owner never typed. The seat is the choice; the proud is derived from it and the
+// blank on every thickness or seat change. A TYPED proud stays, with the refusal stated and a
+// "Re-seat on the ledge" press beside it.
+describe('EngravePanel (#891) — the vise follows its seat', () => {
+  const job = () => useEngraveJobStore.getState().job;
+  /** The store's job with its vise SAVED and seated on the blank, as the wizard writes it. */
+  const savedVise = (proudSource: ViseParams['proudSource']): void => {
+    act(() => {
+      const current = useEngraveJobStore.getState().job;
+      const vise = { ...jobVise(current), source: 'saved' as const, proudSource };
+      useEngraveJobStore.setState({
+        job: {
+          ...current,
+          workholding: {
+            kind: 'vise',
+            vise: { ...vise, stockProud: proudForSeat(current.stock.thickness, vise.seat) },
+          },
+        },
+      });
+    });
+  };
+
+  it('toggling the seat on a saved vise re-derives the proud from the current blank', () => {
+    resetCncMode();
+    savedVise('seat');
+    render(<EngravePanel />);
+    const card = screen.getByTestId('engrave-vise-card');
+    fireEvent.click(card.querySelector('summary')!);
+    // 12 mm on the ledge is 8.9 mm proud; the body floor sits 20 mm below the jaw tops.
+    expect(jobVise(job()).stockProud).toBeCloseTo(8.9, 6);
+    fireEvent.change(screen.getByTestId('engrave-vise-seat'), { target: { value: 'floor' } });
+    const after = jobVise(job());
+    expect(after.seat).toBe('floor');
+    expect(after.source).toBe('saved');
+    expect(after.stockProud).toBeCloseTo(12 - 20, 6);
+  });
+
+  it('a typed proud that the blank cannot hold is stated, with one press to re-seat it', () => {
+    resetCncMode();
+    savedVise('seat');
+    render(<EngravePanel />);
+    const card = screen.getByTestId('engrave-vise-card');
+    fireEvent.click(card.querySelector('summary')!);
+    const proudInput = card.querySelector('[data-testid="engrave-vise-stockProud"]') as HTMLInputElement | null;
+    // The number field is the panel's `viseNum`; typing is what makes the proud a person's own.
+    expect(proudInput).not.toBeNull();
+    fireEvent.change(proudInput!, { target: { value: '20' } });
+    expect(jobVise(job()).proudSource).toBe('stated');
+    const fact = screen.getByTestId('engrave-vise-proud-impossible');
+    expect(fact.textContent).toContain('nothing is left in the jaws');
+    fireEvent.click(screen.getByTestId('engrave-vise-reseat'));
+    expect(jobVise(job()).stockProud).toBeCloseTo(12 - 3.1, 6);
+    expect(jobVise(job()).proudSource).toBe('seat');
+    expect(screen.queryByTestId('engrave-vise-proud-impossible')).toBeNull();
   });
 });
 

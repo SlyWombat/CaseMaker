@@ -17,7 +17,7 @@ import {
   newEngraveThreadId,
   newEngraveTraceId,
 } from '@/engine/cnc/engrave/defaults';
-import { defaultStockProud, jobVise, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
+import { jobVise, proudForSeat, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { chuckStockOf, cylinderFrameOf, rodDimsOf, rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
 import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { faceOperationWords } from '@/engine/cnc/rotary/faceOps';
@@ -26,6 +26,7 @@ import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
 import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
 import { withSideGoal, withoutSideGoal } from '@/engine/cnc/engrave/jobSetup';
+import { reholdSetupGoals } from '@/engine/cnc/engrave/goalFlipSetups';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { isUnifiedSize, nearestThreadSize, threadClassFor, threadSpec } from '@/engine/cnc/threadTable';
 import { applyHoldAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
@@ -584,10 +585,21 @@ function viseAfterStockEdit(job: EngraveJob, patch: Partial<EngraveJob['stock']>
   // the panel reads (`jobVise`), and `setStock` writes it back only when the job is a vise job.
   const vise = jobVise(job);
   if (thickness === undefined) return vise;
-  if (vise.source !== 'default') return vise;
-  // #508 — the seat, not just the thickness: a floor-seated blank sits `VISE_FLOOR_DEPTH` down.
-  const stockProud = defaultStockProud(thickness, vise.seat);
+  // #891 — A SAVED OR MEASURED VISE FOLLOWS ITS SEAT TOO. What its owner chose is the seat (on the
+  // ledges, on the floor, or on the board between them), not the proud number that seat produced
+  // for the old blank: 50 mm on the ledge gives 46.9, and 32 mm must give 28.9 rather than keep a
+  // figure the operator never typed (the blank floated and Generate refused). A TYPED proud
+  // (`proudSource: 'stated'`) is a person's number and is left exactly as typed; the panel states
+  // an impossible one and offers the re-seat. A document written before the key reads as seated,
+  // which is what heals the saved vices already in the field.
+  if (vise.proudSource === 'stated') return vise;
+  const stockProud = proudForSeat(thickness, vise.seat, sacrificialBoardMm(job));
   return stockProud === vise.stockProud ? vise : { ...vise, stockProud };
+}
+
+/** #891 — the board under the part, mm: it lifts the blank between the jaws like the stock does. */
+function sacrificialBoardMm(job: EngraveJob): number {
+  return job.sacrificial.under?.thickness ?? 0;
 }
 
 /**
@@ -1700,11 +1712,20 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // The vise follows a blank that changes size (#344) — see `viseAfterStockEdit`.
         const vise = viseAfterStockEdit(job, patch);
         const next = { ...job, stock, sources };
+        // #891 — THE TURNED-OVER SIDES FOLLOW THE BLANK. A flip plan's later goals were placed
+        // through the stock box it was built for; a thickness change moves a flipped side's work
+        // frame, so each side's goal is re-derived from setup 1's through the same isometry (its
+        // band, if the split gave it one, carried over).
+        const sides =
+          patch.thickness === undefined || Math.abs(stock.thickness - job.stock.thickness) < 1e-9
+            ? null
+            : reholdSetupGoals(next, { x: stock.length, y: stock.width, z: stock.thickness });
+        const held = sides === null ? next : { ...next, targetObjects: sides };
         // #240 — a rotary job keeps its workholding. The neutral vise above is the panel's
         // stand-in, not an answer; returning to the vise is the Holding step's own write.
         return job.workholding.kind !== 'vise' || vise === job.workholding.vise
-          ? next
-          : { ...next, workholding: { ...job.workholding, vise } };
+          ? held
+          : { ...held, workholding: { ...job.workholding, vise } };
       }),
 
     setHold: (hold) =>
@@ -3158,8 +3179,16 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           source,
           ...(source !== 'default' && !patch.measuredAt ? { measuredAt: todayISODate() } : {}),
         };
-        if (patch.seat !== undefined && source === 'default') {
-          vise.stockProud = defaultStockProud(job.stock.thickness, vise.seat);
+        // #891 — A SEAT CHANGE RE-DERIVES THE PROUD, whatever the vise's source. The seat is what
+        // its owner chose; the proud number is derived from it and the blank (and the board under
+        // the part). Before this, toggling ledge ↔ floor on a SAVED vise moved nothing, so a blank
+        // saved at 46.9 stayed floating above the jaws after the stock was made thinner.
+        // A TYPED proud is a person's number: it stays (`'stated'`), and the panel offers the
+        // re-seat when a thickness makes it impossible. Typing a proud stamps it.
+        if (patch.stockProud !== undefined) {
+          vise.proudSource = 'stated';
+        } else if (patch.seat !== undefined && vise.proudSource !== 'stated') {
+          vise.stockProud = proudForSeat(job.stock.thickness, vise.seat, sacrificialBoardMm(job));
         }
         return { ...job, workholding: { ...job.workholding, vise } };
       }),

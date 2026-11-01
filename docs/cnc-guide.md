@@ -773,9 +773,15 @@ badge's blank, its magnet pocket and its print already the job's, so nobody rety
 76.2 × 38.1 × 3.81 mm (chapter 6). A blank taken from the badge is **turned a quarter turn** to
 sit in the vise: its 38.1 mm side runs across the jaws, its 76.2 mm side along them, so a name
 reads along Y (#383).
-Taking a blank also brings the vise's **stock proud** with it when the vise is still the shipped
-default — half the blank, at most 4 mm (#344) — because a flat 4 mm stands taller than a 3.81 mm
-badge. A vise you saved or measured is never touched.
+Taking a blank also brings the vise's **stock proud** with it — for the shipped default, half the
+blank at most 4 mm (#344), because a flat 4 mm stands taller than a 3.81 mm badge; and for a saved
+or measured vise, from its SEAT (#891): the seat (jaw ledge, body floor, or the board between) is
+what its owner chose, so the proud is re-derived from it and the blank on every thickness or seat
+change. A blank made thinner no longer keeps the proud its old thickness gave (46.9 mm on a 50 mm
+stock became 46.9 on a 32 mm stock, and the blank floated). A proud you TYPED is a number you
+stated: it stands exactly as typed, and one that a thinner blank makes impossible is stated with a
+**Re-seat on the ledge** press rather than silently rewritten. The turned-over sides of a
+two-side job follow the new thickness through the same flip.
 
 A new blank re-works the **lines** on it where the job's set is still one the app laid out
 itself. Those three demo words were laid out for the 100 × 60 mm default plank, so on a badge
@@ -1774,7 +1780,7 @@ simulation does report about one is the sweep's own list, next:
 | `vise-default` | warning | The vise is the shipped set, not measured on this machine, and an unmeasured figure could decide the job: the sentence names the grip or proud height that sits within the vise's uncertainty of the threshold it is judged against (#809). The provenance itself is a one-line fact in the Hold summary (`shipped · not measured here`), not a warning on every job. | Measure your vise. |
 | `vise-stock-not-proud` | warning | The blank sits at or below the jaw tops. Since #488 this is a note, not a refusal: the job's cuts were measured against the jaw faces and every one keeps the jaw clearance, so no packer is needed. | Nothing, unless a `vise-jaw-collision` names the cut that does not clear. |
 | `vise-seat` | info | Which seat the blank's underside rests on — the soft jaws' ledge (3.1 mm below the jaw tops) or the vise body's floor (20 mm, PROVISIONAL until the bench calipers it, #508) — and how far that leaves the blank standing proud. It is a statement about the setup, not a fault in it. | Nothing, unless the proud it states is not what you see; then change the seat on the vise row or state the proud yourself. |
-| `vise-stock-proud-exceeds-thickness` | error | The blank stands proud by more than its own thickness; the numbers do not add up. | Re-check the vise and stock numbers. |
+| `vise-stock-proud-exceeds-thickness` | error | The blank stands proud by more than its own thickness; the numbers do not add up. A SEAT-derived proud cannot reach this on a seated blank, so this is a typed (or stale) number that a change to the stock left impossible (#891). | Press **Re-seat on the ledge** in the vise card: the proud is re-derived from the seat and the current thickness. Or type the proud the blank really has. A new thickness on a seat-derived vise re-derives on its own. |
 | `vise-grip-shallow` | warning | The jaws grip too little of the blank to hold it safely. | Seat the blank deeper, or use thicker stock. |
 | `vise-jaw-short` | warning | The jaws are shorter than the blank, so part of it is unsupported. | Check the jaw length. |
 | `side-strip-unsupported` | error | A front or back sacrificial strip has no board under the part to rest on. | Add a board under the part, or remove the strip. |

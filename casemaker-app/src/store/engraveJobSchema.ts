@@ -1099,6 +1099,12 @@ const viseSchema = z.object({
     .number()
     .finite()
     .describe('How far the stock stands proud of the jaws, in millimetres.'),
+  // #891 — 'seat' (and absent, which every pre-#891 document reads as) means the number follows
+  // the seat and the stock's thickness; 'stated' is a typed number the app leaves alone.
+  proudSource: z
+    .enum(['seat', 'stated'])
+    .optional()
+    .describe("Where the proud number came from: 'seat' (re-derived; the default when absent) or 'stated' (typed by a person)."),
   // #508 — what the blank's underside rests on. DEFAULTED rather than optional: a document written
   // before the seat existed was a ledge job by definition (the shipped model only had the ledge),
   // so it parses into the same shape without a schemaVersion bump.
