@@ -233,3 +233,61 @@ describe('EngraveThreadRow — internal/external and metric/imperial (#841)', ()
     expect(screen.getByTestId('engrave-thread-add-boss-0').textContent).toBe('Add a ⌀8 mm boss here');
   });
 });
+
+describe('EngraveThreadRow — the boss row (#848)', () => {
+  const ext = { ...THREAD, size: 'M8' as const, classFit: '6h' as const, side: 'external' as const };
+
+  it('the type tag says "Thread · external" for an external thread, and "Thread" for an internal one', () => {
+    render(<EngraveThreadRow thread={ext} index={0} maxDepth={20} onChange={vi.fn()} onRemove={vi.fn()} findings={[]} boss={null} />);
+    expect(screen.getByTestId('engrave-thread-type-0').textContent).toBe('Thread · external');
+    cleanup();
+    row();
+    expect(screen.getByTestId('engrave-thread-type-0').textContent).toBe('Thread');
+  });
+
+  it('a boss that is not the thread offers the nearest size as one press', () => {
+    const onChange = vi.fn<(patch: ThreadPatch) => void>();
+    const sizeFinding = finding('warning', 'thread-boss-size', 'Thread M10×1.5 external is cut on circle "boss" (⌀8 mm), and the M10 major is ⌀10 mm.');
+    render(
+      <EngraveThreadRow
+        thread={{ ...ext, size: 'M10' }}
+        index={0}
+        maxDepth={20}
+        onChange={onChange}
+        onRemove={vi.fn()}
+        findings={[sizeFinding]}
+        boss={{ what: 'circle "boss" (⌀8 mm)', diameterMm: 8, raisedBy: null }}
+      />,
+    );
+    open();
+    const button = screen.getByTestId('engrave-thread-use-size-0');
+    expect(button.textContent).toBe('Use M8 (⌀8 mm)');
+    fireEvent.click(button);
+    expect(onChange).toHaveBeenCalledWith({ size: 'M8' });
+  });
+
+  it('a boss that matches offers no size change', () => {
+    render(
+      <EngraveThreadRow thread={ext} index={0} maxDepth={20} onChange={vi.fn()} onRemove={vi.fn()} findings={[finding('warning', 'thread-boss-size', 'x')]} boss={{ what: 'x', diameterMm: 8 }} />,
+    );
+    open();
+    expect(screen.queryByTestId('engrave-thread-use-size-0')).toBeNull();
+  });
+
+  it('a boss the job raises is named with the cut that raises it', () => {
+    render(
+      <EngraveThreadRow
+        thread={ext}
+        index={0}
+        maxDepth={20}
+        onChange={vi.fn()}
+        onRemove={vi.fn()}
+        findings={[]}
+        boss={{ what: 'circle "boss" (⌀8 mm)', diameterMm: 8, raisedBy: { what: 'the cutaway "ring"', heightMm: 8 } }}
+      />,
+    );
+    open();
+    expect(screen.getByTestId('engrave-thread-boss-0').textContent).toBe('Cut on circle "boss" (⌀8 mm), which the cutaway "ring" raises 8 mm tall before the thread.');
+    expect(screen.getByTestId('engrave-thread-boss-note-0').textContent).toContain('the boss is cut first, in its own program');
+  });
+});

@@ -2017,7 +2017,8 @@ export function EngravePanel(): JSX.Element {
   const namedSplit =
     measuredNow !== null &&
     measuredNow.cutters.length > 1 &&
-    measuredNow.cutters[0]?.key === job.toolKey &&
+    // #848 — the named thread mill is LAST when the plan raises its boss first; it is still kept.
+    measuredNow.cutters.some((c) => c.key === job.toolKey) &&
     namedNow !== null &&
     (namedNow.shape === 'drill' || namedNow.shape === 'thread');
   // #786 slice 4c-2 — A MISSING OR REFUSED CUTTER IS REPLACED BY THE SEARCH'S ANSWER. The guard

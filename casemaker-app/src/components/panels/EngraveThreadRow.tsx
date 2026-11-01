@@ -6,6 +6,7 @@ import {
   METRIC_THREAD_SIZES,
   UNIFIED_THREAD_SIZES,
   fmtPitch,
+  nearestThreadSize,
   threadOptionLabel,
   threadSpec,
   type ThreadSize,
@@ -69,7 +70,7 @@ export interface EngraveThreadRowProps {
    * #841 — an external thread's boss as the panel found it (`threadBoss`): its words, or null when
    * none stands at the axis. Absent on an internal thread.
    */
-  boss?: { what: string } | null;
+  boss?: { what: string; diameterMm?: number; raisedBy?: { what: string; heightMm: number } | null } | null;
   /** #841 — the one press that states a boss at the axis (a reference circle of the major). */
   onAddBoss?: () => void;
   /** #841 — a one-press control beside a finding (the nearest owned thread mill). */
@@ -90,6 +91,10 @@ export function EngraveThreadRow({
 }: EngraveThreadRowProps): JSX.Element {
   const spec = threadSpec(thread.size);
   const external = thread.side === 'external';
+  const raisedBy = boss?.raisedBy ?? null;
+  // #848 — the size nearest the boss, when the boss is not this thread's major (the finding's own rule).
+  const nearest = boss?.diameterMm === undefined ? null : nearestThreadSize(spec.standard, boss.diameterMm);
+  const useSize = nearest !== null && nearest !== thread.size && Math.abs(boss!.diameterMm! - spec.major) > 0.05 ? nearest : null;
   const depthInvalid = thread.depth > maxDepth;
   const standardWords = spec.standard === 'metric' ? 'ISO 261 basic minor' : 'ASME B1.1 basic minor';
 
@@ -123,7 +128,7 @@ export function EngraveThreadRow({
       index={index}
       glyph="⌗"
       kindWord="Thread"
-      typeLabel="Thread"
+      typeLabel={external ? 'Thread · external' : 'Thread'}
       name={threadOperationName(thread)}
       summary={rowSummary(thread.depth)}
       enabled={thread.enabled}
@@ -131,7 +136,17 @@ export function EngraveThreadRow({
       removeTitle="Remove this thread."
       removeNoun="Thread"
       findings={findings}
-      {...(findingAction === undefined ? {} : { findingAction })}
+      findingAction={(f) => {
+        // #848 — a boss that is not the thread's major offers the size nearest the boss as one press.
+        if (f.code === 'thread-boss-size' && useSize !== null) {
+          return (
+            <button type="button" data-testid={`engrave-thread-use-size-${index}`} onClick={() => onChange({ size: useSize })}>
+              Use {useSize} (⌀{threadSpec(useSize).major} mm)
+            </button>
+          );
+        }
+        return findingAction?.(f) ?? null;
+      }}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
     >
@@ -210,7 +225,9 @@ export function EngraveThreadRow({
       {external ? (
         <>
           <p style={MUTED} data-testid={`engrave-thread-boss-note-${index}`}>
-            The program cuts the thread only — it never cuts the boss. The boss must already stand at{' '}
+            {raisedBy == null
+              ? 'The program cuts the thread only — it never cuts the boss. The boss must already stand at '
+              : 'The thread program cuts the thread only; the boss is cut first, in its own program, and must stand at '}
             <strong>⌀{spec.major} mm</strong>, at least the threaded length plus a pitch tall; the tooth tip lands on the ⌀
             {spec.externalMinor} mm external minor (ISO 965-1 d3).
           </p>
@@ -225,7 +242,10 @@ export function EngraveThreadRow({
                 ) : null}
               </>
             ) : (
-              <>Cut on {boss.what}.</>
+              <>
+                Cut on {boss.what}
+                {raisedBy == null ? '' : `, which ${raisedBy.what} raises ${Number(raisedBy.heightMm.toFixed(3))} mm tall before the thread`}.
+              </>
             )}
           </p>
         </>
