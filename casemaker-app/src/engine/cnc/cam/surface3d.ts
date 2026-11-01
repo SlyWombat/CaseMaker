@@ -722,6 +722,23 @@ export interface Surface3dArgs {
   rapid: RapidEstimate;
   /** The goal object's id, so the operations name the label they cut. */
   labelId: string;
+  /**
+   * #869 — THE FLAT THAT ROUGHS BEFORE THE FINISHING CUTTER. Real 3D practice: a flat end mill
+   * takes the bulk (a deeper step-down and a wider step-over than the ball, and the adaptive
+   * clearing engine, which sweeps flat end mills only), and the ball finishes the surface. The
+   * rough's operation is named with ITS tool number and cut with ITS feeds, and the caller posts
+   * it as a program of its own; the finishing passes (`tool`, `feeds` and the rim) are untouched.
+   * Absent: one cutter for both passes, exactly as before.
+   */
+  rough?: {
+    /** The roughing cutter's swept shape — a flat's disc. */
+    tool: SurfaceTool;
+    /** The cutter as the IR and the post describe it. */
+    toolObj: Tool;
+    toolNumber: number;
+    /** The rough's own feeds (its step-down and step-over, not the finishing proxy's). */
+    feeds: SurfaceFeeds;
+  };
   opts?: SurfaceOpts;
 }
 
@@ -755,6 +772,11 @@ export interface Surface3dResult {
    * cut the clear band's wall the raster cannot: the field is the whole finish's surface.
    */
   finishTip: Float32Array;
+  /**
+   * #869 — which roughing pass the roughing operation holds: the adaptive clearing of each level,
+   * or the legacy raster. `chooseRough`'s note says why; this is the fact a reader switches on.
+   */
+  roughKind: 'raster' | 'adaptive';
   /** Labelled placeholders and limitations for the run sheet (feeds, undercuts, flat finish). */
   notes: string[];
 }
@@ -790,6 +812,11 @@ export interface GoalSurfaceFacts {
   gridCells: number;
   /** Roughing step-down per Z layer, mm. */
   stepDownMm: number;
+  /**
+   * #869 — the FINISHING cutter's step-down, mm — the spacing of the rim laps (#862), which ride
+   * the finish. Absent on a result stored before the field; a reader falls back to `stepDownMm`.
+   */
+  finishStepDownMm?: number;
   /** Roughing raster pitch, mm. */
   roughStepOverMm: number;
   /** Finishing raster pitch, mm. */
@@ -798,6 +825,13 @@ export interface GoalSurfaceFacts {
   stockToLeaveMm: number;
   /** Z layers the roughing pass stepped through. */
   roughingLayers: number;
+  /**
+   * #869 — THE FLAT ROUGH, when the goal is cut as two programs: the cutter's name, as the run
+   * sheet names it, and which roughing pass ran. Null when a flat was chosen but nothing stood
+   * above the allowance to remove; ABSENT on a one-cutter goal and on every result stored before
+   * the field, which is why a reader asks `!= null`.
+   */
+  rough?: { tool: string; kind: 'raster' | 'adaptive' } | null;
   /**
    * #671 — the scallop pass's numbers, or null when it did not run. ABSENT on a result stored by
    * a build before #671, which is why a reader asks `!= null` rather than `!== null`.
@@ -998,8 +1032,16 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     ? (opts.maxFinishTipOps as number)
     : DEFAULT_MAX_FINISH_TIP_OPS;
 
+  // #869 — THE ROUGH MAY BE ANOTHER CUTTER. Its feeds are its own row's (a flat's step-down and
+  // step-over, not the ball's flat proxy), and its operation is named with its own tool number;
+  // the finishing passes below keep `feeds` and `tool` unchanged.
+  const roughArgs = args.rough ?? null;
+  const roughFeeds = roughArgs === null ? feeds : roughArgs.feeds;
+
   const notes: string[] = [
-    'The cutting feed, plunge feed, step-down and step-over are the job’s 2.5D feeds, reused unchanged. Measured 3D engagement numbers are not in the feeds table.',
+    roughArgs === null
+      ? 'The cutting feed, plunge feed, step-down and step-over are the job’s 2.5D feeds, reused unchanged. Measured 3D engagement numbers are not in the feeds table.'
+      : 'The rough’s and the finish’s cutting feeds, plunge feeds, step-downs and step-overs are each cutter’s own 2.5D feeds row, reused unchanged. Measured 3D engagement numbers are not in the feeds table.',
     'A heightfield has one top-Z per (x, y): undercuts and overhangs cannot be expressed, so hidden material below the topmost surface is left standing (the 3-axis answer).',
     `Resolution: ${hf.resolutionNote}.`,
   ];
@@ -1008,17 +1050,24 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
       'The finishing cutter is not a ball nose; a flat tool drops onto the highest point under its disc and cannot enter concavities, so the finish is faceted — use a ball for a 3D surface.',
     );
   }
+  if (roughArgs !== null) {
+    notes.push(
+      `Roughing is its own program with ${roughArgs.toolObj.name}, before the finishing cutter; it leaves ${allowance} mm of stock on the surface for the finish to lift.`,
+    );
+  }
 
   // #846 — the raster stays the default (a plan without `roughing` is unchanged);
   // 'auto' chooses per job and STATES the choice in one line.
   const rough = chooseRough(
     hf,
-    feeds,
+    roughFeeds,
     allowance,
     alongStep,
     safeZ,
     hopZ,
-    args.toolObj,
+    // #869 — the rough is the flat's question: its radius sets the adaptive engagement cap and its
+    // depth ratio sets the rule. Absent, the finishing cutter answers both, as it always has.
+    roughArgs?.toolObj ?? args.toolObj,
     args.rapid,
     opts.roughing,
     (done, total) => opts.onProgress?.({ pass: 'rough', done, total }),
@@ -1052,7 +1101,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
   const depth = Math.max(0, hf.topZ - hf.minZ);
   const roughing: CamOperation = {
     number: 1,
-    name: `[T${args.toolNumber}] 3D rough${rough.kind === 'adaptive' ? ' (adaptive)' : ''} — ${allowance} mm to leave`,
+    name: `[T${roughArgs === null ? args.toolNumber : roughArgs.toolNumber}] 3D rough${rough.kind === 'adaptive' ? ' (adaptive)' : ''} — ${allowance} mm to leave`,
     labelId: args.labelId,
     depth,
     passKind: 'rough',
@@ -1164,6 +1213,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     pencil,
     rim: rimFacts,
     finishTip,
+    roughKind: rough.kind,
     notes,
   };
 }
@@ -1252,6 +1302,12 @@ export function generateSurface3dForGoal(args: {
   feeds: SurfaceFeeds;
   rapid: RapidEstimate;
   sample?: SampleGoalOpts;
+  /** #869 — the flat that roughs before `tool` finishes (see {@link Surface3dArgs.rough}). */
+  rough?: {
+    tool: Tool;
+    toolNumber: number;
+    feeds: SurfaceFeeds;
+  };
   opts?: SurfaceOpts;
 }): (Surface3dResult & { heightfield: GoalHeightfield }) | null {
   const sampled = sampleGoalHeightfield(args.target, args.sample);
@@ -1262,12 +1318,14 @@ export function generateSurface3dForGoal(args: {
     isMold(args.target)
       ? moldHeightfield(sampled, args.target.position.y, args.target.position.z - placedSize(args.target).z)
       : sampled;
-  const d = cuttingDiameter(args.tool);
-  const radius = d !== null && d > 0 ? d / 2 : 0;
-  const surfaceTool: SurfaceTool = { radius, ball: args.tool.shape === 'ball' || args.tool.shape === 'bull' };
+  const surfaceToolOf = (tool: Tool): SurfaceTool => {
+    const d = cuttingDiameter(tool);
+    const radius = d !== null && d > 0 ? d / 2 : 0;
+    return { radius, ball: tool.shape === 'ball' || tool.shape === 'bull' };
+  };
   const result = generateSurface3dIR({
     heightfield,
-    tool: surfaceTool,
+    tool: surfaceToolOf(args.tool),
     toolObj: args.tool,
     toolNumber: args.toolNumber,
     spindleRpm: args.spindleRpm,
@@ -1275,6 +1333,17 @@ export function generateSurface3dForGoal(args: {
     feeds: args.feeds,
     rapid: args.rapid,
     labelId: args.target.id,
+    // #869 — the flat's rough, when the caller split the goal in two programs.
+    ...(args.rough === undefined
+      ? {}
+      : {
+          rough: {
+            tool: surfaceToolOf(args.rough.tool),
+            toolObj: args.rough.tool,
+            toolNumber: args.rough.toolNumber,
+            feeds: args.rough.feeds,
+          },
+        }),
     opts: args.opts,
   });
   return { ...result, heightfield };

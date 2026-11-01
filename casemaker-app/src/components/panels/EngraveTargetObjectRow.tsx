@@ -922,7 +922,11 @@ export function EngraveTargetObjectRow({
 
             {surfaceFacts !== null && (
               <p style={MUTED} data-testid={`engrave-target-surface-report-${index}`}>
-                Last generated: {surfaceFacts.roughingLayers} roughing layer
+                Last generated:{' '}
+                {surfaceFacts.rough == null
+                  ? ''
+                  : `${surfaceFacts.rough.tool} roughs (${surfaceFacts.rough.kind === 'adaptive' ? 'adaptive' : 'raster'}) as program 1, then the ball finishes as program 2; `}
+                {surfaceFacts.roughingLayers} roughing layer
                 {surfaceFacts.roughingLayers === 1 ? '' : 's'} at{' '}
                 {Number(surfaceFacts.stepDownMm.toFixed(3))} mm step-down and{' '}
                 {Number(surfaceFacts.roughStepOverMm.toFixed(3))} mm step-over, leaving{' '}

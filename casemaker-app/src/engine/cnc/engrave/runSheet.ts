@@ -2985,8 +2985,10 @@ function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
   const passes = [
     facts.rim == null
       ? `Finishing follows the surface at ${fmtNum(facts.finishStepOverMm)} mm step-over.`
+      // #869 — the rim laps ride the FINISHING cutter, so their spacing is ITS step-down (the
+      // rough's deeper step-down is not the wall's lap height).
       : `The finish opens with ${facts.rim.laps} rim lap${facts.rim.laps === 1 ? '' : 's'} down the cleared band’s wall, ` +
-        `one per ${fmtNum(facts.stepDownMm)} mm from the stock top to its floor, then follows the surface at ` +
+        `one per ${fmtNum(facts.finishStepDownMm ?? facts.stepDownMm)} mm from the stock top to its floor, then follows the surface at ` +
         `${fmtNum(facts.finishStepOverMm)} mm step-over.`,
   ];
   if (facts.scallop != null) {
@@ -3013,6 +3015,17 @@ function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
         (facts.pencil == null ? '' : ' · pencil'),
     },
   ];
+  // #869 — TWO CUTTERS, TWO PROGRAMS: the rough is its own file, so the sheet states the change
+  // and which rough ran. Its numbers are the facts' own (the rough's step-down and step-over).
+  if (facts.rough != null) {
+    steps.unshift({
+      text:
+        `Two programs, two cutters: ${facts.rough.tool} takes the rough ` +
+        `(${facts.rough.kind === 'adaptive' ? 'adaptive clearing, capped engagement' : 'raster'}) and leaves ` +
+        `${fmtNum(facts.stockToLeaveMm)} mm of stock on the surface; change to the ball, then run the finish.`,
+      value: `${facts.rough.kind === 'adaptive' ? 'adaptive' : 'raster'} rough · 1 tool change`,
+    });
+  }
   for (const note of facts.notes) steps.push({ text: note });
   return steps;
 }

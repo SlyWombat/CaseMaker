@@ -916,9 +916,27 @@ Both are off unless the fold says otherwise, so a job written before #671 cuts e
 did. The program's check (the material sweep on the flat dexel) records the passes it judged as
 well as the grid it ran on, and the run sheet states the contour and crease counts.
 
-The goal row's **Technical** fold carries the operation's own numbers: the **cutter** (one cutter
-cuts both passes — a ball or bull nose finishes the surface round; a flat cutter finishes it
-faceted), the **roughing step-down** and **step-over**, the **finishing step-over**, the
+**Two cutters, two programs (#869).** A goal may rough with a **flat end mill** and finish with
+the ball — real 3D practice, and the only way the adaptive clearing engine (#846), which sweeps
+flat end mills only, reaches a goal at all. The measured cutter search offers both shapes for the
+goal's plan — the ball alone, and the same ball after a flat (each candidate sized nearest the
+ball's diameter first) — and the run's own measured cost, plus a stated allowance per tool change,
+decides. When the split is chosen the goal posts **two programs**: program 1 is the flat's rough,
+with its own feeds row (a flat takes a deeper step-down and a wider step-over than the ball),
+its own `surfaceCheck`, and its own `T`/`M6` — it is swept and judged like every file; program 2
+is the ball's finish, unchanged — the rim laps (#862), the parallel raster and the scallop and
+pencil passes ride the FINISHING cutter. The rough leaves the roughing allowance above the
+surface, which is what the finish (and a later rest pass, #847) lifts. The goal row and the run
+sheet state both cutters, the tool change, and which roughing pass ran and why — adaptive with
+its engagement cap, or the raster with the reason the adaptive route was not taken. A stated
+rough the shop cannot use (not in the library, not a flat end mill, or not feedable for the
+material) leaves the goal cut by one cutter and a warning says which. Surface **primitives**
+(#786 4a-2) stay on a single cutter: the split is the goal's.
+
+The goal row's **Technical** fold carries the operation's own numbers: the **cutter** (unless the
+goal is split into a flat rough and the ball's finish, above, one cutter cuts both passes — a ball
+or bull nose finishes the surface round; a flat cutter finishes it faceted), the **roughing
+step-down** and **step-over**, the **finishing step-over**, the
 **heightfield grid pitch** and the **stock to leave**. Each is prefilled from the default the
 engine would otherwise use — the feeds row's step-down and step-over for the passes, the shop's
 `finish.stockToLeaveMm` for the allowance and `sim.columnFlatPitchYMm` for the grid — and the row

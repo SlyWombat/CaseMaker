@@ -4774,6 +4774,61 @@ export function generateGoalProgram(
     // operation states its own.
     finishStepOver: settings.finishStepOverMm ?? resolved.params.stepOver,
   };
+
+  // #869 — THE GOAL'S FLAT ROUGH: a program of its own, with its own feeds. The measured search
+  // wrote the key into the goal (`roughToolKey`); the split happens only when the library really
+  // holds a FLAT under it and that flat can be fed for this material. A key that cannot be used
+  // leaves the goal cut by one cutter (as before) and says so — inform, never refuse: the part is
+  // still made, the finish is unchanged.
+  const roughFindings: JobFinding[] = [];
+  const roughEntryDefined = goal.roughToolKey !== undefined;
+  const roughEntry = roughEntryDefined ? (shop.tools ?? []).find((e) => e.key === goal.roughToolKey) : undefined;
+  const roughTool = roughEntry !== undefined && roughEntry.tool.shape === 'flat' ? roughEntry.tool : null;
+  const roughResolved =
+    roughTool === null
+      ? null
+      : feedsFor(catalogue, job.stock.material, roughTool, mill, job.cutOverride, shop.feeds ?? undefined);
+  if (roughEntryDefined && roughEntry === undefined) {
+    roughFindings.push({
+      severity: 'warning',
+      code: 'goal-rough-no-cutter',
+      labelId: goal.id,
+      message: `The goal is cut by one cutter: the roughing cutter “${goal.roughToolKey}” is not in the tool library — choose another, or none.`,
+    });
+  } else if (roughEntryDefined && roughTool === null) {
+    roughFindings.push({
+      severity: 'warning',
+      code: 'goal-rough-no-cutter',
+      labelId: goal.id,
+      message: `The goal is cut by one cutter: “${roughEntry!.tool.name}” is a ${roughEntry!.tool.shape} cutter, and a goal’s rough must be a flat end mill.`,
+    });
+  } else if (roughEntryDefined && roughResolved !== null && !roughResolved.ok) {
+    roughFindings.push({
+      severity: 'warning',
+      code: 'goal-rough-no-cutter',
+      labelId: goal.id,
+      message: `The goal is cut by one cutter: “${roughEntry!.tool.name}” cannot be fed for ${job.stock.material} — ${roughResolved.reason}.`,
+    });
+  }
+  /** The rough cutter, its station and its own feeds — null when the goal is cut by one cutter. */
+  const rough: { tool: Tool; number: number; feeds: SurfaceFeeds; rpm: number } | null =
+    roughTool === null || roughResolved === null || !roughResolved.ok
+      ? null
+      : {
+          tool: roughTool,
+          number: toolNumberFor(roughTool),
+          rpm: roughResolved.params.rpm,
+          feeds: {
+            feed: roughResolved.params.feed,
+            plungeFeed: roughResolved.params.plungeFeed,
+            // The goal's stated step-down/step-over win, as they do for the ball (they are the
+            // GOAL's own operation settings); otherwise the flat's row — a flat takes more than a
+            // ball, which is the whole point of the split.
+            stepDown: settings.roughStepDownMm ?? roughResolved.params.stepDown,
+            roughStepOver: settings.roughStepOverMm ?? roughResolved.params.stepOver,
+            finishStepOver: roughResolved.params.stepOver,
+          },
+        };
   // #755 — A FINISH FINER THAN THE SHAPE IS KNOWN BUYS NOTHING. When the finish's step-over is
   // finer than the grid the goal would be sampled on, sample at the step-over instead: the passes
   // then follow a surface known at the resolution they cut at. A COARSER step-over does not
@@ -4829,7 +4884,9 @@ export function generateGoalProgram(
   const movesAt = (pitchMm: number): { moves: number; depth: number; cells: number; pitch: number } => {
     const hf = sampleGoalHeightfield(goal, sampleAt(pitchMm));
     if (hf.coveredCount === 0) return { moves: 0, depth: 0, cells: 0, pitch: hf.pitch };
-    const levels = Math.max(1, Math.ceil((hf.topZ - hf.minZ + allowanceMm) / feeds.stepDown));
+    // #869 — the levels are the ROUGH's: a flat's deeper step-down is fewer levels than the ball's.
+    const stepDown = rough === null ? feeds.stepDown : rough.feeds.stepDown;
+    const levels = Math.max(1, Math.ceil((hf.topZ - hf.minZ + allowanceMm) / stepDown));
     return { moves: hf.coveredCount * (levels + 1), depth: hf.topZ - hf.minZ, cells: hf.coveredCount, pitch: hf.pitch };
   };
   let cutPitchMm = refinedPitchMm;
@@ -4899,6 +4956,8 @@ export function generateGoalProgram(
       feeds,
       rapid: mill.rapidEstimate,
       sample: sampleAt(pitchMm),
+      // #869 — the split: the flat roughs, the ball (this call's `tool`) finishes.
+      ...(rough === null ? {} : { rough: { tool: rough.tool, toolNumber: rough.number, feeds: rough.feeds } }),
       opts: {
         stockToLeaveMm,
         scallop,
@@ -5009,13 +5068,39 @@ export function generateGoalProgram(
     camVersion: CAM_VERSION,
     toolKey: job.toolKey,
   };
+  // #869 — THE SPLIT, POSTED AS TWO PROGRAMS. A flat rough that actually has stock to remove posts
+  // first, with its own tool key, station and feed events; the ball's finishing passes (the rim
+  // laps #862 included) post second, exactly as they did as one program. The rough's check is its
+  // OWN surface check (#535): every posted file is swept and judged by #844's per-program oracle,
+  // and the release gate takes no program without one, so the rough is a first-class file rather
+  // than a prefix of the finish.
+  const splitRough = rough !== null && surfaced.roughing.moves.length > 0;
+  const roughIr: ToolpathIR | null = splitRough
+    ? {
+        ...surfaced.ir,
+        tool: rough!.tool,
+        toolNumber: rough!.number,
+        spindleRpm: rough!.rpm,
+        operations: [surfaced.roughing],
+      }
+    : null;
+  const finishIr: ToolpathIR = splitRough
+    ? { ...surfaced.ir, operations: surfaced.ir.operations.filter((op) => op !== surfaced.roughing) }
+    : surfaced.ir;
+
   let nc: string;
+  let roughNc: string | null = null;
   onProgress?.({ stage: 'post', label: 'posting the program' });
   try {
+    if (roughIr !== null) {
+      const postedRough = postZ1(roughIr, { ...ctx, toolKey: goal.roughToolKey! }, mill, { vacuum: 'whole' });
+      if (!postedRough.ok) return fail('post', postedRough.errors.join('; '), resolved);
+      roughNc = postedRough.text;
+    }
     // #771 — the goal's design preview is its own sampled heightfield, drawn in the blank's
     // frame. It is the same grid the toolpath was generated over (no second sampling), and the
     // post writes it as the same after-M02 comment block as an engrave program.
-    const posted = postZ1(surfaced.ir, ctx, mill, {
+    const posted = postZ1(finishIr, ctx, mill, {
       vacuum: 'whole',
       thumbnail: heightfieldTopViewPng(job.stock, surfaced.heightfield),
     });
@@ -5034,22 +5119,23 @@ export function generateGoalProgram(
   // #671 — the check also carries the PASSES it was made over. The grid says what the sweep is
   // good to; the pass list says what that sweep judged, so a dropped finishing pass is visible in
   // the frozen package instead of assumed.
-  const surfaceCheck: SurfaceProgramCheck = {
+  const checkOf = (ir: ToolpathIR, layers: number): SurfaceProgramCheck => ({
     kind: 'surface',
     gridPitchMm: surfaced.heightfield.pitch,
-    roughingLayers: surfaced.roughingLayers,
-    passes: surfaced.ir.operations.map((op) => op.name),
+    roughingLayers: layers,
+    passes: ir.operations.map((op) => op.name),
     resolutionNote: surfaced.heightfield.resolutionNote,
-    bbox: pathBbox(surfaced.ir),
-  };
-  const cam = summarize(surfaced.ir);
+    bbox: pathBbox(ir),
+  });
+  const surfaceCheck: SurfaceProgramCheck = checkOf(finishIr, splitRough ? 0 : surfaced.roughingLayers);
+  const cam = summarize(finishIr);
   const program: EngraveProgram = {
     kind: 'engrave',
     setupIndex: 1,
     setupId: jobSetups(job)[0]!.id,
     toolKey: job.toolKey,
     nc,
-    frame: surfaced.ir.frame,
+    frame: finishIr.frame,
     verify: null,
     surfaceCheck,
     frameNc: null,
@@ -5057,6 +5143,23 @@ export function generateGoalProgram(
     programHash: programHash(nc),
     cam,
   };
+  const roughProgram: EngraveProgram | null =
+    roughNc === null || roughIr === null
+      ? null
+      : {
+          kind: 'engrave',
+          setupIndex: 1,
+          setupId: jobSetups(job)[0]!.id,
+          toolKey: goal.roughToolKey!,
+          nc: roughNc,
+          frame: roughIr.frame,
+          verify: null,
+          surfaceCheck: checkOf(roughIr, surfaced.roughingLayers),
+          frameNc: null,
+          frameVerify: null,
+          programHash: programHash(roughNc),
+          cam: summarize(roughIr),
+        };
 
   // #847 — WHAT THE FINISH LEFT, AND THE REST PASS THAT TAKES IT. The measurement is the finish's
   // OWN gouge-safe tip field (the surface its program cuts): where the ball could not enter a
@@ -5386,14 +5489,18 @@ export function generateGoalProgram(
       ...gridFindings,
       ...reachFindings,
       ...restFindings,
+      ...roughFindings,
       ...chamferFindings,
     ]),
     feeds: resolved,
     cam,
     nc,
     verify: null,
-    // #847 — the rest pass follows the finish, and the V-bit's edges come last.
+    // #869/#847 — cut order: the flat's rough (when split), the ball's finish (with the part's
+    // thumbnail), the rest pass over what the finish left, then the V-bit's bevel. The top-level
+    // `nc`/`cam` above describe the FINISHING program — the part.
     programs: [
+      ...(roughProgram === null ? [] : [roughProgram]),
       program,
       ...(restProgram === null ? [] : [restProgram]),
       ...(chamferProgram === null ? [] : [chamferProgram]),
@@ -5404,11 +5511,18 @@ export function generateGoalProgram(
       resolutionNote: surfaced.heightfield.resolutionNote,
       gridPitchMm: surfaced.heightfield.pitch,
       gridCells: surfaced.heightfield.nx * surfaced.heightfield.ny,
-      stepDownMm: feeds.stepDown,
-      roughStepOverMm: feeds.roughStepOver,
+      // #869 — the rough's own numbers when it is split out; the ball's otherwise. The finish's
+      // step-down rides separately (the rim laps are the finish's).
+      stepDownMm: rough?.feeds.stepDown ?? feeds.stepDown,
+      finishStepDownMm: feeds.stepDown,
+      roughStepOverMm: rough?.feeds.roughStepOver ?? feeds.roughStepOver,
       finishStepOverMm: feeds.finishStepOver,
       stockToLeaveMm: stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM,
       roughingLayers: surfaced.roughingLayers,
+      rough:
+        roughProgram === null
+          ? null
+          : { tool: toolDisplayName(rough!.tool).split(' · ')[0]!, kind: surfaced.roughKind },
       scallop: surfaced.scallop === null ? null : surfaced.scallop.facts,
       pencil: surfaced.pencil === null ? null : surfaced.pencil.facts,
       // #862 — the rim laps that finished the clear band's wall, or null when there is no band.
@@ -5459,9 +5573,9 @@ function generateGoalPrograms(
 ): EngraveGenerated {
   // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
   // path already builds each program with it — so each side's programs are those programs with the
-  // side's setup on them, never a field-by-field copy that could drop the check. #847 — a side can
-  // be more than one program (its rest pass, its chamfer), so the side's whole list carries over;
-  // each keeps its own cutter key.
+  // side's setup on them, never a field-by-field copy that could drop the check. A side can be
+  // more than one program (#847's rest pass, #869's flat rough, the chamfer), so the side's whole
+  // list carries over; each keeps its own cutter key.
   const sidePrograms = (one: EngraveGenerated, side: GoalSide): EngraveProgram[] | null => {
     if (!(one.ok && one.nc !== null) || one.programs.length === 0) return null;
     return one.programs.map((program) => ({

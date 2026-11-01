@@ -396,6 +396,11 @@ export type JobFindingCode =
   // that would reach it.
   | 'goal-rest-pass'
   | 'goal-rest-uncut'
+  // #869 — THE GOAL'S FLAT ROUGH. `goal-rough-no-cutter` is the WARNING that names why the goal
+  // is cut by one cutter although it names a rough: a key the library does not hold, a cutter
+  // that is not a flat end mill, or one that cannot be fed for the material. The goal still
+  // surfaces (the finish is unchanged), so this informs and never refuses.
+  | 'goal-rough-no-cutter'
   // Facing (#432). The job's facing depth is taken off the same blank every item is measured
   // against, so the check is one number against the stock's minimum floor — not a per-item one.
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
