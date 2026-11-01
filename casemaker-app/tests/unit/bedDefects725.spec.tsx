@@ -43,7 +43,6 @@ import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore'
 import { resetMachineChange, useMachineChangeStore } from '@/store/machineChangeStore';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetMachineStore } from '@/store/machineStore';
-import { useViewportStore } from '@/store/viewportStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { resetEngraveRows } from '@/store/engraveRowStore';
@@ -334,15 +333,12 @@ describe('#725 B7/W11 — the bed reaches the panel’s own through rule', () =>
 });
 
 describe('#894 — a Fix press always does what its name says', () => {
-  it('the simulation budget stop is named “Open Simulate” and switches the rail there', () => {
+  it('a simulation stop shows NO fix link — the Cut panel answers it with its own presses', () => {
     render(<EngravePanel />);
     act(() => {
       useEngraveRunStore.setState({
         generated: refused([
-          {
-            code: 'sweep-budget-exceeded',
-            message: 'the simulation was stopped after 60 s: this program is too slow to simulate at this size. Try again with a longer limit',
-          },
+          { code: 'sweep-stalled', message: 'the simulation stalled: no progress for 30 s after checkpoint 4 of 10. This is a fault, not a slow program' },
         ]),
         simStatus: null,
         simDiagnostics: [],
@@ -351,12 +347,10 @@ describe('#894 — a Fix press always does what its name says', () => {
       });
     });
 
-    // The press that was "Open the control" and did nothing: it now names the surface its fix is
-    // on, and the press is that surface's own switch.
-    const press = screen.getByTestId('engrave-run-blocker-fix');
-    expect(press.textContent).toBe('Open Simulate');
-    fireEvent.click(press);
-    expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-sim');
+    // The sentence is the person's to read; "Open the control" is gone, and the stall's answers
+    // ("Simulate again", "Save a report") are the panel's own presses, not a fix link (#895).
+    expect(screen.getByTestId('engrave-run-errors').textContent).toContain('This is a fault, not a slow program');
+    expect(screen.queryByTestId('engrave-run-blocker-fix')).toBeNull();
   });
 
   it('a code with no control this panel can open shows NO press, never a dead one', () => {

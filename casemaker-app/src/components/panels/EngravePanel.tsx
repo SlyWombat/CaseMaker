@@ -12,7 +12,6 @@ import { useCncModeStore } from '@/store/cncModeStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
 import { useStockStore } from '@/store/stockStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
-import { useViewportStore } from '@/store/viewportStore';
 import { preflightHub } from '@/engine/cnc/preflight';
 import type { PreflightCause } from '@/engine/cnc/preflight';
 import { runContextFor } from '@/store/machineRunStore';
@@ -927,9 +926,6 @@ export function EngravePanel(): JSX.Element {
     // #725 B4 — the bed's clamp/arm refusals are fixed on Holding's picture, and a non-cylinder
     // rotary blank on the Stock step: open the step, not a field of this panel.
     if (fix.openWizardStep !== undefined) useStartWizardStore.getState().openWizard(fix.openWizardStep);
-    // #894 — a fix on another surface of the rail (the simulation's budget stop lives on
-    // Simulate): the press switches the rail, so it does what its name says.
-    if (fix.openSection !== undefined) useViewportStore.getState().setActiveSidebarSection(fix.openSection);
     // A fresh object each press: the same Fix pressed twice must run twice.
     setFixRequest({ ...fix });
   }

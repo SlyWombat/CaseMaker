@@ -27,13 +27,11 @@ const NAMED_CODES = [
   'side-strip-thin',
   'strip-too-narrow',
   'under-cut',
-  'sweep-budget-exceeded',
 ];
 
 /** The fix names something a panel can actually open or focus — the "does something" half. */
 function namesATarget(fix: PanelFix): boolean {
   return (
-    fix.openSection !== undefined ||
     fix.openWizardStep !== undefined ||
     fix.itemId !== undefined ||
     fix.focusTestid !== undefined ||
@@ -72,9 +70,11 @@ describe('#894 — every fix a finding can carry is a real press', () => {
     expect(fixIsOffered(null)).toBe(false);
   });
 
-  it('#894 item 3 — the simulation budget stop opens Simulate by name', () => {
-    const fix = findingFix({ code: 'sweep-budget-exceeded' })!;
-    expect(fix.openSection).toBe('cnc-sim');
-    expect(fixActionLabel(fix)).toBe('Open Simulate');
+  it('#895 — a simulation stop carries no fix link: its presses are the Cut panel’s own', () => {
+    // `sweep-budget-exceeded` was retired with the wall-clock limit; a stall is answered beside
+    // the sentence by "Simulate again" and "Save a report", so neither code names a control here.
+    for (const code of ['sweep-budget-exceeded', 'sweep-stalled']) {
+      expect(fixIsOffered(findingFix({ code })), code).toBe(false);
+    }
   });
 });

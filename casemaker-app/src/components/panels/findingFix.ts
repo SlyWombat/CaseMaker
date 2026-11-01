@@ -23,13 +23,6 @@ export interface PanelFix {
    * is not a cylinder opens the Stock step.
    */
   openWizardStep?: 'holding' | 'stock';
-  /**
-   * #894 — the fix is on another SURFACE of the right rail. The simulation's budget stop is
-   * reported by the Cut panel, but what resolves it (a longer limit, and the program to re-run)
-   * lives on Simulate; the press opens that panel rather than pointing at a control the Cut panel
-   * does not have.
-   */
-  openSection?: 'cnc-sim';
 }
 
 /**
@@ -51,10 +44,10 @@ export function findingFix(f: { code: string; labelId?: string }): PanelFix | nu
   if (HOLD_FIX_CODES.has(code)) {
     return { group: 'engrave-group-hold', openWizardStep: 'holding' };
   }
-  // #894 — the simulation's budget stop. The Cut panel shows the sentence, but the control that
-  // resolves it is Simulate's own; until #871's in-place "Simulate with an N min limit" press
-  // lands there, the fix names the panel to open rather than pointing at nothing.
-  if (code === 'sweep-budget-exceeded') return { group: 'engrave-group-job', openSection: 'cnc-sim' };
+  // #895 — `sweep-budget-exceeded` is retired: a simulation stops on a progress STALL now, and a
+  // stall is answered by the Cut panel's own presses beside the sentence ("Simulate again",
+  // "Save a report") — not by a fix link. So neither code carries a PanelFix here: `sweep-stalled`
+  // falls through to the generic group, which `fixActionLabel` refuses to name (no press).
   if (f.labelId !== undefined) return { group: 'engrave-group-job', itemId: f.labelId };
   if (code === 'rotary-stock') return { group: 'engrave-group-job', openWizardStep: 'stock' };
   if (code === 'tool-missing') return { group: 'engrave-group-cutter', focusTestid: 'engrave-tool' };
@@ -118,7 +111,6 @@ export const HOLD_FIX_CODES: ReadonlySet<string> = new Set([
  * control is not on that panel at all.
  */
 export function fixActionLabel(fix: PanelFix): string | null {
-  if (fix.openSection === 'cnc-sim') return 'Open Simulate';
   if (fix.openWizardStep === 'holding') return 'Open the Holding step';
   if (fix.openWizardStep === 'stock') return 'Open the Stock step';
   if (fix.group === 'engrave-group-cutter') return 'Open the cutter list';
