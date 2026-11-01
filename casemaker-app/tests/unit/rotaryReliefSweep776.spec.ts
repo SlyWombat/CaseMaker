@@ -166,7 +166,7 @@ describe('#776 — the lobed-shaft relief', () => {
     let total = 0;
     const out = swept(
       columnSweep(timeline, tool, setup, {
-        budgetMs: 30_000,
+        stallMs: 30_000,
         onProgress: (done, count) => {
           lastDone = done;
           total = count;
@@ -183,9 +183,9 @@ describe('#776 — the lobed-shaft relief', () => {
 
   it('a budget it cannot meet refuses by name rather than running on', { timeout: 120_000 }, () => {
     const { timeline, tool, setup } = reliefTimeline(true);
-    const out = columnSweep(timeline, tool, setup, { budgetMs: 0 });
+    const out = columnSweep(timeline, tool, setup, { stallMs: 0 });
     expect(out.ok).toBe(false);
     if (out.ok) return;
-    expect(out.diagnostics.some((d) => d.code === 'sweep-budget-exceeded')).toBe(true);
+    expect(out.diagnostics.some((d) => d.code === 'sweep-stalled')).toBe(true);
   });
 });

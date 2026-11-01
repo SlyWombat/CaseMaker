@@ -5459,20 +5459,16 @@ describe('EngravePanel (#893) — the run row names its stop and offers the next
     expect(screen.getByTestId('engrave-run-simulate-line').textContent).toContain('Simulation not started.');
     fireEvent.click(screen.getByTestId('engrave-run-simulate'));
     expect(simulate).toHaveBeenCalledTimes(1);
+  });
+});
 
-// #871 — THE CUT STEP'S SIMULATION BUDGET. The red line said "Try again with a longer limit" and
-// the only control that did so lived in the Simulate panel (which the Cut step is not): on the Cut
-// screen, and from a phone, the instruction named a press that was not there. The retry now sits
-// beside the sentence and names the limit it will use: the sweep's own projected limit when the
-// stop came from a projection, the doubled one for a plain timer stop, and NO press when even the
-// 10 min maximum cannot cover the projection (then the program, not the limit, is the answer).
-describe('EngravePanel — the Cut step’s simulation budget (#871)', () => {
+// #871/#895 — THE CUT STEP'S SIMULATION STOP. #871 gave the Cut screen a retry beside the sentence;
+// #895 removed the limit it was retrying against — the simulation stops only when progress stalls,
+// so the press is "Simulate again", the progress line says how much is left from the sweep's own
+// projection, and Cancel is always on screen while the run is under way.
+describe('EngravePanel — the Cut step’s simulation stall (#895)', () => {
   /** The run's blocked shape, with the one simulation diagnostic under test. */
-  function blockedBy(diagnostic: {
-    message: string;
-    projectedMs?: number;
-    suggestedBudgetMs?: number;
-  }): void {
+  function blockedBy(diagnostic: { message: string; stallMs?: number }): void {
     act(() => {
       useEngraveRunStore.setState({
         generated: {
@@ -5486,9 +5482,7 @@ describe('EngravePanel — the Cut step’s simulation budget (#871)', () => {
           programs: [],
           errors: [{ stage: 'simulate', message: diagnostic.message }],
         } as unknown as EngraveGenerated,
-        simDiagnostics: [
-          { source: 'sweep', severity: 'error', code: 'sweep-budget-exceeded', line: 1, ...diagnostic },
-        ],
+        simDiagnostics: [{ source: 'sweep', severity: 'error', code: 'sweep-stalled', line: 1, ...diagnostic }],
         phase: 'blocked',
         staleSince: null,
       });
@@ -5517,69 +5511,81 @@ describe('EngravePanel — the Cut step’s simulation budget (#871)', () => {
     return () => calls;
   }
 
-  it('a plain timer stop doubles the limit, and the press names the doubled one', async () => {
-    act(() => useSimStore.getState().setBudgetMs(60_000));
-    const calls = fakeGenerate();
-    blockedBy({
-      message:
-        'the simulation was stopped after 60 s: this program is too slow to simulate at this size. Try again with a longer limit',
+  it('a stalled sweep’s press is the row’s own Simulate, and it re-sweeps without generating', async () => {
+    // #895 — the stall press and #893's "Simulation not started" press are ONE control: the
+    // program is already on screen, so "again" is the sweep and the check, not another Generate.
+    const original = useEngraveRunStore.getState().simulate;
+    let simulated = 0;
+    act(() => {
+      useEngraveRunStore.setState({
+        simulate: async () => {
+          simulated += 1;
+        },
+      });
     });
-    render(<EngravePanel />);
-    expect(screen.getByTestId('engrave-run-errors').textContent).toContain('Try again with a longer limit');
-    const retry = screen.getByTestId('engrave-run-retry-sim');
-    expect(retry.textContent).toBe('Simulate with a 2 min limit');
-    fireEvent.click(retry);
-    await waitFor(() => expect(calls()).toBe(1));
-    expect(useSimStore.getState().budgetMs).toBe(120_000);
-    setEngraveRunClientLoader(null);
+    try {
+      blockedBy({
+        message: 'the simulation stalled: no progress for 30 s after checkpoint 49915 of 341707. This is a fault, not a slow program',
+      });
+      render(<EngravePanel />);
+      expect(screen.getByTestId('engrave-run-errors').textContent).toContain('This is a fault, not a slow program');
+      // A fault offers the crash-style report beside the rerun (#895).
+      expect(screen.getByTestId('engrave-run-save-report').textContent).toBe('Save a report');
+      const press = screen.getByTestId('engrave-run-simulate');
+      expect(press.textContent).toBe('Simulate again');
+      fireEvent.click(press);
+      await waitFor(() => expect(simulated).toBe(1));
+    } finally {
+      act(() => {
+        useEngraveRunStore.setState({ simulate: original });
+      });
+    }
   });
 
-  it('a projection offers the limit that covers it, not a blind double', async () => {
-    act(() => useSimStore.getState().setBudgetMs(60_000));
-    const calls = fakeGenerate();
-    blockedBy({
-      message:
-        'the simulation is too slow to finish: at the rate it has run (10 of 100 checkpoints) it projects ' +
-        'about 3 min 12 s, and the limit is 60 s. Try again with a longer limit',
-      projectedMs: 192_000,
-      suggestedBudgetMs: 240_000,
+  it('no other simulation error offers that press — a stall is the one the retry answers', () => {
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: false,
+          stage: 'findings',
+          findings: [],
+          feeds: null,
+          cam: null,
+          nc: null,
+          verify: null,
+          programs: [],
+          errors: [{ stage: 'simulate', message: 'a rapid passes through stock' }],
+        } as unknown as EngraveGenerated,
+        simDiagnostics: [{ source: 'sweep', severity: 'error', code: 'rapid-through-stock', line: 1, message: 'a rapid passes through stock' }],
+        phase: 'blocked',
+        staleSince: null,
+      });
     });
     render(<EngravePanel />);
-    const retry = screen.getByTestId('engrave-run-retry-sim');
-    expect(retry.textContent).toBe('Simulate with a 4 min limit');
-    fireEvent.click(retry);
-    await waitFor(() => expect(calls()).toBe(1));
-    // The suggested limit exactly — a doubling would have been 120 s, which the projection says
-    // cannot finish.
-    expect(useSimStore.getState().budgetMs).toBe(240_000);
-    setEngraveRunClientLoader(null);
+    expect(screen.queryByTestId('engrave-run-simulate')).toBeNull();
   });
 
-  it('a projection past the maximum offers no press at all, and says the program is the answer', () => {
-    act(() => useSimStore.getState().setBudgetMs(60_000));
-    blockedBy({
-      message:
-        'this program would take about 78 h 53 min to simulate, beyond the 10 min it can be given. ' +
-        'The program is what has to change, not the limit',
-      projectedMs: 284_000_000,
-    });
-    render(<EngravePanel />);
-    const line = screen.getByTestId('engrave-run-errors');
-    expect(line.textContent).toContain('beyond the 10 min it can be given');
-    expect(line.textContent).toContain('The program is what has to change, not the limit');
-    expect(screen.queryByTestId('engrave-run-retry-sim')).toBeNull();
-  });
-
-  it('states the limit in the progress line while the sweep is running', () => {
-    const budget = useSimStore.getState().budgetMs;
+  it('states swept/total and the time left from the projection, with no limit in the line', () => {
     act(() => {
       useEngraveRunStore.setState({ phase: 'simulating', simProgram: { index: 1, count: 2 }, staleSince: null });
-      useSimStore.setState({ status: 'loading', phase: 'sweep', progress: { done: 12, total: 234 } });
+      // 12 of 234 checkpoint in, the projection says the whole load is 13 min: about 12 min left.
+      useSimStore.setState({ status: 'loading', phase: 'sweep', progress: { done: 12, total: 234 }, projectionMs: 780_000 });
     });
     render(<EngravePanel />);
     const progress = screen.getByTestId('engrave-generate-progress').textContent ?? '';
     expect(progress).toContain('simulating program 1 of 2');
     expect(progress).toContain('swept 12 of 234');
-    expect(progress).toContain(`${Math.round(budget / 1000)} s limit`);
+    expect(progress).toContain('about 12 min');
+    expect(progress).toContain('left');
+    expect(progress).not.toContain('limit');
+  });
+
+  it('Cancel is on screen for the whole run', () => {
+    act(() => {
+      useEngraveRunStore.setState({ phase: 'simulating', simProgram: { index: 1, count: 2 }, staleSince: null });
+      useSimStore.setState({ status: 'loading', phase: 'sweep', progress: { done: 12, total: 234 }, projectionMs: null });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-generate-cancel')).toBeTruthy();
   });
 });

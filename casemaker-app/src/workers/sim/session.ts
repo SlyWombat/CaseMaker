@@ -75,17 +75,10 @@ export interface SimDiagnostic {
   step?: number;
   checkpoint?: number;
   /**
-   * #871 — THE SWEEP'S OWN PROJECTION, when the budget stop came from one (the load's measured
-   * rate said the run could not finish): the projected total wall clock, ms. Absent on the plain
-   * timer stop, where nothing was measured about the run itself.
+   * #895 — the stall that stopped the run: the window, ms, that passed without a checkpoint. Set
+   * on a `sweep-stalled` diagnostic only; the panel offers a report beside it.
    */
-  projectedMs?: number;
-  /**
-   * #871 — THE LIMIT THAT WOULD COVER THE PROJECTION (its headroom included, rounded up to a
-   * whole minute), ms; absent when even the session's maximum cannot cover it — then the program,
-   * not the limit, is what has to change.
-   */
-  suggestedBudgetMs?: number;
+  stallMs?: number;
 }
 
 /** A checkpoint without its geometry-sized arrays (`xy`, `zs`, `steps`). */
@@ -312,8 +305,11 @@ type Live = LiveSwept | LivePath | LiveColumn;
 
 /** What `load` will accept on top of its arguments (#194). */
 export interface SimLoadOpts {
-  /** Wall clock for the sweep itself; the client's timer is the hard stop. */
-  budgetMs?: number;
+  /**
+   * #895 — how long the sweep may go without completing a checkpoint, ms. The worker's own guard
+   * (the client's watchdog is the hard stop for a single call that never yields).
+   */
+  stallMs?: number;
   onProgress?: (done: number, total: number) => void;
   /**
    * The machine's own coordinate frame, if one has been read from it (#279). Resolved against

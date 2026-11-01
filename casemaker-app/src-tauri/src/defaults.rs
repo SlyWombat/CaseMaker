@@ -316,7 +316,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("sim.defaultStockLengthMm", 100.0, "mm", "chosen, not measured: the blank a simulation starts with when the file states no stock, along X; 100 x 100 x 10 is the documented default (/Simulation.md §6)"),
     ("sim.defaultStockWidthMm", 100.0, "mm", "chosen, not measured: the blank a simulation starts with when the file states no stock, along Y; 100 x 100 x 10 is the documented default (/Simulation.md §6)"),
     ("sim.defaultStockThicknessMm", 10.0, "mm", "chosen, not measured: the blank a simulation starts with when the file states no stock, in Z; 100 x 100 x 10 is the documented default (/Simulation.md §6)"),
-    ("sim.budgetMs", 60000.0, "ms", "chosen, not measured: the wall-clock limit one simulation load starts with. Past it the load is refused (or the worker killed), and Retry starts a load with twice this"),
+    // #895 — retired key `sim.budgetMs` (a wall-clock limit per load): the simulation now stops on
+    // a progress stall, so a stored total-time value is ignored rather than converted (a 10-minute
+    // budget is not a 10-minute stall window). See `defaultsClient.ts` RETIRED_DEFAULTS.
+    ("sim.loadStallMs", 30000.0, "ms", "chosen, not measured: how long a simulation may run without completing a progress checkpoint before it is called stalled. A healthy sweep resets the window at every checkpoint and runs as long as it takes"),
     ("sim.stallMs", 180000.0, "ms", "chosen, not measured: how long Generate may be silent before the app presumes the worker stopped and Reports it; three minutes, because one stage of a large job can be a long CAM pass"),
     // ── #451 sim starting values (end)
     // ── #451 new-item starting depths (begin) — where an item the Engrave panel just added begins.
@@ -990,7 +993,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.1..=100.0).contains(&v)),
             "0.1 to 100 mm",
         )),
-        "sim.budgetMs" => Some(need(
+        "sim.loadStallMs" => Some(need(
             n.is_some_and(|v| (5000.0..=600000.0).contains(&v)),
             "5000 to 600000 ms",
         )),

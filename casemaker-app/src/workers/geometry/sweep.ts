@@ -351,12 +351,13 @@ export type SweepOutcome = { ok: true; value: SweepResult } | { ok: false; diagn
 /** A sweep that must not run forever (#194). */
 export interface SweepOpts {
   /**
-   * Wall clock in ms, counted from the start of the checkpoint loop. Checked between
-   * checkpoints and between air-move rechecks — the finest grain a synchronous wasm call
-   * allows, so this is an early exit, not a hard bound on a single call. The HARD bound is
-   * the client's timer, which terminates the worker (#194).
+   * #895 — the STALL WINDOW, ms: how long the sweep may go without completing a checkpoint. It is
+   * re-armed after every checkpoint (and before the air-move rechecks), so a healthy sweep runs as
+   * long as it takes and only silence is refused — the finest grain a synchronous wasm call
+   * allows, so this is an early exit, not a hard bound on a single call. The hard bound is the
+   * client's own watchdog, which terminates the worker (#194/#895).
    */
-  budgetMs?: number;
+  stallMs?: number;
   /** Once per checkpoint, after its solid is built. `done` runs 1…total. */
   onProgress?: (done: number, total: number) => void;
   /**
@@ -1085,7 +1086,7 @@ function sameFootprint(xy: readonly number[], a: number | null, f: Footprint): b
  *
  * Refuses (rather than approximating) a non-flat tool, an unsupported stock, and an empty
  * program. Diagnostics name the checkpoint. The caller owns every Manifold in the result and
- * must `delete()` them — including on the `sweep-budget-exceeded` refusal, which deletes
+ * must `delete()` them — including on the `sweep-stalled` refusal, which deletes
  * everything it built before it returns (#194).
  */
 export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: Tool, setup: Setup, opts?: SweepOpts): SweepOutcome {
@@ -1322,8 +1323,14 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
 
   const t0 = performance.now();
   const total = timeline.checkpoints.length;
-  const deadline = opts?.budgetMs === undefined ? null : t0 + opts.budgetMs;
-  const overBudget = (): boolean => deadline !== null && performance.now() > deadline;
+  // #895 — no deadline: the window restarts whenever a checkpoint completes. `lastProgressAt` is
+  // moved after every checkpoint AND before the air-move phase, so each phase gets its own window.
+  const stallMs = opts?.stallMs;
+  let lastProgressAt = performance.now();
+  // `>=` so a 0 ms window (a spec's sentinel; the shop rule's floor is 5 s) refuses at once.
+  const overStall = (): boolean => stallMs !== undefined && performance.now() - lastProgressAt >= stallMs;
+  /** The window's own deadline for the one phase that takes it as a parameter (the air moves). */
+  const freshDeadline = (): number | null => (stallMs === undefined ? null : performance.now() + stallMs);
   let msUnion = 0;
   let msExtrude = 0;
   let contours = 0;
@@ -1356,7 +1363,6 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
    * both; `stock` is the only other handle alive at either call site.
    */
   const refuseBudget = (done: number): SweepOutcome => {
-    const elapsed = Math.round(performance.now() - t0);
     for (const s of solids) s.delete();
     disposeFixture();
     sacrificial?.delete();
@@ -1366,8 +1372,8 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       diagnostics: [
         {
           severity: 'error',
-          code: 'sweep-budget-exceeded',
-          message: `the sweep stopped after ${elapsed} ms, at checkpoint ${done} of ${total}: this program is too slow to simulate at this size. Raise the time limit and try again`,
+          code: 'sweep-stalled',
+          message: `the sweep stalled at checkpoint ${done} of ${total}: no progress for ${Math.round((stallMs ?? 0) / 1000)} s. This is a fault, not a slow program`,
         },
       ],
     };
@@ -1498,9 +1504,10 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       }
     }
     done = idx + 1;
+    lastProgressAt = performance.now();
     opts?.onProgress?.(done, total);
     // Between checkpoints is as fine-grained as this can be: a wasm call is not interruptible.
-    if (overBudget()) {
+    if (overStall()) {
       budgetHit = true;
       break;
     }
@@ -1541,7 +1548,8 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // `fixture-unchecked` when none is modelled.
   const bedZ = setup.part.kind === 'cylinder' ? Number.NEGATIVE_INFINITY : bb.min[2];
   const a0 = performance.now();
-  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, deadline, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity);
+  // #895 — the air phase gets its own stall window: the checkpoints it follows made progress.
+  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, freshDeadline(), fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity);
   if (airMaterial !== stock) airMaterial.delete();
   const msAir = performance.now() - a0;
   if (air.budgetExceeded) {

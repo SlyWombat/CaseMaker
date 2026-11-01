@@ -122,7 +122,7 @@ function measureRotary(file: string): void {
   const timeline = buildTimeline(parsed, setup, MACHINES.Z1);
   const tBuild = performance.now();
   const t1 = performance.now();
-  const out = columnSweep(timeline, flatEndMill(3.175), setup, { resolution: COLUMN_SIM_RESOLUTION, budgetMs: 180_000 });
+  const out = columnSweep(timeline, flatEndMill(3.175), setup, { resolution: COLUMN_SIM_RESOLUTION, stallMs: 180_000 });
   const tSweep = performance.now() - t1;
   console.log(
     `# ${file}  stock=cylinder ⌀${(2 * maxR).toFixed(2)}×${length.toFixed(2)}  checkpoints=${timeline.checkpoints.length}  buildTimeline=${(tBuild - t0).toFixed(0)}ms  sweep=${tSweep.toFixed(0)}ms`,

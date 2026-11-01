@@ -25,9 +25,8 @@ import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
-import { liveShopDefaults, readDefault, SIM_BUDGET_MAX_MS } from '@/platform/defaultsClient';
+import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
 import { recordCrumb } from '@/platform/flightRecorder';
-import { formatDuration } from '@/engine/cnc/plan/format';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { createFrameCoalescer } from './frameCoalescer';
 
@@ -138,37 +137,28 @@ export function setSimSinks(onFrame: ((k: number, frame: SimFrame) => void) | nu
 }
 
 /**
- * Hard stop for one load, ms (#194). `sweepTimeline` is one synchronous call, so nothing can
- * interrupt it from the main thread: past this the only cancel is `terminateSim()`.
+ * #895 — HOW LONG A LOAD MAY RUN WITHOUT A PROGRESS CHECKPOINT, ms. `sweepTimeline` is one
+ * synchronous call, so nothing can interrupt it from the main thread: the watchdog's only stop is
+ * `terminateSim()`. The window RESETS on every checkpoint, so a healthy sweep runs as long as it
+ * takes; only silence is a fault.
  *
- * #451: the value is the shop's `sim.budgetMs`, read when a load starts; this constant is its
- * LABELLED no-service fallback and `simStore`'s `DEFAULT_SIM_BUDGET_MS` is the counterpart — keep
- * the two equal. This module is main-thread side (it CREATES the worker), so it may read the live
- * location through `defaultsClient`; the worker itself never does.
+ * #451/#895: the value is the shop's `sim.loadStallMs`, read when a load starts; this constant is
+ * its LABELLED no-service fallback and `simStore`'s `DEFAULT_SIM_STALL_MS` is the counterpart —
+ * keep the two equal. This module is main-thread side (it CREATES the worker), so it may read the
+ * live location through `defaultsClient`; the worker itself never does.
  */
-export const SIM_BUDGET_MS = 60_000;
+export const SIM_LOAD_STALL_MS = 30_000;
 
 /**
- * How far the worker's own budget sits BELOW the hard stop (#194). The sweep checks its
- * deadline between checkpoints, so a budget below the stop lets it refuse cleanly — with a
- * "checkpoint N of M" message and without killing the worker — while the hard stop remains for
- * a single wasm call that overran in between. A decision taken where the issue was silent.
- */
-const SIM_BUDGET_GRACE_MS = 5_000;
-
-/**
- * #871 — WHEN THE SWEEP'S OWN RATE SAYS IT CANNOT FINISH IN TIME. A program whose sweep will take
- * minutes is known to be too slow after a few seconds of checkpoints; waiting out the whole limit
- * tells the operator the same thing a minute later. The projection is `elapsed / done × total`,
+ * #871/#895 — THE SWEEP'S PROJECTED TOTAL TIME, from its measured rate: `elapsed / done × total`,
  * measured from the FIRST checkpoint (worker startup and parsing are a fixed cost, not the sweep's
  * rate), and only trusted after a floor of {@link SIM_PROJECTION_MIN_MS} and
- * {@link SIM_PROJECTION_MIN_SHARE} of the checkpoints; it calls the sweep over only with
- * {@link SIM_PROJECTION_MARGIN} of headroom, so a noisy first sample cannot stop a program that
- * would have finished.
+ * {@link SIM_PROJECTION_MIN_SHARE} of the checkpoints. It INFORMS — the progress line's "about N
+ * left" — and never stops the run (#895): a long projection is stated up front and the sweep keeps
+ * going.
  */
 const SIM_PROJECTION_MIN_MS = 4_000;
 const SIM_PROJECTION_MIN_SHARE = 0.05;
-const SIM_PROJECTION_MARGIN = 1.25;
 
 /**
  * #871 — the sweep's projected total time from its measured rate, ms; null while the sample is too
@@ -181,67 +171,61 @@ export function sweepProjectionMs(elapsedMs: number, done: number, total: number
 }
 
 /**
- * #871 — the projection WHEN IT SAYS THE SWEEP CANNOT FINISH: the projected ms when it is past
- * the limit by {@link SIM_PROJECTION_MARGIN}, else null. The headroom is the policy, so it lives
- * in one function a test can pin rather than in the progress wrapper.
+ * #895 — THE PROGRESS WATCHDOG. `arm()` (re)starts the window; it fires ONCE after `windowMs` with
+ * no arm in between. A sweep that keeps reporting checkpoints therefore runs as long as it takes,
+ * and only silence is a fault. Exported so a spec can pin both rules without a worker; `loadSim`
+ * arms it at the start and on every checkpoint, and stops it when the load settles.
  */
-export function sweepProjectionOverLimit(
-  elapsedMs: number,
-  done: number,
-  total: number,
-  budgetMs: number,
-): number | null {
-  const ms = sweepProjectionMs(elapsedMs, done, total);
-  if (ms === null || !(ms > budgetMs * SIM_PROJECTION_MARGIN)) return null;
-  return ms;
+export function stallWatchdog(windowMs: number, onStall: () => void): { arm: () => void; stop: () => void } {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let fired = false;
+  const fire = (): void => {
+    if (fired) return;
+    fired = true;
+    timer = null;
+    onStall();
+  };
+  return {
+    arm: () => {
+      if (fired) return;
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(fire, windowMs);
+    },
+    stop: () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      fired = true;
+    },
+  };
 }
 
-/**
- * #871 — THE LIMIT THE PROJECTION ASKS FOR: its headroom, rounded UP to a whole minute, or null
- * when even the session's maximum ({@link SIM_BUDGET_MAX_MS}) cannot cover it. Rounding up is
- * deliberate — the estimate is a rate, not a promise, and a limit that lands exactly on it fails
- * on the next tick.
- */
-export function suggestedBudgetFor(projectedMs: number): number | null {
-  if (!(projectedMs > 0)) return null;
-  const ms = Math.ceil((projectedMs * SIM_PROJECTION_MARGIN) / 60_000) * 60_000;
-  return ms <= SIM_BUDGET_MAX_MS ? ms : null;
-}
-
-/**
- * #871 — the sentence a projection-based early stop reports, naming its own sample. The
- * projection uses the app's duration words ("78 h 56 min"), the vocabulary the program's cut
- * estimate is already shown in; the limit keeps the plain seconds the timer's own sentence uses.
- * When no limit within the session's maximum covers it, the sentence says so and points at the
- * program — offering a retry that must fail again would be a lie with a button on it.
- */
-export function sweepProjectionMessage(
-  done: number,
-  total: number,
-  projectedMs: number,
-  budgetMs: number,
-  suggestedBudgetMs: number | null,
-): string {
-  if (suggestedBudgetMs === null) {
-    return (
-      `this program would take about ${formatDuration(projectedMs / 1000)} to simulate, beyond the ` +
-      `${formatDuration(SIM_BUDGET_MAX_MS / 1000)} it can be given. ` +
-      'The program is what has to change, not the limit'
-    );
-  }
+/** #895 — THE STALL SENTENCE: what happened, where it stopped, and that it is the app's fault. */
+export function sweepStallMessage(stallMs: number, done: number, total: number): string {
   return (
-    `the simulation is too slow to finish: at the rate it has run (${done} of ${total} checkpoints) it ` +
-    `projects about ${formatDuration(projectedMs / 1000)}, and the limit is ${Math.round(budgetMs / 1000)} s. ` +
-    'Try again with a longer limit'
+    `the simulation stalled: no progress for ${Math.round(stallMs / 1000)} s` +
+    (total > 0 ? ` after checkpoint ${done} of ${total}` : '') +
+    '. This is a fault, not a slow program'
   );
 }
 
 /** What `loadSim` accepts on top of its arguments (#194). */
 export interface SimLoadOpts {
-  /** Wall-clock limit for this load, ms. Defaults to the shop's `sim.budgetMs` (#451). */
-  budgetMs?: number;
-  /** Checkpoints swept so far. Called from the worker as the sweep advances. */
-  onProgress?: (done: number, total: number) => void;
+  /**
+   * #895 — how long the load may run WITHOUT a progress checkpoint, ms. Resets on every
+   * checkpoint. Defaults to the shop's `sim.loadStallMs`.
+   */
+  stallMs?: number;
+  /**
+   * Checkpoints swept so far. Called from the worker as the sweep advances; #896 adds the
+   * worker's own JS heap (MB) so a long goal sweep can say which worker holds the memory.
+   */
+  onProgress?: (done: number, total: number, memoryMB?: number | null) => void;
+  /**
+   * #895 — the sweep's own projection of the total load, ms, whenever the sample is good enough
+   * to trust ({@link sweepProjectionMs}). It INFORMS the progress line ("about N left") and never
+   * stops the run: a long projection is stated, and the sweep keeps going while it advances.
+   */
+  onProjection?: (projectedMs: number, done: number, total: number) => void;
   /**
    * Which stage of the load is running (#224): `sweep` while the sweep runs, then `playback`
    * while the anchor chain is built up front. The UI shows the latter as "preparing playback…".
@@ -317,79 +301,61 @@ export type SimLoadPhase = 'sweep' | 'playback';
  * every playback anchor while this promise is still pending, so the caller can show it as part
  * of loading and the first real scrub does not pay for it.
  *
- * Raced against a timer (#194): the sim worker is the one place a wasm call can run for
- * minutes without yielding, so a load that overruns the budget is refused by terminating the
- * worker — which frees every handle it owned with it, so there is nothing to clean up here.
+ * Raced against a STALL WATCHDOG (#194, #895): the sim worker is the one place a wasm call can run
+ * for minutes without yielding, so a load that has stopped reporting checkpoints is refused by
+ * terminating the worker — which frees every handle it owned with it, so there is nothing to clean
+ * up here. The window RESETS on every checkpoint: a healthy sweep runs as long as it needs, and
+ * only silence is a fault.
  */
 export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): Promise<SimLoadResult> {
   frames.reset();
   frameDesign = 'stock'; // a new session opens on the rod, whatever the last one was showing
-  // #451 — the one seed, read at the load: the caller's explicit budget, else the shop's.
-  const budgetMs = opts?.budgetMs ?? readDefault(liveShopDefaults(), 'sim.budgetMs').value;
-  const sweepBudget = Math.max(1, budgetMs - SIM_BUDGET_GRACE_MS);
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  // #451/#895 — the one seed, read at the load: the caller's explicit window, else the shop's.
+  const stallMs = opts?.stallMs ?? readDefault(liveShopDefaults(), 'sim.loadStallMs').value;
   let settled = false;
-  const expired = new Promise<SimLoadResult>((resolve) => {
-    timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      terminateSim();
-      resolve({
-        ok: false,
-        pathOnly: false,
-        diagnostics: [
-          {
-            source: 'sweep',
-            severity: 'error',
-            code: 'sweep-budget-exceeded',
-            message: `the simulation was stopped after ${Math.round(budgetMs / 1000)} s: this program is too slow to simulate at this size. Try again with a longer limit`,
-          },
-        ],
-      });
-    }, budgetMs);
+  // What the last checkpoint said, so a stall can name where it stopped.
+  let lastDone = 0;
+  let lastTotal = 0;
+  let resolveStall: (result: SimLoadResult) => void = () => undefined;
+  const stalled = new Promise<SimLoadResult>((resolve) => {
+    resolveStall = resolve;
   });
-  // #871 — SAY IT UP FRONT. The sweep reports checkpoints as it runs; once its own measured rate
-  // projects past the limit, stop there and state the projection instead of spending the whole
-  // limit to learn it. The clock starts at the FIRST checkpoint, so worker startup and parsing (a
-  // fixed cost on every load) are not charged to the sweep's rate; the timer above still bounds the
-  // whole load's wall clock. The worker is terminated exactly as the timer's own stop does — the
-  // sweep's state does not outlive this call, so a retry starts from zero (there is nothing to
-  // resume).
+  const watchdog = stallWatchdog(stallMs, () => {
+    if (settled) return;
+    settled = true;
+    terminateSim();
+    resolveStall({
+      ok: false,
+      pathOnly: false,
+      diagnostics: [
+        {
+          source: 'sweep',
+          severity: 'error',
+          code: 'sweep-stalled',
+          message: sweepStallMessage(stallMs, lastDone, lastTotal),
+          ...(lastTotal > 0 ? { checkpoint: lastDone } : null),
+        },
+      ],
+    });
+  });
+  watchdog.arm();
+  // #871/#895 — the projection INFORMS and never stops. The clock starts at the FIRST checkpoint,
+  // so worker startup and parsing (a fixed cost on every load) are not charged to the sweep's rate.
   const forward = opts?.onProgress;
+  const report = opts?.onProjection;
   let rateSince: number | null = null;
-  let projectionDone: ((result: SimLoadResult) => void) | null = null;
-  const projected =
-    forward === undefined
-      ? null
-      : new Promise<SimLoadResult>((resolve) => {
-          projectionDone = resolve;
-        });
   const onProgress =
-    forward === undefined
+    forward === undefined && report === undefined
       ? undefined
-      : (done: number, total: number): void => {
-          forward(done, total);
+      : (done: number, total: number, memoryMB?: number | null): void => {
+          forward?.(done, total, memoryMB);
+          lastDone = done;
+          lastTotal = total;
+          watchdog.arm();
+          if (report === undefined) return;
           rateSince ??= performance.now();
-          if (settled || projectionDone === null) return;
-          const ms = sweepProjectionOverLimit(performance.now() - rateSince, done, total, budgetMs);
-          if (ms === null) return;
-          settled = true;
-          terminateSim();
-          const suggested = suggestedBudgetFor(ms);
-          projectionDone({
-            ok: false,
-            pathOnly: false,
-            diagnostics: [
-              {
-                source: 'sweep',
-                severity: 'error',
-                code: 'sweep-budget-exceeded',
-                message: sweepProjectionMessage(done, total, ms, budgetMs, suggested),
-                projectedMs: ms,
-                ...(suggested === null ? null : { suggestedBudgetMs: suggested }),
-              },
-            ],
-          });
+          const ms = sweepProjectionMs(performance.now() - rateSince, done, total);
+          if (ms !== null) report(ms, done, total);
         };
   try {
     const result = await Promise.race([
@@ -405,7 +371,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
           // through as RAW, and the raw function reaches `postMessage`: "could not be cloned".
           // Only a TOP-LEVEL argument can carry a proxy, which is why `onProgress` is its own.
           {
-            budgetMs: sweepBudget,
+            stallMs,
             calibration: opts?.calibration ?? null,
             drillPointDefault: opts?.drillPointDefault ?? null,
             flatPitchYMm: opts?.flatPitchYMm ?? null,
@@ -433,16 +399,14 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
           }
           return r;
         }),
-      expired,
+      stalled,
       // #830 — a worker that died mid-sweep fails this load AT ONCE, with its own words, rather
       // than letting the budget timer report a misleading "too slow" a minute later.
       ...(failure === null ? [] : [failure.promise]),
-      // #871 — the projection's own early stop, when the sweep's rate says it cannot finish.
-      ...(projected === null ? [] : [projected]),
     ]);
     return result;
   } finally {
-    if (timer !== null) clearTimeout(timer);
+    watchdog.stop();
   }
 }
 

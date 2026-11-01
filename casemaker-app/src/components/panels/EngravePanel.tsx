@@ -17,7 +17,9 @@ import type { PreflightCause } from '@/engine/cnc/preflight';
 import { runContextFor } from '@/store/machineRunStore';
 import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { EngraveCutSurface } from './EngraveCutSurface';
-import { saveEngraveProgram } from '@/engine/exportTrigger';
+import { saveEngraveProgram, saveText } from '@/engine/exportTrigger';
+import { buildSimStallReport, simStallReportFileName } from '@/engine/jobs/simStallReport';
+import { flightCrumbs } from '@/platform/flightRecorder';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
   blankDepthCeiling,
@@ -51,7 +53,7 @@ import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type 
 import { slotFacts, type SlotCutterOption } from '@/engine/cnc/engrave/slot';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
-import { readDefault, SIM_BUDGET_MAX_MS } from '@/platform/defaultsClient';
+import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTargetObjects, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 // #835 — one setup's own work, measured and written back into that setup only.
@@ -758,19 +760,37 @@ function RemovalAnnouncement(): JSX.Element {
  * #871 — and the limit the sweep is running under, so the budget is a fact on the screen while the
  * run is in flight, not only a sentence after it has been spent.
  */
+/** A count in the operator's own reading form: `49,915` (#895's example line). */
+function grouped(n: number): string {
+  return n.toLocaleString('en-CA');
+}
+
+/**
+ * #895 — WHAT IS LEFT, from the sweep's own rate projection (#871): the projected total less the
+ * share already swept. It INFORMS — the sweep runs as long as it keeps advancing, so this can say
+ * hours without anything stopping. Null until the projection's first trustworthy sample.
+ */
+function timeLeftWords(projectionMs: number | null, progress: { done: number; total: number }): string | null {
+  if (projectionMs === null || progress.total <= 0) return null;
+  const leftMs = Math.max(0, projectionMs * (1 - progress.done / progress.total));
+  return `about ${formatDuration(leftMs / 1000)} left`;
+}
+
 function runProgressWords(
   run: Pick<EngraveRunState, 'phase' | 'progress' | 'simProgram'>,
   simStatus: string,
   simPhase: string | null,
   simProgress: { done: number; total: number } | null,
-  simBudgetMs: number,
+  simProjectionMs: number | null,
 ): string {
   if (run.phase === 'simulating') {
     const where = run.simProgram === null ? 'simulating' : `simulating program ${run.simProgram.index} of ${run.simProgram.count}`;
-    const limit = `${Math.round(simBudgetMs / 1000)} s limit`;
-    if (simStatus === 'loading' && simPhase === 'playback') return `${where} · preparing playback · ${limit}`;
-    if (simStatus === 'loading' && simProgress !== null) return `${where} · swept ${simProgress.done} of ${simProgress.total} · ${limit}`;
-    return `${where} · ${limit}`;
+    if (simStatus === 'loading' && simPhase === 'playback') return `${where} · preparing playback`;
+    if (simStatus === 'loading' && simProgress !== null) {
+      const left = timeLeftWords(simProjectionMs, simProgress);
+      return `${where} · swept ${grouped(simProgress.done)} of ${grouped(simProgress.total)}${left === null ? '' : ` · ${left}`}`;
+    }
+    return where;
   }
   if (run.phase === 'checking') return 'checking the result';
   return run.progress === null ? 'Working…' : `${run.progress.label}…`;
@@ -787,8 +807,8 @@ function RunProgressLine({ run }: { run: Pick<EngraveRunState, 'phase' | 'progre
   const simStatus = useSimStore((s) => s.status);
   const simPhase = useSimStore((s) => s.phase);
   const simProgress = useSimStore((s) => s.progress);
-  const simBudgetMs = useSimStore((s) => s.budgetMs);
-  return <span>{runProgressWords(run, simStatus, simPhase, simProgress, simBudgetMs)}</span>;
+  const simProjectionMs = useSimStore((s) => s.projectionMs);
+  return <span>{runProgressWords(run, simStatus, simPhase, simProgress, simProjectionMs)}</span>;
 }
 
 /**
@@ -2649,23 +2669,29 @@ export function EngravePanel(): JSX.Element {
   // #785 follow-up — the too-big refusal's one-click grid: the run stopped on it, and the finding
   // carries the pitch that fits. The button beside the sentence writes that pitch onto the goal's
   // grid and presses Generate in the same click, so the refusal turns into a choice.
-  // #871 — the Cut step's retry for a sweep that stopped on the session's budget, beside the
-  // sentence that says so: raise the limit and run again (Generate's own path).
-  const retryWithLongerSimulation = useEngraveRunStore((s) => s.retryWithLongerSimulation);
-  const simBudgetMs = useSimStore((s) => s.budgetMs);
-  // #871 — THE LIMIT THE PRESS OFFERS, from what the stop knew:
-  //   a projection — the limit that covers it (the sweep's own rate said what it needs), or none
-  //     when even the session's maximum cannot, because a press that must fail again is not an
-  //     offer (the sentence then points at the program);
-  //   a plain timer stop — the doubled limit, up to the same maximum.
-  const simRetryLimitMs: number | null =
-    currentRunError?.code === 'sweep-budget-exceeded'
-      ? currentRunError.projectedMs !== undefined
-        ? (currentRunError.suggestedBudgetMs ?? null)
-        : Math.min(simBudgetMs * 2, SIM_BUDGET_MAX_MS) > simBudgetMs
-          ? Math.min(simBudgetMs * 2, SIM_BUDGET_MAX_MS)
-          : null
-      : null;
+  // #895 — the Cut step's press for a sweep that STALLED, beside the sentence that says so: run
+  // the job again (Generate's own path). There is no limit to raise: the simulation stops only on
+  // silence, so "again" is the whole of it.
+  const simStalled = currentRunError?.code === 'sweep-stalled';
+  /**
+   * #895 — a stall is a fault, so its sentence offers the same kind of report the crash banner
+   * does: one JSON file with the moment, the program and the recorder's recent crumbs. Nothing is
+   * written until the press.
+   */
+  const saveStallReport = (): void => {
+    const runState = useEngraveRunStore.getState();
+    const report = buildSimStallReport({
+      at: Date.now(),
+      jobName: job.name,
+      message: currentRunError?.message ?? '',
+      progress: useSimStore.getState().progress,
+      program: runState.simProgram,
+      engine: runState.simEngine,
+      diagnostics: runState.simDiagnostics,
+      crumbs: flightCrumbs(),
+    });
+    void saveText(JSON.stringify(report, null, 2), simStallReportFileName(Date.now()), 'application/json');
+  };
   const runPitchFinding =
     run.staleSince === null
       ? (run.generated?.findings.find((f) => f.code === 'goal-program-too-big' && f.suggestedPitchMm !== undefined) ?? null)
@@ -5419,20 +5445,20 @@ export function EngravePanel(): JSX.Element {
                     )}
                   </>
                 )}
-                {/* #871 — the budget's own press, naming the limit it will use. From a sweep's
-                    projection that is THE limit that covers its rate (never a blind double); from
-                    a plain timer stop it is the doubled one. No press when the projection is past
-                    the session's 10 min maximum — the sentence then says the program is the
-                    answer, and a retry would only fail again. */}
-                {simRetryLimitMs !== null && (
+                {/* #895 — a stall is a fault, not a slow program: the sentence says so, and the
+                    press simply runs the job again (the simulation stops only on silence). */}
+                {simStalled && (
                   <>
                     {' '}
-                    <button
-                      type="button"
-                      data-testid="engrave-run-retry-sim"
-                      onClick={() => void retryWithLongerSimulation(simRetryLimitMs)}
-                    >
-                      Simulate with a {formatDuration(simRetryLimitMs / 1000)} limit
+                    {/* #895 — the SAME press the run row offers for an unsimulated program (#893):
+                        a stall leaves the program on screen, so "again" is the sweep and the check,
+                        not another Generate. */}
+                    <button type="button" data-testid="engrave-run-simulate" onClick={() => void simulateProgram()}>
+                      Simulate again
+                    </button>
+                    {' '}
+                    <button type="button" data-testid="engrave-run-save-report" onClick={saveStallReport}>
+                      Save a report
                     </button>
                   </>
                 )}

@@ -829,11 +829,11 @@ describe('#194 step 7: a retract provably in air needs no boolean', () => {
 });
 
 describe('#194: the time budget and progress are part of the contract', () => {
-  it('budgetMs: 0 is refused with sweep-budget-exceeded, and a later sweep on the same wasm heap still works', () => {
-    const { out } = sweep(THREE, tool, setup(), { budgetMs: 0 });
+  it('#895 stallMs: 0 is refused with sweep-stalled, and a later sweep on the same wasm heap still works', () => {
+    const { out } = sweep(THREE, tool, setup(), { stallMs: 0 });
     expect(out.ok).toBe(false);
     if (out.ok) return;
-    expect(out.diagnostics[0]?.code).toBe('sweep-budget-exceeded');
+    expect(out.diagnostics[0]?.code).toBe('sweep-stalled');
     expect(out.diagnostics[0]?.message).toMatch(/checkpoint 1 of 3/);
     // The refusal deleted every handle it had created; if it had not, this would throw or hang.
     const after = sweep(THREE);

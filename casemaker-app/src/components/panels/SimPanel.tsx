@@ -884,7 +884,7 @@ export function SimPanel() {
             ))}
           </div>
           {pathOnly && (
-            <button type="button" data-testid="sim-retry" onClick={() => void useSimStore.getState().retryWithLongerBudget()} style={{ width: '100%', padding: 7, marginTop: 6 }}>
+            <button type="button" data-testid="sim-retry" onClick={() => void useSimStore.getState().retry()} style={{ width: '100%', padding: 7, marginTop: 6 }}>
               Try again with a longer limit
             </button>
           )}

@@ -16,9 +16,9 @@ import { fileURLToPath } from 'node:url';
 
 import { KNOWN_DEFAULTS, ShopDefaultsSchema, type ShopDefaults } from '@/platform/defaultsClient';
 import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
-import { DEFAULT_SIM_BUDGET_MS, SIM_SPEEDS, setSimClientLoader, useSimStore, type SimClient } from '@/store/simStore';
+import { DEFAULT_SIM_STALL_MS, SIM_SPEEDS, setSimClientLoader, useSimStore, type SimClient } from '@/store/simStore';
 import { DEFAULT_STOCK, useSimSetupStore } from '@/store/simSetupStore';
-import { SIM_BUDGET_MS } from '@/engine/jobs/simClient';
+import { SIM_LOAD_STALL_MS } from '@/engine/jobs/simClient';
 import { useSettingsStore } from '@/store/settingsStore';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { stubSetup } from '@/engine/cnc/setup';
@@ -28,7 +28,7 @@ const KEYS = [
   'sim.defaultStockLengthMm',
   'sim.defaultStockWidthMm',
   'sim.defaultStockThicknessMm',
-  'sim.budgetMs',
+  'sim.loadStallMs',
   'sim.stallMs',
 ] as const;
 
@@ -57,7 +57,7 @@ function captureClient(): { client: SimClient; budgets: Array<number | undefined
   const client = {
     setSimSinks: () => {},
     loadSim: async (...a: Parameters<SimClient['loadSim']>) => {
-      budgets.push(a[4]?.budgetMs);
+      budgets.push(a[4]?.stallMs);
       return { ok: false, pathOnly: false, diagnostics: [] };
     },
     requestFrame: () => {},
@@ -85,8 +85,8 @@ describe('the sim’s starting values as shop defaults (#451)', () => {
     expect(KNOWN_DEFAULTS['sim.defaultStockWidthMm']!.fallback).toBe(DEFAULT_STOCK.width);
     expect(KNOWN_DEFAULTS['sim.defaultStockThicknessMm']!.fallback).toBe(DEFAULT_STOCK.thickness);
     // ONE seed, two readers: the store and the client keep the same labelled fallback.
-    expect(KNOWN_DEFAULTS['sim.budgetMs']!.fallback).toBe(DEFAULT_SIM_BUDGET_MS);
-    expect(SIM_BUDGET_MS).toBe(DEFAULT_SIM_BUDGET_MS);
+    expect(KNOWN_DEFAULTS['sim.loadStallMs']!.fallback).toBe(DEFAULT_SIM_STALL_MS);
+    expect(SIM_LOAD_STALL_MS).toBe(DEFAULT_SIM_STALL_MS);
     for (const key of KEYS) expect(KNOWN_DEFAULTS[key]!.rule.safeParse(KNOWN_DEFAULTS[key]!.fallback).success, key).toBe(true);
   });
 
@@ -108,24 +108,25 @@ describe('the sim’s starting values as shop defaults (#451)', () => {
     expect(rule.safeParse(0).success).toBe(false);
   });
 
-  it('a fresh sim session takes the located speed and budget; a retry doubles only the budget', async () => {
-    choose({ 'sim.playbackSpeed': 5, 'sim.budgetMs': 90_000 });
+  it('a fresh sim session takes the located speed and stall window; a retry keeps the same window', async () => {
+    choose({ 'sim.playbackSpeed': 5, 'sim.loadStallMs': 45_000 });
     const { client, budgets } = captureClient();
     setSimClientLoader(async () => client);
 
     await useSimStore.getState().loadProgram('G0 X0 Y0 Z1\n', setup(), flatEndMill(1), null);
-    expect(budgets).toEqual([90_000]);
+    expect(budgets).toEqual([45_000]);
     expect(useSimStore.getState().speed).toBe(5);
 
-    await useSimStore.getState().retryWithLongerBudget();
-    expect(budgets).toEqual([90_000, 180_000]);
+    // #895 — no doubling: the window is a stall bound, not a budget to raise.
+    await useSimStore.getState().retry();
+    expect(budgets).toEqual([45_000, 45_000]);
 
-    // A session ends; the NEXT load is fresh again and reads the seed, not the doubled budget.
+    // A session ends; the NEXT load is fresh again and reads the seed.
     await useSimStore.getState().dispose();
-    expect(useSimStore.getState().budgetMs).toBe(90_000);
+    expect(useSimStore.getState().stallMs).toBe(45_000);
     expect(useSimStore.getState().speed).toBe(5);
     await useSimStore.getState().loadProgram('G0 X0 Y0 Z1\n', setup(), flatEndMill(1), null);
-    expect(budgets).toEqual([90_000, 180_000, 90_000]);
+    expect(budgets).toEqual([45_000, 45_000, 45_000]);
   });
 
   it('a form with no file stock starts from the located blank, and reset returns to it', () => {

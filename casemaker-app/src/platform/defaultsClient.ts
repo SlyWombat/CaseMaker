@@ -43,11 +43,24 @@ export type DefaultSource = (typeof DEFAULT_SOURCES)[number];
 export const DEFAULT_KEY = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)+$/;
 
 /**
- * #871 — THE MOST A SIMULATION SESSION'S LIMIT MAY BE (ms): the `sim.budgetMs` rule's maximum, ten
- * minutes. The shop seed and every retry share it, so "raise the limit" always has a stated top;
- * `simClient` offers the projected limit up to this and says the program is the answer past it.
+ * #895 — HOW LONG A SIMULATION MAY RUN WITHOUT A PROGRESS CHECKPOINT (ms), the `sim.loadStallMs`
+ * rule's maximum: ten minutes. The window is a stall bound, not a limit on a healthy sweep — a
+ * sweep that keeps reporting checkpoints keeps running past any total time.
  */
-export const SIM_BUDGET_MAX_MS = 600_000;
+export const SIM_LOAD_STALL_MAX_MS = 600_000;
+/** #895 — the window's floor: less than this would call a healthy but slow checkpoint a stall. */
+export const SIM_LOAD_STALL_MIN_MS = 5_000;
+
+/**
+ * #895 — KEYS THIS APP NO LONGER READS, and why. `sim.budgetMs` was a wall-clock limit per load;
+ * the simulation now stops only when progress stalls (`sim.loadStallMs`), so the old value is
+ * ignored rather than converted — a total-time budget is not a stall window (a 10-minute budget
+ * would become a 10-minute stall window). Written down here so the retirement is stated, not
+ * silent, and a test proves the stored value is not read.
+ */
+export const RETIRED_DEFAULTS: Readonly<Record<string, string>> = {
+  'sim.budgetMs': 'retired 2026-11-01 (#895): a simulation stops on a progress stall (sim.loadStallMs), not a wall-clock limit',
+};
 
 const filled = z.string().refine((v) => v.trim().length > 0, 'is empty');
 
@@ -340,13 +353,16 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // 10 (/Simulation.md §6) and the budget is where a load used to be stopped. `simStore` and
   // `simSetupStore` read them when a session or a form opens; `simClient` (main-thread side) reads
   // the budget at a load, and the worker is sent plain numbers, never this module. Fallbacks =
-  // `simStore.ts`'s DEFAULT_SPEED / DEFAULT_SIM_BUDGET_MS and `simSetupStore.ts`'s DEFAULT_STOCK.
+  // `simStore.ts`'s DEFAULT_SPEED / DEFAULT_SIM_STALL_MS and `simSetupStore.ts`'s DEFAULT_STOCK.
   // The speed is one of the transport's multipliers (SIM_SPEEDS), not any number in the range.
   'sim.playbackSpeed': { label: 'playback speed a session starts at (chosen)', unit: 'x', rule: z.union([z.literal(1), z.literal(5), z.literal(20), z.literal(100)]), fallback: 20 },
   'sim.defaultStockLengthMm': { label: 'simulation stock length when the file states none (chosen)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 100 },
   'sim.defaultStockWidthMm': { label: 'simulation stock width when the file states none (chosen)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 100 },
   'sim.defaultStockThicknessMm': { label: 'simulation stock thickness when the file states none (chosen)', unit: 'mm', rule: z.number().min(0.1).max(100), fallback: 10 },
-  'sim.budgetMs': { label: 'simulation load budget (chosen)', unit: 'ms', rule: z.number().min(5000).max(SIM_BUDGET_MAX_MS), fallback: 60_000 },
+  // #895 — the simulation's stall watchdog, chosen not measured: generous enough for the slowest
+  // real checkpoint (the bench's slowest single checkpoint measured so far is under a second; the
+  // window is thirty times that so a slow machine or a cold worker is never called a stall).
+  'sim.loadStallMs': { label: 'how long a simulation may run without a progress checkpoint (chosen)', unit: 'ms', rule: z.number().min(SIM_LOAD_STALL_MIN_MS).max(SIM_LOAD_STALL_MAX_MS), fallback: 30_000 },
   'sim.stallMs': { label: 'how long Generate may be silent before the worker is presumed stopped (chosen)', unit: 'ms', rule: z.number().min(10_000).max(1_800_000), fallback: 180_000 },
   // ── #451 sim starting values (end)
   // ── #451 new-item starting depths (begin) — where an item the panel just added begins. CHOSEN,

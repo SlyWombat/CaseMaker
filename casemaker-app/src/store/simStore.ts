@@ -21,7 +21,6 @@ import { MACHINES } from '@/engine/cnc/machine';
 import { simulationProblem } from '@/engine/cnc/simGate';
 import { useSettingsStore } from '@/store/settingsStore';
 import { shopDefault } from '@/store/shopDefaultsStore';
-import { SIM_BUDGET_MAX_MS } from '@/platform/defaultsClient';
 import { stepAtTime, timeAtStep, totalTime } from '@/engine/cnc/playbackClock';
 import { generateRestart as buildRestart, stockFromSetup, type RestartResult } from '@/engine/cnc/restart';
 import type { Tool } from '@/engine/cnc/tool';
@@ -107,20 +106,18 @@ export interface SimProgress {
 }
 
 /**
- * Wall-clock limit a load starts with, ms (#194). Written out rather than imported from
- * `simClient`: that module is reached only by dynamic import so the worker stays out of the
- * production graph, and importing a constant from it here would pull it in. `simClient`'s
- * `SIM_BUDGET_MS` is the counterpart — keep the two equal. Both are the LABELLED no-service
- * fallback for the ONE seed `sim.budgetMs` (#451): each reads the location at use time.
+ * #895 — the STALL WINDOW a load starts with, ms: how long the sweep may run without completing a
+ * checkpoint. Written out rather than imported from `simClient`: that module is reached only by
+ * dynamic import so the worker stays out of the production graph, and importing a constant from it
+ * here would pull it in. `simClient`'s `SIM_LOAD_STALL_MS` is the counterpart — keep the two equal.
+ * Both are the LABELLED no-service fallback for the ONE seed `sim.loadStallMs`: each reads the
+ * location at use time. A healthy sweep keeps resetting the window and runs as long as it takes.
  */
-export const DEFAULT_SIM_BUDGET_MS = 60_000;
+export const DEFAULT_SIM_STALL_MS = 30_000;
 
-/**
- * The budget a fresh session starts with (#451): the shop's `sim.budgetMs`, or the fallback.
- * A retry doubles whatever the session is running on; a NEW session reads the seed again.
- */
-function startingBudgetMs(): number {
-  return shopDefault('sim.budgetMs').value;
+/** The window a fresh session starts with: the shop's `sim.loadStallMs`, or the fallback. */
+function startingStallMs(): number {
+  return shopDefault('sim.loadStallMs').value;
 }
 
 export interface SimState {
@@ -188,21 +185,13 @@ export interface SimState {
    * only what the panel needs to show it.
    */
   restart: RestartResult | null;
-  /** The limit the next `loadProgram` uses, ms; `retryWithLongerBudget` doubles it (#194). */
-  budgetMs: number;
+  /** #895 — the STALL WINDOW the next `loadProgram` uses, ms (no checkpoint inside it = a fault). */
+  stallMs: number;
   /**
-   * #871 — raise this session's limit for a caller that will re-run something itself (the Cut
-   * step's retry re-generates and re-simulates; it needs the new limit, not a re-load of one
-   * program). Clamped to the shop rule's maximum ({@link SIM_BUDGET_MAX_MS}); returns the limit
-   * the next load will use, ms.
+   * #871/#895 — the sweep's latest projection of the whole load, ms, from its measured rate. The
+   * progress line says "about N left" from it; it never stops the run.
    */
-  raiseBudget(factor?: number): number;
-  /**
-   * #871 — set this session's limit to a stated value (the Cut step's retry from a sweep's own
-   * projection names the limit it needs). Clamped to the shop rule's 5 s–10 min; returns what the
-   * next load will use, ms.
-   */
-  setBudgetMs(ms: number): number;
+  projectionMs: number | null;
   /**
    * `calibration` is the saved frame the caller already resolved its OWN machine with (#297). Omit it
    * and the store reads the settings itself, once; pass it (including `null`, meaning "none") and that
@@ -263,8 +252,8 @@ export interface SimState {
     /** #817 — which of `priorRemoval` an exact program made; a column seed cannot use them. */
     priorExactRemoval?: readonly NodeMeshOutput[] | null,
   ): Promise<SimLoadResult | null>;
-  /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
-  retryWithLongerBudget(): Promise<void>;
+  /** #895 — run the last load again on the same stall window. No-op when nothing has been loaded. */
+  retry(): Promise<void>;
   /**
    * Generate a restart `.nc` for the loaded program, resuming at `step` (default: the current
    * step). Refuses when the resume state cannot be re-established, and — like every other
@@ -353,7 +342,7 @@ const EMPTY = {
 };
 let loadSeq = 0;
 /**
- * The arguments of the most recent load, so `retryWithLongerBudget` can run it again (#194), and
+ * The arguments of the most recent load, so `retry` can run it again (#194), and
  * so `generateRestart` verifies against the same machine (#279).
  *
  * `calibration` is read from the settings store ONCE, at the load, and kept for the later restart
@@ -414,10 +403,10 @@ interface LoadArgs {
 let lastLoad: LoadArgs | null = null;
 
 export const useSimStore = create<SimState>()((set, get) => {
-  async function run(args: LoadArgs, budgetMs: number): Promise<SimLoadResult | null> {
+  async function run(args: LoadArgs, stallMs: number): Promise<SimLoadResult | null> {
     const mine = ++loadSeq;
     // A load starts the session's speed at the shop's seed, as it always reset to 20 before #451.
-    set({ ...EMPTY, speed: startingSpeed(), status: 'loading', budgetMs, phase: 'sweep', origin: args.origin, loadedProgram: args.gcodeText, loadedAt: Date.now(), tool: args.tool });
+    set({ ...EMPTY, speed: startingSpeed(), status: 'loading', stallMs, phase: 'sweep', origin: args.origin, loadedProgram: args.gcodeText, loadedAt: Date.now(), tool: args.tool });
     try {
       const client = await clientLoader();
       client.setSimSinks(
@@ -429,11 +418,14 @@ export const useSimStore = create<SimState>()((set, get) => {
         },
       );
       const r = await client.loadSim(args.gcodeText, args.setup, args.tool, args.machineId, {
-        budgetMs,
+        stallMs,
         onProgress: (done: number, total: number, memoryMB?: number | null) => {
           if (mine === loadSeq) set({ progress: { done, total } });
           // #896 — a long goal sweep says which worker is holding the memory, in the report.
           noteFlightProgress('simulate', 'sweep', done, total, undefined, memoryMB === undefined || memoryMB === null ? undefined : { memoryMB });
+        },
+        onProjection: (projectedMs) => {
+          if (mine === loadSeq) set({ projectionMs: projectedMs });
         },
         onPhase: (phase) => {
           if (mine === loadSeq) set({ phase });
@@ -501,7 +493,8 @@ export const useSimStore = create<SimState>()((set, get) => {
   return {
     ...EMPTY,
     speed: startingSpeed(),
-    budgetMs: startingBudgetMs(),
+    stallMs: startingStallMs(),
+  projectionMs: null,
     async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null, breakthroughMm = null, priorRemoval = null, carried = null, priorFields = null, priorExactRemoval = null) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
@@ -517,9 +510,9 @@ export const useSimStore = create<SimState>()((set, get) => {
       const pitchX = shopDefault('sim.columnPitchXMm');
       const rotaryPitch = shopDefault('sim.rotaryPitchDeg');
       const proximity = shopDefault('sim.spindleOffProximityMm');
-      // #451 — a FRESH session takes the shop's `sim.budgetMs`; a later load keeps the session's
-      // budget, which a retry may have doubled. Reading the seed here (not at module import) means
-      // a location that answered after this module loaded still applies to the first load.
+      // #451/#895 — a FRESH session takes the shop's `sim.loadStallMs`; a later load keeps the
+      // session's window. Reading the seed here (not at module import) means a location that
+      // answered after this module loaded still applies to the first load.
       const fresh = lastLoad === null;
       lastLoad = {
         gcodeText,
@@ -542,22 +535,11 @@ export const useSimStore = create<SimState>()((set, get) => {
         priorFields: priorFields === null ? null : [...priorFields],
         priorExactRemoval: priorExactRemoval === null ? null : [...priorExactRemoval],
       };
-      return run(lastLoad, fresh ? startingBudgetMs() : get().budgetMs);
+      return run(lastLoad, fresh ? startingStallMs() : get().stallMs);
     },
-    async retryWithLongerBudget() {
+    async retry() {
       if (!lastLoad) return;
-      await run(lastLoad, Math.min(get().budgetMs * 2, SIM_BUDGET_MAX_MS));
-    },
-    raiseBudget(factor = 2) {
-      const by = Number.isFinite(factor) && factor > 0 ? factor : 2;
-      const next = Math.min(SIM_BUDGET_MAX_MS, Math.round(get().budgetMs * by));
-      set({ budgetMs: next });
-      return next;
-    },
-    setBudgetMs(ms) {
-      const clamped = Math.min(SIM_BUDGET_MAX_MS, Math.max(5_000, Math.round(ms)));
-      set({ budgetMs: clamped });
-      return clamped;
+      await run(lastLoad, get().stallMs);
     },
     generateRestart(opts) {
       const s = get();
@@ -735,7 +717,7 @@ export const useSimStore = create<SimState>()((set, get) => {
     async dispose() {
       loadSeq++;
       lastLoad = null;
-      set({ ...EMPTY, speed: startingSpeed(), budgetMs: startingBudgetMs() });
+      set({ ...EMPTY, speed: startingSpeed(), stallMs: startingStallMs() });
       const c = await clientLoader().catch(() => null);
       await c?.disposeSim();
     },

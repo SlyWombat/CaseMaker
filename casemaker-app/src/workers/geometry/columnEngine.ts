@@ -567,7 +567,12 @@ export interface ColumnParameterisation {
 }
 
 export interface ColumnSweepOpts {
-  budgetMs?: number;
+  /**
+   * #895 — the STALL WINDOW, ms: how long the grid may go without completing a checkpoint. It is
+   * re-armed after every checkpoint, so a healthy grid runs as long as it takes and only silence
+   * is refused. No total-time bound: that is the client's watchdog's business (#194/#895).
+   */
+  stallMs?: number;
   onProgress?: (done: number, total: number) => void;
   /** Override the §4.4 sim-resolution estimate (a spec and the probe set this). */
   resolution?: ColumnResolution;
@@ -1923,7 +1928,11 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const tGrid = performance.now();
 
   const count = perCheckpoint.length;
-  const deadline = opts?.budgetMs === undefined ? null : tGrid + opts.budgetMs;
+  // #895 — the window restarts at every checkpoint, so this is a stall bound, not a deadline.
+  const stallMs = opts?.stallMs;
+  let lastProgressAt = performance.now();
+  // `>=` so a 0 ms window (a spec's sentinel; the shop rule's floor is 5 s) refuses at once.
+  const overStall = (): boolean => stallMs !== undefined && performance.now() - lastProgressAt >= stallMs;
   const anchorEvery = Math.max(COLUMN_MIN_ANCHOR_EVERY, Math.ceil(count / COLUMN_MAX_ANCHORS));
   // anchors[k] is a full grid copy after checkpoint k, for k ≡ anchorEvery−1 (mod anchorEvery),
   // plus the last checkpoint. Snapshotting is a `slice`, the only allocation in the hot loop.
@@ -1969,11 +1978,12 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       }
     }
     if (k % anchorEvery === anchorEvery - 1 || k === count - 1) anchors.set(k, grid.h.slice());
+    lastProgressAt = performance.now();
     if (opts?.onProgress) opts.onProgress(k + 1, count);
-    if (deadline !== null && performance.now() > deadline) {
+    if (overStall()) {
       stats.ms.total = performance.now() - t0;
       stats.checkpointsSwept = k + 1;
-      return { ok: false, diagnostics: [{ severity: 'error', code: 'sweep-budget-exceeded', message: `the column sweep passed its ${Math.round((opts?.budgetMs ?? 0) / 1000)} s budget after ${k + 1} of ${count} checkpoints; raise the limit or coarsen the grid` }] };
+      return { ok: false, diagnostics: [{ severity: 'error', code: 'sweep-stalled', message: `the column sweep stalled at checkpoint ${k + 1} of ${count}: no progress for ${Math.round((stallMs ?? 0) / 1000)} s. This is a fault, not a slow program` }] };
     }
   }
   const tSweep = performance.now();
@@ -2002,11 +2012,13 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     // remains is the sweep's own time budget: past it, the moves still to test are reported.
     let unchecked = 0;
     let outOfTime = false;
+    // #895 — the air phase gets its OWN stall window: the grid checkpoints it follows made progress.
+    const airDeadline = stallMs === undefined ? null : performance.now() + stallMs;
     for (const mv of timeline.airMoves) {
       checked++;
       const tip = Math.min(mv.from[2], mv.to[2]);
       if (tip > grid.initial) continue; // wholly above the stock
-      if (!outOfTime && deadline !== null && checked % 256 === 0 && performance.now() > deadline) outOfTime = true;
+      if (!outOfTime && airDeadline !== null && checked % 256 === 0 && performance.now() > airDeadline) outOfTime = true;
       if (outOfTime) {
         unchecked++;
         continue;
@@ -2023,7 +2035,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       }
     }
     if (unchecked > 0) {
-      diagnostics.push({ severity: 'warning', code: 'air-moves-unchecked', message: `${unchecked} air move(s) below the stock top not checked: the simulation's time budget ran out first` });
+      diagnostics.push({ severity: 'warning', code: 'air-moves-unchecked', message: `${unchecked} air move(s) below the stock top not checked: the simulation stopped making progress before them` });
     }
     stats.airMovesChecked = checked;
     if (gouges.length > 0) diagnostics.push({ severity: 'error', code: 'rapid-through-stock', message: `${gouges.length} rapid${gouges.length === 1 ? '' : 's'} pass through material still present at that point in the program (first at line ${gouges[0]?.line})` });

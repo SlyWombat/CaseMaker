@@ -747,15 +747,15 @@ describe('simStore: plain data and meshes, never jobStore.nodes', () => {
     expect('nodes' in useSimStore.getState()).toBe(false);
   });
 
-  it('#194: progress is observable while loading, and a retry re-runs the SAME file with double the limit', async () => {
+  it('#194/#895: progress is observable while loading, and a retry re-runs the SAME file on the SAME stall window', async () => {
     const session = createSimSession(tl);
-    const seen: { budgetMs?: number; progress: boolean }[] = [];
+    const seen: { stallMs?: number; progress: boolean }[] = [];
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     const client = {
       setSimSinks: () => {},
       loadSim: async (...a: Parameters<typeof session.load>) => {
-        seen.push({ budgetMs: a[4]?.budgetMs, progress: a[4]?.onProgress !== undefined });
+        seen.push({ stallMs: a[4]?.stallMs, progress: a[4]?.onProgress !== undefined });
         a[4]?.onProgress?.(2, 5);
         await gate; // hold the load open, so the store's progress is observable mid-flight
         return session.load(...a);
@@ -775,24 +775,24 @@ describe('simStore: plain data and meshes, never jobStore.nodes', () => {
     expect(store.getState().status).toBe('ready');
     expect(store.getState().progress).toBeNull(); // nothing is loading any more
     expect(store.getState().pathOnly).toBe(false);
-    expect(seen).toEqual([{ budgetMs: 60_000, progress: true }]);
+    expect(seen).toEqual([{ stallMs: 30_000, progress: true }]);
 
-    // The user's "try again with a longer limit": same file, twice the wall clock.
-    await store.getState().retryWithLongerBudget();
-    expect(seen).toEqual([{ budgetMs: 60_000, progress: true }, { budgetMs: 120_000, progress: true }]);
+    // #895 — "again": same file, same window (a stall window is not a budget to raise).
+    await store.getState().retry();
+    expect(seen).toEqual([{ stallMs: 30_000, progress: true }, { stallMs: 30_000, progress: true }]);
     expect(store.getState().status).toBe('ready');
     await store.getState().dispose();
-    expect(store.getState().budgetMs).toBe(60_000); // a fresh session starts at the default again
+    expect(store.getState().stallMs).toBe(30_000); // a fresh session starts at the seed again
     setSimClientLoader(null);
   });
 });
 
 // ---------------------------------------------------------------------------------------
-// #194: the client's hard stop. `sweepTimeline` is ONE synchronous call, so a load that
+// #194/#895: the client's stall watchdog. `sweepTimeline` is ONE synchronous call, so a load that
 // overruns cannot be interrupted from the main thread: terminating the worker is the cancel,
 // and it frees every wasm handle the worker owned with it.
 // ---------------------------------------------------------------------------------------
-describe('simClient: an overrunning load is stopped by the clock', () => {
+describe('#895 — a load that stops reporting is stopped by the watchdog', () => {
   class SilentWorker {
     static terminated = 0;
     addEventListener(): void {}
@@ -801,20 +801,22 @@ describe('simClient: an overrunning load is stopped by the clock', () => {
     terminate(): void { SilentWorker.terminated++; }
   }
 
-  it('the budget expires, the worker is terminated exactly once, and the refusal names the code', async () => {
+  it('the stall window expires, the worker is terminated exactly once, and the refusal names the fault', async () => {
     const g = globalThis as unknown as { Worker: unknown };
     const real = g.Worker;
     SilentWorker.terminated = 0;
     g.Worker = SilentWorker;
     try {
-      const r = await loadSim(THREE, setup(), tool, null, { budgetMs: 25 });
+      // #895 — the window is a stall bound: a worker that never reports a checkpoint is a fault.
+      const r = await loadSim(THREE, setup(), tool, null, { stallMs: 25 });
       expect(r.ok).toBe(false);
       if (r.ok) return;
       // NOT path-only: killing the worker takes the timeline with it, so there is no path
       // either. A path-only refusal only happens when the SWEEP refused and the worker lived.
       expect(r.pathOnly).toBe(false);
-      expect(r.diagnostics[0]?.code).toBe('sweep-budget-exceeded');
-      expect(r.diagnostics[0]?.message).toMatch(/stopped after/);
+      expect(r.diagnostics[0]?.code).toBe('sweep-stalled');
+      expect(r.diagnostics[0]?.message).toMatch(/no progress for/);
+      expect(r.diagnostics[0]?.message).toMatch(/This is a fault, not a slow program/);
       expect(SilentWorker.terminated).toBe(1);
     } finally {
       g.Worker = real;

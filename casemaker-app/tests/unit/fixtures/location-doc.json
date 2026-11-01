@@ -1277,12 +1277,12 @@
       "unit": "mm",
       "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, in Z; 100 x 100 x 10 is the documented default (/Simulation.md \u00a76)"
     },
-    "sim.budgetMs": {
-      "value": 60000.0,
+    "sim.loadStallMs": {
+      "value": 30000.0,
       "source": "seeded",
       "setAt": null,
       "unit": "ms",
-      "note": "chosen, not measured: the wall-clock limit one simulation load starts with. Past it the load is refused (or the worker killed), and Retry starts a load with twice this"
+      "note": "chosen, not measured: how long a simulation may run without completing a progress checkpoint before it is called stalled. A healthy sweep resets the window at every checkpoint and runs as long as it takes"
     },
     "sim.stallMs": {
       "value": 180000.0,
