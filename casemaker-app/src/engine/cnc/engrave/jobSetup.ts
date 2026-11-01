@@ -444,6 +444,11 @@ export type JobFindingCode =
   | 'face-hole-cutter'
   // #836 — the neck for parting and face operations cannot share a run: the neck is the last cut.
   | 'neck-with-faces'
+  // #842 — a cut on a face the face's cutter cannot make: carried by a finer owned cutter in its
+  // own program (`face-cut-finer-cutter`, info), or left uncut with the rest posting
+  // (`face-cut-uncuttable`, warning).
+  | 'face-cut-finer-cutter'
+  | 'face-cut-uncuttable'
   // #666 — THE ADAPTIVE-CLEARING STRATEGY a metal pocket is cut with (see `cam/adaptive.ts`).
   // `adaptive-clearing` (info) states the plan the file was cut from — engagement, levels, entry,
   // feed owner — in the plan's own words. `adaptive-fallback` (warning) says the planner declined a

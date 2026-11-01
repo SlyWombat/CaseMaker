@@ -31,7 +31,7 @@
  *     but not for a CAM or POST refusal, and a refusal with no reason is useless in the panel.
  */
 
-import type { EngraveItem, EngraveJob, EngraveMargins, EngraveRectShape, EngraveShape, EngraveTargetObject } from '@/types/engraveJob';
+import type { EngraveFaceItem, EngraveItem, EngraveJob, EngraveMargins, EngraveRectShape, EngraveShape, EngraveTargetObject } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
@@ -73,7 +73,7 @@ import {
   type VCarvePlane,
 } from '@/engine/cnc/vCarveGeometry';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
-import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
+import { cutterOnMetalLine, cutterRefusedOnMaterial } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
@@ -5386,16 +5386,192 @@ function generateFaceProgram(
   // follow the face's pocket, so the plane is cut before the work on it. A sub-program that
   // refuses (a text too large for the face, a pocket off its edges) refuses the job with its own
   // sentences — they name the item.
-  const faceCuts = new Map<number, { operations: CamOperation[]; predicted: OraclePredicted[] }>();
+  // #842 — A CUT TOO FINE FOR THE FACE'S CUTTER INFORMS, IT DOES NOT REFUSE. The cut is measured
+  // by generating it: when the face's cutter cannot make one (text thinner than the cutter, a
+  // pocket smaller than it), a FINER owned flat end is tried and the cut is carried in its own
+  // program at the same indices; when no owned cutter makes it, the cut is named as left uncut
+  // and the rest of the job posts.
+  type CutBuild = { operations: CamOperation[]; predicted: OraclePredicted[] };
+  const buildCut = (
+    frame: FaceFrame,
+    cutTool: Tool,
+    items: readonly EngraveFaceItem[],
+  ): { ok: true; built: CutBuild; findings: JobFinding[] } | { ok: false; findings: JobFinding[]; failedIds: string[]; hard: boolean } => {
+    const built = faceItemProgram({ tl, frame: { ...frame, items }, job, tool: cutTool, catalogue, calibration, margins, shop, radius: map.radius });
+    if (!built.errored) {
+      return { ok: true, built: { operations: built.operations, predicted: built.predicted }, findings: built.findings };
+    }
+    const ids = new Set(items.map((it) => it.id));
+    const failedIds: string[] = [];
+    let hard = false;
+    for (const f of built.findings) {
+      if (f.severity !== 'error') continue;
+      if (f.labelId !== undefined && ids.has(f.labelId)) {
+        if (!failedIds.includes(f.labelId)) failedIds.push(f.labelId);
+      } else {
+        hard = true;
+      }
+    }
+    return { ok: false, findings: built.findings, failedIds, hard: hard || failedIds.length === 0 };
+  };
+  const faceCuts = new Map<number, CutBuild>();
+  const failedByFrame = new Map<number, string[]>();
   for (let i = 0; i < frames.length; i++) {
     const frame = frames[i]!;
     if (frame.items.length === 0) continue;
-    const built = faceItemProgram({ tl, frame, job, tool, catalogue, calibration, margins, shop, radius: map.radius });
-    allFindings = dedupeFindings([...allFindings, ...built.findings]);
-    if (built.errored) {
-      return fail('findings', 'a cut on a face cannot be made as it is', { findings: allFindings, feeds });
+    const r = buildCut(frame, tool, frame.items);
+    allFindings = dedupeFindings([...allFindings, ...r.findings]);
+    if (r.ok) {
+      if (r.built.operations.length > 0) faceCuts.set(i, r.built);
+      continue;
     }
-    if (built.operations.length > 0) faceCuts.set(i, { operations: built.operations, predicted: built.predicted });
+    if (r.hard) return fail('findings', 'a cut on a face cannot be made as it is', { findings: allFindings, feeds });
+    failedByFrame.set(i, r.failedIds);
+  }
+  /** #842 — one program per finer cutter, each carrying the cuts it was chosen for. */
+  const finePrograms: EngraveProgram[] = [];
+  if (failedByFrame.size > 0) {
+    // The coarse program keeps every cut its cutter can make.
+    for (const [i, ids] of failedByFrame) {
+      const frame = frames[i]!;
+      const keep = frame.items.filter((it) => !ids.includes(it.id));
+      if (keep.length === 0) continue;
+      const r = buildCut(frame, tool, keep);
+      if (r.ok) {
+        if (r.built.operations.length > 0) faceCuts.set(i, r.built);
+      } else if (r.hard) {
+        return fail('findings', 'a cut on a face cannot be made as it is', { findings: allFindings, feeds });
+      }
+    }
+    // The finer cutters: owned flat ends narrower than the face's cutter, widest first, that the
+    // material allows and that fit the narrowest failed face's chord.
+    const currentD = cuttingDiameter(tool) ?? 0;
+    const failedFrames = [...failedByFrame.keys()].map((i) => frames[i]!);
+    const narrowestChord = failedFrames.reduce((m, f) => Math.min(m, f.chord), Number.POSITIVE_INFINITY);
+    const candidates = (shop.tools ?? [])
+      .filter((entry) => entry.tool.shape === 'flat')
+      .filter((entry) => {
+        const d = statedCuttingSize(entry.tool) ?? 0;
+        return d > 0 && d < currentD - 1e-9 && d <= narrowestChord + 1e-9;
+      })
+      .filter((entry) => !cutterRefusedOnMaterial(entry.tool, job.stock.material, job.metalLineOverride, false))
+      .sort((a, b) => (statedCuttingSize(b.tool) ?? 0) - (statedCuttingSize(a.tool) ?? 0));
+    // Each failed frame's cuts go to the first finer cutter that makes them, in one program per
+    // cutter at that face's index.
+    const byCutter = new Map<string, { entry: ToolLibraryEntry; faces: Map<number, CutBuild>; cuts: EngraveFaceItem[] }>();
+    const uncut: { frame: FaceFrame; ids: string[] }[] = [];
+    for (const [i, ids] of failedByFrame) {
+      const frame = frames[i]!;
+      const items = frame.items.filter((it) => ids.includes(it.id));
+      let taken = false;
+      for (const cand of candidates) {
+        const r = buildCut(frame, cand.tool, items);
+        if (!r.ok) continue;
+        const group = byCutter.get(cand.key) ?? { entry: cand, faces: new Map<number, CutBuild>(), cuts: [] };
+        group.faces.set(i, r.built);
+        group.cuts.push(...items);
+        byCutter.set(cand.key, group);
+        allFindings = dedupeFindings([...allFindings, ...r.findings]);
+        taken = true;
+        break;
+      }
+      if (!taken) uncut.push({ frame, ids });
+    }
+    for (const [candKey, group] of byCutter) {
+      const operations: CamOperation[] = [];
+      const finePredicted: OraclePredicted[] = [];
+      for (const [, built] of [...group.faces.entries()].sort((a, b) => a[0] - b[0])) {
+        operations.push(...built.operations);
+        finePredicted.push(...built.predicted);
+      }
+      if (operations.length === 0) continue;
+      let n = 1;
+      for (const op of operations) op.number = n++;
+      const fineFeeds = feedsFor(catalogue, job.stock.material, group.entry.tool, mill, job.cutOverride, shop.feeds ?? undefined);
+      if (!fineFeeds.ok) {
+        uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
+        continue;
+      }
+      const fineIr: ToolpathIR = {
+        frame: 'rotary',
+        rotary: { radius: map.radius },
+        tool: group.entry.tool,
+        toolNumber: toolNumberFor(group.entry.tool),
+        spindleRpm: fineFeeds.params.rpm,
+        air: job.cutOverride?.air ?? true,
+        safeZ: SAFE_Z,
+        hopZ: HOP_Z,
+        operations,
+      };
+      const fineCtx: PostContext = {
+        jobName: job.name,
+        stock: { length: job.stock.length, width: 2 * map.radius, thickness: 2 * map.radius },
+        materialName: job.stock.material,
+        zDatum: 'rotary-axis',
+        origin: 'topFrontLeft',
+        camVersion: CAM_VERSION,
+        toolKey: candKey,
+      };
+      const postedFine = postZ1(fineIr, fineCtx, mill, { vacuum: 'none' });
+      if (!postedFine.ok) {
+        uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
+        continue;
+      }
+      const fineSetup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+      const fineVerify = verifyProgram(postedFine.text, {
+        setup: fineSetup,
+        machine: mill,
+        tool: group.entry.tool,
+        depthLimit: jobDepthLimit(job, margins.boundaryMargin),
+        minRapidZ: fineIr.hopZ,
+        rotary: { radius: map.radius, stickout: map.stickout, tailstock: map.tailstock },
+      });
+      if (fineVerify.findings.some((f) => f.severity === 'error')) {
+        uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
+        continue;
+      }
+      const fineOne: Omit<EngraveGenerated, 'programs'> = {
+        ...emptyGoalResult(),
+        ok: true,
+        stage: 'done',
+        findings: [],
+        feeds: fineFeeds,
+        cam: summarize(fineIr),
+        nc: postedFine.text,
+        frame: 'rotary',
+        verify: fineVerify,
+        predicted: finePredicted,
+        errors: [],
+      };
+      finePrograms.push(
+        programOf(fineOne, { setupIndex: 1, setupId: jobSetups(job)[0]!.id, toolKey: candKey, itemIds: [] }),
+      );
+      const words = group.cuts.map((c) => `“${c.text ?? ''}”`).join(', ');
+      allFindings = dedupeFindings([
+        ...allFindings,
+        {
+          severity: 'info',
+          code: 'face-cut-finer-cutter',
+          message: `${words} on the face${group.faces.size === 1 ? '' : 's'} is finer than the job’s ${toolDisplayName(tool)}; it is cut with ${toolDisplayName(group.entry.tool)} in a program of its own, after the face.`,
+        },
+      ]);
+    }
+    for (const u of uncut) {
+      const items = u.frame.items.filter((it) => u.ids.includes(it.id));
+      const finest = candidates.at(-1);
+      const words = items.map((it) => (it.kind === 'text' ? `“${it.text ?? ''}”` : it.kind === 'pocket' ? 'a pocket' : 'a hole')).join(', ');
+      allFindings = dedupeFindings([
+        ...allFindings,
+        {
+          severity: 'warning',
+          code: 'face-cut-uncuttable',
+          message:
+            `${words} on the face at A ${Math.round(u.frame.a * 1000) / 1000}° is finer than every owned flat end` +
+            `${finest === undefined ? '' : ` (the finest tried is ${toolDisplayName(finest.tool)})`}, so it is left uncut — the rest of the job cuts. ` +
+            `Use a finer flat end for that cut, or make it larger.`,
+        },
+      ]);
+    }
   }
   let predicted: OraclePredicted[] = planned.plan.predicted;
   if (faceCuts.size > 0) {
@@ -5469,7 +5645,8 @@ function generateFaceProgram(
     toolKey: job.toolKey,
     itemIds: [],
   };
-  return { ...one, programs: [programOf(one, ref)] };
+  // #842 — the coarse face program, then one program per finer cutter the cuts needed.
+  return { ...one, programs: [programOf(one, ref), ...finePrograms] };
 }
 
 export function engraveGenerate(
@@ -5739,7 +5916,7 @@ export function engraveGenerate(
         ...oneReady,
         surface: shop.surface ?? null,
         findings: dedupeFindings([...oneReady.findings, ...faceOne.findings]),
-        programs: [...surfacePrograms, ...(facingFile === null ? [] : [facingFile]), ...engraved, programOf(faceOne, faceRef)],
+        programs: [...surfacePrograms, ...(facingFile === null ? [] : [facingFile]), ...engraved, ...faceOne.programs],
       };
     }
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
@@ -5791,6 +5968,8 @@ export function engraveGenerate(
   const attempts: OneProgram[] = [];
   const posted: PostedProgram[] = [];
   const restFindings: JobFinding[] = [];
+  // #842 — a face ref's finer-cut programs ride AFTER its coarse file, in the run's list.
+  const extraFacePrograms: EngraveProgram[] = [];
   let restLink: RestLink | null = null;
   let cursor = 0;
   const spanAt = (index: number): VacuumSpan =>
@@ -5839,9 +6018,13 @@ export function engraveGenerate(
         const span = spanAt(cursor);
         const subTool = toolForProgram(ref, job, tool, shop);
         const sub = jobForSetup(job, ref, subTool);
-        const one = generateFaceProgram(tl, sub, subTool, catalogue, calibration, margins, shop, span);
-        attempts.push(one);
-        if (one.ok && one.nc !== null && one.verify !== null) posted.push({ ref, one, make: () => one, span });
+        const faceResult = generateFaceProgram(tl, sub, subTool, catalogue, calibration, margins, shop, span);
+        const { programs: facePrograms, ...faceOne } = faceResult;
+        attempts.push(faceOne);
+        if (faceOne.ok && faceOne.nc !== null && faceOne.verify !== null) {
+          posted.push({ ref, one: faceOne, make: () => faceOne, span });
+          extraFacePrograms.push(...facePrograms.slice(1));
+        }
         cursor += 1;
         continue;
       }
@@ -5971,16 +6154,20 @@ export function engraveGenerate(
     errors: attempts.flatMap((one) => one.errors),
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
     surface: shop.surface ?? null,
-    programs: posted.flatMap((program) => {
-      // #473 — the face file is the run's first program, then the setup's own. Only the first
-      // program builds it (`generateOneProgram`'s `withFacing`), so only the first posted one can
-      // add it.
-      const face = facingProgramOf(program.one, program.ref);
-      return [
-        ...(face === null ? [] : [face]),
-        programOf(program.one, program.ref),
-      ];
-    }),
+    programs: [
+      ...posted.flatMap((program) => {
+        // #473 — the face file is the run's first program, then the setup's own. Only the first
+        // program builds it (`generateOneProgram`'s `withFacing`), so only the first posted one can
+        // add it.
+        const face = facingProgramOf(program.one, program.ref);
+        return [
+          ...(face === null ? [] : [face]),
+          programOf(program.one, program.ref),
+        ];
+      }),
+      // #842 — the finer-cut face programs follow their coarse file.
+      ...extraFacePrograms,
+    ],
     restPass,
   };
 }

@@ -332,6 +332,60 @@ describe('#833 — cuts ON a face', () => {
   }, 300_000);
 });
 
+describe('#842 — a cut too fine for the face’s cutter', () => {
+  const fine1 = flatEndMill(1, { name: '1 mm flat end', handleDiameter: 3.175, fluteLength: 12, shoulderLength: 12 });
+  const lib = [
+    { key: 'inv:flat-3.175', provenance: 'test', tool: TOOL },
+    { key: 'inv:flat-1', provenance: 'test', tool: fine1 },
+  ];
+  const faceJob = (items: EngraveFaceItem[], depth = 1): EngraveJob => {
+    const job = rod([{ id: 'f', kind: 'flat', a: 30, depth, items }]);
+    job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
+    return job;
+  };
+
+  it('a 3 mm text and the ⌀3.175 cutter: the text is stated uncut, and the face still posts', () => {
+    const job = faceJob([{ id: 't', kind: 'text', x: 20, y: 0, depth: 0.5, text: 'HI', font: DEFAULT_FONT_ID, size: 3 }]);
+    const g = engraveGenerate(tl, job, TOOL, [], null, undefined, { tools: lib });
+    expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.programs).toHaveLength(1);
+    const warning = g.findings.find((f) => f.code === 'face-cut-uncuttable');
+    expect(warning?.severity).toBe('warning');
+    expect(warning?.message).toContain('“HI”');
+    expect(warning?.message).toContain('left uncut');
+  }, 240_000);
+
+  it('a pocket the face’s cutter cannot make is cut by a finer owned cutter, in its own program', () => {
+    // 4 × 1.5 mm: the ⌀3.175 cutter cannot open 1.5 mm, and the ⌀1 can.
+    const job = faceJob([{ id: 'p', kind: 'pocket', x: 20, y: 0, depth: 1, width: 4, height: 1.5 }]);
+    const g = engraveGenerate(tl, job, TOOL, [], null, undefined, { tools: lib });
+    expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.programs).toHaveLength(2);
+    expect(g.programs[0]!.toolKey).toBe(job.toolKey);
+    expect(g.programs[1]!.toolKey).toBe('inv:flat-1');
+    const info = g.findings.find((f) => f.code === 'face-cut-finer-cutter');
+    expect(info?.message).toContain('1 mm flat end');
+    const classes = g.programs.map((p) => buildTimeline(parseGcode(p.nc), toSetup(job, Z1)).summary.rotaryClass);
+    expect(classes).toEqual(['indexed', 'indexed']);
+    const fineA = g.programs[1]!.nc
+      .split('\n')
+      .filter((l) => l.startsWith('G0') || l.startsWith('G1'))
+      .flatMap((l) => [...l.matchAll(/A(-?[\d.]+)/g)].map((m) => Number(m[1])));
+    expect(fineA.every((a) => Math.abs(a - 30) < 1e-6)).toBe(true);
+  }, 300_000);
+
+  it('with no owned finer cutter known, the cut is stated uncut and the face still posts', () => {
+    const job = faceJob([{ id: 'p', kind: 'pocket', x: 20, y: 0, depth: 1, width: 4, height: 1.5 }]);
+    const g = engraveGenerate(tl, job, TOOL, [], null);
+    expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.programs).toHaveLength(1);
+    expect(g.findings.some((f) => f.code === 'face-cut-uncuttable')).toBe(true);
+  }, 240_000);
+});
+
 describe('#836 — a mixed job cuts two programs in cut order', () => {
   it('the map work first (wrapped), then the faces (indexed), in one mounting', () => {
     const job = rod([{ id: 'f', kind: 'flat', a: 30, depth: 1 }]);
