@@ -174,6 +174,16 @@ export type AxisSteps =
     }
   | null;
 
+/** #828 — an ATC's rack as the frame states it: slot positions (tools 1..n), and the exchange Z. */
+export interface ToolRack {
+  /** Slot XY in MACHINE coordinates, index 0 = tool 1. */
+  slots: readonly Vec2[];
+  /** The Z the changer exchanges at (`coordinate.toolrack_z`). */
+  z: Mm;
+  /** Where those positions come from — never left silent, because none of them is a measurement. */
+  source: string;
+}
+
 export interface MillProfile extends MachineIdentity {
   /** A mill. The only process with a spindle and a tool change. */
   process: 'mill';
@@ -261,6 +271,18 @@ export interface MillProfile extends MachineIdentity {
    */
   hasATC: boolean;
   toolSlots: number;
+  /**
+   * #828 — THE RACK ITSELF, when the machine has an automatic changer: where each slot stands in
+   * MACHINE coordinates, and the Z every exchange happens at. Absent on a manual machine.
+   *
+   * The POSITIONS are a statement, not a command: our post writes `Tn M6` and the controller
+   * drives its own rack, so nothing here is ever commanded by this app. They are carried so the
+   * machine profile can STATE the changer the way it states the travel — and so a reader can see
+   * that a Carvera's slots are the firmware's default arrangement rather than a measurement. A
+   * machine that has configured its own slots (`load_custom_tool_slots`) reports those on its own
+   * console and its config; this app does not hold them, and `source` says so.
+   */
+  toolRack?: ToolRack;
   /**
    * #530 — the machine's own camera, when it serves one: the ESP32 module on the Z1 pushes JPEGs
    * over its own WebSocket. Absent on a machine with no camera, and then the camera panel is not
@@ -948,50 +970,206 @@ export function machineFrameProblemById(id: string | null | undefined): string |
 }
 
 /**
- * The Makera Carvera (#773) — the vendor's row, and nothing else.
+ * #828 — THE CARVERA'S SHIPPED FRAME, from the Carvera Community Firmware: the open-source fork
+ * that targets the ORIGINAL Carvera (C1), not the Air. Its `src/config.default` carries
+ * `wifi.machine_name CARVERA_01001` (the Air's file is `config2.default` with
+ * `CARVERA_AIR_01001`), and the anchor, toolrack, clearance and worksize values below; the keys
+ * the file leaves commented are the firmware's own compiled defaults, which `ATCHandler.cpp` and
+ * `Robot.cpp` state.
+ *
+ * Commit: `2c97111cb0bbd6d3edfac2c138963c0255248865`
+ * (github.com/Carvera-Community/Carvera_Community_Firmware).
+ *
+ * NONE OF IT IS A READ OF A MACHINE. A Carvera whose own `/sd/config.txt` was calibrated away
+ * from these shipped defaults reports its own values, and the #279 connection read is what would
+ * replace them — the same standing the Air's shipped frame has. And it is NOT the Z1's Studio
+ * export nor the Air's Controller config: #773 records which file belongs to which machine.
+ */
+export const C1_FRAME: CoordinateFrame = {
+  anchor1: [-360.158, -234.568], // src/config.default @ 2c97111 — coordinate.anchor1_x/_y, active lines
+  anchor2Offset: [90.0, 45.0], // y active in the same file; x is its documented default (coordinate.anchor2_offset_x)
+  toolrackOffset: [356.0, 0.0], // the file's documented defaults; ATCHandler.cpp's CARVERA defaults agree
+  clearanceXY: [-75.0, -3.0], // ATCHandler.cpp's CARVERA arm (@ 2c97111); config.default documents the same
+  clearanceZ: -3.0, // the same arm
+  toolrackZ: -112.5, // config.default's ACTIVE coordinate.toolrack_z (ATCHandler's compiled default is -105)
+};
+
+/**
+ * The Carvera's derivation constants (#828), from the same firmware commit:
+ *
+ *  - the tool-length sensor: `ATCHandler.cpp`'s CARVERA probe fallback is
+ *    `(anchor1_x + toolrack_offset_x, anchor1_y + toolrack_offset_y + 180)` — (356, 180) from
+ *    anchor1 — used when the machine configures no `probe_mcs_*`;
+ *  - the +132 on X: the family's change-arm constant (`ATCHandler.cpp`), the same number the Z1
+ *    and the Air derive. A Carvera with an ATC never runs a manual park — the controller's `M6`
+ *    drives its own rack — so the change position this derives is the family formula, carried
+ *    because the profile's shape is shared, not a position this app commands.
+ *
+ * The config.default comment beside `probe_mcs_*` states the unset probe as Y −42.568, Z −157.0,
+ * which DISAGREES with this commit's code (Y −54.568, Z −152.5 at the same file's toolrack_z).
+ * The code is what the firmware runs, so the code's formula is recorded here and the
+ * disagreement is stated rather than smoothed over.
+ */
+export const C1_DERIVATION_OFFSETS: FrameDerivationOffsets = {
+  sensorOffsetFromAnchor1: [356, 180],
+  changePositionExtraX: 132,
+};
+
+/** The Carvera's shipped frame and its derived datums (#828). */
+const C1_DATUMS = deriveCoordinateFrame(C1_FRAME, C1_DERIVATION_OFFSETS);
+
+/**
+ * The changer's default rack (#828): six slots (`t_MachineType`'s `ATC_Number`), the firmware's
+ * own default arrangement — tool i at `anchor1 + toolrack_offset`, 30 mm apart along Y, tool 1 at
+ * the far end. A machine that configured custom slots (`load_custom_tool_slots`) reports those
+ * instead; this app never commands a slot, so the numbers are carried to be STATED.
+ */
+const C1_RACK_SLOTS: readonly Vec2[] = [1, 2, 3, 4, 5, 6].map(
+  (tool): Vec2 => [
+    // Rounded to the firmware's own three decimals: -234.568 + 150 is -84.56800000000001 in
+    // binary, and a position printed to a screen should read as the number the firmware states.
+    Number((C1_FRAME.anchor1[0] + C1_FRAME.toolrackOffset[0]).toFixed(3)),
+    Number((C1_FRAME.anchor1[1] + C1_FRAME.toolrackOffset[1] + (6 - tool) * 30).toFixed(3)),
+  ],
+);
+
+/**
+ * The Makera Carvera (#773, framed in #828): the vendor's row for the travel and the changer's
+ * size, and the Carvera Community Firmware's shipped configuration for the frame the controller
+ * works in.
  *
  * `t_MachineType` (read 2026-10-29, the Carvera/C1 row): 320 × 240 × 140, rotary ⌀92 × 240, ATC
- * with 6 tools, 3000 mm/min, 15 000 RPM.
+ * with 6 tools, 3000 mm/min, 15 000 RPM. The worksize the firmware file states (340 × 240) is
+ * WIDER on X than the vendor row; the row is what this app bounds a job's stock with, and the
+ * firmware figure is noted here rather than preferred, because the row is the machine's stated
+ * range and the work area is not.
  *
- * NO FRAME, ON PURPOSE. No `coordinate.*` group has ever been read from a Carvera, and the other
- * numbers within reach are not it: Studio's `ControllerConfig.txt` on this machine is the Z1's own
- * export, and the open-source Controller's `CNC.py` fallbacks (anchor1 −360.158, worksize
- * 340 × 240, `travel_x 340`) are a program default that contradicts the library row and is not a
- * machine read. So this is a {@link MillModel}: anything that needs a position refuses by name
- * until the #279 config read runs against a connected Carvera.
+ * WHAT IS NULL, RATHER THAN COPIED FROM THE Z1: the axes' steps-per-mm (the firmware's
+ * `config.default` carries the generic Smoothieboard 200, not this machine's steps, and nothing
+ * else we hold states them) and the rotary's steps-per-degree and homing direction. A controller
+ * read against a real Carvera is what fills them.
+ *
+ * WHAT IS FALSE, AND IS NOT SILENCE: this app's accessory words are the Z1's (`M331`/`M332` and
+ * their sub-codes). The Carvera's vacuum is `M801`/`M802` — a different machine's controls, which
+ * this app does not drive — so `vacuum`, `air` and `antistatic` are false here because the post
+ * must not speak them at a Carvera, not because the machine lacks them. `rotary` is true: the
+ * library row states the module's envelope. `laser` is false: no source states one is fitted.
+ *
+ * The dialect is the shared Makera firmware's — the same family the Air's comment records — read
+ * off that firmware's parser and its own G-code vocabulary.
  */
-export const CARVERA: MillModel = {
+export const CARVERA: MillProfile = {
   id: 'C1',
   name: 'Makera Carvera',
   process: 'mill',
-  frameState: 'unread',
+  frameState: 'read',
   materials: MAKERA_MATERIALS,
   envelope: { x: { min: -320, max: 0 }, y: { min: -240, max: 0 }, z: { min: -140, max: 0 } },
   maxCutFeed: 3000,
+  rapidEstimate: {
+    xyMmPerMin: 3000,
+    zMmPerMin: 2000,
+    accelMmPerS2: 150,
+    // src/config.default @ 2c97111: alpha/beta_max_rate 3000, gamma_max_rate 2000, acceleration
+    // 150 — the documented defaults (the Air ships the same rates). Shipped settings, not measured.
+    source:
+      'Carvera Community Firmware src/config.default @ 2c97111 (alpha/beta_max_rate 3000, gamma_max_rate 2000, acceleration 150 — the keys’ defaults) — shipped settings, not measured',
+  },
+  axisSteps: null,
   maxRpm: 15000,
+  sensorOffsetFromAnchor1: C1_DERIVATION_OFFSETS.sensorOffsetFromAnchor1,
+  changePositionExtraX: C1_DERIVATION_OFFSETS.changePositionExtraX,
+  sources: {
+    maxCutFeed:
+      'makera_library.db t_MachineType, Carvera (C1) row (maxFeedRate 3000), read 2026-10-29 (vendor figure, not measured)',
+    maxRpm:
+      'makera_library.db t_MachineType, Carvera (C1) row (maxRPM 15000), read 2026-10-29 (vendor figure, not measured)',
+    sensorOffsetFromAnchor1:
+      'Carvera Community Firmware src/modules/tools/atc/ATCHandler.cpp @ 2c97111 — the CARVERA probe fallback (anchor1 + toolrack offsets, +180 on Y) when no probe_mcs_* is configured',
+    changePositionExtraX:
+      'Carvera Community Firmware src/modules/tools/atc/ATCHandler.cpp @ 2c97111 — the +132 on X every model’s change arm uses (an ATC Carvera changes at its rack, not here)',
+  },
+  // t_MachineType C1: isATC 1, ATC_Number 6.
   hasATC: true,
   toolSlots: 6,
-  rotaryEnvelope: { diameter: 92, length: 240 },
-  sources: {
-    envelope:
-      'makera_library.db t_MachineType, Carvera (C1) row: range 320 × 240 × 140, read 2026-10-29 (vendor figure, not measured)',
-    maxCutFeed:
-      'makera_library.db t_MachineType, Carvera (C1) row (maxFeedRate 3000), read 2026-10-29',
-    maxRpm: 'makera_library.db t_MachineType, Carvera (C1) row (maxRPM 15000), read 2026-10-29',
-    atc: 'makera_library.db t_MachineType, Carvera (C1) row (isATC 1, ATC_Number 6), read 2026-10-29',
-    rotaryEnvelope:
-      'makera_library.db t_MachineType, Carvera (C1) row (range_A_Diameter 92, range_A_Length 240), read 2026-10-29',
+  toolRack: {
+    slots: C1_RACK_SLOTS,
+    z: C1_FRAME.toolrackZ,
+    source:
+      'Carvera Community Firmware src/modules/tools/atc/ATCHandler.cpp @ 2c97111 — the default slot list built when a machine configures no custom slots (tool i at anchor1 + the toolrack offsets, 30 mm apart along Y); a machine with its own slot list reports those, and this app does not hold them',
+  },
+  softEndstop: {
+    enabled: true,
+    xMin: -371.0,
+    yMin: -250.0,
+    zMin: -135.0,
+    // src/modules/robot/Robot.cpp @ 2c97111: soft_endstop.enable true, x_min -371.0, y_min -250.0,
+    // z_min -135.0 — the firmware's compiled defaults; config.default documents the same values.
+    source:
+      'Carvera Community Firmware src/modules/robot/Robot.cpp @ 2c97111 (the soft_endstop defaults) — shipped settings, not measured',
+  },
+  capabilities: { rotary: true, laser: false, air: false, vacuum: false, antistatic: false },
+  dialect: { acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 },
+  anchor1: C1_FRAME.anchor1,
+  anchor2: C1_DATUMS.anchor2,
+  toolChange: {
+    clearanceZ: C1_FRAME.clearanceZ,
+    clearanceXY: C1_FRAME.clearanceXY,
+    changePosition: C1_DATUMS.changePosition,
+    // atc.safe_z_mm, an ACTIVE key in the same config.default; the Air's file ships the same value.
+    safeZ: -20.0,
+    sensor: C1_DATUMS.sensor,
+    // The firmware's CARVERA probe fallback: `toolrack_z − 40` at the same commit, so -152.5 at this
+    // file's toolrack_z. It is BELOW the 140 mm travel the row states, exactly as the Air's -108 is
+    // below its 130 — recorded as the firmware would send it, not as a reachable position.
+    sensorZ: C1_FRAME.toolrackZ - 40,
+    probeFastFeed: 500, // atc.probe.fast_rate_mm_m, active
+    probeSlowFeed: 100, // atc.probe.slow_rate_mm_m, active
+    probeRetract: 2, // atc.probe.retract_mm — the documented default (the Z1's is 1)
+    sources: {
+      safeZ: 'Carvera Community Firmware src/config.default @ 2c97111 (atc.safe_z_mm -20.0) — shipped settings',
+      probeFastFeed: 'Carvera Community Firmware src/config.default @ 2c97111 (atc.probe.fast_rate_mm_m 500)',
+      probeSlowFeed: 'Carvera Community Firmware src/config.default @ 2c97111 (atc.probe.slow_rate_mm_m 100)',
+      probeRetract: 'Carvera Community Firmware src/config.default @ 2c97111 (atc.probe.retract_mm default 2)',
+    },
+  },
+  holder: null,
+  rotary: {
+    axis: 'A',
+    parent: 'y',
+    envelope: { diameter: 92, length: 240 },
+    stepsPerDegree: null,
+    // delta_max_rate 1800 and delta_acceleration 360, both ACTIVE keys in the same file.
+    maxRate: 1800,
+    acceleration: 360,
+    homing: null,
+    unwind: 'G92.4 A S',
+    sources: {
+      envelope:
+        'Makera’s own figure (t_MachineType C1 row: range_A_Diameter 92, range_A_Length 240 — the library database, read 2026-10-29) — not measured',
+      stepsPerDegree:
+        'not stated anywhere we hold: the Carvera Community Firmware config.default carries no rotary steps per degree for the C1',
+      maxRate: 'Carvera Community Firmware src/config.default @ 2c97111 (delta_max_rate 1800) — shipped settings',
+      acceleration:
+        'Carvera Community Firmware src/config.default @ 2c97111 (delta_acceleration 360) — shipped settings',
+      homing:
+        'not stated: config.default leaves delta_homing_direction commented at this commit, so the A axis’s homing direction is unread',
+      unwind:
+        'the shared Makera firmware (MakeraZ1Firmware Robot.cpp:667, G92.4) @ 8ae81f3 — the same family',
+    },
   },
 };
 
 /**
  * The mills whose controller frame is established: the only machines a job may be written for.
- * The Z1 and the Carvera Air are FRAMED; a {@link MillModel} is not in here, so no id lookup that
- * returns a `MillProfile` can ever hand back a machine whose positions are unknown.
+ * The Z1, the Carvera Air and — since #828 — the Carvera are FRAMED; a {@link MillModel} is not
+ * in here, so no id lookup that returns a `MillProfile` can ever hand back a machine whose
+ * positions are unknown.
  */
 export const MACHINES: Readonly<Record<string, MillProfile>> = {
   [Z1.id]: Z1,
   [CARVERA_AIR.id]: CARVERA_AIR,
+  [CARVERA.id]: CARVERA,
 };
 
 /**
@@ -1224,6 +1402,16 @@ export const millProfileSchema = z.object({
   }),
   hasATC: z.boolean(),
   toolSlots: z.number().int().nonnegative(),
+  // #828 — an ATC's rack as the frame states it. Optional: a manual machine has none, and a
+  // changer's positions may be unstated (the rack is the controller's) — but when the field IS
+  // present its source is required, like every other provenance on this record.
+  toolRack: z
+    .object({
+      slots: z.array(vec2),
+      z: finite,
+      source: z.string().min(1),
+    })
+    .optional(),
   softEndstop: softEndstopSchema,
   capabilities: z.object({ rotary: z.boolean(), laser: z.boolean(), air: z.boolean(), vacuum: z.boolean(), antistatic: z.boolean() }),
   dialect: z.object({

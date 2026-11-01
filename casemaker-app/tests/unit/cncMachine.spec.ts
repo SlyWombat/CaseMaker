@@ -28,11 +28,12 @@ import {
 } from '@/engine/cnc/machine';
 
 describe('the Z1 profile', () => {
-  it('is one of the framed mills — the Z1 and the Carvera Air carry a frame (#773)', () => {
-    // #183 scoped the file to the Z1; #773 adds the Carvera Air (framed) and the Carvera (a row
-    // with no frame, deliberately NOT in `MACHINES`). What a job may be written for is exactly
-    // the framed pair: no id lookup here can hand back a machine whose positions are unknown.
-    expect(Object.keys(MACHINES)).toEqual(['Z1', 'CA1']);
+  it('is one of the framed mills — the Z1, the Carvera Air and the Carvera carry a frame (#773, #828)', () => {
+    // #183 scoped the file to the Z1; #773 added the Carvera Air (framed) and the Carvera (a row
+    // with no frame at the time); #828 framed the Carvera from the Carvera Community Firmware.
+    // What a job may be written for is exactly the framed trio: no id lookup here can hand back a
+    // machine whose positions are unknown.
+    expect(Object.keys(MACHINES)).toEqual(['Z1', 'CA1', 'C1']);
   });
 
   it('carries the database row: 200 x 200 x 100, 1200 mm/min, 13 000 RPM, no ATC', () => {
@@ -395,43 +396,66 @@ describe('#773 the Carvera Air is framed, and the Carvera is a row with no frame
     expect(CARVERA_AIR.toolChange.probeRetract).toBe(2); // the Z1's is 1
   });
 
-  it('the Carvera is a vendor row with no frame, and the sentence names the fix', () => {
+  it('the Carvera’s frame is the community firmware’s shipped configuration, every field sourced (#828)', () => {
+    const near = (got: readonly number[], want: readonly number[]): void => {
+      expect(got).toHaveLength(want.length);
+      got.forEach((v, i) => expect(v).toBeCloseTo(want[i]!, 6));
+    };
     expect(CARVERA).toMatchObject({
       id: 'C1',
       name: 'Makera Carvera',
-      frameState: 'unread',
+      frameState: 'read',
       maxCutFeed: 3000,
       maxRpm: 15000,
       hasATC: true,
       toolSlots: 6,
-      rotaryEnvelope: { diameter: 92, length: 240 },
     });
     expect(CARVERA.envelope).toEqual({
       x: { min: -320, max: 0 },
       y: { min: -240, max: 0 },
       z: { min: -140, max: 0 },
     });
-    // NOT a framed profile: no id lookup a job path uses may answer with one.
-    expect(MACHINES.C1).toBeUndefined();
-    expect(Object.keys(MACHINES)).toEqual(['Z1', 'CA1']);
+    // The frame: src/config.default @ 2c97111 (CARVERA_01001), with the firmware's own compiled
+    // defaults where the file leaves a key commented.
+    expect(CARVERA.anchor1).toEqual([-360.158, -234.568]);
+    near(CARVERA.anchor2, [-270.158, -189.568]); // anchor1 + (90, 45)
+    near(CARVERA.toolChange.sensor, [-4.158, -54.568]); // the CARVERA probe fallback: anchor1 + (356, 180)
+    near(CARVERA.toolChange.changePosition, [127.842, -234.568]); // anchor1 + (356, 0) + the family's +132
+    expect(CARVERA.toolChange.sensorZ).toBe(-152.5); // toolrack_z − 40 at the file's −112.5
+    expect(CARVERA.toolChange.clearanceZ).toBe(-3);
+    expect(CARVERA.toolChange.clearanceXY).toEqual([-75, -3]);
+    expect(CARVERA.toolChange.safeZ).toBe(-20);
+    expect(CARVERA.softEndstop).toMatchObject({ enabled: true, xMin: -371, yMin: -250, zMin: -135 });
+    // The rack: six slots, the firmware's default arrangement, stated — never commanded.
+    expect(CARVERA.toolRack?.slots).toHaveLength(6);
+    near(CARVERA.toolRack!.slots[0]!, [-4.158, -84.568]); // tool 1
+    near(CARVERA.toolRack!.slots[5]!, [-4.158, -234.568]); // tool 6
+    expect(CARVERA.toolRack!.z).toBe(-112.5);
+    expect(CARVERA.toolRack!.source).toContain('ATCHandler.cpp');
+    // Provenance is SHOWN for the numbers a screen prints.
+    expect(CARVERA.sources.sensorOffsetFromAnchor1).toContain('ATCHandler.cpp');
+    expect(CARVERA.toolChange.sources.safeZ).toContain('config.default');
+    expect(CARVERA.softEndstop.source).toContain('Robot.cpp');
+    // What no source states stays unread rather than borrowed.
+    expect(CARVERA.axisSteps).toBeNull();
+    expect(CARVERA.rotary?.stepsPerDegree).toBeNull();
+    expect(CARVERA.rotary?.homing).toBeNull();
+    // The rotary's shipped rates are the file's active keys.
+    expect(CARVERA.rotary).toMatchObject({ envelope: { diameter: 92, length: 240 }, maxRate: 1800, acceleration: 360 });
     expect(Object.keys(MILL_MODELS)).toEqual(['Z1', 'CA1', 'C1']);
     expect(millModelById('C1')).toBe(CARVERA);
-    expect(millModelById('CA1')).toBe(CARVERA_AIR);
-    expect(millModelById('nope')).toBeUndefined();
-    expect(machineFrameProblem(CARVERA)).toBe(MACHINE_FRAME_UNREAD);
-    expect(machineFrameProblem(CARVERA_AIR)).toBeNull();
-    expect(machineFrameProblemById('C1')).toBe(MACHINE_FRAME_UNREAD);
-    expect(machineFrameProblemById('CA1')).toBeNull();
-    expect(machineFrameProblemById('nope')).toBeNull();
+    expect(machineFrameProblem(CARVERA)).toBeNull();
+    expect(machineFrameProblemById('C1')).toBeNull();
+    // The refusal sentence stays for a model with no frame; nothing this build ships is one.
     expect(MACHINE_FRAME_UNREAD).toBe(
       "This Carvera's frame has not been read from the machine yet; connect it once.",
     );
   });
 
-  it('jobMachine refuses an unframed machine rather than answering with the Z1', () => {
-    // A parsed job cannot name one — the schema refuses it — so this is the guard behind that
-    // refusal. An id this build does not know keeps the documented Z1 fallback.
-    expect(() => jobMachine({ machineId: 'C1' })).toThrow(MACHINE_FRAME_UNREAD);
+  it('jobMachine answers the Carvera with its own framed profile', () => {
+    // An id this build does not know keeps the documented Z1 fallback; a framed model answers
+    // with itself.
+    expect(jobMachine({ machineId: 'C1' })).toBe(CARVERA);
     expect(jobMachine({ machineId: 'CA1' })).toBe(CARVERA_AIR);
     expect(jobMachine({ machineId: 'nope' })).toBe(Z1);
   });
@@ -440,10 +464,27 @@ describe('#773 the Carvera Air is framed, and the Carvera is a row with no frame
     expect(machineSchema.parse(Z1)).toEqual(Z1);
     expect(machineSchema.parse(CARVERA_AIR)).toEqual(CARVERA_AIR);
     expect(machineSchema.parse(CARVERA)).toEqual(CARVERA);
-    expect(millProfileSchema.safeParse(CARVERA).success).toBe(false);
+    // #828 — the Carvera is FRAMED now, so it is a MillProfile and no longer a MillModel.
+    expect(millProfileSchema.safeParse(CARVERA).success).toBe(true);
+    expect(millModelSchema.safeParse(CARVERA).success).toBe(false);
     expect(millModelSchema.safeParse(CARVERA_AIR).success).toBe(false);
+    // A model WITH NO FRAME still parses as the unread kind — the refusal path keeps a shape.
+    const unread = {
+      id: 'X9',
+      name: 'An unread mill',
+      process: 'mill',
+      frameState: 'unread',
+      materials: [],
+      envelope: CARVERA.envelope,
+      maxCutFeed: 1000,
+      maxRpm: 1000,
+      hasATC: false,
+      toolSlots: 0,
+      sources: { envelope: 'test', maxCutFeed: 'test', maxRpm: 'test', atc: 'test', rotaryEnvelope: 'test' },
+    };
+    expect(millModelSchema.parse(unread).frameState).toBe('unread');
     // The half tool change is refused on the row too.
-    expect(millModelSchema.safeParse({ ...CARVERA, toolSlots: 0 }).success).toBe(false);
-    expect(millModelSchema.safeParse({ ...CARVERA, hasATC: false }).success).toBe(false);
+    expect(millProfileSchema.safeParse({ ...CARVERA, toolSlots: 0 }).success).toBe(false);
+    expect(millProfileSchema.safeParse({ ...CARVERA, hasATC: false }).success).toBe(false);
   });
 });

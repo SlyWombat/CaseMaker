@@ -37,7 +37,7 @@ import { engravedFaceWorkZ, partToWork } from '@/engine/cnc/frames';
 import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { validateVise } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
-import { MACHINE_FRAME_UNREAD, Z1 } from '@/engine/cnc/machine';
+import { Z1 } from '@/engine/cnc/machine';
 
 const KEY = 'casemaker.engraveJob.v3';
 
@@ -1719,9 +1719,21 @@ describe('#773 a job names its own machine', () => {
     }
   });
 
-  it('refuses a Carvera job by name: its frame has not been read', () => {
+  // #828 — the Carvera's frame is stated now (the Carvera Community Firmware's shipped
+  // configuration, `machine.ts`), so a Carvera job PARSES; its stock is bounded by the C1's own
+  // travel exactly as any other framed machine's is. The #773 refusal remains for a model whose
+  // frame is still unread — the mechanism, not the Carvera.
+  it('accepts a Carvera job, bounded by the C1’s own travel', () => {
     const parsed = parseEngraveJob(withPatch({ machineId: 'C1' }));
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.errors).toEqual([MACHINE_FRAME_UNREAD]);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.job.machineId).toBe('C1');
+
+    // Wider stock than the Z1 could hold is fine; past the C1's own 320 mm it is not.
+    expect(parseEngraveJob(withPatch({ machineId: 'C1', stock: stockOf({ length: 300, width: 200 }) })).ok).toBe(true);
+    // 330 mm passes the document's own field bound (the widest machine's) and fails the C1's own
+    // 320 mm travel — the per-machine check is what speaks, not a generic field error.
+    const long = parseEngraveJob(withPatch({ machineId: 'C1', stock: stockOf({ length: 330 }) }));
+    expect(long.ok).toBe(false);
+    if (!long.ok) expect(long.errors.join(' ')).toContain("330 mm long is more than the Makera Carvera's 320 mm X travel");
   });
 });
