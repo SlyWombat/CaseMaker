@@ -65,6 +65,12 @@ import { segmentEntersTailstock, tailstockSpan } from './rotary/tailstock';
 export type DepthLimit = (x: number, y: number) => number;
 
 export interface VerifyContext {
+  /**
+   * #845 — WHICH POST WROTE THE FILE. The dialect's word list and its `not-our-dialect` sentence
+   * belong to the post: the Z1's Smoothie dialect and a GRBL 1.1 machine's differ. Absent is the
+   * Z1's, byte for byte, so every caller written before this field judges as it always did.
+   */
+  dialect?: 'z1' | 'grbl';
   /** `toSetup(job, machine)` — #200. Carries the G54 origin and the starting tool. */
   setup: Setup;
   machine: MillProfile;
@@ -263,8 +269,36 @@ export function sacrificialDepthLimit(stock: StockDims, s: Sacrificial, opts: Sa
   };
 }
 
-/** The words our post-processor (#173) may write. Anything else is `not-our-dialect`. */
-const G_ALLOWED = new Set([0, 1, 21, 28, 53, 90]);
+/**
+ * #845 — THE DIALECT TABLE. The whitelist and the refusal's sentence belong to the POST that
+ * wrote the file, not to one machine. `z1` is the Smoothie dialect this app has always written;
+ * `grbl` is the 1.1 post (`post/grbl.ts`), whose words are the control's own — M8/M9 coolant and
+ * the M0 pause, no M6/T, none of the Z1's M331 family.
+ */
+interface DialectWords {
+  g: ReadonlySet<number>;
+  m: ReadonlySet<number>;
+  gList: string;
+  mList: string;
+}
+
+const DIALECTS: Record<'z1' | 'grbl', DialectWords> = {
+  z1: {
+    g: new Set([0, 1, 21, 28, 53, 90]),
+    m: new Set([2, 3, 5, 6, 7, 9, 331, 332]),
+    gList: 'G0 G1 G21 G28 G53 G90',
+    mList: 'M2 M3 M5 M6 M7 M9 M331 M332',
+  },
+  grbl: {
+    // GRBL 1.1: planes and work offsets, the homing move, the modal groups the post uses.
+    g: new Set([0, 1, 17, 21, 28, 53, 54, 90]),
+    // Spindle, coolant, and the MANUAL TOOL CHANGE PAUSE (M0) — no M6, no Z1 accessory codes.
+    m: new Set([0, 3, 5, 8, 9, 30]),
+    gList: 'G0 G1 G17 G21 G28 G53 G54 G90',
+    mList: 'M0 M3 M5 M8 M9 M30',
+  },
+};
+
 /**
  * `M331`/`M332` (bare) are the vacuum the post now writes (#283), and they are the ONLY accessory
  * our post drives. `M7`/`M9` stay accepted although the post no longer writes them: the machine
@@ -277,7 +311,6 @@ const G_ALLOWED = new Set([0, 1, 21, 28, 53, 90]);
  * removal) are refused by the `sub !== 0` rule below, as they always were: we drive the bare mode
  * and nothing else.
  */
-const M_ALLOWED = new Set([2, 3, 5, 6, 7, 9, 331, 332]);
 const PARAM_LETTERS = new Set(['T', 'S', 'F', 'X', 'Y', 'Z']);
 
 interface SourceWord {
@@ -373,6 +406,8 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
   // and turns on the rotary frame's own rules below; absent, this verifier is exactly the flat
   // one it has always been, byte for byte.
   const rotary = ctx.rotary ?? null;
+  // #845 — the post's own words; a rotary file is the Z1 rotary dialect's whatever the machine.
+  const dialect = rotary !== null ? DIALECTS.z1 : DIALECTS[ctx.dialect ?? 'z1'];
 
   // ---- 2. not-our-dialect. A strict whitelist: our post writes only these words.
   for (const w of words) {
@@ -386,24 +421,24 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         rotary !== null &&
         c !== null &&
         ((c.code === 17 && c.sub === 0) || (c.code === 54 && c.sub === 0) || (c.code === 92 && c.sub === 4));
-      if ((c === null || c.sub !== 0 || !G_ALLOWED.has(c.code)) && !rotaryWord) {
+      if ((c === null || c.sub !== 0 || !dialect.g.has(c.code)) && !rotaryWord) {
         push(
           'not-our-dialect',
           w.line,
           rotary === null
-            ? `the word '${shown}' is not in the post's dialect (G0 G1 G21 G28 G53 G90)`
+            ? `the word '${shown}' is not in the post's dialect (${dialect.gList})`
             : `the word '${shown}' is not in the rotary post's dialect (G0 G1 G17 G21 G28 G53 G54 G90 G92.4)`,
         );
       }
     } else if (w.letter === 'M') {
       const c = numParts(w.text);
       const rotaryWord = rotary !== null && c !== null && c.sub === 0 && c.code === 30;
-      if ((c === null || c.sub !== 0 || !M_ALLOWED.has(c.code)) && !rotaryWord) {
+      if ((c === null || c.sub !== 0 || !dialect.m.has(c.code)) && !rotaryWord) {
         push(
           'not-our-dialect',
           w.line,
           rotary === null
-            ? `the word '${shown}' is not in the post's dialect (M2 M3 M5 M6 M7 M9 M331 M332)`
+            ? `the word '${shown}' is not in the post's dialect (${dialect.mList})`
             : `the word '${shown}' is not in the rotary post's dialect (M2 M3 M5 M6 M7 M9 M30 M331 M332)`,
         );
       }

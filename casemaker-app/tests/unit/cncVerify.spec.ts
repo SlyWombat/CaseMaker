@@ -616,3 +616,45 @@ describe('cut-outside-stock against supportedFootprint (#213 §3)', () => {
     expect(codes(ctxFor({ depthLimit }), pastStrip)).not.toContain('cut-outside-stock');
   });
 });
+
+// #845 — THE DIALECT TABLE. A GRBL 1.1 file is judged by the GRBL post's own words: M8/M9
+// coolant and the M0 manual-change pause are its dialect, the Z1's M331 family is not.
+describe('#845 the GRBL dialect', () => {
+  const GRBL_FILE = [
+    'G21 G90',
+    'G54',
+    'M0',
+    'M8',
+    'G0 Z3',
+    'G0 X2 Y2',
+    'M3 S12000',
+    'G0 Z1',
+    'G1 Z-0.5 F300',
+    'G1 X6 F600',
+    'G0 Z5',
+    'M9',
+    'M5',
+    'M30',
+  ].join('\n');
+
+  it('admits the GRBL post’s words under the grbl dialect', () => {
+    const report = verifyProgram(GRBL_FILE, ctxFor({ dialect: 'grbl' }));
+    expect(report.findings.filter((f) => f.code === 'not-our-dialect')).toEqual([]);
+  });
+
+  it('refuses the Z1’s accessory words in a GRBL file, in the GRBL sentence', () => {
+    const z1Word = `${GRBL_FILE}\nM331`;
+    const report = verifyProgram(z1Word, ctxFor({ dialect: 'grbl' }));
+    const refusal = report.findings.find((f) => f.code === 'not-our-dialect');
+    expect(refusal).toBeDefined();
+    expect(refusal!.message).toContain("'M331'");
+    expect(refusal!.message).toContain('M0 M3 M5 M8 M9 M30');
+  });
+
+  it('and the Z1 dialect is unchanged: M8 is not its word, M331 is', () => {
+    const m8 = verifyProgram(GRBL_FILE, ctxFor());
+    expect(m8.findings.some((f) => f.code === 'not-our-dialect' && f.message.includes("'M8'"))).toBe(true);
+    const m331 = verifyProgram(`${GRBL_FILE.replace('M8', 'M331').replace('M9', 'M332')}`, ctxFor());
+    expect(m331.findings.filter((f) => f.code === 'not-our-dialect' && f.message.includes("'M0'"))).toHaveLength(1);
+  });
+});
