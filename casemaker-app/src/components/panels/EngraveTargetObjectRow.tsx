@@ -18,8 +18,10 @@ import {
   LAY_FLAT_SUGGEST_RATIO,
   turnAboutAxis,
   turnsPatch,
+  type FaceDirection,
 } from '@/engine/cnc/engrave/goalOrientation';
 import { rememberGoalPlacement, undoGoalPlacement, useGoalTransformUndo } from '@/store/goalTransformUndo';
+import { useViewportStore } from '@/store/viewportStore';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
 import type { EngraveSurfaceSettings, EngraveTargetObject } from '@/types/engraveJob';
 
@@ -305,6 +307,16 @@ function MeshTurnControls({
   const canUndo = useGoalTransformUndo(
     (s) => s.stack.length > 0 && s.stack[s.stack.length - 1]!.targetId === target.id,
   );
+  // #876 — PLACE ON FACE: arm the viewport to take the click, with the direction the operator
+  // chose. The press toggles; the picker disarms itself once a face is placed.
+  const placeFace = useViewportStore((s) => s.placeFace);
+  const armPlaceFace = useViewportStore((s) => s.armPlaceFace);
+  const disarmPlaceFace = useViewportStore((s) => s.disarmPlaceFace);
+  const armedDirection = placeFace !== null && placeFace.targetId === target.id ? placeFace.direction : null;
+  const arm = (direction: FaceDirection): void => {
+    if (armedDirection === direction) disarmPlaceFace();
+    else armPlaceFace(target.id, direction);
+  };
   const write = (patch: TargetObjectPatch): void => {
     rememberGoalPlacement(target);
     onChange(patch);
@@ -406,6 +418,35 @@ function MeshTurnControls({
           </button>
         )}
       </div>
+      {/* #876 — the face choice is made where the faces are; this press arms the viewport and
+          says which way the picked face goes. 44 px so a phone finger can take it. */}
+      <div style={ROW_INLINE}>
+        <span style={{ fontSize: 11, color: '#9aa4b0' }}>place on face</span>
+        {(['down', 'up'] as const).map((direction) => (
+          <button
+            key={direction}
+            type="button"
+            data-testid={`engrave-target-place-${direction}-${index}`}
+            aria-pressed={armedDirection === direction}
+            title={
+              direction === 'down'
+                ? 'Pick a face in the 3D view: it becomes the bottom of the part.'
+                : 'Pick a face in the 3D view: it becomes the top, the face machined first.'
+            }
+            style={{ minHeight: 44, minWidth: 44 }}
+            onClick={() => arm(direction)}
+          >
+            {direction === 'down' ? 'Face down' : 'Face up first'}
+          </button>
+        ))}
+      </div>
+      {armedDirection !== null && (
+        <p style={MUTED} data-testid={`engrave-target-place-armed-${index}`}>
+          {armedDirection === 'down'
+            ? 'Click a face in the 3D view: it goes face down, at the bottom of the part.'
+            : 'Click a face in the 3D view: it goes face up, the face machined first.'}
+        </p>
+      )}
       {said !== null && said.id === target.id && said.key === turnsKey ? (
         <p style={MUTED} data-testid={`engrave-target-layflat-said-${index}`}>
           {said.text}

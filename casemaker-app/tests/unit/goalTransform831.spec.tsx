@@ -25,6 +25,7 @@ import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { EngraveTargetObjectRow } from '@/components/panels/EngraveTargetObjectRow';
 import { resetEngraveRows } from '@/store/engraveRowStore';
 import { useEngraveJobStore, type TargetObjectPatch } from '@/store/engraveJobStore';
+import { useViewportStore } from '@/store/viewportStore';
 import {
   rememberGoalPlacement,
   resetGoalTransformUndo,
@@ -290,5 +291,37 @@ describe('#831 — undo', () => {
     rememberGoalPlacement();
     useEngraveJobStore.getState().setTargetObject(tall({ id: 'other', data: undefined }));
     expect(undoGoalPlacement()).toBe(false);
+  });
+});
+
+// #876 — PLACE ON FACE is armed from the row: the two presses say which way the picked face
+// goes, the same press toggles off, and arming writes nothing to the document (the click in the
+// viewport is the write).
+describe('#876 — arming place-on-face', () => {
+  function renderRow(target: EngraveTargetObject) {
+    const onChange = vi.fn<(patch: TargetObjectPatch) => void>();
+    render(
+      <EngraveTargetObjectRow target={target} index={0} onChange={onChange} onRemove={() => undefined} findings={[]} stock={STOCK} />,
+    );
+    fireEvent.click(screen.getByTestId('engrave-target-expand-0'));
+    return { onChange };
+  }
+
+  it('arms Face down / Face up first on the viewport store, and toggles off', () => {
+    useViewportStore.setState({ placeFace: null });
+    const target = tall();
+    const { onChange } = renderRow(target);
+    fireEvent.click(screen.getByTestId('engrave-target-place-down-0'));
+    expect(useViewportStore.getState().placeFace).toEqual({ targetId: target.id, direction: 'down' });
+    expect(screen.getByTestId('engrave-target-place-armed-0').textContent).toContain('face down');
+    // The same press disarms.
+    fireEvent.click(screen.getByTestId('engrave-target-place-down-0'));
+    expect(useViewportStore.getState().placeFace).toBeNull();
+    // The other direction arms the other choice and says it.
+    fireEvent.click(screen.getByTestId('engrave-target-place-up-0'));
+    expect(useViewportStore.getState().placeFace).toEqual({ targetId: target.id, direction: 'up' });
+    expect(screen.getByTestId('engrave-target-place-armed-0').textContent).toContain('machined first');
+    expect(onChange).not.toHaveBeenCalled();
+    useViewportStore.setState({ placeFace: null });
   });
 });

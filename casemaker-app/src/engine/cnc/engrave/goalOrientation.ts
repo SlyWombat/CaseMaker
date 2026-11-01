@@ -56,6 +56,78 @@ export function turnAboutAxis(turns: TargetTurns, axis: Axis, deg: number): Targ
   return turnsFromMatrix(mul(r, rotationMatrix(turns)));
 }
 
+/** #876 — which way a placed face ends up: down = the part's bottom, up = the face machined first. */
+export type FaceDirection = 'down' | 'up';
+
+interface Vec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** A rotation of `rad` about the unit `axis`, row-major (Rodrigues). */
+function axisAngleMatrix(axis: Vec3, rad: number): Mat3 {
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  const t = 1 - c;
+  const { x, y, z } = axis;
+  return [
+    t * x * x + c, t * x * y - s * z, t * x * z + s * y,
+    t * x * y + s * z, t * y * y + c, t * y * z - s * x,
+    t * x * z - s * y, t * y * z + s * x, t * z * z + c,
+  ];
+}
+
+function unit(v: Vec3): Vec3 {
+  const len = Math.hypot(v.x, v.y, v.z);
+  return len > 1e-12 ? { x: v.x / len, y: v.y / len, z: v.z / len } : { x: 0, y: 0, z: 1 };
+}
+
+function cross(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x };
+}
+
+/** Rotate vector `v` by the row-major matrix `m`. */
+function applyMatrix(m: Mat3, v: Vec3): Vec3 {
+  return {
+    x: m[0]! * v.x + m[1]! * v.y + m[2]! * v.z,
+    y: m[3]! * v.x + m[4]! * v.y + m[5]! * v.z,
+    z: m[6]! * v.x + m[7]! * v.y + m[8]! * v.z,
+  };
+}
+
+/**
+ * #876 — THE TURNS THAT PUT A CHOSEN FACE ON ±Z. `localNormal` is the face's normal in the mesh's
+ * own frame (as the face picker measured it) and `scale` the target's per-axis scale: a
+ * non-uniform scale turns a normal by the INVERSE TRANSPOSE, not by R alone, so the placed normal
+ * is `R · S⁻¹ · n`. The delta is the smallest world-axis rotation carrying that placed normal to
+ * the chosen target — `down` puts the face at −Z (the part's bottom), `up` at +Z (the face
+ * machined first) — composed exactly as `turnAboutAxis` composes, so the stored form never
+ * changes and a face already facing the target leaves the turns untouched.
+ */
+export function turnsFacing(turns: TargetTurns, localNormal: Vec3, scale: Vec3, direction: FaceDirection): TargetTurns {
+  const inv = (s: number): number => (Math.abs(s) > 1e-9 ? 1 / s : 1);
+  const n = unit({ x: localNormal.x * inv(scale.x), y: localNormal.y * inv(scale.y), z: localNormal.z * inv(scale.z) });
+  const w = unit(applyMatrix(rotationMatrix(turns), n));
+  const target: Vec3 = direction === 'up' ? { x: 0, y: 0, z: 1 } : { x: 0, y: 0, z: -1 };
+  const cos = Math.max(-1, Math.min(1, w.x * target.x + w.y * target.y + w.z * target.z));
+  if (cos >= 1 - 1e-12) return { ...turns };
+  let axis: Vec3;
+  let angle: number;
+  if (cos <= -1 + 1e-12) {
+    // Exactly opposed: a half turn about any axis perpendicular to `w`. Pick a stable one, and
+    // choose it BEFORE normalising — the cross with +Z is zero when w is itself ±Z.
+    let perp = cross(w, { x: 0, y: 0, z: 1 });
+    if (Math.hypot(perp.x, perp.y, perp.z) < 1e-6) perp = cross(w, { x: 1, y: 0, z: 0 });
+    axis = unit(perp);
+    angle = Math.PI;
+  } else {
+    axis = unit(cross(w, target));
+    angle = Math.acos(cos);
+  }
+  return turnsFromMatrix(mul(axisAngleMatrix(axis, angle), rotationMatrix(turns)));
+}
+
 /** The patch that stores `turns` the way the row always has: 0 about X or Y is an absent key. */
 export function turnsPatch(turns: TargetTurns): {
   rotation: number;

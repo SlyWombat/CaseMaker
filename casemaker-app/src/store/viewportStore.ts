@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+import type { FaceDirection } from '@/engine/cnc/engrave/goalOrientation';
+
 const LS_KEY = 'casemaker.viewport';
 
 // Issue #59 — board visualization cycle (schematic / photo / 3d) was a
@@ -146,6 +148,12 @@ export interface ViewportState {
    *  visible on reload, so a hidden part doesn't silently stay hidden when
    *  the user opens a different project. */
   hiddenParts: ReadonlySet<string>;
+  /**
+   * #876 — PLACE ON FACE is armed for a goal mesh: the viewport highlights its near-flat regions
+   * and the next click turns the chosen face `down` to −Z (the part's bottom) or `up` to +Z (the
+   * face machined first). Session-only; the click, a second press, or removing the target ends it.
+   */
+  placeFace: { targetId: string; direction: FaceDirection } | null;
   setShowLid: (v: boolean) => void;
   setShowBoard: (v: boolean) => void;
   setShowGrid: (v: boolean) => void;
@@ -161,6 +169,9 @@ export interface ViewportState {
   togglePartVisible: (partId: string) => void;
   /** Issue #120 — set all parts visible (clear the hidden set). */
   showAllParts: () => void;
+  /** #876 — arm place-on-face for one target; the picker and the row both read this. */
+  armPlaceFace: (targetId: string, direction: FaceDirection) => void;
+  disarmPlaceFace: () => void;
 }
 
 const persisted = loadPersisted();
@@ -181,6 +192,8 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
   selection: null,
   activeSidebarSection: null,
   hiddenParts: new Set<string>(),
+  // #876 — session-only: arming place-on-face never survives a reload.
+  placeFace: null,
   setShowLid: (v) => {
     set({ showLid: v });
     savePersisted({ ...get(), showLid: v });
@@ -246,6 +259,8 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
     set({ hiddenParts: next });
   },
   showAllParts: () => set({ hiddenParts: new Set<string>() }),
+  armPlaceFace: (targetId, direction) => set({ placeFace: { targetId, direction } }),
+  disarmPlaceFace: () => set({ placeFace: null }),
 }));
 
 /**

@@ -30,16 +30,17 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveRowStore } from '@/store/engraveRowStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
-import { targetObjectMesh } from '@/engine/import/targetObject';
 import { targetPlacement } from '@/engine/cnc/engrave/targetScale';
 import { isMold } from '@/engine/cnc/cam/surface3d';
 import type { EngravePrimitive, EngraveTargetObject } from '@/types/engraveJob';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngravePreviewGoal } from '@/workers/sim/engravePreview';
 import { activateEngraveItem } from './engravePick';
+import { GoalFacePicker } from './GoalFacePicker';
 import { GoalTransformHandles } from './GoalTransformHandles';
 import { geometryFromMesh, REMOVED_COLOR } from './simGeometry';
 import { STOCK_COLOR } from './engraveRamp';
+import { useTargetGeometry } from './targetObjectGeometry';
 
 /** The cut-away volume's colour: warm red, distinct from the stock's wood and the floor ramp. */
 const CUT_COLOR = '#e0685f';
@@ -176,27 +177,8 @@ function PrimitiveBody({ primitive }: { primitive: EngravePrimitive }) {
 
 /** The embedded reference part, placed by bbox centre in X/Y and top at `position.z`. */
 function TargetObjectMesh({ target }: { target: EngraveTargetObject }) {
-  // The three fields the decode reads, so a placement edit does not rebuild a large mesh.
-  const { sha256, format, data } = target;
-  const geom = useMemo(() => {
-    try {
-      const parsed = targetObjectMesh({ sha256, format, data });
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(parsed.positions, 3));
-      g.setIndex(new THREE.BufferAttribute(parsed.indices, 1));
-      g.computeVertexNormals();
-      // Local origin at the bbox centre in X/Y and at its TOP in Z, so the row's placement is
-      // the mesh's position with no second offset in the component.
-      const cx = (parsed.bbox.min[0] + parsed.bbox.max[0]) / 2;
-      const cy = (parsed.bbox.min[1] + parsed.bbox.max[1]) / 2;
-      g.translate(-cx, -cy, -parsed.bbox.max[2]);
-      return g;
-    } catch {
-      // A malformed embedded document draws nothing rather than taking the viewport down.
-      return null;
-    }
-  }, [sha256, format, data]);
-  useEffect(() => () => geom?.dispose(), [geom]);
+  // #876 — the geometry build (and its one cache) lives with the place-on-face picker's copy.
+  const geom = useTargetGeometry(target);
   const selected = useViewportStore((s) => isEngraveItemSelected(s.selection, target.id));
   // #721 — a MOLD draws the part as its cavity: the heightfield turns the sampled part over about
   // its X axis at the stock top, which in the placed frame is the same as composing its turn with
@@ -328,6 +310,10 @@ export function EngravePrimitives() {
   );
   const rowOpen = useEngraveRowStore((s) => target !== undefined && s.open.has(target.id));
   const handlesOn = target !== undefined && target.format !== 'png' && (selectedTarget || rowOpen);
+  // #876 — the place-on-face picker, armed from the goal row's Face down / Face up press.
+  const placeFace = useViewportStore((s) => s.placeFace);
+  const facePickOn =
+    target !== undefined && target.enabled && target.format !== 'png' && placeFace !== null && placeFace.targetId === target.id;
 
   if (enabled.length === 0 && (target === undefined || !target.enabled)) return null;
 
@@ -340,6 +326,9 @@ export function EngravePrimitives() {
         ) : (
           <TargetObjectMesh target={target} />
         ))}
+      {facePickOn && target !== undefined && placeFace !== null && (
+        <GoalFacePicker target={target} direction={placeFace.direction} />
+      )}
       {target !== undefined && target.enabled && handlesOn && (
         <GoalTransformHandles target={target} mold={goalTarget && isMold(target)} />
       )}
