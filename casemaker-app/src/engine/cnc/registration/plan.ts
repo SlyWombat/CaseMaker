@@ -165,7 +165,7 @@ export interface MountDatum {
  * (a flat face at axis height, or the radius) is a bench question of its own — the rotary tap
  * arrives with it, and the union gains its member then.
  */
-export type MountTapReference = 'vise-jaw-top' | 'bracket-seat';
+export type MountTapReference = 'vise-jaw-top' | 'bracket-seat' | 'rotary-axis';
 
 /**
  * #599/#607 — the mount's reference point for the registration tap, as the plan carries it.

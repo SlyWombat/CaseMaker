@@ -719,7 +719,7 @@ export async function runMountTap(
   deps: ExecDeps,
   workEnvelopeFloorZ: number,
   /** #607 — which mount's reference this is, for the miss sentence. The vise is the default. */
-  mount: 'vise' | 'bracket' = 'vise',
+  mount: 'vise' | 'bracket' | 'rotary' = 'vise',
 ): Promise<MountTapResult> {
   const io = session(deps, seekFromMachineZ, settings.idlePollLimit);
   const bad = settingsProblem(settings);
@@ -744,7 +744,7 @@ export async function runMountTap(
     if (prb === null || !prb.touched) {
       // The vise's sentence is the bench-tested one and stays byte for byte; the others name their
       // own reference the way the operator sees it.
-      const what = mount === 'vise' ? 'jaw top' : 'bracket top';
+      const what = mount === 'vise' ? 'jaw top' : mount === 'bracket' ? 'bracket top' : 'axis';
       throw new Stop(`no ${what} at (${tap.x}, ${tap.y}) down to machine Z ${f(workEnvelopeFloorZ)} — is the ${mount} where the machine record says?`);
     }
     // #519 item 1 — the standalone tap's reading, as it lands.
