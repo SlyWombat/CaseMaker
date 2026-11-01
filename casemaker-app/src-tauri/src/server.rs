@@ -92,6 +92,136 @@ fn bind_addr_for(host: Option<&str>, bind_to_all: bool) -> IpAddr {
     }
 }
 
+/// Bind the listener for `addr`, with the port held EXCLUSIVELY on Windows (#838).
+///
+/// WINDOWS SHARES A PORT UNLESS TOLD NOT TO. A second process that sets `SO_REUSEADDR` may bind a
+/// specific address on a port another socket already holds on `0.0.0.0`, and receive that
+/// address's traffic — so with the app listening on every interface (`--bind-all`), another
+/// program on the machine can stand in front of the port the page and the machine relay answer on.
+/// The one defence is `SO_EXCLUSIVEADDRUSE`, and Winsock requires it to be set BEFORE the bind.
+/// With it, the hijacker's bind answers `WSAEADDRINUSE` instead of succeeding.
+///
+/// Everywhere else the default IS the behaviour this wants: Rust's `TcpListener::bind` never sets
+/// `SO_REUSEADDR`, and a second bind of the same port fails. So the platform gate is the whole
+/// difference, and the comment stops there rather than pretending to configure Unix.
+fn bind_listener(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    #[cfg(windows)]
+    {
+        windows_bind_exclusive(addr)
+    }
+    #[cfg(not(windows))]
+    {
+        TcpListener::bind(addr)
+    }
+}
+
+/// `bind_listener`'s Windows arm: a Winsock socket created by hand, `SO_EXCLUSIVEADDRUSE` set,
+/// bound and listened before std takes ownership (#838). Hand-rolled rather than pulled from a
+/// crate: this is the one socket the app creates itself, the rest are tokio's, and `socket2` does
+/// not expose the option.
+#[cfg(windows)]
+fn windows_bind_exclusive(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    use std::mem::size_of;
+    use std::os::windows::io::FromRawSocket;
+
+    // Winsock constants (winsock2.h / ws2def.h).
+    const AF_INET: i32 = 2;
+    const SOCK_STREAM: i32 = 1;
+    const IPPROTO_TCP: i32 = 6;
+    const SOL_SOCKET: i32 = 0xffff;
+    // `SO_EXCLUSIVEADDRUSE` is `(int)~SO_REUSEADDR` in ws2def.h, and `SO_REUSEADDR` is 0x0004.
+    const SO_EXCLUSIVEADDRUSE: i32 = !0x0004;
+    const INVALID_SOCKET: usize = usize::MAX;
+    const SOCKET_ERROR: i32 = -1;
+    const BACKLOG: i32 = 128;
+
+    #[repr(C)]
+    struct SockAddrIn {
+        sin_family: u16,
+        sin_port: u16,
+        sin_addr: u32,
+        sin_zero: [u8; 8],
+    }
+
+    #[link(name = "ws2_32")]
+    extern "system" {
+        fn socket(af: i32, ty: i32, protocol: i32) -> usize;
+        fn setsockopt(s: usize, level: i32, optname: i32, optval: *const u8, optlen: i32) -> i32;
+        fn bind(s: usize, name: *const SockAddrIn, namelen: i32) -> i32;
+        fn listen(s: usize, backlog: i32) -> i32;
+        fn closesocket(s: usize) -> i32;
+        fn WSAGetLastError() -> i32;
+    }
+
+    /// Winsock reports through WSA functions, not through the Win32 last-error `std` reads.
+    fn wsa_error() -> std::io::Error {
+        std::io::Error::from_raw_os_error(unsafe { WSAGetLastError() })
+    }
+
+    let ipv4 = match addr.ip() {
+        IpAddr::V4(v4) => v4,
+        // `bind_addr_for` never yields IPv6 (#401), so this is a programming error, not a setting.
+        IpAddr::V6(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "the embedded server binds IPv4 only (#401)",
+            ))
+        }
+    };
+
+    // SAFETY: every handle created here is either closed on the error paths below or handed to a
+    // `TcpListener` exactly once, which takes ownership and closes it on drop.
+    unsafe {
+        let raw = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if raw == INVALID_SOCKET {
+            return Err(wsa_error());
+        }
+        let on: i32 = 1;
+        if setsockopt(
+            raw,
+            SOL_SOCKET,
+            SO_EXCLUSIVEADDRUSE,
+            &on as *const i32 as *const u8,
+            size_of::<i32>() as i32,
+        ) == SOCKET_ERROR
+        {
+            let err = wsa_error();
+            closesocket(raw);
+            return Err(err);
+        }
+        let name = SockAddrIn {
+            sin_family: AF_INET as u16,
+            // Winsock takes the port and address in NETWORK byte order.
+            sin_port: addr.port().to_be(),
+            sin_addr: u32::from_ne_bytes(ipv4.octets()),
+            sin_zero: [0; 8],
+        };
+        if bind(raw, &name, size_of::<SockAddrIn>() as i32) == SOCKET_ERROR {
+            let code = WSAGetLastError();
+            closesocket(raw);
+            // A port held EXCLUSIVELY answers WSAEACCES (10013) to the next bind; a plain
+            // collision answers WSAEADDRINUSE (10048). Both mean "the port is taken", which is
+            // the one thing the caller's sentence says — and the sentence is why the kind matters
+            // more than the code here.
+            const WSAEACCES: i32 = 10013;
+            const WSAEADDRINUSE: i32 = 10048;
+            let err = if code == WSAEACCES || code == WSAEADDRINUSE {
+                std::io::Error::from(std::io::ErrorKind::AddrInUse)
+            } else {
+                std::io::Error::from_raw_os_error(code)
+            };
+            return Err(err);
+        }
+        if listen(raw, BACKLOG) == SOCKET_ERROR {
+            let err = wsa_error();
+            closesocket(raw);
+            return Err(err);
+        }
+        // Ownership transfers here; do not close on this path.
+        Ok(TcpListener::from_raw_socket(raw as u64))
+    }
+}
+
 /// Start the HTTP server on a background tokio task: the SPA's static assets, and the house service
 /// under `/api/v1` (#306). Both are served from this one listener, because a second port would need
 /// its own discovery on the client and its own firewall story on Windows for no gain.
@@ -123,7 +253,7 @@ pub fn start(
     // engrave job and the run records. The app would then open looking exactly like a first run,
     // with the user's data still on disk under a port they no longer know. Refusing to start is the
     // only failure that loses nothing, so `AddrInUse` is reported rather than stepped around.
-    let listener = TcpListener::bind(SocketAddr::new(bind_addr, cfg.requested_port)).map_err(|e| {
+    let listener = bind_listener(SocketAddr::new(bind_addr, cfg.requested_port)).map_err(|e| {
         if e.kind() == std::io::ErrorKind::AddrInUse {
             std::io::Error::new(
                 std::io::ErrorKind::AddrInUse,
@@ -604,6 +734,120 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         assert!(content_type(&res).starts_with("application/json"));
         assert_eq!(body_json(res).await, serde_json::json!([]));
+    }
+
+    /// #838 — THE LISTENER HOLDS ITS PORT EXCLUSIVELY ON WINDOWS.
+    ///
+    /// The attack the issue describes, measured both ways: a plain `TcpListener::bind` on every
+    /// interface leaves the port open to a second process that sets `SO_REUSEADDR` and binds a
+    /// CONCRETE address on it (the hijack), while `bind_listener` sets `SO_EXCLUSIVEADDRUSE`
+    /// before its bind and the same hijack answers `WSAEADDRINUSE`. The last assertion binds the
+    /// hijacker once the listener is dropped, so the test measured the flag rather than a port
+    /// that could not be shared for some other reason.
+    #[cfg(windows)]
+    #[test]
+    fn the_listener_holds_its_port_exclusively() {
+        let plain = TcpListener::bind("0.0.0.0:0").expect("a plain bind");
+        let plain_port = plain.local_addr().expect("plain local addr").port();
+        assert!(
+            hijack(plain_port).is_ok(),
+            "on Windows a plain bind is hijackable — the behaviour #838 is about"
+        );
+        drop(plain);
+
+        let ours = bind_listener("0.0.0.0:0".parse().unwrap()).expect("our exclusive bind");
+        let port = ours.local_addr().expect("local addr").port();
+        assert!(
+            hijack(port).is_err(),
+            "SO_EXCLUSIVEADDRUSE must refuse a second bind of the held port"
+        );
+        // And the APP's own second bind reads as "in use", which is the sentence start() prints:
+        // winsock answers WSAEACCES for an exclusively held port, and `bind_listener` maps both
+        // that and WSAEADDRINUSE onto AddrInUse.
+        let second = bind_listener(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
+        assert_eq!(
+            second.expect_err("the port is held").kind(),
+            std::io::ErrorKind::AddrInUse,
+            "start()'s already-in-use sentence hangs off this kind"
+        );
+        drop(ours);
+        assert!(
+            hijack(port).is_ok(),
+            "the port is free once the listener is dropped"
+        );
+    }
+
+    /// #838 — the hijacker's half: a Winsock socket with `SO_REUSEADDR` set, binding the loopback
+    /// address on a port another listener holds on every interface. `Ok(())` means the bind
+    /// SUCCEEDED (the port was taken over); `Err` is the refusal the exclusive flag produces.
+    #[cfg(windows)]
+    fn hijack(port: u16) -> std::io::Result<()> {
+        use std::mem::size_of;
+
+        const AF_INET: i32 = 2;
+        const SOCK_STREAM: i32 = 1;
+        const IPPROTO_TCP: i32 = 6;
+        const SOL_SOCKET: i32 = 0xffff;
+        const SO_REUSEADDR: i32 = 0x0004;
+        const INVALID_SOCKET: usize = usize::MAX;
+        const SOCKET_ERROR: i32 = -1;
+
+        #[repr(C)]
+        struct SockAddrIn {
+            sin_family: u16,
+            sin_port: u16,
+            sin_addr: u32,
+            sin_zero: [u8; 8],
+        }
+
+        #[link(name = "ws2_32")]
+        extern "system" {
+            fn socket(af: i32, ty: i32, protocol: i32) -> usize;
+            fn setsockopt(s: usize, level: i32, optname: i32, optval: *const u8, optlen: i32) -> i32;
+            fn bind(s: usize, name: *const SockAddrIn, namelen: i32) -> i32;
+            fn listen(s: usize, backlog: i32) -> i32;
+            fn closesocket(s: usize) -> i32;
+            fn WSAGetLastError() -> i32;
+        }
+
+        fn wsa_error() -> std::io::Error {
+            std::io::Error::from_raw_os_error(unsafe { WSAGetLastError() })
+        }
+
+        // SAFETY: the handle is closed on every path below; nothing outlives this function.
+        unsafe {
+            let raw = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if raw == INVALID_SOCKET {
+                return Err(wsa_error());
+            }
+            let on: i32 = 1;
+            if setsockopt(
+                raw,
+                SOL_SOCKET,
+                SO_REUSEADDR,
+                &on as *const i32 as *const u8,
+                size_of::<i32>() as i32,
+            ) == SOCKET_ERROR
+            {
+                let err = wsa_error();
+                closesocket(raw);
+                return Err(err);
+            }
+            let name = SockAddrIn {
+                sin_family: AF_INET as u16,
+                sin_port: port.to_be(),
+                sin_addr: u32::from_ne_bytes(Ipv4Addr::LOCALHOST.octets()),
+                sin_zero: [0; 8],
+            };
+            if bind(raw, &name, size_of::<SockAddrIn>() as i32) == SOCKET_ERROR {
+                let err = wsa_error();
+                closesocket(raw);
+                return Err(err);
+            }
+            let _ = listen(raw, 1);
+            closesocket(raw);
+            Ok(())
+        }
     }
 
     /// #401 — the address is refused in this function, not only where `--host` is read, because the
