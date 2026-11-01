@@ -1798,6 +1798,8 @@ export function EngravePanel(): JSX.Element {
       construction: true,
     });
   };
+
+  /**
    * #736 — THE THROUGH CUT'S TWO ONE-CLICK FIXES. The finding carries the numbers, so the button
    * and the sentence cannot disagree: the board is the thickness that clears the breakthrough with
    * its millimetre, and the membrane is the job's own floor (`minFloor`). Both are ordinary job
