@@ -1262,6 +1262,60 @@ export function finishTipField(
   return tip;
 }
 
+/**
+ * #847 — WHAT A FINISH LEFT, CELL FOR CELL. The finish's gouge-safe TIP FIELD is the surface its
+ * program cuts: at a cell the ball can reach, the tip rests ON the goal; in a concavity tighter
+ * than the ball it rests ABOVE it, and that height IS the material the big ball cannot take.
+ *
+ * A cell is RESIDUAL when its tip stands above the goal by more than the stated tolerance (the
+ * stock-to-leave is not residual — the job means to leave it). `volumeMm3` is the residual above
+ * the goal less that allowance, summed over the cells; `deepestMm` is the largest rise, which is
+ * the depth a smaller ball has to reach to touch the deepest one.
+ */
+export interface SurfaceResidual {
+  /** 1 where the finish's tip field stands above the goal by more than the tolerance. */
+  mask: Uint8Array;
+  /** How many cells the mask holds. */
+  cells: number;
+  /** Residual material above the goal (less the allowance), mm³. */
+  volumeMm3: number;
+  /** The largest tip-above-goal rise, mm — 0 when the finish reaches everything. */
+  deepestMm: number;
+}
+
+/**
+ * The residual a finish's tip field leaves against the goal itself, beyond `stockToLeave` and the
+ * grid's own tolerance. Pure: the same field the CAM cut from, so the number cannot be a second
+ * model of the cut.
+ */
+export function surfaceResidual(
+  hf: GoalHeightfield,
+  tip: Float32Array,
+  stockToLeaveMm: number,
+  toleranceMm: number,
+): SurfaceResidual {
+  const { nx, ny, z, covered, pitch } = hf;
+  const mask = new Uint8Array(nx * ny);
+  const leave = Number.isFinite(stockToLeaveMm) && stockToLeaveMm > 0 ? stockToLeaveMm : 0;
+  const tol = Number.isFinite(toleranceMm) && toleranceMm > 0 ? toleranceMm : 0;
+  let cells = 0;
+  let volume = 0;
+  let deepest = 0;
+  const area = pitch * pitch;
+  for (let idx = 0; idx < nx * ny; idx++) {
+    if (covered[idx] === 0) continue;
+    const rise = (tip[idx] as number) - (z[idx] as number);
+    if (!(rise > 0)) continue;
+    if (rise > deepest) deepest = rise;
+    const over = rise - leave;
+    if (!(over > tol)) continue;
+    mask[idx] = 1;
+    cells += 1;
+    volume += over * area;
+  }
+  return { mask, cells, volumeMm3: volume, deepestMm: deepest };
+}
+
 /** Contiguous runs of covered columns in grid-row `j`, as `[iStart, iEnd]` inclusive pairs. */
 function coveredRuns(hf: GoalHeightfield, j: number): [number, number][] {
   const { nx, covered } = hf;
