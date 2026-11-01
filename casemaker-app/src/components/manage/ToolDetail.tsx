@@ -240,7 +240,7 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
           className="btn btn--sm"
           data-testid="manage-clone-here"
           disabled={disabled}
-          title="Copy this definition into your own tier, to rename it or to record what you measured"
+          title="Copy this definition into your own tier, to rename it or to note what you measured"
           onClick={() => void registerTool(cloneOf(entry, new Date().toISOString()))}
         >
           Clone to change
@@ -514,7 +514,7 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
       <div className="panel-subhead">Codes</div>
       {item.codes.length === 0 ? (
         <p className="hint">
-          No code on record. A code is what a scan matches against, and it is only ever written when
+          No code yet. A code is what a scan matches against, and one is set when
           a cutter is registered.
         </p>
       ) : (

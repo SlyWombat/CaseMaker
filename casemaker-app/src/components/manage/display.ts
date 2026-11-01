@@ -39,3 +39,20 @@ export function formatDay(iso: string | null | undefined): string | null {
   const stamp = formatStamp(iso);
   return stamp === null ? null : (stamp.split(' ')[0] ?? stamp);
 }
+
+/**
+ * #887 — A TIME AS A PERSON SAYS IT: "14:17 today", "yesterday 09:02", and the date only when it
+ * is older than that. A full timestamp everywhere read as machinery.
+ */
+export function timeOfDayWords(iso: string | null, now: Date = new Date()): string | null {
+  if (iso === null) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (d.toDateString() === now.toDateString()) return `${hm} today`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `yesterday ${hm}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
+}

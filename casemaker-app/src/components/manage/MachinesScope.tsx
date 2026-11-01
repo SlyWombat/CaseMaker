@@ -55,7 +55,7 @@ import { ACCESSORIES, AIR_SENTENCE } from '@/platform/machineAccessory';
 import { MachineUnlock } from './MachineUnlock';
 import { MachineStop } from './MachineStop';
 import { MachineLaserOptions } from './MachineLaserOptions';
-import { formatStamp, mm } from './display';
+import { formatStamp, mm, timeOfDayWords } from './display';
 
 /** One `label → value` pair in the card's two-column read-out. */
 function Kv({ label, children }: { label: string; children: ReactNode }) {
@@ -236,10 +236,7 @@ export function MachinesScope() {
         <div className="mhead">
           <div>
             <h3>Machines</h3>
-            <p>
-              The machines this app has reached, each as it answered last time. A check asks the
-              network; the machine answers or it does not.
-            </p>
+            <p>Machines this app has connected to.</p>
             {/* #566 — the commit this installed build came from, from the service's own health
                 report. On k3 the only way to tell one fixed build from the next used to be the
                 binary's md5 and the build timestamp; this is the answer in the place a person
@@ -311,14 +308,9 @@ export function MachinesScope() {
             <h4>
               {machineDisplayName(record, model) ?? machine.name ?? 'A controller'}{' '}
               <span className="tag tag--owned">found</span>
-              <span className="badge">
-                profile: {machine.profileId ?? 'unknown'}
-              </span>
             </h4>
             <div className="sub">
-              {machine.host} : {machine.port} · checked{' '}
-              {formatStamp(checkedAt ?? machine.observedAt) ?? 'at an unreadable time'} · a record of
-              that moment, not a standing claim
+              {machine.host} · checked {timeOfDayWords(checkedAt ?? machine.observedAt) ?? 'at an unreadable time'}
             </div>
             <div className="two">
               <div className="kv">
@@ -328,9 +320,7 @@ export function MachinesScope() {
                 </Kv>
                 <Kv label="busy">
                   {machine.busy === null ? (
-                    <>
-                      — <span className="dim">nothing announced it; a typed address has no broadcast</span>
-                    </>
+                    '—'
                   ) : machine.busy ? (
                     'yes'
                   ) : (
@@ -369,7 +359,7 @@ export function MachinesScope() {
                 type="button"
                 className="btn btn--sm btn--danger"
                 data-testid="manage-machine-forget"
-                title="Forget this machine — the profile keeps its own numbers, this drops our record of it"
+                title="Forget this machine — the profile keeps its own numbers; this forgets it here"
                 onClick={forget}
               >
                 Forget this machine
@@ -584,13 +574,14 @@ export function MachinesScope() {
 
       <aside className="context-panel" data-testid="manage-machine-detail">
         <div className="panel-head">
-          <h3>{machine === null ? 'No machine' : `${machineDisplayName(record, model) ?? machine.host} · last check`}</h3>
+          <h3>
+            {machine === null
+              ? 'No machine'
+              : `${machineDisplayName(record, model) ?? machine.host} · from the machine’s config.txt · read ${
+                  timeOfDayWords(checkedAt ?? machine.observedAt) ?? 'at an unreadable time'
+                }`}
+          </h3>
         </div>
-        <p className="hint">
-          {machine === null
-            ? 'A check writes a record here: where the machine answered, when, and which profile its identity resolved to. Nothing on this rail is edited by hand — the machine owns these numbers, and “Forget” is the only write.'
-            : `Everything here was read from the machine at ${formatStamp(checkedAt ?? machine.observedAt) ?? 'an unreadable time'}. Nothing is edited on this rail: the machine owns these numbers, and “Forget” is the only write.`}
-        </p>
 
         <div className="panel-subhead">Calibration read back</div>
         {calibration === undefined ? (
@@ -681,11 +672,14 @@ export function MachinesScope() {
           </>
         )}
 
-        <div className="panel-subhead">What a job gets from this</div>
-        <p className="hint">
-          The envelope gate, the tool-change positions and the probe feeds in every <code>.nc</code>{' '}
-          this app writes for it — the numbers the file is verified against.
-        </p>
+        <details data-testid="manage-machine-technical">
+          <summary>Technical</summary>
+          <div className="panel-subhead">What a job gets from this</div>
+          <p className="hint">
+            The envelope gate, the tool-change positions and the probe feeds in every <code>.nc</code>{' '}
+            this app writes for it — the numbers the file is verified against.
+          </p>
+        </details>
 
         {/* #416 — no "Bench power" paragraph for everyone: a machine with no switch shows nothing
             about power. A configured switch is on the machine card (`MachinePower`). */}

@@ -5,10 +5,13 @@
 // decimals and trailing zeros dropped. The no-cutting-size branch no longer prints the vendor label
 // (`drill (1mm Drill(Metal))`), and an unclassifiable row is never given a guessed kind.
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { TOOL_GROUPS, cutterNameForKey, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { resetRegistry, setRegistry } from '@/engine/cnc/toolRegistry';
 import { flatEndMill, parseLabelAngle, type Tool } from '@/engine/cnc/tool';
+
+afterEach(() => resetRegistry());
 
 const tool = (over: Partial<Tool>): Tool => ({ ...flatEndMill(1, { number: 1, name: 'vendor label' }), ...over });
 
@@ -153,5 +156,33 @@ describe('#646 the tool display name', () => {
     expect(shapesIn('engraver')).toEqual(['engraving']);
     // No group invents a heading for a row this build cannot classify.
     expect(TOOL_GROUPS.some((g) => g.shapes.includes('unknown'))).toBe(false);
+  });
+});
+
+// #887 — the Cut panel printed `program 1 (cat:019c049a-…)` after a simulation stopped. A built-in
+// key is already a name these surfaces use; a namespaced key is an id and never reaches the screen.
+describe('#887 — a raw registry id is never rendered', () => {
+  it('leaves a friendly built-in key alone', () => {
+    expect(cutterNameForKey('flat-1.0')).toBe('flat-1.0');
+    expect(cutterNameForKey('fly-22')).toBe('fly-22');
+  });
+
+  it('names a catalogue row in words', () => {
+    setRegistry([
+      {
+        key: 'cat:019c049a-8169-73ea-abe6-1076f4779fb6',
+        tool: flatEndMill(3.175, { name: '3.175*12mm Flat End(Metal)' }),
+        provenance: 'spec',
+      },
+    ]);
+    expect(cutterNameForKey('cat:019c049a-8169-73ea-abe6-1076f4779fb6')).toBe('⌀ 3.175 mm flat end');
+  });
+
+  it('names an inventory row in words too, and never prints an id it cannot resolve', () => {
+    setRegistry([{ key: 'inv:kz-o-flute-3-175-25', tool: flatEndMill(3.175, { name: 'Spiral O Flute' }), provenance: 'spec' }]);
+    expect(cutterNameForKey('inv:kz-o-flute-3-175-25')).toBe('⌀ 3.175 mm flat end');
+    // Not in this build's registry: a phrase, never the key.
+    expect(cutterNameForKey('cat:deadbeef-0000-0000-0000-000000000000')).toBe('unknown cutter');
+    expect(cutterNameForKey('user:not-loaded-here')).toBe('unknown cutter');
   });
 });

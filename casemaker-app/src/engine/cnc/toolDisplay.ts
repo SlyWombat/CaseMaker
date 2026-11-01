@@ -26,6 +26,7 @@
  * the hover does.
  */
 
+import { entryFor } from './toolRegistry';
 import { isMetalCutterName, parseLabelAngle, statedCuttingSize, type Tool, type ToolShape } from './tool';
 
 /**
@@ -137,6 +138,19 @@ export function toolDisplay(tool: Tool): ToolDisplay {
 /** The display name alone, for a sentence that names the cutter. */
 export function toolDisplayName(tool: Tool): string {
   return toolDisplay(tool).name;
+}
+
+/**
+ * #887 — A RAW ID IS NEVER RENDERED. Registry keys are namespaced: a built-in has a friendly key
+ * (`flat-1.0`, `fly-22`) that the surfaces have always shown, while `cat:`/`user:`/`inv:` keys are
+ * ids — a catalogue row, the person's own addition, an inventory row — not words. This resolves
+ * those to the cutter's display name, and a row this build cannot see is "unknown cutter" rather
+ * than the id. The maintainer saw `program 1 (cat:019c049a-…)` in the Cut panel's sim-stop line.
+ */
+export function cutterNameForKey(toolKey: string): string {
+  if (!/^(?:cat|user|inv):/.test(toolKey)) return toolKey;
+  const entry = entryFor(toolKey);
+  return entry === null ? 'unknown cutter' : toolDisplayName(entry.tool);
 }
 
 /**

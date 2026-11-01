@@ -87,7 +87,7 @@ import {
   type SurfaceReadingSource,
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
-import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { cutterNameForKey, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor } from '@/engine/cnc/toolRegistry';
 import { finishSourceWords, type FinishSettingSource } from '@/engine/cnc/engrave/finishPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
@@ -3272,10 +3272,10 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
     {
       text:
         program.neckOnly === true
-          ? `Program ${number} is ${program.nc}, the neck for parting alone — cut with ${program.toolKey}, ` +
+          ? `Program ${number} is ${program.nc}, the neck for parting alone — cut with ${cutterNameForKey(program.toolKey)}, ` +
             'after the faces, as the run’s last cut.'
           : `Program ${number} is ${program.nc}, the cut for setup ${program.setupIndex} — ` +
-            `cut with ${program.toolKey}.`,
+            `cut with ${cutterNameForKey(program.toolKey)}.`,
       value:
         cam === null
           ? 'no CAM summary was recorded'
@@ -4421,8 +4421,8 @@ export function buildRunSheet(
           id: `cut-${number}`,
           title:
             program.neckOnly === true
-              ? `Cut, program ${number} — the neck for parting (${program.toolKey})`
-              : `Cut, program ${number} — ${program.toolKey}`,
+              ? `Cut, program ${number} — the neck for parting (${cutterNameForKey(program.toolKey)})`
+              : `Cut, program ${number} — ${cutterNameForKey(program.toolKey)}`,
           steps: engraveProgramSectionSteps(program, number),
         });
       }

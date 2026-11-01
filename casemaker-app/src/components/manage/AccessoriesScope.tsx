@@ -375,7 +375,7 @@ export function AccessoriesScope() {
 
       {open === null || gone ? (
         <aside className="context-panel" data-testid="manage-accessories-detail-empty">
-          <div className="empty">Pick an accessory to see its record, or register one.</div>
+          <div className="empty">Pick an accessory to see what is known about it, or register one.</div>
         </aside>
       ) : open === 'new' ? (
         <AccessoryRegister onSaved={(id) => setOpen(id)} onClose={() => setOpen(null)} />
@@ -686,7 +686,7 @@ function AccessoryDetail({
         </button>
       </div>
 
-      <div className="panel-subhead">Measured record</div>
+      <div className="panel-subhead">Measurements</div>
       {item.kind === 'probe' ? (
         <>
           <p className="hint" data-testid="manage-acc-measured">

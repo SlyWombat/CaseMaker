@@ -26,6 +26,7 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { SimDiagnostic, SimLoadOk, SimLoadResult } from '@/workers/sim/session';
 import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
+import { cutterNameForKey } from '@/engine/cnc/toolDisplay';
 import type { OraclePredicted } from './oracle';
 
 /** The part of a generated program this walk reads. `EngraveProgram` satisfies it structurally. */
@@ -189,12 +190,19 @@ export function programOrdinal(programs: readonly SweepProgram[], index: number)
  * How a program is named to an operator: `program 2 (flat-3.175x12)` — the run sheet's Cut
  * numbering — and `the facing pass (…)` for the skim. One function, so the sweep note, the app's
  * diagnostic prefix and the sheet cannot number the same program differently.
+ *
+ * #887 — THE CUTTER IS NAMED IN WORDS, NEVER BY A RAW ID. A catalogue row's key is `cat:<uuid>`
+ * and an inventory row's is `inv:<id>`; the maintainer saw `program 1 (cat:019c049a-…)` on the Cut
+ * panel after a simulation stopped. `cutterNameForKey` resolves those keys to the cutter's display
+ * name (a friendly built-in key already reads as one), and a row this build cannot see is named an
+ * unknown cutter rather than printed.
  */
 export function programLabel(programs: readonly SweepProgram[], index: number): string {
   const program = programs[index];
   if (program === undefined) return `program ${index + 1}`;
-  if ((program.kind ?? 'engrave') === 'facing') return `the facing pass (${program.toolKey})`;
-  return `program ${programOrdinal(programs, index) ?? index + 1} (${program.toolKey})`;
+  const cutter = cutterNameForKey(program.toolKey);
+  if ((program.kind ?? 'engrave') === 'facing') return `the facing pass (${cutter})`;
+  return `program ${programOrdinal(programs, index) ?? index + 1} (${cutter})`;
 }
 
 /** The flat column grid's Y pitch a load ran on, mm; null for an exact or rotary sweep. */
@@ -310,7 +318,7 @@ export async function sweepPrograms<P extends SweepProgram>(options: SweepProgra
             source: 'sweep',
             severity: 'error',
             code: 'tool-refused',
-            message: `${label} names ${program.toolKey}, which is not on this bench`,
+            message: `${label} names ${cutterNameForKey(program.toolKey)}, which is not on this bench`,
           },
         ],
         sweep: null,

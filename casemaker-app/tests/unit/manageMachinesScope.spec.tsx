@@ -509,3 +509,46 @@ describe('#884 the machine card’s outputs are the profile’s', () => {
     expect(charger.getAttribute('data-mode')).toBe('on');
   });
 });
+
+// #887 — THE MANAGE WORDS: the side panel names the source, the card says when in plain words,
+// and "What a job gets from this" is under Technical rather than in the operator's face.
+describe('#887 the machine card’s words', () => {
+  it('names the source in the side panel and says the time as “today”', () => {
+    caps.drive = false;
+    withMachine();
+    useMachineStore.setState({ checkedAt: new Date().toISOString() });
+    render(<MachinesScope />);
+    expect(screen.getByTestId('manage-machine-detail').textContent).toContain(
+      'from the machine’s config.txt · read ',
+    );
+    expect(screen.getByTestId('manage-machine-detail').textContent).toContain(' today');
+    // The sentence under it is gone: the heading names the source.
+    expect(screen.getByTestId('manage-machine-detail').textContent).not.toContain('rail');
+    expect(screen.getByTestId('manage-machine-detail').textContent).not.toContain('Nothing is edited');
+  });
+
+  it('the card reads “host · checked 14:17 today”, and the busy row is a dash', () => {
+    caps.drive = false;
+    withMachine();
+    useMachineStore.setState({ checkedAt: new Date().toISOString() });
+    render(<MachinesScope />);
+    const card = screen.getByTestId('manage-machine-card').textContent ?? '';
+    expect(card).toContain(`${Z1_RECORD.host} · checked `);
+    expect(card).toContain(' today');
+    expect(card).not.toContain('standing claim');
+    expect(card).not.toContain(': 2222');
+    // The busy row's explanation is gone; the reason belongs to how the machine was found.
+    expect(card).not.toContain('nothing announced it');
+  });
+
+  it('the heading is one sentence, and “What a job gets from this” lives under Technical', () => {
+    caps.drive = false;
+    withMachine();
+    render(<MachinesScope />);
+    expect(screen.getByTestId('manage-machine-detail')).not.toBeNull();
+    expect(screen.getByText('Machines this app has connected to.')).toBeTruthy();
+    const technical = screen.getByTestId('manage-machine-technical');
+    expect(technical.querySelector('summary')?.textContent).toBe('Technical');
+    expect(technical.textContent).toContain('What a job gets from this');
+  });
+});

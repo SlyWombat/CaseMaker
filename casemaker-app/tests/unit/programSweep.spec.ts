@@ -3,12 +3,13 @@
 // earlier ones left, with its own cutter and its own drill point; a program's refusal or an error
 // in its diagnostics stops the walk and names that program.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { createSimSession, type SimSession } from '@/workers/sim/session';
 import { stubSetup } from '@/engine/cnc';
 import { rectProfile } from '@/engine/compiler/profile';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { resetRegistry, setRegistry } from '@/engine/cnc/toolRegistry';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import {
   attributedDiagnostics,
@@ -115,6 +116,8 @@ async function sweep(
   }
 }
 
+afterEach(() => resetRegistry());
+
 describe('#744 one sweep per program, shared with the command line', () => {
   it('sweeps each program on the stock the earlier ones left — a rest-pair rapid in the channel is clean', async () => {
     const tools = new Map<string, Tool>([
@@ -165,6 +168,9 @@ describe('#744 one sweep per program, shared with the command line', () => {
       ['flat-2', FLAT_2],
       ['inv:drill-2', DRILL],
     ]);
+    // #887 — the note names the cutter in words; the registry is what the label resolves `inv:`
+    // keys through, so the row is registered exactly as the app's inventory loads it.
+    setRegistry([{ key: 'inv:drill-2', tool: DRILL, provenance: 'spec' }]);
     const { outcome, calls } = await sweep(
       [program('flat-2', CHANNEL), program('inv:drill-2', DRILL_HOLE, { simDrillPoint: POINT })],
       tools,
@@ -179,7 +185,7 @@ describe('#744 one sweep per program, shared with the command line', () => {
     expect(drill.fromBlank).toBe(true);
     expect(drill.fromBlankCode).toBe('prior-removal-column');
     expect(drill.notes).toHaveLength(1);
-    expect(drill.notes[0]?.message).toContain('program 2 (inv:drill-2) was swept from the blank');
+    expect(drill.notes[0]?.message).toContain('program 2 (⌀ 2 mm drill) was swept from the blank');
     // The point the plan used is the one the cone was swept with (#434).
     expect(drill.diagnostics.find((d) => d.code === 'drill-point-angle')?.message).toContain('118°');
     expect(drill.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
@@ -286,6 +292,35 @@ describe('#744 one sweep per program, shared with the command line', () => {
     expect(programLabel(programs, 0)).toBe('the facing pass (fly-22)');
     expect(programLabel(programs, 1)).toBe('program 1 (flat-2)');
     expect(programLabel(programs, 2)).toBe('program 2 (flat-1)');
+  });
+
+  it('#887 — a catalogue cutter’s raw id never reaches the label or a diagnostic prefix', () => {
+    // The bench's own case: a job on a catalogue cutter, labelled `program 1 (cat:019c049a-…)` on
+    // the Cut panel after the simulation stopped.
+    const key = 'cat:019c049a-8169-73ea-abe6-1076f4779fb6';
+    setRegistry([{ key, tool: flatEndMill(3.175, { name: '3.175*12mm Flat End(Metal)' }), provenance: 'spec' }]);
+    const programs: SweepProgram[] = [{ kind: 'engrave', toolKey: key, nc: '' }];
+    expect(programLabel(programs, 0)).toBe('program 1 (⌀ 3.175 mm flat end)');
+    // And the prefix `attributedDiagnostics` puts on a later program's sentence is the same words.
+    const summary: ProgramSweepSummary = {
+      index: 0,
+      program: 1,
+      label: programLabel(programs, 0),
+      toolKey: key,
+      outcome: 'swept',
+      engine: 'exact',
+      count: 1,
+      removedVolume: 1,
+      errorCount: 1,
+      diagnostics: [{ source: 'sweep', severity: 'error', code: 'sweep-budget-exceeded', message: 'the simulation was stopped after 60 s' }],
+      notes: [],
+      fromBlank: false,
+      fromBlankCode: null,
+      gridPitchMm: null,
+    };
+    const [sentence] = attributedDiagnostics([summary], true);
+    expect(sentence!.message).toBe('program 1 (⌀ 3.175 mm flat end): the simulation was stopped after 60 s');
+    expect(sentence!.message).not.toContain('cat:');
   });
 
   // #744 — the run's LENGTH, not the result count, decides attribution. A walk that stops at its

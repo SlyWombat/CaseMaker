@@ -272,7 +272,7 @@ export function ToolsScope() {
             <h3>Tools</h3>
             <p>
               {pane === 'cutters'
-                ? 'Every cutter a job can name, and where each definition came from. Makera’s rows are read-only — clone one to rename it or to record what you measured. The built-ins are always here, service or not.'
+                ? 'Every cutter a job can name, and where each definition came from. Makera’s rows are read-only — clone one to rename it or to note what you measured. The built-ins are always here, service or not.'
                 : 'The feeds table: how fast each material and cutter edge should cut. A row answers for one diameter band. Change a seeded row’s numbers and it becomes a chosen row, dated today.'}
             </p>
           </div>
@@ -296,7 +296,7 @@ export function ToolsScope() {
                   title={
                     selected === null
                       ? 'Pick a row first'
-                      : 'Copy this definition into your own tier, to rename it or to record what you measured'
+                      : 'Copy this definition into your own tier, to rename it or to note what you measured'
                   }
                   onClick={onClone}
                 >

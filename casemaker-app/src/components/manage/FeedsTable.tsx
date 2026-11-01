@@ -664,7 +664,7 @@ export function FeedEditor({
       </p>
       {candidate.source === 'measured' && (
         <p className="hint" data-testid="manage-feed-measured">
-          <b>Measured</b> is this shop’s own claim: the save dates it, and the provenance sentence
+          <b>Measured</b> is this shop’s own answer: the save dates it, and the provenance sentence
           says who measured it (a coupon on the bench, a dial test, the machine’s own report).
           Nothing here promotes a row to measured — only choosing <b>measured</b> does.
         </p>

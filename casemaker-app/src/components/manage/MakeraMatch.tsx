@@ -67,8 +67,8 @@ export function MakeraMatch({ item }: { item: InventoryItem }) {
         </>
       ) : suggestion === null ? (
         <p className="hint" data-testid="manage-makera-no-evidence">
-          No Makera match is suggested: this cutter carries no readable box code, and its record
-          states no shape or tip to match on.
+          No Makera match is suggested: this cutter carries no readable box code, and nothing on it
+          states a shape or tip to match on.
         </p>
       ) : (
         <>
@@ -78,7 +78,7 @@ export function MakeraMatch({ item }: { item: InventoryItem }) {
                 Read from the box code <span className="mono">{suggestion.code}</span>:{' '}
               </>
             ) : (
-              'Read from this cutter’s own record: '
+              'Read from this cutter’s own details: '
             )}
             <b>{describeReading(suggestion.reading)}</b>.{' '}
             {suggestion.matches.length === 0 ? 'No catalogue row fits it.' : `${rowsFit(suggestion.matches.length)}, the same Makera line first. Pick the one on the box.`}
@@ -117,7 +117,7 @@ export function MakeraMatch({ item }: { item: InventoryItem }) {
                 </button>
               </div>
               <p className="hint">
-                The match is suggested from the cutter’s own label and record. Nothing is saved until
+                The match is suggested from the cutter’s own label and details. Nothing is saved until
                 you confirm it.
               </p>
             </>

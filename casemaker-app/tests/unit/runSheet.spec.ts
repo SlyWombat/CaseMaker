@@ -7,7 +7,7 @@
  * against the real shapes without the generator existing yet.
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { jobVise } from '@/engine/cnc/fixture';
 import { SCAN_FALLBACK } from '@/engine/cnc/engrave/materialScan';
 import { readFileSync } from 'node:fs';
@@ -51,6 +51,9 @@ import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Orientation } from '@/engine/cnc/setups/types';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { resetRegistry, setRegistry } from '@/engine/cnc/toolRegistry';
+
+afterEach(() => resetRegistry());
 import type { ThreadPlanFacts, ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 import type { ProgramSweepSummary } from '@/engine/cnc/engrave/programSweep';
 import { renderRunSheetMarkdown } from '../../scripts/runSheetMarkdown';
@@ -2061,6 +2064,9 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
   });
 
   it('gives any later engraving program its own file, frame and CAM estimate', () => {
+    // #887 — the sheet names an inventory row's cutter in words, never its `inv:` key; the row is
+    // registered exactly as the app's inventory loads it.
+    setRegistry([{ key: 'inv:o-flute-0.6', tool: flatEndMill(0.6, { name: 'O Flute 0.6' }), provenance: 'spec' }]);
     const job = dj();
     const generated: RunSheetGenerated = {
       ...stubGenerated(job),
@@ -2072,7 +2078,7 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
     const sheet = buildRunSheet(job, generated, NO_SIM, NOW);
     const cut2 = sectionText(sheet, 'cut-2');
     expect(cut2).toContain(`Program 2 is ${OTHER_NC}`);
-    expect(cut2).toContain('cut with inv:o-flute-0.6');
+    expect(cut2).toContain('cut with ⌀ 0.6 mm flat end');
     expect(cut2).toContain(OTHER_FRAME);
     expect(cut2).toContain(OTHER_NC);
     expect(cut2).toContain('2 operations');
