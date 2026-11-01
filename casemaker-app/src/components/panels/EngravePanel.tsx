@@ -37,6 +37,7 @@ import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
+import { jobFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { machineDisplayName } from '@/platform/locationClient';
 import { machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
 import { mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
@@ -1130,6 +1131,9 @@ export function EngravePanel(): JSX.Element {
     // chosen cutter's known reach blocks here, with the numbers and the one-click top-band option;
     // an unrecorded reach is an info and blocks nothing.
     ...jobReachFindings(job, tool, tools.map((e) => e.tool), tools),
+    // #872 — WHAT THE TOP SETUP LEAVES UNREACHED, stated beside the reach check: the share the
+    // sentence measures, the split, and the flip plan's one press when a side earns its setup.
+    ...jobFlipFindings(job),
     // #513 — the bed: a job planned on a bed that is not there now (`bed-changed`, a WARNING here
     // with its two presses — the Cut gate makes it the error), a mount the bed does not have, a
     // stock that leaves the board, an unmeasured datum the mount's registration would need. A bed

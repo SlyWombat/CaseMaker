@@ -253,8 +253,13 @@ describe('#873/#872 the plan each shape gets, when the top setup cannot finish i
 describe('#873 the goal corpus: generated, swept, and measured against the goal', () => {
   // THE BASELINE, measured 2026-11-01 on main + manifold 3.5.4 with the recommendation's own
   // cutter (`flat-1.0`): the coverage fraction and the cycle estimate are pinned as NUMBERS, so a
-  // regression in tool choice, the CAM or the estimate is caught as a figure that moved. They move
-  // when #869/#872 deliberately improve them — that is the tightening the issue asks for.
+  // regression in tool choice, the CAM or the estimate is caught as a figure that moved.
+  //
+  // THE SIMULATED fractions are LOW ON PURPOSE and stay so until #869 lands: a 1 mm flat terraces
+  // steep flanks far outside the 0.1 mm tolerance, so the swept surface reproduces ~13 % of a
+  // sphere where #872's plan reaches ~50 % of it GEOMETRICALLY (100 % with the flip). #869 (the
+  // rough-plus-finish cutter pairing) is the step that has to lift these numbers; until then this
+  // is today's honest baseline, and the plan's geometric reach is pinned in the describe below.
   it('the relief: about a quarter of the surface — the top and the dome; the flat back faces away', async () => {
     const r = await runFixture('relief-plate.stl', { length: 80, width: 50, thickness: 20 });
     expect(r.ok).toBe(true);

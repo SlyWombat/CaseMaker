@@ -16,8 +16,9 @@
  */
 
 import { targetObjectMesh } from '@/engine/import/targetObject';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { placeTarget } from './targetPlace';
-import { jobMount, type JobFinding } from './jobSetup';
+import { jobMount, jobTargetObjects, type JobFinding } from './jobSetup';
 import {
   coveragePercent,
   coverageTriangles,
@@ -140,7 +141,7 @@ export function goalFlipFindings(job: EngraveJob, goal: EngraveTargetObject): Jo
         : ` Setup 2 needs two locating holes to register on; none of your cutters is a drill, so record one in Manage › Tools first.`;
   const proposal =
     plan.sides.length > 1
-      ? ` A flip finishes it: ${sidesSentence(plan)} — ${plan.sides.length} setups reach ${planWords} of the surface.${holdWords}`
+      ? ` A flip finishes it: ${sidesSentence(plan)} — ${plan.sides.length} setups reach ${planWords} of the surface. That is the geometry the sides expose: how much of it the CHOSEN CUTTER reproduces is the run's own simulation verdict.${holdWords}`
       : plan.stopped === 'only-flat-faces-remain'
         ? ` What remains is the stock's own flat face, so no second setup is proposed.`
         : ` No side this mount can hold reaches more of it, so no second setup is proposed.`;
@@ -154,4 +155,57 @@ export function goalFlipFindings(job: EngraveJob, goal: EngraveTargetObject): Jo
       message: `The top setup reproduces ${topWords} of the goal's surface. ${split}${proposal}`,
     },
   ];
+}
+
+/**
+ * Every coverage finding over the job's goals, in goal order — the PANEL's reading, beside
+ * `jobReachFindings`. A ROTARY job is not judged by the flat frame (its goal's local Z is radial,
+ * the same rule the reach check states): the rotary's own checks and the sweep judge it.
+ */
+export function jobFlipFindings(job: EngraveJob): JobFinding[] {
+  if (rotaryMapOf(job) !== null) return [];
+  const out: JobFinding[] = [];
+  for (const goal of jobTargetObjects(job)) out.push(...cachedFlipFindings(job, goal));
+  return out;
+}
+
+/**
+ * THE PANEL CALLS THIS ON EVERY RENDER, so the measure is CACHED on the facts it reads: the
+ * goal's bytes, placement and scale, the stock, and the mount. A 4 000-triangle goal is six
+ * rasters per measure; running that per render is the render-storm this codebase has already
+ * been bitten by (#830). The cache is small and keyed by content, so an edit anywhere the measure
+ * reads misses it and everything else hits.
+ */
+const flipCache = new Map<string, JobFinding[]>();
+const FLIP_CACHE_MAX = 8;
+
+function cacheKey(job: EngraveJob, goal: EngraveTargetObject): string {
+  const s = goal.scale ?? { x: 1, y: 1, z: 1 };
+  return [
+    goal.sha256,
+    goal.format,
+    // The bytes travel BESIDE the job: while they are loading there is no mesh to measure, and a
+    // cached empty answer keyed on the sha alone would outlive their arrival.
+    goal.data === undefined ? 'blob-absent' : 'blob-present',
+    goal.enabled ? 1 : 0,
+    goal.role ?? 'reference',
+    goal.position.x, goal.position.y, goal.position.z,
+    goal.rotation, goal.rotationX ?? 0, goal.rotationY ?? 0,
+    s.x, s.y, s.z,
+    job.stock.length, job.stock.width, job.stock.thickness,
+    jobMount(job),
+  ].join('|');
+}
+
+function cachedFlipFindings(job: EngraveJob, goal: EngraveTargetObject): JobFinding[] {
+  const key = cacheKey(job, goal);
+  const hit = flipCache.get(key);
+  if (hit !== undefined) return hit;
+  const computed = goalFlipFindings(job, goal);
+  flipCache.set(key, computed);
+  if (flipCache.size > FLIP_CACHE_MAX) {
+    const first = flipCache.keys().next().value;
+    if (first !== undefined) flipCache.delete(first);
+  }
+  return computed;
 }

@@ -62,6 +62,9 @@ describe('#872 the goal-unreached finding', () => {
     expect(finding!.goalFlipSides).toEqual(['top', 'bottom']);
     expect(finding!.goalReachedFraction).toBeGreaterThan(0.9);
     expect(finding!.message).toMatch(/A flip finishes it: top, then bottom — 2 setups reach/);
+    // The percentage is the GEOMETRY the sides expose; the cutter's own reproduction is the run's
+    // simulation verdict (#869 lifts it). The sentence says so rather than promising a finish.
+    expect(finding!.message).toMatch(/how much of it the CHOSEN CUTTER reproduces is the run's own simulation verdict/);
     // The hold the flip needs is stated: the default registry owns no drill, and the sentence
     // says which one to record rather than planning a registration with nothing to sit on.
     expect(finding!.message).toMatch(/locating holes/);
