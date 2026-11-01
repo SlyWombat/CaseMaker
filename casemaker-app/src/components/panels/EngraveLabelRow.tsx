@@ -58,6 +58,8 @@ export interface EngraveLabelRowProps {
   onRemove: () => void;
   /** Findings about THIS label (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
+  /** #856 — a finding's one-press action, drawn under its sentence (the V-carve's deeper V-bit). */
+  findingAction?: (finding: JobFinding) => ReactNode;
   /**
    * #667 — the rest pair's control data (the setup's rough and rest cutters), or null when this
    * row's item is not in a setup or the job has no cutter. The panel owns the registry reading.
@@ -101,6 +103,7 @@ export function EngraveLabelRow({
   onChange,
   onRemove,
   findings,
+  findingAction,
   rest = null,
   customFonts = [],
   recommended,
@@ -219,6 +222,7 @@ export function EngraveLabelRow({
       removeTitle="Remove this label."
       removeNoun="label"
       findings={findings}
+      findingAction={findingAction}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
       restLabel={rest?.chip ?? null}

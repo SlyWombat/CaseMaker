@@ -176,6 +176,24 @@ export interface ToolpathIR {
    * numbers are.
    */
   adaptive?: AdaptiveRegionReport[];
+  /**
+   * #856 — items the region CAM LEFT UNCUT, one entry each: a V-carve with no material above its
+   * floor, or one whose level sets collapse before a single ring. The CAM writes NO operation for
+   * such an item and never fails the whole job on one item's geometry; the worker turns each entry
+   * into the item's `item-left-uncut` finding, so the run says what was not cut. Absent when every
+   * region cut something, so an existing job's IR (and its `.nc`) is byte-identical.
+   */
+  uncut?: UncutRegionReport[];
+}
+
+/** #856 — one item the CAM deliberately wrote no cut for, and why. */
+export interface UncutRegionReport {
+  /** The item the region belongs to. */
+  labelId: string;
+  /** The operation's descriptor — no `[T#]` prefix, no depth suffix. */
+  name: string;
+  /** The one sentence the finding shows verbatim. */
+  reason: string;
 }
 
 /**

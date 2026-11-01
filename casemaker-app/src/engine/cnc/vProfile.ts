@@ -242,7 +242,19 @@ export function vDepthLimit(tool: Tool): VDepthLimit | null {
  * the same fact differently: the item, its depth, the cutter, the binding height, and the way out,
  * every number with its unit.
  */
-export function vDepthRefusal(itemName: string, depthMm: number, tool: Tool, limit: VDepthLimit): string {
+/**
+ * #856 — `depthMm` is the MATERIAL depth (the item's depth less the floor it sits on), never the
+ * depth below the stock's top: a V-carve in a pocket floor 10 mm down cuts `depth − floor` of
+ * material, and the cone's reach is measured against exactly that. A non-zero `floorMm` is named
+ * in the sentence so the reader sees which surface the numbers are from.
+ */
+export function vDepthRefusal(
+  itemName: string,
+  depthMm: number,
+  tool: Tool,
+  limit: VDepthLimit,
+  floorMm = 0,
+): string {
   const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
   const cone = vConeGeometry(tool);
   const included = cone === null ? null : cone.halfAngleDeg * 2;
@@ -258,10 +270,12 @@ export function vDepthRefusal(itemName: string, depthMm: number, tool: Tool, lim
       : `its ${angle}cone reaches the ${body ?? 'cutter’s'} body at ${mm(limit.limitMm)} mm, and ` +
         'deeper than that the body cuts a vertical wall instead of a V' +
         (limit.statedFluteMm === null ? '' : ` (the record states a ${mm(limit.statedFluteMm)} mm flute)`);
+  const deep = floorMm > 0 ? `cuts ${mm(depthMm)} mm of material above its ${mm(floorMm)} mm floor` : `is ${mm(depthMm)} mm deep`;
+  const reach = floorMm > 0 ? `${mm(depthMm)} mm above the floor` : `${mm(depthMm)} mm`;
   return (
-    `${itemName} is ${mm(depthMm)} mm deep, but the cutter "${tool.name}" can only V-carve ` +
+    `${itemName} ${deep}, but the cutter "${tool.name}" can only V-carve ` +
     `${mm(limit.limitMm)} mm deep: ${reason}. Cut no deeper than ${mm(limit.limitMm)} mm, or use a ` +
-    `cutter that reaches ${mm(depthMm)} mm.`
+    `cutter that reaches ${reach}.`
   );
 }
 
@@ -271,14 +285,37 @@ export function vDepthRefusal(itemName: string, depthMm: number, tool: Tool, lim
  * it. The SHANK case (a stated flute shorter than the cone) is not this sentence — there is no
  * cutting edge past the flute, so it stays a refusal.
  */
-export function vDepthShortfall(itemName: string, depthMm: number, tool: Tool, limit: VDepthLimit): string {
+export function vDepthShortfall(
+  itemName: string,
+  depthMm: number,
+  tool: Tool,
+  limit: VDepthLimit,
+  floorMm = 0,
+): string {
   const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
   const { angle, body } = coneWords(tool);
   const short = depthMm - limit.limitMm;
+  // #856 — the numbers are MATERIAL, above the floor the item sits on (see `vDepthRefusal`).
+  const is = floorMm > 0 ? `cuts ${mm(depthMm)} mm of material above its ${mm(floorMm)} mm floor` : `is ${mm(depthMm)} mm deep`;
+  const reach = floorMm > 0 ? `${mm(depthMm)} mm above the floor` : `${mm(depthMm)} mm`;
   return (
-    `${itemName} is ${mm(depthMm)} mm deep, but the cutter "${tool.name}"'s ${angle}cone reaches its ` +
+    `${itemName} ${is}, but the cutter "${tool.name}"'s ${angle}cone reaches its ` +
     `${body ?? 'body'} at ${mm(limit.limitMm)} mm. The cut stops there and leaves ${mm(short)} mm of the ` +
-    `design in the stock — use a cutter whose cone reaches ${mm(depthMm)} mm for the full depth.`
+    `design in the stock — use a cutter whose cone reaches ${reach} for the full depth.`
+  );
+}
+
+/**
+ * #856 — AN ITEM LEFT UNCUT, in one sentence both the findings layer and the CAM's own guard
+ * print: the item sits on a floor at or under its stated depth, so there is no material for the
+ * V to open. The same words come out of both callers, so `dedupeFindings` collapses them into one
+ * row instead of two near-identical ones.
+ */
+export function itemLeftUncutMessage(itemName: string, floorMm: number, depthMm: number): string {
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+  return (
+    `${itemName} sits on a floor ${mm(floorMm)} mm down and states a depth of ${mm(depthMm)} mm, ` +
+    'so it cuts no material — it is left uncut. Raise its depth above the floor.'
   );
 }
 

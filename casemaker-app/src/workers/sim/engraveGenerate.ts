@@ -62,7 +62,7 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
+import { itemLeftUncutMessage, vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
   coreOffsetRadius,
@@ -1309,13 +1309,33 @@ function intersectionArea(tl: ManifoldToplevel, a: Polygons, b: Polygons): numbe
  * (`vcarve-trace-beyond-cone`); past a stated flute there is no cutting edge at all, so it is
  * REFUSED (`vcarve-trace-beyond-flute`). Both sentences come from the same owner.
  */
-function vCarveDepthFindings(plan: PartPlan, tool: Tool): JobFinding[] {
+function vCarveDepthFindings(plan: PartPlan, tool: Tool, floors: ReadonlyMap<string, number>): JobFinding[] {
   const limit = vDepthLimit(tool);
   if (limit === null) return [];
   const findings: JobFinding[] = [];
   for (const item of plan.engraves) {
     if (item.prism !== undefined) continue;
-    if (!(item.depth > limit.limitMm + 1e-9)) continue;
+    // #856 — THE MATERIAL ABOVE THE FLOOR, not the depth below the top. A V-carve inside a pocket
+    // cuts `depth − floor`; the cone's reach is measured against that. A demo job (a coaster
+    // inlay: a 30° bit, a pocket on a 10 mm floor, letters 14 mm deep) was clamped to the cone's
+    // 4.992 mm against its ABSOLUTE depth, which is above the floor — the cut was then forged
+    // below the surface it sat on and the CAM threw. Measured from the floor it cuts its 4 mm and
+    // the job posts.
+    const floor = floors.get(item.id) ?? 0;
+    const material = item.depth - floor;
+    if (!(material > 1e-9)) {
+      // An item at or under its floor cuts nothing. NEVER an error from the CAM: the item is
+      // left uncut, said here (and again by the CAM's own report, in the same words, for the run's
+      // findings — `dedupeFindings` collapses the pair).
+      findings.push({
+        severity: 'warning',
+        code: 'item-left-uncut',
+        labelId: item.id,
+        message: itemLeftUncutMessage(item.name, floor, item.depth),
+      });
+      continue;
+    }
+    if (!(material > limit.limitMm + 1e-9)) continue;
     // #786 slice 3 — CUT TO THE CONE, INFORMED. Past the cone's height the flank has ended; the
     // cut stops at the height the cone reaches and the sentence states the shortfall. A STATED
     // FLUTE shorter than the cone still refuses: past it there is no cutting edge at all, and the
@@ -1325,7 +1345,12 @@ function vCarveDepthFindings(plan: PartPlan, tool: Tool): JobFinding[] {
       severity: shank ? 'error' : 'warning',
       code: 'vcarve-depth-beyond-cone',
       labelId: item.id,
-      message: shank ? vDepthRefusal(item.name, item.depth, tool, limit) : vDepthShortfall(item.name, item.depth, tool, limit),
+      // #856 — the shortfall names the material it needs, so the panel's one-press deeper V-bit
+      // knows what the replacement must reach.
+      ...(shank ? {} : { materialMm: material }),
+      message: shank
+        ? vDepthRefusal(item.name, material, tool, limit, floor)
+        : vDepthShortfall(item.name, material, tool, limit, floor),
     });
   }
   for (const trace of plan.traces) {
@@ -2145,7 +2170,7 @@ export function engraveRegions(
         );
   // #741 — the depth rule runs whatever the tip's record state: a cutter with no stated tip still
   // has a stated body and angle, and a V-cut past its cone is refused on those.
-  const depthFindings = tool === null ? [] : vCarveDepthFindings(plan, tool);
+  const depthFindings = tool === null ? [] : vCarveDepthFindings(plan, tool, floorById);
 
   // #218 — CUT-OUTS: each one's offset centre path, its tab spans, the kerf the oracle expects
   // and the finding a tab that could not be placed raises. Built here, with the same injected
@@ -2400,13 +2425,19 @@ export function engraveRegions(
   const vLimit = tool === null ? null : vDepthLimit(tool);
   const regions: EngraveRegion[] = plan.engraves.map((e) => {
     const vCarve = vCarveById.get(e.id);
+    // #856 — the clamp is measured FROM THE FLOOR: the cone reaches `limit` mm of material above
+    // the surface the item sits on, so the clamped depth is `floor + limit`. Before this the
+    // clamp wrote the cone's reach as an ABSOLUTE depth, which on a floor 10 mm down put the cut
+    // above the floor — the CAM then found no material and failed the job.
+    const floor = floorById.get(e.id) ?? 0;
+    const material = e.depth - floor;
     const clampToCone =
-      vCarve !== undefined && vLimit !== null && vLimit.boundBy === 'cone' && e.depth > vLimit.limitMm + 1e-9;
+      vCarve !== undefined && vLimit !== null && vLimit.boundBy === 'cone' && material > vLimit.limitMm + 1e-9;
     return {
       id: e.id,
       text: regionText(itemById.get(e.id)),
       name: e.name,
-      depth: clampToCone ? vLimit.limitMm : e.depth,
+      depth: clampToCone ? floor + vLimit.limitMm : e.depth,
       polygons: designOf(e),
       ...(vCarve === undefined ? {} : { vCarve }),
       ...(e.inlay === undefined ? {} : { inlay: e.inlay }),
@@ -7184,6 +7215,14 @@ function generateOneProgram(
             'plunge the rings always used.',
         });
       }
+    }
+
+    // #856 — WHAT THE CAM DELIBERATELY DID NOT CUT. An item with no material above its floor, or
+    // one whose V-carve collapses before a single ring, has no operation in this program; the CAM
+    // reports it rather than throwing, and the run says so on the item's row. The findings layer
+    // states the floor case in the same words, so `dedupeFindings` keeps one row.
+    for (const u of ir.uncut ?? []) {
+      findings.push({ severity: 'warning', code: 'item-left-uncut', labelId: u.labelId, message: u.reason });
     }
 
     // #668 — what the bores in THIS program cut, for the run sheet's pitch step. The cutter radius

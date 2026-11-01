@@ -33,7 +33,7 @@ import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { CutParams } from '../feeds';
 import { cuttingForTrace, type Tool } from '../tool';
 import { vCarveLevels, vCarveRowStepover } from '../vCarveGeometry';
-import { vDepthLimit, vDepthRefusal } from '../vProfile';
+import { itemLeftUncutMessage, vDepthLimit, vDepthRefusal } from '../vProfile';
 import { prismHeightRefusal, prismNumbers } from '../engrave/prism';
 import { boreMoves, borePasses, drillMoves, orderHolesNearest, peckDepths } from './drill';
 import {
@@ -47,6 +47,7 @@ import {
   type CamPassKind,
   type RapidEstimate,
   type ToolpathIR,
+  type UncutRegionReport,
   toolNumberFor,
 } from './ir';
 import { pocketLoops, type OffsetFn, type Polygons } from './pocket';
@@ -371,6 +372,12 @@ interface Prepared {
    * the worker's `adaptive-fallback` finding: the limitation is stated, the job is not refused.
    */
   adaptiveRefusal?: { code: string; reason: string };
+  /**
+   * #856 — WHY this item is left uncut (no material above its floor, or nothing the tip can open).
+   * Such an item contributes NO operation; its reason becomes the IR's `uncut` report, which the
+   * worker turns into the item's `item-left-uncut` finding.
+   */
+  uncutReason?: string;
 }
 
 /**
@@ -667,9 +674,14 @@ export function generateEngrave(
         }
       } else {
         const limit = vDepthLimit(tool);
-        if (limit !== null && label.depth > limit.limitMm + 1e-9) {
+        // #856 — the MATERIAL above the floor the item sits on, not the depth below the top:
+        // a V-carve in a pocket floor 10 mm down cuts `depth − floor`, and the cone's reach is
+        // measured against that (the clamped region arrives at `floor + reach`).
+        const floor = label.vCarve.floorDepth ?? 0;
+        const material = label.depth - floor;
+        if (limit !== null && material > limit.limitMm + 1e-9) {
           throw new Error(
-            `generateEngrave: ${vDepthRefusal(label.name ?? label.text, label.depth, tool, limit)}`,
+            `generateEngrave: ${vDepthRefusal(label.name ?? label.text, material, tool, limit, floor)}`,
           );
         }
       }
@@ -852,10 +864,17 @@ export function generateEngrave(
       const floor = label.vCarve.floorDepth ?? 0;
       const cap = label.depth - floor;
       if (!(cap > 0)) {
-        throw new Error(
-          `generateEngrave: "${label.name ?? label.text}" sits on a floor ${floor} mm down and states ` +
-            `a depth of ${label.depth} mm, so it cuts no material; raise its depth above the floor`,
-        );
+        // #856 — NEVER THROW ON AN ITEM THAT CUTS NOTHING. The item is left uncut, in words the run
+        // shows on its row; the rest of the job still posts. (The findings layer states the same
+        // sentence when it measured this as a document defect, and `dedupeFindings` collapses the
+        // pair.)
+        return {
+          label,
+          passList: [],
+          ladder: [],
+          firstCut: firstCuttingPoint([label.polygons]),
+          uncutReason: itemLeftUncutMessage(label.name ?? label.text, floor, label.depth),
+        };
       }
       // The feeds row caps the bite: its step-down is a depth, its step-over a radial width on the
       // flank. The tighter one sets the pitch, so neither the row nor the scallop is exceeded.
@@ -870,10 +889,17 @@ export function generateEngrave(
         ladder.push({ rings: [rings], passes: [-(floor + level.depth)], stepMm: pitch });
       }
       if (ladder.length === 0) {
-        throw new Error(
-          `generateEngrave: "${label.name ?? label.text}" is narrower than its cutter's tip at every ` +
-            'level, so a variable-depth V-carve has nothing to cut; use a smaller bit',
-        );
+        // #856 — the design is narrower than the tip at every level: nothing to cut. Left uncut
+        // and said, never a stage error.
+        return {
+          label,
+          passList: [],
+          ladder: [],
+          firstCut: firstCuttingPoint([label.polygons]),
+          uncutReason:
+            `"${label.name ?? label.text}" is narrower than its cutter's tip at every level, so a ` +
+            'variable-depth V-carve has nothing to cut — it is left uncut. Use a smaller bit.',
+        };
       }
       return { label, passList: [], ladder, firstCut: firstCuttingPoint(ladder[0]!.rings) };
     }
@@ -967,15 +993,25 @@ export function generateEngrave(
   });
 
   const strategies: Record<'nearest', (items: readonly Prepared[]) => Prepared[]> = { nearest: orderNearest };
+  // #856 — an item that cuts nothing contributes no operation and no report entry here beyond its
+  // reason: ordering, travel and the cursor are the cut items' business.
+  const cut = prepared.filter((p) => p.uncutReason === undefined);
   // Drills run FIRST, before any cut-out (#220 work item 4): a peck cycle leaves the blank
   // unweakened, whereas a finished cut-out can let the part shift under the tape. Within each
   // group the ordering is unchanged, so a job with no drills is byte-identical to before.
-  const drilled = prepared.filter((p) => p.drillMoves !== undefined);
-  const pocketed = prepared.filter((p) => p.drillMoves === undefined);
+  const drilled = cut.filter((p) => p.drillMoves !== undefined);
+  const pocketed = cut.filter((p) => p.drillMoves === undefined);
   const ordered =
     drilled.length === 0
-      ? strategies[order](prepared)
+      ? strategies[order](cut)
       : [...strategies[order](drilled), ...strategies[order](pocketed)];
+  const uncutReport: UncutRegionReport[] = prepared
+    .filter((p) => p.uncutReason !== undefined)
+    .map((p) => ({
+      labelId: p.label.id,
+      name: p.label.name ?? `Engrave "${p.label.text}"`,
+      reason: p.uncutReason!,
+    }));
 
   // #487 — the tool's position carries from one operation to the next. Before this, every
   // operation chose its entry as if the tool stood at the origin, so the first rapid of each
@@ -1162,5 +1198,6 @@ export function generateEngrave(
     // #666 — present only when a caller handed adaptive settings AND a region was marked for it;
     // every pre-#666 caller's IR is unchanged.
     ...(adaptiveReport.length === 0 ? {} : { adaptive: adaptiveReport }),
+    ...(uncutReport.length === 0 ? {} : { uncut: uncutReport }),
   };
 }

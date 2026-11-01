@@ -103,6 +103,10 @@ export type JobFindingCode =
   // breakthrough near that edge goes past the board and into the bed. The plain overhang (no
   // through cut) is `stock-off-surface`; this sentence names the hazard instead of repeating it.
   | 'cut-leaves-board'
+  // #856 — an item left uncut: it sits at or under the floor it was placed on (a V-carve with no
+  // material above its floor, or one whose level sets collapse before a single ring). The job
+  // still posts; the row says what was not cut and how to get it cut.
+  | 'item-left-uncut'
   // #740 — the tip is unrecorded and the job's variable-depth, inlay or prism items cut with the
   // cone, so the plan assumes a SHARP POINT. A warning, not the error above: those items are not
   // judged at a colour plane, and the carve proceeds with the assumption stated.
@@ -508,6 +512,12 @@ export interface JobFinding {
    * Generate; absent on every other finding.
    */
   suggestedPitchMm?: number;
+  /**
+   * #856 — on `vcarve-depth-beyond-cone`, the MATERIAL depth (above its floor) the item asks the
+   * cone to cut, mm. The panel's press finds a cutter whose cone reaches it; absent on findings
+   * that are not about a V-carve's reach.
+   */
+  materialMm?: number;
   /**
    * #832 — on `goal-program-too-big`, the step-down that fits the move budget AT the pitch the
    * run settled on, mm. The moves fall with the step-down as they do with the pitch, so this is

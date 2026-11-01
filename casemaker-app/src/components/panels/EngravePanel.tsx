@@ -59,6 +59,7 @@ import { toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
 // the panel reads the SAME answer to decide that a refused cutter must be substituted.
 import { columnCutterFor } from '@/workers/geometry/columnEngine';
 import { bedUnderFacts, machineForJob, switchActiveProfile } from '@/platform/bedProfiles';
+import { vDepthLimit } from '@/engine/cnc/vProfile';
 // #513 — the bed a job was set up on: binding, version diff and the findings that say so.
 // `bedLine` is ALIASED: this component already has a `bedLine` (the holding step's, 2456).
 import { bedChangedSentence, bedFindings, bedLine as bedProfileLine, bindJob } from '@/engine/cnc/bed/binding';
@@ -937,6 +938,8 @@ export function EngravePanel(): JSX.Element {
   const setCutOverrideSource = useEngraveJobStore((s) => s.setCutOverrideSource);
   const setFacing = useEngraveJobStore((s) => s.setFacing);
   const setBed = useEngraveJobStore((s) => s.setBed);
+  const setToolKey = useEngraveJobStore((s) => s.setTool);
+  const setSetups = useEngraveJobStore((s) => s.setSetups);
   /**
    * #513 — a `bed-changed` job's other way out: make the profile it was set up on the machine's
    * active bed again (the operator physically swapped the bed back). The machine record's own
@@ -945,6 +948,65 @@ export function EngravePanel(): JSX.Element {
   const switchBedBack = async (profileId: string): Promise<void> => {
     if (locationMachine === null) return;
     await saveMachineWithRetry(locationMachine, (current) => switchActiveProfile(current, profileId, new Date().toISOString()));
+  };
+  /**
+   * #856 — the one press a `vcarve-depth-beyond-cone` warning offers: swap the cutter that owns
+   * the item for a V-bit whose cone reaches the MATERIAL the item asks for. The replacement is
+   * made where the item is actually cut — the setup's `tools` and `toolItems` — and the job's own
+   * key follows when it was the one replaced, so the program, the row and the sentence agree.
+   */
+  const useDeeperVCutter = (labelId: string, newKey: string): void => {
+    const current = useEngraveJobStore.getState().job;
+    const fromKey = (() => {
+      for (const setup of current.setups ?? []) {
+        for (const [index, key] of setupTools(setup, current).entries()) {
+          if (toolItemsFor(setup, key, index).includes(labelId)) return key;
+        }
+      }
+      return null;
+    })();
+    if (fromKey === null || current.setups === undefined) {
+      setToolKey(newKey, 'user');
+      return;
+    }
+    setSetups(
+      current.setups.map((setup) => {
+        if (!setup.tools.includes(fromKey)) return setup;
+        const tools = setup.tools.map((key) => (key === fromKey ? newKey : key));
+        const toolItems =
+          setup.toolItems === undefined
+            ? undefined
+            : Object.fromEntries(Object.entries(setup.toolItems).map(([key, items]) => [key === fromKey ? newKey : key, items]));
+        return { ...setup, tools, ...(toolItems === undefined ? {} : { toolItems }) };
+      }),
+    );
+    if (current.toolKey === fromKey) setToolKey(newKey, 'user');
+  };
+  /**
+   * #856 — THE V-CARVE'S ONE PRESS: when a V-carve is cut short of the material it asks for, and
+   * the house owns a V-bit whose cone reaches that material, the item's row offers it. The button
+   * names the cutter; pressing swaps the bit that owns the item (see `useDeeperVCutter`).
+   */
+  const vCarveDeeperAction = (f: JobFinding): JSX.Element | null => {
+    if (f.code !== 'vcarve-depth-beyond-cone' || f.severity !== 'warning' || f.materialMm === undefined || f.labelId === undefined) {
+      return null;
+    }
+    const materialMm = f.materialMm;
+    let best: { key: string; name: string; reach: number } | null = null;
+    for (const entry of tools) {
+      const limit = vDepthLimit(entry.tool);
+      if (limit === null || limit.limitMm < materialMm - 1e-9) continue;
+      if (best === null || limit.limitMm > best.reach) {
+        best = { key: entry.key, name: toolDisplayName(entry.tool), reach: limit.limitMm };
+      }
+    }
+    if (best === null) return null;
+    const chosen = best as { key: string; name: string };
+    return (
+      <button type="button" data-testid={`engrave-vcarve-deeper-tool-${f.labelId}`} onClick={() => useDeeperVCutter(f.labelId!, chosen.key)}>
+        Use the {chosen.name}
+      </button>
+    );
   };
 
   const preview = useEngravePreviewStore((s) => s.preview);
@@ -3860,6 +3922,7 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(label.id)}
+          findingAction={vCarveDeeperAction}
           customFonts={job.customFonts}
           recommended={depthRecommendation(label)}
           split={split}
@@ -3878,7 +3941,7 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(shape.id)}
-          findingAction={throughFix(shape.id)}
+          findingAction={(f) => vCarveDeeperAction(f) ?? throughFix(shape.id)(f)}
           rest={shape.construction === true || shape.prism !== undefined ? null : restFor(shape.id)}
           vCarve={
             cone === null
@@ -3906,11 +3969,12 @@ export function EngravePanel(): JSX.Element {
           candidates={referenceableItems(shape.id)}
           findings={findingsFor(shape.id)}
           findingAction={(f) =>
-            f.code === 'isolation-short' && f.suggestedCutterKey !== undefined && f.suggestedCutterDiameterMm !== undefined ? (
+            vCarveDeeperAction(f) ??
+            (f.code === 'isolation-short' && f.suggestedCutterKey !== undefined && f.suggestedCutterDiameterMm !== undefined ? (
               <button type="button" data-testid="engrave-pcb-finer-engraver" onClick={() => giveIsolationToFinerEngraver(f)}>
                 Use the ⌀{f.suggestedCutterDiameterMm} mm engraver
               </button>
-            ) : null
+            ) : null)
           }
           rest={shape.construction === true ? null : restFor(shape.id)}
           technical={vCarveTechnical(shape.id)}
@@ -4011,6 +4075,8 @@ export function EngravePanel(): JSX.Element {
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(primitive.id)}
           findingAction={(f) => {
+            const deeper = vCarveDeeperAction(f);
+            if (deeper !== null) return deeper;
             if (f.code !== 'primitive-surface-ball-offer' || f.suggestedCutterKey === undefined) return null;
             const entry = tools.find((e) => e.key === f.suggestedCutterKey);
             if (entry === undefined) return null;
@@ -4064,6 +4130,7 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(shape.id)}
+          findingAction={vCarveDeeperAction}
           rest={shape.construction === true ? null : restFor(shape.id)}
           technical={vCarveTechnical(shape.id)}
           onChange={(patch) => updateVector(shape.id, patch)}
@@ -4835,6 +4902,7 @@ export function EngravePanel(): JSX.Element {
                       override active
                     </span>
                   )}
+
                   {/* #513 — a bed-changed refusal's two ways out, pressed where the sentence is
                       read: bind this job to the bed the machine has now, or make the bed it was
                       set up on the active one again (when the machine still holds it). */}

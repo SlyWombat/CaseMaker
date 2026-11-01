@@ -155,13 +155,13 @@ export function EngraveShapeRow({
   onChange,
   onRemove,
   findings,
+  findingAction,
   rest = null,
   vCarve = null,
   inlay = null,
   texture = null,
   prism = null,
   technical = null,
-  findingAction,
 }: EngraveShapeRowProps): JSX.Element {
   // #662 - the chip states what THIS cutter makes of a region.
   const region = useRegionOperationType();
