@@ -93,7 +93,7 @@ function colorForNode(id: string): string {
   // did. The dividers (#150) are accessories, in the shelf green.
   if (id === TOOLBOX_BIN_NODE_ID) return '#88a4cc';
   if (id === TOOLBOX_LID_NODE_ID) return '#a8b8d0';
-  if (id.startsWith('divider-peg-')) return '#8fb0a0';
+  if (id.startsWith('divider-peg-') || id.startsWith('case-divider-')) return '#8fb0a0';
   if (id.startsWith('nameplate-')) return '#d8c8a0';
   // Rack assembly: structural frame blue-grey, accessories differentiated
   // so the stacked faceplates read as separate parts.

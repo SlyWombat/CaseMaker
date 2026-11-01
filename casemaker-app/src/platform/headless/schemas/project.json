@@ -1014,6 +1014,62 @@
           },
           "type": "array"
         },
+        "dividers": {
+          "description": "Drop-in dividers standing on the floor grid, each its own printed part; omit for none.",
+          "items": {
+            "properties": {
+              "axis": {
+                "description": "The wall runs along X (on a grid row) or along Y (on a grid column).",
+                "enum": [
+                  "x",
+                  "y"
+                ],
+                "type": "string"
+              },
+              "enabled": {
+                "description": "False keeps the divider in the document but builds nothing.",
+                "type": "boolean"
+              },
+              "holes": {
+                "description": "Sockets the wall covers, first to last; tenons sit in the end two.",
+                "maximum": 9007199254740991,
+                "minimum": 2,
+                "type": "integer"
+              },
+              "id": {
+                "description": "Unique divider id.",
+                "type": "string"
+              },
+              "line": {
+                "description": "Grid row (axis x) or column (axis y), counted from 0 at the -Y / -X wall.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "start": {
+                "description": "First socket along the wall, counted from 0.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "thickness": {
+                "description": "Wall thickness, in millimetres; omit for 2.4.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "axis",
+              "line",
+              "start",
+              "holes",
+              "enabled"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "extraCavityZ": {
           "description": "Extra cavity depth above the board, in millimetres.",
           "minimum": 0,
@@ -1027,6 +1083,46 @@
             "loose"
           ],
           "type": "string"
+        },
+        "floorGrid": {
+          "description": "Blind socket grid in the case floor for drop-in dividers; omit for none.",
+          "properties": {
+            "depth": {
+              "description": "Socket depth into the floor, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "enabled": {
+              "description": "True cuts the socket grid into the case floor.",
+              "type": "boolean"
+            },
+            "fit": {
+              "description": "Peg-in-socket fit; omit to inherit case.fit.",
+              "enum": [
+                "tight",
+                "standard",
+                "loose"
+              ],
+              "type": "string"
+            },
+            "pitch": {
+              "description": "Socket centre spacing in both axes, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "socket": {
+              "description": "Square socket side before the fit relief, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled",
+            "pitch",
+            "socket",
+            "depth"
+          ],
+          "type": "object"
         },
         "floorThickness": {
           "description": "Case floor thickness, in millimetres.",

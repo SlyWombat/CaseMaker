@@ -347,6 +347,53 @@ export interface CavityClearanceTweaks {
   yMax: Mm;
 }
 
+/**
+ * Issue #150 — the case floor's socket grid: a lattice of square, BLIND sockets
+ * cut into the floor's top face, which drop-in dividers ({@link CaseDivider})
+ * plug into. Absent or disabled builds nothing, so a project without it
+ * compiles exactly as before.
+ *
+ * The lattice hangs off the cavity's own -X/-Y corner (`holeGrid.ts`'s `'bbox'`
+ * anchor), and sockets that would land under the board, its standoffs or
+ * bosses are left out. The numbers default to the reviewed system's measured
+ * 5 × 5 mm sockets on a 12 mm pitch (`holeGrid.ts`); they are user-tunable.
+ */
+export interface FloorGridParams {
+  enabled: boolean;
+  /** Socket centre spacing, both axes, mm. Default 12. */
+  pitch: Mm;
+  /** Square socket side, mm, before the fit relief. Default 5. */
+  socket: Mm;
+  /** Socket depth into the floor, mm. Default 2. Capped so 1.2 mm of floor stays under it. */
+  depth: Mm;
+  /** Print fit of the peg-in-socket joint. Absent = the case's own `fit`. */
+  fit?: FitVariant;
+}
+
+/**
+ * Issue #150 — a drop-in divider standing on the floor grid: a wall with a
+ * square tenon under each end, printed as its own part. It is placed on a GRID
+ * LINE, not at a millimetre position, so it always lands in sockets.
+ *
+ * `axis: 'x'` runs the wall along X on grid ROW `line`; `axis: 'y'` runs it
+ * along Y on grid COLUMN `line`. Rows and columns count from 0 at the cavity's
+ * -Y / -X wall, over the WHOLE lattice — sockets dropped for the board still
+ * have an index, so a divider keeps its place when the board changes.
+ */
+export interface CaseDivider {
+  id: string;
+  axis: 'x' | 'y';
+  /** Grid row (axis 'x') or column (axis 'y') the wall stands on. */
+  line: number;
+  /** First socket along the wall (column for 'x', row for 'y'). */
+  start: number;
+  /** Sockets the wall covers, first to last; at least 2. The tenons sit in the end two. */
+  holes: number;
+  /** Wall thickness, mm. Default 2.4. */
+  thickness?: Mm;
+  enabled: boolean;
+}
+
 export interface CaseParameters {
   wallThickness: Mm;
   floorThickness: Mm;
@@ -439,6 +486,16 @@ export interface CaseParameters {
    * disabled builds nothing, so legacy projects compile unchanged.
    */
   nameplate?: NameplateParams;
+  /**
+   * Issue #150 — the floor's socket grid. Optional; absent or disabled cuts
+   * nothing, so legacy projects compile unchanged.
+   */
+  floorGrid?: FloorGridParams;
+  /**
+   * Issue #150 — drop-in dividers on the floor grid, each its own printed
+   * part. Built only while `floorGrid` is enabled.
+   */
+  dividers?: CaseDivider[];
   /**
    * Issue #92 — optional barrel hinge on a side face. Only one hinge per
    * case in v1; multi-hinge support is deferred. Missing/disabled = no hinge

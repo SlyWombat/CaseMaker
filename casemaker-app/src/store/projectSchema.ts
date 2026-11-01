@@ -475,6 +475,33 @@ export const caseParamsSchema = z.object({
     })
     .optional()
     .describe('A swappable magnetic nameplate; omit for none.'),
+  // Issue #150 — the floor socket grid and its drop-in dividers. Optional with
+  // NO version bump (the toolbox `pegs` precedent): absent reads back as
+  // undefined, which the compiler treats as "no grid, no dividers".
+  floorGrid: z
+    .object({
+      enabled: z.boolean().describe('True cuts the socket grid into the case floor.'),
+      pitch: z.number().positive().describe('Socket centre spacing in both axes, in millimetres.'),
+      socket: z.number().positive().describe('Square socket side before the fit relief, in millimetres.'),
+      depth: z.number().positive().describe('Socket depth into the floor, in millimetres.'),
+      fit: fitVariantSchema.optional().describe('Peg-in-socket fit; omit to inherit case.fit.'),
+    })
+    .optional()
+    .describe('Blind socket grid in the case floor for drop-in dividers; omit for none.'),
+  dividers: z
+    .array(
+      z.object({
+        id: z.string().describe('Unique divider id.'),
+        axis: z.enum(['x', 'y']).describe('The wall runs along X (on a grid row) or along Y (on a grid column).'),
+        line: z.number().int().nonnegative().describe('Grid row (axis x) or column (axis y), counted from 0 at the -Y / -X wall.'),
+        start: z.number().int().nonnegative().describe('First socket along the wall, counted from 0.'),
+        holes: z.number().int().min(2).describe('Sockets the wall covers, first to last; tenons sit in the end two.'),
+        thickness: z.number().positive().optional().describe('Wall thickness, in millimetres; omit for 2.4.'),
+        enabled: z.boolean().describe('False keeps the divider in the document but builds nothing.'),
+      }),
+    )
+    .optional()
+    .describe('Drop-in dividers standing on the floor grid, each its own printed part; omit for none.'),
   // Issue #92 — optional barrel hinge. Side faces only; one per case in v1.
   // Missing on disk = no hinge emitted.
   hinge: z

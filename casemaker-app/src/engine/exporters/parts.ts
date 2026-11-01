@@ -310,6 +310,23 @@ const PRINT_PATTERNS: PrintPattern[] = [
       },
     ),
   },
+  // Issue #150 — a case divider is the same peg, laid on its side the same way.
+  // The axis is in the id because a wall along Y needs its quarter turn about
+  // Y, not X, to come down flat (a turn about X would stand it on its end).
+  {
+    test: (id) => id.startsWith('case-divider-x-'),
+    meta: flat(
+      'Lay it on its SIDE — wall face on the bed, tenons pointing sideways. The wall prints as flat layers and nothing overhangs',
+      { rotation: [90, 0, 0], exportedOrientationNote: 'the tenons point sideways, not down.' },
+    ),
+  },
+  {
+    test: (id) => id.startsWith('case-divider-y-'),
+    meta: flat(
+      'Lay it on its SIDE — wall face on the bed, tenons pointing sideways. The wall prints as flat layers and nothing overhangs',
+      { rotation: [0, 90, 0], exportedOrientationNote: 'the tenons point sideways, not down.' },
+    ),
+  },
   {
     test: (id) => /^rack-(blank|keystone)-\d+$/.test(id),
     meta: flat(
@@ -487,6 +504,10 @@ function describePart(
       material: 'rigid',
       category: 'accessory',
     };
+  }
+  if (id.startsWith('case-divider-')) {
+    const axis = id.slice('case-divider-'.length, 'case-divider-'.length + 1).toUpperCase();
+    return { displayName: `Divider (along ${axis})`, material: 'rigid', category: 'accessory' };
   }
   if (id.startsWith('divider-peg-')) {
     const suffix = id.slice('divider-peg-'.length);

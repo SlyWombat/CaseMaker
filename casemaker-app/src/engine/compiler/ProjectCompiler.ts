@@ -24,6 +24,7 @@ import { buildSecondaryMountOps } from './secondaryMounts';
 import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
 import { buildMagnetOps } from './magnets';
+import { buildCaseDividerOps } from './caseDividers';
 import { buildStandNodes } from './stand';
 import { buildRackNodes } from './rack';
 import { rectFitsBed, resolvePrinter } from './rackFit';
@@ -232,6 +233,9 @@ export function compileProject(project: Project): BuildPlan {
     resolveDisplay,
     project.customFonts ?? [],
   );
+  // Issue #150 — the floor socket grid and its drop-in dividers. Both lists
+  // are empty for a project with no enabled grid, so its plan is unchanged.
+  const dividerOps = buildCaseDividerOps(project);
 
   const additive = [
     shellOuter,
@@ -293,6 +297,7 @@ export function compileProject(project: Project): BuildPlan {
     ...latchOps.caseSubtract,
     ...buildCustomCutouts(caseParams.customCutouts, board, caseParams, hats ?? [], resolveHat, display, resolveDisplay),
     ...magnetOps.shellCut,
+    ...dividerOps.floorCut,
   ];
 
   let shellOp: BuildOp = additive.length > 1 ? union(additive) : shellOuter;
@@ -520,6 +525,11 @@ export function compileProject(project: Project): BuildPlan {
   // slip-on parts.
   for (const b of ruggedOps.bumperNodes) {
     nodes.push(b);
+  }
+
+  // Issue #150 — each divider is a free part, dropped into the finished case.
+  for (const d of dividerOps.nodes) {
+    nodes.push(d);
   }
 
   const placementReport = validatePlacements(project);
