@@ -4048,7 +4048,12 @@ export function EngravePanel(): JSX.Element {
           index={i}
           maxDepth={maxDepth}
           maxDepthWhy={maxDepthWhy}
-          findings={findingsFor(thread.id)}
+          // #445 D1 — THE ROW STATES THE PILOT IN ITS OWN WORDS (the diameter from the thread
+          // table, the "never drills" fact, the depth the thread needs), so the
+          // `thread-pilot-unproven` warning would print the same sentence twice — and it fires on
+          // every internal thread. The row does not carry it; the run's own findings (the gate,
+          // the sheet and the receipt) still do.
+          findings={findingsFor(thread.id).filter((f) => f.code !== 'thread-pilot-unproven')}
           {...(thread.side === 'external'
             ? { boss: threadBoss(job, thread.position), onAddBoss: () => addThreadBoss(thread) }
             : {})}
