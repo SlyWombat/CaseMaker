@@ -98,6 +98,7 @@ The compiler is 43 modules. Grouped by what they build:
 | `fans.ts` | `buildFanMountOps` | Fan opening, bolt circle and mounting pad |
 | `externalAssets.ts` | `buildExternalAssetOps` | Imported STL/3MF turned into mesh ops with transforms |
 | `secondaryMounts.ts` | `buildSecondaryMountOps` | A second board or module carried in the same case |
+| `magnets.ts` | `buildMagnetOps`, `resolveMagnets`, `magnetFactsForProject`, `buildNameplateLocal`, `nameplateNodeId` | Issue #152 — `case.magnetPockets` (a row of `count` pockets at (u, v) on a face, `+z` into the lid) and `case.nameplate` (a separate `nameplate-<face>` part carrying text through `textLabels.ts`' `centredTextOutline`, with pockets on its back at the same world centres as the case pockets behind it). A wall thinner than skin + pocket + 1 mm backing gets an inside boss (pocket Ø + 3.2). `captured` closes the pocket with a 0.6 mm skin and states the pause height; it is only possible where the pocket axis is vertical as printed (floor, lid), so a side-wall `captured` is cut open for glue and says so. Every list is empty for a project without magnets, so its plan is byte-identical |
 
 **Whole-product archetypes**
 
@@ -473,7 +474,8 @@ and `--list` prints the ids.
 
 | id | settles |
 | :--- | :--- |
-| `magnet-6x2`, `magnet-8x3`, `magnet-10x2` | the magnet pocket diameter, as a clearance ladder cut in two print orientations |
+| `magnet-6x2`, `magnet-8x3`, `magnet-10x2` | the magnet pocket diameter, as a clearance ladder cut in two print orientations (`npm run magnet:coupon -- <size>` renders the same ladder for any of the seven table sizes) |
+| `magnet-sizes` | one pocket of every `MAGNETS` row (6×2, 6×3, 8×2, 8×3, 10×2, 10×3, 12×3) at the table's glue fit, labelled with the size's digits (`62` … `123`): does each row take its disc at all |
 | `board-snap` | `boardSnap.ts`'s `CLIP_FIT` (the spine-to-PCB-edge gap) laddered by #153's `fitRelief`, one clipped two-jaw clip per rung, plus a gauge cut to the board's own thickness to check the Z jaw opening accepts it |
 | `snap-catch` | `snapCatches.ts`'s hook socket, laddered by #153 — the tab and the socket wall are both the compiler's geometry, the barb pocket is measured off the mesh |
 | `rack-tab` | `rack.ts`'s `TAB_SLACK` (plate tab in its ledge), laddered by #153; both halves are the compiler's own parts cut with a slab, so the tab prints counterbore-up |

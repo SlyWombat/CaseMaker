@@ -135,6 +135,24 @@ Side-facing components on the loaded board (USB-C, HDMI, RJ-45, etc.) automatica
 
 A port's cutout box inflates by `cutoutMargin` (default 0.5 mm) on the perpendicular axes and pierces the wall on the facing axis. Edit the per-component margin in the custom-board component editor.
 
+## Magnet pockets and the nameplate
+
+The **Features** panel has two magnet sections.
+
+**Magnet pockets** cut blind pockets for disc magnets into any case face. Each row sets the face, the magnet size (6 × 2, 6 × 3, 8 × 2, 8 × 3, 10 × 2, 10 × 3 or 12 × 3 mm), how the magnet is held, how many pockets sit in a row, and the row's centre (U and V, in mm from the face's corner). A top-face pocket is cut into the lid.
+
+| Hold | Pocket |
+| :--- | :--- |
+| **glue** | Open, disc Ø + 0.5 mm, disc thickness + 0.4 mm deep. Glue the magnet in. |
+| **press** | Open, disc Ø + 0.1 mm: printed holes come out a little small, so this lands as a light press fit. |
+| **captured** | Closed at the face by a 0.6 mm skin. The panel states the height to pause the print at (0.2 mm layers): drop the magnet in, then resume, and the next layers roof it over. Only the case floor and the lid can be captured; on a side wall the pocket would print on its edge, so it is cut open for glue and the panel says so. |
+
+Case walls are usually thinner than a pocket plus its 1 mm backing, so a round boss is added on the inside of the wall behind each pocket. The panel says when a pocket runs off its face or into a port cutout.
+
+**Nameplate** adds a separate plate carrying text, held on by magnets. Set its face, centre, size, thickness, text and the number of magnets (1 to 4). The plate has pockets on its back, and the case face has pockets at exactly the same centres, so one magnet in each pulls the plate home; set each pair so they attract. The plate exports as its own part, laid back down on the bed with the text on top. If the plate is too thin for the magnet under the text, or the text is wider than the plate, the panel says by how much.
+
+**The fits are provisional.** No magnet coupon has been printed and measured yet. Print `fit-coupon-magnet-sizes.stl` (`npm run fit:coupon -- magnet-sizes`): one pocket of every size, labelled 62, 63, 82, 83, 102, 103, 123. Press a magnet of each size in and note which ones do not seat or fall out.
+
 ## External assets (STL / 3MF import)
 
 The **External assets** panel imports binary STL, ASCII STL, or 3MF meshes. Per asset, you choose visibility:
