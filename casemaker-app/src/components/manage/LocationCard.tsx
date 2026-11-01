@@ -8,7 +8,7 @@
  * never typed in.
  */
 
-import { useState, type ReactNode } from 'react';
+import { useState, type JSX, type ReactNode } from 'react';
 import type { FixtureRecord, LocationView, MachineRecord } from '@/platform/locationClient';
 import { formatStamp } from './display';
 import { MachinePower } from './MachinePower';
@@ -24,6 +24,9 @@ import {
 } from '@/store/locationStore';
 import { useHouseStore } from '@/store/houseStore';
 import type { InventoryItem } from '@/platform/houseClient';
+import { GRBL_PRESETS } from '@/engine/cnc/machine';
+import { machineRecordFromPreset } from '@/platform/genericMachines';
+import { newId } from '@/utils/id';
 
 /** Dismiss, then re-read `/health` (through the registry's refresh) so the warning goes. */
 async function dismissHouseWarning(): Promise<void> {
@@ -273,6 +276,71 @@ export function LocationProblemCard({ reason }: { reason: string | null }) {
   );
 }
 
+/**
+ * #845 — ADD A GRBL MACHINE TO THE HOUSE LOCATION.
+ *
+ * The four presets the app ships (Shapeoko 4 XXL, Shapeoko 5 Pro, X-Carve Pro, 3018-PROVer V2) are
+ * STATED machines: the owner tells the app the work area and spindle, Case Maker writes the `.nc`
+ * for the owner's own sender and never drives it. Adding one is an ordinary machine record in the
+ * house location (the manager's rule: shared, visible from any LAN browser), so it is written
+ * through the same guarded machine PUT as every other record. A preset already in the location is
+ * not offered twice; the values are edited on the record afterwards, and the Manage row then reads
+ * "values stated by you".
+ */
+function GrblPresetRow({ existing }: { existing: readonly MachineRecord[] }): JSX.Element {
+  const saveMachine = useLocationStore((s) => s.saveMachine);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const present = new Set(existing.map((m) => m.profileId));
+  const offered = GRBL_PRESETS.filter((preset) => !present.has(preset.id));
+  if (offered.length === 0) return <></>;
+  const add = async (id: string): Promise<void> => {
+    const preset = GRBL_PRESETS.find((p) => p.id === id);
+    if (preset === undefined) return;
+    setBusy(id);
+    setNote(null);
+    try {
+      const record = machineRecordFromPreset(preset, { id: newId('machine'), now: new Date().toISOString() });
+      const res = await saveMachine(record);
+      setNote(
+        res === 'ok'
+          ? { kind: 'ok', text: `${preset.name} is in the location. Run from your own sender — Case Maker writes its .nc and does not drive it.` }
+          : { kind: 'error', text: `the machine was not saved (${res}) — try again` },
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div data-testid="manage-location-add-grbl">
+      <p className="hint">
+        Add a machine Case Maker writes files for but does not drive — a GRBL router run from your
+        own sender. Every value is a starting point you can edit; the vendor's published spec is
+        cited on each one.
+      </p>
+      <span className="btn-row">
+        {offered.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className="btn btn--sm"
+            data-testid={`manage-location-add-${preset.id}`}
+            disabled={busy !== null}
+            onClick={() => void add(preset.id)}
+          >
+            {busy === preset.id ? 'Adding…' : `Add ${preset.name}`}
+          </button>
+        ))}
+      </span>
+      {note !== null && (
+        <p className="hint" data-testid="manage-location-add-note" data-status={note.kind === 'error' ? 'error' : undefined}>
+          {note.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function LocationCard({
   location,
   writeNote,
@@ -306,6 +374,7 @@ export function LocationCard({
           <MachineHolds machine={machine} />
         </>
       )}
+      <GrblPresetRow existing={location.machines} />
       {location.machines.length > 1 && (
         <p className="hint">
           {location.machines.length - 1} more machine record(s) in this location — this build shows the

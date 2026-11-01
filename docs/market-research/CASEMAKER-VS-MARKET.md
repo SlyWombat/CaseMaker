@@ -64,7 +64,7 @@ with a paid tier (`(Pro)`, `(Plus)`, `(M+)`, `(Starter)`, `(sub)`). No vendor wa
 | Feeds & speeds database | Y | Y — catalogue tier clamped to the machine, measured rows win (#310); none measured yet (**#284**) | Y 14 · N 2 · ? 2 |
 | Material library | Y | Y (#413, #456) | Y 13 · ? 5 |
 | Toolpath templates / presets | ? | R-7 — the job file is the template | Y 5 · P 1 · N 2 · ? 10 · tier 2 |
-| Post-processors / machine profiles | ? | P — one post, one profile (Z1) with calibration (#184, #279) | Y 14 · P 1 · N 1 · ? 2 |
+| Post-processors / machine profiles | ? | P — the Z1's post and its calibrated frame (#184, #279), the Carvera models (#773/#828), and since #845 a GRBL 1.1 post with stated-machine presets (Shapeoko 4 XXL, Shapeoko 5 Pro, X-Carve Pro, 3018-PROVer) — export only: the `.nc` is written for the owner's own sender and Case Maker never drives those machines | Y 14 · P 1 · N 1 · ? 2 |
 | Plugin / scripting API | N | R-11 — a CLI and a read-only MCP server instead (#485) | Y 5 · P 3 · N 8 · ? 2 |
 
 ## D. Preview & simulation
@@ -138,9 +138,12 @@ gouge checks that are errors rather than warnings (3/18 have any check), a machi
 (6/18) and a **volumetric oracle** nobody else has, gating the file before it can be uploaded. Its
 machine model is **measured-provenance** throughout — every feed, fixture dimension, probe reading
 and bed datum carries a source and a date, and a catalogue number can never read as a measurement.
-The honest limit is **scope: one machine (the Makera Z1), one post, one profile**, where 14/18 of the
-field ship multiple machine profiles; the `MachineProfile` seam exists (#184, decision 25) but
-nothing beyond the Z1 is supported, by decision (`/Makera-Parity.md` §10, §13).
+The honest limit was **scope: one machine (the Makera Z1), one post, one profile**, where 14/18 of
+the field ship multiple machine profiles. #845 narrowed it: a **GRBL 1.1 post** and four
+**stated-machine presets** (Shapeoko 4 XXL, Shapeoko 5 Pro, X-Carve Pro, 3018-PROVer V2) let the app
+write a program for a router it does not drive — export only, every value cited from the vendor's
+published spec or said to be the owner's — while live control beyond the Makera machines stays out
+by decision (`/Makera-Parity.md` §10, §13; live GRBL streaming is #845's follow-up).
 
 ## Top five market-facing gaps
 

@@ -62,6 +62,17 @@ describe('#513 the sheet’s Bed line', () => {
   });
 });
 
+describe('#845 the sheet’s Dialect line', () => {
+  it('prints when the machine is a GRBL machine, and is absent on a Makera sheet', () => {
+    const job = dj();
+    const { unmount } = render(<RunSheetView sheet={sheetFor(job, { dialectName: 'GRBL 1.1' })} />);
+    expect(screen.getByTestId('run-sheet-dialect').textContent).toBe('GRBL 1.1');
+    unmount();
+    render(<RunSheetView sheet={sheetFor(job)} />);
+    expect(screen.queryByTestId('run-sheet-dialect')).toBeNull();
+  });
+});
+
 describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
   it('draws the side view when the job has sacrificial material', () => {
     const job = dj();

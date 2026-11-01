@@ -58,6 +58,21 @@ export type MachineProcess = 'fdm' | 'mill';
  */
 export type MachinePost = 'z1' | 'grbl';
 
+/**
+ * #845 — THE WORK-ORIGIN CONVENTION a stated machine's programs are written against.
+ *
+ *   - `'top-front-left'` — the Z1's convention and the app's `PostContext.origin` literal: G54 at
+ *     the stock's front-left corner, Z0 on its top face.
+ *   - `'top-centre'` — the centre-zero convention most GRBL senders offer: G54 at the stock's XY
+ *     CENTRE, Z0 on its top face.
+ *
+ * Absent reads `'top-front-left'`, so every profile written before the field existed is unchanged.
+ * A FRAMED profile (the Z1, the Carvera Air) never carries it: its convention is the controller's,
+ * read with its frame. Only a stated machine — one Case Maker writes files for and never drives —
+ * states one.
+ */
+export type WorkOrigin = 'top-front-left' | 'top-centre';
+
 /** The identity and process discriminator every machine shares. */
 export interface MachineIdentity {
   id: string;
@@ -943,10 +958,23 @@ export interface MillModel extends MachineIdentity {
    * connects to — export only — so there is no frame to read and none is invented.
    */
   frameState: 'unread' | 'stated';
+  /**
+   * #845 — the work-origin convention the machine's programs are written against; absent reads
+   * `'top-front-left'` (see {@link WorkOrigin}). Stated machines only: a framed profile's
+   * convention is its controller's.
+   */
+  workOrigin?: WorkOrigin;
   materials: StockMaterial[];
   envelope: { x: AxisRange; y: AxisRange; z: AxisRange };
   maxCutFeed: number;
   maxRpm: number;
+  /**
+   * #845 — THE RAPID MODEL, for the cycle ESTIMATE only (it is never written as an `F`). A framed
+   * profile reads it from its controller configuration; a stated machine carries the owner's own
+   * numbers, and the estimate's `source` says exactly that. Required, so a post reads one field
+   * and no caller has to decide what an absent estimate means.
+   */
+  rapidEstimate: RapidEstimate;
   hasATC: boolean;
   toolSlots: number;
   /** The rotary module's stock envelope, from the same row; absent when the row names none. */
@@ -956,7 +984,8 @@ export interface MillModel extends MachineIdentity {
     maxCutFeed: string;
     maxRpm: string;
     atc: string;
-    rotaryEnvelope: string;
+    /** Present exactly when the model states a rotary — a machine without one has no source. */
+    rotaryEnvelope?: string;
   };
 }
 
@@ -987,6 +1016,15 @@ export function machineFrameProblem(model: Mill): string | null {
 /** A mill model by id — framed or not — or undefined for an id this build does not know. */
 export function millModelById(id: string | null | undefined): Mill | undefined {
   return id == null ? undefined : MILL_MODELS[id];
+}
+
+/**
+ * #845 — the work-origin convention a stated machine's programs are written against; absent reads
+ * `'top-front-left'`. One reader, so the post, the header sentence and the run sheet cannot default
+ * differently.
+ */
+export function workOriginOf(model: MillModel): WorkOrigin {
+  return model.workOrigin ?? 'top-front-left';
 }
 
 /** The frame refusal for an id: null for a framed or UNKNOWN id, the sentence for an unread one. */
@@ -1187,6 +1225,181 @@ export const CARVERA: MillProfile = {
 };
 
 /**
+ * #845 SLICE B — THE GRBL MACHINES THE APP SHIPS PRESETS FOR.
+ *
+ * A stated machine, not a vendor row: the owner tells the app the work area and the spindle, and
+ * Case Maker writes its `.nc` for the owner's own sender and never drives the machine
+ * (`frameState: 'stated'`, `post: 'grbl'`). Every value's `sources` entry says where it came from —
+ * the vendor's published spec with its URL, or "stated by you — the vendor publishes no value" for
+ * the handful no vendor states. Nothing here is measured on the maintainer's bench, and nothing is
+ * invented and labelled as published.
+ *
+ * THE ENVELOPE IS THE WORK AREA, from the machine's front-left corner: `0 … W` on each axis. The
+ * Z1's negative machine frame is a controller convention it has and these machines do not; a
+ * stated machine's numbers are relative to the work origin the profile names in `workOrigin`.
+ *
+ * THE VALUES ARE STARTING POINTS. Any of them may be edited on the machine record; after an edit
+ * the value is the owner's, which is why the Manage row reads "values stated by you".
+ */
+
+/** A cited value: the vendor's number, with the page it came from. */
+const cited = (what: string, url: string): string => `${what} (${url})`;
+
+/** What no vendor publishes: the owner's own starting value, said as such. */
+const statedByYou = (what: string): string => `stated by you — ${what}`;
+
+const GRBL_MATERIALS: StockMaterial[] = ['softwood', 'hardwood', 'mdf', 'plastic', 'acrylic', 'aluminium-6061'];
+
+/** The 0…extent envelope a work-area figure makes. */
+const workArea = (x: number, y: number, z: number): MillModel['envelope'] => ({
+  x: { min: 0, max: x },
+  y: { min: 0, max: y },
+  z: { min: 0, max: z },
+});
+
+/** The tools every GRBL preset is run with: a manual change, so no slots. */
+const MANUAL_CHANGE: Pick<MillModel, 'hasATC' | 'toolSlots'> = { hasATC: false, toolSlots: 0 };
+
+export const SHAPEOKO_4: MillModel = {
+  id: 'grbl:shapeoko-4',
+  name: 'Shapeoko 4 XXL',
+  process: 'mill',
+  post: 'grbl',
+  frameState: 'stated',
+  workOrigin: 'top-front-left',
+  materials: GRBL_MATERIALS,
+  // 33 × 33 × 4 in — the XXL, the size most shops buy (Standard and XL are in the same page).
+  envelope: workArea(838.2, 838.2, 101.6),
+  maxCutFeed: 3000,
+  // Carbide Compact Router: 12 000–30 000 RPM (the DeWalt's dial tops at 27 000).
+  maxRpm: 30000,
+  // #845 — no rapid rate is published for this machine: the owner's own starting values.
+  rapidEstimate: {
+    xyMmPerMin: 5000,
+    zMmPerMin: 1000,
+    accelMmPerS2: 250,
+    source: 'stated by you — the vendor publishes no rapid rate; 5000 mm/min XY, 1000 mm/min Z, 250 mm/s²',
+  },
+  ...MANUAL_CHANGE,
+  sources: {
+    envelope: cited(
+      'Carbide 3D Shapeoko 4 XXL, 33 × 33 × 4 in (838.2 × 838.2 × 101.6 mm)',
+      'https://easel.inventables.com/partners/machines/carbide3d-shapeoko-4/',
+    ),
+    maxCutFeed: statedByYou('Carbide 3D publishes no maximum feed; 3000 mm/min is a starting value'),
+    maxRpm: cited(
+      'Carbide Compact Router 12 000–30 000 RPM',
+      'https://easel.inventables.com/partners/machines/carbide3d-shapeoko-4/',
+    ),
+    atc: cited('no tool changer — a manual change', 'https://easel.inventables.com/partners/machines/carbide3d-shapeoko-4/'),
+  },
+};
+
+export const SHAPEOKO_5: MillModel = {
+  id: 'grbl:shapeoko-5-pro',
+  name: 'Shapeoko 5 Pro (4 × 4)',
+  process: 'mill',
+  post: 'grbl',
+  frameState: 'stated',
+  workOrigin: 'top-front-left',
+  materials: GRBL_MATERIALS,
+  // 48.7 × 48.7 × 6.1 in — the 4 × 4 table (Z travel 5.51 in with the dust boot fitted).
+  envelope: workArea(1237.0, 1237.0, 154.9),
+  maxCutFeed: 3000,
+  maxRpm: 27000,
+  // #845 — no rapid rate is published for this machine: the owner's own starting values.
+  rapidEstimate: {
+    xyMmPerMin: 5000,
+    zMmPerMin: 1000,
+    accelMmPerS2: 250,
+    source: 'stated by you — the vendor publishes no rapid rate; 5000 mm/min XY, 1000 mm/min Z, 250 mm/s²',
+  },
+  ...MANUAL_CHANGE,
+  sources: {
+    envelope: cited(
+      'Carbide 3D Shapeoko 5 Pro, 4 × 4: 48.7 × 48.7 × 6.1 in (1237 × 1237 × 154.9 mm)',
+      'https://easel.inventables.com/partners/machines/carbide3d-shapeoko-5-pro/',
+    ),
+    maxCutFeed: statedByYou('Carbide 3D publishes no maximum feed; 3000 mm/min is a starting value'),
+    maxRpm: cited(
+      'the DeWalt DW611 dial tops out at 27 000 RPM (no router is included)',
+      'https://easel.inventables.com/partners/machines/carbide3d-shapeoko-5-pro/',
+    ),
+    atc: cited('no tool changer — a manual change', 'https://easel.inventables.com/partners/machines/carbide3d-shapeoko-5-pro/'),
+  },
+};
+
+export const X_CARVE: MillModel = {
+  id: 'grbl:x-carve-pro',
+  name: 'X-Carve Pro (4 × 4)',
+  process: 'mill',
+  post: 'grbl',
+  frameState: 'stated',
+  workOrigin: 'top-front-left',
+  materials: GRBL_MATERIALS,
+  // 48 × 48 × 4 in — the 4 × 4 model (the 4 × 2 is the other size on the same page).
+  envelope: workArea(1219.2, 1219.2, 101.6),
+  maxCutFeed: 3000,
+  // 2 HP VFD spindle: 8 000–24 000 RPM.
+  maxRpm: 24000,
+  // #845 — no rapid rate is published for this machine: the owner's own starting values.
+  rapidEstimate: {
+    xyMmPerMin: 5000,
+    zMmPerMin: 1000,
+    accelMmPerS2: 250,
+    source: 'stated by you — the vendor publishes no rapid rate; 5000 mm/min XY, 1000 mm/min Z, 250 mm/s²',
+  },
+  ...MANUAL_CHANGE,
+  sources: {
+    envelope: cited(
+      'Inventables X-Carve Pro 4 × 4: 48 × 48 × 4 in (1219.2 × 1219.2 × 101.6 mm)',
+      'https://easel.inventables.com/partners/machines/inventables-x-carve-pro/',
+    ),
+    maxCutFeed: statedByYou('Inventables publishes no maximum feed; 3000 mm/min is a starting value'),
+    maxRpm: cited(
+      'X-Carve Pro 2 HP VFD spindle, 8 000–24 000 RPM',
+      'https://easel.inventables.com/partners/machines/inventables-x-carve-pro/',
+    ),
+    atc: cited('no tool changer — a manual change', 'https://easel.inventables.com/partners/machines/inventables-x-carve-pro/'),
+  },
+};
+
+export const GENMITSU_3018: MillModel = {
+  id: 'grbl:3018-prover',
+  name: '3018-PROVer V2',
+  process: 'mill',
+  post: 'grbl',
+  frameState: 'stated',
+  workOrigin: 'top-front-left',
+  materials: GRBL_MATERIALS,
+  // The published work area: 300 × 180 × 45 mm (the V2's effective Z travel is 40 mm).
+  envelope: workArea(300, 180, 45),
+  maxCutFeed: 500,
+  // The 775 motor at 24 V: 10 000 RPM.
+  maxRpm: 10000,
+  // #845 — no rapid rate is published for this machine: the owner's own starting values.
+  rapidEstimate: {
+    xyMmPerMin: 2000,
+    zMmPerMin: 500,
+    accelMmPerS2: 100,
+    source: 'stated by you — the vendor publishes no rapid rate; 2000 mm/min XY, 500 mm/min Z, 100 mm/s²',
+  },
+  ...MANUAL_CHANGE,
+  sources: {
+    envelope: cited(
+      'Genmitsu 3018-PROVer V2 work area 300 × 180 × 45 mm (V2 Z travel 40 mm)',
+      'https://www.sainsmart.com/products/genmitsu-3018-prover',
+    ),
+    maxCutFeed: statedByYou('SainSmart publishes no maximum feed; 500 mm/min is a starting value'),
+    maxRpm: cited('775 spindle motor at 24 V: 10 000 RPM', 'https://www.sainsmart.com/products/genmitsu-3018-prover'),
+    atc: cited('no tool changer — a manual change', 'https://www.sainsmart.com/products/genmitsu-3018-prover'),
+  },
+};
+
+/** The four GRBL presets the Manage panel offers, in the order it lists them. */
+export const GRBL_PRESETS: readonly MillModel[] = [SHAPEOKO_4, SHAPEOKO_5, X_CARVE, GENMITSU_3018];
+
+/**
  * The mills whose controller frame is established: the only machines a job may be written for.
  * The Z1, the Carvera Air and — since #828 — the Carvera are FRAMED; a {@link MillModel} is not
  * in here, so no id lookup that returns a `MillProfile` can ever hand back a machine whose
@@ -1206,6 +1419,8 @@ export const MILL_MODELS: Readonly<Record<string, Mill>> = {
   [Z1.id]: Z1,
   [CARVERA_AIR.id]: CARVERA_AIR,
   [CARVERA.id]: CARVERA,
+  // #845 — the GRBL presets: stated machines the owner adds to the house location.
+  ...Object.fromEntries(GRBL_PRESETS.map((model) => [model.id, model])),
 };
 
 /**
@@ -1503,6 +1718,8 @@ export const millModelSchema = z.object({
   // #845 — absent reads 'z1' (every record written before the field existed).
   post: z.enum(['z1', 'grbl']).optional(),
   frameState: z.enum(['unread', 'stated']),
+  // #845 — absent reads 'top-front-left'; a stated machine may state the centre-zero convention.
+  workOrigin: z.enum(['top-front-left', 'top-centre']).optional(),
   materials: z.array(z.enum(STOCK_MATERIALS)),
   envelope: z.object({
     x: z.object({ min: finite, max: finite }),
@@ -1511,6 +1728,13 @@ export const millModelSchema = z.object({
   }),
   maxCutFeed: finite.positive(),
   maxRpm: finite.positive(),
+  // #845 — the estimate's rapid model: required on a stated model too, so a post reads one field.
+  rapidEstimate: z.object({
+    xyMmPerMin: finite.positive(),
+    zMmPerMin: finite.positive(),
+    accelMmPerS2: finite.positive(),
+    source: z.string().min(1),
+  }),
   hasATC: z.boolean(),
   toolSlots: z.number().int().nonnegative(),
   rotaryEnvelope: z.object({ diameter: finite.positive(), length: finite.positive() }).optional(),
@@ -1519,7 +1743,9 @@ export const millModelSchema = z.object({
     maxCutFeed: z.string().min(1),
     maxRpm: z.string().min(1),
     atc: z.string().min(1),
-    rotaryEnvelope: z.string().min(1),
+    // #845 — optional: a machine with no rotary module has no rotary fact to cite (the Carvera
+    // states one; a Shapeoko does not).
+    rotaryEnvelope: z.string().min(1).optional(),
   }),
 }).superRefine((model, ctx) => {
   // The pair is one fact on a row too (#773): a 6-slot changer is a changer, and a manual machine
@@ -1529,6 +1755,17 @@ export const millModelSchema = z.object({
   }
   if (!model.hasATC && model.toolSlots !== 0) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['toolSlots'], message: 'a manual tool change lists no slots' });
+  }
+  // #845 — A GRBL MACHINE CHANGES TOOLS BY HAND. Case Maker's GRBL post writes no tool changer
+  // (no `M6`): a green field that claimed one would promise a change the program never makes, so
+  // the record is refused here, with the sentence the operator reads — the cut side never sees
+  // one to refuse, and no second sentence exists to disagree with this one.
+  if (model.post === 'grbl' && model.hasATC) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['hasATC'],
+      message: 'a GRBL machine changes tools by hand: Case Maker’s GRBL post writes no tool changer',
+    });
   }
 });
 

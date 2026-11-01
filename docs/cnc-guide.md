@@ -280,6 +280,35 @@ says two fixtures are placed on the same locating pins, which is physically impo
 **`surface-top-unmeasured`** says a taped (or unbracketed) job needs the surface top and the
 active bed has not measured it. None of them refuses on a tolerance, and each names the fix.
 
+### Machines Case Maker does not drive — the GRBL post
+
+> **Status: Available** — the GRBL 1.1 post and the four stated-machine presets (#845 slice B).
+> Export only: the app writes the `.nc` and never connects to these machines; live streaming is a
+> follow-up in the same issue.
+
+**A machine you tell the app about.** Not a vendor row — Case Maker has no configuration for a
+Shapeoko, an X-Carve or a 3018, and it does not invent one. You add the machine to the shop's
+location with **Machines → Add …**, from one of four presets, and every value is a starting point
+you can edit: the work area, the fastest feed, the spindle range, and where the origin sits.
+Values the vendor publishes carry the page they came from; values no vendor publishes say
+"stated by you" rather than pretending otherwise. Once the machine is in the location, its row
+reads **"values stated by you"** — that is the whole claim, and it is the honest one.
+
+**What is written.** Programs use the GRBL 1.1 dialect: `G21 G90 G54`, `M3`/`M5` for the spindle,
+`M8`/`M9` coolant only where the job asks, no tool changer — a tool change pauses with `M0`, names
+the tool and says to re-zero. The header carries the machine and the date; the run sheet adds a
+**Dialect** line ("GRBL 1.1") beside the machine, because a sheet read at a Shapeoko has to say
+which dialect its lines are in.
+
+**What is refused, by name.** A tool changer on a GRBL machine is refused when the machine is
+added (the post writes no `M6`); the rotary 4th axis is refused unless the profile states one. The
+verifier judges a GRBL file by the GRBL dialect table, so the same checks that read a Makera
+program read yours — and the simulator and the cutting-time estimate run unchanged.
+
+**What the app will not do.** It will not home, probe, upload or run this machine: there is no
+controller to reach, and a check that can only fail is not offered. Save the `.nc` and run it in
+your own sender.
+
 ---
 
 ## 3 · Ideas you need first

@@ -1755,7 +1755,11 @@
           "enum": [
             "Z1",
             "CA1",
-            "C1"
+            "C1",
+            "grbl:shapeoko-4",
+            "grbl:shapeoko-5-pro",
+            "grbl:x-carve-pro",
+            "grbl:3018-prover"
           ],
           "type": "string"
         },
@@ -1764,7 +1768,7 @@
           "properties": {
             "boundaryMargin": {
               "description": "Extra clearance kept from the stock's boundary, in millimetres.",
-              "maximum": 140,
+              "maximum": 154.9,
               "minimum": 0,
               "type": "number"
             },
@@ -1779,7 +1783,7 @@
             },
             "zTolerance": {
               "description": "Tolerance on the Z floor, in millimetres.",
-              "maximum": 140,
+              "maximum": 154.9,
               "minimum": 0,
               "type": "number"
             }
@@ -5849,14 +5853,14 @@
               "properties": {
                 "capMm": {
                   "description": "Thickness of the top colour layer, measured from the engraved face, in millimetres.",
-                  "maximum": 140,
+                  "maximum": 154.9,
                   "minimum": 0,
                   "type": "number"
                 },
                 "firstLayerHeight": {
                   "description": "First-layer height in millimetres; printed blanks only, and needs layerHeight.",
                   "exclusiveMinimum": 0,
-                  "maximum": 140,
+                  "maximum": 154.9,
                   "type": "number"
                 },
                 "kind": {
@@ -5870,7 +5874,7 @@
                 "layerHeight": {
                   "description": "Print layer height in millimetres; printed blanks only, omit when unknown.",
                   "exclusiveMinimum": 0,
-                  "maximum": 140,
+                  "maximum": 154.9,
                   "type": "number"
                 }
               },
@@ -5883,7 +5887,7 @@
             "diameter": {
               "description": "Outer diameter of round stock in millimetres; present exactly when shape is \"cylinder\" or \"disc\".",
               "exclusiveMinimum": 0,
-              "maximum": 240,
+              "maximum": 1237,
               "type": "number"
             },
             "fibre": {
@@ -5917,13 +5921,13 @@
                     },
                     "xMm": {
                       "description": "Measured bow along X, in millimetres, over the clamped piece.",
-                      "maximum": 140,
+                      "maximum": 154.9,
                       "minimum": 0,
                       "type": "number"
                     },
                     "yMm": {
                       "description": "Measured bow along Y, in millimetres, over the clamped piece.",
-                      "maximum": 140,
+                      "maximum": 154.9,
                       "minimum": 0,
                       "type": "number"
                     }
@@ -5975,7 +5979,7 @@
             "length": {
               "description": "Stock length along X, in millimetres (bounded by the job's own machine's X travel).",
               "exclusiveMinimum": 0,
-              "maximum": 320,
+              "maximum": 1237,
               "type": "number"
             },
             "material": {
@@ -6023,7 +6027,7 @@
             "thickness": {
               "description": "Stock thickness along Z, in millimetres (bounded by the job's own machine's Z travel).",
               "exclusiveMinimum": 0,
-              "maximum": 140,
+              "maximum": 154.9,
               "type": "number"
             },
             "wall": {
@@ -6034,7 +6038,7 @@
             "width": {
               "description": "Stock width along Y, in millimetres (bounded by the job's own machine's Y travel).",
               "exclusiveMinimum": 0,
-              "maximum": 240,
+              "maximum": 1237,
               "type": "number"
             }
           },

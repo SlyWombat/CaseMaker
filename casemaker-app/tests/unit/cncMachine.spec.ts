@@ -442,7 +442,18 @@ describe('#773 the Carvera Air is framed, and the Carvera is a row with no frame
     expect(CARVERA.rotary?.homing).toBeNull();
     // The rotary's shipped rates are the file's active keys.
     expect(CARVERA.rotary).toMatchObject({ envelope: { diameter: 92, length: 240 }, maxRate: 1800, acceleration: 360 });
-    expect(Object.keys(MILL_MODELS)).toEqual(['Z1', 'CA1', 'C1']);
+    // #845 — the four GRBL presets are models too: a job may name one (export only). The framed
+    // registry keeps the three machines whose frames are read; the model registry lists every mill
+    // this build knows, framed or stated.
+    expect(Object.keys(MILL_MODELS)).toEqual([
+      'Z1',
+      'CA1',
+      'C1',
+      'grbl:shapeoko-4',
+      'grbl:shapeoko-5-pro',
+      'grbl:x-carve-pro',
+      'grbl:3018-prover',
+    ]);
     expect(millModelById('C1')).toBe(CARVERA);
     expect(machineFrameProblem(CARVERA)).toBeNull();
     expect(machineFrameProblemById('C1')).toBeNull();

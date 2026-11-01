@@ -780,6 +780,13 @@ export interface RunSheetHeader {
    * numbers are true about, because the operator reads it standing beside one.
    */
   bed?: string;
+  /**
+   * #845 — the DIALECT the file is written in, when the machine is not the Z1's Smoothie family:
+   * "GRBL 1.1" for a machine run from its own sender. Present on a stated machine; absent on the
+   * Makera machines, whose sheet has always named only the machine (their dialect is the app's
+   * own and was never a choice).
+   */
+  dialect?: string;
   /** ISO date (`YYYY-MM-DD`) the sheet was generated. */
   generatedOn: string;
   /** The sanitised job name plus `.nc` — the file the operator loads. */
@@ -2276,6 +2283,12 @@ export interface RunSheetOptions {
    *  active profile; absent leaves the header without it (an older caller, the bench CLI). */
   bedName?: string;
   /**
+   * #845 — the file's g-code dialect, when the machine names a post that is not the Z1's: "GRBL
+   * 1.1" for a stated machine. Resolved by the caller from the machine's model (`post`); absent on
+   * every Makera machine, so their sheets are unchanged.
+   */
+  dialectName?: string;
+  /**
    * #604 — the found position from the registration: how far the measured blank sits from the
    * plan's nominal origin. Absent: no registration has run on this machine, and no found-position
    * section prints — an unregistered job's sheet is unchanged.
@@ -3665,6 +3678,7 @@ export function buildRunSheet(
     ...(options.probeName !== undefined ? { probe: options.probeName } : {}),
     ...(options.mountName !== undefined ? { mount: options.mountName } : {}),
     ...(options.bedName !== undefined ? { bed: options.bedName } : {}),
+    ...(options.dialectName !== undefined ? { dialect: options.dialectName } : {}),
   };
 
   // ---- 1 · What you need ---------------------------------------------------------------------

@@ -102,6 +102,14 @@ export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: ()
                 <dd data-testid="run-sheet-bed">{sheet.header.bed}</dd>
               </div>
             )}
+            {/* #845 — which dialect the file is written in, when the machine is not a Makera: a
+                GRBL machine is run from its owner's own sender. */}
+            {sheet.header.dialect !== undefined && (
+              <div>
+                <dt>Dialect</dt>
+                <dd data-testid="run-sheet-dialect">{sheet.header.dialect}</dd>
+              </div>
+            )}
             <div>
               <dt>Generated</dt>
               <dd>{sheet.header.generatedOn}</dd>
