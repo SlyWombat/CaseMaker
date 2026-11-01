@@ -162,13 +162,20 @@ import {
   generateSurface3dForGoal,
   generateSurface3dIR,
   GOAL_MOVE_BUDGET,
+  REST_TOLERANCE_MM,
+  planSurfaceRest,
   sampleGoalHeightfield,
+  suggestedRestRadiusMm,
+  surfaceResidual,
   type SampleGoalOpts,
   isMold,
   steepestWallDeg,
+  type GoalRestFacts,
   type GoalSurfaceFacts,
   type SurfaceFeeds,
+  type SurfaceRestPlan,
   type Surface3dResult,
+  type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
@@ -5006,6 +5013,185 @@ export function generateGoalProgram(
     cam,
   };
 
+  // #847 — WHAT THE FINISH LEFT, AND THE REST PASS THAT TAKES IT. The measurement is the finish's
+  // OWN gouge-safe tip field (the surface its program cuts): where the ball could not enter a
+  // concavity its tip rests above the goal, and that rise is material. A smaller owned ball is
+  // tried over just those cells (the same finishing raster, the residual dilated by the ball's
+  // radius); the pick takes the least residual, then the least time. When nothing owned lowers it
+  // the finish still posts, and a warning states the volume, the depth and the ball that would.
+  const restFindings: JobFinding[] = [];
+  const finishTool: SurfaceTool = {
+    radius: (cuttingDiameter(tool) ?? 0) / 2,
+    ball: tool.shape === 'ball' || tool.shape === 'bull',
+  };
+  const finishResidual = surfaceResidual(surfaced.heightfield, surfaced.finishTip, 0, REST_TOLERANCE_MM);
+  // The ball that finished, as the run's sentences name it.
+  const finishName = finishTool.radius > 0 ? `${Number((finishTool.radius * 2).toFixed(2))} mm ${tool.shape === 'ball' || tool.shape === 'bull' ? 'ball' : 'cutter'}` : tool.name;
+  const mm3 = (v: number): string => String(Number(v.toFixed(v >= 10 ? 1 : v >= 1 ? 2 : 3)));
+  const mm2 = (v: number): string => String(Number(v.toFixed(2)));
+  const restPick = ((): { entry: ToolLibraryEntry; plan: SurfaceRestPlan; rpm: number } | null => {
+    if (finishResidual.cells === 0 || !(finishTool.radius > 0)) return null;
+    let best: { entry: ToolLibraryEntry; plan: SurfaceRestPlan; rpm: number } | null = null;
+    const seenRadius = new Set<number>();
+    for (const entry of shop.tools ?? []) {
+      if (entry.key === job.toolKey) continue;
+      const candidate = entry.tool;
+      if (candidate.shape !== 'ball' && candidate.shape !== 'bull' && candidate.shape !== 'tapered-ball') continue;
+      const diameter = cuttingDiameter(candidate);
+      if (diameter === null || !(diameter > 0)) continue;
+      const radius = diameter / 2;
+      // A ball no smaller than the finish cannot enter a concavity that this one could not.
+      if (!(radius < finishTool.radius - 1e-9)) continue;
+      // One candidate per stated radius: the first library entry that states it.
+      const bucket = Math.round(radius * 1000);
+      if (seenRadius.has(bucket)) continue;
+      seenRadius.add(bucket);
+      const restResolved = feedsFor(
+        catalogue,
+        job.stock.material,
+        feedsToolForSurface(candidate),
+        mill,
+        job.cutOverride,
+        shop.feeds ?? undefined,
+      );
+      if (!restResolved.ok) continue;
+      const restFeeds: SurfaceFeeds = {
+        feed: restResolved.params.feed,
+        plungeFeed: restResolved.params.plungeFeed,
+        stepDown: restResolved.params.stepDown,
+        roughStepOver: restResolved.params.stepOver,
+        // The operation's own finishing step-over wins; else the smaller ball's own feeds row.
+        finishStepOver: settings.finishStepOverMm ?? restResolved.params.stepOver,
+      };
+      let plan: SurfaceRestPlan;
+      try {
+        plan = planSurfaceRest({
+          heightfield: surfaced.heightfield,
+          residual: finishResidual,
+          tool: { radius, ball: true },
+          feeds: restFeeds,
+          rapid: mill.rapidEstimate,
+          stockToLeaveMm: 0,
+          toleranceMm: REST_TOLERANCE_MM,
+        });
+      } catch {
+        // Over the tip field's budget: skip this ball rather than fail the goal; the warning
+        // below still states what the finish left.
+        continue;
+      }
+      // The simulated outcome: the material the ball still leaves above the goal, then time.
+      if (plan.moves.length === 0 || !(plan.residual.volumeMm3 < finishResidual.volumeMm3 - 1e-9)) continue;
+      const better =
+        best === null ||
+        plan.residual.volumeMm3 < best.plan.residual.volumeMm3 - 1e-9 ||
+        (Math.abs(plan.residual.volumeMm3 - best.plan.residual.volumeMm3) <= 1e-9 &&
+          plan.estimatedSeconds < best.plan.estimatedSeconds);
+      if (better) best = { entry, plan, rpm: restResolved.params.rpm };
+    }
+    return best;
+  })();
+
+  let restProgram: EngraveProgram | null = null;
+  let restFacts: GoalRestFacts | null = null;
+  if (finishResidual.cells > 0) {
+    const left =
+      `The finish leaves ${mm3(finishResidual.volumeMm3)} mm³ up to ${mm2(finishResidual.deepestMm)} mm ` +
+      `above the goal where the ${finishName} cannot enter`;
+    if (restPick === null) {
+      const suggestion = suggestedRestRadiusMm(
+        surfaced.heightfield,
+        finishResidual,
+        finishTool,
+        0,
+        REST_TOLERANCE_MM,
+        DEFAULT_MAX_FINISH_TIP_OPS,
+      );
+      restFindings.push({
+        severity: 'warning',
+        code: 'goal-rest-uncut',
+        labelId: goal.id,
+        message:
+          `${left}, and no owned ball cuts it` +
+          (suggestion === null
+            ? '.'
+            : ` — a ball of about ⌀${mm2(suggestion * 2)} mm would reach it.`),
+      });
+    } else {
+      const restTool = restPick.entry.tool;
+      const restDiameter = Number((cuttingDiameter(restTool) ?? 0).toFixed(2));
+      const restIr: ToolpathIR = {
+        frame: 'flat',
+        tool: restTool,
+        toolNumber: toolNumberFor(restTool),
+        spindleRpm: restPick.rpm,
+        air: job.cutOverride?.air ?? true,
+        safeZ: SAFE_Z,
+        hopZ: HOP_Z,
+        operations: [
+          {
+            number: 1,
+            name: `[T${toolNumberFor(restTool)}] 3D rest — ⌀${restDiameter} mm ball`,
+            labelId: goal.id,
+            depth: Math.max(0, surfaced.heightfield.topZ - surfaced.heightfield.minZ),
+            passKind: 'finish',
+            moves: restPick.plan.moves,
+            estimatedSeconds: restPick.plan.estimatedSeconds,
+          },
+        ],
+      };
+      onProgress?.({ stage: 'post', label: 'posting the rest pass' });
+      const postedRest = postZ1(restIr, { ...ctx, toolKey: restPick.entry.key }, mill, { vacuum: 'whole' });
+      if (!postedRest.ok) {
+        restFindings.push({
+          severity: 'warning',
+          code: 'goal-rest-uncut',
+          labelId: goal.id,
+          message: `${left}: the ${restTool.name} rest pass was refused by the post — ${postedRest.errors.join('; ')}.`,
+        });
+      } else {
+        restProgram = {
+          kind: 'engrave',
+          setupIndex: 1,
+          setupId: jobSetups(job)[0]!.id,
+          toolKey: restPick.entry.key,
+          nc: postedRest.text,
+          frame: 'flat',
+          verify: null,
+          surfaceCheck: {
+            kind: 'surface',
+            gridPitchMm: surfaced.heightfield.pitch,
+            roughingLayers: 0,
+            passes: restIr.operations.map((op) => op.name),
+            resolutionNote: surfaced.heightfield.resolutionNote,
+            bbox: pathBbox(restIr),
+          },
+          frameNc: null,
+          frameVerify: null,
+          programHash: programHash(postedRest.text),
+          cam: summarize(restIr),
+        };
+        restFacts = {
+          toolKey: restPick.entry.key,
+          toolName: restTool.name,
+          finishResidualMm3: finishResidual.volumeMm3,
+          residualMm3: restPick.plan.residual.volumeMm3,
+          deepestMm: finishResidual.deepestMm,
+          moves: restPick.plan.moves.length,
+          seconds: restPick.plan.estimatedSeconds,
+        };
+        restFindings.push({
+          severity: 'info',
+          code: 'goal-rest-pass',
+          labelId: goal.id,
+          message:
+            `${left}; a rest pass with the ${restTool.name} (⌀${restDiameter} mm) cuts those concavities — ` +
+            `${restPick.plan.moves.length.toLocaleString('en-US')} moves, about ${Math.round(restPick.plan.estimatedSeconds)} s — ` +
+            `and leaves ${mm3(restPick.plan.residual.volumeMm3)} mm³.`,
+        });
+      }
+    }
+  }
+
   // #829 — THE PART'S EDGES: a second program with the V-bit, along the mesh's top rim. The goal
   // stays a pure goal (the chamfer is a property of the object, not an item), and the bevel's
   // shortfalls are stated with the numbers the CAM cuts — the 2D chamfer's own codes.
@@ -5139,13 +5325,19 @@ export function generateGoalProgram(
       ...moldFindings,
       ...gridFindings,
       ...reachFindings,
+      ...restFindings,
       ...chamferFindings,
     ]),
     feeds: resolved,
     cam,
     nc,
     verify: null,
-    programs: chamferProgram === null ? [program] : [program, chamferProgram],
+    // #847 — the rest pass follows the finish, and the V-bit's edges come last.
+    programs: [
+      program,
+      ...(restProgram === null ? [] : [restProgram]),
+      ...(chamferProgram === null ? [] : [chamferProgram]),
+    ],
     // #535 — the operation's own facts, for its row and the run sheet: the numbers the CAM ran
     // with and the grid it sampled. A caller with no generated result has no facts to print.
     surface3d: {
@@ -5161,6 +5353,8 @@ export function generateGoalProgram(
       pencil: surfaced.pencil === null ? null : surfaced.pencil.facts,
       // #862 — the rim laps that finished the clear band's wall, or null when there is no band.
       rim: surfaced.rim,
+      // #847 — the rest pass over what the finish left, or null when there was nothing to take.
+      rest: restFacts,
       // #721 — the run sheet and the row say a mold is a mold.
       notes: [
         ...surfaced.notes,
@@ -5204,24 +5398,29 @@ function generateGoalPrograms(
   onProgress?: EngraveProgressFn,
 ): EngraveGenerated {
   // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
-  // path already builds the program with it — so each side's program is that program with the
-  // side's setup on it, never a field-by-field copy that could drop the check.
-  const sideProgram = (one: EngraveGenerated, side: GoalSide): EngraveProgram | null => {
-    const program = one.ok && one.nc !== null ? one.programs[0] : undefined;
-    if (program === undefined) return null;
-    return { ...program, setupIndex: side.setupIndex + 1, setupId: side.setup.id, toolKey: job.toolKey };
+  // path already builds each program with it — so each side's programs are those programs with the
+  // side's setup on them, never a field-by-field copy that could drop the check. #847 — a side can
+  // be more than one program (its rest pass, its chamfer), so the side's whole list carries over;
+  // each keeps its own cutter key.
+  const sidePrograms = (one: EngraveGenerated, side: GoalSide): EngraveProgram[] | null => {
+    if (!(one.ok && one.nc !== null) || one.programs.length === 0) return null;
+    return one.programs.map((program) => ({
+      ...program,
+      setupIndex: side.setupIndex + 1,
+      setupId: side.setup.id,
+    }));
   };
 
   const firstSide = sides[0]!;
   const first = generateGoalProgram(job, firstSide.goal, tool, catalogue, calibration, shop, onProgress);
-  const firstProgram = sideProgram(first, firstSide);
-  if (firstProgram === null) return { ...first, programs: [] };
-  const programs: EngraveProgram[] = [firstProgram];
+  const firstPrograms = sidePrograms(first, firstSide);
+  if (firstPrograms === null) return { ...first, programs: [] };
+  const programs: EngraveProgram[] = [...firstPrograms];
   for (const side of sides.slice(1)) {
     const one = generateGoalProgram(job, side.goal, tool, catalogue, calibration, shop, onProgress);
-    const program = sideProgram(one, side);
-    if (program === null) return { ...one, programs };
-    programs.push(program);
+    const sideList = sidePrograms(one, side);
+    if (sideList === null) return { ...one, programs };
+    programs.push(...sideList);
   }
   return { ...first, programs };
 }

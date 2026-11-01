@@ -77,6 +77,14 @@ export const DEFAULT_MAX_CELLS = 4_000_000;
 export const DEFAULT_STOCK_TO_LEAVE_MM = 0.3;
 
 /**
+ * #847 — the rise above the goal that counts as material the finish LEFT, mm. A hundredth of a
+ * millimetre: the residual is measured cell for cell from the same grid the tip was dropped on, so
+ * this is not a sampling allowance — it keeps float noise along a flat or a straight wall from
+ * summoning a rest pass, and names the smallest concavity worth a second program.
+ */
+export const REST_TOLERANCE_MM = 0.01;
+
+/**
  * The finishing tip-field compute budget (#540): the ball drop is O(covered cells × disc-stencil
  * cells), so a large ball on a fine grid is billions of inner-loop ops with no cutoff — enough to
  * hang the worker. Above this cap {@link finishTipField} REFUSES honestly (it states the op count
@@ -732,6 +740,14 @@ export interface Surface3dResult {
    * rides the floor beside it.
    */
   rim: { laps: number; floorZ: number } | null;
+  /**
+   * #847 — the finish's gouge-safe tip field, the surface its program cuts. Returned so the goal
+   * path measures the residual from the SAME field rather than a second model of the cut. It is a
+   * tall array (one Float32 per grid cell): never store it on a program, a fact or a result that
+   * is serialized — the caller's own measurement is what leaves this call. The rim laps ride this
+   * field (they are the finishing operation's opening moves), so the field is the whole finish.
+   */
+  finishTip: Float32Array;
   /** Labelled placeholders and limitations for the run sheet (feeds, undercuts, flat finish). */
   notes: string[];
 }
@@ -787,6 +803,12 @@ export interface GoalSurfaceFacts {
    * the finishing operation's opening moves, down the clear band's wall.
    */
   rim?: { laps: number; floorZ: number } | null;
+  /**
+   * #847 — the REST PASS the finish was followed by, or null when the finish reached the goal (or
+   * nothing owned would lower it; the run's `goal-rest-uncut` warning states that case). ABSENT on
+   * a result stored by a build before #847.
+   */
+  rest?: GoalRestFacts | null;
   /** The engine's notes for the run sheet: the feeds, undercuts and a flat finishing cutter. */
   notes: string[];
 }
@@ -905,6 +927,26 @@ function chooseRough(
       `Raster roughing chosen by rule: ${ruleLine} (rough3d.adaptiveDepthRatio ${depthRatio}×); the comparison was ` +
       `skipped above ${budget.toLocaleString('en')} cells (rough3d.compareCellBudget).`,
   };
+}
+
+/**
+ * #847 — WHAT A REST PASS DID, as the operation row and the run sheet quote it: the smaller ball,
+ * the material the finish left, and what that ball still leaves measured from its own tip field.
+ */
+export interface GoalRestFacts {
+  /** The smaller ball the rest pass runs, as the tool library files it. */
+  toolKey: string;
+  /** Its display name. */
+  toolName: string;
+  /** What the finish left above the goal, mm³. */
+  finishResidualMm3: number;
+  /** What the rest ball still leaves, mm³. */
+  residualMm3: number;
+  /** The deepest rise above the goal the finish left, mm. */
+  deepestMm: number;
+  /** The rest program's moves and the CAM's cutting-time estimate, seconds. */
+  moves: number;
+  seconds: number;
 }
 
 /**
@@ -1068,7 +1110,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     operations,
   };
 
-  return { ir, roughing, finishing, roughingLayers: rough.layers, scallop, pencil, rim: rimFacts, notes };
+  return { ir, roughing, finishing, roughingLayers: rough.layers, scallop, pencil, rim: rimFacts, finishTip: tip, notes };
 }
 
 /** #721 — true for a goal MESH marked as a mold (a PNG relief and an item are never molds). */
@@ -1316,13 +1358,16 @@ export function surfaceResidual(
   return { mask, cells, volumeMm3: volume, deepestMm: deepest };
 }
 
-/** Contiguous runs of covered columns in grid-row `j`, as `[iStart, iEnd]` inclusive pairs. */
-function coveredRuns(hf: GoalHeightfield, j: number): [number, number][] {
+/**
+ * Contiguous runs of cuttable columns in grid-row `j`, as `[iStart, iEnd]` inclusive pairs. With
+ * `only` (#847), a cell is cuttable only where the mask says so — the rest pass's own region.
+ */
+function coveredRuns(hf: GoalHeightfield, j: number, only?: Uint8Array | null): [number, number][] {
   const { nx, covered } = hf;
   const runs: [number, number][] = [];
   let start = -1;
   for (let i = 0; i < nx; i++) {
-    const on = covered[j * nx + i] === 1;
+    const on = covered[j * nx + i] === 1 && (only === undefined || only === null || only[j * nx + i] === 1);
     if (on && start === -1) start = i;
     else if (!on && start !== -1) {
       runs.push([start, i - 1]);
@@ -1343,12 +1388,55 @@ function rasterRows(hf: GoalHeightfield, stepOver: number): number[] {
 }
 
 /** X sample columns across a run, spaced by `alongStep` (always including both ends). */
-function alongColumns(hf: GoalHeightfield, iStart: number, iEnd: number, alongStep: number): number[] {
+function alongColumns(
+  hf: GoalHeightfield,
+  iStart: number,
+  iEnd: number,
+  alongStep: number,
+  only?: Uint8Array | null,
+  j?: number,
+): number[] {
   const stride = Math.max(1, Math.round(alongStep / hf.pitch));
   const cols: number[] = [];
-  for (let i = iStart; i <= iEnd; i += stride) cols.push(i);
-  if (cols.length === 0 || cols[cols.length - 1] !== iEnd) cols.push(iEnd);
+  for (let i = iStart; i <= iEnd; i += stride) {
+    if (only !== undefined && only !== null && j !== undefined && only[j * hf.nx + i] !== 1) continue;
+    cols.push(i);
+  }
+  if (only === undefined || only === null) {
+    if (cols.length === 0 || cols[cols.length - 1] !== iEnd) cols.push(iEnd);
+  } else if (j !== undefined) {
+    // A masked run's ends are its own mask's ends; add them when the stride skipped them.
+    if (only[j * hf.nx + iStart] === 1 && !cols.includes(iStart)) cols.unshift(iStart);
+    if (only[j * hf.nx + iEnd] === 1 && !cols.includes(iEnd)) cols.push(iEnd);
+  }
   return cols;
+}
+
+/**
+ * #847 — DILATE a residual mask by `radiusMm` (a disc on the grid), so a smaller ball's BODY can
+ * reach a residual cell: a ball whose centre cannot come within its own radius of the cell leaves
+ * it uncut, and the rest pass's raster samples centres.
+ */
+export function dilateMask(hf: GoalHeightfield, mask: Uint8Array, radiusMm: number): Uint8Array {
+  const { nx, ny, pitch } = hf;
+  const out = new Uint8Array(nx * ny);
+  const span = Math.max(0, Math.ceil(radiusMm / pitch));
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      if (mask[j * nx + i] !== 1) continue;
+      for (let dj = -span; dj <= span; dj++) {
+        const jj = j + dj;
+        if (jj < 0 || jj >= ny) continue;
+        for (let di = -span; di <= span; di++) {
+          const ii = i + di;
+          if (ii < 0 || ii >= nx) continue;
+          if (Math.hypot(di * pitch, dj * pitch) > radiusMm + 1e-9) continue;
+          out[jj * nx + ii] = 1;
+        }
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -1460,17 +1548,24 @@ export function finishingMoves(
   hopZ: number,
   /** #785 — called once per scan line, before it is cut (`done` counts from 1). */
   onRow?: (done: number, total: number) => void,
+  /**
+   * #847 — cut ONLY where this mask says (a rest pass over the finish's residual), dilated by the
+   * rest ball's radius before it is handed in. Absent: every covered cell, as the finish does.
+   */
+  only?: Uint8Array | null,
 ): CamMove[] {
   const moves: CamMove[] = [];
   if (hf.coveredCount === 0) return moves;
   const { pitch, x0, y0 } = hf;
-  const rows = rasterRows(hf, feeds.finishStepOver);
+  const rows = rasterRows(hf, feeds.finishStepOver).filter(
+    (j) => only === undefined || only === null || only.subarray(j * hf.nx, (j + 1) * hf.nx).some((v) => v === 1),
+  );
   let flip = false;
   for (const [index, j] of rows.entries()) {
     onRow?.(index + 1, rows.length);
     const y = y0 + j * pitch;
-    for (const [iS, iE] of coveredRuns(hf, j)) {
-      const cols = alongColumns(hf, iS, iE, alongStep);
+    for (const [iS, iE] of coveredRuns(hf, j, only)) {
+      const cols = alongColumns(hf, iS, iE, alongStep, only, j);
       const ordered = flip ? [...cols].reverse() : cols;
       let open = false;
       for (const i of ordered) {
@@ -1497,6 +1592,106 @@ export function finishingMoves(
 
 function positive(v: number | null | undefined): boolean {
   return typeof v === 'number' && Number.isFinite(v) && v > 0;
+}
+
+// ---------------------------------------------------------------------------
+// #847 — THE REST PASS: a smaller ball over what the finish could not reach.
+// ---------------------------------------------------------------------------
+
+export interface SurfaceRestArgs {
+  heightfield: GoalHeightfield;
+  /** The finish's residual, measured by {@link surfaceResidual} over its OWN tip field. */
+  residual: SurfaceResidual;
+  /** The smaller ball being tried. */
+  tool: SurfaceTool;
+  /** The feeds the rest pass runs at — the job's 2.5D feeds, as the finish runs them. */
+  feeds: SurfaceFeeds;
+  rapid: RapidEstimate;
+  /** The allowance the goal's roughing left; the rest's own residual is measured against it. */
+  stockToLeaveMm: number;
+  /** The rise above the goal that counts as material left, mm. */
+  toleranceMm: number;
+  /** Sampling pitch along a raster line, mm; absent → the heightfield pitch. */
+  alongStepMm?: number;
+  safeZ?: number;
+  hopZ?: number;
+  /** The rest ball's tip-field op budget; absent → {@link DEFAULT_MAX_FINISH_TIP_OPS}. */
+  maxFinishTipOps?: number;
+  onRow?: (done: number, total: number) => void;
+}
+
+/** What one candidate ball's rest pass would do, as the pick compares it. */
+export interface SurfaceRestPlan {
+  /** The region actually cut: the residual dilated by the ball's radius. */
+  region: Uint8Array;
+  /** The pass's moves, over the region only. */
+  moves: CamMove[];
+  /** What THIS ball still leaves above the goal, measured from its own tip field. */
+  residual: SurfaceResidual;
+  /** The pass's cutting time, the pick's tie-break. */
+  estimatedSeconds: number;
+  /** The dilation the region took, mm (the ball's own radius). */
+  dilationMm: number;
+}
+
+/**
+ * #847 — PLAN ONE CANDIDATE REST BALL. The ball's own gouge-safe tip field is what its program
+ * cuts, so the SAME finishing raster runs over the finish's residual dilated by the ball's radius
+ * (its centre has to fit beside a cell to reach it), and the ball's residual is then measured from
+ * that same field. The finish's raster settings (step-over, along-step, feeds) are reused unchanged:
+ * the rest pass is the finish again, with a smaller ball, over less of the surface.
+ *
+ * Throws the tip-field budget's error for a candidate the grid cannot afford (the caller skips it).
+ */
+export function planSurfaceRest(args: SurfaceRestArgs): SurfaceRestPlan {
+  const { heightfield: hf, residual, tool, feeds, rapid, stockToLeaveMm, toleranceMm } = args;
+  const alongStep = positive(args.alongStepMm) ? (args.alongStepMm as number) : hf.pitch;
+  const safeZ = args.safeZ ?? SAFE_Z;
+  const hopZ = args.hopZ ?? HOP_Z;
+  const maxOps = positive(args.maxFinishTipOps) ? (args.maxFinishTipOps as number) : DEFAULT_MAX_FINISH_TIP_OPS;
+  const tip = finishTipField(hf, tool, maxOps);
+  const region = dilateMask(hf, residual.mask, tool.radius);
+  const moves = finishingMoves(hf, tip, feeds, alongStep, safeZ, hopZ, args.onRow, region);
+  return {
+    region,
+    moves,
+    residual: surfaceResidual(hf, tip, stockToLeaveMm, toleranceMm),
+    estimatedSeconds: estimateCycleSeconds(moves, rapid),
+    dilationMm: tool.radius,
+  };
+}
+
+/**
+ * #847 — WHEN NOTHING OWNED REACHES THE RESIDUAL, the ball that would: halve the finish ball's
+ * radius until its own tip field leaves less material above the goal, and name the first (largest)
+ * that does. Pure geometry on the measured grid — no inventory, no simulation. Null when even a ball a
+ * grid cell wide leaves the same cells, or when the goal had no residual to begin with.
+ */
+export function suggestedRestRadiusMm(
+  hf: GoalHeightfield,
+  finishResidual: SurfaceResidual,
+  finishTool: SurfaceTool,
+  stockToLeaveMm: number,
+  toleranceMm: number,
+  maxOps: number = DEFAULT_MAX_FINISH_TIP_OPS,
+): number | null {
+  if (finishResidual.cells === 0 || !(finishTool.radius > 0)) return null;
+  let radius = finishTool.radius / 2;
+  // Down to a ball no wider than the grid's own cell: smaller than that, the grid cannot tell.
+  for (let n = 0; n < 8 && radius >= hf.pitch / 2; n++) {
+    let tip: Float32Array;
+    try {
+      tip = finishTipField(hf, { ball: true, radius }, maxOps);
+    } catch {
+      // Over the tip-field budget: a smaller ball is cheaper, so the next halving may fit.
+      radius /= 2;
+      continue;
+    }
+    const after = surfaceResidual(hf, tip, stockToLeaveMm, toleranceMm);
+    if (after.volumeMm3 < finishResidual.volumeMm3 - 1e-9) return radius;
+    radius /= 2;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

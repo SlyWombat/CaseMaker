@@ -379,6 +379,13 @@ export type JobFindingCode =
   // Neither refuses the goal: it is surfaced either way, with its edges left square and said so.
   | 'goal-chamfer-no-cutter'
   | 'goal-chamfer-no-rim'
+  // #847 — THE REST PASS AFTER A 3D FINISH. `goal-rest-pass` is the INFO naming the smaller owned
+  // ball that took the material the finish's ball could not enter, with the volume it left and what
+  // the rest still leaves. `goal-rest-uncut` is the WARNING when nothing owned lowers that
+  // residual: the finish still posts, and the sentence states the volume, its depth and the ball
+  // that would reach it.
+  | 'goal-rest-pass'
+  | 'goal-rest-uncut'
   // Facing (#432). The job's facing depth is taken off the same blank every item is measured
   // against, so the check is one number against the stock's minimum floor — not a per-item one.
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
