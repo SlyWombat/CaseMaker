@@ -1482,6 +1482,10 @@ impl HouseStore {
         if_match: Option<&str>,
     ) -> Result<(), HouseError> {
         record.validate()?;
+        // #509 — the WRITE-only half of the bed's validation: a scar outside its board's stated
+        // footprint is refused here, with a sentence, while the same document still LOADS (the
+        // load path never calls this). See `BedSurface::validate_scar_footprints`.
+        record.validate_bed_footprints()?;
         let mut inner = self.inner.write().await;
         Self::writable(&inner.location_problem)?;
         check_precondition(&etag_for(&location_bytes(&inner)?), if_match, "the location")?;

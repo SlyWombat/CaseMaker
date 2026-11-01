@@ -19,6 +19,7 @@ import {
   bracketDatum,
   bracketSeat,
   bracketSettings,
+  type BracketSeatDatum,
   bracketTapPoint,
   bracketTopMachineZ,
 } from '@/engine/cnc/mounts/bracket';
@@ -254,6 +255,36 @@ export function surfaceTopDatumFor(machine: MachineRecord | null): { value: numb
 }
 
 /**
+ * #509 — the seat beside the bracket, from the ACTIVE bed profile: `datums.bracketSeatZ` first,
+ * else `datums.surfaceTopZ` (the seat IS the surface beside the bracket — the design's own
+ * fallback). The probe-match rule is `surfaceTopDatumFor`'s, for the same reason (#611/#632: a
+ * datum is a raw MPos reading, so another probe cannot anchor this plan on it).
+ *
+ * Null when the profile has neither datum, or the one it has was taken with another probe; the
+ * engine then falls back to the legacy shop default `bracket.seatMachineZ` for one release
+ * (`bracketSeatReading` in `mounts/bracket.ts`).
+ */
+export function bracketSeatDatumFor(machine: MachineRecord | null): {
+  value: number;
+  what: 'bracket seat' | 'surface top';
+  measuredAt: string | null;
+} | null {
+  if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
+  const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
+  if (profile === undefined) return null;
+  const checkedOut = probeFor(machine)?.id ?? null;
+  const usable = (datum: { value: number; measuredAt: string; by: string } | null | undefined): boolean =>
+    datum != null && (checkedOut === null || datum.by === checkedOut);
+  // A profile written before a datum existed has no key for it at all, so `?? null` here is the
+  // absence the type promises; `usable` treats null and undefined the same.
+  const seat = profile.datums.bracketSeatZ ?? null;
+  if (usable(seat)) return { value: seat!.value, what: 'bracket seat', measuredAt: seat!.measuredAt };
+  const surface = profile.datums.surfaceTopZ ?? null;
+  if (usable(surface)) return { value: surface!.value, what: 'surface top', measuredAt: surface!.measuredAt };
+  return null;
+}
+
+/**
  * #599/#607 — the mount tap point (machine XY) for the VISE, from the bed placement or the newest
  * registration, with the #607 fields filled in for the executor and the write-back.
  */
@@ -316,10 +347,12 @@ export function bracketTapFor(args: {
   machineId: string;
   seekFromMachineZ: number;
   defaults: ShopDefaults | null;
+  /** #509 — the active bed profile's seat datum, when the caller holds the machine record. */
+  bedSeat?: BracketSeatDatum | null;
 }): PlanMountTap | null {
   const anchor = anchorFrom(args.calibration, args.machineId);
   if (!anchor.ok) return null;
-  const seat = bracketSeat(args.defaults);
+  const seat = bracketSeat(args.defaults, args.bedSeat ?? null);
   const armTop = bracketArmTop(args.defaults);
   if (seat === null || armTop === null) return null;
   const sizes = bracketSettings(args.defaults);

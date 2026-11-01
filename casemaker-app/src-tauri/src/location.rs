@@ -503,6 +503,47 @@ impl BedSurface {
         }
         validate_provenance(machine, "bed profile", profile, &self.provenance)
     }
+
+    /// #509 — THE SCARS MUST LIE ON THE BOARD. A scar outside the surface's own footprint was
+    /// recorded against a different board (or one whose stated size has since changed), and a cut
+    /// planned against it would be watched in the wrong place.
+    ///
+    /// THIS IS A WRITE RULE, NOT A READ RULE. `validate` (which runs when the document is LOADED as
+    /// well as written) deliberately does not call it: a location saved before this rule existed —
+    /// with a board that states a size and a stray scar — keeps loading, so the rule can never lock
+    /// a shop out of its own house. `MachineRecord::validate_bed_footprints` runs it on the write
+    /// path, where a new scar can be answered with a sentence instead.
+    ///
+    /// A surface that states no footprint (`length`/`width`/`position` absent — the migrated #417
+    /// board has only a thickness) has nothing to hold a scar to, and passes.
+    fn validate_scar_footprints(&self, machine: &str, profile: &str) -> Result<(), HouseError> {
+        let (Some(length), Some(width), Some(position)) = (self.length, self.width, self.position.as_ref()) else {
+            return Ok(());
+        };
+        let [x0, y0] = position.front_left;
+        let (x1, y1) = (x0 + length, y0 + width);
+        // A millimetre alone is 1e-6 of a micron; a scar exactly on the edge is ON the board.
+        const EPS: f64 = 1e-6;
+        for scar in &self.scars {
+            let inside = scar.x >= x0 - EPS
+                && scar.y >= y0 - EPS
+                && scar.x + scar.width <= x1 + EPS
+                && scar.y + scar.height <= y1 + EPS;
+            if !inside {
+                return Err(HouseError::BadEntry(format!(
+                    "machine {machine}'s bed profile {profile}: the surface has a scar at ({}, {}) outside its {} × {} mm footprint — resurface the board, or correct the board\'s size and position",
+                    scar.x, scar.y, length, width
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl BedProfile {
+    fn validate_scar_footprints(&self, machine: &str) -> Result<(), HouseError> {
+        self.surface.validate_scar_footprints(machine, &self.id)
+    }
 }
 
 impl PlacementWhere {
@@ -807,6 +848,17 @@ impl MachineRecord {
                     )));
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// #509 — the write-time half of the bed's validation: every scar must lie on its board.
+    /// Separate from `validate` ON PURPOSE — that one runs when the document is LOADED too, and a
+    /// location saved before this rule existed must keep loading (see
+    /// `BedSurface::validate_scar_footprints`). `HouseStore::put_machine` is the caller.
+    pub(crate) fn validate_bed_footprints(&self) -> Result<(), HouseError> {
+        for profile in self.bed_profiles.as_deref().unwrap_or_default() {
+            profile.validate_scar_footprints(&self.id)?;
         }
         Ok(())
     }
@@ -1189,6 +1241,35 @@ mod tests {
         assert_eq!(v["activeBedProfileId"], serde_json::json!("bp-1"));
         let back: MachineRecord = serde_json::from_value(v).unwrap();
         assert_eq!(back, machine);
+    }
+
+    #[test]
+    fn a_scar_off_the_board_is_refused_on_write_and_still_loads() {
+        // #509 — the footprint check is a WRITE rule. The same machine LOADS (validate) around a
+        // stray scar — a location saved before the rule must not lock the shop out of its own
+        // house — and the write path refuses it with a sentence. The board states 200 × 200 at
+        // machine (−150, −150), so its far corner is (50, 50).
+        let scar = |x: f64, y: f64| crate::wasteboard::Scar {
+            x,
+            y,
+            width: 10.0,
+            height: 10.0,
+            at: "2026-10-20T10:00:00.000Z".into(),
+            job_id: None,
+        };
+        let mut on_it = a_machine_with_a_bed();
+        on_it.bed_profiles.as_mut().unwrap()[0].surface.scars.push(scar(-150.0, 40.0));
+        on_it.validate().unwrap();
+        on_it.validate_bed_footprints().unwrap();
+
+        let mut stray = a_machine_with_a_bed();
+        stray.bed_profiles.as_mut().unwrap()[0].surface.scars.push(scar(60.0, -150.0));
+        stray.validate().unwrap();
+        let refused = stray.validate_bed_footprints();
+        assert!(matches!(refused, Err(HouseError::BadEntry(_))), "{refused:?}");
+        if let Err(HouseError::BadEntry(why)) = refused {
+            assert!(why.contains("outside its 200 × 200 mm footprint"), "{why}");
+        }
     }
 
     #[test]

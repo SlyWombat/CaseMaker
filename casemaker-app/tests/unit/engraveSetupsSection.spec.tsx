@@ -629,7 +629,8 @@ describe('#471 registration — planned only after approval, refused with the en
     // #607 — the bracket's tap cannot stand in for the FIRST seat measurement (its arm top is
     // measured-only too, and no point is known clear of the slots until then), so the unmeasured
     // seat keeps the sentence that says how to measure it.
-    expect(screen.getByTestId('engrave-setup-reg-refusal-1').textContent).toContain('bracket.seatMachineZ');
+    // #509 — the sentence names the bed profile's seat, which is where the seat lives now.
+    expect(screen.getByTestId('engrave-setup-reg-refusal-1').textContent).toContain('the bed profile’s bracket seat');
 
     act(() =>
       useShopDefaultsStore.setState({

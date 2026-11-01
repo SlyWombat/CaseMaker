@@ -26,7 +26,7 @@ import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { expandEngraveRow } from '@/store/engraveRowStore';
 import { machineAt, useLocationStore } from '@/store/locationStore';
 import { newId } from '@/utils/id';
-import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements } from '@/engine/cnc/mounts/bracket';
+import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements, type BracketSeatDatum } from '@/engine/cnc/mounts/bracket';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
@@ -42,6 +42,7 @@ import {
   probeFor,
   probeNameFor,
   surfaceTopDatumFor,
+  bracketSeatDatumFor,
 } from '@/engine/cnc/registration/mountContext';
 import { useMountTap, useMountTapBusyFlag } from '@/hooks/useMountTap';
 import {
@@ -133,6 +134,8 @@ export function planRegistrationAttempt(args: {
   mountDatumMismatchName: string | null;
   /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate. */
   surfaceTopZ: { value: number } | null;
+  /** #509 — the active bed profile's seat beside the bracket (its bracket seat, else its surface top). */
+  bracketSeat: BracketSeatDatum | null;
   probe: ProbeSpec | null;
   /** #603 — the checked-out probe's display name (its product), or null when none is checked out. */
   probeName: string | null;
@@ -155,12 +158,12 @@ export function planRegistrationAttempt(args: {
     const under = mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
     // #607 — the bracket's tap: its front arm's top, and the seat the reading measures back. The
     // expected top comes from the measured seat, so it is null until the seat has been tapped once.
-    const tap = bracketTapFor({ calibration, machineId: job.machineId, seekFromMachineZ, defaults });
+    const tap = bracketTapFor({ calibration, machineId: job.machineId, seekFromMachineZ, defaults, bedSeat: args.bracketSeat });
     // The engine's expected-surface read also carries the refusal when the seat was never measured.
     // #607 — the tap cannot stand in for that first seat: `bracketTapFor` has no point until the
     // seat AND the arm's own top are measured, so an unmeasured seat keeps the sentence that says
     // how to measure it (one touch on the surface beside the bracket).
-    const expected = bracketExpectedSurface(defaults, dims.z, under);
+    const expected = bracketExpectedSurface(defaults, dims.z, under, args.bracketSeat);
     if (!expected.ok) return { kind: 'refused', reason: expected.reason };
     const stock = { x: dims.x, y: dims.y, z: dims.z };
     // #707 BM-1 — the registration's confirm scans are planned around the JOB's clamps (the default
@@ -300,6 +303,9 @@ export function EngraveSetupsSection({
   );
   // #619 — the measured surface top, so a re-plan expects the found top rather than the ledge estimate.
   const surfaceTopZ = useMemo(() => surfaceTopDatumFor(machineRecord), [machineRecord]);
+  // #509 — the bracket's seat from the ACTIVE bed profile (bracket seat, else surface top; the
+  // shop-default fallback lives in the engine for one release).
+  const bracketSeat = useMemo(() => bracketSeatDatumFor(machineRecord), [machineRecord]);
   // #599 — the mount tap point (machine XY), from the placement frame or the newest usable registration.
   const registrations = useEngraveRegistrationStore((s) => s.records);
   const seekFromMachineZ = useMemo(() => jobMachine(job, calibration).toolChange.clearanceZ, [job, calibration]);
@@ -763,6 +769,7 @@ export function EngraveSetupsSection({
                   mountDatumMismatch: mountDatumMismatchBy,
                   mountDatumMismatchName,
                   surfaceTopZ,
+                  bracketSeat,
                   probe,
                   probeName,
                   mountTap,

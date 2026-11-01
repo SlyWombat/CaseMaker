@@ -194,21 +194,59 @@ export function bracketDatum(anchor: AnchorRead, b: BracketSettingsRead): Bracke
 }
 
 /**
+ * #509 — THE SEAT AS THE BED PROFILE KNOWS IT. The datum the machine's ACTIVE bed profile measured
+ * beside the bracket — `datums.bracketSeatZ`, or its `surfaceTopZ` (the seat IS the surface beside
+ * the bracket, so the surface top is the design's own fallback) — with the day it was taken. The
+ * caller reads it from the location (`bracketSeatDatumFor`); the engine never reaches the store.
+ */
+export interface BracketSeatDatum {
+  value: number;
+  /** Which datum it is, in the words the bed profile uses. */
+  what: 'bracket seat' | 'surface top';
+  /** When it was measured, ISO, or null for a legacy reading that did not carry a date. */
+  measuredAt: string | null;
+}
+
+/**
+ * #509 — the seat, in PRECEDENCE: the bed profile's datum first (`bracketSeatReading`'s caller
+ * chooses it), then the legacy shop default for one release. This is the one place that order is
+ * written down, so the plan and the tap cannot read two different seats.
+ */
+function bracketSeatReading(
+  map: ShopDefaults | null,
+  bedSeat: BracketSeatDatum | null,
+): { value: number; source: string; setAt: string | null } | null {
+  if (bedSeat !== null) {
+    return { value: bedSeat.value, source: `the bed profile’s ${bedSeat.what}`, setAt: bedSeat.measuredAt };
+  }
+  // #509 — THE LEGACY SHOP DEFAULT, KEPT FOR ONE RELEASE (removed in 1.1). A shop whose bracket
+  // seat was tapped before bed profiles carried one still has the reading under
+  // `bracket.seatMachineZ`; reading it keeps their bracket path working through this release. The
+  // datum write-back (`writeBracketSeat`) has mirrored both since #607, so a machine that has
+  // tapped since then resolves from the profile above and never reaches this line.
+  return readMeasured(map, 'bracket.seatMachineZ');
+}
+
+/**
  * Where the surface touch expects the stock's top, machine Z: the surface it sits on beside the bracket
- * (MEASURED only — `bracket.seatMachineZ`) + anything under it + its thickness. Refused without the
- * measurement: the touch is bounded to this ± the tolerance (#430), and a guessed seat would either
- * refuse every real reading or let a wrong one through.
+ * (the active bed profile's seat datum — MEASURED only) + anything under it + its thickness. Refused
+ * without the measurement: the touch is bounded to this ± the tolerance (#430), and a guessed seat
+ * would either refuse every real reading or let a wrong one through.
+ *
+ * #509 — the seat comes from the bed profile (`BedSeatDatum`, read by the caller from the location);
+ * the old shop default is the one-release fallback inside `bracketSeatReading`.
  */
 export function bracketExpectedSurface(
   map: ShopDefaults | null,
   stockThickness: number,
   underMm = 0,
+  bedSeat: BracketSeatDatum | null = null,
 ): { ok: true; expectedSurface: { machineZ: number; from: string } } | { ok: false; reason: string } {
-  const seat = readMeasured(map, 'bracket.seatMachineZ');
+  const seat = bracketSeatReading(map, bedSeat);
   if (seat === null) {
     return {
       ok: false,
-      reason: 'where the stock sits beside the bracket has not been measured (bracket.seatMachineZ): touch the bed beside the bracket once with the probe and save its machine Z',
+      reason: 'where the stock sits beside the bracket has not been measured (the bed profile’s bracket seat): touch the surface beside the bracket once with the probe and save it as the bed profile’s seat',
     };
   }
   const under = underMm > 0 ? ` + ${underMm} mm under the stock` : '';
@@ -246,16 +284,20 @@ export function bracketTapPoint(corner: { x: number; y: number }, s: BracketSett
 }
 
 /**
- * #607 — the measured seat beside the bracket (`bracket.seatMachineZ`), machine Z, or null.
+ * #607 — the measured seat beside the bracket, machine Z, or null: the active bed profile's datum
+ * first, else the legacy shop default (`bracketSeatReading`, one release).
  *
- * `readMeasured` is the point: the key is MEASURED-ONLY (no default at all), so a seeded or absent
- * entry is null rather than a number nobody touched. The tap's expected height and its write-back
- * both come from this one read.
+ * `readMeasured` is the point for the legacy path: the key is MEASURED-ONLY (no default at all), so
+ * a seeded or absent entry is null rather than a number nobody touched. The tap's expected height
+ * and its write-back both come from this one read.
  */
 export function bracketSeat(
   map: ShopDefaults | null,
-): { value: number; source: DefaultSource; setAt: string | null; note: string | null } | null {
-  return readMeasured(map, 'bracket.seatMachineZ');
+  bedSeat: BracketSeatDatum | null = null,
+): { value: number; source: string; setAt: string | null; note: string | null } | null {
+  const reading = bracketSeatReading(map, bedSeat);
+  if (reading === null) return null;
+  return { ...reading, note: null };
 }
 
 /**

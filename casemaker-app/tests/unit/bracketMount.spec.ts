@@ -94,7 +94,8 @@ describe('#427 the datum: G54 XY from the bracket, Z from the probed top', () =>
   });
 
   it('the surface touch expects the stock on the measured seat — and is refused without one', () => {
-    expect(bracketExpectedSurface(DEFAULTS, 5)).toMatchObject({ ok: false, reason: expect.stringContaining('bracket.seatMachineZ') });
+    // #509 — the refusal names the bed profile's seat, because that is now where the seat lives.
+    expect(bracketExpectedSurface(DEFAULTS, 5)).toMatchObject({ ok: false, reason: expect.stringContaining('the bed profile’s bracket seat') });
     const seated = { ...DEFAULTS, 'bracket.seatMachineZ': { value: -70.2, source: 'measured' as const, setAt: '2026-10-16T10:00:00.000Z', unit: 'mm', note: 'one touch' } };
     const e = bracketExpectedSurface(seated, 5, 2);
     expect(e).toMatchObject({ ok: true, expectedSurface: { machineZ: -63.2 } });

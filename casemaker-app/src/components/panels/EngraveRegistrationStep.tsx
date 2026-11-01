@@ -73,6 +73,7 @@ import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type MachineUpdate } from '@/store/locationStore';
 import {
   accessoryNameFor,
+  bracketSeatDatumFor,
   mountDatumFor,
   mountDatumMismatch,
   mountTapFor,
@@ -207,6 +208,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     [mountDatumMismatchBy],
   );
   const surfaceTopZ = useMemo(() => surfaceTopDatumFor(machineRecord), [machineRecord]);
+  // #509 — the bracket's seat from the ACTIVE bed profile (bracket seat, else surface top).
+  const bracketSeat = useMemo(() => bracketSeatDatumFor(machineRecord), [machineRecord]);
   const registrations = useEngraveRegistrationStore((s) => s.records);
   const seekFromMachineZ = useMemo(() => jobMachine(job, calibration).toolChange.clearanceZ, [job, calibration]);
   const mountTap = useMemo(
@@ -235,6 +238,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       mountDatumMismatch: mountDatumMismatchBy,
       mountDatumMismatchName,
       surfaceTopZ,
+      bracketSeat,
       probe,
       probeName,
       mountTap,
