@@ -759,9 +759,11 @@ describe('EngravePanel — the Add menu (#214)', () => {
   it('draws the one grouped picker, with the folded kinds as its options (#685)', () => {
     render(<EngravePanel />);
 
-    for (const group of ['engrave-carve', 'cut-away', 'holes', '3d']) {
+    // #874 — "From a file" holds the two operations that are a FILE: a mesh and a board.
+    for (const group of ['engrave-carve', 'cut-away', 'holes', 'file']) {
       expect(screen.getByTestId(`operation-picker-group-${group}`)).toBeTruthy();
     }
+    expect(screen.getByTestId('operation-picker-group-file').textContent).toContain('From a file');
     // Every operation keeps the historic id the flows already drive.
     for (const type of OPERATION_TYPES) {
       expect(screen.getByTestId(type.addTestId)).toBeTruthy();

@@ -324,6 +324,10 @@ export function StartWizard(): JSX.Element {
     reEntry &&
     step === initialStep &&
     (step === 'holding' || (step === 'stock' && confirmReplace === null));
+  // #874 — a job that already has work opens step 4 with nothing picked, and pressing the primary
+  // then adds nothing: it FINISHES, so it says Done until a chip is picked. A chip picked turns it
+  // back into "Add the operation" (`wizardNextLabel`).
+  const operationIdle = step === 'operation' && hasOperations && operationChoice === null;
 
   // `probeMachine` resolves every failure into one of its four outcomes, so there is nothing to
   // catch here: a thrown probe would be a bug in the probe, not an error to swallow.
@@ -663,6 +667,9 @@ export function StartWizard(): JSX.Element {
             [choice.lengthMm / 2, 0],
           ],
         });
+      } else if (choice.type === 'pcb') {
+        // #874 — the board's Gerber set wrote the job's items as it read; Create adds nothing.
+        // `id` stays null, so no row is opened and the wizard simply closes onto the work.
       } else if (choice.type === 'flat' || choice.type === 'faces-all-round' || choice.type === 'cross-hole') {
         // #241 slice 2 — a cut on the round stock's face. The operation carries its own index and
         // is appended to the job's face list, which is the cut order Generate walks.
@@ -924,7 +931,7 @@ export function StartWizard(): JSX.Element {
                 disabled={operationCreateBlocked(operationChoice) !== null || (operationChoice === null && !hasOperations)}
                 onClick={next}
               >
-                {wizardNextLabel('operation', reEntry)}
+                {wizardNextLabel('operation', reEntry, operationIdle)}
               </button>
             )}
           </div>

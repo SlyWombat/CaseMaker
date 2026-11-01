@@ -1,17 +1,44 @@
 // @vitest-environment jsdom
 // #662/#681/#685 — step 4 of the one cutting-job wizard: "What are you cutting?".
 //
-// The picker is the SHARED grouped one (`OperationPicker`, `operationTypes.ts`): the fourteen
+// The picker is the SHARED grouped one (`OperationPicker`, `operationTypes.ts`): the sixteen
 // operations in the mockup's four groups, in the table's own order and words. The button that
 // leaves the step CREATES the answer and lands in Design. A job with nothing to cut opens on
 // Engrave text with the field it needs; Create waits for that field, and the sentence beside it
 // says what to type (§3.5 — never a placeholder "New text"). A template's job starts with nothing
-// selected and Create finishes without adding a duplicate. Surface a mesh is the one whole-job
-// operation: its card is disabled with its reason on a job that has items (B6), and on an empty
-// job its one essential field is the FILE, read here into the job's goal (#685).
+// selected and Create finishes without adding a duplicate (the button says Done). Surface a mesh
+// is the one whole-job operation: its card is disabled with its reason on a job that has items
+// (B6), and on an empty job its one essential field is the FILE, read here into the job's goal
+// (#685). #874 — the circuit board is its second chip: its Gerber set is the field, and once the
+// set reads Create is enabled and adds nothing (the files ARE the items).
 
-import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+
+// #874 — the board's chip drives the store's real import action, whose PLANNER needs the Manifold
+// runtime and real Gerber bytes (pinned in `pcbJobImport.spec.ts` and the e2e walk). Here the
+// question is the step's selection and its gate, so the planner answers with a plan and no items.
+vi.mock('@/workers/geometry/ManifoldRuntime', () => ({ getToplevel: async () => ({}) }));
+vi.mock('@/engine/import/pcbJobImport', () => ({
+  planPcbJobImport: async () => ({
+    ok: true as const,
+    plan: {
+      files: [{ name: 'practice-F_Cu.gbr', kind: 'gerber' }],
+      board: { left: 0, top: 0, width: 1, height: 1 },
+      mount: { kind: 'tape' },
+      mirrored: false,
+      twoSided: false,
+      second: null,
+      copperId: 'vec-copper',
+      outlineId: 'vec-outline',
+      items: { vectors: [], frames: [], drills: [], cutouts: [] },
+      notes: [],
+      warnings: [],
+    },
+    sources: [],
+    skipped: [],
+  }),
+}));
 import { StartWizard } from '@/components/welcome/StartWizard';
 import { OPERATION_TYPES } from '@/components/panels/operationTypes';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
@@ -106,11 +133,13 @@ describe('#685 — step 4, what are you cutting', () => {
     // This run opened AT step 4, so it is a re-entry: the button adds to a job that exists.
     expect(screen.getByTestId('start-wizard-create').textContent).toBe('Add the operation');
 
-    // The four groups, and the fifteen operations in the mockup's words and grouped order
+    // The four groups, and the sixteen operations in the mockup's words and grouped order
     // (`first-job-flow-mockups.html`, station 4) — the same table the panel's picker reads.
-    for (const group of ['engrave-carve', 'cut-away', 'holes', '3d']) {
+    for (const group of ['engrave-carve', 'cut-away', 'holes', 'file']) {
       expect(screen.getByTestId(`operation-picker-group-${group}`)).toBeTruthy();
     }
+    // #874 — the group says what its two operations share: they are files.
+    expect(screen.getByTestId('operation-picker-group-file').textContent).toContain('From a file');
     const chips = within(screen.getByTestId('operation-picker')).getAllByRole('button');
     expect(chips.map((chip) => chip.textContent)).toEqual([
       'Engrave text',
@@ -128,10 +157,14 @@ describe('#685 — step 4, what are you cutting', () => {
       'Thread',
       'Thread a boss (external)',
       'Surface a mesh',
+      'Circuit board (Gerbers)',
     ]);
     for (const type of OPERATION_TYPES) {
       expect(screen.getByTestId(`engrave-setup-what-${type.id}`)).toBeTruthy();
     }
+    // #874 — nothing picked is disabled on an empty job, so the surface hint has nothing to say:
+    // the enabled-state sentence it used to draw told every new job the same non-fact.
+    expect(screen.queryByTestId('operation-picker-surface-hint')).toBeNull();
 
     // An empty job starts on Engrave text, with the one field that operation needs.
     expect(screen.getByTestId('engrave-setup-what-engrave').getAttribute('aria-pressed')).toBe('true');
@@ -142,6 +175,10 @@ describe('#685 — step 4, what are you cutting', () => {
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
       'Type the text to engrave.',
     );
+    // #874 — the sentence names the Text field, so it sits IN that field's box, under the field.
+    expect(
+      screen.getByTestId('start-wizard-op-field').contains(screen.getByTestId('start-wizard-create-unblock')),
+    ).toBe(true);
 
     // A pocket needs no field here: it gets its size in the panel, so Create can act.
     fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
@@ -209,6 +246,9 @@ describe('#685 — step 4, what are you cutting', () => {
     expect(screen.getByTestId('engrave-setup-what-engrave').getAttribute('aria-pressed')).toBe('false');
     const create = screen.getByTestId('start-wizard-create') as HTMLButtonElement;
     expect(create.disabled).toBe(false);
+    // #874 — with nothing picked the primary FINISHES: it says Done, not "Add the operation",
+    // which would promise an item the press does not make.
+    expect(create.textContent).toBe('Done');
 
     // Surface a mesh is a whole-job operation: a job that has items gets a DISABLED card with its
     // reason beside it, not a sentence in place of the card (principle 4, B6).
@@ -228,8 +268,10 @@ describe('#685 — step 4, what are you cutting', () => {
     openOperationStep();
     fireEvent.click(screen.getByTestId('engrave-setup-what-surface'));
 
-    // Its ONE essential field is the mesh file — not text, and not a size.
-    expect(screen.getByTestId('start-wizard-op-field').textContent).toContain('Surface a mesh');
+    // Its ONE essential field is the mesh file — not text, and not a size. #874 — the box no
+    // longer repeats the chip's word as a heading above it: its first line IS the field.
+    const surfaceBox = screen.getByTestId('start-wizard-op-field');
+    expect(within(surfaceBox).getByTestId('start-wizard-op-surface-file')).toBeTruthy();
     const input = screen.getByTestId('start-wizard-op-surface-file') as HTMLInputElement;
     expect(input.getAttribute('accept')).toContain('.stl');
     expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(true);
@@ -284,5 +326,48 @@ describe('#685 — step 4, what are you cutting', () => {
     expect(screen.getByTestId('start-wizard-op-surface-mold-note').textContent).toContain('two-part mould');
     fireEvent.click(screen.getByTestId('start-wizard-create'));
     expect(useEngraveJobStore.getState().job.targetObject).toMatchObject({ role: 'goal', goalMode: 'mold' });
+  });
+
+  it('#874 — picking a chip turns Done back into the operation it adds', () => {
+    act(() => {
+      useEngraveJobStore.setState({ job: defaultEngraveJob() });
+    });
+    openOperationStep();
+    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Done');
+    fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
+    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Add the operation');
+  });
+
+  it('#874 — the circuit board is a chip: its Gerber set unblocks Create, which adds nothing', async () => {
+    openOperationStep();
+    // The engrave default still blocks Create; picking the board's chip REPLACES it (B.3's bug —
+    // an import used to leave `picked` on Engrave text, so Create stayed disabled with a sentence
+    // about text nobody had been asked to type).
+    expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-setup-what-pcb'));
+    expect(screen.getByTestId('engrave-setup-what-pcb').getAttribute('aria-pressed')).toBe('true');
+
+    // The chosen chip's one field is the Gerber set, its sentence inside the same box.
+    const box = screen.getByTestId('start-wizard-op-pcb');
+    expect(within(box).getByTestId('start-wizard-op-pcb-files')).toBeTruthy();
+    const create = (): HTMLButtonElement => screen.getByTestId('start-wizard-create') as HTMLButtonElement;
+    expect(create().disabled).toBe(true);
+    expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
+      "Choose the board's Gerber and drill files.",
+    );
+
+    const input = screen.getByTestId('start-wizard-op-pcb-files') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File([new Uint8Array([1, 2, 3])], 'practice-F_Cu.gbr')] } });
+    await waitFor(() => expect(create().disabled).toBe(false), { timeout: 15_000 });
+    expect(screen.getByTestId('start-wizard-op-pcb-summary').textContent).toContain('The board is in');
+
+    // Create adds no item: the files already ARE the job's items.
+    fireEvent.click(create());
+    expect(screen.queryByTestId('start-wizard')).toBeNull();
+    const job = useEngraveJobStore.getState().job;
+    expect(job.labels).toHaveLength(0);
+    expect(job.shapes).toHaveLength(0);
+    expect(job.traces).toHaveLength(0);
+    expect(job.drills).toHaveLength(0);
   });
 });

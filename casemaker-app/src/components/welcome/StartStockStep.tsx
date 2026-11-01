@@ -33,6 +33,7 @@ import {
   type StockSizeKey,
 } from '@/engine/cnc/stockStart';
 import { readStockFile, type StockFileRead } from '@/engine/import/meshStock';
+import { SELECTED_FILL } from '@/components/selectionChip';
 import { featureSim } from '@/platform/features';
 import { stockProblem, type StockItem } from '@/platform/stockClient';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -107,15 +108,15 @@ const FORM_BUTTON: CSSProperties = {
   lineHeight: 1.2,
   color: '#cfe',
   background: 'transparent',
-  border: '1px solid #2a2f36',
+  // Longhands: the shared ON fill names `borderColor` (#874).
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: '#2a2f36',
   borderRadius: 4,
   cursor: 'pointer',
 };
-const FORM_BUTTON_ON: CSSProperties = {
-  ...FORM_BUTTON,
-  border: '1px solid #5a8abf',
-  background: 'rgba(90, 138, 191, 0.14)',
-};
+// #874 — the same ON fill every selected chip uses; the button keeps its own icon-and-word shape.
+const FORM_BUTTON_ON: CSSProperties = { ...FORM_BUTTON, ...SELECTED_FILL };
 
 /** #870 — a stock file's one fact beside its name: the box (or rim) it measures. */
 function fileFact(read: StockFileRead): string | null {

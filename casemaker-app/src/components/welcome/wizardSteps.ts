@@ -62,7 +62,11 @@ export function wizardStepLine(id: WizardStepId): string {
  *
  * A run that began as a re-entry is editing a job that already exists, so walking on to step 4
  * ADDS an operation to it; only a run that started at step 1 creates a job (#681 follow-up).
+ *
+ * #874 — a job that already has work opens step 4 with nothing picked, and the button then adds
+ * nothing: it FINISHES, so it says Done until a chip is picked, when it becomes the add again.
  */
-export function wizardNextLabel(id: WizardStepId, reEntry: boolean): string {
+export function wizardNextLabel(id: WizardStepId, reEntry: boolean, operationIdle = false): string {
+  if (id === 'operation' && operationIdle) return 'Done';
   return id === 'operation' && reEntry ? 'Add the operation' : wizardStep(id).nextLabel;
 }

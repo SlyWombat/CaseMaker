@@ -210,6 +210,18 @@ for (const vp of VIEWPORTS) {
       await expect(dialog).not.toContainText('No file chosen');
       await expect(page.getByTestId('start-wizard-create')).toBeEnabled();
 
+      // #874 — the circuit board is a chip in "From a file". Picking it REPLACES the mesh choice,
+      // and its Gerber set is the one field: Create is blocked until the set reads (B.3's bug —
+      // an import used to leave the engrave choice on, so Create stayed disabled with a sentence
+      // about text nobody had been asked for).
+      await page.getByTestId('engrave-setup-what-pcb').click();
+      await expect(page.getByTestId('engrave-setup-what-pcb')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByTestId('start-wizard-op-surface-file')).toHaveCount(0);
+      await expect(page.getByTestId('start-wizard-create')).toBeDisabled();
+      await expect(page.getByTestId('start-wizard-create-unblock')).toHaveText(
+        "Choose the board's Gerber and drill files.",
+      );
+
       // The circuit board's Gerbers: the set named in the row with Change.
       await page.getByTestId('start-wizard-op-pcb-files').setInputFiles(
         ['tiny-F_Cu.gbr', 'tiny-Edge_Cuts.gbr', 'tiny.drl'].map((f) => ({
@@ -223,7 +235,22 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByTestId('start-wizard-op-pcb-summary')).toContainText('The board is in');
       await expectSameRow(pcbName, page.getByTestId('start-wizard-op-pcb-picker-change'), 'Gerber set and Change');
       await expect(dialog).not.toContainText('No file chosen');
+      await expect(page.getByTestId('start-wizard-create')).toBeEnabled();
       await page.screenshot({ path: `test-results/870-file-field-${vp.name}.png` });
+
+      // Create adds no extra item: the files ARE the job's items, and there is nothing on the
+      // picker's `pcb` choice for the shell to make.
+      const items = (): Promise<number> =>
+        page.evaluate(() => {
+          const job = JSON.parse(localStorage.getItem('casemaker.engraveJob.v3') ?? '{}') as Record<string, { length?: number } | undefined>;
+          const lists = ['labels', 'shapes', 'traces', 'drills', 'threads', 'primitives', 'cutouts', 'vectors', 'chamfers', 'faces'];
+          return lists.reduce((n, k) => n + (job[k]?.length ?? 0), 0);
+        });
+      const before = await items();
+      expect(before).toBeGreaterThan(0);
+      await page.getByTestId('start-wizard-create').click();
+      await expect(page.getByTestId('start-wizard')).toHaveCount(0);
+      expect(await items()).toBe(before);
     });
   });
 }

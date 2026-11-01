@@ -32,6 +32,7 @@ describe('#662 the operation types', () => {
       'thread',
       'thread-external',
       'surface',
+      'pcb',
       'texture',
       'flute',
       'prism',

@@ -7,8 +7,9 @@
  * asks for its one field (#685, `OperationStep`); the panel adds it and opens its row.
  *
  * TWO MODES, ONE PICKER (#685):
- *  - `select` is the wizard: the fourteen operation chips, grouped, and the one hint a card needs
- *    (Surface a mesh is the whole job). Nothing is added here; the shell's Create does that.
+ *  - `select` is the wizard: the sixteen operation chips, grouped, and the one hint a card needs
+ *    (Surface a mesh is the whole job, which a job with work already cannot be). Nothing is added
+ *    here; the shell's Create does that.
  *  - `add` is the panel's "+ Add operation": the same chips, plus every kind the old second
  *    vocabulary ("More kinds and imports") carried, drawn as OPTIONS OF the operation it always
  *    was — a Circle is a Pocket, a Line is Engrave text, a Hole array is a Hole, the primitives
@@ -22,6 +23,12 @@
 
 import type { CSSProperties, JSX } from 'react';
 import {
+  SELECTION_CHIP,
+  SELECTION_CHIP_DISABLED,
+  SELECTION_CHIP_ON,
+  useSelectionChipGrid,
+} from '@/components/selectionChip';
+import {
   OPERATION_GROUPS,
   operationOptionsInGroup,
   operationTypesInGroup,
@@ -30,20 +37,7 @@ import {
 } from './operationTypes';
 
 const GROUP_LABEL: CSSProperties = { fontSize: 11, fontWeight: 600, color: '#9aa4b0', margin: '8px 0 3px' };
-const CHIPS: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' };
-const CHIP: CSSProperties = {
-  padding: '4px 8px',
-  border: '1px solid #2a2f36',
-  borderRadius: 12,
-  background: '#161b21',
-  color: '#cfe',
-  font: 'inherit',
-  fontSize: 11,
-  cursor: 'pointer',
-};
-const CHIP_ON: CSSProperties = { ...CHIP, borderColor: '#5a8abf', background: '#1d2a38', color: '#e6edf5' };
-const CHIP_DISABLED: CSSProperties = { ...CHIP, color: '#6b7480', cursor: 'not-allowed', opacity: 0.7 };
-const HINT: CSSProperties = { fontSize: 10, color: '#9aa4b0', lineHeight: 1.4 };
+const HINT: CSSProperties = { fontSize: 10, color: '#9aa4b0', lineHeight: 1.4, margin: '2px 0 0' };
 const OPTIONS_ROW: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', margin: '3px 0 0 12px' };
 const OPTIONS_LABEL: CSSProperties = { fontSize: 10, color: '#9aa4b0', marginRight: 2 };
 const OPTION_CHIP: CSSProperties = {
@@ -67,8 +61,6 @@ export interface OperationPickerProps {
   onPick: (id: OperationTypeId) => void;
   /** Whether "Surface a mesh" can run — the job holds no operations yet. */
   surfaceAllowed: boolean;
-  /** #723 P2-3 — what the surface chip means where it is offered (a sides job names its side). */
-  surfaceHint?: string;
   /** `select` mode: which chip is on. */
   selected?: OperationTypeId | null;
   /** `add` mode only: a folded option was picked. */
@@ -86,7 +78,6 @@ export function OperationPicker({
   testidFor,
   onPick,
   surfaceAllowed,
-  surfaceHint,
   selected = null,
   onOption,
   optionEnabled,
@@ -94,12 +85,13 @@ export function OperationPicker({
   onImportImage,
   importing = false,
 }: OperationPickerProps): JSX.Element {
+  const grid = useSelectionChipGrid();
   return (
     <div data-testid="operation-picker" style={{ marginTop: 4 }}>
       {OPERATION_GROUPS.map((group) => (
         <div key={group.id} data-testid={`operation-picker-group-${group.id}`}>
           <div style={GROUP_LABEL}>{group.label}</div>
-          <div style={CHIPS}>
+          <div style={grid}>
             {operationTypesInGroup(group.id).map((t) => {
               // A whole-job operation on a job that has work already: say why, at the card.
               const disabled = t.id === 'surface' && !surfaceAllowed;
@@ -112,24 +104,23 @@ export function OperationPicker({
                   aria-pressed={mode === 'select' ? on : undefined}
                   disabled={disabled}
                   title={t.blurb}
-                  style={disabled ? CHIP_DISABLED : on ? CHIP_ON : CHIP}
+                  style={disabled ? SELECTION_CHIP_DISABLED : on ? SELECTION_CHIP_ON : SELECTION_CHIP}
                   onClick={() => onPick(t.id)}
                 >
                   {t.label}
                 </button>
               );
             })}
-            {group.id === '3d' && (
-              // #726 W23 — a DISABLED card carries its reason in words on the screen (A10), not
-              // only in a hover title: the generic rule says what the operation is, not why this
-              // job cannot pick it now.
-              <span style={HINT} data-testid="operation-picker-surface-hint">
-                {!surfaceAllowed
-                  ? 'this job already has work — Surface a mesh starts a new, empty job'
-                  : (surfaceHint ?? 'a whole-job operation; it starts an empty job')}
-              </span>
-            )}
           </div>
+          {group.id === 'file' && !surfaceAllowed && (
+            // #726 W23 — a DISABLED card carries its reason in words on the screen (A10), not only
+            // in a hover title: the generic rule says what the operation is, not why this job
+            // cannot pick it now. Nothing is said while it CAN be picked (#874): on a new job that
+            // is every job, so the enabled sentence told no one anything.
+            <div style={HINT} data-testid="operation-picker-surface-hint">
+              this job already has work — Surface a mesh starts a new, empty job
+            </div>
+          )}
           {mode === 'add' &&
             operationOptionsInGroup(group.id).map((row) => (
               <div key={row.operation} style={OPTIONS_ROW} data-testid={`operation-picker-options-${row.operation}`}>

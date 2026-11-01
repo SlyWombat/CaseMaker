@@ -25,6 +25,7 @@ import { pcbReHoldNote } from '@/engine/import/pcbHold';
 import { readGoalObjectFile } from '@/engine/import/targetObject';
 import { FontPicker } from '@/components/panels/FontPicker';
 import { OperationPicker } from '@/components/panels/OperationPicker';
+import { SELECTED_FILL, useSelectionChipGrid } from '@/components/selectionChip';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { RotaryOperationPicker } from './RotaryOperationPicker';
 import { WizardFileField } from './WizardFileField';
@@ -43,6 +44,10 @@ const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap:
 const FIELD: CSSProperties = { width: 72 };
 const FIELDS: CSSProperties = { display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' };
 const FIELD_BOX: CSSProperties = { borderTop: '1px solid #2a2f36', marginTop: 10, paddingTop: 8 };
+/** #870 — the engrave box's grid: Text across the box, Depth and Font side by side, labels above. */
+const ENGRAVE_FIELDS: CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'end' };
+const FIELD_STACK: CSSProperties = { display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 2, fontSize: 12, margin: 0 };
+const FIELD_UNIT_ROW: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4 };
 
 /** The job's cutter diameter, mm — the size a cross-hole starts at, so the seed is a hole it cuts. */
 function toolDiameterMm(job: EngraveJob): number {
@@ -57,8 +62,10 @@ function boxFact(size: { x: number; y: number; z: number }): string {
 }
 const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: '6px 0 0' };
 /** #723 P2-3 — one side of a part cut from several sides, as a choice. */
-const SIDE_CHIP: CSSProperties = { fontSize: 11, padding: '4px 8px', borderRadius: 4, border: '1px solid #2a2f36', background: 'transparent', color: '#c8d3de', cursor: 'pointer' };
-const SIDE_CHIP_ON: CSSProperties = { ...SIDE_CHIP, border: '1px solid #4a90d9', background: '#1c2b3a' };
+// Longhands, not the `border` shorthand: the ON fill names `borderColor` (#874).
+const SIDE_CHIP: CSSProperties = { fontSize: 11, padding: '4px 8px', borderRadius: 4, borderWidth: 1, borderStyle: 'solid', borderColor: '#2a2f36', background: 'transparent', color: '#c8d3de', cursor: 'pointer' };
+/** #874 — the same ON fill every selected control uses (chips, form buttons, sides). */
+const SIDE_CHIP_ON: CSSProperties = { ...SIDE_CHIP, ...SELECTED_FILL };
 
 /**
  * What Create asks the shell to make; `null` = nothing new (the job already has its operation).
@@ -75,13 +82,19 @@ const SIDE_CHIP_ON: CSSProperties = { ...SIDE_CHIP, border: '1px solid #4a90d9',
 export type OperationChoice =
   | { type: 'engrave'; text: string; depth: number; font: TextFont; reads?: 'along' | 'around' }
   | { type: 'surface'; target: EngraveTargetObject | null; /** #723 P2-3 — the side it is written to. */ setupId?: string }
+  /**
+   * #874 — a circuit board, from its Gerber and drill files. `imported` is whether the set has
+   * READ: the files write the job's items themselves, so Create adds nothing and waits only for
+   * them to be in.
+   */
+  | { type: 'pcb'; imported: boolean }
   /** #241 slice 2 — a flat on a face: the index and the depth. */
   | { type: 'flat'; a: number; depth: number }
   /** #241 slice 2 — evenly spaced flats: the first index, the count, and the across-flats. */
   | { type: 'faces-all-round'; a: number; count: number; acrossFlats: number }
   /** #241 slice 2 — a cross-hole: the index and the diameter. */
   | { type: 'cross-hole'; a: number; diameter: number }
-  | { type: Exclude<OperationTypeId, 'engrave' | 'surface'>; text?: string; lengthMm?: number };
+  | { type: Exclude<OperationTypeId, 'engrave' | 'surface' | 'pcb'>; text?: string; lengthMm?: number };
 
 export interface OperationStepProps {
   job: EngraveJob;
@@ -128,10 +141,13 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   const [surfaceFileName, setSurfaceFileName] = useState<string | null>(null);
   // #721 — what the goal makes: the part itself, or a mold to cast it in.
   const [makeMold, setMakeMold] = useState(false);
-  // #743 P-4b — the circuit-board door. The set writes its items through the store's one import
-  // action; the step only reads the files and reports the outcome (there is no `OperationChoice`
-  // for it — the files ARE the design, and Create finishes without adding a placeholder).
+  // #743 P-4b — the circuit-board door, a chip in "From a file" since #874. The set writes its
+  // items through the store's one import action; the step reads the files, reports the outcome,
+  // and its `pcb` choice blocks Create only until the set has read (the files ARE the design, so
+  // Create adds no placeholder).
   const [pcbReading, setPcbReading] = useState(false);
+  /** Whether the last picked set READ; the summary may be replaced by a notice, this may not. */
+  const [pcbImported, setPcbImported] = useState(false);
   const [pcbSummary, setPcbSummary] = useState<string | null>(null);
   /** #870 — the picked set, named for the file field, and its refusal when the set did not read. */
   const [pcbFilesName, setPcbFilesName] = useState<string | null>(null);
@@ -180,10 +196,20 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
       ? { type: 'engrave', text, depth, font }
       : picked === 'surface'
         ? surfaceChoice
-        : picked === null
-          ? null
-          : { type: picked };
+        : picked === 'pcb'
+          ? { type: 'pcb', imported: pcbImported }
+          : picked === null
+            ? null
+            : { type: picked };
   const unblock = operationCreateBlocked(choice);
+  // #874 — the sentence names the FIELD it is about, so it renders in that chip's own field box,
+  // directly under the field, never at the foot of the step 300 px away from the Text input.
+  const unblockLine =
+    unblock === null ? null : (
+      <p style={UNBLOCK} data-testid="start-wizard-create-unblock">
+        {unblock}
+      </p>
+    );
 
   // Report on every input change: the footer's Create is the shell's, and it enables the moment the
   // answer is one that can be made. Keyed on the fields, not the object, so it does not re-fire.
@@ -197,10 +223,11 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   useLayoutEffect(() => {
     onChoiceChange(choice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked, text, depth, font, surface, makeMold, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, onChoiceChange]);
+  }, [picked, text, depth, font, surface, makeMold, pcbImported, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, onChoiceChange]);
 
   async function readPcbSet(files: File[]): Promise<void> {
     setPcbSummary(null);
+    setPcbImported(false);
     setPcbStockFix(null);
     setPcbHoldingFix(null);
     setPcbAlignment(null);
@@ -210,6 +237,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
     try {
       const out = await useEngraveJobStore.getState().importPcbFiles(files);
       if (!out.ok) setPcbError(out.reason);
+      else setPcbImported(true);
       setPcbSummary(
         out.ok
           ? `The board is in: ${out.itemCount} items from ${out.fileCount} files${out.twoSided ? ', cut on both faces' : ''}${out.warnings.length > 0 ? ` — ${out.warnings.map((w) => w.message).join(' ')}` : ''}`
@@ -251,11 +279,14 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
 
   const engraveField = rotary ? rotaryPicked === 'engrave' : picked === 'engrave';
   const surfaceField = rotary ? rotaryPicked === 'relief' : picked === 'surface';
+  // #874 — the board is the second file chip, so its field is the chosen chip's box like any other.
+  const pcbField = !rotary && picked === 'pcb';
   const vcarveField = rotary && rotaryPicked === 'v-carve';
   const pocketField = rotary && rotaryPicked === 'pocket';
   const fluteField = rotary && rotaryPicked === 'flute';
   // #241 slice 2 — the face group: each operation's one field, and the index it is cut at.
   const faceField = rotary && (rotaryPicked === 'flat' || rotaryPicked === 'faces-all-round' || rotaryPicked === 'cross-hole');
+  const sideGrid = useSelectionChipGrid();
 
   return (
     <div data-testid="engrave-setup-step-what" style={{ marginTop: 8 }}>
@@ -266,7 +297,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
             This job is cut from {savedSides.length} sides. A mesh picked below is attached to the
             side you choose; the other sides keep theirs.
           </p>
-          <div style={FIELDS} role="radiogroup" aria-label="Which side this mesh is for">
+          <div style={sideGrid} role="radiogroup" aria-label="Which side this mesh is for">
             {savedSides.map((setup, i) => {
               const goal = goalForSide(setup.id);
               return (
@@ -298,76 +329,74 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
           testidFor={(id) => `engrave-setup-what-${id}`}
           onPick={setPicked}
           surfaceAllowed={!jobHasItems(job)}
-          surfaceHint={
-            savedSides.length > 0
-              ? 'the mesh goes on the side chosen above; the other sides keep theirs'
-              : undefined
-          }
           selected={picked}
         />
       )}
 
       {engraveField && (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
-          <div style={FIELD_HEADING}>Engrave text</div>
-          <div style={FIELDS}>
-            <label style={FIELD_LABEL}>
+          <div style={ENGRAVE_FIELDS}>
+            <label style={{ ...FIELD_STACK, gridColumn: '1 / -1' }}>
               <span>Text</span>
               <input
                 type="text"
                 data-testid="start-wizard-op-text"
                 aria-label="Engrave text"
-                style={{ width: 180 }}
+                style={{ width: '100%', boxSizing: 'border-box' }}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
               />
             </label>
-            <label style={FIELD_LABEL}>
+            <label style={FIELD_STACK}>
               <span>Depth</span>
-              <input
-                type="number"
-                min={0}
-                step="any"
-                data-testid="start-wizard-op-depth"
-                aria-label="Engrave depth"
-                style={FIELD}
-                value={depth}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  if (Number.isFinite(v)) setDepth(v);
-                }}
-              />
-              <span style={MUTED}>mm</span>
+              <span style={FIELD_UNIT_ROW}>
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  data-testid="start-wizard-op-depth"
+                  aria-label="Engrave depth"
+                  style={FIELD}
+                  value={depth}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) setDepth(v);
+                  }}
+                />
+                <span style={MUTED}>mm</span>
+              </span>
             </label>
-            <label style={FIELD_LABEL} data-testid="start-wizard-op-font">
+            <label style={FIELD_STACK} data-testid="start-wizard-op-font">
               <span>Font</span>
               <FontPicker value={font} onChange={setFont} aria-label="Font" />
             </label>
             {rotary && (
               // #752 — §3.6's one field for text on a round stock: which way the line reads,
               // along the rod by default (like a pencil's lettering).
-              <label style={FIELD_LABEL} data-testid="start-wizard-op-reads">
+              <label style={FIELD_STACK} data-testid="start-wizard-op-reads">
                 <span>Reads</span>
-                <select
-                  data-testid="start-wizard-op-reads-select"
-                  aria-label="Reads"
-                  style={FIELD}
-                  value={reads}
-                  onChange={(e) => setReads(e.target.value === 'around' ? 'around' : 'along')}
-                >
-                  <option value="along">along</option>
-                  <option value="around">around</option>
-                </select>
-                <span style={MUTED}>the rod</span>
+                <span style={FIELD_UNIT_ROW}>
+                  <select
+                    data-testid="start-wizard-op-reads-select"
+                    aria-label="Reads"
+                    style={FIELD}
+                    value={reads}
+                    onChange={(e) => setReads(e.target.value === 'around' ? 'around' : 'along')}
+                  >
+                    <option value="along">along</option>
+                    <option value="around">around</option>
+                  </select>
+                  <span style={MUTED}>the rod</span>
+                </span>
               </label>
             )}
           </div>
+          {unblockLine}
         </div>
       )}
 
       {vcarveField && (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
-          <div style={FIELD_HEADING}>V-carve</div>
           <div style={FIELDS}>
             <label style={FIELD_LABEL}>
               <span>Text</span>
@@ -382,21 +411,21 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
             </label>
             <span style={MUTED}>Leave it empty to draw a region in the panel.</span>
           </div>
+          {unblockLine}
         </div>
       )}
 
       {pocketField && (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
-          <div style={FIELD_HEADING}>Pocket</div>
           <p style={MUTED} data-testid="start-wizard-op-pocket-note">
             The pocket’s size and place come in the panel — Create adds it, ready to drag.
           </p>
+          {unblockLine}
         </div>
       )}
 
       {fluteField && (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
-          <div style={FIELD_HEADING}>Flute</div>
           <div style={FIELDS}>
             <label style={FIELD_LABEL}>
               <span>Length along</span>
@@ -416,14 +445,12 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
               <span style={MUTED}>mm</span>
             </label>
           </div>
+          {unblockLine}
         </div>
       )}
 
       {faceField && (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
-          <div style={FIELD_HEADING}>
-            {rotaryPicked === 'flat' ? 'Flat' : rotaryPicked === 'faces-all-round' ? 'Faces all round' : 'Cross-hole'}
-          </div>
           <div style={FIELDS}>
             <label style={FIELD_LABEL}>
               <span>{rotaryPicked === 'faces-all-round' ? 'First face' : 'Angle'}</span>
@@ -525,12 +552,12 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
                 ? `${facesCount} faces, evenly spaced from A ${faceAngle}°, leaving ${facesAcross} mm across flats.`
                 : `Turned to A ${faceAngle}° and drilled across; the hole comes out at the cutter's own diameter.`}
           </p>
+          {unblockLine}
         </div>
       )}
 
       {surfaceField && (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
-          <div style={FIELD_HEADING}>{rotary ? 'Relief from a mesh' : 'Surface a mesh'}</div>
           <WizardFileField
             accept=".stl,.3mf,.obj,.step,.stp,.png,model/stl,model/3mf,model/step,image/png"
             inputTestId="start-wizard-op-surface-file"
@@ -588,17 +615,12 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
               right way round. One side only: a part with undercuts needs a two-part mould.
             </p>
           )}
+          {unblockLine}
         </div>
       )}
 
-      {!rotary && (
+      {pcbField && (
         <div data-testid="start-wizard-op-pcb" style={FIELD_BOX}>
-          <div style={FIELD_HEADING}>Circuit board from Gerber files</div>
-          <p style={MUTED}>
-            A board's copper, holes and outline as ordinary items: the copper kept, the band
-            isolating it, the holes and the board cut-out. A board is cut from copper-clad PCB; on
-            another blank the import says so and offers PCB stock, and can still be a practice cut.
-          </p>
           <WizardFileField
             accept=".gbr,.gtl,.gbl,.gko,.gm1,.gto,.gbo,.gts,.gbs,.gtp,.gbp,.drl,.xln,.zip"
             multiple
@@ -613,6 +635,9 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
             error={pcbError}
             onFiles={(files) => void readPcbSet(files)}
           />
+          <p style={MUTED}>
+            The copper, holes and outline become items. A board is cut from copper-clad PCB.
+          </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {pcbSummary !== null && !pcbReading && (
               <span style={MUTED} data-testid="start-wizard-op-pcb-summary">
@@ -672,13 +697,8 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
               </span>
             )}
           </div>
+          {unblockLine}
         </div>
-      )}
-
-      {unblock !== null && (
-        <p style={UNBLOCK} data-testid="start-wizard-create-unblock">
-          {unblock}
-        </p>
       )}
     </div>
   );

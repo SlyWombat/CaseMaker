@@ -1729,6 +1729,13 @@ export function EngravePanel(): JSX.Element {
       goalInputRef.current?.click();
       return;
     }
+    // #874 — the board's chip is the picker's door to the same Gerber import the standalone
+    // control below the reference object opens; the set's files ARE the items, so nothing is
+    // added by the pick itself.
+    if (type === 'pcb') {
+      pcbInputRef.current?.click();
+      return;
+    }
     expandEngraveRow(addOperationOfType(type));
   }
 

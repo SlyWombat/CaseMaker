@@ -36,6 +36,10 @@
  *    engine posts it for a PURE goal job, so the picker offers it only while the list is empty,
  *    and picking it sets the imported object's `role: 'goal'` — the control the UI did not have
  *    (matrix gap A1);
+ *  - `pcb` — a circuit board from its Gerber and drill files (#743 P-4b): the copper kept, the band
+ *    isolating it, the holes and the board cut-out arrive as the job's ordinary items. Like a
+ *    mesh, it needs a FILE, so it is a chip in "From a file" and its field is the file picker;
+ *    unlike a mesh, the items are already in once the set reads, so Create adds nothing (#874);
  *  - `texture` — a seeded pattern of short strokes over a region, cut as traces by a V-bit or a
  *    flat end mill (#670): the picker adds a rect carrying a `texture` marker, and the row states
  *    the pattern, pitch, stroke length and seed;
@@ -68,6 +72,8 @@ export type OperationTypeId =
   | 'thread'
   | 'thread-external'
   | 'surface'
+  /** #874 — a board from its Gerber and drill files: the files ARE the items. */
+  | 'pcb'
   | 'texture'
   | 'flute'
   | 'prism';
@@ -77,13 +83,15 @@ export type OperationTypeId =
  * words (`docs/design/first-job-flow-mockups.html`, station 4). The panel's "Add operation" will
  * read the same table (#685), so the picker has one shape wherever it appears.
  */
-export type OperationGroupId = 'engrave-carve' | 'cut-away' | 'holes' | '3d';
+export type OperationGroupId = 'engrave-carve' | 'cut-away' | 'holes' | 'file';
 
 export const OPERATION_GROUPS: readonly { id: OperationGroupId; label: string }[] = [
   { id: 'engrave-carve', label: 'Engrave & carve' },
   { id: 'cut-away', label: 'Cut away' },
   { id: 'holes', label: 'Holes' },
-  { id: '3d', label: '3D' },
+  // #874 — the group is what its two operations have in common: both are a FILE. "3D" named only
+  // one of them and made the circuit board a separate section outside the selection model.
+  { id: 'file', label: 'From a file' },
 ];
 
 export interface OperationTypeDef {
@@ -119,7 +127,10 @@ export const OPERATION_TYPES: readonly OperationTypeDef[] = [
   { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, helixed down its wall', addTestId: 'engrave-add-bore', group: 'holes' },
   { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread', group: 'holes' },
   { id: 'thread-external', label: 'Thread a boss (external)', blurb: 'A milled thread around the outside of a boss or rod', addTestId: 'engrave-add-thread-external', group: 'holes' },
-  { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal mesh or picture', addTestId: 'engrave-add-surface', group: '3d' },
+  { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal mesh or picture', addTestId: 'engrave-add-surface', group: 'file' },
+  // #874 — the board's chip carries its own id: `engrave-add-pcb` is the panel's older standalone
+  // door to the same import, and two elements with one test id are one element too many.
+  { id: 'pcb', label: 'Circuit board (Gerbers)', blurb: 'A board’s copper, holes and outline, from its Gerber and drill files', addTestId: 'engrave-add-pcb-chip', group: 'file' },
   { id: 'texture', label: 'Texture', blurb: 'A seeded pattern of short strokes over a region', addTestId: 'engrave-add-texture', group: 'engrave-carve' },
   { id: 'flute', label: 'Flute', blurb: 'A groove that ramps in and out along its ends', addTestId: 'engrave-add-flute', group: 'engrave-carve' },
   { id: 'prism', label: 'Prism', blurb: 'A shape standing on sloped sides, cut by the V-bit', addTestId: 'engrave-add-prism', group: 'engrave-carve' },
@@ -322,13 +333,15 @@ export function regionChipLabel(through: boolean | undefined, region: 'v-carve' 
 }
 
 /**
- * Add one operation of `type` to the open job and return its id. Surface a mesh is not here: it
- * needs a FILE, so the caller with the file input handles it (the panel's goal import, #662).
+ * Add one operation of `type` to the open job and return its id. The two file operations are not
+ * here: Surface a mesh needs a FILE, so the caller with the file input handles it (the panel's
+ * goal import, #662); a circuit board needs its Gerber set, and once that reads the items are
+ * already in (#874).
  *
  * The defaults are the store's own add actions — this only says which action a type means, once,
  * for every entry point (the wizard's first step and the panel's Add operation).
  */
-export function addOperationOfType(type: Exclude<OperationTypeId, 'surface'>): string {
+export function addOperationOfType(type: Exclude<OperationTypeId, 'surface' | 'pcb'>): string {
   const store = useEngraveJobStore.getState();
   switch (type) {
     case 'engrave':

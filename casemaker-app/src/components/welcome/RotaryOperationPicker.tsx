@@ -10,22 +10,16 @@
  * screen (#726 W23), never only a hover title — no chip carries one today.
  */
 import type { CSSProperties, JSX } from 'react';
+import {
+  SELECTION_CHIP,
+  SELECTION_CHIP_DISABLED,
+  SELECTION_CHIP_ON,
+  useSelectionChipGrid,
+} from '@/components/selectionChip';
 import { ROTARY_OPERATION_GROUPS, type RotaryOperationId } from './rotaryOperations';
 
 const GROUP_LABEL: CSSProperties = { fontSize: 11, fontWeight: 600, color: '#9aa4b0', margin: '8px 0 3px' };
-const CHIPS: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' };
-const CHIP: CSSProperties = {
-  padding: '4px 8px',
-  border: '1px solid #2a2f36',
-  borderRadius: 12,
-  background: '#161b21',
-  color: '#cfe',
-  font: 'inherit',
-  fontSize: 11,
-  cursor: 'pointer',
-};
-const CHIP_ON: CSSProperties = { ...CHIP, borderColor: '#5a8abf', background: '#1d2a38', color: '#e6edf5' };
-const CHIP_DISABLED: CSSProperties = { ...CHIP, color: '#6b7480', cursor: 'not-allowed', opacity: 0.7 };
+const TAGS: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', margin: '2px 0 0' };
 const TAG: CSSProperties = { fontSize: 10, color: '#e0c07a', border: '1px solid #5a4a1d', borderRadius: 8, padding: '1px 6px' };
 
 export interface RotaryOperationPickerProps {
@@ -37,12 +31,13 @@ export interface RotaryOperationPickerProps {
 }
 
 export function RotaryOperationPicker({ selected, onPick, testidFor }: RotaryOperationPickerProps): JSX.Element {
+  const grid = useSelectionChipGrid();
   return (
     <div data-testid="rotary-operation-picker" style={{ marginTop: 4 }}>
       {ROTARY_OPERATION_GROUPS.map((group) => (
         <div key={group.id} data-testid={`rotary-operation-group-${group.id}`}>
           <div style={GROUP_LABEL}>{group.label}</div>
-          <div style={CHIPS}>
+          <div style={grid}>
             {group.operations.map((op) => {
               const disabled = op.reason !== null;
               const on = !disabled && selected === op.id;
@@ -54,22 +49,26 @@ export function RotaryOperationPicker({ selected, onPick, testidFor }: RotaryOpe
                   aria-pressed={on}
                   disabled={disabled}
                   title={op.reason ?? op.blurb}
-                  style={disabled ? CHIP_DISABLED : on ? CHIP_ON : CHIP}
+                  style={disabled ? SELECTION_CHIP_DISABLED : on ? SELECTION_CHIP_ON : SELECTION_CHIP}
                   onClick={() => onPick(op.id)}
                 >
                   {op.label}
                 </button>
               );
             })}
-            {group.id === '3d' &&
-              group.operations
+          </div>
+          {group.id === '3d' && group.operations.some((op) => op.tag !== null) && (
+            // A fact tag beside its operation — `simulate only` — never a disabled state.
+            <div style={TAGS}>
+              {group.operations
                 .filter((op) => op.tag !== null)
                 .map((op) => (
                   <span key={`tag-${op.id}`} data-testid={`rotary-operation-tag-${op.id}`} style={TAG}>
                     {op.tag}
                   </span>
                 ))}
-          </div>
+            </div>
+          )}
         </div>
       ))}
     </div>

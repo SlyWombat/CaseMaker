@@ -377,13 +377,14 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     expect(jobVise(useEngraveJobStore.getState().job).stockProud).toBeCloseTo(-8, 6);
     expect(useEngraveJobStore.getState().job.sacrificial.under).toBeNull();
 
-    // Walking on is still offered; at step 4 the button says what it would do to an existing job.
+    // Walking on is still offered; at step 4 with nothing picked the primary FINISHES (#874), and
+    // picking a chip is what turns it into the add it really is.
     fireEvent.click(screen.getByTestId('engrave-hold-edit'));
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
       'Step 4 of 4 · What are you cutting?',
     );
-    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Add the operation');
+    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Done');
   });
 
   it('lets the sacrificial and material answers through to the job', async () => {
