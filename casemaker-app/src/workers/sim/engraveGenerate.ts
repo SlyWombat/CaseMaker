@@ -4810,13 +4810,31 @@ export function generateGoalProgram(
       message: `The goal is cut by one cutter: “${roughEntry!.tool.name}” cannot be fed for ${job.stock.material} — ${roughResolved.reason}.`,
     });
   }
+  // A station the post cannot write (T0 is the probe slot) is a refusal of the SPLIT, not of the
+  // goal: the finish still runs on one cutter.
+  const roughStation = ((): number | null => {
+    if (roughTool === null) return null;
+    try {
+      return toolNumberFor(roughTool);
+    } catch {
+      return null;
+    }
+  })();
+  if (roughTool !== null && roughStation === null && roughEntryDefined) {
+    roughFindings.push({
+      severity: 'warning',
+      code: 'goal-rough-no-cutter',
+      labelId: goal.id,
+      message: `The goal is cut by one cutter: “${roughEntry!.tool.name}” states no usable tool station, so the post cannot change to it.`,
+    });
+  }
   /** The rough cutter, its station and its own feeds — null when the goal is cut by one cutter. */
   const rough: { tool: Tool; number: number; feeds: SurfaceFeeds; rpm: number } | null =
-    roughTool === null || roughResolved === null || !roughResolved.ok
+    roughTool === null || roughResolved === null || !roughResolved.ok || roughStation === null
       ? null
       : {
           tool: roughTool,
-          number: toolNumberFor(roughTool),
+          number: roughStation,
           rpm: roughResolved.params.rpm,
           feeds: {
             feed: roughResolved.params.feed,
