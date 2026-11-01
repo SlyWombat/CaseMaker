@@ -6,6 +6,62 @@
     "bed": {
       "description": "The bed profile the job was set up on, with its version; omit for a job that names none.",
       "properties": {
+        "datums": {
+          "description": "The datum snapshot the job was planned against; omit on a job bound before the snapshot existed.",
+          "properties": {
+            "bracketSeatZ": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The bracket seat the job was planned against, mm; null when it was unmeasured."
+            },
+            "rotaryAxis": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The rotary axis line the job was planned against, mm; null when it was unmeasured."
+            },
+            "surfaceTopZ": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The bed surface top the job was planned against, mm; null when it was unmeasured."
+            },
+            "viseJawTopZ": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The vise jaw top the job was planned against, mm; null when it was unmeasured."
+            }
+          },
+          "required": [
+            "surfaceTopZ",
+            "viseJawTopZ",
+            "bracketSeatZ",
+            "rotaryAxis"
+          ],
+          "type": "object"
+        },
         "profileId": {
           "description": "The active bed profile's id.",
           "minLength": 1,

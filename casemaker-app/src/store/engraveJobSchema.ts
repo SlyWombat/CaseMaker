@@ -1243,6 +1243,15 @@ const jobBedBindingSchema = z.object({
     .string()
     .min(1)
     .describe("The profile's version: the time of its last history line, which is how a change to the bed is detected."),
+  datums: z
+    .object({
+      surfaceTopZ: z.number().finite().nullable().describe('The bed surface top the job was planned against, mm; null when it was unmeasured.'),
+      viseJawTopZ: z.number().finite().nullable().describe('The vise jaw top the job was planned against, mm; null when it was unmeasured.'),
+      bracketSeatZ: z.number().finite().nullable().describe('The bracket seat the job was planned against, mm; null when it was unmeasured.'),
+      rotaryAxis: z.number().finite().nullable().describe('The rotary axis line the job was planned against, mm; null when it was unmeasured.'),
+    })
+    .optional()
+    .describe('The datum snapshot the job was planned against; omit on a job bound before the snapshot existed.'),
 });
 
 /**

@@ -1411,6 +1411,17 @@ export interface JobBedBinding {
   profileId: string;
   /** The profile's version: the `at` of its last history line. */
   profileVersion: string;
+  /**
+   * #513 — THE DATUMS THIS JOB WAS PLANNED AGAINST, mm (null = unmeasured), copied when the job
+   * bound. The profile is a reference, but a reloaded job must be able to say WHAT MOVED when the
+   * bed changed under it (the design's open question D): `bed-changed` names the numbers.
+   */
+  datums?: {
+    surfaceTopZ: number | null;
+    viseJawTopZ: number | null;
+    bracketSeatZ: number | null;
+    rotaryAxis: number | null;
+  };
 }
 
 /**

@@ -93,6 +93,16 @@ export type JobFindingCode =
   // geometry sentence to write about the item. Raised where the plane model would otherwise judge
   // it (`item-empty`, `vcarve-groove-too-narrow`), asking for the field instead.
   | 'tool-tip-unrecorded'
+  // #513 — the bed a job was set up on (engine/cnc/bed/binding.ts).
+  | 'bed-changed'
+  | 'mount-not-on-bed'
+  | 'stock-off-surface'
+  | 'fixture-overlap'
+  | 'surface-top-unmeasured'
+  // #513 — a bed-held job whose stock leaves the board it is held on, and cuts THROUGH it: the
+  // breakthrough near that edge goes past the board and into the bed. The plain overhang (no
+  // through cut) is `stock-off-surface`; this sentence names the hazard instead of repeating it.
+  | 'cut-leaves-board'
   // #740 — the tip is unrecorded and the job's variable-depth, inlay or prism items cut with the
   // cone, so the plan assumes a SHARP POINT. A warning, not the error above: those items are not
   // judged at a colour plane, and the carve proceeds with the assumption stated.

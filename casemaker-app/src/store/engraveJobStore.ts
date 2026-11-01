@@ -74,6 +74,7 @@ import type {
   EngraveFacing,
   EngraveFrameShape,
   EngraveJob,
+  JobBedBinding,
   EngraveJobSources,
   EngraveKeepOut,
   EngraveKeepOutCircle,
@@ -1352,6 +1353,12 @@ export interface EngraveJobState {
    * which is the pre-#432 state — no facing section on the sheet and nothing faced.
    */
   setFacing: (facing: EngraveFacing | null) => void;
+  /**
+   * #513 — bind the job to a bed profile (or clear the binding). `undefined` deletes the key, so a
+   * job written before the bed binding existed keeps its exact shape; the panel calls this at
+   * Generate and from `bed-changed`'s "re-plan on the current bed".
+   */
+  setBed: (bed: JobBedBinding | undefined) => void;
   /**
    * Replace the job's saved setups (#471). Once present the list is AUTHORITATIVE: the section
    * writes it whole on every authoring action, and no item edit rewrites it behind the person's
@@ -3021,6 +3028,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           return rest;
         }
         return { ...job, facing };
+      }),
+
+    // #513 — the job's bed binding: written whole (the panel binds from the active profile), or
+    // deleted, so an unbound job keeps the shape every pre-bed document has.
+    setBed: (bed) =>
+      apply((job) => {
+        if (bed === undefined) {
+          const { bed: _dropped, ...rest } = job;
+          return rest;
+        }
+        return { ...job, bed };
       }),
 
     // #471 — the section's one write of the saved list. `null` is the absence the compatibility

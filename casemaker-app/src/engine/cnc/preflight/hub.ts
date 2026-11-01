@@ -80,6 +80,14 @@ export interface PreflightHubInput {
    * pre-#712 sentences. The hub reads no store, so this arrives as data like the rest.
    */
   bed?: BedUnderFacts | null;
+  /**
+   * #513 — WHY the bed the job was planned on is not the machine's bed any more, in words
+   * (`bedChangedSentence`), or null/undefined when they agree. The design's §8 makes `bed-changed`
+   * an ERROR before a run and a warning in design: the Design panel shows the warning with its two
+   * presses, and this row is the error that stops the Cut — the presses live back in Design, so the
+   * sentence says so. The hub reads no store; the caller resolves the profile and hands the words in.
+   */
+  bedChanged?: string | null;
 }
 
 /** One scope's rows, in the collector's own order. */
@@ -207,6 +215,18 @@ function runPolicyRows(input: PreflightHubInput, firstScope: PreflightScope): Pr
     toolKey: firstScope.toolKey,
     hubTarget: null,
   });
+
+  // #513 — the bed moved under the job. Before the stale rows: this is about the SETUP, and no
+  // re-generate changes it — the operator has to re-plan or put the bed back.
+  if (input.bedChanged !== null && input.bedChanged !== undefined) {
+    rows.push({
+      severity: 'error',
+      code: 'bed-changed',
+      message: `${input.bedChanged} Go back to Design (‹ Design) and press Re-plan on the current bed, or switch the bed back.`,
+      owner: 'run',
+      cause: cause(),
+    });
+  }
 
   if (input.generated !== null && input.staleSince !== null) {
     rows.push({

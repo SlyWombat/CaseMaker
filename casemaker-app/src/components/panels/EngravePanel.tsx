@@ -37,7 +37,7 @@ import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineDisplayName } from '@/platform/locationClient';
-import { machineRecordByProfile, useLocationStore } from '@/store/locationStore';
+import { machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
 import { mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { findingFix, type PanelFix } from './findingFix';
@@ -49,7 +49,7 @@ import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
-import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobSetups, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 // #835 — one setup's own work, measured and written back into that setup only.
 import { deadSetupKeys, replacementCutter } from '@/engine/cnc/engrave/setupWork';
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
@@ -58,7 +58,10 @@ import { toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
 // #786 slice 6 — the simulator's own cutter resolver, the one `columnSweep` asks before it sweeps:
 // the panel reads the SAME answer to decide that a refused cutter must be substituted.
 import { columnCutterFor } from '@/workers/geometry/columnEngine';
-import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
+import { bedUnderFacts, machineForJob, switchActiveProfile } from '@/platform/bedProfiles';
+// #513 — the bed a job was set up on: binding, version diff and the findings that say so.
+// `bedLine` is ALIASED: this component already has a `bedLine` (the holding step's, 2456).
+import { bedChangedSentence, bedFindings, bedLine as bedProfileLine, bindJob } from '@/engine/cnc/bed/binding';
 import type { RestChoice } from '@/components/panels/RestCutterControl';
 import {
   hasRegionItems,
@@ -933,6 +936,16 @@ export function EngravePanel(): JSX.Element {
   const setCutOverride = useEngraveJobStore((s) => s.setCutOverride);
   const setCutOverrideSource = useEngraveJobStore((s) => s.setCutOverrideSource);
   const setFacing = useEngraveJobStore((s) => s.setFacing);
+  const setBed = useEngraveJobStore((s) => s.setBed);
+  /**
+   * #513 — a `bed-changed` job's other way out: make the profile it was set up on the machine's
+   * active bed again (the operator physically swapped the bed back). The machine record's own
+   * write path carries it, so a stale guard re-applies on the fresh record.
+   */
+  const switchBedBack = async (profileId: string): Promise<void> => {
+    if (locationMachine === null) return;
+    await saveMachineWithRetry(locationMachine, (current) => switchActiveProfile(current, profileId, new Date().toISOString()));
+  };
 
   const preview = useEngravePreviewStore((s) => s.preview);
   const previewStatus = useEngravePreviewStore((s) => s.status);
@@ -1053,6 +1066,11 @@ export function EngravePanel(): JSX.Element {
     // chosen cutter's known reach blocks here, with the numbers and the one-click top-band option;
     // an unrecorded reach is an info and blocks nothing.
     ...jobReachFindings(job, tool, tools.map((e) => e.tool), tools),
+    // #513 — the bed: a job planned on a bed that is not there now (`bed-changed`, an error with
+    // its two presses), a mount the bed does not have, a stock larger than the board, an
+    // unmeasured datum the mount's registration would need. A bed with unmeasured datums is NOT
+    // reported per job (every fresh bed is unmeasured); the cards and the Start line say it once.
+    ...bedFindings({ job, machine: locationMachine, mount: jobMount(job) }),
   ]);
   const jobFindings = findings.filter((f) => f.labelId === undefined);
   // A cutter this app can write an answer to: a house definition or an owned cutter. A catalogue
@@ -2333,6 +2351,9 @@ export function EngravePanel(): JSX.Element {
             // #735 — the same bed facts the Design fallback reads (#725 B7): the gate's through-cut
             // owner must judge a taped job by the bed it is taped to, not in the pre-#712 vise words.
             bed: bedFacts,
+            // #513 — an ERROR here where Design warns: the job was planned on a bed that is not
+            // the machine's bed now, and no program is cut against a bed that moved.
+            bedChanged: bedChangedSentence(job, locationMachine),
           })
         : null,
     [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem, bedFacts],
@@ -2394,6 +2415,10 @@ export function EngravePanel(): JSX.Element {
     // checked out means none drawn.
     const sheetProbe = machineRecord === null ? null : probeFor(machineRecord);
     const mountName = mountNameFor(machineRecord, job.workholding.kind);
+    // #513 — the Bed line: the machine's active profile, worded by the job's own mount so the
+    // datum printed is the one this job's registration will read.
+    const activeBed = activeProfileOf(machineRecord);
+    const bedName = activeBed === null ? undefined : bedProfileLine(activeBed, jobMount(job));
     // #345 — the house setting the run was gated to, handed over rather than a pre-resolved margin:
     // the sheet resolves it the same way `engraveRunStore` did at Generate, so its depth notes are
     // the numbers the verifier enforced and its recommendation is made from the SETTING.
@@ -2430,6 +2455,7 @@ export function EngravePanel(): JSX.Element {
           probeName: probeName ?? undefined,
           ...(sheetProbe === null ? {} : { probeInstrument: probeInstrumentOf(sheetProbe) }),
           mountName,
+          bedName,
           found:
             foundReg === null
               ? undefined
@@ -2741,6 +2767,14 @@ export function EngravePanel(): JSX.Element {
     // #766 D — AND IT IS THE MEASURED PICK IT APPLIES. Generate re-runs the search only when no
     // measured answer exists for exactly this job (`measureNow` joins a run already in flight);
     // the #211 rule's answer is the fallback when the search cannot answer at all.
+    // #513 — A JOB BINDS TO THE BED IT IS SET UP ON, at the moment it is set up to run: Generate
+    // writes the active profile's id, version and datum snapshot onto the job, so a later reload
+    // can say exactly what it was planned against (`bed-changed`). A job already bound keeps its
+    // binding — that is what makes a changed bed VISIBLE rather than silently re-planned.
+    if (job.bed === undefined) {
+      const bedNow = activeProfileOf(locationMachine);
+      if (bedNow !== null) setBed(bindJob(bedNow));
+    }
     const source = job.sources?.tool;
     if (job.toolKey === '' && source !== 'user' && source !== 'measured') {
       const pick = await useEngravePreviewStore.getState().measureNow(job);
@@ -4800,6 +4834,31 @@ export function EngravePanel(): JSX.Element {
                       override active
                     </span>
                   )}
+                  {/* #513 — a bed-changed refusal's two ways out, pressed where the sentence is
+                      read: bind this job to the bed the machine has now, or make the bed it was
+                      set up on the active one again (when the machine still holds it). */}
+                  {f.code === 'bed-changed' && (() => {
+                    const bedNow = activeProfileOf(locationMachine);
+                    const boundId = job.bed?.profileId;
+                    const canSwitchBack =
+                      boundId !== undefined &&
+                      bedNow?.id !== boundId &&
+                      locationMachine?.bedProfiles?.some((p) => p.id === boundId) === true;
+                    return (
+                      <span style={{ flexShrink: 0, marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                        {bedNow !== null && (
+                          <button type="button" data-testid="engrave-bed-replan" onClick={() => setBed(bindJob(bedNow))}>
+                            Re-plan on the current bed
+                          </button>
+                        )}
+                        {canSwitchBack && (
+                          <button type="button" data-testid="engrave-bed-switch-back" onClick={() => void switchBedBack(boundId)}>
+                            Switch the bed back
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })()}
                   {/* #785 — the reach refusal's one-click choice: cut the stock's top band the
                       chosen cutter reaches safely, and say what is left, instead of refusing. */}
                   {f.code === 'goal-reach-short' && f.severity === 'error' && f.goalBandMm !== undefined && job.targetObject?.id === f.targetId && (
