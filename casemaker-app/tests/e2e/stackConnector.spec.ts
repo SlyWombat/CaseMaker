@@ -51,6 +51,13 @@ test('sockets on two walls and a key, the clash offer, and the export', async ({
   await expect(page.getByTestId('stack-key-storage')).toContainText('half-proud');
   await expect(page.locator('[data-testid^="stack-note-not-flush"]')).toHaveCount(0);
 
+  // #854 item 2 — registration is its own option, apart from keys: a ridge on
+  // the lid and a groove in the floor, and the case still compiles.
+  await page.getByTestId('stack-register').check();
+  await page.evaluate(() => window.__caseMaker!.waitForIdle());
+  await expect(page.getByTestId('stack-register')).toBeChecked();
+  await section.screenshot({ path: path.join(OUT, 'registration-on.png') });
+
   // One key, long variant, loose fit.
   await page.getByTestId('stack-key-count').fill('1');
   await page.getByTestId('stack-key-variant').selectOption('long');

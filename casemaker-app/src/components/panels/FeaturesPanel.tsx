@@ -1558,7 +1558,7 @@ function StackConnectorSection() {
     });
   const fit: FitVariant = c.fit ?? caseFit ?? 'tight';
   const dims = stackKeyDims(c.key, fit);
-  const active = c.sockets.length > 0 || c.keys > 0;
+  const active = c.sockets.length > 0 || c.keys > 0 || c.register === true;
 
   return (
     <section className="features-section" data-testid="stack-connector-section">
@@ -1649,6 +1649,22 @@ function StackConnectorSection() {
             </option>
           ))}
         </select>
+      </label>
+      {/* #854 item 2 — registration, apart from retention: a ridge on the lid
+          and a groove under the floor square a stack before any key goes in. */}
+      <label
+        className="cell-label"
+        style={{ display: 'flex', width: '100%' }}
+        title="A ridge on the lid's top and a matching groove under the floor, so stacked cases register square with no key in them. Registration only — it holds nothing down; keys do the retaining."
+      >
+        <input
+          type="checkbox"
+          checked={c.register === true}
+          onChange={(e) => set({ register: e.target.checked })}
+          data-testid="stack-register"
+          aria-label="Register stacked cases with a skirt and rim ridge"
+        />
+        <span>register stacked cases (skirt + rim ridge)</span>
       </label>
       {active && (
         <p className="features-empty" data-testid="stack-key-summary">

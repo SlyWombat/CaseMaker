@@ -69,6 +69,13 @@ export interface StackConnectorParams {
    * relief goes on the KEY, not the socket — see {@link STACK_SLIDE_CLEARANCE}.
    */
   fit?: FitVariant;
+  /**
+   * #854 item 2 — REGISTRATION, separate from retention: a raised ring on the
+   * lid's top and a matching groove in the floor's underside, so stacked cases
+   * seat square with no key in them. Absent/false cuts nothing (legacy plans
+   * stay byte-identical).
+   */
+  register?: boolean;
 }
 
 // ---------------------------------------------------------------------------

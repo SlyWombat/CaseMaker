@@ -435,6 +435,12 @@ export const caseParamsSchema = z.object({
         .max(8)
         .describe('How many printed keys to add to the export (0 to 8).'),
       fit: fitVariantSchema.optional().describe("Key print-fit variant; omit to inherit case.fit."),
+      register: z
+        .boolean()
+        .optional()
+        .describe(
+          'Issue #854 — a ridge on the lid top and a groove in the floor underside, so stacked cases register square with no key; omit for none.',
+        ),
     })
     .optional()
     .describe('Stacking connector sockets and keys; omit for none.'),

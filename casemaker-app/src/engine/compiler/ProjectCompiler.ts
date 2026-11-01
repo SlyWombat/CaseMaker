@@ -42,6 +42,7 @@ import { buildInsertNodes } from './insert';
 import { buildBlankNodes } from './blank';
 import { buildToolboxNodes } from './toolbox';
 import { buildStackConnector, stackConnectorWanted, stackPadCutouts } from './stackConnector';
+import { buildStackGroove, buildStackRidge, stackRegisterWanted } from './stackRegister';
 import { ClashEnv, dividerClashStatements, hatBeyondHost, magnetClashStatements, type ClashStatement } from './caseClashes';
 import { feature, featureOfOps } from './interiorClash';
 import { resolveMountingPosition } from './hatOrientation';
@@ -483,6 +484,26 @@ export function compileProject(project: Project): BuildPlan {
   additive.push(...connector.shellAdd);
   cutoutOps.push(...connector.shellCut);
 
+  // #854 item 2 — registration: a ridge on the lid's top and a groove in the
+  // floor's underside, so a stack squares itself before any key goes in. The
+  // ridge is in lid-local coordinates (the lid's own top); the groove is a
+  // cutter in the case frame, where z = 0 is the floor's underside.
+  const register = (() => {
+    if (!stackRegisterWanted(caseParams.stackConnector)) return { ridge: null, groove: null };
+    const dims = computeShellDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+    const lidLocal = computeLidDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+    const frame = {
+      outerX: dims.outerX,
+      outerY: dims.outerY,
+      cornerRadius: caseParams.cornerRadius,
+      wallThickness: caseParams.wallThickness,
+      floorThickness: caseParams.floorThickness,
+      lidTopZ: lidLocal.z,
+    };
+    return { ridge: buildStackRidge(frame), groove: buildStackGroove(frame) };
+  })();
+  if (register.groove !== null) cutoutOps.push(register.groove);
+
   let shellOp: BuildOp = additive.length > 1 ? union(additive) : shellOuter;
   if (cutoutOps.length > 0) {
     shellOp = difference([shellOp, ...cutoutOps]);
@@ -585,6 +606,9 @@ export function compileProject(project: Project): BuildPlan {
   }
 
   let lidOp = baseLidOp;
+  // #854 item 2 — the registration ridge rides on the lid's top, in lid-local
+  // coordinates exactly as the lid's other features are added.
+  if (register.ridge !== null) lidOp = union([lidOp, register.ridge]);
   const lidDims = computeLidDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   // Issue #104 — top-position bosses fuse with the lid mesh, anchored to
   // the lid's WORLD underside Z. The buildLid result is in lid-local
