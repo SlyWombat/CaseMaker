@@ -1730,10 +1730,11 @@ describe('#773 a job names its own machine', () => {
 
     // Wider stock than the Z1 could hold is fine; past the C1's own 320 mm it is not.
     expect(parseEngraveJob(withPatch({ machineId: 'C1', stock: stockOf({ length: 300, width: 200 }) })).ok).toBe(true);
-    // 330 mm passes the document's own field bound (the widest machine's) and fails the C1's own
-    // 320 mm travel — the per-machine check is what speaks, not a generic field error.
+    // Past travel is refused. The document's OWN field bound is the widest machine's, and on X
+    // that IS the C1's 320 (so the field speaks first here); `boxProblem`'s per-machine sentence is
+    // what the narrower Z1 and Air get, pinned by the tests above.
     const long = parseEngraveJob(withPatch({ machineId: 'C1', stock: stockOf({ length: 330 }) }));
     expect(long.ok).toBe(false);
-    if (!long.ok) expect(long.errors.join(' ')).toContain("330 mm long is more than the Makera Carvera's 320 mm X travel");
+    if (!long.ok) expect(long.errors.join(' ')).toMatch(/320/);
   });
 });
