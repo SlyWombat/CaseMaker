@@ -64,8 +64,20 @@ const MIN_WIDTH_SCALE = 0.5;
 const MAX_WIDTH_SCALE = 2;
 const MAX_STROKE_WEIGHT = 20;
 
+/**
+ * #843 — A POINT PRINTS AS MILLIMETRES, not as the float it happens to be: three decimals (the
+ * app's display precision), and a value within 1e-9 of zero reads `0` — an imported SVG path's
+ * `1.7763568394002505e-15` is its own arithmetic's dust, not a position. The stored numbers are
+ * untouched; only the field's text is rounded, and a re-committed text loses at most the 0.0005
+ * the display already rounds.
+ */
+function pointMm(v: number): string {
+  if (Math.abs(v) < 1e-9) return '0';
+  return String(Math.round(v * 1000) / 1000);
+}
+
 function pointsToText(points: readonly [Mm, Mm][]): string {
-  return points.map(([x, y]) => `${x}, ${y}`).join('\n');
+  return points.map(([x, y]) => `${pointMm(x)}, ${pointMm(y)}`).join('\n');
 }
 
 /** Parse "x, y" per line into points, or null when any line is not two finite numbers. */

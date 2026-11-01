@@ -16,7 +16,7 @@ import { useSimStore } from '@/store/simStore';
 import { resetEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngravePackageStore } from '@/store/engravePackageStore';
 import { resetCncMode, useCncModeStore } from '@/store/cncModeStore';
-import { resetEngraveRows } from '@/store/engraveRowStore';
+import { expandEngraveRow, resetEngraveRows } from '@/store/engraveRowStore';
 import {
   resetEngraveRegistrationStore,
   useEngraveRegistrationStore,
@@ -1284,6 +1284,36 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
 // #219's panel: the two single-line kinds in the Add menu, their editors, and the finding the
 // pure validator raises when a trace's strokes merge under the cutter.
 describe('EngravePanel — single-line traces (#219)', () => {
+  // #843 — A POINT PRINTS AS MILLIMETRES, not as the float it happens to be: an imported SVG
+  // path's `1.7763568394002505e-15` is its arithmetic's dust, not a position.
+  it('prints the imported points rounded to 0.001 mm, with near-zero as 0', () => {
+    const before = useEngraveJobStore.getState().job;
+    const trace: EngraveTraceItem = {
+      kind: 'line',
+      id: 'line-843',
+      position: { x: 0, y: 0 },
+      rotation: 0,
+      depth: 0.2,
+      enabled: true,
+      closed: false,
+      points: [
+        [1.7763568394002505e-15, -2.5],
+        [-18.92902504699487, 1.7119341563786001],
+      ],
+    };
+    act(() => {
+      useEngraveJobStore.setState({ job: { ...before, traces: [...(before.traces ?? []), trace] } });
+      // The Add menu expands the row it adds; a job set directly does the same here.
+      expandEngraveRow(trace.id);
+    });
+    render(<EngravePanel />);
+    const field = screen.getByTestId('engrave-trace-points-0') as HTMLTextAreaElement;
+    expect(field.value).toBe('0, -2.5\n-18.929, 1.712');
+    // The stored numbers are untouched: only the field's text is rounded.
+    const stored = useEngraveJobStore.getState().job.traces![0]!;
+    expect(stored.kind === 'line' && stored.points[0]).toEqual([1.7763568394002505e-15, -2.5]);
+  });
+
   it('adds a Line and a Single-line text from the Add menu', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-add-line'));
