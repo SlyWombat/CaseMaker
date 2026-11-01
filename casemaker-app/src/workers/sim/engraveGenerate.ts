@@ -99,6 +99,7 @@ import {
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
 import { pcbIsolationFindings, pcbIsolationSubjects } from '@/workers/sim/pcbIsolation';
 import {
+  restDepthShortfallFindings,
   restJobFor,
   vBitRestRefusal,
   type RestPassFacts,
@@ -478,6 +479,13 @@ export interface EngraveProgram {
    * for program 1 — and on a file with nothing to predict (a surface program's empty list).
    */
   predicted?: OraclePredicted[];
+  /**
+   * #865 — THIS PROGRAM'S OWN GENERATED FINDINGS, exactly as its generation raised them. The run's
+   * list is built from these: a program after the first one has them tagged `program N (cutter)`,
+   * and one identical to a design-level finding is dropped rather than repeated. Absent on a result
+   * stored before the field existed.
+   */
+  findings?: JobFinding[];
   /**
    * #434 — the drill facts when THIS program is the drill bit's, so a caller describing program N
    * (the run plan, a per-program sheet) can name its `drill.*` numbers. Null on every other file.
@@ -4167,6 +4175,12 @@ function generateRestPair(
     // items were trimmed — an item the first cutter cannot enter is entirely this one's job. The
     // later cutter's own items are NOT in `measureJob`; they are measured only in its own program.
     const design = engraveRegions(tl, measureJob, restTool, margins, shop, mill, catalogue, undefined, floors);
+    // #865 — A REST PASS PLANNED SHALLOWER THAN THE DESIGN. `design.cuts` carry the depth the REST
+    // tool can reach, and a V's region is clamped to its cone — so a rest whose flank ends above
+    // the design's floor is planned at the cone's height and nothing said so (j20: the 90° chamfer
+    // rests a 6 mm pocket at 1.5375 mm). Raise the shortfall on THIS program, where the run's
+    // tagging names it `program 2 (…)`.
+    const restDepthFindings = restDepthShortfallFindings(design.plan, restTool);
     const restFeeds = feedsFor(
       catalogue,
       job.stock.material,
@@ -4239,7 +4253,11 @@ function generateRestPair(
         // #760 — an even later rest pass re-cuts this one's leftovers.
         laterRestFlat(r + 1),
       );
-    const restOne = makeRest(restSpan);
+    const restOneBase = makeRest(restSpan);
+    const restOne =
+      restDepthFindings.length === 0
+        ? restOneBase
+        : { ...restOneBase, findings: dedupeFindings([...restDepthFindings, ...restOneBase.findings]) };
     nextCursor += 1;
     attempts.push(restOne);
     if (!restOne.ok || restOne.nc === null || restOne.verify === null) break;
@@ -6642,6 +6660,10 @@ export function engraveGenerate(
     if (want === program.span) return;
     const next = program.make(want);
     if (next.ok && next.nc !== null && next.verify !== null) {
+      // #865 — the settled program replaces its attempt, so `attempts` still names every posted
+      // file (the unposted ones carry their findings untagged).
+      const at = attempts.indexOf(program.one);
+      if (at >= 0) attempts[at] = next;
       program.one = next;
       program.span = want;
     }
@@ -6675,40 +6697,65 @@ export function engraveGenerate(
     });
   }
   const restErrors = restFindings.filter((f) => f.severity === 'error');
+  const programs: EngraveProgram[] = [
+    ...posted.flatMap((program) => {
+      // #473 — the face file is the run's first program, then the setup's own. Only the first
+      // program builds it (`generateOneProgram`'s `withFacing`), so only the first posted one can
+      // add it.
+      const face = facingProgramOf(program.one, program.ref);
+      return [
+        ...(face === null ? [] : [face]),
+        programOf(program.one, program.ref),
+      ];
+    }),
+    // #842 — the finer-cut face programs follow their coarse file.
+    ...extraFacePrograms,
+    // #849 — and the neck file closes the run.
+    ...neckFiles.map((file) => programOf(file.one, file.ref)),
+  ];
+  // #865 — EACH PROGRAM'S OWN FINDINGS, TAGGED WITH THE PROGRAM THEY BELONG TO. The first
+  // program's findings are the design-level ones the operator already reads on the job; a later
+  // program's are prefixed `program N (cutter):` and a copy identical to a design-level finding is
+  // dropped rather than repeated. An attempt that posted no program (a refused stage, an empty
+  // rest) keeps its findings untagged: there is no file to put them on.
+  const postedOnes = new Set(posted.map((program) => program.one));
+  const designFindings = dedupeFindings([
+    ...catalogueFindings,
+    ...(programs[0]?.findings ?? attempts[0]?.findings ?? []),
+    // #743 P-5 — a HOLE NO OWNED CUTTER MAKES belongs to no program, so no per-program sub-job
+    // ever validates it. State it on the whole job, once, so the run still posts everything else.
+    ...holeNoCutterFindings(job, shop.tools ?? getTools()),
+    ...(neckFiles.length === 0 ? [] : [neckAfterFacesFinding()]),
+    ...restFindings,
+  ]);
+  const programFindings: JobFinding[] = [];
+  programs.forEach((program, i) => {
+    if (i === 0) return;
+    const entry =
+      program.toolKey === job.toolKey && tool !== null
+        ? tool
+        : (shop.tools ?? []).find((e) => e.key === program.toolKey)?.tool ?? null;
+    const name = entry === null ? program.toolKey : toolDisplayName(entry).split(' · ')[0]!;
+    for (const finding of program.findings ?? []) {
+      const duplicate = designFindings.some(
+        (d) => d.code === finding.code && d.labelId === finding.labelId && d.message === finding.message,
+      );
+      if (duplicate) continue;
+      programFindings.push({ ...finding, message: `program ${i + 1} (${name}): ${finding.message}` });
+    }
+  });
+  const unpostedFindings = attempts.filter((one) => !postedOnes.has(one)).flatMap((one) => one.findings);
   return {
     // The adapter: the top-level fields describe the FIRST program, which is the file the panels
     // upload, simulate and save today. Multi-program upload is #419 §3's, not this slice's.
     ...first,
     ok: stopped === undefined && restErrors.length === 0,
     stage: stopped?.stage ?? (restErrors.length > 0 ? 'findings' : 'done'),
-    findings: dedupeFindings([
-      ...catalogueFindings,
-      ...attempts.flatMap((one) => one.findings),
-      ...restFindings,
-      // #743 P-5 — a HOLE NO OWNED CUTTER MAKES belongs to no program, so no per-program sub-job
-      // ever validates it. State it on the whole job, once, so the run still posts everything else.
-      ...holeNoCutterFindings(job, shop.tools ?? getTools()),
-      ...(neckFiles.length === 0 ? [] : [neckAfterFacesFinding()]),
-    ]),
+    findings: dedupeFindings([...designFindings, ...programFindings, ...unpostedFindings]),
     errors: attempts.flatMap((one) => one.errors),
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
     surface: shop.surface ?? null,
-    programs: [
-      ...posted.flatMap((program) => {
-        // #473 — the face file is the run's first program, then the setup's own. Only the first
-        // program builds it (`generateOneProgram`'s `withFacing`), so only the first posted one can
-        // add it.
-        const face = facingProgramOf(program.one, program.ref);
-        return [
-          ...(face === null ? [] : [face]),
-          programOf(program.one, program.ref),
-        ];
-      }),
-      // #842 — the finer-cut face programs follow their coarse file.
-      ...extraFacePrograms,
-      // #849 — and the neck file closes the run.
-      ...neckFiles.map((file) => programOf(file.one, file.ref)),
-    ],
+    programs,
     restPass,
   };
 }
@@ -6777,6 +6824,8 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     frameError: one.frameError ?? null,
     programHash: programHash(nc),
     cam: one.cam,
+    // #865 — this file's own findings, for the run's tagged list and the receipt.
+    findings: one.findings,
     // #844 — the program's own predictions, so the run judges its own file.
     predicted: one.predicted,
     drill: one.drill ?? null,

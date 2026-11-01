@@ -2161,6 +2161,14 @@ export interface RunSheetOptions {
    */
   materialScan?: boolean;
   /**
+   * #865 — FINDINGS FROM THE RUN'S OTHER PROGRAMS, tagged where they were raised ("program 2 (90°
+   * chamfer): …"). A sheet is built for the FIRST program; a later file's own findings (a rest V
+   * that reaches only part of a floor) belong on the setup's one sheet, and this is how they get
+   * there. The app's generator tags and merges them into `generated.findings` itself; the CLI's
+   * two-program route hands them in here.
+   */
+  extraFindings?: readonly JobFinding[];
+  /**
    * #449/#452 — the material-position scan's tunables, from the shop defaults the registration planner
    * reads: `materialScanSettingsFrom(registrationSettings(defaults).settings)`. Passed in, never read
    * here — this module is in the sim worker's import graph. Absent: `SCAN_FALLBACK`, the seeds.
@@ -4395,7 +4403,7 @@ export function buildRunSheet(
     if (code === 'vise-default' && viseWarningAt < 0) viseWarningAt = warnings.length;
     warnings.push({ text: message });
   };
-  for (const f of generated.findings) {
+  for (const f of [...generated.findings, ...(options.extraFindings ?? [])]) {
     // #737 — the neck step in its program's Cut section already carries this warning at the point
     // of use, with the air-cut instruction. Carrying it here too printed the same warning twice on
     // one sheet; the neck step is the one copy the operator reads beside the cut it describes.

@@ -79,7 +79,7 @@ import { explainSmartPick } from '../../../src/engine/cnc/engrave/smartPickWords
 import type { ToolLibraryEntry } from '../../../src/engine/cnc/toolLibrary';
 import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
 import { unionRemoval, restMachining } from '../../../src/workers/sim/engraveRest';
-import { restJobFor, roughPick, restToolPick, unroughedItems, vBitRestRefusal, type RestPassFacts } from '../../../src/engine/cnc/engrave/restPass';
+import { restDepthShortfallFindings, restJobFor, roughPick, restToolPick, unroughedItems, vBitRestRefusal, type RestPassFacts } from '../../../src/engine/cnc/engrave/restPass';
 // #762 — the per-item-kind picker: what each item IS before the area-share rule is asked.
 import {
   REST_OVERLAP_KEY,
@@ -92,6 +92,8 @@ import {
   type SeamFactsInput,
 } from '../../../src/engine/cnc/engrave/restSettings';
 import type { Tool } from '../../../src/engine/cnc/tool';
+import { toolDisplayName } from '../../../src/engine/cnc/toolDisplay';
+import type { JobFinding } from '../../../src/engine/cnc/engrave/jobSetup';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
 import { Z1 } from '../../../src/engine/cnc/machine';
 import { jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
@@ -1852,7 +1854,20 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // the second one's job and a table measured on the reduced job could not say so. `engraveRegions`
     // is the same measurement the generator itself makes, so the region the rest pass cuts is the
     // region this route reasoned about (#288's one enumeration of the cut classes).
-    const designCuts = restTool === null ? [] : engraveRegions(tl, job, restTool).cuts;
+    const restMeasure = restTool === null ? null : engraveRegions(tl, job, restTool);
+    const designCuts = restMeasure?.cuts ?? [];
+    // #865 — A REST PASS PLANNED SHALLOWER THAN THE DESIGN. `designCuts` carry the depth the REST
+    // tool can reach, and a V's region is clamped to its cone — so a rest whose flank ends above
+    // the design's floor is planned at the cone's height with nothing said (j20: the 90° chamfer
+    // rests a 6 mm pocket at 1.5375 mm). Raised here, tagged as program 2's, and carried onto the
+    // sheet and the receipt.
+    const restDepthTagged: JobFinding[] =
+      restTool === null || restMeasure === null
+        ? []
+        : restDepthShortfallFindings(restMeasure.plan, restTool).map((f) => ({
+            ...f,
+            message: `program 2 (${toolDisplayName(restTool).split(' · ')[0]!}): ${f.message}`,
+          }));
 
     // WHAT PROGRAM 1 LEAVES OFF. An item the first bit cannot enter AT ALL is a hard `item-empty`
     // refusal, so with a rest pass it is turned off in program 1 and named — the second program cuts
@@ -2243,6 +2258,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           reachability: cut,
           unreachable,
           ...(facts === null ? null : { restPass: facts }),
+          ...(restDepthTagged.length === 0 ? null : { extraFindings: restDepthTagged }),
         },
         preview: true,
       });
@@ -2260,6 +2276,12 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         previews.push(...w2.files.previews);
         programs.push(...w2.programs);
         runDiagnostics.push(...w2.diagnostics);
+        // #865 — the rest program's own depth shortfall, tagged as program 2's, in the receipt.
+        runDiagnostics.push(
+          ...restDepthTagged.map((f) =>
+            diagnostic(f.code, f.severity, f.message, 'findings', p2.generated.programs[0]?.toolKey ?? null),
+          ),
+        );
         // #478 — the pair is result data. `renderReceipt` prints it, third-tool answer included, from
         // `details.pair`; the numbers here are the ones the sheet's two-tool section was given.
         pair = {

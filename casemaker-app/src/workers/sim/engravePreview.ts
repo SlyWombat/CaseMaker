@@ -42,7 +42,10 @@ import {
   traceSweptProfile,
 } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { clampPlacementsFor, jobMount, jobSetups, setupTools, toolItemsFor } from '@/engine/cnc/engrave/jobSetup';
+import { clampPlacementsFor, dedupeFindings, jobMount, jobSetups, setupTools, toolItemsFor } from '@/engine/cnc/engrave/jobSetup';
+import { setupPrograms } from '@/engine/cnc/engrave/programs';
+import { restDepthShortfallFindings } from '@/engine/cnc/engrave/restPass';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { jobVise } from '@/engine/cnc/fixture';
 import { viseBody } from '@/engine/cnc/drawnVise';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
@@ -605,7 +608,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       job.tool === undefined || job.tool === null
         ? job
         : { ...job, tool: withCatalogueValues(job.tool, catalogueEntries).tool };
-    const { plan, measured, cuts, findings, colourBoundaryDepth, floors: supportingFloors } = engraveRegions(
+    const { plan, measured, cuts, findings: regionFindings, colourBoundaryDepth, floors: supportingFloors } = engraveRegions(
       tl,
       judgedJob,
       tool,
@@ -614,6 +617,29 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       null,
       catalogue,
     );
+
+    // #865 — A REST PROGRAM'S OWN SHORTFALL, on the panel too. The preview judges the document
+    // with the job's own cutter (program 1); a rest pass planned at a V's cone height leaves the
+    // design's floor standing, and the engine's finding for it is raised inside that program's own
+    // generation. The preview does not generate the rest file, so the same sentence is built here
+    // from the plan's design depths and the rest cutter, tagged with the program it belongs to.
+    const restFindings: JobFinding[] = [];
+    {
+      const refs = setupPrograms(job);
+      // A facing file is the run's first program when it exists, so the numbering shifts by one.
+      const offset = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0 ? 1 : 0;
+      refs.forEach((ref, i) => {
+        if (ref.itemIds.length > 0) return; // a rest cutter owns no items
+        const restTool =
+          ref.toolKey === job.toolKey ? tool : (catalogueEntries.find((e) => e.key === ref.toolKey)?.tool ?? null);
+        if (restTool === null) return;
+        const tag = `program ${i + 1 + offset} (${toolDisplayName(restTool).split(' · ')[0]!})`;
+        for (const f of restDepthShortfallFindings(plan, restTool)) {
+          restFindings.push({ ...f, message: `${tag}: ${f.message}` });
+        }
+      });
+    }
+    const findings = dedupeFindings([...regionFindings, ...restFindings]);
 
     // #743 P-6 review — AN ITEM NO SETUP ASSIGNS IS NOT MEASURED AGAINST A CUTTER THAT WILL NEVER CUT
     // IT. The preview judges the whole document with the job's own cutter; an item the setups leave

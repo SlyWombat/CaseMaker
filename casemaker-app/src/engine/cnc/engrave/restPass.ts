@@ -35,6 +35,9 @@ import type { EngraveJob, EngraveVectorShape } from '@/types/engraveJob';
 import { blankDepthCeiling } from './depthBounds';
 import { hasRegionItems } from './recommendTool';
 import { isVTraceTool, type Tool } from '@/engine/cnc/tool';
+import { vCone, vDepthLimit, vDepthShortfall } from '@/engine/cnc/vProfile';
+import type { PartPlan } from './partPlan';
+import type { JobFinding } from './jobSetup';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { SeamFacts, ThirdToolAdvice } from './restSettings';
 
@@ -175,6 +178,31 @@ export interface RestToolPick {
  *
  * A trace-only job has no regions and takes a V-bit as a normal trace tool, so it is not refused.
  */
+/**
+ * #865 — THE SHORTFALL OF A REST PASS PLANNED AT THE CUTTER'S REACH. The rest regions carry the
+ * depth the REST tool can cut, and a V's region is clamped to its cone — so a rest whose flank ends
+ * above the design's floor is planned at the cone's height (j20: the 90° chamfer rests a 6 mm
+ * pocket at 1.5375 mm) and every check passes because the plan names that shallower depth. This is
+ * the sentence the rest program's own findings carry: one per region the design cuts deeper than
+ * the rest cutter can reach. Untagged here — the caller puts the program's number on it.
+ */
+export function restDepthShortfallFindings(plan: PartPlan, rest: Tool): JobFinding[] {
+  if (vCone(rest) === null) return [];
+  const limit = vDepthLimit(rest);
+  if (limit === null || limit.boundBy !== 'cone') return [];
+  const findings: JobFinding[] = [];
+  for (const item of plan.engraves) {
+    if (!(item.depth > limit.limitMm + 1e-9)) continue;
+    findings.push({
+      severity: 'warning',
+      code: 'vcarve-depth-beyond-cone',
+      labelId: item.id,
+      message: vDepthShortfall(item.name, item.depth, rest, limit),
+    });
+  }
+  return findings;
+}
+
 export function vBitRestRefusal(job: EngraveJob, rest: Tool): string | null {
   if (!isVTraceTool(rest)) return null;
   // The same question `recommendTool` asks, so a primitive pocket counts as a region here too.

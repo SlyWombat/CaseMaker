@@ -88,6 +88,101 @@ function locationWithPointAngle(deg: number): string {
   return path;
 }
 
+/**
+ * #865 — the fixture location plus a 90° chamfer whose cone reaches (3.175 − 0.3) / 2 = 1.4375 mm.
+ * The 0.3 mm tip is the width the starting feeds table has a V row for, so the rest program can be
+ * fed; any wider body would make the cone shorter still.
+ */
+const V_KEY = 'user:865chamfer90';
+function locationWithV(): string {
+  const doc = JSON.parse(readFileSync(LOCATION, 'utf8')) as { tools: unknown[] };
+  doc.tools.push({
+    key: V_KEY,
+    provenance: 'test',
+    origin: null,
+    tool: {
+      number: null,
+      id: null,
+      name: '90° chamfer 3.175',
+      typeText: 'Chamfer',
+      shape: 'chamfer',
+      handleDiameter: null,
+      tipDiameter: 0.3,
+      diameter: 3.175,
+      cornerRadius: 0,
+      angle: 90,
+      halfAngle: null,
+      fluteLength: null,
+      shoulderLength: null,
+      stickout: null,
+      centreCutting: null,
+    },
+  });
+  const path = join(SCRATCH, 'location-865.json');
+  writeFileSync(path, JSON.stringify(doc, null, 2) + '\n');
+  return path;
+}
+
+/** #865 — a raised M standing in a 6 mm cutaway, with the V as the rest pass. */
+function raisedRestJob(): EngraveJob {
+  const base = defaultEngraveJob();
+  return {
+    ...base,
+    name: 'raised rest bench job',
+    labels: [
+      {
+        id: 'm',
+        text: 'M',
+        font: base.labels[0]?.font ?? 'serif-default',
+        weight: 'bold',
+        size: 18,
+        position: { x: 30, y: 30 },
+        rotation: 0,
+        depth: 6,
+        enabled: true,
+        construction: true,
+      },
+    ],
+    shapes: [
+      {
+        id: 'field',
+        kind: 'rect',
+        position: { x: 30, y: 30 },
+        rotation: 0,
+        depth: 6,
+        enabled: true,
+        width: 40,
+        height: 30,
+        cornerRadius: 2,
+        construction: true,
+      },
+    ],
+    combined: [
+      {
+        id: 'clear',
+        kind: 'cutaway',
+        position: { x: 30, y: 30 },
+        rotation: 0,
+        depth: 6,
+        enabled: true,
+        outer: 'field',
+        islands: ['m'],
+      },
+    ],
+    toolKey: FIRST,
+    setups: [
+      {
+        id: 'setup-1',
+        orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
+        mount: { kind: 'vise' },
+        itemIds: ['clear'],
+        tools: [FIRST, V_KEY],
+        toolItems: { [FIRST]: ['clear'], [V_KEY]: [] },
+      },
+    ],
+  } as EngraveJob;
+}
+
 /** A softwood job whose one setup names two cutters, each owning one of its two labels (#472). */
 function twoCutterJob(): EngraveJob {
   const base = defaultEngraveJob();
@@ -113,6 +208,27 @@ function twoCutterJob(): EngraveJob {
     setups: [setup],
   };
 }
+
+describe('#865 a later program’s own findings reach the receipt', () => {
+  it('states the V rest’s depth shortfall under program 2', async () => {
+    const run = await cut(raisedRestJob(), 'program-findings-865', locationWithV());
+    expect(
+      run.code,
+      JSON.stringify({ refusals: run.receipt?.refusals ?? null, diagnostics: run.receipt?.diagnostics ?? null }),
+    ).toBe(0);
+    expect(run.receipt).not.toBeNull();
+    const short = run.receipt!.diagnostics.filter((d) => d.code === 'vcarve-depth-beyond-cone');
+    expect(short).toHaveLength(1);
+    expect(short[0]!.severity).toBe('warning');
+    expect(short[0]!.message).toMatch(/^program 2 \(/);
+    expect(short[0]!.message).toContain('6 mm deep');
+    // The one sheet carries it too, in its warnings section.
+    const stem = runSheetFileName(run.receipt!.ok && run.receipt!.command === 'engrave' ? raisedRestJob().name : '');
+    const sheetPath = join(run.outDir, stem.replace(/\.nc$/, '') + '-run-sheet.md');
+    expect(existsSync(sheetPath), sheetPath).toBe(true);
+    expect(readFileSync(sheetPath, 'utf8')).toContain('program 2 (');
+  }, 300_000);
+});
 
 describe('#733 a job posts one program per cutter', () => {
   it('writes the second cutter’s program, not only the first', async () => {
