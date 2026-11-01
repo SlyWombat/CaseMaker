@@ -118,3 +118,26 @@ test('add a floor grid and two dividers in the Features panel, then export the p
     expect(stl.bbox.min[2]!).toBeCloseTo(0, 2);
   }
 });
+
+// Placement order: in the two-row bay, adding the divider ALONG the bay first
+// used to take the whole row and leave no clean line across it. Now the first
+// one leaves room, so both seat whichever is added first.
+test('in a two-row bay, a divider along X first still leaves room for one along Y', async ({ cm, page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    await window.__caseMaker!.waitForIdle();
+  });
+  await page.getByTestId('sidebar-button-features').click();
+  await page.getByTestId('floor-grid-section').scrollIntoViewIfNeeded();
+  await page.getByTestId('floor-grid-enabled').check();
+  await page.getByTestId('floor-grid-widen').click();
+  await page.getByTestId('add-divider-x').click();
+  await page.getByTestId('add-divider-y').click();
+  const project = await page.evaluate(() => window.__caseMaker!.getProject());
+  expect(project.case.dividers!.map((d) => d.axis)).toEqual(['x', 'y']);
+  await expect(page.locator('[data-testid^="divider-clash-"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid^="divider-make-room-"]')).toHaveCount(0);
+});

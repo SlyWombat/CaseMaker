@@ -101,3 +101,44 @@ test('sockets on two walls and a key, the clash offer, and the export', async ({
   const parsed = parseBinaryStl(await downloadToBuffer(await download.createReadStream()));
   expect(parsed.triCount).toBe(all.triangleCount);
 });
+
+// The protective case's brim and ribbing run along every wall, so no position
+// clears them: the statement offers a pad cut-out through them instead of
+// "no position", and taking it notches them and leaves the shell one body.
+test('the protective case: a pad cut-out through the brim, offered and taken', async ({ cm, page }) => {
+  test.setTimeout(150_000);
+  mkdirSync(OUT, { recursive: true });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await cm.ready();
+  await page.getByTestId('welcome-template-protective-case').click();
+  await page.evaluate(() => window.__caseMaker!.waitForIdle());
+
+  await page.getByTestId('sidebar-button-features').click();
+  const section = page.getByTestId('stack-connector-section');
+  await section.scrollIntoViewIfNeeded();
+  await page.getByTestId('stack-socket--y').check();
+  await page.evaluate(() => window.__caseMaker!.waitForIdle());
+
+  const clash = page.getByTestId('stack-note-clash--y');
+  await expect(clash).toContainText('Every position along this wall runs into the alignment brim');
+  await expect(clash).toContainText('pad cut-out');
+  await expect(clash).not.toContainText('No position');
+  await section.screenshot({ path: path.join(OUT, 'panel-pad-cutout-offer.png') });
+
+  await page.getByTestId('stack-pad-cutout--y').click();
+  await page.evaluate(() => window.__caseMaker!.waitForIdle());
+  await expect(page.getByTestId('stack-note-clash--y')).toHaveCount(0);
+  await expect(page.getByTestId('stack-note-pad-cutout--y')).toContainText('has a pad cut-out');
+  const sock = await page.evaluate(() => window.__caseMaker!.getProject().case.stackConnector!.sockets[0]!);
+  expect(sock.cutThrough).toBe(true);
+  await section.screenshot({ path: path.join(OUT, 'panel-pad-cutout-taken.png') });
+
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        await window.__caseMaker!.waitForIdle();
+        return window.__caseMaker!.getSceneGraph().find((n) => n.id === 'shell')?.componentCount ?? 0;
+      }),
+    { timeout: 60_000 })
+    .toBe(1);
+});

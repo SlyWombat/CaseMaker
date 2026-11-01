@@ -518,14 +518,56 @@ bump grows by the same amount, so its tip still reaches 0.8 mm past the floor an
 the click still lands. All of it is PROVISIONAL until the `stack-connector` fit
 coupon is printed.
 
-**Inform, don't refuse.** Each socket's zone (pad, plus the wall behind it, full
-height) is checked against the features already on that wall — port cutouts,
-vents, bosses, the hinge, latches, mounting features, fans, the display opening,
-labels, antennas, snap catches, the rugged ribbing, the alignment brim, custom
-cutouts and the board clips. A clash is stated and the socket is still cut where
-it was put; the statement offers the nearest shift along the wall (0.5 mm steps)
-that clears everything, or says there is none. Statements travel on
-`BuildPlan.connector` to `jobStore.connector` and the Features panel.
+**Inform, don't refuse.** Each socket — its pad (with the half-wall embed) and
+the key's grip out of the mouth, as real solids — is checked through the shared
+clash check (below) against the features already on that wall: port cutouts,
+vents, bosses, the hinge, latches, magnet pockets and their bosses, the
+nameplate, the floor grid, mounting features, fans, the display opening, labels,
+antennas, snap catches, the rugged ribbing, the alignment brim, custom cutouts
+and the board clips. A clash is stated and the socket is still cut where it was
+put; the statement offers the nearest shift along the wall (0.5 mm steps) that
+clears everything. The shifts are found in one test per keep-out: each socket box
+is swept along the whole wall, intersected with the keep-out, and the overlap's
+pieces are projected back onto the wall as blocked intervals. When only the brim
+or ribbing blocks every shift, the offer is a pad cut-out instead
+(`StackSocket.cutThrough`, `stackPadCutouts`): the pad's width plus 0.5 mm each
+side is subtracted from the brim and rib ops — never the shell — so the wall and
+the seal are untouched. Statements travel on `BuildPlan.connector` to
+`jobStore.connector` and the Features panel.
+
+### The shared clash check
+
+`interiorClash.ts` answers "does feature A intersect feature B, how much, and
+where" on the real geometry, for the magnets, the dividers and the connector
+(`caseClashes.ts` assembles the case's features and writes the statements).
+
+- **Solids.** Each BuildOp becomes convex polyhedra: cubes, cylinders and cones,
+  extrusions of convex outlines (rectangles, circles, rounded rectangles, hulls,
+  offsets), small 3D hulls and convex meshes, through every translate, rotate and
+  scale. A union is its pieces; a difference subtracts exactly (P∖C as disjoint
+  convex pieces, one per face plane of C), so a ring is a ring. Two solids clash
+  when the clipped intersection still has volume ≥ 0.01 mm in every axis. Circles
+  are at most 48-sided (≤ 0.02 mm on an 8 mm radius).
+- **Footprints.** Flat features (a divider's foot, a HAT board beyond the host)
+  are convex outlines between two Z heights; two footprints are tested in 2D.
+- **Stand-ins.** What cannot be read exactly — a non-convex outline, an
+  intersection op, a twisted or unevenly tapered extrusion, a revolve, a large
+  hull or a non-convex mesh — becomes its bounding box. Every answer carries
+  `method: 'solid' | 'footprint' | 'bounds'`, shown in the panel's tooltip.
+- **Speed.** Shapes are cached by op content and pair answers by the two shapes'
+  keys (LRU, 512 shapes and 4096 pairs); boxes that do not meet are never
+  intersected; a magnet move search's trial shapes are kept out of the caches and
+  its answer is memoized. On the protective case with four sockets, a magnet row,
+  the floor grid and two dividers the pass takes about 20 ms cold and 2–3 ms warm;
+  `interiorClash.spec.ts` holds it under 100 ms and 25 ms.
+
+Magnet statements (pocket and boss against the board, standoffs, latches, the
+hinge and the lid; the pocket against port cutters) and divider statements
+(against a snap-fit lid's lip, the vents, HATs beyond the host and the
+split-for-print seam) travel on `BuildPlan.clashes`, present only when there is
+something to say, to `jobStore.clashes`. The divider offers come from
+`caseDividerFacts`'s `extraClash` hook, so a **Move to row N** or **Shorten to N
+sockets** clears the grid's own clashes too.
 
 A project with no connector — the field absent, or no sockets and no keys —
 compiles to a byte-identical plan and mesh; `stackConnectorUnchanged.spec.ts`

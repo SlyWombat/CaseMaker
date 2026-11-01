@@ -37,6 +37,8 @@ import {
 } from '@/types/stackConnector';
 import { FIT_VARIANTS, type FitVariant } from '@/types/snap';
 import { stackKeyDims } from '@/engine/compiler/stackConnector';
+import type { ClashOffer, ClashStatement } from '@/engine/compiler/caseClashes';
+import { METHOD_NAME } from '@/engine/compiler/interiorClash';
 
 /**
  * Issue #49 — combined panel exposing the six engine domains that previously
@@ -1024,6 +1026,9 @@ function NameplateSection() {
 
 function MagnetNotes() {
   const project = useProjectStore((s) => s.project);
+  const patchCase = useProjectStore((s) => s.patchCase);
+  const allClashes = useJobStore((s) => s.clashes);
+  const clashes = allClashes.filter((c) => c.subject === 'magnet');
   const notes = useMemo(() => {
     const c = project.case;
     if (!(c.magnetPockets ?? []).some((m) => m.enabled) && !c.nameplate?.enabled) return [];
@@ -1033,7 +1038,16 @@ function MagnetNotes() {
       return [];
     }
   }, [project]);
-  if (notes.length === 0) return null;
+  const take = (o: ClashOffer) => {
+    if (o.kind !== 'move-magnet') return;
+    const c = project.case;
+    if (o.source === 'nameplate') {
+      if (c.nameplate) patchCase({ nameplate: { ...c.nameplate, u: o.u, v: o.v } });
+    } else {
+      patchCase({ magnetPockets: (c.magnetPockets ?? []).map((m) => (m.id === o.source ? { ...m, u: o.u, v: o.v } : m)) });
+    }
+  };
+  if (notes.length === 0 && clashes.length === 0) return null;
   return (
     <section className="features-section" data-testid="magnet-notes">
       {notes.map((n) => (
@@ -1041,7 +1055,63 @@ function MagnetNotes() {
           {n}
         </p>
       ))}
+      <ClashList statements={clashes} testId="magnet-clash" onTake={take} />
     </section>
+  );
+}
+
+/** Words on the button that takes a clash offer. */
+function offerLabel(o: ClashOffer): string {
+  switch (o.kind) {
+    case 'move-magnet':
+      return `Move to u ${Math.round(o.u * 10) / 10} mm, v ${Math.round(o.v * 10) / 10} mm`;
+    case 'move-divider':
+      return `Move to line ${o.line + 1}`;
+    case 'shorten-divider':
+      return `Shorten to ${o.holes} sockets`;
+  }
+}
+
+/**
+ * The compiler's clash statements for one feature, each with its offer as a
+ * button. The tooltip says how the clash was found. Taking an offer is the
+ * only thing a click does: nothing here blocks an export.
+ */
+function ClashList({
+  statements,
+  testId,
+  onTake,
+  label = offerLabel,
+}: {
+  statements: ClashStatement[];
+  testId: string;
+  onTake: (o: ClashOffer) => void;
+  label?: (o: ClashOffer) => string;
+}) {
+  if (statements.length === 0) return null;
+  // One button per distinct offer, after the last statement that makes it.
+  const lastWithOffer = new Map<string, number>();
+  statements.forEach((c, i) => c.offer && lastWithOffer.set(JSON.stringify(c.offer), i));
+  return (
+    <>
+      {statements.map((c, i) => (
+        <div key={`${c.message}-${i}`}>
+          <p className="features-note" data-testid={testId} data-method={c.method} title={METHOD_NAME[c.method]}>
+            {c.message}
+          </p>
+          {c.offer && lastWithOffer.get(JSON.stringify(c.offer)) === i && (
+            <button
+              type="button"
+              onClick={() => onTake(c.offer!)}
+              data-testid={`${testId}-offer`}
+              title="Take the offer: the clash is gone after the next rebuild."
+            >
+              {label(c.offer)}
+            </button>
+          )}
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -1151,6 +1221,7 @@ function FloorGridSection() {
   const grid = params.floorGrid;
   const dividers = params.dividers ?? EMPTY_DIVIDERS;
   const facts = caseDividerFacts(project);
+  const clashes = useJobStore((s) => s.clashes);
 
   const setGrid = (patch: Partial<NonNullable<typeof grid>>) =>
     patchCase({ floorGrid: { ...DEFAULT_FLOOR_GRID, ...grid, ...patch } });
@@ -1401,6 +1472,35 @@ function FloorGridSection() {
                     Move to {lineWord.toLowerCase()} {f.moveTo + 1}
                   </button>
                 )}
+                {f && f.makeRoom && (
+                  <button
+                    onClick={() => patchDivider(f.makeRoom!.id, { start: f.makeRoom!.start, holes: f.makeRoom!.holes })}
+                    data-testid={`divider-make-room-${i + 1}`}
+                    title={`Shorten ${f.makeRoom.label} so this divider seats beside it.`}
+                  >
+                    Shorten {f.makeRoom.label} to {f.makeRoom.holes} sockets
+                  </button>
+                )}
+                {f && f.clashes.length > 0 && f.moveTo === null && f.shortenTo && !f.makeRoom && (
+                  <button
+                    onClick={() => patchDivider(d.id, { start: f.shortenTo!.start, holes: f.shortenTo!.holes })}
+                    data-testid={`divider-shorten-${i + 1}`}
+                    title="Drop sockets from the end that clashes."
+                  >
+                    Shorten to {f.shortenTo.holes} sockets
+                  </button>
+                )}
+                <ClashList
+                  statements={clashes.filter((c) => c.subject === 'divider' && c.subjectId === d.id)}
+                  testId={`divider-clash-${i + 1}`}
+                  onTake={(o) => {
+                    if (o.kind === 'move-divider') patchDivider(o.id, { line: o.line });
+                    else if (o.kind === 'shorten-divider') patchDivider(o.id, { start: o.start, holes: o.holes });
+                  }}
+                  label={(o) =>
+                    o.kind === 'move-divider' ? `Move to ${lineWord.toLowerCase()} ${o.line + 1}` : offerLabel(o)
+                  }
+                />
               </div>
             );
           })}
@@ -1448,6 +1548,14 @@ function StackConnectorSection() {
     });
   const setOffset = (face: ConnectorFace, offset: number) =>
     set({ sockets: c.sockets.map((s) => (s.face === face ? { ...s, offset } : s)) });
+  const setCutThrough = (face: ConnectorFace, offset: number, cutThrough: boolean) =>
+    set({
+      sockets: c.sockets.map((s) => {
+        if (s.face !== face) return s;
+        const { cutThrough: _drop, ...rest } = s;
+        return cutThrough ? { ...rest, offset, cutThrough: true } : rest;
+      }),
+    });
   const fit: FitVariant = c.fit ?? caseFit ?? 'tight';
   const dims = stackKeyDims(c.key, fit);
   const active = c.sockets.length > 0 || c.keys > 0;
@@ -1554,7 +1662,7 @@ function StackConnectorSection() {
           {report.notes.map((n, i) => (
             <li key={i} data-testid={`stack-note-${n.kind}-${n.face}`}>
               {n.message}
-              {n.suggestedOffset !== undefined && (
+              {n.suggestedOffset !== undefined && !n.padCutout && (
                 <button
                   type="button"
                   onClick={() => setOffset(n.face, n.suggestedOffset!)}
@@ -1562,6 +1670,29 @@ function StackConnectorSection() {
                   title="Move the socket along its wall to the nearest clear position."
                 >
                   Move to {mm1(n.suggestedOffset)} mm
+                </button>
+              )}
+              {n.suggestedOffset !== undefined && n.padCutout && (
+                <button
+                  type="button"
+                  onClick={() => setCutThrough(n.face, n.suggestedOffset!, true)}
+                  data-testid={`stack-pad-cutout-${n.face}`}
+                  title="Notch the brim and ribbing where the socket stands. The wall itself is not cut."
+                >
+                  Cut a pad cut-out at {mm1(n.suggestedOffset)} mm
+                </button>
+              )}
+              {n.kind === 'pad-cutout' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sock = c.sockets.find((x) => x.face === n.face);
+                    if (sock) setCutThrough(n.face, sock.offset, false);
+                  }}
+                  data-testid={`stack-pad-cutout-remove-${n.face}`}
+                  title="Leave the brim and ribbing whole."
+                >
+                  Remove the pad cut-out
                 </button>
               )}
             </li>

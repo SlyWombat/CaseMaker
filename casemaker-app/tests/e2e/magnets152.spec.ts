@@ -96,3 +96,30 @@ test('add a magnet pocket and a nameplate in the Features panel, then export the
   expect(Math.max(size[0]!, size[1]!)).toBeCloseTo(50, 0);
   expect(Math.min(size[0]!, size[1]!)).toBeCloseTo(16, 0);
 });
+
+// A pocket whose boss lands on a board standoff is stated by the shared clash
+// check, with the overlap and an offer to move; taking it clears the statement.
+test('a magnet boss on a standoff is stated, and the move offer clears it', async ({ cm, page }) => {
+  test.setTimeout(120_000);
+  fs.mkdirSync(SHOTS, { recursive: true });
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    await window.__caseMaker!.patchCase({
+      magnetPockets: [{ id: 'm1', face: '-z', u: 7.5, v: 7.5, size: '6x2', enabled: true }],
+    });
+    await window.__caseMaker!.waitForIdle();
+  });
+  await page.getByTestId('sidebar-button-features').click();
+  const said = page.getByTestId('magnet-clash').first();
+  await expect(said).toContainText('runs into a board standoff');
+  await expect(said).toContainText('they overlap');
+  await expect(said).toHaveAttribute('data-method', 'solid');
+  await page.getByTestId('magnet-notes').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(SHOTS, '03-magnet-clash.png') });
+  await page.getByTestId('magnet-clash-offer').click();
+  await page.evaluate(() => window.__caseMaker!.waitForIdle());
+  await expect(page.getByTestId('magnet-clash')).toHaveCount(0);
+  const m = await page.evaluate(() => window.__caseMaker!.getProject().case.magnetPockets![0]!);
+  expect(m.u !== 7.5 || m.v !== 7.5).toBe(true);
+});

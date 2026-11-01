@@ -147,7 +147,9 @@ The **Features** panel has two magnet sections.
 | **press** | Open, disc Ø + 0.1 mm: printed holes come out a little small, so this lands as a light press fit. |
 | **captured** | Closed at the face by a 0.6 mm skin. The panel states the height to pause the print at (0.2 mm layers): drop the magnet in, then resume, and the next layers roof it over. Only the case floor and the lid can be captured; on a side wall the pocket would print on its edge, so it is cut open for glue and the panel says so. |
 
-Case walls are usually thinner than a pocket plus its 1 mm backing, so a round boss is added on the inside of the wall behind each pocket. The panel says when a pocket runs off its face or into a port cutout.
+Case walls are usually thinner than a pocket plus its 1 mm backing, so a round boss is added on the inside of the wall behind each pocket. The panel says when a pocket runs off its face.
+
+**When a pocket or its boss lands on something.** Each pocket and the boss behind it are checked against the board and its connectors, the board standoffs, latches, the hinge and the lid, and each pocket against the port cutouts. The check uses the real shapes, not boxes around them, so a pocket that only comes near a port's corner is not flagged. A clash is stated with the size of the overlap and where it is ("they overlap 5 × 5 × 3.4 mm around X 7.5, Y 7.5, Z 1.7 mm"), and the panel offers the nearest spot on the face that clears it — **Move to u … mm, v … mm**. A row of pockets, or the nameplate's pockets, moves together. Nothing is moved until you choose to, and a clash never stops an export.
 
 **Nameplate** adds a separate plate carrying text, held on by magnets. Set its face, centre, size, thickness, text and the number of magnets (1 to 4). The plate has pockets on its back, and the case face has pockets at exactly the same centres, so one magnet in each pulls the plate home; set each pair so they attract. The plate exports as its own part, laid back down on the bed with the text on top. If the plate is too thin for the magnet under the text, or the text is wider than the plate, the panel says by how much.
 
@@ -183,10 +185,19 @@ apart; lifting the top one off takes a firm pull against the click. Sockets on
 the same walls of both parts must line up, so give both cases the same shifts.
 
 **When a socket lands on something.** If a socket would run into a port, a vent,
-a hinge, a latch or another feature on that wall, the panel says so and offers
-the nearest clear position — **Move to … mm**. The socket is still cut where you
-put it until you choose to move it. A wall too short for the receiving pocket is
-also stated: that case can be the bottom of a stack, not the top.
+a hinge, a latch, a magnet pocket, the nameplate or another feature on that wall,
+the panel says so and offers the nearest clear position — **Move to … mm**. The
+check uses the socket's real pad and each feature's real shape. The socket is
+still cut where you put it until you choose to move it. A wall too short for the
+receiving pocket is also stated: that case can be the bottom of a stack, not the
+top.
+
+**Brim and ribbing.** On a protective case, the alignment brim and the rugged
+ribbing run along the whole wall, so no position clears them. The panel then
+offers **Cut a pad cut-out at … mm**: a notch through the brim and ribbing the
+width of the pad plus 0.5 mm each side, where the socket stands. Only the brim
+and ribbing are notched; the wall and the seal inside the rim are not cut.
+**Remove the pad cut-out** puts them back.
 
 ## External assets (STL / 3MF import)
 
@@ -206,7 +217,7 @@ The **Features** panel's **Floor grid and dividers** section cuts a grid of squa
 
 The grid starts 3 mm in from the cavity wall. Sockets that would land under the board, its overhanging connectors, a mounted display or a standoff are left out, with 1 mm to spare. On a rounded case, sockets that would cross into a rounded corner are left out too. A case sized tightly around its board has no room for a socket. In that case the panel says so and offers to widen one side of the cavity, always a side with no port cutouts on it, by just enough for a bay two sockets each way.
 
-**Dividers.** Click **+ Divider along X** or **+ Divider along Y**. A new divider goes on the longest clear run of sockets that crosses nothing already there. You place it on a grid line, so it always lands in sockets:
+**Dividers.** Click **+ Divider along X** or **+ Divider along Y**. A new divider goes on the longest clear run of sockets that crosses nothing already there. While there is no divider the other way yet, it also leaves a clear line for one, so the order you add them in does not decide whether both fit. You place it on a grid line, so it always lands in sockets:
 
 | Field | Meaning |
 | :--- | :--- |
@@ -216,7 +227,7 @@ The grid starts 3 mm in from the cavity wall. Sockets that would land under the 
 
 A divider is `(sockets − 1) × pitch + 9.6 mm` long, 2.4 mm thick, and as tall as the cavity's inside height less 1 mm, so it clears the lid. The panel states all three numbers for each divider.
 
-**Clashes are stated, not refused.** If a divider runs into the board or a standoff, ends in the wall, has a tenon with no socket under it, or crosses another divider, the panel names the clash ("Divider 2: it runs into the board from X 14.7 mm to 84.3 mm") and offers **Move to row N**, the nearest grid line where the divider seats cleanly. A clashing divider still exports.
+**Clashes are stated, not refused.** If a divider runs into the board or a standoff, ends in the wall, has a tenon with no socket under it, or crosses another divider, the panel names the clash ("Divider 2: it runs into the board from X 14.7 mm to 84.3 mm") and offers **Move to row N**, the nearest grid line where the divider seats cleanly. A divider is also checked against a snap-fit lid's lip, the vents, a HAT board that reaches past the host board, and the split-for-print seam, with the size of the overlap. When no grid line clears it (an end against the lid's lip, say), the panel offers to drop sockets from the end that clashes — **Shorten to N sockets**. When a new divider crosses one already standing, it offers **Shorten Divider 1 to N sockets** to make room. A clashing divider still exports.
 
 **Fit.** Each tenon is 0.3 mm smaller than the socket. That number is provisional: nothing has been printed to settle it yet. The grid's **Fit** follows the case's print fit unless you pick one for the grid. Tight adds nothing, Standard adds 0.1 mm and Loose adds 0.25 mm to the socket, so the clearance is 0.3, 0.4 or 0.55 mm. The relief goes on the socket, the cut, never on the tenon. If a divider will not drop in, go one grade looser.
 
