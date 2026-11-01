@@ -141,6 +141,20 @@ export interface EngraveJobSubstitution {
   toName: string;
 }
 
+/**
+ * #835 — THE SAME PENCIL LINE FOR ONE SETUP'S CUTTER. A multi-setup job's later setup can name a
+ * key the library no longer holds; that setup's own work is measured (the search judges one setup
+ * at a time) and its plan written back into that setup. The record says which setup, who was
+ * named, why it could not cut, and what cuts it now, so the one substitution sentence can state
+ * it — never silently.
+ */
+export interface EngraveSetupSubstitution extends EngraveJobSubstitution {
+  /** The setup's stable id. */
+  setupId: string;
+  /** The setup's position when the sentence was written, 1-based (the run's own numbering). */
+  setupNumber: number;
+}
+
 export interface EngraveJobSources {
   /**
    * Which stock fields were asserted, and how (#254). Absent = the shipped default blank. `colour`
@@ -2038,6 +2052,12 @@ export interface EngraveJob {
    * the operator chose. The finding and the cutter line render it; choosing a cutter clears it.
    */
   substitution?: EngraveJobSubstitution;
+  /**
+   * #835 — present while one or more SETUPS name a cutter the measured search replaced for that
+   * setup. Optional, and absent on every document written before the field existed; each entry is
+   * cleared when a later plan for that setup is written without a substitution.
+   */
+  setupSubstitutions?: EngraveSetupSubstitution[];
   customFonts: CustomFont[];
   /**
    * Where the stock came from (#418, §5.1) — the shelf entry, the file, or a piece typed in the start

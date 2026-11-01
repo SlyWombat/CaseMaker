@@ -24,6 +24,7 @@ import { faceOperationWords } from '@/engine/cnc/rotary/faceOps';
 import { defaultSacrificialUnder, sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
+import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
 import { withSideGoal, withoutSideGoal } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { applyHoldAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
@@ -105,6 +106,7 @@ import type {
   TapeHold,
   ViseParams,
   EngraveJobSubstitution,
+  EngraveSetupSubstitution,
 } from '@/types/engraveJob';
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import {
@@ -1022,6 +1024,16 @@ export interface EngraveJobState {
     /** #786 slice 4c-2 — set ONLY when this plan replaces a cutter the operator chose. */
     substitution?: EngraveJobSubstitution,
   ) => void;
+  /**
+   * #835 — write ONE setup's measured plan into THAT setup only (the search judges one setup at a
+   * time), recording any dead key it replaced. Every other setup, and the document's own
+   * `toolKey`/`tool` pair when the setup is not the first, is untouched.
+   */
+  applySetupPlan: (
+    setupIndex: number,
+    cutters: readonly { key: string; items: readonly string[] }[],
+    substitutions?: readonly EngraveSetupSubstitution[],
+  ) => void;
   /** #572 — record (or clear) the double-confirmed cutter/material override. */
   setMetalLineOverride: (override: boolean) => void;
   setVise: (patch: Partial<ViseParams>) => void;
@@ -1857,6 +1869,23 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           // A plan applied without a substitution CLEARS an earlier record: the sentence must
           // never outlive the replacement it describes.
           ...(substitution === undefined ? { substitution: undefined } : { substitution }),
+        };
+      }),
+
+    // #835 — one setup's plan, written into that setup only. The records for THIS setup are
+    // replaced by the ones handed in (none = an ordinary plan for it), so the sentence can never
+    // outlive the replacement it describes; another setup's records stand untouched.
+    applySetupPlan: (setupIndex, cutters, substitutions = []) =>
+      apply((job) => {
+        if (cutters.length === 0) return job;
+        const next = writeSetupPlan(job, getTools(), setupIndex, cutters);
+        if (next === job) return job;
+        const setupId = jobSetups(job)[setupIndex]?.id;
+        const kept = (job.setupSubstitutions ?? []).filter((s) => s.setupId !== setupId);
+        const records = [...kept, ...substitutions];
+        return {
+          ...next,
+          ...(records.length === 0 ? { setupSubstitutions: undefined } : { setupSubstitutions: records }),
         };
       }),
 

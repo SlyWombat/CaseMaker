@@ -28,7 +28,7 @@ export function deadSetupKeys(
   const setup = jobSetups(job)[setupIndex];
   if (setup === undefined) return [];
   const seen = new Set<string>();
-  return setup.tools.filter((key) => {
+  return (setup.tools ?? []).filter((key) => {
     if (seen.has(key)) return false;
     seen.add(key);
     return toolForIn(tools, key) === null;
@@ -60,7 +60,7 @@ export function setupWorkJob(
   const keep = <T extends { id: string }>(items: readonly T[] | undefined): T[] | undefined =>
     items === undefined ? undefined : items.filter((item) => ids.has(item.id));
   const goal = jobTargetObjects(job).find((t) => isSideGoal(t) && sideSetupIdOf(job, t) === setup.id) ?? null;
-  const first = setup.tools[0];
+  const first = (setup.tools ?? [])[0];
   const namedTool = first === undefined ? null : toolForIn(tools, first);
   const sub: EngraveJob = {
     ...job,
@@ -136,7 +136,7 @@ export function replacementCutter(
   setup: JobSetup,
   deadKey: string,
 ): PlanCutter {
-  const first = setup.tools[0];
+  const first = (setup.tools ?? [])[0];
   if (cutters.length === 0) throw new Error('a plan with no cutters has no replacement');
   // The cutter that took the dead key's own items, when the plan says who owns them.
   const owned = new Set(setup.toolItems?.[deadKey] ?? []);

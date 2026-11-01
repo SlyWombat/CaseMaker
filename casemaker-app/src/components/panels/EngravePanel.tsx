@@ -32,7 +32,7 @@ import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds'
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
-import { substitutionSentence } from '@/engine/cnc/engrave/substitution';
+import { setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
 import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -48,6 +48,9 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobSetups, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+// #835 — one setup's own work, measured and written back into that setup only.
+import { deadSetupKeys, replacementCutter } from '@/engine/cnc/engrave/setupWork';
+import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
 import { toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
 // #786 slice 6 — the simulator's own cutter resolver, the one `columnSweep` asks before it sweeps:
@@ -171,6 +174,7 @@ import type {
   EngraveDrill,
   EngraveJob,
   EngraveJobSubstitution,
+  EngraveSetupSubstitution,
   EngraveKeepOut,
   EngraveLabel,
   EngraveShape,
@@ -856,6 +860,8 @@ export function EngravePanel(): JSX.Element {
     recordCutterField({ diameter: mm }, `cutting diameter ${fmt(mm)} mm stated by you`);
   // #766 D — the measured plan's write-back. The rule's single-cutter answer still uses setTool.
   const applyCutterPlan = useEngraveJobStore((s) => s.applyCutterPlan);
+  // #835 — one setup's plan, written into that setup only.
+  const applySetupPlan = useEngraveJobStore((s) => s.applySetupPlan);
   const setVise = useEngraveJobStore((s) => s.setVise);
   const setMetalLineOverride = useEngraveJobStore((s) => s.setMetalLineOverride);
   // #572 — the double-confirm state for the cutter/material override affordance.
@@ -934,6 +940,9 @@ export function EngravePanel(): JSX.Element {
   const measuredProgress = useEngravePreviewStore((s) => s.measuredProgress);
   const measuredError = useEngravePreviewStore((s) => s.measuredError);
   const measuredNow = measuredStatus === 'ready' ? measuredPick : null;
+  // #835 — the per-setup answers for a multi-setup job (the search judges one setup at a time).
+  const setupMeasured = useEngravePreviewStore((s) => s.setupMeasured);
+  const setupMeasuredJob = useEngravePreviewStore((s) => s.setupMeasuredJob);
 
   // The first preview. Later edits reach the store through its own subscription to the job
   // store, so the panel never has to ask after this.
@@ -1029,6 +1038,12 @@ export function EngravePanel(): JSX.Element {
     ...(job.substitution === undefined
       ? []
       : [{ severity: 'info' as const, code: 'cutter-substituted' as const, message: substitutionSentence(job.substitution) }]),
+    // #835 — a SETUP's substitute is stated the same way, in the same sentence, naming its setup.
+    ...(job.setupSubstitutions ?? []).map((s) => ({
+      severity: 'info' as const,
+      code: 'cutter-substituted' as const,
+      message: setupSubstitutionSentence(s),
+    })),
     // #785 — the reach check joins the list at Generate's own sentence: a goal deeper than the
     // chosen cutter's known reach blocks here, with the numbers and the one-click top-band option;
     // an unrecorded reach is an info and blocks nothing.
@@ -2048,6 +2063,85 @@ export function EngravePanel(): JSX.Element {
     if (job.toolKey !== key) setTool(key, 'computed');
   }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, job.substitution, job.setups, namedSplit, namedMissing, namedRefused, namedNow, feeds, tools, drillShop, rotaryHeld, job.stock.material, applyCutterPlan, setTool]);
 
+  // #835 — A SETUP'S DEAD CUTTER IS REPLACED BY THAT SETUP'S OWN MEASURED ANSWER. The search
+  // judges one setup at a time, so a multi-setup job's dead keys are measured on the setup each
+  // belongs to (`setupWorkJob`) and the plan is written back into THAT setup only. Applied only
+  // for the job content it was measured on, and never while a run is in flight or a current
+  // result still describes this job — the same guards the job-level substitution keeps. One write
+  // per pass: the write changes the fingerprint, and a remaining setup with a dead key is
+  // measured afresh on the new content.
+  useEffect(() => {
+    if (setupMeasured === null || setupMeasuredJob === null) return;
+    if (setupMeasuredJob !== measureFingerprint(job)) return;
+    const runNow = useEngraveRunStore.getState();
+    if (
+      runNow.phase === 'generating' ||
+      runNow.phase === 'simulating' ||
+      runNow.phase === 'checking' ||
+      (runNow.generated !== null && runNow.staleSince === null)
+    ) {
+      return;
+    }
+    const setups = jobSetups(job);
+    const nameOf = (key: string): string => {
+      const entry = tools.find((e) => e.key === key);
+      return entry === undefined ? key : toolDisplayName(entry.tool).split(' · ')[0]!;
+    };
+    for (const { setupIndex, forKeys, pick } of setupMeasured) {
+      const setup = setups[setupIndex];
+      if (setup === undefined || pick.cutters.length === 0) continue;
+      // ONLY THE DEAD KEYS THIS ANSWER WAS MEASURED FOR ARE ANSWERED. The fingerprint cannot see a
+      // setup's tool list (that is what lets a write-back keep the answer), so a setup the
+      // operator has since re-cut by hand — or a NEW dead key the search never saw — is left
+      // exactly as it is.
+      const stillDead = deadSetupKeys(job, tools, setupIndex);
+      if (!forKeys.some((key) => stillDead.includes(key))) continue;
+      const cutters = pick.cutters;
+      // "Applied" is the whole write, as on the job's cutter: a plan whose keys match but whose
+      // item assignment differs would otherwise be re-applied on every render.
+      const written =
+        setup.tools.length === cutters.length &&
+        setup.tools.every((k, i) => k === cutters[i]?.key) &&
+        cutters.every((c) => {
+          const owned = setup.toolItems?.[c.key] ?? [];
+          return owned.length === c.items.length && owned.every((id, i) => id === c.items[i]);
+        });
+      if (written) continue;
+      const records: EngraveSetupSubstitution[] = [];
+      // A cutter that EXISTS but whose plan drops it could not cut this setup's work; that is a
+      // replacement of the operator's choice too, and is recorded with its own clause.
+      const first = setup.tools[0];
+      if (first !== undefined && first !== '' && toolForIn(tools, first) !== null && cutters[0]?.key !== first) {
+        records.push({
+          setupId: setup.id,
+          setupNumber: setupIndex + 1,
+          fromKey: first,
+          fromName: nameOf(first),
+          reason: 'refused',
+          toKey: cutters[0]!.key,
+          toName: nameOf(cutters[0]!.key),
+        });
+      }
+      for (const dead of forKeys) {
+        if (!stillDead.includes(dead)) continue;
+        if (cutters.some((c) => c.key === dead)) continue;
+        const to = replacementCutter(cutters, setup, dead);
+        records.push({
+          setupId: setup.id,
+          setupNumber: setupIndex + 1,
+          fromKey: dead,
+          // The library does not hold it, so the key is the most it can be called.
+          fromName: dead,
+          reason: 'missing',
+          toKey: to.key,
+          toName: nameOf(to.key),
+        });
+      }
+      applySetupPlan(setupIndex, cutters, records);
+      return;
+    }
+  }, [setupMeasured, setupMeasuredJob, job, tools, applySetupPlan]);
+
   // ---- #798 — THE CUTTER AS ONE LINE ------------------------------------------------------
   // What is in the spindle, where that answer came from, and — when the measured search chose it
   // — the plan's own worst-item fidelity. "choosing…" while the search runs, unless the operator
@@ -2068,6 +2162,8 @@ export function EngravePanel(): JSX.Element {
   const cutterFidelity = measuredNow !== null && measuredApplied ? `${Math.round(measuredNow.worstFidelity * 100)} % fidelity` : null;
   // #786 slice 4c-2 — the substitution is on the line, not only in the findings fold.
   const substitutionNote = job.substitution === undefined ? null : substitutionSentence(job.substitution);
+  // #835 — a SETUP's substitute says so in the same sentence, naming its setup.
+  const setupSubstitutionNote = (job.setupSubstitutions ?? []).map(setupSubstitutionSentence).join(' ');
   // #786 slice 4c-2 — WHAT THE CATALOGUE'S OWN RECORD SUPPLIED, on the same line: a value the
   // toolpath is actually cutting with (the engine fills the blank before the CAM), not a footnote
   // beside it. Nothing is shown when the record states everything.
@@ -2083,7 +2179,9 @@ export function EngravePanel(): JSX.Element {
   // its answer is waiting to be applied), the line says the app is choosing.
   const cutterVerdict =
     tool !== null
-      ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote, substitutionNote].filter((w): w is string => w !== null).join(' · ')
+      ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote, substitutionNote, setupSubstitutionNote === '' ? null : setupSubstitutionNote]
+          .filter((w): w is string => w !== null)
+          .join(' · ')
       : measuredStatus === 'measuring' || measuredNow !== null || rec !== null
         ? 'choosing…'
         : 'no cutter chosen';

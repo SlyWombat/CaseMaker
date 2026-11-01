@@ -23,6 +23,8 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 
+const IDENTITY = { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' } as const;
+
 interface PendingCall {
   job: EngraveJob;
   gen: number;
@@ -180,6 +182,67 @@ describe('#766 D the store’s background measured search', () => {
     expect(calls.length).toBe(0);
     expect(await useEngravePreviewStore.getState().measureNow(job)).toBeNull();
     expect(calls.length).toBe(0);
+  });
+
+  // #835 — a multi-setup job is not measured as ONE plan, but each setup that names a cutter the
+  // bench does not hold IS measured, on its own work, and its answer kept for that job content.
+  it('#835 — measures each setup that names a dead cutter, on that setup’s own work', async () => {
+    const job = jobWith('SIDE-B');
+    const ids = job.labels.map((l) => l.id);
+    job.setups = [
+      { id: 'setup-1', orientation: IDENTITY, mount: { kind: 'vise' }, itemIds: [], tools: ['flat-1.0'] },
+      { id: 'setup-2', orientation: IDENTITY, mount: { kind: 'tape' }, itemIds: ids, tools: ['inv:gone'] },
+    ] as unknown as EngraveJob['setups'];
+    job.toolKey = 'flat-1.0';
+
+    useEngravePreviewStore.getState().request(job);
+    expect(useEngravePreviewStore.getState().measuredStatus).toBe('measuring');
+    await vi.advanceTimersByTimeAsync(ENGRAVE_PICK_DEBOUNCE_MS);
+    expect(calls.length).toBe(1);
+    // The searched job is THAT SETUP'S work: one setup, its own items and its own first key.
+    const sub = calls[0]!.job;
+    expect(sub.setups).toHaveLength(1);
+    expect(sub.setups?.[0]?.id).toBe('setup-2');
+    expect(sub.labels.map((l) => l.text)).toEqual(['SIDE-B']);
+    expect(sub.toolKey).toBe('inv:gone');
+
+    calls[0]!.resolve();
+    await flush();
+    const state = useEngravePreviewStore.getState();
+    expect(state.measuredStatus).toBe('ready');
+    expect(state.setupMeasured?.map((a) => a.setupIndex)).toEqual([1]);
+    expect(state.setupMeasuredJob).toBe(measureFingerprint(job));
+    // No whole-job answer: the search judged one setup, not the document.
+    expect(state.measured).toBeNull();
+  });
+
+  it('#835 — once the plan is written into the setup, no dead key remains and no search re-runs', async () => {
+    const job = jobWith('SIDE-B');
+    const ids = job.labels.map((l) => l.id);
+    job.setups = [
+      { id: 'setup-1', orientation: IDENTITY, mount: { kind: 'vise' }, itemIds: [], tools: ['flat-1.0'] },
+      { id: 'setup-2', orientation: IDENTITY, mount: { kind: 'tape' }, itemIds: ids, tools: ['inv:gone'] },
+    ] as unknown as EngraveJob['setups'];
+    job.toolKey = 'flat-1.0';
+
+    useEngravePreviewStore.getState().request(job);
+    await vi.advanceTimersByTimeAsync(ENGRAVE_PICK_DEBOUNCE_MS);
+    calls[0]!.resolve();
+    await flush();
+    expect(useEngravePreviewStore.getState().setupMeasured).not.toBeNull();
+
+    const written: EngraveJob = {
+      ...job,
+      setups: job.setups!.map((s, i) =>
+        i === 1 ? { ...s, tools: ['flat-1.0'], toolItems: { 'flat-1.0': ids } } : s,
+      ),
+    };
+    useEngravePreviewStore.getState().request(written);
+    // The write-back is not an edit (`measureFingerprint` drops `setups`): the answer stays, and
+    // no search re-runs because no setup names a dead cutter any more.
+    expect(useEngravePreviewStore.getState().setupMeasured).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(ENGRAVE_PICK_DEBOUNCE_MS * 2);
+    expect(calls.length).toBe(1);
   });
 
   it('measureNow runs the search at once for a Generate pressed before the debounce, and reuses it', async () => {

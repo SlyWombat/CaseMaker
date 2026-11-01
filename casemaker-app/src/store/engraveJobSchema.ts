@@ -2378,6 +2378,27 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
     })
     .optional()
     .describe("Set while the job's cutter is a measured substitute for one the operator chose; omit otherwise."),
+  // #835 — the same pencil line per SETUP: a later setup's cutter the search replaced, measured
+  // on that setup's own work. OPTIONAL, for the same byte-for-byte reason as `substitution`.
+  setupSubstitutions: z
+    .array(
+      z
+        .object({
+          setupId: z.string().min(1).describe('The setup this replacement belongs to.'),
+          setupNumber: z.number().int().min(1).describe('The setup’s 1-based position when the sentence was written.'),
+          fromKey: z.string().min(1).describe("The key the setup's cutter was named by."),
+          fromName: z.string().min(1).describe('How the sentence names that cutter (its display name, or the key).'),
+          reason: z
+            .enum(['missing', 'no-feeds', 'refused'])
+            .describe('Why it could not be used: missing from the library, no feeds, or unusable here.'),
+          material: z.enum(STOCK_MATERIALS).optional().describe('The material a feeds refusal was judged on; omit for the other reasons.'),
+          toKey: z.string().min(1).describe('The plan’s cutter that took the dead key’s work over.'),
+          toName: z.string().min(1).describe('How the sentence names that cutter (at the time of the write).'),
+        })
+        .strict(),
+    )
+    .optional()
+    .describe('Set while one or more setups run a measured substitute for a cutter they named; omit otherwise.'),
   // #305's snapshot of the cutter the job was written with. OPTIONAL, not defaulted, for the
   // same byte-for-byte reason as `combined`/`traces`/`vectors`/`keepOuts`/`drills`, and nullable
   // so a snapshot that could not be taken stays an explicit null. Validated by the SAME

@@ -321,6 +321,73 @@ describe('#786 slice 6 — a refused cutter and a missing rest cutter are substi
     expect(note).toContain('is not in the tool library');
   });
 
+  // #835 — A LATER SETUP'S DEAD CUTTER IS MEASURED ON THAT SETUP'S OWN WORK. The whole-job search
+  // refuses a multi-setup job, so the preview store measures each dead setup separately
+  // (`setupWorkJob`); the panel writes the plan into THAT setup and records the substitution, in
+  // the one sentence, naming the setup.
+  it('#835 — a dead key in a LATER setup is replaced by that setup’s plan, and the sentence names the setup', () => {
+    const base = defaultEngraveJob();
+    const itemIds = base.labels.map((l) => l.id);
+    const setups: JobSetup[] = [
+      { id: 'setup-1', orientation: { ...IDENTITY }, mount: { kind: 'vise' }, itemIds: itemIds.slice(0, 2), tools: [KEY_FLAT] },
+      { id: 'setup-2', orientation: { ...IDENTITY }, mount: { kind: 'tape' }, itemIds: itemIds.slice(2), tools: [MISSING_REST] },
+    ];
+    const job = jobWith(KEY_FLAT, FLAT, setups);
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    useEngravePreviewStore.setState({
+      preview: barePreview(),
+      status: 'ready',
+      setupMeasured: [{ setupIndex: 1, forKeys: [MISSING_REST], pick: measuredPlan([{ key: KEY_REST, items: itemIds.slice(2) }]) }],
+      setupMeasuredJob: measureFingerprint(job),
+      measuredStatus: 'idle',
+    });
+
+    render(<EngravePanel />);
+
+    const after = useEngraveJobStore.getState().job;
+    // The dead key is replaced IN ITS SETUP; setup 1 and the document's own cutter are untouched.
+    expect(after.setups?.[1]?.tools).toEqual([KEY_REST]);
+    expect(after.setups?.[0]?.tools).toEqual([KEY_FLAT]);
+    expect(after.toolKey).toBe(KEY_FLAT);
+    expect(after.setupSubstitutions).toMatchObject([
+      { setupId: 'setup-2', setupNumber: 2, fromKey: MISSING_REST, reason: 'missing', toKey: KEY_REST },
+    ]);
+    // The one substitution sentence says which setup, and both surface it.
+    const note = screen.getByTestId('engrave-cutter-line').textContent ?? '';
+    expect(note).toContain('Setup 2');
+    expect(note).toContain(MISSING_REST);
+    expect(note).toContain('is not in the tool library');
+    expect(note).toContain('is used instead');
+  });
+
+  it('#835 — an answer measured on older content is not written into the job', () => {
+    const base = defaultEngraveJob();
+    const itemIds = base.labels.map((l) => l.id);
+    const setups: JobSetup[] = [
+      { id: 'setup-1', orientation: { ...IDENTITY }, mount: { kind: 'vise' }, itemIds: itemIds.slice(0, 2), tools: [KEY_FLAT] },
+      { id: 'setup-2', orientation: { ...IDENTITY }, mount: { kind: 'tape' }, itemIds: itemIds.slice(2), tools: [MISSING_REST] },
+    ];
+    const job = jobWith(KEY_FLAT, FLAT, setups);
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    useEngravePreviewStore.setState({
+      preview: barePreview(),
+      status: 'ready',
+      setupMeasured: [{ setupIndex: 1, forKeys: [MISSING_REST], pick: measuredPlan([{ key: KEY_REST, items: itemIds.slice(2) }]) }],
+      setupMeasuredJob: 'content-that-has-moved-on',
+      measuredStatus: 'idle',
+    });
+
+    render(<EngravePanel />);
+
+    const after = useEngraveJobStore.getState().job;
+    expect(after.setups?.[1]?.tools).toEqual([MISSING_REST]);
+    expect(after.setupSubstitutions).toBeUndefined();
+  });
+
   it('a generated job is offered the answer, never rewritten behind its own program', () => {
     const job = drillJob(KEY_DRILL_SIZELESS, DRILL_SIZELESS);
     act(() => {

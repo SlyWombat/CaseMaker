@@ -3499,6 +3499,94 @@
       "description": "Document schema version.",
       "type": "number"
     },
+    "setupSubstitutions": {
+      "description": "Set while one or more setups run a measured substitute for a cutter they named; omit otherwise.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "fromKey": {
+            "description": "The key the setup's cutter was named by.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "fromName": {
+            "description": "How the sentence names that cutter (its display name, or the key).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "material": {
+            "description": "The material a feeds refusal was judged on; omit for the other reasons.",
+            "enum": [
+              "softwood",
+              "hardwood",
+              "mdf",
+              "pla",
+              "petg",
+              "pet",
+              "abs",
+              "asa",
+              "hips",
+              "pa",
+              "pa-cf",
+              "pa-gf",
+              "pc",
+              "pp",
+              "tpu",
+              "pva",
+              "acrylic",
+              "plastic",
+              "pcb",
+              "aluminium-6061",
+              "aluminium-7075",
+              "brass",
+              "copper"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why it could not be used: missing from the library, no feeds, or unusable here.",
+            "enum": [
+              "missing",
+              "no-feeds",
+              "refused"
+            ],
+            "type": "string"
+          },
+          "setupId": {
+            "description": "The setup this replacement belongs to.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "setupNumber": {
+            "description": "The setup’s 1-based position when the sentence was written.",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "toKey": {
+            "description": "The plan’s cutter that took the dead key’s work over.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "toName": {
+            "description": "How the sentence names that cutter (at the time of the write).",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "setupId",
+          "setupNumber",
+          "fromKey",
+          "fromName",
+          "reason",
+          "toKey",
+          "toName"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "setups": {
       "description": "Saved setups; omit for the implicit single top-up vise setup.",
       "items": {

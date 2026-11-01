@@ -25,6 +25,7 @@ import { featureSim } from '@/platform/features';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
 import { noteProgress as noteFlightProgress, noteStage, noteWorkEnd, noteWorkStart } from '@/platform/flightRecorder';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { deadSetupKeys, setupsWithDeadCutters, setupWorkJob } from '@/engine/cnc/engrave/setupWork';
 import { create } from 'zustand';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
@@ -49,6 +50,14 @@ export type EngravePreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /** #766 D — where the measured pick stands: no search, running, answered, or failed. */
 export type EngravePickStatus = 'idle' | 'measuring' | 'ready' | 'error';
+
+/** #835 — one setup's measured answer: the setup it answers for, the dead keys it answered, and the plan. */
+export interface SetupPick {
+  setupIndex: number;
+  /** The keys that named nothing when the setup's work was measured — what this answer replaces. */
+  forKeys: string[];
+  pick: EngravePickSummary;
+}
 
 export type EngravePreviewClient = {
   engravePreview: (
@@ -116,6 +125,15 @@ export interface EngravePreviewState {
   measuredJob: string | null;
   measuredStatus: EngravePickStatus;
   measuredError: string | null;
+  /**
+   * #835 — the measured answer for EACH setup of a multi-setup job that names a cutter this bench
+   * does not hold. The search judges one setup at a time, so the job as a whole is not measurable
+   * (`canMeasure`); each dead setup is measured on its own work and the plan is written back into
+   * that setup only.
+   */
+  setupMeasured: SetupPick[] | null;
+  /** `measureFingerprint` of the job the setup answers describe. */
+  setupMeasuredJob: string | null;
   /**
    * #785 — the search's own count while it runs ("measuring candidates 3 of 12"), else null. The
    * panel shows it in the provisional tag; the recorder gets the same events as flight crumbs.
@@ -339,6 +357,71 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
     return promise;
   }
 
+  /**
+   * #835 — ONE SEARCH PER SETUP THAT NAMES A DEAD CUTTER. The whole-job search refuses a
+   * multi-setup job (`canMeasure`), so each such setup is measured on ITS OWN work
+   * (`setupWorkJob`) and the plans are kept under the job content they describe. The panel writes
+   * each plan back into its setup and records the substitution; nothing here writes the job.
+   */
+  async function runSetupPicks(job: EngraveJob, mine: number, jobFingerprintNow: string): Promise<SetupPick[] | null> {
+    let inputs: PreviewInputs;
+    let indices: number[];
+    try {
+      inputs = previewInputs(job);
+      indices = setupsWithDeadCutters(job, inputs.tools);
+    } catch (e) {
+      if (mine === seq) set({ measuredStatus: 'error', measuredError: e instanceof Error ? e.message : String(e), measuredProgress: null });
+      return null;
+    }
+    if (indices.length === 0) {
+      if (mine === seq) set({ measuredStatus: 'idle', measuredProgress: null, setupMeasured: null, setupMeasuredJob: null });
+      return null;
+    }
+    try {
+      const client = await clientLoader();
+      if (client.engraveSmartPick === undefined) {
+        // A preview-only client (a test, or a build without the search): leave the job as it is.
+        if (mine === seq) set({ measuredStatus: 'idle', measuredProgress: null });
+        return null;
+      }
+      const answers: SetupPick[] = [];
+      for (const index of indices) {
+        const sub = setupWorkJob(job, inputs.tools, index);
+        if (sub === null) continue;
+        const forKeys = deadSetupKeys(job, inputs.tools, index);
+        noteWorkStart('smart-pick');
+        noteStage('smart-pick', 'candidates', `measuring setup ${index + 1}'s work`);
+        const pick = await client.engraveSmartPick(
+          sub,
+          inputs.tools,
+          inputs.catalogue,
+          mine,
+          inputs.conditions,
+          inputs.shop,
+          (progress) => {
+            if (mine === seq) set({ measuredProgress: progress });
+          },
+        );
+        if (mine !== seq) return null; // superseded by a newer request (or a dispose)
+        if (pick !== null) answers.push({ setupIndex: index, forKeys, pick });
+      }
+      noteWorkEnd('smart-pick', 'done');
+      if (mine !== seq) return null;
+      set({
+        setupMeasured: answers.length === 0 ? null : answers,
+        setupMeasuredJob: answers.length === 0 ? null : jobFingerprintNow,
+        measuredStatus: answers.length === 0 ? 'idle' : 'ready',
+        measuredError: null,
+        measuredProgress: null,
+      });
+      return answers;
+    } catch (e) {
+      noteWorkEnd('smart-pick', 'failed');
+      if (mine === seq) set({ measuredStatus: 'error', measuredError: e instanceof Error ? e.message : String(e), measuredProgress: null });
+      return null;
+    }
+  }
+
   return {
     preview: null,
     status: 'idle',
@@ -349,6 +432,8 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
     measuredStatus: 'idle',
     measuredError: null,
     measuredProgress: null,
+    setupMeasured: null,
+    setupMeasuredJob: null,
     scrubStage: null,
     setScrubStage(stage) {
       set({ scrubStage: stage });
@@ -362,6 +447,11 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
       const jobFingerprintNow = measureFingerprint(job);
       const kept = get().measured !== null && get().measuredJob === jobFingerprintNow;
       const measurable = canMeasure(job);
+      // #835 — a multi-setup job is not measurable as ONE plan, but a setup that names a dead
+      // cutter is measurable on its own work; those answers are kept by the same rule.
+      const setupKept = get().setupMeasured !== null && get().setupMeasuredJob === jobFingerprintNow;
+      const setupIndices = measurable ? [] : setupsWithDeadCutters(job, getTools());
+      const measuring = measurable || setupIndices.length > 0;
       set({
         gen: mine,
         ...(kept
@@ -369,10 +459,11 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
           : {
               measured: null,
               measuredJob: null,
-              measuredStatus: measurable ? ('measuring' as const) : ('idle' as const),
+              measuredStatus: measuring && !setupKept ? ('measuring' as const) : ('idle' as const),
               measuredError: null,
               measuredProgress: null,
             }),
+        ...(setupKept ? {} : { setupMeasured: null, setupMeasuredJob: null }),
       });
       if (timer !== null) clearTimeout(timer);
       timer = setTimeout(() => {
@@ -387,6 +478,12 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
           pickTimer = null;
           if (mine !== seq) return;
           void runPick(job, mine, jobFingerprintNow);
+        }, ENGRAVE_PICK_DEBOUNCE_MS);
+      } else if (!setupKept && setupIndices.length > 0) {
+        pickTimer = setTimeout(() => {
+          pickTimer = null;
+          if (mine !== seq) return;
+          void runSetupPicks(job, mine, jobFingerprintNow);
         }, ENGRAVE_PICK_DEBOUNCE_MS);
       }
     },
@@ -422,6 +519,8 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
         measuredJob: null,
         measuredStatus: 'idle',
         measuredError: null,
+        setupMeasured: null,
+        setupMeasuredJob: null,
         scrubStage: null,
       });
     },
