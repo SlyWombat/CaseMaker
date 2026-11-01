@@ -6,19 +6,21 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useManageModeStore } from '@/store/manageModeStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
-import { accessoriesFor, machineRecordByProfile } from '@/store/locationStore';
+import { accessoriesFor, machineRecordByAddress, machineRecordByProfile } from '@/store/locationStore';
 import { MILL_MODELS } from '@/engine/cnc/machine';
 import { machineDisplayName } from '@/platform/locationClient';
 import { probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useStripAccessoryStore } from '@/store/stripAccessoryStore';
 import { useCameraPaneStore } from '@/store/cameraPaneStore';
 import { useMachineCamera } from '@/hooks/useMachineCamera';
 import { readStatusLine, type JobProgress, type StatusPosition, type StatusRate } from '@/platform/desktop/protocol';
 import { alarmLine } from '@/platform/machineUpload';
 import { stateColour, stateWord } from './machineWords';
+import { machineToolName, spindleMismatchWords } from './machineToolWords';
 import { rotaryAngleWords } from './rotaryWords';
 import { StripAccessories } from './StripAccessories';
 
@@ -222,6 +224,11 @@ function Axes({
 export function MachineStatusStrip(): JSX.Element | null {
   const machine = useMachineStore((s) => s.machine);
   const openManage = useManageModeStore((s) => s.openManage);
+  // #883 — the app's tool table, for the number the machine reports. THIS HOOK MUST STAY HERE, with
+  // the rest: the no-machine band returns before the with-machine body is reached, and a hook below
+  // that return is one more hook on the render a machine arrives, which React refuses outright
+  // ("Rendered more hooks than during the previous render") and the whole tree goes blank.
+  const registry = useToolRegistry();
   // #689 review — the no-machine band belongs to CNC work only. `Viewport` mounts this strip for
   // every project, so without this guard the band would sit under a case, rack or toolbox where
   // there is no machine to connect. The with-machine strip is unchanged and still rides every
@@ -377,11 +384,15 @@ export function MachineStatusStrip(): JSX.Element | null {
   const toolNumber = line?.tool ?? null;
   // The strip's machine is the OBSERVATION; the accessories and the probe name live on the saved
   // machine record it resolves to (#604's accessor).
-  const record = machineRecordByProfile(machine.profileId ?? null);
+  // #883 — a check made BY ADDRESS carries no profile id, so the machine the location already
+  // records is found by its host and port: the strip names it instead of printing the address twice.
+  const record =
+    machineRecordByProfile(machine.profileId ?? null) ?? machineRecordByAddress(machine.host, machine.port);
+  const recordProfileId = machine.profileId ?? record?.profileId ?? null;
   // #689 — the strip is the ONE home for the connection: the machine's name and address lead it, so
   // Cut never repeats a Machines card. The record's nickname wins; the profile name is next.
   const machineName =
-    machineDisplayName(record, machine.profileId === null ? undefined : MILL_MODELS[machine.profileId]) ??
+    machineDisplayName(record, recordProfileId === null ? undefined : MILL_MODELS[recordProfileId]) ??
     machine.name ??
     machine.host;
   // #658 — the rotary AXIS exists only when a rotary module is checked out to this machine. Not
@@ -393,28 +404,50 @@ export function MachineStatusStrip(): JSX.Element | null {
     typeof lastM491 === 'object' && lastM491 !== null && typeof (lastM491 as { z?: unknown }).z === 'number'
       ? (lastM491 as { z: number }).z
       : null;
-  const toolName = registrationActive ? (probeNameFor(record) ?? 'probe') : cutter;
+  // #883 — THE MACHINE'S TOOL, NEVER THE JOB'S. The label is derived from the number the machine
+  // reports: T8888 is the 3D probe, T0 is nothing fitted, anything else is looked up in the app's
+  // own tool table (the registry's entries by their numbers). The job's cutter is context, and a
+  // disagreement between the two is a separate fact in the hover, never a merged label.
+  // #883 — when the frame carries NO `T:` at all the machine has not spoken about its tool, and the
+  // strip keeps #652's rule (the frozen package's cutter, else the job's). A T0 IS a claim (nothing
+  // fitted) and is respected as such. Any other number is the machine's own and is looked up here:
+  // the number the program gave the job's cutter names that cutter; anything else needs ONE table
+  // entry with that number (two built-ins share a default number, and guessing between them would
+  // be the old merge in another form).
+  const machineTool = registrationActive
+    ? (probeNameFor(record) ?? 'probe')
+    : toolNumber === null
+      ? cutter
+      : machineToolName(toolNumber, (n) => {
+          if (jobCutter !== null && jobCutter.number === n) return toolDisplayName(jobCutter);
+          const matches = registry.filter((e) => e.tool.number === n);
+          return matches.length === 1 ? toolDisplayName(matches[0]!.tool) : null;
+        });
   // #769 — T:0 is the firmware's "nothing in the spindle" (a manual change parks at 0 until the next
   // program or probe claims a slot), so 0 is not a tool number the strip states. The raw value stays
   // in the hover as provenance; the visible number is only ever a tool the machine claims to hold.
   const activeTool = toolNumber !== null && toolNumber > 0 ? toolNumber : null;
+  const mismatch = registrationActive
+    ? null
+    : spindleMismatchWords(cutter, jobCutter?.number ?? null, toolNumber, machineTool);
   const toolTitle = [
     jobCutter?.name ?? null,
     toolNumber !== null ? `T${toolNumber}` : null,
     lastM491Z !== null ? `M491 ${fmt3(lastM491Z)}` : null,
+    mismatch,
   ]
     .filter((part): part is string => part !== null)
     .join(' · ');
   // #769 — the tool cell names the cutter AND says the machine's own T number. The name is the
   // elastic part; the number leads and stays fixed, so a long name ellipsises and the slot does not.
   const toolText =
-    toolName === null
+    machineTool === null
       ? activeTool !== null
         ? `T${activeTool}`
         : 'no cutter'
       : activeTool !== null
-        ? `T${activeTool} · ${toolName}`
-        : toolName;
+        ? `T${activeTool} · ${machineTool}`
+        : machineTool;
 
   // #769 — WHAT IT IS DOING, from the frame's own `F:` and `S:` fields. A machine that is Offline has
   // stopped answering, so its last rates are no more live than its last coordinates: they print "—"

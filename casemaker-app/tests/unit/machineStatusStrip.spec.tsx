@@ -7,7 +7,7 @@
 // through `machineStore` exactly as the heartbeat leaves it.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MachineStatusStrip } from '@/components/viewport/MachineStatusStrip';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { resetMachineRunStore, useMachineRunStore, type RunEntry } from '@/store/machineRunStore';
@@ -177,6 +177,21 @@ describe('#689 the connection', () => {
     expect(useManageModeStore.getState().scope).toBe('machines');
   });
 
+  it('#883 — the first machine to answer keeps the strip’s hook count the same', () => {
+    // The no-machine band returns before the with-machine body is reached. #883's tool-table lookup
+    // sat below that return for one pass, and React refused the next render outright — "Rendered
+    // more hooks than during the previous render" — blanking the whole window the moment a check
+    // found the bench Z1 (#885's e2e, 2026-11-01). This walk crosses that boundary in one tree.
+    useViewportStore.setState({ activeSidebarSection: 'cnc-engrave' });
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-no-machine')).not.toBeNull();
+
+    act(() => remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0>'));
+
+    expect(screen.getByTestId('machine-status-name').textContent).toBe('Makera Z1');
+    expect(screen.queryByTestId('machine-status-no-machine')).toBeNull();
+  });
+
   it('#689 review — the no-machine band stays out of a print project', () => {
     useViewportStore.setState({ activeSidebarSection: 'part' });
     const { container } = render(<MachineStatusStrip />);
@@ -251,13 +266,14 @@ describe('#647 the DRO — the tool slot', () => {
     expect(screen.getByTestId('machine-status-step').textContent).toContain('the surface seek');
   });
 
-  it('#769 does not state T:0 as the active tool — it is the firmware’s ‘nothing fitted’', () => {
+  it('#769/#883 does not state T:0 as the active tool — and never borrows the job’s cutter for it', () => {
     // 2026-10-08-console.log: stopped at an M6 waiting for the cutter (T:0 = none, waiting for 1).
     remember(
       '<Tool|MPos:-10.0900,-12.8300,-3.0000,0.0000,0.0000|WPos:138.3100,111.9700,71.8750,0.0000,0.0000|F:0.0,2000.0,100.0|S:0.0,10000.0,100.0,0,24.8,23.7,0,0,0,0|T:0,-9.757,1|L:0, 0, 0, 0.0,100.0|C:3,1,0,0|E:0,0,0,692,7610|OTA:0,0>',
     );
     render(<MachineStatusStrip />);
-    expect(screen.getByTestId('machine-status-tool').textContent).toBe('⌀ 1 mm flat end');
+    // The machine holds nothing: the strip says so rather than printing the job's cutter.
+    expect(screen.getByTestId('machine-status-tool').textContent).toBe('no cutter');
     expect(screen.getByTestId('machine-status-tool').textContent).not.toContain('T0');
   });
 });
@@ -622,5 +638,53 @@ describe('#659 the state popover', () => {
       "This machine's status frame carries no extra readings.",
     );
     expect(screen.queryByTestId('machine-status-monitor-spindle')).toBeNull();
+  });
+});
+
+
+// #883 — THE MACHINE'S TOOL BY NAME. The strip pairs the machine's own `T:` with the job's cutter,
+// so a Z1 holding the 3D probe (T8888) read "T8888 · ⌀1 mm flat end". The label now comes from
+// the machine: T8888 is the 3D probe, another number is looked up in the tool table, and a
+// disagreement with the job is a separate fact.
+describe('#883 — the machine’s tool, never the job’s', () => {
+  it('T8888 is the 3D probe, and the disagreement with the job is stated separately', () => {
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0|T:8888>');
+    render(<MachineStatusStrip />);
+    const slot = screen.getByTestId('machine-status-tool');
+    expect(slot.textContent).toBe('T8888 · 3D probe');
+    expect(slot.getAttribute('title')).toContain(
+      'the job wants ⌀ 1 mm flat end; the spindle holds the 3D probe',
+    );
+  });
+
+  it('an unknown T is just its number — never the job’s cutter name', () => {
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0|T:7>');
+    render(<MachineStatusStrip />);
+    const slot = screen.getByTestId('machine-status-tool');
+    expect(slot.textContent).toBe('T7');
+    expect(slot.textContent).not.toContain('flat end');
+    expect(slot.getAttribute('title')).toContain('the job wants ⌀ 1 mm flat end; the spindle holds T7');
+  });
+
+  it('a T that matches the job’s cutter is named from the table, with no mismatch sentence', () => {
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0|T:1>');
+    render(<MachineStatusStrip />);
+    const slot = screen.getByTestId('machine-status-tool');
+    expect(slot.textContent).toBe('T1 · ⌀ 1 mm flat end');
+    expect(slot.getAttribute('title')).not.toContain('the job wants');
+  });
+
+  it('a by-address connection resolves to the recorded machine for its name', () => {
+    // A typed address carries no profile id; the location records this host and port.
+    useLocationStore.setState({
+      location: {
+        ...LOCATION,
+        machines: [{ ...(LOCATION.machines[0] as object), nickname: 'Zoomba' }],
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0|T:1>', null);
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-name').textContent).toBe('Zoomba');
+    expect(screen.getByTestId('machine-status-host').textContent).toBe('192.0.2.10');
   });
 });

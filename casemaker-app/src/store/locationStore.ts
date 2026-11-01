@@ -384,6 +384,22 @@ export function machineRecordByProfile(profileId: string | null): MachineRecord 
 }
 
 /**
+ * #883 — THE RECORD A CONNECTION BY ADDRESS BELONGS TO. A check made with a typed address (the
+ * wizard's "another machine…", the Machines page's address field) carries no profile id, but the
+ * location may already record that host and port; resolving it there gives the strip the machine's
+ * own name instead of printing the address twice.
+ */
+export function machineRecordByAddress(host: string | null, port: number | null = null): MachineRecord | null {
+  if (host === null) return null;
+  const machines = useLocationStore.getState().location?.machines ?? [];
+  return (
+    machines.find(
+      (m) => m.address !== null && m.address.host === host && (port === null || m.address.port === port),
+    ) ?? null
+  );
+}
+
+/**
  * #779 — the ACTIVE bed profile's vise placement frame (machine XY), or null when the record has
  * not placed it. A registration's write (#600) is what fills it; until then the pictures fall
  * back to the pins plus the drawn base's constants, and say so.
