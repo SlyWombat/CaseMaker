@@ -746,6 +746,20 @@ function runProgressWords(
 }
 
 /**
+ * #830 review — THE PROGRESS LINE IS ITS OWN LEAF. The sweep reports a checkpoint per swept row,
+ * and the sim store's `progress` changes on every one. Subscribing the whole panel to it (as #830
+ * first did) re-rendered every group, row and fold once per row: the two-side mouse-shell walk
+ * (flipMouldShell) went from 71.7 s to locked past 18 minutes. Only this span reads those three
+ * fields, so only this span re-renders; the panel around it is untouched.
+ */
+function RunProgressLine({ run }: { run: Pick<EngraveRunState, 'phase' | 'progress' | 'simProgram'> }): JSX.Element {
+  const simStatus = useSimStore((s) => s.status);
+  const simPhase = useSimStore((s) => s.phase);
+  const simProgress = useSimStore((s) => s.progress);
+  return <span>{runProgressWords(run, simStatus, simPhase, simProgress)}</span>;
+}
+
+/**
  * #830 review — the ONE sentence a stopped simulation gets, with the worker's own words inside it
  * ("The simulation stopped: the simulation worker was killed by the test."). Said once, beside
  * Generate with Try again; the run's other surfaces stay quiet or say "not simulated".
@@ -1863,10 +1877,6 @@ export function EngravePanel(): JSX.Element {
   // ---- the run (#206) ----------------------------------------------------------------------
 
   const run = useEngraveRunStore();
-  // #830 — the simulation's own stage feeds the progress line while the sweep runs.
-  const simStatus = useSimStore((s) => s.status);
-  const simPhase = useSimStore((s) => s.phase);
-  const simProgress = useSimStore((s) => s.progress);
   const simEnabled = featureSim;
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
 
@@ -4384,7 +4394,7 @@ export function EngravePanel(): JSX.Element {
               data-testid="engrave-generate-progress"
               style={{ display: 'flex', alignItems: 'center', gap: 8, flexBasis: '100%', fontSize: 12, color: '#c8d3de' }}
             >
-              <span>{runProgressWords(run, simStatus, simPhase, simProgress)}</span>
+              <RunProgressLine run={run} />
               <button type="button" data-testid="engrave-generate-cancel" onClick={() => run.cancelGenerate()}>
                 Cancel
               </button>
