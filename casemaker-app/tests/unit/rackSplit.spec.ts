@@ -18,7 +18,7 @@ import {
   type RackPartSplitRequest,
 } from '@/engine/compiler/rackSplit';
 import { LUG_EMBED, LUG_LAP } from '@/engine/compiler/shellSplit';
-import { cube, intersection, translate, type Aabb, type BuildOp } from '@/engine/compiler/buildPlan';
+import { cube, difference, intersection, translate, type Aabb, type BuildOp } from '@/engine/compiler/buildPlan';
 import type { PrinterVolume } from '@/types/printer';
 import { exec } from './helpers/manifoldExec';
 
@@ -146,7 +146,7 @@ describe('#266 — the strap joint on a rack part', () => {
 // #266 — the rack's parts as the engine offers them (rack.ts wiring).
 // ---------------------------------------------------------------------------
 
-import { buildRackSplitNodes, rackSplitOffers } from '@/engine/compiler/rack';
+import { KS_WIN_W, buildRackSplitNodes, keystoneLayout, rackSplitOffers } from '@/engine/compiler/rack';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { createDefaultProject } from '@/store/projectStore';
 import type { RackParams } from '@/types';
@@ -207,5 +207,58 @@ describe('#266 — the rack’s own parts, part by part', () => {
     expect(plan.nodes.some((n) => n.id.startsWith('rack-top-split-'))).toBe(true);
     // The whole parts stay on the list: the split is an offer, not a replacement.
     expect(plan.nodes.some((n) => n.id === 'rack-top')).toBe(true);
+  });
+});
+
+describe('#266 — face plates and lattice decks', () => {
+  it('a keystone plate’s seam lands between whole jack windows', () => {
+    const rack: RackParams = { ...SAMPLE, accessories: [{ id: 'k', type: 'keystone' }] };
+    const offer = rackSplitOffers(rack, SMALL).find((o) => o.partId === 'rack-keystone-0');
+    expect(offer?.state).toBe('available');
+    const { jacksX } = keystoneLayout(rack.width);
+    expect(jacksX.length).toBeGreaterThan(1);
+    for (const seam of offer!.seams!) {
+      if (seam.axis !== 0) continue; // an X seam is the one that meets the jack row
+      for (const cx of jacksX) {
+        // Clear of the window, whole jack on both sides.
+        expect(Math.abs(seam.at - cx)).toBeGreaterThanOrEqual(KS_WIN_W / 2);
+      }
+    }
+  });
+
+  it('a seam band makes the cut run through solid material across the part', () => {
+    // A lattice-like deck: square holes leaving a grid, so the band has voids
+    // to fill where the seam crosses it.
+    const holes: BuildOp[] = [];
+    for (let x = 10; x < 290; x += 14) {
+      for (let y = 10; y < 110; y += 14) holes.push(translate([x, y, -1], cube([8, 8, 5])));
+    }
+    const op = difference([slab(300, 120, 3), ...holes]);
+    const plain = { partOp: op, bounds: boundsOf(op), printer: BED, face: { axis: 2 as const, sign: -1 as const } };
+    const banded = { ...plain, seamBand: { z: [0, 3] as [number, number], width: 12 } };
+    const plainSplit = buildRackPartSplit(plain, planRackPartSplit(plain)!, 'rack-shelf-0')!;
+    const bandedSplit = buildRackPartSplit(banded, planRackPartSplit(banded)!, 'rack-shelf-0')!;
+    // The band is real material: the banded piece carries more of it.
+    const vol = (o: BuildOp): number => {
+      const m = exec(o);
+      const v = m.volume();
+      m.delete();
+      return v;
+    };
+    const total = (nodes: { op: BuildOp }[]): number => nodes.reduce((n, node) => n + vol(node.op), 0);
+    expect(total(bandedSplit.nodes)).toBeGreaterThan(total(plainSplit.nodes));
+    // ...and it is SOLID across the deck along the seam on BOTH sides (the
+    // probes sit on the band, 2 mm inside each cut face).
+    const seam = bandedSplit.seams[0]!;
+    for (const [node, off] of [
+      [bandedSplit.nodes[0]!, -2],
+      [bandedSplit.nodes[1]!, 2],
+    ] as const) {
+      for (const y of [10, 30, 50, 70, 90, 110]) {
+        const at: [number, number, number] =
+          seam.axis === 0 ? [seam.at + off, y, 1.5] : [y, seam.at + off, 1.5];
+        expect(probeMaterial(node.op, at), `band at y=${y}`).toBeGreaterThan(0.5);
+      }
+    }
   });
 });

@@ -84,6 +84,15 @@ export interface RackPartSplitRequest {
   face: StrapFace;
   /** Regions a seam must not cross, in the part's assembly frame. */
   keepOut?: Aabb[];
+  /**
+   * #266 — A SOLID STRIP UNDER THE SEAM, for a part whose deck is a lightened
+   * lattice (the shelves and the cable tray). A straight seam cannot avoid a
+   * ±45° lattice, so the joint supplies the material instead: a band across
+   * the full width at the seam, `z` tall as the deck, so the cut runs through
+   * solid deck and each piece's edge is closed. Without it the seam leaves
+   * open lattice cells on both pieces.
+   */
+  seamBand?: { z: [number, number]; width: number };
   size?: FastenerSize;
 }
 
@@ -172,6 +181,27 @@ function strapBox(ext: [ [number, number], [number, number], [number, number] ])
  * nodes are in the part's own frame; the caller positions them as it does the
  * whole part.
  */
+/** The solid strip a seam runs through, across the part's far horizontal extent. */
+function seamBandBox(
+  seam: SplitSeam,
+  req: RackPartSplitRequest,
+  band: NonNullable<RackPartSplitRequest['seamBand']>,
+): BuildOp {
+  const otherAxis: 0 | 1 = seam.axis === 0 ? 1 : 0;
+  const ext: [[number, number], [number, number], [number, number]] = [
+    [0, 0],
+    [0, 0],
+    [0, 0],
+  ];
+  ext[seam.axis] = [
+    Math.max(seam.at - band.width / 2, req.bounds.min[seam.axis]!),
+    Math.min(seam.at + band.width / 2, req.bounds.max[seam.axis]!),
+  ];
+  ext[otherAxis] = [req.bounds.min[otherAxis]!, req.bounds.max[otherAxis]!];
+  ext[2] = band.z;
+  return strapBox(ext);
+}
+
 export function buildRackPartSplit(
   req: RackPartSplitRequest,
   plan?: RackPartJointPlan,
@@ -186,6 +216,11 @@ export function buildRackPartSplit(
   }
   const joint = plan ?? planRackPartSplit(req);
   if (!joint) return null;
+  // A banded part re-splits WITH its seam strips unioned, so both pieces'
+  // cut edges are solid deck (#266's shelf/faceplate rule).
+  const pieces = req.seamBand
+    ? splitBySeams(union([req.partOp, ...joint.seams.map((seam) => seamBandBox(seam, req, req.seamBand!))]), req.bounds, joint.seams)
+    : joint.pieces;
   const depth = strapDepthRange(req);
   const depthMid = (depth[0] + depth[1]) / 2;
 
@@ -196,7 +231,7 @@ export function buildRackPartSplit(
     else strapsByPiece.set(lug.piece, [lug]);
   }
 
-  const nodes: BuildNode[] = joint.pieces.map((piece, index) => {
+  const nodes: BuildNode[] = pieces.map((piece, index) => {
     let op = piece.op;
     const holes: BuildOp[] = [];
     for (const lug of strapsByPiece.get(index) ?? []) {

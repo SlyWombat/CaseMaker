@@ -416,7 +416,7 @@ const TAB_ACCESS_D = 10.8;
 /** Keystone jack (industry standard, NEVER scaled): retention window in a
  *  2 mm web the jack's latch clicks over (insert from the back), body
  *  clearance behind, 30 mm jack pitch. */
-const KS_WIN_W = 15.0;
+export const KS_WIN_W = 15.0;
 const KS_WIN_H = 16.7;
 const KS_WEB_T = 2;
 const KS_BODY_W = 17.4;
@@ -1280,15 +1280,35 @@ function buildBlank(dims: RackDims, nSlots: number): BuildOp {
 /** Keystone patch plate: as many standard jacks as the width allows, plus a
  *  cable pass-through when there's room. Jacks insert from the BACK; their
  *  latch clicks over the 2 mm front web. */
+/**
+ * #266 — the keystone row's layout, shared by the geometry and the split's
+ * seam keep-outs. The "anything that lines up with a pattern comes from the
+ * pattern's own function" rule (`lightenBars` says the same): a keep-out
+ * reconstructed beside `buildKeystone` would drift the first time a constant
+ * moved.
+ */
+export function keystoneLayout(width: number): {
+  rowX0: number;
+  rowW: number;
+  jacksX: number[];
+  spare: { x: number; w: number } | null;
+} {
+  const usable0 = SIDE_T + SIDE_CLEAR + RIB_W + 6;
+  const usable1 = width - SIDE_T - SIDE_CLEAR - RIB_W - 6;
+  const count = Math.max(1, Math.floor((usable1 - usable0) / KS_PITCH));
+  const rowW = count * KS_PITCH;
+  const rowX0 = usable0 + (usable1 - usable0 - rowW) / 2;
+  const jacksX = Array.from({ length: count }, (_, j) => rowX0 + KS_PITCH / 2 + j * KS_PITCH);
+  const spareW = usable1 - (rowX0 + rowW);
+  return { rowX0, rowW, jacksX, spare: spareW >= 55 ? { x: rowX0 + rowW + 6, w: spareW - 12 } : null };
+}
+
 function buildKeystone(dims: RackDims, nSlots: number): { op: BuildOp; jacks: number } {
   const { width } = dims;
   const base = faceplateBase(dims, nSlots, FACE_T);
   const h = base.h;
-  const usable0 = SIDE_T + SIDE_CLEAR + RIB_W + 6;
-  const usable1 = width - SIDE_T - SIDE_CLEAR - RIB_W - 6;
-  const jacks = Math.max(1, Math.floor((usable1 - usable0) / KS_PITCH));
-  const rowW = jacks * KS_PITCH;
-  const rowX0 = usable0 + (usable1 - usable0 - rowW) / 2;
+  const { rowX0, rowW, jacksX, spare } = keystoneLayout(width);
+  const jacks = jacksX.length;
   const zC = h / 2;
   const solid = [...base.solid];
   const cuts = [...base.cuts];
@@ -1300,8 +1320,7 @@ function buildKeystone(dims: RackDims, nSlots: number): { op: BuildOp; jacks: nu
       cube([rowW + 8, KS_DEPTH - FACE_T + OVER, KS_BODY_H + 8]),
     ),
   );
-  for (let j = 0; j < jacks; j++) {
-    const cx = rowX0 + KS_PITCH / 2 + j * KS_PITCH;
+  for (const cx of jacksX) {
     // Front retention window through the 2 mm web…
     cuts.push(
       translate([cx - KS_WIN_W / 2, -OVER, zC - KS_WIN_H / 2], cube([KS_WIN_W, KS_WEB_T + OVER, KS_WIN_H])),
@@ -1317,11 +1336,9 @@ function buildKeystone(dims: RackDims, nSlots: number): { op: BuildOp; jacks: nu
   // Cable pass-through in the leftover width (right of the jack row).
   // roundedRectPrism extrudes along z; rotate X by -90° re-aims it along +y
   // so the slot pierces the plate + boss band front-to-back.
-  const spare = usable1 - (rowX0 + rowW);
-  if (spare >= 55) {
-    const sx = rowX0 + rowW + 6;
+  if (spare !== null) {
     cuts.push(
-      translate([sx, -OVER, zC + 9], rotate([-90, 0, 0], roundedRectPrism(spare - 12, 18, KS_DEPTH + 2 * OVER, 6))),
+      translate([spare.x, -OVER, zC + 9], rotate([-90, 0, 0], roundedRectPrism(spare.w, 18, KS_DEPTH + 2 * OVER, 6))),
     );
   }
   return { op: difference([union(solid), ...cuts]), jacks };
@@ -2094,12 +2111,36 @@ function sidePanelKeepOuts(rack: RackParams, dims: RackDims): Aabb[] {
   return out;
 }
 
+/** #266 — the solid strip a shelf's or tray's seam runs through, mm along the
+ *  seam (the strap's own width, so the band and the strap agree). */
+const SEAM_BAND_W = 12;
+
+/**
+ * #266 — a KEYSTONE plate's seam keep-outs: the jack windows and the cable
+ * pass-through. The seam must land between whole jacks, or a piece loses half
+ * an opening and a jack stops fitting.
+ */
+function keystoneKeepOuts(dims: RackDims, nSlots: number, z0: number): Aabb[] {
+  const h = nSlots * SLOT_PITCH - 0.5;
+  const zC = z0 + h / 2;
+  const { jacksX, spare } = keystoneLayout(dims.width);
+  const out: Aabb[] = jacksX.map((cx) => ({
+    min: [cx - KS_WIN_W / 2, -1, zC - KS_WIN_H / 2],
+    max: [cx + KS_WIN_W / 2, dims.depth + 1, zC + KS_WIN_H / 2],
+  }));
+  if (spare !== null) {
+    const sz = z0 + h / 2 + 9;
+    out.push({ min: [spare.x, -1, sz - 9], max: [spare.x + spare.w, dims.depth + 1, sz + 9] });
+  }
+  return out;
+}
+
 /** The parts a split would work on, rebuilt from the same builders the node
  *  list uses, each with the face its strap stands on and its seam keep-outs. */
 function rackSplitEntries(
   rack: RackParams,
   dims: RackDims,
-): { id: string; op: BuildOp; face: StrapFace; keepOut: Aabb[] }[] {
+): { id: string; op: BuildOp; face: StrapFace; keepOut: Aabb[]; seamBand?: { z: [number, number]; width: number } }[] {
   const out = frameParts(rack, dims).map((n) => ({
     id: n.id,
     op: n.op,
@@ -2111,11 +2152,20 @@ function rackSplitEntries(
     const n = accessorySlots(acc);
     const z0 = dims.slotZ(Math.min(cursor, Math.max(0, dims.slots - n))) + 0.25;
     cursor += n;
+    // #266 — face plates keep whole openings; lattice decks get a solid seam band.
+    const keepOut = acc.type === 'keystone' ? keystoneKeepOuts(dims, n, z0) : [];
+    const seamBand =
+      acc.type === 'shelf'
+        ? { z: [z0, z0 + SHELF_DECK_T] as [number, number], width: SEAM_BAND_W }
+        : acc.type === 'cable-tray'
+          ? { z: [z0, z0 + TRAY_DECK_T] as [number, number], width: SEAM_BAND_W }
+          : undefined;
     out.push({
       id: `rack-${acc.type}-${i}`,
       op: accessoryPlacedOp(rack, dims, acc, n, z0),
       face: strapFaceOfAccessory(),
-      keepOut: [],
+      keepOut,
+      ...(seamBand !== undefined ? { seamBand } : {}),
     });
   });
   return out;
@@ -2133,6 +2183,8 @@ export interface RackPartSplitOffer {
   pieces?: number;
   screws?: number;
   screwLabel?: string;
+  /** Where the cuts go, for callers that test or show the joint. */
+  seams?: { axis: 0 | 1; at: number }[];
 }
 
 /**
@@ -2160,7 +2212,14 @@ export function rackSplitOffers(rack: RackParams, printerOverride?: PrinterVolum
       continue;
     }
     if (partFitsBed(w, d, printer)) continue;
-    const plan = planRackPartSplit({ partOp: part.op, bounds, printer, face: part.face, keepOut: part.keepOut });
+    const plan = planRackPartSplit({
+      partOp: part.op,
+      bounds,
+      printer,
+      face: part.face,
+      keepOut: part.keepOut,
+      ...(part.seamBand !== undefined ? { seamBand: part.seamBand } : {}),
+    });
     offers.push(
       plan
         ? {
@@ -2169,6 +2228,7 @@ export function rackSplitOffers(rack: RackParams, printerOverride?: PrinterVolum
             pieces: plan.pieces.length,
             screws: plan.screwCount,
             screwLabel: `${DEFAULT_SPLIT_SCREW}×${LUG_LAP * 2} socket cap`,
+            seams: plan.seams,
           }
         : { partId: part.id, state: 'blocked' },
     );
@@ -2190,7 +2250,14 @@ export function buildRackSplitNodes(rack: RackParams, printerOverride?: PrinterV
     const bounds = aabbOfOp(part.op);
     if (!bounds) continue;
     const split = buildRackPartSplit(
-      { partOp: part.op, bounds, printer, face: part.face, keepOut: part.keepOut },
+      {
+        partOp: part.op,
+        bounds,
+        printer,
+        face: part.face,
+        keepOut: part.keepOut,
+        ...(part.seamBand !== undefined ? { seamBand: part.seamBand } : {}),
+      },
       undefined,
       part.id,
     );
