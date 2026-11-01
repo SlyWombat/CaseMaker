@@ -12,6 +12,9 @@ import { generate } from './helpers/engravePipeline';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { createEngravePreviewer } from '@/workers/sim/engravePreview';
+import { engravabilityFindings, type LabelEngravability } from '@/workers/sim/engraveGeometry';
+import { restJobFor } from '@/engine/cnc/engrave/restPass';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -28,10 +31,27 @@ const V: Tool = {
 };
 const FLAT_KEY = 'inv:flat-3.175-865';
 const V_KEY = 'inv:chamfer-90-865';
+/** A 1 mm flat like j20's rest: no shoulder or flute stated, so the holder cannot be proven. */
+const FINE: Tool = flatEndMill(1, { name: '1 mm flat', fluteLength: null, shoulderLength: null });
+const FINE_KEY = 'inv:flat-1-865';
 const ENTRIES: ToolLibraryEntry[] = [
   { key: FLAT_KEY, tool: { ...FLAT, id: FLAT_KEY, number: 1 }, provenance: 'test' },
   { key: V_KEY, tool: { ...V, id: V_KEY, number: 2 }, provenance: 'test' },
+  { key: FINE_KEY, tool: { ...FINE, id: FINE_KEY, number: 3 }, provenance: 'test' },
 ];
+
+/** The same raised field, rested by a finer FLAT instead of the V. */
+function raisedFlatRestJob(): EngraveJob {
+  const job = raisedJob();
+  return {
+    ...job,
+    setups: job.setups!.map((setup) => ({
+      ...setup,
+      tools: [FLAT_KEY, FINE_KEY],
+      toolItems: { [FLAT_KEY]: ['clear'], [FINE_KEY]: [] },
+    })),
+  };
+}
 
 /** A raised M in a 6 mm cutaway — the j20 shape, small enough for a unit test. */
 function raisedJob(): EngraveJob {
@@ -123,6 +143,72 @@ describe('#865 a later program’s own findings', () => {
     const short = preview!.findings.find((f) => f.code === 'vcarve-depth-beyond-cone');
     expect(short?.message).toMatch(/^program 2 \(/);
     expect(short?.message).toContain('6 mm deep');
+  }, 180_000);
+
+  it('a normal rest pair carries no area-loss finding on program 2', () => {
+    // The rest regions are the first program's leftovers, named "rest of …" — their outline was
+    // never the design, so "loses N % of its area" is true of every rest pass. The verifier's own
+    // findings still apply.
+    const g = generate(tl, raisedFlatRestJob(), null, [], undefined, { tools: ENTRIES });
+    expect(
+      g.ok,
+      JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error') }),
+    ).toBe(true);
+    expect(g.programs).toHaveLength(2);
+    const areaLoss = new Set(['item-detail-lost', 'item-chars-lost', 'item-empty']);
+    expect((g.programs[1]!.findings ?? []).some((f) => areaLoss.has(f.code))).toBe(false);
+    expect(
+      g.findings.some((f) => /^program 2 \(/.test(f.message) && areaLoss.has(f.code)),
+      JSON.stringify(g.findings.map((f) => f.message)),
+    ).toBe(false);
+    // The suppression is keyed on the `restRegion` marker the rest job sets, never on the display
+    // name; the sweep's holder gate (`holder-unproven`, a SIMULATION diagnostic) and the verifier's
+    // findings are untouched.
+
+    expect(g.programs[1]!.nc).toContain('rest of');
+  }, 180_000);
+
+  it('keys the suppression on the rest marker, not the name: a user’s "rest of …" is judged normally', () => {
+    const base = defaultEngraveJob();
+    const userVector: NonNullable<EngraveJob['vectors']>[number] = {
+      kind: 'vector',
+      id: 'user-vector',
+      sourceName: 'rest of the panel.svg',
+      contours: [[[0, 0], [10, 0], [10, 10], [0, 10]]],
+      fillRule: 'EvenOdd',
+      width: 10,
+      height: 10,
+      position: { x: 30, y: 30 },
+      rotation: 0,
+      depth: 0.5,
+      enabled: true,
+    };
+    const job: EngraveJob = {
+      ...base,
+      labels: [],
+      shapes: [],
+      combined: [],
+      vectors: [userVector],
+      toolKey: FLAT_KEY,
+      tool: { ...FLAT, id: FLAT_KEY, number: 1 },
+    };
+    const rows: LabelEngravability[] = [
+      { labelId: 'user-vector', glyphArea: 100, openedArea: 50, ratio: 0.5, emptyChars: [], outsideArea: 0, polygons: [] },
+    ];
+    const findings = engravabilityFindings(job, rows, () => 0.5, FLAT);
+    expect(findings.some((f) => f.code === 'item-detail-lost')).toBe(true);
+    // The marker is what the rest job sets, and the document keeps it through the schema.
+    const restJob = restJobFor(
+      { ...job, vectors: [userVector] },
+      [{ id: 'r1', depth: 2, polygons: [[[10, 10], [20, 10], [20, 20], [10, 20]]] }],
+      FLAT_KEY,
+    );
+    expect(restJob.vectors?.[0]?.restRegion).toBe(true);
+    const parsed = parseEngraveJob(restJob);
+    expect(parsed.ok, parsed.ok ? '' : parsed.errors.join('; ')).toBe(true);
+    if (parsed.ok) expect(parsed.job.vectors?.[0]?.restRegion).toBe(true);
+    // A user's vector has no marker, so the suppression cannot claim it.
+    expect(userVector.restRegion).toBeUndefined();
   }, 180_000);
 
   it('does not repeat a design-level finding on a later program', () => {

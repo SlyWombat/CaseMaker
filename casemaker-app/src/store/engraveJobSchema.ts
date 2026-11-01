@@ -472,6 +472,12 @@ const vectorSchema = shapeBaseSchema
       .string()
       .min(1)
       .describe('Name of the design file the outline came from.'),
+    restRegion: z
+      .literal(true)
+      .optional()
+      .describe(
+        'Set by the generator on the synthetic regions a rest pass cuts (their outline is only what the earlier program left); never on an imported design.',
+      ),
     contours: z
       .array(z.array(polygonPointSchema).min(3))
       .min(1)

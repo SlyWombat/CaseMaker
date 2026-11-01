@@ -913,6 +913,13 @@ export interface EngraveVectorShape extends EngraveShapeBase {
    * SVG/DXF, hand-built items, and imports made before this field existed.
    */
   importedFrom?: { name: string; sha256: string };
+  /**
+   * #865 — A SYNTHETIC REST REGION. Set by `restJobFor` on each vector a rest pass cuts: the region
+   * is, by construction, only what the earlier program left, so its outline was never the design
+   * and the engravability area-loss sentences are suppressed for it. NEVER set on an item the
+   * document's author made — a file named "rest of …" is a user's own and is judged as any other.
+   */
+  restRegion?: true;
 }
 
 /**

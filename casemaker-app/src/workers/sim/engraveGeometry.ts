@@ -324,11 +324,20 @@ export function engravabilityFindings(
     const primitive = src === undefined ? findPrimitive(job, row.labelId) : undefined;
     const label = src && !isShapeItem(src) ? src : null;
     const shape = src && isShapeItem(src) ? src : null;
+    // #865 follow-up — A REST PROGRAM'S REGIONS ARE SYNTHETIC. `restJobFor` marks each one
+    // `restRegion` and names it "rest of …" for display; the marker, not the name, is what says
+    // the outline is only what the earlier cutter could not reach — a user's own file may well be
+    // called "rest of …" and is judged like any other. For a marked region "loses N % of its area"
+    // measures the rest opening against an outline that was never the design, true of every rest
+    // pass and meaningless. The area-loss sentences are suppressed for those items; the rest's real
+    // question (what it left uncut) is its own measure, and the verifier's findings — holder
+    // clearance, gouges, the fixture — still apply.
+    const syntheticRest = src !== undefined && isShapeItem(src) && src.kind === 'vector' && src.restRegion === true;
 
     const empty =
       (src !== undefined && hasContent(src) && row.openedArea === 0) ||
       (primitive !== undefined && row.glyphArea > 0 && row.openedArea === 0);
-    if (empty) {
+    if (empty && !syntheticRest) {
       findings.push({
         severity: 'warning',
         code: 'item-empty',
@@ -343,7 +352,7 @@ export function engravabilityFindings(
     }
 
     // Whole characters are a label-only loss: a shape has no glyphs to lose one at a time.
-    if (label && row.emptyChars.length > 0) {
+    if (label && row.emptyChars.length > 0 && !syntheticRest) {
       const list = row.emptyChars.map((c) => `"${c.char}" (index ${c.index})`).join(', ');
       findings.push({
         severity: 'warning',
@@ -353,7 +362,7 @@ export function engravabilityFindings(
       });
     }
 
-    if (label && row.ratio > 0 && row.ratio < bar) {
+    if (label && row.ratio > 0 && row.ratio < bar && !syntheticRest) {
       const lostPct = (1 - row.ratio) * 100;
       // A measured suggestion, not a scaled one (#201 review): raise the cap height until
       // the re-measured opening reaches the warning bar, or say the cutter is too large.
@@ -368,7 +377,7 @@ export function engravabilityFindings(
         labelId: row.labelId,
         message: `Engrave text "${label.text}" loses ${lostPct.toFixed(0)}% of its area to ${cutter}; ${hint}.`,
       });
-    } else if (shape && row.ratio > 0 && row.ratio < bar) {
+    } else if (shape && row.ratio > 0 && row.ratio < bar && !syntheticRest) {
       // No cap height to offer: say so plainly and point at the two real choices (#214).
       const lostPct = (1 - row.ratio) * 100;
       findings.push({

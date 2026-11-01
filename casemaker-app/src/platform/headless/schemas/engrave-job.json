@@ -7393,6 +7393,11 @@
             },
             "type": "object"
           },
+          "restRegion": {
+            "const": true,
+            "description": "Set by the generator on the synthetic regions a rest pass cuts (their outline is only what the earlier program left); never on an imported design.",
+            "type": "boolean"
+          },
           "rotation": {
             "description": "Rotation in degrees counter-clockwise about position.",
             "type": "number"

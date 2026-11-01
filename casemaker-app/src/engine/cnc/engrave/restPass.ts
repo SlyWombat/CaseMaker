@@ -370,6 +370,9 @@ export function restJobFor(
       rotation: 0,
       depth: Math.min(r.depth, floorAllowed),
       enabled: true,
+      // #865 — this region is the FIRST program's leftover, not a design: the marker travels with
+      // the document (the schema keeps it) so the engravability sentences can tell the two apart.
+      restRegion: true,
     };
   });
   return {
