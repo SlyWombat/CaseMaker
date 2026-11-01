@@ -21,7 +21,7 @@ import { buildHouseInventory } from '@/engine/cnc/houseDocument';
 import {
   cuttingDiameter,
   statedCuttingSize,
-  threadMillNamedDiameter,
+  namedCuttingDiameter,
   type Tool,
 } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -83,10 +83,10 @@ describe('#859 — the M3 job picks Makera’s M3 thread mill', () => {
 
 describe('#859 — a thread mill’s cutting diameter is never its shank', () => {
   it('reads the size its name prints', () => {
-    expect(threadMillNamedDiameter('Thread Milling Bit - 1/8" Shank M3(d2.4mm) * 9mm')).toBe(2.4);
-    expect(threadMillNamedDiameter('Thread Milling Bit - 1/8" Shank M5(d4) * 15mm')).toBe(4);
-    expect(threadMillNamedDiameter('Thread mill 1/4-20 UNC (d4.0mm)')).toBe(4);
-    expect(threadMillNamedDiameter('3.175*M3*9mm Thread')).toBeNull();
+    expect(namedCuttingDiameter('Thread Milling Bit - 1/8" Shank M3(d2.4mm) * 9mm')).toBe(2.4);
+    expect(namedCuttingDiameter('Thread Milling Bit - 1/8" Shank M5(d4) * 15mm')).toBe(4);
+    expect(namedCuttingDiameter('Thread mill 1/4-20 UNC (d4.0mm)')).toBe(4);
+    expect(namedCuttingDiameter('3.175*M3*9mm Thread')).toBeNull();
   });
 
   it('a record with only the shank in `diameter` and the size in its name cuts at the name’s size', () => {

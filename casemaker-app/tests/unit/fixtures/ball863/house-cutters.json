@@ -1,0 +1,3317 @@
+{
+ "_note": "#863 — the demo library's 29 house (kz-) records as the demo5 bench location served them (before #863: a ball's and a drill's `diameter` is the 3.175 shank), the Makera catalogue tools with the same g_IDs plus a full-shank ball and a tapered ball-nose engraver, and every feed row for those g_IDs. Trimmed from ~/casemaker-manager/demo5/bench on 2026-11-01.",
+ "catalogue": [
+  {
+   "key": "cat:019c049a-816a-72a0-9b81-3bb1d7e154e0",
+   "tool": {
+    "number": 1,
+    "id": "132112103803",
+    "name": "3.175*1*3mm Ball Nose(Metal)",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 1.0,
+    "cornerRadius": 0.5,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": 3.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-816a-7a60-b3cc-a23c770b168e",
+   "tool": {
+    "number": 1,
+    "id": "131012103804",
+    "name": "3.175*1*4mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 1.0,
+    "cornerRadius": 0.5,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 4.0,
+    "shoulderLength": 4.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-816a-728d-aec2-8e415f77087b",
+   "tool": {
+    "number": 1,
+    "id": "132112313810",
+    "name": "3.175*10mm Ball Nose(Metal)",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 1.5875,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": 10.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-816a-724c-9b81-3c9736a934f1",
+   "tool": {
+    "number": 1,
+    "id": "131012203812",
+    "name": "3.175*2*12mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": 1.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-816a-7881-a26b-4f766593eee9",
+   "tool": {
+    "number": 1,
+    "id": "132112203806",
+    "name": "3.175*2*6mm Ball Nose(Metal)",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": 1.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 6.0,
+    "shoulderLength": 6.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-816a-721a-9280-827661b4047b",
+   "tool": {
+    "number": 1,
+    "id": "131012313822",
+    "name": "3.175*22mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 1.5875,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 22.0,
+    "shoulderLength": 22.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7665-9868-73b50991865b",
+   "tool": {
+    "number": 3,
+    "id": "111218063803",
+    "name": "3.175*0.6*3mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.6,
+    "diameter": 0.6,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": 3.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-760d-9c56-347f9dd3036f",
+   "tool": {
+    "number": 4,
+    "id": "112111103803",
+    "name": "3.175*1*3mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 1.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": 3.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7fc2-b88b-35fe6cc6a2f8",
+   "tool": {
+    "number": 3,
+    "id": "111218103807",
+    "name": "3.175*1*7mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 1.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 7.0,
+    "shoulderLength": 7.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7be6-b0e6-a3dc480a86d1",
+   "tool": {
+    "number": 4,
+    "id": "112111153806",
+    "name": "3.175*1.5*6mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.5,
+    "diameter": 1.5,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 6.0,
+    "shoulderLength": 6.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7633-8723-74b49e391948",
+   "tool": {
+    "number": 4,
+    "id": "112111313812",
+    "name": "3.175*12mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-782e-8664-15c15e282920",
+   "tool": {
+    "number": 3,
+    "id": "111218203811",
+    "name": "3.175*2*10.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.5,
+    "shoulderLength": 10.5,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-79cd-8c4e-dd0e9de5b8a9",
+   "tool": {
+    "number": 1,
+    "id": "111011203812",
+    "name": "3.175*2*12mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-78f4-928b-1f61c4dfb42b",
+   "tool": {
+    "number": 4,
+    "id": "112111203808",
+    "name": "3.175*2*8mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.0,
+    "shoulderLength": 8.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7fae-89dc-489271a6c70e",
+   "tool": {
+    "number": 1,
+    "id": "111011313825",
+    "name": "3.175*25mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 25.0,
+    "shoulderLength": 25.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7b82-b719-16aed0544f7d",
+   "tool": {
+    "number": 1,
+    "id": "111011313842",
+    "name": "3.175*42mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 42.0,
+    "shoulderLength": 42.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7a1e-ace2-28e03809ce44",
+   "tool": {
+    "number": 6,
+    "id": "122111013890",
+    "name": "3.175mm*90º Chamfer",
+    "typeText": "Chamfer",
+    "shape": "chamfer",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.1,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": 90.0,
+    "halfAngle": null,
+    "fluteLength": 1.6,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7e57-b9c0-e4e514129727",
+   "tool": {
+    "number": 2,
+    "id": "122111013860",
+    "name": "3.175*0.1mm*60º Engraving(Metal)",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.1,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 30.0,
+    "fluteLength": 2.6,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7d8b-b0ca-1c5d2df910ad",
+   "tool": {
+    "number": 2,
+    "id": "122111023830",
+    "name": "3.175*0.2mm*30º Engraving(Metal)",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.2,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7c1c-9eef-c06213343fbe",
+   "tool": {
+    "number": 2,
+    "id": "121011033830",
+    "name": "3.175*0.3mm*30º Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.3,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-73b7-9441-8519b9902529",
+   "tool": {
+    "number": 2,
+    "id": "122111033830",
+    "name": "3.175*0.3mm*30º Engraving(Metal)",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.3,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-79ba-980b-38f0fc1b746a",
+   "tool": {
+    "number": 2,
+    "id": "121011053830",
+    "name": "3.175*0.5mm*30º Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.5,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-816a-78a3-acec-bfb42e7e6489",
+   "tool": {
+    "number": 5,
+    "id": "142212303812",
+    "name": "3.175*3*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.0,
+    "diameter": 3.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-7347-8e3f-2e34168cf68f",
+   "tool": {
+    "number": 6,
+    "id": "152111243809",
+    "name": "3.175*M3*9mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 2.42,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": 9.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-8169-71f8-952f-fac929c81602",
+   "tool": {
+    "number": 6,
+    "id": "152111403815",
+    "name": "3.175*M5*15mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 16.0,
+    "shoulderLength": 15.0,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "cat:019c049a-816a-73c3-bb7a-ebe6062233be",
+   "tool": {
+    "number": 1,
+    "id": "161032205031",
+    "name": "6*2*30.5mm Ball Nose Engraving",
+    "typeText": "Ball Nose Engraving",
+    "shape": "ball",
+    "handleDiameter": 6.0,
+    "tipDiameter": 2.0,
+    "diameter": 6.0,
+    "cornerRadius": 1.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 30.5,
+    "shoulderLength": 30.5,
+    "stickout": null,
+    "centreCutting": null
+   }
+  }
+ ],
+ "feeds": [
+  {
+   "cutterId": "111011203812",
+   "material": "ABS",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "111011203812",
+   "material": "Acrylic",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "111011203812",
+   "material": "Bakelite",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "111011203812",
+   "material": "Delrin",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "111011203812",
+   "material": "Epoxy Tooling",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "111011203812",
+   "material": "Hardwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "111011203812",
+   "material": "Polycarbonate",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "111011203812",
+   "material": "Softwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011203812",
+   "material": "Synthetic Stone",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "111011313825",
+   "material": "ABS",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313825",
+   "material": "Acrylic",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313825",
+   "material": "Bakelite",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313825",
+   "material": "Delrin",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313825",
+   "material": "Epoxy Tooling",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313825",
+   "material": "Hardwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313825",
+   "material": "Polycarbonate",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313825",
+   "material": "Softwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "111011313825",
+   "material": "Synthetic Stone",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313842",
+   "material": "ABS",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313842",
+   "material": "Acrylic",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313842",
+   "material": "Bakelite",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313842",
+   "material": "Delrin",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313842",
+   "material": "Epoxy Tooling",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313842",
+   "material": "Hardwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313842",
+   "material": "Polycarbonate",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111011313842",
+   "material": "Softwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "111011313842",
+   "material": "Synthetic Stone",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "111218063803",
+   "material": "Carbon Fiber",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.3
+  },
+  {
+   "cutterId": "111218063803",
+   "material": "PCB",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.3
+  },
+  {
+   "cutterId": "111218103807",
+   "material": "Carbon Fiber",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.3
+  },
+  {
+   "cutterId": "111218103807",
+   "material": "PCB",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.3
+  },
+  {
+   "cutterId": "111218203811",
+   "material": "Carbon Fiber",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.3
+  },
+  {
+   "cutterId": "111218203811",
+   "material": "PCB",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.3
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "ABS",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "Acrylic",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "Bakelite",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.05
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.05
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "Delrin",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "Epoxy Tooling",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "Hardwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "Polycarbonate",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "Softwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "112111103803",
+   "material": "Synthetic Stone",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "ABS",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "Acrylic",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "Bakelite",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.05
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.05
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "Delrin",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "Epoxy Tooling",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "Hardwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "Polycarbonate",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "Softwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "112111153806",
+   "material": "Synthetic Stone",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.15
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.15
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "ABS",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "Acrylic",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "Bakelite",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "Delrin",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "Epoxy Tooling",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "Hardwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "Polycarbonate",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "Softwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "112111203808",
+   "material": "Synthetic Stone",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "ABS",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "Acrylic",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "Bakelite",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "Delrin",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "Epoxy Tooling",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "Hardwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "Polycarbonate",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "Softwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "112111313812",
+   "material": "Synthetic Stone",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011033830",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011033830",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011033830",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011033830",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011033830",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011033830",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011033830",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011033830",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "121011033830",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011053830",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011053830",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011053830",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011053830",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011053830",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011053830",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011053830",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "121011053830",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "121011053830",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "PCB",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "122111013860",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 600.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 600.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Carbon Fiber",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "PCB",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 1200.0,
+   "plungeFeed": 500.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "122111013890",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "PCB",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "122111023830",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "PCB",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "122111033830",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 500.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012103804",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012103804",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012103804",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012103804",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012103804",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012103804",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012103804",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012103804",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "131012103804",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012203812",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012203812",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012203812",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012203812",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012203812",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012203812",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012203812",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012203812",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "131012203812",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012313822",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012313822",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012313822",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012313822",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012313822",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012313822",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012313822",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "131012313822",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "131012313822",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "132112103803",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "132112203806",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "6061 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "7075 Aluminum",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "Brass",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "Copper",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 0.1
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "132112313810",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 500.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "6061 Aluminum",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "7075 Aluminum",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "ABS",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Acrylic",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Bakelite",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Brass",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Carbon Fiber",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Copper",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 100.0,
+   "stepDown": 0.2
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Delrin",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Epoxy Tooling",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Hardwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "PCB",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Polycarbonate",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Softwood",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "142212303812",
+   "material": "Synthetic Stone",
+   "rpm": 10000.0,
+   "feed": 1000.0,
+   "plungeFeed": 300.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "6061 Aluminum",
+   "rpm": 15000.0,
+   "feed": 60.0,
+   "plungeFeed": 60.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "7075 Aluminum",
+   "rpm": 15000.0,
+   "feed": 60.0,
+   "plungeFeed": 60.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "Brass",
+   "rpm": 15000.0,
+   "feed": 50.0,
+   "plungeFeed": 50.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "Copper",
+   "rpm": 15000.0,
+   "feed": 50.0,
+   "plungeFeed": 50.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111243809",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.5
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "6061 Aluminum",
+   "rpm": 15000.0,
+   "feed": 80.0,
+   "plungeFeed": 80.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "7075 Aluminum",
+   "rpm": 15000.0,
+   "feed": 80.0,
+   "plungeFeed": 80.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "Brass",
+   "rpm": 15000.0,
+   "feed": 60.0,
+   "plungeFeed": 60.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "Copper",
+   "rpm": 15000.0,
+   "feed": 60.0,
+   "plungeFeed": 60.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "152111403815",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 300.0,
+   "plungeFeed": 300.0,
+   "stepDown": 0.8
+  },
+  {
+   "cutterId": "161032205031",
+   "material": "ABS",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "161032205031",
+   "material": "Acrylic",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "161032205031",
+   "material": "Bakelite",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "161032205031",
+   "material": "Delrin",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "161032205031",
+   "material": "Epoxy Tooling",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "161032205031",
+   "material": "Hardwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "161032205031",
+   "material": "Polycarbonate",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  },
+  {
+   "cutterId": "161032205031",
+   "material": "Softwood",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 2.0
+  },
+  {
+   "cutterId": "161032205031",
+   "material": "Synthetic Stone",
+   "rpm": 12000.0,
+   "feed": 1000.0,
+   "plungeFeed": 200.0,
+   "stepDown": 1.0
+  }
+ ],
+ "inventory": [
+  {
+   "key": "inv:kz-corn-2-0-10-5",
+   "tool": {
+    "number": null,
+    "id": "111218203811",
+    "name": "TiN Coating Corn Bit - 1/8\" Shank 2mm * 10.5mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.5,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-drill-1-10",
+   "tool": {
+    "number": null,
+    "id": null,
+    "name": "TiN Coating Drill Bit - 1/8\" Shank 1mm * 10mm",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-drill-2-12",
+   "tool": {
+    "number": null,
+    "id": null,
+    "name": "TiN Coating Drill Bit - 1/8\" Shank 2mm * 12mm",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-engrave-30-0-3",
+   "tool": {
+    "number": null,
+    "id": "121011033830",
+    "name": "Single Flute Engraving Bit - 1/8\" Shank 30° * 0.3mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.3,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-corn-3-0-12",
+   "tool": {
+    "number": null,
+    "id": null,
+    "name": "TiN Coating Corn Bit - 1/8\" Shank 3.0mm * 12mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.0,
+    "diameter": 3.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-drill-2-5-12",
+   "tool": {
+    "number": null,
+    "id": null,
+    "name": "TiN Coating Drill Bit - 1/8\" Shank 2.5mm * 12mm",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.5,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-o-flute-m-2-8",
+   "tool": {
+    "number": null,
+    "id": "112111203808",
+    "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank 2mm * 8mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-ball-nose-3-175-22",
+   "tool": {
+    "number": null,
+    "id": null,
+    "name": "Two Flute Ball Nose Bit - 1/8\" Shank 3.175mm * 22mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 1.5875,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 22.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-o-flute-2-12",
+   "tool": {
+    "number": null,
+    "id": "111011203812",
+    "name": "Spiral 'O' Single Flute Bit - 1/8\" Shank 2mm * 12mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-o-flute-3-175-25",
+   "tool": {
+    "number": null,
+    "id": "111011313825",
+    "name": "Spiral 'O' Single Flute Bit - 1/8\" Shank 3.175mm * 25mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 25.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-o-flute-m-3-175-12",
+   "tool": {
+    "number": null,
+    "id": "112111313812",
+    "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank [diameter washed out on label; code says 3.175]mm * 12mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-ball-nose-2-12",
+   "tool": {
+    "number": null,
+    "id": "131012203812",
+    "name": "Two Flute Ball Nose Bit - 1/8\" Shank 2mm * 12mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 3.175,
+    "cornerRadius": 1.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-engrave-30-0-5",
+   "tool": {
+    "number": null,
+    "id": "121011053830",
+    "name": "Single Flute Engraving Bit - 1/8\" Shank 30° * 0.5mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.5,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-corn-0-6-3",
+   "tool": {
+    "number": null,
+    "id": "111218063803",
+    "name": "TiN Coating Corn Bit - 1/8\" Shank 0.6mm * 3mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.6,
+    "diameter": 0.6,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-corn-1-7",
+   "tool": {
+    "number": null,
+    "id": "111218103807",
+    "name": "TiN Coating Corn Bit - 1/8\" Shank 1mm * 7mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 1.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 7.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-drill-3-12",
+   "tool": {
+    "number": null,
+    "id": "142212303812",
+    "name": "TiN Coating Drill Bit - 1/8\" Shank 3mm * 12mm",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.0,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-chamfer-90",
+   "tool": {
+    "number": null,
+    "id": "122111013890",
+    "name": "Chamfering Bit - 1/8\" Shank 90°",
+    "typeText": "Chamfer",
+    "shape": "chamfer",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.1,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": 90.0,
+    "halfAngle": null,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-engrave-m-30-0-2",
+   "tool": {
+    "number": null,
+    "id": "122111023830",
+    "name": "Single Flute Engraving Bit for Metal - 1/8\" Shank 30° * 0.2mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.2,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-engrave-m-30-0-3",
+   "tool": {
+    "number": null,
+    "id": "122111033830",
+    "name": "Single Flute Engraving Bit for Metal - 1/8\" Shank 30° * 0.3mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.3,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-o-flute-m-1-3",
+   "tool": {
+    "number": null,
+    "id": "112111103803",
+    "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank 1mm * 3mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 1.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-engrave-m-60-0-1",
+   "tool": {
+    "number": null,
+    "id": "122111013860",
+    "name": "Single Flute Engraving Bit for Metal - 1/8\" Shank 60° * 0.1mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.1,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 30.0,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-thread-m5-15",
+   "tool": {
+    "number": null,
+    "id": "152111403815",
+    "name": "Thread Milling Bit - 1/8\" Shank M5(d4) * 15mm",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": 4.0,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 15.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-ball-nose-m-2-6",
+   "tool": {
+    "number": null,
+    "id": "132112203806",
+    "name": "Two Flute Ball Nose Bit for Metal - 1/8\" Shank 2mm * 6mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 3.175,
+    "cornerRadius": 1.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-ball-nose-m-1-3",
+   "tool": {
+    "number": null,
+    "id": "132112103803",
+    "name": "Two Flute Ball Nose Bit for Metal - 1/8\" Shank 1mm * 3mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 3.175,
+    "cornerRadius": 0.5,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-thread-m3-9",
+   "tool": {
+    "number": null,
+    "id": "152111243809",
+    "name": "Thread Milling Bit - 1/8\" Shank M3(d2.4mm) * 9mm",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.4,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 9.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-o-flute-3-175-42",
+   "tool": {
+    "number": null,
+    "id": "111011313842",
+    "name": "Spiral 'O' Single Flute Bit - 1/8\" Shank 3.175mm * 42mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 42.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-ball-nose-m-3-175-10",
+   "tool": {
+    "number": null,
+    "id": "132112313810",
+    "name": "Two Flute Ball Nose Bit for Metal - 1/8\" Shank 3.175mm * 10mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 1.5875,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-ball-nose-1-4",
+   "tool": {
+    "number": null,
+    "id": "131012103804",
+    "name": "Two Flute Ball Nose Bit - 1/8\" Shank 1mm * 4mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 3.175,
+    "cornerRadius": 0.5,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 4.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  },
+  {
+   "key": "inv:kz-o-flute-m-1-5-6",
+   "tool": {
+    "number": null,
+    "id": "112111153806",
+    "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank 1.5mm * 6mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.5,
+    "diameter": 1.5,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   }
+  }
+ ]
+}

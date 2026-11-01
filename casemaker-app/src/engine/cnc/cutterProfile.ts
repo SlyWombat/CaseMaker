@@ -261,12 +261,13 @@ function nonNegative(v: number | null | undefined): number | null {
 }
 
 /**
- * A shape whose `diameter=` is the SHANK, not the cutting tip (`Tool.diameter`). Not a thread mill
- * (#859): Makera's catalogue puts its CUTTING diameter in `diameter`, and a record that states a tip
- * (the label's `d2.4`) cuts with that tip — the tip-first order below is the one `cuttingDiameter`
- * keeps for it, so the drawing's DC is never the shank.
+ * A shape whose `diameter=` is the cone's BODY (the shank), not the cutting tip (`Tool.diameter`).
+ * Not a thread mill (#859) nor a drill (#863): Makera's catalogue puts their CUTTING diameter in
+ * `diameter` (a drill's bore, 3 mm for the ⌀3 drill), and a record that states a tip cuts with that
+ * tip — the tip-first order below is the one `cuttingDiameter` keeps, so the drawing's DC is never
+ * the shank.
  */
-const SHANK_DIAMETER_SHAPES: readonly ToolShape[] = ['engraving', 'chamfer', 'drill'];
+const SHANK_DIAMETER_SHAPES: readonly ToolShape[] = ['engraving', 'chamfer'];
 
 /**
  * The record's `DC` — the cutting diameter — and the field it came from.

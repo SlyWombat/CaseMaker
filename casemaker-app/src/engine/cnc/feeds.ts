@@ -91,7 +91,7 @@
  */
 
 import { z } from 'zod';
-import { cuttingDiameter, cuttingForTrace, feedRowDiameter, flatEndMill, threadMillUnambiguousDiameter, vendorId } from './tool';
+import { cuttingDiameter, cuttingForTrace, feedRowDiameter, flatEndMill, unambiguousCuttingDiameter, vendorId } from './tool';
 import type { Tool, ToolShape } from './tool';
 import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
 import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
@@ -824,8 +824,11 @@ function sizeChanged(
   return { owned: a, catalogue: b };
 }
 
-/** #859 — half the 0.1 mm step a thread mill's label prints its cutting diameter to (`d2.4`). */
-export const THREAD_LABEL_TOLERANCE_MM = 0.05 + 1e-9;
+/**
+ * #859/#863 — half the 0.1 mm step a label prints a cutting diameter to (a thread mill's `d2.4` for
+ * the catalogue's 2.42): two statements of one cutter's cut agree within it.
+ */
+export const LABEL_TOLERANCE_MM = 0.05 + 1e-9;
 
 /**
  * The catalogue's coverage of a cutter for a material (#455). `catalogue` is the caller's rows,
@@ -851,23 +854,25 @@ export function catalogueCoverageFor(
   // row about a different cutter. The geometry is on the row (`withCatalogueGeometry`); a row that
   // carries none — the service's own rows, before the join — says nothing and falls through.
   const stated = rows.find((row) => row.cutter !== undefined)?.cutter;
-  if (stated !== undefined && tool.shape === 'thread') {
-    // #859 — A THREAD MILL IS COMPARED ON ITS CUTTING DIAMETER, never its shank. The catalogue's
-    // `diameter` for a thread mill is the cutting one (2.42 mm for the M3 mill); a house record
-    // carried the 3.175 mm shank there and the label's `d2.4` as its tip, and the shank-vs-cutting
-    // comparison called Makera's own M3 mill "a different cutter". A label prints the cutting
-    // diameter to 0.1 mm (`d2.4` for 2.42), so the two agree within half that step. A `diameter`
-    // that is only the shank's own number proves nothing either way.
-    const owned = threadMillUnambiguousDiameter(tool);
-    const catalogue = statedSize(stated.tipDiameter) ?? statedSize(stated.diameter);
-    if (owned !== null && catalogue !== null && Math.abs(owned - catalogue) > THREAD_LABEL_TOLERANCE_MM) {
-      return { kind: 'mismatched', cutterId, field: 'diameter', owned, catalogue };
+  if (stated !== undefined) {
+    // #859/#863 — A CUTTER IS COMPARED ON ITS CUTTING DIAMETER, never its shank. The catalogue's
+    // `diameter` for a ball, a drill and a thread mill is the cutting one (2 mm for the ⌀2 ball,
+    // 2.42 mm for the M3 mill); the house records carried the 3.175 mm SHANK there and the cut in
+    // the tip, and the shank-vs-cutting comparison called Makera's own ⌀2 ball "a different
+    // cutter". A label prints the cutting diameter to 0.1 mm (`d2.4` for 2.42), so the two agree
+    // within half that step. A `diameter` that is only the shank's own number proves nothing.
+    const v = tool.shape === 'engraving' || tool.shape === 'chamfer';
+    const owned = unambiguousCuttingDiameter(tool);
+    const catalogue = statedSize(stated.tipDiameter) ?? (v ? null : statedSize(stated.diameter));
+    if (owned !== null && catalogue !== null && Math.abs(owned - catalogue) > LABEL_TOLERANCE_MM) {
+      return { kind: 'mismatched', cutterId, field: v ? 'tip' : 'diameter', owned, catalogue };
     }
-  } else if (stated !== undefined) {
-    const diameter = sizeChanged(tool.diameter, stated.diameter);
-    if (diameter !== null) return { kind: 'mismatched', cutterId, field: 'diameter', ...diameter };
-    const tip = sizeChanged(tool.tipDiameter, stated.tipDiameter);
-    if (tip !== null) return { kind: 'mismatched', cutterId, field: 'tip', ...tip };
+    // A V-bit's BODY is in `diameter` in both conventions (the cone's base, the 3.175 shank), and a
+    // body that moved is a different cone (#732).
+    if (v) {
+      const body = sizeChanged(tool.diameter, stated.diameter);
+      if (body !== null) return { kind: 'mismatched', cutterId, field: 'diameter', ...body };
+    }
   }
   const direct = rows.find((row) => catalogueMaterialFor(row.material) === material);
   if (direct) return { kind: 'covered', row: direct, via: null };

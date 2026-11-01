@@ -17,8 +17,8 @@
  * same order `knownReach` uses). A catalogue row that states none fills nothing.
  */
 
-import { threadMillUnambiguousDiameter, vendorId, type Tool } from '@/engine/cnc/tool';
-import { THREAD_LABEL_TOLERANCE_MM } from '@/engine/cnc/feeds';
+import { unambiguousCuttingDiameter, vendorId, type Tool } from '@/engine/cnc/tool';
+import { LABEL_TOLERANCE_MM } from '@/engine/cnc/feeds';
 import { isVShape } from '@/engine/cnc/vProfile';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 
@@ -111,10 +111,10 @@ export function withCatalogueValues(
   // rule (`catalogueCoverageFor`) names it a different cutter.
   if (tool.shape === 'thread') {
     const cut = positive(twin.tool.tipDiameter) ?? positive(twin.tool.diameter);
-    const own = threadMillUnambiguousDiameter(tool);
+    const own = unambiguousCuttingDiameter(tool);
     if (
       cut !== null &&
-      (own === null || Math.abs(own - cut) <= THREAD_LABEL_TOLERANCE_MM) &&
+      (own === null || Math.abs(own - cut) <= LABEL_TOLERANCE_MM) &&
       (tool.diameter !== cut || tool.tipDiameter !== cut)
     ) {
       next = { ...next, diameter: cut, tipDiameter: cut };

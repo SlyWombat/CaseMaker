@@ -195,7 +195,10 @@ export type RadiusResult = { ok: true; radius: number } | { ok: false; reason: s
 
 /**
  * The tool's cutting diameter, best effort: `tipDiameter` when it states one (the tip is what
- * cuts), `diameter` otherwise, `null` when it states neither.
+ * cuts), `diameter` otherwise, `null` when it states neither. #859/#863 — for every kind but a
+ * V-bit the order is {@link unambiguousCuttingDiameter}'s (tip, the size the name prints, a
+ * `diameter` that is not the shank), then `diameter`: a record whose only size is the shank-sized
+ * `diameter` still cuts at it, as before.
  *
  * The ONE copy of this rule (#316 review). The header matcher, the sweep, the verifier, the run
  * sheet, the run record, the tool recommendation, the engravability findings and every place a
@@ -204,42 +207,50 @@ export type RadiusResult = { ok: true; radius: number } | { ok: false; reason: s
  * cutter at all.
  */
 export function cuttingDiameter(tool: Tool): number | null {
-  if (tool.shape === 'thread') return threadMillCuttingDiameter(tool);
-  return tool.tipDiameter ?? tool.diameter;
+  if (isVShape(tool)) return tool.tipDiameter ?? tool.diameter;
+  return unambiguousCuttingDiameter(tool) ?? positiveSize(tool.diameter) ?? tool.tipDiameter;
 }
 
 /**
- * #859 — the cutting diameter a THREAD MILL's own name states, mm, or null: Makera's store names
- * print it beside the thread (`M3(d2.4mm)`, `M5(d4)`), and a shop's own name may too
- * (`1/4-20 UNC (d4.0mm)`). The box code never carries it (#380).
+ * #859/#863 — the cutting diameter a cutter's own NAME states, mm, or null. The box code never
+ * carries a thread mill's (#380), and a record may leave the tip blank, but the names print it:
+ *   - a thread mill beside its thread: `M3(d2.4mm)`, `M5(d4)`, a shop's `1/4-20 UNC (d4.0mm)`;
+ *   - a house label after its shank: `1/8" Shank 2mm * 12mm` (ball, drill, flat);
+ *   - a Makera catalogue name as shank × cut × length: `3.175*2*12mm Ball Nose`. A two-part name
+ *     (`3.175*22mm Ball Nose`, `3.175*M3*9mm Thread`) states no separate cut, so it says nothing.
+ * A V-bit's name prints its angle and tip in other places (`30° * 0.3mm`); its tip field is the
+ * only statement this reads for it, so `shape` is not consulted here — the caller skips V-bits.
  */
-export function threadMillNamedDiameter(name: string): number | null {
-  const m = /\(\s*d\s*(\d+(?:\.\d+)?)\s*(?:mm)?\s*\)/i.exec(name);
+export function namedCuttingDiameter(name: string): number | null {
+  const m =
+    /\(\s*d\s*(\d+(?:\.\d+)?)\s*(?:mm)?\s*\)/i.exec(name) ??
+    /\bShank\s+(\d+(?:\.\d+)?)\s*mm\s*\*/i.exec(name) ??
+    /^\s*\d+(?:\.\d+)?\s*\*\s*(\d+(?:\.\d+)?)\s*\*\s*\d+(?:\.\d+)?\s*mm/i.exec(name);
   if (m === null) return null;
   const v = Number(m[1]);
   return Number.isFinite(v) && v > 0 ? v : null;
 }
 
 /**
- * #859 — A THREAD MILL'S CUTTING DIAMETER, never its shank. Two conventions write a thread mill's
- * record: Makera's catalogue puts the cutting diameter in `diameter` (`max_diameter`, catalogue.rs)
- * and states no tip, while the house inventory (`houseDocument.ts`, before #859) put the 3.175 mm
- * SHANK in `diameter` and the label's `d2.4` in `tipDiameter`. Reading `diameter` first made
- * Makera's M3 mill a ⌀3.175 cutter — too wide for the ⌀2.459 M3 pilot. So the order is: a stated
- * tip, then the size the name prints, then `diameter` — the catalogue's cutting column.
+ * #859/#863 — the cutting diameter a record states BEYOND DOUBT, or null. Two conventions write the
+ * same Makera cutter: the catalogue puts the CUTTING diameter in `diameter` (a ball's ball, a
+ * drill's bore, a thread mill's `max_diameter`, catalogue.rs), while the house inventory
+ * (`houseDocument.ts`, before #859/#863) put the 3.175 mm SHANK there and the cut in `tipDiameter`.
+ * So the order is the kind's own field first — the tip (a ball's ball, a bull's or a tapered ball's
+ * tip, a drill's bore, a thread mill's label `d2.4`) — then the size the name prints, then a
+ * `diameter` that is not the shank's own number. A `diameter` equal to `handleDiameter` may be the
+ * shank or a full-shank cutter (a ⌀3.175 ball, Makera's ⌀6 M8 mill), so it proves nothing.
+ *
+ * A V-bit (engraver, chamfer) states its cut in the tip alone: both conventions put the cone's
+ * BODY in its `diameter`, which is never a cutting diameter. A record of `unknown` kind reads no
+ * name: the name's size is evidence only for a kind whose convention says where it prints.
  */
-export function threadMillCuttingDiameter(tool: Tool): number | null {
-  return threadMillUnambiguousDiameter(tool) ?? positiveSize(tool.diameter);
-}
-
-/**
- * #859 — the cutting diameter a thread mill's record states BEYOND DOUBT, or null: a tip, the size
- * its name prints, or a `diameter` that is not the shank's own number. A `diameter` equal to
- * `handleDiameter` may be the shank (the house convention) or a full-shank cutter (Makera's
- * ⌀6 mm M8 mill), so it cannot contradict the catalogue's cutting column, nor stand against it.
- */
-export function threadMillUnambiguousDiameter(tool: Tool): number | null {
-  const stated = positiveSize(tool.tipDiameter) ?? threadMillNamedDiameter(tool.name);
+export function unambiguousCuttingDiameter(
+  tool: Pick<Tool, 'shape' | 'name' | 'tipDiameter' | 'diameter' | 'handleDiameter'>,
+): number | null {
+  if (tool.shape === 'engraving' || tool.shape === 'chamfer') return positiveSize(tool.tipDiameter);
+  // A name prints its cut by its kind's convention; a record of no known kind reads no name.
+  const stated = positiveSize(tool.tipDiameter) ?? (tool.shape === 'unknown' ? null : namedCuttingDiameter(tool.name));
   if (stated !== null) return stated;
   const d = positiveSize(tool.diameter);
   const shank = positiveSize(tool.handleDiameter);
@@ -291,8 +302,9 @@ export function feedRowDiameter(tool: Tool): number | null {
 export const SHANK_DIAMETER_KINDS: ReadonlySet<ToolShape> = new Set(['engraving', 'chamfer', 'drill']);
 
 export function statedCuttingSize(tool: Tool): number | null {
-  if (tool.shape === 'thread') return threadMillCuttingDiameter(tool);
-  const diameter = SHANK_DIAMETER_KINDS.has(tool.shape) ? tool.tipDiameter : (tool.tipDiameter ?? tool.diameter);
+  // #863 — a shank-diameter kind states its cut beyond doubt or not at all: a V-bit's tip, a
+  // drill's tip or named bore (Makera's catalogue drill states it in `diameter` too, never the shank).
+  const diameter = SHANK_DIAMETER_KINDS.has(tool.shape) ? unambiguousCuttingDiameter(tool) : cuttingDiameter(tool);
   return diameter === null || diameter <= 0 ? null : diameter;
 }
 
