@@ -1657,6 +1657,13 @@ function StackConnectorSection() {
           mm {fit} relief). Provisional until the stacking-connector fit coupon is printed.
         </p>
       )}
+      {active && report?.storage != null && (
+        <p className="features-empty" data-testid="stack-key-storage">
+          Key storage: {report.storage.flush
+            ? 'a parked key sits flush with the top.'
+            : `a parked key stands ${mm1(report.storage.storedProud)} mm half-proud — the wall has room for the ${mm1(report.storage.channelMm)} mm channel, not a flush seat.`}
+        </p>
+      )}
       {report && report.notes.length > 0 && (
         <ul className="features-notes" data-testid="stack-connector-notes">
           {report.notes.map((n, i) => (

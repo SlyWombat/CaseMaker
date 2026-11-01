@@ -44,6 +44,13 @@ test('sockets on two walls and a key, the clash offer, and the export', async ({
   await page.evaluate(() => window.__caseMaker!.waitForIdle());
   await expect(page.getByTestId('stack-note-clash--x')).toHaveCount(0);
 
+  // #854 — the storage mode is a quiet fact in the section, never a statement:
+  // a 28 mm case parks the key half-proud, and saying that as a note fired on
+  // nearly every case.
+  await expect(page.getByTestId('stack-key-storage')).toBeVisible();
+  await expect(page.getByTestId('stack-key-storage')).toContainText('half-proud');
+  await expect(page.locator('[data-testid^="stack-note-not-flush"]')).toHaveCount(0);
+
   // One key, long variant, loose fit.
   await page.getByTestId('stack-key-count').fill('1');
   await page.getByTestId('stack-key-variant').selectOption('long');

@@ -533,14 +533,7 @@ export function stackPadCutouts(
  */
 export type ConnectorKeepOut = ClashFeature;
 
-export type ConnectorNoteKind =
-  | 'clash'
-  | 'clamped'
-  | 'no-pocket'
-  | 'not-flush'
-  | 'too-short'
-  | 'duplicate'
-  | 'pad-cutout';
+export type ConnectorNoteKind = 'clash' | 'clamped' | 'no-pocket' | 'too-short' | 'duplicate' | 'pad-cutout';
 
 export interface ConnectorNote {
   face: ConnectorFace;
@@ -568,6 +561,14 @@ export interface StackConnectorReport {
   sockets: PlacedSocket[];
   notes: ConnectorNote[];
   key: StackKeyDims;
+  /**
+   * #854 item 1 — HOW A STORED KEY PARKS, as a fact about the case rather than
+   * a statement: every socket on a case shares one height, and most cases are
+   * too short to seat the key flush, so "not flush" fired on nearly every case
+   * and stopped being information. The connector section shows this quietly
+   * ("key parks half-proud"); null when no socket was placed.
+   */
+  storage: { flush: boolean; storedProud: Mm; channelMm: Mm } | null;
 }
 
 export interface StackConnectorOps {
@@ -682,10 +683,9 @@ export function buildStackConnector(
   if (!stackConnectorWanted(params)) return out;
   const fit = params.fit ?? geom.caseFit ?? 'tight';
   const key = stackKeyDims(params.key, fit);
-  const report: StackConnectorReport = { sockets: [], notes: [], key };
+  const report: StackConnectorReport = { sockets: [], notes: [], key, storage: null };
   const embed = geom.wall / 2;
   const seen = new Set<ConnectorFace>();
-  let notFlushStated = false;
 
   for (const s of params.sockets as StackSocket[]) {
     const face = s.face;
@@ -744,18 +744,15 @@ export function buildStackConnector(
           `the receiving pocket under it (a full socket needs ${fmt(socketFullHeight(params.key))} mm): ` +
           `this case can be the lower part of a stack, not the upper.`,
       });
-    } else if (!layout.flush && !notFlushStated) {
-      // Every socket on a case shares one height, so this is stated once, not
-      // once per wall: it is a fact about the case, not about a placement.
-      notFlushStated = true;
-      report.notes.push({
-        face,
-        kind: 'not-flush',
-        message:
-          `At ${fmt(geom.top)} mm tall the storage channel is ${fmt(layout.channel[1] - layout.channel[0])} mm deep, ` +
-          `so a stored ${params.key} key stands ${fmt(layout.storedProud)} mm proud instead of flush ` +
-          `(flush needs ${fmt(socketFullHeight(params.key))} mm).`,
-      });
+    } else if (report.storage === null) {
+      // #854 item 1 — the storage mode is a FACT about the case (one height for
+      // every socket), shown quietly in the connector section, not a statement:
+      // a note here fired on nearly every case and drowned the real ones.
+      report.storage = {
+        flush: layout.flush,
+        storedProud: layout.storedProud,
+        channelMm: layout.channel[1] - layout.channel[0],
+      };
     }
 
     const found = clashesWith(socketFeature(face, offset, geom), keepOuts);

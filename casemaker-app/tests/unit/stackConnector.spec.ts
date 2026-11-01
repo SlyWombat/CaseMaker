@@ -407,7 +407,7 @@ describe('inform, don\'t refuse', () => {
     expect(Math.abs(plan.connector!.sockets[0]!.offset)).toBeLessThan(500);
   });
 
-  it('the not-flush fact is stated once per case, not once per wall', () => {
+  it('the storage mode is a FACT on the report, not a statement (#854)', () => {
     const plan = compileProject(
       withConnector(stock(), {
         sockets: [{ face: '+y', offset: 0 }, { face: '-y', offset: 29 }],
@@ -415,7 +415,12 @@ describe('inform, don\'t refuse', () => {
         keys: 0,
       }),
     );
-    expect(plan.connector!.notes.filter((n) => n.kind === 'not-flush')).toHaveLength(1);
+    // No statement at all: a note that fires on nearly every case is noise.
+    expect(plan.connector!.notes.some((n) => /stands .* proud instead of flush/.test(n.message))).toBe(false);
+    // The fact lives on the report, once for the case, for the section to show.
+    expect(plan.connector!.storage).not.toBeNull();
+    expect(plan.connector!.storage!.storedProud).toBeGreaterThan(0);
+    expect(plan.connector!.storage!.channelMm).toBeGreaterThan(0);
   });
 
   it('a second socket on the same wall is stated and not cut', () => {
