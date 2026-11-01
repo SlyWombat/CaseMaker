@@ -59,6 +59,7 @@ function previewWith(reason = 'the largest cutter that keeps every item intact')
     stock: EMPTY_MESH,
     floors: [],
     outlines: [],
+    chamferBands: [],
     fixture: [],
     sacrificial: [],
     voids: [],

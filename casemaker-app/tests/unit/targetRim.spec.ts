@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { targetRim } from '@/engine/cnc/engrave/targetRim';
+import { chamferBandFor, targetRim } from '@/engine/cnc/engrave/targetRim';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 
@@ -172,5 +172,22 @@ describe('#829 the target mesh’s top rim', () => {
     expect(Math.max(...xs)).toBeCloseTo(25, 6);
     expect(Math.min(...ys)).toBeCloseTo(25, 6);
     expect(Math.max(...ys)).toBeCloseTo(35, 6);
+  });
+
+  it('#829 — the preview band is the rim and the line its bevel reaches, at the rim’s height', () => {
+    clearTargetObjectMeshCache();
+    const band = chamferBandFor(target(boxMesh(), { chamfer: { widthMm: 1 } }) as never);
+    expect(band).not.toBeNull();
+    expect(band!.rings).toHaveLength(2);
+    const [edge, inner] = band!.rings;
+    // Both rings sit at the rim's own height (the placed top).
+    for (const p of [...edge!, ...inner!]) expect(p[2]).toBeCloseTo(5, 6);
+    // The inner ring is the edge moved 1 mm toward the part: the box spans −5…5, so each corner
+    // moves 1 mm toward the centre (0,0) along the corner bisector.
+    edge!.forEach((p, i) => {
+      const q = inner![i]!;
+      expect(Math.hypot(q[0] - p[0], q[1] - p[1])).toBeCloseTo(1, 6);
+      expect(Math.hypot(q[0], q[1])).toBeLessThan(Math.hypot(p[0], p[1]));
+    });
   });
 });

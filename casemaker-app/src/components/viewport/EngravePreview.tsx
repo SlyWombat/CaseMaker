@@ -37,7 +37,7 @@ import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { useSimStore } from '@/store/simStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
-import type { EngravePreviewLost, EngravePreviewOutline } from '@/workers/sim/engravePreview';
+import type { EngravePreviewChamferBand, EngravePreviewLost, EngravePreviewOutline } from '@/workers/sim/engravePreview';
 import type { EngravePreviewRegistrationBand } from '@/workers/sim/engraveRegistration';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -304,6 +304,8 @@ function Void({
  * outline with the stock's top face.
  */
 const OUTLINE_LIFT = 0.02;
+/** #829 — the 3D chamfer's band: a colour no other preview layer uses. */
+const CHAMFER_BAND_COLOR = '#e8a33d';
 
 /**
  * The three V-carve levels (#221): the opening at the top face, the colour plane where the
@@ -317,6 +319,36 @@ const OUTLINE_COLOR: Record<EngravePreviewOutline['level'], string> = {
 };
 
 /** One V-carve outline: every ring drawn as line segments at its own depth. */
+/**
+ * #829 — THE 3D CHAMFER'S BAND. Two rings per rim chain — the part's top edge and the line the
+ * bevel's inner mouth reaches — drawn at the rim's own height, in a colour of their own so the
+ * second program's cut is visible before Generate.
+ */
+function ChamferBand({ labelId, rings, closed }: EngravePreviewChamferBand) {
+  const geom = useMemo(() => {
+    const pts: number[] = [];
+    rings.forEach((ring, index) => {
+      const count = ring.length;
+      for (let i = 0; i < count; i++) {
+        const a = ring[i]!;
+        const next = ring[(i + 1) % count]!;
+        const last = i === count - 1;
+        if (last && closed[index] !== true) break;
+        pts.push(a[0], a[1], a[2], next[0], next[1], next[2]);
+      }
+    });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    return geometry;
+  }, [rings, closed]);
+  useEffect(() => () => geom.dispose(), [geom]);
+  return (
+    <lineSegments geometry={geom} name={`engrave-chamfer-${labelId}`} userData={{ engraveChamfer: labelId }}>
+      <lineBasicMaterial color={CHAMFER_BAND_COLOR} />
+    </lineSegments>
+  );
+}
+
 function Outline({ labelId, level, depth, rings }: EngravePreviewOutline) {
   const z = -depth + OUTLINE_LIFT;
   const geom = useMemo(() => voidGeometry(rings, z), [rings, z]);
@@ -1008,6 +1040,9 @@ export function EngravePreview() {
 
       {wrapRadius === null &&
         preview.outlines.map((o) => <Outline key={`${o.labelId}:${o.level}`} {...o} />)}
+
+      {wrapRadius === null &&
+        preview.chamferBands.map((b) => <ChamferBand key={b.labelId} {...b} />)}
 
       {wrapRadius === null &&
         rotary === null &&

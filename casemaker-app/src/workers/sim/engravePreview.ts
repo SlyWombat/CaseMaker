@@ -65,6 +65,7 @@ import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
 import { grooveRadiusAt, vCone } from '@/engine/cnc/vProfile';
+import { chamferBandFor, type ChamferBand } from '@/engine/cnc/engrave/targetRim';
 import { vGrooveSolid } from './engraveGroove';
 import {
   registrationBandsFor,
@@ -134,6 +135,14 @@ export interface EngravePreviewOutline {
   /** Contours, outer CCW and holes CW, one entry per ring. */
   rings: [number, number][][];
 }
+
+/**
+ * #829 — THE 3D CHAMFER'S BAND, drawn on the rim it will be cut along: for every rim chain, the
+ * edge itself and the line the bevel's inner mouth reaches (`width` toward the part), both at the
+ * rim's own height. Two rings per chain, in the work frame, so the operator sees what the V
+ * program will cut before Generate.
+ */
+export type EngravePreviewChamferBand = ChamferBand;
 
 /**
  * One drawn vise piece — a jaw or the body — from `viseBody` (#508). It sits where the user SAID
@@ -264,6 +273,8 @@ export interface EngravePreview {
    * cutter, whose three outlines are one and the same polygon set and are already the cut body.
    */
   outlines: EngravePreviewOutline[];
+  /** #829 — the 3D chamfer's band on the goal's rim, or empty when the goal asks for none. */
+  chamferBands: EngravePreviewChamferBand[];
   /** The drawn vise — two jaw bars and the body — from `viseBody` (#508). */
   fixture: EngravePreviewFixture[];
   /** The sacrificial material (#213), from `sacrificialBoxes`; empty when the job has none. */
@@ -1014,11 +1025,34 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // below is the quick answer; the measured pick is the CLI's no-cutter path and Generate's
     // question today, and an explicit panel action when one is added (the same `smartPick`,
     // `evaluatePlan` seam, called once and cached).
+    // #829 — THE CHAMFER'S BAND, on the rim the V program will follow: the part's top edge and
+    // the line its bevel's inner mouth reaches, drawn from the mesh itself so the picture and
+    // the CAM cannot disagree. A mesh whose bytes are not here draws nothing; its own finding
+    // says so.
+    const chamferBands: EngravePreviewChamferBand[] = [];
+    const chamferGoal = job.targetObject;
+    if (
+      chamferGoal !== undefined &&
+      (chamferGoal.role ?? 'reference') === 'goal' &&
+      chamferGoal.enabled &&
+      chamferGoal.format !== 'png' &&
+      chamferGoal.chamfer !== undefined &&
+      chamferGoal.chamfer.widthMm > 0
+    ) {
+      try {
+        const band = chamferBandFor(chamferGoal);
+        if (band !== null) chamferBands.push(band);
+      } catch {
+        // No bytes here: the goal's own `target-mesh-missing` finding is the sentence.
+      }
+    }
+
     return {
       stock: stockMesh,
       stages,
       floors,
       outlines,
+      chamferBands,
       fixture,
       sacrificial,
       voids,

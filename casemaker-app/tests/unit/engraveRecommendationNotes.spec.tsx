@@ -77,6 +77,7 @@ function previewWith(
     stock: EMPTY_MESH,
     floors: [],
     outlines: [],
+    chamferBands: [],
     fixture: [],
     sacrificial: [],
     voids: [],

@@ -306,3 +306,46 @@ function chainTilt(chainEdges: RimEdge[], normals: Vec3[]): number {
   }
   return worst;
 }
+
+/**
+ * #829 — THE BAND THE PREVIEW DRAWS: for every rim chain, the edge itself and the line the bevel's
+ * inner mouth reaches (`width` toward the part), both at the rim's own height. Computed from the
+ * same `targetRim` the CAM follows, so the picture and the program cannot disagree. Null when the
+ * goal asks for no chamfer or the mesh has no rim; a mesh whose bytes are absent throws, as
+ * `targetRim` does, and the caller's own `target-mesh-missing` finding is the sentence.
+ */
+export interface ChamferBand {
+  labelId: string;
+  widthMm: number;
+  rings: [number, number, number][][];
+  /** True per ring when it closes back to its first point. */
+  closed: boolean[];
+}
+
+export function chamferBandFor(
+  target: PlacementTarget &
+    Pick<EngraveTargetObject, 'id' | 'sha256' | 'format' | 'data' | 'chamfer'>,
+): ChamferBand | null {
+  const widthMm = target.chamfer?.widthMm;
+  if (widthMm === undefined || !(widthMm > 0)) return null;
+  const rim = targetRim(target);
+  if (rim.chains.length === 0) return null;
+  const rings: [number, number, number][][] = [];
+  const closed: boolean[] = [];
+  for (const chain of rim.chains) {
+    rings.push(chain.points.map((p) => [p.x, p.y, p.z] as [number, number, number]));
+    closed.push(chain.closed);
+    rings.push(
+      chain.points.map(
+        (p, i) =>
+          [
+            p.x - (chain.outward[i]?.x ?? 0) * widthMm,
+            p.y - (chain.outward[i]?.y ?? 0) * widthMm,
+            p.z,
+          ] as [number, number, number],
+      ),
+    );
+    closed.push(chain.closed);
+  }
+  return { labelId: target.id, widthMm, rings, closed };
+}
