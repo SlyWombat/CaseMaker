@@ -63,6 +63,27 @@ export const DEFAULT_FLOOR_GRID = {
 } as const;
 
 type Rect = { x0: number; y0: number; x1: number; y1: number };
+/** A divider's footprint in world XY, mm. */
+export type DividerRect = Rect;
+
+/** Where a divider stands in Z: tenons from `floorZ − depth`, wall up to `floorZ + height`. */
+export interface DividerBand {
+  floorZ: number;
+  depth: number;
+  height: number;
+}
+
+/**
+ * Extra clashes for a divider at a trial footprint, as phrases ("it runs into
+ * the lid's lip …"). The compiler passes the shared clash check here, so the
+ * offers to move or shorten clear those too.
+ */
+export type DividerExtraClash = (rect: Rect, d: CaseDivider, band: DividerBand) => string[];
+
+export interface CaseDividerFactsOptions {
+  trial?: boolean;
+  extraClash?: DividerExtraClash;
+}
 type Circle = { x: number; y: number; r: number };
 export type WidenSide = 'xMin' | 'xMax' | 'yMin' | 'yMax';
 
@@ -89,6 +110,16 @@ export interface DividerFact {
   clashes: string[];
   /** The nearest grid line that clears every clash, or null. */
   moveTo: number | null;
+  /**
+   * When no line clears it: the fewest sockets to drop, from either end, that
+   * do (a divider whose end meets the lid's lip, say). Null when none does.
+   */
+  shortenTo: { start: number; holes: number } | null;
+  /**
+   * When it crosses an earlier divider: shortening THAT one to this span makes
+   * room for this one. Null when no shortening does.
+   */
+  makeRoom: { id: string; label: string; start: number; holes: number } | null;
 }
 
 export interface CaseDividerFacts {
@@ -218,7 +249,7 @@ export const WIDEN_SIDE_NAME: Record<WidenSide, string> = {
  * Everything the panel says and the compiler builds, from the project alone.
  * Returns `enabled: false` (and nothing else of use) when the grid is off.
  */
-export function caseDividerFacts(project: Project, opts: { trial?: boolean } = {}): CaseDividerFacts {
+export function caseDividerFacts(project: Project, opts: CaseDividerFactsOptions = {}): CaseDividerFacts {
   const { board, case: params } = project;
   const g = params.floorGrid;
   const fit: FitVariant = g?.fit ?? params.fit ?? 'tight';
@@ -381,6 +412,7 @@ export function caseDividerFacts(project: Project, opts: { trial?: boolean } = {
       problems.push('it runs into a board standoff');
     }
     if (!rectInRoundedRect(rect, cavity, innerR)) problems.push('its end runs into the case wall');
+    if (opts.extraClash) problems.push(...opts.extraClash(rect, d, { floorZ: facts.floorZ, depth, height }));
     for (const idx of [first, last]) {
       const key = d.axis === 'x' ? `${idx},${line}` : `${line},${idx}`;
       if (!live.has(key)) {
@@ -407,6 +439,8 @@ export function caseDividerFacts(project: Project, opts: { trial?: boolean } = {
         rect: { x0: 0, y0: 0, x1: 0, y1: 0 },
         clashes: [`${label} needs a whole number of sockets, at least 2, on a whole grid line — it is not built.`],
         moveTo: null,
+        shortenTo: null,
+        makeRoom: null,
       });
       return;
     }
@@ -432,15 +466,57 @@ export function caseDividerFacts(project: Project, opts: { trial?: boolean } = {
       rect: here.rect ?? { x0: 0, y0: 0, x1: 0, y1: 0 },
       clashes: here.problems.map((p) => `${label}: ${p}.`),
       moveTo,
+      shortenTo: null,
+      makeRoom: null,
     });
   });
 
   // Two dividers that cross cannot both seat.
   const placed = facts.dividers.filter((d) => d.builds && d.rect.x1 > d.rect.x0);
+  const byId = new Map((params.dividers ?? []).map((d) => [d.id, d] as const));
+  /** Every span of `d` on its own line with `holes` sockets, fewest dropped first. */
+  const trims = (d: CaseDivider): { start: number; holes: number }[] => {
+    const out: { start: number; holes: number }[] = [];
+    for (let holes = d.holes - 1; holes >= 2; holes--)
+      for (let start = d.start; start + holes <= d.start + d.holes; start++) out.push({ start, holes });
+    return out;
+  };
+  const clearOf = (rect: Rect, skip: string[]) =>
+    placed.every((o) => skip.includes(o.id) || !rectsOverlap(rect, o.rect));
   for (let i = 0; i < placed.length; i++)
     for (let j = i + 1; j < placed.length; j++)
-      if (rectsOverlap(placed[i]!.rect, placed[j]!.rect))
-        placed[j]!.clashes.push(`${placed[j]!.label}: it crosses ${placed[i]!.label} — only one can seat there.`);
+      if (rectsOverlap(placed[i]!.rect, placed[j]!.rect)) {
+        const first = placed[i]!;
+        const later = placed[j]!;
+        later.clashes.push(`${later.label}: it crosses ${first.label} — only one can seat there.`);
+        // Placement order should not decide which one fits: offer to shorten
+        // the one already standing so the new one seats as well.
+        const d = byId.get(first.id);
+        if (d && !later.makeRoom) {
+          for (const t of trims(d)) {
+            const trial = place({ ...d, ...t }, d.line);
+            if (trial.rect && trial.problems.length === 0 && clearOf(trial.rect, [first.id])) {
+              later.makeRoom = { id: first.id, label: first.label, ...t };
+              break;
+            }
+          }
+        }
+      }
+
+  // A clash no line clears (an end against the lid's lip, a seam across the
+  // whole run) may clear by dropping sockets from one end.
+  for (const f of facts.dividers) {
+    const d = byId.get(f.id);
+    if (!d || f.moveTo !== null || f.clashes.length === 0 || !f.builds) continue;
+    if (f.clashes.every((c) => c.includes('only one can seat there'))) continue;
+    for (const t of trims(d)) {
+      const trial = place({ ...d, ...t }, d.line);
+      if (trial.rect && trial.problems.length === 0 && clearOf(trial.rect, [f.id])) {
+        f.shortenTo = t;
+        break;
+      }
+    }
+  }
 
   return facts;
 }
@@ -494,21 +570,18 @@ export function buildCaseDividerOps(project: Project): CaseDividerOps {
   return { floorCut, nodes };
 }
 
-/**
- * Where a new divider along `axis` should go: the longest run of consecutive
- * live sockets on one grid line that seats cleanly and crosses no existing
- * divider. Falls back to the first line when nothing seats, and the panel then
- * states the clash like any other.
- */
-export function suggestCaseDivider(
+/** Which socket runs on each line can still take a divider of `axis` that seats cleanly. */
+function cleanPlacements(
   project: Project,
   axis: 'x' | 'y',
-): Pick<CaseDivider, 'axis' | 'line' | 'start' | 'holes'> {
-  const base = caseDividerFacts(project, { trial: true });
+  base: CaseDividerFacts,
+  opts: CaseDividerFactsOptions,
+  firstOnly: boolean,
+): Pick<CaseDivider, 'axis' | 'line' | 'start' | 'holes'>[] {
   const lines = axis === 'x' ? base.rows.length : base.columns.length;
   const live = new Set(base.sockets.map((k) => (axis === 'x' ? `${k.col},${k.row}` : `${k.row},${k.col}`)));
   const alongCount = axis === 'x' ? base.columns.length : base.rows.length;
-  let best: Pick<CaseDivider, 'axis' | 'line' | 'start' | 'holes'> | null = null;
+  const out: Pick<CaseDivider, 'axis' | 'line' | 'start' | 'holes'>[] = [];
   for (let line = 0; line < lines; line++) {
     let i = 0;
     while (i < alongCount) {
@@ -520,7 +593,7 @@ export function suggestCaseDivider(
       while (j + 1 < alongCount && live.has(`${j + 1},${line}`)) j++;
       // Every sub-run of the live run, longest first: the full run may cross
       // a divider already standing at one end of it.
-      for (let holes = j - i + 1; holes >= 2 && (!best || holes > best.holes); holes--) {
+      for (let holes = j - i + 1; holes >= 2; holes--) {
         for (let start = i; start + holes - 1 <= j; start++) {
           const cand = { axis, line, start, holes };
           const probe = caseDividerFacts(
@@ -528,17 +601,71 @@ export function suggestCaseDivider(
               ...project,
               case: { ...project.case, dividers: [...(project.case.dividers ?? []), { id: '__probe', enabled: true, ...cand }] },
             },
-            { trial: true },
+            { ...opts, trial: true },
           );
           const fact = probe.dividers.find((d) => d.id === '__probe');
           if (fact && fact.clashes.length === 0) {
-            best = cand;
-            break;
+            out.push(cand);
+            if (firstOnly) return out;
           }
         }
       }
       i = j + 1;
     }
   }
-  return best ?? { axis, line: 0, start: 0, holes: 2 };
+  return out;
+}
+
+/**
+ * Where a new divider along `axis` should go: the longest run of consecutive
+ * live sockets on one grid line that seats cleanly and crosses no existing
+ * divider — and, while the case has no divider the other way yet, one that
+ * still leaves a clean line for a divider the other way, so the order the two
+ * are added in does not decide whether both fit. Falls back to the longest
+ * clean run when no placement leaves that room, then to the first line when
+ * nothing seats; the panel then states the clash, with an offer to shorten
+ * the divider in the way.
+ */
+export function suggestCaseDivider(
+  project: Project,
+  axis: 'x' | 'y',
+  opts: CaseDividerFactsOptions = {},
+): Pick<CaseDivider, 'axis' | 'line' | 'start' | 'holes'> {
+  const base = caseDividerFacts(project, { ...opts, trial: true });
+  const clean = cleanPlacements(project, axis, base, opts, false).sort((a, b) => b.holes - a.holes);
+  if (clean.length === 0) {
+    // Nothing seats as things stand: prefer a spot where shortening a divider
+    // already standing makes room, so the panel can offer exactly that.
+    const lines = axis === 'x' ? base.rows.length : base.columns.length;
+    const along = axis === 'x' ? base.columns.length : base.rows.length;
+    for (let holes = along; holes >= 2; holes--)
+      for (let line = 0; line < lines; line++)
+        for (let start = 0; start + holes <= along; start++) {
+          const cand = { axis, line, start, holes };
+          const probe = caseDividerFacts(
+            {
+              ...project,
+              case: { ...project.case, dividers: [...(project.case.dividers ?? []), { id: '__probe', enabled: true, ...cand }] },
+            },
+            { ...opts, trial: true },
+          );
+          const fact = probe.dividers.find((d) => d.id === '__probe');
+          if (fact && fact.makeRoom && fact.clashes.every((c) => c.includes('only one can seat there'))) return cand;
+        }
+    return { axis, line: 0, start: 0, holes: 2 };
+  }
+  const other: 'x' | 'y' = axis === 'x' ? 'y' : 'x';
+  const hasOther = (project.case.dividers ?? []).some((d) => d.enabled && d.axis === other);
+  if (hasOther) return clean[0]!;
+  // Does the other way have a clean line at all today? If not, nothing to keep.
+  if (cleanPlacements(project, other, base, opts, true).length === 0) return clean[0]!;
+  for (const cand of clean) {
+    const withCand: Project = {
+      ...project,
+      case: { ...project.case, dividers: [...(project.case.dividers ?? []), { id: '__first', enabled: true, ...cand }] },
+    };
+    const after = caseDividerFacts(withCand, { ...opts, trial: true });
+    if (cleanPlacements(withCand, other, after, opts, true).length > 0) return cand;
+  }
+  return clean[0]!;
 }

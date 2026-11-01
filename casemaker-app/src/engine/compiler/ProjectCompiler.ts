@@ -1,18 +1,18 @@
 import type { Project, HatProfile } from '@/types';
 import type { Aabb, BuildPlan, BuildNode, BuildOp, SplitOffer } from './buildPlan';
-import { union, difference, translate, aabbOfOp } from './buildPlan';
+import { union, difference, translate, aabbOfOp, cube } from './buildPlan';
 import { buildOuterShell } from './caseShell';
 import { computeBossPlacements, buildBossesUnion, buildLidBosses } from './bosses';
 import { buildSealChannel, buildSealTongue, buildGasketBody } from './seal';
 import { buildLatchOps } from './latches';
 import { buildAlignmentFlange } from './alignmentFlange';
 import { buildRuggedOps } from './rugged';
-import { buildLid, computeLidDims } from './lid';
-import { buildPortCutoutsForProject } from './ports';
+import { buildFullLidFrictionLip, buildLid, computeLidDims } from './lid';
+import { buildPortCutoutOp, buildPortCutoutsForProject } from './ports';
 import { applySmartCutoutLayout } from './smartCutoutLayout';
 import { buildVentilationCutouts } from './ventilation';
 import { buildExternalAssetOps } from './externalAssets';
-import { buildHatCutoutsForProject } from './hats';
+import { buildHatCutoutsForProject, computeHatBaseZ } from './hats';
 import { buildMountingFeatureOps } from './mountingFeatures';
 import { buildDisplayCutoutOps } from './displays';
 import { buildFanMountOps } from './fans';
@@ -23,8 +23,8 @@ import { buildBoardSnapOps } from './boardSnap';
 import { buildSecondaryMountOps } from './secondaryMounts';
 import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
-import { buildMagnetOps } from './magnets';
-import { buildCaseDividerOps } from './caseDividers';
+import { buildMagnetOps, faceSizeForProject } from './magnets';
+import { boardFootprint, buildCaseDividerOps } from './caseDividers';
 import { buildStandNodes } from './stand';
 import { buildRackNodes } from './rack';
 import { rectFitsBed, resolvePrinter } from './rackFit';
@@ -39,7 +39,12 @@ import { buildBadgeNodes } from './badge';
 import { buildInsertNodes } from './insert';
 import { buildBlankNodes } from './blank';
 import { buildToolboxNodes } from './toolbox';
-import { buildStackConnector, stackConnectorWanted, type ConnectorKeepOut } from './stackConnector';
+import { buildStackConnector, stackConnectorWanted, stackPadCutouts } from './stackConnector';
+import { ClashEnv, dividerClashStatements, hatBeyondHost, magnetClashStatements, type ClashStatement } from './caseClashes';
+import { feature, featureOfOps } from './interiorClash';
+import { resolveMountingPosition } from './hatOrientation';
+import { cavityOriginXY } from '@/engine/coords';
+import type { ShellJointPlan } from './shellSplit';
 import { computeShellDims } from './caseShell';
 import { lidIsRecessed } from './lidMode';
 import { derivedKind } from './archetype';
@@ -202,7 +207,7 @@ export function compileProject(project: Project): BuildPlan {
   const latchOps = buildLatchOps(caseParams.latches, board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   // Pelican alignment brim + tongue/groove around the perimeter (auto-on
   // for shell-mode lids).
-  const flangeOps = buildAlignmentFlange(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  const flangeOps = { ...buildAlignmentFlange(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay) };
   // Board-retention snap fingers (when boardRetention='snap'). Emitted
   // on the cavity walls; auto-skipped when boardRetention is anything else.
   const boardSnapOps = buildBoardSnapOps(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
@@ -211,6 +216,34 @@ export function compileProject(project: Project): BuildPlan {
   const secondaryMountOps = buildSecondaryMountOps(board, caseParams);
   // Issue #111 — rugged exterior (corner bumpers, ribbing, feet).
   const ruggedOps = buildRuggedOps(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  // A connector socket that asks for a pad cut-out notches the brim and the
+  // ribbing where it stands. Nothing changes unless a socket asks for one.
+  const connectorOn = stackConnectorWanted(caseParams.stackConnector);
+  const shellDimsEarly = connectorOn
+    ? computeShellDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay)
+    : null;
+  const lidDimsEarly = computeLidDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  const connectorTop = shellDimsEarly
+    ? lidIsRecessed(caseParams)
+      ? shellDimsEarly.outerZ
+      : lidDimsEarly.zPosition + lidDimsEarly.z
+    : 0;
+  const padCuts = shellDimsEarly
+    ? stackPadCutouts(caseParams.stackConnector, {
+        outerX: shellDimsEarly.outerX,
+        outerY: shellDimsEarly.outerY,
+        top: connectorTop,
+        wall: caseParams.wallThickness,
+        cornerRadius: caseParams.cornerRadius,
+      })
+    : [];
+  if (padCuts.length > 0) {
+    const toLid = padCuts.map((op) => translate([0, 0, -lidDimsEarly.zPosition], op));
+    if (flangeOps.caseAdditive) flangeOps.caseAdditive = difference([flangeOps.caseAdditive, ...padCuts]);
+    if (flangeOps.lidAdditive) flangeOps.lidAdditive = difference([flangeOps.lidAdditive, ...toLid]);
+    ruggedOps.caseAdditive = ruggedOps.caseAdditive.map((op) => difference([op, ...padCuts]));
+    ruggedOps.lidAdditive = ruggedOps.lidAdditive.map((op) => difference([op, ...toLid]));
+  }
   // Issue #92 — barrel hinge. caseAdditive joins the shell pre-cavity-cut so
   // the through-hole bores cleanly through both the wall and the knuckle;
   // lidAdditive is unioned with the lid op (pre-drilled in lid-local coords);
@@ -304,51 +337,130 @@ export function compileProject(project: Project): BuildPlan {
     ...dividerOps.floorCut,
   ];
 
+  // The shared clash pass (interiorClash.ts) — only for a case with magnets,
+  // dividers or a connector, so every other project compiles exactly as before.
+  const lidZ = lidDimsEarly.zPosition;
+  const toWorld = (ops: BuildOp[]): BuildOp[] => ops.map((op) => translate([0, 0, lidZ], op));
+  const magnetsOn = magnetOps.facts.pockets.length > 0;
+  const dividersOn =
+    caseParams.floorGrid?.enabled === true && (caseParams.dividers ?? []).some((d) => d.enabled);
+  const baseLidOp = buildLid(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  const env = new ClashEnv();
+  if (magnetsOn || dividersOn || connectorOn) {
+    const enabledPorts = smartLayout.ports.filter((p) => p.enabled);
+    env
+      .addFeatures('board', () => {
+        const o = cavityOriginXY(caseParams);
+        const z = caseParams.floorThickness + board.defaultStandoffHeight;
+        const pcb = board.pcb.size;
+        const ops: BuildOp[] = [translate([o.x, o.y, z], cube([pcb.x, pcb.y, pcb.z]))];
+        for (const c of board.components)
+          ops.push(translate([o.x + c.position.x, o.y + c.position.y, z + c.position.z], cube([c.size.x, c.size.y, c.size.z])));
+        return [featureOfOps('board', 'board', 'the board', ops)];
+      })
+      .add('standoff', 'standoffs', 'a board standoff', () => [
+        ...bossOps,
+        ...buildLidBosses(
+          bossPlacements,
+          lidZ,
+          caseParams.floorThickness + board.defaultStandoffHeight + board.pcb.size.z + 0.3,
+        ),
+      ])
+      .addFeatures('port', () =>
+        enabledPorts.flatMap((p) => {
+          const op = buildPortCutoutOp(p, board, caseParams);
+          return op ? [featureOfOps(`port:${p.id}`, 'port', `the ${p.kind} cutout`, [op])] : [];
+        }),
+      )
+      .add('latch', 'latches', 'a latch', () => [...latchOps.caseAdditive, ...latchOps.caseSubtract, ...latchOps.lidAdditive])
+      .add('hinge', 'hinge', 'the hinge', () => [...hingeOps.caseAdditive, ...hingeOps.subtractive, ...toWorld(hingeOps.lidAdditive)])
+      .add('lid', 'lid', 'the lid', () => toWorld([baseLidOp]))
+      .add('lid-lip', 'lid-lip', "the lid's friction lip", () => {
+        if (caseParams.joint !== 'snap-fit' || caseParams.snapType !== 'full-lid') return [];
+        const lip = buildFullLidFrictionLip(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+        return lip ? toWorld([lip]) : [];
+      })
+      .addFeatures('vent', () => {
+        const floorTop = caseParams.floorThickness + 1.5;
+        const bottom = ventCuts.shellCuts.filter((op) => (aabbOfOp(op)?.max[2] ?? Infinity) <= floorTop);
+        const side = ventCuts.shellCuts.filter((op) => !bottom.includes(op));
+        return [
+          ...(bottom.length ? [featureOfOps('vents-bottom', 'vent', 'a bottom vent', bottom)] : []),
+          ...(side.length ? [featureOfOps('vents-side', 'vent', 'a side vent', side)] : []),
+        ];
+      })
+      .addFeatures('hat', () => {
+        const baseZ = computeHatBaseZ(board, caseParams, hats ?? [], resolveHat);
+        const host = boardFootprint(board, caseParams, display, resolveDisplay);
+        const o = cavityOriginXY(caseParams);
+        const out = [];
+        for (const h of hats ?? []) {
+          const prof = resolveHat(h.hatId);
+          const z0 = baseZ.get(h.id);
+          if (!prof || z0 === undefined || !h.enabled) continue;
+          const pos = resolveMountingPosition(prof, h);
+          const turned = pos.rotation === 90 || pos.rotation === 270;
+          const w = turned ? prof.pcb.size.y : prof.pcb.size.x;
+          const d = turned ? prof.pcb.size.x : prof.pcb.size.y;
+          const cx = o.x + prof.pcb.size.x / 2 + pos.offset.x + (h.offsetOverride?.x ?? 0);
+          const cy = o.y + prof.pcb.size.y / 2 + pos.offset.y + (h.offsetOverride?.y ?? 0);
+          const tallest = prof.components.reduce((m, c) => Math.max(m, c.position.z + c.size.z), prof.pcb.size.z);
+          const shapes = hatBeyondHost(
+            { x0: cx - w / 2, y0: cy - d / 2, x1: cx + w / 2, y1: cy + d / 2 },
+            host,
+            z0,
+            z0 + tallest,
+          );
+          if (shapes.length) out.push(feature(`hat:${h.id}`, 'hat', `the ${prof.name} board`, shapes));
+        }
+        return out;
+      })
+      .add('magnet', 'magnets', 'a magnet pocket', () => [
+        ...magnetOps.shellAdd,
+        ...magnetOps.shellCut,
+        ...toWorld([...magnetOps.lidAdd, ...magnetOps.lidCut]),
+      ])
+      .add('nameplate', 'nameplate', 'the nameplate', () => (magnetOps.nameplate ? [magnetOps.nameplate.op] : []))
+      .add('floor-grid', 'floor-grid', 'the floor grid', () => dividerOps.floorCut)
+      .add('brim', 'brim', 'the alignment brim', () => [
+        ...(flangeOps.caseAdditive ? [flangeOps.caseAdditive] : []),
+        ...(flangeOps.lidAdditive ? toWorld([flangeOps.lidAdditive]) : []),
+      ])
+      .add('ribbing', 'ribbing', 'the rugged ribbing', () => [...ruggedOps.caseAdditive, ...toWorld(ruggedOps.lidAdditive)])
+      .add('other', 'mounting', 'a mounting feature', () => [...featureOps.additive, ...featureOps.subtractive])
+      .add('other', 'fan', 'a fan mount', () => [...fanOps.additive, ...fanOps.subtractive])
+      .add('other', 'display', 'the display opening', () => [...displayOps.additive, ...displayOps.subtractive])
+      .add('other', 'label', 'a label', () => [...textOps.additive, ...textOps.subtractive])
+      .add('other', 'antenna', 'an antenna', () => antennaOps.subtractive)
+      .add('other', 'snap', 'a snap catch', () => [...snapOps.shellAdd, ...snapOps.shellSubtract])
+      .add('other', 'custom', 'a custom cutout', () => customCutOps)
+      .add('other', 'board-snap', 'the board-snap clips', () => boardSnapOps.caseAdditive)
+      .add('other', 'secondary', 'a secondary-board mount', () => secondaryMountOps.caseAdditive);
+  }
+
   // Issue #149 — the stacking connector's sockets. Everything it returns is
   // empty when the project asks for no connector, and every splice below is
   // guarded, so an unconnected project's plan stays byte-identical.
   const connector = (() => {
-    if (!stackConnectorWanted(caseParams.stackConnector)) {
+    if (!connectorOn || !shellDimsEarly) {
       return buildStackConnector(undefined, { outerX: 0, outerY: 0, shellTop: 0, top: 0, wall: 0, cornerRadius: 0 });
     }
-    const dims = computeShellDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
-    const recessed = lidIsRecessed(caseParams);
-    const lidDimsEarly = computeLidDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
-    const lidZ = lidDimsEarly.zPosition;
-    const toWorld = (ops: BuildOp[]): BuildOp[] => ops.map((op) => translate([0, 0, lidZ], op));
-    const named = (what: string, ops: BuildOp[]): ConnectorKeepOut[] =>
-      ops
-        .map(aabbOfOp)
-        .filter((b): b is Aabb => b !== null)
-        .map((box) => ({ what, box }));
-    const keepOuts: ConnectorKeepOut[] = [
-      ...named('a port cutout', portCutOps),
-      ...named('a vent', [...ventCuts.shellCuts, ...toWorld(ventCuts.lidCuts)]),
-      ...named('a board boss', bossOps),
-      ...named('the hinge', [...hingeOps.caseAdditive, ...hingeOps.subtractive, ...toWorld(hingeOps.lidAdditive)]),
-      ...named('a latch', [...latchOps.caseAdditive, ...latchOps.caseSubtract, ...latchOps.lidAdditive]),
-      ...named('a mounting feature', [...featureOps.additive, ...featureOps.subtractive]),
-      ...named('a fan mount', [...fanOps.additive, ...fanOps.subtractive]),
-      ...named('the display opening', [...displayOps.additive, ...displayOps.subtractive]),
-      ...named('a label', [...textOps.additive, ...textOps.subtractive]),
-      ...named('an antenna', antennaOps.subtractive),
-      ...named('a snap catch', [...snapOps.shellAdd, ...snapOps.shellSubtract]),
-      ...named('the rugged ribbing', [...ruggedOps.caseAdditive, ...toWorld(ruggedOps.lidAdditive)]),
-      ...named('the alignment brim', [
-        ...(flangeOps.caseAdditive ? [flangeOps.caseAdditive] : []),
-        ...(flangeOps.lidAdditive ? toWorld([flangeOps.lidAdditive]) : []),
-      ]),
-      ...named('a custom cutout', customCutOps),
-      ...named('the board-snap clips', boardSnapOps.caseAdditive),
-      ...named('a secondary-board mount', secondaryMountOps.caseAdditive),
-    ];
+    const dims = shellDimsEarly;
+    // The connector's keep-outs, named as its statements always have. Ports
+    // are one feature so a socket on two ports says "a port cutout" once.
+    const keepOuts = [
+      featureOfOps('k:ports', 'port', 'a port cutout', portCutOps),
+      featureOfOps('k:vents', 'vent', 'a vent', [...ventCuts.shellCuts, ...toWorld(ventCuts.lidCuts)]),
+      featureOfOps('k:bosses', 'standoff', 'a board boss', bossOps),
+      ...env.of('hinge', 'latch', 'brim', 'ribbing', 'magnet', 'nameplate', 'floor-grid', 'other'),
+    ].filter((k) => k.shapes.length > 0);
     return buildStackConnector(
       caseParams.stackConnector,
       {
         outerX: dims.outerX,
         outerY: dims.outerY,
         shellTop: dims.outerZ,
-        top: recessed ? dims.outerZ : lidZ + lidDimsEarly.z,
+        top: connectorTop,
         wall: caseParams.wallThickness,
         cornerRadius: caseParams.cornerRadius,
         caseFit: caseParams.fit,
@@ -392,6 +504,7 @@ export function compileProject(project: Project): BuildPlan {
   const splitPrinter = resolvePrinter(project);
   const shellBounds = splitPrinter ? aabbOfOp(shellOp) : null;
   let splitOffer: SplitOffer | undefined;
+  let splitJoint: ShellJointPlan | null = null;
   if (shellBounds && splitPrinter) {
     const splitWidth = shellBounds.max[0] - shellBounds.min[0];
     const splitDepth = shellBounds.max[1] - shellBounds.min[1];
@@ -439,6 +552,7 @@ export function compileProject(project: Project): BuildPlan {
         // The plan is what the builder would work out anyway, so it is handed
         // over rather than recomputed.
         const joint = planShellJoint(request);
+        if (joint && caseParams.splitForPrint === true) splitJoint = joint;
         if (!joint) {
           splitOffer = { state: 'blocked' };
         } else {
@@ -458,7 +572,7 @@ export function compileProject(project: Project): BuildPlan {
     }
   }
 
-  let lidOp = buildLid(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  let lidOp = baseLidOp;
   const lidDims = computeLidDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   // Issue #104 — top-position bosses fuse with the lid mesh, anchored to
   // the lid's WORLD underside Z. The buildLid result is in lid-local
@@ -600,6 +714,48 @@ export function compileProject(project: Project): BuildPlan {
     nodes.push(d);
   }
 
+  // The clash statements for magnets and dividers. Informational only: the
+  // nodes above are already what gets built.
+  const statements: ClashStatement[] = [];
+  if (magnetsOn) {
+    const sideEnv = env.of('board', 'standoff', 'latch', 'hinge', 'lid');
+    statements.push(
+      ...magnetClashStatements({
+        facts: magnetOps.facts,
+        lidZ,
+        faceExtent: (face) => faceSizeForProject(project, face),
+        origin: (source) => {
+          if (source === 'nameplate') return caseParams.nameplate ? [caseParams.nameplate.u, caseParams.nameplate.v] : null;
+          const m = (caseParams.magnetPockets ?? []).find((x) => x.id === source);
+          return m ? [m.u, m.v] : null;
+        },
+        shellEnv: sideEnv,
+        lidEnv: env.of('board', 'standoff', 'latch', 'hinge'),
+        ports: env.of('port'),
+      }),
+    );
+  }
+  if (dividersOn) {
+    const seams =
+      splitJoint && shellBounds
+        ? splitJoint.seams.map((seam) => {
+            const b = shellBounds;
+            const lo: [number, number, number] = [b.min[0], b.min[1], b.min[2]];
+            const hi: [number, number, number] = [b.max[0], b.max[1], b.max[2]];
+            lo[seam.axis] = seam.at - 0.5;
+            hi[seam.axis] = seam.at + 0.5;
+            const name = seam.axis === 0 ? 'X' : 'Y';
+            return featureOfOps(
+              `seam:${seam.axis}:${seam.at}`,
+              'seam',
+              `the split-for-print seam at ${name} ${Math.round(seam.at * 10) / 10} mm`,
+              [translate(lo, cube([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]))],
+            );
+          })
+        : [];
+    statements.push(...dividerClashStatements(project, [...env.of('lid-lip', 'vent', 'hat'), ...seams]));
+  }
+
   const placementReport = validatePlacements(project);
   return {
     nodes,
@@ -607,5 +763,6 @@ export function compileProject(project: Project): BuildPlan {
     smartCutoutDecisions: smartLayout.decisions,
     splitOffer,
     ...(connector.report ? { connector: connector.report } : {}),
+    ...(statements.length > 0 ? { clashes: { statements } } : {}),
   };
 }

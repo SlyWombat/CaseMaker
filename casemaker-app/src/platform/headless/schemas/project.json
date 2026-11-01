@@ -2193,6 +2193,10 @@
               "description": "Dovetail sockets, at most one per side wall; empty cuts none.",
               "items": {
                 "properties": {
+                  "cutThrough": {
+                    "description": "Cut a pad cut-out through the alignment brim and ribbing at the socket; omit for none.",
+                    "type": "boolean"
+                  },
                   "face": {
                     "description": "Side wall the socket is cut into.",
                     "enum": [

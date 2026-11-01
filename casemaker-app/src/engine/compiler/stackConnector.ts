@@ -39,11 +39,11 @@ import {
   rotate,
   translate,
   union,
-  type Aabb,
   type BuildNode,
   type BuildOp,
   type Profile,
 } from './buildPlan';
+import { MIN_OVERLAP, clashesWith, describeOverlap, feature, shapeOfOp, type ClashFeature, type ClashMethod } from './interiorClash';
 
 /**
  * Issue #149 — the stacking connector: dovetail sockets on the outside of the
@@ -459,49 +459,88 @@ export function maxSocketOffset(face: ConnectorFace, outerX: number, outerY: num
   return faceLength(face, outerX, outerY) / 2 - Math.max(0, cornerRadius) - STACK_PAD_W / 2;
 }
 
-/** The world box a socket occupies — the clash zone for the inform-don't-refuse check. */
-export function socketZone(
+/**
+ * What a socket occupies, as solids for the shared clash check: the pad (its
+ * half-wall embed included, so a port or a pocket cut through the wall under
+ * it is caught) and the key's grip standing out of the mouth. The channel cuts
+ * all lie inside the pad, so the pad is the socket's real extent.
+ */
+export function socketClashOps(
   face: ConnectorFace,
   offset: number,
   height: number,
   wall: number,
   outerX: number,
   outerY: number,
-): Aabb {
+  /** Extra half-width along the wall, mm: a socket swept that far each way. */
+  sweep = 0,
+): BuildOp[] {
   const u = faceLength(face, outerX, outerY) / 2 + offset;
-  const halfW = STACK_PAD_W / 2;
-  const out = STACK_PAD_PROUD + STACK_WEB_PROUD;
-  switch (face) {
-    case '-y':
-      return { min: [u - halfW, -out, 0], max: [u + halfW, wall, height] };
-    case '+y':
-      return { min: [u - halfW, outerY - wall, 0], max: [u + halfW, outerY + out, height] };
-    case '-x':
-      return { min: [-out, u - halfW, 0], max: [wall, u + halfW, height] };
-    case '+x':
-      return { min: [outerX - wall, u - halfW, 0], max: [outerX + out, u + halfW, height] };
-  }
+  const embed = wall / 2;
+  return SOCKET_BOXES.map(({ halfW, y0, y1 }) =>
+    placeOnWall(box([-(halfW + sweep), y0(embed), 0], [halfW + sweep, y1, height]), face, u, outerX, outerY),
+  );
 }
 
-function boxesOverlap(a: Aabb, b: Aabb): boolean {
-  for (let i = 0; i < 3; i++) {
-    if (a.max[i]! <= b.min[i]! || b.max[i]! <= a.min[i]!) return false;
+/** The socket's two boxes in its own frame: the pad, and the key's grip out of the mouth. */
+const SOCKET_BOXES: { halfW: number; y0: (embed: number) => number; y1: number }[] = [
+  { halfW: STACK_PAD_W / 2, y0: (embed) => -embed, y1: STACK_PAD_PROUD },
+  { halfW: STACK_MOUTH_W / 2, y0: () => STACK_PAD_PROUD, y1: STACK_PAD_PROUD + STACK_WEB_PROUD },
+];
+
+/** Side gap left between the pad and a cut-out through the brim or ribbing, mm. */
+export const PAD_CUTOUT_GAP = 0.5;
+/** How far out from the wall a pad cut-out reaches, mm (past any brim or rib). */
+const PAD_CUTOUT_REACH = 25;
+
+/**
+ * The notch a socket with `cutThrough` takes out of the alignment brim and the
+ * rugged ribbing (WORLD coordinates): the pad's width plus a gap each side,
+ * from the pad's embed in the wall out past the brim, the full height of the
+ * socket. It is subtracted from the brim and rib ops only, never the shell, so
+ * the wall and the pad are untouched. Empty when no socket asks for one.
+ */
+export function stackPadCutouts(
+  params: StackConnectorParams | undefined,
+  geom: Pick<StackConnectorCase, 'outerX' | 'outerY' | 'top' | 'wall' | 'cornerRadius'>,
+): BuildOp[] {
+  if (!stackConnectorWanted(params)) return [];
+  const out: BuildOp[] = [];
+  const seen = new Set<ConnectorFace>();
+  for (const s of params.sockets) {
+    if (seen.has(s.face)) continue;
+    seen.add(s.face);
+    if (!s.cutThrough) continue;
+    const limit = maxSocketOffset(s.face, geom.outerX, geom.outerY, geom.cornerRadius);
+    if (limit < 0 || !socketZLayout(geom.top, params.key)) continue;
+    const offset = Math.abs(s.offset) > limit ? Math.sign(s.offset) * limit : s.offset;
+    const u = faceLength(s.face, geom.outerX, geom.outerY) / 2 + offset;
+    const hw = STACK_PAD_W / 2 + PAD_CUTOUT_GAP;
+    const notch = box([-hw, -(geom.wall / 2 + 0.05), 0], [hw, PAD_CUTOUT_REACH, geom.top + OVER]);
+    out.push(placeOnWall(notch, s.face, u, geom.outerX, geom.outerY));
   }
-  return true;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
 // The whole feature
 // ---------------------------------------------------------------------------
 
-/** A feature already on the case that a socket must not land on. */
-export interface ConnectorKeepOut {
-  /** What it is, as a phrase: "a port cutout", "the hinge". */
-  what: string;
-  box: Aabb;
-}
+/**
+ * A feature already on the case that a socket must not land on — any shared
+ * clash-check feature (`interiorClash.ts`); its `label` is the phrase a
+ * statement names it by ("a port cutout", "the hinge").
+ */
+export type ConnectorKeepOut = ClashFeature;
 
-export type ConnectorNoteKind = 'clash' | 'clamped' | 'no-pocket' | 'not-flush' | 'too-short' | 'duplicate';
+export type ConnectorNoteKind =
+  | 'clash'
+  | 'clamped'
+  | 'no-pocket'
+  | 'not-flush'
+  | 'too-short'
+  | 'duplicate'
+  | 'pad-cutout';
 
 export interface ConnectorNote {
   face: ConnectorFace;
@@ -509,6 +548,13 @@ export interface ConnectorNote {
   message: string;
   /** The offer to move: an offset (mm) that clears every clash on this wall. */
   suggestedOffset?: Mm;
+  /**
+   * The offer to cut a pad cut-out through the brim or ribbing at
+   * `suggestedOffset`, when they block every position along the wall.
+   */
+  padCutout?: boolean;
+  /** How the clash was found (the shared check's method). */
+  method?: ClashMethod;
 }
 
 export interface PlacedSocket {
@@ -561,19 +607,45 @@ export function stackConnectorWanted(p: StackConnectorParams | undefined): p is 
   return !!p && (p.sockets.length > 0 || p.keys > 0);
 }
 
-/** The first offset nearest `from` (0.5 mm steps) whose zone clears every keep-out, or null. */
-function clearOffset(
-  face: ConnectorFace,
-  from: number,
-  limit: number,
-  geom: StackConnectorCase,
-  keepOuts: ConnectorKeepOut[],
-): number | null {
+/** Offsets (open intervals, mm) at which a socket on `face` would run into a keep-out. */
+type Blocked = { keep: ConnectorKeepOut; from: number; to: number }[];
+
+/**
+ * Every offset along the wall at which the socket would clash, found in one
+ * intersection per keep-out: each of the socket's boxes is swept along the
+ * whole wall, intersected with the keep-out's real solid, and the overlap's
+ * pieces are projected back onto the wall. A box of half-width w at offset o
+ * meets a piece spanning [a, b] along the wall exactly when o lies in
+ * (a − c − w, b − c + w), c being the wall's centre — the same answer as
+ * testing the socket at every offset, at the cost of one test.
+ */
+function blockedOffsets(face: ConnectorFace, limit: number, geom: StackConnectorCase, keepOuts: ConnectorKeepOut[]): Blocked {
+  const out: Blocked = [];
+  if (limit < 0) return out;
+  const c = faceLength(face, geom.outerX, geom.outerY) / 2;
+  const axis = face === '+y' || face === '-y' ? 0 : 1;
+  const sweep = limit + 1;
+  const ops = socketClashOps(face, 0, geom.top, geom.wall, geom.outerX, geom.outerY, sweep);
+  ops.forEach((op, i) => {
+    const w = SOCKET_BOXES[i]!.halfW;
+    const swept = feature(`socket-sweep:${face}:${i}`, 'socket', 'socket', [shapeOfOp(op)]);
+    for (const { with: keep, hit } of clashesWith(swept, keepOuts)) {
+      for (const p of hit.pieces) {
+        const a = p.min[axis]!;
+        const b = p.max[axis]!;
+        // A sliver thinner than the clash threshold is not a clash.
+        out.push({ keep, from: a - c - w + MIN_OVERLAP, to: b - c + w - MIN_OVERLAP });
+      }
+    }
+  });
+  return out;
+}
+
+/** The first offset nearest `from` (0.5 mm steps) clear of every blocked interval, or null. */
+function clearOffset(from: number, limit: number, blocked: Blocked, skip: (k: ConnectorKeepOut) => boolean = () => false): number | null {
   if (limit < 0) return null;
-  const clear = (o: number): boolean => {
-    const z = socketZone(face, o, geom.top, geom.wall, geom.outerX, geom.outerY);
-    return keepOuts.every((k) => !boxesOverlap(z, k.box));
-  };
+  const live = blocked.filter((b) => !skip(b.keep));
+  const clear = (o: number): boolean => live.every((b) => o <= b.from || o >= b.to);
   const steps = Math.ceil((2 * limit) / 0.5) + 1;
   for (let i = 0; i <= steps; i++) {
     for (const sign of [1, -1]) {
@@ -583,6 +655,18 @@ function clearOffset(
   }
   return null;
 }
+
+function socketFeature(face: ConnectorFace, offset: number, geom: StackConnectorCase): ClashFeature {
+  return feature(
+    `socket:${face}`,
+    'socket',
+    `the ${FACE_NAME[face]} socket`,
+    socketClashOps(face, offset, geom.top, geom.wall, geom.outerX, geom.outerY).map((op) => shapeOfOp(op)),
+  );
+}
+
+/** Keep-outs a pad cut-out can go through. */
+const CUTTABLE = new Set(['brim', 'ribbing']);
 
 /**
  * Build the connector for one case. Returns empty arrays and a null report
@@ -674,20 +758,48 @@ export function buildStackConnector(
       });
     }
 
-    const zone = socketZone(face, offset, geom.top, geom.wall, geom.outerX, geom.outerY);
-    const hits = [...new Set(keepOuts.filter((k) => boxesOverlap(zone, k.box)).map((k) => k.what))];
-    if (hits.length > 0) {
-      const move = clearOffset(face, offset, limit, geom, keepOuts);
+    const found = clashesWith(socketFeature(face, offset, geom), keepOuts);
+    if (found.length > 0) {
+      const hits = [...new Set(found.map((f) => f.with.label))];
+      const method = found.reduce<ClashMethod>(
+        (m, f) => (f.hit.method === 'bounds' || m === 'bounds' ? 'bounds' : f.hit.method === 'solid' ? 'solid' : m),
+        'footprint',
+      );
+      const blocked = blockedOffsets(face, limit, geom, keepOuts);
+      const move = clearOffset(offset, limit, blocked);
       const what = hits.length === 1 ? hits[0]! : `${hits.slice(0, -1).join(', ')} and ${hits[hits.length - 1]}`;
+      // Where the brim or the ribbing is all that stands in the way at every
+      // position, the answer is a notch through it, not "nowhere".
+      const pad =
+        move === null && found.some((f) => CUTTABLE.has(f.with.kind))
+          ? clearOffset(offset, limit, blocked, (k) => CUTTABLE.has(k.kind))
+          : null;
+      const first = found[0]!;
+      const overlap = found.length === 1 ? ` (they overlap ${describeOverlap(first.hit)})` : '';
+      let offer: string;
+      if (move !== null) offer = `Moving it to ${fmt(move)} mm clears it.`;
+      else if (pad !== null) {
+        const cuttable = [...new Set(found.filter((f) => CUTTABLE.has(f.with.kind)).map((f) => f.with.label))];
+        offer =
+          `Every position along this wall runs into ${cuttable.join(' and ')}. ` +
+          (pad === offset ? 'A' : `At ${fmt(pad)} mm, a`) +
+          ` pad cut-out through ${cuttable.length > 1 ? 'them' : 'it'}, ${fmt(STACK_PAD_W + 2 * PAD_CUTOUT_GAP)} mm wide, makes room for the socket.`;
+      } else offer = 'No position along this wall clears it; the socket is cut as placed.';
       report.notes.push({
         face,
         kind: 'clash',
+        message: `The ${name} socket at ${fmt(offset)} mm runs into ${what}${overlap}. ${offer}`,
+        method,
+        ...(move !== null ? { suggestedOffset: move } : pad !== null ? { suggestedOffset: pad, padCutout: true } : {}),
+      });
+    }
+    if (s.cutThrough) {
+      report.notes.push({
+        face,
+        kind: 'pad-cutout',
         message:
-          `The ${name} socket at ${fmt(offset)} mm runs into ${what}. ` +
-          (move === null
-            ? 'No position along this wall clears it; the socket is cut as placed.'
-            : `Moving it to ${fmt(move)} mm clears it.`),
-        ...(move === null ? {} : { suggestedOffset: move }),
+          `The ${name} socket has a pad cut-out, ${fmt(STACK_PAD_W + 2 * PAD_CUTOUT_GAP)} mm wide, through the ` +
+          `alignment brim and the ribbing; the wall and the seal inside the rim are not cut.`,
       });
     }
 

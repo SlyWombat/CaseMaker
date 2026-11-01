@@ -327,14 +327,20 @@ describe('nameplate', () => {
 
 describe('pockets and ports', () => {
   it('says so when a pocket runs into a port cutout (the Pi 4B USB end)', () => {
-    const facts = magnetFactsForProject(
+    // The compiler's shared clash pass states it now, on the real pocket and
+    // the real cutter (interiorClash.spec covers the near misses).
+    const plan = compileProject(
       withCase({ magnetPockets: [{ id: 'm', face: '+x', u: 21, v: 15, size: '6x2', enabled: true }] }),
     );
-    expect(facts.notes.join(' ')).toMatch(/runs into the .* cutout/);
-    const clear = magnetFactsForProject(
+    const said = (plan.clashes?.statements ?? []).map((c) => c.message).join(' ');
+    expect(said).toMatch(/runs into the .* cutout, which is cut through it/);
+    const clear = compileProject(
       withCase({ magnetPockets: [{ id: 'm', face: '-x', u: 40, v: 15, size: '6x2', enabled: true }] }),
     );
-    expect(clear.notes).toEqual([]);
+    expect(clear.clashes).toBeUndefined();
+    expect(magnetFactsForProject(
+      withCase({ magnetPockets: [{ id: 'm', face: '-x', u: 40, v: 15, size: '6x2', enabled: true }] }),
+    ).notes).toEqual([]);
   });
 });
 

@@ -4,6 +4,7 @@ import type { PlacementReport } from '@/engine/compiler/placementValidator';
 import type { SmartCutoutDecision } from '@/engine/compiler/smartCutoutLayout';
 import type { SplitOffer } from '@/engine/compiler/buildPlan';
 import type { StackConnectorReport } from '@/engine/compiler/stackConnector';
+import type { ClashStatement } from '@/engine/compiler/caseClashes';
 
 export type JobStatus = 'idle' | 'rebuilding' | 'error';
 
@@ -35,6 +36,8 @@ export interface JobState {
    * project asks for no connector.
    */
   connector: StackConnectorReport | null;
+  /** The compiler's clash statements for magnets and dividers (empty when none). */
+  clashes: ClashStatement[];
   setStatus: (status: JobStatus, error?: string | null) => void;
   applyResult: (
     generation: number,
@@ -47,6 +50,7 @@ export interface JobState {
       smartCutoutDecisions?: SmartCutoutDecision[];
       splitOffer?: SplitOffer;
       connector?: StackConnectorReport;
+      clashes?: ClashStatement[];
     },
   ) => void;
 }
@@ -63,6 +67,7 @@ export const useJobStore = create<JobState>()((set) => ({
   smartCutoutDecisions: [],
   splitOffer: null,
   connector: null,
+  clashes: [],
   setStatus: (status, error = null) => set({ status, error }),
   applyResult: (generation, nodes, combinedStats, durationMs, diag, diagnostics) =>
     set(() => {
@@ -80,6 +85,7 @@ export const useJobStore = create<JobState>()((set) => ({
         smartCutoutDecisions: diagnostics?.smartCutoutDecisions ?? [],
         splitOffer: diagnostics?.splitOffer ?? null,
         connector: diagnostics?.connector ?? null,
+        clashes: diagnostics?.clashes ?? [],
       };
     }),
 }));

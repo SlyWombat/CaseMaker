@@ -49,6 +49,12 @@ export interface StackSocket {
    * Positive is toward +X on the ±Y walls and toward +Y on the ±X walls.
    */
   offset: Mm;
+  /**
+   * Cut a pad cut-out through the alignment brim and the rugged ribbing where
+   * the socket stands, for a case whose brim or ribbing runs along the whole
+   * wall. Absent or false cuts nothing.
+   */
+  cutThrough?: boolean;
 }
 
 export interface StackConnectorParams {

@@ -159,6 +159,12 @@ export interface BuildPlan {
    * for no connector, so an unconnected plan is unchanged.
    */
   connector?: import('./stackConnector').StackConnectorReport;
+  /**
+   * The shared clash pass's statements for magnet pockets and dividers, each
+   * with its offer. Absent when there is nothing to say, so a project without
+   * those features (or without a clash) keeps its plan.
+   */
+  clashes?: import('./caseClashes').ClashReport;
 }
 
 export function cube(size: Vec3, center = false): BuildOp {

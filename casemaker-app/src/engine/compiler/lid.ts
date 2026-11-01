@@ -310,7 +310,7 @@ export function buildSnapFitLid(
  *
  * Used by buildSnapFitLid AND by the lidRecess + full-lid combo path.
  */
-function buildFullLidFrictionLip(
+export function buildFullLidFrictionLip(
   board: BoardProfile,
   params: CaseParameters,
   hats: HatPlacement[] = NO_HATS,

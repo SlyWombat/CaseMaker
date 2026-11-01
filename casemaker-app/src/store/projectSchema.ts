@@ -418,6 +418,10 @@ export const caseParamsSchema = z.object({
             offset: z
               .number()
               .describe('Shift of the socket centre along the wall from its centre, in millimetres.'),
+            cutThrough: z
+              .boolean()
+              .optional()
+              .describe('Cut a pad cut-out through the alignment brim and ribbing at the socket; omit for none.'),
           }),
         )
         .describe('Dovetail sockets, at most one per side wall; empty cuts none.'),

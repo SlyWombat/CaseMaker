@@ -52,8 +52,6 @@ import {
   type BuildOp,
 } from './buildPlan';
 import { computeShellDims } from './caseShell';
-import { buildPortCutoutsForProject } from './ports';
-import { aabbOfOp } from './buildPlan';
 import { computeLidDims } from './lid';
 import { faceFrame, placeOnFace } from '@/engine/coords';
 import { centredTextOutline, faceRotations } from './textLabels';
@@ -370,12 +368,13 @@ function projectResolvers(project: Project) {
   };
 }
 
-/** `resolveMagnets` for a whole project, with the compiler's resolvers, plus
- *  a note for any shell pocket that runs into a port cutout (the port wins:
- *  it is cut through the pocket and its boss). */
+/** `resolveMagnets` for a whole project, with the compiler's resolvers. A
+ *  pocket that runs into a port, the board or another interior feature is
+ *  stated by the compiler's shared clash pass (`caseClashes.ts`), which tests
+ *  the real solids rather than their boxes. */
 export function magnetFactsForProject(project: Project): MagnetFacts {
   const r = projectResolvers(project);
-  const facts = resolveMagnets(
+  return resolveMagnets(
     project.board,
     project.case,
     project.hats ?? [],
@@ -384,48 +383,6 @@ export function magnetFactsForProject(project: Project): MagnetFacts {
     r.resolveDisplay,
     project.customFonts ?? [],
   );
-  const shellPockets = facts.pockets.filter((p) => p.face !== '+z');
-  if (shellPockets.length === 0) return facts;
-  const ports = project.ports.filter((p) => p.enabled);
-  const boxes = buildPortCutoutsForProject(ports, project.board, project.case).map((op, i) => ({
-    kind: ports[i]?.kind ?? 'port',
-    box: aabbOfOp(op),
-  }));
-  const hit = new Set<string>();
-  for (const p of shellPockets) {
-    // The pocket itself, not its boss: a boss clipped by a port still holds
-    // the magnet, a pocket opened into one does not.
-    const end = add3(p.world, AXIS_VEC[p.inward], p.skin + p.depth);
-    const rad = p.diameter / 2;
-    const lo = [0, 1, 2].map((k) => Math.min(p.world[k]!, end[k]!) - (AXIS_VEC[p.inward][k] === 0 ? rad : 0));
-    const hi = [0, 1, 2].map((k) => Math.max(p.world[k]!, end[k]!) + (AXIS_VEC[p.inward][k] === 0 ? rad : 0));
-    for (const { kind, box } of boxes) {
-      if (!box) continue;
-      const overlap = [0, 1, 2].every((k) => lo[k]! < box.max[k]! && hi[k]! > box.min[k]!);
-      const key = `${p.sourceId}:${kind}`;
-      if (overlap && !hit.has(key)) {
-        hit.add(key);
-        const who = p.sourceId === 'nameplate' ? 'A nameplate pocket' : 'A magnet pocket';
-        facts.notes.push(
-          `${who} on the ${FACE_NAME[p.face]} face runs into the ${kind} cutout, which is cut through it. Move it clear of the port.`,
-        );
-      }
-    }
-  }
-  return facts;
-}
-
-const AXIS_VEC: Record<Facing, Vec3> = {
-  '+x': [1, 0, 0],
-  '-x': [-1, 0, 0],
-  '+y': [0, 1, 0],
-  '-y': [0, -1, 0],
-  '+z': [0, 0, 1],
-  '-z': [0, 0, -1],
-};
-
-function add3(a: Vec3, b: Vec3, k: number): Vec3 {
-  return [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
 }
 
 /** A case face's (u, v) extent, mm — for defaults that land mid-face. */
@@ -447,6 +404,20 @@ export interface MagnetOpGroups {
   /** The nameplate part, WORLD (assembled), or null. */
   nameplate: BuildNode | null;
   facts: MagnetFacts;
+}
+
+/** The inside boss for one resolved pocket, or null when the wall is thick
+ *  enough. Same frame as `pocketCutter` (WORLD for the shell, LID-LOCAL for
+ *  '+z'). Started 0.05 mm inside the face so it never shares the face's plane. */
+export function pocketBossOp(p: ResolvedPocket): BuildOp | null {
+  if (!p.boss) return null;
+  return magnetPocketBoss({
+    at: p.at,
+    axis: p.inward,
+    start: 0.05,
+    length: p.boss.length - 0.05,
+    diameter: p.boss.diameter,
+  });
 }
 
 /** Cutter for one resolved case pocket (exported for the specs). */
@@ -516,17 +487,8 @@ export function buildMagnetOps(
   const out: MagnetOpGroups = { shellAdd: [], shellCut: [], lidAdd: [], lidCut: [], nameplate: null, facts };
   for (const p of facts.pockets) {
     const onLid = p.face === '+z';
-    if (p.boss) {
-      // Started 0.05 mm inside the face so it never shares the face's plane.
-      const boss = magnetPocketBoss({
-        at: p.at,
-        axis: p.inward,
-        start: 0.05,
-        length: p.boss.length - 0.05,
-        diameter: p.boss.diameter,
-      });
-      (onLid ? out.lidAdd : out.shellAdd).push(boss);
-    }
+    const boss = pocketBossOp(p);
+    if (boss) (onLid ? out.lidAdd : out.shellAdd).push(boss);
     (onLid ? out.lidCut : out.shellCut).push(pocketCutter(p));
   }
   const np = facts.nameplate;
