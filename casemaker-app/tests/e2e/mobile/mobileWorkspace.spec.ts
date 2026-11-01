@@ -55,11 +55,36 @@ test('the phone header exposes every control without a hidden swipe (#134)', asy
   await expect(page.getByTestId('welcome-overlay')).toBeVisible();
 
   // The header no longer scrolls: its content fits the window exactly.
-  const headerFit = await page.evaluate(() => {
-    const h = document.querySelector('.app-header') as HTMLElement;
-    return { clientW: h.clientWidth, scrollW: h.scrollWidth };
+  const headerFit = async () =>
+    page.evaluate(() => {
+      const h = document.querySelector('.app-header') as HTMLElement;
+      return { clientW: h.clientWidth, scrollW: h.scrollWidth };
+    });
+  let fit = await headerFit();
+  expect(fit.scrollW - fit.clientW).toBeLessThanOrEqual(0);
+
+  // #878 — on the welcome page there is no job yet, so the job's chrome is not drawn: only
+  // Manage, Load, Docs and settings, in one row with no ⋯ menu, and the hero has the top of the
+  // page to itself.
+  for (const id of ['manage-open', 'load-project', 'docs-open', 'settings-open']) {
+    const box = await page.getByTestId(id).boundingBox();
+    expect(box, id).not.toBeNull();
+    expect(box!.x + box!.width, `${id} right edge`).toBeLessThanOrEqual(390);
+    expect(box!.y + box!.height, `${id} bottom edge`).toBeLessThanOrEqual(48.5);
+  }
+  for (const id of ['undo-btn', 'redo-btn', 'save-project', 'parts-menu-toggle', 'toolbar-overflow-toggle']) {
+    await expect(page.getByTestId(id), `${id} on the welcome page`).toHaveCount(0);
+  }
+  const hero = (await page.getByTestId('welcome-hero').boundingBox())!;
+  expect(hero.y, 'the hero starts below the header').toBeGreaterThanOrEqual(48);
+
+  // Entering a flow brings the full toolbar back.
+  await page.evaluate(() => {
+    window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  expect(headerFit.scrollW - headerFit.clientW).toBeLessThanOrEqual(0);
+  await expect(page.getByTestId('welcome-overlay')).toHaveCount(0);
+  fit = await headerFit();
+  expect(fit.scrollW - fit.clientW).toBeLessThanOrEqual(0);
 
   // The primary controls are all on-screen ...
   for (const id of ['undo-btn', 'redo-btn', 'save-project', 'parts-menu-toggle', 'toolbar-overflow-toggle']) {

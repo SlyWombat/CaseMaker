@@ -18,6 +18,15 @@ import { test, expect } from '../fixtures/caseMaker';
 
 const BAND = [641, 700, 768, 820, 900];
 
+/** #878 — the job toolbar is only drawn once there is a job: these tests are about that toolbar,
+ *  so each one opens a board first. The welcome page's own slim bar has its own test below. */
+async function enterProject(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+  });
+  await expect(page.getByTestId('welcome-overlay')).toHaveCount(0);
+}
+
 /** Every toolbar control's right edge — anything past the window is hidden. */
 async function toolbarFit(page: import('@playwright/test').Page) {
   return page.evaluate(() => {
@@ -40,6 +49,7 @@ async function toolbarFit(page: import('@playwright/test').Page) {
 
 test('the tablet header scrolls in neither axis and hides no control (#134)', async ({ cm, page }) => {
   await cm.ready();
+  await enterProject(page);
   for (const width of BAND) {
     await page.setViewportSize({ width, height: 1024 });
     const fit = await toolbarFit(page);
@@ -62,6 +72,7 @@ test('the tablet header scrolls in neither axis and hides no control (#134)', as
 
 test('the tablet ⋯ menu and the settings popover are fully on-screen (#134)', async ({ cm, page }) => {
   await cm.ready();
+  await enterProject(page);
   await page.setViewportSize({ width: 768, height: 1024 });
 
   await page.getByTestId('toolbar-overflow-toggle').click();
@@ -91,6 +102,7 @@ test('the tablet ⋯ menu and the settings popover are fully on-screen (#134)', 
 // pins is that the row FITS: nothing overflows the header and the ⋯ toggle is gone.
 test('at 1024px every toolbar control still fits the header (#134, #355)', async ({ cm, page }) => {
   await cm.ready();
+  await enterProject(page);
   await page.setViewportSize({ width: 1024, height: 768 });
   await expect(page.getByTestId('toolbar-overflow-toggle')).toHaveCount(0);
   const fit = await toolbarFit(page);
@@ -98,5 +110,25 @@ test('at 1024px every toolbar control still fits the header (#134, #355)', async
   expect(fit.overflowY).toBe('visible');
   for (const c of fit.controls) {
     expect(c.right, `${c.id} right edge at 1024px`).toBeLessThanOrEqual(fit.innerW + 0.5);
+  }
+});
+
+// #878 — before anything is chosen the header is the slim bar: Manage, Load, Docs, settings, no ⋯
+// menu, and it fits the band at every width.
+test('the welcome page keeps only the pre-job controls across the band', async ({ cm, page }) => {
+  await cm.ready();
+  for (const width of [...BAND, 1024]) {
+    await page.setViewportSize({ width, height: 1024 });
+    const fit = await toolbarFit(page);
+    expect(fit.scrollW - fit.clientW, `horizontal overflow at ${width}px`).toBeLessThanOrEqual(0);
+    for (const c of fit.controls) {
+      expect(c.right, `${c.id} right edge at ${width}px`).toBeLessThanOrEqual(fit.innerW + 0.5);
+    }
+    for (const id of ['manage-open', 'load-project', 'docs-open', 'settings-open']) {
+      await expect(page.getByTestId(id), `${id} at ${width}px`).toBeVisible();
+    }
+    for (const id of ['undo-btn', 'save-project', 'export-default', 'parts-menu-toggle', 'toolbar-overflow-toggle']) {
+      await expect(page.getByTestId(id), `${id} at ${width}px`).toHaveCount(0);
+    }
   }
 });

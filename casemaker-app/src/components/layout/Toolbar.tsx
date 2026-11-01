@@ -318,6 +318,50 @@ export function Toolbar() {
   );
   const settingsMenu = settingsOpen ? <SettingsMenu onClose={closeSettings} /> : null;
 
+  const settingsBtn = (
+    <div className="toolbar-settings-wrap">
+      <button
+        onClick={() => setSettingsOpen((v) => !v)}
+        data-testid="settings-open"
+        title="App settings"
+        aria-haspopup="dialog"
+        aria-expanded={settingsOpen}
+      >
+        ⚙
+      </button>
+      {settingsMenu}
+    </div>
+  );
+  const fileInputEl = (
+    <input
+      ref={fileInput}
+      type="file"
+      accept=".json,.caseproj.json,application/json"
+      onChange={onFileChange}
+      data-testid="load-project-input"
+    />
+  );
+
+  // The welcome page (#878): nothing has been chosen yet, so the job's chrome — Undo, Redo, Save,
+  // Save as, Export, Parts, and the ⋯ menu that holds them on a phone — has nothing to act on and
+  // is not drawn. What stays is what makes sense before any work exists: Manage (the house and its
+  // cutters), Load, Docs and settings, in one short row that fits every width without a menu.
+  // The full toolbar is back the moment `welcomeMode` flips off, which every way into a flow does
+  // (`setProject`, `loadBuiltinBoard`, the wizard).
+  if (welcomeMode) {
+    return (
+      <div className="toolbar-buttons toolbar-buttons--welcome" data-testid="toolbar-welcome">
+        {manageBtn}
+        {loadBtn}
+        {docsBtn}
+        {settingsBtn}
+        {fileInputEl}
+        {error && <span style={{ color: '#ff8888', fontSize: 12 }}>{error}</span>}
+        {docsOpen && <DocsModal initialId="user-manual" onClose={() => setDocsOpen(false)} />}
+      </div>
+    );
+  }
+
   return (
     <div className="toolbar-buttons">
       {isCompactBar ? (
@@ -397,27 +441,10 @@ export function Toolbar() {
               mode. */}
           <PartsMenu />
           {docsBtn}
-          <div className="toolbar-settings-wrap">
-            <button
-              onClick={() => setSettingsOpen((v) => !v)}
-              data-testid="settings-open"
-              title="App settings"
-              aria-haspopup="dialog"
-              aria-expanded={settingsOpen}
-            >
-              ⚙
-            </button>
-            {settingsMenu}
-          </div>
+          {settingsBtn}
         </>
       )}
-      <input
-        ref={fileInput}
-        type="file"
-        accept=".json,.caseproj.json,application/json"
-        onChange={onFileChange}
-        data-testid="load-project-input"
-      />
+      {fileInputEl}
       {error && <span style={{ color: '#ff8888', fontSize: 12 }}>{error}</span>}
       {docsOpen && <DocsModal initialId="user-manual" onClose={() => setDocsOpen(false)} />}
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
