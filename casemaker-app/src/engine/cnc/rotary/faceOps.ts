@@ -391,3 +391,70 @@ export function faceJobRefusal(job: EngraveJob): JobFinding | null {
   }
   return null;
 }
+
+/** The neck for parting as the face check reads it: its X span and how deep its floor is, mm. */
+export interface FaceNeckSpan {
+  fromMm: Mm;
+  toMm: Mm;
+  /** The neck's floor below the rod's surface, mm (`R − diameter / 2`). */
+  depthMm: Mm;
+  diameterMm: Mm;
+}
+
+/**
+ * #849 — A FACE CUT THAT REACHES INTO THE NECK FOR PARTING, or null.
+ *
+ * A mixed job with a neck cuts the map items, then the faces, then the neck — so a face never
+ * cuts a part already hanging on its neck. What is left to refuse is a face cut that eats into
+ * the neck's own section: inside the neck's X span AND deeper than its floor, it leaves less
+ * than the neck's stated diameter holding the part through the faces and the saw. A cut that
+ * stays above the floor there is removed again by the neck itself, so it is not refused.
+ *
+ * `cutterRadiusMm` is the face program's cutter: a face's X span is one radius in from the free
+ * span's ends, and a hole is as wide as the cutter that plunges it. An engraving's length along
+ * the axis is not known before it is laid out, so it is judged over its whole face.
+ */
+export function faceCutIntoNeck(
+  job: EngraveJob,
+  map: RotaryMap,
+  neck: FaceNeckSpan,
+  cutterRadiusMm: Mm,
+): JobFinding | null {
+  const eps = 1e-6;
+  const over = (from: number, to: number): boolean => from < neck.toMm - eps && to > neck.fromMm + eps;
+  const deeper = (depth: number): boolean => depth > neck.depthMm + eps;
+  const span = faceSpanMm(map, cutterRadiusMm);
+  const free = rotaryFreeSpan(map);
+  const sentence = (what: string, depth: number, from: number, to: number): JobFinding => ({
+    severity: 'error',
+    code: 'face-cuts-neck',
+    message:
+      `${what} cuts into the neck for parting: it reaches ${num(depth)} mm below the surface between X ${num(Math.max(from, neck.fromMm))} and ` +
+      `X ${num(Math.min(to, neck.toMm))} mm, and the neck keeps ⌀${num(neck.diameterMm)} mm there (${num(neck.depthMm)} mm below the surface), ` +
+      `so less than the neck would hold the part. Keep the cut shallower than ${num(neck.depthMm)} mm or clear of X ${num(neck.fromMm)}–${num(neck.toMm)} mm, or move the neck.`,
+  });
+  for (const op of job.faces ?? []) {
+    if (op.kind === 'cross-hole') {
+      const x = op.atX ?? free.centre;
+      const half = Math.max((op.diameter ?? 0) / 2, cutterRadiusMm);
+      // A cross-hole goes through the axis: inside the span it always cuts the neck's section.
+      if (over(x - half, x + half)) return { ...sentence(`The cross-hole at A ${num(op.a)}°`, 2 * map.radius, x - half, x + half), labelId: op.id };
+      continue;
+    }
+    const depth = op.kind === 'flat' ? (op.depth ?? 0) : map.radius - (op.acrossFlats ?? 0) / 2;
+    const name = op.kind === 'flat' ? `The flat at A ${num(op.a)}°` : `The ${op.count ?? 0} flats ${num(op.acrossFlats ?? 0)} mm across`;
+    const faceFrom = span.from - cutterRadiusMm;
+    const faceTo = span.to + cutterRadiusMm;
+    if (deeper(depth) && over(faceFrom, faceTo)) return { ...sentence(name, depth, faceFrom, faceTo), labelId: op.id };
+    for (const item of op.items ?? []) {
+      const reach = depth + item.depth;
+      if (!deeper(reach)) continue;
+      const half =
+        item.kind === 'pocket' ? (item.width ?? 0) / 2 : item.kind === 'hole' ? Math.max((item.diameter ?? 0) / 2, cutterRadiusMm) : Number.POSITIVE_INFINITY;
+      const from = Number.isFinite(half) ? span.from + item.x - half : faceFrom;
+      const to = Number.isFinite(half) ? span.from + item.x + half : faceTo;
+      if (over(from, to)) return { ...sentence(`The ${faceItemWord(item)} on ${name.charAt(0).toLowerCase()}${name.slice(1)}`, reach, from, to), labelId: item.id };
+    }
+  }
+  return null;
+}

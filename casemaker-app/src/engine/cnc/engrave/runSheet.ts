@@ -290,6 +290,11 @@ export interface RunSheetProgram {
    * that cuts no neck, and on a result stored by an older build.
    */
   neck?: RunSheetNeckFacts | null;
+  /**
+   * #849 — this file cuts the neck for parting alone: a mixed rotary job's last file, played after
+   * its faces. Absent on every other program.
+   */
+  neckOnly?: boolean;
 }
 
 /**
@@ -3201,8 +3206,11 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
   return [
     {
       text:
-        `Program ${number} is ${program.nc}, the cut for setup ${program.setupIndex} — ` +
-        `cut with ${program.toolKey}.`,
+        program.neckOnly === true
+          ? `Program ${number} is ${program.nc}, the neck for parting alone — cut with ${program.toolKey}, ` +
+            'after the faces, as the run’s last cut.'
+          : `Program ${number} is ${program.nc}, the cut for setup ${program.setupIndex} — ` +
+            `cut with ${program.toolKey}.`,
       value:
         cam === null
           ? 'no CAM summary was recorded'
@@ -4341,7 +4349,10 @@ export function buildRunSheet(
       } else {
         programSections.push({
           id: `cut-${number}`,
-          title: `Cut, program ${number} — ${program.toolKey}`,
+          title:
+            program.neckOnly === true
+              ? `Cut, program ${number} — the neck for parting (${program.toolKey})`
+              : `Cut, program ${number} — ${program.toolKey}`,
           steps: engraveProgramSectionSteps(program, number),
         });
       }

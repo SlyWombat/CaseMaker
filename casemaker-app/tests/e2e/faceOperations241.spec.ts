@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
+import { fakeRotaryHouse } from './fixtures/rotaryHouse';
 
 test.setTimeout(600_000);
 const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'bench', 'img', '2026-10-31-241-faces');
@@ -150,4 +151,56 @@ test('a Cross-hole is one plunge at its angle, turned to before it cuts', async 
   expect(await turnAt(page, 90)).toBeCloseTo(90, 3);
 
   await page.screenshot({ path: path.join(SHOTS, 'cross-hole-at-90.png') });
+});
+
+// #849 — A MIXED JOB WITH A NECK FOR PARTING: an engraving on the map, a flat, and the neck. The
+// run is three files — the map work, the face, then the neck alone — and a flat deep enough to
+// cut into the neck's own section is refused by name.
+test('a mixed job with a neck cuts the map work, the face, then the neck', async ({ cm, page }) => {
+  fs.mkdirSync(SHOTS, { recursive: true });
+  // The neck is a field of the rotary chuck, which the Holding step offers on a machine carrying
+  // the module.
+  await fakeRotaryHouse(page);
+  await cm.ready();
+  await page.getByTestId('welcome-starter-dowel').click();
+  await expect(page.getByTestId('start-wizard')).toBeVisible();
+  await expect(page.getByTestId('engrave-setup-mount-rotary')).toBeChecked({ timeout: 30_000 });
+  // The Holding step: leave the part on the default neck (chuck side, ⌀7 mm on the ⌀20 mm rod).
+  await page.getByTestId('engrave-setup-rotary-neck').check();
+  await expect(page.getByTestId('engrave-setup-rotary-neck-diameter')).toBeVisible();
+  await page.getByTestId('engrave-setup-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
+  await page.getByTestId('start-wizard-op-text').fill('Zoomba');
+  await expect(page.getByTestId('start-wizard-create')).toBeEnabled();
+  await page.getByTestId('start-wizard-create').click();
+  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
+
+  // A flat on the stock's faces, from the panel's own add menu (A 0°, 1 mm deep).
+  await page.getByTestId('engrave-add-summary').click();
+  await page.getByTestId('engrave-add-face-flat').click();
+  await expect(page.getByTestId('engrave-face-summary-0')).toContainText('Flat 1 mm deep at A 0°');
+
+  await expect(page.getByTestId('engrave-generate')).toBeEnabled({ timeout: 60_000 });
+  await page.getByTestId('engrave-generate').click();
+  for (const id of ['engrave-run-toolpath', 'engrave-run-verified']) {
+    await expect(page.getByTestId(id)).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
+  }
+  const run = await page.evaluate(() => window.__caseMaker!.getEngraveRunState());
+  expect(run.ok, JSON.stringify(run)).toBe(true);
+  // Items, the face, then the neck alone: three files (the unit spec pins their order and the
+  // one-line statement of it).
+  expect(run.programs).toBe(3);
+  await page.screenshot({ path: path.join(SHOTS, 'mixed-neck-last.png') });
+
+  // An 8 mm flat reaches below the neck's 6.5 mm floor across its span: refused by name.
+  await page.getByTestId('engrave-face-summary-0').click();
+  await page.getByTestId('engrave-face-depth-0').fill('8');
+  await page.getByTestId('engrave-face-depth-0').press('Tab');
+  await expect(page.getByTestId('engrave-face-summary-0')).toContainText('Flat 8 mm deep at A 0°');
+  await expect(page.getByTestId('engrave-generate')).toBeEnabled({ timeout: 60_000 });
+  await page.getByTestId('engrave-generate').click();
+  await expect(page.getByText(/The flat at A 0° cuts into the neck for parting/).first()).toBeVisible({ timeout: 120_000 });
+  const refused = await page.evaluate(() => window.__caseMaker!.getEngraveRunState());
+  expect(refused.ok).toBe(false);
+  expect(refused.programs).toBe(0);
 });

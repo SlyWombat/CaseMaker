@@ -452,8 +452,11 @@ export type JobFindingCode =
   | 'face-item-off-face'
   | 'face-item-too-deep'
   | 'face-hole-cutter'
-  // #836 — the neck for parting and face operations cannot share a run: the neck is the last cut.
-  | 'neck-with-faces'
+  // #849 — a mixed job with a neck cuts the map items, the faces, then the neck: one line states
+  // that order (`neck-after-faces`, info), and a face cut that reaches into the neck's section is
+  // refused by name (`face-cuts-neck`).
+  | 'neck-after-faces'
+  | 'face-cuts-neck'
   // #842 — a cut on a face the face's cutter cannot make: carried by a finer owned cutter in its
   // own program (`face-cut-finer-cutter`, info), or left uncut with the rest posting
   // (`face-cut-uncuttable`, warning).

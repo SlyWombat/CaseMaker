@@ -214,7 +214,7 @@ import {
 import { generateIndexed } from '@/engine/cnc/cam/indexed';
 import type { FaceFrame } from '@/engine/cnc/rotary/faceOps';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
-import { faceJobRefusal, planFaceCuts } from '@/engine/cnc/rotary/faceOps';
+import { faceCutIntoNeck, faceJobRefusal, planFaceCuts } from '@/engine/cnc/rotary/faceOps';
 import { rotaryMapOf, toRotaryIR } from '@/engine/cnc/rotary/wrap';
 import { rotaryFreeSpan, freeEndSentence, jawsSentence, tailstockSentence, throughCentreSentence } from '@/engine/cnc/rotary/wrap';
 import { generateRotaryReliefIR, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
@@ -503,6 +503,8 @@ export interface EngraveProgram {
    * findings judged and the CAM cut.
    */
   neck?: RotaryNeckFacts | null;
+  /** #849 — this file cuts the neck for parting alone: the run's last file, after the faces. */
+  neckOnly?: boolean;
 }
 
 /** #677 — one program's clearance of the standing cores, one entry per variable region. */
@@ -3344,7 +3346,24 @@ function jobHasNonSurfaceWork(job: EngraveJob): boolean {
   );
 }
 
+/**
+ * #737/#849 — whether a program leaves the neck for parting: `false`, `true` (appended as its last
+ * operations, in the same file), or `{ apart }` — cut by the same CAM but posted as a neck-only
+ * file of its own, with `apart` as that file's share of the run's vacuum words.
+ */
+type NeckMode = boolean | { apart: VacuumSpan };
+
 type OneProgram = Omit<EngraveGenerated, 'programs'> & {
+  /**
+   * #849 — the NECK-ONLY file this program's CAM was split into, when the caller asked for the neck
+   * apart (a mixed rotary job: items, then faces, then the neck). This program then holds the items
+   * alone; the neck file carries the neck's facts, its own post, verify and predictions.
+   */
+  neckApart?: OneProgram | null;
+  /** #849 — this program's `predicted` is its own file's alone: `programOf` carries it on the list. */
+  ownPredicted?: boolean;
+  /** #849 — this is the neck-only file. */
+  neckOnly?: boolean;
   /**
    * #786 slice 4a-2 — a SURFACE program's check: the analytic cone/sphere program has no 2.5D
    * verifier report, so its check is the same `SurfaceProgramCheck` a goal program carries.
@@ -3638,9 +3657,10 @@ function generateRestPair(
   withFacing: boolean,
   /**
    * #737 — this pair is the RUN'S LAST CUT, so its last program leaves the neck for parting. The
-   * rough program never does: the neck comes after every finish pass.
+   * rough program never does: the neck comes after every finish pass. #849 — `{ apart }` posts the
+   * neck as a file of its own (a mixed rotary job's faces are cut between them).
    */
-  withNeck: boolean,
+  withNeck: NeckMode,
   cursor: number,
   refCount: number,
   findings: JobFinding[],
@@ -3788,7 +3808,7 @@ function generateRestPair(
             false,
             'rough-and-finish',
             // Only the LAST program of a run that ends here leaves the neck (#737).
-            withNeck && r === restTools.length - 1,
+            r === restTools.length - 1 ? withNeck : false,
             cuttable,
             floors,
           );
@@ -3820,7 +3840,7 @@ function generateRestPair(
           false,
           'rough-and-finish',
           // #737 — only the last program of the run leaves the neck.
-          withNeck && r === restTools.length - 1,
+          r === restTools.length - 1 ? withNeck : false,
           derived.length === 0 ? undefined : derived,
           floors,
         );
@@ -4001,7 +4021,7 @@ function generateRestPair(
           false,
           'rough-and-finish',
           // #737 — only the last program of the run leaves the neck.
-          withNeck && r === restTools.length - 1,
+          r === restTools.length - 1 ? withNeck : false,
           undefined,
           floors,
           // #760 — a later rest pass re-cuts this program's leftovers at its own width.
@@ -4132,7 +4152,7 @@ function generateRestPair(
         false,
         'finish-only',
         // Only the LAST rest program of a pair that ends the run leaves the neck.
-        withNeck && r === restTools.length - 1,
+        r === restTools.length - 1 ? withNeck : false,
         undefined,
         floors,
         // #760 — an even later rest pass re-cuts this one's leftovers.
@@ -6000,28 +6020,25 @@ export function engraveGenerate(
         : legacySurfaces.map((p) => generateSurfacePrimitiveProgram(job, p, tool, catalogue, calibration, shop, 'whole'));
     // #836 — A LEGACY MIXED JOB (no `setups[]`, map items AND faces): the wrapped program is cut
     // as it always was, then the face program after it, in the same mounting. The vacuum words
-    // split across the two files; a neck would be cut by the wrapped file and the faces after it,
-    // which the refusal below states rather than posting.
+    // split across the files.
+    // #849 — WITH A NECK, the neck is posted apart and cut LAST: items, then faces, then the neck,
+    // so no face is cut on a part already hanging on its neck. Only a face cut that reaches into
+    // the neck's own section is refused.
     const mixedFaces = (job.faces?.length ?? 0) > 0 && jobHasItems(job);
-    if (mixedFaces && job.workholding.kind === 'rotary-chuck' && job.workholding.rotary.neck !== undefined) {
-      return {
-        ...emptyGoalResult(),
-        ok: false,
-        stage: 'findings',
-        findings: [
-          {
-            severity: 'error',
-            code: 'neck-with-faces',
-            message:
-              'The neck for parting is the run’s last cut, and this job also cuts faces after its map work: a face cut after the parting neck would leave the part held only by the neck. Turn the neck off, or cut the faces in a job of their own.',
-          },
-        ],
-        feeds: null,
-        cam: null,
-        nc: null,
-        verify: null,
-        errors: [{ stage: 'findings', message: 'the neck for parting and face operations cannot share a run' }],
-      };
+    const faceRef: JobProgramRef | null = mixedFaces
+      ? {
+          setupIndex: 1,
+          setupId: jobSetups(job)[0]!.id,
+          toolKey: jobSetups(job)[0]!.faceToolKey ?? job.toolKey,
+          itemIds: [],
+          faces: true,
+        }
+      : null;
+    const faceTool = faceRef === null ? null : toolForProgram(faceRef, job, tool, shop);
+    const neckLast = mixedFaces && rotaryNeckOf(job) !== null;
+    if (neckLast) {
+      const into = faceIntoNeckFinding(job, faceTool);
+      if (into !== null) return neckRefusal(into);
     }
     // #786 slice 4a-2 — a document whose only work is surfaces takes the first surface program as
     // its one program (the rest are appended below); one with item work cuts its item program.
@@ -6038,7 +6055,7 @@ export function engraveGenerate(
             mixedFaces ? 'first' : 'whole',
             true,
             'rough-and-finish',
-            !mixedFaces,
+            neckLast ? { apart: 'last' } : !mixedFaces,
             undefined,
             documentFloors,
           )
@@ -6063,15 +6080,7 @@ export function engraveGenerate(
     const engraved =
       itemProgramHere && oneReady.ok && oneReady.nc !== null && oneReady.verify !== null ? [programOf(oneReady, ref)] : [];
     // #836 — the face program, cut after the map work with the setup's face cutter.
-    if (mixedFaces) {
-      const faceRef: JobProgramRef = {
-        setupIndex: 1,
-        setupId: jobSetups(job)[0]!.id,
-        toolKey: jobSetups(job)[0]!.faceToolKey ?? job.toolKey,
-        itemIds: [],
-        faces: true,
-      };
-      const faceTool = toolForProgram(faceRef, job, tool, shop);
+    if (faceRef !== null) {
       const faceOne = generateFaceProgram(
         tl,
         jobForSetup(job, faceRef, faceTool),
@@ -6080,7 +6089,7 @@ export function engraveGenerate(
         calibration,
         margins,
         shop,
-        'last',
+        neckLast ? 'middle' : 'last',
       );
       if (!faceOne.ok || faceOne.nc === null || faceOne.verify === null) {
         return {
@@ -6092,11 +6101,18 @@ export function engraveGenerate(
           programs: [],
         };
       }
+      // #849 — the neck-only file closes the run, after every face file.
+      const neckFile = engraved.length > 0 && oneReady.neckApart != null ? [programOf(oneReady.neckApart, ref)] : [];
+      const facePrograms = neckFile.length === 0 ? faceOne.programs : withOwnPredicted(faceOne.programs, faceOne.predicted);
       return {
         ...oneReady,
         surface: shop.surface ?? null,
-        findings: dedupeFindings([...oneReady.findings, ...faceOne.findings]),
-        programs: [...surfacePrograms, ...(facingFile === null ? [] : [facingFile]), ...engraved, ...faceOne.programs],
+        findings: dedupeFindings([
+          ...oneReady.findings,
+          ...faceOne.findings,
+          ...(neckFile.length === 0 ? [] : [neckAfterFacesFinding()]),
+        ]),
+        programs: [...surfacePrograms, ...(facingFile === null ? [] : [facingFile]), ...engraved, ...facePrograms, ...neckFile],
       };
     }
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
@@ -6152,8 +6168,18 @@ export function engraveGenerate(
   const extraFacePrograms: EngraveProgram[] = [];
   let restLink: RestLink | null = null;
   let cursor = 0;
+  // #849 — A MIXED ROTARY JOB WITH A NECK: the face ref is the run's last (one mounting, one
+  // setup), so the neck is posted apart from the last wrapped program and played after the faces.
+  // The run then has one file more than it has refs, and the face file is no longer its last word.
+  const faceLastRef = refs.at(-1)?.faces === true ? refs.at(-1)! : null;
+  const neckApart = faceLastRef !== null && rotaryNeckOf(job) !== null;
+  if (neckApart) {
+    const into = faceIntoNeckFinding(job, toolForProgram(faceLastRef, job, tool, shop));
+    if (into !== null) return neckRefusal(into);
+  }
+  const runLength = refs.length + (neckApart ? 1 : 0);
   const spanAt = (index: number): VacuumSpan =>
-    refs.length === 1 ? 'whole' : index === 0 ? 'first' : index === refs.length - 1 ? 'last' : 'middle';
+    runLength === 1 ? 'whole' : index === 0 ? 'first' : index === runLength - 1 ? 'last' : 'middle';
 
   for (let s = 0; s < setups.length; s++) {
     const group = refs.filter((ref) => ref.setupIndex === s + 1);
@@ -6185,11 +6211,15 @@ export function engraveGenerate(
       else segments.push({ drill: false, refs: [ref] });
     }
 
+    // #849 — with the neck apart, the neck rides the last WRAPPED segment (the face segment after
+    // it cuts no neck), and is posted as a file of its own that the run plays after the faces.
+    const neckSegment = neckApart ? segments.filter((g) => g.refs[0]?.faces !== true).at(-1) : segments[segments.length - 1];
+    const neckMode: NeckMode = neckApart ? { apart: 'last' } : true;
     for (const segment of segments) {
       const segmentRefs = segment.refs;
       // #737 — only the last segment of the last setup is the RUN'S last cut, so only its last
       // program leaves the neck; every earlier program cuts the part alone.
-      const lastGroup = s === setups.length - 1 && segment === segments[segments.length - 1];
+      const lastGroup = s === setups.length - 1 && segment === neckSegment;
       // #836 — THE FACE REF's program: the job's face list, cut AFTER the map work in the same
       // mounting. Its cutter is the setup's `faceToolKey` (or the setup's first cutter when the
       // two are the same), resolved through the run's own tool list; the sub-job holds no items.
@@ -6199,7 +6229,9 @@ export function engraveGenerate(
         const subTool = toolForProgram(ref, job, tool, shop);
         const sub = jobForSetup(job, ref, subTool);
         const faceResult = generateFaceProgram(tl, sub, subTool, catalogue, calibration, margins, shop, span);
-        const { programs: facePrograms, ...faceOne } = faceResult;
+        const { programs: facePrograms, ...faceBuilt } = faceResult;
+        // #849 — between the items file and the neck file, the face file carries its own predictions.
+        const faceOne: OneProgram = neckApart ? { ...faceBuilt, ownPredicted: true } : faceBuilt;
         attempts.push(faceOne);
         if (faceOne.ok && faceOne.nc !== null && faceOne.verify !== null) {
           posted.push({ ref, one: faceOne, make: () => faceOne, span });
@@ -6228,7 +6260,7 @@ export function engraveGenerate(
             nextSpan,
             cursor === 0,
             'rough-and-finish',
-            lastGroup,
+            lastGroup ? neckMode : false,
             undefined,
             documentFloors,
           );
@@ -6260,9 +6292,9 @@ export function engraveGenerate(
         margins,
         shop,
         cursor === 0,
-        lastGroup,
+        lastGroup ? neckMode : false,
         cursor,
-        refs.length,
+        runLength,
         restFindings,
         documentFloors,
       );
@@ -6283,7 +6315,8 @@ export function engraveGenerate(
   // nothing to cut leaves fewer files than `refs` predicted, so the last actual program has to
   // become the run's last word; regenerating only the boundary files keeps every other byte where
   // it was.
-  const total = posted.length;
+  // #849 — the neck file posted apart is the run's last file, after every face file.
+  const total = posted.length + posted.filter((program) => program.one.neckApart != null).length;
   posted.forEach((program, i) => {
     const want: VacuumSpan = total === 1 ? 'whole' : i === 0 ? 'first' : i === total - 1 ? 'last' : 'middle';
     if (want === program.span) return;
@@ -6294,6 +6327,7 @@ export function engraveGenerate(
     }
   });
 
+  const neckFiles = posted.flatMap((program) => (program.one.neckApart != null ? [{ ref: program.ref, one: program.one.neckApart }] : []));
   const restPass = restLink === null ? null : assembleRestFacts(restLink, posted);
   // #768 — THE TOP-LEVEL FIELDS ARE THE FIRST POSTED PROGRAM, not the first ATTEMPT. The settle
   // walk above REGENERATES the programs whose vacuum span moved (a rest program the generator
@@ -6308,7 +6342,11 @@ export function engraveGenerate(
   // last rest program (`setup-rest-nothing`) posts nothing that cuts the neck, and the per-program
   // check never fires because no program was asked to carry it. Refuse the run itself here, so the
   // panels' "the part stays on a neck" sentence is never shown for a neck nothing cut.
-  if (stopped === undefined && rotaryNeckOf(job) !== null && !posted.some((p) => p.one.neck != null)) {
+  if (
+    stopped === undefined &&
+    rotaryNeckOf(job) !== null &&
+    !posted.some((p) => p.one.neck != null || p.one.neckApart?.neck != null)
+  ) {
     restFindings.push({
       severity: 'error',
       code: 'neck-not-cut',
@@ -6330,6 +6368,7 @@ export function engraveGenerate(
       // #743 P-5 — a HOLE NO OWNED CUTTER MAKES belongs to no program, so no per-program sub-job
       // ever validates it. State it on the whole job, once, so the run still posts everything else.
       ...holeNoCutterFindings(job, shop.tools ?? getTools()),
+      ...(neckFiles.length === 0 ? [] : [neckAfterFacesFinding()]),
     ]),
     errors: attempts.flatMap((one) => one.errors),
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
@@ -6347,9 +6386,57 @@ export function engraveGenerate(
       }),
       // #842 — the finer-cut face programs follow their coarse file.
       ...extraFacePrograms,
+      // #849 — and the neck file closes the run.
+      ...neckFiles.map((file) => programOf(file.one, file.ref)),
     ],
     restPass,
   };
+}
+
+/**
+ * #849 — the one line a mixed rotary job with a neck states: its run order. Info, like the other
+ * multi-program splits — it describes how the job is cut, not a problem with it.
+ */
+function neckAfterFacesFinding(): JobFinding {
+  return {
+    severity: 'info',
+    code: 'neck-after-faces',
+    labelId: ROTARY_NECK_ID,
+    message:
+      'Cut in this order, in one mounting: the map work, then the faces, then the neck for parting last, so every face is cut on the whole part.',
+  };
+}
+
+/**
+ * #849 — a face cut that reaches into the neck's section (`faceCutIntoNeck`), judged with the face
+ * program's own cutter, or null. Null too when the job has no neck that can be placed.
+ */
+function faceIntoNeckFinding(job: EngraveJob, faceTool: Tool | null): JobFinding | null {
+  const map = rotaryMapOf(job);
+  const neck = rotaryNeckFacts(job);
+  if (map === null || neck === null) return null;
+  const cutter = faceTool === null ? null : cuttingRadiusForSweep(faceTool);
+  return faceCutIntoNeck(job, map, neck, cutter !== null && cutter.ok ? cutter.radius : 0);
+}
+
+/** #849 — the run refused before anything is cut, with the one finding that refuses it. */
+function neckRefusal(finding: JobFinding): EngraveGenerated {
+  return {
+    ...emptyGoalResult(),
+    ok: false,
+    stage: 'findings',
+    findings: [finding],
+    feeds: null,
+    cam: null,
+    nc: null,
+    verify: null,
+    errors: [{ stage: 'findings', message: 'a face cut reaches into the neck for parting' }],
+  };
+}
+
+/** #849 — the face file's own predictions, on the first (coarse) face program of the list. */
+function withOwnPredicted(programs: readonly EngraveProgram[], predicted: readonly OraclePredicted[]): EngraveProgram[] {
+  return programs.map((program, i) => (i === 0 ? { ...program, predicted: [...predicted] } : program));
 }
 
 /** One program as the result's list entry, keyed by the FNV of its posted text (decision 3). */
@@ -6382,6 +6469,8 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     surfaceCheck: one.surfaceCheck ?? null,
     // #848 — this file's own thread plans (null on a program that mills none).
     threads: one.threads ?? null,
+    // #849 — the neck-only file is flagged; its own predictions ride #844's `predicted` above.
+    ...(one.neckOnly === true ? { neckOnly: true } : {}),
   };
 }
 
@@ -6480,8 +6569,9 @@ function generateOneProgram(
    * #737 — this program is the RUN'S LAST CUT, so it leaves the neck for parting. Only the last
    * program carries it: the neck must come after every finish pass and be cut once, by the cutter
    * that cut the part. False on every other program, and on a rough-only half of a rest pair.
+   * #849 — `{ apart }` cuts it with the same CAM and posts it as a neck-only file of its own.
    */
-  withNeck = false,
+  withNeck: NeckMode = false,
   /**
    * #677 — the cores this program clears: the derived regions a variable V-carve leaves standing,
    * handed over by the run's generator. Present only on the core-clearance program, whose sub-job
@@ -7154,6 +7244,21 @@ function generateOneProgram(
     mill.rapidEstimate,
   );
 
+  // #849 — THE NECK APART. A mixed rotary job cuts its faces between the map items and the neck,
+  // so the CAM above (unchanged: the neck is still its last operations) is split here, once every
+  // frame and height rule has been applied to the whole: the items file keeps every operation but
+  // the neck's, and the neck-only file takes the neck's. Each is posted and verified below with its
+  // own predictions, so each file's oracle judges what that file alone removes.
+  let neckIr: ToolpathIR | null = null;
+  let neckPredicted: OraclePredicted[] = [];
+  if (typeof withNeck === 'object' && neckProgram !== null) {
+    const renumber = (ops: CamOperation[]): CamOperation[] => ops.map((op, index) => ({ ...op, number: index + 1 }));
+    neckIr = { ...ir, operations: renumber(ir.operations.filter((op) => op.labelId === ROTARY_NECK_ID)) };
+    ir = { ...ir, operations: renumber(ir.operations.filter((op) => op.labelId !== ROTARY_NECK_ID)) };
+    neckPredicted = predictedForRun.filter((p) => p.itemId === ROTARY_NECK_ID);
+    predictedForRun = predictedForRun.filter((p) => p.itemId !== ROTARY_NECK_ID);
+  }
+
   // #432 — FACING IS ITS OWN PROGRAM, and this one is untouched by it.
   //
   // The skim is posted against the blank's PROBED top and posted as its own file (below, beside the
@@ -7346,6 +7451,47 @@ function generateOneProgram(
     // it, the file is WITHHELD (`frameNc` null) with the reason in `frameError` and the report (when
     // there is one) kept in `frameVerify`, so the receipt, the sheet and the panel can say what
     // happened. The frame's Z is computed by `frameTraceZ`, the one owner of that rule.
+    // #849 — the neck-only file: the same context, setup, limit and rapid floor as the items file,
+    // its own share of the vacuum words, and its own verifier report. A neck file the post or the
+    // verifier refuses refuses the program — the neck is the run's last cut, and nothing else can
+    // carry it.
+    let neckApartOne: OneProgram | null = null;
+    if (neckIr !== null && typeof withNeck === 'object') {
+      const postedNeck = postZ1(neckIr, ctx, mill, { vacuum: withNeck.apart, thumbnail: null });
+      if (!postedNeck.ok) return stop('post', { feeds, message: `the neck file: ${postedNeck.errors.join('; ')}`, facing });
+      const neckVerify = verifyProgram(postedNeck.text, {
+        setup,
+        machine: mill,
+        tool,
+        depthLimit: limit,
+        minRapidZ: neckIr.hopZ,
+        ...(limitReasonAt ? { limitReasonAt } : {}),
+        ...(rotaryMap === null
+          ? mountCtx(shop.mount, job.jawClearance, liftOverStock)
+          : { rotary: { radius: rotaryMap.radius, stickout: rotaryMap.stickout, tailstock: rotaryMap.tailstock } }),
+      });
+      if (neckVerify.findings.some((f) => f.severity === 'error')) {
+        errors.push({ stage: 'verify', message: `the neck file: ${neckVerify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
+        return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc: postedNeck.text, verify: neckVerify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: neckPredicted, errors };
+      }
+      neckApartOne = {
+        ...emptyGoalResult(),
+        ok: true,
+        stage: 'done',
+        findings: [],
+        feeds,
+        cam: summarize(neckIr),
+        nc: postedNeck.text,
+        frame: neckIr.frame,
+        verify: neckVerify,
+        predicted: neckPredicted,
+        errors: [],
+        neck: neckProgram,
+        ownPredicted: true,
+        neckOnly: true,
+      };
+    }
+
     let frameNc: string | null = null;
     let frameVerify: VerifyReport | null = null;
     let frameZ: Mm | null = null;
@@ -7403,8 +7549,10 @@ function generateOneProgram(
       facingError: facing.error,
       facingCam: facing.cam,
       predicted: predictedForRun,
-      // #737 — the neck this program leaves, for the run sheet's saw step.
-      neck: neckProgram,
+      // #737 — the neck this program leaves, for the run sheet's saw step. #849 — when the neck was
+      // posted apart, its file carries it and this one cuts the items alone.
+      neck: neckApartOne === null ? neckProgram : null,
+      ...(neckApartOne === null ? {} : { neckApart: neckApartOne, ownPredicted: true }),
       // #748 — the document's floors ride the program, so the sheet and the panel quote the floor
       // the item is written into even when the item's own setup never cut it.
       floors: floorById,
