@@ -175,6 +175,15 @@ describe('divider size against the cavity', () => {
     expect(f.dividers[1]!.clashes.join(' ')).toMatch(/crosses Divider 1/);
   });
 
+  it('places a second divider short of one already standing', () => {
+    const first = suggestCaseDivider(bayProject(), 'y');
+    const withFirst = bayProject({ dividers: [{ id: 'a', enabled: true, ...first }] });
+    const second = suggestCaseDivider(withFirst, 'x');
+    const f = caseDividerFacts(bayProject({ dividers: [{ id: 'a', enabled: true, ...first }, { id: 'b', enabled: true, ...second }] }));
+    expect(f.dividers.flatMap((d) => d.clashes)).toEqual([]);
+    expect(second.holes).toBeGreaterThanOrEqual(2);
+  });
+
   it('suggests a clean placement for a new divider each way', () => {
     for (const axis of ['x', 'y'] as const) {
       const at = suggestCaseDivider(bayProject(), axis);

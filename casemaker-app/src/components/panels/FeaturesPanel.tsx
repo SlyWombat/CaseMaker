@@ -14,6 +14,17 @@ import type { DisplayFraming } from '@/types/display';
 import { MAGNET_SIZES, type MagnetPocket, type MagnetRetention, type MagnetSize, type NameplateParams } from '@/types';
 import { MAGNETS } from '@/engine/compiler/fasteners';
 import { FACE_NAME, faceSizeForProject, magnetFactsForProject } from '@/engine/compiler/magnets';
+import type { CaseDivider, FitVariant } from '@/types';
+import { FIT_VARIANTS } from '@/types/snap';
+import {
+  DEFAULT_FLOOR_GRID,
+  DIVIDER_THICKNESS,
+  DIVIDER_TOP_CLEARANCE,
+  GRID_FLOOR_UNDER,
+  WIDEN_SIDE_NAME,
+  caseDividerFacts,
+  suggestCaseDivider,
+} from '@/engine/compiler/caseDividers';
 
 /**
  * Issue #49 — combined panel exposing the six engine domains that previously
@@ -80,6 +91,7 @@ export function FeaturesPanel() {
       <NameplateSection />
       <MagnetNotes />
       <SnapCatchesSection />
+      <FloorGridSection />
     </div>
   );
 }
@@ -1104,6 +1116,283 @@ function SnapCatchesSection() {
           </div>
         );
       })}
+    </section>
+  );
+}
+
+const EMPTY_DIVIDERS: CaseDivider[] = [];
+const FIT_NAME: Record<FitVariant, string> = { tight: 'Tight', standard: 'Standard', loose: 'Loose' };
+const fmt = (n: number) => `${Math.round(n * 100) / 100} mm`;
+
+/**
+ * Issue #150 — the floor socket grid and the drop-in dividers that plug into
+ * it. Every fact here comes from `caseDividerFacts`, the same function the
+ * compiler builds from, so what the panel says is what gets built. A clash is
+ * stated with an offer to move, never a refusal.
+ */
+function FloorGridSection() {
+  const project = useProjectStore((s) => s.project);
+  const patchCase = useProjectStore((s) => s.patchCase);
+  const [thickened, setThickened] = useState<string | null>(null);
+  const params = project.case;
+  const grid = params.floorGrid;
+  const dividers = params.dividers ?? EMPTY_DIVIDERS;
+  const facts = caseDividerFacts(project);
+
+  const setGrid = (patch: Partial<NonNullable<typeof grid>>) =>
+    patchCase({ floorGrid: { ...DEFAULT_FLOOR_GRID, ...grid, ...patch } });
+  const setDividers = (next: CaseDivider[]) => patchCase({ dividers: next });
+  const patchDivider = (id: string, patch: Partial<CaseDivider>) =>
+    setDividers(dividers.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+
+  const onToggle = (on: boolean) => {
+    if (!on) {
+      setGrid({ enabled: false });
+      setThickened(null);
+      return;
+    }
+    const depth = grid?.depth ?? DEFAULT_FLOOR_GRID.depth;
+    const need = depth + GRID_FLOOR_UNDER;
+    if (params.floorThickness < need) {
+      setThickened(
+        `Floor thickened from ${fmt(params.floorThickness)} to ${fmt(need)} so the ${fmt(depth)} sockets keep ${fmt(GRID_FLOOR_UNDER)} of floor under them.`,
+      );
+      patchCase({ floorGrid: { ...DEFAULT_FLOOR_GRID, ...grid, enabled: true }, floorThickness: need });
+    } else {
+      setThickened(null);
+      setGrid({ enabled: true });
+    }
+  };
+
+  const onAdd = (axis: 'x' | 'y') => {
+    const at = suggestCaseDivider(project, axis);
+    setDividers([...dividers, { id: newId('divider'), ...at, thickness: DIVIDER_THICKNESS, enabled: true }]);
+  };
+
+  const onWiden = () => {
+    if (!facts.widen) return;
+    const t = params.clearanceTweaks ?? { xMin: 0, xMax: 0, yMin: 0, yMax: 0 };
+    patchCase({ clearanceTweaks: { ...t, [facts.widen.side]: (t[facts.widen.side] ?? 0) + facts.widen.by } });
+  };
+
+  const caseFit = params.fit ?? 'tight';
+  return (
+    <section className="features-section" data-testid="floor-grid-section">
+      <h4>Floor grid and dividers</h4>
+      <div className="features-row">
+        <label title="Cut a grid of square, blind sockets into the case floor. Dividers plug into it and lift out again.">
+          <input
+            type="checkbox"
+            checked={grid?.enabled === true}
+            onChange={(e) => onToggle(e.target.checked)}
+            data-testid="floor-grid-enabled"
+          />{' '}
+          Socket grid in the floor
+        </label>
+      </div>
+      {thickened && (
+        <p className="features-empty" data-testid="floor-grid-thickened">
+          {thickened}
+        </p>
+      )}
+      {grid?.enabled && (
+        <>
+          <div className="features-row">
+            <label>
+              Pitch (mm){' '}
+              <input
+                type="number"
+                min={1}
+                step={0.5}
+                value={grid.pitch}
+                style={{ width: 56 }}
+                onChange={(e) => setGrid({ pitch: Number(e.target.value) })}
+                data-testid="floor-grid-pitch"
+                title="Socket centre spacing, both ways, in millimetres."
+              />
+            </label>
+            <label>
+              Socket (mm){' '}
+              <input
+                type="number"
+                min={1}
+                step={0.1}
+                value={grid.socket}
+                style={{ width: 56 }}
+                onChange={(e) => setGrid({ socket: Number(e.target.value) })}
+                data-testid="floor-grid-socket"
+                title="Side of each square socket before the fit relief, in millimetres."
+              />
+            </label>
+            <label>
+              Depth (mm){' '}
+              <input
+                type="number"
+                min={0.5}
+                step={0.1}
+                value={grid.depth}
+                style={{ width: 56 }}
+                onChange={(e) => setGrid({ depth: Number(e.target.value) })}
+                data-testid="floor-grid-depth"
+                title={`How deep the sockets go. The floor keeps ${GRID_FLOOR_UNDER} mm under them.`}
+              />
+            </label>
+            <label>
+              Fit{' '}
+              <select
+                value={grid.fit ?? ''}
+                onChange={(e) =>
+                  setGrid({ fit: e.target.value === '' ? undefined : (e.target.value as FitVariant) })
+                }
+                data-testid="floor-grid-fit"
+                title="How much clearance the divider tenons get in their sockets. Go looser if a divider will not drop in."
+              >
+                <option value="">Case fit ({FIT_NAME[caseFit]})</option>
+                {FIT_VARIANTS.map((f) => (
+                  <option key={f} value={f}>
+                    {FIT_NAME[f]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className="features-empty" data-testid="floor-grid-facts">
+            {fmt(facts.pitch)} pitch · sockets cut {fmt(facts.socketCut)} square and {fmt(facts.depth)} deep ·
+            tenons {fmt(facts.tenon)} square, {fmt(facts.clearance)} clearance ({FIT_NAME[facts.fit]}
+            {facts.fitSource === 'case' ? ', the case fit' : ''}) · {facts.sockets.length} sockets, {facts.blocked} left out
+            for the board, its standoffs and the wall.
+          </p>
+          {facts.notes.map((n) => (
+            <p key={n} className="features-empty" data-testid="floor-grid-note">
+              {n}
+            </p>
+          ))}
+          <div className="features-row">
+            {facts.depth < facts.depthWanted && (
+              <button
+                onClick={() => patchCase({ floorThickness: facts.floorNeeded })}
+                data-testid="floor-grid-thicken"
+                title="Thicken the case floor so the sockets reach their full depth."
+              >
+                Thicken the floor to {fmt(facts.floorNeeded)}
+              </button>
+            )}
+            {facts.widen && (
+              <button
+                onClick={onWiden}
+                data-testid="floor-grid-widen"
+                title="Grow the cavity on a side with no ports, to make room for a bay beside the board."
+              >
+                Widen the {WIDEN_SIDE_NAME[facts.widen.side]} side by {fmt(facts.widen.by)}
+              </button>
+            )}
+          </div>
+          <div className="features-row">
+            <button onClick={() => onAdd('x')} data-testid="add-divider-x" title="Add a divider wall running along X, on a grid row.">
+              + Divider along X
+            </button>
+            <button onClick={() => onAdd('y')} data-testid="add-divider-y" title="Add a divider wall running along Y, on a grid column.">
+              + Divider along Y
+            </button>
+          </div>
+          {dividers.length === 0 && <p className="features-empty">No dividers.</p>}
+          {dividers.map((d, i) => {
+            const f = facts.dividers.find((x) => x.id === d.id);
+            const lineWord = d.axis === 'x' ? 'Row' : 'Column';
+            return (
+              <div key={d.id} data-testid={`divider-${i + 1}`}>
+                <div className="features-row">
+                  <input
+                    type="checkbox"
+                    checked={d.enabled}
+                    onChange={(e) => patchDivider(d.id, { enabled: e.target.checked })}
+                    aria-label={`Divider ${i + 1} enabled`}
+                    title="Build this divider."
+                  />
+                  <strong>Divider {i + 1}</strong>
+                  <select
+                    value={d.axis}
+                    onChange={(e) => patchDivider(d.id, { axis: e.target.value as 'x' | 'y' })}
+                    aria-label={`Divider ${i + 1} direction`}
+                    title="Which way the wall runs."
+                  >
+                    <option value="x">along X</option>
+                    <option value="y">along Y</option>
+                  </select>
+                  <label>
+                    {lineWord}{' '}
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={d.line + 1}
+                      style={{ width: 48 }}
+                      onChange={(e) => patchDivider(d.id, { line: Math.max(0, Math.round(Number(e.target.value)) - 1) })}
+                      aria-label={`Divider ${i + 1} ${lineWord.toLowerCase()}`}
+                      data-testid={`divider-line-${i + 1}`}
+                      title={`The grid ${lineWord.toLowerCase()} the wall stands on, counted from 1 at the ${d.axis === 'x' ? 'front (−Y)' : 'left (−X)'} wall.`}
+                    />
+                  </label>
+                  <label>
+                    From{' '}
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={d.start + 1}
+                      style={{ width: 48 }}
+                      onChange={(e) => patchDivider(d.id, { start: Math.max(0, Math.round(Number(e.target.value)) - 1) })}
+                      aria-label={`Divider ${i + 1} first socket`}
+                      title="The socket the wall starts at, counted from 1."
+                    />
+                  </label>
+                  <label>
+                    Sockets{' '}
+                    <input
+                      type="number"
+                      min={2}
+                      step={1}
+                      value={d.holes}
+                      style={{ width: 48 }}
+                      onChange={(e) => patchDivider(d.id, { holes: Math.max(2, Math.round(Number(e.target.value))) })}
+                      aria-label={`Divider ${i + 1} sockets`}
+                      data-testid={`divider-holes-${i + 1}`}
+                      title="How many sockets the wall covers, first to last. The tenons sit in the end two."
+                    />
+                  </label>
+                  <button
+                    onClick={() => setDividers(dividers.filter((x) => x.id !== d.id))}
+                    aria-label={`Remove divider ${i + 1}`}
+                    title="Remove this divider."
+                  >
+                    ✕
+                  </button>
+                </div>
+                {f && (
+                  <p className="features-empty" data-testid={`divider-facts-${i + 1}`}>
+                    {fmt(f.length)} long × {fmt(f.height)} tall × {fmt(d.thickness ?? DIVIDER_THICKNESS)} thick — the cavity's{' '}
+                    {fmt(facts.cavityHeight)} inside height less {fmt(DIVIDER_TOP_CLEARANCE)} under the lid. Prints on its side as its own part.
+                  </p>
+                )}
+                {f?.clashes.map((c) => (
+                  <p key={c} className="features-empty" data-testid={`divider-clash-${i + 1}`}>
+                    {c}
+                  </p>
+                ))}
+                {f && f.clashes.length > 0 && f.moveTo !== null && (
+                  <button
+                    onClick={() => patchDivider(d.id, { line: f.moveTo! })}
+                    data-testid={`divider-move-${i + 1}`}
+                    title="Move the divider to the nearest grid line where it seats cleanly."
+                  >
+                    Move to {lineWord.toLowerCase()} {f.moveTo + 1}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
     </section>
   );
 }

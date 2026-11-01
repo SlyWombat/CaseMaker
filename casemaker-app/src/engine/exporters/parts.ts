@@ -316,15 +316,15 @@ const PRINT_PATTERNS: PrintPattern[] = [
   {
     test: (id) => id.startsWith('case-divider-x-'),
     meta: flat(
-      'Lay it on its SIDE — wall face on the bed, tenons pointing sideways. The wall prints as flat layers and nothing overhangs',
-      { rotation: [90, 0, 0], exportedOrientationNote: 'the tenons point sideways, not down.' },
+      'Lay it on its SIDE — wall face on the bed, tenons pointing sideways. The wall prints as flat layers and nothing overhangs.',
+      { rotation: [90, 0, 0], exportedOrientationNote: 'The exported file already lies on its side.' },
     ),
   },
   {
     test: (id) => id.startsWith('case-divider-y-'),
     meta: flat(
-      'Lay it on its SIDE — wall face on the bed, tenons pointing sideways. The wall prints as flat layers and nothing overhangs',
-      { rotation: [0, 90, 0], exportedOrientationNote: 'the tenons point sideways, not down.' },
+      'Lay it on its SIDE — wall face on the bed, tenons pointing sideways. The wall prints as flat layers and nothing overhangs.',
+      { rotation: [0, 90, 0], exportedOrientationNote: 'The exported file already lies on its side.' },
     ),
   },
   {

@@ -518,18 +518,24 @@ export function suggestCaseDivider(
       }
       let j = i;
       while (j + 1 < alongCount && live.has(`${j + 1},${line}`)) j++;
-      const holes = j - i + 1;
-      if (holes >= 2 && (!best || holes > best.holes)) {
-        const cand = { axis, line, start: i, holes };
-        const probe = caseDividerFacts(
-          {
-            ...project,
-            case: { ...project.case, dividers: [...(project.case.dividers ?? []), { id: '__probe', enabled: true, ...cand }] },
-          },
-          { trial: true },
-        );
-        const fact = probe.dividers.find((d) => d.id === '__probe');
-        if (fact && fact.clashes.length === 0) best = cand;
+      // Every sub-run of the live run, longest first: the full run may cross
+      // a divider already standing at one end of it.
+      for (let holes = j - i + 1; holes >= 2 && (!best || holes > best.holes); holes--) {
+        for (let start = i; start + holes - 1 <= j; start++) {
+          const cand = { axis, line, start, holes };
+          const probe = caseDividerFacts(
+            {
+              ...project,
+              case: { ...project.case, dividers: [...(project.case.dividers ?? []), { id: '__probe', enabled: true, ...cand }] },
+            },
+            { trial: true },
+          );
+          const fact = probe.dividers.find((d) => d.id === '__probe');
+          if (fact && fact.clashes.length === 0) {
+            best = cand;
+            break;
+          }
+        }
       }
       i = j + 1;
     }
