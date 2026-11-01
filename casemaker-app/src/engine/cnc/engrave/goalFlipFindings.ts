@@ -26,6 +26,7 @@ import {
   type CoverageMesh,
 } from './goalCoverage';
 import { goalFlipPlan, sideWords, type FlipPlan } from './goalFlipPlan';
+import { dowelHold } from './goalFlipSetups';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 /** The measure the finding is built from, kept as data so a caller can assert on it. */
@@ -130,9 +131,16 @@ export function goalFlipFindings(job: EngraveJob, goal: EngraveTargetObject): Jo
   const split =
     `${facingWords} of its surface faces away from the tool — downward faces and undercuts — and ` +
     `${shadowWords} lies in an overhang's shadow, so it is not cut from this side.`;
+  const hold = plan.sides.length > 1 ? dowelHold(job, goal, plan.sides[1]!.rotate?.about ?? 'x') : null;
+  const holdWords =
+    plan.sides.length <= 1
+      ? ''
+      : hold !== null
+        ? ` Setup 1 drills two ⌀${hold.diameterMm} mm locating holes ${hold.depthMm} mm deep in the margin, clear of the part, and setup 2 registers on them.`
+        : ` Setup 2 needs two locating holes to register on; none of your cutters is a drill, so record one in Manage › Tools first.`;
   const proposal =
     plan.sides.length > 1
-      ? ` A flip finishes it: ${sidesSentence(plan)} — ${plan.sides.length} setups reach ${planWords} of the surface.`
+      ? ` A flip finishes it: ${sidesSentence(plan)} — ${plan.sides.length} setups reach ${planWords} of the surface.${holdWords}`
       : plan.stopped === 'only-flat-faces-remain'
         ? ` What remains is the stock's own flat face, so no second setup is proposed.`
         : ` No side this mount can hold reaches more of it, so no second setup is proposed.`;

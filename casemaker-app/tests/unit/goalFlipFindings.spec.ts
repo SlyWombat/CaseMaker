@@ -62,6 +62,9 @@ describe('#872 the goal-unreached finding', () => {
     expect(finding!.goalFlipSides).toEqual(['top', 'bottom']);
     expect(finding!.goalReachedFraction).toBeGreaterThan(0.9);
     expect(finding!.message).toMatch(/A flip finishes it: top, then bottom — 2 setups reach/);
+    // The hold the flip needs is stated: the default registry owns no drill, and the sentence
+    // says which one to record rather than planning a registration with nothing to sit on.
+    expect(finding!.message).toMatch(/locating holes/);
   });
 
   it('a reference object is not a goal and gets no finding', async () => {

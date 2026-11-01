@@ -36,6 +36,7 @@ import { setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/en
 import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
 import { machineDisplayName } from '@/platform/locationClient';
 import { machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
 import { mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
@@ -1930,6 +1931,26 @@ export function EngravePanel(): JSX.Element {
     if (errors.length === 1 && errors[0]?.code === 'goal-reach-short' && errors[0]?.targetId === finding.targetId) {
       void generate();
     }
+  };
+
+  /**
+   * #872 — THE FLIP PLAN'S ONE PRESS. The finding carries the sides the plan chose; this turns
+   * them into saved setups and the goal each one cuts (the flipped side's copy placed in its own
+   * work frame), then Generate runs on the whole job. Nothing is written for a plan the setups
+   * engine refuses: the reason is shown beside the goal instead.
+   */
+  const addFlipPlan = (finding: JobFinding): void => {
+    const sides = finding.goalFlipSides;
+    const goal = job.targetObject;
+    if (sides === undefined || sides.length < 2 || goal === undefined) return;
+    const result = planFlipSetups(job, goal, sides);
+    if (!result.ok) {
+      setTargetError(result.reason);
+      return;
+    }
+    setSetups(result.setups);
+    for (const side of result.goals) setSideGoal(side.setupId!, side);
+    void generate();
   };
 
   /**
@@ -4966,6 +4987,15 @@ export function EngravePanel(): JSX.Element {
                     <span style={{ flexShrink: 0, marginLeft: 'auto' }}>
                       <button type="button" data-testid="engrave-goal-cut-top-band" onClick={() => cutTopBand(f)}>
                         Cut the top {f.goalBandMm} mm only
+                      </button>
+                    </span>
+                  )}
+                  {/* #872 — the flip plan's one press: the sides the run measured are added as
+                      setups, the goal copied into each one's work frame, and Generate runs. */}
+                  {f.code === 'goal-unreached' && (f.goalFlipSides?.length ?? 0) > 1 && job.targetObject?.id === f.targetId && (
+                    <span style={{ flexShrink: 0, marginLeft: 'auto' }}>
+                      <button type="button" data-testid="engrave-goal-add-flip" onClick={() => addFlipPlan(f)}>
+                        Add the {f.goalFlipSides!.length} setups
                       </button>
                     </span>
                   )}
