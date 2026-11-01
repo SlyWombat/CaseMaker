@@ -20,6 +20,7 @@ import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { chooseLayFlat } from '@/engine/cnc/engrave/goalOrientation';
 import { sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import { goalCoverage, type CoverageMesh, type ResultTop } from '@/engine/cnc/engrave/goalCoverage';
+import { goalSurfaceOffer } from '@/engine/cnc/engrave/goalFlipFindings';
 import { clearTargetObjectMeshCache, readTargetObjectFile, targetObjectMesh } from '@/engine/import/targetObject';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import { Z1 } from '@/engine/cnc/machine';
@@ -211,6 +212,41 @@ describe('#873 the goal corpus: the import states what the file is', () => {
     const sphere = await read('near-sphere.stl');
     const target = targetOf(sphere, { length: 60, width: 50 });
     expect(chooseLayFlat(target, { x: 50, y: 40 }).changes).toBe(false);
+  });
+});
+
+describe('#873/#872 the plan each shape gets, when the top setup cannot finish it', () => {
+  it('a sphere: two setups reach the goal — the flip is the plan', async () => {
+    const imported = await read('near-sphere.stl');
+    const target = targetOf(imported, { length: 60, width: 50 });
+    const job = goalJob(target, { length: 60, width: 50, thickness: 32 });
+    const offer = goalSurfaceOffer(job, target);
+    expect(offer).not.toBeNull();
+    expect(offer!.plan.sides.map((s) => s.faceUp)).toEqual(['top', 'bottom']);
+    expect(offer!.plan.reachedFraction).toBeGreaterThanOrEqual(0.95);
+  });
+
+  it('a figure: the sides it needs, stopping at the target — top, bottom, and one more', async () => {
+    const imported = await read('figure.stl');
+    const target = targetOf(imported, { length: 100, width: 60 });
+    const job = goalJob(target, { length: 100, width: 60, thickness: 40 });
+    const offer = goalSurfaceOffer(job, target);
+    expect(offer).not.toBeNull();
+    // Today the figure's third side is a real gain (surfaces shadowed from both the top and the
+    // bottom, under the body); the plan says so rather than calling a 91 % plan finished.
+    expect(offer!.plan.sides.length).toBeGreaterThanOrEqual(2);
+    expect(offer!.plan.reachedFraction).toBeGreaterThanOrEqual(0.95);
+    expect(offer!.plan.stopped).toBe('target-reached');
+  });
+
+  it('a relief: no plan at all — what remains is the stock’s own flat face', async () => {
+    const imported = await read('relief-plate.stl');
+    const target = targetOf(imported, { length: 80, width: 50 });
+    const job = goalJob(target, { length: 80, width: 50, thickness: 20 });
+    const offer = goalSurfaceOffer(job, target);
+    expect(offer).not.toBeNull();
+    expect(offer!.plan.sides).toHaveLength(1);
+    expect(offer!.plan.stopped).toBe('only-flat-faces-remain');
   });
 });
 
