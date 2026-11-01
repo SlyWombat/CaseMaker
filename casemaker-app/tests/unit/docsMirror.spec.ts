@@ -10,10 +10,10 @@
 // canonical side and the failure message names the fix.
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DOC_PAIRS, canonicalText } from '../../scripts/sync-docs.mjs';
+import { DOC_IMAGE_DIRS, DOC_PAIRS, canonicalText } from '../../scripts/sync-docs.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -47,12 +47,38 @@ describe('documentation mirrors', () => {
     // do not exist from `src/docs/` — `../CHANGELOG.md` became
     // `casemaker-app/src/CHANGELOG.md`, and the in-app viewer renders plain
     // anchors, so it was a 404 rather than a fallback.
+    //
+    // #880 — A FIGURE IS THE ONE RELATIVE REFERENCE THAT IS RIGHT IN BOTH: `img/<file>` is a file
+    // in the document's own folder (bundled by the app, mirrored for the repo), so it resolves
+    // beside each copy. It is checked to exist rather than banned.
     for (const { canonical } of DOC_PAIRS) {
       const text = canonicalText(join(ROOT, canonical));
-      const relative = [...text.matchAll(/\]\(([^)]+)\)/g)]
-        .map((m) => m[1]!)
-        .filter((href) => !/^(https?:|#|mailto:)/.test(href));
+      const hrefs = [...text.matchAll(/\]\(([^)]+)\)/g)].map((m) => m[1]!);
+      for (const href of hrefs.filter((h) => h.startsWith('img/'))) {
+        const file = href.slice('img/'.length);
+        expect(
+          existsSync(join(ROOT, 'casemaker-app/src/docs/img', file)),
+          `${canonical} refers to ${href}, which is not a bundled figure`,
+        ).toBe(true);
+      }
+      const relative = hrefs.filter((href) => !/^(https?:|#|mailto:|img\/)/.test(href));
       expect(relative, `${canonical} has links that only resolve from one copy`).toEqual([]);
+    }
+  });
+
+  it('mirrors every figure byte for byte (#880)', () => {
+    for (const dir of DOC_IMAGE_DIRS) {
+      const files = readdirSync(join(ROOT, dir.canonical)).filter((f) => /\.(png|webp|svg)$/i.test(f));
+      expect(files.length, `${dir.canonical} should carry the guide's figures`).toBeGreaterThan(0);
+      for (const file of files) {
+        const canonical = readFileSync(join(ROOT, dir.canonical, file));
+        const mirrorPath = join(ROOT, dir.mirror, file);
+        expect(existsSync(mirrorPath), `${dir.mirror}/${file} is missing — run \`npm run docs:sync\``).toBe(true);
+        expect(
+          readFileSync(mirrorPath).equals(canonical),
+          `${dir.mirror}/${file} is out of date — run \`npm run docs:sync\``,
+        ).toBe(true);
+      }
     }
   });
 });

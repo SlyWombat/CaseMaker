@@ -23,7 +23,7 @@
 //   npm run docs:sync          write the mirrors
 //   npm run docs:sync -- --check   fail if any mirror is out of date
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,6 +43,15 @@ export const DOC_PAIRS = [
   { canonical: 'casemaker-app/src/docs/getting-started.md', mirror: 'docs/getting-started.md' },
   { canonical: 'casemaker-app/src/docs/cnc-guide.md', mirror: 'docs/cnc-guide.md' },
 ];
+
+/**
+ * FIGURES, canonical → mirror (#880). A document refers to a picture as `img/<file>` — relative,
+ * because the two copies of every document are byte-identical and an absolute path cannot be right
+ * in both. The app resolves the path through the bundle (`src/docs/images.ts`); the repo mirror
+ * resolves it against `docs/img/`, so the same files are copied there. The canonical side is the
+ * one you edit, as above.
+ */
+export const DOC_IMAGE_DIRS = [{ canonical: 'casemaker-app/src/docs/img', mirror: 'docs/img' }];
 
 /**
  * The mirror is a byte-for-byte copy with LF endings.
@@ -86,6 +95,32 @@ function main() {
     } else {
       writeFileSync(join(ROOT, pair.mirror), canonical);
       console.log(`  wrote ${pair.mirror}  <- ${pair.canonical}`);
+    }
+  }
+  // #880 — the figures. Same direction, byte for byte (they are PNGs/SVGs, so no LF normalising).
+  for (const dir of DOC_IMAGE_DIRS) {
+    mkdirSync(join(ROOT, dir.mirror), { recursive: true });
+    const files = readdirSync(join(ROOT, dir.canonical)).sort();
+    for (const file of files) {
+      if (!/\.(png|webp|svg)$/i.test(file)) continue;
+      const want = readFileSync(join(ROOT, dir.canonical, file));
+      let got = null;
+      try {
+        got = readFileSync(join(ROOT, dir.mirror, file));
+      } catch {
+        got = null;
+      }
+      if (got !== null && got.equals(want)) {
+        console.log(`  ok    ${dir.mirror}/${file}`);
+        continue;
+      }
+      stale++;
+      if (check) {
+        console.log(`  STALE ${dir.mirror}/${file}  <- copy from ${dir.canonical}/${file}`);
+      } else {
+        writeFileSync(join(ROOT, dir.mirror, file), want);
+        console.log(`  wrote ${dir.mirror}/${file}  <- ${dir.canonical}/${file}`);
+      }
     }
   }
   if (stale === 0) console.log('\nall mirrors up to date');

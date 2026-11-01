@@ -16,3 +16,10 @@ export const DOC_PAIRS: DocPair[];
 
 /** Read a markdown file as UTF-8 with CRLF collapsed to LF, so the two copies compare equal. */
 export function canonicalText(absPath: string): string;
+
+/**
+ * #880 — figures: canonical → mirror folders. A document refers to a picture as `img/<file>`
+ * (relative, because both copies of a document are byte-identical), and `docs:sync` copies each
+ * figure so the path resolves beside each copy.
+ */
+export const DOC_IMAGE_DIRS: DocPair[];

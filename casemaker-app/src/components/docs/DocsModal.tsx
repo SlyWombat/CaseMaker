@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { marked } from 'marked';
 import { DOCS, findDoc, type DocEntry } from '@/docs';
+import { resolveDocImages } from '@/docs/images';
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -13,7 +14,9 @@ export function DocsModal({ initialId, onClose }: Props) {
   const fallback = DOCS[0]!;
   const [activeId, setActiveId] = useState<string>(initialId ?? fallback.id);
   const active: DocEntry = findDoc(activeId) ?? fallback;
-  const html = useMemo(() => marked.parse(active.source) as string, [active]);
+  // #880 — a document's pictures are bundled (`img/<file>` in the markdown, a hashed asset URL in
+  // the bundle); the rewrite happens here so the markdown stays readable in both of its copies.
+  const html = useMemo(() => resolveDocImages(marked.parse(active.source) as string), [active]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
