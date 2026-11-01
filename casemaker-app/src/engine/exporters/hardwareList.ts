@@ -192,6 +192,38 @@ export function hardwareForProject(project: Project): HardwareItem[] {
   // want is a magnet or a latch, and v1 has neither.
   if (kind === 'toolbox') return items;
 
+  // ----- Magnets (issue #152) -----------------------------------------------
+  // One disc per case pocket, and for the nameplate one in the plate AND one
+  // in the case behind it, per position. Grouped by size: a 6×2 and an 8×3 are
+  // different bags.
+  const discs = new Map<string, { count: number; captured: boolean }>();
+  const addDiscs = (size: string, n: number, captured: boolean) => {
+    const cur = discs.get(size) ?? { count: 0, captured: false };
+    discs.set(size, { count: cur.count + n, captured: cur.captured || captured });
+  };
+  for (const m of c.magnetPockets ?? []) {
+    if (m.enabled) addDiscs(m.size, Math.max(1, Math.floor(m.count ?? 1)), m.retention === 'captured');
+  }
+  if (c.nameplate?.enabled) {
+    const n = Math.max(1, Math.min(4, Math.floor(c.nameplate.magnetCount)));
+    addDiscs(c.nameplate.magnetSize, n * 2, c.nameplate.retention === 'captured');
+  }
+  for (const [size, d] of discs) {
+    const [dia, thick] = size.split('x');
+    items.push({
+      id: `magnets-${size}`,
+      label: `Disc magnets ${dia} × ${thick} mm (neodymium)`,
+      count: d.count,
+      note:
+        'Glue into their pockets (cyanoacrylate or epoxy); a press pocket is pushed in. ' +
+        (c.nameplate?.enabled
+          ? 'For the nameplate, set each plate magnet so it ATTRACTS the case magnet facing it. '
+          : '') +
+        (d.captured ? 'Captured pockets take theirs mid-print: see the pause height in the panel. ' : '') +
+        'Pocket fits are provisional until the magnet coupon is printed.',
+    });
+  }
+
   // ----- Screws into the bosses --------------------------------------------
   // Two independent retention paths share the same threaded boss/insert:
   //   (a) LID screws — when joint='screw-down': screw goes from the top

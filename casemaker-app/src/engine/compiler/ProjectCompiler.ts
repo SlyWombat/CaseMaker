@@ -23,6 +23,7 @@ import { buildBoardSnapOps } from './boardSnap';
 import { buildSecondaryMountOps } from './secondaryMounts';
 import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
+import { buildMagnetOps } from './magnets';
 import { buildStandNodes } from './stand';
 import { buildRackNodes } from './rack';
 import { rectFitsBed, resolvePrinter } from './rackFit';
@@ -220,6 +221,18 @@ export function compileProject(project: Project): BuildPlan {
     resolveDisplay,
   );
 
+  // Issue #152 — magnet pockets and the swappable nameplate. Every list is
+  // empty for a project with neither, so its plan is unchanged.
+  const magnetOps = buildMagnetOps(
+    board,
+    caseParams,
+    hats ?? [],
+    resolveHat,
+    display,
+    resolveDisplay,
+    project.customFonts ?? [],
+  );
+
   const additive = [
     shellOuter,
     ...bossOps,
@@ -235,6 +248,7 @@ export function compileProject(project: Project): BuildPlan {
     ...(flangeOps.caseAdditive ? [flangeOps.caseAdditive] : []),
     ...boardSnapOps.caseAdditive,
     ...secondaryMountOps.caseAdditive,
+    ...magnetOps.shellAdd,
   ];
 
   const smartLayout = applySmartCutoutLayout(
@@ -278,6 +292,7 @@ export function compileProject(project: Project): BuildPlan {
     ...hingeOps.subtractive,
     ...latchOps.caseSubtract,
     ...buildCustomCutouts(caseParams.customCutouts, board, caseParams, hats ?? [], resolveHat, display, resolveDisplay),
+    ...magnetOps.shellCut,
   ];
 
   let shellOp: BuildOp = additive.length > 1 ? union(additive) : shellOuter;
@@ -342,6 +357,8 @@ export function compileProject(project: Project): BuildPlan {
         ...fanOps.additive,
         ...fanOps.subtractive,
         ...assetOps.unionOps,
+        ...magnetOps.shellAdd,
+        ...magnetOps.shellCut,
       ]
         .map(aabbOfOp)
         .filter((b): b is Aabb => b !== null);
@@ -448,6 +465,14 @@ export function compileProject(project: Project): BuildPlan {
   if (textOps.lidSubtractive.length > 0) {
     lidOp = difference([lidOp, ...textOps.lidSubtractive]);
   }
+  // Issue #152 — magnet bosses and pockets in the lid, LID-LOCAL like the
+  // `+z` text labels above.
+  if (magnetOps.lidAdd.length > 0) {
+    lidOp = union([lidOp, ...magnetOps.lidAdd]);
+  }
+  if (magnetOps.lidCut.length > 0) {
+    lidOp = difference([lidOp, ...magnetOps.lidCut]);
+  }
   // Groove cut into lid brim underside.
   if (flangeOps.lidSubtract) {
     lidOp = difference([lidOp, flangeOps.lidSubtract]);
@@ -466,6 +491,11 @@ export function compileProject(project: Project): BuildPlan {
   // than the pin by knuckleClearance/2 + 0.1 mm of slop).
   if (hingeOps.pinNode) {
     nodes.push({ id: 'hinge-pin', op: hingeOps.pinNode });
+  }
+
+  // Issue #152 — the nameplate prints as its own part.
+  if (magnetOps.nameplate) {
+    nodes.push(magnetOps.nameplate);
   }
 
   // Issue #108 — gasket body is its own top-level node so the export

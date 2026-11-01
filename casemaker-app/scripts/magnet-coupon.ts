@@ -20,7 +20,8 @@
 //   • the smallest pocket that holds without splitting the boss (the press fit)
 //   • the largest that still seats and stays put (the glue/slip fit)
 //
-//   npm run magnet:coupon            -> all three sizes
+//   npm run magnet:coupon            -> every table size
+//   (one pocket of EVERY size on one bar: npm run fit:coupon -- magnet-sizes)
 //   npm run magnet:coupon -- 8x3     -> samples/magnet-coupon-8x3.stl only
 
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -29,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 
 import { bootstrap } from '../src/platform/headless/bootstrap';
 import { MAGNETS, type MagnetSize } from '../src/engine/compiler/fasteners';
+import { MAGNET_SIZES } from '../src/types/case';
 import {
   buildMagnetCoupon,
   magnetCouponLayout,
@@ -48,7 +50,7 @@ const outDir = process.env.COUPON_OUT
 mkdirSync(outDir, { recursive: true });
 const { manifold: tl } = await bootstrap();
 
-const ALL: MagnetSize[] = ['6x2', '8x3', '10x2'];
+const ALL: MagnetSize[] = [...MAGNET_SIZES];
 const arg = process.argv[2];
 let sizes: MagnetSize[];
 if (!arg) {

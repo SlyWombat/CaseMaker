@@ -94,6 +94,7 @@ function colorForNode(id: string): string {
   if (id === TOOLBOX_BIN_NODE_ID) return '#88a4cc';
   if (id === TOOLBOX_LID_NODE_ID) return '#a8b8d0';
   if (id.startsWith('divider-peg-')) return '#8fb0a0';
+  if (id.startsWith('nameplate-')) return '#d8c8a0';
   // Rack assembly: structural frame blue-grey, accessories differentiated
   // so the stacked faceplates read as separate parts.
   if (id.startsWith('rack-side-')) return '#88a4cc';
@@ -187,6 +188,18 @@ function CaseMeshes() {
     if (viewMode !== 'exploded') return [0, 0, 0];
     if (id === 'lid' || id === 'gasket') return [0, 0, lift];
     if (id === 'hinge-pin') return [0, 0, lift];
+    // Issue #152 — the nameplate pulls straight off its face.
+    if (id.startsWith('nameplate-')) {
+      const away: Record<string, [number, number, number]> = {
+        front: [0, -15, 0],
+        back: [0, 15, 0],
+        left: [-15, 0, 0],
+        right: [15, 0, 0],
+        top: [0, 0, lift + 15],
+        bottom: [0, 0, -15],
+      };
+      return away[id.slice('nameplate-'.length)] ?? [0, 0, 0];
+    }
     // Rack assembly: sides pull apart laterally, top/bottom split
     // vertically, accessories slide forward out of the frame.
     if (id === 'rack-side-left') return [-lateral, 0, 0];

@@ -1202,8 +1202,12 @@
               "description": "Magnet size as diameter×thickness, in millimetres; used with magnetic retention.",
               "enum": [
                 "6x2",
+                "6x3",
+                "8x2",
                 "8x3",
-                "10x2"
+                "10x2",
+                "10x3",
+                "12x3"
               ],
               "type": "string"
             },
@@ -1338,6 +1342,12 @@
           "description": "Magnet pockets for magnetic retention; omit for none.",
           "items": {
             "properties": {
+              "count": {
+                "description": "Pockets in a row along the face, centred on the position; omit for 1.",
+                "maximum": 12,
+                "minimum": 1,
+                "type": "integer"
+              },
               "enabled": {
                 "description": "False keeps the pocket in the document but cuts nothing.",
                 "type": "boolean"
@@ -1362,6 +1372,11 @@
                 "description": "Optional label shown with the pocket.",
                 "type": "string"
               },
+              "pitch": {
+                "description": "Centre-to-centre spacing of that row, in millimetres; omit for disc diameter + 6.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
               "retention": {
                 "description": "How the magnet is retained; omit for the builder default.",
                 "enum": [
@@ -1375,8 +1390,12 @@
                 "description": "Magnet size as diameter×thickness, in millimetres.",
                 "enum": [
                   "6x2",
+                  "6x3",
+                  "8x2",
                   "8x3",
-                  "10x2"
+                  "10x2",
+                  "10x3",
+                  "12x3"
                 ],
                 "type": "string"
               },
@@ -1400,6 +1419,133 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "nameplate": {
+          "description": "A swappable magnetic nameplate; omit for none.",
+          "properties": {
+            "cornerRadius": {
+              "description": "Corner radius of the plate outline, in millimetres; omit for 2.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "enabled": {
+              "description": "True builds the nameplate and its pockets.",
+              "type": "boolean"
+            },
+            "face": {
+              "description": "Case face the plate sits on.",
+              "enum": [
+                "+x",
+                "-x",
+                "+y",
+                "-y",
+                "+z",
+                "-z"
+              ],
+              "type": "string"
+            },
+            "font": {
+              "description": "Font registry id; omit for the bundled sans.",
+              "type": "string"
+            },
+            "height": {
+              "description": "Plate height across the face, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "magnetCount": {
+              "description": "Magnets along the plate width, 1 to 4.",
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "magnetSize": {
+              "description": "Magnet size as diameter×thickness, in millimetres.",
+              "enum": [
+                "6x2",
+                "6x3",
+                "8x2",
+                "8x3",
+                "10x2",
+                "10x3",
+                "12x3"
+              ],
+              "type": "string"
+            },
+            "retention": {
+              "description": "How the case-side magnets are retained; omit for 'glue'.",
+              "enum": [
+                "glue",
+                "press",
+                "captured"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "description": "Text carried by the plate.",
+              "type": "string"
+            },
+            "textDepth": {
+              "description": "Engraving depth or emboss height, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "textMode": {
+              "description": "Cut the text in or raise it.",
+              "enum": [
+                "engrave",
+                "emboss"
+              ],
+              "type": "string"
+            },
+            "textSize": {
+              "description": "Cap height of the text, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "thickness": {
+              "description": "Plate thickness, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "u": {
+              "description": "Plate centre along the face, in millimetres.",
+              "type": "number"
+            },
+            "v": {
+              "description": "Plate centre across the face, in millimetres.",
+              "type": "number"
+            },
+            "weight": {
+              "description": "Stroke weight; omit for 'regular'.",
+              "enum": [
+                "regular",
+                "bold"
+              ],
+              "type": "string"
+            },
+            "width": {
+              "description": "Plate width along the face, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled",
+            "face",
+            "u",
+            "v",
+            "width",
+            "height",
+            "thickness",
+            "text",
+            "textSize",
+            "textMode",
+            "textDepth",
+            "magnetSize",
+            "magnetCount"
+          ],
+          "type": "object"
         },
         "rack": {
           "description": "Mini-rack archetype settings; omit or disable for a normal shell and lid.",

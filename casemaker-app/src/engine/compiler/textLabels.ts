@@ -68,7 +68,7 @@ const EMBOSS_EMBED_MM = 0.2;
  * the pair is left-handed about the outward normal, so mapping text-right to +u
  * would print it mirrored. On those faces text therefore reads along -u.
  */
-function faceRotations(face: TextLabel['face']): Vec3[] {
+export function faceRotations(face: TextLabel['face']): Vec3[] {
   switch (face) {
     case '+z':
       return [];
@@ -85,19 +85,35 @@ function faceRotations(face: TextLabel['face']): Vec3[] {
   }
 }
 
+/**
+ * A line of text as a 2D outline centred on the origin: the ink centred
+ * horizontally, the CAP-height box centred vertically (so y = 0 is the middle
+ * of a capital letter). Null for whitespace. Shared with the nameplate
+ * (`magnets.ts`, issue #152), so plate text and face labels typeset alike.
+ */
+export function centredTextOutline(
+  text: string,
+  fontId: string,
+  weight: TextLabel['weight'],
+  size: number,
+  customFonts: readonly CustomFont[] = [],
+): { outline: Profile; width: number } | null {
+  const font = resolveFont(fontId, weight, customFonts);
+  const glyphs = glyphProfile(text, font, size);
+  const box = aabbOfProfile(glyphs);
+  if (!box) return null;
+  const cx = (box.min[0] + box.max[0]) / 2;
+  return { outline: pTranslate([-cx, -size / 2], glyphs), width: box.max[0] - box.min[0] };
+}
+
 function generateLabelOps(
   label: TextLabel,
   frame: FaceFrame,
   customFonts: readonly CustomFont[],
 ): BuildOp[] {
-  const font = resolveFont(label.font, label.weight, customFonts);
-  const glyphs = glyphProfile(label.text, font, label.size);
-  const box = aabbOfProfile(glyphs);
-  if (!box) return []; // whitespace only
-  // Centre the ink horizontally on the label position, and centre the CAP-height
-  // box vertically on it (so v is the middle of a capital letter).
-  const cx = (box.min[0] + box.max[0]) / 2;
-  let outline: Profile = pTranslate([-cx, -label.size / 2], glyphs);
+  const typeset = centredTextOutline(label.text, label.font, label.weight, label.size, customFonts);
+  if (!typeset) return []; // whitespace only
+  let outline: Profile = typeset.outline;
   if (label.rotation) outline = pRotate(label.rotation, outline);
 
   const engrave = label.mode === 'engrave';

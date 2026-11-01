@@ -31,7 +31,8 @@
  */
 
 import type { BoardProfile, CaseParameters, MagnetSize, RackParams, SnapCatch, Vec3 } from '@/types';
-import { MAGNETS, MAGNET_GLUE_GAP, magnetPocket } from './fasteners';
+import { MAGNETS, MAGNET_DEPTH_GAP, MAGNET_GLUE_GAP, magnetPocket } from './fasteners';
+import { MAGNET_SIZES } from '@/types/case';
 import { CLIP_FIT, buildBoardSnapOps } from './boardSnap';
 import { cavityOriginXY } from '@/engine/coords';
 import { defaultInsert, roundPocketCutter } from './insert';
@@ -250,6 +251,45 @@ export function buildMagnetCoupon(size: MagnetSize, label?: Labeler): FitCouponB
     provenance:
       'PROVISIONAL — every magnet pocket in fasteners.ts is derived. This coupon ' +
       'settles the diameter; the +0.4 depth gap stays derived until its own coupon.',
+  };
+}
+
+/**
+ * Issue #152 — the size coupon: ONE pocket of every table size, at the table's
+ * glue fit, cut down through the top face, each labelled with its size as
+ * digits (6×2 → "62", 10×3 → "103"; the coupon glyphs have no "×"). Where the
+ * per-size ladders ask "which clearance?", this asks the cheaper first
+ * question: "does the table's pocket take the disc I bought?" — one print, one
+ * magnet of each size, in or not. Report the sizes that do not seat, or that
+ * fall out when the coupon is turned over.
+ */
+export const MAGNET_SIZE_COUPON = { col: 18, x0: 11, barY: 26, barZ: 5, pocketY: 18, labelY: 3, engrave: 0.6 };
+
+export function magnetSizeLabel(size: MagnetSize): string {
+  return size.replace('x', '');
+}
+
+export function buildMagnetSizesCoupon(label?: Labeler): FitCouponBuild {
+  const L = MAGNET_SIZE_COUPON;
+  const barX = L.x0 * 2 + L.col * (MAGNET_SIZES.length - 1);
+  const cuts: BuildOp[] = [];
+  const columns: CouponColumn[] = [];
+  MAGNET_SIZES.forEach((size, i) => {
+    const cx = L.x0 + i * L.col;
+    cuts.push(magnetPocket({ size, at: [cx, L.pocketY, L.barZ], axis: '-z' }));
+    const text = magnetSizeLabel(size);
+    if (label) cuts.push(...label(text, cx, L.labelY, L.barZ, L.engrave));
+    columns.push({ x: cx, value: MAGNETS[size].pocket.d, label: text, shipped: true });
+  });
+  return {
+    op: difference([cube([barX, L.barY, L.barZ]), ...cuts]),
+    dims: { x: barX, y: L.barY, z: L.barZ },
+    columns,
+    bodies: 1,
+    settles: `every MAGNETS row's pocket at the glue fit (disc + ${shippedMagnetClearance()} mm Ø, + ${MAGNET_DEPTH_GAP} mm deep)`,
+    provenance:
+      'PROVISIONAL — every magnet pocket in fasteners.ts is derived; this coupon checks each row ' +
+      'takes its disc. The per-size ladders (magnet-6x2 …) settle the clearance itself.',
   };
 }
 
@@ -1235,6 +1275,11 @@ export const FIT_COUPONS: readonly FitCouponSpec[] = [
       build: (label) => buildMagnetCoupon(size, label),
     }),
   ),
+  {
+    id: 'magnet-sizes',
+    title: 'Magnet pockets — one of every table size, labelled',
+    build: (label) => buildMagnetSizesCoupon(label),
+  },
   {
     id: 'board-snap',
     title: 'Board-snap two-jaw clip + PCB-edge gauge',

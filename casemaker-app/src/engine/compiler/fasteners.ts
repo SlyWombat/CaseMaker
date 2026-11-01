@@ -622,10 +622,9 @@ export function screwStarter(o: ScrewStarterOptions): BuildOp {
 /*
  * Issue #152 — a disc magnet and the blind pocket that holds it.
  *
- * This is the primitive half of the issue; swappable name plates, tool holders
- * and lids-that-shouldn't-latch all want the same pocket, but none of those
- * archetypes exist yet, so nothing calls it today — it ships as a table, a
- * cutting op, and this provenance note, with no caller until something asks.
+ * Callers: the tool insert's magnet retention (#262), the case's own
+ * `magnetPockets` feature and the swappable nameplate (`magnets.ts`), and the
+ * fit coupons (`fitCoupons.ts`).
  *
  * Same provenance idiom as FastenerSpec: `source: 'coupon'` means the pocket
  * was printed and a real magnet pressed into it; `'derived'` means the number
@@ -636,13 +635,17 @@ export function screwStarter(o: ScrewStarterOptions): BuildOp {
  * hypothesis until a coupon settles it, not a spec.
  *
  * Where the numbers come from:
- *  - Disc diameters and thicknesses are the common neodymium sizes the reviewed
- *    system uses: 6×2, 8×3, 10×2 (/Toolbox.md construct 7).
+ *  - Disc diameters and thicknesses are the common stock neodymium discs:
+ *    6×2, 6×3, 8×2, 8×3, 10×2, 10×3, 12×3 (the reviewed system uses 6×2,
+ *    /Toolbox.md construct 7; the rest are the catalogue sizes either side).
  *  - The pocket is that system's own printed number for a 6×2 disc, 6.5 × 2.4
  *    (/Toolbox.md, "Generator parameter list" item 8) — a slip/glue fit: 0.25
  *    of radial clearance per side and 0.4 of extra depth.
- *  - That +0.25/+0.4 rule is then extrapolated to the other two sizes. One data
- *    point is not a rule: treat 8×3 and 10×2 as the weakest numbers in the file.
+ *  - That +0.25/+0.4 rule is then extrapolated to every other size. One data
+ *    point is not a rule: treat every row but 6×2 as arithmetic.
+ *  - No fit has been RECORDED in this repo (2026-10-31): the magnet coupons
+ *    (`samples/fit-coupon-magnet-*.stl`) have been generated but no measured
+ *    result was written back. So the table is PROVISIONAL as a whole.
  *
  * A PRESS-in magnet wants a different fit, and the sign may be an INTERFERENCE
  * (a pocket smaller than the disc) rather than a gap. That is exactly what the
@@ -674,9 +677,61 @@ export interface MagnetSpec {
 /** The pocket table. Every row is PROVISIONAL — see the note above. */
 export const MAGNETS: Readonly<Record<MagnetSize, MagnetSpec>> = {
   '6x2': { d: 6, h: 2, pocket: { d: 6.5, h: 2.4 }, source: 'derived' },
+  '6x3': { d: 6, h: 3, pocket: { d: 6.5, h: 3.4 }, source: 'derived' },
+  '8x2': { d: 8, h: 2, pocket: { d: 8.5, h: 2.4 }, source: 'derived' },
   '8x3': { d: 8, h: 3, pocket: { d: 8.5, h: 3.4 }, source: 'derived' },
   '10x2': { d: 10, h: 2, pocket: { d: 10.5, h: 2.4 }, source: 'derived' },
+  '10x3': { d: 10, h: 3, pocket: { d: 10.5, h: 3.4 }, source: 'derived' },
+  '12x3': { d: 12, h: 3, pocket: { d: 12.5, h: 3.4 }, source: 'derived' },
 };
+
+/**
+ * Diametral clearance of a PRESS pocket: disc Ø + 0.1. PROVISIONAL, and the
+ * reason is the printer, not the magnet: FDM holes print ~0.1–0.2 mm under
+ * their nominal Ø (the M5 pilot, #140, printed 4.8 to hold an M5), so a pocket
+ * modelled 0.1 over the disc lands as a light interference. The magnet coupon
+ * ladders −0.25 → +1.25 around the glue fit, so it brackets this number too.
+ */
+export const MAGNET_PRESS_CLEARANCE = 0.1;
+
+/** Pocket Ø for a retention: press = disc + `MAGNET_PRESS_CLEARANCE`; glue and
+ *  captured = the table's glue fit (a captured disc only has to drop in). */
+export function magnetPocketDiameterForRetention(
+  size: MagnetSize,
+  retention: 'glue' | 'press' | 'captured' = 'glue',
+): number {
+  const spec = MAGNETS[size];
+  if (retention === 'press') return Math.round((spec.d + MAGNET_PRESS_CLEARANCE) * 100) / 100;
+  return spec.pocket.d;
+}
+
+/**
+ * Print-in-place capture (`retention: 'captured'`): the skin left between the
+ * entry face and the pocket, mm. 0.6 = three 0.2 mm layers, the usual minimum
+ * for a closed, non-porous printed surface. PROVISIONAL like the table: it has
+ * not been printed over a magnet here.
+ */
+export const MAGNET_CAPTURE_SKIN = 0.6;
+
+/** Layer height the pause heights are stated against, mm. */
+export const MAGNET_PAUSE_LAYER = 0.2;
+
+/**
+ * Where to pause a print to drop a magnet into a captured pocket, for a part
+ * that prints with the pocket's ENTRY face on the bed (the case floor; the lid,
+ * which prints flipped): the skin, then the pocket's full depth, rounded UP to
+ * a whole layer. Pause after the layer that finishes at this Z, before the one
+ * that roofs the pocket.
+ */
+export function magnetCapturePauseZ(
+  size: MagnetSize,
+  skin: number = MAGNET_CAPTURE_SKIN,
+  layer: number = MAGNET_PAUSE_LAYER,
+  depth: number = MAGNETS[size].pocket.h,
+): number {
+  const top = skin + depth;
+  return Math.round(Math.ceil(top / layer - 1e-6) * layer * 100) / 100;
+}
 
 /** Pocket diameter for a size at the table's glue fit, mm. */
 export function magnetPocketDiameter(size: MagnetSize): number {
@@ -705,6 +760,13 @@ export interface MagnetPocketOptions {
   material?: number;
   /** Solid to leave under the pocket so it never breaks through. Default 1. */
   floor?: number;
+  /**
+   * Print-in-place capture: leave this much solid between the entry face and
+   * the pocket, so the pocket is a closed void (see `MAGNET_CAPTURE_SKIN`).
+   * 0 / absent = an open pocket. `material` then has to hold skin + depth +
+   * floor.
+   */
+  skin?: number;
   segments?: number;
 }
 
@@ -724,7 +786,8 @@ export function magnetPocket(o: MagnetPocketOptions): BuildOp {
   const seg = o.segments ?? 32;
   const d = o.diameter ?? spec.pocket.d;
   const floor = o.floor ?? DEFAULT_FLOOR;
-  const limit = o.material !== undefined ? Math.max(0, o.material - floor) : Infinity;
+  const skin = Math.max(0, o.skin ?? 0);
+  const limit = o.material !== undefined ? Math.max(0, o.material - floor - skin) : Infinity;
   const depth = Math.min(o.depth ?? spec.pocket.h, limit);
   if (depth <= 0) {
     throw new Error(
@@ -733,7 +796,29 @@ export function magnetPocket(o: MagnetPocketOptions): BuildOp {
     );
   }
   // Cut from just above the entry face so the mouth is clean, and stop `depth`
-  // below it. The floor is whatever is left between pocket and far face.
-  const body = translate([0, 0, -OVER], cylinder(depth + OVER, d / 2, seg));
+  // below it. The floor is whatever is left between pocket and far face. A
+  // captured pocket starts `skin` below the face instead: a closed void.
+  const body =
+    skin > 0
+      ? translate([0, 0, skin], cylinder(depth, d / 2, seg))
+      : translate([0, 0, -OVER], cylinder(depth + OVER, d / 2, seg));
   return translate(o.at, orient(o.axis ?? '+z', body));
+}
+
+/**
+ * A solid cylinder around a pocket, to ADD where the material is thinner than
+ * the pocket needs (a 2 mm case wall under a 3.4 mm pocket). Runs from `start`
+ * to `start + length` along `axis` from `at` — the same frame as
+ * `magnetPocket`, so the two line up by construction.
+ */
+export function magnetPocketBoss(o: {
+  at: Vec3;
+  axis: Facing;
+  start: number;
+  length: number;
+  diameter: number;
+  segments?: number;
+}): BuildOp {
+  const body = translate([0, 0, o.start], cylinder(o.length, o.diameter / 2, o.segments ?? 32));
+  return translate(o.at, orient(o.axis, body));
 }

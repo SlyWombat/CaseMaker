@@ -243,7 +243,8 @@ export const VENT_SURFACES: ReadonlyArray<VentSurface> = [
  * and `types/` must not reach up into the engine; the table in `fasteners.ts`
  * re-exports this union.
  */
-export type MagnetSize = '6x2' | '8x3' | '10x2';
+export const MAGNET_SIZES = ['6x2', '6x3', '8x2', '8x3', '10x2', '10x3', '12x3'] as const;
+export type MagnetSize = (typeof MAGNET_SIZES)[number];
 
 /**
  * How a disc is held in its pocket.
@@ -251,9 +252,12 @@ export type MagnetSize = '6x2' | '8x3' | '10x2';
  *  - 'press'   : an interference pocket, the disc pressed in and held by
  *                friction. Not a table number yet — PROVISIONAL until a coupon
  *                settles the fit (see `fasteners.ts`'s MAGNETS note).
- *  - 'captured': a thin printed membrane left over/under the pocket so the
- *                disc cannot fall out. The caller must know print orientation;
- *                the membrane is a bridge.
+ *  - 'captured': print-in-place capture. The pocket is closed at the face by
+ *                a stated skin (`MAGNET_CAPTURE_SKIN`), the print pauses at the
+ *                layer that would roof the pocket, and the magnet is dropped
+ *                in. Only a pocket whose axis is vertical as printed can be
+ *                captured (the case floor and the lid); on a side wall the
+ *                compiler cuts it open for glue and the panel says so.
  */
 export type MagnetRetention = 'glue' | 'press' | 'captured';
 
@@ -274,9 +278,49 @@ export interface MagnetPocket {
   size: MagnetSize;
   /** Default 'glue'. See {@link MagnetRetention} — all fits are PROVISIONAL. */
   retention?: MagnetRetention;
+  /** Pockets in a row along +u, centred on (u, v). Default 1. */
+  count?: number;
+  /** Centre-to-centre spacing of that row, mm. Default disc Ø + 6. */
+  pitch?: Mm;
   enabled: boolean;
   /** User-facing label shown in the editor (e.g. "nameplate magnet"). */
   label?: string;
+}
+
+/**
+ * Issue #152 — a swappable nameplate: a separate printed plate carrying text,
+ * held to a case face by disc magnets. The plate has blind pockets on its back
+ * and the case face has pockets at the SAME centres, so one magnet sits in each
+ * and the pair pulls the plate home. One plate per case.
+ */
+export interface NameplateParams {
+  enabled: boolean;
+  /** Case face the plate sits on. */
+  face: CaseFace;
+  /** Plate CENTRE on the face, mm from the face's (uMin, vMin) corner. */
+  u: Mm;
+  v: Mm;
+  /** Plate outline, mm (along u, along v). */
+  width: Mm;
+  height: Mm;
+  /** Plate thickness, mm. Must hold the pocket plus a back of solid. */
+  thickness: Mm;
+  /** Corner radius of the outline, mm. Default 2. */
+  cornerRadius?: Mm;
+  text: string;
+  /** Cap height of the text, mm. */
+  textSize: Mm;
+  /** Engrave (cut in) or emboss (stand proud), mm deep / tall. */
+  textMode: 'engrave' | 'emboss';
+  textDepth: Mm;
+  /** Font id from the font registry; default the bundled sans. */
+  font?: string;
+  weight?: 'regular' | 'bold';
+  magnetSize: MagnetSize;
+  /** Magnets along the plate's width, 1–4. */
+  magnetCount: number;
+  /** Retention of the CASE-side pockets (the plate's are always open). */
+  retention?: MagnetRetention;
 }
 
 export interface VentilationParams {
@@ -386,11 +430,15 @@ export interface CaseParameters {
   customCutouts?: CustomCutout[];
   /**
    * Issue #152 — disc-magnet pockets for magnetic retention. Optional so
-   * legacy projects load with no migration; missing field = empty list. No
-   * geometry is emitted until an archetype consumes it (the primitive exists
-   * in `engine/compiler/fasteners`, but nothing calls it yet).
+   * legacy projects load with no migration; missing field = empty list.
+   * Compiled by `engine/compiler/magnets.ts`.
    */
   magnetPockets?: MagnetPocket[];
+  /**
+   * Issue #152 — the swappable magnetic nameplate. Optional; absent or
+   * disabled builds nothing, so legacy projects compile unchanged.
+   */
+  nameplate?: NameplateParams;
   /**
    * Issue #92 — optional barrel hinge on a side face. Only one hinge per
    * case in v1; multi-hinge support is deferred. Missing/disabled = no hinge

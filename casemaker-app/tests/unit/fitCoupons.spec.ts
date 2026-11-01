@@ -642,6 +642,7 @@ describe('registry', () => {
       'magnet-6x2',
       'magnet-8x3',
       'magnet-10x2',
+      'magnet-sizes',
       'board-snap',
       'snap-catch',
       'rack-tab',

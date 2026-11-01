@@ -36,11 +36,17 @@ export async function buildOp(op: BuildOp, check: GenerationCheck): Promise<Node
     let componentCount = 1;
     try {
       // Manifold's decompose() returns the disjoint components. We only need
-      // the count, then dispose the children.
+      // the count, then dispose the children. A SEALED VOID comes back as its
+      // own component with negative volume; it is a cavity inside a part, not
+      // a loose part the slicer would print on its own, so only positive-volume
+      // bodies count (issue #152: a captured magnet pocket is exactly such a
+      // void, on purpose; the unit specs count bodies the same way).
       const parts = (m as unknown as { decompose?: () => unknown[] }).decompose?.();
       if (Array.isArray(parts)) {
-        componentCount = parts.length;
+        componentCount = 0;
         for (const p of parts) {
+          const vol = (p as { volume?: () => number }).volume?.() ?? 1;
+          if (vol > 0) componentCount += 1;
           (p as { delete?: () => void }).delete?.();
         }
       }

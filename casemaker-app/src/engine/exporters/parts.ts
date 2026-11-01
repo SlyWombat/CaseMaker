@@ -237,7 +237,35 @@ interface PrintPattern {
   meta: PrintMeta;
 }
 
+/**
+ * Issue #152 — the nameplate, one id per case face (`nameplate-front` …). As
+ * modelled it stands on the face it is mounted to, so each face needs its own
+ * quarter turn to lay the plate BACK DOWN on the bed: the pocket mouths then
+ * open onto the bed (each roof a short bridge, 6.5–12.5 mm), and the text is
+ * the top layers, where it prints crispest. The rotation takes the face's
+ * outward normal to +z; `nameplate.spec.ts` checks the exported part lies flat.
+ */
+const NAMEPLATE_ROTATION: Record<string, [number, number, number]> = {
+  front: [-90, 0, 0],
+  back: [90, 0, 0],
+  right: [0, -90, 0],
+  left: [0, 90, 0],
+  top: [0, 0, 0],
+  bottom: [180, 0, 0],
+};
+
 const PRINT_PATTERNS: PrintPattern[] = [
+  ...Object.entries(NAMEPLATE_ROTATION).map(
+    ([face, rotation]): PrintPattern => ({
+      test: (id) => id === `nameplate-${face}`,
+      meta: flat(
+        'Lay it BACK DOWN — magnet pockets on the bed, text on top. Each pocket roof is a short bridge; no supports.',
+        rotation[0] === 0 && rotation[1] === 0 && rotation[2] === 0
+          ? {}
+          : { rotation, exportedOrientationNote: 'The exported file already lies back down.' },
+      ),
+    }),
+  ),
   // Issue #148 — a split piece of the shell. It prints the same way up as the
   // whole shell (floor on the bed, cavity up), but the joint laps hang ~8 mm
   // below the floor, so the piece stands on its laps and the floor's underside
@@ -452,6 +480,13 @@ function describePart(
   if (id.startsWith('bumper-')) {
     const suffix = id.slice('bumper-'.length);
     return { displayName: `Bumper ${suffix}`, material: 'flex', category: 'accessory' };
+  }
+  if (id.startsWith('nameplate-')) {
+    return {
+      displayName: `Nameplate (${id.slice('nameplate-'.length)} face)`,
+      material: 'rigid',
+      category: 'accessory',
+    };
   }
   if (id.startsWith('divider-peg-')) {
     const suffix = id.slice('divider-peg-'.length);

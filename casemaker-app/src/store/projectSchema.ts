@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAGNET_SIZES } from '@/types/case';
 import { boardProfileSchema } from '@/library/schema';
 import { hatProfileSchema } from '@/library/hatSchema';
 import { displayProfileSchema } from '@/library/displaySchema';
@@ -417,17 +418,63 @@ export const caseParamsSchema = z.object({
           .describe('Case face the pocket is cut into.'),
         u: z.number().describe('Position along the face, in millimetres.'),
         v: z.number().describe('Position across the face, in millimetres.'),
-        size: z.enum(['6x2', '8x3', '10x2']).describe('Magnet size as diameter×thickness, in millimetres.'),
+        size: z.enum(MAGNET_SIZES).describe('Magnet size as diameter×thickness, in millimetres.'),
         retention: z
           .enum(['glue', 'press', 'captured'])
           .optional()
           .describe('How the magnet is retained; omit for the builder default.'),
+        count: z
+          .number()
+          .int()
+          .min(1)
+          .max(12)
+          .optional()
+          .describe('Pockets in a row along the face, centred on the position; omit for 1.'),
+        pitch: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Centre-to-centre spacing of that row, in millimetres; omit for disc diameter + 6.'),
         enabled: z.boolean().describe('False keeps the pocket in the document but cuts nothing.'),
         label: z.string().optional().describe('Optional label shown with the pocket.'),
       }),
     )
     .optional()
     .describe('Magnet pockets for magnetic retention; omit for none.'),
+  // Issue #152 — the swappable magnetic nameplate. Optional with NO version
+  // bump (the toolbox `pegs` precedent): absent reads back as undefined, which
+  // the compiler treats as "no plate".
+  nameplate: z
+    .object({
+      enabled: z.boolean().describe('True builds the nameplate and its pockets.'),
+      face: z
+        .enum(['+x', '-x', '+y', '-y', '+z', '-z'])
+        .describe('Case face the plate sits on.'),
+      u: z.number().describe('Plate centre along the face, in millimetres.'),
+      v: z.number().describe('Plate centre across the face, in millimetres.'),
+      width: z.number().positive().describe('Plate width along the face, in millimetres.'),
+      height: z.number().positive().describe('Plate height across the face, in millimetres.'),
+      thickness: z.number().positive().describe('Plate thickness, in millimetres.'),
+      cornerRadius: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe('Corner radius of the plate outline, in millimetres; omit for 2.'),
+      text: z.string().describe('Text carried by the plate.'),
+      textSize: z.number().positive().describe('Cap height of the text, in millimetres.'),
+      textMode: z.enum(['engrave', 'emboss']).describe('Cut the text in or raise it.'),
+      textDepth: z.number().positive().describe('Engraving depth or emboss height, in millimetres.'),
+      font: z.string().optional().describe('Font registry id; omit for the bundled sans.'),
+      weight: z.enum(['regular', 'bold']).optional().describe("Stroke weight; omit for 'regular'."),
+      magnetSize: z.enum(MAGNET_SIZES).describe('Magnet size as diameter×thickness, in millimetres.'),
+      magnetCount: z.number().int().min(1).max(4).describe('Magnets along the plate width, 1 to 4.'),
+      retention: z
+        .enum(['glue', 'press', 'captured'])
+        .optional()
+        .describe("How the case-side magnets are retained; omit for 'glue'."),
+    })
+    .optional()
+    .describe('A swappable magnetic nameplate; omit for none.'),
   // Issue #92 — optional barrel hinge. Side faces only; one per case in v1.
   // Missing on disk = no hinge emitted.
   hinge: z
@@ -521,7 +568,7 @@ export const caseParamsSchema = z.object({
         .optional()
         .describe("How tools are held: friction or magnets; omit for 'friction'."),
       magnetSize: z
-        .enum(['6x2', '8x3', '10x2'])
+        .enum(MAGNET_SIZES)
         .optional()
         .describe('Magnet size as diameter×thickness, in millimetres; used with magnetic retention.'),
       items: z

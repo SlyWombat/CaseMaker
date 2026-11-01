@@ -25,10 +25,10 @@ import {
 import { cube, difference, translate, type BuildOp } from '@/engine/compiler/buildPlan';
 import { createDefaultProject } from '@/store/projectStore';
 import { serializeProject, parseProject } from '@/store/persistence';
-import type { Facing } from '@/types';
+import { MAGNET_SIZES, type Facing } from '@/types';
 import { Manifold, exec, type ManifoldInstance } from './helpers/manifoldExec';
 
-const SIZES: MagnetSize[] = ['6x2', '8x3', '10x2'];
+const SIZES: MagnetSize[] = [...MAGNET_SIZES];
 
 /** Is the op's material present at this point? */
 function solidAt(m: ManifoldInstance, p: [number, number, number], s = 0.12): boolean {

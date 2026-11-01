@@ -1,6 +1,7 @@
 import type { Project, MeshNode, MeshStats } from '@/types';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
+import { nameplateFontLabels } from '@/engine/compiler/magnets';
 import { buildGeometry, setWorkerGeneration } from './workerClient';
 import { useJobStore } from '@/store/jobStore';
 
@@ -36,7 +37,13 @@ async function dispatch(project: Project, myGen: number): Promise<void> {
     // Issue #180 — the bundled faces are static assets now, fetched on first use. Load exactly
     // the keys this project's enabled labels typeset with BEFORE the synchronous compile; a
     // project with no text labels passes `[]` and fetches nothing.
-    await ensureFontsLoaded(fontKeysForLabels(project.textLabels, project.customFonts ?? []));
+    // Issue #152 — the nameplate typesets too.
+    await ensureFontsLoaded(
+      fontKeysForLabels(
+        [...(project.textLabels ?? []), ...nameplateFontLabels(project.case)],
+        project.customFonts ?? [],
+      ),
+    );
     if (myGen !== currentGeneration) return;
     const plan = compileProject(project);
     const result = await buildGeometry(plan, myGen);
