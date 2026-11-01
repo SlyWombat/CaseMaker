@@ -26,6 +26,7 @@ import { formatStamp } from '@/components/manage/display';
 import { stateColour, stateWord } from '@/components/viewport/machineWords';
 import { canReachMachine, NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
 import { MACHINE_MOUNT_WORDS, activeMountOf, activeProfileOf, surfaceWords } from '@/platform/machineChange';
+import { bedNeverMeasured } from '@/engine/cnc/bed/binding';
 import { readStatusLine } from '@/platform/desktop/protocol';
 import { readMachineRest } from '@/platform/machineChangeRun';
 import type { MachineObservation } from '@/platform/machineProbe';
@@ -220,10 +221,14 @@ export function MachineStep({
       )}
 
       {/* #726 W24 — WHAT IS ON THE MACHINE, from the active bed profile (the design's
-          "On the machine now: Vise on the pins · bare bed"). Absent when the house records no bed. */}
+          "On the machine now: Vise on the pins · bare bed"). Absent when the house records no bed.
+          #513 — the bed's measured state is stated HERE once (the maintainer's rule), not as a
+          finding on every job: a profile with no datum measured says so on the Start line, and the
+          job findings speak only where an unmeasured datum changes that job. */}
       {house !== null && activeProfileOf(house) !== null && (
         <p style={MUTED} data-testid="start-wizard-machine-now">
           On the machine now: {MACHINE_MOUNT_WORDS[activeMountOf(house)]} · {surfaceWords(activeProfileOf(house)!.surface)}
+          {bedNeverMeasured(activeProfileOf(house)!) ? ' · not measured yet' : ''}
         </p>
       )}
 

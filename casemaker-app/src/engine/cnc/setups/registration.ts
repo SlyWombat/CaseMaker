@@ -33,20 +33,34 @@ export function referenceFeatures(setup: Setup): ReferenceFeature[] {
     });
 }
 
+/** #513 — the surface's own words, for the sentence that names where a datum was measured. */
+const SURFACE_WORD: Readonly<Record<string, string>> = {
+  'bare-bed': 'the bare bed',
+  wasteboard: 'the wasteboard',
+  'fixture-plate': 'the fixture plate',
+  'vacuum-bed': 'the vacuum bed',
+};
+
 /** #598 — the surface the stock's top is expected at: the datum's jaw top + proud, or the seat + height. */
 function expectedSurface(
   setup: Setup,
   dims: { x: number; y: number; z: number },
   datum: MountDatum | null,
-  surfaceTopZ: { value: number } | null,
+  surfaceTopZ: { value: number; measuredAt?: string; surface?: string } | null,
   seatMachineZ: number | undefined,
 ): { machineZ: number; from: string } {
   // #619 — a measured surface top beats the ledge estimate: the next plan expects the top that was
   // actually found, not `jawTop + (thickness − ledgeStep)`.
+  // #513 — and the sentence names the DATUM: the bed profile's surface top, which surface it was
+  // taken on, and the day (a machine Z without its date is a claim about the wrong morning).
   if (surfaceTopZ !== null) {
+    const on = surfaceTopZ.surface === undefined ? null : (SURFACE_WORD[surfaceTopZ.surface] ?? null);
+    const day = surfaceTopZ.measuredAt === undefined ? null : surfaceTopZ.measuredAt.slice(0, 10);
     return {
       machineZ: surfaceTopZ.value,
-      from: `the measured surface top at machine Z ${surfaceTopZ.value} (setup ${setup.index})`,
+      from:
+        `the bed profile’s surface top${on === null ? '' : ` on ${on}`} at machine Z ${surfaceTopZ.value}` +
+        `${day === null ? '' : `, measured ${day}`} (setup ${setup.index})`,
     };
   }
   if (datum !== null) {
@@ -72,8 +86,9 @@ export function registrationFor(
     cornerRadius: number;
     /** Vise (#598): the measured jaw-top datum; the expected surface is `jawTopZ + (dims.z − LEDGE_STEP)`. */
     mountDatum?: MountDatum | null;
-    /** #619 — the measured surface-top datum; when present it beats the ledge estimate for the expected surface. */
-    surfaceTopZ?: { value: number } | null;
+    /** #619 — the measured surface-top datum; when present it beats the ledge estimate for the expected surface.
+     *  #513 — it also carries the surface it was taken on and the day, for the sentence. */
+    surfaceTopZ?: { value: number; measuredAt?: string; surface?: string } | null;
     /** The checked-out probe, carried on the plan for the record. */
     probe?: ProbeSpec | null;
     /** #599 — the mount tap point (machine XY), computed by the caller from the bed placement. */
@@ -168,7 +183,7 @@ export function referenceRegistrationFor(
     /** Vise (#598): the measured jaw-top datum. */
     mountDatum?: MountDatum | null;
     /** #619 — the measured surface-top datum; when present it beats the ledge estimate for the expected surface. */
-    surfaceTopZ?: { value: number } | null;
+    surfaceTopZ?: { value: number; measuredAt?: string; surface?: string } | null;
     /** The checked-out probe, carried on the plan for the record. */
     probe?: ProbeSpec | null;
     /** #599 — the mount tap point (machine XY), computed by the caller from the bed placement. */

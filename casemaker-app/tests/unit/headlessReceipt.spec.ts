@@ -52,6 +52,7 @@ function engraveReceipt(over: Partial<Extract<Receipt, { command: 'engrave' }>> 
     details: {
       kind: 'job',
       outDir: '/out',
+      bed: null,
       programs: [
         {
           name: 'Badge',
@@ -281,12 +282,25 @@ describe('#478 the human output is rendered from the receipt', () => {
     expect(text).not.toContain('     frame warn  vise-default');
   });
 
+  it('names the bed the job was set up on, by profile and version (#513)', () => {
+    const bound = engraveReceipt({
+      details: {
+        ...engraveReceipt().details,
+        bed: { profileId: 'bp-z1-kit', profileVersion: '2026-10-18T09:12:00.000Z' },
+      },
+    } as never);
+    const text = renderReceipt(bound).join('\n');
+    expect(text).toContain('  bed        bp-z1-kit @ 2026-10-18T09:12:00.000Z');
+    // A job naming no bed prints no line at all — an unbound document reads exactly as before.
+    expect(renderReceipt(engraveReceipt()).join('\n')).not.toContain('  bed ');
+  });
+
   it('renders a stopped run’s errors and refusal from the receipt', () => {
     const stopped = engraveReceipt({
       ok: false,
       stage: 'findings',
       gate: 'generated',
-      details: { kind: 'job', outDir: '/out', programs: [], coupon: null, pair: null },
+      details: { kind: 'job', outDir: '/out', programs: [], coupon: null, pair: null, bed: null },
       diagnostics: [diagnostic('item-empty', 'error', 'nothing to cut', 'findings', 'Badge')],
       refusals: [{ code: 'stopped', reason: 'stopped at findings' }],
     });

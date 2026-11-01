@@ -142,6 +142,13 @@ describe('runSheet (#207)', () => {
     expect(sheet.header.machine).toBe(Z1.name);
   });
 
+  it('#513 the header names the bed the job is set up on, and says nothing when none is resolved', () => {
+    const job = dj();
+    expect(sheetFor(job).header.bed).toBeUndefined();
+    const line = 'Vise on the pins; jaw top -56.65 mm measured 2026-10-17; surface top not measured';
+    expect(sheetFor(job, NO_SIM, NC, { bedName: line }).header.bed).toBe(line);
+  });
+
   it('#604 names the probe and mount in the header, and the found section prints only with a record', () => {
     const job = dj();
     // No registration: no probe/mount header lines, no found section.

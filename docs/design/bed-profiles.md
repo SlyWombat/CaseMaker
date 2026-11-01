@@ -258,7 +258,8 @@ its "to measure before the gates stop refusing" list.
 | `bed-unmeasured` | info | the active profile has datums the job will need; names them and the calipers list |
 | `bed-changed` | error (run) / warning (design) | the job's profile is not the machine's active one |
 | `mount-not-on-bed` | error | the job's mounting names a placement the active profile lacks |
-| `stock-off-surface` | warning | the stock's footprint leaves the surface's footprint |
+| `stock-off-surface` | warning | the stock's footprint leaves the surface's footprint (exact on a taped job: `tape.where` is machine XY; by size on the bracket) |
+| `cut-leaves-board` | warning | the same overhang on a job that cuts THROUGH — the breakthrough goes past the board's edge into the bed, so the hazard is said instead of the size |
 | `fixture-overlap` | error | two placements occupy the same bed area or pins |
 | `surface-top-unmeasured` | error | a tape/bracket registration needs the surface top and it is null (replaces the lone `bracket.seatMachineZ` refusal) |
 

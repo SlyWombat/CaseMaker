@@ -12,6 +12,33 @@
         "details": {
           "description": "The job command’s own details.",
           "properties": {
+            "bed": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "profileId": {
+                      "description": "The bed profile the job was set up on (#513).",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "profileVersion": {
+                      "description": "That profile’s version — the time of its last edit when the job was planned.",
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "profileId",
+                    "profileVersion"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The bed the job was bound to, or null for a job that names none (a design or coupon run, or a document written before jobs were bound to a bed). Omitted by receipts written before this field existed — a committed receipt parses to itself, byte for byte."
+            },
             "coupon": {
               "anyOf": [
                 {

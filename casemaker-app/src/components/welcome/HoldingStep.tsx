@@ -67,6 +67,7 @@ import { KNOWN_DEFAULTS, readDefault } from '@/platform/defaultsClient';
 import { canReachMachine } from '@/platform/capabilities';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import { surfaceWords, type MachineMountKind } from '@/platform/machineChange';
+import { scarsUnder, tapeFootprint } from '@/engine/cnc/bed/binding';
 import type { BedProfile } from '@/platform/locationClient';
 import { useLocationStore } from '@/store/locationStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -1919,6 +1920,16 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
       : [];
   // #712's board-size refusal, at the field that causes it (§3.5): the house board must cover the
   // stock, and the sentence names the board's own size.
+  // #513 — the scar under the blank. Scars are machine XY and so is the tape hold's `where`, so the
+  // overlap is EXACT — said at the place the position is chosen, and only when it is true of THIS
+  // placement (#417's check, re-homed onto the bed profile's surface).
+  const scarUnder = useMemo(() => {
+    if (profile === null || job.workholding.kind !== 'tape') return null;
+    const footprint = tapeFootprint(profile, job.workholding.tape, job.stock);
+    if (footprint === null) return null;
+    const scars = scarsUnder(profile, footprint);
+    return scars.length === 0 ? null : scars;
+  }, [job, profile]);
   const boardTooSmall = useMemo(() => {
     if (jobHold === null || profile === null) return null;
     const bed = bedUnderFacts(machine, shopDefaults ?? null, job.breakthrough + 1, {
@@ -1997,6 +2008,14 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
             )}
           </FieldRow>
           <FieldRow label="Square to">the front edge of the bed</FieldRow>
+          {scarUnder !== null && profile !== null && (
+            <p style={BED_WARNING} data-testid="engrave-setup-tape-scar">
+              The blank sits over {scarUnder.length === 1 ? 'a scar' : `${scarUnder.length} scars`} on{' '}
+              {surfaceWords(profile.surface).replace(' under', '')} (
+              {[...new Set(scarUnder.map((s) => s.at.slice(0, 10)))].join(', ')}) — it may not sit flat
+              there. Move the blank, or resurface the board.
+            </p>
+          )}
           {boardTooSmall !== null && (
             <p style={BED_ERROR} data-testid="engrave-setup-board-too-small">
               {boardTooSmall.message}
@@ -2689,6 +2708,7 @@ function MountRow({
 
 const BED_FIELDS: CSSProperties = { display: 'grid', gap: 4, margin: '2px 0 4px' };
 const BED_ERROR: CSSProperties = { fontSize: 12, lineHeight: 1.45, margin: '2px 0', color: '#f0b4ad' };
+const BED_WARNING: CSSProperties = { fontSize: 12, lineHeight: 1.45, margin: '2px 0', color: '#e0c07a' };
 
 /** One labelled row of the bed option's fields, the mockup's "Under it | wasteboard". */
 function FieldRow({ label, children }: { label: string; children: ReactNode }): JSX.Element {

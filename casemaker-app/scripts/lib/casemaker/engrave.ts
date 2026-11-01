@@ -417,6 +417,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   let outDir = '';
   let coupon: EngraveDetails['coupon'] = null;
   let pair: EngraveDetails['pair'] = null;
+  // #513 — the bed the job was set up on, when the document names one (the design and coupon
+  // routes build their own jobs and name none).
+  let bed: NonNullable<EngraveDetails['bed']> | null = null;
   let runOk = true;
   let runStage: string | null = null;
   let runGate: Receipt['gate'] = null;
@@ -465,7 +468,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       diagnostics: runDiagnostics,
       provenance: runProvenance,
       refusals: runRefusals,
-      details: { kind, outDir, programs, coupon, pair },
+      // #513 — the bed rides only when the document names one. Omitting the null keeps every
+      // receipt for a job without a bed byte-identical to the pre-#513 output (the committed
+      // bench receipts rewrite to themselves).
+      details: { kind, outDir, programs, coupon, pair, ...(bed === null ? {} : { bed }) },
     });
   }
 
@@ -1593,6 +1599,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     }
     outDir = args.out ?? dirname(path);
     mkdirSync(outDir, { recursive: true });
+    // #513 — the job's bed binding rides into the receipt, so a run can be matched to the bed it
+    // was planned against even when the machine's active profile has changed since.
+    bed = parsed.job.bed === undefined ? null : { profileId: parsed.job.bed.profileId, profileVersion: parsed.job.bed.profileVersion };
     // #766 — A JOB THAT NAMES NO CUTTER IS GIVEN ONE BY SIMULATION. The rules that came before
     // (area share #762, item kind, the tightest raised gap #760/#765) each failed on a real job;
     // this path now runs the measured search: plausible kind-valid plans are generated

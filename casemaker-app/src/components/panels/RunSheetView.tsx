@@ -94,6 +94,14 @@ export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: ()
                 <dd data-testid="run-sheet-mount">{sheet.header.mount}</dd>
               </div>
             )}
+            {/* #513 — the bed the sheet's numbers are true about: what is mounted, the datum the
+                job's registration reads with the day it was measured, and the surface under it. */}
+            {sheet.header.bed !== undefined && (
+              <div>
+                <dt>Bed</dt>
+                <dd data-testid="run-sheet-bed">{sheet.header.bed}</dd>
+              </div>
+            )}
             <div>
               <dt>Generated</dt>
               <dd>{sheet.header.generatedOn}</dd>

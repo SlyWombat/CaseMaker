@@ -50,6 +50,18 @@ function sheetFor(job: EngraveJob, options?: RunSheetOptions): RunSheet {
 
 afterEach(cleanup);
 
+describe('#513 the sheet’s Bed line', () => {
+  it('prints beside the machine, probe and mount, and is absent when no bed was resolved', () => {
+    const job = dj();
+    const line = 'Vise on the pins; jaw top -56.65 mm measured 2026-10-17; surface top not measured';
+    const { unmount } = render(<RunSheetView sheet={sheetFor(job, { bedName: line })} />);
+    expect(screen.getByTestId('run-sheet-bed').textContent).toBe(line);
+    unmount();
+    render(<RunSheetView sheet={sheetFor(job)} />);
+    expect(screen.queryByTestId('run-sheet-bed')).toBeNull();
+  });
+});
+
 describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
   it('draws the side view when the job has sacrificial material', () => {
     const job = dj();

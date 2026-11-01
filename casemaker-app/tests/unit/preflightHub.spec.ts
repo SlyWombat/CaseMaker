@@ -106,6 +106,24 @@ function hubFor(job: EngraveJob, over: Partial<PreflightHubInput> = {}) {
   });
 }
 
+describe('#513 the bed moved under the job — the Cut gate’s error', () => {
+  it('is a run-policy row, an error, and says the presses are back in Design', () => {
+    const job = dj();
+    const report = hubFor(job, { bedChanged: 'This job was set up on the bed “Vise on the pins”, and the bed has changed since: the jaw top moved from -56.8 mm to -56.65 mm.' });
+    const row = report.policyRows.find((r) => r.code === 'bed-changed');
+    expect(row).toMatchObject({ severity: 'error', owner: 'run' });
+    expect(row!.message).toContain('Go back to Design (‹ Design) and press Re-plan on the current bed, or switch the bed back.');
+    // It leads the page: this is about the SETUP, and a re-generate cannot clear it.
+    expect(report.firstBlocking?.code).toBe('bed-changed');
+    expect(report.errorCount).toBeGreaterThan(0);
+  });
+
+  it('says nothing when the beds agree (the caller passes no sentence)', () => {
+    const report = hubFor(dj());
+    expect(report.policyRows.some((r) => r.code === 'bed-changed')).toBe(false);
+  });
+});
+
 describe('preflightHub: the (setup, tool) loop', () => {
   it('asks once per scope, in the job`s setup and tool order, and stamps every row with its scope', () => {
     const job = twoSetups(dj(), ['user:flat-1-a', TOOL_B]);

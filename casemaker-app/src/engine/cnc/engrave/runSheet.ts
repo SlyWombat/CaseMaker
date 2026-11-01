@@ -771,6 +771,14 @@ export interface RunSheetHeader {
   probe?: string;
   /** #604 — the mount's name (the vise the job holds with), or absent. */
   mount?: string;
+  /**
+   * #513 — the bed the job is set up on, in the design's one line ("Vise on the pins; jaw top
+   * −56.650 mm measured 2026-10-17; surface not measured"), or absent when the house records no bed
+   * (or the sheet is built where no profile can be read — the bench CLI). Resolved by the caller
+   * (`bedLine`) from the machine's active profile and the job's mount; paper says which bed the
+   * numbers are true about, because the operator reads it standing beside one.
+   */
+  bed?: string;
   /** ISO date (`YYYY-MM-DD`) the sheet was generated. */
   generatedOn: string;
   /** The sanitised job name plus `.nc` — the file the operator loads. */
@@ -2244,6 +2252,9 @@ export interface RunSheetOptions {
   probeInstrument?: ProbeFitInstrument;
   /** #604 — the mount's name (the vise the job holds with), or absent. */
   mountName?: string;
+  /** #513 — the bed line the header prints (`bedLine`), resolved by the caller from the machine's
+   *  active profile; absent leaves the header without it (an older caller, the bench CLI). */
+  bedName?: string;
   /**
    * #604 — the found position from the registration: how far the measured blank sits from the
    * plan's nominal origin. Absent: no registration has run on this machine, and no found-position
@@ -3620,6 +3631,7 @@ export function buildRunSheet(
     estimatedTimeNote: rapidAssumptionNote(machine.rapidEstimate),
     ...(options.probeName !== undefined ? { probe: options.probeName } : {}),
     ...(options.mountName !== undefined ? { mount: options.mountName } : {}),
+    ...(options.bedName !== undefined ? { bed: options.bedName } : {}),
   };
 
   // ---- 1 · What you need ---------------------------------------------------------------------

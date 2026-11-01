@@ -376,6 +376,32 @@ describe('#715 the clamp handles and the board under', () => {
     );
   });
 
+  it('#513 a blank over a scar says so where its place is chosen — and only when it is over one', () => {
+    const machine = bedMachine();
+    const profile = machine.bedProfiles![0]!;
+    profile.surface = {
+      ...profile.surface,
+      scars: [{ x: 60, y: 40, width: 40, height: 20, at: '2026-10-12T08:00:00.000Z', jobId: null }],
+    };
+    seedLocation(machine);
+    const taped = (where: { x: number; y: number }): EngraveJob => ({
+      ...dj({ length: 40, width: 30, thickness: 3 }),
+      workholding: {
+        kind: 'tape',
+        tape: { width: 20, thickness: 0.1, inset: 2, where, squareTo: 'front', source: 'saved' },
+      },
+    });
+
+    openHolding(taped({ x: 50, y: 35 }));
+    expect(screen.getByTestId('engrave-setup-tape-scar').textContent).toContain('The blank sits over a scar');
+    expect(screen.getByTestId('engrave-setup-tape-scar').textContent).toContain('2026-10-12');
+    expect(screen.getByTestId('engrave-setup-tape-scar').textContent).toContain('Move the blank, or resurface the board.');
+
+    cleanup();
+    openHolding(taped({ x: 120, y: 120 }));
+    expect(screen.queryByTestId('engrave-setup-tape-scar')).toBeNull();
+  });
+
   it('a taped job reloads with its own hold: the position, the roll and the option checked', () => {
     const base = dj({ length: 76.2, width: 38.1, thickness: 3.81 });
     seedLocation(bedMachine());

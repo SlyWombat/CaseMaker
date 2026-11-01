@@ -6,7 +6,7 @@
  * one set of rules rather than two copies that can drift.
  */
 
-import type { MachineRecord } from '@/platform/locationClient';
+import type { BedProfile, MachineRecord } from '@/platform/locationClient';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { probeInstrument, type MountDatum, type PlanMountTap, type ProbeSpec } from '@/engine/cnc/registration/plan';
 import { accessoriesFor, useLocationStore } from '@/store/locationStore';
@@ -238,8 +238,15 @@ export function mountDatumMismatch(machine: MachineRecord | null): string | null
   return checkedOut !== null && datum.by !== checkedOut ? datum.by : null;
 }
 
-/** #619 — the active bed profile's measured surface-top datum, or null when it has none. */
-export function surfaceTopDatumFor(machine: MachineRecord | null): { value: number; measuredAt: string; by: string; at: [number, number] | null } | null {
+/**
+ * #619 — the active bed profile's measured surface-top datum, or null when it has none.
+ * #513 — the datum carries the SURFACE it was taken on (the profile's `surface.kind`), so the
+ * registration's expected-surface sentence can name the board the top belongs to and the day it
+ * was measured, rather than a bare machine Z.
+ */
+export function surfaceTopDatumFor(
+  machine: MachineRecord | null,
+): { value: number; measuredAt: string; by: string; at: [number, number] | null; surface: BedProfile['surface']['kind'] } | null {
   if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
   const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
   const datum = profile?.datums.surfaceTopZ ?? null;
@@ -251,7 +258,10 @@ export function surfaceTopDatumFor(machine: MachineRecord | null): { value: numb
   // surface top from a thinner blank is a separate note on #632, not a one-line guard.)
   const checkedOut = probeFor(machine)?.id ?? null;
   if (checkedOut !== null && datum.by !== checkedOut) return null;
-  return datum;
+  // A record whose profile carries no surface (an older document, a fixture) still yields the
+  // datum; the sentence then says "the bed" rather than naming a surface it does not have.
+  const surface = profile?.surface as BedProfile['surface'] | null | undefined;
+  return { ...datum, surface: surface == null ? 'bare-bed' : surface.kind };
 }
 
 /**

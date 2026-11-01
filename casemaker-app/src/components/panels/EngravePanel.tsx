@@ -1066,10 +1066,11 @@ export function EngravePanel(): JSX.Element {
     // chosen cutter's known reach blocks here, with the numbers and the one-click top-band option;
     // an unrecorded reach is an info and blocks nothing.
     ...jobReachFindings(job, tool, tools.map((e) => e.tool), tools),
-    // #513 — the bed: a job planned on a bed that is not there now (`bed-changed`, an error with
-    // its two presses), a mount the bed does not have, a stock larger than the board, an
-    // unmeasured datum the mount's registration would need. A bed with unmeasured datums is NOT
-    // reported per job (every fresh bed is unmeasured); the cards and the Start line say it once.
+    // #513 — the bed: a job planned on a bed that is not there now (`bed-changed`, a WARNING here
+    // with its two presses — the Cut gate makes it the error), a mount the bed does not have, a
+    // stock that leaves the board, an unmeasured datum the mount's registration would need. A bed
+    // with unmeasured datums is NOT reported per job (every fresh bed is unmeasured); the cards and
+    // the Start line say it once.
     ...bedFindings({ job, machine: locationMachine, mount: jobMount(job) }),
   ]);
   const jobFindings = findings.filter((f) => f.labelId === undefined);
@@ -2356,7 +2357,7 @@ export function EngravePanel(): JSX.Element {
             bedChanged: bedChangedSentence(job, locationMachine),
           })
         : null,
-    [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem, bedFacts],
+    [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem, bedFacts, locationMachine],
   );
 
   const backToDesign = (cause: PreflightCause | null): void => {

@@ -146,6 +146,33 @@ describe('#682 — step 1 is the house’s machine', () => {
     );
   });
 
+  it('#513 — a bed with nothing measured says so on the Start line, once — not as a finding per job', async () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const doc = JSON.parse(readFileSync(join(here, 'fixtures', 'location-doc.json'), 'utf8')) as { machines: unknown[] };
+    const machine = MachineRecordSchema.parse(JSON.parse(JSON.stringify(doc.machines[0]))) as MachineRecord & {
+      address?: { host: string; port: number };
+    };
+    machine.address = { host: HOUSE_HOST, port: 2222 };
+    // A freshly shipped profile: nothing has been measured on it yet.
+    machine.bedProfiles = machine.bedProfiles!.map((p) => ({
+      ...p,
+      datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+    }));
+    useLocationStore.setState({
+      status: 'present',
+      location: { machines: [machine] } as unknown as Location,
+      etag: '"e1"',
+      reason: null,
+    });
+    useClient(bench());
+    render(<StartWizard />);
+
+    await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
+    expect(screen.getByTestId('start-wizard-machine-now').textContent).toBe(
+      'On the machine now: Vise on the pins · wasteboard under · not measured yet',
+    );
+  });
+
   it('an Idle line away from the homed rest does not say homed', async () => {
     withHouse();
     useClient({

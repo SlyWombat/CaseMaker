@@ -201,6 +201,21 @@ export const engraveDetailsSchema = z
     programs: z.array(engraveProgramSchema).describe('Every program the run wrote, in the order written.'),
     coupon: engraveCouponSchema.nullable().describe('The coupon summary, or null for a job or design run.'),
     pair: engravePairSchema.nullable().describe('The two-program summary, or null when only one program ran.'),
+    bed: z
+      .object({
+        profileId: z.string().min(1).describe('The bed profile the job was set up on (#513).'),
+        profileVersion: z
+          .string()
+          .min(1)
+          .describe('That profile’s version — the time of its last edit when the job was planned.'),
+      })
+      .nullable()
+      .optional()
+      .describe(
+        'The bed the job was bound to, or null for a job that names none (a design or coupon run, ' +
+          'or a document written before jobs were bound to a bed). Omitted by receipts written ' +
+          'before this field existed — a committed receipt parses to itself, byte for byte.',
+      ),
   })
   .describe('The job command’s own details.');
 
@@ -595,6 +610,12 @@ function engraveLines(receipt: Extract<Receipt, { command: 'engrave' }>): string
       `${details.coupon.title} — ${details.coupon.parameter} sweep over ${details.coupon.values.join(', ')}`,
       `${details.programs.length} program${details.programs.length === 1 ? '' : 's'} into ${details.outDir}`,
     );
+  }
+
+  // #513 — the bed the job was set up on, by profile and version: a run's paper trail has to name
+  // the bed its numbers were planned against, and a saved job only records WHICH profile it was.
+  if (details.bed != null && details.programs.length > 0) {
+    lines.push('', `  bed        ${details.bed.profileId} @ ${details.bed.profileVersion}`);
   }
 
   for (const program of details.programs) {
