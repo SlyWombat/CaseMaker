@@ -12,6 +12,7 @@ import { useCncModeStore } from '@/store/cncModeStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
 import { useStockStore } from '@/store/stockStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
+import { useViewportStore } from '@/store/viewportStore';
 import { preflightHub } from '@/engine/cnc/preflight';
 import type { PreflightCause } from '@/engine/cnc/preflight';
 import { runContextFor } from '@/store/machineRunStore';
@@ -46,7 +47,7 @@ import { machineDisplayName } from '@/platform/locationClient';
 import { machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
 import { mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
-import { findingFix, type PanelFix } from './findingFix';
+import { findingFix, fixActionLabel, fixIsOffered, type PanelFix } from './findingFix';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
@@ -926,6 +927,9 @@ export function EngravePanel(): JSX.Element {
     // #725 B4 — the bed's clamp/arm refusals are fixed on Holding's picture, and a non-cylinder
     // rotary blank on the Stock step: open the step, not a field of this panel.
     if (fix.openWizardStep !== undefined) useStartWizardStore.getState().openWizard(fix.openWizardStep);
+    // #894 — a fix on another surface of the rail (the simulation's budget stop lives on
+    // Simulate): the press switches the rail, so it does what its name says.
+    if (fix.openSection !== undefined) useViewportStore.getState().setActiveSidebarSection(fix.openSection);
     // A fresh object each press: the same Fix pressed twice must run twice.
     setFixRequest({ ...fix });
   }
@@ -2044,21 +2048,6 @@ export function EngravePanel(): JSX.Element {
     setSetups(result.setups);
     for (const side of result.goals) setSideGoal(side.setupId!, side);
     void generate();
-  };
-
-  /**
-   * #832 — NO BARE "Fix". A press is named by the action it takes, so the operator knows what will
-   * happen before pressing it: the group/row/step it opens, in words.
-   */
-  const fixActionLabel = (fix: PanelFix): string => {
-    if (fix.openWizardStep === 'holding') return 'Open the Holding step';
-    if (fix.openWizardStep === 'stock') return 'Open the Stock step';
-    if (fix.group === 'engrave-group-cutter') return 'Open the cutter list';
-    if (fix.openDetails === 'engrave-override') return 'Open the feeds override';
-    if (fix.openDetails === 'engrave-add-menu') return 'Open the add menu';
-    if (fix.group === 'engrave-group-hold') return 'Open the holding';
-    if (fix.itemId !== undefined) return 'Show the item';
-    return 'Open the control';
   };
 
   // #673 — THE INLAY HALF: the derived plug numbers (null when they do not derive) and the action
@@ -5278,7 +5267,8 @@ export function EngravePanel(): JSX.Element {
               style={{ flex: '1 1 180px', fontSize: 12, lineHeight: 1.45, color: SEVERITY_COLOR.error }}
             >
               {generateBlocker.sentence}
-              {generateBlocker.fix !== null && (
+              {/* #894 — a press only where the panel can actually open what the fix names. */}
+              {generateBlocker.fix !== null && fixIsOffered(generateBlocker.fix) && (
               <>
               {' '}
               <button
@@ -5465,7 +5455,7 @@ export function EngravePanel(): JSX.Element {
                 {/* #725 B4 — the same sentence's Fix, in the footer at the button: the verifier's
                     clamp/arm refusals and the rotary's have always had their sentences, but no
                     control took the operator to what resolves one. #832: named by its action. */}
-                {runFix !== null && runPitchFinding === null && (
+                {runFix !== null && fixIsOffered(runFix) && runPitchFinding === null && (
                   <>
                     {' '}
                     <button

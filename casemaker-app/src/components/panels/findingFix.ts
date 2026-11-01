@@ -1,8 +1,12 @@
 /**
  * #688 — where a blocking finding's Fix takes the reader, kept out of the panel module so that file
  * exports only its component (react-refresh/only-export-components). The panel opens the GROUP,
- * expands the item's row, opens the fold and focuses the control; a job-level finding with no field
- * of its own (there is none today) still lands on the findings list.
+ * expands the item's row, opens the fold and focuses the control.
+ *
+ * #894 — A PRESS IS OFFERED ONLY WHERE IT CAN DO SOMETHING. The label lives here beside the
+ * mapping (`fixActionLabel`), and a fix it cannot name is not rendered at all. The old generic
+ * fallback, "Open the control", was a dead press on the Cut panel: the simulation budget stop's
+ * control is on Simulate, not there.
  */
 
 export interface PanelFix {
@@ -19,6 +23,13 @@ export interface PanelFix {
    * is not a cylinder opens the Stock step.
    */
   openWizardStep?: 'holding' | 'stock';
+  /**
+   * #894 — the fix is on another SURFACE of the right rail. The simulation's budget stop is
+   * reported by the Cut panel, but what resolves it (a longer limit, and the program to re-run)
+   * lives on Simulate; the press opens that panel rather than pointing at a control the Cut panel
+   * does not have.
+   */
+  openSection?: 'cnc-sim';
 }
 
 /**
@@ -40,6 +51,10 @@ export function findingFix(f: { code: string; labelId?: string }): PanelFix | nu
   if (HOLD_FIX_CODES.has(code)) {
     return { group: 'engrave-group-hold', openWizardStep: 'holding' };
   }
+  // #894 — the simulation's budget stop. The Cut panel shows the sentence, but the control that
+  // resolves it is Simulate's own; until #871's in-place "Simulate with an N min limit" press
+  // lands there, the fix names the panel to open rather than pointing at nothing.
+  if (code === 'sweep-budget-exceeded') return { group: 'engrave-group-job', openSection: 'cnc-sim' };
   if (f.labelId !== undefined) return { group: 'engrave-group-job', itemId: f.labelId };
   if (code === 'rotary-stock') return { group: 'engrave-group-job', openWizardStep: 'stock' };
   if (code === 'tool-missing') return { group: 'engrave-group-cutter', focusTestid: 'engrave-tool' };
@@ -69,7 +84,7 @@ export function findingFix(f: { code: string; labelId?: string }): PanelFix | nu
  * offer: asking an operator to re-seat the work for a program defect is the one thing a Fix must
  * never do.
  */
-const PROGRAM_DEFECT_CODES: ReadonlySet<string> = new Set([
+export const PROGRAM_DEFECT_CODES: ReadonlySet<string> = new Set([
   'rotary-y-off-axis',
   'rotary-rapid-engaged',
   'rotary-turn-in-stock',
@@ -80,7 +95,7 @@ const PROGRAM_DEFECT_CODES: ReadonlySet<string> = new Set([
  * `bracket-in-path` are the verifier's; the tape/board ones are the document gate's. They open
  * the Holding step, where the clamp is dragged and the board chosen.
  */
-const HOLD_FIX_CODES: ReadonlySet<string> = new Set([
+export const HOLD_FIX_CODES: ReadonlySet<string> = new Set([
   'clamp-in-path',
   'bracket-in-path',
   'clamps-overlap',
@@ -92,3 +107,34 @@ const HOLD_FIX_CODES: ReadonlySet<string> = new Set([
   'through-into-air',
   'board-too-small',
 ]);
+
+/**
+ * #894 — NO DEAD PRESSES, AND NO GENERIC LABEL. A fix is offered only where its target can be
+ * opened from the panel showing the sentence, and the press is named by the action it takes — the
+ * group, fold, step or surface it opens, in words.
+ *
+ * `null` means "no press here": the finding's sentence stands alone. Called on the Cut panel, the
+ * old fallback ("Open the control") was that dead press in labels' clothing — the budget stop's
+ * control is not on that panel at all.
+ */
+export function fixActionLabel(fix: PanelFix): string | null {
+  if (fix.openSection === 'cnc-sim') return 'Open Simulate';
+  if (fix.openWizardStep === 'holding') return 'Open the Holding step';
+  if (fix.openWizardStep === 'stock') return 'Open the Stock step';
+  if (fix.group === 'engrave-group-cutter') return 'Open the cutter list';
+  if (fix.openDetails === 'engrave-override') return 'Open the feeds override';
+  if (fix.openDetails === 'engrave-add-menu') return 'Open the add menu';
+  if (fix.group === 'engrave-group-hold') return 'Open the holding';
+  if (fix.itemId !== undefined) return 'Show the item';
+  // The job-level controls that state a value of their own. Each is named by that control, not by
+  // "the control": these were the last findings behind the generic label.
+  if (fix.focusTestid === 'engrave-target-input') return 'Open the goal’s placement';
+  if (fix.focusTestid === 'engrave-facing-depth') return 'Open the facing depth';
+  // No target this panel can open: the sentence stands alone.
+  return null;
+}
+
+/** True when the fix has a name — the one rule that decides whether a press is rendered (#894). */
+export function fixIsOffered(fix: PanelFix | null): fix is PanelFix {
+  return fix !== null && fixActionLabel(fix) !== null;
+}

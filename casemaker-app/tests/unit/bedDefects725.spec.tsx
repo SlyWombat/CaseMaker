@@ -43,6 +43,7 @@ import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore'
 import { resetMachineChange, useMachineChangeStore } from '@/store/machineChangeStore';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetMachineStore } from '@/store/machineStore';
+import { useViewportStore } from '@/store/viewportStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { resetEngraveRows } from '@/store/engraveRowStore';
@@ -329,6 +330,49 @@ describe('#725 B7/W11 — the bed reaches the panel’s own through rule', () =>
     expect(bed).toMatchObject({ surface: 'wasteboard', wasteboardMm: 10 });
     const findings = validateJob(tapedJob(), null, { bed, defaults: DOC.defaults as never });
     expect(findings.filter((f) => f.code === 'through-needs-board')).toHaveLength(0);
+  });
+});
+
+describe('#894 — a Fix press always does what its name says', () => {
+  it('the simulation budget stop is named “Open Simulate” and switches the rail there', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: refused([
+          {
+            code: 'sweep-budget-exceeded',
+            message: 'the simulation was stopped after 60 s: this program is too slow to simulate at this size. Try again with a longer limit',
+          },
+        ]),
+        simStatus: null,
+        simDiagnostics: [],
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+
+    // The press that was "Open the control" and did nothing: it now names the surface its fix is
+    // on, and the press is that surface's own switch.
+    const press = screen.getByTestId('engrave-run-blocker-fix');
+    expect(press.textContent).toBe('Open Simulate');
+    fireEvent.click(press);
+    expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-sim');
+  });
+
+  it('a code with no control this panel can open shows NO press, never a dead one', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: refused([{ code: 'a-code-no-panel-rule-covers', message: 'the run stopped for a reason nobody mapped' }]),
+        simStatus: null,
+        simDiagnostics: [],
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+    // The sentence is the person's to read; the press would go nowhere, so there is none.
+    expect(screen.getByTestId('engrave-run-errors').textContent).toContain('nobody mapped');
+    expect(screen.queryByTestId('engrave-run-blocker-fix')).toBeNull();
   });
 });
 
