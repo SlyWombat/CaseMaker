@@ -2751,6 +2751,10 @@ export function validateJob(
       findings.push({
         severity: 'warning',
         code: 'plunge-unproven',
+        // ONE hole wears the finding on its own row (the `⚠` the operator reads where the hole
+        // is, and where the Yes/No sits); several holes get ONE job-level question naming the
+        // count, so a ten-hole job is not ten copies of the same sentence.
+        ...(plungeDrills.length === 1 ? { labelId: plungeDrills[0]!.id } : {}),
         message:
           `"${drillTool.name}" is recorded as NOT centre-cutting, so ` +
           `${holes.length === 1 ? holes[0] : `${holes.length} plunge holes`} ` +
@@ -2762,20 +2766,25 @@ export function validateJob(
       // the flat cutter's unproven-plunge warning would be a false doubt. The explicit `false`
       // above still fires: a record that says so is a contradiction worth showing.
       //
-      // #786 slice 4c-2 — THE UNKNOWN IS ASKED, IN PLACE, ONCE PER CUTTER. The hole is left out
-      // of the programs until the operator answers (the engine withholds it; every other cut
-      // still posts), and the answer goes on the cutter's own record — so this sentence is shown
-      // once per cutter, ever, not once per job.
+      // #786 slice 4c-2 — THE UNKNOWN IS ASKED, IN PLACE, ONCE PER CUTTER, AND THE CUT POSTS.
+      // An unrecorded cutter is not a refusal (#220's rule): the hole is programmed with the
+      // uncertainty named, and the answer goes on the cutter's own record — so this sentence is
+      // shown once per cutter, ever, not once per job. Withholding the unanswered hole deleted
+      // every drill's own operation from jobs whose cutter had never been asked (the engrave e2e
+      // found it); an ANSWERED "no" is the only claim that leaves the hole out.
       const holes = plungeDrills.map(drillOperationName);
       findings.push({
         severity: 'warning',
         code: 'plunge-unproven',
+        // See the answered-`no` branch above: one hole carries the question on its row; several
+        // ask once, job-level, with the count.
+        ...(plungeDrills.length === 1 ? { labelId: plungeDrills[0]!.id } : {}),
         message:
-          `Is the ${toolDisplayName(drillTool).split(' · ')[0]!} centre-cutting? ` +
-          `${holes.length === 1 ? holes[0] : `${holes.length} plunge holes`} ` +
-          `${holes.length === 1 ? 'is' : 'are'} left out of the programs until this is answered — ` +
-          `every other cut still posts. A centre-cutting end mill plunges straight down; a cutter ` +
-          `that cannot needs a pilot hole or a drill bit.`,
+          `Is the ${toolDisplayName(drillTool).split(' · ')[0]!} centre-cutting? Nothing on its ` +
+          `record says so, and this job plunges ` +
+          `${holes.length === 1 ? holes[0] : `${holes.length} plunge holes`} straight into the ` +
+          `stock: a cutter that cannot plunge needs a pilot hole or a drill bit, so answer once ` +
+          `on the cutter — the cut posts either way until the record says it cannot.`,
       });
     }
     // A peck must fit inside the flute: beyond it the chips have nowhere to go. A drill bit's

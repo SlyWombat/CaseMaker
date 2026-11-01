@@ -117,13 +117,16 @@ afterEach(() => {
 });
 
 describe('#786 4c-2 the panel asks, and writes the answer to the cutter', () => {
-  it('asks the question with Yes/No, and Yes records centre-cutting on the tool', async () => {
+  it('asks the question with Yes/No on the hole’s own row, and Yes records centre-cutting on the tool', async () => {
     render(<EngravePanel />);
+    // #786 (4c-2 correction) — a job with ONE plunging hole carries the question on that hole's
+    // row, where its `⚠` and its answer belong; several holes ask once in the footer instead.
+    fireEvent.click(screen.getByTestId('engrave-drill-expand-0'));
     expect(screen.getByText(/Is the ⌀ 3.175 mm flat end centre-cutting\?/)).toBeTruthy();
-    expect(screen.getByTestId('plunge-centre-yes')).toBeTruthy();
-    expect(screen.getByTestId('plunge-centre-no')).toBeTruthy();
+    expect(screen.getByTestId('engrave-drill-centre-yes-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-drill-centre-no-0')).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId('plunge-centre-yes'));
+    fireEvent.click(screen.getByTestId('engrave-drill-centre-yes-0'));
 
     await waitFor(() => {
       expect(useEngraveJobStore.getState().job.tool?.centreCutting).toBe(true);
@@ -142,7 +145,8 @@ describe('#786 4c-2 the panel asks, and writes the answer to the cutter', () => 
 
   it('No records centre-cutting false, and the sentence says the holes stay out', async () => {
     render(<EngravePanel />);
-    fireEvent.click(screen.getByTestId('plunge-centre-no'));
+    fireEvent.click(screen.getByTestId('engrave-drill-expand-0'));
+    fireEvent.click(screen.getByTestId('engrave-drill-centre-no-0'));
 
     await waitFor(() => {
       expect(useEngraveJobStore.getState().job.tool?.centreCutting).toBe(false);

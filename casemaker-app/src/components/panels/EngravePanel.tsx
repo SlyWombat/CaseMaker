@@ -3675,6 +3675,21 @@ export function EngravePanel(): JSX.Element {
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(drill.id)}
           findingAction={(f) => {
+            // #786 slice 4c-2 — the plunge question sits on the hole's own row when the job has one
+            // plunging hole (the count-bearing version stays job-level in the footer), and the
+            // answer is the same write the footer's Yes/No makes.
+            if (f.code === 'plunge-unproven' && cutterRecordWritable) {
+              return (
+                <span style={{ display: 'inline-flex', gap: 6 }}>
+                  <button type="button" data-testid={`engrave-drill-centre-yes-${i}`} onClick={() => void answerCentreCutting(true)}>
+                    Yes
+                  </button>
+                  <button type="button" data-testid={`engrave-drill-centre-no-${i}`} onClick={() => void answerCentreCutting(false)}>
+                    No
+                  </button>
+                </span>
+              );
+            }
             if (f.code !== 'bore-narrow' || f.suggestedPlungeMm === undefined) return null;
             return (
               <button

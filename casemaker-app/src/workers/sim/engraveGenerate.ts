@@ -1682,13 +1682,20 @@ export function engraveRegions(
           })),
         },
   );
-  // #786 slice 4c-2 — AN UNPROVEN PLUNGE IS NOT IN THE PROGRAMS. A plunge needs a centre-cutting
-  // cutter; when nothing records that (and it is not a drill bit, whose point is the cutting end),
-  // the hole is WITHHELD — the finding asks the operator the one question — while every other cut
-  // still posts. A BORE is helixed down the wall, so it needs no plunge proof and stays. This is
-  // the one point the preview, the CAM and the oracle all read the holes from, so none of them
-  // can show a cut the run does not make.
-  if (tool !== null && tool.shape !== 'drill' && tool.centreCutting !== true) {
+  // #786 slice 4c-2, corrected — ONLY AN ANSWERED "NO" WITHHOLDS A PLUNGE. A plunge needs a
+  // centre-cutting cutter, and a record that states the cutter is NOT one (`centreCutting ===
+  // false`) is a claim the hole cannot be cut soundly: the hole is left out and the sentence says
+  // so. An UNRECORDED cutter is a QUESTION, not a refusal — #220's own rule ("a warning with the
+  // uncertainty named, never a silent plunge") — and the hole is cut while the finding asks. The
+  // first version of this slice withheld the unanswered hole too, and that silently deleted every
+  // drill's own operation from jobs whose cutter had never been asked (the engrave e2e's seven
+  // operations became six, the hole left the preview's legend and the mixed-item row lost its
+  // drill). Inform, don't refuse: the cut posts, the question is asked once per cutter.
+  //
+  // A BORE is helixed down the wall, so it needs no plunge proof and always stays. This is the
+  // one point the preview, the CAM and the oracle all read the holes from, so none of them can
+  // show a cut the run does not make.
+  if (tool !== null && tool.shape !== 'drill' && tool.centreCutting === false) {
     plan.drills = plan.drills.filter((d) => d.mode === 'bore');
   }
   // #748 — THE FLOOR EACH ITEM SITS ON, one owner for the whole pipeline. Every plane below, the
