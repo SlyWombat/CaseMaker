@@ -893,9 +893,9 @@ const targetObjectSchema = z
     id: z.string().min(1).describe('Unique id for the reference object.'),
     name: z.string().min(1).describe('File name the reference object was imported from.'),
     format: z
-      .enum(['stl', '3mf', 'png'])
+      .enum(['stl', '3mf', 'obj', 'png'])
       .describe(
-        "File format of the reference object: a mesh ('stl'/'3mf'), or a 'png' picture whose " +
+        "File format of the reference object: a mesh ('stl'/'3mf'/'obj'), or a 'png' picture whose " +
           'luminance is the goal heightfield (#672).',
       ),
     sha256: z

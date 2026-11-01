@@ -763,7 +763,7 @@ export function StartStockStep({
         data-state={dragOver ? 'over' : reading ? 'reading' : 'idle'}
         role="button"
         tabIndex={0}
-        aria-label="Load an STL, 3MF or STEP as the stock"
+        aria-label="Load an STL, 3MF, OBJ or STEP as the stock"
         onClick={() => fileInput.current?.click()}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -783,11 +783,11 @@ export function StartStockStep({
         }}
         style={dragOver ? DROP_OVER : DROP}
       >
-        Load an STL, 3MF or STEP as the stock…
+        Load an STL, 3MF, OBJ or STEP as the stock…
         <input
           ref={fileInput}
           type="file"
-          accept=".stl,.3mf,.step,.stp"
+          accept=".stl,.3mf,.obj,.step,.stp"
           hidden
           data-testid="start-wizard-load-file"
           aria-label="Stock file"
@@ -798,6 +798,12 @@ export function StartStockStep({
         {fileRead !== null && (
           <div data-testid="start-wizard-load-name" style={{ marginTop: 4 }}>
             {fileRead.read.name}
+          </div>
+        )}
+        {/* #825 — an OBJ states no unit of its own; the door says which reading it got. */}
+        {fileRead?.read.kind === 'mesh' && fileRead.read.note !== undefined && (
+          <div data-testid="start-wizard-load-note" style={{ marginTop: 2 }}>
+            {fileRead.read.note}
           </div>
         )}
       </div>

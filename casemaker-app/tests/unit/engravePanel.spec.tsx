@@ -3328,8 +3328,40 @@ describe('EngravePanel — 3D primitives and the target object (#435)', () => {
     const input = screen.getByTestId('engrave-target-input') as HTMLInputElement;
     expect(input.accept).toContain('.stl');
     expect(input.accept).toContain('.3mf');
+    expect(input.accept).toContain('.obj');
     expand('engrave-target');
     expect(screen.getByTestId('engrave-target-finding-0-target-object-not-cut')).toBeTruthy();
+  });
+
+  // #825 — Makera Studio reads OBJ; the goal/reference door does too, and it STATES the unit
+  // reading (an OBJ has no unit of its own).
+  it('imports an OBJ through the target door and states the unit it was read as', async () => {
+    const obj = `v 0 0 0
+v 40 0 0
+v 40 30 0
+v 0 30 0
+v 0 0 6
+v 40 0 6
+v 40 30 6
+v 0 30 6
+f 1 4 3 2
+f 5 6 7 8
+f 1 2 6 5
+f 2 3 7 6
+f 3 4 8 7
+f 4 1 5 8
+`;
+    render(<EngravePanel />);
+    fireEvent.change(screen.getByTestId('engrave-target-input'), {
+      target: { files: [new File([obj], 'bracket.obj')] },
+    });
+    const note = await screen.findByTestId('engrave-target-note');
+    expect(note.textContent).toContain('states no unit');
+    expect(note.textContent).toContain('read as millimetres');
+    const target = useEngraveJobStore.getState().job.targetObject;
+    expect(target?.format).toBe('obj');
+    expect(target?.name).toBe('bracket.obj');
+    expect(target?.size).toEqual({ x: 40, y: 30, z: 6 });
   });
 });
 

@@ -115,6 +115,8 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   // The Surface a mesh pick's one field: the file, read here into the job's GOAL (#685).
   const [surface, setSurface] = useState<EngraveTargetObject | null>(null);
   const [surfaceError, setSurfaceError] = useState<string | null>(null);
+  /** #825 — the unit the picked OBJ's numbers were read as, stated beside the picker. */
+  const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
   const [surfaceReading, setSurfaceReading] = useState(false);
   // #721 — what the goal makes: the part itself, or a mold to cast it in.
   const [makeMold, setMakeMold] = useState(false);
@@ -211,11 +213,14 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
 
   async function chooseGoal(file: File): Promise<void> {
     setSurfaceError(null);
+    setSurfaceNote(null);
     setSurfaceReading(true);
     try {
       const result = await readGoalObjectFile(file, newTargetObjectId(), job.stock);
-      if (result.ok) setSurface(result.target);
-      else setSurfaceError(result.error);
+      if (result.ok) {
+        setSurface(result.target);
+        setSurfaceNote(result.note ?? null);
+      } else setSurfaceError(result.error);
     } catch (e) {
       setSurfaceError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -510,7 +515,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
               <span>Mesh</span>
               <input
                 type="file"
-                accept=".stl,.3mf,.step,.stp,.png,model/stl,model/3mf,model/step,image/png"
+                accept=".stl,.3mf,.obj,.step,.stp,.png,model/stl,model/3mf,model/step,image/png"
                 data-testid="start-wizard-op-surface-file"
                 aria-label="Mesh to surface"
                 onChange={(e) => {
@@ -556,6 +561,11 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
           {surfaceError !== null && (
             <p style={ERROR} data-testid="start-wizard-op-surface-error">
               {surfaceError}
+            </p>
+          )}
+          {surfaceNote !== null && (
+            <p style={MUTED} data-testid="start-wizard-op-surface-note">
+              {surfaceNote}
             </p>
           )}
         </div>

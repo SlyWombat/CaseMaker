@@ -1,5 +1,5 @@
 /**
- * An STL, 3MF or STEP used AS THE STOCK (#418, §5.1's "Load" door) — what the mesh is, or why it
+ * An STL, 3MF, OBJ or STEP used AS THE STOCK (#418, §5.1's "Load" door; OBJ is #825) — what the mesh is, or why it
  * cannot be the stock a job cuts. A STEP is tessellated by the CAD kernel before it gets here
  * (#774), so every question below reads the same triangle mesh an STL gives.
  *
@@ -21,6 +21,7 @@
  */
 
 import { parseStl, type ParsedMesh } from './stlParser';
+import { objUnitSentence, parseObj } from './objParser';
 import { unzipSync } from 'fflate';
 import { sha256HexBytes } from './sha256';
 import { parse3MF } from './threeMfParser';
@@ -367,6 +368,8 @@ export type StockFileRead =
       width: number;
       thickness: number;
       shape?: 'disc';
+      /** #825 — an OBJ's unit reading, in one sentence (see `objParser.objUnitSentence`). */
+      note?: string;
     }
   /**
    * A PrusaSlicer project with NEGATIVE VOLUMES: the blank and the design in one file (#410). The
@@ -389,8 +392,11 @@ export async function readStockFile(file: File): Promise<StockFileRead> {
   const lower = name.toLowerCase();
   const isStl = lower.endsWith('.stl');
   const is3mf = lower.endsWith('.3mf');
+  const isObj = lower.endsWith('.obj');
   const isStep = lower.endsWith('.step') || lower.endsWith('.stp');
-  if (!isStl && !is3mf && !isStep) return { kind: 'refused', name, reason: `${name} is not an .stl, .3mf or .step file` };
+  if (!isStl && !is3mf && !isObj && !isStep) {
+    return { kind: 'refused', name, reason: `${name} is not an .stl, .3mf, .obj or .step file` };
+  }
   try {
     const bytes = await file.arrayBuffer();
     const sha256 = await sha256Hex(bytes);
@@ -408,6 +414,7 @@ export async function readStockFile(file: File): Promise<StockFileRead> {
       if (why !== null) return { kind: 'refused', name, reason: why };
     }
     let mesh: ParsedMesh;
+    let note: string | undefined;
     if (isStep) {
       // Lazy, like the goal door: a job whose stock is an STL never downloads the kernel. The
       // stock keeps a SIZE, so the mesh alone is enough — no STL is written for it.
@@ -417,6 +424,11 @@ export async function readStockFile(file: File): Promise<StockFileRead> {
       } catch (e) {
         return { kind: 'refused', name, reason: `${name} could not be read as STEP: ${e instanceof Error ? e.message : String(e)}` };
       }
+    } else if (isObj) {
+      // #825 — the OBJ reader beside the STL one; its unit reading is part of what the door says.
+      const parsed = parseObj(bytes);
+      mesh = parsed;
+      note = objUnitSentence(name, parsed.unit);
     } else {
       mesh = isStl ? parseStl(bytes) : parse3MF(bytes);
     }
@@ -430,6 +442,7 @@ export async function readStockFile(file: File): Promise<StockFileRead> {
       width: read.width,
       thickness: read.thickness,
       ...(read.shape === 'disc' ? { shape: 'disc' as const } : {}),
+      ...(note === undefined ? {} : { note }),
     };
   } catch (e) {
     return { kind: 'refused', name, reason: e instanceof Error ? e.message : String(e) };

@@ -60,7 +60,7 @@ describe('#435 — reading a target object', () => {
   it('refuses a file that is not STL/3MF/STEP/PNG, an empty file, a flat mesh and an oversized one', async () => {
     expect(await readTargetObjectFile(new File(['hello'], 'notes.txt'), 't')).toMatchObject({
       ok: false,
-      error: 'notes.txt is not an STL, 3MF, STEP or PNG file.',
+      error: 'notes.txt is not an STL, 3MF, OBJ, STEP or PNG file.',
     });
     expect(await readTargetObjectFile(new File([], 'empty.stl'), 't')).toMatchObject({
       ok: false,

@@ -1498,6 +1498,9 @@ export function EngravePanel(): JSX.Element {
   }, []);
   const [targetImporting, setTargetImporting] = useState(false);
   const [targetError, setTargetError] = useState<string | null>(null);
+  // #825 — what the import must STATE about the file it read (an OBJ's unit), beside the row it
+  // made; cleared with the error on every new pick.
+  const [targetNote, setTargetNote] = useState<string | null>(null);
   // #743 P-4b — the circuit board's Gerber set: several files (or one .zip), read by the store's
   // import action; the summary line under the menu states what the files made and what they warn.
   const pcbInputRef = useRef<HTMLInputElement>(null);
@@ -1572,6 +1575,7 @@ export function EngravePanel(): JSX.Element {
    */
   async function readTarget(file: File, role: 'reference' | 'goal' = 'reference', setupId?: string): Promise<void> {
     setTargetError(null);
+    setTargetNote(null);
     setTargetImporting(true);
     try {
       // #672 — a PICTURE has no physical size: the import fits it onto the blank (aspect kept),
@@ -1589,6 +1593,7 @@ export function EngravePanel(): JSX.Element {
         setTargetError(result.error);
         return;
       }
+      setTargetNote(result.note ?? null);
       const target = {
         id: result.id,
         name: result.name,
@@ -3640,7 +3645,7 @@ export function EngravePanel(): JSX.Element {
       <input
         ref={targetInputRef}
         type="file"
-        accept=".stl,.3mf,.step,.stp,model/stl,model/3mf,model/step"
+        accept=".stl,.3mf,.obj,.step,.stp,model/stl,model/3mf,model/step"
         style={{ display: 'none' }}
         data-testid="engrave-target-input"
         onChange={(e) => {
@@ -3652,6 +3657,12 @@ export function EngravePanel(): JSX.Element {
       {targetError && (
         <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-target-error">
           {targetError}
+        </p>
+      )}
+      {/* #825 — an OBJ states no unit of its own, so the import says which reading it got. */}
+      {targetNote !== null && (
+        <p style={MUTED} data-testid="engrave-target-note">
+          {targetNote}
         </p>
       )}
             {/* #743 P-4b — the board's Gerber set, beside the reference object: one entry of the
@@ -4082,7 +4093,7 @@ export function EngravePanel(): JSX.Element {
       <input
         ref={goalInputRef}
         type="file"
-        accept=".stl,.3mf,.step,.stp,.png,model/stl,model/3mf,model/step,image/png"
+        accept=".stl,.3mf,.obj,.step,.stp,.png,model/stl,model/3mf,model/step,image/png"
         style={{ display: 'none' }}
         data-testid="engrave-surface-input"
         onChange={(e) => {

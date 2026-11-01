@@ -616,3 +616,57 @@ describe('a mesh loaded as stock takes its finish default from the material (#46
     expect(await loadMesh(material)).toBe('rough');
   });
 });
+
+// #825 — an OBJ loaded as stock, and the unit reading the door states for it.
+describe('an OBJ loaded as stock states its unit (#825)', () => {
+  /** The 40 × 30 × 6 box as OBJ quads, at a divisor of 1 (mm) or 10 (cm). */
+  function objBox(unit: string | null, divisor = 1): File {
+    const p: [number, number, number][] = [
+      [0, 0, 0],
+      [4, 0, 0],
+      [4, 3, 0],
+      [0, 3, 0],
+      [0, 0, 0.6],
+      [4, 0, 0.6],
+      [4, 3, 0.6],
+      [0, 3, 0.6],
+    ].map(([x, y, z]) => [x * divisor, y * divisor, z * divisor]);
+    const faces = [
+      [1, 4, 3, 2],
+      [5, 6, 7, 8],
+      [1, 2, 6, 5],
+      [2, 3, 7, 6],
+      [3, 4, 8, 7],
+      [4, 1, 5, 8],
+    ];
+    const text =
+      (unit === null ? '' : `# units: ${unit}\n`) +
+      p.map((v) => `v ${v.join(' ')}`).join('\n') +
+      '\n' +
+      faces.map((f) => `f ${f.join(' ')}`).join('\n') +
+      '\n';
+    return new File([text], 'blank.obj');
+  }
+
+  it('reads a file that states no unit as millimetres, and says so', async () => {
+    fakeShelf(SHELF);
+    await toStockStep();
+    fireEvent.change(screen.getByTestId('start-wizard-load-file'), { target: { files: [objBox(null, 10)] } });
+    const note = await screen.findByTestId('start-wizard-load-note');
+    expect(note.textContent).toContain('read as millimetres');
+    await screen.findByTestId('start-wizard-load-name');
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('40');
+    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('6');
+  });
+
+  it('scales a file that states cm, and names the unit', async () => {
+    fakeShelf(SHELF);
+    await toStockStep();
+    fireEvent.change(screen.getByTestId('start-wizard-load-file'), { target: { files: [objBox('cm', 1)] } });
+    const note = await screen.findByTestId('start-wizard-load-note');
+    expect(note.textContent).toContain('states its unit as “cm”');
+    expect(note.textContent).toContain('centimetres');
+    await screen.findByTestId('start-wizard-load-name');
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('40');
+  });
+});

@@ -6176,10 +6176,11 @@
           "type": "boolean"
         },
         "format": {
-          "description": "File format of the reference object: a mesh ('stl'/'3mf'), or a 'png' picture whose luminance is the goal heightfield (#672).",
+          "description": "File format of the reference object: a mesh ('stl'/'3mf'/'obj'), or a 'png' picture whose luminance is the goal heightfield (#672).",
           "enum": [
             "stl",
             "3mf",
+            "obj",
             "png"
           ],
           "type": "string"
@@ -6431,10 +6432,11 @@
             "type": "boolean"
           },
           "format": {
-            "description": "File format of the reference object: a mesh ('stl'/'3mf'), or a 'png' picture whose luminance is the goal heightfield (#672).",
+            "description": "File format of the reference object: a mesh ('stl'/'3mf'/'obj'), or a 'png' picture whose luminance is the goal heightfield (#672).",
             "enum": [
               "stl",
               "3mf",
+              "obj",
               "png"
             ],
             "type": "string"

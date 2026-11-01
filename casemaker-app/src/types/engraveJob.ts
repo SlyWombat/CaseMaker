@@ -635,8 +635,11 @@ export interface EngraveTargetObject {
   /**
    * #672 — `'png'` is an IMAGE RELIEF: the picture's luminance IS the goal's heightfield (no mesh
    * is built), sampled and surfaced by the same goal pipeline.
+   *
+   * #825 — `'obj'` is a mesh whose embedded bytes are the OBJ text Makera Studio also reads; the
+   * reader is `engine/import/objParser.ts`, and its unit reading is stated at the door.
    */
-  format: 'stl' | '3mf' | 'png';
+  format: 'stl' | '3mf' | 'obj' | 'png';
   /** SHA-256 of the raw bytes, lowercase hex — the object's identity and the mesh cache key. */
   sha256: string;
   /**

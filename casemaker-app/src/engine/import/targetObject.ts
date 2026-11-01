@@ -20,6 +20,7 @@
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { arrayBufferToBase64 } from './base64';
 import { parseStl, type ParsedMesh } from './stlParser';
+import { objUnitSentence, parseObj } from './objParser';
 import { parse3MF } from './threeMfParser';
 import { decodePng } from './png';
 import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/cam/relief';
@@ -35,6 +36,12 @@ export type TargetObjectRead =
       sha256: string;
       data: string;
       size: { x: number; y: number; z: number };
+      /**
+       * #825 — a fact the import must state about the file it read, in one sentence: an OBJ has
+       * no unit of its own, so the door says which reading its numbers got. Absent for the
+       * formats whose numbers are already the app's millimetres by definition.
+       */
+      note?: string;
     }
   | { ok: false; error: string };
 
@@ -49,6 +56,8 @@ function formatOf(name: string): SourceFormat | null {
   const lower = name.toLowerCase();
   if (lower.endsWith('.stl')) return 'stl';
   if (lower.endsWith('.3mf')) return '3mf';
+  // #825 — Makera Studio reads OBJ; so does this door (and the stock's) now.
+  if (lower.endsWith('.obj')) return 'obj';
   // #774 — a STEP/STP is a B-rep; the CAD kernel turns it into a mesh before anything else sees it.
   if (lower.endsWith('.step') || lower.endsWith('.stp')) return 'step';
   // #672 — a picture is a goal: its luminance is the heightfield the goal pipeline surfaces.
@@ -81,7 +90,7 @@ export async function readTargetObjectFile(
 ): Promise<TargetObjectRead> {
   const format = formatOf(file.name);
   if (format === null) {
-    return { ok: false, error: `${file.name} is not an STL, 3MF, STEP or PNG file.` };
+    return { ok: false, error: `${file.name} is not an STL, 3MF, OBJ, STEP or PNG file.` };
   }
   if (file.size === 0) return { ok: false, error: `${file.name} is empty.` };
 
@@ -126,12 +135,20 @@ export async function readTargetObjectFile(
   // file's own name is kept, so the row still says which file was picked.
   let stored: ArrayBuffer = bytes;
   let mesh: ParsedMesh;
+  let note: string | undefined;
   try {
     if (format === 'step') {
       const { stepToStl } = await import('./stepMesh');
       const converted = await stepToStl(bytes);
       stored = converted.stl;
       mesh = converted.mesh;
+    } else if (format === 'obj') {
+      // #825 — the OBJ's own bytes are embedded (they are what the hash identifies), and the
+      // parser's unit reading is stated on the result: an OBJ has no unit, so the door says
+      // whether the file's numbers were taken as mm or converted from the unit it declared.
+      const parsed = parseObj(bytes);
+      mesh = parsed;
+      note = objUnitSentence(file.name, parsed.unit);
     } else {
       mesh = format === '3mf' ? parse3MF(bytes) : parseStl(bytes);
     }
@@ -176,6 +193,7 @@ export async function readTargetObjectFile(
     sha256,
     data: arrayBufferToBase64(stored),
     size,
+    ...(note === undefined ? {} : { note }),
   };
 }
 
@@ -192,7 +210,7 @@ export async function readGoalObjectFile(
   file: File,
   id: string,
   stock: { length: number; width: number },
-): Promise<{ ok: true; target: EngraveTargetObject } | { ok: false; error: string }> {
+): Promise<{ ok: true; target: EngraveTargetObject; note?: string } | { ok: false; error: string }> {
   // A PICTURE has no physical size: fit it onto the blank, aspect kept — the same door as the
   // panel's goal import (#672).
   const isPng = /\.png$/i.test(file.name);
@@ -206,6 +224,7 @@ export async function readGoalObjectFile(
   if (!result.ok) return result;
   return {
     ok: true,
+    ...(result.note === undefined ? {} : { note: result.note }),
     target: {
       id: result.id,
       name: result.name,
@@ -245,7 +264,10 @@ export function targetObjectMesh(target: Pick<EngraveTargetObject, 'sha256' | 'f
     for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
     return out.buffer;
   })();
-  const parsed = target.format === '3mf' ? parse3MF(bytes) : parseStl(bytes);
+  // #825 — an OBJ's embedded bytes are its text; the same parser the door used reads them back,
+  // so a saved goal draws and surfaces the mesh the import measured.
+  const parsed =
+    target.format === '3mf' ? parse3MF(bytes) : target.format === 'obj' ? parseObj(bytes) : parseStl(bytes);
   meshCache.set(target.sha256, parsed);
   return parsed;
 }
