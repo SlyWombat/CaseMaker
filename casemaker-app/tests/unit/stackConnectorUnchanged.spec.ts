@@ -7,6 +7,11 @@
 // protective-case template. They are pinned, not recomputed, so the test
 // would catch a change that moved geometry for everybody — the failure a new
 // shell feature is most likely to cause.
+//
+// #839 — THE MESH PINS WERE RE-TAKEN FOR MANIFOLD-3D 3.5. The upgrade changes the mesh BYTES
+// (vertex/triangle ordering in the tessellation), not the geometry: every PLAN pin below is the
+// 3992d16d value unchanged, so no BuildOp moved and no feature changed a dimension. Only the four
+// MESH pins moved, and they were re-taken on manifold-3d 3.5.4 with the same projects and seed.
 
 import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
@@ -55,10 +60,10 @@ function protectiveCase(): Project {
 }
 
 const CASES: Array<{ name: string; project: () => Project; plan: string; mesh: string }> = [
-  { name: 'rpi-4b', project: () => stock('rpi-4b'), plan: '3b3c27c902025c9a', mesh: 'f2f0eaf7f197b209' },
-  { name: 'arduino-uno-r3', project: () => stock('arduino-uno-r3'), plan: '6fd17d3e74cb04fb', mesh: 'caafa37eb220b912' },
-  { name: 'esp32-devkit-v1', project: () => stock('esp32-devkit-v1'), plan: '3abbf69b9c4efa30', mesh: '2173ce7132bd3747' },
-  { name: 'protective-case', project: protectiveCase, plan: '7163f90fe6953446', mesh: '8de0e37209aad076' },
+  { name: 'rpi-4b', project: () => stock('rpi-4b'), plan: '3b3c27c902025c9a', mesh: '8ade07545b614a47' },
+  { name: 'arduino-uno-r3', project: () => stock('arduino-uno-r3'), plan: '6fd17d3e74cb04fb', mesh: '4ba3603571b25377' },
+  { name: 'esp32-devkit-v1', project: () => stock('esp32-devkit-v1'), plan: '3abbf69b9c4efa30', mesh: '99b94b62b336f516' },
+  { name: 'protective-case', project: protectiveCase, plan: '7163f90fe6953446', mesh: '87c9612b2088d52c' },
 ];
 
 /** The same project carrying a connector block that asks for nothing. */

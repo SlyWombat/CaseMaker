@@ -13,8 +13,8 @@
   "outputs": [
     {
       "path": "<out>/ESP32_DevKit_V1_CLI_sample.stl",
-      "sha256": "26b6f2011027292d4003652c3b99e4928171a32a6871bac4b1162e7eb3a6effc",
-      "bytes": 124284
+      "sha256": "b00a04473afdefb8c00216a8e06c34c00534ccfc4aea1976081982ca18b94135",
+      "bytes": 124184
     },
     {
       "path": "<out>/ESP32_DevKit_V1_CLI_sample-PRINT-NOTES.txt",
@@ -27,6 +27,6 @@
   "refusals": [],
   "command": "export",
   "details": {
-    "triangles": 2484
+    "triangles": 2482
   }
 }
