@@ -841,6 +841,11 @@ export interface DiagnoseReading {
   probe: boolean | null;
   /** P slot 2: the calibrate (tool-setter) input. */
   calibrate: boolean | null;
+  /**
+   * #884 — C slot 0: the wireless probe charger's output (`C:<probecharger out>` in the diagnose
+   * line). The Z1 has no device on it; a machine that does reports it here.
+   */
+  probeChargerOn: boolean | null;
   /** I: the emergency stop. */
   estop: boolean | null;
   /** RSSI, dBm. */
@@ -872,6 +877,7 @@ export function readDiagnoseLine(text: string): DiagnoseReading {
     },
     probe: diagnoseBit(p, 0),
     calibrate: diagnoseBit(p, 1),
+    probeChargerOn: diagnoseBit(bits(statusField(text, 'C')), 0),
     estop: i === null ? null : i.trim() === '1',
     rssi: rssi === null || Number.isNaN(rssi) ? null : rssi,
   };

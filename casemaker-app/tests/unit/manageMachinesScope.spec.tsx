@@ -465,3 +465,47 @@ describe('#828 a Carvera record with its frame stated', () => {
     expect(screen.getByText(/\(anchor \+ 356 · \+180\)/)).toBeDefined();
   });
 });
+
+// #884 — THE MACHINE CARD'S OUTPUTS ARE THE PROFILE'S. On the Z1 the external output IS the
+// vacuum (observed twice on the bench), and the 3D probe is wired and powered through M831, so
+// the wireless-probe charger has nothing attached. Every row used to read "unknown"; the card now
+// says "not reported" once, and shows the charger from the diagnose line where the machine
+// reports it.
+describe('#884 the machine card’s outputs are the profile’s', () => {
+  it('the Z1 shows one vacuum/external-output row, no charger, and “not reported” once', () => {
+    caps.drive = true;
+    withMachine();
+    render(<MachinesScope />);
+    expect(screen.getAllByTestId('manage-accessory-unreported')).toHaveLength(1);
+    expect(screen.getByTestId('manage-accessory-unreported').textContent).toBe(
+      'These outputs are not reported by the machine; a row shows only what this page has sent.',
+    );
+    // One plug, named for both facts; the separate external-output row is gone.
+    expect(screen.getByTestId('manage-vacuum').textContent).toContain(
+      'External output: the vacuum on this machine',
+    );
+    expect(screen.queryByTestId('manage-accessory-external-output')).toBeNull();
+    // The Z1's probe is wired: no charger row.
+    expect(screen.queryByTestId('manage-accessory-wp-charge')).toBeNull();
+    // The row itself no longer says "unknown".
+    expect(screen.getByTestId('manage-vacuum-state').textContent).toBe('—');
+  });
+
+  it('another machine keeps its own wiring, and the charger shows what the machine reports', () => {
+    caps.drive = true;
+    useMachineStore.setState({
+      machine: { ...Z1_RECORD, profileId: 'CARVERA' },
+      outcome: 'found',
+      reason: null,
+      checkedAt: '2026-10-09T06:00:00.000Z',
+    });
+    // The heartbeat's diagnose line carries the charger's output in its C: field.
+    useMachineStore.getState().noteDiagnoseLine('<Idle|C:1|E:1,1,1,1,1,1|P:0,0|I:0|RSSI:-50>');
+    render(<MachinesScope />);
+    expect(screen.getByTestId('manage-vacuum').textContent).toContain('Vacuum');
+    expect(screen.getByTestId('manage-accessory-external-output')).toBeTruthy();
+    const charger = screen.getByTestId('manage-accessory-wp-charge-state');
+    expect(charger.textContent).toBe('on');
+    expect(charger.getAttribute('data-mode')).toBe('on');
+  });
+});

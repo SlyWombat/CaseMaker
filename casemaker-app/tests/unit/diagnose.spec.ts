@@ -15,6 +15,8 @@ describe('#826 readDiagnoseLine', () => {
       endstops: { xMin: false, xMax: false, yMin: false, yMax: false, zMin: false },
       probe: false,
       calibrate: false,
+      // C slot 0 is the wireless probe charger's output (#884); the bench line carries `C:1`.
+      probeChargerOn: true,
       estop: false,
       rssi: -40,
     });

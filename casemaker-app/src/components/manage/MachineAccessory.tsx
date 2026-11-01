@@ -17,6 +17,7 @@
 import { useState } from 'react';
 import { canReachMachine } from '@/platform/capabilities';
 import { accessory, toggleAccessory, type AccessoryId } from '@/platform/machineAccessory';
+import { useMachineStore } from '@/store/machineStore';
 
 /** The switch, or nothing at all in a build that cannot open a socket. */
 export function MachineAccessory({ host, port, id }: { host: string; port: number; id: AccessoryId }) {
@@ -28,6 +29,11 @@ type Mode = boolean | null;
 
 function AccessorySwitch({ host, port, id }: { host: string; port: number; id: AccessoryId }) {
   const spec = accessory(id);
+  // #884 — the wireless-probe charger IS reported by the machine's diagnose line (its `C:` field),
+  // so that row shows the machine's own answer when one has been read; the others say nothing
+  // until this page has sent something.
+  const diagnose = useMachineStore((s) => s.diagnose);
+  const reported = id === 'wp-charge' ? (diagnose?.probeChargerOn ?? null) : null;
   const [mode, setMode] = useState<Mode>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -58,7 +64,9 @@ function AccessorySwitch({ host, port, id }: { host: string; port: number; id: A
     }
   }
 
-  const word = mode === null ? 'unknown' : mode ? 'on' : 'off';
+  // #884 — "not reported" is said once at the top of the card's output section, not on every row.
+  const word = mode === null ? (reported === null ? '—' : reported ? 'on' : 'off') : mode ? 'on' : 'off';
+  const stateMode = mode === null ? (reported === null ? 'unknown' : reported ? 'on' : 'off') : mode ? 'on' : 'off';
 
   return (
     <div className="mvacuum" data-testid={`manage-accessory-${id}`}>
@@ -67,7 +75,7 @@ function AccessorySwitch({ host, port, id }: { host: string; port: number; id: A
         <span
           className="mvacuum-state"
           data-testid={`manage-accessory-${id}-state`}
-          data-mode={mode === null ? 'unknown' : mode ? 'on' : 'off'}
+          data-mode={stateMode}
         >
           {word}
         </span>

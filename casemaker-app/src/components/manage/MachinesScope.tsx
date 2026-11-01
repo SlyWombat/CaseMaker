@@ -48,6 +48,7 @@ import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { MachineConsole } from './MachineConsole';
 import { MachineFiles } from './MachineFiles';
 import { MachineVacuum } from './MachineVacuum';
+import { outputPlanFor } from './machineOutputs';
 import { MachineLight } from './MachineLight';
 import { MachineAccessory } from './MachineAccessory';
 import { ACCESSORIES, AIR_SENTENCE } from '@/platform/machineAccessory';
@@ -389,10 +390,21 @@ export function MachinesScope() {
                 plug switched off with nothing else happening — there is no power feed in this app
                 (`tools/z1/power.sh` is a person's act) and nothing polls — so the switch stops
                 claiming the moment anything reaches the machine again, and not before. */}
+            {/* #884 — the machine does not report these switches; say so ONCE here rather than
+                "unknown" on every row. A row shows only what this page has sent (or what the
+                machine's diagnose line reported, where it carries it). */}
+            <p className="hint" data-testid="manage-accessory-unreported">
+              These outputs are not reported by the machine; a row shows only what this page has sent.
+            </p>
             <MachineVacuum
               key={`${machine.host}:${machine.port}@${machine.observedAt}`}
               host={machine.host}
               port={machine.port}
+              label={
+                outputPlanFor(machine.profileId ?? record?.profileId ?? null).externalOutputIsVacuum
+                  ? 'External output: the vacuum on this machine'
+                  : 'Vacuum'
+              }
             />
             {/* #422 — the work light, the vacuum switch's shape: asked live, idle-only, `unknown`
                 until it has sent something, and keyed on the observation for the same reset rule. */}
@@ -404,14 +416,23 @@ export function MachinesScope() {
             {/* #289 — the machine's other accessory modes, the same shape and the same reset rule:
                 spindle fan (M811/M812), power fan (M801/M802), external output (M851/M852), the
                 wireless-probe charge (M841/M842) — all from configZ1.default's switch instances. */}
-            {ACCESSORIES.map((spec) => (
-              <MachineAccessory
-                key={`${spec.id}:${machine.host}:${machine.port}@${machine.observedAt}`}
-                host={machine.host}
-                port={machine.port}
-                id={spec.id}
-              />
-            ))}
+            {(() => {
+              const plan = outputPlanFor(machine.profileId ?? record?.profileId ?? null);
+              return ACCESSORIES.filter((spec) =>
+                spec.id === 'external-output'
+                  ? !plan.externalOutputIsVacuum
+                  : spec.id === 'wp-charge'
+                    ? plan.showProbeCharger
+                    : true,
+              ).map((spec) => (
+                <MachineAccessory
+                  key={`${spec.id}:${machine.host}:${machine.port}@${machine.observedAt}`}
+                  host={machine.host}
+                  port={machine.port}
+                  id={spec.id}
+                />
+              ));
+            })()}
             {/* #289 — air is NOT offered: the Z1's switch.air is commented out, M7/M9 answer `ok`
                 and blow nothing, and its blowing mode (M331.1) is not driven here. The panel states
                 the fact rather than drawing a switch that does nothing. */}

@@ -162,7 +162,10 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
     const wire = fakeConsole(idleMachine);
     render(<MachinesScope />);
 
-    expect(state().textContent).toBe('unknown');
+    // #884 — the card states "these outputs are not reported" once at the section top, so a row
+    // that knows nothing yet shows a dash instead of repeating "unknown"; `data-mode` carries the
+    // meaning for anything reading the switch rather than looking at it.
+    expect(state().textContent).toBe('—');
     expect(state().getAttribute('data-mode')).toBe('unknown');
     expect(on().getAttribute('aria-pressed')).toBe('false');
     expect(off().getAttribute('aria-pressed')).toBe('false');
@@ -204,7 +207,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
     expect(screen.getByTestId('manage-vacuum-note').textContent).toContain('a program owns the vacuum');
     // Nothing was sent but the ask, and the state this panel remembers is still unknown.
     expect(wire.sent).toEqual(['?']);
-    expect(state().textContent).toBe('unknown');
+    expect(state().textContent).toBe('—');
   });
 
   it('a mid-job Idle is refused too — a `P:` below 100 is a program still running', async () => {
@@ -227,7 +230,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
     await waitFor(() => expect(q('manage-vacuum-note')).not.toBeNull());
     expect(screen.getByTestId('manage-vacuum-note').textContent).toContain('90% through');
     expect(wire.sent).toEqual(['?']);
-    expect(state().textContent).toBe('unknown');
+    expect(state().textContent).toBe('—');
   });
 
   it('a press that lost the link goes back to unknown, because the code may or may not have arrived', async () => {
@@ -241,7 +244,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
 
     await waitFor(() => expect(q('manage-vacuum-note')).not.toBeNull());
     expect(screen.getByTestId('manage-vacuum-note').textContent).toContain('no reply within');
-    expect(state().textContent).toBe('unknown');
+    expect(state().textContent).toBe('—');
     expect(wire.sent).toEqual(['?', 'M331']);
   });
 
@@ -254,7 +257,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
 
     await waitFor(() => expect(q('manage-vacuum-note')).not.toBeNull());
     expect(screen.getByTestId('manage-vacuum-note').textContent).toContain('connection reset');
-    expect(state().textContent).toBe('unknown');
+    expect(state().textContent).toBe('—');
     // Only the ask was attempted; the code was never reached.
     expect(wire.sent).toEqual(['?']);
   });
@@ -292,7 +295,7 @@ describe('#390 the vacuum switch — the memory belongs to one connection (#390 
       });
     });
 
-    expect(state().textContent).toBe('unknown');
+    expect(state().textContent).toBe('—');
     expect(state().getAttribute('data-mode')).toBe('unknown');
     expect(on().getAttribute('aria-pressed')).toBe('false');
     // The note went with the connection it was about.
@@ -308,7 +311,7 @@ describe('#390 the vacuum switch — the memory belongs to one connection (#390 
       });
     });
 
-    expect(state().textContent).toBe('unknown');
+    expect(state().textContent).toBe('—');
     // Changing the address a machine answers on is a new connection even with the same stamp, which
     // is why the key carries host and port and not only `observedAt`.
     expect(on().getAttribute('aria-pressed')).toBe('false');

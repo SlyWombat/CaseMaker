@@ -36,14 +36,26 @@ import { canReachMachine } from '@/platform/capabilities';
 import { toggleVacuum } from '@/platform/machineVacuum';
 
 /** The switch, or nothing at all in a build that cannot open a socket. Read at render, not at import. */
-export function MachineVacuum({ host, port }: { host: string; port: number }) {
-  return canReachMachine ? <VacuumSwitch host={host} port={port} /> : null;
+export function MachineVacuum({
+  host,
+  port,
+  label = 'Vacuum',
+}: {
+  host: string;
+  port: number;
+  /**
+   * #884 — the row's name from the machine PROFILE: on the Z1 the external output IS the vacuum,
+   * so the row says both rather than describing one plug twice.
+   */
+  label?: string;
+}) {
+  return canReachMachine ? <VacuumSwitch host={host} port={port} label={label} /> : null;
 }
 
 /** `true` on, `false` off, `null` unknown — nothing has been sent, or the last press was unsure. */
 type Mode = boolean | null;
 
-function VacuumSwitch({ host, port }: { host: string; port: number }) {
+function VacuumSwitch({ host, port, label }: { host: string; port: number; label: string }) {
   const [mode, setMode] = useState<Mode>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -76,12 +88,13 @@ function VacuumSwitch({ host, port }: { host: string; port: number }) {
     }
   }
 
-  const word = mode === null ? 'unknown' : mode ? 'on' : 'off';
+  // #884 — "not reported" is said once at the top of the card's output section, not on every row.
+  const word = mode === null ? '—' : mode ? 'on' : 'off';
 
   return (
     <div className="mvacuum" data-testid="manage-vacuum">
       <div className="mvacuum-row">
-        <span className="mvacuum-label">Vacuum</span>
+        <span className="mvacuum-label">{label}</span>
         <span className="mvacuum-state" data-testid="manage-vacuum-state" data-mode={mode === null ? 'unknown' : mode ? 'on' : 'off'}>
           {word}
         </span>

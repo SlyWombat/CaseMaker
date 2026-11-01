@@ -81,17 +81,22 @@ beforeEach(() => {
 afterEach(() => setMachineConsoleLoader(null));
 
 describe('#289 the accessory switches on the machine card', () => {
-  it('draws one switch per Z1 accessory, each unknown until it has sent something', () => {
+  it('draws one switch per Z1 accessory, each “— ” until it has sent something', () => {
     withMachine();
     render(<MachinesScope />);
-    for (const spec of ACCESSORIES) {
+    // #884 — the Z1's external output IS the vacuum (one row, above) and its probe charger has
+    // nothing attached, so the two REMAINING switches are the fans.
+    for (const spec of ACCESSORIES.filter((a) => a.id === 'spindle-fan' || a.id === 'power-fan')) {
       const row = screen.getByTestId(`manage-accessory-${spec.id}`);
       expect(row).toBeTruthy();
       expect(screen.getByTestId(`manage-accessory-${spec.id}-state`).getAttribute('data-mode')).toBe('unknown');
+      expect(screen.getByTestId(`manage-accessory-${spec.id}-state`).textContent).toBe('—');
       // The vendor key is the provenance the button titles carry, and the hint says what it is.
       expect(screen.getByTestId(`manage-accessory-${spec.id}-on`).getAttribute('title')).toContain(spec.vendorKey);
       expect(screen.getByTestId(`manage-accessory-${spec.id}-hint`).textContent).toBe(spec.meaning);
     }
+    expect(screen.queryByTestId('manage-accessory-external-output')).toBeNull();
+    expect(screen.queryByTestId('manage-accessory-wp-charge')).toBeNull();
     // No air switch — the card says why instead.
     expect(screen.queryByTestId('manage-accessory-air')).toBeNull();
     expect(screen.getByTestId('manage-accessory-no-air').textContent).toContain('No air switch');
@@ -113,7 +118,13 @@ describe('#289 the accessory switches on the machine card', () => {
   });
 
   it('sends the off code from the Off half', async () => {
-    withMachine();
+    // A machine that keeps the separate charger row (#884 hides it on the Z1).
+    useMachineStore.setState({
+      machine: { ...Z1_RECORD, profileId: 'CARVERA' },
+      outcome: 'found',
+      reason: null,
+      checkedAt: '2026-10-09T06:00:00.000Z',
+    });
     const sent = fakeConsole(IDLE);
     render(<MachinesScope />);
     await act(async () => {
@@ -130,11 +141,11 @@ describe('#289 the accessory switches on the machine card', () => {
     const sent = fakeConsole(RUNNING);
     render(<MachinesScope />);
     await act(async () => {
-      fireEvent.click(screen.getByTestId('manage-accessory-external-output-on'));
+      fireEvent.click(screen.getByTestId('manage-accessory-spindle-fan-on'));
     });
     expect(sent).toEqual(['?']);
-    expect(screen.getByTestId('manage-accessory-external-output-note').textContent).toContain('Run');
-    expect(screen.getByTestId('manage-accessory-external-output-state').getAttribute('data-mode')).toBe('unknown');
+    expect(screen.getByTestId('manage-accessory-spindle-fan-note').textContent).toContain('Run');
+    expect(screen.getByTestId('manage-accessory-spindle-fan-state').getAttribute('data-mode')).toBe('unknown');
   });
 
   it('a build that cannot open a socket draws none of them', () => {
@@ -144,5 +155,6 @@ describe('#289 the accessory switches on the machine card', () => {
     for (const spec of ACCESSORIES) {
       expect(screen.queryByTestId(`manage-accessory-${spec.id}`)).toBeNull();
     }
+    expect(screen.queryByTestId('manage-vacuum')).toBeNull();
   });
 });
