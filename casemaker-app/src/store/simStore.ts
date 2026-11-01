@@ -190,6 +190,12 @@ export interface SimState {
   /** The limit the next `loadProgram` uses, ms; `retryWithLongerBudget` doubles it (#194). */
   budgetMs: number;
   /**
+   * #871 — raise this session's limit for a caller that will re-run something itself (the Cut
+   * step's retry re-generates and re-simulates; it needs the new limit, not a re-load of one
+   * program). Returns the limit the next load will use, ms.
+   */
+  raiseBudget(factor?: number): number;
+  /**
    * `calibration` is the saved frame the caller already resolved its OWN machine with (#297). Omit it
    * and the store reads the settings itself, once; pass it (including `null`, meaning "none") and that
    * exact answer is the one simulated, so a caller that also generated against it cannot be split.
@@ -533,6 +539,12 @@ export const useSimStore = create<SimState>()((set, get) => {
     async retryWithLongerBudget() {
       if (!lastLoad) return;
       await run(lastLoad, get().budgetMs * 2);
+    },
+    raiseBudget(factor = 2) {
+      const by = Number.isFinite(factor) && factor > 0 ? factor : 2;
+      const next = Math.round(get().budgetMs * by);
+      set({ budgetMs: next });
+      return next;
     },
     generateRestart(opts) {
       const s = get();

@@ -5459,5 +5459,78 @@ describe('EngravePanel (#893) — the run row names its stop and offers the next
     expect(screen.getByTestId('engrave-run-simulate-line').textContent).toContain('Simulation not started.');
     fireEvent.click(screen.getByTestId('engrave-run-simulate'));
     expect(simulate).toHaveBeenCalledTimes(1);
+
+// #871 — THE CUT STEP'S SIMULATION BUDGET. The red line said "Try again with a longer limit" and
+// the only control that did so lived in the Simulate panel (which the Cut step is not): on the Cut
+// screen, and from a phone, the instruction named a press that was not there. The retry now sits
+// beside the sentence, raises the session's limit (the same doubling the Simulate panel's own
+// retry uses) and runs the job again from here.
+describe('EngravePanel — the Cut step’s simulation budget (#871)', () => {
+  it('puts the retry beside the budget sentence, and pressing it raises the limit and re-runs', async () => {
+    let generatedCalls = 0;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => {
+        generatedCalls += 1;
+        return {
+          ok: false,
+          stage: 'findings',
+          findings: [],
+          feeds: null,
+          cam: null,
+          nc: null,
+          verify: null,
+          programs: [],
+          errors: [{ stage: 'findings', message: 'nothing to post' }],
+        } as unknown as EngraveGenerated;
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    const before = useSimStore.getState().budgetMs;
+    const message =
+      'the simulation was stopped after 60 s: this program is too slow to simulate at this size. Try again with a longer limit';
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: false,
+          stage: 'findings',
+          findings: [],
+          feeds: null,
+          cam: null,
+          nc: null,
+          verify: null,
+          programs: [],
+          errors: [{ stage: 'simulate', message }],
+        } as unknown as EngraveGenerated,
+        simDiagnostics: [
+          { source: 'sweep', severity: 'error', code: 'sweep-budget-exceeded', message, line: 1 },
+        ],
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+    render(<EngravePanel />);
+    const line = screen.getByTestId('engrave-run-errors');
+    expect(line.textContent).toContain('Try again with a longer limit');
+    // The press names the limit it will run with: the session's, doubled — the same rule the
+    // Simulate panel's own retry (`sim-retry`) applies.
+    const retry = screen.getByTestId('engrave-run-retry-sim');
+    expect(retry.textContent).toBe(`Simulate with a ${Math.round((before * 2) / 1000)} s limit`);
+    fireEvent.click(retry);
+    await waitFor(() => expect(generatedCalls).toBe(1));
+    expect(useSimStore.getState().budgetMs).toBe(before * 2);
+    setEngraveRunClientLoader(null);
+  });
+
+  it('states the limit in the progress line while the sweep is running', () => {
+    const budget = useSimStore.getState().budgetMs;
+    act(() => {
+      useEngraveRunStore.setState({ phase: 'simulating', simProgram: { index: 1, count: 2 }, staleSince: null });
+      useSimStore.setState({ status: 'loading', phase: 'sweep', progress: { done: 12, total: 234 } });
+    });
+    render(<EngravePanel />);
+    const progress = screen.getByTestId('engrave-generate-progress').textContent ?? '';
+    expect(progress).toContain('simulating program 1 of 2');
+    expect(progress).toContain('swept 12 of 234');
+    expect(progress).toContain(`${Math.round(budget / 1000)} s limit`);
   });
 });

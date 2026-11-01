@@ -27,6 +27,7 @@ import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
 import { recordCrumb } from '@/platform/flightRecorder';
+import { formatDuration } from '@/engine/cnc/plan/format';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { createFrameCoalescer } from './frameCoalescer';
 
@@ -155,6 +156,57 @@ export const SIM_BUDGET_MS = 60_000;
  */
 const SIM_BUDGET_GRACE_MS = 5_000;
 
+/**
+ * #871 — WHEN THE SWEEP'S OWN RATE SAYS IT CANNOT FINISH IN TIME. A program whose sweep will take
+ * minutes is known to be too slow after a few seconds of checkpoints; waiting out the whole limit
+ * tells the operator the same thing a minute later. The projection is `elapsed / done × total`,
+ * measured from the FIRST checkpoint (worker startup and parsing are a fixed cost, not the sweep's
+ * rate), and only trusted after a floor of {@link SIM_PROJECTION_MIN_MS} and
+ * {@link SIM_PROJECTION_MIN_SHARE} of the checkpoints; it calls the sweep over only with
+ * {@link SIM_PROJECTION_MARGIN} of headroom, so a noisy first sample cannot stop a program that
+ * would have finished.
+ */
+const SIM_PROJECTION_MIN_MS = 4_000;
+const SIM_PROJECTION_MIN_SHARE = 0.05;
+const SIM_PROJECTION_MARGIN = 1.25;
+
+/**
+ * #871 — the sweep's projected total time from its measured rate, ms; null while the sample is too
+ * early to trust. Pure, so the rule can be tested without a worker.
+ */
+export function sweepProjectionMs(elapsedMs: number, done: number, total: number): number | null {
+  if (!(done > 0) || !(total > 0) || elapsedMs < SIM_PROJECTION_MIN_MS) return null;
+  if (done < Math.max(1, Math.ceil(total * SIM_PROJECTION_MIN_SHARE))) return null;
+  return (elapsedMs / done) * total;
+}
+
+/**
+ * #871 — the projection WHEN IT SAYS THE SWEEP CANNOT FINISH: the projected ms when it is past
+ * the limit by {@link SIM_PROJECTION_MARGIN}, else null. The headroom is the policy, so it lives
+ * in one function a test can pin rather than in the progress wrapper.
+ */
+export function sweepProjectionOverLimit(
+  elapsedMs: number,
+  done: number,
+  total: number,
+  budgetMs: number,
+): number | null {
+  const ms = sweepProjectionMs(elapsedMs, done, total);
+  if (ms === null || !(ms > budgetMs * SIM_PROJECTION_MARGIN)) return null;
+  return ms;
+}
+
+/** #871 — the sentence a projection-based early stop reports, naming its own sample. The
+ * projection uses the app's duration words ("78 h 56 min"), the vocabulary the program's cut
+ * estimate is already shown in; the limit keeps the plain seconds the timer's own sentence uses. */
+export function sweepProjectionMessage(done: number, total: number, projectedMs: number, budgetMs: number): string {
+  return (
+    `the simulation is too slow to finish: at the rate it has run (${done} of ${total} checkpoints) it ` +
+    `projects about ${formatDuration(projectedMs / 1000)}, and the limit is ${Math.round(budgetMs / 1000)} s. ` +
+    'Try again with a longer limit'
+  );
+}
+
 /** What `loadSim` accepts on top of its arguments (#194). */
 export interface SimLoadOpts {
   /** Wall-clock limit for this load, ms. Defaults to the shop's `sim.budgetMs` (#451). */
@@ -247,8 +299,11 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
   const budgetMs = opts?.budgetMs ?? readDefault(liveShopDefaults(), 'sim.budgetMs').value;
   const sweepBudget = Math.max(1, budgetMs - SIM_BUDGET_GRACE_MS);
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let settled = false;
   const expired = new Promise<SimLoadResult>((resolve) => {
     timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       terminateSim();
       resolve({
         ok: false,
@@ -264,6 +319,46 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
       });
     }, budgetMs);
   });
+  // #871 — SAY IT UP FRONT. The sweep reports checkpoints as it runs; once its own measured rate
+  // projects past the limit, stop there and state the projection instead of spending the whole
+  // limit to learn it. The clock starts at the FIRST checkpoint, so worker startup and parsing (a
+  // fixed cost on every load) are not charged to the sweep's rate; the timer above still bounds the
+  // whole load's wall clock. The worker is terminated exactly as the timer's own stop does — the
+  // sweep's state does not outlive this call, so a retry starts from zero (there is nothing to
+  // resume).
+  const forward = opts?.onProgress;
+  let rateSince: number | null = null;
+  let projectionDone: ((result: SimLoadResult) => void) | null = null;
+  const projected =
+    forward === undefined
+      ? null
+      : new Promise<SimLoadResult>((resolve) => {
+          projectionDone = resolve;
+        });
+  const onProgress =
+    forward === undefined
+      ? undefined
+      : (done: number, total: number): void => {
+          forward(done, total);
+          rateSince ??= performance.now();
+          if (settled || projectionDone === null) return;
+          const ms = sweepProjectionOverLimit(performance.now() - rateSince, done, total, budgetMs);
+          if (ms === null) return;
+          settled = true;
+          terminateSim();
+          projectionDone({
+            ok: false,
+            pathOnly: false,
+            diagnostics: [
+              {
+                source: 'sweep',
+                severity: 'error',
+                code: 'sweep-budget-exceeded',
+                message: sweepProjectionMessage(done, total, ms, budgetMs),
+              },
+            ],
+          });
+        };
   try {
     const result = await Promise.race([
       getSimApi()
@@ -294,7 +389,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             priorFields: opts?.priorFields ?? undefined,
             priorExactRemoval: opts?.priorExactRemoval ?? undefined,
           },
-          opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
+          onProgress === undefined ? undefined : Comlink.proxy(onProgress),
         )
         .then(async (r) => {
           // #224: the warm-up is part of the load, not the first scrub. Awaiting `simWarmup`
@@ -310,6 +405,8 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
       // #830 — a worker that died mid-sweep fails this load AT ONCE, with its own words, rather
       // than letting the budget timer report a misleading "too slow" a minute later.
       ...(failure === null ? [] : [failure.promise]),
+      // #871 — the projection's own early stop, when the sweep's rate says it cannot finish.
+      ...(projected === null ? [] : [projected]),
     ]);
     return result;
   } finally {

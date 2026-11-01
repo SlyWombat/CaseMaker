@@ -755,18 +755,22 @@ function RemovalAnnouncement(): JSX.Element {
  * #830 — WHAT THE RUN IS DOING, for the progress line. Generate's own stages are one half; the
  * SIMULATION is the other, and it used to show a bare "Working…" for a whole multi-program sweep.
  * The sweep's stage names the program and, from the sim store, how many checkpoints are done.
+ * #871 — and the limit the sweep is running under, so the budget is a fact on the screen while the
+ * run is in flight, not only a sentence after it has been spent.
  */
 function runProgressWords(
   run: Pick<EngraveRunState, 'phase' | 'progress' | 'simProgram'>,
   simStatus: string,
   simPhase: string | null,
   simProgress: { done: number; total: number } | null,
+  simBudgetMs: number,
 ): string {
   if (run.phase === 'simulating') {
     const where = run.simProgram === null ? 'simulating' : `simulating program ${run.simProgram.index} of ${run.simProgram.count}`;
-    if (simStatus === 'loading' && simPhase === 'playback') return `${where} · preparing playback`;
-    if (simStatus === 'loading' && simProgress !== null) return `${where} · swept ${simProgress.done} of ${simProgress.total}`;
-    return where;
+    const limit = `${Math.round(simBudgetMs / 1000)} s limit`;
+    if (simStatus === 'loading' && simPhase === 'playback') return `${where} · preparing playback · ${limit}`;
+    if (simStatus === 'loading' && simProgress !== null) return `${where} · swept ${simProgress.done} of ${simProgress.total} · ${limit}`;
+    return `${where} · ${limit}`;
   }
   if (run.phase === 'checking') return 'checking the result';
   return run.progress === null ? 'Working…' : `${run.progress.label}…`;
@@ -783,7 +787,8 @@ function RunProgressLine({ run }: { run: Pick<EngraveRunState, 'phase' | 'progre
   const simStatus = useSimStore((s) => s.status);
   const simPhase = useSimStore((s) => s.phase);
   const simProgress = useSimStore((s) => s.progress);
-  return <span>{runProgressWords(run, simStatus, simPhase, simProgress)}</span>;
+  const simBudgetMs = useSimStore((s) => s.budgetMs);
+  return <span>{runProgressWords(run, simStatus, simPhase, simProgress, simBudgetMs)}</span>;
 }
 
 /**
@@ -2644,6 +2649,10 @@ export function EngravePanel(): JSX.Element {
   // #785 follow-up — the too-big refusal's one-click grid: the run stopped on it, and the finding
   // carries the pitch that fits. The button beside the sentence writes that pitch onto the goal's
   // grid and presses Generate in the same click, so the refusal turns into a choice.
+  // #871 — the Cut step's retry for a sweep that stopped on the session's budget, beside the
+  // sentence that says so: raise the limit and run again (Generate's own path).
+  const retryWithLongerSimulation = useEngraveRunStore((s) => s.retryWithLongerSimulation);
+  const simBudgetMs = useSimStore((s) => s.budgetMs);
   const runPitchFinding =
     run.staleSince === null
       ? (run.generated?.findings.find((f) => f.code === 'goal-program-too-big' && f.suggestedPitchMm !== undefined) ?? null)
@@ -5395,6 +5404,21 @@ export function EngravePanel(): JSX.Element {
                         </button>
                       </>
                     )}
+                  </>
+                )}
+                {/* #871 — the budget's own press. The sentence said "raise the limit" with no
+                    control on this screen; this raises the session's limit (doubled, as the
+                    Simulate panel's retry does) and runs the job again from here. */}
+                {currentRunError?.code === 'sweep-budget-exceeded' && (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      data-testid="engrave-run-retry-sim"
+                      onClick={() => void retryWithLongerSimulation()}
+                    >
+                      Simulate with a {Math.round((simBudgetMs * 2) / 1000)} s limit
+                    </button>
                   </>
                 )}
                 {/* #725 B4 — the same sentence's Fix, in the footer at the button: the verifier's

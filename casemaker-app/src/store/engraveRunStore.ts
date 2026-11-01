@@ -337,6 +337,12 @@ export interface EngraveRunState {
   /** #893 — simulate and check the program already generated, without generating again. */
   simulate: () => Promise<void>;
   /**
+   * #871 — THE CUT STEP'S RETRY. The sweep stopped on the session's `sim.budgetMs` (the Cut step's
+   * red line); raise the limit and run the job again, Generate's own path, so the program and the
+   * sweep that judges it are measured together. The button sits beside the sentence it answers.
+   */
+  retryWithLongerSimulation: () => Promise<void>;
+  /**
    * #785 — CANCEL a run in flight. The worker is terminated (the only reliable stop for a wasm
    * call), the in-flight result is orphaned, and the panel returns to the phase it was in before
    * the run — the last generated result is still on screen, marked as before.
@@ -1047,6 +1053,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     /** #893 — re-run the sweep and the check for the program already on screen. */
     simulate: async () => {
       await run(null, { simulateOnly: true });
+    },
+    retryWithLongerSimulation: async () => {
+      useSimStore.getState().raiseBudget(2);
+      await get().generate();
     },
     cancelGenerate: () => {
       const phase = get().phase;
