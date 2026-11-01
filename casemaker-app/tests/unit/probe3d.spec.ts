@@ -275,21 +275,51 @@ describe('#525 — corner finding: the plan', () => {
     expect(cornerPlan('back-right').corner).toEqual({ id: 'back-right', xEdge: 'right', yEdge: 'back' });
   });
 
-  // #827 — the vise and the bracket find the corner on the STOCK's own faces now; their anchors
-  // are the fallback when a face cannot be touched.
-  it('plans a corner on the vise and the bracket — the stock’s own faces', () => {
-    const vise = planRegistration(input({ probe: PROBE_3D, corner: 'front-left' }), S);
+  // #827 — the vise and the bracket find the corner on the STOCK's own faces now; a stock that is
+  // not proud enough gets the fixed jaw's face as X, planned and stated in one line, never stopped.
+  it('plans a corner on the vise: the stock’s face when proud enough, the fixed jaw’s face otherwise', () => {
+    // The reference blank: 1.77 mm proud, under the ball's 1.5 + 1 margin + 0.3 depth. A vise
+    // registration carries the measured jaw-top datum, which is what makes "proud" knowable.
+    const datum = { jawTopZ: SURFACE - 1.77, measuredAt: '2026-10-24T00:00:00.000Z', by: 'test' };
+    const vise = planRegistration(
+      input({ probe: PROBE_3D, corner: 'front-left', mountDatum: datum, fixtureBelowSurfaceMm: undefined }),
+      S,
+    );
     expect(vise.ok).toBe(true);
     if (vise.ok) {
       expect(vise.plan.corner).toEqual({ id: 'front-left', xEdge: 'left', yEdge: 'front' });
-      expect(vise.plan.notes.join(' ')).toContain('corner mode');
+      expect(vise.plan.cornerXFrom).toBe('jaw');
+      expect(vise.plan.notes.join(' ')).toContain("X is taken from the fixed jaw's face");
+      expect(vise.plan.notes.join(' ')).toContain('proud of the jaws');
     }
+    // 2 mm prouder: the stock's own X face is touched, and no fallback note is written.
+    const proud = planRegistration(
+      input({
+        probe: PROBE_3D,
+        corner: 'front-left',
+        mountDatum: datum,
+        fixtureBelowSurfaceMm: undefined,
+        expectedSurface: { machineZ: SURFACE + 2, from: 'test' },
+      }),
+      S,
+    );
+    expect(proud.ok).toBe(true);
+    if (proud.ok) {
+      expect(proud.plan.cornerXFrom).toBeUndefined();
+      expect(proud.plan.notes.join(' ')).not.toContain("X is taken from the fixed jaw's face");
+    }
+  });
+
+  it('plans a corner on the bracket — the stock’s exposed faces, the anchor as fallback', () => {
     const bracket = planRegistration(
       input({ mount: 'bracket', probe: PROBE_3D, bracketOrigin: { x: -181.55, y: -184.8, from: 'anchor1', offsetMeasured: true }, mountObstacles: [], corner: 'front-left' }),
       S,
     );
     expect(bracket.ok).toBe(true);
-    if (bracket.ok) expect(bracket.plan.corner).toEqual({ id: 'front-left', xEdge: 'left', yEdge: 'front' });
+    if (bracket.ok) {
+      expect(bracket.plan.corner).toEqual({ id: 'front-left', xEdge: 'left', yEdge: 'front' });
+      expect(bracket.plan.cornerXFrom).toBeUndefined();
+    }
   });
 
   it('refuses without the 3D probe — the wired probe cannot see the angle between two edges', () => {

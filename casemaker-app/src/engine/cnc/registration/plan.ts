@@ -41,6 +41,7 @@
 
 import { PARK_CLEARANCE_MM } from '@/platform/defaultsClient';
 import { settingsProblem, type RegistrationSettings } from './settings';
+import { MIN_SIDE_DEPTH_MM, SIDE_TOUCH_JAW_MARGIN_MM } from './probe3d';
 
 export type Mount = 'vise' | 'bracket' | 'tape';
 
@@ -298,6 +299,12 @@ export interface RegistrationPlan {
   /** #743 D-2 — the disc this plan registers on its rim: its stated diameter. Absent for a rectangle. */
   disc?: { diameterMm: number };
   /**
+   * #827 — a corner plan's X datum. `stock` (or absent): the stock's own X face, found with sideways
+   * touches above the jaws. `jaw`: the stock does not stand proud enough, so X comes from the fixed
+   * jaw's face with the Z-only scan — a tolerance answer, stated in one line, never a stop.
+   */
+  cornerXFrom?: 'stock' | 'jaw';
+  /**
    * #525 — the corner this plan measures: two sideways lines per edge on the two named edges. The
    * outcome intersects their lines for the origin and reads the stock's rotation from the same
    * points. Absent on every other plan.
@@ -472,6 +479,8 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       : `the ${name} edge is ${r3(hi - lo)} mm long — too short to keep a scan ${keepOff} mm clear of its rounded corners`;
 
   const scans: EdgeScan[] = [];
+  /** #827 — see RegistrationPlan.cornerXFrom; set by the corner branch, read by the plan's return. */
+  let cornerXFrom: 'stock' | 'jaw' | undefined;
   const disc = input.disc !== undefined;
   const midY = (stock.yMin + stock.yMax) / 2;
   const midX = (stock.xMin + stock.xMax) / 2;
@@ -625,6 +634,19 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     } else if (corner !== undefined) {
       // #525 — CORNER MODE: two sideways lines on each of the two edges that meet at the corner, at
       // the ends of each edge's usable span — the longest baseline, clear of the rounded corners.
+      // #827 — ON THE VISE, X COMES FROM THE STOCK'S OWN FACE ONLY WHEN IT STANDS PROUD ENOUGH; a
+      // stock that does not is registered with the fixed jaw's face as X, and the plan says so in
+      // one line. The tolerance answer is stated, not refused.
+      if (mount === 'vise') {
+        const proud = mountDatum === null ? null : Math.round((input.expectedSurface.machineZ - mountDatum.jawTopZ) * 1000) / 1000;
+        const needed = Math.round((s.tipRadiusMm + SIDE_TOUCH_JAW_MARGIN_MM + MIN_SIDE_DEPTH_MM) * 1000) / 1000;
+        if (proud !== null && proud < needed) {
+          cornerXFrom = 'jaw';
+          notes.push(
+            `the stock stands ${proud} mm proud of the jaws — X is taken from the fixed jaw's face (the Z-only edge scan); side-touching the stock's own X face needs ${needed} mm`,
+          );
+        }
+      }
       const { xEdge, yEdge } = cornerEdges(corner);
       const ysC = span(stock.yMin, stock.yMax, xEdge);
       if (typeof ysC === 'string') return { ok: false, reason: ysC };
@@ -673,6 +695,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       bracketOrigin,
       mountObstacles,
       settings: s,
+      ...(cornerXFrom === undefined ? {} : { cornerXFrom }),
       notes,
     },
   };

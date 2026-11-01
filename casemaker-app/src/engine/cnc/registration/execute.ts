@@ -1149,7 +1149,10 @@ export async function runRegistration(
     const g54 = { x: r3(slow.x - plan.surfacePoint.x), y: r3(slow.y - plan.surfacePoint.y) };
     for (const scan of plan.scans) {
       scans.push(
-        probeInstrumentOf(plan.probe) === 'xyz' && (sideTouchAllowed(plan.mount, scan.edge) || plan.corner !== undefined)
+        probeInstrumentOf(plan.probe) === 'xyz' &&
+        (sideTouchAllowed(plan.mount, scan.edge) ||
+          (plan.corner !== undefined &&
+            !(plan.cornerXFrom === 'jaw' && (scan.edge === 'left' || scan.edge === 'right'))))
           ? await scanEdgeSideways(io, plan, scan, slow.z, g54)
           : await scanEdge(io, plan, scan, parkZ, slow.z),
       );
