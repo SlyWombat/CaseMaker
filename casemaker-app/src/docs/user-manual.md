@@ -184,6 +184,12 @@ enough — the panel says so if it is not). The key locks the parts against slid
 apart; lifting the top one off takes a firm pull against the click. Sockets on
 the same walls of both parts must line up, so give both cases the same shifts.
 
+**Registering a stack.** Tick **register stacked cases (skirt + rim ridge)** and the lid's top carries a raised ring just inside the wall, while the floor's underside gets a matching groove — the floor and wall left outside it form the telescoping skirt. Set one case on another and it settles square with no key in it. This is registration only: it squares the stack and holds nothing down, so keys still do the retaining. The ring's height follows the floor's thickness, so a thin floor gets a shallow ridge rather than a floor cut through.
+
+**Matching two cases.** **Same shift on every wall** puts one shift on all four walls, so two projects set the same way line up without adjusting each wall separately.
+
+**A base plate.** **Export a base plate** adds a shallow tray on the case's own footprint, its rim carrying the same sockets, so a single case can sit on one. The plate is the lower part of the pair: the key parks half-proud out of its rim and the case drops onto it.
+
 **When a socket lands on something.** If a socket would run into a port, a vent,
 a hinge, a latch, a magnet pocket, the nameplate or another feature on that wall,
 the panel says so and offers the nearest clear position — **Move to … mm**. The
