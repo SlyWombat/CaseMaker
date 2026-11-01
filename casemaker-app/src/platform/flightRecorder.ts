@@ -389,8 +389,16 @@ export function noteStage(work: WorkScope, stage: string, label?: string, done?:
 }
 
 /** Coarse progress inside a stage. Debounced by the ring's own flush, not by dropping the event. */
-export function noteProgress(work: WorkScope, stage: string, done: number, total: number, label?: string): void {
-  recordCrumb({ kind: 'progress', work, stage, done, total, ...(label === undefined ? {} : { label }) });
+export function noteProgress(
+  work: WorkScope,
+  stage: string,
+  done: number,
+  total: number,
+  label?: string,
+  /** #896 — extra facts for the report: the worker's own heap, when the browser exposes it. */
+  data?: Record<string, unknown>,
+): void {
+  recordCrumb({ kind: 'progress', work, stage, done, total, ...(label === undefined ? {} : { label }), ...(data === undefined ? {} : { data }) });
 }
 
 /** A finding the run raised, small enough to survive in the report. */

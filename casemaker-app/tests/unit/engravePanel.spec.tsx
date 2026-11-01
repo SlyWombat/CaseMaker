@@ -5097,3 +5097,68 @@ describe('EngravePanel — the narrow-bore plunge offer (#786 slice 5)', () => {
     expect(useEngraveJobStore.getState().job.drills?.[0]?.mode).toBe('drill');
   });
 });
+
+// #893 — the maintainer's elephant goal stopped at "generated · not checked yet · not simulated
+// yet" with nothing to press. The row now names the input that moved (with Generate again) or
+// offers Simulate for a program nothing simulated.
+describe('EngravePanel (#893) — the run row names its stop and offers the next step', () => {
+  const ORIGINAL_SIMULATE = useEngraveRunStore.getState().simulate;
+  const GENERATED = {
+    ok: true,
+    stage: 'done',
+    findings: [],
+    feeds: null,
+    threads: null,
+    cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
+    nc: 'G90\nM02',
+    verify: null,
+    frameNc: null,
+    frameVerify: null,
+    facingNc: null,
+    facingVerify: null,
+    facingToolKey: null,
+    facingError: null,
+    facingCam: null,
+    predicted: [],
+    programs: [],
+    errors: [],
+  } as unknown as EngraveGenerated;
+
+  afterEach(() => {
+    useEngraveRunStore.getState().reset();
+    useEngraveRunStore.setState({ simulate: ORIGINAL_SIMULATE });
+  });
+
+  it('a stale run says which input moved, and offers Generate again', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({ generated: GENERATED, phase: 'blocked', staleSince: Date.now(), staleReason: 'job' });
+    });
+    expect(screen.getByTestId('engrave-run-stale').textContent).toContain('The job changed while generating.');
+    expect(screen.getByTestId('engrave-run-stale-regenerate').textContent).toBe('Generate again');
+
+    // The machine and the margins word themselves; the job is the generic sentence.
+    act(() => useEngraveRunStore.setState({ staleReason: 'machine' }));
+    expect(screen.getByTestId('engrave-run-stale').textContent).toContain('The machine’s saved frame changed while generating.');
+    act(() => useEngraveRunStore.setState({ staleReason: 'margins' }));
+    expect(screen.getByTestId('engrave-run-stale').textContent).toContain('The depth margins changed while generating.');
+  });
+
+  it('a generated program with no simulation offers Simulate, and the press runs it', () => {
+    const simulate = vi.fn(async () => undefined);
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: GENERATED,
+        phase: 'blocked',
+        simStatus: null,
+        simStopped: true,
+        error: 'the simulation stopped before it finished',
+        simulate,
+      });
+    });
+    expect(screen.getByTestId('engrave-run-simulate-line').textContent).toContain('Simulation not started.');
+    fireEvent.click(screen.getByTestId('engrave-run-simulate'));
+    expect(simulate).toHaveBeenCalledTimes(1);
+  });
+});

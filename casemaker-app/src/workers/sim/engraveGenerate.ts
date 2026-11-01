@@ -5709,6 +5709,8 @@ export interface EngraveProgress {
   label: string;
   done?: number;
   total?: number;
+  /** #896 — the worker's own JS heap at this report, MB; null where the browser does not expose it. */
+  memoryMB?: number | null;
 }
 export type EngraveProgressFn = (progress: EngraveProgress) => void;
 

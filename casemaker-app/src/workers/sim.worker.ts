@@ -61,6 +61,17 @@ async function getPreviewer(): Promise<EngravePreviewer> {
  */
 let latestEditGen = Number.NEGATIVE_INFINITY;
 
+/**
+ * #896 — the JS heap this worker is using, MB, when the browser exposes it. It rides on the
+ * progress messages so a flight recorder can see WHICH worker is holding the memory: a goal run
+ * showed an 84 MB window beside a 1.2 GB tab, and the answer was in a worker.
+ */
+function workerMemoryMb(): number | null {
+  const mem = (performance as unknown as { memory?: { usedJSHeapSize?: number } }).memory;
+  const used = mem?.usedJSHeapSize;
+  return used === undefined ? null : Math.round(used / 1e6);
+}
+
 function buffersOf(meshes: (NodeMeshOutput | null | undefined)[]): Transferable[] {
   const out: Transferable[] = [];
   for (const m of meshes) if (m) out.push(m.positions.buffer, m.indices.buffer);
@@ -81,8 +92,22 @@ const api = {
    * `opts.calibration` (#279) is a plain record and crosses the boundary by structured clone —
    * it is data about a machine, not a handle.
    */
-  async simLoad(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts, onProgress?: (done: number, total: number) => void): Promise<SimLoadResult> {
-    const result = (await getSession()).load(gcodeText, setup, tool, machineId, { ...opts, onProgress });
+  /**
+   * #896 — STOP the measured search, without a preview. A renderer starting a run must not have
+   * the pick computing beside it (the crash reports show it ending after Generate's own done); a
+   * preview request would also cancel it, but a goal preview rebuilds the mesh volume, which is
+   * the memory the run is already spending. `gen` is the caller's generation: the next real
+   * preview (a higher gen) resumes measuring.
+   */
+  cancelEngravePick(gen: number): void {
+    if (gen + 1 > latestEditGen) latestEditGen = gen + 1;
+  },
+  async simLoad(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts, onProgress?: (done: number, total: number, memoryMB?: number | null) => void): Promise<SimLoadResult> {
+    // #896 — the sweep's progress carries THIS worker's heap, so a long goal sweep says what it
+    // is holding while it holds it.
+    const withMemory =
+      onProgress === undefined ? undefined : (done: number, total: number): void => onProgress(done, total, workerMemoryMb());
+    const result = (await getSession()).load(gcodeText, setup, tool, machineId, { ...opts, onProgress: withMemory });
     if (!result.ok) return result;
     const m = result.meshes;
     return Comlink.transfer(result, buffersOf([m.stock, m.result, m.removal, ...m.gouges.map((g) => g.mesh)]));
@@ -234,7 +259,10 @@ const api = {
     onProgress?: (progress: EngraveProgress) => void,
   ): Promise<EngraveGenerated> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    return runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, onProgress);
+    // #896 — every stage report names this worker's heap too (see `workerMemoryMb`).
+    const withMemory =
+      onProgress === undefined ? undefined : (progress: EngraveProgress): void => onProgress({ ...progress, memoryMB: workerMemoryMb() });
+    return runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory);
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The

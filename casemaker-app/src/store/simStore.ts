@@ -12,6 +12,7 @@
 
 import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
+import { noteProgress as noteFlightProgress } from '@/platform/flightRecorder';
 import type { MachineCalibration, PausePoint, Setup } from '@/engine/cnc';
 import { resolveMachine } from '@/engine/cnc/calibration';
 import { MACHINES } from '@/engine/cnc/machine';
@@ -415,8 +416,10 @@ export const useSimStore = create<SimState>()((set, get) => {
       );
       const r = await client.loadSim(args.gcodeText, args.setup, args.tool, args.machineId, {
         budgetMs,
-        onProgress: (done, total) => {
+        onProgress: (done: number, total: number, memoryMB?: number | null) => {
           if (mine === loadSeq) set({ progress: { done, total } });
+          // #896 — a long goal sweep says which worker is holding the memory, in the report.
+          noteFlightProgress('simulate', 'sweep', done, total, undefined, memoryMB === undefined || memoryMB === null ? undefined : { memoryMB });
         },
         onPhase: (phase) => {
           if (mine === loadSeq) set({ phase });

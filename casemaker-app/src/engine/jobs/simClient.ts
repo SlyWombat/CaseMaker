@@ -375,6 +375,17 @@ export const engravePreview = (
  * means the run was superseded (or the job has nothing to measure) — the caller owns a newer
  * answer, or leaves the rule's provisional one standing.
  */
+/**
+ * #896 — STOP the measured pick in the worker, without asking for a preview: a renderer starting a
+ * run must not have the pick computing beside it, and a goal preview would rebuild the mesh
+ * volume the run is already spending. `gen` is the preview store's generation; its next request
+ * (a higher gen) resumes measuring.
+ */
+export const cancelEngravePick = (gen: number): void => {
+  if (simApi === null) return;
+  void guarded(getSimApi().cancelEngravePick(gen)).catch(() => undefined);
+};
+
 export const engraveSmartPick = (
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],

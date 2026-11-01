@@ -2852,6 +2852,11 @@ export function EngravePanel(): JSX.Element {
     await run.generate();
   }
 
+  /** #893 — the row's Simulate press: sweep and check the program already on screen. */
+  async function simulateProgram(): Promise<void> {
+    await run.simulate();
+  }
+
   async function saveProgram(): Promise<void> {
     const generated = run.generated;
     if (!generated?.nc || saveBlockerText !== null) return;
@@ -5163,6 +5168,35 @@ export function EngravePanel(): JSX.Element {
                 )}
               </div>
             )}
+            {/* #893 — a run whose job changed while generating used to end at four "not … yet"
+                rows with no control: name the input that moved and offer the press that helps. */}
+            {run.staleSince !== null && run.generated !== null && (
+              <p data-testid="engrave-run-stale" style={{ ...MUTED, color: SEVERITY_COLOR.warning }}>
+                {run.staleReason === 'machine'
+                  ? 'The machine’s saved frame changed while generating.'
+                  : run.staleReason === 'margins'
+                    ? 'The depth margins changed while generating.'
+                    : 'The job changed while generating.'}{' '}
+                <button type="button" data-testid="engrave-run-stale-regenerate" onClick={() => void generate()}>
+                  Generate again
+                </button>
+              </p>
+            )}
+            {/* #893 — A PROGRAM WITH NO SIMULATION IS NOT A DEAD END: the sweep and the check
+                re-run for the program on screen, without generating again. Shown for every such
+                state — a stopped worker, a cancel, a run that never reached the sweep. */}
+            {run.generated !== null &&
+              run.generated.nc !== null &&
+              run.staleSince === null &&
+              !running &&
+              run.simStatus !== 'ready' && (
+                <p data-testid="engrave-run-simulate-line" style={MUTED}>
+                  Simulation not started.{' '}
+                  <button type="button" data-testid="engrave-run-simulate" onClick={() => void simulateProgram()}>
+                    Simulate
+                  </button>
+                </p>
+              )}
             {/* #432 review R11 — the facing program is its own file: name the cutter it runs, or
                 the reason it was withheld. Absent when the job does not face. */}
             {facingJob && <RunRow testid="engrave-run-facing" state={rowFacing} text={rowFacingText} />}

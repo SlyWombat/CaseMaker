@@ -20,6 +20,11 @@ import {
   type EngraveRunView,
 } from '@/store/engraveRunStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import {
+  ENGRAVE_PICK_DEBOUNCE_MS,
+  setEngravePreviewClientLoader,
+  useEngravePreviewStore,
+} from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveGenerated, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import {
@@ -29,6 +34,7 @@ import {
   type ToolCopy,
 } from '@/engine/cnc/toolCondition';
 import { useSimStore } from '@/store/simStore';
+import { flightCrumbs } from '@/platform/flightRecorder';
 import type { SimLoadOk } from '@/workers/sim/session';
 import { useSettingsStore } from '@/store/settingsStore';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -1458,5 +1464,190 @@ describe('#785 progress and Cancel', () => {
     expect(s.error).toBe('the simulation worker was killed');
     expect(s.simDiagnostics, 'no finding is manufactured for a program that was never swept').toEqual([]);
     expect(s.simStatus, 'no simulation verdict was reached').toBeNull();
+  });
+});
+
+describe('#893 — a run holds the measured pick, and an unsimulated program can be simulated', () => {
+  const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function jobWithCutter(): void {
+    const jobNow = useEngraveJobStore.getState().job;
+    useEngraveJobStore.setState({ job: { ...jobNow, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+  }
+
+  /** A preview client that counts the pick, the preview and the pick-cancel calls. */
+  function counted(): { picks: () => number; previews: () => number; cancels: () => number[] } {
+    let picks = 0;
+    let previews = 0;
+    const cancels: number[] = [];
+    setEngravePreviewClientLoader(async () => ({
+      engravePreview: async () => {
+        previews += 1;
+        return null;
+      },
+      engraveSmartPick: async () => {
+        picks += 1;
+        return null;
+      },
+      cancelEngravePick: (gen: number) => {
+        cancels.push(gen);
+      },
+    }));
+    return { picks: () => picks, previews: () => previews, cancels: () => cancels };
+  }
+
+  beforeEach(() => {
+    useEngravePreviewStore.getState().dispose();
+    setEngravePreviewClientLoader(null);
+  });
+  afterEach(() => {
+    useEngravePreviewStore.getState().dispose();
+    setEngravePreviewClientLoader(null);
+  });
+
+  it('starts no pick while the measurement is held, and starts one when it is released', async () => {
+    jobWithCutter();
+    const countedClient = counted();
+    const job = useEngraveJobStore.getState().job;
+    useEngravePreviewStore.getState().holdMeasurement();
+    useEngravePreviewStore.getState().request(job);
+    await sleep(ENGRAVE_PICK_DEBOUNCE_MS + 200);
+    expect(countedClient.picks(), 'no pick while the measurement is held').toBe(0);
+    expect(countedClient.previews(), 'no preview either — a goal preview rebuilds its mesh').toBe(0);
+    expect(countedClient.cancels().length, 'the worker-side search is stopped without a preview').toBe(1);
+    useEngravePreviewStore.getState().releaseMeasurement();
+    await sleep(ENGRAVE_PICK_DEBOUNCE_MS + 200);
+    expect(countedClient.previews(), 'the preview resumes after the run').toBeGreaterThan(0);
+    expect(countedClient.picks(), 'the pick resumes after the run').toBeGreaterThan(0);
+  });
+
+  it('a Generate holds it for the whole run, so the pick cannot touch the job it describes', async () => {
+    jobWithCutter();
+    const countedClient = counted();
+    let releaseGen!: (g: EngraveGenerated) => void;
+    const gen = new Promise<EngraveGenerated>((resolve) => {
+      releaseGen = resolve;
+    });
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async () => {
+        useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+        return swept();
+      },
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => gen,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    try {
+      const running = useEngraveRunStore.getState().generate();
+      // An edit lands while the run is generating: without the hold this schedules a pick, and the
+      // pick's plan write is what staleness the maintainer's elephant run.
+      useEngravePreviewStore.getState().request(useEngraveJobStore.getState().job);
+      await sleep(ENGRAVE_PICK_DEBOUNCE_MS + 200);
+      expect(countedClient.picks(), 'no pick runs under a Generate').toBe(0);
+      expect(countedClient.previews(), 'no preview runs under a Generate').toBe(0);
+      expect(useEngraveRunStore.getState().phase).toBe('generating');
+      releaseGen(clean());
+      await running;
+      // The job never changed under the run, so the result is current and the sweep ran.
+      expect(useEngraveRunStore.getState().staleSince).toBeNull();
+      expect(useEngraveRunStore.getState().oracle?.ok).toBe(true);
+      // Released with the run: the next request measures again.
+      useEngravePreviewStore.getState().request(useEngraveJobStore.getState().job);
+      await sleep(ENGRAVE_PICK_DEBOUNCE_MS + 200);
+      expect(countedClient.previews(), 'the preview resumes after the run').toBeGreaterThan(0);
+      expect(countedClient.picks(), 'the pick resumes after the run').toBeGreaterThan(0);
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  });
+
+  it('Cancel releases the preview hold even when the cancelled call never settles', async () => {
+    jobWithCutter();
+    const countedClient = counted();
+    // A generate call that never settles, as a terminated worker's does: nothing rejects it.
+    const never = new Promise<EngraveGenerated>(() => undefined);
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => never,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    void useEngraveRunStore.getState().generate();
+    await sleep(50);
+    expect(countedClient.previews(), 'held while the run is in flight').toBe(0);
+    useEngraveRunStore.getState().cancelGenerate();
+    // The run's own `finally` never runs; the cancel released the hold, so a preview may start.
+    useEngravePreviewStore.getState().request(useEngraveJobStore.getState().job);
+    await sleep(ENGRAVE_PICK_DEBOUNCE_MS + 200);
+    expect(countedClient.previews(), 'previews resume after a cancel').toBeGreaterThan(0);
+  });
+
+  it('writes the sweep and the check to the flight recorder, so a crash report can see them', async () => {
+    jobWithCutter();
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async () => {
+        useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+        return swept();
+      },
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => clean(),
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+      const stages = flightCrumbs()
+        .filter((c) => c.kind === 'stage' && c.work === 'generate')
+        .map((c) => c.stage);
+      expect(stages).toContain('simulate');
+      expect(stages).toContain('check');
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  });
+
+  it('Simulate sweeps the program already generated, without generating again', async () => {
+    jobWithCutter();
+    let generates = 0;
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async () => {
+        useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+        return swept();
+      },
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => {
+        generates += 1;
+        return clean();
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+      expect(generates).toBe(1);
+      expect(useEngraveRunStore.getState().oracle?.ok).toBe(true);
+      // A simulation that stopped before it finished: the row shows the program and the press.
+      useEngraveRunStore.setState({
+        simStatus: null,
+        oracle: null,
+        oraclePrograms: [],
+        simDiagnostics: [],
+        simPrograms: [],
+        phase: 'blocked',
+        error: 'the simulation stopped before it finished',
+        simStopped: true,
+      });
+      await useEngraveRunStore.getState().simulate();
+      const s = useEngraveRunStore.getState();
+      expect(generates, 'Simulate does not generate again').toBe(1);
+      expect(s.simStatus).toBe('ready');
+      expect(s.oracle?.ok).toBe(true);
+      expect(s.phase).toBe('ready');
+      expect(s.staleSince).toBeNull();
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
   });
 });

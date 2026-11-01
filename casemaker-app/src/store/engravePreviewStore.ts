@@ -77,6 +77,8 @@ export type EngravePreviewClient = {
    * #766 D — the measured cutter pick. Optional so a preview-only fake (and a build without the
    * search) still satisfies this type; the real client always has it.
    */
+  /** #896 — stop a measured search without a preview (the sim worker's own cancel). */
+  cancelEngravePick?: (gen: number) => void;
   engraveSmartPick?: (
     job: EngraveJob,
     tools: readonly ToolLibraryEntry[],
@@ -153,6 +155,10 @@ export interface EngravePreviewState {
   setScrubStage: (stage: number | null) => void;
   /** Debounced: rebuild the preview for `job` after the quiet window. */
   request: (job: EngraveJob) => void;
+  /** #893 — stop the measured pick writing the job (a Generate is starting); previews continue. */
+  holdMeasurement: () => void;
+  /** #893 — the run is over: allow the pick again, and schedule one for the current job. */
+  releaseMeasurement: () => void;
   /**
    * #766 D — the measured pick for exactly this job, resolving with the answer: the current one,
    * the one already in flight, or a search started NOW (a Generate pressed before the debounce
@@ -237,6 +243,15 @@ function previewInputs(job: EngraveJob): PreviewInputs {
     residuals: probeResiduals(),
   };
 }
+
+/**
+ * #893 — A GENERATE HOLDS THE MEASURED PICK. The background search writes its plan into the job,
+ * and a run whose job changes under it is stale the moment it finishes — the maintainer's elephant
+ * goal generated and then stopped at "generated · not checked yet", because the pick landed
+ * mid-run. While held, no pick starts and one already in flight is superseded (its `mine !== seq`
+ * checks drop its write); the preview itself keeps updating, because the panel draws it.
+ */
+let measurementHeld = false;
 
 export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) => {
   async function run(job: EngraveJob, mine: number): Promise<void> {
@@ -440,6 +455,39 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
     setScrubStage(stage) {
       set({ scrubStage: stage });
     },
+    holdMeasurement() {
+      measurementHeld = true;
+      // Supersede anything in flight FIRST: its `mine !== seq` checks then drop every write.
+      seq += 1;
+      if (pickTimer !== null) {
+        clearTimeout(pickTimer);
+        pickTimer = null;
+      }
+      set({
+        gen: seq,
+        measured: null,
+        measuredJob: null,
+        measuredStatus: 'idle',
+        measuredError: null,
+        measuredProgress: null,
+        setupMeasured: null,
+        setupMeasuredJob: null,
+      });
+      if (pickTimer !== null) {
+        clearTimeout(pickTimer);
+        pickTimer = null;
+      }
+      // #896 — stop a search already inside its loop WITHOUT a preview: the worker's search checks
+      // its generation between plan evaluations, and a goal preview would rebuild the mesh volume
+      // the run is already spending. The next request (a higher gen) resumes it.
+      void clientLoader()
+        .then((client) => client.cancelEngravePick?.(seq))
+        .catch(() => undefined);
+    },
+    releaseMeasurement() {
+      measurementHeld = false;
+      get().request(useEngraveJobStore.getState().job);
+    },
     request(job) {
       const mine = ++seq;
       // #766 D — the measured answer is current only while the job content a measure can see is
@@ -468,6 +516,12 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
         ...(setupKept ? {} : { setupMeasured: null, setupMeasuredJob: null }),
       });
       if (timer !== null) clearTimeout(timer);
+      // #896 — A RUN IN FLIGHT OWNS THE WORKERS: a preview (a goal rebuilds its whole mesh volume)
+      // and the pick both wait. The release after the run requests the job again.
+      if (measurementHeld) {
+        timer = null;
+        return;
+      }
       timer = setTimeout(() => {
         timer = null;
         if (mine !== seq) return; // a newer request arrived during the debounce
@@ -475,13 +529,13 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
       }, ENGRAVE_PREVIEW_DEBOUNCE_MS);
       if (pickTimer !== null) clearTimeout(pickTimer);
       pickTimer = null;
-      if (!kept && measurable) {
+      if (!measurementHeld && !kept && measurable) {
         pickTimer = setTimeout(() => {
           pickTimer = null;
           if (mine !== seq) return;
           void runPick(job, mine, jobFingerprintNow);
         }, ENGRAVE_PICK_DEBOUNCE_MS);
-      } else if (!setupKept && setupIndices.length > 0) {
+      } else if (!measurementHeld && !setupKept && setupIndices.length > 0) {
         pickTimer = setTimeout(() => {
           pickTimer = null;
           if (mine !== seq) return;
@@ -490,6 +544,8 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
       }
     },
     async measureNow(job) {
+      // #893 — a run in flight owns the job: no measured plan may be applied under it.
+      if (measurementHeld) return null;
       // The CURRENT generation, not a new one: an edit must supersede this run, and the preview
       // for this generation may already be in flight (or its timer pending) — neither is stale.
       const mine = seq;

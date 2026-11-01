@@ -70,6 +70,7 @@ import {
 import type { SurfacePostFit } from '@/engine/cnc/engrave/surfaceSpread';
 import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
+import { useEngravePreviewStore } from './engravePreviewStore';
 import { useSimStore } from './simStore';
 import { shopDefault, useShopDefaultsStore } from './shopDefaultsStore';
 import { useFeedTableStore } from './feedTableStore';
@@ -333,6 +334,8 @@ export interface EngraveRunState {
   simStopped: boolean;
   /** Run the whole pipeline for the job as it is NOW. `surface` (#608) re-posts against a tilt. */
   generate: (surface?: SurfacePostFit | null) => Promise<void>;
+  /** #893 — simulate and check the program already generated, without generating again. */
+  simulate: () => Promise<void>;
   /**
    * #785 — CANCEL a run in flight. The worker is terminated (the only reliable stop for a wasm
    * call), the in-flight result is orphaned, and the panel returns to the phase it was in before
@@ -392,7 +395,20 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     simStopped: false,
   };
 
-  async function run(surface: SurfacePostFit | null = null): Promise<void> {
+  /**
+   * #893 — WHICH run owns the preview store's hold. A run stopped by Cancel keeps its awaited call
+   * pending forever (the worker is terminated, nothing rejects it), so its `finally` may never
+   * fire; the cancel releases the hold itself, and this token stops a late `finally` from
+   * releasing a NEWER run's hold.
+   */
+  let runHold: symbol | null = null;
+
+  async function run(surface: SurfacePostFit | null = null, opts: { simulateOnly?: boolean } = {}): Promise<void> {
+    // #893 — SIMULATE ONLY: the program is already this job's, so the run starts at the sweep.
+    // A stale program (or one that never posted) has nothing this press can honestly check.
+    const simulateOnly = opts.simulateOnly === true;
+    const priorGenerated = get().generated;
+    if (simulateOnly && (priorGenerated === null || priorGenerated.nc === null || get().staleSince !== null)) return;
     const job = useEngraveJobStore.getState().job;
     const mine = ++seq;
     // #581 — WHAT THE RUN BEFORE THIS ONE SAW, captured before the reset below clears the result.
@@ -408,11 +424,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const previousInputs = before.inputs;
     set({
       ...empty,
-      phase: 'generating',
+      phase: simulateOnly ? 'simulating' : 'generating',
       generated: get().generated,
       // #785 — a name from the FIRST frame: the worker's own first stage can be seconds away (the
       // module and its wasm load), and "Working…" with no words is the complaint this issue is.
-      progress: { stage: 'prepare', label: 'starting the worker' },
+      progress: simulateOnly ? null : { stage: 'prepare', label: 'starting the worker' },
     });
 
     // ONE machine per run (#297): the saved frame is read once, here, and handed to the generator
@@ -591,6 +607,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     try {
       client = await clientLoader();
       activeClient = client;
+      if (simulateOnly) {
+        // #893 — nothing to generate: the program the row shows is this job's own.
+        generated = priorGenerated as EngraveGenerated;
+      } else {
       armStall();
       // #785 — every stage report is BOTH the panel's progress and a flight-recorder crumb: one
       // event stream, two readers. A stage change is a crumb of its own (the marker moves with it);
@@ -602,13 +622,22 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           lastStage = progress.stage;
           noteStage('generate', progress.stage, progress.label);
         } else if (progress.done !== undefined && progress.total !== undefined) {
-          noteFlightProgress('generate', progress.stage, progress.done, progress.total, progress.label);
+          // #896 — the worker's heap rides with its progress into the report.
+          noteFlightProgress(
+            'generate',
+            progress.stage,
+            progress.done,
+            progress.total,
+            progress.label,
+            progress.memoryMB === undefined || progress.memoryMB === null ? undefined : { memoryMB: progress.memoryMB },
+          );
         }
       };
       try {
         generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress);
       } finally {
         clearStall();
+      }
       }
     } catch (e) {
       clearStall();
@@ -636,7 +665,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // #642 — the margins are compared by their STAMP (both numbers), not `boundaryMargin` alone:
     // `inputs.margins` carries `zTolerance` too, and it can move on its own.
     const changedMargins = marginsKey(nowMargins) !== inputs.margins;
-    const stale = changedJob || changedMachine || changedMargins;
+    // #893 — a simulate-only pass checks the program that is already this job's; it cannot stale itself.
+    const stale = !simulateOnly && (changedJob || changedMachine || changedMargins);
     if (stale) {
       // #581 — name which one moved; the generic sentence is only for a caller that cannot know.
       set({
@@ -745,6 +775,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // #830 — the simulation's own stage: which program of the sweep is being simulated, so
           // the panel never shows a bare "Working…" through a multi-program sweep.
           if (mine === seq) set({ simProgram: { index: index + 1, count: generated.programs.length } });
+          // #896 — AND IT IS IN THE FLIGHT RECORDER, which logged nothing during a simulation: a
+          // crash report could not say which program was sweeping, or how far it got.
+          const label = programLabel(generated.programs, index);
+          noteStage('generate', 'simulate', `sweeping ${label}`, index + 1, generated.programs.length);
           try {
             // #723 P2-2b-ii — CARRY THE SIDES. The walk hands us the earlier programs' remaining
             // solids in the frame of the program that cut them; a program in a later setup starts
@@ -836,6 +870,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         afterLoad: async ({ index, program }) => {
           // THE ORACLE RUNS WHILE THE PROGRAM IT JUDGES IS STILL THE SESSION'S LIVE ONE — the walk
           // awaits this hook before loading the next.
+          // #896 — the check is a stage of its own in the recorder, per program.
+          noteStage('generate', 'check', `checking ${programLabel(generated.programs, index)} against the design`);
           if (pcbSides.length > 0) {
             // #743 P-5 — the board's own check, on the sweep that has finished drawing this side.
             const side = pcbSides.find((s) => isolationIndexOf(s) === index);
@@ -990,10 +1026,37 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     progress: null,
     simProgram: null,
     simStopped: false,
-    generate: run,
+    // #893 — THE RUN HOLDS THE MEASURED PICK: it writes the cutter plan into the job, and a job
+    // that changes mid-run makes the run stale the moment it finishes (the maintainer's elephant
+    // goal stopped at "generated · not checked yet" for exactly this). Held for the run, released
+    // for the next edit — the preview keeps drawing.
+    generate: async (surface?: SurfacePostFit | null) => {
+      const token = Symbol('generate');
+      runHold = token;
+      useEngravePreviewStore.getState().holdMeasurement();
+      try {
+        await run(surface ?? null);
+      } finally {
+        // A newer run (or a cancel) may own the hold by now: only its owner releases it.
+        if (runHold === token) {
+          runHold = null;
+          useEngravePreviewStore.getState().releaseMeasurement();
+        }
+      }
+    },
+    /** #893 — re-run the sweep and the check for the program already on screen. */
+    simulate: async () => {
+      await run(null, { simulateOnly: true });
+    },
     cancelGenerate: () => {
       const phase = get().phase;
       if (phase !== 'generating' && phase !== 'simulating' && phase !== 'checking') return;
+      // #893 — the cancelled run may never reach its own `finally` (its awaited worker call is
+      // orphaned, not rejected): release the preview hold here, and leave a newer run's alone.
+      if (runHold !== null) {
+        runHold = null;
+        useEngravePreviewStore.getState().releaseMeasurement();
+      }
       // Orphan the in-flight run FIRST, so its late result (if any) can never write state...
       seq += 1;
       // ...then kill the worker. A synchronous wasm call cannot hear a message; termination is the
@@ -1018,6 +1081,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       set((state) => ({ simDiagnostics: [...state.simDiagnostics, diagnostic] })),
     reset: () => {
       seq += 1; // orphan any run in flight
+      if (runHold !== null) {
+        runHold = null;
+        useEngravePreviewStore.getState().releaseMeasurement();
+      }
       set({ generated: null, ...empty, phase: 'idle' });
     },
   };
