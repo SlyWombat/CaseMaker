@@ -5401,16 +5401,21 @@ function generateFaceProgram(
     if (!built.errored) {
       return { ok: true, built: { operations: built.operations, predicted: built.predicted }, findings: built.findings };
     }
+    // #842 × #786 — the tolerance findings that name a cut (`item-empty`, `item-chars-lost`) are
+    // WARNINGS now, and a sub-program made only of cuts nobody can reach can still fail outright
+    // (no operations to post). Both mean the same thing here: these cuts are the ones the face's
+    // cutter cannot make, so the partition takes them; a label-less ERROR (the holding, the
+    // mechanism) is still a hard refusal.
     const ids = new Set(items.map((it) => it.id));
     const failedIds: string[] = [];
     let hard = false;
     for (const f of built.findings) {
-      if (f.severity !== 'error') continue;
       if (f.labelId !== undefined && ids.has(f.labelId)) {
-        if (!failedIds.includes(f.labelId)) failedIds.push(f.labelId);
-      } else {
-        hard = true;
+        const named = { id: f.labelId };
+        if (!failedIds.includes(named.id)) failedIds.push(named.id);
+        continue;
       }
+      if (f.severity === 'error') hard = true;
     }
     return { ok: false, findings: built.findings, failedIds, hard: hard || failedIds.length === 0 };
   };
@@ -5420,7 +5425,9 @@ function generateFaceProgram(
     const frame = frames[i]!;
     if (frame.items.length === 0) continue;
     const r = buildCut(frame, tool, frame.items);
-    allFindings = dedupeFindings([...allFindings, ...r.findings]);
+    // The failed attempt's own warnings are replaced by the fine/uncut sentences below: what the
+    // job states is the DECISION (a finer cutter, or left uncut), not the coarse attempt's notes.
+    if (r.ok) allFindings = dedupeFindings([...allFindings, ...r.findings]);
     if (r.ok) {
       if (r.built.operations.length > 0) faceCuts.set(i, r.built);
       continue;
