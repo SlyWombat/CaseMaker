@@ -489,6 +489,9 @@ describe('#773 the Carvera Air is framed, and the Carvera is a row with no frame
       envelope: CARVERA.envelope,
       maxCutFeed: 1000,
       maxRpm: 1000,
+      // #845 — the estimate's rapid model is REQUIRED on a model too: a stated machine's post reads
+      // one field, and an unread row still has to answer the same shape.
+      rapidEstimate: { xyMmPerMin: 1000, zMmPerMin: 500, accelMmPerS2: 100, source: 'test' },
       hasATC: false,
       toolSlots: 0,
       sources: { envelope: 'test', maxCutFeed: 'test', maxRpm: 'test', atc: 'test', rotaryEnvelope: 'test' },

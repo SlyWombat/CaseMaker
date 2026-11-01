@@ -211,6 +211,7 @@ export interface ToolRack {
   z: Mm;
   /** Where those positions come from — never left silent, because none of them is a measurement. */
   source: string;
+}
 
 /**
  * #845 — THE CONTROLLER'S G-CODE FORMATTING: what a POST writes to. `dialect` on a framed profile
