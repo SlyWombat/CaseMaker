@@ -683,7 +683,7 @@ doors are open today:
   held standing on its end and cut on that ⌀ end). A rod longer than the vise's grip (20 mm) is
   the rotary's, and the form says so instead of offering it. A **tube** is refused by name — its
   hole leaves no face a job can cut. A piece made here can be put on the shelf in the same step.
-- **Load** — an STL, 3MF or STEP used as the stock. A prism (identical slices) cuts as a block of
+- **Load** — an STL, 3MF, OBJ or STEP used as the stock. A prism (identical slices) cuts as a block of
   that outline; a PrusaSlicer 3MF with negative volumes is recognised and offered as **stock +
   design** in one step (#410, #437). A STEP/STP is a B-rep, not a mesh: the OpenCascade WASM
   kernel tessellates it at import (#774), and the questions above read the triangles it produces —
@@ -816,7 +816,9 @@ alone. The two named refusals and the merge warning are in §8.1.
 
 **3D surfacing from a goal mesh (#534, #535, #671).** A **design target object** can be marked
 with role **goal** — "this is the shape to *make*", as opposed to a reference to position other
-work against. A goal may be picked as STL, 3MF, STEP/STP or — a picture relief — PNG; a STEP is
+work against. A goal may be picked as STL, 3MF, OBJ, STEP/STP or — a picture relief — PNG; an OBJ
+has no unit of its own, so a `# units:` comment (mm, cm, m, in, ft, um) is read and its numbers
+scaled, every other OBJ is read as millimetres, and the door says which reading it got (#825); a STEP is
 tessellated to a mesh at import by the OpenCascade WASM kernel (#774), so the surfacing below
 reads the same heightfield every mesh goal gives. A job whose only work is a goal mesh generates a two-operation surfacing program: a
 **raster roughing** in step-down layers that clears the stock above the goal (leaving the
