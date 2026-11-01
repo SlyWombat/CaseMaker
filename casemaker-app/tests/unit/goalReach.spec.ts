@@ -283,13 +283,22 @@ describe('#785 — Generate', () => {
     expect(out.stage).toBe('findings');
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
     expect(refusal?.severity).toBe('error');
-    expect(refusal?.message).toContain('moves');
-    expect(refusal?.message).toContain("the app's budget is 12,000,000");
-    // #832 — the sentence says it is a budget, names the step-down that fits too, and the
-    // finding carries both numbers.
-    expect(refusal?.message).toContain('A budget limit, not a fault');
-    expect(refusal?.message).toContain('coarsen the grid to about');
-    expect(refusal?.message).toContain('raise the step-down to about');
+    // #888 — the sentence is the operator's: the goal, the pitch and the depth. Moves, cells and
+    // the budget ride the finding's own fields (the panel's Technical line).
+    expect(refusal?.message).toContain('This goal is too detailed to plan at 0.02 mm in one go');
+    expect(refusal?.message).toContain('30 mm deep');
+    expect(refusal?.message).not.toContain('moves');
+    expect(refusal?.budgetMoves).toBeGreaterThan(12_000_000);
+    expect(refusal?.budgetCells).toBeGreaterThan(0);
+    expect(refusal?.budgetLimit).toBe(12_000_000);
+    expect(refusal?.budgetPitchMm).toBeCloseTo(0.02, 4);
+    // The feeds row's own step-down, as the solver resolved it — 0.6 mm for a 3 mm flat in the
+    // default blank's material (hardwood since #879; it was softwood's 1.0 before).
+    expect(refusal?.budgetStepDownMm).toBeCloseTo(0.6, 6);
+    // #888 — no two-band split fits a goal this large: 1 M cells over 30 mm is ~52 M moves even
+    // at half the depth, so the finding offers no split and the panel draws no press.
+    expect(refusal?.suggestedSplit).toBeUndefined();
+    // #832 — the two other presses are still stated, as numbers the panel names.
     expect(refusal?.suggestedPitchMm).toBeGreaterThan(0.02);
     expect(refusal?.suggestedStepDownMm).toBeGreaterThan(0.3);
     expect(out.nc).toBeNull();
@@ -301,6 +310,38 @@ describe('#785 — Generate', () => {
     const retry = generateGoalProgram(tallJob(pitched), pitched, flat({ fluteLength: 40 }), [], null, {});
     expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(retry.findings.some((f) => f.code === 'goal-program-too-big')).toBe(false);
+  }, 120_000);
+
+  it('#888 a goal whose depth can be split in two under the budget carries the split, and the press builds it', async () => {
+    // 20 × 20 mm at 0.05 mm (plus the clear ring) is ~330 000 cells; 60 mm deep at the row's
+    // 1.0 mm step-down is ~61 levels, so the one program is ~20 M moves — over the 12 M budget —
+    // while each 30 mm band is ~10.6 M: two setups, each under the budget, is exactly the case
+    // the press exists for.
+    // The step-down is PINNED on the goal: the split's numbers are the point, not the feeds
+    // row, which follows the default blank's material (#879 moved it to hardwood).
+    const target = rampGoal({ surface: { gridPitchMm: 0.05, roughStepDownMm: 1.0 } }, 60);
+    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 80 }), [], null, {});
+    expect(out.ok).toBe(false);
+    const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
+    expect(refusal?.suggestedSplit).toBeDefined();
+    const split = refusal!.suggestedSplit!;
+    expect(split.firstMm + split.secondMm).toBeCloseTo(60, 2);
+    expect(split.movesEach).toBeLessThanOrEqual(12_000_000);
+    expect(refusal?.budgetMoves).toBeGreaterThan(12_000_000);
+
+    // The press's machinery: two setups, each side's goal carrying its band, the second side the
+    // stock turned over. (No drill is owned here, so the hold states no pins — the setups and
+    // bands are the claim.)
+    const { splitGoalForBudget } = await import('@/engine/cnc/engrave/goalFlipSetups');
+    const built = splitGoalForBudget(tallJob(target), target, split, []);
+    expect(built.ok, built.ok ? '' : built.reason).toBe(true);
+    if (!built.ok) return;
+    expect(built.setups).toHaveLength(2);
+    expect(built.goals).toHaveLength(2);
+    expect(built.goals[0]!.bandMm).toBeCloseTo(split.firstMm, 6);
+    expect(built.goals[1]!.bandMm).toBeCloseTo(split.secondMm, 6);
+    expect(built.goals[0]!.setupId).toBe(built.setups[0]!.id);
+    expect(built.goals[1]!.setupId).toBe(built.setups[1]!.id);
   }, 120_000);
 
   it('a goal within reach generates with no reach finding at all', () => {

@@ -567,6 +567,23 @@ export interface JobFinding {
    */
   suggestedStepDownMm?: number;
   /**
+   * #888 — on `goal-program-too-big`, the MOVES the run estimated, the cells it counted and the
+   * budget it broke. The panel folds these under its Technical line; the sentence the operator
+   * reads does not count them.
+   */
+  budgetMoves?: number;
+  budgetCells?: number;
+  budgetLimit?: number;
+  budgetPitchMm?: number;
+  budgetStepDownMm?: number;
+  /**
+   * #888 — on `goal-program-too-big`, the depth split that puts BOTH programs under the budget:
+   * each side of a top/bottom split, mm. The panel's "Split into two setups" press builds the two
+   * setups from it (via `goalFlipSetups`' machines); absent when no two-band split fits — the
+   * press is then not shown at all rather than opening a dead end.
+   */
+  suggestedSplit?: { firstMm: number; secondMm: number; movesEach: number };
+  /**
    * #805 — on `goal-rotary-oversize`, the goal's own outermost radius, mm (the field's
    * `maxRadius`). The panel's "Scale the goal to fit (r …)" button turns it into the factor that
    * brings the part to the rod; absent on every other finding.
@@ -1003,6 +1020,13 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
     // #669 — a chamfer is cutting work too, and it must ride in its TARGET's setup: one program
     // has one tool, and the bevel follows an edge that program's cut leaves.
     ...(job.chamfers ?? []),
+    // #888 item 6 — a GOAL is cutting work: its surface program IS the setup's cut, so its id
+    // rides the implicit setup exactly as a side setup's does (`planFlipSetups` writes the goal's
+    // id there). The item pipeline never sees it — a pure goal dispatches before that path — and
+    // a goal that is a reference stays out, as it always has.
+    ...(job.targetObjects ?? (job.targetObject === undefined ? [] : [job.targetObject]))
+      .filter((t) => (t.role ?? 'reference') === 'goal')
+      .map((t) => ({ id: t.id, enabled: t.enabled })),
   ];
   const itemIds = items
     .filter((item) => item.enabled && item.construction !== true)

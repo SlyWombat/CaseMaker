@@ -713,6 +713,14 @@ export interface EngraveTargetObject {
    */
   cutWithinReach?: boolean;
   /**
+   * #888 — CUT ONLY THIS SETUP'S DEPTH BAND. A goal split over two mountings (the budget split's
+   * top and bottom halves) names, on each side's copy, how deep from THAT setup's work top its
+   * program cuts; the sampler floors the heightfield there, so the first side leaves the material
+   * the second side takes. Absent (every goal written before the split) cuts the whole depth, and
+   * `cutWithinReach`'s cutter-derived band keeps its own meaning when this is absent.
+   */
+  bandMm?: Mm;
+  /**
    * #672 — a PNG goal's relief map: the depth the darkest (or, inverted, the lightest) tone is cut
    * to and which end of the greys sits at the top face. Absent = the engine's labelled defaults.
    */
@@ -2255,6 +2263,14 @@ export interface JobStockEntry {
 export interface EngraveFacing {
   /** The two-state choice. `facingDefault` seeds it from the stock's finish; a person overrides it. */
   enabled: boolean;
+  /**
+   * #888 — WHO MADE THE CHOICE. `'seed'` is the finish's default, written when the blank was
+   * chosen, and it yields to the plan: when the goal cuts the whole top away, a seeded ON is not
+   * acted on (nothing is left to skim). `'user'` is a person's press and is always honoured.
+   * Absent — every document written before this key — reads as `'user'`, so an existing job keeps
+   * the facing it had.
+   */
+  source?: 'seed' | 'user';
   /** Material taken off the top face, mm — the depth every later program is posted from. */
   depth: Mm;
   /**

@@ -106,6 +106,12 @@ function itemIdsIn(job: EngraveJob): Set<string> {
     // so it must be in the presence set too: without it every board's cut-out read as "no longer
     // in the job" while also being "in no setup" — one item, two contradictory stale sentences.
     ...(job.cutouts ?? []),
+    // #888 item 6 — a GOAL is a cut the setups name (`removalsFrom` gives it a removal), so it is
+    // present for the same reason: a side setup naming its goal must not read as "no longer in
+    // the job".
+    ...(job.targetObjects ?? (job.targetObject === undefined ? [] : [job.targetObject])).filter(
+      (t) => (t.role ?? 'reference') === 'goal',
+    ),
   ];
   for (const item of lists) ids.add(item.id);
   return ids;

@@ -781,10 +781,12 @@ export function facingSeed(
   finish: JobStockFinish | null,
   material: StockMaterial,
   shop?: Partial<FacingDepthShop>,
-): Pick<EngraveFacing, 'enabled' | 'depth'> {
-  if (facingRefusal(material) !== null) return { enabled: false, depth: 0 };
+): Pick<EngraveFacing, 'enabled' | 'depth' | 'source'> {
+  // #888 — a SEEDED choice says so: it is the finish's default, and a plan that cuts the whole top
+  // away turns it off. A press in the panel writes `'user'` and is always honoured.
+  if (facingRefusal(material) !== null) return { enabled: false, depth: 0, source: 'seed' };
   const def = facingDefault(finish ?? 'unknown', material);
-  return { enabled: def.on, depth: facingDepthDefault(finish ?? 'unknown', { shop }).depthMm };
+  return { enabled: def.on, depth: facingDepthDefault(finish ?? 'unknown', { shop }).depthMm, source: 'seed' };
 }
 
 /**

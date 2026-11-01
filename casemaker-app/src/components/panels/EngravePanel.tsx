@@ -36,8 +36,9 @@ import { setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/en
 import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
+import { planFlipSetups, splitGoalForBudget } from '@/engine/cnc/engrave/goalFlipSetups';
 import { jobFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
+import { jobTopFaceCached, NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { machineDisplayName } from '@/platform/locationClient';
 import { machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
 import { mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
@@ -51,7 +52,7 @@ import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
-import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTargetObjects, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 // #835 — one setup's own work, measured and written back into that setup only.
 import { deadSetupKeys, replacementCutter } from '@/engine/cnc/engrave/setupWork';
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
@@ -1484,7 +1485,13 @@ export function EngravePanel(): JSX.Element {
   const facingRefused = facingRefusal(job.stock.material) !== null;
   const facingDef = facingDefault(finish ?? 'unknown', job.stock.material);
   const facing = job.facing ?? null;
-  const facingOn = facing?.enabled ?? false;
+  // #888 — THE PLAN OVERRIDES A SEEDED CHOICE. The finish's default (`source: 'seed'`) was written
+  // when the blank was chosen, before the goal existed. When the plan cuts the whole stock top
+  // away there is nothing to skim, so the seeded ON is drawn OFF and the line states why; a
+  // person's press (`'user'`, and every document written before the key) always stands.
+  const topFaceFacts = jobTopFaceCached(job);
+  const facingYieldsToPlan = facing?.source === 'seed' && topFaceFacts !== null && !topFaceFacts.keeps;
+  const facingOn = (facing?.enabled ?? false) && !facingYieldsToPlan;
   // #432 review R9 — the aimed-for default is the MEASURED top's high-to-low spread plus the
   // shop's margin. Since #496 `stock.flatness` IS the measurement (nothing else writes it), and
   // `measuredTopSpreadMm` returns null on any plastic, so the wood/metal-only rule holds here too.
@@ -1499,7 +1506,9 @@ export function EngravePanel(): JSX.Element {
   /** Turn facing on or off, FILLING IN the depth's default when the job had not chosen one. */
   function chooseFacing(on: boolean): void {
     const depth = facing?.depth ?? facingDepthFill.depthMm;
-    setFacing({ enabled: on, depth, ...(facing?.toolKey ? { toolKey: facing.toolKey } : {}) });
+    // #888 — a press is a PERSON'S choice: `'user'` stands even when the plan cuts the whole top
+    // away (the operator may want the skim for the Z0 it leaves, or expect the goal to change).
+    setFacing({ enabled: on, depth, source: 'user', ...(facing?.toolKey ? { toolKey: facing.toolKey } : {}) });
   }
   // "Recommends more" is the only case worth a button: a recommendation that ties or loses to what
   // is already in force has nothing to offer, and two numbers that agree do not need a control.
@@ -1981,9 +1990,27 @@ export function EngravePanel(): JSX.Element {
     void generate();
   };
 
-  /** #832 — the split suggestion is a place to go: the Holding step is where setups are made. */
-  const openSetupsToSplit = (): void => {
-    openWizard('holding');
+  /**
+   * #888 — THE SPLIT PRESS DOES THE SPLIT. The finding's `suggestedSplit` was computed with the
+   * generator's own move model (both bands under the budget), so this builds the two sides the
+   * sentence promised — the goal cut as a top band and a bottom band from its flipped side,
+   * registered on the same dowel holes #872's plan uses — writes them as the job's setups, and
+   * presses Generate. A plan the setups engine refuses is stated beside the goal, never half
+   * written. The press is not drawn at all when no split fits (the finding carries no numbers).
+   */
+  const splitForBudget = (finding: JobFinding): void => {
+    const split = finding.suggestedSplit;
+    if (split === undefined) return;
+    const goal = jobTargetObjects(job).find((g) => g.id === finding.targetId) ?? job.targetObject;
+    if (goal === undefined) return;
+    const result = splitGoalForBudget(job, goal, split);
+    if (!result.ok) {
+      setTargetError(result.reason);
+      return;
+    }
+    setSetups(result.setups);
+    for (const side of result.goals) setSideGoal(side.setupId!, side);
+    void generate();
   };
 
   /**
@@ -2754,6 +2781,12 @@ export function EngravePanel(): JSX.Element {
   // sentence (`engrave-run-errors`); it is not four failed rows. #830 review — the run's OWN
   // `error` is stated once beside Generate (`engrave-generate-error`), not printed here too.
   const runSaysSomething = running || run.generated !== null || run.error !== null;
+  // #888 — A RUN THAT STOPPED BEFORE POSTING states ONE sentence, not four "not … yet" rows (the
+  // three other rows add nothing when there is no program at all). The reason itself is the
+  // errors line below; the budget gets its own words because that is the case the maintainer hit.
+  const runRefused = run.generated !== null && !run.generated.ok;
+  const runRefusedBudget =
+    runRefused && (run.generated?.findings.some((f) => f.code === 'goal-program-too-big') ?? false);
   // …and a run that PASSED and still matches the job collapses to ONE line, with the ticks behind
   // its `›`. #794 — that line is the Ready card, and the footer's primary becomes the next step.
   const runReady =
@@ -2832,18 +2865,25 @@ export function EngravePanel(): JSX.Element {
   // explanation. The row mirrors `facingSteps`' vocabulary ("the facing program was not produced"),
   // and the cutter named is the one the file was cut with (`facingCam.toolName`), never the job's
   // engraving tool. Facing off adds no row at all — nothing was asked for, so nothing is missing.
-  const facingJob = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0;
+  // #888 — the row reads the EFFECTIVE facing (a seeded choice the plan overrode is off), and the
+  // plan's own reason has its own sentence rather than the "clear the reason" dead end.
+  const facingJob = facingOn && job.facing !== undefined && job.facing.depth > 0;
+  const facingYielded = run.generated?.facingError === NO_FACING_TOP_REASON;
   const rowFacing: RowState = !facingJob
     ? 'idle'
     : run.generated === null
       ? run.phase === 'generating'
         ? 'pending'
         : 'idle'
-      : run.generated.facingNc !== null
-        ? 'tick'
-        : 'cross';
+      : facingYielded
+        ? 'idle'
+        : run.generated.facingNc !== null
+          ? 'tick'
+          : 'cross';
   const facingCam = run.generated?.facingCam ?? null;
-  const rowFacingText = `Facing — ${
+  const rowFacingText = facingYielded
+    ? `Facing — ${NO_FACING_TOP}`
+    : `Facing — ${
     run.generated === null
       ? run.phase === 'generating'
         ? 'working…'
@@ -3649,11 +3689,13 @@ export function EngravePanel(): JSX.Element {
           Facing —{' '}
           {facingRefused
             ? 'not offered on plastic'
-            : facing === null
-              ? 'not chosen'
-              : facingOn
-                ? `${fmt(facing.depth)} mm off the top`
-                : 'off'}{' '}
+            : facingYieldsToPlan
+              ? 'off — every part of the top is cut away'
+              : facing === null
+                ? 'not chosen'
+                : facingOn
+                  ? `${fmt(facing.depth)} mm off the top`
+                  : 'off'}{' '}
           <span aria-hidden style={{ marginLeft: 4, color: '#8fb8e0' }}>›</span>
         </summary>
       <p style={MUTED} data-testid="engrave-facing-why">
@@ -3669,11 +3711,13 @@ export function EngravePanel(): JSX.Element {
               : `The stock is ${FINISH_WORD[finish]}`}
             {' — '}
             {facingDef.reason}.
-            {facing === null
-              ? ' Nothing has been chosen, so the top is not skimmed.'
-              : facingOn && facing.depth === 0
-                ? ' Facing is on with a zero depth, so nothing is taken off.'
-                : ''}
+            {facingYieldsToPlan
+              ? ` ${NO_FACING_TOP} The goal’s plan leaves none of the top at its own height, so there is nothing to skim; face it anyway with the button below if you want the skim’s Z0.`
+              : facing === null
+                ? ' Nothing has been chosen, so the top is not skimmed.'
+                : facingOn && facing.depth === 0
+                  ? ' Facing is on with a zero depth, so nothing is taken off.'
+                  : ''}
           </>
         )}
       </p>
@@ -3723,6 +3767,8 @@ export function EngravePanel(): JSX.Element {
                 if (!Number.isFinite(v) || v < 0) return;
                 setFacing({
                   enabled: true,
+                  // #888 — typing a depth is a person's choice too.
+                  source: 'user',
                   depth: Math.min(v, FACING_DEPTH_MAX_MM),
                   ...(facing?.toolKey ? { toolKey: facing.toolKey } : {}),
                 });
@@ -5203,11 +5249,21 @@ export function EngravePanel(): JSX.Element {
                 data-testid="engrave-run-rows"
                 style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
               >
-                {runTicks}
-                {runTimeText !== null && (
-                  <span data-testid="engrave-run-time" style={{ marginLeft: 'auto', color: '#9aa4b0' }}>
-                    {runTimeText}
+                {/* #888 — a run that stopped before posting says ONE sentence: three "not … yet"
+                    rows said the same thing three more times. */}
+                {runRefused ? (
+                  <span data-testid="engrave-run-refused" style={{ color: '#c8d3de' }}>
+                    {runRefusedBudget ? 'Not generated: the goal is over the planning budget.' : 'Not generated.'}
                   </span>
+                ) : (
+                  <>
+                    {runTicks}
+                    {runTimeText !== null && (
+                      <span data-testid="engrave-run-time" style={{ marginLeft: 'auto', color: '#9aa4b0' }}>
+                        {runTimeText}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -5241,8 +5297,13 @@ export function EngravePanel(): JSX.Element {
                 </p>
               )}
             {/* #432 review R11 — the facing program is its own file: name the cutter it runs, or
-                the reason it was withheld. Absent when the job does not face. */}
-            {facingJob && <RunRow testid="engrave-run-facing" state={rowFacing} text={rowFacingText} />}
+                the reason it was withheld. Absent when the job does not face.
+                #888 — quiet while the MAIN program is refused (facing was not the failure, and
+                "clear the reason" named a reason it never gave), and it states the plan's own
+                "every part of the top is cut away" fact when the run carries it. */}
+            {!runRefused && (facingJob || facingYielded) && (
+              <RunRow testid="engrave-run-facing" state={rowFacing} text={rowFacingText} />
+            )}
             {/* #277 — what the last measured run of this program actually took, from a record
                 file a person filled in. It sits BESIDE the estimate, never in place of it: the
                 figure above is the program's planning estimate, and this is a reading with a
@@ -5266,18 +5327,21 @@ export function EngravePanel(): JSX.Element {
               >
                 {firstRunErrorText ?? `${runErrors.length} error${runErrors.length === 1 ? '' : 's'} outstanding.`}
                 {runErrors.length > 1 && ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'})`}
-                {/* #832 — the budget's presses, each NAMED: the recommended one first, then the
-                    step-down alternative and the place to split. No bare "Fix": every press says
-                    what it will do. The budget finding has no generic fix any more — it has these. */}
+                {/* #888 — the budget's three presses, in the operator's words, each saying what it
+                    costs: coarsen, thicken the layers, or split the depth into two setups. The
+                    numbers that made the decision live under Technical, not in the sentence. The
+                    split press is drawn only when a two-band split actually fits (the finding's
+                    `suggestedSplit`) — a press that cannot do what it says is not shown. */}
                 {runPitchFinding !== null && (
                   <>
                     {' '}
+                    Choose one:{' '}
                     <button
                       type="button"
                       data-testid="engrave-generate-at-pitch"
                       onClick={() => generateAtPitch(runPitchFinding)}
                     >
-                      Generate at {runPitchFinding.suggestedPitchMm} mm
+                      Coarser detail ({runPitchFinding.suggestedPitchMm} mm)
                     </button>
                     {runPitchFinding.suggestedStepDownMm !== undefined && (
                       <>
@@ -5287,14 +5351,22 @@ export function EngravePanel(): JSX.Element {
                           data-testid="engrave-generate-at-stepdown"
                           onClick={() => generateAtStepDown(runPitchFinding)}
                         >
-                          Raise the step-down to {runPitchFinding.suggestedStepDownMm} mm
+                          Thicker layers ({runPitchFinding.suggestedStepDownMm} mm step-down, rougher walls)
                         </button>
                       </>
                     )}
-                    {' '}
-                    <button type="button" data-testid="engrave-open-setups-to-split" onClick={openSetupsToSplit}>
-                      Open the setups to split it
-                    </button>
+                    {runPitchFinding.suggestedSplit !== undefined && (
+                      <>
+                        {' '}
+                        <button
+                          type="button"
+                          data-testid="engrave-split-goal"
+                          onClick={() => splitForBudget(runPitchFinding)}
+                        >
+                          Split into two setups
+                        </button>
+                      </>
+                    )}
                   </>
                 )}
                 {/* #725 B4 — the same sentence's Fix, in the footer at the button: the verifier's
@@ -5322,6 +5394,24 @@ export function EngravePanel(): JSX.Element {
                   </>
                 )}
               </p>
+            )}
+            {/* #888 — THE NUMBERS UNDER TECHNICAL. The sentence above says what the goal is in the
+                operator's terms; the moves, cells, pitch, step-down and budget that made the
+                decision are a fact to look at when someone wants them, not the message. */}
+            {runPitchFinding !== null && runPitchFinding.budgetMoves !== undefined && (
+              <details data-testid="engrave-run-budget-technical" style={{ margin: '0 0 6px' }}>
+                <summary style={{ ...MUTED, cursor: 'pointer', listStyle: 'none' }}>Technical</summary>
+                <p style={{ ...MUTED, margin: '2px 0 0', lineHeight: 1.45 }}>
+                  About {runPitchFinding.budgetMoves.toLocaleString('en-US')} moves on{' '}
+                  {runPitchFinding.budgetCells?.toLocaleString('en-US') ?? '—'} cells at{' '}
+                  {runPitchFinding.budgetPitchMm ?? runPitchFinding.suggestedPitchMm} mm,{' '}
+                  {runPitchFinding.budgetStepDownMm ?? '—'} mm step-down; the app’s budget is{' '}
+                  {runPitchFinding.budgetLimit?.toLocaleString('en-US') ?? '—'} moves.
+                  {runPitchFinding.suggestedSplit !== undefined
+                    ? ` A two-setup split takes ${runPitchFinding.suggestedSplit.firstMm} mm from the top and ${runPitchFinding.suggestedSplit.secondMm} mm from the flipped side — about ${runPitchFinding.suggestedSplit.movesEach.toLocaleString('en-US')} moves each.`
+                    : ' No two-setup depth split puts both programs under the budget.'}
+                </p>
+              </details>
             )}
             {/* #803 (as the manager asked at the #792 hand-in) — SAVE SAYS NOTHING HERE. Save is
                 not on this screen any more: it is the File ▾ menu's item, and the reason it is

@@ -291,6 +291,44 @@ export function planFlipSetups(
 }
 
 /**
+ * #888 — THE BUDGET'S SPLIT, as setups: the goal cut as a top band and a bottom band, each from
+ * its own side of the stock (the bottom band with the stock turned over, registered on the same
+ * dowel holes #872 uses). Each side's goal copy states its band (`bandMm`), and the generator
+ * floors that side's cut there — so one program per side, each about half the levels, each under
+ * the move budget the finding states.
+ *
+ * The plan's numbers come from the finding (`suggestedSplit`), which was computed with the
+ * generator's OWN move model: this function does not re-derive them, or the press and the sentence
+ * could disagree about what fits. A job that already states setups, or a plan the setups engine
+ * refuses, is refused with its reason rather than half-built.
+ */
+export function splitGoalForBudget(
+  job: EngraveJob,
+  target: EngraveTargetObject,
+  split: { firstMm: number; secondMm: number },
+  tools?: readonly { key: string; tool: Tool }[],
+): FlipSetupsResult {
+  let plan: FlipSetupsResult;
+  try {
+    plan = planFlipSetups(job, target, ['top', 'bottom'], tools);
+  } catch (e) {
+    // The goal's bytes are not a mesh the app can read: the press states the reason instead of
+    // throwing into the panel.
+    return { ok: false, reason: e instanceof Error ? e.message : 'the goal could not be read' };
+  }
+  if (!plan.ok) return plan;
+  const [first, second] = plan.goals;
+  if (first === undefined || second === undefined) return { ok: false, reason: 'the split needs both sides' };
+  return {
+    ...plan,
+    goals: [
+      { ...first, bandMm: split.firstMm },
+      { ...second, bandMm: split.secondMm },
+    ],
+  };
+}
+
+/**
  * The hold's two holes in a setup's mounted work XY. The transform is the SAME isometry the goal
  * went through, so the pins are the physical holes and never a guessed mirror; a setup that turns
  * the stock so the holes no longer run vertically (a quarter turn) cannot use them and states

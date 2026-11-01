@@ -78,6 +78,7 @@ import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
+import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { primitiveHeightfield, surfacePrimitiveWord, surfacePrimitivesOf, type SurfacePrimitive } from '@/engine/cnc/engrave/primitiveSurface';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -168,6 +169,7 @@ import {
   planSurfaceRest,
   restResidualVisible,
   sampleGoalHeightfield,
+  goalClearBand,
   suggestedRestRadiusMm,
   surfaceResidual,
   type SampleGoalOpts,
@@ -4751,15 +4753,14 @@ export function generateGoalProgram(
   // plane between the two fillets the ball necessarily leaves against the part and against the
   // stock outside the ring (each one radius wide on a tall wall). A band of exactly one diameter
   // lets the two fillets meet, and the "cleared" floor then sits a radius above the base.
-  const clearAround = settings.clearAround ?? 'ring';
+  // #888 — the ONE reader of the clear band (`goalClearBand`), shared with the top-face measure
+  // that decides whether facing has anything to skim. The step-over widens the ring exactly as
+  // this block always did.
   const ringStepOverMm = settings.finishStepOverMm ?? resolved.params.stepOver;
-  const ringWidthMm = (cuttingDiameter(tool) ?? 0) + (ringStepOverMm > 0 ? ringStepOverMm : 0);
-  const clear =
-    goal.format === 'png' || isMold(goal) || clearAround === 'none' || (clearAround === 'ring' && !(ringWidthMm > 0))
-      ? null
-      : clearAround === 'whole'
-        ? ({ kind: 'whole' } as const)
-        : ({ kind: 'ring', widthMm: ringWidthMm } as const);
+  const { clear, ringWidthMm } = goalClearBand(goal, {
+    toolDiameterMm: cuttingDiameter(tool) ?? 0,
+    stepOverMm: ringStepOverMm > 0 ? ringStepOverMm : 0,
+  });
   const sampleClear =
     clear === null
       ? {}
@@ -4878,8 +4879,15 @@ export function generateGoalProgram(
     cutterReach !== null && goalDepth > cutterReach.mm + 1e-9 && goal.cutWithinReach === true
       ? Number((cutterReach.mm - GOAL_BAND_CLEARANCE_MM).toFixed(3))
       : null;
-  const topBandMm = bandMm !== null && bandMm > 0 ? bandMm : null;
-  const depthLimitZ = topBandMm === null ? null : -topBandMm;
+  // #888 — THE SPLIT'S OWN BAND. A goal copy made by the budget split names how deep ITS side cuts
+  // below the goal's own highest surface; the floor it states wins over the reach-derived one,
+  // because the split chose it to keep this program under the move budget. Measured from the
+  // placement's top (not the blank's) so the same number splits the goal in the flipped frame,
+  // where the goal's own top is the stock's underside. Absent on every goal that has not been split.
+  const statedBandMm = goal.bandMm !== undefined && goal.bandMm > 0 ? goal.bandMm : null;
+  const topBandMm = statedBandMm === null && bandMm !== null && bandMm > 0 ? bandMm : null;
+  const depthLimitZ =
+    statedBandMm !== null ? goal.position.z - statedBandMm : topBandMm === null ? null : -topBandMm;
 
   // #862 — THE CLEAR BAND'S WALL, as the rim finish is told it: from the stock top down to the
   // band's own floor — the goal's base plane, or the #785 top-band clamp when the operator chose
@@ -4941,19 +4949,47 @@ export function generateGoalProgram(
     // budget. Both are stated, so the sentence names two numbers rather than one and a verb.
     const suggestedStepDown =
       Math.ceil(feeds.stepDown * (moveEstimate.moves / GOAL_MOVE_BUDGET) * 1.05 * 100) / 100;
+    // #888 — THE DEPTH SPLIT, IF TWO BANDS FIT. The budget is a per-PROGRAM limit (the CAM holds
+    // every move at once), so a goal cut as a top band and a bottom band — each from its own side
+    // of the stock — is two programs, each at half the levels. The two halves meet wherever they
+    // meet; each side's band is stated on its own goal copy (`bandMm`). Offered only when BOTH
+    // bands fit the budget and the chosen cutter can reach the deeper half, so the press never
+    // builds a job that refuses again. A goal already cutting a band (a split side, or the
+    // #785 top-band cut) is not split.
+    const levelsForBand = (bandMm: number): number =>
+      Math.max(1, Math.ceil((bandMm + allowanceMm) / feeds.stepDown));
+    const movesForBand = (bandMm: number): number => moveEstimate.cells * (levelsForBand(bandMm) + 1);
+    const firstBandMm = Number((moveEstimate.depth / 2).toFixed(3));
+    const secondBandMm = Number((moveEstimate.depth - firstBandMm).toFixed(3));
+    const splitMoves = Math.max(movesForBand(firstBandMm), movesForBand(secondBandMm));
+    const splitReachFits =
+      cutterReach === null || Math.max(firstBandMm, secondBandMm) <= cutterReach.mm - GOAL_BAND_CLEARANCE_MM + 1e-9;
+    const suggestedSplit =
+      statedBandMm === null &&
+      goal.cutWithinReach !== true &&
+      moveEstimate.depth > 0 &&
+      splitReachFits &&
+      splitMoves <= GOAL_MOVE_BUDGET
+        ? { firstMm: firstBandMm, secondMm: secondBandMm, movesEach: splitMoves }
+        : undefined;
     const finding: JobFinding = {
       severity: 'error',
       code: 'goal-program-too-big',
       targetId: goal.id,
       suggestedPitchMm: suggestedPitch,
       suggestedStepDownMm: suggestedStepDown,
+      // #888 — the numbers the operator does not count, folded under Technical.
+      budgetMoves: moveEstimate.moves,
+      budgetCells: moveEstimate.cells,
+      budgetLimit: GOAL_MOVE_BUDGET,
+      budgetPitchMm: moveEstimate.pitch,
+      budgetStepDownMm: feeds.stepDown,
+      ...(suggestedSplit === undefined ? {} : { suggestedSplit }),
+      // #888 — the plain sentence (the panel adds " Choose one:" and its presses): what the goal
+      // is, in the operator's units. Moves, cells and the budget are the Technical line's.
       message:
-        `The goal would need about ${moveEstimate.moves.toLocaleString('en-US')} moves — ` +
-        `${Number(moveEstimate.depth.toFixed(3))} mm deep at a ${feeds.stepDown} mm step-down on ` +
-        `${moveEstimate.cells.toLocaleString('en-US')} cells at ${Number(moveEstimate.pitch.toFixed(4))} mm — and the ` +
-        `app's budget is ${GOAL_MOVE_BUDGET.toLocaleString('en-US')}. A budget limit, not a fault: ` +
-        `coarsen the grid to about ${suggestedPitch} mm, raise the step-down to about ${suggestedStepDown} mm, ` +
-        `or cut the goal in two setups.`,
+        `This goal is too detailed to plan at ${Number(moveEstimate.pitch.toFixed(4))} mm in one go ` +
+        `(${Number(moveEstimate.depth.toFixed(3))} mm deep).`,
     };
     return {
       ...base,
@@ -5573,6 +5609,12 @@ export function generateGoalProgram(
           ? []
           : [
               `Cut only the stock's top ${Number(topBandMm.toFixed(3))} mm (this cutter's reach less ${GOAL_BAND_CLEARANCE_MM} mm clearance); the rest of the goal is left in the stock.`,
+            ]),
+        // #888 — one side of the budget's depth split: what this program takes and what it leaves.
+        ...(statedBandMm === null
+          ? []
+          : [
+              `This side cuts the top ${Number(statedBandMm.toFixed(3))} mm of the goal; the other side of the split takes the rest.`,
             ]),
       ],
     } satisfies GoalSurfaceFacts,
@@ -7304,7 +7346,14 @@ function generateOneProgram(
   // the facing artefact is built at all; it never touches the ENGRAVING program, which stays in the
   // document's frame (Z0 = the faced surface) because the re-touch re-zeros Z there between the two
   // programs. Slice 3 orders the two; slice 4 is the re-touch itself.
-  const facingDepth = plan.facing?.depth ?? 0;
+  //
+  // #888 — A SEEDED FACING CHOICE YIELDS TO THE PLAN. The finish's default (`source: 'seed'`) was
+  // written when the blank was chosen, before the goal existed. If the plan cuts the whole stock
+  // top away, there is nothing to skim: no file is built, and the result says why. A person's own
+  // press (`'user'`, and every document written before the key) is always honoured.
+  const facingTopFace = plan.facing === null ? null : jobTopFace(job, { tool });
+  const facingYieldsToPlan = job.facing?.source === 'seed' && facingTopFace !== null && !facingTopFace.keeps;
+  const facingDepth = plan.facing !== null && !facingYieldsToPlan ? plan.facing.depth : 0;
   if (tool.shape === 'drill') {
     // #434 — A DRILL BIT'S OWN PROGRAM. `cuttingForTrace` and `feedsFor` both refuse a drill (it is
     // not a milling cutter), so this branch is taken BEFORE either. One operation per drill item,
@@ -7922,7 +7971,7 @@ function generateOneProgram(
           span === 'none' ? 'none' : 'first',
           liftOverStock,
         )
-      : { nc: null, verify: null, toolKey: null, error: null, cam: null };
+      : { nc: null, verify: null, toolKey: null, error: facingYieldsToPlan ? NO_FACING_TOP_REASON : null, cam: null };
 
   // 7. the post-processor's text, with this file's share of the vacuum words: `span` when the
   // engraving is the run's only program (or the facing file was withheld), `spanAfterFacing(span)`

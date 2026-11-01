@@ -2680,7 +2680,7 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
     withFinish('rough');
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-facing-on'));
-    expect(job().facing).toEqual({ enabled: true, depth: 0.5 });
+    expect(job().facing).toEqual({ enabled: true, depth: 0.5, source: 'user' });
     expect((screen.getByTestId('engrave-facing-depth') as HTMLInputElement).value).toBe('0.5');
     expect(screen.getByTestId('engrave-facing-depth-why').textContent).toContain(
       "Rough stock, so the shop's 0.5 mm skim is filled in",
@@ -2692,7 +2692,7 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
     render(<EngravePanel />);
     expect(screen.getByTestId('engrave-facing-why').textContent).toContain('a finished face is cut as it is');
     fireEvent.click(screen.getByTestId('engrave-facing-off'));
-    expect(job().facing).toEqual({ enabled: false, depth: 0.2 });
+    expect(job().facing).toEqual({ enabled: false, depth: 0.2, source: 'user' });
     expect(screen.getByTestId('engrave-facing-state').textContent).toBe('facing off');
     expect(screen.queryByTestId('engrave-facing-depth')).toBeNull();
   });
@@ -2706,9 +2706,9 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
     expect(screen.getByTestId('engrave-facing-depth-why').textContent).toContain('Your number');
     // Off and back on again keeps what was typed: the toggle is not the depth field's reset.
     fireEvent.click(screen.getByTestId('engrave-facing-off'));
-    expect(job().facing).toEqual({ enabled: false, depth: 0.35 });
+    expect(job().facing).toEqual({ enabled: false, depth: 0.35, source: 'user' });
     fireEvent.click(screen.getByTestId('engrave-facing-on'));
-    expect(job().facing).toEqual({ enabled: true, depth: 0.35 });
+    expect(job().facing).toEqual({ enabled: true, depth: 0.35, source: 'user' });
   });
 
   it('reads a badge blank as printed even when no shelf entry names a finish', () => {
@@ -2730,7 +2730,7 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
     render(<EngravePanel />);
     expect(screen.getByTestId('engrave-facing-why').textContent).toContain('finish is not recorded');
     fireEvent.click(screen.getByTestId('engrave-facing-on'));
-    expect(job().facing).toEqual({ enabled: true, depth: 0.2 });
+    expect(job().facing).toEqual({ enabled: true, depth: 0.2, source: 'user' });
   });
 
   // #474/#493 — the maintainer, 2026-10-17: facing plastic will never work. The material withholds
@@ -2773,7 +2773,7 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
     expect(screen.getByTestId('engrave-facing-state').textContent).toBe('facing on');
     expect(screen.queryByTestId('engrave-facing-depth')).toBeNull();
     fireEvent.click(screen.getByTestId('engrave-facing-off'));
-    expect(job().facing).toEqual({ enabled: false, depth: 0.5 });
+    expect(job().facing).toEqual({ enabled: false, depth: 0.5, source: 'user' });
   });
 });
 
@@ -4388,6 +4388,245 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     expect(warning?.textContent).toContain("only the stock's top 11 mm is cut");
   });
 
+  /** #888 — a tiny valid STL (a 10 × 10 ramp falling 5 mm in Z) for the split/sunk-goal presses. */
+  function rampStl(): string {
+    const tris: [number, number, number][][] = [
+      [[0, 0, 0], [10, 0, -5], [10, 10, -5]],
+      [[0, 0, 0], [10, 10, -5], [0, 10, -5]],
+    ];
+    const buf = new ArrayBuffer(84 + tris.length * 50);
+    const dv = new DataView(buf);
+    dv.setUint32(80, tris.length, true);
+    let off = 84;
+    for (const t of tris) {
+      off += 12;
+      for (const v of t) {
+        dv.setFloat32(off, v[0], true);
+        dv.setFloat32(off + 4, v[1], true);
+        dv.setFloat32(off + 8, v[2], true);
+        off += 12;
+      }
+      off += 2;
+    }
+    return Buffer.from(new Uint8Array(buf)).toString('base64');
+  }
+
+  it('#888 the budget refusal is one plain sentence with three named presses, and no split when none fits', async () => {
+    resetCncMode();
+    const goal: EngraveTargetObject = {
+      id: 'goal-budget',
+      name: 'big.stl',
+      format: 'stl',
+      sha256: 'd'.repeat(64),
+      data: 'AAAA',
+      size: { x: 60, y: 40, z: 50 },
+      position: { x: 50, y: 30, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+    };
+    act(() => {
+      useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal } });
+    });
+    const finding = {
+      severity: 'error' as const,
+      code: 'goal-program-too-big' as const,
+      targetId: goal.id,
+      suggestedPitchMm: 0.24,
+      suggestedStepDownMm: 1.55,
+      budgetMoves: 58_994_858,
+      budgetCells: 349_082,
+      budgetLimit: 12_000_000,
+      budgetPitchMm: 0.1,
+      budgetStepDownMm: 0.3,
+      message: 'This goal is too detailed to plan at 0.1 mm in one go (50 mm deep).',
+    };
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: false,
+          stage: 'findings',
+          findings: [finding],
+          feeds: null,
+          cam: null,
+          nc: null,
+          verify: null,
+          programs: [],
+          errors: [{ stage: 'findings', message: finding.message }],
+        } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated,
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+    render(<EngravePanel />);
+    // #888 — ONE status sentence instead of four "not … yet" rows.
+    expect(screen.getByTestId('engrave-run-refused').textContent).toBe(
+      'Not generated: the goal is over the planning budget.',
+    );
+    expect(screen.queryByTestId('engrave-run-toolpath')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-verified')).toBeNull();
+    const line = screen.getByTestId('engrave-run-errors');
+    expect(line.textContent).toContain('too detailed to plan at 0.1 mm in one go');
+    expect(line.textContent).toContain('Choose one:');
+    expect(screen.getByTestId('engrave-generate-at-pitch').textContent).toContain('Coarser detail (0.24 mm)');
+    expect(screen.getByTestId('engrave-generate-at-stepdown').textContent).toContain(
+      'Thicker layers (1.55 mm step-down, rougher walls)',
+    );
+    // The numbers are under Technical, not in the sentence.
+    const technical = screen.getByTestId('engrave-run-budget-technical');
+    expect(technical.textContent).toContain('58,994,858');
+    expect(technical.textContent).toContain('349,082');
+    expect(technical.textContent).toContain('12,000,000');
+    // No split fits this goal, so the press is not shown at all.
+    expect(screen.queryByTestId('engrave-split-goal')).toBeNull();
+  });
+
+  it('#888 the split press builds two setups whose bands are the finding’s numbers', async () => {
+    resetCncMode();
+    const goal: EngraveTargetObject = {
+      id: 'goal-split',
+      name: 'ramp.stl',
+      format: 'stl',
+      sha256: 'e'.repeat(64),
+      data: rampStl(),
+      size: { x: 10, y: 10, z: 5 },
+      position: { x: 50, y: 30, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+    };
+    act(() => {
+      useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal } });
+    });
+    const finding = {
+      severity: 'error' as const,
+      code: 'goal-program-too-big' as const,
+      targetId: goal.id,
+      suggestedPitchMm: 0.24,
+      suggestedStepDownMm: 1.55,
+      budgetMoves: 20_000_000,
+      budgetCells: 100_000,
+      budgetLimit: 12_000_000,
+      budgetPitchMm: 0.05,
+      budgetStepDownMm: 0.3,
+      suggestedSplit: { firstMm: 2.5, secondMm: 2.5, movesEach: 9_000_000 },
+      message: 'This goal is too detailed to plan at 0.05 mm in one go (5 mm deep).',
+    };
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: false,
+          stage: 'findings',
+          findings: [finding],
+          feeds: null,
+          cam: null,
+          nc: null,
+          verify: null,
+          programs: [],
+          errors: [{ stage: 'findings', message: finding.message }],
+        } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated,
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () =>
+        ({ ok: false, stage: 'findings', findings: [], feeds: null, cam: null, nc: null, verify: null, programs: [], errors: [] }) as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    render(<EngravePanel />);
+    const press = screen.getByTestId('engrave-split-goal');
+    expect(press.textContent).toContain('Split into two setups');
+    fireEvent.click(press);
+    const job = useEngraveJobStore.getState().job;
+    expect(job.setups).toHaveLength(2);
+    const goals = job.targetObjects ?? [];
+    expect(goals).toHaveLength(2);
+    expect(goals[0]!.bandMm).toBeCloseTo(2.5, 6);
+    expect(goals[1]!.bandMm).toBeCloseTo(2.5, 6);
+    // Each side names its own setup; the goal's own single form is gone.
+    expect(goals[0]!.setupId).toBe(job.setups![0]!.id);
+    expect(goals[1]!.setupId).toBe(job.setups![1]!.id);
+    setEngraveRunClientLoader(null);
+  });
+
+  it('#888 the facing row is quiet while the main program is refused', async () => {
+    resetCncMode();
+    act(() => {
+      const base = defaultEngraveJob();
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          // One label: a job with no work at all is blocked before the footer is drawn.
+          labels: base.labels.slice(0, 1),
+          shapes: [],
+          facing: { enabled: true, depth: 0.5, source: 'user' },
+        },
+      });
+    });
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: false,
+          stage: 'findings',
+          findings: [],
+          feeds: null,
+          cam: null,
+          nc: null,
+          verify: null,
+          programs: [],
+          errors: [{ stage: 'findings', message: 'the job has no usable cutter' }],
+        } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated,
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-run-refused').textContent).toBe('Not generated.');
+    expect(screen.queryByTestId('engrave-run-facing')).toBeNull();
+  });
+
+  it('#888 a seeded facing choice yields when the plan cuts the whole top away, and a press takes it back', async () => {
+    resetCncMode();
+    const goal: EngraveTargetObject = {
+      id: 'goal-sunk',
+      name: 'sunk.stl',
+      format: 'stl',
+      sha256: 'f'.repeat(64),
+      data: rampStl(),
+      size: { x: 100, y: 60, z: 5 },
+      // The 10 × 10 ramp scaled to the blank's own 100 × 60: its footprint covers the stock and
+      // its whole surface is below the top (sunk 6 mm), so the plan leaves no top to skim.
+      scale: { x: 10, y: 6, z: 1 },
+      position: { x: 50, y: 30, z: -6 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+    };
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...defaultEngraveJob(),
+          labels: [],
+          shapes: [],
+          targetObject: goal,
+          facing: { enabled: true, depth: 0.5, source: 'seed' },
+        },
+      });
+    });
+    render(<EngravePanel />);
+    const line = screen.getByTestId('engrave-facing-line');
+    expect(line.textContent).toContain('off — every part of the top is cut away');
+    expect(screen.getByTestId('engrave-facing-why').textContent).toContain(
+      'No facing: every part of the top is cut away.',
+    );
+    // The operator can still turn it on: the press is a person's choice.
+    fireEvent.click(screen.getByTestId('engrave-facing-on'));
+    const facing = useEngraveJobStore.getState().job.facing;
+    expect(facing?.enabled).toBe(true);
+    expect(facing?.source).toBe('user');
+  });
+
   it('#785 a goal-program-too-big refusal offers the pitch that fits, and one press writes it', async () => {
     const goal: EngraveTargetObject = {
       id: 'goal-pitch',
@@ -4409,12 +4648,14 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
       code: 'goal-program-too-big' as const,
       targetId: goal.id,
       suggestedPitchMm: 0.25,
-      // #832 — the finding now states the other press too, and the sentence says it is a budget.
+      // #832 — the finding now states the other press too; #888 gives the sentence its plain form.
       suggestedStepDownMm: 0.42,
-      message:
-        "The goal would need about 22,000,000 moves — the app's budget is 12,000,000. A budget " +
-        'limit, not a fault: coarsen the grid to about 0.25 mm, raise the step-down to about ' +
-        '0.42 mm, or cut the goal in two setups.',
+      budgetMoves: 22_000_000,
+      budgetCells: 10_000,
+      budgetLimit: 12_000_000,
+      budgetPitchMm: 0.02,
+      budgetStepDownMm: 0.3,
+      message: 'This goal is too detailed to plan at 0.02 mm in one go (30 mm deep).',
     };
     act(() => {
       useEngraveRunStore.setState({
@@ -4446,20 +4687,15 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     expect(line.style.color).toBe('rgb(224, 192, 122)');
     expect(line.textContent).not.toContain('▸ Fix');
     const pitchButton = screen.getByTestId('engrave-generate-at-pitch');
-    expect(pitchButton.textContent).toContain('Generate at 0.25 mm');
+    expect(pitchButton.textContent).toContain('Coarser detail (0.25 mm)');
     const stepButton = screen.getByTestId('engrave-generate-at-stepdown');
-    expect(stepButton.textContent).toContain('Raise the step-down to 0.42 mm');
-    expect(screen.getByTestId('engrave-open-setups-to-split').textContent).toContain('Open the setups');
+    expect(stepButton.textContent).toContain('Thicker layers (0.42 mm step-down, rougher walls)');
+    // #888 — no split fits this goal, so no split press: a dead-end press is not drawn.
+    expect(screen.queryByTestId('engrave-split-goal')).toBeNull();
 
     // The step-down press is the same kind of choice as the pitch: it writes the goal's setting.
     fireEvent.click(stepButton);
     expect(useEngraveJobStore.getState().job.targetObject?.surface?.roughStepDownMm).toBe(0.42);
-
-    // And the split suggestion is a place to go.
-    fireEvent.click(screen.getByTestId('engrave-open-setups-to-split'));
-    expect(useStartWizardStore.getState().open).toBe(true);
-    expect(useStartWizardStore.getState().initialStep).toBe('holding');
-    act(() => useStartWizardStore.getState().closeWizard());
 
     fireEvent.click(pitchButton);
     // The press is the choice: the goal's own grid records the pitch the refusal suggested.

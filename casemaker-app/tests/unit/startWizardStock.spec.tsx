@@ -300,7 +300,7 @@ describe('the material-first start (#418)', () => {
     });
     await screen.findByTestId('engrave-setup-step-holding');
     expect(useEngraveJobStore.getState().job.stock.material).toBe(material);
-    expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0 });
+    expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0, source: 'seed' });
   });
 
   it('Back to stock after the project was made: a changed piece re-sizes the drawn part', async () => {

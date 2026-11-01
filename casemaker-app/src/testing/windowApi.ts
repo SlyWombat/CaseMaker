@@ -191,6 +191,12 @@ export interface CaseMakerTestApi {
   /** #723 R-4 e2e — the open job's target object as the stores hold it (bytes included?). */
   engraveTargetState(): { role: string | null; enabled: boolean; format: string; hasData: boolean } | null;
   /**
+   * #888 e2e — the job's setups and each side's goal, with the depth band that side cuts (mm) and
+   * the pin count it registers on. Lets a spec prove the budget split BUILT two bands without
+   * waiting for two programs at the budget edge to generate.
+   */
+  engraveSetups(): { id: string; goalId: string | null; bandMm: number | null; pinCount: number }[];
+  /**
    * #811 e2e — THE GOAL'S DRAWING as the preview worker built it: the mode and the two volumes'
    * closed-form sizes (mm³). A spec can then tell "the picture changed with the mode toggle" from
    * "the legend's word changed", without reading pixels. Null until a goal drawing exists.
@@ -527,6 +533,19 @@ export function installCaseMakerTestApi(): void {
       const t = useEngraveJobStore.getState().job.targetObject;
       if (t === undefined) return null;
       return { role: t.role ?? null, enabled: t.enabled, format: t.format, hasData: t.data !== undefined };
+    },
+    engraveSetups() {
+      const job = useEngraveJobStore.getState().job;
+      const goals = job.targetObjects ?? (job.targetObject === undefined ? [] : [job.targetObject]);
+      return (job.setups ?? []).map((setup) => {
+        const goal = goals.find((g) => g.setupId === setup.id) ?? null;
+        return {
+          id: setup.id,
+          goalId: goal?.id ?? null,
+          bandMm: goal?.bandMm ?? null,
+          pinCount: setup.pins?.at.length ?? 0,
+        };
+      });
     },
     engraveTargetPlacement() {
       const t = useEngraveJobStore.getState().job.targetObject;

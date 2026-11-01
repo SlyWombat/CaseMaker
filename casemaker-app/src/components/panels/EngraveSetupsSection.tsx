@@ -373,6 +373,8 @@ export function EngraveSetupsSection({
     for (const primitive of job.primitives ?? []) {
       map.set(primitive.id, primitive.name ?? primitiveLabel(primitive));
     }
+    // #888 item 6 — a goal is a setup item now: its row reads the mesh's own name.
+    for (const goal of jobTargetObjects(job)) map.set(goal.id, goal.name);
     return map;
   }, [job]);
   const itemName = (id: string): string => names.get(id) ?? id;

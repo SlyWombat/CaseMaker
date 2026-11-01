@@ -867,6 +867,13 @@ A facing job is **two programs** — a facing pass with its own flat cutter,
 then the program from the faced top — each with its own tool-length calibration and
 its own Z0. The run sheet orders them probe → face → re-touch → cut.
 
+The finish's default is a **seed**, and the plan can turn it off (#888): when the goal's own cut
+surface leaves none of the blank's original top at the top height, there is nothing to skim — the
+Facing line reads "off — every part of the top is cut away" with the fact "No facing: every part
+of the top is cut away", and no facing program is posted. Pressing **Face the top** is a person's
+choice and is always honoured, even then. A goal that keeps any of the top (a smaller footprint,
+or a surface at the top height) keeps the finish's default as before.
+
 **Depth is bounded by every plane the job knows.** Each floor has to stay clear of a void's
 ceiling, the stock's underside, a layer boundary or a laminate's colour cap by the **boundary
 margin**. A two-colour blank's label chooses **surface** or **reveal** beside its depth, and
@@ -976,6 +983,9 @@ re-find. The **Setups** section (#471) is the job's ordered list of holds:
   of setup N.
 - **Re-plan** groups the job's cuts by the face each opens to and offers the directions that
   reach the most volume first. A direction the mount cannot hold is `unholdable` with the reason.
+  A **goal mesh is one of those cuts** (#888): its surface program is the setup's work, so a
+  goal job is not "empty" and Add setup offers the face its material is still reachable from —
+  the flipped side when the part does not reach the blank's bottom.
 - **Use this plan** writes the list; **Edit setups** materialises a one-setup job into an
   editable list. A saved list is authoritative: an item removed after it was saved is reported
   (`setup-item-missing`) and never silently rewritten.
@@ -1650,7 +1660,7 @@ simulation does report about one is the sweep's own list, next:
 | `target-mesh-unstored` | warning | The open job holds the mesh's bytes, but the browser refused to keep a copy in its mesh store (storage full, or a private window), so a reload would lose them (#728). | Save the job to a file — the file embeds the mesh — or free browser storage and import the mesh again. |
 | `goal-object-oversize` | warning (error when nothing of the goal is over the blank) | A target object marked as the shape to MAKE (its role is "goal", not a reference) extends past the blank. The row names, per axis and side, exactly what lies outside (#533, #784). Generate cuts the goal clipped to the blank, so the part outside the stock is not cut; it is an error only when none of the goal is over the blank at all. | Move the goal inward, scale it down (the row's size fields, its percent, or **Fit to the stock**), or use a larger blank. |
 | `goal-reach-short` | error | A goal is deeper than the reach the chosen cutter is known to have — its own stated flute, or Makera's catalogue number for the same cutter — so the holder would enter the part before the tip reaches the bottom (#785). The sentence names the goal's depth and that reach (and the longest reach you own, when it is another cutter), and names the top-band cut's depth when one is safe. | Scale the goal to that reach or less, cut it from both sides (a flip, one setup per side — #723 part 2), choose a longer cutter, or press **Cut the top N mm only**: the goal is cut as the stock's top band (the reach less 1 mm clearance) and the result states what is left. |
-| `goal-program-too-big` | error | The goal's program would need more moves than the app's stated budget (12 000 000), so building it could exhaust the tab (#785). The sentence states the estimated moves, the goal's depth, the step-down, the covered cells and the grid pitch, and suggests the grid pitch that fits both the move budget and the finishing pass's tip-field budget. | Press **Generate at N mm** — it writes that pitch onto the goal's grid and generates — or set the grid yourself, raise the roughing step-down, or cut the goal in two setups. |
+| `goal-program-too-big` | error | The goal's program would need more moves than the app's stated budget (12 000 000), so building it could exhaust the tab (#785). The sentence says what the goal is in the operator's terms — the grid pitch and the depth — and the estimated moves, cells, step-down and budget sit under its **Technical** fold (#888). | Choose one of its presses: **Coarser detail (N mm)** writes the pitch that fits onto the goal's grid and generates; **Thicker layers (N mm step-down, rougher walls)** raises the roughing step-down instead; **Split into two setups** — drawn only when both depth bands fit the budget — builds a top and a flipped bottom setup, each cutting its own band of the goal's depth, and generates. |
 | `goal-cut-top-band` | warning | The one-click top-band cut is in effect: the goal is deeper than the chosen cutter's known reach, and you chose to cut the stock's top band the cutter reaches safely (#785). The sentence states how much of the goal is left in the stock. | Nothing — this is the cut you chose. Cut the other side as a second setup, scale the goal, or choose a longer cutter to remove the rest. |
 | `goal-unreached` | warning | The top setup does not reach the whole of a goal's surface (#872): the sentence states the share it reproduces, how much faces away from the tool (downward faces and undercuts) and how much lies in an overhang's shadow, and — when one is worth a setup — the flip plan with its sides and the locating holes the first setup drills. The remainder is a flat face on a relief, so no plan is offered there. | Press **Add the N setups**: the sides become saved setups with the goal placed in each one's work frame, setup 1 drills two locating holes in the margin, setup 2 registers on them, and Generate runs — or leave it, the program posts and runs as it is. |
 | `goal-reach-unrecorded` | info | The chosen cutter states no flute length and no Makera catalogue row supplies one, so the depth it can reach is unchecked (#785). It is a stated assumption, not a block: the sweep's holder gate (`holder-unproven`) judges the run. | Record the cutter's flute in Manage › Tools. |

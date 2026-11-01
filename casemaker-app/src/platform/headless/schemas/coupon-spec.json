@@ -1203,6 +1203,14 @@
               "description": "True runs a facing pass before the job.",
               "type": "boolean"
             },
+            "source": {
+              "description": "Who chose: 'seed' (the finish's default) or 'user' (a person's press); omit as 'user'.",
+              "enum": [
+                "seed",
+                "user"
+              ],
+              "type": "string"
+            },
             "toolKey": {
               "anyOf": [
                 {
@@ -6201,6 +6209,12 @@
           "additionalProperties": false,
           "description": "Reference mesh the primitives are positioned against; omit for none.",
           "properties": {
+            "bandMm": {
+              "description": "Depth band this side of a split goal cuts, mm from its setup’s work top; omit to cut the whole depth.",
+              "exclusiveMinimum": 0,
+              "maximum": 200,
+              "type": "number"
+            },
             "chamfer": {
               "additionalProperties": false,
               "description": "Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.",
@@ -6462,6 +6476,12 @@
             "additionalProperties": false,
             "description": "An embedded mesh (STL/3MF, or a STEP the CAD kernel tessellated at import, #774): a reference the cutting volumes are positioned against, or a goal shape to make.",
             "properties": {
+              "bandMm": {
+                "description": "Depth band this side of a split goal cuts, mm from its setup’s work top; omit to cut the whole depth.",
+                "exclusiveMinimum": 0,
+                "maximum": 200,
+                "type": "number"
+              },
               "chamfer": {
                 "additionalProperties": false,
                 "description": "Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.",
@@ -7523,6 +7543,14 @@
                     "movingJawThickness": {
                       "description": "Moving jaw thickness in millimetres.",
                       "type": "number"
+                    },
+                    "proudSource": {
+                      "description": "Where the proud number came from: 'seat' (re-derived; the default when absent) or 'stated' (typed by a person).",
+                      "enum": [
+                        "seat",
+                        "stated"
+                      ],
+                      "type": "string"
                     },
                     "seat": {
                       "default": "ledge",

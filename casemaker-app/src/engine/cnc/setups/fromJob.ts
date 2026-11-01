@@ -24,9 +24,11 @@
  * holes, a combined region and a trace are not, and are left unmarked rather than guessed.
  */
 
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { drillHoles, sweptCuts } from '@/engine/cnc/engrave/partPlan';
-import type { Removal } from './types';
+import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
+import { targetObjectMesh } from '@/engine/import/targetObject';
+import type { Face, Removal } from './types';
 
 /**
  * The facing pass's removal id. It starts with `@`, which no item id minted by `newId` does, so a
@@ -104,12 +106,80 @@ function holeFootprints(job: EngraveJob): Map<string, { minX: number; maxX: numb
   return out;
 }
 
+/**
+ * #888 item 6 — A GOAL IS CUTTING WORK, so the planner counts it. A surface-a-mesh job's plans
+ * used to read "Setups (1) empty" and "Add setup is unavailable: the job has no cuts to plan"
+ * while the same job generated two programs: the goal is not an item in the document's lists, so
+ * it never became a removal. Each enabled goal becomes one removal, its placed box in the stock
+ * frame, opening to the top — and to the bottom too when the part does not reach the blank's
+ * bottom, because the material under it is taken from the flipped side.
+ *
+ * `volume` is the box's own volume, the relative weight the greedy grouping weighs (the same kind
+ * of estimate every other removal's volume is) — not a claim about the material actually removed.
+ * A mesh that cannot be read is skipped: its own row states the load refusal.
+ */
+function goalRemovals(job: EngraveJob): Removal[] {
+  const { length, width, thickness } = job.stock;
+  const targets = job.targetObjects ?? (job.targetObject === undefined ? [] : [job.targetObject]);
+  const out: Removal[] = [];
+  for (const goal of targets) out.push(...goalRemoval(goal, { length, width, thickness }));
+  return out;
+}
+
+function goalRemoval(goal: EngraveTargetObject, stock: { length: number; width: number; thickness: number }): Removal[] {
+  if ((goal.role ?? 'reference') !== 'goal' || !goal.enabled) return [];
+  const { length, width, thickness } = stock;
+  let mesh;
+  let place: ReturnType<typeof placeTarget>['place'];
+  try {
+    mesh = targetObjectMesh(goal);
+    if (mesh.triangleCount === 0) return [];
+    place = placeTarget(goal, mesh).place;
+  } catch {
+    return [];
+  }
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const bx of [mesh.bbox.min[0], mesh.bbox.max[0]]) {
+    for (const by of [mesh.bbox.min[1], mesh.bbox.max[1]]) {
+      for (const bz of [mesh.bbox.min[2], mesh.bbox.max[2]]) {
+        const [x, y, z] = place(bx, by, bz);
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+        // The work frame's top is the stock's top (z = 0); the stock frame counts up from the
+        // bottom, so the box is the work Z shifted by the thickness.
+        minZ = Math.min(minZ, z);
+        maxZ = Math.max(maxZ, z);
+      }
+    }
+  }
+  const lo: [number, number, number] = [Math.max(0, minX), Math.max(0, minY), Math.max(0, thickness + minZ)];
+  const hi: [number, number, number] = [Math.min(length, maxX), Math.min(width, maxY), Math.min(thickness, thickness + maxZ)];
+  if (!(hi[0] > lo[0] && hi[1] > lo[1] && hi[2] > lo[2])) return []; // wholly off the blank
+  const opensTo: Face[] = thickness + minZ > 0.01 ? ['top', 'bottom'] : ['top'];
+  return [
+    {
+      id: goal.id,
+      name: goal.name,
+      volume: (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]),
+      box: { min: lo, max: hi },
+      opensTo,
+    },
+  ];
+}
+
 export function removalsFrom(job: EngraveJob): Removal[] {
   const { length, width, thickness } = job.stock;
   const through = throughById(job);
   const connected = connectedById(job);
   const holes = holeFootprints(job);
-  const removals: Removal[] = [];
+  const removals: Removal[] = [...goalRemovals(job)];
 
   for (const cut of sweptCuts(job)) {
     const isThrough = through.get(cut.id) === true;

@@ -1224,6 +1224,31 @@ export function isMold(target: Pick<EngraveTargetObject, 'format' | 'goalMode'>)
 }
 
 /**
+ * #764/#888 — THE CLEAR BAND A GOAL'S PROGRAM CUTS AROUND ITS FOOTPRINT, from the goal's own
+ * settings. ONE reader, used by the CAM and by the top-face measure (#888), so the plan that is
+ * judged and the program that is cut cannot disagree about what is cleared. `stepOverMm` widens
+ * the ring as the CAM does; a caller that does not know it (the measure before a cutter is
+ * resolved) passes none, which only makes the ring narrower — a top reads as surviving a little
+ * more often, never less.
+ */
+export function goalClearBand(
+  goal: Pick<EngraveTargetObject, 'format' | 'goalMode' | 'surface'>,
+  opts: { toolDiameterMm?: number | null; stepOverMm?: number | null } = {},
+): { clear: { kind: 'ring'; widthMm: number } | { kind: 'whole' } | null; ringWidthMm: number } {
+  const settings = goal.surface ?? {};
+  const clearAround = settings.clearAround ?? 'ring';
+  const stepOver = opts.stepOverMm !== null && opts.stepOverMm !== undefined && opts.stepOverMm > 0 ? opts.stepOverMm : 0;
+  const ringWidthMm = (opts.toolDiameterMm ?? 0) + stepOver;
+  const clear =
+    goal.format === 'png' || isMold(goal) || clearAround === 'none' || (clearAround === 'ring' && !(ringWidthMm > 0))
+      ? null
+      : clearAround === 'whole'
+        ? ({ kind: 'whole' } as const)
+        : ({ kind: 'ring', widthMm: ringWidthMm } as const);
+  return { clear, ringWidthMm };
+}
+
+/**
  * #721 — turn an ITEM heightfield into the MOLD of the same part.
  *
  * The part's height above its own base at each covered cell (`z − baseZ`) becomes the cavity's

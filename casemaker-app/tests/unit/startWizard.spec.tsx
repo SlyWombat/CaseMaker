@@ -484,7 +484,7 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stockEntry?.finish).toBe('rough');
-    expect(job.facing).toEqual({ enabled: true, depth: 0.5 });
+    expect(job.facing).toEqual({ enabled: true, depth: 0.5, source: 'seed' });
   });
 
   it('a finished piece is seeded facing off — the face is cut as it is', async () => {
@@ -493,7 +493,7 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
     typePiece('finished');
     await start();
 
-    expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0.2 });
+    expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0.2, source: 'seed' });
   });
 
   it('the finish line states the rule once, with no consequence paragraph (#683, A8)', () => {

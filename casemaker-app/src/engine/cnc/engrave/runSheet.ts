@@ -95,6 +95,7 @@ import { VISE_BODY_DEPTH, jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
+import { NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
 import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
@@ -1413,6 +1414,17 @@ function facingSteps(
   const def = facingDefault(finish ?? 'unknown', job.stock.material);
   const stockWords = finish === null ? 'stock whose finish is not recorded' : `${FINISH_WORDS[finish]} stock`;
   const steps: RunSheetStep[] = [];
+
+  // #888 — A SEEDED CHOICE THE PLAN OVERRODE. The finish's default was written before the goal
+  // existed; when the plan cuts the whole top away no facing file is built, and the sheet states
+  // the fact rather than a "Face the top first" step that would not run.
+  if (facing.source === 'seed' && generated.facingError === NO_FACING_TOP_REASON) {
+    steps.push({
+      text: `${NO_FACING_TOP} The plan leaves none of the blank’s top at its own height, so there is nothing to skim; a facing choice made by hand would be run.`,
+      value: 'facing off',
+    });
+    return steps;
+  }
 
   // #474/#493 — no plastic is faced (wood and metal only). A job that still carries a pass (written
   // before the rule, or edited elsewhere) is called out rather than presented as a step to run.

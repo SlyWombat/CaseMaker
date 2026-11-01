@@ -987,6 +987,15 @@ const targetObjectSchema = z
       .boolean()
       .optional()
       .describe('Cut only the top band the chosen cutter reaches when the goal is deeper than its reach; omit to refuse (the default).'),
+    // #888 — the depth band one side of a split goal cuts, from ITS OWN setup's work top. Optional
+    // like `cutWithinReach`: absent cuts the whole depth, so older documents round-trip unchanged.
+    bandMm: z
+      .number()
+      .finite()
+      .positive()
+      .max(200)
+      .optional()
+      .describe('Depth band this side of a split goal cuts, mm from its setup’s work top; omit to cut the whole depth.'),
     surface: surfaceSettingsSchema
       .optional()
       .describe('The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.'),
@@ -1781,6 +1790,12 @@ const cutOverrideSchema = z.object({
  */
 const facingSchema = z.object({
   enabled: z.boolean().describe('True runs a facing pass before the job.'),
+  // #888 — 'seed' is the finish's default and yields to a plan that cuts the whole top away;
+  // 'user' is a person's press. Optional: an absent key reads as 'user', so old jobs keep theirs.
+  source: z
+    .enum(['seed', 'user'])
+    .optional()
+    .describe("Who chose: 'seed' (the finish's default) or 'user' (a person's press); omit as 'user'."),
   depth: z
     .number()
     .finite()
