@@ -917,12 +917,20 @@ export function buildPocketOp(board: BoardProfile, stand: StandParams): BuildOp 
   const innerX1 = innerX0 + d.innerW;
   const cavity = translate([innerX0, T, T], cube([d.innerW, d.innerH, d.pocketD + OVER]));
   const lead = POCKET_LEAD;
-  // Sides: triangle in (x, z), down the wall's full height.
+  // #839 — THE LEAD CUTS OVERSHOOT THE MOUTH BY `OVER`. Each wedge's top edge used to lie exactly
+  // in the tray's top plane, and manifold 3.5's boolean leaves those coincident faces as a
+  // ZERO-VOLUME shell on that plane (a "second component" with no volume — the pocket-tray split).
+  // Raising the wedge's top corner to `mouth + OVER` extends the SAME 45° face (the hypotenuse
+  // still passes through the old top-corner point) into the air above the part, so no cut face is
+  // coplanar with a solid's any more and the boolean has nothing to leave behind. The part's
+  // geometry below the mouth is unchanged.
+  const leadTop = mouth + OVER;
+  // Sides: wedge in (x, z), down the wall's full height.
   const leadLeft = triPrismY(
     [
       [innerX0, mouth - lead],
-      [innerX0, mouth],
-      [innerX0 - lead, mouth],
+      [innerX0, leadTop],
+      [innerX0 - lead - OVER, leadTop],
     ],
     T,
     d.plateH + OVER,
@@ -930,8 +938,8 @@ export function buildPocketOp(board: BoardProfile, stand: StandParams): BuildOp 
   const leadRight = triPrismY(
     [
       [innerX1, mouth - lead],
-      [innerX1, mouth],
-      [innerX1 + lead, mouth],
+      [innerX1, leadTop],
+      [innerX1 + lead + OVER, leadTop],
     ],
     T,
     d.plateH + OVER,
@@ -941,8 +949,8 @@ export function buildPocketOp(board: BoardProfile, stand: StandParams): BuildOp 
   const leadFloor = triPrismX(
     [
       [T, mouth - lead],
-      [T, mouth],
-      [T - lead, mouth],
+      [T, leadTop],
+      [T - lead - OVER, leadTop],
     ],
     wx0,
     wx0 + trayW,
