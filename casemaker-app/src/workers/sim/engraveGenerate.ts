@@ -4901,6 +4901,18 @@ export function generateGoalProgram(
         ...(pencilCreaseDeg === undefined ? {} : { pencilCreaseDeg }),
         // #862 — finish the clear band's wall as contour laps (see bandFloorZ above).
         rim: bandFloorZ === null ? null : { floorZ: bandFloorZ },
+        // #846 — HOW EACH ROUGHING LEVEL IS CLEARED, decided per job from the shop's two rough3d
+        // numbers and the job's material — the same wiring a surface primitive gets. A mesh goal
+        // is where most 3D roughing happens, so the chooser's one stated line lands in this run's
+        // notes and its sheet; a goal with no roughing option (a caller of the CAM directly) keeps
+        // the raster byte for byte.
+        roughing: {
+          mode: 'auto',
+          material: job.stock.material,
+          depthRatio: readDefault(shop.defaults ?? null, 'rough3d.adaptiveDepthRatio').value,
+          cellBudget: readDefault(shop.defaults ?? null, 'rough3d.compareCellBudget').value,
+          adaptive: adaptiveSettings(shop.defaults ?? null).settings,
+        },
         // #785 — the CAM's own layer/scan-line counts, as Generate's progress words.
         onProgress: (p) =>
           onProgress?.({
