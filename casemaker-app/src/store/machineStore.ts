@@ -21,7 +21,7 @@
  */
 
 import { create } from 'zustand';
-import type { MachineObservation, MachineProbeResult } from '@/platform/machineProbe';
+import type { MachineObservation, MachineProbeResult, MachineProbeRoute } from '@/platform/machineProbe';
 import { readDiagnoseLine, readStatusLine, type DiagnoseReading } from '@/platform/desktop/protocol';
 
 const MACHINE_KEY = 'casemaker.machine.v1';
@@ -49,6 +49,12 @@ export interface MachineState {
   machine: MachineObservation | null;
   /** What the last check concluded, so a re-opened wizard can say what happened. */
   outcome: MachineCheckOutcome | null;
+  /**
+   * #882 — HOW the last found machine was reached: the UDP search (`network`), its recorded
+   * address when the search heard nothing (`recorded`), or an address the operator typed
+   * (`manual`). Null when the last check found nothing.
+   */
+  route: MachineProbeRoute | null;
   /**
    * Why there is no machine, when the outcome was `unavailable` or `error` — the browser's refusal
    * or the socket's fault, verbatim. Never a substitute for a machine.
@@ -103,6 +109,8 @@ export interface MachineState {
 interface MachineSlice {
   machine: MachineObservation | null;
   outcome: MachineCheckOutcome | null;
+  /** #882 — see {@link MachineState.route}. Persisted with the outcome, so a re-opened wizard says it too. */
+  route: MachineProbeRoute | null;
   reason: string | null;
   checkedAt: string | null;
   heartbeat: MachineHeartbeat;
@@ -115,6 +123,7 @@ interface MachineSlice {
 const EMPTY: MachineSlice = {
   machine: null,
   outcome: null,
+  route: null,
   reason: null,
   checkedAt: null,
   heartbeat: { reachable: null, lastSeenAt: null },
@@ -124,6 +133,8 @@ const EMPTY: MachineSlice = {
 
 /** The four outcomes, stated once so a corrupted or older payload cannot invent a fifth. */
 const OUTCOMES: ReadonlySet<MachineCheckOutcome> = new Set(['found', 'not-found', 'unavailable', 'error']);
+/** #882 — the three routes, likewise. */
+const ROUTES: ReadonlySet<MachineProbeRoute> = new Set(['network', 'recorded', 'manual']);
 
 /**
  * Read one persisted machine record, or drop it.
@@ -171,6 +182,10 @@ function loadMachine(): MachineSlice {
     return {
       machine: parseMachine(parsed.machine),
       outcome,
+      route:
+        typeof parsed.route === 'string' && ROUTES.has(parsed.route as MachineProbeRoute)
+          ? (parsed.route as MachineProbeRoute)
+          : null,
       reason: typeof parsed.reason === 'string' ? parsed.reason : null,
       checkedAt: typeof parsed.checkedAt === 'string' ? parsed.checkedAt : null,
       // Reachability is a live claim, never a record: the heartbeat re-establishes it on open.
@@ -190,7 +205,7 @@ function persist(s: MachineSlice): void {
     // the heartbeat on every open, and storing a 2 s poll would churn the record for nothing.
     localStorage.setItem(
       MACHINE_KEY,
-      JSON.stringify({ machine: s.machine, outcome: s.outcome, reason: s.reason, checkedAt: s.checkedAt }),
+      JSON.stringify({ machine: s.machine, outcome: s.outcome, route: s.route, reason: s.reason, checkedAt: s.checkedAt }),
     );
   } catch {
     // ignore quota errors
@@ -204,6 +219,7 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
     const slice: MachineSlice = {
       machine: result.kind === 'found' ? result.observation : null,
       outcome: result.kind,
+      route: result.kind === 'found' ? result.route : null,
       // #726 W24 — EVERY reader gets one sentence. An 'unavailable' probe is already a sentence;
       // an 'error' probe's detail is the bare reason (`probeMachine`), so the sentence is built
       // here, once — the Machines page prints `reason` raw, and the start wizard must not prefix it
@@ -232,6 +248,8 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
     const slice: MachineSlice = {
       machine: { ...current, busy, status, statusLine: readStatusLine(status), observedAt: new Date().toISOString() },
       outcome: get().outcome,
+      // #882 — the live answer is the SAME machine, reached the same way.
+      route: get().route,
       reason: get().reason,
       checkedAt: get().checkedAt,
       heartbeat: get().heartbeat,

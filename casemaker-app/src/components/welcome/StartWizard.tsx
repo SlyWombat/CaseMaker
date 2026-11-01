@@ -254,6 +254,8 @@ export function StartWizard(): JSX.Element {
   const machine = useMachineStore((s) => s.machine);
   const outcome = useMachineStore((s) => s.outcome);
   const reason = useMachineStore((s) => s.reason);
+  // #882 — how the last found machine was reached, so the step can say it.
+  const machineRoute = useMachineStore((s) => s.route);
   const setProbeResult = useMachineStore((s) => s.setProbeResult);
   const setProject = useProjectStore((s) => s.setProject);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
@@ -440,7 +442,13 @@ export function StartWizard(): JSX.Element {
   async function runCheck(host?: string): Promise<void> {
     setBusy(true);
     try {
-      const result = await probeMachine(host === undefined ? {} : { host });
+      // #882 — THE LOCATION'S MACHINES GO WITH THE SEARCH. A LAN server on a bridge network cannot
+      // hear the UDP broadcast, but it reaches the machine at its recorded address over TCP; the
+      // probe tries both and the result says which route found it.
+      const recorded = (machines ?? []).flatMap((m) =>
+        m.address === null ? [] : [{ host: m.address.host, port: m.address.port, profileId: m.profileId }],
+      );
+      const result = await probeMachine(host === undefined ? { recorded } : { host });
       setProbeResult(result);
       // The machine's own coordinate frame, saved where its provenance lives (#279). Only a
       // COMPLETE read ever produces one, so this cannot half-apply; a read that failed leaves the
@@ -870,6 +878,7 @@ export function StartWizard(): JSX.Element {
           outcome={outcome}
           machine={machine}
           reason={reason}
+          route={machineRoute}
           address={address}
           onAddress={setAddress}
           onCheck={(host) => {

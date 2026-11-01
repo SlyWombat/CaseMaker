@@ -29,7 +29,7 @@ import { MACHINE_MOUNT_WORDS, activeMountOf, activeProfileOf, surfaceWords } fro
 import { bedNeverMeasured } from '@/engine/cnc/bed/binding';
 import { readStatusLine } from '@/platform/desktop/protocol';
 import { readMachineRest } from '@/platform/machineChangeRun';
-import type { MachineObservation } from '@/platform/machineProbe';
+import type { MachineObservation, MachineProbeRoute } from '@/platform/machineProbe';
 import type { MachineRecord } from '@/platform/locationClient';
 import type { MachineCheckOutcome } from '@/store/machineStore';
 
@@ -110,6 +110,8 @@ export interface MachineStepProps {
   machines: readonly MachineRecord[] | null;
   busy: boolean;
   outcome: MachineCheckOutcome | null;
+  /** #882 — how the found machine was reached; null when the last check found nothing. */
+  route: MachineProbeRoute | null;
   machine: MachineObservation | null;
   reason: string | null;
   address: string;
@@ -122,6 +124,7 @@ export function MachineStep({
   machines,
   busy,
   outcome,
+  route,
   machine,
   reason,
   address,
@@ -275,6 +278,20 @@ export function MachineStep({
               {busy ? 'Looking…' : 'Check again'}
             </button>
           </div>
+
+          {/* #882 — WHICH ROUTE FOUND IT. A LAN server on a bridge network cannot hear the UDP
+              broadcast, so a location-known machine is also tried at its recorded address; the
+              line says when that was the way, plainly, rather than leaving the operator to guess
+              why "the search" found nothing. */}
+          {found && route !== null && (
+            <p style={NOTE} data-testid="start-wizard-machine-route">
+              {route === 'recorded'
+                ? 'Reached at its recorded address — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
+                : route === 'network'
+                  ? 'Found on the network.'
+                  : 'Reached at the address you gave.'}
+            </p>
+          )}
 
           {!checking && outcome === 'not-found' && (
             <p style={MUTED} data-testid="start-wizard-machine-offline-note">

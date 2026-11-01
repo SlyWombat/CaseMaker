@@ -64,14 +64,26 @@ function withHouse(): void {
   });
 }
 
-/** A bench Z1 that answers; `found: false` is a search that hears nothing. */
-function bench(options: { found?: boolean } = {}): MachineProbeClient {
+/**
+ * A bench Z1 that answers. `found: false` is a machine that is not there at all: the search hears
+ * nothing AND its recorded address refuses (#882) — an absent machine, not merely a silent
+ * broadcast. `hearNothing: true` is the k3 bridge's case: the search is deaf but the machine answers
+ * at its recorded address.
+ */
+function bench(options: { found?: boolean; hearNothing?: boolean } = {}): MachineProbeClient {
   const found = options.found ?? true;
+  const heard = found && options.hearNothing !== true;
   return {
     discover: async () =>
-      found ? [{ name: 'Makera_Z1_010290', host: HOUSE_HOST, port: 2222, busy: false }] : [],
-    identify: async (target) => ({ ip: target.host, mac: 'aa:bb:cc:dd:ee:ff' }),
-    status: async () => ({ ok: true, text: IDLE_LINE }),
+      heard ? [{ name: 'Makera_Z1_010290', host: HOUSE_HOST, port: 2222, busy: false }] : [],
+    identify: async (target) => {
+      if (!found) throw new Error('ECONNREFUSED');
+      return { ip: target.host, mac: 'aa:bb:cc:dd:ee:ff' };
+    },
+    status: async () => {
+      if (!found) throw new Error('ECONNREFUSED');
+      return { ok: true, text: IDLE_LINE };
+    },
     readConfig: async () => ({ values: new Map<string, string>(), failures: [] }),
   };
 }
@@ -121,6 +133,21 @@ describe('#682 — step 1 is the house’s machine', () => {
       `Online · Idle · homed · checked ${hhmm(machine!.observedAt)}`,
     );
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('#882 — Online when only the recorded address answers, and the line says which route', async () => {
+    withHouse();
+    useClient(bench({ hearNothing: true }));
+    render(<StartWizard />);
+
+    await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
+    expect(stateLine().textContent).toContain('Online');
+    expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain(
+      'Reached at its recorded address',
+    );
+    expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain('cannot receive broadcasts');
+    // The route is remembered with the check, so a re-opened wizard can still say it.
+    expect(useMachineStore.getState().route).toBe('recorded');
   });
 
   it('#726 W24 — step 1 says what is on the machine, from the active bed profile', async () => {

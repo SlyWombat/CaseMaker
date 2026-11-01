@@ -116,6 +116,14 @@ export interface MachineProbeOptions {
   host?: string;
   /** The command port for a typed address. Defaults to the bridge's own (2222). */
   port?: number;
+  /**
+   * #882 — THE LOCATION'S OWN MACHINES. A LAN server on a bridge network (k3's container) never
+   * hears the UDP broadcast, yet it reaches the same machine at its recorded address over TCP.
+   * Every non-empty address here is probed DIRECTLY, in parallel with the search; a machine that
+   * answers is found and the result says which route found it. The search is still how a NEW
+   * machine is met.
+   */
+  recorded?: readonly RecordedMachineAddress[];
 }
 
 /**
@@ -166,6 +174,14 @@ export type MachineProbeResult =
       kind: 'found';
       observation: MachineObservation;
       /**
+       * #882 — HOW THE MACHINE WAS REACHED. `network` is the UDP broadcast (a machine found by the
+       * search); `recorded` is a location-known machine's own address, probed directly because a
+       * server that cannot hear broadcasts (a bridged container) still reaches it over TCP;
+       * `manual` is an address the operator typed. The screen states this so "Online" always says
+       * how the app knows.
+       */
+      route: MachineProbeRoute;
+      /**
        * The machine's own coordinate frame, read during the check (#279, decision 28's measured
        * tier). Null when it could not be read — which is a normal answer, not a failure: the
        * shipped profile's vendor defaults then stay in force and `notes` says why.
@@ -182,6 +198,18 @@ export type MachineProbeResult =
   | { kind: 'unavailable'; reason: string }
   /** The search itself threw: a socket error, a malformed reply, a bridge fault. */
   | { kind: 'error'; detail: string };
+
+/** #882 — see {@link MachineProbeResult}. */
+export type MachineProbeRoute = 'network' | 'recorded' | 'manual';
+
+/** #882 — one machine the LOCATION records, with the address it can be reached at. */
+export interface RecordedMachineAddress {
+  host: string;
+  /** The command port; the bridge's own (2222) when the record states none. */
+  port?: number;
+  /** The profile the location records, so a recorded machine can still be asked for its frame. */
+  profileId?: string | null;
+}
 
 /**
  * Broadcast name → profile id. **This table is the adaptability hinge** (#280): every entry is one
@@ -288,30 +316,64 @@ export async function probeMachine(opts: MachineProbeOptions = {}): Promise<Mach
       host,
       port: opts.port ?? DEFAULT_COMMAND_PORT,
       busy: null,
+      source: 'typed',
     });
-    return { kind: 'found', observation, calibration };
+    return { kind: 'found', observation, calibration, route: 'manual' };
   }
 
-  let found: DiscoveredMachineSummary[];
+  // #882 — THE LOCATION'S MACHINES ARE PROBED BESIDE THE SEARCH. Started before the broadcast is
+  // awaited, so a server that cannot hear it (a bridged container) still reaches the machine the
+  // location already records. The search stays the way to meet a NEW machine.
+  const recorded = (opts.recorded ?? [])
+    .map((r) => ({ host: r.host.trim(), port: r.port ?? DEFAULT_COMMAND_PORT, profileId: r.profileId ?? null }))
+    .filter((r) => r.host.length > 0);
+  // `.then(ok, failed)` rather than `allSettled` alone: when the search DOES find a machine these
+  // promises are left behind, and a rejected one must not surface as an unhandled rejection.
+  const direct = recorded.map((r) =>
+    observe(client, { name: null, host: r.host, port: r.port, busy: null, profileId: r.profileId, source: 'recorded' }).then(
+      (value) => ({ ok: true as const, value }),
+      () => ({ ok: false as const }),
+    ),
+  );
+
+  let found: DiscoveredMachineSummary[] = [];
+  let discoveryError: unknown = null;
   try {
     // The shop's discovery window (#449), read now rather than compiled here. The web build has no
     // location: `readDefault` answers the labelled 3000 ms fallback.
     found = await client.discover({ windowMs: opts.windowMs ?? machineTiming(liveShopDefaults()).discoveryWindowMs });
   } catch (e) {
-    // #726 W24 — the detail is the REASON; the screen supplies the sentence ("The search failed:"
-    // was printed twice when both carried it).
-    return { kind: 'error', detail: reasonOf(e) };
+    // #882 — a discovery FAILURE is not the whole answer any more: a recorded machine may have
+    // answered meanwhile. The error is kept and only reported when nothing did.
+    discoveryError = e;
   }
 
   const first = found[0];
-  if (first === undefined) return { kind: 'not-found' };
-  const { observation, calibration } = await observe(client, {
-    name: first.name,
-    host: first.host,
-    port: first.port,
-    busy: first.busy,
-  });
-  return { kind: 'found', observation, calibration };
+  if (first !== undefined) {
+    const { observation, calibration } = await observe(client, {
+      name: first.name,
+      host: first.host,
+      port: first.port,
+      busy: first.busy,
+      source: 'discovered',
+    });
+    return { kind: 'found', observation, calibration, route: 'network' };
+  }
+
+  if (direct.length > 0) {
+    const settled = await Promise.all(direct);
+    // #882 — ONLY A MACHINE THAT ANSWERED. `observe` turns a silent identify/status into notes for
+    // a machine the broadcast already proved exists; with no broadcast, silence means the host did
+    // not answer, and saying "Online" for it would be the very bug this fixes.
+    const hit = settled.find((s) => s.ok && s.value.answered);
+    if (hit !== undefined && hit.ok) return { kind: 'found', ...hit.value, route: 'recorded' };
+  }
+
+  if (discoveryError !== null) {
+    // #726 W24 — the detail is the REASON; the screen supplies the sentence.
+    return { kind: 'error', detail: reasonOf(discoveryError) };
+  }
+  return { kind: 'not-found' };
 }
 
 /** What the check knows before it connects: everything from the broadcast, or a typed address. */
@@ -320,12 +382,18 @@ interface Reached {
   host: string;
   port: number;
   busy: boolean | null;
+  /** #882 — the profile the LOCATION records for a recorded address (absent for a typed one). */
+  profileId?: string | null;
+  /** #882 — how the address was obtained; the "typed rather than announced" note is for `typed`. */
+  source: 'discovered' | 'typed' | 'recorded';
 }
 
 /** What one check established about a machine we reached. */
 interface Observation {
   observation: MachineObservation;
   calibration: MachineCalibration | null;
+  /** #882 — did the address answer at all? False when neither identify nor status did. */
+  answered: boolean;
 }
 
 /**
@@ -337,11 +405,13 @@ async function observe(client: MachineProbeClient, reached: Reached): Promise<Ob
   const target = { host: reached.host, port: reached.port };
   const observedAt = new Date().toISOString();
   const notes: string[] = [];
+  let answered = false;
 
   let ip: string | null = null;
   let mac: string | null = null;
   try {
     const identity = await client.identify(target);
+    answered = true;
     ip = identity.ip;
     mac = identity.mac;
     if (ip === null) notes.push('The controller did not report an IP address of its own.');
@@ -353,20 +423,23 @@ async function observe(client: MachineProbeClient, reached: Reached): Promise<Ob
   let status: string | null = null;
   try {
     const s = await client.status(target);
+    if (s.ok) answered = true;
     status = s.ok ? s.text : null;
     if (!s.ok) notes.push('The controller did not answer a status request.');
   } catch (e) {
     notes.push(`The controller did not answer a status request: ${reasonOf(e)}`);
   }
 
-  const profileId = reached.name === null ? null : profileForDiscoveredName(reached.name);
+  // #882 — a RECORDED machine's profile comes from the location; an announced one's from its
+  // broadcast name. A typed address has neither, so its frame is not read (nothing says it is a Z1).
+  const profileId = reached.profileId ?? (reached.name === null ? null : profileForDiscoveredName(reached.name));
   const calibration = await readFrame(client, target, profileId, observedAt, notes);
   // Notes record what the controller FAILED to tell us — not a restatement of what the panel
   // already says. "Nothing here knows this machine" is a sentence the panel owns and prints for
   // both paths (announced and typed), so it is deliberately not also a note: in the browser that
   // read as the same paragraph twice in two different wordings. A typed address keeps its note,
   // because that is the one thing the panel does not say about it.
-  if (reached.name === null) {
+  if (reached.source === 'typed') {
     notes.push(
       'This address was typed rather than announced, so the machine has not said what it is: ' +
         'its work envelope and limits are unknown until it does.',
@@ -388,6 +461,7 @@ async function observe(client: MachineProbeClient, reached: Reached): Promise<Ob
       notes,
     },
     calibration,
+    answered,
   };
 }
 

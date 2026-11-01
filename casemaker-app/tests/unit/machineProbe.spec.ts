@@ -334,3 +334,87 @@ describe('#449 the discovery window comes from the shop defaults', () => {
     expect(seen).toBe(250);
   });
 });
+
+/**
+ * #882 — THE MACHINE THE LOCATION ALREADY KNOWS. On k3's LAN server the container sits on a bridge
+ * network and never hears the UDP broadcast, so the wizard showed a powered, Idle machine as
+ * Offline. The same server reaches it at the recorded address over TCP, so the check now probes
+ * every recorded address beside the search, and says which route found the machine.
+ */
+describe('#882 — a recorded machine when discovery hears nothing', () => {
+  it('probes the recorded address and says the recorded route', async () => {
+    const hosts: string[] = [];
+    use(
+      fakeClient({
+        discover: async () => [],
+        identify: async (t) => {
+          hosts.push(t.host);
+          return { ip: '192.168.10.43', mac: 'aa:bb:cc:dd:ee:ff' };
+        },
+      }),
+    );
+    const result = await probeMachine({ recorded: [{ host: '192.168.10.43', port: 2222, profileId: 'Z1' }] });
+    expect(result.kind).toBe('found');
+    if (result.kind !== 'found') return;
+    expect(result.route).toBe('recorded');
+    expect(result.observation.host).toBe('192.168.10.43');
+    expect(hosts).toContain('192.168.10.43');
+    // The location's profile id lets a recorded machine still be asked for its own frame.
+    expect(result.observation.profileId).toBe('Z1');
+  });
+
+  it('the search still wins when it finds a machine', async () => {
+    use(
+      fakeClient({
+        discover: async () => [{ name: 'Makera_Z1_010290', host: '192.168.10.44', port: 2222, busy: false }],
+      }),
+    );
+    const result = await probeMachine({ recorded: [{ host: '192.168.10.43' }] });
+    expect(result.kind).toBe('found');
+    if (result.kind !== 'found') return;
+    expect(result.route).toBe('network');
+    expect(result.observation.host).toBe('192.168.10.44');
+  });
+
+  it('a recorded host that never answers is not found', async () => {
+    use(
+      fakeClient({
+        discover: async () => [],
+        identify: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+        status: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+      }),
+    );
+    expect((await probeMachine({ recorded: [{ host: '192.168.10.43' }] })).kind).toBe('not-found');
+  });
+
+  it('a discovery failure does not hide a recorded machine that answered', async () => {
+    use(
+      fakeClient({
+        discover: async () => {
+          throw new Error('udp: bind failed');
+        },
+      }),
+    );
+    const result = await probeMachine({ recorded: [{ host: '192.168.10.43', profileId: 'Z1' }] });
+    expect(result.kind).toBe('found');
+    if (result.kind !== 'found') return;
+    expect(result.route).toBe('recorded');
+  });
+
+  it('a typed address states the manual route', async () => {
+    use(fakeClient());
+    const result = await probeMachine({ host: '192.168.10.43' });
+    expect(result.kind).toBe('found');
+    if (result.kind !== 'found') return;
+    expect(result.route).toBe('manual');
+  });
+
+  it('no recorded list keeps the search-only path', async () => {
+    use(fakeClient({ discover: async () => [] }));
+    expect((await probeMachine({})).kind).toBe('not-found');
+  });
+});

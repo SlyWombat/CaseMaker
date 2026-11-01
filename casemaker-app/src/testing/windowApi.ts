@@ -504,7 +504,7 @@ export function installCaseMakerTestApi(): void {
     setMachine(observation, statusLine) {
       // The app's own "a check found it" path (and its persistence), then the live line the
       // heartbeat would have read — the strip's monitor rows come from `S:` on that line.
-      useMachineStore.getState().setProbeResult({ kind: 'found', observation, calibration: null });
+      useMachineStore.getState().setProbeResult({ kind: 'found', observation, calibration: null, route: 'manual' });
       if (statusLine !== undefined) useMachineStore.getState().noteLiveStatusLine(statusLine);
     },
     getFrozenProgram() {
