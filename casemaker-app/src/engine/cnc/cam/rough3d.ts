@@ -35,6 +35,18 @@ const EPS = 1e-6;
  * winding of the traced loops does not matter to the adaptive planner.
  */
 export function roughLevelRegion(hf: GoalHeightfield, levelZ: number, allowance: number): Polygons {
+  const mask = roughLevelMask(hf, levelZ, allowance);
+  if (mask === null) return [];
+  return polygonalizeMask(hf, mask);
+}
+
+/**
+ * #868 — THE MASK a level clears (see {@link roughLevelRegion}): 1 where the goal's top plus the
+ * allowance stands above the level, 0 elsewhere. Null when nothing stands above it. Pulled out
+ * of `roughLevelRegion` so the caller can HASH it: two levels that clear exactly the same cells
+ * get exactly the same plan, and the second one reuses the first's instead of walking again.
+ */
+export function roughLevelMask(hf: GoalHeightfield, levelZ: number, allowance: number): Uint8Array | null {
   const { nx, ny } = hf;
   const mask = new Uint8Array(nx * ny);
   let any = false;
@@ -48,11 +60,24 @@ export function roughLevelRegion(hf: GoalHeightfield, levelZ: number, allowance:
       any = true;
     }
   }
-  if (!any) return [];
-  const loops = traceMaskLoops(mask, nx, ny);
-  // Cell indices → work mm (a cell's centre is x0 + i·pitch; its edges are half a pitch out).
+  return any ? mask : null;
+}
+
+/** The mask's outline as polygons in the work frame (cell indices → mm, edes half a pitch out). */
+export function polygonalizeMask(hf: GoalHeightfield, mask: Uint8Array): Polygons {
+  const loops = traceMaskLoops(mask, hf.nx, hf.ny);
   const { x0, y0, pitch } = hf;
   return loops.map((loop) => loop.map(([i, j]) => [x0 + (i - 0.5) * pitch, y0 + (j - 0.5) * pitch] as [number, number]));
+}
+
+/** FNV-1a over a mask's bytes: the same bytes, the same plan. */
+function maskHash(mask: Uint8Array): number {
+  let h = 0x811c9dc5;
+  for (let k = 0; k < mask.length; k++) {
+    h ^= mask[k]!;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
 }
 
 /**
@@ -120,6 +145,8 @@ export interface AdaptiveRoughResult {
   maxEngagementMm: number;
   /** The engagement cap the planner held itself to, mm (fraction × diameter). */
   capMm: number;
+  /** #868 — levels that reused the level above's plan because their region mask was identical. */
+  reusedLevels: number;
 }
 
 /**
@@ -137,7 +164,7 @@ export function roughingAdaptiveMoves(
     return { ok: false, reason: `3D roughing needs a positive step-down; the feeds gave ${feeds.stepDown} mm` };
   }
   if (hf.coveredCount === 0) {
-    return { ok: true, result: { moves: [], layers: 0, maxEngagementMm: 0, capMm: 0 } };
+    return { ok: true, result: { moves: [], layers: 0, maxEngagementMm: 0, capMm: 0, reusedLevels: 0 } };
   }
   const { topZ, minZ } = hf;
   const deepest = minZ + allowance;
@@ -151,31 +178,52 @@ export function roughingAdaptiveMoves(
   let maxEngagementMm = 0;
   let lastLevel = levels[0] ?? topZ;
 
+  // #868 — EXACT-REGION REUSE. A level whose mask is byte-identical to the level above's (a
+  // vertical wall, a flat-sided goal) clears the same cells at the same thickness, and
+  // `planAdaptive` is a pure function of both — so its plan is reused, shifted to the new Z,
+  // instead of walking again. The reuse is therefore BYTE-IDENTICAL to planning afresh (the
+  // test pins that), and it costs a hash per level.
+  let cached: { hash: number; thickness: number; moves: CamMove[]; maxEngagement: number } | null = null;
+  let reusedLevels = 0;
+
   for (const [index, L] of levels.entries()) {
     opts.onLayer?.(index + 1, levels.length);
-    const region = roughLevelRegion(hf, L, allowance);
-    if (region.length === 0) continue;
+    const mask = roughLevelMask(hf, L, allowance);
+    if (mask === null) continue;
     // The layer's own thickness: the distance from the level above it (or the
     // stock top for the first), which is the depth the planner descends.
     const thickness = index === 0 ? topZ - L : lastLevel - L;
     lastLevel = L;
-    const planned = planAdaptive({
-      tool: opts.tool,
-      region,
-      depth: Math.max(thickness, 0.01),
-      // One level per call: the planner's own step-down is the layer's thickness,
-      // so it cannot subdivide it; its feeds come from the job's.
-      settings: { ...opts.adaptive, stepDownMm: Math.max(thickness, 0.01), cutFeed: feeds.feed, entryFeed: feeds.plungeFeed },
-      ...(opts.provenance !== undefined ? { provenance: opts.provenance } : {}),
-    });
-    if (!planned.ok) return { ok: false, reason: `adaptive level at Z ${Math.round(L * 100) / 100}: ${planned.reason}` };
-    maxEngagementMm = Math.max(maxEngagementMm, planned.plan.stats.maxStepEngagement);
+    const depth = Math.max(thickness, 0.01);
+    const hash = maskHash(mask);
+    let planMoves: CamMove[];
+    let planMax: number;
+    if (cached !== null && cached.hash === hash && cached.thickness === depth) {
+      planMoves = cached.moves;
+      planMax = cached.maxEngagement;
+      reusedLevels++;
+    } else {
+      const planned = planAdaptive({
+        tool: opts.tool,
+        region: polygonalizeMask(hf, mask),
+        depth,
+        // One level per call: the planner's own step-down is the layer's thickness,
+        // so it cannot subdivide it; its feeds come from the job's.
+        settings: { ...opts.adaptive, stepDownMm: depth, cutFeed: feeds.feed, entryFeed: feeds.plungeFeed },
+        ...(opts.provenance !== undefined ? { provenance: opts.provenance } : {}),
+      });
+      if (!planned.ok) return { ok: false, reason: `adaptive level at Z ${Math.round(L * 100) / 100}: ${planned.reason}` };
+      planMoves = planned.plan.moves;
+      planMax = planned.plan.stats.maxStepEngagement;
+      cached = { hash, thickness: depth, moves: planMoves, maxEngagement: planMax };
+    }
+    maxEngagementMm = Math.max(maxEngagementMm, planMax);
     // Shift the plan's Zs: its single level (−thickness) lands on L; its 0-plane
     // (the material's top at that layer) becomes the level above. Hops and safe
     // retracts map to the 3D job's own heights.
     const shift = L + thickness;
-    for (let i = 0; i < planned.plan.moves.length; i++) {
-      const m = planned.plan.moves[i]!;
+    for (let i = 0; i < planMoves.length; i++) {
+      const m = planMoves[i]!;
       moves.push(
         m.kind === 'rapid' && m.z >= HOP_Z - EPS
           ? { ...m, z: m.z >= SAFE_Z - EPS ? opts.safeZ : opts.hopZ }
@@ -187,5 +235,5 @@ export function roughingAdaptiveMoves(
     const last = moves[moves.length - 1]!;
     moves.push({ kind: 'rapid', x: last.x, y: last.y, z: opts.safeZ });
   }
-  return { ok: true, result: { moves, layers: levels.length, maxEngagementMm, capMm } };
+  return { ok: true, result: { moves, layers: levels.length, maxEngagementMm, capMm, reusedLevels } };
 }

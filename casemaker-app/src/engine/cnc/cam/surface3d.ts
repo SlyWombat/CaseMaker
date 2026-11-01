@@ -875,6 +875,9 @@ function chooseRough(
   const ruleLine = `the goal is ${r3n(ratio)}× the cutter’s ⌀ deep${metal ? ` in ${opts!.material}` : ''}`;
   const settings = opts?.adaptive ?? adaptiveSettings(null).settings;
   const runAdaptive = () => roughingAdaptiveMoves(hf, feeds, allowance, { tool, adaptive: settings, safeZ, hopZ, onLayer });
+  // #868 — levels whose region repeated were not walked again; say so when it happened.
+  const reuseWords = (reused: number): string =>
+    reused > 0 ? `, ${reused} level${reused === 1 ? '' : 's'} reusing the level above’s identical region` : '';
   const mins = (seconds: number): string => `${(seconds / 60).toFixed(1)} min`;
   const refusal = (reason: string): RoughChoice => ({
     kind: 'raster',
@@ -890,7 +893,7 @@ function chooseRough(
       kind: 'adaptive',
       moves: a.result.moves,
       layers: a.result.layers,
-      note: `Adaptive roughing: max engagement ${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap (${ruleLine}).`,
+      note: `Adaptive roughing: max engagement ${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap${reuseWords(a.result.reusedLevels)} (${ruleLine}).`,
     };
   }
 
@@ -932,7 +935,7 @@ function chooseRough(
       note:
         `${adaptive ? 'Adaptive' : 'Raster'} roughing chosen: ${mins(adaptive ? tAdaptive : tRaster)} vs the ` +
         `${adaptive ? 'raster’s' : 'adaptive'} ${mins(adaptive ? tRaster : tAdaptive)}` +
-        `${adaptive ? `, max engagement ${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap` : ''} ` +
+        `${adaptive ? `, max engagement ${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap${reuseWords(a.result.reusedLevels)}` : ''} ` +
         `(${ruleLine}; ${byRule ? 'the depth and material rule prefers the capped engagement' : 'the shorter simulated time wins'}; both were measured at ${hf.coveredCount.toLocaleString('en')} covered cells).`,
     };
   }
@@ -945,7 +948,7 @@ function chooseRough(
       layers: a.result.layers,
       note:
         `Adaptive roughing chosen by rule: ${ruleLine} (rough3d.adaptiveDepthRatio ${depthRatio}×), max engagement ` +
-        `${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap; the comparison was skipped above ` +
+        `${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap${reuseWords(a.result.reusedLevels)}; the comparison was skipped above ` +
         `${budget.toLocaleString('en')} cells (rough3d.compareCellBudget).`,
     };
   }
