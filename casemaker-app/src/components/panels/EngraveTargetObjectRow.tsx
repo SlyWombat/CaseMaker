@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { DEFAULT_PENCIL_CREASE_DEG, type GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
 import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/cam/relief';
@@ -277,6 +277,15 @@ function MeshSizeControls({
 
 const fmt1 = (n: number): string => `${Number(n.toFixed(1))}`;
 
+/** A field has the keyboard: the arrow keys belong to it, not to the nudge (#876). */
+function isInputFocused(): boolean {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  return (el as HTMLElement).isContentEditable === true;
+}
+
 /**
  * #831 — TURNING THE MESH TO FIT THE STOCK: the three angles (degrees, the stored "XYZ" turns), a
  * +90° button per stock axis, and "Lay it flat" — the shallowest of the 24 axis-aligned
@@ -321,6 +330,39 @@ function MeshTurnControls({
     rememberGoalPlacement(target);
     onChange(patch);
   };
+
+  // #876 — ARROW KEYS NUDGE THE GOAL: 1 mm, and Shift 10 mm, in the stock's X/Y. Bound to the
+  // window while the row is open (the row is the focus context, as the board's own nudge is), and
+  // skipped while a field has focus so typing and stepping a number still work.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (isInputFocused()) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const step = e.shiftKey ? 10 : 1;
+      let patch: TargetObjectPatch;
+      switch (e.key) {
+        case 'ArrowLeft':
+          patch = { position: { x: target.position.x - step } };
+          break;
+        case 'ArrowRight':
+          patch = { position: { x: target.position.x + step } };
+          break;
+        case 'ArrowDown':
+          patch = { position: { y: target.position.y - step } };
+          break;
+        case 'ArrowUp':
+          patch = { position: { y: target.position.y + step } };
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+      write(patch);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // `write` reads the target being nudged and the row's own onChange; both change with `target`.
+  }, [target, onChange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const layFlat = (): void => {
     if (!flat.changes) {

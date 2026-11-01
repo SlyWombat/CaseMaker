@@ -324,4 +324,26 @@ describe('#876 — arming place-on-face', () => {
     expect(onChange).not.toHaveBeenCalled();
     useViewportStore.setState({ placeFace: null });
   });
+
+  it('nudges the goal with the arrow keys — 1 mm, Shift 10 mm — and never while a field has focus', () => {
+    const target = tall();
+    const { onChange } = renderRow(target);
+    const key = (k: string, opts: KeyboardEventInit = {}): void => {
+      fireEvent.keyDown(window, { key: k, ...opts });
+    };
+    key('ArrowRight');
+    expect(onChange).toHaveBeenLastCalledWith({ position: { x: target.position.x + 1 } });
+    key('ArrowLeft', { shiftKey: true });
+    expect(onChange).toHaveBeenLastCalledWith({ position: { x: target.position.x - 10 } });
+    key('ArrowUp');
+    expect(onChange).toHaveBeenLastCalledWith({ position: { y: target.position.y + 1 } });
+    key('ArrowDown', { shiftKey: true });
+    expect(onChange).toHaveBeenLastCalledWith({ position: { y: target.position.y - 10 } });
+    // A focused field keeps the arrows (stepping a number), so the nudge stands aside.
+    const calls = onChange.mock.calls.length;
+    (screen.getByTestId('engrave-target-x-0') as HTMLInputElement).focus();
+    key('ArrowRight');
+    expect(onChange).toHaveBeenCalledTimes(calls);
+  });
+
 });

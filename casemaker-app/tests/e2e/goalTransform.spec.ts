@@ -287,4 +287,18 @@ test('#876 — a ring drag in the scale band snaps; the same drag outside it doe
   expect(Math.abs(freeDeg - Math.round(freeDeg / 5) * 5)).toBeGreaterThan(0.3);
   await page.mouse.up();
   expect((await placement(page))!.turns).not.toEqual(before.turns);
+
+  // #876 — THE Z ARROW: depth in the stock, the same 1 mm snap. Press 20 mm along it (clear of the
+  // X/Y arrows' pick tubes, which share the compass centre), drag to 25 mm, and the stored top
+  // moves +5 mm.
+  const zAt = (mm: number) => page.evaluate((v) => window.__caseMaker!.engraveGoalHandlePoint('arrow', 'z', v), mm);
+  const beforeZ = (await placement(page))!.position.z;
+  const za = (await zAt(20))!;
+  const zb = (await zAt(25))!;
+  await page.mouse.move(za.x, za.y);
+  await page.mouse.down();
+  await page.mouse.move(zb.x, zb.y, { steps: 3 });
+  await expect(readout).toHaveText('ΔZ +5 mm');
+  await page.mouse.up();
+  expect((await placement(page))!.position.z).toBeCloseTo(beforeZ + 5, 3);
 });

@@ -48,7 +48,7 @@ interface Drag {
   axis: Axis;
   centre: THREE.Vector3;
   startTurns: TargetTurns;
-  startPos: { x: number; y: number };
+  startPos: { x: number; y: number; z: number };
   /** Ring: the last in-plane angle (rad) and the unwrapped sum since the press. */
   lastAngle: number;
   sumAngle: number;
@@ -161,9 +161,10 @@ export function GoalTransformHandles({ target, mold }: { target: EngraveTargetOb
       const free = shiftKey;
       const t = lineParam(ray, d.axis, d.centre);
       if (t === null) return;
-      const raw = (d.axis === 'x' ? d.startPos.x : d.startPos.y) + (t - d.t0);
+      const base = d.axis === 'x' ? d.startPos.x : d.axis === 'y' ? d.startPos.y : d.startPos.z;
+      const raw = base + (t - d.t0);
       const snapped = free ? Math.round(raw * 100) / 100 : Math.round(raw / MOVE_SNAP_MM) * MOVE_SNAP_MM;
-      value = snapped - (d.axis === 'x' ? d.startPos.x : d.startPos.y);
+      value = snapped - base;
     }
     if (value === d.shown) return;
     d.shown = value;
@@ -175,7 +176,7 @@ export function GoalTransformHandles({ target, mold }: { target: EngraveTargetOb
       updateTargetObject(turnsPatch(turnAboutAxis(d.startTurns, d.axis, value)));
       setActive({ kind: 'ring', axis: d.axis, text: `${d.axis.toUpperCase()} ${value > 0 ? '+' : ''}${Number(value.toFixed(1))}°` });
     } else {
-      const base = d.axis === 'x' ? d.startPos.x : d.startPos.y;
+      const base = d.axis === 'x' ? d.startPos.x : d.axis === 'y' ? d.startPos.y : d.startPos.z;
       updateTargetObject({ position: { [d.axis]: Number((base + value).toFixed(3)) } });
       setActive({
         kind: 'arrow',
@@ -237,7 +238,7 @@ export function GoalTransformHandles({ target, mold }: { target: EngraveTargetOb
       axis,
       centre: centre.clone(),
       startTurns: targetTurns(target),
-      startPos: { x: target.position.x, y: target.position.y },
+      startPos: { x: target.position.x, y: target.position.y, z: target.position.z },
       lastAngle: start,
       sumAngle: 0,
       t0: start,
@@ -327,9 +328,16 @@ export function GoalTransformHandles({ target, mold }: { target: EngraveTargetOb
           </mesh>
         </group>
       ))}
-      {(['x', 'y'] as const).map((axis) => (
-        <group key={`arrow-${axis}`} rotation={axis === 'x' ? [0, 0, -Math.PI / 2] : [0, 0, 0]}>
-          {/* A cylinder stands along local +Y; the X arrow is the Y arrow turned a quarter about Z. */}
+      {/* #876 — THREE arrows: X and Y across the stock, Z for depth in it (a mould's cavity opens
+          at the stock top, so its Z is not a placement and the Z arrow is not drawn for one). */}
+      {(['x', 'y', 'z'] as const)
+        .filter((axis) => axis !== 'z' || !mold)
+        .map((axis) => (
+        <group
+          key={`arrow-${axis}`}
+          rotation={axis === 'x' ? [0, 0, -Math.PI / 2] : axis === 'z' ? [Math.PI / 2, 0, 0] : [0, 0, 0]}
+        >
+          {/* A cylinder stands along local +Y; X is a quarter about Z, Z a quarter about X. */}
           <mesh position={[0, arrowLen / 2, 0]} renderOrder={RENDER_ORDER} name={`engrave-goal-arrow-${axis}`}>
             <cylinderGeometry args={[tube, tube, arrowLen, 8]} />
             {mat(colour(`arrow-${axis}`, axis))}
