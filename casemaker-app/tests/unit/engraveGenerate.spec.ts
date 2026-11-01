@@ -1319,6 +1319,24 @@ describe('a V-bit trace job (#405)', () => {
     expect(merge).toBeDefined();
     expect(merge!.severity).toBe('warning');
     expect(merge!.message).toContain('0.107');
+
+    // #861 — the SAME strokes on a one-colour blank: their openings still meet, but there is no
+    // top colour to leave a ridge of, so the warning would mean nothing (demo j02/j03/j20).
+    const oneColour = regions(
+      tl,
+      traceJob([], { labels: [], vectors: [lobes], stock: { length: 38.1, width: 76.2, thickness: 1.5, material: 'pla' } }),
+    );
+    expect(oneColour.findings.filter((f) => f.code === 'vcarve-surface-merge')).toEqual([]);
+  });
+
+  it('a one-colour blank raises no merge warning for two coincident items (#861)', () => {
+    const job = traceJob([], {
+      labels: [regionLabel({ id: 'pair-a' }), regionLabel({ id: 'pair-b' })],
+      stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'pla' },
+      minFloor: 1,
+    });
+    const r = regions(tl, job);
+    expect(r.findings.filter((f) => f.code === 'vcarve-surface-merge')).toEqual([]);
   });
 
   it('does NOT refuse the 30° engraving bit on PLA — the (Metal) name is a false signal (#575)', () => {

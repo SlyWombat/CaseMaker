@@ -1393,6 +1393,12 @@ function vCarveFindings(
   designById: ReadonlyMap<string, Polygons>,
   surfaceById: ReadonlyMap<string, Polygons>,
   requestedStepOver: number | null,
+  /**
+   * #861 — the colour plane the job states (`colourBoundaryFor`), or null for a one-colour blank.
+   * The merge warning is about a ridge of the TOP COLOUR below that plane: with no second colour
+   * there is no ridge to see, and a warning that fires on every one-colour job is noise.
+   */
+  colourBoundaryDepth: number | null,
 ): JobFinding[] {
   const offset = makeClipperOffset(tl);
   const findings: JobFinding[] = [];
@@ -1483,6 +1489,9 @@ function vCarveFindings(
   // corners, so the area must reach a gap-width strip of {@link VCARVE_MERGE_RUN_MM} before it is a
   // ridge between strokes rather than a corner sliver. Both the opening and the strip are taken at
   // the floor the item sits on, so a label 0.25 mm into a pocket is judged at 0.25 mm of material.
+  // #861 — the two merge checks below speak of the top colour's ridge; a one-colour blank has none.
+  if (colourBoundaryDepth === null) return findings;
+
   for (const item of plan.engraves) {
     const plane = planeById.get(item.id);
     const design = designById.get(item.id);
@@ -2132,6 +2141,7 @@ export function engraveRegions(
           designById,
           surfaceById,
           requestedStepOver,
+          colourBoundaryDepth,
         );
   // #741 — the depth rule runs whatever the tip's record state: a cutter with no stated tip still
   // has a stated body and angle, and a V-cut past its cone is refused on those.
