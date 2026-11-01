@@ -131,7 +131,7 @@ in the picker); `defaultStandoffHeight: 8` pays for them (6.5 + 1.5 mm).
 
 ## Assumptions (measured nowhere — do not read these as vendor numbers)
 
-Recorded here because the schema has no free-text notes field. **The bench's calipers replace
+A summary is in the profile's `notes` (#622), shown in the board picker. **The bench's calipers replace
 them.**
 
 1. **Stock heatsink + fan envelope** (the profile's `heatsink-fan`, and therefore the lid height):

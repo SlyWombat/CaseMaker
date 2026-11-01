@@ -219,6 +219,10 @@ export interface BoardProfile {
   crossReference?: string;
   /** Datasheet revision string, e.g. "Rev 1.4 — 2023-08". */
   datasheetRevision?: string;
+  /** #622 — free-text assumptions and unmeasured dimensions: what the profile
+   * guessed, and what a caliper should confirm before printing. Shown in the
+   * board picker under the provenance. */
+  notes?: string;
   /** Set when this "board" is not a bare PCB but a FINISHED module in its own
    * shell (e.g. the Guition JC4880P443C touch panel). The case archetypes that
    * hold such a module — the desk stand — need its shell geometry, not a

@@ -743,6 +743,15 @@ export function WelcomeOverlay() {
                   </>
                 )}
 
+                {selected.board.notes && (
+                  <>
+                    <h3>Notes</h3>
+                    <p className="wb-notes" data-testid="welcome-board-notes">
+                      {selected.board.notes}
+                    </p>
+                  </>
+                )}
+
                 {selected.origin.kind === 'local' && (
                   <div className="wb-local-actions">
                     <button className="wb-btn" onClick={() => onExport(selected.board.id)} data-testid="welcome-export-board">

@@ -22,6 +22,7 @@
     }
   },
   "source": "https://techspecs.ui.com/unifi/wifi/u7-pro-outdoor-us",
-  "datasheetRevision": "techspecs.ui.com 2026-08 — outline 170x208x66.5 / 1.2 kg are official; ALL sliderChannel dims are UNVERIFIED estimates (Ubiquiti publishes none) — caliper the rear channel before printing",
+  "datasheetRevision": "techspecs.ui.com 2026-08",
+  "notes": "The outline (170 × 208 × 66.5 mm) and the 1.2 kg weight are official. Every sliderChannel dimension is an unverified estimate, because Ubiquiti publishes none. Caliper the rear channel before printing.",
   "builtin": true
 }

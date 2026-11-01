@@ -364,6 +364,10 @@ export const boardProfileSchema = z.object({
     .string()
     .optional()
     .describe('Revision of the datasheet the dimensions were read from.'),
+  notes: z
+    .string()
+    .optional()
+    .describe('Assumptions and unmeasured dimensions; read before printing.'),
   measurementMethod: z
     .enum(['datasheet', 'open-source-cad', 'physical-measurement'])
     .optional()

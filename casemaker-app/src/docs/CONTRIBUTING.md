@@ -31,6 +31,7 @@ cardinal rule.
 1. Drop `casemaker-app/src/library/boards/<id>.json` (model after `rpi-4b.json`).
    Discovery is automatic (`import.meta.glob`) — there is **no import list to edit**.
 2. A manufacturer `source` URL is **mandatory** (the strict zod schema rejects builtins without one); record `measurementMethod` honestly — vendor CAD beats datasheet drawings.
+   Anything assumed rather than measured (an estimated envelope, a dimension no source gives) goes in `notes`, not in `datasheetRevision`; the picker shows it.
 3. Ship a quickstart template: drop `casemaker-app/src/library/templates/specs/<id>.json`
    with `boardId` and an `order` value, then add the template id to the
    sequence assertion in `tests/unit/templates.spec.ts` and the mirror list in

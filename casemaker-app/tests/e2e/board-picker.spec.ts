@@ -66,6 +66,9 @@ test('picker: the Radxa Dragon Q8B is a built-in, with its drawing dimensions in
   await expect(detail).toContainText('Radxa Dragon Q8B');
   // The drawing's dimensions, not the label's nominal 100 × 75.
   await expect(detail).toContainText('100.2 × 74.2');
+  // #622 — the profile's own assumptions, under the provenance.
+  await expect(detail.getByRole('heading', { name: 'Notes' })).toBeVisible();
+  await expect(detail.getByTestId('welcome-board-notes')).toContainText('heatsink');
 });
 
 test('picker: quickstart filter shows only boards with templates', async ({ cm, page }) => {

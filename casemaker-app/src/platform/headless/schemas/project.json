@@ -403,6 +403,10 @@
           "minLength": 1,
           "type": "string"
         },
+        "notes": {
+          "description": "Assumptions and unmeasured dimensions; read before printing.",
+          "type": "string"
+        },
         "pcb": {
           "description": "The bare PCB: its size determines the case cavity footprint.",
           "properties": {

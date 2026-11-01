@@ -48,6 +48,7 @@ When auditing a board:
    - Each `BoardComponent` (position, size, facing)
 2. Find one independent cross-reference (an open-source CAD file, an authoritative community wiki) and link it.
 3. Record `datasheetRevision` (e.g., `"Rev 1.4 — 2023-08"`).
+   Keep it to the revision. Put assumptions and unmeasured dimensions, the things a caliper should confirm before printing, in `notes` (#622). The board picker shows them under the provenance.
 4. Update the JSON profile with the new fields.
 5. Update this table with the cross-reference URL and method.
 

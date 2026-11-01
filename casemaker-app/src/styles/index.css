@@ -1842,6 +1842,12 @@ body, html, #root {
 }
 .wb-provenance a { color: var(--cm-color-primary); text-decoration: none; }
 .wb-provenance a:hover { text-decoration: underline; }
+.wb-notes {
+  margin: 0;
+  white-space: pre-line;
+  font-size: var(--cm-text-mono-size);
+  color: var(--cm-color-on-surface-variant);
+}
 .wb-local-actions {
   display: flex;
   gap: var(--cm-space-2);
