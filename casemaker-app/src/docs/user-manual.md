@@ -163,6 +163,30 @@ The **External assets** panel imports binary STL, ASCII STL, or 3MF meshes. Per 
 
 Mesh data is base64-stored inside the project file (`.caseproj.json`), so saved projects round-trip cleanly.
 
+## Floor grid and dividers
+
+The **Features** panel's **Floor grid and dividers** section cuts a grid of square, blind sockets into the case floor. Drop-in dividers plug into the sockets to split the inside of the case into bays. Each divider prints as its own part, and you can lift it out again later.
+
+**The grid.** Tick **Socket grid in the floor**. The defaults are 5 × 5 mm sockets on a 12 mm pitch in both directions, cut 2 mm deep. The pitch, the socket size and the depth can all be changed. A socket always keeps 1.2 mm of floor under it, so the case stays sealed. The case floor defaults to 2 mm, so turning the grid on thickens the floor to 3.2 mm, and the panel says so. Change the floor back in **Case parameters** if you prefer: the sockets are then cut shallower, and the panel states the depth they actually get and offers to thicken the floor again.
+
+The grid starts 3 mm in from the cavity wall. Sockets that would land under the board, its overhanging connectors, a mounted display or a standoff are left out, with 1 mm to spare. On a rounded case, sockets that would cross into a rounded corner are left out too. A case sized tightly around its board has no room for a socket. In that case the panel says so and offers to widen one side of the cavity, always a side with no port cutouts on it, by just enough for a bay two sockets each way.
+
+**Dividers.** Click **+ Divider along X** or **+ Divider along Y**. A new divider goes on the longest clear run of sockets that crosses nothing already there. You place it on a grid line, so it always lands in sockets:
+
+| Field | Meaning |
+| :--- | :--- |
+| **Row** / **Column** | The grid line the wall stands on, counted from 1 at the front (−Y) wall for a divider along X, or at the left (−X) wall for one along Y. |
+| **From** | The first socket the wall covers, counted from 1. |
+| **Sockets** | How many sockets the wall covers, first to last (at least 2). The two tenons sit in the end sockets. |
+
+A divider is `(sockets − 1) × pitch + 9.6 mm` long, 2.4 mm thick, and as tall as the cavity's inside height less 1 mm, so it clears the lid. The panel states all three numbers for each divider.
+
+**Clashes are stated, not refused.** If a divider runs into the board or a standoff, ends in the wall, has a tenon with no socket under it, or crosses another divider, the panel names the clash ("Divider 2: it runs into the board from X 14.7 mm to 84.3 mm") and offers **Move to row N**, the nearest grid line where the divider seats cleanly. A clashing divider still exports.
+
+**Fit.** Each tenon is 0.3 mm smaller than the socket. That number is provisional: nothing has been printed to settle it yet. The grid's **Fit** follows the case's print fit unless you pick one for the grid. Tight adds nothing, Standard adds 0.1 mm and Loose adds 0.25 mm to the socket, so the clearance is 0.3, 0.4 or 0.55 mm. The relief goes on the socket, the cut, never on the tenon. If a divider will not drop in, go one grade looser.
+
+**Printing.** In the export, each divider is listed under accessories as **Divider (along X)** or **Divider (along Y)**. Each one is exported lying on its side: the wall face is on the bed, the tenons point sideways, and nothing needs supports.
+
 ## Export
 
 Three formats:
