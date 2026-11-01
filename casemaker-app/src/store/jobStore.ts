@@ -3,6 +3,7 @@ import type { MeshNode, MeshStats } from '@/types';
 import type { PlacementReport } from '@/engine/compiler/placementValidator';
 import type { SmartCutoutDecision } from '@/engine/compiler/smartCutoutLayout';
 import type { SplitOffer } from '@/engine/compiler/buildPlan';
+import type { StackConnectorReport } from '@/engine/compiler/stackConnector';
 
 export type JobStatus = 'idle' | 'rebuilding' | 'error';
 
@@ -28,6 +29,12 @@ export interface JobState {
    * knows the case's own keep-outs, and only it can say whether a seam exists.
    */
   splitOffer: SplitOffer | null;
+  /**
+   * Issue #149 — the stacking connector's placed sockets and statements, as
+   * the compiler laid them out against the case's real features; null when the
+   * project asks for no connector.
+   */
+  connector: StackConnectorReport | null;
   setStatus: (status: JobStatus, error?: string | null) => void;
   applyResult: (
     generation: number,
@@ -39,6 +46,7 @@ export interface JobState {
       placementReport?: PlacementReport;
       smartCutoutDecisions?: SmartCutoutDecision[];
       splitOffer?: SplitOffer;
+      connector?: StackConnectorReport;
     },
   ) => void;
 }
@@ -54,6 +62,7 @@ export const useJobStore = create<JobState>()((set) => ({
   placementReport: null,
   smartCutoutDecisions: [],
   splitOffer: null,
+  connector: null,
   setStatus: (status, error = null) => set({ status, error }),
   applyResult: (generation, nodes, combinedStats, durationMs, diag, diagnostics) =>
     set(() => {
@@ -70,6 +79,7 @@ export const useJobStore = create<JobState>()((set) => ({
         placementReport: diagnostics?.placementReport ?? null,
         smartCutoutDecisions: diagnostics?.smartCutoutDecisions ?? [],
         splitOffer: diagnostics?.splitOffer ?? null,
+        connector: diagnostics?.connector ?? null,
       };
     }),
 }));

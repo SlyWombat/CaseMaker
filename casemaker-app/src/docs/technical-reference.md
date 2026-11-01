@@ -464,6 +464,73 @@ wants a bare gridded floor is the toolbox archetype, which is still a go/no-go
 (#155); shipping the host-less primitive is what lets that decision be made
 with something in hand.
 
+## Stacking connector
+
+`stackConnector.ts` (#149) joins two separately printed parts — one case
+stacked on another, or a case on a base plate that carries the same socket. It
+is clean-room: the behaviours come from the ToolStack review in `/Toolbox.md`
+("Interface 2 of 3"), the numbers are ours (`types/stackConnector.ts`), and no
+compatibility with any reviewed product is claimed.
+
+**The socket** is a pad standing `STACK_PAD_PROUD` (4.2 mm) off a side wall,
+`STACK_PAD_W` (22 mm) wide, with a vertical 45° dovetail channel cut into it:
+3.0 mm deep, 14.0 mm across the floor, 8.0 mm across the mouth. The channel's
+floor is 1.2 mm of pad backing, so nothing the socket cuts reaches the wall.
+Bottom to top on a wall of exterior height H:
+
+| z | what | why |
+| :--- | :--- | :--- |
+| 0 → 12.5 mm | receiving pocket, open at the bottom | takes the key half standing proud of the part below |
+| 3.0 mm | over-insertion stop | a key pushed home bottoms here, flush with the top |
+| → H | storage channel, open at the top, one key long + 0.5 mm | the key enters here, parks half-proud, or stores flush |
+
+H is the shell's height plus the lid's when the lid sits ON the rim (the pad and
+channel continue through the lid's edge); a recessed lid leaves the socket in the
+shell. A short wall loses the flush storage first (stated, with how far a stored
+key stands proud), then the pocket (stated: the case can only be the lower part),
+and only below 15.5 mm is no socket cut. Both open ends carry a 1 mm 45° lead-in
+on the lips and a seam notch in the floor backing; two stacked parts' notches make
+one V-groove at the seam, which is where the key's bump clicks.
+
+The channel is vertical, so the joint locks the parts against sliding apart and
+against peeling off the wall; lifting off is resisted only by the detent. That
+is also why a lid the socket spans still lifts straight off. Registration — the
+stack sitting square — is a separate feature, not the key's job.
+
+**The key** (`stack-key-N` nodes, category `fastener`) is the socket's section
+moved `clearance` off the floor and both flanks, with a web through the mouth
+standing 1.5 mm past the pad face as the grip. `short` is 24 mm (12 mm in each
+part); `long` adds 16 mm between the halves to bridge a gap such as rugged feet.
+The leaf spring is a 1.0 mm beam over a 2.0 mm window with 1 mm slits either
+side, so it is held only at its ends; a 0.8 mm bump with 45° flanks sits 12 mm
+from each end (one bump at the middle of the short key). The beam's free span is
+20 mm; the fixed-fixed estimate of its peak strain at full deflection is 2.4 %,
+inside PETG's elastic range and near the edge of PLA's — an estimate, not a test.
+The key is built lying flat, grip face on the bed: the flanks lean out at 45°
+going up and the beam bridges its window, so it needs no supports.
+
+**Fit.** The gap per face is `STACK_SLIDE_CLEARANCE` (0.15 mm, ours, unprinted)
+plus the fit rung's relief (`tight` 0, `standard` 0.10, `loose` 0.25 mm), from
+`stackConnector.fit` or, when that is absent, the case's `fit`. The relief goes on
+the KEY — the reverse of the snap catches — because a socket is part of a printed
+case and a key is a 2 g reprint: one socket serves every rung. A relieved key's
+bump grows by the same amount, so its tip still reaches 0.8 mm past the floor and
+the click still lands. All of it is PROVISIONAL until the `stack-connector` fit
+coupon is printed.
+
+**Inform, don't refuse.** Each socket's zone (pad, plus the wall behind it, full
+height) is checked against the features already on that wall — port cutouts,
+vents, bosses, the hinge, latches, mounting features, fans, the display opening,
+labels, antennas, snap catches, the rugged ribbing, the alignment brim, custom
+cutouts and the board clips. A clash is stated and the socket is still cut where
+it was put; the statement offers the nearest shift along the wall (0.5 mm steps)
+that clears everything, or says there is none. Statements travel on
+`BuildPlan.connector` to `jobStore.connector` and the Features panel.
+
+A project with no connector — the field absent, or no sockets and no keys —
+compiles to a byte-identical plan and mesh; `stackConnectorUnchanged.spec.ts`
+pins the hashes taken on main before the feature landed.
+
 ## Fit coupons
 
 Every fit-critical interface can be printed on its own before the part that uses
@@ -479,6 +546,7 @@ and `--list` prints the ids.
 | `board-snap` | `boardSnap.ts`'s `CLIP_FIT` (the spine-to-PCB-edge gap) laddered by #153's `fitRelief`, one clipped two-jaw clip per rung, plus a gauge cut to the board's own thickness to check the Z jaw opening accepts it |
 | `snap-catch` | `snapCatches.ts`'s hook socket, laddered by #153 — the tab and the socket wall are both the compiler's geometry, the barb pocket is measured off the mesh |
 | `rack-tab` | `rack.ts`'s `TAB_SLACK` (plate tab in its ledge), laddered by #153; both halves are the compiler's own parts cut with a slab, so the tab prints counterbore-up |
+| `stack-connector` | `STACK_SLIDE_CLEARANCE`, the stacking connector's sliding gap per face: three sockets in one bar, each opened by one fit rung, and one shipped key that should slide into the right one |
 | `insert-pocket` | the tool-insert pocket's `clearance` and `chamfer`, as two ladders of Ø10 pockets in one bar |
 
 The three #153-laddered coupons (`board-snap`, `snap-catch`, `rack-tab`) each print

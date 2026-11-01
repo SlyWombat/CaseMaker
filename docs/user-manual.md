@@ -153,6 +153,41 @@ Case walls are usually thinner than a pocket plus its 1 mm backing, so a round b
 
 **The fits are provisional.** No magnet coupon has been printed and measured yet. Print `fit-coupon-magnet-sizes.stl` (`npm run fit:coupon -- magnet-sizes`): one pocket of every size, labelled 62, 63, 82, 83, 102, 103, 123. Press a magnet of each size in and note which ones do not seat or fall out.
 
+## Stacking connector
+
+Two printed cases can be locked together — one stacked on the other, or a case
+on a base plate — with a small printed key. In the **Features** panel, under
+**Stacking connector**:
+
+- **Walls.** Tick the walls (front, back, left, right) that get a socket. Each
+  socket is a dovetail channel in a pad standing 4.2 mm off the wall. **Shift**
+  moves it along the wall from the centre, in millimetres.
+- **Key.** *Short* (24 mm) joins two parts that touch. *Long* (40 mm) reaches
+  across a 16 mm gap, for a case standing on rugged feet or a hanger held off the
+  wall.
+- **Keys to print.** Each key is its own part in the export (0 to 8), already
+  lying flat — print it as it comes, no supports.
+- **Key fit.** Tight, standard or loose; by default the case's own fit. A looser
+  key is smaller; the socket never changes, so a loose key can be reprinted for a
+  case that is already printed. The summary under it gives the gap per face and
+  how much of the key sits under each lip. These numbers are provisional until
+  the stacking-connector fit coupon has been printed.
+
+**Using it.** Slide a key down into the lower part's socket from the top. It
+stops half in, half out with a click — that is the parked position. Lower the
+upper part straight down onto it: the proud half goes up into the pocket in the
+upper part's socket, and the key clicks again at the seam. Pushed all the way
+into one socket instead, the key sits flush for storage (when the case is tall
+enough — the panel says so if it is not). The key locks the parts against sliding
+apart; lifting the top one off takes a firm pull against the click. Sockets on
+the same walls of both parts must line up, so give both cases the same shifts.
+
+**When a socket lands on something.** If a socket would run into a port, a vent,
+a hinge, a latch or another feature on that wall, the panel says so and offers
+the nearest clear position — **Move to … mm**. The socket is still cut where you
+put it until you choose to move it. A wall too short for the receiving pocket is
+also stated: that case can be the bottom of a stack, not the top.
+
 ## External assets (STL / 3MF import)
 
 The **External assets** panel imports binary STL, ASCII STL, or 3MF meshes. Per asset, you choose visibility:

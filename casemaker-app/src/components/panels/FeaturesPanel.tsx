@@ -14,8 +14,7 @@ import type { DisplayFraming } from '@/types/display';
 import { MAGNET_SIZES, type MagnetPocket, type MagnetRetention, type MagnetSize, type NameplateParams } from '@/types';
 import { MAGNETS } from '@/engine/compiler/fasteners';
 import { FACE_NAME, faceSizeForProject, magnetFactsForProject } from '@/engine/compiler/magnets';
-import type { CaseDivider, FitVariant } from '@/types';
-import { FIT_VARIANTS } from '@/types/snap';
+import type { CaseDivider } from '@/types';
 import {
   DEFAULT_FLOOR_GRID,
   DIVIDER_THICKNESS,
@@ -25,6 +24,19 @@ import {
   caseDividerFacts,
   suggestCaseDivider,
 } from '@/engine/compiler/caseDividers';
+import { useJobStore } from '@/store/jobStore';
+import {
+  CONNECTOR_FACES,
+  STACK_KEY_VARIANTS,
+  STACK_LONG_REACH,
+  STACK_SLIDE_CLEARANCE,
+  stackKeyLength,
+  type ConnectorFace,
+  type StackConnectorParams,
+  type StackKeyVariant,
+} from '@/types/stackConnector';
+import { FIT_VARIANTS, type FitVariant } from '@/types/snap';
+import { stackKeyDims } from '@/engine/compiler/stackConnector';
 
 /**
  * Issue #49 — combined panel exposing the six engine domains that previously
@@ -92,6 +104,7 @@ export function FeaturesPanel() {
       <MagnetNotes />
       <SnapCatchesSection />
       <FloorGridSection />
+      <StackConnectorSection />
     </div>
   );
 }
@@ -1392,6 +1405,168 @@ function FloorGridSection() {
             );
           })}
         </>
+      )}
+    </section>
+  );
+}
+
+const FACE_LABEL: Record<ConnectorFace, string> = {
+  '-y': 'Front (−Y)',
+  '+y': 'Back (+Y)',
+  '-x': 'Left (−X)',
+  '+x': 'Right (+X)',
+};
+
+const KEY_LABEL: Record<StackKeyVariant, string> = {
+  short: `Short — ${stackKeyLength('short')} mm, parts touching`,
+  long: `Long — ${stackKeyLength('long')} mm, bridges a ${STACK_LONG_REACH} mm gap`,
+};
+
+const EMPTY_CONNECTOR: StackConnectorParams = { sockets: [], key: 'short', keys: 0 };
+
+const mm1 = (v: number): string => `${Math.round(v * 100) / 100}`;
+
+/**
+ * Issue #149 — the stacking connector: which walls get a dovetail socket, which
+ * key, how many keys go in the export, and the key's fit. The compiler's own
+ * statements (a socket on a port, a short wall) are listed under it, each with
+ * the move that clears it when there is one — inform, never refuse.
+ */
+function StackConnectorSection() {
+  const stored = useProjectStore((s) => s.project.case.stackConnector);
+  const caseFit = useProjectStore((s) => s.project.case.fit);
+  const patchCase = useProjectStore((s) => s.patchCase);
+  const report = useJobStore((s) => s.connector);
+  const c = stored ?? EMPTY_CONNECTOR;
+  const set = (patch: Partial<StackConnectorParams>) => patchCase({ stackConnector: { ...c, ...patch } });
+  const socketOn = (face: ConnectorFace) => c.sockets.find((s) => s.face === face);
+  const toggleFace = (face: ConnectorFace, on: boolean) =>
+    set({
+      sockets: on
+        ? [...c.sockets.filter((s) => s.face !== face), { face, offset: 0 }]
+        : c.sockets.filter((s) => s.face !== face),
+    });
+  const setOffset = (face: ConnectorFace, offset: number) =>
+    set({ sockets: c.sockets.map((s) => (s.face === face ? { ...s, offset } : s)) });
+  const fit: FitVariant = c.fit ?? caseFit ?? 'tight';
+  const dims = stackKeyDims(c.key, fit);
+  const active = c.sockets.length > 0 || c.keys > 0;
+
+  return (
+    <section className="features-section" data-testid="stack-connector-section">
+      <h4>Stacking connector</h4>
+      <p className="features-empty">
+        Dovetail sockets on the outside of the walls, and printed keys that slide into them to lock
+        this case to another one or to a base plate.
+      </p>
+      {CONNECTOR_FACES.map((face) => {
+        const sock = socketOn(face);
+        return (
+          <div key={face} className="features-row" title={`Dovetail socket on the ${FACE_LABEL[face]} wall`}>
+            <label className="cell-label">
+              <input
+                type="checkbox"
+                checked={!!sock}
+                onChange={(e) => toggleFace(face, e.target.checked)}
+                data-testid={`stack-socket-${face}`}
+                aria-label={`Socket on the ${FACE_LABEL[face]} wall`}
+              />
+              <span className="cell-label__axis">{FACE_LABEL[face]}</span>
+            </label>
+            {sock && (
+              <label className="cell-label" title="Shift along the wall from its centre, in millimetres.">
+                <span className="cell-label__axis">shift (mm)</span>
+                <input
+                  type="number"
+                  step={0.5}
+                  value={sock.offset}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) setOffset(face, v);
+                  }}
+                  data-testid={`stack-socket-offset-${face}`}
+                  aria-label={`Socket shift along the ${FACE_LABEL[face]} wall, mm`}
+                />
+              </label>
+            )}
+          </div>
+        );
+      })}
+      <label className="cell-label" style={{ display: 'flex', width: '100%' }}>
+        <span className="cell-label__axis">key</span>
+        <select
+          value={c.key}
+          onChange={(e) => set({ key: e.target.value as StackKeyVariant })}
+          data-testid="stack-key-variant"
+          aria-label="Key length"
+          title="The short key joins two parts that touch; the long key reaches across a gap such as rugged feet."
+        >
+          {STACK_KEY_VARIANTS.map((v) => (
+            <option key={v} value={v}>
+              {KEY_LABEL[v]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="cell-label" style={{ display: 'flex', width: '100%' }}>
+        <span className="cell-label__axis">keys to print</span>
+        <input
+          type="number"
+          min={0}
+          max={8}
+          step={1}
+          value={c.keys}
+          onChange={(e) => {
+            const v = Math.max(0, Math.min(8, Math.floor(Number(e.target.value) || 0)));
+            set({ keys: v });
+          }}
+          data-testid="stack-key-count"
+          aria-label="Keys to add to the export"
+          title="Each key is its own part in the export, printed flat."
+        />
+      </label>
+      <label className="cell-label" style={{ display: 'flex', width: '100%' }}>
+        <span className="cell-label__axis">key fit</span>
+        <select
+          value={c.fit ?? ''}
+          onChange={(e) => set({ fit: e.target.value === '' ? undefined : (e.target.value as FitVariant) })}
+          data-testid="stack-key-fit"
+          aria-label="Key fit"
+          title="Looser rungs make the key smaller; the socket never changes, so a looser key can be reprinted for a case already printed."
+        >
+          <option value="">Case fit ({caseFit ?? 'tight'})</option>
+          {FIT_VARIANTS.map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
+      </label>
+      {active && (
+        <p className="features-empty" data-testid="stack-key-summary">
+          Key {mm1(dims.length)} mm long, {mm1(dims.capture)} mm held in each part, {mm1(dims.lipOverlap)} mm
+          under each lip; gap {mm1(dims.clearance)} mm per face ({mm1(STACK_SLIDE_CLEARANCE)} mm sliding gap + {mm1(dims.relief)}{' '}
+          mm {fit} relief). Provisional until the stacking-connector fit coupon is printed.
+        </p>
+      )}
+      {report && report.notes.length > 0 && (
+        <ul className="features-notes" data-testid="stack-connector-notes">
+          {report.notes.map((n, i) => (
+            <li key={i} data-testid={`stack-note-${n.kind}-${n.face}`}>
+              {n.message}
+              {n.suggestedOffset !== undefined && (
+                <button
+                  type="button"
+                  onClick={() => setOffset(n.face, n.suggestedOffset!)}
+                  data-testid={`stack-move-${n.face}`}
+                  title="Move the socket along its wall to the nearest clear position."
+                >
+                  Move to {mm1(n.suggestedOffset)} mm
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

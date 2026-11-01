@@ -654,6 +654,21 @@ body, html, #root {
   font-style: italic;
   margin: 2px 0;
 }
+/* Issue #149 — the stacking connector's statements: facts, each with the move
+   that clears it when there is one. Not an error colour — nothing is refused. */
+.features-notes {
+  margin: 4px 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+.features-notes li {
+  margin: 2px 0;
+}
+.features-notes button {
+  margin-left: 6px;
+  font-size: 11px;
+  padding: 1px 6px;
+}
 /* Issue #89 follow-up — every per-cell input gets a visible inline mini-label
    (e.g. "X" / "Y" / "Ø" for mounting holes, "wall" / "u (mm)" for snap
    catches). The wrapping <label> also gives every input a programmatic

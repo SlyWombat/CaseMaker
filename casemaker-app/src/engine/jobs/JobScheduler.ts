@@ -84,6 +84,7 @@ async function dispatch(project: Project, myGen: number): Promise<void> {
       placementReport: plan.placementReport,
       smartCutoutDecisions: plan.smartCutoutDecisions,
       splitOffer: plan.splitOffer,
+      connector: plan.connector,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
