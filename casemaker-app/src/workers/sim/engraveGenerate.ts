@@ -156,7 +156,7 @@ import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import { generateChamfer3d, type Chamfer3dCut } from '@/engine/cnc/cam/chamfer3d';
 import { targetRim } from '@/engine/cnc/engrave/targetRim';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { concatToolpathIR, estimateCycleSeconds, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStats, type CamMove, type CamOperation, type CamPassStep, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, estimateCycleSeconds, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStatsOf, type CamMove, type CamOperation, type CamPassStep, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
   DEFAULT_GRID_PITCH_MM,
   DEFAULT_MAX_CELLS,
@@ -3003,7 +3003,7 @@ function summarize(ir: Pick<ToolpathIR, 'operations' | 'ordering'>): EngraveCamS
   // #487 — the program's own travel, and the same program had its region loops been placed in
   // document order. The report's two region numbers differ by exactly the ordering's doing, so
   // swapping them in leaves every non-region move (a trace, a drill) where it was.
-  const travel = travelStats(ir.operations.flatMap((op) => op.moves));
+  const travel = travelStatsOf(ir.operations.map((op) => op.moves));
   const ordering = ir.ordering;
   const baselineRapidMm =
     ordering === undefined

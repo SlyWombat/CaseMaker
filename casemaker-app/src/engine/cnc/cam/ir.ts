@@ -261,14 +261,27 @@ export interface TravelStats {
  * the ledger the issue prints was measured from the G-code the same way.
  */
 export function travelStats(moves: readonly CamMove[]): TravelStats {
+  return travelStatsOf([moves]);
+}
+
+/**
+ * #889 — {@link travelStats} over several move lists read as one, in order (an IR's operations),
+ * without first concatenating them: a packed goal program would otherwise be copied out as one
+ * object per move just to be measured.
+ */
+export function travelStatsOf(lists: readonly (readonly CamMove[])[]): TravelStats {
   let rapidMm = 0;
   let cutMm = 0;
-  for (let i = 1; i < moves.length; i++) {
-    const a = moves[i - 1]!;
-    const b = moves[i]!;
-    const distance = Math.hypot(b.x - a.x, b.y - a.y);
-    if (b.kind === 'rapid') rapidMm += distance;
-    else cutMm += distance;
+  let a: CamMove | null = null;
+  for (const moves of lists) {
+    for (const b of moves) {
+      if (a !== null) {
+        const distance = Math.hypot(b.x - a.x, b.y - a.y);
+        if (b.kind === 'rapid') rapidMm += distance;
+        else cutMm += distance;
+      }
+      a = b;
+    }
   }
   return { rapidMm, cutMm };
 }

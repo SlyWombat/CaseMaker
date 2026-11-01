@@ -56,6 +56,7 @@ import { cuttingDiameter, cuttingRadiusForSweep } from '../tool';
 import { adaptiveSettings, type AdaptiveSettings } from './adaptive';
 import { roughingAdaptiveMoves } from './rough3d';
 import { isMetalMaterial } from '../materials';
+import { MoveStore } from './moveStore';
 import type { StockMaterial } from '@/types/engraveJob';
 
 /**
@@ -1086,7 +1087,14 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     opts.rim != null
       ? rimMoves(hf, tool, feeds, opts.rim.floorZ, alongStep, safeZ, hopZ)
       : { moves: [], laps: 0, tip: null };
-  const finishMoves = rim.moves.length > 0 ? [...rim.moves, ...finishRaster] : finishRaster;
+  // #889 — joined packed to packed: the rim's few laps, then the raster's arrays copied as they are.
+  const finishMoves = ((): CamMove[] => {
+    if (rim.moves.length === 0) return finishRaster;
+    const joined = new MoveStore({ capacity: rim.moves.length + finishRaster.length });
+    joined.append(rim.moves);
+    joined.append(finishRaster);
+    return joined.view();
+  })();
   // #847 — THE FINISH'S CUT SURFACE IS THE RASTER'S, LOWERED BY THE RIM LAPS WHERE THEY RUN. The
   // laps take the clear band's wall down to its floor; measured from the raster's tip field alone
   // that wall would read as residual the finish has already removed. The returned field is the
@@ -1637,8 +1645,9 @@ function roughingMoves(
   hopZ: number,
   onLayer?: (done: number, total: number) => void,
 ): { moves: CamMove[]; layers: number } {
-  const moves: CamMove[] = [];
-  if (hf.coveredCount === 0) return { moves, layers: 0 };
+  // #889 — packed: the roughing is most of a goal program's moves.
+  const moves = new MoveStore();
+  if (hf.coveredCount === 0) return { moves: moves.view(), layers: 0 };
   // #541 — the layer loop steps L down by `stepDown` until it passes `deepest`. A zero or negative
   // step-down (a placeholder or bad feed row through the flat proxy) never terminates it, so refuse
   // here rather than hang: a non-positive step-down cannot layer a roughing pass.
@@ -1663,8 +1672,7 @@ function roughingMoves(
   const rows = rasterRows(hf, feeds.roughStepOver);
   /** #738 — a Z-only retract at the point the cut stopped; the traverse comes after it. */
   const retract = (z: number): void => {
-    const last = moves[moves.length - 1]!;
-    moves.push({ kind: 'rapid', x: last.x, y: last.y, z });
+    moves.rapid(moves.lastX(), moves.lastY(), z);
   };
 
   for (const [index, L] of levels.entries()) {
@@ -1686,11 +1694,11 @@ function roughingMoves(
           const cut = tip < topZ - 1e-9; // something stands above the tip here
           if (cut) {
             if (!open) {
-              moves.push({ kind: 'rapid', x, y, z: hopZ });
-              moves.push({ kind: 'feed', x, y, z: tip, f: feeds.plungeFeed });
+              moves.rapid(x, y, hopZ);
+              moves.feed(x, y, tip, feeds.plungeFeed);
               open = true;
             } else {
-              moves.push({ kind: 'feed', x, y, z: tip, f: feeds.feed });
+              moves.feed(x, y, tip, feeds.feed);
             }
           } else if (open) {
             // Lift clear where the cut stopped. The rapid to the current (no-material) column
@@ -1709,7 +1717,7 @@ function roughingMoves(
     }
   }
   if (moves.length > 0) retract(safeZ);
-  return { moves, layers: levels.length };
+  return { moves: moves.view(), layers: levels.length };
 }
 
 /**
@@ -1732,8 +1740,9 @@ export function finishingMoves(
    */
   only?: Uint8Array | null,
 ): CamMove[] {
-  const moves: CamMove[] = [];
-  if (hf.coveredCount === 0) return moves;
+  // #889 — packed, as the roughing is.
+  const moves = new MoveStore();
+  if (hf.coveredCount === 0) return moves.view();
   const { pitch, x0, y0 } = hf;
   const rows = rasterRows(hf, feeds.finishStepOver).filter(
     (j) => only === undefined || only === null || only.subarray(j * hf.nx, (j + 1) * hf.nx).some((v) => v === 1),
@@ -1750,22 +1759,19 @@ export function finishingMoves(
         const x = x0 + i * pitch;
         const z = tip[j * hf.nx + i] as number;
         if (!open) {
-          moves.push({ kind: 'rapid', x, y, z: hopZ });
-          moves.push({ kind: 'feed', x, y, z, f: feeds.plungeFeed });
+          moves.rapid(x, y, hopZ);
+          moves.feed(x, y, z, feeds.plungeFeed);
           open = true;
         } else {
-          moves.push({ kind: 'feed', x, y, z, f: feeds.feed });
+          moves.feed(x, y, z, feeds.feed);
         }
       }
-      if (open) {
-        const last = moves[moves.length - 1]!;
-        moves.push({ kind: 'rapid', x: last.x, y: last.y, z: hopZ });
-      }
+      if (open) moves.rapid(moves.lastX(), moves.lastY(), hopZ);
     }
     flip = !flip;
   }
-  if (moves.length > 0) moves.push({ kind: 'rapid', x: moves[moves.length - 1]!.x, y: moves[moves.length - 1]!.y, z: safeZ });
-  return moves;
+  if (moves.length > 0) moves.rapid(moves.lastX(), moves.lastY(), safeZ);
+  return moves.view();
 }
 
 function positive(v: number | null | undefined): boolean {
