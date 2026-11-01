@@ -165,3 +165,62 @@ describe('#854 — the toolbox module joins through the same connector', () => {
     expect(plain.nodes.some((n) => n.id.startsWith('stack-key-'))).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #854 item 4 — the base plate, and matched shifts between projects.
+// ---------------------------------------------------------------------------
+
+import { socketMinHeight } from '@/engine/compiler/stackConnector';
+import { STACK_PAD_PROUD } from '@/types';
+
+describe('#854 — the base plate and matched socket shifts', () => {
+  const withConnector = (connector: CaseParameters['stackConnector']): Project => {
+    const base = createDefaultProject(BOARD_ID);
+    return { ...base, case: { ...base.case, stackConnector: connector } as CaseParameters };
+  };
+
+  const bboxOf = (op: BuildOp): { min: number[]; max: number[] } => {
+    const m = exec(op);
+    const b = m.boundingBox();
+    m.delete();
+    return { min: [...b.min], max: [...b.max] };
+  };
+
+  it('exports a base plate on the case footprint, a socket channel tall', () => {
+    const plan = compileProject(
+      withConnector({ sockets: [{ face: '+y', offset: 0 }], key: 'short', keys: 0, basePlate: true }),
+    );
+    const node = plan.nodes.find((n) => n.id === 'stack-base');
+    expect(node).toBeDefined();
+    const b = bboxOf(node!.op);
+    // A shallow tray: just tall enough to hold the parked key's channel.
+    expect(b.max[2]! - b.min[2]!).toBeCloseTo(socketMinHeight(), 3);
+    // The +y socket's pad stands proud of that wall, as on a case.
+    const f = frame();
+    expect(b.max[1]!).toBeGreaterThan(f.outerY + STACK_PAD_PROUD - 0.5);
+  });
+
+  it('adds no plate when the project does not ask', () => {
+    const plan = compileProject(
+      withConnector({ sockets: [{ face: '+y', offset: 0 }], key: 'short', keys: 0 }),
+    );
+    expect(plan.nodes.some((n) => n.id === 'stack-base')).toBe(false);
+  });
+
+  it('matchShifts gives every wall the first socket’s shift', () => {
+    const plan = compileProject(
+      withConnector({
+        sockets: [
+          { face: '+y', offset: 0 },
+          { face: '-y', offset: 30 },
+        ],
+        key: 'short',
+        keys: 0,
+        matchShifts: true,
+      }),
+    );
+    const offsets = plan.connector!.sockets.map((s) => s.offset);
+    expect(offsets.length).toBe(2);
+    expect(new Set(offsets).size).toBe(1);
+  });
+});

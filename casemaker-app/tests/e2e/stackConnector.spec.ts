@@ -58,6 +58,15 @@ test('sockets on two walls and a key, the clash offer, and the export', async ({
   await expect(page.getByTestId('stack-register')).toBeChecked();
   await section.screenshot({ path: path.join(OUT, 'registration-on.png') });
 
+  // #854 item 4 — the same shift on every wall, and a base plate on the
+  // export list carrying the same sockets.
+  await page.getByTestId('stack-match-shifts').check();
+  await page.getByTestId('stack-base-plate').check();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.waitForIdle();
+  });
+  await expect(page.getByTestId('stack-base-plate')).toBeChecked();
+
   // One key, long variant, loose fit.
   await page.getByTestId('stack-key-count').fill('1');
   await page.getByTestId('stack-key-variant').selectOption('long');

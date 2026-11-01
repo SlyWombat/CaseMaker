@@ -1650,6 +1650,53 @@ function StackConnectorSection() {
           ))}
         </select>
       </label>
+      {/* #854 item 4 — the same shift on every wall lines two projects up,
+          and the base plate gives a case something to drop onto. */}
+      <label
+        className="cell-label"
+        style={{ display: 'flex', width: '100%' }}
+        title="Use one shift for every wall, so a second case set the same way lines its sockets up with this one."
+      >
+        <input
+          type="checkbox"
+          checked={c.matchShifts === true}
+          onChange={(e) => set({ matchShifts: e.target.checked })}
+          data-testid="stack-match-shifts"
+          aria-label="Use one socket shift on every wall"
+        />
+        <span>same shift on every wall</span>
+      </label>
+      {c.matchShifts === true && c.sockets.length > 1 && (
+        <label className="cell-label" title="The shift every wall uses, mm from the wall's centre.">
+          <span className="cell-label__axis">shift (all walls)</span>
+          <input
+            type="number"
+            step={0.5}
+            value={c.sockets[0]!.offset}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v)) set({ sockets: c.sockets.map((s) => ({ ...s, offset: v })) });
+            }}
+            data-testid="stack-shift-all"
+            aria-label="Socket shift on every wall, mm"
+          />
+        </label>
+      )}
+      <label
+        className="cell-label"
+        style={{ display: 'flex', width: '100%' }}
+        title="Add a shallow base plate to the export: a tray on this case's footprint whose rim carries the same sockets, so the case drops onto it with the keys parked half-proud."
+      >
+        <input
+          type="checkbox"
+          checked={c.basePlate === true}
+          onChange={(e) => set({ basePlate: e.target.checked })}
+          data-testid="stack-base-plate"
+          aria-label="Export a base plate carrying the same sockets"
+        />
+        <span>export a base plate</span>
+      </label>
+
       {/* #854 item 2 — registration, apart from retention: a ridge on the lid
           and a groove under the floor square a stack before any key goes in. */}
       <label

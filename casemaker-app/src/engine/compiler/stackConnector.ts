@@ -37,6 +37,7 @@ import {
   hull,
   poly,
   rotate,
+  roundedRectPrism,
   translate,
   union,
   type BuildNode,
@@ -603,6 +604,48 @@ const FACE_NAME: Record<ConnectorFace, string> = {
 
 const fmt = (v: number): string => `${Math.round(v * 10) / 10}`;
 
+/**
+ * #854 item 4 — the base plate's floor thickness, mm. The plate is a shallow
+ * tray: its rim is exactly as tall as a socket's storage channel needs, so the
+ * PARKED key stands half-proud out of the rim and the case's bottom pocket
+ * receives it. The plate is the LOWER part of a stack by design — its sockets
+ * carry the storage channel, not the receiving pocket.
+ */
+export const STACK_BASE_FLOOR: Mm = 3;
+
+/** The base plate's node, when the project asks for one. */
+export function buildStackBasePlate(
+  params: StackConnectorParams | undefined,
+  geom: { outerX: Mm; outerY: Mm; wall: Mm; cornerRadius: Mm; caseFit?: FitVariant },
+): BuildNode | null {
+  if (params?.basePlate !== true || !stackConnectorWanted(params)) return null;
+  const h = socketMinHeight();
+  if (h <= STACK_BASE_FLOOR + 2) return null;
+  const cavityX = geom.outerX - 2 * geom.wall;
+  const cavityY = geom.outerY - 2 * geom.wall;
+  if (cavityX <= 4 || cavityY <= 4) return null;
+  const outer = translate([0, 0, 0], roundedRectPrism(geom.outerX, geom.outerY, h, geom.cornerRadius));
+  const cavity = translate(
+    [geom.wall, geom.wall, STACK_BASE_FLOOR],
+    roundedRectPrism(cavityX, cavityY, h - STACK_BASE_FLOOR + 1, Math.max(0, geom.cornerRadius - geom.wall)),
+  );
+  const solid = difference([outer, cavity]);
+  // The same sockets, placed by the same code — on the tray's own rim.
+  const socketOps = buildStackConnector(params, {
+    outerX: geom.outerX,
+    outerY: geom.outerY,
+    shellTop: h,
+    top: h,
+    wall: geom.wall,
+    cornerRadius: geom.cornerRadius,
+    ...(geom.caseFit !== undefined ? { caseFit: geom.caseFit } : {}),
+  });
+  let op = solid;
+  if (socketOps.shellAdd.length > 0) op = union([op, ...socketOps.shellAdd]);
+  if (socketOps.shellCut.length > 0) op = difference([op, ...socketOps.shellCut]);
+  return { id: 'stack-base', op };
+}
+
 /** True when the connector asks for anything at all. */
 export function stackConnectorWanted(p: StackConnectorParams | undefined): p is StackConnectorParams {
   return !!p && (p.sockets.length > 0 || p.keys > 0);
@@ -721,7 +764,9 @@ export function buildStackConnector(
       });
       continue;
     }
-    let offset = s.offset;
+    // #854 item 4 — one shift for every wall when the project asks, so two
+    // projects set the same way line up; the per-wall offsets are then moot.
+    let offset = params.matchShifts === true && params.sockets.length > 0 ? params.sockets[0]!.offset : s.offset;
     if (Math.abs(offset) > limit) {
       const clamped = Math.sign(offset) * limit;
       report.notes.push({

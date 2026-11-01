@@ -76,6 +76,19 @@ export interface StackConnectorParams {
    * stay byte-identical).
    */
   register?: boolean;
+  /**
+   * #854 item 4 — put the SAME socket shift on every wall, so two projects set
+   * the same way line up: with it on, the first socket's offset is used for
+   * all faces and the per-wall offsets are ignored.
+   */
+  matchShifts?: boolean;
+  /**
+   * #854 item 4 — export a BASE PLATE for this case: a shallow tray sharing
+   * the case's footprint, its rim carrying the same sockets, so the case drops
+   * onto it with the keys parked half-proud. The plate is the LOWER part of a
+   * stack (its sockets carry the storage channel, not the receiving pocket).
+   */
+  basePlate?: boolean;
 }
 
 // ---------------------------------------------------------------------------

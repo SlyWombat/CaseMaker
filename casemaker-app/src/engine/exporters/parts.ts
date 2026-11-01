@@ -121,6 +121,9 @@ function flat(hint: string, extra: Partial<PrintMeta> = {}): PrintMeta {
 const PRINT_TABLE: Record<string, PrintMeta> = {
   shell: flat('Print right-side up (case floor on the bed, walls + cavity opening up)'),
   lid: flat('Print upside-down (lid ceiling on the bed)', { flipForPrint: true }),
+  // #854 item 4 — the stacking base plate: a tray that sits on the bed exactly
+  // as it stacks under its case.
+  'stack-base': flat('Print FLAT — the tray sits on the bed exactly as it stacks'),
   gasket: flat('Lay flat (TPU 95A — see the *-gasket-print-instructions.txt sidecar)'),
   'hinge-pin': flat('Stand on end or lay flat — straight cylinder'),
   stand: flat(
@@ -483,6 +486,9 @@ function describePart(
   }
   if (id === 'lid') {
     return { displayName: 'Lid', material: 'rigid', category: 'case' };
+  }
+  if (id === 'stack-base') {
+    return { displayName: 'Base plate (stacking connector)', material: 'rigid', category: 'case' };
   }
   if (id === 'gasket') {
     return { displayName: 'Gasket (TPU 95A)', material: 'flex', category: 'gasket' };

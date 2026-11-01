@@ -441,6 +441,18 @@ export const caseParamsSchema = z.object({
         .describe(
           'Issue #854 — a ridge on the lid top and a groove in the floor underside, so stacked cases register square with no key; omit for none.',
         ),
+      matchShifts: z
+        .boolean()
+        .optional()
+        .describe(
+          'Issue #854 — use the first socket\'s shift on every wall, so two projects set the same way line up; omit for per-wall shifts.',
+        ),
+      basePlate: z
+        .boolean()
+        .optional()
+        .describe(
+          'Issue #854 — export a base plate carrying the same sockets, for a case to drop onto; omit for none.',
+        ),
     })
     .optional()
     .describe('Stacking connector sockets and keys; omit for none.'),

@@ -42,7 +42,7 @@ import { buildBadgeNodes } from './badge';
 import { buildInsertNodes } from './insert';
 import { buildBlankNodes } from './blank';
 import { buildToolboxNodes, TOOLBOX_BIN_NODE_ID } from './toolbox';
-import { buildStackConnector, stackConnectorWanted, stackPadCutouts } from './stackConnector';
+import { buildStackBasePlate, buildStackConnector, stackConnectorWanted, stackPadCutouts } from './stackConnector';
 import { buildStackGroove, buildStackRidge, stackRegisterWanted } from './stackRegister';
 import { ClashEnv, dividerClashStatements, hatBeyondHost, magnetClashStatements, type ClashStatement } from './caseClashes';
 import { feature, featureOfOps } from './interiorClash';
@@ -535,6 +535,20 @@ export function compileProject(project: Project): BuildPlan {
   }
 
   const nodes: BuildNode[] = [{ id: 'shell', op: shellOp }];
+
+  // #854 item 4 — a base plate carrying the same sockets, when the project
+  // asks for one: a shallow tray on the case's footprint for it to drop onto.
+  if (caseParams.stackConnector?.basePlate === true) {
+    const dims = computeShellDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+    const plate = buildStackBasePlate(caseParams.stackConnector, {
+      outerX: dims.outerX,
+      outerY: dims.outerY,
+      wall: caseParams.wallThickness,
+      cornerRadius: caseParams.cornerRadius,
+      ...(caseParams.fit !== undefined ? { caseFit: caseParams.fit } : {}),
+    });
+    if (plate !== null) nodes.push(plate);
+  }
 
   // Issue #148 — a bolted split of the shell, for a project whose bed the shell
   // does not fit.
