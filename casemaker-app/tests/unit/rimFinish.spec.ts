@@ -111,9 +111,22 @@ describe('#862 — the rim pass finishes the band wall', () => {
     const raised = 20 * hf.nx + 0; // cell (i=0, j=20), its centre at (0, 10)
     hf.z[raised] = -1;
     const r = run(hf, { floorZ: -5 });
-    const near = r.finishing.moves.filter(
-      (m) => m.kind === 'feed' && Math.hypot(m.x - 0, m.y - 10) <= 0.4,
-    );
+    // #889 — the laps' straight stretches are merged, so the path is read along each feed (every
+    // 0.05 mm), not only at its ends.
+    const moves = [...r.finishing.moves];
+    const near: { z: number }[] = [];
+    for (let k = 1; k < moves.length; k++) {
+      const a = moves[k - 1]!;
+      const m = moves[k]!;
+      if (m.kind !== 'feed') continue;
+      const steps = Math.max(1, Math.ceil(Math.hypot(m.x - a.x, m.y - a.y, m.z - a.z) / 0.05));
+      for (let q = 0; q <= steps; q++) {
+        const x = a.x + ((m.x - a.x) * q) / steps;
+        const y = a.y + ((m.y - a.y) * q) / steps;
+        const z = a.z + ((m.z - a.z) * q) / steps;
+        if (Math.hypot(x - 0, y - 10) <= 0.4) near.push({ z });
+      }
+    }
     // The laps cut at -1 there, and never below the surface they stand beside.
     expect(near.some((m) => Math.abs(m.z + 1) <= 1e-9)).toBe(true);
     expect(near.every((m) => m.z >= -1 - 1e-9)).toBe(true);

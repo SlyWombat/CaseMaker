@@ -467,6 +467,32 @@ describe('#889 — the goal estimate counts what the CAM will write', () => {
     }
   });
 
+  it('counts the rim laps into the finish when the run clears a band', () => {
+    const hf = sampleGoalHeightfield(goal(domeTris(5)), {
+      pitchMm: 0.1,
+      clear: { kind: 'ring', widthMm: 3 },
+      stockRect: { xMin: 0, xMax: 40, yMin: 0, yMax: 40 },
+      baseZ: -5,
+    });
+    const rim = { floorZ: -5 };
+    const { finishing } = generateSurface3dIR({
+      heightfield: hf,
+      tool: BALL,
+      toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
+      toolNumber: 1,
+      spindleRpm: 12000,
+      air: true,
+      feeds: FEEDS,
+      rapid: RAPID,
+      labelId: 'goal-1',
+      opts: { rim },
+    });
+    const without = estimateGoalMoves(hf, FEEDS, 0.3);
+    const withRim = estimateGoalMoves(hf, FEEDS, 0.3, null, { floorZ: rim.floorZ, tool: BALL });
+    expect(withRim.finish).toBeGreaterThan(without.finish);
+    expect(withRim.finish).toBeGreaterThanOrEqual(finishing.moves.length);
+  });
+
   it('a phone gets the smaller budget', () => {
     expect(goalMemoryBudgetMb({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/156.0.0.0' })).toBe(GOAL_MEMORY_BUDGET_MB.desktop);
     expect(goalMemoryBudgetMb({ userAgent: 'Mozilla/5.0 (Linux; Android 14) Mobile Safari/537.36' })).toBe(GOAL_MEMORY_BUDGET_MB.phone);

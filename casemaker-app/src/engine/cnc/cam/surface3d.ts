@@ -180,7 +180,7 @@ export function goalMemoryBudgetMb(nav: { userAgent?: string; userAgentData?: { 
 export interface GoalMoveEstimate {
   /** The roughing's moves, counted exactly (the levels, merged as the CAM merges them). */
   rough: number;
-  /** The finishing raster's moves, at most (one per sample, before any merge). */
+  /** The finish's moves: its raster at most (one per sample, before any merge), and its rim laps. */
   finish: number;
   /** Both. */
   moves: number;
@@ -200,6 +200,8 @@ export function estimateGoalMoves(
   feeds: SurfaceFeeds,
   allowanceMm: number,
   alongStepMm?: number | null,
+  /** #862's rim laps, when the run will cut them: the band floor and the finishing cutter. */
+  rim?: { floorZ: number; tool: SurfaceTool } | null,
 ): GoalMoveEstimate {
   const alongStep = positive(alongStepMm) ? (alongStepMm as number) : hf.pitch;
   // A step-down the roughing cannot layer is the CAM's own named refusal; it is not counted here.
@@ -212,6 +214,7 @@ export function estimateGoalMoves(
       for (const [iS, iE] of coveredRuns(hf, j)) finish += alongColumns(hf, iS, iE, alongStep).length + 2;
     }
     finish += 1;
+    if (rim != null) finish += rimMoves(hf, rim.tool, feeds, rim.floorZ, alongStep, SAFE_Z, HOP_Z, true).count;
   }
   const moves = rough + finish;
   return { rough, finish, moves, mb: (moves * GOAL_BYTES_PER_MOVE) / (1024 * 1024) };
@@ -1156,7 +1159,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
   const rim =
     opts.rim != null
       ? rimMoves(hf, tool, feeds, opts.rim.floorZ, alongStep, safeZ, hopZ)
-      : { moves: [], laps: 0, tip: null };
+      : { moves: [], laps: 0, tip: null, count: 0 };
   // #889 — joined packed to packed: the rim's few laps, then the raster's arrays copied as they are.
   const finishMoves = ((): CamMove[] => {
     if (rim.moves.length === 0) return finishRaster;
@@ -2372,9 +2375,12 @@ function rimMoves(
   alongStep: number,
   safeZ: number,
   hopZ: number,
-): { moves: CamMove[]; laps: number; tip: Float32Array | null } {
-  const moves: CamMove[] = [];
-  if (hf.coveredCount === 0 || !(feeds.stepDown > 0)) return { moves, laps: 0, tip: null };
+  /** #889 — count the moves without holding them (the budget's estimate); no tip field either. */
+  countOnly = false,
+): { moves: CamMove[]; laps: number; tip: Float32Array | null; count: number } {
+  // #889 — packed and merged like the raster passes: a lap's straight stretches are one move.
+  const moves = new MoveStore({ mergeToleranceMm: GOAL_MERGE_TOLERANCE_MM, countOnly });
+  if (hf.coveredCount === 0 || !(feeds.stepDown > 0)) return { moves: [], laps: 0, tip: null, count: 0 };
   const D = distanceField(hf);
   // Decimated at the finishing step-over: the rim's own chord facets are then the size of the
   // finish's, so the wall carries no coarser a pattern than the floor beside it.
@@ -2386,7 +2392,7 @@ function rimMoves(
   const paths = contourLoops(hf, D, boundaryLevel)
     .map((loop) => decimateLoop(loop, along))
     .filter((loop) => loop.length >= 2);
-  if (paths.length === 0) return { moves, laps: 0, tip: null };
+  if (paths.length === 0) return { moves: [], laps: 0, tip: null, count: 0 };
   // The wall's foot at a contour point: the highest covered cell around it (the boundary cell the
   // contour runs through, and its neighbours if a rounded corner puts the point between cells).
   const footAt = (x: number, y: number): number => {
@@ -2463,7 +2469,7 @@ function rimMoves(
   // the chord between them, so the field cannot claim a cut the laps did not make.
   let lapTip: Float32Array | null = null;
   const radius = tool.radius;
-  if (radius > 0) {
+  if (radius > 0 && !countOnly) {
     lapTip = new Float32Array(hf.nx * hf.ny);
     lapTip.fill(Infinity);
     for (const pts of paths) {
@@ -2484,11 +2490,8 @@ function rimMoves(
       }
     }
   }
-  if (moves.length > 0) {
-    const last = moves[moves.length - 1]!;
-    moves.push({ kind: 'rapid', x: last.x, y: last.y, z: safeZ });
-  }
-  return { moves, laps: levels.length, tip: lapTip };
+  if (moves.length > 0) moves.rapid(moves.lastX(), moves.lastY(), safeZ);
+  return { moves: countOnly ? [] : moves.view(), laps: levels.length, tip: lapTip, count: moves.length };
 }
 
 
