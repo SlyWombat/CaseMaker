@@ -2089,6 +2089,9 @@ export function EngravePanel(): JSX.Element {
     (job.targetObject?.chamfer === undefined ||
       measuredNow.cutters[1] === undefined ||
       job.targetObject.chamfer.toolKey === measuredNow.cutters[1].key) &&
+    // #869 — the goal's rough is the plan's own decision: the applied answer must be the one the
+    // goal carries, and a plan with no rough matches only a goal with none.
+    (job.targetObject?.roughToolKey ?? null) === (measuredNow.goalRoughKey ?? null) &&
     (measuredSetup?.tools ?? []).length === measuredNow.cutters.length &&
     (measuredSetup?.tools ?? []).every((k, i) => k === measuredNow.cutters[i]?.key) &&
     measuredNow.cutters.every((c) => {
@@ -2222,9 +2225,9 @@ export function EngravePanel(): JSX.Element {
             ...(reason === 'no-feeds' ? { material: job.stock.material } : {}),
             toKey,
             toName: toEntry !== undefined ? toolDisplayName(toEntry.tool).split(' · ')[0]! : toKey,
-          });
+          }, measuredNow.goalRoughKey);
         } else {
-          applyCutterPlan(measuredNow.cutters, 'computed');
+          applyCutterPlan(measuredNow.cutters, 'computed', 0, undefined, measuredNow.goalRoughKey);
         }
       }
       return;
@@ -2843,7 +2846,7 @@ export function EngravePanel(): JSX.Element {
     if (job.toolKey === '' && source !== 'user' && source !== 'measured') {
       const pick = await useEngravePreviewStore.getState().measureNow(job);
       if (pick !== null) {
-        applyCutterPlan(pick.cutters, 'computed');
+        applyCutterPlan(pick.cutters, 'computed', 0, undefined, pick.goalRoughKey);
       } else {
         const key = rec?.key ?? (await awaitPreviewRecommendationKey());
         if (key) setTool(key, 'computed');
@@ -4321,7 +4324,7 @@ export function EngravePanel(): JSX.Element {
               <button
                 type="button"
                 data-testid="engrave-use-measured"
-                onClick={() => applyCutterPlan(measuredNow.cutters, 'computed')}
+                onClick={() => applyCutterPlan(measuredNow.cutters, 'computed', 0, undefined, measuredNow.goalRoughKey)}
               >
                 Use the recommendation
               </button>

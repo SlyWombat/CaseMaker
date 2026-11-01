@@ -725,6 +725,16 @@ export interface EngraveTargetObject {
    * findings. Optional, so every document written before the field existed round-trips unchanged.
    */
   chamfer?: EngraveGoalChamfer;
+  /**
+   * #869 — THE FLAT THAT ROUGHS A GOAL, when it is not the ball that finishes it. Present on a
+   * GOAL while a flat end mill clears the stock as its own program before the ball's finishing
+   * program: a flat takes a deeper step-down and a wider step-over than the ball, so the rough is
+   * faster, and the adaptive clearing engine (flat end mills only) becomes available to it. The
+   * measured search chooses the key; absent (or a key the library does not hold) means the goal is
+   * cut by one cutter, as before. Optional, so every document written before the field existed
+   * round-trips unchanged.
+   */
+  roughToolKey?: string;
 }
 
 /** #829 — the 3D chamfer a GOAL asks for: its bevel width, and the V-bit chosen to cut it. */

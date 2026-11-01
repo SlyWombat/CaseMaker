@@ -104,6 +104,8 @@ export interface CutterPlanLike {
   cutters: readonly PlanCutter[];
   /** #842 — the mixed job's face-program cutter (the setup's `faceToolKey`). */
   faceToolKey?: string;
+  /** #869 — the flat that roughs a goal before its ball, run before `cutters[0]`. */
+  goalRoughKey?: string;
   /**
    * #743 P-8 — WHICH setup the plan rewrites (0-based), defaulting to the first. A two-sided
    * board has one setup per face, and a fix applied to the bottom's cutter must not collapse the
@@ -143,9 +145,22 @@ export function applyCutterPlanToJob(job: EngraveJob, plan: CutterPlanLike): Eng
   if (pureGoalObject(job) !== null) {
     // #829 — a pure goal's SECOND cutter is the V-bit that bevels its rim; the goal has no setup
     // to carry it, so the plan's second key is written into the goal's own `chamfer`.
+    //
+    // #869 — AND THE ROUGH IS THE PLAN'S OWN. The goal's `roughToolKey` is written when the plan
+    // names one and CLEARED when it does not: the rough's presence is the plan's decision, and a
+    // stale key would make a plan measured as one program generate as two — the evaluator applies
+    // a plan to a clone and generates it, so the job the verdict describes must be the job it
+    // writes. (The chamfer is different: whether the goal asks for a bevel is the document's, so a
+    // plan with no second cutter leaves the V alone.)
     const goal = applied.targetObject;
-    if (goal !== undefined && goal.chamfer !== undefined && plan.cutters[1] !== undefined) {
-      applied.targetObject = { ...goal, chamfer: { ...goal.chamfer, toolKey: plan.cutters[1].key } };
+    if (goal !== undefined) {
+      const next = { ...goal };
+      if (plan.goalRoughKey === undefined) delete next.roughToolKey;
+      else next.roughToolKey = plan.goalRoughKey;
+      if (goal.chamfer !== undefined && plan.cutters[1] !== undefined) {
+        next.chamfer = { ...goal.chamfer, toolKey: plan.cutters[1].key };
+      }
+      applied.targetObject = next;
     }
     return applied;
   }

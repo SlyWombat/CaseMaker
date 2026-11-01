@@ -31,7 +31,16 @@ import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { statedCuttingSize as stated } from '@/engine/cnc/tool';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
-import { faceCutterOptions, faceWorkOf, kindedWork, materialRefusal, planCutters, reachOf, type PlannedCutter } from './cutterPlan';
+import {
+  faceCutterOptions,
+  faceWorkOf,
+  goalRoughOptions,
+  kindedWork,
+  materialRefusal,
+  planCutters,
+  reachOf,
+  type PlannedCutter,
+} from './cutterPlan';
 import { goalNeedMm } from './goalReach';
 import { jobHasItems, jobTargetObjects, pureGoalObject } from './jobSetup';
 import { bossBeforeThread } from './threadFit';
@@ -152,8 +161,10 @@ export function planKey(plan: CandidatePlan): string {
   // different runs, and they must not dedupe (nor share a cache row).
   const cutters = plan.cutters.map((c) => `${c.key}[${[...c.items].sort().join(',')}]`).join('|');
   // A plan with no face cutter keeps the pre-#842 canonical form byte for byte: the suffix is
-  // written only when a face program has a cutter of its own.
-  return plan.faceToolKey === undefined ? cutters : `${cutters}@face:${plan.faceToolKey}`;
+  // written only when a face program has a cutter of its own. #869's goal rough follows the same
+  // rule, so a plan without one keys exactly as it did before the field existed.
+  const faced = plan.faceToolKey === undefined ? cutters : `${cutters}@face:${plan.faceToolKey}`;
+  return plan.goalRoughKey === undefined ? faced : `${faced}@rough:${plan.goalRoughKey}`;
 }
 
 /**
@@ -170,20 +181,31 @@ export function rulePlanOf(
 ): CandidatePlan | null {
   const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined);
   if (base.cutters.length === 0) return null;
-  return planFrom(base.cutters, tools, base.faceToolKey);
+  return planFrom(base.cutters, tools, base.faceToolKey, base.goalRoughKey);
 }
 
 /** A plan from `planCutters`' output, with each cutter's source recorded. */
-function planFrom(cutters: readonly PlannedCutter[], tools: readonly ToolLibraryEntry[], faceToolKey?: string): CandidatePlan {
+function planFrom(
+  cutters: readonly PlannedCutter[],
+  tools: readonly ToolLibraryEntry[],
+  faceToolKey?: string,
+  goalRoughKey?: string,
+): CandidatePlan {
   const source: Record<string, 'owned' | 'catalogue'> = {};
   for (const c of cutters) {
     const entry = tools.find((t) => t.key === c.key);
     source[c.key] = entry === undefined ? 'owned' : sourceOf(entry);
   }
+  // #869 — the rough owns no items, but it is a program of the plan: its own source rides too.
+  if (goalRoughKey !== undefined) {
+    const entry = tools.find((t) => t.key === goalRoughKey);
+    source[goalRoughKey] = entry === undefined ? 'owned' : sourceOf(entry);
+  }
   return {
     cutters: cutters.map((c) => ({ key: c.key, items: [...c.items] })),
     source,
     ...(faceToolKey === undefined ? {} : { faceToolKey }),
+    ...(goalRoughKey === undefined ? {} : { goalRoughKey }),
   };
 }
 
@@ -322,6 +344,30 @@ export function candidatePlans(
       .sort((a, b) => byDiameter(b, a))
       .slice(0, 6);
     for (const ball of balls) add({ cutters: [{ key: ball.key, items: ids }], source: { [ball.key]: sourceOf(ball) } });
+    // #869 — AND THE SAME BALL WITH A FLAT ROUGHING BEFORE IT. A flat takes a deeper step-down and
+    // a wider step-over than the ball, so the bulk comes off faster, and the adaptive clearing
+    // engine (flat end mills only) becomes available to the goal; the finish is the ball either
+    // way. Which is cheaper is a measured question — the split is tried beside the single ball and
+    // the run's own cost (seconds plus each tool change, #858) decides. The roughest variants are
+    // capped: the top two balls, and three flats for the largest, so the search stays affordable.
+    const roughsFor = (ball: ToolLibraryEntry, count: number): CandidatePlan[] => {
+      const options = goalRoughOptions(
+        job,
+        tools,
+        catalogue,
+        conditions,
+        table ?? undefined,
+        stated(ball.tool) ?? 0,
+      );
+      return (options?.candidates ?? []).slice(0, count).map((flat) => ({
+        cutters: [{ key: ball.key, items: ids }],
+        source: { [ball.key]: sourceOf(ball), [flat.key]: sourceOf(flat) },
+        goalRoughKey: flat.key,
+      }));
+    };
+    for (const [i, ball] of balls.slice(0, 2).entries()) {
+      for (const plan of roughsFor(ball, i === 0 ? 3 : 1)) add(plan);
+    }
   }
   // #829 — A PURE GOAL THAT ASKS FOR A CHAMFER gains the V-bit as a SECOND program in every
   // candidate considered so far: the surfacing cutter still cuts the part and the V bevels its
@@ -339,6 +385,9 @@ export function candidatePlans(
       for (const cone of cones) {
         if (plan.cutters.some((c) => c.key === cone.key)) continue;
         add({
+          // #869 — the surfacing plan's own fields ride: a goal rough (and a face cutter) is part
+          // of the plan the V joins, not something the chamfer variant drops.
+          ...plan,
           cutters: [...plan.cutters, { key: cone.key, items: [] }],
           source: { ...plan.source, [cone.key]: sourceOf(cone) },
         });

@@ -30,9 +30,19 @@ function cutterWord(cutter: { key: string; items: readonly string[] }, tools: re
   return `${size} ${entry !== undefined && vCone(entry.tool) !== null ? 'V ' : ''}rest`;
 }
 
-/** A whole plan in the operator's words — the measured answer's own name (#766 D). */
-export function planLabel(plan: Pick<CandidatePlan, 'cutters'>, tools: readonly ToolLibraryEntry[]): string {
-  return plan.cutters.map((cutter) => cutterWord(cutter, tools)).join(' + ');
+/**
+ * A whole plan in the operator's words — the measured answer's own name (#766 D). #869 — a goal's
+ * flat rough is the plan's FIRST program even though it owns no item, so it leads the name.
+ */
+export function planLabel(
+  plan: Pick<CandidatePlan, 'cutters' | 'goalRoughKey'>,
+  tools: readonly ToolLibraryEntry[],
+): string {
+  const chain = plan.cutters.map((cutter) => cutterWord(cutter, tools)).join(' + ');
+  if (plan.goalRoughKey === undefined) return chain;
+  const entry = tools.find((t) => t.key === plan.goalRoughKey);
+  const d = entry === undefined ? null : statedCuttingSize(entry.tool);
+  return `${d === null ? 'a flat' : `⌀${Number(d.toFixed(3))}`} rough + ${chain}`;
 }
 
 const pct = (v: number): string => `${Math.round(Math.max(0, Math.min(1, v)) * 100)} %`;
@@ -104,7 +114,7 @@ export function cutterLines(
   cutterKeys = false,
 ): string[] {
   const byId = new Map(pick.chosen.evaluation.items.map((i) => [i.id, i] as const));
-  return pick.chosen.plan.cutters.map((cutter, index) => {
+  const lines = pick.chosen.plan.cutters.map((cutter, index) => {
     const entry = tools.find((t) => t.key === cutter.key);
     if (cutter.items.length === 0) {
       // A rest cutter: its sentence is the raised measurement at ITS width — the whole point of
@@ -136,6 +146,14 @@ export function cutterLines(
         : `its worst item is ${worst.name} at ${pct(worst.fidelity)} fidelity${worst.charsLost > 0 ? `, ${worst.charsLost} character${worst.charsLost === 1 ? '' : 's'} lost` : ''}${floorWord}`;
     return `${dia(entry)}${cutterKeys ? ` (${cutter.key})` : ''} cuts ${cutter.items.length === 1 ? 'one item' : `${cutter.items.length} items`} and ${detail}.`;
   });
+  // #869 — THE ROUGH'S OWN SENTENCE, FIRST: it is the plan's first program, and it owns no item.
+  const roughKey = pick.chosen.plan.goalRoughKey;
+  if (roughKey === undefined) return lines;
+  const entry = tools.find((t) => t.key === roughKey);
+  lines.unshift(
+    `${dia(entry)}${cutterKeys ? ` (${roughKey})` : ''} roughs the goal before the ball finishes it — one program of its own, leaving the finishing allowance.`,
+  );
+  return lines;
 }
 
 /** What the runner-up would lose, in measured words — the 'here is why not that cutter' line. */

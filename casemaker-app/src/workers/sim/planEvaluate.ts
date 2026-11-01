@@ -87,6 +87,12 @@ export interface CandidatePlan {
    * setup, so the face program is measured with the cutter it would really run.
    */
   faceToolKey?: string;
+  /**
+   * #869 — the FLAT that roughs a goal as its own program, before the ball in `cutters[0]`
+   * finishes it. Written into the goal's `roughToolKey`, so the split is generated, posted and
+   * measured exactly as it would run. Absent: the goal is cut by one cutter.
+   */
+  goalRoughKey?: string;
 }
 
 /**
@@ -282,6 +288,9 @@ export function planEvaluationKey(job: EngraveJob, plan: CandidatePlan, ctx: Eva
   return [
     jobFingerprint(job),
     JSON.stringify(plan.cutters.map((c) => [c.key, [...c.items]])),
+    // #869 — the goal's rough is part of a plan's identity: two plans that differ only there are
+    // two different runs, and must not share a cached verdict.
+    plan.goalRoughKey ?? '',
     JSON.stringify(plan.source),
     contextSignature(ctx, level),
   ].join('\u0000');
@@ -362,7 +371,10 @@ function measuresFor(
 
 /** The cutters a plan uses, resolved; null when any key is not in the list. */
 function resolveCutters(plan: CandidatePlan, tools: readonly ToolLibraryEntry[]): string | null {
-  const missing = plan.cutters.map((c) => c.key).filter((k) => toolFor(tools, k) === null);
+  const keys = plan.cutters.map((c) => c.key);
+  // #869 — a goal's rough is a program of the plan even though it owns no item.
+  if (plan.goalRoughKey !== undefined) keys.push(plan.goalRoughKey);
+  const missing = keys.filter((k) => toolFor(tools, k) === null);
   return missing.length === 0 ? null : `the plan names ${missing.join(', ')}, which ${missing.length === 1 ? 'is' : 'are'} not in the tool list`;
 }
 
@@ -516,7 +528,9 @@ function measureReach(job: EngraveJob, plan: CandidatePlan, tools: readonly Tool
 
 function baseVerdict(plan: CandidatePlan): Pick<PlanEvaluation, 'toolChanges' | 'risk'> {
   return {
-    toolChanges: Math.max(0, plan.cutters.length - 1),
+    // #869 — a goal's rough is one more bit in the spindle before the first program, and its
+    // change is charged like any other (#858).
+    toolChanges: Math.max(0, plan.cutters.length - 1) + (plan.goalRoughKey === undefined ? 0 : 1),
     risk: { reachMarginMm: null, holderClearanceMm: null, chipLoadRatio: null },
   };
 }

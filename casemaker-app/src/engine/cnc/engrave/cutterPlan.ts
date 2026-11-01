@@ -113,6 +113,63 @@ export interface CutterPlan {
    * cutter serves them too.
    */
   faceToolKey?: string;
+  /**
+   * #869 — the FLAT that roughs a goal as its own program, before the ball finishes it. Owns no
+   * items (there are none): it is a program of the plan, not an item's cutter. Absent when the
+   * goal is cut by one cutter.
+   */
+  goalRoughKey?: string;
+}
+
+/**
+ * #869 — THE FLATS THAT CAN ROUGH A GOAL, and the order the rule tries them in.
+ *
+ * A goal's rough is a flat end mill: it takes a deeper step-down and a wider step-over than the
+ * ball, so the bulk comes off faster, and the adaptive clearing engine — flat end mills only —
+ * becomes available to the goal. The finishing ball still owns the surface, so the rough's size is
+ * not a fidelity question: the flat nearest the ball's diameter leaves the least extra stock for
+ * the finish to lift, and a wider one trades finer finish work for a faster bulk cut. That trade
+ * is exactly what the measured search decides; this list is its candidates, nearest the ball's
+ * size first, and the rule answers with the first.
+ *
+ * A flat must REACH the goal's depth (the ball's own reach rule) and pass the material gate. Null
+ * when the job has no goal, or no flat in the shop qualifies — the goal is then cut by one cutter,
+ * as it always was.
+ */
+export interface GoalRoughOptions {
+  /** The flats that can rough this goal, nearest the ball's diameter first. */
+  candidates: ToolLibraryEntry[];
+  /** The ball diameter the order is sized against, mm (0 when the caller gave none). */
+  ballDiameter: number;
+}
+
+export function goalRoughOptions(
+  job: EngraveJob,
+  tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[],
+  conditions?: ReadonlyMap<string, ConditionSummary> | null,
+  table?: readonly FeedsEntry[],
+  ballDiameter = 0,
+): GoalRoughOptions | null {
+  const ballWork = kindedWork(job).filter((w) => w.kind === 'ball');
+  if (ballWork.length === 0) return null;
+  const needed = ballWork.reduce((m, w) => Math.max(m, w.reachMm), 0);
+  const sizeOf = (entry: ToolLibraryEntry): number => statedCuttingSize(entry.tool) ?? cuttingDiameter(entry.tool) ?? 0;
+  const flats = tools.filter((entry) => {
+    if (entry.tool.shape !== 'flat') return false;
+    if (!(sizeOf(entry) > 0)) return false;
+    const reach = reachOf(entry);
+    if (reach !== null && needed > reach + 1e-9) return false;
+    return materialRefusal(job, entry, catalogue, conditions, table) === null;
+  });
+  if (flats.length === 0) return null;
+  const nearBall = (a: ToolLibraryEntry, b: ToolLibraryEntry): number => {
+    const da = Math.abs(sizeOf(a) - ballDiameter);
+    const db = Math.abs(sizeOf(b) - ballDiameter);
+    if (da !== db) return da - db;
+    return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+  };
+  return { candidates: [...flats].sort(nearBall), ballDiameter };
 }
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -523,6 +580,8 @@ export function planCutters(
   const deepest = (list: KindedItem[]) => list.reduce((m, w) => Math.max(m, w.reachMm), 0);
   const label = (list: KindedItem[]) => (list.length === 1 ? list[0]!.name : `${list.length} items`);
   const cutters: PlannedCutter[] = [];
+  /** #869 — the flat that roughs the goal before its ball, when one qualifies. */
+  let goalRoughKey: string | undefined;
   const add = (c: Candidate, list: KindedItem[], reason: string) =>
     cutters.push({
       key: c.entry.key,
@@ -565,8 +624,20 @@ export function planCutters(
       coveredCount === null || coveredCount * stencilCells(c.diameter) <= DEFAULT_MAX_FINISH_TIP_OPS;
     const balls = candidates.filter((c) => (c.tool.shape === 'ball' || c.tool.shape === 'bull') && c.diameter > 0 && reaches(c, needed));
     const pick = bestOf(balls.filter(budgetOk), deeperFirst) ?? bestOf(balls, smallerFirst);
-    if (pick !== null) add(pick, ballWork, `a 3D goal is surfaced by a ball — ${dia(pick.diameter)} is the largest that reaches ${r3(needed)} mm and fits the finishing budget`);
-    else {
+    if (pick !== null) {
+      add(pick, ballWork, `a 3D goal is surfaced by a ball — ${dia(pick.diameter)} is the largest that reaches ${r3(needed)} mm and fits the finishing budget`);
+      // #869 — THE ROUGH IS A FLAT, AND ITS OWN PROGRAM. The rule names the flat nearest the
+      // ball's size: the finish must lift whatever the rough leaves, and the flat closest to the
+      // ball leaves the least extra stock for it. The search measures the alternatives.
+      const rough = goalRoughOptions(job, tools, catalogue, conditions, table, pick.diameter);
+      const roughPick = rough?.candidates[0];
+      if (roughPick !== undefined) {
+        goalRoughKey = roughPick.key;
+        notes.push(
+          `the goal’s rough is its own program — ${roughPick.key} clears the stock before the ball finishes`,
+        );
+      }
+    } else {
       const balls = candidates.filter((c) => c.tool.shape === 'ball' || c.tool.shape === 'bull').length;
       const all = tools.filter((t) => t.tool.shape === 'ball' || t.tool.shape === 'bull').length;
       for (const w of ballWork) {
@@ -842,6 +913,7 @@ export function planCutters(
     unassigned,
     notes,
     ...(faceToolKey === undefined ? {} : { faceToolKey }),
+    ...(goalRoughKey === undefined ? {} : { goalRoughKey }),
   };
 }
 

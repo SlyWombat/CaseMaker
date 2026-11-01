@@ -47,6 +47,11 @@ export interface EngravePickSummary {
   /** `smartPickKey` of the job and context this answers — equal keys mean the same answer. */
   jobKey: string;
   cutters: EngravePickCutter[];
+  /**
+   * #869 — the flat the chosen plan roughs a goal with, when the plan splits the goal's program
+   * into a flat rough and the ball finish. Absent on every one-cutter plan.
+   */
+  goalRoughKey?: string;
   words: SmartPickWords;
   /** The chosen plan's worst-item fidelity, 0…1. */
   worstFidelity: number;
@@ -129,6 +134,7 @@ export async function runSmartPick(
       items: [...cutter.items],
       source: chosen.plan.source[cutter.key] ?? 'owned',
     })),
+    ...(chosen.plan.goalRoughKey === undefined ? {} : { goalRoughKey: chosen.plan.goalRoughKey }),
     words: explainSmartPick(pick, tools),
     worstFidelity: chosen.worstFidelity,
     toolChanges: chosen.evaluation.toolChanges,

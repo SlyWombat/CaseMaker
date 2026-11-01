@@ -1079,6 +1079,8 @@ export interface EngraveJobState {
     setupIndex?: number,
     /** #786 slice 4c-2 — set ONLY when this plan replaces a cutter the operator chose. */
     substitution?: EngraveJobSubstitution,
+    /** #869 — the flat that roughs a pure goal before the plan's first cutter; absent = one cutter. */
+    goalRoughKey?: string,
   ) => void;
   /**
    * #835 — write ONE setup's measured plan into THAT setup only (the search judges one setup at a
@@ -1922,10 +1924,14 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     // #766 D — see the interface note. The plan itself is written by the same function the
     // evaluator applies (engine/cnc/engrave/measuredPick), so the app and the search cannot
     // disagree about what "this plan" means in the document.
-    applyCutterPlan: (cutters, source = 'computed', setupIndex = 0, substitution) =>
+    applyCutterPlan: (cutters, source = 'computed', setupIndex = 0, substitution, goalRoughKey) =>
       apply((job) => {
         if (cutters.length === 0) return job;
-        const next = applyCutterPlanToJob(job, { cutters, setupIndex });
+        const next = applyCutterPlanToJob(job, {
+          cutters,
+          setupIndex,
+          ...(goalRoughKey === undefined ? {} : { goalRoughKey }),
+        });
         // A later setup's plan is not the JOB's cutter: the job's tool is the first program's,
         // and a fix on the bottom face must not claim otherwise (#743 P-8).
         if (setupIndex !== 0) return next;

@@ -6320,6 +6320,11 @@
           "description": "Turn in degrees about the mesh centre’s Y axis (applied after Z); omit for 0.",
           "type": "number"
         },
+        "roughToolKey": {
+          "description": "The flat end mill’s library key for the goal’s roughing program (#869); omit to cut the goal with one cutter.",
+          "minLength": 1,
+          "type": "string"
+        },
         "scale": {
           "additionalProperties": false,
           "description": "A mesh’s per-axis scale about its X/Y centre and its top; omit for the file’s own size. Ignored for a PNG relief.",
@@ -6575,6 +6580,11 @@
           "rotationY": {
             "description": "Turn in degrees about the mesh centre’s Y axis (applied after Z); omit for 0.",
             "type": "number"
+          },
+          "roughToolKey": {
+            "description": "The flat end mill’s library key for the goal’s roughing program (#869); omit to cut the goal with one cutter.",
+            "minLength": 1,
+            "type": "string"
           },
           "scale": {
             "additionalProperties": false,
