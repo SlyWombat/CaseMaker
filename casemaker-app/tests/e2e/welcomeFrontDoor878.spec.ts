@@ -43,11 +43,20 @@ test('Cases leads to the board catalog with the search focused', async ({ cm, pa
   await expect(page.getByTestId('welcome-overlay')).toBeVisible();
 });
 
-test('Racks opens the rack designer', async ({ cm, page }) => {
+test('Racks opens the rack designer, and the job toolbar comes back with it', async ({ cm, page }) => {
   await cm.ready();
+  // Before a flow is chosen the header is the slim bar: no job chrome, no ⋯ menu.
+  await expect(page.getByTestId('toolbar-welcome')).toBeVisible();
+  for (const id of ['undo-btn', 'save-project', 'export-default', 'parts-menu-toggle']) {
+    await expect(page.getByTestId(id)).toHaveCount(0);
+  }
   await page.getByTestId('welcome-start-rack').click();
   await page.getByTestId('welcome-overlay').waitFor({ state: 'detached', timeout: 30_000 });
   await expect(page.getByTestId('rack-panel')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('toolbar-welcome')).toHaveCount(0);
+  for (const id of ['undo-btn', 'save-project', 'export-default', 'parts-menu-toggle']) {
+    await expect(page.getByTestId(id)).toBeVisible();
+  }
 });
 
 test('Toolboxes opens the toolbox designer', async ({ cm, page }) => {

@@ -5,7 +5,7 @@
 // reachable from a ⋯ overflow menu instead, while the desktop bar is unchanged.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Toolbar } from '@/components/layout/Toolbar';
 import { useProjectStore } from '@/store/projectStore';
 import { useManageModeStore } from '@/store/manageModeStore';
@@ -174,6 +174,43 @@ describe('the header toolbar hides the print project’s file actions on a CNC p
     render(<Toolbar />);
     fireEvent.click(screen.getByTestId('toolbar-overflow-toggle'));
     for (const id of ['new-project', 'save-project-as', 'load-project', 'export-default']) {
+      expect(q(id), id).not.toBeNull();
+    }
+  });
+});
+
+// #878 — before anything is chosen the job's chrome has nothing to act on, so the welcome page
+// draws a slim bar: Manage, Load, Docs and settings, at every width, with no ⋯ menu. The full
+// toolbar is back the moment welcome mode ends.
+describe('the header toolbar on the welcome page (#878)', () => {
+  const PRE_JOB = ['manage-open', 'load-project', 'docs-open', 'settings-open'];
+  const JOB_CHROME = ['new-project', 'undo-btn', 'redo-btn', 'save-project', 'export-default', 'parts-menu-toggle', 'toolbar-overflow-toggle'];
+
+  it.each([1280, 1024, 390])('at %ipx keeps only the pre-job controls, inline', (width) => {
+    setWidth(width);
+    useProjectStore.setState({ welcomeMode: true });
+    render(<Toolbar />);
+    expect(q('toolbar-welcome')).not.toBeNull();
+    for (const id of PRE_JOB) expect(q(id), id).not.toBeNull();
+    for (const id of JOB_CHROME) expect(q(id), id).toBeNull();
+  });
+
+  it('settings and Manage work from it', () => {
+    useProjectStore.setState({ welcomeMode: true });
+    render(<Toolbar />);
+    fireEvent.click(screen.getByTestId('settings-open'));
+    expect(q('settings-menu')).not.toBeNull();
+    fireEvent.click(screen.getByTestId('manage-open'));
+    expect(useManageModeStore.getState().open).toBe(true);
+  });
+
+  it('leaving welcome mode restores the full toolbar', () => {
+    useProjectStore.setState({ welcomeMode: true });
+    render(<Toolbar />);
+    expect(q('undo-btn')).toBeNull();
+    act(() => useProjectStore.getState().loadBuiltinBoard('rpi-4b'));
+    expect(q('toolbar-welcome')).toBeNull();
+    for (const id of ['new-project', 'undo-btn', 'redo-btn', 'save-project', 'load-project', 'export-default', 'parts-menu-toggle', 'docs-open', 'settings-open']) {
       expect(q(id), id).not.toBeNull();
     }
   });
