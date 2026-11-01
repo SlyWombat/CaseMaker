@@ -2962,8 +2962,14 @@ function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
         `${fmtNum(facts.stepDownMm)} mm step-down and ${fmtNum(facts.roughStepOverMm)} mm step-over, ` +
         `leaving ${fmtNum(facts.stockToLeaveMm)} mm of stock on the surface.`;
   // #671 — the passes run in the order they are listed: the parallel finish, then the scallop
-  // contours, then the pencil paths along the corners.
-  const passes = [`Finishing follows the surface at ${fmtNum(facts.finishStepOverMm)} mm step-over.`];
+  // contours, then the pencil paths along the corners. #862 — the rim laps open the finish.
+  const passes = [
+    facts.rim == null
+      ? `Finishing follows the surface at ${fmtNum(facts.finishStepOverMm)} mm step-over.`
+      : `The finish opens with ${facts.rim.laps} rim lap${facts.rim.laps === 1 ? '' : 's'} down the cleared band’s wall, ` +
+        `one per ${fmtNum(facts.stepDownMm)} mm from the stock top to its floor, then follows the surface at ` +
+        `${fmtNum(facts.finishStepOverMm)} mm step-over.`,
+  ];
   if (facts.scallop != null) {
     passes.push(
       `Then a scallop pass on ${facts.scallop.contours} offset contour${facts.scallop.contours === 1 ? '' : 's'}, ` +
@@ -2983,6 +2989,7 @@ function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
         `${facts.roughingLayers} layer${facts.roughingLayers === 1 ? '' : 's'} · ` +
         `${fmtNum(facts.stepDownMm)} mm step-down · ${fmtNum(facts.finishStepOverMm)} mm finish step-over · ` +
         `${fmtNum(facts.stockToLeaveMm)} mm left` +
+        (facts.rim == null ? '' : ' · rim') +
         (facts.scallop == null ? '' : ' · scallop') +
         (facts.pencil == null ? '' : ' · pencil'),
     },

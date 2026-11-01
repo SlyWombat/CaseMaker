@@ -684,6 +684,16 @@ export interface SurfaceOpts {
    * of the work that line will do; the CAM's output is byte-for-byte unchanged.
    */
   onProgress?: (p: { pass: 'rough' | 'finish'; done: number; total: number }) => void;
+  /**
+   * #862 — FINISH THE CLEAR-BAND WALL. A goal sampled with a clear ring (#764) is cut out of the
+   * stock as a plateau, and its outer edge is a vertical wall between the band floor and the stock
+   * top. The roughing's raster only reaches that wall with its row ends — the wall keeps the
+   * raster's step-over as vertical ridges and its top edge as ball bites. Given the band's floor,
+   * the finishing operation also runs contour laps along the covered boundary from the stock top
+   * down to it, so the pocket's outer wall is a contour cut like any other finished face. Absent →
+   * no rim pass (every pre-#862 plan, byte for byte).
+   */
+  rim?: { floorZ: number } | null;
 }
 
 export interface Surface3dArgs {
@@ -716,6 +726,12 @@ export interface Surface3dResult {
   scallop: { operation: CamOperation; facts: ScallopPassFacts } | null;
   /** #671 — the pencil pass and its own numbers, or null when it did not run. */
   pencil: { operation: CamOperation; facts: PencilPassFacts } | null;
+  /**
+   * #862 — the rim pass that finished the clear band's wall, or null when it did not run. Its
+   * moves are part of the FINISHING operation, at its head: the wall is cut before the finish
+   * rides the floor beside it.
+   */
+  rim: { laps: number; floorZ: number } | null;
   /** Labelled placeholders and limitations for the run sheet (feeds, undercuts, flat finish). */
   notes: string[];
 }
@@ -766,6 +782,11 @@ export interface GoalSurfaceFacts {
   scallop?: { contours: number; stepOverMm: number; clamped: boolean } | null;
   /** #671 — the pencil pass's numbers, or null when it did not run; absent before #671. */
   pencil?: { paths: number; creaseDeg: number } | null;
+  /**
+   * #862 — the rim pass's numbers, or null when it did not run; absent before #862. The laps are
+   * the finishing operation's opening moves, down the clear band's wall.
+   */
+  rim?: { laps: number; floorZ: number } | null;
   /** The engine's notes for the run sheet: the feeds, undercuts and a flat finishing cutter. */
   notes: string[];
 }
@@ -932,9 +953,14 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
   // #671 — ONE tip field, four passes: the finishing raster, the scallop contours and the pencil
   // paths all ride the same gouge-safe drop, so no pass can promise a depth another one refuses.
   const tip = finishTipField(hf, tool, maxFinishTipOps);
-  const finishMoves = finishingMoves(hf, tip, feeds, alongStep, safeZ, hopZ, (done, total) =>
+  const finishRaster = finishingMoves(hf, tip, feeds, alongStep, safeZ, hopZ, (done, total) =>
     opts.onProgress?.({ pass: 'finish', done, total }),
   );
+  // #862 — THE RIM PASS OPENS THE FINISH: the clear band's wall as contour laps from the stock
+  // top down to its floor, then the raster rides the floor beside it.
+  const rim =
+    opts.rim != null ? rimMoves(hf, feeds, opts.rim.floorZ, alongStep, safeZ, hopZ) : { moves: [], laps: 0 };
+  const finishMoves = rim.moves.length > 0 ? [...rim.moves, ...finishRaster] : finishRaster;
 
   const depth = Math.max(0, hf.topZ - hf.minZ);
   const roughing: CamOperation = {
@@ -956,6 +982,17 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     estimatedSeconds: estimateCycleSeconds(finishMoves, args.rapid),
   };
   const operations: CamOperation[] = [roughing, finishing];
+
+  // #862 — the rim pass's numbers, and the line that says what the wall now is.
+  let rimFacts: Surface3dResult['rim'] = null;
+  if (rim.laps > 0 && opts.rim != null) {
+    rimFacts = { laps: rim.laps, floorZ: opts.rim.floorZ };
+    notes.push(
+      `The finish opens with ${rim.laps} rim lap${rim.laps === 1 ? '' : 's'} down the cleared band’s wall — ` +
+        `the goal’s own outline, one pass per ${feeds.stepDown} mm from the stock top to the band floor — so the ` +
+        'pocket’s outer wall is a contour cut, not the roughing’s row ends.',
+    );
+  }
 
   // #671 — THE SCALLOP PASS: offset contours of the goal's footprint, each projected onto the tip
   // field, spaced so the step measured ALONG THE SURFACE is the finishing step-over.
@@ -1031,7 +1068,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     operations,
   };
 
-  return { ir, roughing, finishing, roughingLayers: rough.layers, scallop, pencil, notes };
+  return { ir, roughing, finishing, roughingLayers: rough.layers, scallop, pencil, rim: rimFacts, notes };
 }
 
 /** #721 — true for a goal MESH marked as a mold (a PNG relief and an item are never molds). */
@@ -1738,6 +1775,120 @@ function decimateLoop(loop: [number, number][], alongStep: number): [number, num
   }
   return out;
 }
+
+/**
+ * #862 — THE RIM PASS: contour laps around the covered boundary, down the clear band's wall.
+ *
+ * A goal cut with a clear ring (#764) is a plateau out of the stock; its outer edge is a vertical
+ * wall between the band floor and the stock top. The roughing's raster reaches that wall only with
+ * its row ends, so the wall keeps the raster's step-over as vertical ridges and its top edge as
+ * ball bites. A contour lap at Z has the ball's equator at Z + radius touching the wall there, so
+ * laps from the stock top down to the floor cut the wall as one contour surface instead.
+ *
+ * The path is the boundary cells' centres — the distance field's first contour, at one pitch — so
+ * the wall stands exactly where the roughing's outermost pass left it. A lap cuts only where the
+ * boundary cell's own surface is at or below it: over a part's own rim (a goal clipped at the
+ * stock edge) the wall stops at the surface, and the lap must not gouge below it.
+ */
+function rimMoves(
+  hf: GoalHeightfield,
+  feeds: SurfaceFeeds,
+  floorZ: number,
+  alongStep: number,
+  safeZ: number,
+  hopZ: number,
+): { moves: CamMove[]; laps: number } {
+  const moves: CamMove[] = [];
+  if (hf.coveredCount === 0 || !(feeds.stepDown > 0)) return { moves, laps: 0 };
+  const D = distanceField(hf);
+  // Decimated at the finishing step-over: the rim's own chord facets are then the size of the
+  // finish's, so the wall carries no coarser a pattern than the floor beside it.
+  const along = Math.max(alongStep, feeds.finishStepOver > 0 ? feeds.finishStepOver : 0);
+  // The distance field's first expressible contour sits one cell in from the edge; 5 % of a pitch
+  // past that puts the path on the boundary cells' centres, where the roughing's outermost pass
+  // ran — a plateau at exactly one pitch has no contour at all.
+  const boundaryLevel = hf.pitch * 1.05;
+  const paths = contourLoops(hf, D, boundaryLevel)
+    .map((loop) => decimateLoop(loop, along))
+    .filter((loop) => loop.length >= 2);
+  if (paths.length === 0) return { moves, laps: 0 };
+  // The wall's foot at a contour point: the highest covered cell around it (the boundary cell the
+  // contour runs through, and its neighbours if a rounded corner puts the point between cells).
+  const footAt = (x: number, y: number): number => {
+    const i = Math.round((x - hf.x0) / hf.pitch);
+    const j = Math.round((y - hf.y0) / hf.pitch);
+    let foot = -Infinity;
+    for (let dj = -1; dj <= 1; dj++) {
+      for (let di = -1; di <= 1; di++) {
+        const ii = i + di;
+        const jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= hf.nx || jj >= hf.ny) continue;
+        const k = jj * hf.nx + ii;
+        if (hf.covered[k] === 1) foot = Math.max(foot, hf.z[k] as number);
+      }
+    }
+    return foot === -Infinity ? hf.topZ : foot;
+  };
+
+  const levels: number[] = [];
+  for (let L = hf.topZ - feeds.stepDown; L > floorZ + 1e-9; L -= feeds.stepDown) levels.push(L);
+  levels.push(floorZ);
+
+  for (const L of levels) {
+    for (const pts of paths) {
+      const n = pts.length;
+      const cut = pts.map((p) => footAt(p[0], p[1]) <= L + 1e-9);
+      const rapidsOut = (x: number, y: number): void => {
+        moves.push({ kind: 'rapid', x, y, z: hopZ });
+      };
+      if (cut.every(Boolean)) {
+        const first = pts[0]!;
+        rapidsOut(first[0], first[1]);
+        moves.push({ kind: 'feed', x: first[0], y: first[1], z: L, f: feeds.plungeFeed });
+        for (let p = 1; p < n; p++) {
+          const q = pts[p]!;
+          moves.push({ kind: 'feed', x: q[0], y: q[1], z: L, f: feeds.feed });
+        }
+        const last = pts[n - 1]!;
+        if (last[0] !== first[0] || last[1] !== first[1]) {
+          moves.push({ kind: 'feed', x: first[0], y: first[1], z: L, f: feeds.feed });
+        }
+        rapidsOut(first[0], first[1]);
+        continue;
+      }
+      // Split runs: start after a skipped point so every run is found exactly once.
+      const start = cut.indexOf(false);
+      let inRun = false;
+      for (let s = 1; s <= n; s++) {
+        const idx = (start + s) % n;
+        const q = pts[idx]!;
+        if (cut[idx] === true) {
+          if (!inRun) {
+            rapidsOut(q[0], q[1]);
+            moves.push({ kind: 'feed', x: q[0], y: q[1], z: L, f: feeds.plungeFeed });
+            inRun = true;
+          } else {
+            moves.push({ kind: 'feed', x: q[0], y: q[1], z: L, f: feeds.feed });
+          }
+        } else if (inRun) {
+          const prev = pts[(start + s - 1) % n]!;
+          rapidsOut(prev[0], prev[1]);
+          inRun = false;
+        }
+      }
+      if (inRun) {
+        const prev = pts[(start + n) % n]!;
+        rapidsOut(prev[0], prev[1]);
+      }
+    }
+  }
+  if (moves.length > 0) {
+    const last = moves[moves.length - 1]!;
+    moves.push({ kind: 'rapid', x: last.x, y: last.y, z: safeZ });
+  }
+  return { moves, laps: levels.length };
+}
+
 
 // ---------------------------------------------------------------------------
 // #671 — THE PENCIL PASS: one path along every concave crease the heightfield shows.

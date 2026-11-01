@@ -4725,6 +4725,13 @@ export function generateGoalProgram(
   const topBandMm = bandMm !== null && bandMm > 0 ? bandMm : null;
   const depthLimitZ = topBandMm === null ? null : -topBandMm;
 
+  // #862 — THE CLEAR BAND'S WALL, as the rim finish is told it: from the stock top down to the
+  // band's own floor — the goal's base plane, or the #785 top-band clamp when the operator chose
+  // to cut only what the cutter reaches. A job with no band has no wall to finish.
+  const bandBaseZ = goal.position.z - placedSize(goal).z;
+  const bandFloorZ =
+    clear === null ? null : depthLimitZ === null ? bandBaseZ : Math.max(bandBaseZ, depthLimitZ);
+
   // #784 — the blank's rectangle: an oversized goal is cut clipped to the stock, never as air
   // cuts past its edge. A goal already inside the blank samples exactly as before.
   const sampleAt = (pitchMm: number): SampleGoalOpts => ({
@@ -4819,6 +4826,8 @@ export function generateGoalProgram(
         scallop,
         pencil,
         ...(pencilCreaseDeg === undefined ? {} : { pencilCreaseDeg }),
+        // #862 — finish the clear band's wall as contour laps (see bandFloorZ above).
+        rim: bandFloorZ === null ? null : { floorZ: bandFloorZ },
         // #785 — the CAM's own layer/scan-line counts, as Generate's progress words.
         onProgress: (p) =>
           onProgress?.({
@@ -5109,6 +5118,8 @@ export function generateGoalProgram(
       roughingLayers: surfaced.roughingLayers,
       scallop: surfaced.scallop === null ? null : surfaced.scallop.facts,
       pencil: surfaced.pencil === null ? null : surfaced.pencil.facts,
+      // #862 — the rim laps that finished the clear band's wall, or null when there is no band.
+      rim: surfaced.rim,
       // #721 — the run sheet and the row say a mold is a mold.
       notes: [
         ...surfaced.notes,

@@ -928,6 +928,9 @@ export function EngraveTargetObjectRow({
                 {Number(surfaceFacts.roughStepOverMm.toFixed(3))} mm step-over, leaving{' '}
                 {Number(surfaceFacts.stockToLeaveMm.toFixed(3))} mm; finishing at{' '}
                 {Number(surfaceFacts.finishStepOverMm.toFixed(3))} mm step-over
+                {surfaceFacts.rim == null
+                  ? ''
+                  : `, opening with ${surfaceFacts.rim.laps} rim lap${surfaceFacts.rim.laps === 1 ? '' : 's'} down the cleared band’s wall`}
                 {surfaceFacts.scallop == null
                   ? ''
                   : `, then a scallop pass on ${surfaceFacts.scallop.contours} contour${surfaceFacts.scallop.contours === 1 ? '' : 's'}`}
