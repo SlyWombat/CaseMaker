@@ -6,6 +6,19 @@ export interface MeshBuffer {
   indices: Uint32Array;
 }
 
+/**
+ * Issue #850 — a SEALED VOID found in a node's solid: a closed cavity inside
+ * the part. It prints as trapped air — sometimes on purpose (a captured magnet
+ * pocket), otherwise by accident. The compiler classifies it; the mesh layer
+ * only reports what Manifold decomposed.
+ */
+export interface SealedVoid {
+  /** The cavity's enclosed volume, mm³ (the magnitude of its negative volume). */
+  volumeMm3: number;
+  /** The cavity's bounding-box centre, in the node's own frame. */
+  centreMm: [Mm, Mm, Mm];
+}
+
 export interface MeshStats {
   vertexCount: number;
   triangleCount: number;
@@ -17,6 +30,8 @@ export interface MeshStats {
    *  in the slicer. Surfaced as a warning, not a hard error — the user
    *  can still export and clean up in their slicer. */
   componentCount?: number;
+  /** Issue #850 — closed cavities, deliberate or not; the compiler classifies. */
+  sealedVoids?: SealedVoid[];
 }
 
 /**

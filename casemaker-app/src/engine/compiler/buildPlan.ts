@@ -169,6 +169,12 @@ export interface BuildPlan {
    * those features (or without a clash) keeps its plan.
    */
   clashes?: import('./caseClashes').ClashReport;
+  /**
+   * Issue #850 — voids the compiler made ON PURPOSE (captured magnet pockets),
+   * tagged where they were cut, so the sealed-void report stays quiet about
+   * them.
+   */
+  deliberateVoids?: import('./sealedVoids').DeliberateVoid[];
 }
 
 export function cube(size: Vec3, center = false): BuildOp {

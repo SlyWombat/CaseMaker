@@ -1,4 +1,5 @@
-import type { Project, MeshNode, MeshStats } from '@/types';
+import type { Project, MeshNode, MeshStats, SealedVoid } from '@/types';
+import { classifySealedVoids } from '@/engine/compiler/sealedVoids';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { nameplateFontLabels } from '@/engine/compiler/magnets';
@@ -73,8 +74,17 @@ async function dispatch(project: Project, myGen: number): Promise<void> {
         // Issue #83 — propagate Manifold.decompose() count so the UI can
         // warn when a node has loose pieces.
         componentCount: n.componentCount,
+        // Issue #850 — the closed cavities, with size and position.
+        ...(n.sealedVoids !== undefined && n.sealedVoids.length > 0 ? { sealedVoids: n.sealedVoids } : {}),
       },
     }));
+    // Issue #850 — state only the voids NOBODY asked for: a captured magnet
+    // pocket is deliberate and quiet; anything else prints as trapped air.
+    const voidsByNode = new Map<string, SealedVoid[]>();
+    for (const n of result.nodes) {
+      if (n.sealedVoids !== undefined && n.sealedVoids.length > 0) voidsByNode.set(n.id, n.sealedVoids);
+    }
+    const accidentalVoids = classifySealedVoids(voidsByNode, plan.deliberateVoids ?? []);
     const combined: MeshStats = {
       vertexCount: result.combinedVertexCount,
       triangleCount: result.combinedTriangleCount,
@@ -88,6 +98,7 @@ async function dispatch(project: Project, myGen: number): Promise<void> {
       clashes: plan.clashes?.statements ?? [],
       lidSplitOffer: plan.lidSplitOffer,
       rackSplitOffers: plan.rackSplitOffers,
+      sealedVoids: accidentalVoids,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

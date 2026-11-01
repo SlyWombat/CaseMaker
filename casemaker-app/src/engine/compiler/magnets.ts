@@ -143,6 +143,40 @@ export interface ResolvedNameplate {
   textWidth: number;
 }
 
+/**
+ * Issue #850 — THE DELIBERATE VOIDS: a CAPTURED pocket (skin > 0) is a closed
+ * cavity inside the part, made on purpose. Each is tagged with the node it
+ * lands in and the cavity's centre, so the sealed-void report can stay quiet
+ * about it and speak only about the ones nobody asked for. An OPEN pocket
+ * (skin 0) cuts through to the face and seals nothing.
+ */
+export function deliberateVoidsFor(
+  pockets: readonly ResolvedPocket[],
+): { node: string; centreMm: [number, number, number] }[] {
+  const V: Record<Facing, [number, number, number]> = {
+    '+x': [1, 0, 0],
+    '-x': [-1, 0, 0],
+    '+y': [0, 1, 0],
+    '-y': [0, -1, 0],
+    '+z': [0, 0, 1],
+    '-z': [0, 0, -1],
+  };
+  return pockets
+    .filter((p) => p.skin > 0)
+    .map((p) => {
+      const v = V[p.inward];
+      const d = p.skin + p.depth / 2;
+      return {
+        node: p.face === '+z' ? 'lid' : 'shell',
+        centreMm: [
+          p.world[0] + v[0] * d,
+          p.world[1] + v[1] * d,
+          p.world[2] + v[2] * d,
+        ] as [number, number, number],
+      };
+    });
+}
+
 export interface MagnetFacts {
   pockets: ResolvedPocket[];
   nameplate: ResolvedNameplate | null;

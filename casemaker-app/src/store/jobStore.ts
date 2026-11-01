@@ -6,6 +6,7 @@ import type { SplitOffer } from '@/engine/compiler/buildPlan';
 import type { StackConnectorReport } from '@/engine/compiler/stackConnector';
 import type { ClashStatement } from '@/engine/compiler/caseClashes';
 import type { RackPartSplitOffer } from '@/engine/compiler/rack';
+import type { SealedVoidNote } from '@/engine/compiler/sealedVoids';
 
 export type JobStatus = 'idle' | 'rebuilding' | 'error';
 
@@ -46,6 +47,11 @@ export interface JobState {
   lidSplitOffer: SplitOffer | null;
   /** Issue #266 — the rack's per-part split offers, decided by the compiler. */
   rackSplitOffers: RackPartSplitOffer[];
+  /**
+   * Issue #850 — sealed cavities nobody asked for, with size and position; a
+   * deliberate magnet pocket is classified away before it reaches here.
+   */
+  sealedVoids: SealedVoidNote[];
   setStatus: (status: JobStatus, error?: string | null) => void;
   applyResult: (
     generation: number,
@@ -61,6 +67,7 @@ export interface JobState {
       clashes?: ClashStatement[];
       lidSplitOffer?: SplitOffer;
       rackSplitOffers?: RackPartSplitOffer[];
+      sealedVoids?: SealedVoidNote[];
     },
   ) => void;
 }
@@ -80,6 +87,7 @@ export const useJobStore = create<JobState>()((set) => ({
   clashes: [],
   lidSplitOffer: null,
   rackSplitOffers: [],
+  sealedVoids: [],
   setStatus: (status, error = null) => set({ status, error }),
   applyResult: (generation, nodes, combinedStats, durationMs, diag, diagnostics) =>
     set(() => {
@@ -100,6 +108,7 @@ export const useJobStore = create<JobState>()((set) => ({
         clashes: diagnostics?.clashes ?? [],
         lidSplitOffer: diagnostics?.lidSplitOffer ?? null,
         rackSplitOffers: diagnostics?.rackSplitOffers ?? [],
+        sealedVoids: diagnostics?.sealedVoids ?? [],
       };
     }),
 }));

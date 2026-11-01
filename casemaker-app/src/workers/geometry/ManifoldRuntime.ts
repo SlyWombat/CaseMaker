@@ -3,7 +3,7 @@ import wasmUrl from 'manifold-3d/manifold.wasm?url';
 
 import type { BuildOp } from '@/engine/compiler/buildPlan';
 
-import { meshOutputOf, type NodeMeshOutput } from './meshOutput';
+import { decomposeCounts, meshOutputOf, type NodeMeshOutput } from './meshOutput';
 import { executeOp, type GenerationCheck, type ManifoldToplevel } from './evaluateOp';
 
 export type { GenerationCheck } from './evaluateOp';
@@ -33,27 +33,16 @@ export async function buildOp(op: BuildOp, check: GenerationCheck): Promise<Node
   const m = await executeOp(tl, op, check);
   try {
     check();
-    let componentCount = 1;
-    try {
-      // Manifold's decompose() returns the disjoint components. We only need
-      // the count, then dispose the children. A SEALED VOID comes back as its
-      // own component with negative volume; it is a cavity inside a part, not
-      // a loose part the slicer would print on its own, so only positive-volume
-      // bodies count (issue #152: a captured magnet pocket is exactly such a
-      // void, on purpose; the unit specs count bodies the same way).
-      const parts = (m as unknown as { decompose?: () => unknown[] }).decompose?.();
-      if (Array.isArray(parts)) {
-        componentCount = 0;
-        for (const p of parts) {
-          const vol = (p as { volume?: () => number }).volume?.() ?? 1;
-          if (vol > 0) componentCount += 1;
-          (p as { delete?: () => void }).delete?.();
-        }
-      }
-    } catch {
-      // older Manifold without decompose — leave at 1
-    }
-    return meshOutputOf(m, componentCount);
+    // Manifold's decompose() returns the disjoint components. A SEALED VOID
+    // comes back as its own component with negative volume; it is a cavity
+    // inside a part, not a loose part the slicer would print on its own, so it
+    // does not count toward issue #83's bodies (issue #152: a captured magnet
+    // pocket is exactly such a void, on purpose). Issue #850 — the voids are
+    // reported separately, with size and position, so an ACCIDENTAL one can be
+    // stated while a deliberate magnet pocket stays quiet (the compiler
+    // classifies them).
+    const decomposed = decomposeCounts(m);
+    return meshOutputOf(m, decomposed.componentCount, decomposed.sealedVoids);
   } finally {
     m.delete();
   }

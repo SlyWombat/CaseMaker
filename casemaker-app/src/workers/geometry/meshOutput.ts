@@ -10,6 +10,56 @@ export interface NodeMeshOutput {
   bbox: { min: [number, number, number]; max: [number, number, number] };
   /** Number of disjoint solid components in this node (issue #26). */
   componentCount: number;
+  /** Issue #850 — closed cavities inside the solid, with size and position. */
+  sealedVoids?: { volumeMm3: number; centreMm: [number, number, number] }[];
+}
+
+/**
+ * Issue #850 — ONE decompose pass for both numbers the caller needs: the count
+ * of POSITIVE-volume bodies (issue #83's loose parts) and the closed cavities
+ * (negative volume), each with its size and bounding-box centre. Decomposing
+ * twice per node would double the cost on a big model, so the caller reads both
+ * from here.
+ *
+ * An absent decompose (older Manifold) leaves the count at 1 and the voids
+ * empty — exactly the pre-#850 behaviour.
+ */
+export interface DecomposedSolid {
+  componentCount: number;
+  sealedVoids: { volumeMm3: number; centreMm: [number, number, number] }[];
+}
+
+export function decomposeCounts(m: ManifoldInstance): DecomposedSolid {
+  const out: DecomposedSolid = { componentCount: 1, sealedVoids: [] };
+  try {
+    const parts = (m as unknown as { decompose?: () => unknown[] }).decompose?.();
+    if (!Array.isArray(parts)) return out;
+    out.componentCount = 0;
+    for (const p of parts) {
+      const vol = (p as { volume?: () => number }).volume?.() ?? 1;
+      if (vol > 0) out.componentCount += 1;
+      else if (vol < 0) {
+        const bb = (p as { boundingBox?: () => { min: number[]; max: number[] } }).boundingBox?.();
+        if (bb) {
+          out.sealedVoids.push({
+            volumeMm3: -vol,
+            centreMm: [(bb.min[0]! + bb.max[0]!) / 2, (bb.min[1]! + bb.max[1]!) / 2, (bb.min[2]! + bb.max[2]!) / 2],
+          });
+        }
+      }
+      (p as { delete?: () => void }).delete?.();
+    }
+  } catch {
+    // older Manifold without decompose — leave at 1 and no voids
+    out.componentCount = 1;
+    out.sealedVoids = [];
+  }
+  return out;
+}
+
+/** The sealed voids of a solid, for callers that want only that (`#850`). */
+export function sealedVoidsOf(m: ManifoldInstance): { volumeMm3: number; centreMm: [number, number, number] }[] {
+  return decomposeCounts(m).sealedVoids;
 }
 
 /**
@@ -17,7 +67,11 @@ export interface NodeMeshOutput {
  * the caller still owns (and deletes) `m`. Shared by the geometry worker and the sim worker so
  * both ship the same `NodeMeshOutput`.
  */
-export function meshOutputOf(m: ManifoldInstance, componentCount = 1): NodeMeshOutput {
+export function meshOutputOf(
+  m: ManifoldInstance,
+  componentCount = 1,
+  sealedVoids: { volumeMm3: number; centreMm: [number, number, number] }[] = [],
+): NodeMeshOutput {
   const mesh = m.getMesh();
   const positions = new Float32Array(mesh.vertProperties);
   const indices = new Uint32Array(mesh.triVerts);
@@ -47,6 +101,7 @@ export function meshOutputOf(m: ManifoldInstance, componentCount = 1): NodeMeshO
     vertexCount: numVert,
     bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
     componentCount,
+    ...(sealedVoids.length > 0 ? { sealedVoids } : {}),
   };
 }
 

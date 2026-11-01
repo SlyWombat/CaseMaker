@@ -25,7 +25,7 @@ import { buildBoardSnapOps } from './boardSnap';
 import { buildSecondaryMountOps } from './secondaryMounts';
 import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
-import { buildMagnetOps, faceSizeForProject } from './magnets';
+import { buildMagnetOps, deliberateVoidsFor, faceSizeForProject } from './magnets';
 import { boardFootprint, buildCaseDividerOps } from './caseDividers';
 import { buildStandNodes } from './stand';
 import { buildRackNodes, buildRackSplitNodes, rackSplitOffers } from './rack';
@@ -309,6 +309,9 @@ export function compileProject(project: Project): BuildPlan {
   );
   // Issue #150 — the floor socket grid and its drop-in dividers. Both lists
   // are empty for a project with no enabled grid, so its plan is unchanged.
+  // Issue #850 — the magnet pockets' closed cavities are deliberate: tag them
+  // so the sealed-void report can tell them from an accident.
+  const deliberateVoids = deliberateVoidsFor(magnetOps.facts.pockets);
   const dividerOps = buildCaseDividerOps(project);
 
   const additive = [
@@ -903,5 +906,6 @@ export function compileProject(project: Project): BuildPlan {
     ...(connector.report ? { connector: connector.report } : {}),
     ...(statements.length > 0 ? { clashes: { statements } } : {}),
     lidSplitOffer,
+    ...(deliberateVoids.length > 0 ? { deliberateVoids } : {}),
   };
 }
