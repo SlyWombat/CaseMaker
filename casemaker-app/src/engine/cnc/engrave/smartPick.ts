@@ -33,7 +33,7 @@ import { statedCuttingSize as stated } from '@/engine/cnc/tool';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { faceCutterOptions, faceWorkOf, kindedWork, materialRefusal, planCutters, reachOf, type PlannedCutter } from './cutterPlan';
 import { goalNeedMm } from './goalReach';
-import { jobHasItems, jobTargetObjects } from './jobSetup';
+import { jobHasItems, jobTargetObjects, pureGoalObject } from './jobSetup';
 
 export type { CandidatePlan, PinchFact } from '@/workers/sim/planEvaluate';
 
@@ -308,6 +308,29 @@ export function candidatePlans(
       .slice(0, 6);
     for (const ball of balls) add({ cutters: [{ key: ball.key, items: ids }], source: { [ball.key]: sourceOf(ball) } });
   }
+  // #829 — A PURE GOAL THAT ASKS FOR A CHAMFER gains the V-bit as a SECOND program in every
+  // candidate considered so far: the surfacing cutter still cuts the part and the V bevels its
+  // rim. The V owns no items (it is not an item's cutter), exactly as a rest pass's second cutter
+  // owns none, and `applyCutterPlanToJob` writes the plan's second key into `chamfer.toolKey` so
+  // the generator posts the bevel with the cutter the search measured.
+  const pureGoal = pureGoalObject(job);
+  if (pureGoal !== null && pureGoal.chamfer !== undefined) {
+    // A cone with no feeds for this material is still a CANDIDATE here: the evaluator runs the
+    // generator, which refuses it, and the search simply does not choose that plan.
+    const cones = tools.filter((t) => vCone(t.tool) !== null).slice(0, 4);
+    const surfacing = [...out];
+    for (const plan of surfacing) {
+      if (plan.cutters.length === 0) continue;
+      for (const cone of cones) {
+        if (plan.cutters.some((c) => c.key === cone.key)) continue;
+        add({
+          cutters: [...plan.cutters, { key: cone.key, items: [] }],
+          source: { ...plan.source, [cone.key]: sourceOf(cone) },
+        });
+      }
+    }
+  }
+
   const flatWork = work.filter((w) => w.kind === 'flat');
   if (flatWork.length === 0) {
     // A named thread mill beside other NON-FLAT work (a chamfer) is still a split; the kind plan's

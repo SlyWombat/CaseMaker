@@ -1995,6 +1995,11 @@ export function EngravePanel(): JSX.Element {
   const measuredApplied =
     measuredNow !== null &&
     job.toolKey === measuredNow.cutters[0]?.key &&
+    // #829 — a goal's second cutter is its chamfer's V-bit; the plan is applied only when the
+    // goal already carries the key it measured (a plan with no V leaves it alone).
+    (job.targetObject?.chamfer === undefined ||
+      measuredNow.cutters[1] === undefined ||
+      job.targetObject.chamfer.toolKey === measuredNow.cutters[1].key) &&
     (measuredSetup?.tools ?? []).length === measuredNow.cutters.length &&
     (measuredSetup?.tools ?? []).every((k, i) => k === measuredNow.cutters[i]?.key) &&
     measuredNow.cutters.every((c) => {

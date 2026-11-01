@@ -99,6 +99,7 @@ import type {
   EngraveVectorShape,
   FieldSource,
   FrozenPackage,
+  EngraveGoalChamfer,
   JobRunLogEntry,
   JobSetup,
   JobSource,
@@ -261,6 +262,8 @@ export type TargetObjectPatch = Partial<
   surface?: Partial<EngraveSurfaceSettings>;
   /** #672 — a partial of a picture goal's relief map; `undefined` on a key clears it. */
   relief?: Partial<EngraveReliefSettings>;
+  /** #829 — a goal's 3D chamfer (`undefined` removes it: square edges). */
+  chamfer?: EngraveGoalChamfer;
   /** #672 — a picture's placed size in millimetres (the width field; the aspect is the row's). */
   size?: EngraveTargetObject['size'];
   /**
@@ -2276,6 +2279,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         };
         // #721 — 'item' is the default, so it is stored as an absent key, never `undefined` or 'item'.
         if ('goalMode' in patch && patch.goalMode !== 'mold') delete next.goalMode;
+        // #829 — an empty chamfer field REMOVES the block: square edges serialise like a goal that
+        // never asked for a bevel.
+        if ('chamfer' in patch && patch.chamfer === undefined) delete next.chamfer;
         // #785 — the top-band choice is stored only when it is ON, so a goal that never chose it
         // serialises without gaining a key (and turning it off returns the refusal).
         if ('cutWithinReach' in patch && patch.cutWithinReach !== true) delete next.cutWithinReach;

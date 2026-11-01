@@ -134,7 +134,15 @@ export function applyCutterPlanToJob(job: EngraveJob, plan: CutterPlanLike): Eng
   // states NO setups. Writing one made the generator validate the goal as an ordinary item that
   // the setup does not list ("Setup 1 assigns an item that is not in it: g1") and refused every
   // plan, so wolf, photo-relief and mouse-shell jobs that #762 generated stopped generating.
-  if (pureGoalObject(job) !== null) return applied;
+  if (pureGoalObject(job) !== null) {
+    // #829 — a pure goal's SECOND cutter is the V-bit that bevels its rim; the goal has no setup
+    // to carry it, so the plan's second key is written into the goal's own `chamfer`.
+    const goal = applied.targetObject;
+    if (goal !== undefined && goal.chamfer !== undefined && plan.cutters[1] !== undefined) {
+      applied.targetObject = { ...goal, chamfer: { ...goal.chamfer, toolKey: plan.cutters[1].key } };
+    }
+    return applied;
+  }
   // EVERY plan is written through the setup path — one cutter included. The legacy single-tool
   // document validates its `toolKey` against the built-in registry (`jobTool`), which by design
   // does not hold the location's `inv:` cutters; the setup path resolves each cutter from the

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { candidatePlans, planKey, rulePlanOf, smartPick, sourceOf, type Evaluate } from '@/engine/cnc/engrave/smartPick';
+import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
 import { explainSmartPick } from '@/engine/cnc/engrave/smartPickWords';
 import type { CandidatePlan, PlanEvaluation } from '@/workers/sim/planEvaluate';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -36,6 +37,29 @@ function entry(key: string, shape: ToolShape, over: Partial<Tool> = {}): ToolLib
       ...over,
     },
   };
+}
+
+// #829 — a PURE GOAL that asks for a chamfer: no items, the mesh is the work.
+function goalJobWithChamfer(): EngraveJob {
+  const job = defaultEngraveJob();
+  job.labels = [];
+  job.shapes = [];
+  job.combined = [];
+  job.traces = [];
+  job.toolKey = '';
+  job.targetObject = {
+    id: 'goal-829',
+    name: 'part',
+    role: 'goal',
+    enabled: true,
+    format: 'stl',
+    sha256: 'a'.repeat(64),
+    position: { x: 20, y: 20, z: 0 },
+    rotation: 0,
+    size: { x: 20, y: 20, z: 5 },
+    chamfer: { widthMm: 1 },
+  } as EngraveJob['targetObject'];
+  return job;
 }
 
 const FLAT_2 = entry('inv:flat-2', 'flat', { tipDiameter: 2, diameter: 2, fluteLength: 12 });
@@ -234,5 +258,24 @@ describe('#766 B the chosen plan is the best measured one', () => {
   it('names the plan canonically, for dedupe and the evaluator’s cache', () => {
     const a: CandidatePlan = { cutters: [{ key: 'a', items: ['x', 'y'] }, { key: 'b', items: [] }], source: { a: 'owned', b: 'owned' } };
     expect(planKey(a)).toBe('a[x,y]|b[]');
+  });
+});
+
+describe('#829 a goal’s chamfer enters the measured plans', () => {
+  it('adds the V-bit as the SECOND cutter of every candidate, and the plan writes it into the goal', () => {
+    const job = goalJobWithChamfer();
+    const BALL_2 = entry('inv:ball-2', 'ball', { diameter: 2 });
+    const plans = candidatePlans(job, [BALL_2, V_01], []);
+    expect(plans.length).toBeGreaterThan(0);
+    const withV = plans.filter((p) => p.cutters.some((c) => c.key === V_01.key));
+    expect(withV.length, plans.map((p) => p.cutters.map((c) => c.key).join('+')).join(' / ')).toBeGreaterThan(0);
+    for (const p of withV) {
+      expect(p.cutters[0]!.key).toBe('inv:ball-2');
+      expect(p.cutters[1]!.key).toBe(V_01.key);
+    }
+    // The plan's second cutter is written into the goal's own chamfer (a pure goal has no setup).
+    const applied = applyCutterPlanToJob(job, withV[0]!);
+    expect(applied.toolKey).toBe('inv:ball-2');
+    expect(applied.targetObject?.chamfer?.toolKey).toBe(V_01.key);
   });
 });

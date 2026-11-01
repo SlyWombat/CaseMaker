@@ -666,6 +666,36 @@ export function EngraveTargetObjectRow({
         </label>
       )}
 
+      {/* #829 — CHAMFER THE PART'S EDGES: a V-bit follows the mesh's top rim after the surfacing
+          program. The width is the bevel's on the top face; the app chooses the V-bit by
+          simulation, so nothing is picked here. A mold's rim is a later slice. */}
+      {goal && target.format !== 'png' && target.goalMode !== 'mold' && (
+        <label style={ROW_INLINE}>
+          <span style={{ fontSize: 11, color: '#9aa4b0' }}>chamfer the edges</span>
+          <input
+            type="number"
+            min={0}
+            step={0.1}
+            style={{ width: 64 }}
+            data-testid={`engrave-target-chamfer-${index}`}
+            aria-label="Chamfer the part’s edges: the bevel’s width in millimetres"
+            title="Bevel the part’s top edges with a V-bit after the part is surfaced; the app chooses the V-bit by simulation. Leave it empty for square edges."
+            value={target.chamfer?.widthMm ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value.trim();
+              const mm = Number(raw);
+              onChange({
+                chamfer:
+                  raw === '' || !(mm > 0)
+                    ? undefined
+                    : { ...(target.chamfer ?? { widthMm: mm }), widthMm: mm },
+              });
+            }}
+          />
+          <span style={{ fontSize: 11, color: '#9aa4b0' }}>mm</span>
+        </label>
+      )}
+
       {/* #722 — a mesh's size on the blank; a picture keeps its own width field below. */}
       {target.format !== 'png' && (
         <MeshSizeControls target={target} index={index} onChange={onChange} stock={stock} />
