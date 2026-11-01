@@ -420,7 +420,8 @@ describe('3D primitives and the target object (#435)', () => {
     for (const broken of [
       { ...targetObject, sha256: 'not-a-hash' },
       { ...targetObject, data: '' },
-      { ...targetObject, format: 'obj' },
+      // #825 — 'obj' is a format now; a name no reader answers to is still refused.
+      { ...targetObject, format: 'glb' },
       { ...targetObject, size: { x: 0, y: 8, z: 4 } },
     ]) {
       expect(parseEngraveJob({ ...job, targetObject: broken }).ok).toBe(false);

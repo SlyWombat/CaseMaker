@@ -621,7 +621,7 @@ describe('a mesh loaded as stock takes its finish default from the material (#46
 describe('an OBJ loaded as stock states its unit (#825)', () => {
   /** The 40 × 30 × 6 box as OBJ quads, at a divisor of 1 (mm) or 10 (cm). */
   function objBox(unit: string | null, divisor = 1): File {
-    const p: [number, number, number][] = [
+    const base: [number, number, number][] = [
       [0, 0, 0],
       [4, 0, 0],
       [4, 3, 0],
@@ -630,7 +630,8 @@ describe('an OBJ loaded as stock states its unit (#825)', () => {
       [4, 0, 0.6],
       [4, 3, 0.6],
       [0, 3, 0.6],
-    ].map(([x, y, z]) => [x * divisor, y * divisor, z * divisor]);
+    ];
+    const p = base.map((v): [number, number, number] => [v[0] * divisor, v[1] * divisor, v[2] * divisor]);
     const faces = [
       [1, 4, 3, 2],
       [5, 6, 7, 8],
