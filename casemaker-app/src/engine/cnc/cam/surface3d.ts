@@ -56,7 +56,7 @@ import { cuttingDiameter, cuttingRadiusForSweep } from '../tool';
 import { adaptiveSettings, type AdaptiveSettings } from './adaptive';
 import { roughingAdaptiveMoves } from './rough3d';
 import { isMetalMaterial } from '../materials';
-import { MoveStore } from './moveStore';
+import { GOAL_MERGE_TOLERANCE_MM, MoveStore } from './moveStore';
 import type { StockMaterial } from '@/types/engraveJob';
 
 /**
@@ -1078,8 +1078,16 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
   // #671 — ONE tip field, four passes: the finishing raster, the scallop contours and the pencil
   // paths all ride the same gouge-safe drop, so no pass can promise a depth another one refuses.
   const tip = finishTipField(hf, tool, maxFinishTipOps);
-  const finishRaster = finishingMoves(hf, tip, feeds, alongStep, safeZ, hopZ, (done, total) =>
-    opts.onProgress?.({ pass: 'finish', done, total }),
+  const finishRaster = finishingMoves(
+    hf,
+    tip,
+    feeds,
+    alongStep,
+    safeZ,
+    hopZ,
+    (done, total) => opts.onProgress?.({ pass: 'finish', done, total }),
+    null,
+    GOAL_MERGE_TOLERANCE_MM,
   );
   // #862 — THE RIM PASS OPENS THE FINISH: the clear band's wall as contour laps from the stock
   // top down to its floor, then the raster rides the floor beside it.
@@ -1631,6 +1639,12 @@ export function dilateMask(hf: GoalHeightfield, mask: Uint8Array, radiusMm: numb
  * so it never reaches the goal surface. A sample where the clamp reaches the stock top has no
  * material to remove and opens a gap — the pass retracts and re-enters.
  *
+ * #889 — A LEVEL CUTS WHAT IT REMOVES. A sample whose clamp held the tip at or above the level
+ * before this one was finished there; this level no longer rides it cell by cell (on a 50 mm goal
+ * that ride was more than half of every move). A span is cut from its first to its last sample
+ * that still has material above the tip, a finished stretch inside it is crossed at its own highest
+ * tip, and collinear feeds are merged as they are written.
+ *
  * #738 — every hop out of a cut is TWO moves, as the house rule in `ir.ts` (`rapidRate`) states:
  * a Z-only retract at the point the cut stopped, then the next span's XY traverse at `hopZ`. A
  * single `G0 X.. Z..` from a cut depth climbs away diagonally through material the program has
@@ -1644,10 +1658,18 @@ function roughingMoves(
   safeZ: number,
   hopZ: number,
   onLayer?: (done: number, total: number) => void,
-): { moves: CamMove[]; layers: number } {
-  // #889 — packed: the roughing is most of a goal program's moves.
-  const moves = new MoveStore();
-  if (hf.coveredCount === 0) return { moves: moves.view(), layers: 0 };
+  /** #889 — count the moves without holding them (the budget's estimate); `moves` is then empty. */
+  countOnly = false,
+): { moves: CamMove[]; layers: number; count: number } {
+  // #889 — packed, and collinear feeds merged on the way in: a level's flat stretches are one
+  // move each, not one per cell.
+  const moves = new MoveStore({ mergeToleranceMm: GOAL_MERGE_TOLERANCE_MM, countOnly });
+  const done = (layers: number): { moves: CamMove[]; layers: number; count: number } => ({
+    moves: countOnly ? [] : moves.view(),
+    layers,
+    count: moves.length,
+  });
+  if (hf.coveredCount === 0) return done(0);
   // #541 — the layer loop steps L down by `stepDown` until it passes `deepest`. A zero or negative
   // step-down (a placeholder or bad feed row through the flat proxy) never terminates it, so refuse
   // here rather than hang: a non-positive step-down cannot layer a roughing pass.
@@ -1675,49 +1697,85 @@ function roughingMoves(
     moves.rapid(moves.lastX(), moves.lastY(), z);
   };
 
+  // #889 — a span's points, gathered before any is written: which of them this level REMOVES
+  // material at, and where the tip rides.
+  const spanX: number[] = [];
+  const spanTip: number[] = [];
+  const spanCuts: boolean[] = [];
+  /**
+   * #889 — write one span (a stretch of the run where the tip stands below the stock top). Only the
+   * stretch from the first to the last point this level removes material at is cut. Between two
+   * such points, the points already finished at an earlier level (their tip did not move: the
+   * clamp held them above the previous level) are crossed at their highest tip instead of ridden
+   * cell by cell. A span this level removes nothing at is not cut at all.
+   */
+  const writeSpan = (y: number): void => {
+    let first = -1;
+    let last = -1;
+    for (let k = 0; k < spanCuts.length; k++) {
+      if (!spanCuts[k]) continue;
+      if (first === -1) first = k;
+      last = k;
+    }
+    if (first !== -1) {
+      moves.rapid(spanX[first] as number, y, hopZ);
+      moves.feed(spanX[first] as number, y, spanTip[first] as number, feeds.plungeFeed);
+      let prev = first;
+      for (let k = first + 1; k <= last; k++) {
+        if (!spanCuts[k]) continue;
+        if (k > prev + 1) {
+          // The finished stretch prev+1 .. k-1 is crossed at its own highest tip: up over its
+          // first point, level to its last, then on into the next cut. Every point of the
+          // crossing is at or above the cell-by-cell ride it replaces over the same XY, so it
+          // is never deeper than that ride was, and it is two moves whatever the stretch's length.
+          let top = -Infinity;
+          for (let q = prev + 1; q < k; q++) top = Math.max(top, spanTip[q] as number);
+          moves.feed(spanX[prev + 1] as number, y, top, feeds.feed);
+          if (k - 1 > prev + 1) moves.feed(spanX[k - 1] as number, y, top, feeds.feed);
+        }
+        moves.feed(spanX[k] as number, y, spanTip[k] as number, feeds.feed);
+        prev = k;
+      }
+      retract(hopZ);
+    }
+    spanX.length = 0;
+    spanTip.length = 0;
+    spanCuts.length = 0;
+  };
+
   for (const [index, L] of levels.entries()) {
     // #785 — the level about to be cut, reported BEFORE it (the caller's "doing k of n").
     onLayer?.(index + 1, levels.length);
+    // #889 — the level above this one (the stock top for the first): a point whose clamp holds the
+    // tip at or above it was finished there, and this level removes nothing at it.
+    const above = index === 0 ? topZ : (levels[index - 1] as number);
     let flip = false;
     for (const j of rows) {
       const y = y0 + j * pitch;
       for (const [iS, iE] of coveredRuns(hf, j)) {
         const cols = alongColumns(hf, iS, iE, alongStep);
         const ordered = flip ? [...cols].reverse() : cols;
-        // Build the tip along the run, cutting only where the layer is below the clamp surface
-        // (there is material above L). Contiguous cut spans become one feed polyline each.
-        let open = false;
+        // The tip along the run rides at the layer, clamped up to the allowance surface. A point
+        // where the clamp reaches the stock top has nothing above it: it ends the span (the pass
+        // lifts clear and re-enters, #738).
         for (const i of ordered) {
-          const x = x0 + i * pitch;
           const clamp = floorAt(i, j);
           const tip = Math.max(L, clamp);
-          const cut = tip < topZ - 1e-9; // something stands above the tip here
-          if (cut) {
-            if (!open) {
-              moves.rapid(x, y, hopZ);
-              moves.feed(x, y, tip, feeds.plungeFeed);
-              open = true;
-            } else {
-              moves.feed(x, y, tip, feeds.feed);
-            }
-          } else if (open) {
-            // Lift clear where the cut stopped. The rapid to the current (no-material) column
-            // is gone: the next span's start traverse already runs at `hopZ` from here, and going
-            // to the gap first would have meant lifting diagonally to reach it (#738).
-            retract(hopZ);
-            open = false;
+          if (tip < topZ - 1e-9) {
+            spanX.push(x0 + i * pitch);
+            spanTip.push(tip);
+            spanCuts.push(clamp < above - 1e-9);
+          } else if (spanX.length > 0) {
+            writeSpan(y);
           }
         }
-        if (open) {
-          // Retract at the run's end.
-          retract(hopZ);
-        }
+        if (spanX.length > 0) writeSpan(y);
       }
       flip = !flip;
     }
   }
   if (moves.length > 0) retract(safeZ);
-  return { moves: moves.view(), layers: levels.length };
+  return done(levels.length);
 }
 
 /**
@@ -1739,9 +1797,14 @@ export function finishingMoves(
    * rest ball's radius before it is handed in. Absent: every covered cell, as the finish does.
    */
   only?: Uint8Array | null,
+  /**
+   * #889 — merge collinear feeds within this distance, mm (see `MoveStore`). Absent: 0, every
+   * sample its own move — the rotary relief's reading, which wraps the moves after.
+   */
+  mergeToleranceMm = 0,
 ): CamMove[] {
   // #889 — packed, as the roughing is.
-  const moves = new MoveStore();
+  const moves = new MoveStore({ mergeToleranceMm });
   if (hf.coveredCount === 0) return moves.view();
   const { pitch, x0, y0 } = hf;
   const rows = rasterRows(hf, feeds.finishStepOver).filter(
@@ -1835,7 +1898,7 @@ export function planSurfaceRest(args: SurfaceRestArgs): SurfaceRestPlan {
   const maxOps = positive(args.maxFinishTipOps) ? (args.maxFinishTipOps as number) : DEFAULT_MAX_FINISH_TIP_OPS;
   const tip = finishTipField(hf, tool, maxOps);
   const region = dilateMask(hf, residual.mask, tool.radius);
-  const moves = finishingMoves(hf, tip, feeds, alongStep, safeZ, hopZ, args.onRow, region);
+  const moves = finishingMoves(hf, tip, feeds, alongStep, safeZ, hopZ, args.onRow, region, GOAL_MERGE_TOLERANCE_MM);
   return {
     region,
     moves,

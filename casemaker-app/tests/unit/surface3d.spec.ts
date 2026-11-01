@@ -138,14 +138,18 @@ function prism(w: number, d: number, t: number): Setup {
   return stubSetup({ kind: 'prism', outline: rectProfile(w, d), thickness: t }, { kind: 'tape-down', contact: rectProfile(w, d) });
 }
 
-/** Resolve consecutive feed endpoints into FLAT `CutMove`s (the dexel convention: z = min). */
+/**
+ * Resolve consecutive feed endpoints into FLAT `CutMove`s as the column engine's `flatMovesOf`
+ * does: z = min, and #758's end tips so a ramping move is swept along its slope. #889 — a merged
+ * goal row is one long sloped move; swept at its lowest Z it would read as a gouge it is not.
+ */
 function cutMovesOf(moves: readonly CamMove[]): CutMove[] {
   const out: CutMove[] = [];
   for (let i = 1; i < moves.length; i++) {
     const a = moves[i - 1]!;
     const b = moves[i]!;
     if (b.kind !== 'feed') continue;
-    out.push({ step: i, line: i, u0: a.x, u1: b.x, v0: a.y, v1: b.y, z: Math.min(a.z, b.z) });
+    out.push({ step: i, line: i, u0: a.x, u1: b.x, v0: a.y, v1: b.y, z: Math.min(a.z, b.z), z0: a.z, z1: b.z });
   }
   return out;
 }
@@ -230,14 +234,25 @@ describe('generateSurface3dIR — finishing tracks the goal', () => {
   it('the finishing tip tracks H within the step-over + grid at interior points', () => {
     const tol = FEEDS.finishStepOver + 3 * hf.pitch;
     let checked = 0;
-    for (const m of finishing.moves) {
+    // #889 — collinear samples are merged, so the path is read ALONG each feed (every 0.1 mm),
+    // not only at its ends: the ramp's rows are a few long moves now.
+    const moves = [...finishing.moves];
+    for (let k = 1; k < moves.length; k++) {
+      const a = moves[k - 1]!;
+      const m = moves[k]!;
       if (m.kind !== 'feed') continue;
-      // Interior only: within the tool radius of the footprint edge the ball legitimately lifts.
-      if (m.x < 2 || m.x > 18 || m.y < 2 || m.y > 18) continue;
-      const H = -K * m.x;
-      expect(m.z).toBeGreaterThanOrEqual(H - tol);
-      expect(m.z).toBeLessThanOrEqual(H + tol);
-      checked++;
+      const steps = Math.max(1, Math.ceil(Math.hypot(m.x - a.x, m.y - a.y) / 0.1));
+      for (let s = 0; s <= steps; s++) {
+        const x = a.x + ((m.x - a.x) * s) / steps;
+        const y = a.y + ((m.y - a.y) * s) / steps;
+        const z = a.z + ((m.z - a.z) * s) / steps;
+        // Interior only: within the tool radius of the footprint edge the ball legitimately lifts.
+        if (x < 2 || x > 18 || y < 2 || y > 18) continue;
+        const H = -K * x;
+        expect(z).toBeGreaterThanOrEqual(H - tol);
+        expect(z).toBeLessThanOrEqual(H + tol);
+        checked++;
+      }
     }
     expect(checked).toBeGreaterThan(50);
   });

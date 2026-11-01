@@ -59,6 +59,11 @@ export interface MoveStoreOpts {
   mergeToleranceMm?: number;
   /** Starting capacity, moves. */
   capacity?: number;
+  /**
+   * COUNT ONLY: keep just the last few moves (what merging reads) and count the rest, so a
+   * program's size is known without holding it. {@link MoveStore.view} refuses on such a store.
+   */
+  countOnly?: boolean;
 }
 
 export class MoveStore {
@@ -69,6 +74,9 @@ export class MoveStore {
   private ks: Uint8Array;
   private as: Float64Array | null = null;
   private n = 0;
+  /** Moves a count-only store has let go of (its `length` still counts them). */
+  private dropped = 0;
+  private readonly countOnly: boolean;
   private readonly halfTol: number;
   /** The open merge line: its anchor, unit direction, and the end's distance along it. */
   private lineOpen = false;
@@ -91,10 +99,11 @@ export class MoveStore {
     this.ks = new Uint8Array(cap);
     const tol = opts.mergeToleranceMm ?? 0;
     this.halfTol = tol > 0 ? tol / 2 : 0;
+    this.countOnly = opts.countOnly === true;
   }
 
   get length(): number {
-    return this.n;
+    return this.dropped + this.n;
   }
 
   /** Bytes the store's arrays hold now (capacity, not length: what the heap really pays). */
@@ -122,6 +131,19 @@ export class MoveStore {
   }
 
   private put(kind: number, x: number, y: number, z: number, f: number, a: number | undefined): void {
+    if (this.countOnly && this.n === this.xs.length) {
+      // Keep the last two (all that merging and `lastX`/`lastY` read); count the rest.
+      const keep = 2;
+      const from = this.n - keep;
+      this.xs.copyWithin(0, from, this.n);
+      this.ys.copyWithin(0, from, this.n);
+      this.zs.copyWithin(0, from, this.n);
+      this.fs.copyWithin(0, from, this.n);
+      this.ks.copyWithin(0, from, this.n);
+      if (this.as !== null) this.as.copyWithin(0, from, this.n);
+      this.dropped += from;
+      this.n = keep;
+    }
     if (this.n === this.xs.length) this.grow(this.n + 1);
     const i = this.n++;
     this.xs[i] = x;
@@ -213,7 +235,9 @@ export class MoveStore {
 
   /** Append every move of `moves` (a store, a view, or a plain array), in order. */
   append(moves: MoveStore | readonly CamMove[]): void {
+    if (this.countOnly) throw new Error('a count-only move store cannot take whole lists');
     if (moves instanceof MoveStore) {
+      if (moves.countOnly) throw new Error('a count-only move store holds no moves to append');
       // Packed to packed: copy the arrays, no objects. The seam is never merged across.
       this.lineOpen = false;
       const m = moves.n;
@@ -243,7 +267,7 @@ export class MoveStore {
 
   /** The move at `i`, as a fresh `CamMove` object. */
   at(i: number): CamMove | undefined {
-    if (!(i >= 0 && i < this.n)) return undefined;
+    if (this.countOnly || !(i >= 0 && i < this.n)) return undefined;
     const k = this.ks[i] as number;
     const a = this.as === null ? Number.NaN : (this.as[i] as number);
     if ((k & KIND_FEED) !== 0) {
@@ -267,6 +291,7 @@ export class MoveStore {
 
   /** The arrays, trimmed to the length (copies when the capacity is larger), ready to transfer. */
   buffers(): MoveBuffers {
+    if (this.countOnly) throw new Error('a count-only move store holds no moves');
     const n = this.n;
     const trim64 = (src: Float64Array): Float64Array => (src.length === n ? src : src.slice(0, n));
     const kind = this.ks.length === n ? this.ks : this.ks.slice(0, n);
@@ -295,6 +320,7 @@ export class MoveStore {
 
   /** The store as a read-only `CamMove[]` (see the file header). */
   view(): CamMove[] {
+    if (this.countOnly) throw new Error('a count-only move store holds no moves');
     return moveView(this);
   }
 }
