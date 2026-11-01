@@ -265,6 +265,11 @@ export type JobFindingCode =
   // (`inlay-needs-cone`), its glue gap must derive into a real plug (`inlay-gap`), and its pocket
   // is the PLANE V's — a variable-depth region has no matching plug (`inlay-plane-depth`).
   | 'inlay-needs-cone'
+  // #860 — A MALE INLAY HALF'S PLUG, judged against the pocket it fills: the share of the design
+  // each face keeps (the base, what planing reveals; the tip, which meets the floor), what the
+  // erosion removes and the measured offers. INFO while the visible face keeps the shop's detail
+  // bar; WARNING when it loses more.
+  | 'inlay-plug-face'
   | 'inlay-gap'
   | 'inlay-plane-depth'
   // Surface textures (#670). A texture is a pattern of stroke TRACES over one simple region:
@@ -2465,6 +2470,25 @@ export function validateJob(
     }
     // The male's numbers are the ones it was BUILT for: its cut depth is the plug's, and its
     // island's erosion is what keeps the plug inside the female's wall.
+    //
+    // #860 — AND THE CONE MUST BE THE ONE THE PAIR WAS BUILT FOR. The plug mates with the female's
+    // wall because both are the SAME flank; cutting the male with a different V is a plug that
+    // cannot close, whatever its stored numbers say. The marker stores the tangent it was derived
+    // with, so the job's own cutter is judged against it.
+    if (mark.tanHalf !== undefined && Math.abs(mark.tanHalf - inlayCone.tanHalf) > 1e-6) {
+      const included = (tan: number): string => `${Number(((2 * Math.atan(tan) * 180) / Math.PI).toFixed(1))}°`;
+      findings.push({
+        severity: 'error',
+        code: 'inlay-gap',
+        labelId: item.id,
+        message:
+          `${who} was built for a ${included(mark.tanHalf)} V, but the job's cutter ` +
+          `"${inlayTool.name}" is ${included(inlayCone.tanHalf)}: its plug's flank would not mate ` +
+          'with the female’s wall. Choose the V-bit the pair was built for, or save the male ' +
+          'blank from the female’s job again.',
+      });
+      continue;
+    }
     if (mark.islandInsetMm === undefined) {
       findings.push({
         severity: 'error',

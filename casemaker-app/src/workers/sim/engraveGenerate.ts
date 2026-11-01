@@ -195,6 +195,8 @@ import {
   itemDepthBoundFindings,
   engraveCutRegions,
   engravabilityFindings,
+  inlayPlugFaceFindings,
+  measureInlayPlugs,
   keepOutFindings,
   measureLabels,
   measureRaisedTextDetail,
@@ -2415,6 +2417,9 @@ export function engraveRegions(
     ...tipFindings,
     ...engFindings,
     ...raisedTextPinchFindings(raisedDetails, raisedJudgeTool),
+    // #860 — a MALE inlay half: the plug's faces judged against the pocket it fills, and what its
+    // own erosion removes. Empty on every job but a male half.
+    ...inlayPlugFaceFindings(measureInlayPlugs(tl, plan), shop.lostDetailWarnRatio ?? null),
     ...metalLineFindings(job, tool, catalogue),
     // #741 — a V-cut past the cutter's cone is not a V, so it is refused by name before the CAM.
     ...depthFindings,

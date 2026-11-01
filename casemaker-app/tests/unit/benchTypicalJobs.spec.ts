@@ -1005,21 +1005,25 @@ describe.skipIf(!existsSync(REAL_JOBS))('#766 slice E the demo set’s no-cutter
    */
   const CHOICES_ON_2026_10_30 = [
     // Was refused with "Setup 1 assigns an item that is not in it: g1" — the goal-item seam.
-    { job: 'j07-photo-relief.json', chosen: 'inv:demo-ball-nose-2-30' },
-    { job: 'j07-photo-relief-1mm-ball.json', chosen: 'inv:demo-ball-nose-2-30' },
+    { job: 'j07-photo-relief.json', chosen: 'inv:demo-ball-nose-2-30', worst: 100 },
+    { job: 'j07-photo-relief-1mm-ball.json', chosen: 'inv:demo-ball-nose-2-30', worst: 100 },
     // The mouse shell: the same seam, on an STL goal whose 26 mm stock needs the long ball. #785 —
     // the 1 mm ball has a 4 mm flute and the goal is 17.255 mm deep, so it cannot reach it (the
     // holder would enter the part); the 30 mm-flute ball is the candidate that both reaches and
     // posts at full fidelity.
-    { job: 'j27-mouse-shell-side1.json', chosen: 'inv:demo-ball-nose-2-30' },
-    // Was refused with the cutaway's missing reference — the plan's setup dropped it.
-    { job: 'j11-inlay-female-30v-male.json', chosen: 'inv:kz-engrave-30-0-5' },
+    { job: 'j27-mouse-shell-side1.json', chosen: 'inv:demo-ball-nose-2-30', worst: 100 },
+    // Was refused with the cutaway's missing reference — the plan's setup dropped it. #860 — its
+    // worst item is the MALE PLUG, and a male half is scored by the plug's visible (base) face —
+    // what planing reveals — not by the cutaway's own cut, which reproduces its design exactly.
+    // The j11 plug keeps 81 % of the design there (a 4.8 mm pocket with a 1.3 mm glue gap at a
+    // 30° V), so the search states 81 % rather than the old, mistaken 100 %.
+    { job: 'j11-inlay-female-30v-male.json', chosen: 'inv:kz-engrave-30-0-5', worst: 81 },
     // Was refused with "Characters lost to a 1 mm cutter" under the demo library; the bench
     // location's finest metal engraver holds the tag's "555-0100" instead.
-    { job: 'j14-dog-tag-alu.json', chosen: 'inv:kz-engrave-m-30-0-2' },
+    { job: 'j14-dog-tag-alu.json', chosen: 'inv:kz-engrave-m-30-0-2', worst: 100 },
   ] as const;
 
-  for (const { job, chosen } of CHOICES_ON_2026_10_30) {
+  for (const { job, chosen, worst } of CHOICES_ON_2026_10_30) {
     it(`${job} posts, with ${chosen}`, async () => {
       const { code, receipt, progress } = await cut(pickedVariant(job, REAL_JOBS), SCRATCH, demoSetLocation());
       const lines = progress.join('\n');
@@ -1027,7 +1031,7 @@ describe.skipIf(!existsSync(REAL_JOBS))('#766 slice E the demo set’s no-cutter
       expect(lines, 'the pick is measured and explained').toContain('Chosen by simulation');
       // The CHOSEN cutter, not the runner-up the "also" line names: the cutter line says "cuts".
       expect(lines, `the search must choose ${chosen} for this library`).toContain(`(${chosen}) cuts`);
-      expect(lines).toContain('100 % fidelity on the worst item');
+      expect(lines, 'the worst item’s measured fidelity').toContain(`${worst} % fidelity on the worst item`);
     }, 600_000);
   }
 

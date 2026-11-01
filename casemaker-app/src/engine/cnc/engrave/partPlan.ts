@@ -145,6 +145,27 @@ export interface PartPlan {
     prism?: { baseMm: Mm };
   }[];
   /**
+   * #860 — A MALE INLAY HALF'S PLUGS, as the design the plug holds: every enabled cutaway whose
+   * marker says `male`, with its islands' resolved profiles (the construction items the female's
+   * design became) and the numbers the male was built for. Empty on every job but a male half.
+   * The measurement reads it to say what the plug's own erosion removes; nothing cuts from it.
+   */
+  inlayPlugs: {
+    id: string;
+    name: string;
+    numbers: {
+      /** The glue gap the male was built for, mm. */
+      glueGapMm: Mm;
+      /** The female's pocket depth, mm. */
+      pocketDepthMm: Mm;
+      /** The cone's half-angle tangent the pair was derived with. */
+      tanHalf: number;
+      /** The island's own erosion (the tip's inset), mm. */
+      islandInsetMm: Mm;
+    };
+    islands: { id: string; name: string; profile: Profile }[];
+  }[];
+  /**
    * PROFILE CUT-OUTS (#218), a fifth sibling: the outline a `cam/profile.ts` path follows, plus
    * its side, inset, tab spec and the depth it cuts to. The OUTLINE is the referenced item's
    * profile in the stock frame, BEFORE the tool-radius offset — `cam/profile.ts` owns the
@@ -2159,6 +2180,8 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     job.labels.filter((label) => label.construction === true).map((label) => [label.id, label] as const),
   );
   const raisedTexts: PartPlan['raisedTexts'] = [];
+  // #860 — the male inlay halves' plugs, for the fit measurement below the CAM.
+  const inlayPlugs: PartPlan['inlayPlugs'] = [];
   const ctx: ItemReferenceContext = {
     stockOutline,
     profileOf: (id) => profiles.get(id) ?? null,
@@ -2189,6 +2212,26 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
         return constructionLabels.has(id) && island !== undefined ? [{ labelId: id, profile: island }] : [];
       });
       if (islands.length > 0) raisedTexts.push({ id: item.id, field: profile, islands });
+      // #860 — a MALE inlay half's islands are its plug's design. Carry them with the numbers the
+      // male was built for so the measurement can state what the plug's own erosion removes.
+      if (item.inlay?.role === 'male') {
+        const marked = item.inlay;
+        const glueGapMm = marked.glueGapMm ?? DEFAULT_INLAY_GLUE_GAP_MM;
+        inlayPlugs.push({
+          id: item.id,
+          name: itemOperationName(item),
+          numbers: {
+            glueGapMm,
+            pocketDepthMm: marked.pocketDepthMm ?? item.depth + glueGapMm,
+            tanHalf: marked.tanHalf ?? 0,
+            islandInsetMm: marked.islandInsetMm ?? 0,
+          },
+          islands: item.islands.flatMap((id) => {
+            const island = profiles.get(id);
+            return island === undefined ? [] : [{ id, name: names.get(id) ?? id, profile: island }];
+          }),
+        });
+      }
     }
     // #674 — a PRISM is not pocketed: the V cuts the RING around the shape, so the shape stands.
     // The ring is DERIVED here (pure profile algebra: an outward offset less the shape), from the
@@ -2454,6 +2497,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
         : {}),
     },
     raisedTexts,
+    inlayPlugs,
     engraves,
     cutouts,
     chamfers,

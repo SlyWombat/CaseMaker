@@ -29,6 +29,13 @@ import {
 } from '@/engine/cnc/engrave/inlay';
 import { vCone } from '@/engine/cnc/vProfile';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
+import { inlayPlugFaceFindings, measureInlayPlugs } from '@/workers/sim/engraveGeometry';
+import {
+  clearPlanEvaluations,
+  evaluatePlan,
+  type CandidatePlan,
+  type EvalContext,
+} from '@/workers/sim/planEvaluate';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type {
@@ -471,6 +478,91 @@ describe('the fit — a mirrored male closes onto the female with the gap (#673)
     plug.delete();
     cav.delete();
   }, 90_000);
+});
+
+describe('#860 the male plug, judged against the pocket it fills', () => {
+  it('j11: the FF plug keeps most of its design at the base face and little at its tip', () => {
+    const female = j11();
+    const male = inlayMaleJob(female, J11_CONE);
+    if (!male.ok) throw new Error(male.reason);
+    const plugs = measureInlayPlugs(tl, toPartPlan(male.job));
+    expect(plugs).toHaveLength(1);
+    const plug = plugs[0]!;
+    // The male runs the numbers the female's half was built for: a 4.8 mm pocket and a 1.3 mm gap
+    // at a 30° included V, so the base is inset by g·tanθ and the tip by F·tanθ.
+    const tan15 = Math.tan(Math.PI / 12);
+    expect(plug.numbers.pocketDepthMm).toBeCloseTo(4.8, 6);
+    expect(plug.numbers.glueGapMm).toBeCloseTo(1.3, 6);
+    expect(plug.numbers.baseInsetMm).toBeCloseTo(1.3 * tan15, 6);
+    expect(plug.numbers.tipInsetMm).toBeCloseTo(4.8 * tan15, 6);
+    const ff = plug.parts.find((part) => part.name.includes('FF'));
+    expect(ff, plug.parts.map((p) => p.name).join(', ')).toBeDefined();
+    // The tip face — the one that meets the pocket's floor — is where the crossbars and serifs
+    // go; the base face, which planing reveals, keeps far more of the design.
+    expect(ff!.tipShare).toBeLessThan(ff!.baseShare);
+    expect(ff!.tipShare).toBeLessThan(0.6);
+    expect(ff!.baseShare).toBeGreaterThan(0.5);
+    // The ring loses too: its band is narrow enough for the glue gap's inset to thin it, and its
+    // tip is the pocket floor's own eroded band.
+    const ring = plug.parts.find((part) => part !== ff);
+    expect(ring).toBeDefined();
+    expect(ring!.baseShare).toBeLessThan(1);
+    expect(ring!.tipShare).toBeLessThan(ring!.baseShare);
+  }, 120_000);
+
+  it('states both faces with measured offers, and calls the visible loss a warning', () => {
+    const male = inlayMaleJob(j11(), J11_CONE);
+    if (!male.ok) throw new Error(male.reason);
+    const plugs = measureInlayPlugs(tl, toPartPlan(male.job));
+    const findings = inlayPlugFaceFindings(plugs, 0.9);
+    expect(findings).toHaveLength(1);
+    const f = findings[0]!;
+    expect(f.code).toBe('inlay-plug-face');
+    expect(f.severity).toBe('warning');
+    expect(f.message).toContain('at its base face');
+    expect(f.message).toContain('at its tip');
+    // The tip's loss is explained (the pocket's floor has the same shape), and both offers carry
+    // their measured numbers.
+    expect(f.message).toContain('wedge');
+    expect(f.message).toMatch(/a glue gap of [\d.]+ mm or less keeps the base face whole/);
+    expect(f.message).toMatch(/a V of [\d.]+° or less keeps the tip whole/);
+    // The fit itself: the wall clearance and the gap above the floor.
+    expect(f.message).toContain('clear of the pocket wall');
+    expect(f.message).toContain('above the floor');
+  }, 120_000);
+
+  it('a male cut with a different V is refused: its flank would not mate with the female’s wall', () => {
+    const male = inlayMaleJob(j11(), J11_CONE);
+    if (!male.ok) throw new Error(male.reason);
+    const ninety: Tool = { ...j11Cutter(), name: '90° V', angle: 90, halfAngle: 45 };
+    const changed: EngraveJob = { ...male.job, toolKey: '', tool: ninety };
+    const finding = validateJob(changed).find((f) => f.code === 'inlay-gap' && /would not mate/.test(f.message));
+    expect(finding?.severity).toBe('error');
+    expect(finding?.message).toContain('30°');
+    expect(finding?.message).toContain('90°');
+    // The male it was built for passes the same check: no cone-mismatch sentence.
+    expect(validateJob(male.job).some((f) => /would not mate/.test(f.message))).toBe(false);
+  }, 120_000);
+
+  it('the measured pick scores the male by the plug’s visible face, not by its cutaway’s cut', () => {
+    const male = inlayMaleJob(j11(), J11_CONE);
+    if (!male.ok) throw new Error(male.reason);
+    const entry = { key: 'inv:kz-engrave-30-0-5', tool: j11Cutter(), provenance: 'test' };
+    const ctx: EvalContext = { tl, tools: [entry], catalogue: [], shop: {}, calibration: null };
+    const plan: CandidatePlan = {
+      cutters: [{ key: entry.key, items: ['inlay-male-1'] }],
+      source: { [entry.key]: 'owned' as const },
+    };
+    clearPlanEvaluations();
+    const out = evaluatePlan(male.job, plan, ctx);
+    const row = out.items.find((item) => item.id === 'inlay-male-1');
+    expect(row, out.items.map((item) => item.id).join(', ')).toBeDefined();
+    // The cutaway reproduces its own design exactly — the old 100 %. The plug's visible face is
+    // what the operator gets, and that is the share the plan is scored on.
+    const measured = measureInlayPlugs(tl, toPartPlan(male.job));
+    expect(row!.fidelity).toBeCloseTo(measured[0]!.baseShare, 6);
+    expect(row!.fidelity).toBeLessThan(1);
+  }, 120_000);
 });
 
 describe('the inlay findings (#673)', () => {

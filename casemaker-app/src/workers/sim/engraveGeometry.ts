@@ -410,6 +410,220 @@ export function engravabilityFindings(
   return findings;
 }
 
+// ---------------------------------------------------------------------------
+// #860 — THE MALE INLAY PLUG, JUDGED AGAINST THE POCKET IT MUST FILL
+// ---------------------------------------------------------------------------
+
+/** One island of a male cutaway: the plug's design, and the two faces the erosion leaves of it. */
+export interface InlayPlugPartMeasure {
+  id: string;
+  /** The island's own operation name, as the operator sees it. */
+  name: string;
+  /** The design's area, mm². */
+  designAreaMm2: number;
+  /** The plug's BASE face — what planing reveals after glue-up — inset by `g·tanθ`, mm². */
+  baseAreaMm2: number;
+  /** Its share of the design, 0…1. */
+  baseShare: number;
+  /** The plug's TIP face — the one that meets the pocket's floor — inset by `F·tanθ`, mm². */
+  tipAreaMm2: number;
+  /** Its share of the design, 0…1. */
+  tipShare: number;
+  /**
+   * The largest inset at which the design's own area is unchanged, mm — the tightest feature's
+   * half-width. Every offer in the sentence solves from it.
+   */
+  safeInsetMm: number;
+}
+
+/** One male cutaway's plug, measured. */
+export interface InlayPlugMeasure {
+  cutawayId: string;
+  cutawayName: string;
+  numbers: {
+    glueGapMm: number;
+    pocketDepthMm: number;
+    tanHalf: number;
+    /** The glue gap's inset, `g·tanθ`, mm — how far the base sits inside the design. */
+    baseInsetMm: number;
+    /** The pocket's inset, `F·tanθ`, mm — the tip's own erosion. */
+    tipInsetMm: number;
+    /** The wall clearance, square to the flank: `g·sinθ`, mm. */
+    wallClearanceMm: number;
+  };
+  parts: InlayPlugPartMeasure[];
+  /** The design's total area over the plug's islands, mm². */
+  designAreaMm2: number;
+  baseAreaMm2: number;
+  baseShare: number;
+  tipAreaMm2: number;
+  tipShare: number;
+}
+
+/** The area a profile evaluates to, mm² — 0 for an empty or un-evaluable profile. */
+function profileAreaMm2(tl: ManifoldToplevel, profile: Profile): number {
+  try {
+    const cs = executeProfile(tl, profile);
+    const area = cs.area();
+    cs.delete();
+    return Number.isFinite(area) && area > 0 ? area : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * #860 — WHAT THE PLUG'S OWN EROSION REMOVES. A male half's cutaway leaves its islands standing;
+ * each island is the plug's design, and the plug's faces are that design eroded by the glue gap's
+ * inset (`g·tanθ`, the base — what planing reveals) and the pocket's (`F·tanθ`, the tip — the face
+ * that meets the female's floor). Both are the SAME offset the CAM applies (`pOffset`, round
+ * join), so a share here is a fact about the cut and not a second model of it.
+ *
+ * `safeInsetMm` bisects the largest offset that leaves the design untouched: the tightest
+ * feature's half-width, which is what a narrower V or a smaller glue gap has to stay under.
+ */
+export function measureInlayPlugs(tl: ManifoldToplevel, plan: PartPlan): InlayPlugMeasure[] {
+  const out: InlayPlugMeasure[] = [];
+  for (const plug of plan.inlayPlugs) {
+    const { glueGapMm, pocketDepthMm, tanHalf } = plug.numbers;
+    if (!(tanHalf > 0) || !(pocketDepthMm > 0)) continue;
+    const baseInsetMm = glueGapMm * tanHalf;
+    const tipInsetMm = plug.numbers.islandInsetMm > 0 ? plug.numbers.islandInsetMm : pocketDepthMm * tanHalf;
+    const parts: InlayPlugPartMeasure[] = [];
+    let designArea = 0;
+    let baseArea = 0;
+    let tipArea = 0;
+    for (const island of plug.islands) {
+      const design = profileAreaMm2(tl, island.profile);
+      if (!(design > 0)) continue;
+      const base = profileAreaMm2(tl, pOffset(island.profile, -baseInsetMm, 'round'));
+      const tip = profileAreaMm2(tl, pOffset(island.profile, -tipInsetMm, 'round'));
+      parts.push({
+        id: island.id,
+        name: island.name,
+        designAreaMm2: design,
+        baseAreaMm2: base,
+        baseShare: Math.min(1, base / design),
+        tipAreaMm2: tip,
+        tipShare: Math.min(1, tip / design),
+        safeInsetMm: safeInsetMm(tl, island.profile, design, Math.max(baseInsetMm, tipInsetMm) * 2 + 0.5),
+      });
+      designArea += design;
+      baseArea += base;
+      tipArea += tip;
+    }
+    if (parts.length === 0) continue;
+    out.push({
+      cutawayId: plug.id,
+      cutawayName: plug.name,
+      numbers: {
+        glueGapMm,
+        pocketDepthMm,
+        tanHalf,
+        baseInsetMm,
+        tipInsetMm,
+        wallClearanceMm: glueGapMm * Math.sin(Math.atan(tanHalf)),
+      },
+      parts,
+      designAreaMm2: designArea,
+      baseAreaMm2: baseArea,
+      baseShare: designArea > 0 ? Math.min(1, baseArea / designArea) : 0,
+      tipAreaMm2: tipArea,
+      tipShare: designArea > 0 ? Math.min(1, tipArea / designArea) : 0,
+    });
+  }
+  return out;
+}
+
+/** Bisection steps for the largest inset that leaves an island's area unchanged. */
+const SAFE_INSET_STEPS = 12;
+
+/** The largest offset that removes none of `profile`, mm — an island's tightest feature's half-width. */
+function safeInsetMm(tl: ManifoldToplevel, profile: Profile, designArea: number, hiMm: number): number {
+  const tolerance = Math.max(1e-6, designArea * 1e-3);
+  const kept = (inset: number): number => profileAreaMm2(tl, pOffset(profile, -inset, 'round'));
+  if (kept(hiMm) >= designArea - tolerance) return hiMm;
+  let lo = 0;
+  let hi = hiMm;
+  for (let n = 0; n < SAFE_INSET_STEPS; n++) {
+    const mid = (lo + hi) / 2;
+    if (kept(mid) >= designArea - tolerance) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** A share as the sheet's own `86 %`. */
+function pct(share: number): string {
+  return `${Number((share * 100).toFixed(share * 100 < 2 ? 2 : 0))} %`;
+}
+
+/** A millimetre as the sentences print it. */
+function mm(v: number): string {
+  return String(Number(v.toFixed(v < 1 ? 3 : 2)));
+}
+
+/**
+ * #860 — THE MALE, JUDGED AGAINST THE POCKET IT FILLS. A male job's measured fidelity is its
+ * cutaway's cut — which matches the cutaway's own design at 100 %, however thin the plug becomes.
+ * This sentence says what an operator cannot see from that: the plug is the design eroded twice
+ * over, by the glue gap at its base (the face planing reveals) and by the whole pocket at its tip
+ * (the face that meets the floor), and the erosion is what removes the thin strokes.
+ *
+ * The tip's loss is not a defect — the female's cavity closes over the same strokes above her
+ * floor, so the plug meets them as a wedge — and the sentence says so. The BASE face's loss is
+ * visible in the finished inlay; that is the one the warning bar judges (`lostDetailWarnRatio`,
+ * the same share `item-detail-lost` uses). Both offers are measured from the tightest installed
+ * feature: a glue gap under `safeInset / tanθ` keeps the base whole, a V under
+ * `2·atan(safeInset / F)` the tip.
+ */
+export function inlayPlugFaceFindings(
+  measures: readonly InlayPlugMeasure[],
+  lostDetailWarnRatio: number | null = null,
+): JobFinding[] {
+  const bar = lostDetailRatioFrom(lostDetailWarnRatio);
+  const findings: JobFinding[] = [];
+  for (const plug of measures) {
+    const n = plug.numbers;
+    const parts = plug.parts
+      .map((p) => `${p.name} keeps ${pct(p.baseShare)} at its base face and ${pct(p.tipShare)} at its tip`)
+      .join('; ');
+    const tightest = plug.parts.reduce((m, p) => Math.min(m, p.safeInsetMm), Infinity);
+    const gapOffer = n.tanHalf > 0 ? tightest / n.tanHalf : null;
+    const angleOffer =
+      n.pocketDepthMm > 0 ? (2 * Math.atan(tightest / n.pocketDepthMm) * 180) / Math.PI : null;
+    const offers: string[] = [];
+    if (plug.baseShare < 1 - 1e-9 && gapOffer !== null) {
+      offers.push(`a glue gap of ${mm(gapOffer)} mm or less keeps the base face whole`);
+    }
+    if (plug.tipShare < 1 - 1e-9 && angleOffer !== null) {
+      offers.push(`a V of ${Number(angleOffer.toFixed(1))}° or less keeps the tip whole`);
+    }
+    const narrowest = plug.parts.reduce((m, p) => Math.min(m, p.safeInsetMm), Infinity) * 2;
+    const visibleLoss = plug.baseShare < bar - 1e-9;
+    const baseClause =
+      plug.baseShare < 1 - 1e-9
+        ? `the base face — what planing reveals — is eroded by the glue gap's ${mm(n.baseInsetMm)} mm a side, ` +
+          'and that loss is visible in the finished inlay'
+        : `the base face — what planing reveals — keeps the whole design (the glue gap's ${mm(n.baseInsetMm)} mm a side touches nothing)`;
+    findings.push({
+      severity: visibleLoss ? 'warning' : 'info',
+      code: 'inlay-plug-face',
+      labelId: plug.cutawayId,
+      message:
+        `The male plug: ${parts}. ` +
+        `Its tip face is the design eroded by the pocket's own ${mm(n.tipInsetMm)} mm a side; the female's ` +
+        `floor has the same shape, so strokes narrower than ${mm(narrowest)} mm close above it and the plug ` +
+        `fills them as a wedge rather than missing them. And ${baseClause}. ` +
+        (offers.length === 0
+          ? 'The design keeps every feature at both faces.'
+          : `${offers.join(', ')}; build the male again from the female after either.`) +
+        ` The plug sits ${mm(n.wallClearanceMm)} mm clear of the pocket wall and its tip stops ${mm(n.glueGapMm)} mm above the floor.`,
+    });
+  }
+  return findings;
+}
+
 /**
  * Area below which a glyph contour, or a glyph's overlap with one kept component, is Clipper
  * dust rather than material, mm² (#739).

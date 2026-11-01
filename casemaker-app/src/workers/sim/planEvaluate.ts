@@ -63,7 +63,12 @@ import {
   type EngraveShopOpts,
 } from './engraveGenerate';
 import { createSimSession, type SimLoadOk } from './session';
-import { measureRaisedTextDetail, type RaisedTextDetail } from './engraveGeometry';
+import {
+  measureInlayPlugs,
+  measureRaisedTextDetail,
+  type InlayPlugMeasure,
+  type RaisedTextDetail,
+} from './engraveGeometry';
 
 /** One cutter in a candidate plan: its key, and the item ids it owns (`[]` = rest over earlier work). */
 export interface CandidateCutter {
@@ -225,6 +230,11 @@ interface CutterMeasures {
 const planCache = new Map<string, PlanEvaluation>();
 const cutterCache = new Map<string, CutterMeasures>();
 const partCache = new Map<string, { part: PartPlan; raisedOf: Map<string, PartPlan['raisedTexts']> }>();
+/**
+ * #860 — a male inlay half's plug measure, keyed by the CACHED plan (one per job content, so the
+ * search pays for it once, not once per candidate).
+ */
+const plugCache = new WeakMap<PartPlan, readonly InlayPlugMeasure[]>();
 
 /** Test hook: drop every memoised verdict and per-cutter measure. */
 export function clearPlanEvaluations(): void {
@@ -410,6 +420,15 @@ function measureItems(
   const { part, raisedOf } = partOf(job);
   const work = kindedWork(job);
   const hasRest = plan.cutters.some((c) => c.items.length === 0);
+  // #860 — A MALE INLAY HALF'S fidelity is not its cutaway's cut (which reproduces its own design
+  // exactly, however thin the plug). It is the plug's BASE FACE — what planing reveals — as a
+  // share of the design. Measured once: it depends on the job, not on the cutter.
+  let plugMeasures = plugCache.get(part);
+  if (plugMeasures === undefined) {
+    plugMeasures = measureInlayPlugs(ctx.tl, part);
+    plugCache.set(part, plugMeasures);
+  }
+  const inlayPlugs = new Map(plugMeasures.map((m) => [m.cutawayId, m.baseShare] as const));
   const items: EvaluatedItem[] = [];
   for (const w of work) {
     const cutterKey = effectiveCutter(plan, w.id);
@@ -453,7 +472,10 @@ function measureItems(
     const areaFidelity = row === null ? null : Math.min(1, Math.max(0, row.ratio));
     // #864 — THE FLOOR'S DEPTH, the last cutter's to leave.
     const floorShare = floorShareOf(part, plan, w.id, tools);
-    const fidelity = Math.min(raisedFidelity ?? 1, areaFidelity ?? 1, floorShare);
+    // #860 — A MALE INLAY HALF'S fidelity is its plug's BASE face (what planing reveals): the
+    // cutaway's own cut reproduces its design however thin the plug becomes.
+    const plugFidelity = inlayPlugs.get(w.id) ?? null;
+    const fidelity = Math.min(raisedFidelity ?? 1, areaFidelity ?? 1, plugFidelity ?? 1, floorShare);
     const raisedSliver =
       raised.length === 0 ? null : raised.reduce((sum, d) => sum + d.sliverAreaMm2 + d.counterStandingMm2, 0);
     const counters: CounterFact[] = raised.flatMap((d) =>
