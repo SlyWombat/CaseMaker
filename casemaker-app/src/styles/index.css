@@ -400,6 +400,10 @@ body, html, #root {
 /* Issue #134 — phone-width overflow menu. Below 640px the secondary controls
    (New / Save as / Load / Export / Docs / settings) collapse behind a ⋯ toggle
    so nothing is reachable only by a silent horizontal swipe of the header. */
+/* #878 — the welcome page's slim bar: four controls, their words always shown (the laptop-width
+   label band exists for the full row, which this is not), and nothing behind a menu. */
+.toolbar-buttons--welcome > * .btn-label { display: inline; }
+
 .toolbar-overflow {
   position: relative;
   display: inline-flex;
@@ -1278,44 +1282,6 @@ body, html, #root {
     radial-gradient(800px 400px at 90% 10%, rgba(78, 222, 163, 0.07), transparent 60%),
     var(--cm-color-surface);
 }
-/* #878 — the welcome page's light theme. The app is dark by design and has no light token set,
-   so this is the one place the tokens are redefined: scoped to the page, switched on by
-   `<html data-theme="light">`, and never by the OS setting alone (the header above stays dark). */
-:root[data-theme="light"] .welcome-overlay {
-  color-scheme: light;
-  --cm-color-surface: #f4f6fd;
-  --cm-color-surface-dim: #d9dce7;
-  --cm-color-surface-bright: #ffffff;
-  --cm-color-surface-container-lowest: #ffffff;
-  --cm-color-surface-container-low: #eef1fa;
-  --cm-color-surface-container: #e7ebf6;
-  --cm-color-surface-container-high: #dde3f1;
-  --cm-color-surface-container-highest: #d2d9ea;
-  --cm-color-on-surface: #121a30;
-  --cm-color-on-surface-variant: #3b4254;
-  --cm-color-on-surface-muted: #5a6073;
-  --cm-color-outline: #6c7287;
-  --cm-color-outline-variant: #c4c9d9;
-  --cm-color-primary: #1f55b8;
-  --cm-color-on-primary: #ffffff;
-  --cm-color-primary-container: #2a63d0;
-  --cm-color-on-primary-container: #ffffff;
-  --cm-color-secondary: #0f7a52;
-  --cm-color-on-secondary: #ffffff;
-  --cm-color-tertiary: #a4511a;
-  --cm-color-error: #ba1a1a;
-  --cm-color-error-container: #ffdad6;
-  --wb-shadow: 0 1px 2px rgba(20, 30, 60, 0.08);
-  --wb-shadow-lift: 0 12px 32px rgba(20, 30, 60, 0.16);
-  background:
-    radial-gradient(1200px 500px at 50% -10%, rgba(42, 99, 208, 0.10), transparent 65%),
-    radial-gradient(800px 400px at 90% 10%, rgba(15, 122, 82, 0.07), transparent 60%),
-    var(--cm-color-surface);
-}
-:root[data-theme="light"] .welcome-overlay .wb-btn--primary { color: var(--cm-color-on-primary); }
-:root[data-theme="light"] .welcome-overlay .wb-cap--cnc { --cap-accent: #7a2fb5; --cap-accent-strong: #9a4fd6; }
-:root[data-theme="light"] .welcome-overlay .wb-card:hover,
-:root[data-theme="light"] .welcome-overlay .wb-card--selected { box-shadow: var(--wb-shadow-lift); }
 .wb {
   max-width: 1320px;
   margin: 0 auto;
@@ -1502,6 +1468,14 @@ body, html, #root {
 .wb-art .a-accent .a-top { fill: var(--cm-color-tertiary); }
 .wb-art .a-accent .a-left { fill: color-mix(in srgb, var(--cm-color-tertiary) 70%, var(--cm-color-surface-container)); }
 .wb-art .a-accent .a-right { fill: color-mix(in srgb, var(--cm-color-tertiary) 50%, var(--cm-color-surface-container)); }
+.wb-art .a-latch .a-top,
+.wb-art .a-latch .a-left,
+.wb-art .a-latch .a-right { fill: color-mix(in srgb, var(--cm-color-on-surface) 55%, var(--cm-color-surface-container-highest)); }
+.wb-art .a-handle { fill: none; stroke: color-mix(in srgb, var(--cm-color-on-surface) 75%, var(--cap-accent)); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+.wb-art .a-handle-grip { fill: none; stroke: var(--cap-accent); stroke-width: 5; stroke-linecap: round; opacity: 0.9; }
+.wb-art .a-tier .a-top { fill: color-mix(in srgb, var(--cap-accent) 34%, var(--cm-color-surface-container-highest)); }
+.wb-art .a-tier .a-left { fill: color-mix(in srgb, var(--cap-accent) 22%, var(--cm-color-surface-container-high)); }
+.wb-art .a-tier .a-right { fill: color-mix(in srgb, var(--cap-accent) 12%, var(--cm-color-surface-container)); }
 .wb-art .a-led { fill: var(--cm-color-secondary); stroke: none; }
 .wb-art .a-led--amber { fill: var(--cm-color-tertiary); }
 .wb-art .a-bed .a-top { fill: var(--cm-color-surface-container-high); }
@@ -1529,8 +1503,8 @@ body, html, #root {
 
 /* Hover life, light and optional: the lid lifts, the cutter traces its loop, chips fly. */
 @media (prefers-reduced-motion: no-preference) {
-  .wb-cap:hover .wb-art--cases .a-lid,
-  .wb-cap:hover .wb-art--toolboxes .a-lid { transform: translateY(-6px); }
+  .wb-cap:hover .wb-art--cases .a-lid { transform: translateY(-6px); }
+  .wb-cap:hover .wb-art--toolboxes .a-tray-open { transform: translate(5px, -3px); }
   .wb-cap:hover .wb-art--cnc .a-path--live { animation: wb-trace 1.6s linear infinite; }
   .wb-cap:hover .wb-art--cnc .a-chip { animation: wb-chip 900ms ease-out infinite; }
   .wb-cap:hover .wb-art--cnc .a-chip:nth-child(2n) { animation-delay: 300ms; }
@@ -2108,8 +2082,8 @@ body, html, #root {
 /* Phone-width welcome (#134): single-column catalog, stacked header, and
    the empty-state rail hint hidden — it's pure chrome at this size. */
 @media (max-width: 640px) {
-  .wb { padding: var(--cm-space-4) var(--cm-space-3) 64px; }
-  .wb-hero { flex-direction: column; align-items: stretch; padding-top: 0; }
+  .wb { padding: var(--cm-space-6) var(--cm-space-3) 64px; }
+  .wb-hero { flex-direction: column; align-items: stretch; padding-top: var(--cm-space-2); }
   .wb-hero p { max-width: 100%; overflow-wrap: break-word; font-size: 0.9375rem; }
   .wb-hero__actions { flex-wrap: wrap; }
   .wb-caps { grid-template-columns: 1fr; gap: var(--cm-space-3); }
