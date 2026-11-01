@@ -100,6 +100,30 @@ export interface FlightRecorderStoreState {
   sendReport: (includeMeshes: boolean) => Promise<void>;
 }
 
+/**
+ * #890 — how long a saved or sent report's confirmation line stays before the banner puts itself
+ * away. Long enough to read where the report went, short enough that it is not one more thing to
+ * close: the banner has done its job the moment the report is on disk or at the house.
+ */
+export const CRASH_BANNER_CONFIRM_MS = 4_000;
+
+/** The one pending dismissal (a save and a send cannot both be the last word). */
+let dismissTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** #890 — hold the confirmation line for {@link CRASH_BANNER_CONFIRM_MS}, then dismiss. */
+function dismissAfterConfirmation(): void {
+  if (dismissTimer !== null) clearTimeout(dismissTimer);
+  dismissTimer = setTimeout(() => {
+    dismissTimer = null;
+    useFlightRecorderStore.setState({ dismissed: true });
+  }, CRASH_BANNER_CONFIRM_MS);
+}
+
+function cancelPendingDismiss(): void {
+  if (dismissTimer !== null) clearTimeout(dismissTimer);
+  dismissTimer = null;
+}
+
 /** The service's refusal in one sentence, whichever failure shape it arrived as. */
 function sendFailureWords(answer: Exclude<CrashSend, { kind: 'ok' }>): string {
   switch (answer.kind) {
@@ -174,7 +198,10 @@ export const useFlightRecorderStore = create<FlightRecorderStoreState>()((set, g
     }
   },
 
-  dismiss: () => set({ dismissed: true }),
+  dismiss: () => {
+    cancelPendingDismiss();
+    set({ dismissed: true });
+  },
 
   saveReport: async (includeMeshes) => {
     const previous = get().previous;
@@ -185,6 +212,8 @@ export const useFlightRecorderStore = create<FlightRecorderStoreState>()((set, g
       const filename = crashReportFileName(crashMoment(previous).stoppedAt);
       await saveIO.save(JSON.stringify(report, null, 2), filename);
       set({ saving: false, saved: filename });
+      // #890 — the report is written: the confirmation line shows, and then the banner leaves.
+      dismissAfterConfirmation();
     } catch (e) {
       set({ saving: false, error: e instanceof Error ? e.message : String(e) });
     }
@@ -197,8 +226,13 @@ export const useFlightRecorderStore = create<FlightRecorderStoreState>()((set, g
     try {
       const report = await crashReportFor(previous, includeMeshes);
       const answer = await sendIO(report);
-      if (answer.kind === 'ok') set({ sending: false, sent: answer.path });
-      else set({ sending: false, sendError: sendFailureWords(answer) });
+      if (answer.kind === 'ok') {
+        set({ sending: false, sent: answer.path });
+        // #890 — the house has it: the confirmation line shows, and then the banner leaves.
+        dismissAfterConfirmation();
+      } else {
+        set({ sending: false, sendError: sendFailureWords(answer) });
+      }
     } catch (e) {
       set({ sending: false, sendError: e instanceof Error ? e.message : String(e) });
     }
@@ -208,6 +242,7 @@ export const useFlightRecorderStore = create<FlightRecorderStoreState>()((set, g
 /** Forget the store between specs (the recorder's own state has its own reset). */
 export function __resetFlightRecorderStoreForTests(): void {
   saveIO = FILE_SAVE;
+  cancelPendingDismiss();
   useFlightRecorderStore.setState({
     previous: null,
     moment: null,

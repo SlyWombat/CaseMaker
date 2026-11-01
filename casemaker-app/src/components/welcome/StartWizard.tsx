@@ -16,6 +16,7 @@ import { newItemDepthFor, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useLocationStore } from '@/store/locationStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
+import { useFlightRecorderStore } from '@/store/flightRecorderStore';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { NARROW_QUERY } from './wizardLayout';
 import './startWizard.css';
@@ -282,6 +283,17 @@ export function StartWizard(): JSX.Element {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [confirmReplace, setConfirmReplace] = useState<{ pending: PendingStock; items: number } | null>(null);
+
+  /**
+   * #890 — A NEW JOB HAS STARTED (step 2 created its project). The previous session's crash
+   * prompt is about the session that died, not this job: it goes with the old one rather than
+   * sitting over the new job's first screen. Every start path ends here, so all three say it once.
+   */
+  function noteJobStarted(): void {
+    useFlightRecorderStore.getState().dismiss();
+    setJobStarted(true);
+    setProjectCreatedHere(true);
+  }
   const [address, setAddress] = useState('');
   const [answers, setAnswers] = useState<SetupAnswers>(() =>
     defaultSetupAnswers(useEngraveJobStore.getState().job),
@@ -375,8 +387,7 @@ export function StartWizard(): JSX.Element {
         clearHistory();
       }
       clearStockEntry();
-      setJobStarted(true);
-      setProjectCreatedHere(true);
+      noteJobStarted();
       enterHolding();
       if (project !== null) await scheduleImmediate(project);
       return;
@@ -391,8 +402,7 @@ export function StartWizard(): JSX.Element {
     // A template's blank is the stock now, so a shelf entry or file an earlier start named is no
     // longer where it came from.
     clearStockEntry();
-    setJobStarted(true);
-    setProjectCreatedHere(true);
+    noteJobStarted();
     enterHolding();
     await scheduleImmediate(project);
   }
@@ -593,8 +603,7 @@ export function StartWizard(): JSX.Element {
       setProject(project); // also flips welcomeMode off
       clearHistory();
       setSection('cnc-engrave');
-      setJobStarted(true);
-      setProjectCreatedHere(true);
+      noteJobStarted();
       enterHolding();
       await scheduleImmediate(project);
     } finally {

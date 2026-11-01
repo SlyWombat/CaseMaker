@@ -20,6 +20,7 @@ import { SettingsMenu } from '@/components/layout/SettingsMenu';
 import { PartsMenu } from '@/components/layout/PartsMenu';
 import { ExportModal } from '@/components/panels/ExportModal';
 import { useManageModeStore } from '@/store/manageModeStore';
+import { useFlightRecorderStore } from '@/store/flightRecorderStore';
 import { useViewportStore } from '@/store/viewportStore';
 
 const FORMAT_LABEL: Record<string, string> = {
@@ -196,6 +197,9 @@ export function Toolbar() {
     closeManage();
     showWelcome();
     clearHistory();
+    // #890 — a new job is being started: the previous session's crash prompt belongs to the
+    // session that died, and it goes with the project rather than sitting over the new job.
+    useFlightRecorderStore.getState().dismiss();
   }, [showWelcome, closeManage]);
 
   // Open the multi-part export modal — per-part Save buttons + thumbnails

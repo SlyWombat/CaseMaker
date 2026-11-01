@@ -5,6 +5,12 @@
  * did not exit cleanly (a crash, an OOM kill, a power loss). It says WHEN it stopped, what it was
  * doing and how big the heap was at the end, and offers the one action that matters: save a crash
  * report. Nothing is written or sent until a button is pressed.
+ *
+ * IT IS A SHELL ROW, NOT A WORKSPACE PANEL (#890): it used to render inside `.app-main`, the
+ * sidebar/canvas/context grid, where taking the first cell pushed every panel one column along.
+ * And it does not need closing: once a report is saved or sent its confirmation line shows for a
+ * moment and the banner goes, and starting a new job puts it away too — it is about the session
+ * that died, not the one being worked in.
  */
 
 import { useState } from 'react';
@@ -65,6 +71,10 @@ export function CrashRecoveryBanner() {
       data-testid="crash-banner"
       role="alert"
       style={{
+        // #890 — the shell's own row between the header and the workspace (`index.css`
+        // `.app-shell`), never a cell of the workspace grid whose auto-placement shifted every panel.
+        gridRow: 2,
+        minWidth: 0,
         display: 'flex',
         flexWrap: 'wrap',
         alignItems: 'center',

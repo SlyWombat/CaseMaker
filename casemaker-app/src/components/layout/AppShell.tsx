@@ -91,12 +91,15 @@ export function AppShell() {
         </h1>
         <Toolbar />
       </header>
+      {/* #787 — the previous session's crash, if it left one. Renders itself null otherwise.
+          #890 — OUTSIDE `.app-main`: that element is the workspace's three-column grid, and a
+          banner in it took the first cell and pushed the sidebar, canvas and context panel one
+          column along. It sits in the shell's own row between the header and the workspace. */}
+      <CrashRecoveryBanner />
       <main
         className="app-main"
         style={{ '--context-panel-width': `${contextPanelWidth}px` } as CSSProperties}
       >
-        {/* #787 — the previous session's crash, if it left one. Renders itself null otherwise. */}
-        <CrashRecoveryBanner />
         {/* Welcome mode owns the full main area — the board-picker catalog
             needs the width; sidebar/context panels are project UI anyway. */}
         {manageOpen ? (

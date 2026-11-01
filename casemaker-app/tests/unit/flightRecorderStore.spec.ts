@@ -2,7 +2,7 @@
  * #787 — the crash-recovery store: what a leftover marker means at load, and the report a press
  * writes. The recorder's storage and the file save are both replaced through their seams.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   __resetFlightRecorderForTests,
@@ -15,6 +15,7 @@ import {
 } from '@/platform/flightRecorder';
 import {
   __resetFlightRecorderStoreForTests,
+  CRASH_BANNER_CONFIRM_MS,
   setCrashProbeIO,
   setCrashSaveIO,
   setCrashSendIO,
@@ -173,6 +174,77 @@ describe('#787 — the crash-recovery store', () => {
     const state = useFlightRecorderStore.getState();
     expect(state.sent).toBeNull();
     expect(state.sendError).toContain('the body is not a Case Maker crash report');
+  });
+
+  it('#890 — a report that left the machine takes its banner with it, one line later', async () => {
+    vi.useFakeTimers();
+    try {
+      primeCrash();
+      setCrashProbeIO(async () => ({ kind: 'present' }));
+      setCrashSendIO(async () => ({ kind: 'ok', path: 'crash-reports/crash-1-0.json' }));
+      await useFlightRecorderStore.getState().init();
+      await useFlightRecorderStore.getState().sendReport(false);
+      // The confirmation line is on screen: the banner has not gone yet.
+      expect(useFlightRecorderStore.getState().sent).toBe('crash-reports/crash-1-0.json');
+      expect(useFlightRecorderStore.getState().dismissed).toBe(false);
+      vi.advanceTimersByTime(CRASH_BANNER_CONFIRM_MS - 1);
+      expect(useFlightRecorderStore.getState().dismissed).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(useFlightRecorderStore.getState().dismissed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('#890 — a saved report does the same', async () => {
+    vi.useFakeTimers();
+    try {
+      primeCrash();
+      setCrashProbeIO(async () => ({ kind: 'absent' }));
+      setCrashSaveIO({ save: async () => undefined });
+      await useFlightRecorderStore.getState().init();
+      await useFlightRecorderStore.getState().saveReport(false);
+      expect(useFlightRecorderStore.getState().saved).not.toBeNull();
+      expect(useFlightRecorderStore.getState().dismissed).toBe(false);
+      vi.advanceTimersByTime(CRASH_BANNER_CONFIRM_MS);
+      expect(useFlightRecorderStore.getState().dismissed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('#890 — a refused send keeps the banner: there is nothing to confirm', async () => {
+    vi.useFakeTimers();
+    try {
+      primeCrash();
+      setCrashProbeIO(async () => ({ kind: 'present' }));
+      setCrashSendIO(async () => ({ kind: 'refused', status: 400, message: 'the body is not a Case Maker crash report' }));
+      await useFlightRecorderStore.getState().init();
+      await useFlightRecorderStore.getState().sendReport(false);
+      expect(useFlightRecorderStore.getState().sendError).not.toBeNull();
+      vi.advanceTimersByTime(CRASH_BANNER_CONFIRM_MS * 2);
+      // The reason is the operator's to read; the banner must not vanish with it.
+      expect(useFlightRecorderStore.getState().dismissed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('#890 — a pending dismissal does not outlive a reset (no timer into the next session)', async () => {
+    vi.useFakeTimers();
+    try {
+      primeCrash();
+      setCrashProbeIO(async () => ({ kind: 'present' }));
+      setCrashSendIO(async () => ({ kind: 'ok', path: 'crash-reports/c.json' }));
+      await useFlightRecorderStore.getState().init();
+      await useFlightRecorderStore.getState().sendReport(false);
+      __resetFlightRecorderStoreForTests();
+      vi.advanceTimersByTime(CRASH_BANNER_CONFIRM_MS * 2);
+      // The reset cancelled it: the fresh state is not dismissed by the closed session's timer.
+      expect(useFlightRecorderStore.getState().dismissed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('nothing is written on load — only a press writes', async () => {

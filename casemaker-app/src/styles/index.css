@@ -24,11 +24,18 @@ body, html, #root {
 
 .app-shell {
   display: grid;
-  grid-template-rows: 48px 1fr 28px;
+  /* #890 — four rows: the header, the crash-recovery banner's OWN row (zero-height when no
+     banner is drawn), the workspace and the status bar. The banner used to be a child of
+     `.app-main`, whose three-column grid then shifted the sidebar, canvas and context panel
+     one cell along; it is a shell row now, so it cannot touch that grid at all. */
+  grid-template-rows: 48px auto 1fr 28px;
   height: 100vh;
 }
 
+/* #890 — every shell child is placed BY ROW, so nothing that appears or disappears can move
+   another: the banner is the only child in row 2, and its absence leaves the row at zero. */
 .app-header {
+  grid-row: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -60,6 +67,7 @@ body, html, #root {
 }
 
 .app-main {
+  grid-row: 3;
   display: grid;
   /* Issue #93 Phase 4a — three-panel layout: left domain rail, center canvas, right
      context rail. Below 1024 px (#355) the right rail collapses to a drawer (handled in JS
@@ -2404,6 +2412,7 @@ button:disabled {
 }
 
 .status-bar {
+  grid-row: 4;
   display: flex;
   justify-content: space-between;
   align-items: center;

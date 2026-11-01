@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 // #787 — the banner the recorder's leftover marker earns: the sentence, the one write it offers,
 // and the rule that nothing happens until a press.
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { CrashRecoveryBanner, crashBannerSentence } from '@/components/layout/CrashRecoveryBanner';
-import { __resetFlightRecorderStoreForTests, setCrashSaveIO, setCrashSendIO, useFlightRecorderStore } from '@/store/flightRecorderStore';
+import {
+  __resetFlightRecorderStoreForTests,
+  CRASH_BANNER_CONFIRM_MS,
+  setCrashSaveIO,
+  setCrashSendIO,
+  useFlightRecorderStore,
+} from '@/store/flightRecorderStore';
 import type { CrashMoment, PreviousSession } from '@/platform/flightRecorder';
 import { setMeshBlobIO } from '@/platform/meshBlobs';
 
@@ -90,6 +96,26 @@ describe('#787 — the crash banner', () => {
     await waitFor(() => expect(screen.getByTestId('crash-saved')).toBeTruthy());
     // No house answered: there is no send control at all, so nothing can leave the machine.
     expect(screen.queryByTestId('crash-send')).toBeNull();
+  });
+
+  it('#890 — the confirmation line shows, then the banner puts itself away', async () => {
+    vi.useFakeTimers();
+    try {
+      prime();
+      setCrashSaveIO({ save: async () => undefined });
+      render(<CrashRecoveryBanner />);
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('crash-save'));
+      });
+      // The line the press earned is visible…
+      expect(screen.getByTestId('crash-saved')).toBeTruthy();
+      expect(screen.getByTestId('crash-banner')).toBeTruthy();
+      // …and it is not left standing: the banner goes on its own, without a second press.
+      act(() => vi.advanceTimersByTime(CRASH_BANNER_CONFIRM_MS));
+      expect(screen.queryByTestId('crash-banner')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('offers Send only where a house answered, and sends only on its press', async () => {
