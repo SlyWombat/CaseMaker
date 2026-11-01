@@ -22,6 +22,13 @@ import {
 } from '@/engine/cnc/engrave/goalOrientation';
 import { rememberGoalPlacement, undoGoalPlacement, useGoalTransformUndo } from '@/store/goalTransformUndo';
 import { useViewportStore } from '@/store/viewportStore';
+import {
+  centreInStockPatch,
+  dropToFloorPatch,
+  flushToTopPatch,
+  goalFit,
+  resetRotationPatch,
+} from '@/engine/cnc/engrave/goalPlacement';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
 import type { EngraveSurfaceSettings, EngraveTargetObject } from '@/types/engraveJob';
 
@@ -271,6 +278,65 @@ function MeshSizeControls({
           : ` — stretched: ${fmt(scale.x * 100)} % × ${fmt(scale.y * 100)} % × ${fmt(scale.z * 100)} % of the file’s ${fmt(target.size.x)} × ${fmt(target.size.y)} × ${fmt(target.size.z)} mm.`}
       </p>
       <MeshTurnControls target={target} index={index} onChange={onChange} stock={stock} locked={locked} />
+    </div>
+  );
+}
+
+/**
+ * #876 — THE NUMERIC PLACEMENT PRESSES: Centre in stock, Drop to floor, Flush to top and Reset
+ * rotation, each ONE document write and one undo entry, with the fit fact beneath them. A mould's
+ * cavity always opens at the stock top, so its Z is not a placement: Drop and Flush are not
+ * offered for one. Every press is at least 44 px so a phone finger can take it.
+ */
+function MeshPlacementActions({
+  target,
+  index,
+  onChange,
+  stock,
+  mould,
+}: {
+  target: EngraveTargetObject;
+  index: number;
+  onChange: (patch: TargetObjectPatch) => void;
+  stock: EngraveTargetObjectRowProps['stock'];
+  mould: boolean;
+}): JSX.Element {
+  const write = (patch: TargetObjectPatch): void => {
+    rememberGoalPlacement(target);
+    onChange(patch);
+  };
+  const fit = stock === undefined ? null : goalFit(target, stock);
+  const press = (testid: string, title: string, label: string, run: () => void): JSX.Element => (
+    <button type="button" data-testid={testid} title={title} style={{ minHeight: 44, minWidth: 44 }} onClick={run}>
+      {label}
+    </button>
+  );
+  return (
+    <div data-testid={`engrave-target-place-actions-${index}`} style={{ marginTop: 6 }}>
+      <div style={ROW_INLINE}>
+        {stock !== undefined &&
+          press(`engrave-target-centre-${index}`, 'Centre the object’s bounding box in the stock.', 'Centre in stock', () =>
+            write(centreInStockPatch(stock)),
+          )}
+        {stock !== undefined &&
+          !mould &&
+          press(`engrave-target-drop-${index}`, 'Drop the part until its bottom rests on the stock’s bottom face.', 'Drop to floor', () =>
+            write(dropToFloorPatch(target, stock)),
+          )}
+        {stock !== undefined &&
+          !mould &&
+          press(`engrave-target-flush-${index}`, 'Set the part’s top flush with the stock’s top face.', 'Flush to top', () =>
+            write(flushToTopPatch()),
+          )}
+        {press(`engrave-target-reset-rotation-${index}`, 'Put every turn back to 0°.', 'Reset rotation', () =>
+          write(resetRotationPatch()),
+        )}
+      </div>
+      {fit !== null && (
+        <p style={MUTED} data-testid={`engrave-target-fit-said-${index}`}>
+          {fit.sentence}
+        </p>
+      )}
     </div>
   );
 }
@@ -781,7 +847,11 @@ export function EngraveTargetObjectRow({
 
       {/* #722 — a mesh's size on the blank; a picture keeps its own width field below. */}
       {target.format !== 'png' && (
-        <MeshSizeControls target={target} index={index} onChange={onChange} stock={stock} />
+        <>
+          <MeshSizeControls target={target} index={index} onChange={onChange} stock={stock} />
+          {/* #876 — the numeric placement presses and the fit fact. */}
+          <MeshPlacementActions target={target} index={index} onChange={onChange} stock={stock} mould={moldGoal} />
+        </>
       )}
 
       {/* #535 — the goal operation's own numbers, behind the row's Technical fold. */}

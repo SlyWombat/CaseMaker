@@ -346,4 +346,34 @@ describe('#876 — arming place-on-face', () => {
     expect(onChange).toHaveBeenCalledTimes(calls);
   });
 
+  it('offers Centre / Drop / Flush / Reset as one write each, and states the fit', () => {
+    const target = tall();
+    const { onChange } = renderRow(target);
+    // 75 mm on a 20 mm blank: the fact says so, and names the sink that would fit it.
+    expect(screen.getByTestId('engrave-target-fit-said-0').textContent).toBe(
+      '55 mm too tall: Resize to fit, or Cut the top 55 mm',
+    );
+    fireEvent.click(screen.getByTestId('engrave-target-centre-0'));
+    expect(onChange).toHaveBeenLastCalledWith({ position: { x: 21.5, y: 16 } });
+    fireEvent.click(screen.getByTestId('engrave-target-drop-0'));
+    expect(onChange).toHaveBeenLastCalledWith({ position: { z: 55 } });
+    fireEvent.click(screen.getByTestId('engrave-target-flush-0'));
+    expect(onChange).toHaveBeenLastCalledWith({ position: { z: 0 } });
+    fireEvent.click(screen.getByTestId('engrave-target-reset-rotation-0'));
+    expect(onChange).toHaveBeenLastCalledWith({ rotation: 0, rotationX: undefined, rotationY: undefined });
+  });
+
+  it('says what fits with room to spare, on the tightest axis', () => {
+    // Room is 41 × 30 × 20; this part leaves 3 mm in X, 20 in Y and 12 in Z.
+    renderRow(tall({ size: { x: 38, y: 10, z: 8 } }));
+    expect(screen.getByTestId('engrave-target-fit-said-0').textContent).toBe('fits the stock with 3 mm to spare in X');
+  });
+
+  it('offers no Drop or Flush for a mould: its cavity opens at the stock top, so Z is not a placement', () => {
+    renderRow(tall({ goalMode: 'mold' }));
+    expect(screen.queryByTestId('engrave-target-drop-0')).toBeNull();
+    expect(screen.queryByTestId('engrave-target-flush-0')).toBeNull();
+    expect(screen.getByTestId('engrave-target-centre-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-target-reset-rotation-0')).toBeTruthy();
+  });
 });
