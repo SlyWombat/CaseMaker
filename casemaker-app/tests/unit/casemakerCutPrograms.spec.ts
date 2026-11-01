@@ -25,7 +25,7 @@ import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import type { CommandOptions } from '../../scripts/lib/casemaker/output';
 import { runSheetFileName } from '../../src/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
-import { toSetup } from '../../src/engine/cnc/engrave/jobSetup';
+import { jobSetups, toSetup } from '../../src/engine/cnc/engrave/jobSetup';
 import { Z1 } from '../../src/engine/cnc/machine';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import { entryFor } from '../../src/engine/cnc/toolRegistry';
@@ -576,5 +576,35 @@ describe('#760 a job that names no cutter is given one, the way the design route
     const run = await cut(job, 'cutter-named');
     expect(run.code, JSON.stringify(run.receipt?.diagnostics?.filter((d) => d.severity === 'error') ?? null)).toBe(0);
     expect(run.progress.some((l) => l.includes('cutter 1'))).toBe(false);
+  });
+  // #835 — A SETUP'S DEAD CUTTER IS ANSWERED HEADLESS TOO. The whole-job search judges ONE setup,
+  // so the document's setups are measured one at a time on their own work (`setupWork`), the plan
+  // is written into that setup only, and the replacement is printed as a substitute line.
+  it('#835 — a LATER setup’s dead cutter is substituted, and the run still posts both programs', async () => {
+    const job = twoCutterJob();
+    const base = jobSetups(job)[0]!;
+    const [a, b] = base.itemIds;
+    job.setups = [
+      { ...base, id: 'setup-1', itemIds: [a!], tools: [FIRST], toolItems: { [FIRST]: [a!] } },
+      { ...base, id: 'setup-2', itemIds: [b!], tools: ['inv:gone'], toolItems: { 'inv:gone': [b!] } },
+    ];
+    const stem = runSheetFileName(job.name).replace(/\.nc$/, '');
+    const run = await cut(job, 'setup-dead-cutter');
+    const line = run.progress.find((l) => l.includes('substitute setup 2'));
+    expect(line, run.progress.join('\n')).toBeDefined();
+    expect(line).toContain('inv:gone');
+    expect(line).toContain('is not in the tool library');
+    expect(line).toContain('cuts that setup’s work');
+    expect(
+      run.code,
+      JSON.stringify({ refusals: run.receipt?.refusals ?? null, diagnostics: run.receipt?.diagnostics ?? null }),
+    ).toBe(0);
+    // The substituted setup is a program of its own: both setups post, and the measured plan for
+    // setup 2 may be a pair (its own cutter count is the search's answer, not this test's).
+    if (run.receipt?.command !== 'engrave') throw new Error('expected the engrave receipt');
+    const files = run.receipt.details.programs.map((p) => p.ncFile);
+    expect(files[0]).toBe(`${stem}.nc`);
+    expect(files.length).toBeGreaterThanOrEqual(2);
+    for (const file of files) expect(existsSync(join(run.outDir, file)), file).toBe(true);
   });
 });

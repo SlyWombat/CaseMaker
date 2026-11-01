@@ -94,6 +94,14 @@ import type { Tool } from '../../../src/engine/cnc/tool';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
 import { Z1 } from '../../../src/engine/cnc/machine';
 import { jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
+// #835 — each setup's own work, measured and written back into that setup only.
+import {
+  deadSetupKeys,
+  replacementCutter,
+  setupWorkJob,
+  setupsWithDeadCutters,
+  writeSetupPlan,
+} from '../../../src/engine/cnc/engrave/setupWork';
 import {
   buildRunSheet,
   runSheetFileName,
@@ -1602,6 +1610,37 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         if (namedKey !== null) {
           out.progress(`  substitute ${namedKey} is not in the tool library; ${parsed.job.toolKey} cuts this job`);
         }
+      }
+    }
+    // #835 — A SETUP'S DEAD CUTTER IS ANSWERED ON THAT SETUP'S OWN WORK. The whole-job search
+    // judges ONE setup, so a document that states its setups is measured setup by setup exactly
+    // as the panel does (`setupWork`): the sub-job is that setup's work, the plan is written back
+    // into THAT setup only, and the replacement is printed in the same substitute line. The
+    // setup-less `tool-missing` path above still serves a job that names one cutter.
+    if (parsed.job.setups !== undefined) {
+      const tools = searchToolsFor(parsed.job);
+      for (const setupIndex of setupsWithDeadCutters(parsed.job, tools)) {
+        const setup = jobSetups(parsed.job)[setupIndex]!;
+        const sub = setupWorkJob(parsed.job, tools, setupIndex);
+        if (sub === null) continue;
+        const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation =>
+          evaluatePlan(sub, plan, { tl, tools, catalogue: catalogueRows, shop, calibration: null }, { level });
+        const pick = await smartPick(sub, tools, catalogueRows, evaluate);
+        const chosen = pick.runnable;
+        if (chosen === null) {
+          // No substitute can be measured; the run's own refusal still names the key.
+          out.progress(
+            `  setup ${setupIndex + 1}      no plan the search tried can post: ${pick.notes.join(' ') || 'the generator refuses every candidate'}`,
+          );
+          continue;
+        }
+        for (const dead of deadSetupKeys(parsed.job, tools, setupIndex)) {
+          const to = replacementCutter(chosen.plan.cutters, setup, dead);
+          out.progress(
+            `  substitute setup ${setupIndex + 1}   ${dead} is not in the tool library; ${to.key} cuts that setup’s work`,
+          );
+        }
+        parsed.job = writeSetupPlan(parsed.job, tools, setupIndex, chosen.plan.cutters);
       }
     }
     const result = await runJob(parsed.job, outDir, {
