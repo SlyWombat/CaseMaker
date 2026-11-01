@@ -42,7 +42,7 @@ import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { Tool } from '@/engine/cnc/tool';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { vCone } from '@/engine/cnc/vProfile';
+import { vCone, vDepthLimit } from '@/engine/cnc/vProfile';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
 import {
@@ -141,6 +141,14 @@ export interface EvaluatedItem {
   countersFrom?: 'swept' | 'model';
   /** Why the item is at fidelity 0 / unassigned; absent when the item is cut as designed. */
   reason?: string;
+  /**
+   * #864 — THE SHARE OF THIS ITEM'S FLAT FLOOR THE PLAN REACHES, 0…1. Absent (or 1) when the item
+   * has no flat floor — a trace, a hole, a through cut-out, a V-carve or an inlay — or when the
+   * last cutter to touch it reaches the depth. A cone whose flank ends above the floor (its
+   * `vDepthLimit` shorter than the design's depth) leaves the material below standing, and this is
+   * that shortfall as a share: j20's 90° chamfer reaches 1.5375 of 6 mm, so 0.256.
+   */
+  floorShare?: number;
 }
 
 /** The oracle's whole-run verdict, on the `full` level — the swept area disagreement. */
@@ -357,6 +365,40 @@ function effectiveCutter(plan: CandidatePlan, itemId: string): string | null {
   return found;
 }
 
+/**
+ * #864 — A FLOOR THE DESIGN SAYS IS FLAT MUST BE REACHED. The design item's floor is the plane at
+ * its depth; the plan's LAST cutter to touch it (its owner, or a rest with `items: []`) is the one
+ * that leaves the floor. A cone's flank ends at its cone height (or a shorter stated flute), and a
+ * region deeper than that is cut only to the height the cone reaches — the CAM clamps it with
+ * `vcarve-depth-beyond-cone` — so the share of the floor's depth the item gets is reach/depth.
+ *
+ * The floor's FLATNESS is not re-measured: the V-carve pass pitch is clamped to the tip radius
+ * (`vCarvePassPitch`), so adjacent passes' tip flats overlap and a cone's floor is flat wherever it
+ * cuts. A scallop term would read zero by construction; this is the live shortfall.
+ */
+const FLOOR_DEPTH_TOLERANCE_MM = 1e-6;
+
+function floorShareOf(
+  part: PartPlan,
+  plan: CandidatePlan,
+  id: string,
+  tools: readonly ToolLibraryEntry[],
+): number {
+  const engrave = part.engraves.find((e) => e.id === id);
+  // A flat floor belongs to a PLANE region: a variable-depth V-carve follows the flank, and an
+  // inlay half's design is its own V — neither has a floor at one depth.
+  if (engrave === undefined || engrave.variableDepth === true || engrave.inlay !== undefined) return 1;
+  if (!(engrave.depth > 0)) return 1;
+  const cutterKey = effectiveCutter(plan, id);
+  if (cutterKey === null) return 1;
+  const tool = toolFor(tools, cutterKey);
+  if (tool === null) return 1;
+  const limit = vDepthLimit(tool);
+  if (limit === null) return 1;
+  if (limit.limitMm >= engrave.depth - FLOOR_DEPTH_TOLERANCE_MM) return 1;
+  return Math.max(0, limit.limitMm / engrave.depth);
+}
+
 /** The work each item asks for, and the plan's per-item rows, from the measures alone. */
 function measureItems(
   job: EngraveJob,
@@ -409,7 +451,9 @@ function measureItems(
     // hole, a thread, a cut-out) is reproduced as designed when the plan places it.
     const raisedFidelity = raised.length === 0 ? null : Math.min(...raised.map((d) => d.fidelity));
     const areaFidelity = row === null ? null : Math.min(1, Math.max(0, row.ratio));
-    const fidelity = raisedFidelity ?? areaFidelity ?? 1;
+    // #864 — THE FLOOR'S DEPTH, the last cutter's to leave.
+    const floorShare = floorShareOf(part, plan, w.id, tools);
+    const fidelity = Math.min(raisedFidelity ?? 1, areaFidelity ?? 1, floorShare);
     const raisedSliver =
       raised.length === 0 ? null : raised.reduce((sum, d) => sum + d.sliverAreaMm2 + d.counterStandingMm2, 0);
     const counters: CounterFact[] = raised.flatMap((d) =>
@@ -425,6 +469,7 @@ function measureItems(
       pinches,
       counters,
       ...(raised.length === 0 ? {} : { countersFrom }),
+      ...(floorShare < 1 - 1e-9 ? { floorShare } : {}),
     });
   }
   return items;

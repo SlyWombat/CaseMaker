@@ -112,15 +112,28 @@ export function cutterLines(
       const raised = [...byId.values()].filter((i) => i.pinches.length > 0 || (i.counters ?? []).length > 0);
       const words = raised.map(raisedWords).filter((w) => w !== '');
       const what = index === 0 ? 'cuts first' : 'rest — re-cuts what the earlier cutter left';
+      // #864 — A REST WHOSE FLANK ENDS ABOVE A FLOOR leaves the material below it: state it with
+      // the share of the deepest floor it cannot reach, on the cutter that leaves it.
+      const floors = [...byId.values()].filter((i) => i.floorShare !== undefined && i.floorShare < 1);
+      if (floors.length > 0) {
+        const tightest = floors.reduce((m, i) => Math.min(m, i.floorShare as number), 1);
+        words.push(`it reaches only ${pct(tightest)} of a floor's depth, so what stands below its flank is left`);
+      }
       // #766 review/§6 — the operator's words, never the tool KEY: `flat-1.0` and `cat:…` are the
       // registry's names for a row, and the acceptance grammar forbids them in visible text.
       return `${dia(entry)}${cutterKeys ? ` (${cutter.key})` : ''} ${what}${words.length === 0 ? '' : `; ${words.join('; ')}`}.`;
     }
     const worst = pick.chosen.worstItem;
+    // #864 — A FLOOR THE PLAN DOES NOT REACH is not a fidelity percentage an operator can read as
+    // "detail": say which item's floor and how much of its depth the last cutter got.
+    const floorWord =
+      worst !== null && worst.floorShare !== undefined && worst.floorShare < 1
+        ? `, its floor reached to ${pct(worst.floorShare)} of its depth`
+        : '';
     const detail =
       worst === null || worst.fidelity >= 1
         ? 'keeps every item it owns at full fidelity'
-        : `its worst item is ${worst.name} at ${pct(worst.fidelity)} fidelity${worst.charsLost > 0 ? `, ${worst.charsLost} character${worst.charsLost === 1 ? '' : 's'} lost` : ''}`;
+        : `its worst item is ${worst.name} at ${pct(worst.fidelity)} fidelity${worst.charsLost > 0 ? `, ${worst.charsLost} character${worst.charsLost === 1 ? '' : 's'} lost` : ''}${floorWord}`;
     return `${dia(entry)}${cutterKeys ? ` (${cutter.key})` : ''} cuts ${cutter.items.length === 1 ? 'one item' : `${cutter.items.length} items`} and ${detail}.`;
   });
 }

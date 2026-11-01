@@ -135,6 +135,21 @@ describe('#766 C the words say what the measurement says', () => {
     expect(joinedPinchWords(chosen.evaluation.items[0]!)).toEqual([]);
   });
 
+  it('#864 states the floor a rest’s flank does not reach', () => {
+    // The V rest re-cuts the raised field but its cone ends above the design's floor: 26 % of the
+    // floor's depth is reached, and the rest cutter's own sentence says so.
+    const chosen = scored(COIN, evaluation([item({ fidelity: 0.256, floorShare: 0.256, pinches: [] })]));
+    const words = cutterLines(pickOf({ chosen }), TOOLS);
+    expect(words[1]).toContain("it reaches only 26 % of a floor's depth");
+    // And when the entering cutter itself leaves a floor short, its line carries the share too.
+    const single = scored(
+      plan([['inv:flat-2', ['clear']]]),
+      evaluation([item({ fidelity: 0.256, floorShare: 0.256, pinches: [] })]),
+    );
+    const line = cutterLines(pickOf({ chosen: single }), TOOLS)[0]!;
+    expect(line).toContain('its floor reached to 26 % of its depth');
+  });
+
   it('the runner-up is described by the pinches it leaves joined, with both measured numbers', () => {
     const chosen = scored(plan([['inv:flat-2', ['clear']], ['inv:engraver-0-1', []]]), evaluation([item({ fidelity: 1, pinches: [] })]));
     const runner = scored(
