@@ -1271,10 +1271,51 @@ body, html, #root {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  --wb-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --wb-shadow-lift: 0 12px 32px rgba(0, 0, 0, 0.4);
   background:
-    radial-gradient(1200px 500px at 50% -10%, rgba(77, 142, 255, 0.10), transparent 65%),
+    radial-gradient(1200px 500px at 50% -10%, rgba(77, 142, 255, 0.14), transparent 65%),
+    radial-gradient(800px 400px at 90% 10%, rgba(78, 222, 163, 0.07), transparent 60%),
     var(--cm-color-surface);
 }
+/* #878 — the welcome page's light theme. The app is dark by design and has no light token set,
+   so this is the one place the tokens are redefined: scoped to the page, switched on by
+   `<html data-theme="light">`, and never by the OS setting alone (the header above stays dark). */
+:root[data-theme="light"] .welcome-overlay {
+  color-scheme: light;
+  --cm-color-surface: #f4f6fd;
+  --cm-color-surface-dim: #d9dce7;
+  --cm-color-surface-bright: #ffffff;
+  --cm-color-surface-container-lowest: #ffffff;
+  --cm-color-surface-container-low: #eef1fa;
+  --cm-color-surface-container: #e7ebf6;
+  --cm-color-surface-container-high: #dde3f1;
+  --cm-color-surface-container-highest: #d2d9ea;
+  --cm-color-on-surface: #121a30;
+  --cm-color-on-surface-variant: #3b4254;
+  --cm-color-on-surface-muted: #5a6073;
+  --cm-color-outline: #6c7287;
+  --cm-color-outline-variant: #c4c9d9;
+  --cm-color-primary: #1f55b8;
+  --cm-color-on-primary: #ffffff;
+  --cm-color-primary-container: #2a63d0;
+  --cm-color-on-primary-container: #ffffff;
+  --cm-color-secondary: #0f7a52;
+  --cm-color-on-secondary: #ffffff;
+  --cm-color-tertiary: #a4511a;
+  --cm-color-error: #ba1a1a;
+  --cm-color-error-container: #ffdad6;
+  --wb-shadow: 0 1px 2px rgba(20, 30, 60, 0.08);
+  --wb-shadow-lift: 0 12px 32px rgba(20, 30, 60, 0.16);
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgba(42, 99, 208, 0.10), transparent 65%),
+    radial-gradient(800px 400px at 90% 10%, rgba(15, 122, 82, 0.07), transparent 60%),
+    var(--cm-color-surface);
+}
+:root[data-theme="light"] .welcome-overlay .wb-btn--primary { color: var(--cm-color-on-primary); }
+:root[data-theme="light"] .welcome-overlay .wb-cap--cnc { --cap-accent: #7a2fb5; --cap-accent-strong: #9a4fd6; }
+:root[data-theme="light"] .welcome-overlay .wb-card:hover,
+:root[data-theme="light"] .welcome-overlay .wb-card--selected { box-shadow: var(--wb-shadow-lift); }
 .wb {
   max-width: 1320px;
   margin: 0 auto;
@@ -1284,71 +1325,236 @@ body, html, #root {
   gap: var(--cm-space-5);
 }
 
-/* Header */
-.wb-header {
+/* #878 — the front door. The hero is one line of product and one of promise; the library
+   controls sit to its right as ghost buttons. */
+.wb-hero {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--cm-space-4);
+  padding-top: var(--cm-space-2);
 }
-.wb-header h1 {
-  margin: 0 0 var(--cm-space-2);
+.wb-hero__copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cm-space-2);
+  min-width: 0;
+}
+.wb-hero h1 {
+  margin: 0;
   font-family: var(--cm-font-display);
-  font-size: 2rem;
+  font-size: clamp(2rem, 1.2rem + 2.4vw, 3rem);
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
   color: var(--cm-color-on-surface);
+  background: linear-gradient(100deg, var(--cm-color-on-surface) 0%, var(--cm-color-primary) 55%, var(--cm-color-secondary) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
-.wb-header p {
+.wb-hero p {
   margin: 0;
   color: var(--cm-color-on-surface-variant);
-  font-size: 0.9375rem;
+  font-size: 1rem;
   line-height: 1.5;
-  max-width: 64ch;
+  max-width: 58ch;
+}
+.wb-hero__actions {
+  display: flex;
+  gap: var(--cm-space-2);
+  flex-shrink: 0;
+}
+.wb-eyebrow {
+  font-family: var(--cm-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cm-color-on-surface-muted);
 }
 
-/* #680 — the door: each way of starting is a card of its own, the CNC one beside the print
-   projects. The accent border is the one visual difference: this is the newer door, not a
-   different kind of thing. */
-.wb-doors {
+/* The four capability cards: a row on a wide desktop, 2 × 2 at tablet widths, a column on a
+   phone. Each card is picture, eyebrow, headline, one line, one primary action pinned to its foot. */
+.wb-caps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--cm-space-4);
 }
-.wb-door {
+.wb-caps > li { min-width: 0; display: flex; }
+.wb-cap {
+  --cap-accent: var(--cm-color-primary);
+  --cap-accent-strong: var(--cm-color-primary-container);
+  position: relative;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: var(--cm-space-2);
   padding: var(--cm-space-4);
-  background: var(--cm-color-surface-container-low);
-  border: var(--cm-border-1);
-  border-radius: var(--cm-radius-lg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--cap-accent) 9%, transparent), transparent 55%),
+    var(--cm-color-surface-container-low);
+  border: 1px solid color-mix(in srgb, var(--cap-accent) 28%, var(--cm-color-outline-variant));
+  border-radius: 14px;
+  box-shadow: var(--wb-shadow);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
-.wb-door--cnc {
-  border-color: var(--cm-color-primary);
-  background: color-mix(in srgb, var(--cm-color-primary-container) 10%, var(--cm-color-surface-container-low));
+.wb-cap:hover,
+.wb-cap:focus-within {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--cap-accent) 70%, var(--cm-color-outline-variant));
+  box-shadow: var(--wb-shadow-lift), 0 0 0 1px color-mix(in srgb, var(--cap-accent) 35%, transparent);
 }
-.wb-door__eyebrow {
-  font-family: var(--cm-font-mono);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--cm-color-on-surface-muted);
-}
-.wb-door h2 {
+.wb-cap--cases { --cap-accent: var(--cm-color-primary); --cap-accent-strong: var(--cm-color-primary-container); }
+.wb-cap--racks { --cap-accent: var(--cm-color-secondary); --cap-accent-strong: var(--cm-color-secondary); }
+.wb-cap--toolboxes { --cap-accent: var(--cm-color-tertiary); --cap-accent-strong: var(--cm-color-tertiary); }
+.wb-cap--cnc { --cap-accent: #e9a0ff; --cap-accent-strong: #c86bff; }
+.wb-cap h2 {
   margin: 0;
   font-family: var(--cm-font-display);
-  font-size: 1.125rem;
-  font-weight: 600;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
   color: var(--cm-color-on-surface);
 }
-.wb-door__text {
+.wb-cap p {
   margin: 0;
   color: var(--cm-color-on-surface-variant);
   font-size: 0.875rem;
   line-height: 1.5;
-  max-width: 60ch;
+}
+.wb-cap__action {
+  margin-top: auto;
+  align-self: flex-start;
+  padding-top: calc(var(--cm-space-2) + 1px);
+  padding-bottom: calc(var(--cm-space-2) + 1px);
+}
+.wb-cap__art {
+  aspect-ratio: 260 / 190;
+  border-radius: 10px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 60%, color-mix(in srgb, var(--cap-accent) 16%, transparent), transparent 70%),
+    radial-gradient(rgba(140, 144, 159, 0.16) 1px, transparent 1px) 0 0 / 12px 12px,
+    var(--cm-color-surface-container-lowest);
+  border: 1px solid color-mix(in srgb, var(--cap-accent) 18%, var(--cm-color-outline-variant));
+}
+.wb-cap__art svg { display: block; width: 100%; height: 100%; }
+
+/* The art's materials. Faces are the surface tokens tinted by the card's accent; edges are the
+   accent at low alpha so the line work reads on both themes. */
+.wb-art {
+  --art-edge: color-mix(in srgb, var(--cap-accent) 80%, var(--cm-color-on-surface));
+  --art-top: color-mix(in srgb, var(--cap-accent) 26%, var(--cm-color-surface-container-highest));
+  --art-left: color-mix(in srgb, var(--cap-accent) 14%, var(--cm-color-surface-container-high));
+  --art-right: color-mix(in srgb, var(--cap-accent) 8%, var(--cm-color-surface-container));
+  --art-floor: color-mix(in srgb, var(--cap-accent) 6%, var(--cm-color-surface-container-lowest));
+  --art-hole: var(--cm-color-surface-container-lowest);
+  overflow: visible;
+}
+.wb-art polygon,
+.wb-art path,
+.wb-art ellipse {
+  stroke: var(--art-edge);
+  stroke-width: 0.9;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  transition: transform 300ms ease;
+}
+.wb-art .a-glow { fill: var(--cap-accent); opacity: 0.12; stroke: none; filter: blur(10px); }
+.wb-art .a-top { fill: var(--art-top); }
+.wb-art .a-left { fill: var(--art-left); }
+.wb-art .a-right { fill: var(--art-right); }
+.wb-art .a-floor { fill: var(--art-floor); }
+.wb-art .a-inner-r { fill: color-mix(in srgb, var(--art-right) 70%, var(--art-floor)); }
+.wb-art .a-inner-l { fill: color-mix(in srgb, var(--art-left) 70%, var(--art-floor)); }
+.wb-art .a-hole { fill: var(--art-hole); stroke: color-mix(in srgb, var(--art-edge) 55%, transparent); }
+.wb-art .a-slot { fill: color-mix(in srgb, var(--art-edge) 30%, transparent); stroke: none; }
+.wb-art .a-seam { fill: color-mix(in srgb, var(--art-edge) 45%, transparent); stroke: none; }
+.wb-art .a-green .a-top { fill: color-mix(in srgb, var(--cm-color-secondary) 55%, var(--cm-color-surface-container-high)); }
+.wb-art .a-green .a-left { fill: color-mix(in srgb, var(--cm-color-secondary) 35%, var(--cm-color-surface-container)); }
+.wb-art .a-green .a-right { fill: color-mix(in srgb, var(--cm-color-secondary) 25%, var(--cm-color-surface-container)); }
+.wb-art .a-green polygon { stroke: color-mix(in srgb, var(--cm-color-secondary) 80%, var(--cm-color-on-surface)); }
+.wb-art .a-dark .a-top { fill: var(--cm-color-surface-container-high); }
+.wb-art .a-dark .a-left { fill: var(--cm-color-surface-container-lowest); }
+.wb-art .a-dark .a-right { fill: var(--cm-color-surface-container-low); }
+.wb-art .a-dark polygon,
+.wb-art .a-dark path,
+.wb-art .a-dark ellipse { stroke: color-mix(in srgb, var(--art-edge) 55%, transparent); }
+.wb-art .a-metal .a-top { fill: color-mix(in srgb, var(--cm-color-on-surface) 60%, var(--cm-color-surface-container-highest)); }
+.wb-art .a-metal .a-left,
+.wb-art .a-metal .a-side { fill: color-mix(in srgb, var(--cm-color-on-surface) 30%, var(--cm-color-surface-container-high)); }
+.wb-art .a-metal .a-right { fill: color-mix(in srgb, var(--cm-color-on-surface) 18%, var(--cm-color-surface-container-high)); }
+.wb-art .a-metal polygon,
+.wb-art .a-metal path,
+.wb-art .a-metal ellipse { stroke: color-mix(in srgb, var(--cm-color-on-surface) 70%, transparent); }
+.wb-art .a-standoff .a-side { fill: var(--art-left); }
+.wb-art .a-standoff .a-top { fill: var(--art-top); }
+.wb-art .a-lid { opacity: 0.82; }
+.wb-art .a-lid .a-top { fill: color-mix(in srgb, var(--cap-accent) 36%, var(--cm-color-surface-container-highest)); }
+.wb-art .a-tray .a-top { fill: color-mix(in srgb, var(--cm-color-tertiary) 40%, var(--cm-color-surface-container-highest)); }
+.wb-art .a-tray .a-left { fill: color-mix(in srgb, var(--cm-color-tertiary) 24%, var(--cm-color-surface-container-high)); }
+.wb-art .a-tray .a-right { fill: color-mix(in srgb, var(--cm-color-tertiary) 14%, var(--cm-color-surface-container)); }
+.wb-art .a-accent .a-top { fill: var(--cm-color-tertiary); }
+.wb-art .a-accent .a-left { fill: color-mix(in srgb, var(--cm-color-tertiary) 70%, var(--cm-color-surface-container)); }
+.wb-art .a-accent .a-right { fill: color-mix(in srgb, var(--cm-color-tertiary) 50%, var(--cm-color-surface-container)); }
+.wb-art .a-led { fill: var(--cm-color-secondary); stroke: none; }
+.wb-art .a-led--amber { fill: var(--cm-color-tertiary); }
+.wb-art .a-bed .a-top { fill: var(--cm-color-surface-container-high); }
+.wb-art .a-bed .a-left { fill: var(--cm-color-surface-container); }
+.wb-art .a-bed .a-right { fill: var(--cm-color-surface-container-low); }
+.wb-art .a-wood .a-top { fill: color-mix(in srgb, var(--cm-color-tertiary) 62%, #6b3f1d); }
+.wb-art .a-wood .a-left { fill: color-mix(in srgb, var(--cm-color-tertiary) 40%, #4a2a12); }
+.wb-art .a-wood .a-right { fill: color-mix(in srgb, var(--cm-color-tertiary) 28%, #3a200d); }
+.wb-art .a-wood polygon { stroke: color-mix(in srgb, var(--cm-color-tertiary) 60%, #2a1608); }
+.wb-art .a-grain { fill: none; stroke: #2a1608; stroke-width: 0.8; opacity: 0.38; stroke-linecap: round; }
+.wb-art--cnc .a-floor { fill: color-mix(in srgb, var(--cm-color-tertiary) 34%, #3a200d); }
+.wb-art--cnc .a-inner-r,
+.wb-art--cnc .a-inner-l { fill: color-mix(in srgb, var(--cm-color-tertiary) 22%, #2a1608); }
+.wb-art--cnc .a-hole { stroke: color-mix(in srgb, var(--cm-color-tertiary) 60%, #2a1608); }
+.wb-art .a-letter { fill: #1c0f05; stroke: none; opacity: 0.8; }
+.wb-art .a-path { fill: none; stroke: var(--cap-accent-strong); stroke-width: 1.2; opacity: 0.75; }
+.wb-art .a-path--live { stroke: var(--cap-accent); stroke-width: 1.6; opacity: 1; stroke-dasharray: 6 4; }
+.wb-art .a-spindle .a-side { fill: color-mix(in srgb, var(--cap-accent) 30%, var(--cm-color-surface-container-high)); }
+.wb-art .a-spindle .a-top { fill: color-mix(in srgb, var(--cap-accent) 45%, var(--cm-color-surface-container-highest)); }
+.wb-art .a-tool .a-side { fill: var(--cm-color-on-surface); stroke: none; }
+.wb-art .a-tool .a-top { fill: var(--cm-color-on-surface); stroke: none; }
+.wb-art .a-ring { fill: none; stroke: color-mix(in srgb, var(--art-edge) 60%, transparent); }
+.wb-art .a-chip { fill: var(--cm-color-tertiary); stroke: none; opacity: 0; }
+.wb-art .a-spark { fill: var(--cap-accent); stroke: none; opacity: 0.9; filter: blur(2px); }
+
+/* Hover life, light and optional: the lid lifts, the cutter traces its loop, chips fly. */
+@media (prefers-reduced-motion: no-preference) {
+  .wb-cap:hover .wb-art--cases .a-lid,
+  .wb-cap:hover .wb-art--toolboxes .a-lid { transform: translateY(-6px); }
+  .wb-cap:hover .wb-art--cnc .a-path--live { animation: wb-trace 1.6s linear infinite; }
+  .wb-cap:hover .wb-art--cnc .a-chip { animation: wb-chip 900ms ease-out infinite; }
+  .wb-cap:hover .wb-art--cnc .a-chip:nth-child(2n) { animation-delay: 300ms; }
+  .wb-cap:hover .wb-art--racks .a-led { animation: wb-blink 1.2s steps(2, jump-none) infinite; }
+  .wb-cap:hover .wb-art--racks .a-led--amber { animation-delay: 400ms; }
+}
+@keyframes wb-trace { to { stroke-dashoffset: -20; } }
+@keyframes wb-chip {
+  0% { opacity: 0; transform: translate(0, 0); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translate(6px, -10px); }
+}
+@keyframes wb-blink { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  .wb-cap, .wb-card, .wb-btn, .wb-art polygon, .wb-art path, .wb-art ellipse { transition: none; }
+  .wb-cap:hover, .wb-cap:focus-within, .wb-card:hover { transform: none; }
+}
+
+/* The quiet row under the cards: recents and starters, for coming back to cutting work. */
+.wb-quiet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cm-space-2) var(--cm-space-6);
+  padding: 0 var(--cm-space-1);
 }
 .wb-door__links {
   display: flex;
@@ -1609,7 +1815,6 @@ body, html, #root {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.wb-header__actions { display: flex; gap: var(--cm-space-2); }
 .save-to-library {
   display: flex;
   align-items: center;
@@ -1887,6 +2092,13 @@ body, html, #root {
   opacity: 0.7;
 }
 
+/* #878 — the cards go 2 × 2 once four across would squeeze the pictures under ~260px. */
+@media (max-width: 1199px) {
+  .wb-caps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Two wide cards would make the pictures tall; a wider frame keeps the row above the fold. */
+  .wb-cap__art { aspect-ratio: 260 / 150; }
+}
+
 @media (max-width: 1080px) {
   .wb-layout { grid-template-columns: 1fr; }
   .wb-rail { position: static; order: -1; }
@@ -1897,11 +2109,13 @@ body, html, #root {
    the empty-state rail hint hidden — it's pure chrome at this size. */
 @media (max-width: 640px) {
   .wb { padding: var(--cm-space-4) var(--cm-space-3) 64px; }
-  .wb-header { flex-direction: column; align-items: stretch; }
-  .wb-header h1 { font-size: 1.5rem; }
-  .wb-header p { max-width: 100%; overflow-wrap: break-word; }
-  .wb-header > div { min-width: 0; }
-  .wb-header__actions { flex-wrap: wrap; }
+  .wb-hero { flex-direction: column; align-items: stretch; padding-top: 0; }
+  .wb-hero p { max-width: 100%; overflow-wrap: break-word; font-size: 0.9375rem; }
+  .wb-hero__actions { flex-wrap: wrap; }
+  .wb-caps { grid-template-columns: 1fr; gap: var(--cm-space-3); }
+  .wb-cap { padding: var(--cm-space-3); }
+  .wb-cap__action { align-self: stretch; text-align: center; }
+  .wb-quiet { flex-direction: column; gap: var(--cm-space-2); }
   /* flex-basis is the MAIN axis — in the column toolbar the search's
      `flex: 1 1 260px` would become a 260px-tall input. */
   .wb-search { flex: none; min-width: 0; }

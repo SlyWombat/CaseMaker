@@ -4,6 +4,7 @@ import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { useLibraryStore, refreshStaleSources, type ImportResult } from '@/store/libraryStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { useRecentJobsStore } from '@/store/recentJobsStore';
+import { useViewportStore } from '@/store/viewportStore';
 import { openRecentJob } from '@/store/openRecentJob';
 import { listBoards, type RegisteredBoard } from '@/library/registry';
 import {
@@ -16,16 +17,18 @@ import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 import { BoardPreviewSvg } from './BoardPreviewSvg';
 import { BoardPreview3d } from './BoardPreview3d';
 import { SourcesPanel } from './SourcesPanel';
+import { CasesArt, CncArt, RacksArt, ToolboxesArt } from './CapabilityArt';
 import type { BoardProfile, ComponentKind } from '@/types';
 
 /**
- * Welcome / new-project screen (#69, redesigned). Left: searchable,
- * filterable catalog of every board the registry knows about — builtin,
- * locally-imported, and remote-source — rendered as live top-view previews
- * straight from the profile data. Right: a sticky detail rail with the full
- * spec, connector inventory, provenance links, and the create actions.
- * Below: quick-start template cards (testids consumed by
- * tests/e2e/templates-smoke.spec.ts).
+ * Welcome / new-project screen (#69, #878). Above the fold, the front door: a hero line and the
+ * four capability cards — Cases, Racks, Toolboxes, CNC cutting — each with its own illustration
+ * and one primary action into that flow. Under them, quietly, the starters and the recent jobs.
+ * Below: the catalog. Left: searchable, filterable catalog of every board the registry knows
+ * about — builtin, locally-imported, and remote-source — rendered as live top-view previews
+ * straight from the profile data. Right: a sticky detail rail with the full spec, connector
+ * inventory, provenance links, and the create actions. Then the quick-start template cards
+ * (testids consumed by tests/e2e/templates-smoke.spec.ts).
  */
 
 const KIND_LABELS: Record<ComponentKind, string> = {
@@ -66,6 +69,41 @@ const STARTERS = [
   { id: 'blank', label: 'Bare blank' },
   { id: 'dowel', label: 'Name on a dowel' },
 ] as const;
+
+/** The anchor the Cases card scrolls to: the board catalog is the case designer's way in. */
+const BOARDS_ANCHOR_ID = 'welcome-boards';
+
+/**
+ * The four capability cards' words (#878). A headline of a few words and one line that says what
+ * the user gets; Canadian spelling; nothing about how it is built. The CNC line is the approved
+ * copy from the door it replaces.
+ */
+const CAPABILITY_COPY = {
+  cases: {
+    eyebrow: 'Cases',
+    title: 'Cases that fit the board',
+    text: 'Pick a board and the shell grows around its ports, holes and standoffs.',
+    action: 'Pick a board',
+  },
+  racks: {
+    eyebrow: 'Racks',
+    title: 'Racks sized to your gear',
+    text: 'A snap-together 10-inch rack — shelves, faceplates, cable tray — resized to fit your printer.',
+    action: 'Build a rack',
+  },
+  toolboxes: {
+    eyebrow: 'Toolboxes',
+    title: 'Toolboxes that stack',
+    text: 'Bins and lids that register on each other with no connector, and inserts pocketed to your own tools.',
+    action: 'Stack a toolbox',
+  },
+  cnc: {
+    eyebrow: 'CNC cutting',
+    title: 'Cut it on the CNC',
+    text: 'Carve hardwood on the CNC — a name plate, a coaster, a pocket, an engraving.',
+    action: 'Start a cutting job',
+  },
+} as const;
 
 function fmtMm(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, '');
@@ -152,6 +190,7 @@ export function WelcomeOverlay() {
   const [importNotice, setImportNotice] = useState<ImportResult | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const recents = useRecentJobsStore((s) => s.jobs);
   const [openingRecent, setOpeningRecent] = useState<string | null>(null);
   const [recentError, setRecentError] = useState<string | null>(null);
@@ -265,6 +304,28 @@ export function WelcomeOverlay() {
     }
   };
 
+  /**
+   * The Racks and Toolboxes cards: build the project type's template and land in its own editor,
+   * so the card's promise ("Build a rack") is kept in one click. A template card below leaves the
+   * section alone, as it always has.
+   */
+  const startProjectType = async (templateId: string, section: 'rack' | 'toolbox') => {
+    await applyTemplate(templateId);
+    if (!useProjectStore.getState().welcomeMode) {
+      useViewportStore.getState().setActiveSidebarSection(section);
+    }
+  };
+
+  /** The Cases card: bring the board catalog up and put the cursor in its search. */
+  const goToBoards = () => {
+    const anchor = document.getElementById(BOARDS_ANCHOR_ID);
+    const reduced =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    anchor?.scrollIntoView?.({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+    searchRef.current?.focus({ preventScroll: true });
+  };
+
   /** #680 — reopen a recent job. On success the project flips welcome mode off, so this overlay goes. */
   const openRecent = async (recent: (typeof recents)[number]): Promise<void> => {
     if (openingRecent !== null) return;
@@ -295,11 +356,19 @@ export function WelcomeOverlay() {
   return (
     <div className="welcome-overlay" data-testid="welcome-overlay">
       <div className="wb">
-        <header className="wb-header">
-          <div>
-            <h1>Start a New Project</h1>
+        {/* #878 — the front door. The hero names the product in one line; the four cards are the
+            capabilities, each with its own picture and one way in. The library controls sit to
+            the right of the hero, quieter: they are housekeeping, not a reason to be here. */}
+        <header className="wb-hero" data-testid="welcome-hero">
+          <div className="wb-hero__copy">
+            <span className="wb-eyebrow">Case Maker</span>
+            <h1>Design it. Print it. Cut it.</h1>
+            <p>
+              Enclosures, racks and toolboxes shaped around the hardware you own — and CNC jobs
+              that run on your Carvera, simulated before a chip flies.
+            </p>
           </div>
-          <div className="wb-header__actions">
+          <div className="wb-hero__actions">
             <button
               className={`wb-btn wb-btn--ghost ${sourcesOpen ? 'wb-btn--toggled' : ''}`}
               onClick={() => setSourcesOpen((v) => !v)}
@@ -336,82 +405,138 @@ export function WelcomeOverlay() {
           />
         </header>
 
-        {/* #680 — the door: each way of starting is a card of its own, the CNC one beside the print
-            projects rather than a button among the board controls. Opening the cutting wizard puts
-            its own plain backdrop over this page (`start-wizard`), so the operator is in the job
-            and nowhere else. A build with no CNC section offers no cutting door (#343). */}
-        <div className="wb-doors" data-testid="welcome-doors">
-          <section className="wb-door" data-testid="welcome-door-print">
-            <span className="wb-door__eyebrow">Print</span>
-            <h2>Start a new project</h2>
-            <p className="wb-door__text">
-              Pick a board — its enclosure generates around the real connector and mounting-hole
-              geometry. Import board JSON or add online sources to grow the library.
-            </p>
-          </section>
+        {/* The four doors (#680, #878). The print cards build a project straight away or lead to
+            the board catalog; the CNC card opens the cutting wizard over this page (`start-wizard`),
+            so the operator is in the job and nowhere else. A build with no CNC section offers no
+            cutting door (#343). */}
+        <ul className="wb-caps" data-testid="welcome-doors" aria-label="What Case Maker makes">
+          <li>
+            <article className="wb-cap wb-cap--cases" data-testid="welcome-door-print">
+              <div className="wb-cap__art">
+                <CasesArt title="An open enclosure with a board inside and the port cut-outs in its wall" />
+              </div>
+              <span className="wb-eyebrow">{CAPABILITY_COPY.cases.eyebrow}</span>
+              <h2>{CAPABILITY_COPY.cases.title}</h2>
+              <p>{CAPABILITY_COPY.cases.text}</p>
+              <button
+                type="button"
+                className="wb-btn wb-btn--primary wb-cap__action"
+                onClick={goToBoards}
+                data-testid="welcome-start-case"
+                title="Jump to the board catalog below"
+              >
+                {CAPABILITY_COPY.cases.action}
+              </button>
+            </article>
+          </li>
+          <li>
+            <article className="wb-cap wb-cap--racks" data-testid="welcome-door-racks">
+              <div className="wb-cap__art">
+                <RacksArt title="A 10-inch rack frame with U-rails, two shelves and a switch on the lower shelf" />
+              </div>
+              <span className="wb-eyebrow">{CAPABILITY_COPY.racks.eyebrow}</span>
+              <h2>{CAPABILITY_COPY.racks.title}</h2>
+              <p>{CAPABILITY_COPY.racks.text}</p>
+              <button
+                type="button"
+                className="wb-btn wb-btn--primary wb-cap__action"
+                onClick={() => void startProjectType('mini-rack-10in', 'rack')}
+                data-testid="welcome-start-rack"
+                title="Open the rack designer with the 10-inch mini rack"
+              >
+                {CAPABILITY_COPY.racks.action}
+              </button>
+            </article>
+          </li>
+          <li>
+            <article className="wb-cap wb-cap--toolboxes" data-testid="welcome-door-toolboxes">
+              <div className="wb-cap__art">
+                <ToolboxesArt title="A stacked toolbox bin with a divided tray of sockets and bits, its lid lifted" />
+              </div>
+              <span className="wb-eyebrow">{CAPABILITY_COPY.toolboxes.eyebrow}</span>
+              <h2>{CAPABILITY_COPY.toolboxes.title}</h2>
+              <p>{CAPABILITY_COPY.toolboxes.text}</p>
+              <button
+                type="button"
+                className="wb-btn wb-btn--primary wb-cap__action"
+                onClick={() => void startProjectType('toolbox', 'toolbox')}
+                data-testid="welcome-start-toolbox"
+                title="Open the toolbox designer with the stacking toolbox"
+              >
+                {CAPABILITY_COPY.toolboxes.action}
+              </button>
+            </article>
+          </li>
           {featureSim && (
-            <section className="wb-door wb-door--cnc" data-testid="welcome-door-cnc">
-              <span className="wb-door__eyebrow">CNC</span>
-              <h2>Start a cutting job</h2>
-              <p className="wb-door__text">
-                Cut something on the CNC — a badge, a plate, a pocket, an engraving.
-              </p>
-              <div>
+            <li>
+              <article className="wb-cap wb-cap--cnc" data-testid="welcome-door-cnc">
+                <div className="wb-cap__art">
+                  <CncArt title="A CNC spindle cutting a pocket in a block of stock, the toolpath on its floor" />
+                </div>
+                <span className="wb-eyebrow">{CAPABILITY_COPY.cnc.eyebrow}</span>
+                <h2>{CAPABILITY_COPY.cnc.title}</h2>
+                <p>{CAPABILITY_COPY.cnc.text}</p>
                 <button
-                  className="wb-btn wb-btn--primary"
+                  type="button"
+                  className="wb-btn wb-btn--primary wb-cap__action"
                   onClick={() => openWizard()}
                   data-testid="welcome-start-cnc"
                   title="Check for a machine, pick what you are making, then set up the cut"
                 >
-                  Start a cutting job
+                  {CAPABILITY_COPY.cnc.action}
                 </button>
-              </div>
-              {/* The last three files the app saved or opened. Absent until there is one: no
-                  sentence says so — the card simply offers what it has. */}
-              {recents.length > 0 && (
-                <div className="wb-door__links" data-testid="welcome-recent-jobs">
-                  <span className="wb-door__label">Recent:</span>
-                  {recents.map((recent, i) => (
-                    <span key={recent.fileName}>
-                      {i > 0 && ' · '}
-                      <button
-                        type="button"
-                        className="wb-door__link"
-                        data-testid={`welcome-recent-${i}`}
-                        title={recent.fileName}
-                        disabled={openingRecent !== null}
-                        onClick={() => void openRecent(recent)}
-                      >
-                        {recent.name}
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="wb-door__links" data-testid="welcome-starters">
-                <span className="wb-door__label">Starters:</span>
-                {STARTERS.map((starter, i) => (
-                  <span key={starter.id}>
+              </article>
+            </li>
+          )}
+        </ul>
+
+        {/* The quiet row: ways back into cutting work. The last three files the app saved or
+            opened — absent until there is one, no sentence says so — and the starter jobs. */}
+        {featureSim && (
+          <div className="wb-quiet" data-testid="welcome-quiet">
+            {recents.length > 0 && (
+              <div className="wb-door__links" data-testid="welcome-recent-jobs">
+                <span className="wb-door__label">Recent:</span>
+                {recents.map((recent, i) => (
+                  <span key={recent.fileName}>
                     {i > 0 && ' · '}
                     <button
                       type="button"
                       className="wb-door__link"
-                      data-testid={`welcome-starter-${starter.id}`}
-                      onClick={() => openWizard('machine', starter.id)}
+                      data-testid={`welcome-recent-${i}`}
+                      title={recent.fileName}
+                      disabled={openingRecent !== null}
+                      onClick={() => void openRecent(recent)}
                     >
-                      {starter.label}
+                      {recent.name}
                     </button>
                   </span>
                 ))}
               </div>
-              {recentError !== null && (
-                <p className="wb-door__text" data-testid="welcome-recent-error">
-                  {recentError}
-                </p>
-              )}
-            </section>
-          )}
-        </div>
+            )}
+            <div className="wb-door__links" data-testid="welcome-starters">
+              <span className="wb-door__label">Starters:</span>
+              {STARTERS.map((starter, i) => (
+                <span key={starter.id}>
+                  {i > 0 && ' · '}
+                  <button
+                    type="button"
+                    className="wb-door__link"
+                    data-testid={`welcome-starter-${starter.id}`}
+                    onClick={() => openWizard('machine', starter.id)}
+                  >
+                    {starter.label}
+                  </button>
+                </span>
+              ))}
+            </div>
+            {recentError !== null && (
+              <p className="wb-door__text" data-testid="welcome-recent-error">
+                {recentError}
+              </p>
+            )}
+          </div>
+        )}
 
         {sourcesOpen && <SourcesPanel />}
 
@@ -439,8 +564,9 @@ export function WelcomeOverlay() {
           </div>
         )}
 
-        <div className="wb-toolbar">
+        <div className="wb-toolbar" id={BOARDS_ANCHOR_ID}>
           <input
+            ref={searchRef}
             className="wb-search"
             type="search"
             placeholder="Search boards & templates…"
