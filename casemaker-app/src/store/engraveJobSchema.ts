@@ -2086,6 +2086,13 @@ const jobSetupSchema = z.object({
     .record(z.string().min(1), z.array(z.string().min(1)))
     .optional()
     .describe('Item ids cut by each cutter, keyed by registry key; omit when not assigned per cutter.'),
+  // #836 — the cutter the job's face operations are cut with, when it differs from the setup's
+  // first. Optional and not defaulted, so every earlier setup keeps its exact shape.
+  faceToolKey: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Registry key of the cutter the face operations run, when it is not the setup’s first cutter.'),
   registration: jobSetupRegistrationSchema
     .optional()
     .describe('The approved registration for this setup; omit for none.'),

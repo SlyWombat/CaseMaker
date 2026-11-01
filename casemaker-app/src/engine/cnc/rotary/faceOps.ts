@@ -375,8 +375,8 @@ export function planFaceCuts(
 
 /**
  * Which refusal a job with face operations earns BEFORE any geometry: a face is cut on round
- * stock in the chuck, and a program cannot be half map and half face. Null when the job is one
- * this module's CAM can cut.
+ * stock held in the chuck. Null when the job is one this module's CAM can cut. A job that ALSO
+ * carries map items is not refused — it cuts two programs in cut order (#836).
  */
 export function faceJobRefusal(job: EngraveJob): JobFinding | null {
   const ops = job.faces ?? [];
@@ -387,23 +387,6 @@ export function faceJobRefusal(job: EngraveJob): JobFinding | null {
       code: 'face-needs-chuck',
       message:
         'Faces are cut on round stock held in the rotary chuck, and this job is held in the vise. Change the holding in the Holding step, or remove the face operations.',
-    };
-  }
-  const hasMapItems =
-    job.labels.length > 0 ||
-    job.shapes.length > 0 ||
-    (job.cutouts?.length ?? 0) > 0 ||
-    (job.chamfers?.length ?? 0) > 0 ||
-    (job.combined?.length ?? 0) > 0 ||
-    (job.traces?.length ?? 0) > 0 ||
-    (job.vectors?.length ?? 0) > 0 ||
-    (job.keepOuts?.length ?? 0) > 0;
-  if (hasMapItems) {
-    return {
-      severity: 'error',
-      code: 'face-items-mixed',
-      message:
-        'This job has items on the map AND cuts on the stock’s faces, and one program cannot be both: cut the faces in their own job, or remove the map items. A wrapped program and an indexed one are two programs.',
     };
   }
   return null;

@@ -3735,6 +3735,12 @@ export function EngravePanel(): JSX.Element {
           </p>
         )}
       </details>
+      {/* #836 — a job with map work AND faces cuts two programs in one mounting; say so once. */}
+      {(job.faces?.length ?? 0) > 0 && jobHasItems(job) && (
+        <p style={MUTED} data-testid="engrave-mixed-programs">
+          This job cuts as two programs in one mounting: the map work first, then the faces.
+        </p>
+      )}
       {/* #241 slice 2 — the cuts on the round stock's faces, in cut order, above the map's items. */}
       {(job.faces ?? []).map((face, i) => (
         <FaceOperationRow

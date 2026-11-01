@@ -29,6 +29,7 @@ import { createSimSession } from '@/workers/sim/session';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { getTools } from '@/engine/cnc/toolRegistry';
 import { engraveJobSchema } from '@/store/engraveJobSchema';
 import type { EngraveFaceItem, EngraveFaceOp, EngraveJob } from '@/types/engraveJob';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
@@ -146,10 +147,11 @@ describe('#241 slice 2 — the face model', () => {
     expect(b.ok).toBe(false);
     if (!b.ok) expect(b.findings.map((f) => f.code)).toContain('face-needs-flat-tool');
 
+    // #836 — a mixed job is NOT refused: it cuts two programs in cut order.
     const mixed = rod([flat('f', 0, 1)], {
       labels: [{ ...defaultEngraveJob().labels[0]!, text: 'X', id: 'l1' } as EngraveJob['labels'][number]],
     });
-    expect(faceJobRefusal(mixed)?.code).toBe('face-items-mixed');
+    expect(faceJobRefusal(mixed)).toBeNull();
 
     const viseArm = defaultEngraveJob().workholding as Extract<EngraveJob['workholding'], { kind: 'vise' }>;
     const vise = rod([flat('f', 0, 1)], { workholding: viseArm });
@@ -327,6 +329,62 @@ describe('#833 — cuts ON a face', () => {
     expect(report.ok, JSON.stringify(report.levels)).toBe(true);
     // One face's levels: the face pocket, the pocket cut and the hole all at A 30°.
     expect([...new Set(report.levels.map((l) => l.a))]).toEqual([30]);
+  }, 300_000);
+});
+
+describe('#836 — a mixed job cuts two programs in cut order', () => {
+  it('the map work first (wrapped), then the faces (indexed), in one mounting', () => {
+    const job = rod([{ id: 'f', kind: 'flat', a: 30, depth: 1 }]);
+    job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
+    // A ⌀8 circle pocket on the map, cut by the same ⌀3.175 flat end.
+    job.shapes = [
+      {
+        id: 's1',
+        kind: 'circle',
+        position: { x: 20, y: Math.PI * 10 },
+        rotation: 0,
+        depth: 0.5,
+        enabled: true,
+        diameter: 8,
+      },
+    ];
+    const g = engraveGenerate(tl, job, TOOL, [], null);
+    expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.programs).toHaveLength(2);
+    expect(g.programs.every((p) => p.frame === 'rotary')).toBe(true);
+    // Cut order is the cut order: the wrapped map file first, the indexed face file second.
+    const classes = g.programs.map((p) => buildTimeline(parseGcode(p.nc), toSetup(job, Z1)).summary.rotaryClass);
+    expect(classes).toEqual(['wrapped', 'indexed']);
+    // One mounting: both files belong to the same setup.
+    expect(new Set(g.programs.map((p) => p.setupIndex)).size).toBe(1);
+  }, 300_000);
+});
+
+describe('#836 — a setup’d mixed job names the face program’s own cutter', () => {
+  it('the face file runs the setup’s faceToolKey, and the map file its own cutter', () => {
+    const job = rod([{ id: 'f', kind: 'flat', a: 30, depth: 1 }]);
+    job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
+    job.shapes = [
+      { id: 's1', kind: 'circle', position: { x: 20, y: Math.PI * 10 }, rotation: 0, depth: 0.5, enabled: true, diameter: 8 },
+    ];
+    const setupId = 'set-1';
+    job.setups = [
+      {
+        id: setupId,
+        orientation: { up: '+z', front: '+y' } as never,
+        mount: { kind: 'rotary-chuck' } as never,
+        itemIds: ['s1'],
+        tools: [job.toolKey],
+        faceToolKey: 'flat-1.0',
+      } as never,
+    ];
+    const g = engraveGenerate(tl, job, TOOL, [], null, undefined, { tools: getTools() });
+    expect(g.errors, JSON.stringify(g.findings)).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.programs.map((p) => p.toolKey)).toEqual([job.toolKey, 'flat-1.0']);
+    const classes = g.programs.map((p) => buildTimeline(parseGcode(p.nc), toSetup(job, Z1)).summary.rotaryClass);
+    expect(classes).toEqual(['wrapped', 'indexed']);
   }, 300_000);
 });
 

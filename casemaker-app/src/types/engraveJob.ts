@@ -1644,6 +1644,16 @@ export interface JobSetup {
    * design.
    */
   toolItems?: Record<string, string[]>;
+  /**
+   * #836 — THE CUTTER THE JOB'S FACE OPERATIONS ARE CUT WITH, as a registry key. A job that has
+   * both map items and face operations cuts TWO programs in one setup: the map work with the
+   * setup's cutters, then the faces with this one. ABSENT means the setup's first cutter.
+   *
+   * Optional and absent-not-defaulted, so every document written before this field keeps its
+   * exact shape; it is written only when the two differ (one cutter can cut both, and then the
+   * same key serves both programs).
+   */
+  faceToolKey?: string;
   /** Present only once a registration has been planned and approved for this setup. */
   registration?: JobSetupRegistration;
   /** The directed step into this setup. Absent on the first setup, or where none is needed. */

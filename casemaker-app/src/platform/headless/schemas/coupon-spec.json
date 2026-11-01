@@ -1883,6 +1883,11 @@
               "description": "The setups the frozen programs run in.",
               "items": {
                 "properties": {
+                  "faceToolKey": {
+                    "description": "Registry key of the cutter the face operations run, when it is not the setup’s first cutter.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "id": {
                     "description": "Unique setup id; generated when a document does not state one.",
                     "minLength": 1,
@@ -3661,6 +3666,11 @@
           "description": "Saved setups; omit for the implicit single top-up vise setup.",
           "items": {
             "properties": {
+              "faceToolKey": {
+                "description": "Registry key of the cutter the face operations run, when it is not the setup’s first cutter.",
+                "minLength": 1,
+                "type": "string"
+              },
               "id": {
                 "description": "Unique setup id; generated when a document does not state one.",
                 "minLength": 1,
