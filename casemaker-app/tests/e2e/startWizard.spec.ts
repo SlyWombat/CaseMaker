@@ -33,10 +33,12 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   await page.getByTestId('start-wizard-op-text').fill('Hello');
   await page.getByTestId('start-wizard-operation-next').click();
 
-  // Step 3 — the stock itself, proposed from the work: the line's extent plus the margin each
-  // side. The starters are the door's (#680), not a list under the step.
+  // Step 3 — the stock: #930 proposes the house's stick for a line of text (the work no longer
+  // sizes a plate from its ink). The starters are the door's (#680), not a list under the step.
   await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
-  await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('Sized from the text');
+  await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText(
+    'The house’s stock: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
+  );
   await page.getByTestId('start-wizard-close').click();
   await page.getByTestId('welcome-starter-blank').click();
 

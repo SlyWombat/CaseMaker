@@ -124,16 +124,19 @@ for (const vp of VIEWPORTS) {
       expect(back.x).toBeLessThan(primary.x);
       expect(primary.x + primary.width).toBeGreaterThan(box.x + box.width - 40);
 
-      // A pocket needs no field: the blank step opens with nothing proposed, and so with its
-      // arrival sentence — a grey fact, not an amber refusal.
+      // #930 — a pocket gets the same house stock: the blank step opens with the stick proposed,
+      // so there is no arrival sentence and the primary is live at once.
       await page.getByTestId('engrave-setup-what-pocket').click();
       await page.getByTestId('start-wizard-operation-next').click();
 
       // Step 3 — the blank.
       await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
-      const arrival = page.getByTestId('start-wizard-stock-unblock');
-      await expect(arrival).toBeVisible();
-      await expect(arrival).toHaveCSS('color', 'rgb(154, 164, 176)');
+      await expect(page.getByTestId('start-wizard-stock-unblock')).toHaveCount(0);
+      await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('The house’s stock');
+      await expect(page.getByTestId('start-wizard-form-block')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('100');
+      await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('36');
+      await expect(page.getByTestId('start-wizard-make-thickness')).toHaveValue('36');
       await expectOnScreen(page, page.getByTestId('start-wizard-stock-next'), 'step 3 primary');
       await expectOnScreen(page, page.getByTestId('start-wizard-back'), 'step 3 Back');
 
@@ -141,7 +144,6 @@ for (const vp of VIEWPORTS) {
       await page.getByTestId('start-wizard-make-length').fill('76.2');
       await page.getByTestId('start-wizard-make-width').fill('38.1');
       await page.getByTestId('start-wizard-make-thickness').fill('3.81');
-      await expect(arrival).toHaveCount(0);
       await page.getByTestId('start-wizard-stock-next').click();
 
       // Step 4 — the tallest step — its primary is still on the screen without a scroll.
