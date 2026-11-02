@@ -29,6 +29,7 @@ import { jobSetups, toSetup } from '../../src/engine/cnc/engrave/jobSetup';
 import { Z1 } from '../../src/engine/cnc/machine';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import { entryFor } from '../../src/engine/cnc/toolRegistry';
+import { toolDisplayName } from '../../src/engine/cnc/toolDisplay';
 import { bootstrap } from '../../src/platform/headless/bootstrap';
 import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
 import { parseEngraveJob } from '../../src/store/engraveJobSchema';
@@ -276,8 +277,9 @@ describe('#733 a job posts one program per cutter', () => {
     // file the header names.
     const sheetMd = readFileSync(join(run.outDir, `${stemNoExt}-run-sheet.md`), 'utf8');
     expect(sheetMd).toContain('Checked: all 2 programs in the run');
-    expect(sheetMd).toContain(`program 1 (${FIRST})`);
-    expect(sheetMd).toContain(`program 2 (${SECOND})`);
+    // #887 — the sheet names a cutter in words, never its registry key: `user:…` is an id.
+    expect(sheetMd).toContain(`program 1 (${toolDisplayName(entryFor(FIRST)!.tool)})`);
+    expect(sheetMd).toContain(`program 2 (${toolDisplayName(entryFor(SECOND)!.tool)})`);
     expect(sheetMd).toContain('in cut order, each on the stock the earlier programs left');
 
     // #733 item 4 — EVERY program was swept, not only the first. `sim: null` on the second program
