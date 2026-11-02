@@ -3546,8 +3546,8 @@ function turnOverSteps(
   const to = setups[toIndex - 1];
   if (from === undefined || to === undefined) return [];
   const size = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
-  let words: string[] = [];
-  let axis: 'x' | 'y' | 'z' | null = null;
+  let words: string[];
+  let axis: 'x' | 'y' | 'z' | null;
   try {
     const a = orient(from.orientation.top, from.mount, size);
     const b = orient(to.orientation.top, to.mount, size);
