@@ -14,7 +14,7 @@ import {
 } from '@/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { orient } from '@/engine/cnc/setups/orient';
-import type { EngraveJob, JobSetup } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject, JobSetup } from '@/types/engraveJob';
 
 const NOW = new Date('2026-11-02T00:00:00Z');
 const NO_SIM: RunSheetSim = { diagnostics: [] };
@@ -168,6 +168,42 @@ describe('run sheet — the turn between setups', () => {
     expect(steps[1]!.text).toBe(
       'Side 2 cuts the part free; it will be loose in the vise — hold it or stop before the last pass.',
     );
+  });
+
+  it('#898 — a flipped-tabs goal is HELD by its tabs: no free-part warning, and the tabs are named', () => {
+    const base = flipped(job());
+    const goal: EngraveTargetObject = {
+      id: 'g-side',
+      name: 'panther.stl',
+      format: 'stl',
+      sha256: 'f'.repeat(64),
+      data: 'AAAA',
+      size: { x: 20, y: 20, z: 20 },
+      position: { x: 50, y: 30, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+      setupId: 's2',
+      underside: { kind: 'flipped-tabs', tabs: { count: 3, widthMm: 4, thicknessMm: 1 } },
+    };
+    const j: EngraveJob = {
+      ...base,
+      targetObject: undefined,
+      targetObjects: [goal],
+      setups: base.setups!.map((setup) => (setup.id === 's2' ? { ...setup, itemIds: [goal.id] } : setup)),
+    };
+    const sheet = buildRunSheet(
+      j,
+      goalGenerated([program(NC1, 1, { surfaceCheck: SURFACE }), program(NC2, 2, { surfaceCheck: SURFACE })]),
+      NO_SIM,
+      NOW,
+    );
+    const steps = sheet.sections.find((s) => s.id === 'cut-2')!.steps;
+    expect(steps[0]!.text).toContain('Turn the part over for setup 2.');
+    expect(steps[1]!.text).toBe(
+      'Side 2 leaves the part joined to the stock by its tabs — cut them off by hand when the run is done.',
+    );
+    expect(all(sheet)).not.toContain('cuts the part free');
   });
 
   it('with no pins the turn registers on the fixed jaw and asks for the origin again', () => {

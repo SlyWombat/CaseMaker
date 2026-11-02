@@ -1,7 +1,7 @@
 import type { ProbeFitInstrument } from '@/engine/cnc/probeFitDiagram';
 import type { CamPassStep, RapidEstimate } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
-import { itemLabel, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { itemLabel, jobSetups, jobTargetObjects, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
   idJawReach,
   jawGapFor,
@@ -3454,6 +3454,8 @@ function turnOverSteps(
   fromIndex: number,
   toIndex: number,
   freesPart: boolean,
+  /** #898 — this side's goal is held by TABS at its parting plane: the part is not freed. */
+  heldByTabs = false,
 ): RunSheetStep[] {
   const setups = jobSetups(job);
   const from = setups[fromIndex - 1];
@@ -3498,7 +3500,14 @@ function turnOverSteps(
       bold: true,
     },
   ];
-  if (freesPart) {
+  if (heldByTabs) {
+    // #898 — the tabs at the parting plane hold the part through BOTH sides; the operator cuts them
+    // off after, so this side does not free it and the sheet must not say it does.
+    steps.push({
+      text: `Side ${toIndex} leaves the part joined to the stock by its tabs — cut them off by hand when the run is done.`,
+      bold: true,
+    });
+  } else if (freesPart) {
     const held = to.mount.kind === 'vise' ? 'in the vise' : 'on the bed';
     steps.push({
       text: `Side ${toIndex} cuts the part free; it will be loose ${held} — hold it or stop before the last pass.`,
@@ -4615,15 +4624,25 @@ export function buildRunSheet(
       const program = runPrograms[i]!;
       const number = i + 1;
       const previousSetup = runPrograms[i - 1]!.setupIndex;
+      // #898 — a flipped-tabs goal is HELD through its last side by the tabs at the parting plane:
+      // the side does not free the part, and the sheet says the tabs, not a loose part.
+      const lastSetupId = jobSetups(job)[program.setupIndex - 1]?.id;
+      const lastGoal =
+        lastSetupId === undefined
+          ? undefined
+          : jobTargetObjects(job).find((t) => t.setupId === lastSetupId);
+      const heldByTabs = lastGoal?.underside?.kind === 'flipped-tabs';
       const turn =
         turnsHere && program.setupIndex !== previousSetup
           ? turnOverSteps(
               job,
               previousSetup,
               program.setupIndex,
-              generated.surface3d != null &&
+              !heldByTabs &&
+                generated.surface3d != null &&
                 program.setupIndex === setupCount &&
                 jobSetups(job)[program.setupIndex - 1]?.orientation.top === 'bottom',
+              heldByTabs,
             )
           : [];
       const sectionStart = programSections.length;
