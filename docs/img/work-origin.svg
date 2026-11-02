@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="360" viewBox="0 0 620 360" role="img" aria-labelledby="wo-title wo-desc">
+  <title id="wo-title">The work origin on the blank</title>
+  <desc id="wo-desc">A plan view of the blank. The work origin sits at its top-front-left corner. X runs to the right, Y runs away from the operator, and Z comes out of the blank's top face, where Z equals zero; every cut goes down to negative Z.</desc>
+  <style>
+    .paper { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.5; }
+    .ink { stroke: #1e293b; stroke-width: 1.6; fill: none; }
+    .arrow { fill: #1e293b; }
+    .accent { stroke: #2563eb; stroke-width: 2; fill: none; }
+    .accent-fill { fill: #2563eb; }
+    .dot { fill: #f8fafc; stroke: #2563eb; stroke-width: 1.6; }
+    text { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .label { fill: #1e293b; font-size: 14px; }
+    .small { fill: #64748b; font-size: 12.5px; }
+    .origin-label { fill: #2563eb; font-size: 13px; font-weight: 600; }
+    @media (prefers-color-scheme: dark) {
+      .paper { fill: #1e293b; stroke: #64748b; }
+      .ink { stroke: #e2e8f0; }
+      .arrow { fill: #e2e8f0; }
+      .accent { stroke: #93c5fd; }
+      .accent-fill { fill: #93c5fd; }
+      .dot { fill: #1e293b; stroke: #93c5fd; }
+      .label { fill: #e2e8f0; }
+      .small { fill: #94a3b8; }
+      .origin-label { fill: #93c5fd; }
+    }
+  </style>
+
+  <!-- the blank, seen from above; the origin is its bottom-left corner -->
+  <rect class="paper" x="170" y="70" width="280" height="180" rx="3"/>
+  <text class="label" x="310" y="150" text-anchor="middle">the blank (top face)</text>
+  <text class="small" x="310" y="172" text-anchor="middle">Z = 0 — every cut goes DOWN to −Z</text>
+
+  <!-- Y axis: away from the operator -->
+  <line class="ink" x1="170" y1="250" x2="170" y2="18"/>
+  <polygon class="arrow" points="170,8 164,24 176,24"/>
+  <text class="label" x="184" y="30">Y+  away from you</text>
+
+  <!-- X axis: to the right -->
+  <line class="ink" x1="170" y1="250" x2="566" y2="250"/>
+  <polygon class="arrow" points="576,250 560,244 560,256"/>
+  <text class="label" x="470" y="272">X+  to the right</text>
+
+  <!-- front / back cues -->
+  <text class="small" x="160" y="64" text-anchor="end">back</text>
+  <line class="ink" x1="168" y1="68" x2="176" y2="76" stroke-width="1"/>
+  <text class="small" x="160" y="266" text-anchor="end">front (you)</text>
+  <line class="ink" x1="168" y1="252" x2="176" y2="246" stroke-width="1"/>
+
+  <!-- Z: out of the top face -->
+  <circle class="dot" cx="300" cy="98" r="10"/>
+  <circle class="accent-fill" cx="300" cy="98" r="2.6"/>
+  <text class="small" x="316" y="102">Z+ out of the page</text>
+
+  <!-- the work origin: circled cross on the blank's top-front-left corner -->
+  <circle class="accent" cx="170" cy="250" r="9"/>
+  <line class="accent" x1="161" y1="250" x2="179" y2="250"/>
+  <line class="accent" x1="170" y1="241" x2="170" y2="259"/>
+  <text class="origin-label" x="186" y="298">the work origin — the blank's top-front-left corner</text>
+</svg>

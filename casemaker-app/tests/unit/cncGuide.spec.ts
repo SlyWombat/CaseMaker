@@ -1,13 +1,14 @@
 // `cnc-guide.md` is written for someone who owns a Makera Z1 and has never driven a
 // CNC: it has to be true, and it has to say which parts are true *today*. The status
-// lines carry that claim, and these four rules keep the guide honest mechanically
-// (#210):
+// lines carry that claim, and these rules keep the guide honest mechanically:
 //
 //   1. every diagnostic code the source can emit has a row in chapter 8;
-//   2. every `##` / `###` section opens with a status line;
-//   3. every "Planned" or "Partly available" status names an issue;
-//   4. no issue named in a "Planned" status is closed — read offline from a checked-in
-//      map, never the GitHub API.
+//   2. every `##` / `###` section opens with a status line.
+//
+// The status line used to also have to name a tracker issue, checked against a checked-in
+// map of issue states. The guide speaks to the operator, not to the tracker: issue numbers
+// are not allowed in an end-user document (tests/unit/docsNoInternals.spec.ts holds that
+// rule), so the issue-naming checks and their map are gone with the numbers.
 //
 // Plus the caption rule the mockups ship with: a design mockup may never be shown as if
 // it were the shipped screen.
@@ -20,9 +21,6 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const APP = join(ROOT, 'casemaker-app');
 const GUIDE = readFileSync(join(APP, 'src/docs/cnc-guide.md'), 'utf8');
-const STATUS_MAP: { issues: Record<string, string> } = JSON.parse(
-  readFileSync(join(ROOT, 'docs/cnc-guide-status.json'), 'utf8'),
-);
 
 const CAPTION = '*Design mockup — not the shipped screen.*';
 const CHAPTER_8 = GUIDE.slice(GUIDE.indexOf('\n## 8 · '));
@@ -102,10 +100,6 @@ function sections(): Section[] {
   return out;
 }
 
-function plannedIssues(status: string): number[] {
-  return [...status.matchAll(/#(\d+)/g)].map((m) => Number(m[1]));
-}
-
 describe('cnc-guide.md — the reference table is complete', () => {
   it('lists every diagnostic code the source can emit, in backticks, in chapter 8', () => {
     // Guard against a vacuous pass: if the scan ever reads the wrong directory it finds
@@ -129,40 +123,10 @@ describe('cnc-guide.md — every section says whether you can do it today', () =
       ).toMatch(/^> \*\*Status: (Available|Partly available|Planned)\*\*/);
     }
   });
-
-  it('names an issue in every Planned or Partly available status', () => {
-    for (const s of sections()) {
-      if (/^> \*\*Status: (Planned|Partly available)\*\*/.test(s.status)) {
-        expect(
-          plannedIssues(s.status).length,
-          `${s.heading} is not Available but names no issue (#N)`,
-        ).toBeGreaterThan(0);
-      }
-    }
-  });
-});
-
-describe('cnc-guide.md — a Planned issue is not silently closed', () => {
-  it('has no issue named in a "Planned" status marked closed in docs/cnc-guide-status.json', () => {
-    for (const s of sections()) {
-      if (!/^> \*\*Status: Planned\*\*/.test(s.status)) continue;
-      for (const n of plannedIssues(s.status)) {
-        const state = STATUS_MAP.issues[String(n)];
-        expect(
-          state,
-          `${s.heading} names #${n}, which is missing from docs/cnc-guide-status.json`,
-        ).toBeDefined();
-        expect(
-          state,
-          `${s.heading} still names #${n}, which is closed — flip the status or drop the issue`,
-        ).not.toBe('closed');
-      }
-    }
-  });
 });
 
 describe('cnc-guide.md — a mockup is never shown as the shipped screen', () => {
-  it('captions every image, and keeps mockups out of Available sections', () => {
+  it('captions every mockup, and keeps mockups out of Available sections', () => {
     const lines = GUIDE.split('\n');
     // Walk the document so each image is attributed to the last heading above it.
     const statusByLine = new Map<number, string>();
@@ -177,18 +141,18 @@ describe('cnc-guide.md — a mockup is never shown as the shipped screen', () =>
         currentStatus = lines[j] ?? '';
       }
       statusByLine.set(i, currentStatus);
-      if (line.startsWith('![')) {
+      if (line.startsWith('![') && line.includes('](img/cnc-mockup-')) {
         let j = i + 1;
         while (j < lines.length && lines[j]!.trim() === '') j++;
         // 1. the caption, verbatim
         expect(
           lines[j],
-          `the image on line ${i + 1} must be captioned "${CAPTION}"`,
+          `the mockup on line ${i + 1} must be captioned "${CAPTION}"`,
         ).toBe(CAPTION);
         // 2. never inside an Available section
         expect(
           statusByLine.get(i),
-          `the image on line ${i + 1} is in a section marked Available (${current})`,
+          `the mockup on line ${i + 1} is in a section marked Available (${current})`,
         ).toMatch(/^> \*\*Status: (Partly available|Planned)\*\*/);
       }
     }
