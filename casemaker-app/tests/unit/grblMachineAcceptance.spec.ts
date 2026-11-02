@@ -64,7 +64,7 @@ function demoJob(): EngraveJob {
 }
 
 /** A run view built from the REAL result, with the machine the job names. */
-function readyRun(g: ReturnType<typeof generate>): EngraveRunView {
+function readyRun(g: Awaited<ReturnType<typeof generate>>): EngraveRunView {
   return {
     generated: g,
     oracle: g.predicted.length === 0 ? null : { ok: true, band: 0, levels: [], worst: { underCut: 0, overCut: 0 } },
@@ -81,7 +81,7 @@ function readyRun(g: ReturnType<typeof generate>): EngraveRunView {
 // The other half of the centre-zero convention: the post shifts the coordinates, so the setup's
 // WCS has to be the stock's CENTRE or the verifier's envelope check would test the wrong positions.
 describe('#845 a centre-zero machine’s setup', () => {
-  it('puts the WCS on the stock’s centre and the blank inside the stated envelope', () => {
+  it('puts the WCS on the stock’s centre and the blank inside the stated envelope', async () => {
     const centreZero: MillModel = { ...SHAPEOKO_4, workOrigin: 'top-centre' };
     const job = demoJob();
     const setup = toSetup(job, centreZero);
@@ -95,11 +95,11 @@ describe('#845 a centre-zero machine’s setup', () => {
   });
 });
 
-describe('#845 a Shapeoko job: a pocket, text and holes (the slice-B acceptance)', () => {
+describe('#845 a Shapeoko job: a pocket, text and holes (the slice-B acceptance)', async () => {
   const job = demoJob();
-  const g = generate(tl, job);
+  const g = await generate(tl, job);
 
-  it('generates, and posts the GRBL dialect — not the Z1’s', () => {
+  it('generates, and posts the GRBL dialect — not the Z1’s', async () => {
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.nc).not.toBeNull();
@@ -118,7 +118,7 @@ describe('#845 a Shapeoko job: a pocket, text and holes (the slice-B acceptance)
     expect(nc).not.toMatch(/^G28$/m);
   });
 
-  it('passes the verifier, judged in the GRBL dialect', () => {
+  it('passes the verifier, judged in the GRBL dialect', async () => {
     expect(g.verify).not.toBeNull();
     expect(g.verify?.ok).toBe(true);
     expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -126,7 +126,7 @@ describe('#845 a Shapeoko job: a pocket, text and holes (the slice-B acceptance)
     expect(g.nc as string).toMatch(/^G54$/m);
   });
 
-  it('passes its oracle: the simulation matches the prediction, and the gates refuse only the upload', () => {
+  it('passes its oracle: the simulation matches the prediction, and the gates refuse only the upload', async () => {
     const tool = jobTool(job);
     if (tool === null) throw new Error(`${job.toolKey} is not in the tool library`);
     const session = createSimSession(tl);
@@ -150,7 +150,7 @@ describe('#845 a Shapeoko job: a pocket, text and holes (the slice-B acceptance)
 
   // The issue's second acceptance line: a GRBL-incompatible feature is REFUSED BY NAME, not by a
   // crash or a silently wrong file. A rotary job needs a fourth axis this machine states it has not.
-  it('refuses a rotary job by name: this GRBL machine states three axes', () => {
+  it('refuses a rotary job by name: this GRBL machine states three axes', async () => {
     // A rotary job that is legal ON A Z1 — one label in the free span, no drills — so the refusal
     // this test reads is the MACHINE's (no fourth axis), not a rotary-design finding.
     const rotaryJob: EngraveJob = {
@@ -166,7 +166,7 @@ describe('#845 a Shapeoko job: a pocket, text and holes (the slice-B acceptance)
         rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: true, source: 'test' },
       },
     };
-    const refused = generate(tl, rotaryJob);
+    const refused = await generate(tl, rotaryJob);
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
     const posted = refused.errors.find((e) => e.stage === 'post');

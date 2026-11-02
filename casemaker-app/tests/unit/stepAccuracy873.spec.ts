@@ -465,7 +465,7 @@ const zoneOf = (x: number, y: number): 'dome' | 'corner' | 'other' =>
 interface RunHalf {
   target: EngraveTargetObject;
   job: EngraveJob;
-  generated: ReturnType<typeof generate>;
+  generated: Awaited<ReturnType<typeof generate>>;
   ms: number;
 }
 
@@ -476,7 +476,7 @@ interface Run {
 
 let runPromise: Promise<Run> | null = null;
 
-/** Generate both goal jobs from the pair. Sync work inside; cached so the tests share it. */
+/** Generate both goal jobs from the pair (async, cached so the tests share the work). */
 function loadRun(): Promise<Run> {
   runPromise ??= (async () => {
     const pair = await loadPair();
@@ -485,10 +485,10 @@ function loadRun(): Promise<Run> {
     const jobA = goalJob(targetA, STOCK);
     const jobB = goalJob(targetB, STOCK);
     const aStart = performance.now();
-    const generatedA = generate(tl, jobA);
+    const generatedA = await generate(tl, jobA);
     const aMs = performance.now() - aStart;
     const bStart = performance.now();
-    const generatedB = generate(tl, jobB);
+    const generatedB = await generate(tl, jobB);
     const bMs = performance.now() - bStart;
     return {
       a: { target: targetA, job: jobA, generated: generatedA, ms: aMs },

@@ -75,12 +75,12 @@ const lengthOf = (pts: readonly [number, number][], closed: boolean): number => 
 };
 
 /** Shortest distance from `p` to the (open or closed) polyline. */
-async function distanceToPath(p: readonly [number, number], pts: readonly [number, number][], closed: boolean): Promise<number> {
+function distanceToPath(p: readonly [number, number], pts: readonly [number, number][], closed: boolean): number {
   let best = Infinity;
   const n = closed ? pts.length : pts.length - 1;
   for (let i = 0; i < n; i++) {
-    const a = await pts[i]!;
-    const b = await pts[(i + 1) % pts.length]!;
+    const a = pts[i]!;
+    const b = pts[(i + 1) % pts.length]!;
     const dx = b[0] - a[0];
     const dy = b[1] - a[1];
     const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy)));

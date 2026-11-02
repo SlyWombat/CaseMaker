@@ -142,9 +142,9 @@ function feedCuts(nc: string): { x: number; z: number }[] {
 }
 
 describe('#847 the goal follows its finish with a rest pass', () => {
-  it('cuts a ⌀2 rest program over the notch only, and the residual drops', () => {
+  it('cuts a ⌀2 rest program over the notch only, and the residual drops', async () => {
     const target = goalTarget();
-    const out = generateGoalProgram(goalJob(target), target, BALL6, [], null, { tools: [REST_ENTRY], feeds: SHOP_FEEDS });
+    const out = await generateGoalProgram(goalJob(target), target, BALL6, [], null, { tools: [REST_ENTRY], feeds: SHOP_FEEDS });
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     // The finish, then the rest cutter's own program — a real posted file.
     expect(out.programs).toHaveLength(2);
@@ -173,9 +173,9 @@ describe('#847 the goal follows its finish with a rest pass', () => {
     expect(restCuts.length).toBeLessThan(feedCuts(out.programs[0]!.nc).length);
   }, 180_000);
 
-  it('with no smaller ball owned, the finish still posts and the run states what it left', () => {
+  it('with no smaller ball owned, the finish still posts and the run states what it left', async () => {
     const target = goalTarget();
-    const out = generateGoalProgram(goalJob(target), target, BALL6, [], null, { tools: [], feeds: SHOP_FEEDS });
+    const out = await generateGoalProgram(goalJob(target), target, BALL6, [], null, { tools: [], feeds: SHOP_FEEDS });
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     expect(out.programs).toHaveLength(1);
     const warning = out.findings.find((f) => f.code === 'goal-rest-uncut');
@@ -186,7 +186,7 @@ describe('#847 the goal follows its finish with a rest pass', () => {
     expect(out.surface3d?.rest).toBeNull();
   }, 180_000);
 
-  it('is information when the leftover would not show: a shallow ridge under the shop’s depth', () => {
+  it('is information when the leftover would not show: a shallow ridge under the shop’s depth', async () => {
     // The same part, judged against a shop whose visibility thresholds sit at the tops of their
     // own rules (a 5 mm depth, a 50 % share): the leftover — the ring's fillet, 4.96 mm deep and
     // just under half of what the goal removes — holds under both, so the run still states it, its
@@ -204,7 +204,7 @@ describe('#847 the goal follows its finish with a rest pass', () => {
         visibleDepth: { value: 5, source: 'chosen' as const },
       },
     };
-    const out = generateGoalProgram(goalJob(target), target, BALL6, [], null, quiet);
+    const out = await generateGoalProgram(goalJob(target), target, BALL6, [], null, quiet);
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     const note = out.findings.find((f) => f.code === 'goal-rest-uncut');
     expect(note?.severity).toBe('info');

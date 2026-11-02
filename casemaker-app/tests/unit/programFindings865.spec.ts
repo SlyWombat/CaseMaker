@@ -115,8 +115,8 @@ function raisedJob(): EngraveJob {
 }
 
 describe('#865 a later program’s own findings', () => {
-  it('states the rest V’s depth shortfall, tagged with its program', () => {
-    const g = generate(tl, raisedJob(), null, [], undefined, { tools: ENTRIES });
+  it('states the rest V’s depth shortfall, tagged with its program', async () => {
+    const g = await generate(tl, raisedJob(), null, [], undefined, { tools: ENTRIES });
     expect(
       g.ok,
       JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error') }),
@@ -135,7 +135,7 @@ describe('#865 a later program’s own findings', () => {
     expect(g.programs[1]!.findings?.some((f) => f.code === 'vcarve-depth-beyond-cone')).toBe(true);
   }, 180_000);
 
-  it('the panel’s preview carries the later program’s finding too', () => {
+  it('the panel’s preview carries the later program’s finding too', async () => {
     const job = raisedJob();
     const previewer = createEngravePreviewer(tl);
     const preview = previewer.engravePreview(job, ENTRIES, [], 1, effectiveMargins(job, MARGIN_DEFAULTS), new Map());
@@ -145,11 +145,11 @@ describe('#865 a later program’s own findings', () => {
     expect(short?.message).toContain('6 mm deep');
   }, 180_000);
 
-  it('a normal rest pair carries no area-loss finding on program 2', () => {
+  it('a normal rest pair carries no area-loss finding on program 2', async () => {
     // The rest regions are the first program's leftovers, named "rest of …" — their outline was
     // never the design, so "loses N % of its area" is true of every rest pass. The verifier's own
     // findings still apply.
-    const g = generate(tl, raisedFlatRestJob(), null, [], undefined, { tools: ENTRIES });
+    const g = await generate(tl, raisedFlatRestJob(), null, [], undefined, { tools: ENTRIES });
     expect(
       g.ok,
       JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error') }),
@@ -168,7 +168,7 @@ describe('#865 a later program’s own findings', () => {
     expect(g.programs[1]!.nc).toContain('rest of');
   }, 180_000);
 
-  it('keys the suppression on the rest marker, not the name: a user’s "rest of …" is judged normally', () => {
+  it('keys the suppression on the rest marker, not the name: a user’s "rest of …" is judged normally', async () => {
     const base = defaultEngraveJob();
     const userVector: NonNullable<EngraveJob['vectors']>[number] = {
       kind: 'vector',
@@ -211,8 +211,8 @@ describe('#865 a later program’s own findings', () => {
     expect(userVector.restRegion).toBeUndefined();
   }, 180_000);
 
-  it('does not repeat a design-level finding on a later program', () => {
-    const g = generate(tl, raisedJob(), null, [], undefined, { tools: ENTRIES });
+  it('does not repeat a design-level finding on a later program', async () => {
+    const g = await generate(tl, raisedJob(), null, [], undefined, { tools: ENTRIES });
     // Every finding appears once: a later program's copy of an identical sentence is dropped, and
     // the tagged later ones are the only programme-tagged entries.
     const keys = g.findings.map((f) => `${f.code}|${f.labelId ?? ''}|${f.message}`);

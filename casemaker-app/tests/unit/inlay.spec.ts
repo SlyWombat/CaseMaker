@@ -197,7 +197,7 @@ function label(over: Partial<EngraveLabel> = {}): EngraveLabel {
 }
 
 describe('inlayNumbers — one derivation, with the gap bounded', () => {
-  it('derives the plug, its insets and the wall clearance from F, g and the cone', () => {
+  it('derives the plug, its insets and the wall clearance from F, g and the cone', async () => {
     const check = inlayNumbers(CONE, POCKET_MM, 0.2);
     expect(check.ok).toBe(true);
     if (!check.ok) return;
@@ -218,7 +218,7 @@ describe('inlayNumbers — one derivation, with the gap bounded', () => {
     expect(sixty.numbers.endInsetMm).toBeCloseTo(POCKET_MM * Math.tan(Math.PI / 6), 9);
   });
 
-  it('refuses a gap of zero, a gap at the pocket depth, and a pocket with no depth', () => {
+  it('refuses a gap of zero, a gap at the pocket depth, and a pocket with no depth', async () => {
     expect(inlayNumbers(CONE, POCKET_MM, 0).ok).toBe(false);
     expect(inlayNumbers(CONE, POCKET_MM, POCKET_MM).ok).toBe(false);
     expect(inlayNumbers(CONE, 0, 0.2).ok).toBe(false);
@@ -228,14 +228,14 @@ describe('inlayNumbers — one derivation, with the gap bounded', () => {
 });
 
 describe('the male document — its own job, its own blank, the design mirrored', () => {
-  it('mirrors positions, rotation and polygon points exactly', () => {
+  it('mirrors positions, rotation and polygon points exactly', async () => {
     const shape = lShape();
     const mirrored = mirrorShapeInY(shape, 60);
     expect(mirrored.position.y).toBeCloseTo(60 - shape.position.y, 9);
     expect(mirrored.points.map(([, y]) => y)).toEqual(shape.points.map(([, y]) => -y));
   });
 
-  it('builds the male: a construction island, one cutaway, the numbers it was built for', () => {
+  it('builds the male: a construction island, one cutaway, the numbers it was built for', async () => {
     const female = femaleJob();
     const check = inlayNumbers(CONE, POCKET_MM, 0.2);
     if (!check.ok) throw new Error(check.reason);
@@ -370,7 +370,7 @@ describe('the fit — a mirrored male closes onto the female with the gap (#673)
   ];
 
   for (const { label, bit, cone } of BITS) {
-    it(`[${label}] the island the male's cut leaves fits the cavity at every height — and is not undersized`, () => {
+    it(`[${label}] the island the male's cut leaves fits the cavity at every height — and is not undersized`, async () => {
       if (cone === null) throw new Error('no cone');
       const female = femaleJob(rect(), {}, bit);
       const design = rings(toPartPlan(female).engraves[0]!.profile);
@@ -408,7 +408,7 @@ describe('the fit — a mirrored male closes onto the female with the gap (#673)
     }, 120_000);
   }
 
-  it('[90°] the base at the male’s floor is the visible ring, and the tip is the floor’s extent', () => {
+  it('[90°] the base at the male’s floor is the visible ring, and the tip is the floor’s extent', async () => {
     const female = femaleJob();
     const check = inlayNumbers(CONE, POCKET_MM, 0.2);
     if (!check.ok) throw new Error(check.reason);
@@ -429,7 +429,7 @@ describe('the fit — a mirrored male closes onto the female with the gap (#673)
     expect(areaOf(islandAtMaleDepth(male.job, 0, n.tanHalf))).toBeCloseTo((20 - 2 * POCKET_MM) * (10 - 2 * POCKET_MM), 1);
   }, 90_000);
 
-  it('the OLD inset (the ring, not the tip) pokes the base out through the cavity mouth', () => {
+  it('the OLD inset (the ring, not the tip) pokes the base out through the cavity mouth', async () => {
     // The defect this test exists for: eroding the island by `g·tanθ` instead of `F·tanθ` puts the
     // BASE at the tip's cross-section, so at the male's floor the base is `design ⊕ (F − 2g)·tanθ`
     // — 1.6 mm outside the design for this fixture, which is the female's mouth.
@@ -457,7 +457,7 @@ describe('the fit — a mirrored male closes onto the female with the gap (#673)
     mouth.delete();
   }, 90_000);
 
-  it('an UNMIRRORED island on an asymmetric design pokes through the cavity wall', () => {
+  it('an UNMIRRORED island on an asymmetric design pokes through the cavity wall', async () => {
     const female = femaleJob(lShape());
     const design = rings(toPartPlan(female).engraves[0]!.profile);
     const check = inlayNumbers(CONE, POCKET_MM, 0.2);
@@ -481,7 +481,7 @@ describe('the fit — a mirrored male closes onto the female with the gap (#673)
 });
 
 describe('#860 the male plug, judged against the pocket it fills', () => {
-  it('j11: the FF plug keeps most of its design at the base face and little at its tip', () => {
+  it('j11: the FF plug keeps most of its design at the base face and little at its tip', async () => {
     const female = j11();
     const male = inlayMaleJob(female, J11_CONE);
     if (!male.ok) throw new Error(male.reason);
@@ -510,7 +510,7 @@ describe('#860 the male plug, judged against the pocket it fills', () => {
     expect(ring!.tipShare).toBeLessThan(ring!.baseShare);
   }, 120_000);
 
-  it('states both faces with measured offers, and calls the visible loss a warning', () => {
+  it('states both faces with measured offers, and calls the visible loss a warning', async () => {
     const male = inlayMaleJob(j11(), J11_CONE);
     if (!male.ok) throw new Error(male.reason);
     const plugs = measureInlayPlugs(tl, toPartPlan(male.job));
@@ -531,7 +531,7 @@ describe('#860 the male plug, judged against the pocket it fills', () => {
     expect(f.message).toContain('above the floor');
   }, 120_000);
 
-  it('a male cut with a different V warns, states the miss, and offers the pair’s bit', () => {
+  it('a male cut with a different V warns, states the miss, and offers the pair’s bit', async () => {
     const male = inlayMaleJob(j11(), J11_CONE);
     if (!male.ok) throw new Error(male.reason);
     // The pair's own bit, as the library would hold it; and a steeper 90° V in the spindle.
@@ -562,7 +562,7 @@ describe('#860 the male plug, judged against the pocket it fills', () => {
     expect(validateJob(male.job).some((f) => f.code === 'inlay-cone-mismatch')).toBe(false);
   }, 120_000);
 
-  it('the measured pick scores the male by the plug’s visible face, not by its cutaway’s cut', () => {
+  it('the measured pick scores the male by the plug’s visible face, not by its cutaway’s cut', async () => {
     const male = inlayMaleJob(j11(), J11_CONE);
     if (!male.ok) throw new Error(male.reason);
     const entry = { key: 'inv:kz-engrave-30-0-5', tool: j11Cutter(), provenance: 'test' };
@@ -572,7 +572,7 @@ describe('#860 the male plug, judged against the pocket it fills', () => {
       source: { [entry.key]: 'owned' as const },
     };
     clearPlanEvaluations();
-    const out = evaluatePlan(male.job, plan, ctx);
+    const out = await evaluatePlan(male.job, plan, ctx);
     const row = out.items.find((item) => item.id === 'inlay-male-1');
     expect(row, out.items.map((item) => item.id).join(', ')).toBeDefined();
     // The cutaway reproduces its own design exactly — the old 100 %. The plug's visible face is
@@ -584,7 +584,7 @@ describe('#860 the male plug, judged against the pocket it fills', () => {
 });
 
 describe('the inlay findings (#673)', () => {
-  it('refuses a flat cutter, a gap at the pocket depth, and a variable-depth region', () => {
+  it('refuses a flat cutter, a gap at the pocket depth, and a variable-depth region', async () => {
     const flat: EngraveJob = { ...femaleJob(), tool: flatEndMill(3.175, { name: '3.175 flat' }) };
     expect(validateJob(flat).map((f) => f.code)).toContain('inlay-needs-cone');
 
@@ -603,7 +603,7 @@ describe('the inlay findings (#673)', () => {
     ).toEqual([]);
   });
 
-  it('holds the male to the numbers it was built for', () => {
+  it('holds the male to the numbers it was built for', async () => {
     const male = inlayMaleJob(femaleJob(), CONE);
     if (!male.ok) throw new Error(male.reason);
     const cut = male.job.combined![0]!;
@@ -625,7 +625,7 @@ describe('the inlay findings (#673)', () => {
 });
 
 describe('the documents round-trip, and say nothing more (#673)', () => {
-  it('keeps the female marker and the male numbers, and refuses what the schema does not know', () => {
+  it('keeps the female marker and the male numbers, and refuses what the schema does not know', async () => {
     const female = parseEngraveJob(femaleJob(rect('design', { inlay: { role: 'female', glueGapMm: 0.25 } })));
     expect(female.ok).toBe(true);
     if (!female.ok) return;
@@ -681,7 +681,7 @@ describe('the run sheet names each half (#673)', () => {
 describe('every female mark makes its male (#742)', () => {
   const TAN15 = Math.tan(Math.PI / 12);
 
-  it('j11: makes ONE male cutaway clearing around both the ring and the lettering', () => {
+  it('j11: makes ONE male cutaway clearing around both the ring and the lettering', async () => {
     const female = j11();
     const male = inlayMaleJob(female, J11_CONE);
     expect(male.ok, male.ok ? '' : male.reason).toBe(true);
@@ -741,7 +741,7 @@ describe('every female mark makes its male (#742)', () => {
     return profiles;
   }
 
-  it('every island’s eroded top survives every male engrave profile', () => {
+  it('every island’s eroded top survives every male engrave profile', async () => {
     // THE REVIEW'S DEFECT: one cutaway PER region each cleared the blank except its own island,
     // so the ring's cut erased the lettering's plug (and the lettering's erased the ring). Here
     // every island's eroded top face — what the plug is after planing — must lie wholly
@@ -786,7 +786,7 @@ describe('every female mark makes its male (#742)', () => {
     }
   }, 120_000);
 
-  it('refuses two female halves with different numbers, rather than fitting one at the other’s inset', () => {
+  it('refuses two female halves with different numbers, rather than fitting one at the other’s inset', async () => {
     const female = j11();
     female.labels = female.labels.map((item) => ({ ...item, depth: 4.6 }));
     const male = inlayMaleJob(female, J11_CONE);
@@ -801,7 +801,7 @@ describe('every female mark makes its male (#742)', () => {
     expect(male.reason).toContain('share one depth and one glue gap');
   });
 
-  it('mirrors the lettering island back onto the female’s own text, point for point', () => {
+  it('mirrors the lettering island back onto the female’s own text, point for point', async () => {
     const female = j11();
     const male = inlayMaleJob(female, J11_CONE);
     if (!male.ok) throw new Error(male.reason);
@@ -829,7 +829,7 @@ describe('every female mark makes its male (#742)', () => {
     expect(raw.map(key).filter((p) => !her.has(p)).length).toBeGreaterThan(0);
   }, 120_000);
 
-  it('a ring-only female still makes its male as before', () => {
+  it('a ring-only female still makes its male as before', async () => {
     const female = j11();
     female.labels = female.labels.map((item) => ({ ...item, inlay: undefined }));
     const male = inlayMaleJob(female, J11_CONE);
@@ -853,7 +853,7 @@ describe('every female mark makes its male (#742)', () => {
     expect(island.islands).toHaveLength(1);
   }, 120_000);
 
-  it('refuses a label marked female with no text, in a sentence that names what is missing', () => {
+  it('refuses a label marked female with no text, in a sentence that names what is missing', async () => {
     const job: EngraveJob = { ...femaleJob(), shapes: [], labels: [label({ text: '' , inlay: { role: 'female' } })] };
     const male = inlayMaleJob(job, CONE);
     expect(male.ok).toBe(false);
@@ -864,7 +864,7 @@ describe('every female mark makes its male (#742)', () => {
     expect(male.reason).toContain('Engrave text ""');
   });
 
-  it('refuses a cutaway whose island item is missing rather than dropping the region', () => {
+  it('refuses a cutaway whose island item is missing rather than dropping the region', async () => {
     const outer = rect('ring-outer', { inlay: undefined });
     const ring: EngraveCombinedShape = {
       id: 'ring',
@@ -887,7 +887,7 @@ describe('every female mark makes its male (#742)', () => {
     expect(male.reason).toContain('is not in this job');
   });
 
-  it('refuses a reference-only item’s mark, because no pocket was cut for a plug', () => {
+  it('refuses a reference-only item’s mark, because no pocket was cut for a plug', async () => {
     const job: EngraveJob = {
       ...femaleJob(),
       shapes: [rect('design', { construction: true, inlay: { role: 'female' } })],
@@ -901,7 +901,7 @@ describe('every female mark makes its male (#742)', () => {
     expect(male.reason).toContain('no pocket');
   });
 
-  it('refuses the whole male when one region’s numbers do not derive, instead of dropping it', () => {
+  it('refuses the whole male when one region’s numbers do not derive, instead of dropping it', async () => {
     const good = rect('good', { name: 'good' });
     const bad = rect('bad', {
       name: 'bad',

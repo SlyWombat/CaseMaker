@@ -113,9 +113,9 @@ function goalJob(over: Partial<EngraveTargetObject> = {}, stockThickness = 12): 
 const SHOP = { tools: [BALL, ROUGH, SMALL, WIDE] };
 
 describe('#869 the goal’s split, generated', () => {
-  it('a goal with no flat rough is ONE program, byte-identical (pinned)', () => {
+  it('a goal with no flat rough is ONE program, byte-identical (pinned)', async () => {
     const job = goalJob();
-    const out = generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(1);
     expect(out.programs[0]!.toolKey).toBe(BALL.key);
@@ -127,9 +127,9 @@ describe('#869 the goal’s split, generated', () => {
     expect(programHash(out.nc!)).toBe('5edb255a');
   });
 
-  it('a roughToolKey posts the flat’s rough first and the ball’s finish second', () => {
+  it('a roughToolKey posts the flat’s rough first and the ball’s finish second', async () => {
     const job = goalJob({ roughToolKey: ROUGH.key });
-    const out = generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(2);
     const [rough, finish] = out.programs as [EngraveProgram, EngraveProgram];
@@ -166,19 +166,19 @@ describe('#869 the goal’s split, generated', () => {
     expect(out.surface3d?.rough?.kind).toMatch(/^(raster|adaptive)$/);
   });
 
-  it('the rough’s step-down is its own row’s, and the rim laps keep the finish’s', () => {
+  it('the rough’s step-down is its own row’s, and the rim laps keep the finish’s', async () => {
     // ⌀1.5 is the 0.8–1.6 PLA band (step-down 0.3); the ⌀3 ball is the 1.6–3.2 band (0.5).
     const job = goalJob({ roughToolKey: SMALL.key });
-    const out = generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(2);
     expect(out.surface3d?.stepDownMm).toBeCloseTo(0.3, 6);
     expect(out.surface3d?.finishStepDownMm).toBeCloseTo(0.5, 6);
   });
 
-  it('a rough the library does not hold leaves one program and says which', () => {
+  it('a rough the library does not hold leaves one program and says which', async () => {
     const job = goalJob({ roughToolKey: 'inv:gone' });
-    const out = generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(1);
     const finding = out.findings.find((f) => f.code === 'goal-rough-no-cutter');
@@ -186,18 +186,18 @@ describe('#869 the goal’s split, generated', () => {
     expect(finding!.message).toContain('not in the tool library');
   });
 
-  it('a ball named as the rough is refused by name, and the goal still posts', () => {
+  it('a ball named as the rough is refused by name, and the goal still posts', async () => {
     const job = goalJob({ roughToolKey: BALL.key });
-    const out = generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(1);
     const finding = out.findings.find((f) => f.code === 'goal-rough-no-cutter');
     expect(finding?.message).toContain('must be a flat end mill');
   });
 
-  it('the run sheet states both cutters, the change, and which rough ran', () => {
+  it('the run sheet states both cutters, the change, and which rough ran', async () => {
     const job = goalJob({ roughToolKey: ROUGH.key });
-    const out = generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
     const texts = buildRunSheet(job, out, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const split = texts.find((t) => t.includes('Two programs, two cutters'));
     expect(split).toBeDefined();
@@ -210,7 +210,7 @@ describe('#869 the goal’s split, generated', () => {
 });
 
 describe('#869 the goal’s split, chosen by the search', () => {
-  it('the candidate plans offer the ball alone AND the ball after a flat', () => {
+  it('the candidate plans offer the ball alone AND the ball after a flat', async () => {
     const job = goalJob();
     const plans = candidatePlans(job, SHOP.tools, []);
     const splits = plans.filter((p) => p.goalRoughKey !== undefined);
@@ -225,12 +225,12 @@ describe('#869 the goal’s split, chosen by the search', () => {
     expect(planKey(splits[0]!)).not.toBe(planKey(alone[0]!));
   });
 
-  it('the rule’s plan names a flat rough when the shop owns one', () => {
+  it('the rule’s plan names a flat rough when the shop owns one', async () => {
     const plan = rulePlanOf(goalJob(), SHOP.tools, []);
     expect(plan?.goalRoughKey).toBe(ROUGH.key);
   });
 
-  it('applying a plan writes the rough key, and a plan without one clears it', () => {
+  it('applying a plan writes the rough key, and a plan without one clears it', async () => {
     const job = goalJob();
     const withRough = applyCutterPlanToJob(job, {
       cutters: [{ key: BALL.key, items: [job.targetObject!.id] }],
@@ -241,12 +241,12 @@ describe('#869 the goal’s split, chosen by the search', () => {
     expect(without.targetObject?.roughToolKey).toBeUndefined();
   });
 
-  it('the split charges one more tool change to the measured cost', () => {
+  it('the split charges one more tool change to the measured cost', async () => {
     const job = goalJob();
     const ctx: EvalContext = { tl, tools: [BALL, ROUGH, WIDE], catalogue: [], shop: {}, calibration: null };
     const one: CandidatePlan = { cutters: [{ key: BALL.key, items: [job.targetObject!.id] }], source: { [BALL.key]: 'owned' } };
     const two: CandidatePlan = { ...one, goalRoughKey: ROUGH.key, source: { [BALL.key]: 'owned', [ROUGH.key]: 'owned' } };
-    expect(evaluatePlan(job, one, ctx).toolChanges).toBe(0);
-    expect(evaluatePlan(job, two, ctx).toolChanges).toBe(1);
+    expect((await evaluatePlan(job, one, ctx)).toolChanges).toBe(0);
+    expect((await evaluatePlan(job, two, ctx)).toolChanges).toBe(1);
   });
 });

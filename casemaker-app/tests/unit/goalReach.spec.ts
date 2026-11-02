@@ -129,30 +129,30 @@ function tallJob(target: EngraveTargetObject): EngraveJob {
 }
 
 describe('#785 — which reach is known', () => {
-  it('a stated flute is the cutter’s own reach', () => {
+  it('a stated flute is the cutter’s own reach', async () => {
     expect(knownReach(flat({ fluteLength: 22 }), [])).toEqual({ mm: 22, source: 'stated', catalogueName: null });
   });
 
-  it('the shoulder governs when stated — the engine’s one reach rule — and the flute is the fallback', () => {
+  it('the shoulder governs when stated — the engine’s one reach rule — and the flute is the fallback', async () => {
     expect(knownReach(flat({ fluteLength: 12, shoulderLength: 40 }), [])?.mm).toBe(40);
     expect(knownReach(flat({ fluteLength: 12, shoulderLength: null }), [])?.mm).toBe(12);
   });
 
-  it('an unstated flute takes Makera’s catalogue number for the SAME cutter id, with its provenance', () => {
+  it('an unstated flute takes Makera’s catalogue number for the SAME cutter id, with its provenance', async () => {
     const copy = flat({ id: '112111313812', name: 'owned copy', fluteLength: null });
     const reach = knownReach(copy, [catEntry('112111313812', 12)]);
     expect(reach?.mm).toBe(12);
     expect(reach?.source).toBe('catalogue');
   });
 
-  it('an unstated flute with no catalogue row — or no id to match one by — has no reach', () => {
+  it('an unstated flute with no catalogue row — or no id to match one by — has no reach', async () => {
     expect(knownReach(flat({ fluteLength: null, id: null }), [catEntry('112', 12)])).toBeNull();
     expect(knownReach(flat({ fluteLength: null, id: '999' }), [catEntry('112', 12)])).toBeNull();
     // A non-catalogue tier is not the vendor's number.
     expect(knownReach(flat({ fluteLength: null, id: '112' }), [{ ...catEntry('112', 12), key: 'user:112' }])).toBeNull();
   });
 
-  it('longestKnownReach ranks only the known ones and ignores the unknowns', () => {
+  it('longestKnownReach ranks only the known ones and ignores the unknowns', async () => {
     const best = longestKnownReach(
       [flat({ fluteLength: null }), flat({ fluteLength: 22 }), flat({ fluteLength: 12 })],
       [],
@@ -163,7 +163,7 @@ describe('#785 — which reach is known', () => {
 });
 
 describe('#785 — the findings', () => {
-  it('a known short reach REFUSES with the numbers and the four fixes', () => {
+  it('a known short reach REFUSES with the numbers and the four fixes', async () => {
     const [f] = goalReachFindings(goal(112), flat({ fluteLength: 22 }), [flat({ fluteLength: 22 })], []);
     expect(f?.severity).toBe('error');
     expect(f?.code).toBe('goal-reach-short');
@@ -177,14 +177,14 @@ describe('#785 — the findings', () => {
     expect(f?.message).toContain('cut just the top 21 mm');
   });
 
-  it('names the catalogue as the source, and the house’s longer cutter when the chosen one is not it', () => {
+  it('names the catalogue as the source, and the house’s longer cutter when the chosen one is not it', async () => {
     const copy = flat({ id: '112', fluteLength: null });
     const [f] = goalReachFindings(goal(112), copy, [copy, flat({ fluteLength: 50 })], [catEntry('112', 12)]);
     expect(f?.message).toContain("this cutter reaches 12 mm (Makera's catalogue)");
     expect(f?.message).toContain('your longest reach is 50 mm');
   });
 
-  it('cutWithinReach turns the refusal into the stated top-band cut', () => {
+  it('cutWithinReach turns the refusal into the stated top-band cut', async () => {
     const findings = goalReachFindings(goal(112, { cutWithinReach: true }), flat({ fluteLength: 22 }), [], []);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe('warning');
@@ -194,7 +194,7 @@ describe('#785 — the findings', () => {
     expect(findings.some((f) => f.severity === 'error')).toBe(false);
   });
 
-  it('an unrecorded reach is an INFO with the assumption stated, never a block', () => {
+  it('an unrecorded reach is an INFO with the assumption stated, never a block', async () => {
     const findings = goalReachFindings(goal(112), flat({ fluteLength: null, id: null }), [], []);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe('info');
@@ -204,7 +204,7 @@ describe('#785 — the findings', () => {
     expect(findings[0]?.message).toContain('record its flute in Manage › Tools');
   });
 
-  it('a goal sunk into the blank is judged by its LOWEST surface, and the sentence says both numbers', () => {
+  it('a goal sunk into the blank is judged by its LOWEST surface, and the sentence says both numbers', async () => {
     // 30 mm tall, its top 20 mm below the stock top: the cutter must go 50 mm down, not 30.
     const sunk = goal(30, { position: { x: 25, y: 25, z: -20 } });
     const [f] = goalReachFindings(sunk, flat({ fluteLength: 40 }), [], []);
@@ -215,7 +215,7 @@ describe('#785 — the findings', () => {
     expect(goalReachFindings(goal(30, { position: { x: 25, y: 25, z: 40 } }), flat({ fluteLength: 4 }), [], [])).toEqual([]);
   });
 
-  it('a goal within reach, a reference, a picture, a disabled target or no cutter posts nothing', () => {
+  it('a goal within reach, a reference, a picture, a disabled target or no cutter posts nothing', async () => {
     expect(goalReachFindings(goal(20), flat({ fluteLength: 22 }), [], [])).toEqual([]);
     // Exactly at the reach is within it.
     expect(goalReachFindings(goal(22), flat({ fluteLength: 22 }), [], [])).toEqual([]);
@@ -225,13 +225,13 @@ describe('#785 — the findings', () => {
     expect(goalReachFindings(goal(112), null, [], [])).toEqual([]);
   });
 
-  it('the band clearance is the 1 mm the sentence and the sampler share', () => {
+  it('the band clearance is the 1 mm the sentence and the sampler share', async () => {
     expect(GOAL_BAND_CLEARANCE_MM).toBe(1);
   });
 });
 
 describe('#785 — a rotary relief keeps its own judges', () => {
-  it('a rod job posts no reach finding, whatever the goal’s local Z extent', () => {
+  it('a rod job posts no reach finding, whatever the goal’s local Z extent', async () => {
     const base = defaultEngraveJob();
     const rotary: EngraveJob = {
       ...base,

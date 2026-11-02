@@ -132,7 +132,7 @@ describe('#862 — the rim pass finishes the band wall', () => {
     expect(near.every((m) => m.z >= -1 - 1e-9)).toBe(true);
   });
 
-  it('#847 — the finish’s tip field includes the laps, and the measured residual drops', () => {
+  it('#847 — the finish’s tip field includes the laps, and the measured residual drops', async () => {
     // The rest pass (#847) is planned from the finish's tip field. Without the laps that field is
     // the raster's alone: the ball rests on the stock top at the band's edge, so the whole wall
     // reads as material the finish could not take. The laps cut it, and the field says so.

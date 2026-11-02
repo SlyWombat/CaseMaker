@@ -376,7 +376,7 @@ describe('#737 — the neck is the program’s last operation, all the way round
     const g = await engraveGenerate(tl, dowel(), vBit, [], null);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
-    const f = await g.findings.find((x) => x.code === 'neck-not-cut');
+    const f = g.findings.find((x) => x.code === 'neck-not-cut');
     expect(f).toBeDefined();
     expect(f!.severity).toBe('error');
     expect(f!.message).toContain('The neck for parting is set, but');
@@ -517,7 +517,7 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
     const g = await gen(job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
-    const f = await g.findings.find((x) => x.code === code);
+    const f = g.findings.find((x) => x.code === code);
     expect(f).toBeDefined();
     expect(f!.severity).toBe('error');
     expect(f!.labelId).toBe('rotary-neck');
@@ -530,7 +530,7 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
   async function neckWarning(job: EngraveJob, code: string) {
     const g = await gen(job);
     expect(g.ok, JSON.stringify(g.findings.filter((x) => x.severity === 'error'))).toBe(true);
-    const f = await g.findings.find((x) => x.code === code);
+    const f = g.findings.find((x) => x.code === code);
     expect(f).toBeDefined();
     expect(f!.severity).toBe('warning');
     expect(f!.labelId).toBe('rotary-neck');
@@ -611,7 +611,7 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
     // the rotary is measured on the machine.
     const g = await gen(dowel());
     expect(g.ok).toBe(true);
-    const f = await g.findings.find((x) => x.code === 'neck-jaw-clearance');
+    const f = g.findings.find((x) => x.code === 'neck-jaw-clearance');
     expect(f).toBeDefined();
     expect(f!.severity).toBe('warning');
     expect(f!.labelId).toBe('rotary-neck');
@@ -728,7 +728,7 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
     const g = await engraveGenerate(tl, job, cutter, [], null);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
-    const f = await g.findings.find((x) => x.code === 'neck-too-narrow-for-cutter');
+    const f = g.findings.find((x) => x.code === 'neck-too-narrow-for-cutter');
     expect(f).toBeDefined();
     expect(f!.severity).toBe('error');
     expect(f!.labelId).toBe('rotary-neck');
@@ -798,7 +798,7 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
     expect(g.programs[0]!.neck ?? null).toBeNull();
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
-    const f = await g.findings.find((x) => x.code === 'neck-not-cut');
+    const f = g.findings.find((x) => x.code === 'neck-not-cut');
     expect(f).toBeDefined();
     expect(f!.severity).toBe('error');
     expect(f!.labelId).toBe('rotary-neck');

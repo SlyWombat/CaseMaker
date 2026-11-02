@@ -262,7 +262,7 @@ describe('bore CAM (#668)', () => {
     expect(gThrough.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
   });
 
-  it('states the pitch and both its sources on the run sheet, naming the one that binds', () => {
+  it('states the pitch and both its sources on the run sheet, naming the one that binds', async () => {
     const sheetFor = async (diameter: number) => {
       const job = boreJob([bore(diameter, 4)]);
       const g = await generate(tl, job);
@@ -275,13 +275,13 @@ describe('bore CAM (#668)', () => {
       return step as string;
     };
     // ⌀10 at a 3.4 mm centre radius: the 2° ramp allows ~0.75 mm a turn, so the RAMP is tighter.
-    const narrow = sheetFor(10);
+    const narrow = await sheetFor(10);
     expect(narrow).toContain('⌀10 mm hole');
     expect(narrow).toContain('mm per turn');
     expect(narrow).toContain('bore.rampAngleDeg');
     expect(narrow).toMatch(/ramp angle \(the shop’s bore\.rampAngleDeg, [a-z]+\) is the tighter/);
     // ⌀20: the ramp allows ~1.85 mm a turn on a 3.4 mm radius, so the feeds row's 1 mm step-down is.
-    const wide = sheetFor(20);
+    const wide = await sheetFor(20);
     expect(wide).toMatch(/step-down is the tighter/);
   });
 

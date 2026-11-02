@@ -123,7 +123,7 @@ async function runFixture(
   const imported = await read(name);
   const target = targetOf(imported, stock);
   const job = goalJob(target, stock);
-  const g = generate(tl, job);
+  const g = await generate(tl, job);
   let fraction = 0;
   let facingAway = 0;
   let shadowed = 0;

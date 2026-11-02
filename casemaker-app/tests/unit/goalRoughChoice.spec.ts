@@ -110,9 +110,9 @@ const SMALL_BUDGET: EngraveShopOpts = {
 };
 
 describe('#846 — the goal path chooses its rough, and says so', () => {
-  it('a deep PLA goal on a flat cutter posts the adaptive rough, with both roughs measured', () => {
+  it('a deep PLA goal on a flat cutter posts the adaptive rough, with both roughs measured', async () => {
     const job = jobFor(5, 'pla');
-    const out = generateGoalProgram(job, job.targetObject!, FLAT, [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, {});
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
     // The operation the post names, and the one line the run carries.
@@ -124,9 +124,9 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
     expect(note!).toMatch(/max engagement .* mm under the .* mm cap/);
   });
 
-  it('a shallow softwood goal keeps the raster by the rule, quoting the shop’s own budget', () => {
+  it('a shallow softwood goal keeps the raster by the rule, quoting the shop’s own budget', async () => {
     const job = jobFor(1, 'softwood');
-    const out = generateGoalProgram(job, job.targetObject!, FLAT, [], null, SMALL_BUDGET);
+    const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, SMALL_BUDGET);
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
     expect(out.nc!).not.toContain('(adaptive)');
@@ -138,7 +138,7 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
     expect(note!).toContain('rough3d.compareCellBudget');
   });
 
-  it('over the planning budget the goal keeps the raster, quoting the budget', () => {
+  it('over the planning budget the goal keeps the raster, quoting the budget', async () => {
     const job = jobFor(8, 'pla');
     // The budget's own rule floor is 10,000 cell-levels; this goal plans more than that, so the
     // adaptive rough is not planned at all.
@@ -153,7 +153,7 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
         },
       },
     };
-    const out = generateGoalProgram(job, job.targetObject!, FLAT, [], null, tight);
+    const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, tight);
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
     expect(out.nc!).not.toContain('(adaptive)');
@@ -163,9 +163,9 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
     expect(note!).toContain('the raster runs instead');
   });
 
-  it('a ball goal states that the adaptive rough cannot run and keeps the raster', () => {
+  it('a ball goal states that the adaptive rough cannot run and keeps the raster', async () => {
     const job = jobFor(5, 'pla');
-    const out = generateGoalProgram(job, job.targetObject!, BALL, [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, BALL, [], null, {});
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
     expect(out.nc!).not.toContain('(adaptive)');

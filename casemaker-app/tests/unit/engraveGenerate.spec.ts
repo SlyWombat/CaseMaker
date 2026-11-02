@@ -3433,7 +3433,7 @@ describe('the fitted surface plane is posted against (#608)', () => {
     const zs = new Set<number>();
     for (let i = 0; i < fitMoves.length; i++) {
       const f = flatMoves[i]!;
-      const g = await fitMoves[i]!;
+      const g = fitMoves[i]!;
       expect(g.x).toBeCloseTo(f.x, 6);
       expect(g.y).toBeCloseTo(f.y, 6);
       expect(g.z).toBeCloseTo(f.z + lift(g.x, g.y), 2);

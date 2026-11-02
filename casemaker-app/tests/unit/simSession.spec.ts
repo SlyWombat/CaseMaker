@@ -794,17 +794,28 @@ describe('simStore: plain data and meshes, never jobStore.nodes', () => {
 // ---------------------------------------------------------------------------------------
 describe('#895 — a load that stops reporting is stopped by the watchdog', () => {
   class SilentWorker {
+    /** The SIM workers this mock saw terminated — the clock's kill is about this one. */
     static terminated = 0;
+    /** Every worker stopped, the #881 level pool included (the cancel path disposes it too). */
+    static stopped = 0;
+    private readonly name: string;
+    constructor(_url?: URL | string, options?: { name?: string }) {
+      this.name = options?.name ?? '';
+    }
     addEventListener(): void {}
     removeEventListener(): void {}
     postMessage(): void {} // never answers: only the timer can end the load
-    terminate(): void { SilentWorker.terminated++; }
+    terminate(): void {
+      SilentWorker.stopped++;
+      if (this.name === 'sim') SilentWorker.terminated++;
+    }
   }
 
   it('the stall window expires, the worker is terminated exactly once, and the refusal names the fault', async () => {
     const g = globalThis as unknown as { Worker: unknown };
     const real = g.Worker;
     SilentWorker.terminated = 0;
+    SilentWorker.stopped = 0;
     g.Worker = SilentWorker;
     try {
       // #895 — the window is a stall bound: a worker that never reports a checkpoint is a fault.
