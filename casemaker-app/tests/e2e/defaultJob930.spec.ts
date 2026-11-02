@@ -113,8 +113,8 @@ async function walkToTicks(page: Page, kind: 'engrave' | 'pocket'): Promise<void
     'The house’s stock: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
   );
   await expect(page.getByTestId('start-wizard-form-block')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('100');
-  await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('36');
+  await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('36');
+  await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('100');
   await expect(page.getByTestId('start-wizard-make-thickness')).toHaveValue('36');
   await expect(page.getByTestId('start-wizard-stock-unblock')).toHaveCount(0);
   expectCleanText(`${kind} stock`, await page.getByTestId('start-wizard-body').innerText());

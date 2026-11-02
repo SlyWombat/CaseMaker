@@ -134,8 +134,8 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByTestId('start-wizard-stock-unblock')).toHaveCount(0);
       await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('The house’s stock');
       await expect(page.getByTestId('start-wizard-form-block')).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('100');
-      await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('36');
+      await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('36');
+      await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('100');
       await expect(page.getByTestId('start-wizard-make-thickness')).toHaveValue('36');
       await expectOnScreen(page, page.getByTestId('start-wizard-stock-next'), 'step 3 primary');
       await expectOnScreen(page, page.getByTestId('start-wizard-back'), 'step 3 Back');
