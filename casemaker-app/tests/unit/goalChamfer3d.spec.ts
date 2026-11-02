@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -131,12 +132,14 @@ describe('#829 a goal chamfers its own edges', () => {
     expect(v.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(v.frameNc).not.toBeNull();
     expect(v.frameVerify?.findings.filter((f) => f.severity === 'error') ?? []).toEqual([]);
-    // The run-sheet reading — a checked V program's dry run and no "did not pass verification" —
-    // is asserted once #911's `surfaceCheck` marker is on main; the marker is what makes the
-    // SURFACE program's missing frame read as by design, and the chamfer's own section then takes
-    // the frame path this program's `frameNc` feeds. Validated against 868ef204 locally: §6 reads
-    // "its check is the material sweep", §8 traces program 2's outline in the air, and the phrase
-    // "did not pass verification" is gone from the sheet.
+    // #911 follow-up — AND THE RUN SHEET READS BOTH PROGRAMS AS CHECKED. The surface program's
+    // missing frame is by design (its check is the material sweep), and the bevel carries its own
+    // frame's dry run; the old "did not pass verification … Do not run" is gone from the sheet.
+    const sheet = buildRunSheet(job, out, null, new Date('2026-11-02T00:00:00Z'));
+    const text = sheet.sections.flatMap((s) => s.steps.map((st) => st.text)).join('\n');
+    expect(text).not.toContain('did not pass verification');
+    expect(text).toContain('its check is the material sweep');
+    expect(text).toContain('outline in the air');
   }, 120_000);
 
   it('withholds the V program when the verifier refuses it, and says why', async () => {
