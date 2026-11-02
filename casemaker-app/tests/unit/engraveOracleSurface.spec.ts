@@ -23,6 +23,7 @@ import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { createSimSession, type SimSession } from '@/workers/sim/session';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { ORACLE_AREA_FLOOR, type OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -31,6 +32,7 @@ import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import { Z1 } from '@/engine/cnc/machine';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTraceItem } from '@/types/engraveJob';
+import badgeJobJson from './fixtures/badge-2026-10-24-vbit.job.json';
 
 /** The bench class of bit: a 30° engraver with a 0.3 mm flat, swept by the COLUMN engine. */
 const bit30 = (): Tool => ({
@@ -87,6 +89,18 @@ function traceJob(trace: EngraveTraceItem = line()): EngraveJob {
 }
 
 /**
+ * #628 — THE REAL JOB the surface-frame defect was found on: the 2026-10-24 bench badge
+ * (`badge-2026-10-24-vbit.job.json`, the single badge saved with the 0.5 mm 30° engraver the bench
+ * fitted). Its three filled vectors are a V-carve, so its program routes to the COLUMN engine — the
+ * path #625's exact-sweep fix did not touch, and the one the bench's failure came from.
+ */
+function benchBadgeJob(): EngraveJob {
+  const parsed = parseEngraveJob(badgeJobJson);
+  if (!parsed.ok) throw new Error(parsed.errors.join('; '));
+  return parsed.job;
+}
+
+/**
  * The measured tilt, in the readings' frame: 0.36 mm of lift across the blank's X and 0.24 mm across
  * its Y — the bench's 0.336/0.354 mm tilt class, both positive so the stock seat is exercised too.
  * `z0 = 0`: the reference touch is the plane at the origin, which is what Z0 being the LOWEST touch
@@ -102,6 +116,17 @@ const TILT: SurfaceFrame = { plane: { offset: 0, slopeX: 0.006, slopeY: 0.004 },
  * the tilt is chosen to reach the oracle, which is what #623 is about.
  */
 const TILT_SMALL: SurfaceFrame = { plane: { offset: 0, slopeX: 0.002, slopeY: 0.0015 }, z0: 0 };
+
+/**
+ * #628 — THE BENCH'S OWN PLANE, fitted to the 2026-10-24 run 6 readings (tilt 0.817°: 0.373 toward
+ * +X, 0.338 toward +Y) in machine Z, so `z0` is the lowest touch and `offset` is the plane's value
+ * at the work origin. Against it the old seat path read the badge as 1.6602 mm² under / 75.4995 mm²
+ * over at the floor level; the un-lift reads it 0/0.
+ */
+const BENCH_TILT: SurfaceFrame = {
+  plane: { offset: -54.73947, slopeX: -0.013348, slopeY: -0.005035 },
+  z0: -55.466,
+};
 
 /** A plain 20 × 10 × 1 pocket on the default blank — flat regions, swept by the EXACT engine. */
 function pocketJob(): EngraveJob {
@@ -229,34 +254,27 @@ describe('the surface-frame oracle (#623)', () => {
   });
 
   it('a plane with a NON-ZERO z0 and offset: the column engine still reproduces the flat post (#628)', () => {
-    // The bench's own plane shape — fitted to readings in machine Z, so `z0` is the lowest touch
-    // (−55.466) and `offset` is the plane's value at the work origin, not 0. #623's fixtures used
-    // offset 0 / z0 0, where a per-cell lift and a seated stock both happen to reproduce the work
-    // frame; a real registration's do not. Against them, the old seat path read the 2026-10-25
-    // badge job as 1.6602 mm² under / 75.4995 mm² over at the floor level (#628).
-    const benchTilt: SurfaceFrame = {
-      plane: { offset: -54.73947, slopeX: -0.013348, slopeY: -0.005035 },
-      z0: -55.466,
-    };
-    // The plane really does rise 0.7265 mm over the blank's corner (0.72653 − 0.013348·x −
-    // 0.005035·y at (0,0)): the non-zero offset/z0 matter, they are not a flat-plane artefact.
-    expect(surfaceLift(benchTilt.plane, benchTilt.z0, 0, 0)).toBeCloseTo(0.7265, 4);
+    // #623's fixtures used offset 0 / z0 0, where a per-cell lift and a seated stock both happen
+    // to reproduce the work frame; a real registration's do not. The plane really does rise
+    // 0.7265 mm over the blank's corner (0.72653 − 0.013348·x − 0.005035·y at (0,0)): the non-zero
+    // offset/z0 matter, they are not a flat-plane artefact.
+    expect(surfaceLift(BENCH_TILT.plane, BENCH_TILT.z0, 0, 0)).toBeCloseTo(0.7265, 4);
     expect(surfaceLift(TILT.plane, TILT.z0, 0, 0)).toBeCloseTo(0, 6);
 
     const job = traceJob();
     const tool = jobTool(job)!;
-    const { flat, lifted, blind } = verdicts(job, benchTilt);
+    const { flat, lifted, blind } = verdicts(job, BENCH_TILT);
     expect(flat.ok).toBe(true);
     expectSameVerdict(flat, lifted);
     expect(blind.ok).toBe(false);
 
     const framed = createSimSession(tl);
     const loadResult = framed.load(
-      generate(tl, job, null, [], undefined, { surface: benchTilt }).nc as string,
+      generate(tl, job, null, [], undefined, { surface: BENCH_TILT }).nc as string,
       toSetup(job, Z1),
       tool,
       Z1.id,
-      { surface: benchTilt },
+      { surface: BENCH_TILT },
     );
     expect(loadResult.ok && loadResult.stockTopZ).toBe(0);
     framed.dispose();
@@ -287,6 +305,22 @@ describe('the surface-frame oracle (#623)', () => {
     expect(blind.ok).toBe(false);
     expect(blind.worst.underCut).toBeGreaterThan(1);
   });
+
+  it('#628 the REAL bench badge job, re-posted against the 0.817° plane, reads 0/0 in the surface frame', () => {
+    // The bench's acceptance after #628: "the badge re-post must read 0/0". The job is the badge
+    // itself, the plane is the run 6 fit, and the tool routes to the column engine — the exact
+    // combination that read 1.6602 mm² under / 75.4995 mm² over through the old seat path.
+    const job = benchBadgeJob();
+    const { flat, lifted, blind } = verdicts(job, BENCH_TILT);
+
+    expect(flat.ok).toBe(true);
+    expectSameVerdict(flat, lifted);
+    // The COLUMN engine swept this job, not the exact one: its verdict's area floor is the grid's
+    // cell area × 2 × 2 (~0.04 mm²), not the flat 0.001 mm² default.
+    expect(lifted.areaFloor ?? 0).toBeGreaterThan(ORACLE_AREA_FLOOR);
+    expect(blind.ok).toBe(false);
+    expect(blind.worst.underCut).toBeGreaterThan(100);
+  }, 120_000);
 
   it('reports the frame on the run view: Upload enables, and the row says which frame judged it', () => {
     const job = traceJob();
