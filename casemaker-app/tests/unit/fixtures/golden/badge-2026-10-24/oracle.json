@@ -1,0 +1,66 @@
+{
+  "work": {
+    "ok": true,
+    "band": 0.08862246904977802,
+    "levels": [
+      {
+        "z": -0.985,
+        "predictedArea": 337.5838284240431,
+        "simulatedArea": 336.93767677936034,
+        "underCut": 0,
+        "overCut": 0,
+        "underBbox": null,
+        "overBbox": null
+      },
+      {
+        "z": -0.998,
+        "predictedArea": 71.0693044153196,
+        "simulatedArea": 71.14214903451126,
+        "underCut": 0,
+        "overCut": 0,
+        "underBbox": null,
+        "overBbox": null
+      }
+    ],
+    "worst": {
+      "underCut": 0,
+      "overCut": 0,
+      "underAt": null,
+      "overAt": null
+    },
+    "areaFloor": 0.03990025185160158,
+    "frame": "work"
+  },
+  "surface": {
+    "ok": true,
+    "band": 0.08862319431460328,
+    "levels": [
+      {
+        "z": -0.985,
+        "predictedArea": 337.5838284240431,
+        "simulatedArea": 336.9944754953568,
+        "underCut": 0,
+        "overCut": 0,
+        "underBbox": null,
+        "overBbox": null
+      },
+      {
+        "z": -0.998,
+        "predictedArea": 71.0693044153196,
+        "simulatedArea": 71.13363537274557,
+        "underCut": 0,
+        "overCut": 0,
+        "underBbox": null,
+        "overBbox": null
+      }
+    ],
+    "worst": {
+      "underCut": 0,
+      "overCut": 0,
+      "underAt": null,
+      "overAt": null
+    },
+    "areaFloor": 0.03990107159230209,
+    "frame": "surface"
+  }
+}
