@@ -9,7 +9,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { goalUndersideOffer, undersideClearBaseZ, undersideFloorZ, undersideSentence, UNDERSIDE_PLINTH_MM } from '@/engine/cnc/engrave/goalUnderside';
+import { goalUndersideOffer, silhouettePlane, undersideClearBaseZ, undersideFloorZ, undersideSentence, UNDERSIDE_PLINTH_MM, UNDERSIDE_TAB_THICKNESS_MM } from '@/engine/cnc/engrave/goalUnderside';
+import { planUndersideFlip } from '@/engine/cnc/engrave/goalFlipSetups';
 import { sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
@@ -213,6 +214,49 @@ describe('#898 — the cut floor each kind gives', () => {
     const goal = goalOf(flatBasedStl(), FLAT);
     expect(undersideFloorZ(goal, { thickness: 20 })).toBeNull();
     expect(undersideSentence(goal)).toBeNull();
+  });
+});
+
+describe('#898 — flipped, held by tabs', () => {
+  it('the silhouette plane is the part’s widest cross-section — a sphere parts at its middle', () => {
+    const goal = goalOf(sphereStl(), SPHERE);
+    const plane = silhouettePlane(goal)!;
+    // The sphere is placed with its top on the stock top: it spans −20…0, and its widest section
+    // is its centre line. One sampling step (20/65 ≈ 0.31 mm) either side is the tolerance.
+    expect(plane).toBeGreaterThan(-10.4);
+    expect(plane).toBeLessThan(-9.6);
+  });
+
+  it('the two sides stop a tab band either side of that plane', () => {
+    const goal = goalOf(sphereStl(), SPHERE, { underside: { kind: 'flipped-tabs', tabs: { count: 3, widthMm: 4, thicknessMm: 1 } } });
+    const out = planUndersideFlip(jobOf(goal, 30), goal);
+    expect(out.ok, out.ok ? '' : out.reason).toBe(true);
+    if (!out.ok) return;
+    const { planeZ, tabThicknessMm, goals, setups } = out.plan;
+    expect(planeZ).toBeCloseTo(-10, 0);
+    expect(tabThicknessMm).toBe(1);
+    // Setup 1 stops at plane + tab; setup 2 (turned over) at plane − tab in its own frame.
+    expect(goals).toHaveLength(2);
+    expect(goals[0]!.bandMm).toBeCloseTo(goal.position.z - (planeZ + 1), 2);
+    expect(goals[1]!.bandMm).toBeCloseTo(planeZ - 1 - (goal.position.z - 20), 2);
+    expect(goals[0]!.setupId).toBe(setups[0]!.id);
+    expect(goals[1]!.setupId).toBe(setups[1]!.id);
+    // The band left standing between them is the tab material: 2 × the half-thickness.
+    const depth = goal.position.z - (goal.position.z - 20);
+    expect(goals[0]!.bandMm! + goals[1]!.bandMm!).toBeCloseTo(depth - 2 * tabThicknessMm, 2);
+  });
+
+  it('refuses a goal that is not set to be cut from both sides, and a band that cannot fit', () => {
+    const flat = goalOf(flatBasedStl(), FLAT);
+    expect(planUndersideFlip(jobOf(flat), flat).ok).toBe(false);
+    const fat = goalOf(sphereStl(), SPHERE, { underside: { kind: 'flipped-tabs', tabs: { count: 2, widthMm: 4, thicknessMm: 12 } } });
+    const out = planUndersideFlip(jobOf(fat, 30), fat);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toContain('tab band');
+  });
+
+  it('the default tab band is the labelled half-thickness', () => {
+    expect(UNDERSIDE_TAB_THICKNESS_MM).toBe(1);
   });
 });
 

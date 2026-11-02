@@ -210,6 +210,93 @@ export function undersideSentence(goal: EngraveTargetObject): string | null {
   }
 }
 
+/**
+ * THE CROSS-SECTION AREA AT A HEIGHT, from the triangles alone (#898's silhouette plane): every
+ * triangle the plane cuts contributes one oriented segment, and the signed shoelace sum over all
+ * of them is the enclosed area — the same answer a solid slice would give, without the kernel.
+ */
+export function crossSectionArea(mesh: CoverageMesh, z: number): number {
+  const p = mesh.positions;
+  const idx = mesh.indices;
+  let sum = 0;
+  const seg = (ax: number, ay: number, bx: number, by: number): void => {
+    sum += ax * by - bx * ay;
+  };
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t]! * 3;
+    const b = idx[t + 1]! * 3;
+    const c = idx[t + 2]! * 3;
+    const za = p[a + 2]!;
+    const zb = p[b + 2]!;
+    const zc = p[c + 2]!;
+    // Wholly above or wholly below the plane: no segment. (The plane through a vertex is skipped
+    // by the strict inequalities; the sampling grid avoids it in practice.)
+    if ((za > z && zb > z && zc > z) || (za < z && zb < z && zc < z)) continue;
+    const xs: [number, number][] = [];
+    const edge = (i: number, j: number): void => {
+      const zi = p[i + 2]!;
+      const zj = p[j + 2]!;
+      if ((zi > z) === (zj > z)) return;
+      const t2 = (z - zi) / (zj - zi);
+      xs.push([p[i]! + (p[j]! - p[i]!) * t2, p[i + 1]! + (p[j + 1]! - p[i + 1]!) * t2]);
+    };
+    edge(a, b);
+    edge(b, c);
+    edge(c, a);
+    if (xs.length !== 2) continue;
+    // ORIENT the segment by the triangle's outward normal, so every segment runs the section loop
+    // the same way and the shoelace sum is the enclosed area rather than signed noise: the
+    // direction is the horizontal normal turned a quarter (k × n).
+    const ux = p[b]! - p[a]!;
+    const uy = p[b + 1]! - p[a + 1]!;
+    const uz = p[b + 2]! - p[a + 2]!;
+    const vx = p[c]! - p[a]!;
+    const vy = p[c + 1]! - p[a + 1]!;
+    const vz = p[c + 2]! - p[a + 2]!;
+    const nx = uy * vz - uz * vy;
+    const ny = uz * vx - ux * vz;
+    const tx = -ny;
+    const ty = nx;
+    const dx = xs[1]![0] - xs[0]![0];
+    const dy = xs[1]![1] - xs[0]![1];
+    if (dx * tx + dy * ty < 0) seg(xs[1]![0], xs[1]![1], xs[0]![0], xs[0]![1]);
+    else seg(xs[0]![0], xs[0]![1], xs[1]![0], xs[1]![1]);
+  }
+  return Math.abs(sum) / 2;
+}
+
+/**
+ * #898 — THE SILHOUETTE PARTING PLANE: the work Z where the part's horizontal cross-section is
+ * largest. Sample the plane across the mesh's Z extent and take the widest; ties go to the middle
+ * of the range, so a symmetric part parts on its centre line. Null when the mesh cannot be read.
+ */
+export function silhouettePlane(goal: EngraveTargetObject, samples = 65): number | null {
+  const mesh = goalWorkMesh(goal);
+  if (mesh === null) return null;
+  const { minZ } = bounds(mesh);
+  let maxZ = -Infinity;
+  const p = mesh.positions;
+  for (let i = 2; i < p.length; i += 3) if (p[i]! > maxZ) maxZ = p[i]!;
+  if (!(maxZ > minZ)) return null;
+  let bestZ = (minZ + maxZ) / 2;
+  let bestArea = -1;
+  const span = maxZ - minZ;
+  for (let i = 1; i < samples; i++) {
+    const z = minZ + (span * i) / samples;
+    const area = crossSectionArea(mesh, z);
+    if (area > bestArea + 1e-9 || (Math.abs(area - bestArea) <= 1e-9 && i === (samples >> 1))) {
+      if (area > bestArea + 1e-9) {
+        bestArea = area;
+        bestZ = z;
+      }
+    }
+  }
+  return bestZ;
+}
+
+/** The default half-thickness of a flipped part's tab band, mm. */
+export const UNDERSIDE_TAB_THICKNESS_MM = 1;
+
 /** The three choices, in the panel's order, with the sentence each one promises. */
 export const UNDERSIDE_CHOICES: readonly { kind: GoalUndersideKind; label: string }[] = [
   { kind: 'flat', label: "flat on the stock's bottom" },

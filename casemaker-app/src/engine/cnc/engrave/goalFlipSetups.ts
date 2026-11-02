@@ -25,7 +25,8 @@
 import { getTools } from '@/engine/cnc/toolRegistry';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { placeTarget } from './targetPlace';
-import { applyMat, rotationMatrix, targetTurns, type Mat3 } from './targetScale';
+import { applyMat, placedSize, rotationMatrix, targetTurns, type Mat3 } from './targetScale';
+import { silhouettePlane, UNDERSIDE_TAB_THICKNESS_MM } from './goalUnderside';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { orient } from '@/engine/cnc/setups/orient';
 import type { Face, MountSpec } from '@/engine/cnc/setups/types';
@@ -288,6 +289,61 @@ export function planFlipSetups(
     });
   }
   return { ok: true, setups, goals, hold };
+}
+
+/** #898 — the two sides a flipped-tabs underside cuts the part from, and the tab band between. */
+export interface UndersideFlipPlan {
+  /** The silhouette plane in setup 1's work frame, mm (below the stock top). */
+  planeZ: number;
+  /** The tab band's half-thickness: each side stops this far short of the plane, mm. */
+  tabThicknessMm: number;
+  setups: JobSetup[];
+  goals: EngraveTargetObject[];
+  hold: DowelHold | null;
+}
+
+export type UndersideFlipResult = { ok: true; plan: UndersideFlipPlan } | { ok: false; reason: string };
+
+/**
+ * #898 — "FLIPPED, HELD BY TABS", as the two setups it is. The part parts at its silhouette plane
+ * (its widest cross-section, `silhouettePlane`); setup 1 cuts down to `plane + tab` and setup 2,
+ * the stock turned over, cuts down to `plane − tab` in its own frame. The band between the two
+ * floors is the material the tabs are made of — it survives both programs, and the run sheet says
+ * to cut them off by hand. Registration is #872's dowel hold (the flipped side sits on its pins).
+ *
+ * A goal whose underside is not `flipped-tabs` is refused by name; so is a part too thin for the
+ * stated tab band. The bands are the split's own `bandMm` on each side's goal copy, so the
+ * generator floors each program exactly there.
+ */
+export function planUndersideFlip(
+  job: EngraveJob,
+  target: EngraveTargetObject,
+  tools?: readonly { key: string; tool: Tool }[],
+): UndersideFlipResult {
+  if (target.underside?.kind !== 'flipped-tabs') {
+    return { ok: false, reason: 'this goal is not set to be cut from both sides' };
+  }
+  const plane = silhouettePlane(target);
+  if (plane === null) return { ok: false, reason: 'the goal’s mesh could not be read, so its widest line is unknown' };
+  const tab = Math.max(0.2, target.underside.tabs?.thicknessMm ?? UNDERSIDE_TAB_THICKNESS_MM);
+  const minZ = target.position.z - placedSize(target).z;
+  const band1 = Number((target.position.z - (plane + tab)).toFixed(3));
+  const band2 = Number((plane - tab - minZ).toFixed(3));
+  if (!(band1 > 0) || !(band2 > 0)) {
+    return { ok: false, reason: `a ${Number(tab.toFixed(2))} mm tab band does not fit inside this part at its widest line` };
+  }
+  const base = planFlipSetups(job, target, ['top', 'bottom'], tools);
+  if (!base.ok) return base;
+  return {
+    ok: true,
+    plan: {
+      planeZ: plane,
+      tabThicknessMm: tab,
+      setups: base.setups,
+      goals: [{ ...base.goals[0]!, bandMm: band1 }, { ...base.goals[1]!, bandMm: band2 }],
+      hold: base.hold,
+    },
+  };
 }
 
 /**
