@@ -2419,7 +2419,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     } else return stop(result.failure);
   } else {
     const path = args.coupon as string;
-    const spec = parseCouponSpec(readJson(path), path);
+    const specJson = readJson(path) as { spread?: { axis?: 'x' | 'y'; pitch?: number } };
+    const spec = parseCouponSpec(specJson, path);
     outDir = args.out ?? dirname(path);
     mkdirSync(outDir, { recursive: true });
 
@@ -2428,6 +2429,20 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       couponPrograms = buildCouponPrograms(spec);
     } catch (e) {
       fail((e as Error).message);
+    }
+    // A feed/rpm sweep is one program per value, all at `origin` (#248). On a face long enough for
+    // the whole ladder, `spread` moves program i's cell i pitches along an axis so the four are cut
+    // side by side on one blank instead of on top of each other. The record is unchanged: each
+    // program still tests one value, and the readback still adopts one.
+    const spread = specJson.spread;
+    if (spread !== undefined && typeof spread.pitch === 'number' && spread.pitch > 0) {
+      const axis = spread.axis === 'x' ? 'x' : 'y';
+      couponPrograms.forEach((p, i) => {
+        if (i === 0) return;
+        for (const label of p.job.labels) {
+          label.position = { ...label.position, [axis]: label.position[axis] + i * spread.pitch! };
+        }
+      });
     }
 
     // The cutter's cutting diameter to select a feeds row on readback, so read it

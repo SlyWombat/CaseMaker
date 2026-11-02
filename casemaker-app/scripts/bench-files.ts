@@ -50,7 +50,8 @@ import {
   type RunSheet,
   type RunSheetStep,
 } from '@/engine/cnc/engrave/runSheet';
-import { DEFAULT_VISE } from '@/engine/cnc/fixture';
+import { DEFAULT_VISE, seatedVise } from '@/engine/cnc/fixture';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
 import { DEFAULT_JAW_CLEARANCE_MM, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { HOP_Z } from '@/engine/cnc/cam/ir';
@@ -522,6 +523,101 @@ writeFileSync(join(outDir, '284-pla-feed.json'), JSON.stringify(COUPON_SPEC, nul
 console.log('\n#284 PLA feed coupon spec written: 284-pla-feed.json');
 console.log('  generate its programs with (this script runs from casemaker-app/, the spec is in the repo):');
 console.log('    npx tsx --tsconfig tsconfig.scripts.json scripts/engrave-job.ts --coupon ../docs/bench/284-pla-feed.json');
+
+// ---------------------------------------------------------------------------------------------
+// #938 — the hardwood flat-cutter feed coupon on the house's 36 × 36 × 100 stick
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The stick as #936 clamps it: 36 mm between the jaws (X), 100 mm along them (Y), 36 mm tall and
+ * seated on the vise FLOOR (a 36 mm stock is too tall for the soft jaws' ledge, #508). The coupon's
+ * cells run DOWN the 100 mm face — `spread` in the spec — because four cells across the 36 mm face
+ * cannot fit at a readable size.
+ *
+ * The cutter is the app's own recommendation for a text job on this stick, read from the k3 house
+ * export (owned cutters only): `flat-1.0`, the 1 mm flat. Its row is the seeded hardwood 0.8–1.6
+ * one, so this coupon is what makes it measured. A bigger flat cannot do the job here: a 2 mm
+ * cutter needs ≥13 mm cells, and F1000 at 11 mm is already ~35 mm of ink and refuses at the fixed
+ * jaw on the 36 mm face (measured 2026-11-02; at 8 mm a 2 mm cutter loses 96 % of the cell).
+ */
+const M1_STICK = { length: 36, width: 100, thickness: 36 } as const;
+const M1_STICK_CUTTER = 'flat-1.0';
+
+const m1Base = defaultEngraveJob();
+m1Base.id = 'job-938-stick-base'; // stable, so regenerating does not churn the committed file
+m1Base.name = 'Milestone 1 stick base (hardwood coupon + samples)';
+m1Base.stock = { ...M1_STICK, material: 'hardwood' };
+m1Base.toolKey = M1_STICK_CUTTER;
+m1Base.labels = [];
+m1Base.shapes = [];
+m1Base.workholding = {
+  kind: 'vise',
+  vise: seatedVise({ ...DEFAULT_VISE, seat: 'floor' }, M1_STICK.thickness),
+};
+writeFileSync(join(outDir, '938-stick-base.job.json'), JSON.stringify(m1Base, null, 2) + '\n');
+
+/** A feed sweep carries one cell per program; `spread` walks them down the Y axis of the stick. */
+type CouponSpecFileSpread = CouponSpecFile & { spread: { axis: 'x' | 'y'; pitch: number } };
+
+const M1_COUPON: CouponSpecFileSpread = {
+  id: '938-hardwood-feed',
+  title: '938 hardwood flat-cutter feed coupon',
+  parameter: 'feed',
+  values: [400, 700, 1000, 1200],
+  basePath: '938-stick-base.job.json',
+  text: { size: 9, pitch: 16 },
+  origin: { x: 18, y: 20 },
+  depth: 1,
+  font: 'barlow',
+  weight: 'bold',
+  spread: { axis: 'y', pitch: 16 },
+  note:
+    'Four cells down the 36 × 100 top face of a hardwood stick (Y 20 / 36 / 52 / 68), 9 mm text, ' +
+    '1.0 mm deep, on flat-1.0 — the cutter the app recommends for text on this stick (read from ' +
+    'the k3 house export, owned cutters only) and the cell size the face allows. The values bracket ' +
+    'the SEEDED hardwood 0.8–1.6 row, which is also flat-1.0’s row: its starting F1000 is cut so ' +
+    'the readback can adopt it, which is what makes the row measured. The row measures FEED: every ' +
+    'other parameter comes from the feeds row unchanged. A 2 mm flat needs ≥13 mm cells and cannot ' +
+    'post on the 36 mm face, so it keeps its seeded row.',
+};
+
+writeFileSync(join(outDir, '938-hardwood-feed.json'), JSON.stringify(M1_COUPON, null, 2) + '\n');
+console.log('\n#938 hardwood feed coupon spec written: 938-hardwood-feed.json');
+console.log('  generate its four programs with:');
+console.log('    npx tsx --tsconfig tsconfig.scripts.json scripts/engrave-job.ts --coupon ../docs/bench/938-hardwood-feed.json');
+
+// ---------------------------------------------------------------------------------------------
+// #939 — sample 3: a pocket and four bores on the stick, to a written tolerance
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The job #939 cuts at bench S5, on the same stick and seat as #938's coupon. The cutter is the
+ * app's recommendation for this work, read from the k3 house export (owned cutters only): the 3 mm
+ * corn bit, `inv:kz-corn-3-0-12`. Its feeds row is the SEEDED hardwood 1.6–3.2 (the #938 coupon
+ * measures the 0.8–1.6 row of the 1 mm flat the text job uses; a 3 mm cutter cannot cut a readable
+ * coupon cell on this stick). The bores are BORED (helical), because the house drill is 3 mm and
+ * the drawing asks for 3.2. Everything sits inside the 36 x 100 top face with the job's 1 mm edge
+ * margin, and 6 mm deep leaves 30 mm of stick under every bore — the 25 mm floor #939 asks for.
+ */
+const m1Sample3 = defaultEngraveJob();
+m1Sample3.id = 'job-939-pocket-bores';
+m1Sample3.name = 'Milestone 1 sample 3: pocket and four bores on the stick';
+m1Sample3.stock = { ...M1_STICK, material: 'hardwood' };
+m1Sample3.toolKey = 'inv:kz-corn-3-0-12';
+m1Sample3.labels = [];
+m1Sample3.shapes = [
+  { id: 'pocket-rect', kind: 'rect', position: { x: 18, y: 78 }, rotation: 0, depth: 3, enabled: true, width: 20, height: 10, cornerRadius: 2 },
+  { id: 'pocket-round', kind: 'circle', position: { x: 18, y: 55 }, rotation: 0, depth: 3, enabled: true, diameter: 8 },
+];
+m1Sample3.drills = [
+  { id: 'bore-1', kind: 'drill', position: { x: 10, y: 32 }, rotation: 0, depth: 6, enabled: true, through: false, mode: 'bore', diameter: 3.2 },
+  { id: 'bore-2', kind: 'drill', position: { x: 26, y: 32 }, rotation: 0, depth: 6, enabled: true, through: false, mode: 'bore', diameter: 3.2 },
+  { id: 'bore-3', kind: 'drill', position: { x: 10, y: 18 }, rotation: 0, depth: 6, enabled: true, through: false, mode: 'bore', diameter: 3.2 },
+  { id: 'bore-4', kind: 'drill', position: { x: 26, y: 18 }, rotation: 0, depth: 6, enabled: true, through: false, mode: 'bore', diameter: 3.2 },
+];
+m1Sample3.workholding = { kind: 'vise', vise: { ...m1Base.workholding.vise } };
+writeFileSync(join(outDir, '939-pocket-bores.job.json'), JSON.stringify(m1Sample3, null, 2) + '\n');
+console.log('\n#939 sample 3 job written: 939-pocket-bores.job.json');
 
 // ---------------------------------------------------------------------------------------------
 // #185 — the V-groove reach test: HAND-WRITTEN, because the pipeline cannot generate it

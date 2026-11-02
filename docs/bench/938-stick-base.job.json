@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 3,
+  "id": "job-938-stick-base",
+  "name": "Milestone 1 stick base (hardwood coupon + samples)",
+  "machineId": "Z1",
+  "stock": {
+    "length": 36,
+    "width": 100,
+    "thickness": 36,
+    "material": "hardwood"
+  },
+  "labels": [],
+  "shapes": [],
+  "toolKey": "flat-1.0",
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": 16,
+      "seat": "floor",
+      "fixedJawThickness": 10,
+      "movingJawThickness": 10,
+      "jawLength": 100,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 0.5
+    }
+  },
+  "minFloor": 1,
+  "edgeMargin": 1,
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "jawClearance": 1,
+  "customFonts": []
+}
