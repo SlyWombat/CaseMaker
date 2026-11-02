@@ -11,6 +11,7 @@
  * the work — today the flat-bottom style leaves the goal's height plus a stated skin.
  */
 
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 import { PCB_BLANK_MARGIN_MM, PCB_STANDARD_THICKNESS_MM } from './stockStart';
 
@@ -21,11 +22,11 @@ export const WORK_STOCK_MARGIN_MM = 5;
 export const WORK_STOCK_SKIN_MM = 1;
 
 /**
- * The material the work proposes for a blank it sized itself. The house default is hardwood
- * (#879); this names it ONCE so the wizard and #879's default cannot drift apart — #879 replaces
- * this alias with its own constant when it lands.
+ * The material the work proposes for a blank it sized itself: the house default (#879 — the
+ * hardwood name plate). READ from the default rather than written a second time, so the proposal
+ * and the job the app opens cannot drift apart.
  */
-export const WORK_STOCK_MATERIAL: StockMaterial = 'hardwood';
+export const WORK_STOCK_MATERIAL: StockMaterial = defaultEngraveJob().stock.material;
 
 /** What the work is, in the terms a blank is sized from. */
 export type WorkShape =
