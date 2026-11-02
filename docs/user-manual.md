@@ -18,8 +18,8 @@ board installed; it carries its own copy.
 
 | Format | When to use |
 | :--- | :--- |
-| **STL (binary)** | Default for slicers — smallest file, fastest to write. |
-| **STL (ASCII)** | Human-readable; useful for diffs and inspection. |
+| **STL (ASCII)** | The default — human-readable, so a fresh export is something you can open and check, not just trust. |
+| **STL (binary)** | Smaller and faster to write; switch to it once you're past checking exports by eye. |
 | **3MF** | Carries units and, on a two-colour part, the extruder assignment — nothing to pair up by hand. |
 
 Always use the app's own **Export**, not a browser save of the preview — Export forces a rebuild
@@ -52,15 +52,14 @@ Pick a board and the shell grows around its ports, holes and standoffs.
    as you move it, usually in under 100 ms.
 5. Under **Port cutouts**, turn off anything you don't need — a header pin block hidden under a
    HAT, say.
-6. Under **Case parameters → Joint**, choose a joint for the lid:
+6. Under **Case parameters → Joint type**, choose a joint for the lid:
 
    ![A case shell and its lid apart, with a close-up of a snap-fit lip dropping into the cavity wall](img/case-parts-joint.svg)
    *The snap-fit lid's lip drops inside the case wall.*
 
-   - **flat-lid** — a plain plate on top; glue it or leave it loose.
-   - **snap-fit** — a lip on the lid drops into the cavity with a friction fit; no hardware.
-   - **sliding** — the lid slides in between two rails; easy to reopen often.
-   - **screw-down** — bosses reach the lid, which gets four screw holes.
+   - **Flat lid** — sits flat on top of the rim; easiest to print, no recess.
+   - **Snap-fit** — cantilever barbs on the lid flex into a catch on the case wall; no fasteners.
+   - **Screw-down** — the lid is fastened to the case via screws that engage corner bosses.
 7. Open **Export** and choose a format. The file is upright, in millimetres, ready for a slicer —
    no rotation needed.
 
@@ -74,9 +73,9 @@ clearance offset from the origin.
 | Wall thickness | 2.0 mm | 1–6 | Outer-wall thickness on all four sides |
 | Floor thickness | 2.0 mm | 1–6 | Bottom-floor thickness |
 | Lid thickness | 2.0 mm | 1–6 | Top-lid thickness |
-| Internal clearance | 0.5 mm | 0–3 | Gap between the board's edge and the inner cavity wall |
-| Z clearance | 5.0 mm | 0–50 | Headroom above the board — raise this for tall connectors or an add-on board |
-| Joint | flat-lid | — | flat-lid, snap-fit, sliding, or screw-down (see above) |
+| Internal clearance | 2.0 mm | 0–5 | Gap between the board's edge and the inner cavity wall |
+| Z-clearance | 5.0 mm | 0–50 | Headroom above the board — raise this for tall connectors or an add-on board |
+| Joint type | Flat lid | — | Flat lid, Snap-fit, or Screw-down (see above) |
 | Fit | tight | — | Printed clearance for snap interfaces and tabs: tight (as designed), standard (+0.10 mm) or loose (+0.25 mm). Print a fit coupon before trusting a grade on a new printer. |
 | Mounting bosses | on | — | Posts at the board's hole positions, for self-tapping screws, heat-set inserts, or a plain pass-through hole |
 | Ventilation | off | — | Vent slots or a hex grid cut through one wall |
@@ -126,29 +125,31 @@ editable copy, or **Export JSON** your own profile to share it.
 
 A snap-together rack, resized to fit the hardware going in it.
 
-### Worked example: a 10-inch rack
+### Worked example: a 10″ U-mount rack
 
 1. On the welcome page, click **Racks sized to your gear**, or enable the **Rack** panel from the
    sidebar on an existing project.
-2. Choose a mode — a printed rail or a standard U-mount rail — then set the rack's width, depth
-   and slot count. A fit indicator tells you whether the current size suits the gear you're
-   mounting.
+2. Under **Rack family**, choose **10″ U-mount — 44.45 mm per U** to build to the standard rack-gear
+   pitch, or **Printed-shelf — 16.5 mm side-column pitch** for a smaller, fully custom rack.
 
    ![A rack's rear rail, front-on, showing the two columns of mounting holes on a fixed pitch and a blank panel slotted into one slot height](img/rack-u-rails.svg)
-   *The U-rail's hole pitch sets where every panel mounts.*
-3. Turn on a wall mount if the rack needs to hang rather than stand, and set the mounting
-   guidance it shows you.
-4. Add a fan or an accessory card for anything that needs its own cutout or clearance.
-5. Export the whole rack as one fused part, or as its separate panels — the **assembled export**
-   toggle switches between them.
+   *The rail's hole pitch sets where every panel mounts.*
+3. Set the rack's size. U-mount has **Rack units** (1–12 U) and **Depth** — its width is fixed at
+   236.525 mm, the standard's own hole spacing, so ecosystem gear always fits. Printed-shelf has
+   **Width**, **Depth** and **Height** (in slots) instead, each free to size.
+4. Set **Mounting**: freestanding, wall — screw ears, or wall — french cleat.
+5. Export. The **assembled export** toggle (shown only when the whole rack fits your selected
+   printer) switches between one fused part and the rack's separate panels.
 
 ### Main options
 
-- **Width, depth and slot count** set the rack's overall size; the panel keeps the slot pitch
-  fixed so standard 1U gear always lines up.
-- **Notches** add per-plate cutouts where a specific accessory needs one.
-- **Fans and accessories** are added as cards, each with its own clearance and cutout.
-- **Wall mount** turns on mounting ears and shows guidance for where to anchor them.
+- **Rack family** picks the pitch everything else is built to: U-mount's 44.45 mm standard, or the
+  printed-shelf's 16.5 mm side-column pitch.
+- **Rack units / Depth** (U-mount) or **Width / Depth / Height** (printed-shelf) set the size; a
+  printer-fit banner and an **N/M slots used** line tell you what the current size actually holds
+  and whether your printer can build it.
+- **Mounting** switches between freestanding and the two wall-mounted modes; wall modes thicken the
+  sides' rear band for the added load.
 
 ### Common questions
 
@@ -160,9 +161,9 @@ one-piece fused export. Run 4–5 perimeters — a rack's thin sections are beam
 are their flanges — and don't skimp on layer adhesion: it's where a loaded rack actually fails,
 more than the infill percentage ever will.
 
-**Why won't my rack fit the gear I measured?** Check the fit indicator while you adjust width,
-depth and slot count — it states whether the current size suits what you've told it you're
-mounting, before you commit to a print.
+**Why won't my rack fit on my printer?** Watch the printer-fit banner and the **N/M slots used**
+line as you adjust the size — they state directly whether the current rack fits your selected
+printer's bed, before you commit to a print.
 
 ---
 
@@ -171,33 +172,36 @@ mounting, before you commit to a print.
 Bins and lids that register on each other with no connector, and inserts pocketed to your own
 tools.
 
-### Worked example: a toolbox with a tray
+### Worked example: a toolbox with dividers
 
 1. On the welcome page, click **Toolboxes that stack**, or enable the **Toolbox** panel from the
    sidebar.
-2. Set the toolbox's width — the bin, lid and tray all resize together.
-3. Add dividers to the tray to pocket it for your own tools — a socket set, a screwdriver, a
-   wrench.
+2. Set the **Footprint** (width and depth) and the **Module height** — the bin and its lid resize
+   together.
+3. Turn on **Floor grid** if you want the floor divided into a grid rather than left open.
+4. Add **Dividers** to split the bin into bays sized to your own tools — a socket set, a
+   screwdriver, a wrench. Each divider is its own printed part.
 
-   ![A toolbox bin with its lid above it and a tray of dividers forming pockets of different sizes](img/toolbox-tray-dividers.svg)
-   *A tray's dividers pocket it to whatever you're storing.*
-4. Export the bin, the lid and the tray as separate parts — they print without supports and
-   assemble by registering on each other, no connector needed.
+   ![A toolbox bin with its lid above it and dividers inside the bin forming pockets of different sizes](img/toolbox-tray-dividers.svg)
+   *The bin's dividers pocket it to whatever you're storing.*
+5. Export. The bin, the lid, and each divider export as separate parts — they print without
+   supports and assemble by registering on each other, no connector needed.
 
 ### Main options
 
-- **Width** drives the whole toolbox's proportions; the bin, lid and tray stay sized to fit each
-  other as it changes.
-- **Pegs and dividers** in the tray are added one at a time, each sized to the tool it's meant to
-  hold.
+- **Footprint** (width and depth) and **Module height** set the bin and lid's overall size; both
+  resize together.
+- **Floor grid** divides the floor into a grid instead of leaving it open.
+- **Dividers** are added one at a time, each its own part, sized to split the bin into bays for
+  your own tools.
 
 ### Common questions
 
 **Do the bins need a clip or a catch to stay stacked?** No — the parts register on each other by
 their own geometry. Nothing fastens them; lifting the top one off is a plain lift.
 
-**Can I design a tray for a specific set of tools?** Yes — add a divider per tool and size each
-pocket to it; there's no fixed layout.
+**Can I size a toolbox for a specific set of tools?** Yes — add a divider per tool or group of
+tools; there's no fixed layout.
 
 ---
 
@@ -205,17 +209,26 @@ pocket to it; there's no fixed layout.
 
 Carve hardwood on the CNC — a name plate, a coaster, a pocket, an engraving.
 
-### Worked example: the starter name plate
+> The CNC side is withheld on the public site unless the address carries `?BETA=yes`
+> (`https://electricrv.ca/casemaker/?BETA=yes`) — dev builds and the desktop build show it without
+> the switch. The switch does not let a browser reach a machine; only the desktop build can.
 
-1. On the welcome page, click **Cut it on the CNC**. A job opens already set up: a block of
-   hardwood with three lines of text carved into it — nothing to build from scratch for a first
-   look.
-2. Check the stock and cutter in the sidebar — a job states its stock size, material and the
-   cutter it's planned for.
-3. Click **Generate**. The app plans the toolpath, checks it against the stock and the holding,
-   then runs a simulated pass so you can watch it sweep across the block before anything real
-   happens.
-4. Once it's checked out, the job is ready to post as a program for a CNC machine — the CNC
+### Worked example: a first cutting job
+
+1. On the welcome page, click **Cut it on the CNC**. This opens a four-step wizard: **Machine**,
+   **What are you cutting?**, **Stock**, **Holding**.
+2. On **Machine**, pick a connected machine or continue without one.
+3. On **What are you cutting?**, pick an operation — or, with nothing picked, move on: a fresh job
+   already carries three lines of engraved text on a 100 × 60 × 12 mm hardwood block, ready to cut
+   with no setup at all. A few quick starters are also offered here — **Name badge**, **Bare
+   blank**, **Name on a dowel** — each a different starting recipe.
+4. On **Stock**, the blank is proposed from whatever you're cutting; adjust its material, form or
+   size if the proposal isn't what you want.
+5. On **Holding**, check how the stock is held, then press **Create the job**.
+6. In the Job panel, click **Generate**. The app plans the toolpath, checks it against the stock
+   and the holding, then runs a simulated pass so you can watch it sweep across the block before
+   anything real happens.
+7. Once it's checked out, the job is ready to post as a program for a CNC machine — the CNC
    equivalent of the **Export** button on the other three capabilities.
 
 ### Main options
@@ -260,8 +273,10 @@ DXF for flat vector work if you set its document units to millimetres first.
 ### Common questions
 
 **Why was my Generate refused?** The app checks the planned cut against the stock, the cutter's
-reach and the holding before it will call a job ready — the message names which of those it
-failed, and usually suggests a fix (a different cutter, a resized goal, cutting from both sides).
+reach, the holding, and a planning budget before it will call a job ready — the message names
+which of those it failed. A detailed goal can be refused for being too big to plan at its current
+resolution; the message then offers named presses to fix it — coarser detail, thicker layers, or
+splitting the goal into two setups.
 
 **My imported part looks right but won't carve correctly — why?** Check that the side you want
 cut is facing +Z, and that the unit Case Maker reports on import matches what you actually
@@ -283,6 +298,6 @@ project changes — UI selection itself isn't part of it. Both are suppressed wh
 a text field.
 
 **Tolerances.** Every printed fit in this manual — snap-fit, screw clearance, heat-set inserts,
-tray tenons — is a starting point, not a guarantee. Print one test piece and measure it with
+divider pockets — is a starting point, not a guarantee. Print one test piece and measure it with
 callipers before committing a full build; the fit grade (tight, standard, loose) in each panel is
 there so you don't have to redesign anything to try a looser one.
