@@ -236,7 +236,7 @@ describe('#922 one pipeline', () => {
   // the run-time header differs from line 12. The bench's feed divergence (10000/F1000/300 vs
   // 12000/F500/200) needs the k3 catalogue's PLA rows, which are not committed; it is the same
   // defect — the CLI hands the generator a thinner options object than the app does.
-  it.skip('j13-tool-tray posts the same program from both paths (red on 2026-11-02)', async () => {
+  it('j13-tool-tray posts the same program from both paths (red on 2026-11-02)', async () => {
     await expectSameProgram('j13', join(JOBS, 'j13-tool-tray.json'));
   }, 120_000);
 });
