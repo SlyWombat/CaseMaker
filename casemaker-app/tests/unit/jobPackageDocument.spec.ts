@@ -99,6 +99,15 @@ describe('a stored package is checked for integrity, not only for staleness (#42
     expect(verdict.ok).toBe(false);
     expect(verdict.reason).toContain('a setup it does not carry');
   });
+
+  it('#925 — a bump to the simulator version alone does not make an untouched package read as tampered', () => {
+    const pkg = frozen();
+    // Reads as-is, and also under a hash that predates #925 entirely (no version term at all) —
+    // neither is tampering, since nothing in `programs`/`jobHash` moved.
+    expect(validatePackage(pkg)).toEqual({ ok: true, reason: null });
+    const unversioned: FrozenPackage = { ...pkg, hash: packageHash(pkg.jobHash, pkg.programs) };
+    expect(validatePackage(unversioned)).toEqual({ ok: true, reason: null });
+  });
 });
 
 describe('the run log and the resume point (#425 §6)', () => {

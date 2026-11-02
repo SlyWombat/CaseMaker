@@ -2109,7 +2109,9 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       }
     }
     if (unchecked > 0) {
-      diagnostics.push({ severity: 'warning', code: 'air-moves-unchecked', message: `${unchecked} air move(s) below the stock top not checked: the simulation stopped making progress before them` });
+      // #925 — an unchecked air move below the stock top is a gap in the gate, not a nicety: error,
+      // never downgraded, so it blocks Upload exactly like a proven gouge does.
+      diagnostics.push({ severity: 'error', code: 'air-moves-unchecked', message: `${unchecked} air move(s) below the stock top not checked: the simulation stopped making progress before them` });
     }
     stats.airMovesChecked = checked;
     if (gouges.length > 0) diagnostics.push({ severity: 'error', code: 'rapid-through-stock', message: `${gouges.length} rapid${gouges.length === 1 ? '' : 's'} pass through material still present at that point in the program (first at line ${gouges[0]?.line})` });

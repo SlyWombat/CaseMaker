@@ -23,6 +23,7 @@ import {
   type PackageProgramInput,
 } from '@/engine/cnc/engrave/package';
 import { surfaceRepostBlocker } from '@/store/engraveRunGate';
+import { SIMULATOR_VERSION } from '@/workers/geometry/simVersion';
 import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -72,7 +73,7 @@ describe('the package engine (#419 §4)', () => {
     expect(pkg.programs[0]!.hash).toBe(programHash(pkg.programs[0]!.nc));
     expect(pkg.programs[0]!.frameHash).toBe(programHash('G0 X1 Y1\n'));
     expect(pkg.setups.map((s) => s.id)).toEqual(jobSetups(job).map((s) => s.id));
-    expect(pkg.hash).toBe(packageHash(pkg.jobHash, pkg.programs));
+    expect(pkg.hash).toBe(packageHash(pkg.jobHash, pkg.programs, SIMULATOR_VERSION));
   });
 
   it('refuses a package with no program — there is nothing to approve', () => {
@@ -237,6 +238,33 @@ describe('the package engine (#419 §4)', () => {
     expect(same.package.frozenAt).not.toBe(a.package.frozenAt);
     expect(b.package.hash).not.toBe(a.package.hash);
     expect(c.package.hash).not.toBe(a.package.hash);
+  });
+
+  it('#925 — the simulator’s own version is part of the package hash', () => {
+    const job = defaultEngraveJob();
+    const made = freezePackage(job, [program('G21\nM2\n')], AT);
+    if (!made.ok) throw new Error(made.reason);
+    const pkg = made.package;
+
+    // Frozen just now: current simulator, not stale.
+    expect(packageStaleness(pkg, job)).toEqual({ stale: false, reason: null });
+
+    // The hash moves with the version: the current build's own version and the one before it (no
+    // version has existed below 1) are never mistaken for each other, even over the exact same job
+    // and programs. A version bump's own staleness behaviour is pinned in
+    // `packageSimVersionStaleness925.spec.ts`, which mocks the constant to exercise the bump itself
+    // — `SIMULATOR_VERSION` is 1 today, so there is no genuinely older version to freeze under here.
+    expect(packageHash(pkg.jobHash, pkg.programs, SIMULATOR_VERSION - 1)).not.toBe(pkg.hash);
+
+    // A package frozen before #925 (its hash has no version term at all) is NOT grandfathered in:
+    // the gate reads current only when job, registration, program bytes AND simulator version all
+    // match, and a package with no version to show cannot show that match — one re-simulation,
+    // intentionally, for every package frozen before this existed.
+    const frozenBeforeTheCheck = { ...pkg, hash: packageHash(pkg.jobHash, pkg.programs) };
+    expect(packageStaleness(frozenBeforeTheCheck, job)).toEqual({
+      stale: true,
+      reason: 'frozen before the simulator was versioned — simulate again',
+    });
   });
 });
 

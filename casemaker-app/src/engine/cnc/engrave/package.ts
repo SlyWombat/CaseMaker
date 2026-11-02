@@ -29,6 +29,7 @@ import type { EngraveJob, FrozenPackage, FrozenProgram, JobRunLogEntry } from '@
 import { jobSetups } from './jobSetup';
 import { jobHold, sameHold } from './stockHold';
 import { programHash } from '@/engine/cnc/programHash';
+import { SIMULATOR_VERSION } from '@/workers/geometry/simVersion';
 
 /**
  * The document's own types (#425): the package block lives in `EngraveJob.package`, so the types
@@ -172,7 +173,7 @@ export function freezePackage(
     package: {
       jobId: job.id,
       frozenAt: at,
-      hash: packageHash(jobHash, frozen),
+      hash: packageHash(jobHash, frozen, SIMULATOR_VERSION),
       jobHash,
       programs: frozen,
       setups: structuredClone(jobSetups(job)),
@@ -186,10 +187,36 @@ export function freezePackage(
   };
 }
 
-/** The package's own key: the job's fingerprint plus every program (and frame) key, in order. */
-export function packageHash(jobHash: string, programs: readonly FrozenProgram[]): string {
+/**
+ * The package's own key: the job's fingerprint, every program (and frame) key, and — #925 — the
+ * simulator version that judged them, in order.
+ *
+ * `simVersion` is OMITTED, not defaulted, when it is not given: `FrozenPackage` carries no field of
+ * its own for it (the document's schema is a different column's file, and this stays entirely
+ * `package.ts`'s own statement), so the version a package was frozen under is read back by trying
+ * each one against the stored `hash` (`frozenSimVersion` below) rather than stored directly. Calling
+ * this with no third argument reproduces exactly the pre-#925 hash, so a package frozen before this
+ * existed still validates.
+ */
+export function packageHash(jobHash: string, programs: readonly FrozenProgram[], simVersion?: number): string {
   const parts = [jobHash, ...programs.flatMap((p) => [p.hash, p.frameHash ?? '-'])];
+  if (simVersion !== undefined) parts.push(String(simVersion));
   return programHash(parts.join('|'));
+}
+
+/**
+ * Which simulator version froze this package, read back from its own hash rather than a stored
+ * field (see `packageHash`): `'unversioned'` for a hash that predates #925 (no version term at
+ * all), the version number for one that does, or `null` when neither reconstruction matches —
+ * either the stored bytes were edited, or the package was frozen by a simulator newer than this
+ * build (`validatePackage` and `packageStaleness` tell those two apart by context).
+ */
+function frozenSimVersion(pkg: FrozenPackage): number | 'unversioned' | null {
+  if (packageHash(pkg.jobHash, pkg.programs) === pkg.hash) return 'unversioned';
+  for (let v = 1; v <= SIMULATOR_VERSION; v++) {
+    if (packageHash(pkg.jobHash, pkg.programs, v) === pkg.hash) return v;
+  }
+  return null;
 }
 
 export interface PackageStaleness {
@@ -224,6 +251,21 @@ export function packageStaleness(pkg: FrozenPackage, job: EngraveJob): PackageSt
   // reason names it so the Cut screen can offer a re-freeze rather than a re-generate.
   if (!sameRegistration(pkg.setups, jobSetups(job))) {
     return { stale: true, reason: 'the registration changed since it was frozen' };
+  }
+  // #925 — a package frozen under a sweep/oracle bug reads "current" forever once the bug is
+  // fixed, because the job and the program bytes never moved: the simulator version the package
+  // was frozen under is compared too. A package that cannot SHOW a version at all — frozen before
+  // #925 — is not grandfathered in: the gate's own statement is "current only when job,
+  // registration, program bytes AND simulator version all match", and an unversioned package
+  // cannot show that match, so it reads stale with its own sentence (one re-simulation each,
+  // intentionally, for every pre-#925 package). `null` is a `validatePackage` question, not a
+  // staleness one, so it is not raised here a second time.
+  const simAt = frozenSimVersion(pkg);
+  if (simAt === 'unversioned') {
+    return { stale: true, reason: 'frozen before the simulator was versioned — simulate again' };
+  }
+  if (typeof simAt === 'number' && simAt !== SIMULATOR_VERSION) {
+    return { stale: true, reason: 'the simulator changed since it was frozen' };
   }
   return { stale: false, reason: null };
 }
@@ -282,7 +324,10 @@ export function validatePackage(pkg: FrozenPackage): PackageIntegrity {
       };
     }
   }
-  if (packageHash(pkg.jobHash, pkg.programs) !== pkg.hash) {
+  // #925 — the stored hash may have been frozen under any simulator version this build has ever
+  // shipped (or none, predating the check); `frozenSimVersion` tries each one, so a version bump
+  // alone never makes an untouched package read as tampered.
+  if (frozenSimVersion(pkg) === null) {
     return { ok: false, reason: 'the frozen plan does not match its own fingerprint' };
   }
   return { ok: true, reason: null };
