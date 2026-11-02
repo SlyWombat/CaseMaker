@@ -272,7 +272,7 @@ const LADDER_FOOTER = [
 for (const row of ['A', 'B'] as const) {
 const job = ladderJob(row);
 // No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
-const generated = engraveGenerate(tl, job, jobTool(job), []);
+const generated = await engraveGenerate(tl, job, jobTool(job), []);
 if (!generated.ok || generated.nc === null) {
   console.error(JSON.stringify({ stage: generated.stage, errors: generated.errors, findings: generated.findings }, null, 2));
   throw new Error(`#165 ladder did not generate (stopped at ${generated.stage})`);
@@ -399,7 +399,7 @@ steps 1–3 are the part it is missing; step 4 is its §9 record.*
 
 {
   const job = strokeJob();
-  const generated = engraveGenerate(tl, job, jobTool(job), []);
+  const generated = await engraveGenerate(tl, job, jobTool(job), []);
   if (!generated.ok || generated.nc === null) {
     console.error(JSON.stringify({ stage: generated.stage, errors: generated.errors, findings: generated.findings }, null, 2));
     throw new Error(`#176 stroke did not generate (stopped at ${generated.stage})`);
