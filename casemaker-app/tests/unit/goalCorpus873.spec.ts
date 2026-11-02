@@ -250,6 +250,27 @@ describe('#873/#872 the plan each shape gets, when the top setup cannot finish i
   });
 });
 
+describe('#909 the goal corpus: the plan never cuts into the part', () => {
+  // The oracle compares the SIMULATION with the PLAN; a plan that gouges the goal passes it. Every
+  // fixture therefore generates with the plan judged against the goal's own surface (the roughing
+  // clamped over the cutter's whole footprint): an over-cut refuses Generate, so this pins the
+  // corpus against that regression, and names the check rather than only `ok`.
+  for (const [name, stock] of [
+    ['relief-plate.stl', { length: 80, width: 50, thickness: 20 }],
+    ['near-sphere.stl', { length: 60, width: 50, thickness: 32 }],
+    ['figure.stl', { length: 100, width: 60, thickness: 40 }],
+  ] as const) {
+    it(`${name}: no cell of the plan reaches below the goal`, async () => {
+      const imported = await read(name);
+      const target = targetOf(imported, { length: stock.length, width: stock.width });
+      const job = goalJob(target, stock);
+      const g = await generate(tl, job);
+      expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
+      expect(g.findings.some((f) => f.code === 'goal-overcut')).toBe(false);
+    }, 240_000);
+  }
+});
+
 describe('#873 the goal corpus: generated, swept, and measured against the goal', () => {
   // THE BASELINE, measured 2026-11-01 on main + manifold 3.5.4 with the recommendation's own
   // cutter (`flat-1.0`): the coverage fraction and the cycle estimate are pinned as NUMBERS, so a
@@ -265,7 +286,7 @@ describe('#873 the goal corpus: generated, swept, and measured against the goal'
     expect(r.ok).toBe(true);
     expect(r.stage).toBe('done');
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.382, 2); // today: 0.3822
+    expect(r.fraction).toBeCloseTo(0.471, 2); // today: 0.4713 (#909: the rough no longer over-cuts, so fewer cells sit outside the band)
     expect(r.seconds).toBeLessThan(9_000); // today: 7 948 s
   }, 240_000);
 
@@ -273,7 +294,7 @@ describe('#873 the goal corpus: generated, swept, and measured against the goal'
     const r = await runFixture('near-sphere.stl', { length: 60, width: 50, thickness: 32 });
     expect(r.ok).toBe(true);
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.135, 2); // today: 0.1351
+    expect(r.fraction).toBeCloseTo(0.134, 2); // today: 0.1341 (#909: the clamp is taken over the cutter's whole reach)
     expect(r.facingAway).toBeGreaterThan(0);
     expect(r.seconds).toBeLessThan(51_000); // today: 49 076 s
   }, 240_000);
@@ -282,7 +303,7 @@ describe('#873 the goal corpus: generated, swept, and measured against the goal'
     const r = await runFixture('figure.stl', { length: 100, width: 60, thickness: 40 });
     expect(r.ok).toBe(true);
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.116, 2); // today: 0.1162
+    expect(r.fraction).toBeCloseTo(0.139, 2); // today: 0.1386 (#909)
     // Some of the unreached area faces away (legs, belly, tail underside) and some is shadowed.
     expect(r.facingAway).toBeGreaterThan(0);
     expect(r.seconds).toBeLessThan(97_000); // today: 92 828 s

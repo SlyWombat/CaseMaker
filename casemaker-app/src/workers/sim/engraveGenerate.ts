@@ -182,6 +182,8 @@ import {
   goalClearBand,
   suggestedRestRadiusMm,
   surfaceResidual,
+  surfaceToolFor,
+  planGoalOvercut,
   type SampleGoalOpts,
   isMold,
   steepestWallDeg,
@@ -4962,10 +4964,12 @@ export async function generateGoalProgram(
     // it) and the finish from the ball's, rim included; the two are summed.
     const estimate: GoalMoveEstimate =
       rough === null
-        ? estimateGoalMoves(hf, { ...feeds, stepDown }, allowanceMm, null, rim)
+        ? estimateGoalMoves(hf, { ...feeds, stepDown }, allowanceMm, null, rim, surfaceToolFor(tool))
         : {
             ...(() => {
-              const r = rough === null ? 0 : estimateGoalMoves(hf, { ...rough.feeds, stepDown }, allowanceMm, null, null).rough;
+              // #909 — the rough's clamp is taken over ITS OWN cutter's disc, exactly as the CAM
+              // takes it, so the estimate counts what the rough really writes.
+              const r = rough === null ? 0 : estimateGoalMoves(hf, { ...rough.feeds, stepDown }, allowanceMm, null, null, surfaceToolFor(rough.tool)).rough;
               const f = estimateGoalMoves(hf, feeds, allowanceMm, null, rim).finish;
               const moves = r + f;
               return { rough: r, finish: f, moves, mb: (moves * GOAL_BYTES_PER_MOVE) / (1024 * 1024) };
@@ -5423,6 +5427,8 @@ export async function generateGoalProgram(
   })();
 
   let restProgram: EngraveProgram | null = null;
+  /** #909 — the rest pass's moves and cutter, for the goal over-cut check. */
+  let restStage: { moves: readonly CamMove[]; tool: SurfaceTool } | null = null;
   let restFacts: GoalRestFacts | null = null;
   if (finishResidual.cells > 0) {
     const left =
@@ -5473,6 +5479,7 @@ export async function generateGoalProgram(
     } else {
       const restTool = restPick.entry.tool;
       const restDiameter = Number((cuttingDiameter(restTool) ?? 0).toFixed(2));
+      restStage = { moves: restPick.plan.moves, tool: surfaceToolFor(restTool) };
       const restIr: ToolpathIR = {
         frame: 'flat',
         tool: restTool,
@@ -5671,6 +5678,52 @@ export async function generateGoalProgram(
       cam: summarize(chamferIr),
     };
   })();
+
+  // #909 — EVERY PROGRAM IS JUDGED AGAINST THE GOAL, WHICH THE ORACLE CANNOT DO. The oracle
+  // compares the SIMULATION with the PLAN, so a plan that gouges the goal passes it on every job
+  // (the 2026-11-02 demo's mouse shell: the rough cut up to 7.1 mm into the part). Each program's
+  // own feed moves are stamped by its cutter's whole footprint — the rough, the finish (rim laps
+  // and raster) and the rest pass — and any covered cell reached below the goal's surface by more
+  // than the grid's pitch is a refusal, not a warning: the part cannot be put back.
+  {
+    const roughSurface = rough === null ? finishTool : surfaceToolFor(rough.tool);
+    const finishMoves = surfaced.ir.operations
+      .filter((op) => op !== surfaced.roughing)
+      .flatMap((op) => op.moves);
+    const overcut = planGoalOvercut(
+      surfaced.heightfield,
+      [
+        { moves: surfaced.roughing.moves, tool: roughSurface },
+        { moves: finishMoves, tool: finishTool },
+        ...(restStage === null ? [] : [restStage]),
+      ],
+      Math.max(1e-3, surfaced.heightfield.pitch),
+    );
+    if (overcut.cells > 0 && overcut.at !== null) {
+      const at = overcut.at;
+      // Name the pass that actually gouges: the rough, the finish or the rest (#909).
+      const who = overcut.stage === 1 ? 'finish' : overcut.stage === 2 ? 'rest pass' : 'roughing';
+      const finding: JobFinding = {
+        severity: 'error',
+        code: 'goal-overcut',
+        targetId: goal.id,
+        message:
+          `The ${who} cuts ${Number(overcut.worstMm.toFixed(2))} mm into the goal's surface at ` +
+          `(${Number(at.x.toFixed(1))}, ${Number(at.y.toFixed(1))}) mm; the program would gouge the part.`,
+      };
+      return {
+        ...base,
+        ok: false,
+        stage: 'findings',
+        findings: dedupeFindings([finding, ...goalFindings, ...documentFindings()]),
+        feeds: null,
+        cam: null,
+        nc: null,
+        verify: null,
+        errors: [{ stage: 'findings' as EngraveStage, message: finding.message }],
+      };
+    }
+  }
 
   onProgress?.({ stage: 'done', label: 'done' });
   return {

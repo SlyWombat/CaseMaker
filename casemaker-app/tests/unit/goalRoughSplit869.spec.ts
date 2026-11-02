@@ -123,8 +123,9 @@ describe('#869 the goal’s split, generated', () => {
     // The promise that a goal without a rough is untouched: the posted file's hash. #889 changed
     // goal POSTS on purpose (packed moves, merged collinear feeds, the chunked body), so the pin
     // is the post-#889 value; the split-vs-one-cutter difference is asserted below. Re-pinned when
-    // #889 merged only LEVEL lines (a merged slope sweeps high in the column engine).
-    expect(programHash(out.nc!)).toBe('5edb255a');
+    // #889 merged only LEVEL lines (a merged slope sweeps high in the column engine). Re-pinned
+    // by #909: the single-cutter plan's rough is clamped over its ball's footprint.
+    expect(programHash(out.nc!)).toBe('ad990822');
   });
 
   it('a roughToolKey posts the flat’s rough first and the ball’s finish second', async () => {

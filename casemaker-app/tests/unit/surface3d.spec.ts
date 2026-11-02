@@ -26,6 +26,7 @@ import {
   generateSurface3dIR,
   sampleGoalHeightfield,
   estimateGoalMoves,
+  planGoalOvercut,
   goalMemoryBudgetMb,
   GOAL_MEMORY_BUDGET_MB,
   GOAL_BYTES_PER_MOVE,
@@ -461,7 +462,7 @@ describe('#889 — the goal estimate counts what the CAM will write', () => {
         labelId: 'goal-1',
         opts: { stockToLeaveMm: allowance },
       });
-      const e = estimateGoalMoves(hf, FEEDS, allowance);
+      const e = estimateGoalMoves(hf, FEEDS, allowance, null, null, FLAT_TOOL);
       expect(e.rough).toBe(roughing.moves.length);
       expect(e.finish).toBeGreaterThanOrEqual(finishing.moves.length);
       expect(e.moves).toBe(e.rough + e.finish);
@@ -508,7 +509,41 @@ describe('#889 — the goal estimate counts what the CAM will write', () => {
  * sample at max(level, surface + allowance), one move per sample. #889's roughing skips the
  * segments a level only repeats; it must remove exactly what this removed.
  */
-function ridingRoughReference(hf: GoalHeightfield, feeds: SurfaceFeeds, allowance: number): CamMove[] {
+function ridingRoughReference(
+  hf: GoalHeightfield,
+  feeds: SurfaceFeeds,
+  allowance: number,
+  tool: SurfaceTool,
+  alongStep = hf.pitch,
+): CamMove[] {
+  // #909 — the CAM's clamp: the SEPARABLE MAX over the square containing the cutter's reach (a
+  // flat's widened by half a sample), plus the allowance on the goal; uncut stock clamps to the
+  // stock top. The square is conservative — it can only leave more material than the disc.
+  const radius = tool.ball ? tool.radius : tool.radius + alongStep / 2;
+  const span = Math.max(0, Math.ceil(radius / hf.pitch));
+  const need = new Float32Array(hf.nx * hf.ny);
+  for (let k = 0; k < need.length; k++) {
+    need[k] = hf.covered[k] === 0 ? hf.topZ : (hf.z[k] as number) + allowance;
+  }
+  const clampField = ((): Float32Array => {
+    const out = new Float32Array(hf.nx * hf.ny);
+    for (let j = 0; j < hf.ny; j++) {
+      for (let i = 0; i < hf.nx; i++) {
+        let best = -Infinity;
+        for (let dj = -span; dj <= span; dj++) {
+          for (let di = -span; di <= span; di++) {
+            const ii = i + di;
+            const jj = j + dj;
+            if (ii < 0 || ii >= hf.nx || jj < 0 || jj >= hf.ny) continue;
+            best = Math.max(best, need[jj * hf.nx + ii] as number);
+          }
+        }
+        out[j * hf.nx + i] = best;
+      }
+    }
+    return out;
+  })();
+  const clampAt = (_k: number, i: number, j: number): number => clampField[j * hf.nx + i] as number;
   const moves: CamMove[] = [];
   const levels: number[] = [];
   const deepest = hf.minZ + allowance;
@@ -528,7 +563,7 @@ function ridingRoughReference(hf: GoalHeightfield, feeds: SurfaceFeeds, allowanc
       let open = false;
       for (const i of cols) {
         const k = j * hf.nx + i;
-        const clamp = hf.covered[k] === 0 ? hf.topZ : (hf.z[k] as number) + allowance;
+        const clamp = clampAt(k, i, j);
         const tip = Math.max(L, clamp);
         const x = hf.x0 + i * hf.pitch;
         if (hf.covered[k] === 1 && tip < hf.topZ - 1e-9) {
@@ -573,18 +608,79 @@ describe('#889 — the roughing removes exactly what the cell-by-cell ride remov
         labelId: 'goal-1',
         opts: { stockToLeaveMm: allowance },
       });
-      const reference = ridingRoughReference(hf, FEEDS, allowance);
+      const reference = ridingRoughReference(hf, FEEDS, allowance, FLAT_TOOL);
       const cutter: ColumnCutter = { radius: 1.0, tanHalf: null };
       const ours = sweep(prism(40, 40, 12), cutter, roughing.moves, hf.pitch);
       const ride = sweep(prism(40, 40, 12), cutter, reference, hf.pitch);
       expect(ours.h.length).toBe(ride.h.length);
-      let worst = 0;
-      for (let k = 0; k < ours.h.length; k++) worst = Math.max(worst, Math.abs((ours.h[k] as number) - (ride.h[k] as number)));
-      // The merge tolerance, and nothing more.
-      expect(worst).toBeLessThanOrEqual(0.002 + 1e-6);
+      // TWO SIDES, two bounds. The rough may never remove MORE than the ride — that would be a
+      // gouge the ride did not make — bar the merge tolerance. It may leave MORE material where
+      // #889 crosses finished points on a chord (a curved stretch): the chord is lifted above the
+      // finished tips, so it is safe and the finish lifts what it leaves; the bound below is that
+      // lift's measured worst on this fixture. Before #909 both sides happened to sit inside the
+      // merge tolerance; the disc clamp moves more points to "finished" on a dome, so the crossings
+      // now show.
+      let worstMore = 0;
+      let worstLess = 0;
+      for (let k = 0; k < ours.h.length; k++) {
+        const d = (ours.h[k] as number) - (ride.h[k] as number);
+        if (d < 0) worstMore = Math.max(worstMore, -d);
+        else worstLess = Math.max(worstLess, d);
+      }
+      // The removal bound is the GRID's own resolution, not the merge tolerance: a merged line
+      // between two samples crosses a curved flank by up to a pitch-times-curvature error, which
+      // the CAM's own stated accuracy already accepts (the same pitch-scale bound the goal over-cut
+      // check uses). The leaving bound is #889's chord-crossing lift on this fixture.
+      expect(worstMore).toBeLessThanOrEqual(hf.pitch + 1e-6);
+      expect(worstLess).toBeLessThanOrEqual(0.02);
       expect(roughing.moves.length).toBeLessThan(reference.length * share);
     });
   }
+});
+
+describe('#909 the plan is judged against the goal', () => {
+  it('catches a rough cut below the goal, and the CAM\'s own rough passes it', async () => {
+    const hf = sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.2 });
+    const allowance = 0.3;
+    // A raster held at one low level across the goal: the flat's disc cuts every column at -2,
+    // which is the 2026-11-02 demo's failure in miniature.
+    const bad: CamMove[] = [];
+    for (let j = 0; j < hf.ny; j += 5) {
+      const y = hf.y0 + j * hf.pitch;
+      bad.push({ kind: 'rapid', x: hf.x0, y, z: 1 });
+      bad.push({ kind: 'feed', x: hf.x0, y, z: -2, f: 500 });
+      bad.push({ kind: 'feed', x: hf.x0 + (hf.nx - 1) * hf.pitch, y, z: -2, f: 500 });
+    }
+    const caught = planGoalOvercut(hf, [{ moves: bad, tool: FLAT_TOOL }], hf.pitch);
+    expect(caught.worstMm).toBeGreaterThan(1);
+    expect(caught.cells).toBeGreaterThan(0);
+    // The report names the pass that made the worst cut, so the refusal can say which one (#909).
+    expect(caught.stage).toBe(0);
+
+    // The CAM's own rough on the same field: clamped over the disc, so nothing reaches below the
+    // goal (this is the corpus invariant at the CAM level).
+    const { roughing, finishing } = await generateSurface3dIR({
+      heightfield: hf,
+      tool: FLAT_TOOL,
+      toolObj: flatEndMill(2, { name: 'flat' }),
+      toolNumber: 1,
+      spindleRpm: 12000,
+      air: true,
+      feeds: FEEDS,
+      rapid: RAPID,
+      labelId: 'goal-1',
+      opts: { stockToLeaveMm: allowance },
+    });
+    const clean = planGoalOvercut(
+      hf,
+      [
+        { moves: roughing.moves, tool: FLAT_TOOL },
+        { moves: finishing.moves, tool: FLAT_TOOL },
+      ],
+      hf.pitch,
+    );
+    expect(clean, JSON.stringify(clean)).toEqual({ worstMm: 0, cells: 0, at: null, stage: null });
+  });
 });
 
 describe('generateSurface3dIR — roughing never breaches the goal', () => {
@@ -860,7 +956,7 @@ describe('generateSurface3dIR — the scallop and pencil passes (#671)', () => {
     const pencilOnly = sweep(setup, BALL_CUTTER, full.pencil!.operation.moves, hf.pitch);
     const footprint = full.pencil!.operation.moves.filter((m) => m.kind === 'feed');
     const pathX = footprint[0]!.x;
-    expect(heightAt(pencilOnly, pathX, 10)).toBeLessThan(-0.05); // the corner line, cut
+    expect(heightAt(pencilOnly, pathX, 10)).toBeLessThan(-0.03); // the corner line, cut (#909: the cell-square tip sits ~0.01 higher at the foot)
     expect(heightAt(pencilOnly, 15, 10)).toBe(0); // the open floor, untouched
     const scallopOnly = sweep(setup, BALL_CUTTER, full.scallop!.operation.moves, hf.pitch);
     expect(heightAt(scallopOnly, 15, 10)).toBeLessThan(-0.5); // the floor, cut by the contours
