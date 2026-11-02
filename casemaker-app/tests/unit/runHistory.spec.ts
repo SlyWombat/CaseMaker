@@ -54,6 +54,7 @@ function run(ncFile: string, cutOn: string | null, minutes: number | null): RunR
     tool: 'flat-1.0',
     cuttingDiameter: 1,
     estimatedSeconds: 95,
+    efficiency: null,
     generatedOn: '2026-10-04',
     cutOn,
     minutes,

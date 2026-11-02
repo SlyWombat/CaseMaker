@@ -420,7 +420,17 @@ async function cut(
     options,
   );
   expect(receipt, 'the command must emit a receipt, even on a refusal').not.toBeNull();
-  return { code, receipt: parseReceipt(receipt!), progress, outDir };
+  const parsed = parseReceipt(receipt!);
+  // #926 — EVERY receipt states what each program spends its time and its material on. The 10-27
+  // and 10-28 corpora run through this helper, so this is the corpus's own check that the
+  // efficiency measures reach the receipt an operator and a reviewer read, not just the sheet.
+  if (parsed.command === 'engrave' && parsed.details !== null) {
+    for (const program of parsed.details.programs) {
+      if (program.cam === null) continue; // a refusal may never have recorded a CAM summary
+      expect(program.cam.efficiency, `${program.name} carries the efficiency measures (#926)`).toBeDefined();
+    }
+  }
+  return { code, receipt: parsed, progress, outDir };
 }
 
 /** The text of one `.nc` the run wrote. */

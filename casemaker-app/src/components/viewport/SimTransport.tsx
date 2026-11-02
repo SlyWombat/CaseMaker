@@ -196,6 +196,9 @@ function TransportBar() {
   // one labelled figure, with its source word, and only an imported file — which has no estimate —
   // keeps the simulated clock. The scrubber's step position still says where playback is.
   const jobEstimateSeconds = useEngraveRunStore((s) => s.generated?.cam?.estimatedSeconds ?? null);
+  // #926 — the efficiency measures behind that estimate: the same trapezoids, split into the part
+  // spent in air and the part cutting, so a program that is correct but slow says so here.
+  const jobEfficiency = useEngraveRunStore((s) => s.generated?.cam?.efficiency ?? null);
   const jobTime =
     origin === 'engrave' && jobEstimateSeconds !== null
       ? `about ${formatDuration(jobEstimateSeconds)}`
@@ -425,6 +428,23 @@ function TransportBar() {
             </>
           )}
         </span>
+        {jobEfficiency !== null && (
+          <span
+            data-testid="sim-efficiency"
+            style={READOUT_MUTED}
+            title={
+              "The same trapezoids as the cycle estimate, split up: the share of the cycle spent in rapid (air) moves, " +
+              'the hops between strokes and loops, and how close the feed runs get to the rate they command. ' +
+              "A program can be correct and still be slow; this is where that shows."
+            }
+          >
+            {Math.round(jobEfficiency.airFraction * 100)} % air ·{' '}
+            {jobEfficiency.hopCount} hop{jobEfficiency.hopCount === 1 ? '' : 's'}
+            {jobEfficiency.feedUtilisation === null
+              ? ''
+              : ` · feed at ${Math.round(jobEfficiency.feedUtilisation * 100)} %`}
+          </span>
+        )}
         <span data-testid="sim-step" style={READOUT_MUTED}>
           step {Math.max(0, step)} / {lastStep}
         </span>

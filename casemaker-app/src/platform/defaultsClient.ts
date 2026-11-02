@@ -540,6 +540,22 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'margins.breakthroughMm': { label: 'breakthrough a new job starts from (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 0.3 },
   'margins.measuredThicknessToleranceMm': { label: '± on a measured stock thickness (not measured)', unit: 'mm', rule: z.number().min(0).max(10), fallback: 0.05 },
   // ── #447 (end)
+  // ── #926 (begin) — the two efficiency thresholds the run sheet judges a program against. Chosen
+  // seeds, not measurements: the first corpus run that shows a good program near either value is
+  // what moves them. A fraction of the cycle / of the strip, so both are 0–1.
+  'efficiency.maxAirFraction': {
+    label: 'air-time fraction before a warning (chosen)',
+    unit: 'x',
+    rule: z.number().min(0).max(1),
+    fallback: 0.35,
+  },
+  'efficiency.minWrittenFraction': {
+    label: 'least share of its swept strip a program must remove (chosen)',
+    unit: 'x',
+    rule: z.number().min(0).max(1),
+    fallback: 0.5,
+  },
+  // ── #926 (end)
 };
 
 /**
@@ -712,6 +728,22 @@ export function machineTiming(map: ShopDefaults | null): MachineTiming {
     discoveryWindowMs: readDefault(map, 'machine.discoveryWindowMs').value,
     identifyWindowMs: readDefault(map, 'machine.identifyWindowMs').value,
     uploadInactivityMs: readDefault(map, 'machine.uploadInactivityMs').value,
+  };
+}
+
+/**
+ * #926 — the two efficiency thresholds the run sheet judges a program against, read once so a
+ * caller cannot mix a stored threshold with a compiled fallback for the same check. The sheet
+ * takes the resolved numbers rather than the map: it is in the sim worker's import graph and does
+ * not read the house document itself.
+ */
+export function efficiencyThresholds(map: ShopDefaults | null): {
+  maxAirFraction: number;
+  minWrittenFraction: number;
+} {
+  return {
+    maxAirFraction: readDefault(map, 'efficiency.maxAirFraction').value,
+    minWrittenFraction: readDefault(map, 'efficiency.minWrittenFraction').value,
   };
 }
 

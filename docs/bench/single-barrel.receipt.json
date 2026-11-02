@@ -11,8 +11,8 @@
     },
     {
       "path": "<location>",
-      "sha256": "e4b5339df9aebdf8f505b1fcc9782181ebaff58873cffd69a859faa52de0a71a",
-      "bytes": 60850
+      "sha256": "2074a056178700c50df58e87c00e4f578bdd749f721e63f23c7b8bf60c7aace0",
+      "bytes": 61641
     }
   ],
   "outputs": [
@@ -28,8 +28,8 @@
     },
     {
       "path": "<out>/single-barrel-run-sheet.md",
-      "sha256": "3ce6a55b6f2a4258e5c772cafdd27fd48f4044c1308dd0396879a8665ad2d853",
-      "bytes": 17959
+      "sha256": "6b29451b2cbbddcd0797f482016ce32447d5a1d7d28fed6195fa8526d83241ba",
+      "bytes": 18689
     }
   ],
   "diagnostics": [
@@ -110,7 +110,24 @@
           "estimatedSeconds": 120.10557460458003,
           "rapidMm": 308.72731156457826,
           "cutMm": 357.07405121549573,
-          "baselineRapidMm": 308.72731156457826
+          "baselineRapidMm": 308.72731156457826,
+          "efficiency": {
+            "cycleSeconds": 120.10557460458006,
+            "rapidSeconds": 32.38291208035282,
+            "feedSeconds": 87.72266252422725,
+            "airFraction": 0.26962039178419567,
+            "hopCount": 47,
+            "hopSeconds": 18.116245413686137,
+            "commandedFeedSeconds": 72.84888614585947,
+            "feedUtilisation": 0.8304454521742322,
+            "rapidMm": 237.67323872320665,
+            "cutMm": 357.0740512154956,
+            "rapidCutRatio": 0.6656133032186365,
+            "sweptAreaMm2": 298.47762268725137,
+            "deepestCutMm": 1,
+            "tourBoundMm": 182.63739831461035,
+            "tourExcess": 0.3013393801952424
+          }
         },
         "sim": {
           "ok": true,

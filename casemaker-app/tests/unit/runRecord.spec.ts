@@ -159,6 +159,38 @@ describe('runRecord (#277)', () => {
     expect(back.ok && back.run.estimatedSeconds).toBe(0);
   });
 
+  it('#926 carries the efficiency block it printed, and an older record reads as not recorded', () => {
+    const job = dj();
+    const generated = stubGenerated(job);
+    const efficiency = {
+      cycleSeconds: 100,
+      rapidSeconds: 40,
+      feedSeconds: 60,
+      airFraction: 0.4,
+      hopCount: 10,
+      hopSeconds: 12,
+      commandedFeedSeconds: 45,
+      feedUtilisation: 0.75,
+      rapidMm: 200,
+      cutMm: 300,
+      rapidCutRatio: 2 / 3,
+      sweptAreaMm2: 1000,
+      deepestCutMm: 1,
+      tourBoundMm: 150,
+      tourExcess: 200 / 150 - 1,
+      operations: [],
+    };
+    const run = buildRunRecord(job, { ...generated, cam: { ...generated.cam!, efficiency } }, NOW);
+    expect(run.efficiency?.airFraction).toBe(0.4);
+    const back = parseRunRecord(JSON.parse(serializeRunRecord(run)));
+    expect(back.ok && back.run.efficiency?.airFraction).toBe(0.4);
+    expect(back.ok && back.run.efficiency?.hopCount).toBe(10);
+    // A record written before the measure exists (or hand-stripped) is not a refusal: the app's
+    // half reads as absent, exactly as a missing `estimatedSeconds` does.
+    const older = parseRunRecord(JSON.parse(serializeRunRecord({ ...run, efficiency: null })));
+    expect(older.ok && older.run.efficiency).toBeNull();
+  });
+
   it('round trips through its own text, unchanged', () => {
     const job = dj();
     const run = buildRunRecord(job, stubGenerated(job), NOW);

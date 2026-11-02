@@ -56,6 +56,7 @@ import { resetRegistry, setRegistry } from '@/engine/cnc/toolRegistry';
 afterEach(() => resetRegistry());
 import type { ThreadPlanFacts, ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 import type { ProgramSweepSummary } from '@/engine/cnc/engrave/programSweep';
+import type { ProgramEfficiency } from '@/engine/cnc/cam/ir';
 import { renderRunSheetMarkdown } from '../../scripts/runSheetMarkdown';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
@@ -2391,5 +2392,145 @@ describe('#740 the cutter step states a tip the record actually records', () => 
 
   it('prints the stated tip, with its unit', () => {
     expect(cutterStep({ ...dj(), tool: chamfer(0.1) }).value).toBe('⌀ 0.1 mm cutting');
+  });
+});
+
+// #926 — the efficiency measures and the two shop thresholds. The measure itself is `ir.ts`'s; these
+// tests hold the SHEET to it: a step that states the basis, and a warning that names the airiest
+// operation and the setting it was judged against.
+describe('#926 the sheet prints the efficiency measures and warns on the shop thresholds', () => {
+  const measure = (over: Partial<ProgramEfficiency> = {}): ProgramEfficiency => ({
+    cycleSeconds: 100,
+    rapidSeconds: 40,
+    feedSeconds: 60,
+    airFraction: 0.4,
+    hopCount: 10,
+    hopSeconds: 12,
+    commandedFeedSeconds: 45,
+    feedUtilisation: 0.75,
+    rapidMm: 200,
+    cutMm: 300,
+    rapidCutRatio: 2 / 3,
+    sweptAreaMm2: 1000,
+    deepestCutMm: 1,
+    tourBoundMm: 150,
+    tourExcess: 200 / 150 - 1,
+    operations: [],
+    ...over,
+  });
+
+  const withEfficiency = (job: EngraveJob, efficiency: ProgramEfficiency): RunSheetGenerated => {
+    const base = stubGenerated(job);
+    return { ...base, cam: base.cam === null ? null : { ...base.cam, efficiency } };
+  };
+
+  const cutText = (sheet: RunSheet): string[] => section(sheet, 'cut').steps.map((s) => s.text);
+  const warningText = (sheet: RunSheet): string[] => section(sheet, 'warnings').steps.map((s) => s.text);
+
+  it('prints no efficiency step on a result that carries none (an older stored run)', () => {
+    const job = dj();
+    expect(cutText(sheetFor(job)).some((t) => t.includes('of it in air'))).toBe(false);
+  });
+
+  it('states the air fraction, hops, feed utilisation and the tour bound with their basis', () => {
+    const job = dj();
+    const sheet = buildRunSheet(job, withEfficiency(job, measure()), NO_SIM, NOW);
+    const text = cutText(sheet).find((t) => t.includes('of it in air'));
+    expect(text, 'the efficiency step').toBeTruthy();
+    expect(text).toContain('40 % of it in air');
+    expect(text).toContain('10 hops taking 12 s');
+    expect(text).toContain('the feed running at 75 % of the rate it commands');
+    expect(text).toContain('200 mm against a 150 mm lower bound');
+    expect(text).toContain('33 % past it');
+    // The basis is on the sheet, not assumed: the estimate's own trapezoids on the machine's model.
+    expect(text).toContain("the cycle estimate's own trapezoids");
+  });
+
+  it('warns naming the airiest operation when the air fraction is over the shop threshold', () => {
+    const job = dj();
+    const efficiency = measure({
+      airFraction: 0.4,
+      operations: [
+        {
+          number: 3,
+          name: '[T1]Engrave "CASE" 2.0mm',
+          cycleSeconds: 40,
+          rapidSeconds: 4,
+          feedSeconds: 36,
+          airFraction: 0.1,
+          hopCount: 2,
+          hopSeconds: 1,
+          commandedFeedSeconds: 30,
+          feedUtilisation: 0.8,
+          rapidMm: 20,
+          cutMm: 60,
+          rapidCutRatio: 1 / 3,
+          sweptAreaMm2: 120,
+          deepestCutMm: 1,
+          tourBoundMm: 15,
+          tourExcess: 1 / 3,
+        },
+      ],
+    });
+    const sheet = buildRunSheet(job, withEfficiency(job, efficiency), NO_SIM, NOW, undefined, {
+      efficiencyThresholds: { maxAirFraction: 0.25, minWrittenFraction: 0.5 },
+    });
+    const warning = warningText(sheet).find((t) => t.startsWith('Program 1') && t.includes('in air'));
+    expect(warning).toBeTruthy();
+    expect(warning).toContain('40 % of its cycle in air');
+    expect(warning).toContain('over the 25 % the shop warns at (efficiency.maxAirFraction in location.json)');
+    expect(warning).toContain('Operation 3 ([T1]Engrave "CASE" 2.0mm) is the airiest at 10 %');
+  });
+
+  it('raises no threshold warning without the shop setting, and none under it', () => {
+    const job = dj();
+    const over = withEfficiency(job, measure());
+    expect(warningText(buildRunSheet(job, over, NO_SIM, NOW)).some((t) => t.includes('in air'))).toBe(false);
+    const under = buildRunSheet(job, over, NO_SIM, NOW, undefined, {
+      efficiencyThresholds: { maxAirFraction: 0.5, minWrittenFraction: 0.5 },
+    });
+    expect(warningText(under).some((t) => t.includes('of its cycle in air'))).toBe(false);
+  });
+
+  it('warns that a program mostly cuts air when it removes too little of its swept strip', () => {
+    const job = dj();
+    const efficiency = measure();
+    const program = {
+      setupIndex: 1,
+      toolKey: job.toolKey,
+      nc: NC,
+      frameNc: null,
+      cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2, efficiency },
+    };
+    const generated: RunSheetGenerated = { ...stubGenerated(job), programs: [program] };
+    const sim: RunSheetSim = {
+      diagnostics: [],
+      programs: [
+        {
+          index: 0,
+          program: 1,
+          label: 'program 1',
+          toolKey: job.toolKey,
+          outcome: 'swept',
+          engine: 'exact',
+          count: 10,
+          // 200 mm³ over the 1 mm deepest cut is 200 mm² removed against a 1 000 mm² strip: 20 %.
+          removedVolume: 200,
+          errorCount: 0,
+          diagnostics: [],
+          notes: [],
+          fromBlank: false,
+          fromBlankCode: null,
+          gridPitchMm: null,
+        },
+      ],
+    };
+    const sheet = buildRunSheet(job, generated, sim, NOW, undefined, {
+      efficiencyThresholds: { maxAirFraction: 0.5, minWrittenFraction: 0.5 },
+    });
+    const warning = warningText(sheet).find((t) => t.includes('This program mostly cuts air'));
+    expect(warning).toBeTruthy();
+    expect(warning).toContain('removes 20 % of the strip its path sweeps');
+    expect(warning).toContain('under the 50 % the shop warns at (efficiency.minWrittenFraction in location.json)');
   });
 });

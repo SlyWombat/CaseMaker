@@ -49,6 +49,26 @@ export interface RunRecordDepth {
 }
 
 /**
+ * #926 — the efficiency measure the sheet printed for this program, as the record carries it. The
+ * program-level figures only: the per-operation split is the sheet's to print, and the record is
+ * the file that outlives the sheet.
+ */
+export interface RunRecordEfficiency {
+  cycleSeconds: number;
+  rapidSeconds: number;
+  feedSeconds: number;
+  airFraction: number;
+  hopCount: number;
+  hopSeconds: number;
+  feedUtilisation: number | null;
+  rapidCutRatio: number | null;
+  sweptAreaMm2: number | null;
+  deepestCutMm: number;
+  tourBoundMm: number | null;
+  tourExcess: number | null;
+}
+
+/**
  * One finished run (#277). Everything above `generatedOn` is the app's; everything below is a
  * person's, and every field of it is `null` in the file Save writes.
  */
@@ -70,6 +90,12 @@ export interface RunRecord {
    * never touched by a measurement.
    */
   estimatedSeconds: number | null;
+  /**
+   * #926 — the efficiency measure that estimate was taken with (air fraction, hops, feed
+   * utilisation, the swept strip, the tour bound). Null on a result stored from before the
+   * measure; the record then carries the estimate alone, as it always did.
+   */
+  efficiency: RunRecordEfficiency | null;
   /** ISO date (`YYYY-MM-DD`) the record file was written. The app's date, never a measurement. */
   generatedOn: string;
   // ---- the measured half: a person's, blank in the file Save writes ----
@@ -141,6 +167,23 @@ export function buildRunRecord(
     tool: tool?.name ?? null,
     cuttingDiameter: tool ? cuttingDiameter(tool) : null,
     estimatedSeconds: generated.cam?.estimatedSeconds ?? null,
+    efficiency:
+      generated.cam?.efficiency === undefined
+        ? null
+        : {
+            cycleSeconds: generated.cam.efficiency.cycleSeconds,
+            rapidSeconds: generated.cam.efficiency.rapidSeconds,
+            feedSeconds: generated.cam.efficiency.feedSeconds,
+            airFraction: generated.cam.efficiency.airFraction,
+            hopCount: generated.cam.efficiency.hopCount,
+            hopSeconds: generated.cam.efficiency.hopSeconds,
+            feedUtilisation: generated.cam.efficiency.feedUtilisation,
+            rapidCutRatio: generated.cam.efficiency.rapidCutRatio,
+            sweptAreaMm2: generated.cam.efficiency.sweptAreaMm2,
+            deepestCutMm: generated.cam.efficiency.deepestCutMm,
+            tourBoundMm: generated.cam.efficiency.tourBoundMm,
+            tourExcess: generated.cam.efficiency.tourExcess,
+          },
     generatedOn: now.toISOString().slice(0, 10),
     cutOn: null,
     minutes: null,
@@ -201,8 +244,45 @@ function numberOrNull(v: unknown): number | null {
   return n === false ? null : n;
 }
 
-/** Every reading a person could have taken, so the "dated?" rule can be enforced over all of them. */
-function hasReadings(r: RunRecord): boolean {
+/**
+ * #926 — the record's efficiency block, read leniently. It is the APP's half of the file, not a
+ * measurement: a block with a missing or mistyped number reads as "not recorded" (null) rather
+ * than refusing the whole run, exactly as `estimatedSeconds` does.
+ */
+function parseEfficiency(raw: unknown): RunRecordEfficiency | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const e = raw as Record<string, unknown>;
+  const num = (key: string): number | null => {
+    const v = e[key];
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  };
+  const cycle = num('cycleSeconds');
+  const rapid = num('rapidSeconds');
+  const feed = num('feedSeconds');
+  const air = num('airFraction');
+  const hops = num('hopCount');
+  const hopSeconds = num('hopSeconds');
+  const deepest = num('deepestCutMm');
+  if (cycle === null || rapid === null || feed === null || air === null || hops === null || hopSeconds === null || deepest === null) {
+    return null;
+  }
+  return {
+    cycleSeconds: cycle,
+    rapidSeconds: rapid,
+    feedSeconds: feed,
+    airFraction: air,
+    hopCount: hops,
+    hopSeconds,
+    feedUtilisation: num('feedUtilisation'),
+    rapidCutRatio: num('rapidCutRatio'),
+    sweptAreaMm2: num('sweptAreaMm2'),
+    deepestCutMm: deepest,
+    tourBoundMm: num('tourBoundMm'),
+    tourExcess: num('tourExcess'),
+  };
+}
+
+/** Every reading a person could have taken, so the "dated?" rule can be enforced over all of them. */function hasReadings(r: RunRecord): boolean {
   return (
     r.minutes !== null ||
     r.stockProudMm !== null ||
@@ -299,6 +379,7 @@ export function parseRunRecord(raw: unknown): RunRecordParseResult {
     tool: typeof r.tool === 'string' ? r.tool : null,
     cuttingDiameter: numberOrNull(r.cuttingDiameter),
     estimatedSeconds: numberOrNull(r.estimatedSeconds),
+    efficiency: parseEfficiency(r.efficiency),
     generatedOn: typeof r.generatedOn === 'string' ? r.generatedOn : '',
     cutOn: isIsoDate(r.cutOn) ? r.cutOn : null,
     minutes,
