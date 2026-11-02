@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { goalUndersideOffer, silhouettePlane, undersideClearBaseZ, undersideFloorZ, undersideSentence, UNDERSIDE_PLINTH_MM, UNDERSIDE_TAB_THICKNESS_MM } from '@/engine/cnc/engrave/goalUnderside';
+import { crossSectionPolylines, goalUndersideOffer, silhouettePlane, undersideClearBaseZ, undersideFloorZ, undersideSentence, UNDERSIDE_PLINTH_MM, UNDERSIDE_TAB_THICKNESS_MM } from '@/engine/cnc/engrave/goalUnderside';
 import { planUndersideFlip } from '@/engine/cnc/engrave/goalFlipSetups';
 import { sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
@@ -123,6 +123,9 @@ function jobOf(target: EngraveTargetObject, thickness = 20): EngraveJob {
     targetObject: target,
   };
 }
+
+import { goalWorkMesh } from '@/engine/cnc/engrave/goalFlipFindings';
+const goalWorkMeshForTest = (goal: EngraveTargetObject) => goalWorkMesh(goal)!;
 
 const FLAT = { x: 30, y: 30, z: 10 };
 const SPHERE = { x: 20, y: 20, z: 20 };
@@ -253,6 +256,26 @@ describe('#898 — flipped, held by tabs', () => {
     const out = planUndersideFlip(jobOf(fat, 30), fat);
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toContain('tab band');
+  });
+
+  it('the section contour at a height is a closed loop — the freeing cut follows it', () => {
+    const goal = goalOf(sphereStl(), SPHERE);
+    const mesh = { positions: new Float32Array(0), indices: new Uint32Array(0) };
+    void mesh;
+    // The sphere's section at its centre: one closed loop around the centre, its area the disc's.
+    const loops = crossSectionPolylines(goalWorkMeshForTest(goal), -10);
+    expect(loops).toHaveLength(1);
+    const loop = loops[0]!;
+    let area = 0;
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i]!;
+      const b = loop[(i + 1) % loop.length]!;
+      area += a[0] * b[1] - b[0] * a[1];
+    }
+    const disc = Math.abs(area) / 2;
+    // A faceted ⌀20 sphere: within 5% of π r² (48 facets).
+    expect(disc).toBeGreaterThan(Math.PI * 100 * 0.95);
+    expect(disc).toBeLessThan(Math.PI * 100 * 1.05);
   });
 
   it('the default tab band is the labelled half-thickness', () => {

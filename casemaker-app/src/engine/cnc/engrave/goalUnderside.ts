@@ -266,6 +266,82 @@ export function crossSectionArea(mesh: CoverageMesh, z: number): number {
 }
 
 /**
+ * THE SECTION CONTOUR AT A HEIGHT (#898's freeing cut): the same oriented segments `crossSectionArea`
+ * sums, traced into closed loops — [(x, y), ...] per loop, in the work frame. A loop the mesh does
+ * not close (a non-watertight file) is dropped rather than cut as an open path.
+ */
+export function crossSectionPolylines(mesh: CoverageMesh, z: number): [number, number][][] {
+  const p = mesh.positions;
+  const idx = mesh.indices;
+  const segs: { a: [number, number]; b: [number, number] }[] = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t]! * 3;
+    const b = idx[t + 1]! * 3;
+    const c = idx[t + 2]! * 3;
+    const za = p[a + 2]!;
+    const zb = p[b + 2]!;
+    const zc = p[c + 2]!;
+    if ((za > z && zb > z && zc > z) || (za < z && zb < z && zc < z)) continue;
+    const xs: [number, number][] = [];
+    const edge = (i: number, j: number): void => {
+      const zi = p[i + 2]!;
+      const zj = p[j + 2]!;
+      if ((zi > z) === (zj > z)) return;
+      const t2 = (z - zi) / (zj - zi);
+      xs.push([p[i]! + (p[j]! - p[i]!) * t2, p[i + 1]! + (p[j + 1]! - p[i + 1]!) * t2]);
+    };
+    edge(a, b);
+    edge(b, c);
+    edge(c, a);
+    if (xs.length !== 2) continue;
+    const ux = p[b]! - p[a]!;
+    const uy = p[b + 1]! - p[a + 1]!;
+    const uz = p[b + 2]! - p[a + 2]!;
+    const vx = p[c]! - p[a]!;
+    const vy = p[c + 1]! - p[a + 1]!;
+    const vz = p[c + 2]! - p[a + 2]!;
+    const nx = uy * vz - uz * vy;
+    const ny = uz * vx - ux * vz;
+    const dx = xs[1]![0] - xs[0]![0];
+    const dy = xs[1]![1] - xs[0]![1];
+    const forward = dx * -ny + dy * nx >= 0;
+    segs.push({ a: forward ? xs[0]! : xs[1]!, b: forward ? xs[1]! : xs[0]! });
+  }
+  // Trace the segments into loops: each segment's end snaps to the nearest unused start.
+  const key = (v: [number, number]): string => `${Math.round(v[0] * 1e4)},${Math.round(v[1] * 1e4)}`;
+  const byStart = new Map<string, number[]>();
+  segs.forEach((seg, i) => {
+    const k = key(seg.a);
+    byStart.set(k, [...(byStart.get(k) ?? []), i]);
+  });
+  const used = new Array<boolean>(segs.length).fill(false);
+  const loops: [number, number][][] = [];
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue;
+    used[i] = true;
+    const loop: [number, number][] = [segs[i]!.a];
+    let cursor = segs[i]!;
+    let closed = false;
+    for (let guard = 0; guard < segs.length + 1; guard++) {
+      loop.push(cursor.b);
+      if (key(cursor.b) === key(loop[0]!)) {
+        closed = true;
+        break;
+      }
+      const next = (byStart.get(key(cursor.b)) ?? []).find((j) => !used[j]);
+      if (next === undefined) break;
+      used[next] = true;
+      cursor = segs[next]!;
+    }
+    if (closed && loop.length >= 4) {
+      loop.pop(); // the closing point repeats the first
+      loops.push(loop);
+    }
+  }
+  return loops;
+}
+
+/**
  * #898 — THE SILHOUETTE PARTING PLANE: the work Z where the part's horizontal cross-section is
  * largest. Sample the plane across the mesh's Z extent and take the widest; ties go to the middle
  * of the range, so a symmetric part parts on its centre line. Null when the mesh cannot be read.
