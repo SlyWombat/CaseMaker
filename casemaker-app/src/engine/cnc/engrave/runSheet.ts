@@ -297,6 +297,14 @@ export interface RunSheetProgram {
    * its faces. Absent on every other program.
    */
   neckOnly?: boolean;
+  /**
+   * THE SURFACE MARKER: a 3D surface program's check (`EngraveProgram.surfaceCheck`), the material
+   * sweep that stands in for the 2.5D verifier. Structurally the worker's own field, so the
+   * generated program is assignable unchanged and a stored result keeps it. A surface program has
+   * no verifier report and no air-trace frame BY DESIGN, so its missing frame is not a failure.
+   * Absent/null on every 2.5D program.
+   */
+  surfaceCheck?: { readonly kind: 'surface' } | null;
 }
 
 /**
@@ -3131,15 +3139,27 @@ function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
   return steps;
 }
 
+/** The sentence for a 3D surface program's missing frame: by design, never a failure. */
+function surfaceNoFrameStep(nc: string): RunSheetStep {
+  return {
+    text:
+      'A 3D surface program carries no air-trace frame; its check is the material sweep. Look at the ' +
+      `work origin and the clamps before you load ${nc}.`,
+    value: 'no frame by design',
+  };
+}
+
 /** The frame/load pair for a later program: its own dry run, then the file. */
 function programRunSteps(program: RunSheetProgram, number: number): RunSheetStep[] {
   const steps: RunSheetStep[] = [];
   if (program.frameNc === null) {
     // #747 — two different absences. A frame WITHHELD from a program that verified says so, names
     // the worker's reason and lets the operator decide; only a program that itself failed is a
-    // "do not run".
+    // "do not run". A 3D surface program is a third: it never has a frame, by design.
     steps.push(
-      program.frameError != null
+      program.frameError == null && program.surfaceCheck != null
+        ? surfaceNoFrameStep(program.nc)
+        : program.frameError != null
         ? {
             text:
               `There is no frame file for program ${number}. ${program.frameError} ${program.nc} ` +
@@ -3400,6 +3420,92 @@ function restProgramSection(program: RunSheetProgram, facts: RestPassFacts, labe
     ...throughCutSteps(program.through),
     ...neckSawSteps(program.neck),
   ];
+}
+
+/** The machine axis a turn from one setup's matrix to the next is about, or null when none is clean. */
+function turnAxis(from: readonly (readonly number[])[], to: readonly (readonly number[])[]): 'x' | 'y' | 'z' | null {
+  // The relative turn is `to · fromᵀ`; an axis-aligned turn leaves exactly one machine axis fixed,
+  // and that axis's diagonal entry is 1.
+  const fixed: ('x' | 'y' | 'z')[] = [];
+  (['x', 'y', 'z'] as const).forEach((axis, i) => {
+    let d = 0;
+    for (let k = 0; k < 3; k++) d += to[i]![k]! * from[i]![k]!;
+    if (Math.abs(d - 1) < 1e-9) fixed.push(axis);
+  });
+  return fixed.length === 1 ? fixed[0]! : null;
+}
+
+const AXIS_WORDS: Record<'x' | 'y' | 'z', string> = {
+  x: 'about the machine’s X axis (left to right)',
+  y: 'about the machine’s Y axis (front to back)',
+  z: 'about the vertical axis, flat on the bed',
+};
+
+/**
+ * THE TURN BETWEEN SETUPS: the physical act between the last program of one setup and the first
+ * of the next — what to turn, about which axis, and what to register on. The turn is the setups
+ * engine's own landmark words (`turnWords`), so the paper and the remount page say the same thing.
+ * Empty when the two setups hold the stock the same way up.
+ *
+ * `freesPart` adds the plain warning that the next side separates the part from the stock.
+ */
+function turnOverSteps(
+  job: EngraveJob,
+  fromIndex: number,
+  toIndex: number,
+  freesPart: boolean,
+): RunSheetStep[] {
+  const setups = jobSetups(job);
+  const from = setups[fromIndex - 1];
+  const to = setups[toIndex - 1];
+  if (from === undefined || to === undefined) return [];
+  const size = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
+  let words: string[] = [];
+  let axis: 'x' | 'y' | 'z' | null = null;
+  try {
+    const a = orient(from.orientation.top, from.mount, size);
+    const b = orient(to.orientation.top, to.mount, size);
+    if (!a.ok || !b.ok) return [];
+    words = turnWords(a.matrix, b.matrix, to.mount);
+    axis = turnAxis(a.matrix, b.matrix);
+  } catch {
+    return [];
+  }
+  if (words.length === 0) return [];
+  const fmtAt = (p: { x: number; y: number }): string => `X ${fmtNum(p.x)}, Y ${fmtNum(p.y)}`;
+  const register =
+    to.pins !== undefined
+      ? `Register it on the two locating pins: seat the dowel holes setup ${fromIndex} drilled onto pins at ` +
+        `${fmtAt(to.pins.at[0])} and ${fmtAt(to.pins.at[1])} mm, measured from the blank’s front-left corner ` +
+        'as it now sits. Set the work origin there before you cut.'
+      : to.remount !== undefined && to.remount.instruction.length > 0
+        ? `Register it as the remount says: ${to.remount.instruction.join(' ')}`
+        : to.registration !== undefined
+          ? `Register it with the approved registration — ${to.registration.expected} — before you cut.`
+          : to.mount.kind === 'vise'
+            ? 'Register it on the vise’s fixed jaw and the same stop as before; there is no other reference, ' +
+              'so set the work origin again on the face now up before you cut.'
+            : 'Register it on the mount’s edges as before; there is no other reference, so set the work ' +
+              'origin again on the face now up before you cut.';
+  const turned = to.orientation.top === 'bottom' ? 'over' : 'onto its new face';
+  const steps: RunSheetStep[] = [
+    {
+      text:
+        `Turn the part over for setup ${toIndex}. Lift the cutter clear and unclamp the blank, with the part ` +
+        `still in it, then turn it ${turned}${axis === null ? '' : ` ${AXIS_WORDS[axis]}`}. ${words.join(' ')} ` +
+        register,
+      value: axis === null ? `setup ${toIndex}` : `turned about ${axis.toUpperCase()}`,
+      bold: true,
+    },
+  ];
+  if (freesPart) {
+    const held = to.mount.kind === 'vise' ? 'in the vise' : 'on the bed';
+    steps.push({
+      text: `Side ${toIndex} cuts the part free; it will be loose ${held} — hold it or stop before the last pass.`,
+      bold: true,
+    });
+  }
+  return steps;
 }
 
 /** Where `nc` sits in the run, 1-based among the engraving programs; null when it is not there. */
@@ -4102,13 +4208,21 @@ export function buildRunSheet(
   // the sheet opens on exactly that — it is only blocked when the job has since changed. Since
   // #747 a good program can also have NO frame because the trace was withheld, and `frameError`
   // says why: that is not a refused program, so the step says the file can still be cut.
+  //
+  // A 3D surface program (`surface3d`) never has a frame and has no verifier report: its check is
+  // the material sweep. Its missing frame is by design, so it never reads as a refused program —
+  // unless a verifier report is present and failed, which is a real failure.
+  const surfaceByDesign =
+    generated.surface3d != null && generated.frameError == null && generated.verify?.ok !== false;
   const dryRunSteps: RunSheetStep[] =
     generated.frameNc === null
       ? [
           // #747 — a frame WITHHELD from a program that verified is not a failed program. The
           // reason is the worker's own sentence; the operator may still cut the file, without the
           // trace that would have confirmed the origin, and the sheet says exactly that.
-          generated.frameError != null
+          surfaceByDesign
+            ? surfaceNoFrameStep(header.fileName)
+            : generated.frameError != null
             ? {
                 text:
                   `There is no frame file for this job. ${generated.frameError} The program ` +
@@ -4490,10 +4604,29 @@ export function buildRunSheet(
   // summary and frame. The run is the files played in order, so the sections are the physical
   // order too: after program 1 finishes, the operator meets program 2's swap (or bit) here.
   const programSections: { id: string; title: string; steps: RunSheetStep[] }[] = [];
+  // The turn between setups opens the first section of the next setup. A board's own section
+  // already states its turn, and a rotary job's turns are the A axis's, so neither repeats it here.
+  // A 3D goal turned over to cut its other side has nothing left holding the part once that side
+  // is cut — no tabs — so its last side says the part comes free.
+  const setupCount = jobSetups(job).length;
+  const turnsHere = pcbBoardSteps(job, tool) === null && job.workholding.kind !== 'rotary-chuck';
   if (hasProgramList) {
     for (let i = 1; i < runPrograms.length; i++) {
       const program = runPrograms[i]!;
       const number = i + 1;
+      const previousSetup = runPrograms[i - 1]!.setupIndex;
+      const turn =
+        turnsHere && program.setupIndex !== previousSetup
+          ? turnOverSteps(
+              job,
+              previousSetup,
+              program.setupIndex,
+              generated.surface3d != null &&
+                program.setupIndex === setupCount &&
+                jobSetups(job)[program.setupIndex - 1]?.orientation.top === 'bottom',
+            )
+          : [];
+      const sectionStart = programSections.length;
       const rest =
         options.restPass !== undefined && restInOwnSection && program.nc === options.restPass.rest.nc
           ? options.restPass
@@ -4530,6 +4663,8 @@ export function buildRunSheet(
           steps: engraveProgramSectionSteps(program, number),
         });
       }
+      const opened = programSections[sectionStart];
+      if (opened !== undefined && turn.length > 0) opened.steps = [...turn, ...opened.steps];
     }
   }
 
