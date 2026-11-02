@@ -18,8 +18,9 @@ test.setTimeout(240_000);
 /**
  * The empty job with the block as its goal, set up to exceed the app's memory budget. The defaults
  * make the FINISH the cost (a 0.02 mm grid and step-over); `gridPitch`/`finishStepOver`/`stepDown`
- * override them. A fine step-down makes the ROUGHING the cost instead (#889), and a fine enough
- * step also makes half the depth too big, which is the "no split possible" case.
+ * override them. A fine step-down makes the ROUGHING the cost instead (#889); a scaled-up goal at
+ * a fine finish keeps the memory the cost while half of it is still too big, which is the "no
+ * split possible" case.
  */
 async function budgetBlocker(
   page: import('@playwright/test').Page,
@@ -91,8 +92,11 @@ test('#832/#888/#889 — the step-down press writes the number it states onto th
   await cm.ready();
   // #889 — the step-down press exists for a job whose size is its ROUGHING: a coarse grid keeps
   // the finish's tip field under its cap (so the step-down can help at all), and a very fine
-  // step-down is what puts the rough over the budget.
-  await budgetBlocker(page, { gridPitch: '0.1', finishStepOver: '0.3', stepDown: '0.01', roughStepOver: '0.01' });
+  // step-down is what puts the rough over the budget. #902's re-priced budget counts a merged
+  // flat level in tens of bytes a move, so the goal is scaled to 200 % (40 × 40 × 12 mm): at
+  // 0.01 mm levels the rough alone is ~5.6 M moves, ~1030 MB against the 640 MB budget, and a
+  // coarser step-down brings it under.
+  await budgetBlocker(page, { gridPitch: '0.1', finishStepOver: '0.3', stepDown: '0.01', roughStepOver: '0.01', scalePct: '200' });
   const stepText = (await page.getByTestId('engrave-generate-at-stepdown').textContent()) ?? '';
   const stepMm = Number(/\(([\d.]+) mm step-down/.exec(stepText)?.[1]);
   await page.getByTestId('engrave-generate-at-stepdown').click();
@@ -130,9 +134,11 @@ test('#888 — the split press BUILDS two setups, each side with its own depth b
 
 test('#888 — no split is offered when two bands would not fit the budget', async ({ cm, page }) => {
   await cm.ready();
-  // A finer step-down doubles the levels: half the depth is still over the budget, so there is
-  // no split to make and the press is not drawn.
-  await budgetBlocker(page, { stepDown: '0.2' });
+  // #902 — the budget is over on the FINISH here: at a 0.02 mm grid and step-over the scaled
+  // block (160 %, 32 × 32 × 9.6 mm) makes ~2.9 M finishing moves, ~1040 MB against the 640 MB
+  // budget. Half of them still cost ~805 MB, over the limit, so a two-band split would refuse
+  // again and the press is not drawn.
+  await budgetBlocker(page, { stepDown: '0.2', scalePct: '160' });
   await expect(page.getByTestId('engrave-generate-at-pitch')).toBeVisible();
   await expect(page.getByTestId('engrave-split-goal')).toHaveCount(0);
 });
