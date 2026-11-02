@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 3,
+  "id": "job-939-pocket-bores",
+  "name": "Milestone 1 sample 3: pocket and four bores on the stick",
+  "machineId": "Z1",
+  "stock": {
+    "length": 36,
+    "width": 100,
+    "thickness": 36,
+    "material": "hardwood"
+  },
+  "labels": [],
+  "shapes": [
+    {
+      "id": "pocket-rect",
+      "kind": "rect",
+      "position": {
+        "x": 18,
+        "y": 78
+      },
+      "rotation": 0,
+      "depth": 3,
+      "enabled": true,
+      "width": 20,
+      "height": 10,
+      "cornerRadius": 2
+    },
+    {
+      "id": "pocket-round",
+      "kind": "circle",
+      "position": {
+        "x": 18,
+        "y": 55
+      },
+      "rotation": 0,
+      "depth": 3,
+      "enabled": true,
+      "diameter": 8
+    }
+  ],
+  "toolKey": "inv:kz-corn-3-0-12",
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": 16,
+      "seat": "floor",
+      "fixedJawThickness": 10,
+      "movingJawThickness": 10,
+      "jawLength": 100,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 0.5
+    }
+  },
+  "minFloor": 1,
+  "edgeMargin": 1,
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "jawClearance": 1,
+  "customFonts": [],
+  "drills": [
+    {
+      "id": "bore-1",
+      "kind": "drill",
+      "position": {
+        "x": 10,
+        "y": 32
+      },
+      "rotation": 0,
+      "depth": 6,
+      "enabled": true,
+      "through": false,
+      "mode": "bore",
+      "diameter": 3.2
+    },
+    {
+      "id": "bore-2",
+      "kind": "drill",
+      "position": {
+        "x": 26,
+        "y": 32
+      },
+      "rotation": 0,
+      "depth": 6,
+      "enabled": true,
+      "through": false,
+      "mode": "bore",
+      "diameter": 3.2
+    },
+    {
+      "id": "bore-3",
+      "kind": "drill",
+      "position": {
+        "x": 10,
+        "y": 18
+      },
+      "rotation": 0,
+      "depth": 6,
+      "enabled": true,
+      "through": false,
+      "mode": "bore",
+      "diameter": 3.2
+    },
+    {
+      "id": "bore-4",
+      "kind": "drill",
+      "position": {
+        "x": 26,
+        "y": 18
+      },
+      "rotation": 0,
+      "depth": 6,
+      "enabled": true,
+      "through": false,
+      "mode": "bore",
+      "diameter": 3.2
+    }
+  ]
+}
