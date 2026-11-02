@@ -15,9 +15,16 @@ APPENDIX = [
     ('j26 split-helix', 'a pair of posted halves with no design to check them against'),
 ]
 
-# Sample jobs #939-#941 are written later in this column; the page and this list gain their cards
-# when the job files are committed. Until then they are named in the page's plans line.
-PLANNED = 'The five Milestone 1 hardwood samples (#936-#941): job files for #939-#941 are written later in this column; #936-#938 are bench sessions on jobs that already exist.'
+# The five Milestone 1 hardwood samples (36 × 36 × 100 sticks). A sample becomes a gate card in
+# CARDS when its job file is committed; until then the page lists it here with what is still missing,
+# so the same page gates the bench and shows what it cannot yet judge.
+SAMPLES = [
+    ('S1', 936, 'Flagship text job on the stick', 'the app’s default job, run from the GUI at bench session S2'),
+    ('S2', 938, 'Hardwood flat-cutter feed coupon', 'the coupon ladder is written in this column; its card opens with the record'),
+    ('S3', 939, 'Pocket and four bores on the 36 × 100 face', 'the job file is written in this column after S2'),
+    ('S4', 940, 'Two-cutter job: pocket, then V text on its floor', 'the job file is written in this column after S3'),
+    ('S5', 941, 'Chamfer the top edges, then a through-slot', 'the job files are written in this column after S4'),
+]
 
 CARDS = [
     dict(id='j01', title='Aluminium Top Clamp, the Z1’s preloaded first job', job='j01-topclamp-alu.json',

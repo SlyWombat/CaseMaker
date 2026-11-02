@@ -26,7 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 W = os.path.dirname(HERE)                      # docs/bench/2026-10-28-z1-real-jobs
 JOBS = os.path.join(W, 'jobs')
 sys.path.insert(0, HERE)
-from cards import CARDS, APPENDIX, PLANNED      # noqa: E402
+from cards import CARDS, APPENDIX, SAMPLES      # noqa: E402
 
 TOL = 0.02          # fraction of an item's area; the same 2 % the issue's verdict rule names
 NOISE = {'vise-default', 'sacrificial-default', 'plunge-unproven'}
@@ -380,7 +380,7 @@ def page(cards, args, sha, loc, cat):
   coverage), or a reference program swept the same way. No maker’s photo decides a verdict; the source line is
   provenance only.</p>
   <p class="meta">Case Maker main <b>{html.escape(sha)}</b> · location {html.escape(str(loc.get('id')))} “{html.escape(str(loc.get('name')))}”,
-  {len(loc.get('inventory') or [])} cutters in the location · catalogue {cat.get('tools', 0)} cutters / {cat.get('feeds', 0)} feed rows,
+  {len(loc.get('inventory') or [])} cutters in the location · catalogue {len(cat.get('tools') or [])} cutters / {len(cat.get('feeds') or [])} feed rows,
   synced {html.escape(str(cat.get('syncedAt')))} · built {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · no machine was used</p>
   <p class="meta">The design check is this repo’s own sweep against the job’s design until #924 lands (the app’s
   independent oracle). The page is rebuilt on the pinned sha at every wave end; one command rebuilds it —
@@ -398,7 +398,14 @@ def page(cards, args, sha, loc, cat):
   3D: zero cut-into the goal, coverage ≥ 95 %), <b>Deviates</b> (with the numbers and where), or <b>Refused</b>
   (the app’s sentence). Photo-judged verdicts and material proxies are retired; the as-filed job is judged.</p>
   <p>Not reproducible here, so not cards: {html.escape('; '.join(f'{a} — {b}' for a, b in APPENDIX))}.</p>
-  <p>{html.escape(PLANNED)}</p>
+  <h3>The five hardwood samples (#936–#941, the 36 × 36 × 100 sticks)</h3>
+  <p>A sample joins the card table below as soon as its job file is committed; until then this is what
+  the bench has and what is still missing. The bench sessions run from the app, and their cards are
+  judged by the same computed checks.</p>
+  <div class="tablewrap"><table>
+  <tr><th>sample</th><th>issue</th><th>what it measures</th><th>state</th></tr>
+  {''.join(f"<tr><td>{s}</td><td>#{n}</td><td>{html.escape(t)}</td><td>{html.escape(st)}</td></tr>" for s, n, t, st in SAMPLES)}
+  </table></div>
 </div></section>
 <section class="panel"><h2>All cards</h2><div class="tablewrap"><table>
 <tr><th>id</th><th>job</th><th>check</th><th>verdict</th><th>what the check says</th></tr>
