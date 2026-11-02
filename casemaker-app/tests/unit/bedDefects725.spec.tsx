@@ -395,6 +395,41 @@ describe('#725 B4 — a blocked run names its first error and its Fix', () => {
     expect(useStartWizardStore.getState().open).toBe(true);
   });
 
+  // #930 — THE SWEEP'S IDS DO NOT REACH THE OPERATOR. "the facing pass (flat-1.0): checkpoint 0:
+  // the cutter drives 0.477 mm³ into the fixture 'Vise moving jaw (right)' (vise-moving-jaw)" is a
+  // developer's sentence; the row says what would be cut, by what, and offers the one field that
+  // resolves it (the hold), while the raw sentence stays under Technical.
+  it('#930 — a cut-into-fixture sentence is the operator’s, with the code folded away and the hold as its Fix', () => {
+    render(<EngravePanel />);
+    const raw =
+      'the facing pass (flat-1.0): checkpoint 0: the cutter drives 0.477 mm³ into the fixture ' +
+      "'Vise moving jaw (right)' (vise-moving-jaw)";
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ...refused([]),
+          findings: [{ severity: 'error' as const, code: 'tool-into-fixture', message: raw }],
+        } as unknown as EngraveGenerated,
+        simStatus: null,
+        simDiagnostics: [],
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+
+    const line = screen.getByTestId('engrave-run-errors').textContent ?? '';
+    expect(line).toContain('The facing pass would cut 0.477 mm³ into the vise’s moving jaw (right)');
+    expect(line).not.toContain('flat-1.0');
+    expect(line).not.toContain('vise-moving-jaw');
+    expect(line).not.toContain('checkpoint');
+    // The code is still one press away, in the run's own words.
+    expect(screen.getByTestId('engrave-run-error-technical').textContent).toContain(raw);
+    // The fix is the hold: the pass ends below the jaw tops, so the blank must be held differently.
+    expect(screen.getByTestId('engrave-run-blocker-fix').textContent).toBe('Open the Holding step');
+    fireEvent.click(screen.getByTestId('engrave-run-blocker-fix'));
+    expect(useStartWizardStore.getState().open).toBe(true);
+  });
+
   it('a STALE run keeps no Fix: an edit re-opens Generate', () => {
     render(<EngravePanel />);
     act(() => {

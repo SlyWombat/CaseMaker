@@ -503,6 +503,23 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
     expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0.2, source: 'seed' });
   });
 
+  // #930 — A FACING PASS CANNOT BE SEEDED INTO THE JAWS. A 1.5 mm blank on the recommended 2 mm
+  // board stands 0.4 mm proud — less than the 0.5 mm rough pass — so the pass would end below the
+  // jaw tops and drive the cutter into them (the off-bench walk's failure). The seed is OFF, not
+  // shortened: a facing depth the operator did not ask for is not the app's to invent.
+  it('a blank that stands proud by less than the pass is never seeded facing on, however rough', async () => {
+    render(<StartWizard />);
+    skipToStockStep();
+    fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value: 'softwood' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60.3' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '20.1' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '1.5' } });
+    fireEvent.change(screen.getByTestId('start-wizard-stock-finish'), { target: { value: 'rough' } });
+    await start();
+
+    expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0, source: 'seed' });
+  });
+
   it('the finish line states the rule once, with no consequence paragraph (#683, A8)', () => {
     render(<StartWizard />);
     skipToStockStep();
@@ -594,7 +611,7 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect(job.labels[0]!.text).toBe('No bit yet');
   });
 
-  it('the stock step arrives with the blank the work asks for, and says where it came from', () => {
+  it('the stock step arrives with the house’s stock, and says where it came from', () => {
     act(() => {
       useStartWizardStore.getState().openWizard();
     });
@@ -605,8 +622,13 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect(next.disabled).toBe(false);
     // The button that leaves the stock step says what it leads to.
     expect(next.textContent).toBe('Next: holding');
-    // #897 — a line of text proposes its measured extent plus the margin, and the sentence says so.
-    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('Sized from the text');
+    // #930 — the shop's 36 × 36 × 100 mm hardwood stick, and the sentence says so.
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
+      'The house’s stock: a 36 × 36 × 100 mm hardwood stick',
+    );
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('100');
+    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('36');
+    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('36');
 
     // …and the sentence goes the moment a number is the operator's own.
     typePiece();
@@ -614,26 +636,23 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('nothing for the work to size: Next waits, and one sentence says how to unblock it', () => {
+  it('a pocket proposes the house’s stock too: Next is ready, with the sentence it came from', () => {
     act(() => {
       useStartWizardStore.getState().openWizard();
     });
     render(<WizardHost />);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
-    // A pocket needs no field, so the question is a valid answer that sizes no blank.
+    // A pocket sizes no blank of its own; #930 proposes the stock the shop keeps on the shelf.
     fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     const next = screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement;
-    expect(next.disabled).toBe(true);
-    // …and ONE sentence, in the step, says what to do — with the controls to do it right above.
-    expect(screen.getByTestId('start-wizard-stock-unblock').textContent).toBe(
-      'Choose the stock: a size you type, a piece on the shelf, or a file.',
-    );
+    expect(next.disabled).toBe(false);
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The house’s stock');
+    expect(screen.queryByTestId('start-wizard-stock-unblock')).toBeNull();
 
     typePiece();
     expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.queryByTestId('start-wizard-stock-unblock')).toBeNull();
   });
 });
 

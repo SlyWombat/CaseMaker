@@ -21,6 +21,52 @@ import type { OperationChoice } from './OperationStep';
 export const PROPOSED_TEXT_SIZE_MM = 10;
 
 /**
+ * #930 — THE HOUSE'S STOCK, in one place: a 36 × 36 × 100 mm hardwood stick, the shop's material
+ * (maintainer, 2026-11-02) and the blank the milestone's samples are cut on.
+ *
+ * The wizard PROPOSES this for work that does not size its own blank (a line of text, a pocket,
+ * a chamfer …). Before #930 a line of text proposed a plate sized from its ink — 60.3 × 20.1 ×
+ * 1.5 mm for "Zoomba" — which the wizard's own facing pass then drove into the vise jaws, and the
+ * pocket proposed nothing at all. A first job is cut from the stick the shop has on the shelf, so
+ * that is what the blank step opens on; the operator can change every number.
+ *
+ * The stick stands on its 36 × 100 face: 100 mm along X (between the jaws), 36 mm along Y, 36 mm
+ * tall. That is the `block` form — squared stock — and its height is what puts it on the vise's
+ * body (16 mm above the jaw tops) rather than on the 3.1 mm ledge.
+ */
+export const HOUSE_STOCK = {
+  form: 'block' as const,
+  material: 'hardwood' as const,
+  length: 100,
+  width: 36,
+  thickness: 36,
+} as const;
+
+/** The blank step's proposal for the house stock, with the sentence that says where it came from. */
+export function houseStockProposal(): StockProposal {
+  return {
+    ...HOUSE_STOCK,
+    finish: 'rough',
+    sentence: 'The house’s stock: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
+  };
+}
+
+/**
+ * #930 — the blank a new job is proposed: the work's own when it sizes one (a mesh's box, a
+ * board's outline), the house's stick for everything else. A job already held in the rotary chuck
+ * keeps its own start (`workShapeFor` answers `none` for it), so nothing here invents a stick.
+ */
+export function proposedStockFor(
+  work: WorkShape,
+  job: EngraveJob,
+  proposed: StockProposal | null,
+): StockProposal | null {
+  if (work.kind === 'mesh' || work.kind === 'pcb') return proposed;
+  if (rotaryMapOf(job) !== null) return proposed;
+  return houseStockProposal();
+}
+
+/**
  * The material a proposed blank opens on.
  *
  * #897 — the house's own (hardwood, #879) for a job that has not said otherwise; a job that STATES

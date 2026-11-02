@@ -31,7 +31,7 @@ import {
   VISE_FLOOR_DEPTH,
   seatDepth,
 } from '@/engine/cnc/fixture';
-import { ROD_VISE_MAX_LENGTH_MM } from '@/engine/cnc/stockStart';
+import { ROD_VISE_MAX_LENGTH_MM, facingSeed, type FacingDepthShop } from '@/engine/cnc/stockStart';
 import { rotaryStockFits } from '@/engine/cnc/setups/plan';
 import { millModelById } from '@/engine/cnc/machine';
 import type { SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
@@ -54,7 +54,15 @@ import {
   surfaceWords,
   type MachineMountKind,
 } from '@/platform/machineChange';
-import type { BracketHold, EngraveJob, JobStockForm, TapeHold } from '@/types/engraveJob';
+import type {
+  BracketHold,
+  EngraveFacing,
+  EngraveJob,
+  JobStockFinish,
+  JobStockForm,
+  StockMaterial,
+  TapeHold,
+} from '@/types/engraveJob';
 
 /** The six mounts the step offers, in the mockup's order. */
 export type HoldingMount = 'ledge' | 'board' | 'block' | 'bed-tape' | 'bed-bracket' | 'rotary';
@@ -161,6 +169,8 @@ export function applyMount(
   a: SetupAnswers,
   mount: ViseHoldingMount,
   boardMm: number = a.sacrificial.under?.thickness ?? DEFAULT_BOARD_MM,
+  /** #930 — the recommendation is not the operator's assertion: it keeps the vise's provenance. */
+  asserted = true,
 ): SetupAnswers {
   const thickness = a.stock.thickness;
   const board =
@@ -183,22 +193,62 @@ export function applyMount(
       // change re-derives it instead of keeping this blank's number.
       stockProud: thickness + (board?.thickness ?? 0) - seatDepth(seat),
       proudSource: 'seat',
-      source: 'saved',
+      // #930 — a measured vise's jaw numbers stay the machine's reading; the arrival changed the
+      // SEAT the blank is held on, not the numbers anyone measured.
+      ...(asserted ? { source: 'saved' as const } : {}),
     },
   };
 }
 
 /**
- * Apply the mount the stock calls for, but only to a setup nobody has asserted yet: a shipped
- * default vise (never a saved or measured one) with no board of its own under the part. That is
- * the first arrival at step 3, when the numbers are all there is; a re-entry keeps the operator's
- * setup exactly, and the #231 fix is what corrects a saved value that disagrees with the blank.
+ * #930 — THE FACING THE SEAT CAN TAKE, seeded at the stock step.
+ *
+ * A facing pass sweeps the whole top, so its cutter runs to every edge of the blank; it can only
+ * run while the blank's top stands at least the pass above the jaw tops. A 1.5 mm blank on the
+ * ledge sits 1.6 mm BELOW them, and a 0.4 mm-proud blank on a board is shallower than the 0.5 mm
+ * pass — either way the pass drives the cutter into the jaws (the 2026-11-02 walk's failure). The
+ * recommended seat is the one the Holding step will arrive in, so it is the seat to judge.
+ *
+ * `jaws` is false when the machine does not carry the vise: a bed job has no jaw tops to clear.
+ * With no machine record the app's own vise is the model, and the guard applies.
+ */
+export function facingForSeat(
+  finish: JobStockFinish | null,
+  material: StockMaterial,
+  stock: { thickness: number },
+  shop: Partial<FacingDepthShop> | undefined,
+  jaws = true,
+): Pick<EngraveFacing, 'enabled' | 'depth' | 'source'> {
+  const seed = facingSeed(finish, material, shop);
+  if (!seed.enabled || !jaws) return seed;
+  const mount = recommendedMount(stock);
+  const proud =
+    mount === 'block'
+      ? stock.thickness - VISE_FLOOR_DEPTH
+      : mount === 'board'
+        ? boardSeatProud(stock.thickness, DEFAULT_BOARD_MM)
+        : stock.thickness - LEDGE_STEP;
+  // The pass must END above the jaw tops: a pass exactly as deep as the proud leaves the cutter on
+  // the jaw plane with nothing but the model's uncertainty in hand.
+  return proud > seed.depth ? seed : { enabled: false, depth: 0, source: 'seed' };
+}
+
+/**
+ * Apply the mount the stock calls for, but only to a setup nobody has asserted yet: a shipped or
+ * MEASURED vise (never a saved one) with no board of its own under the part.
+ *
+ * #930 — A MEASURED VISE IS NOT THE OPERATOR'S SETUP (the same reading #725 W10 gives the bed): it
+ * is the machine's own calibration, and a new job seeded from it must still arrive in the mount its
+ * numbers call for. The old rule only accepted `'default'`, so on a measured location the arrival
+ * never ran: a 1.5 mm blank left the ledge radio disabled with nothing selected, and Create wrote a
+ * job seated on the ledge the step had just refused. The write keeps the measured provenance (the
+ * jaw numbers are still the machine's); only the seat and the proud it derives move.
  */
 export function applyRecommendedMount(a: SetupAnswers, boardMm: number = DEFAULT_BOARD_MM): SetupAnswers {
-  if (a.vise.source !== 'default' || a.sacrificial.under !== null) return a;
+  if (a.vise.source === 'saved' || a.sacrificial.under !== null) return a;
   const mount = recommendedMount(a.stock);
   if (currentMount(a) === mount) return a;
-  return applyMount(a, mount, boardMm);
+  return applyMount(a, mount, boardMm, false);
 }
 
 // ── The machine's state, in one line ────────────────────────────────────────────────────────────
@@ -536,8 +586,15 @@ function hintFor(mount: HoldingMount, stock: { thickness: number }, boardMm: num
       if (proud === 0) return 'level with the jaw tops — a thicker board, or tape it to the bed';
       return `still ${fmt(-proud)} mm below the jaw tops — a thicker board, or tape it to the bed`;
     }
-    case 'block':
-      return 'the sides free; for a block taller than the jaws';
+    case 'block': {
+      // #930 — the stock's own numbers, not the option's category: a 36 mm stick on the body's
+      // floor stands 16 mm above the jaw tops and the jaws hold its lower 20 mm.
+      const proud = stock.thickness - VISE_FLOOR_DEPTH;
+      const grip = Math.min(stock.thickness, VISE_FLOOR_DEPTH);
+      return proud > 0
+        ? `${fmt(stock.thickness)} mm on the vise body — ${fmt(proud)} mm proud of the jaw tops; the jaws hold its bottom ${fmt(grip)} mm`
+        : `${fmt(stock.thickness)} mm on the vise body — its top ${fmt(-proud)} mm below the jaw tops`;
+    }
     default:
       return null;
   }

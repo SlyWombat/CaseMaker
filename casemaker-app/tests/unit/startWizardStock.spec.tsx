@@ -253,7 +253,9 @@ describe('the material-first start (#418)', () => {
     const job = useEngraveJobStore.getState().job;
     expect(job.stock).toMatchObject({ length: 80, width: 50, thickness: 6 });
     // The opening finish is "as bought" (#683, A8), so a made piece is rough unless said otherwise.
-    expect(job.stockEntry).toMatchObject({ kind: 'made', shelfId: null, form: 'plate', finish: 'rough' });
+    // #930 — the step opens on the house's BLOCK (the 36 × 36 × 100 stick); typing over its
+    // numbers keeps the form the operator was shown.
+    expect(job.stockEntry).toMatchObject({ kind: 'made', shelfId: null, form: 'block', finish: 'rough' });
     // Non-square on purpose: an X/Y swap would show here. Length (X) is the blank's width, width (Y)
     // its height — `blankStockFor`'s mapping, read back the other way.
     expect(useProjectStore.getState().project.case.blank).toMatchObject({ width: 80, height: 50, thickness: 6 });

@@ -1380,6 +1380,13 @@ export interface HoldingStepProps {
   onHold: (hold: StockHold) => void;
   /** #783 — move the items onto the face that is now up (never automatic). */
   onMoveItemsToTop: () => void;
+  /**
+   * #930 — the hold this step is in cannot be the job's: no mount is selected (the one the job
+   * names is disabled or not offered on this machine). The shell owns the Create button, so it has
+   * to hear the reason and disable it — a disabled option must never leave nothing selected while
+   * Create still lands a job in it.
+   */
+  onMountBlocked?: (reason: string | null) => void;
 }
 
 /** The answers with a board under the part, or none — the bed's own field, as the design writes it. */
@@ -1496,7 +1503,16 @@ function HoldChoice({
   );
 }
 
-export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHold, onMoveItemsToTop }: HoldingStepProps): JSX.Element {
+export function HoldingStep({
+  job,
+  answers,
+  onAnswers,
+  onRotary,
+  onBedHold,
+  onHold,
+  onMoveItemsToTop,
+  onMountBlocked,
+}: HoldingStepProps): JSX.Element {
   const location = useLocationStore((s) => s.location);
   // #730 — the JOB's machine (its `machineId` names a profile id), not the house's first: the
   // step's profile and its board sentence must judge the same bed Generate will. The change
@@ -1601,6 +1617,20 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold, onHo
         : answers.workholding === 'rotary'
           ? 'rotary'
           : currentMount(answers);
+  // #930 — NOTHING SELECTED IS NOT A HOLD. The arrival below makes the stock's own mount the
+  // selected one; if that mount (or one the job names) is disabled on this machine, there is no
+  // selected radio at all, and the job must not be created in it. The shell owns Create, so it
+  // hears the reason and disables the press until a mount is chosen. A mount this build does not
+  // OFFER (a board import's tape, with no machine record) is not this defect: the step simply has
+  // no radio for it, and blocking Create would refuse a job the import already made.
+  const currentOption = options.find((o) => o.mount === current) ?? null;
+  const mountBlocked =
+    currentOption !== null && currentOption.disabled
+      ? (currentOption.reason ?? 'choose how the stock is held')
+      : null;
+  useEffect(() => {
+    onMountBlocked?.(mountBlocked);
+  }, [mountBlocked, onMountBlocked]);
   // #705 — the picture follows the radio: the operator's chosen mount, or the option under the
   // pointer/focus when it is a disabled one that needs a machine change (drawn with its cost line).
   const [previewMount, setPreviewMount] = useState<HoldingMount | null>(null);

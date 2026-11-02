@@ -261,6 +261,38 @@ function sentenceCase(text: string): string {
 }
 
 /**
+ * #930 — A RUN'S FAILURE, IN THE OPERATOR'S WORDS.
+ *
+ * The sweep's message names the program, the checkpoint and the obstacle by their internal ids —
+ * `the facing pass (flat-1.0): checkpoint 0: the cutter drives 0.477 mm³ into the fixture 'Vise
+ * moving jaw (right)' (vise-moving-jaw)` — which is a developer's sentence, not a person's. This
+ * keeps the fact (what would be cut, how much, by what) and drops the ids; the raw sentence is
+ * kept under Technical. A finding's own sentence (a verifier refusal) has no ids and passes
+ * through unchanged.
+ */
+function operatorRunError(message: string): string {
+  const before = message;
+  let text = message
+    // `(flat-1.0)`, `(vise-moving-jaw)` — parenthesised registry keys and obstacle ids.
+    .replace(/\s*\([a-z0-9]+(?:[.-][a-z0-9]+)+\)/gi, '')
+    // `checkpoint 3:` is the sweep's own coordinate, not a place on the part.
+    .replace(/\bcheckpoint \d+:\s*/gi, '');
+  // The program's label keeps its name ("the facing pass") and becomes the subject of the clause.
+  text = text.replace(/^(.+?):\s+the cutter drives\b/i, '$1 would cut');
+  text = text.replace(/\bthe cutter drives\b/i, 'the cutter would cut');
+  // A named obstacle is a fixture with a label: "into the fixture 'Vise moving jaw (right)'" →
+  // "into the vise's moving jaw (right)".
+  text = text.replace(/into the fixture 'Vise ([^']+)'/g, (_m, rest: string) => {
+    const lower = rest.charAt(0).toLowerCase() + rest.slice(1);
+    return `into the vise’s ${lower}`;
+  });
+  text = text.replace(/into the fixture '([^']+)'/g, 'into the $1');
+  // A finding's own sentence (a verifier refusal) is already the operator's and passes through
+  // untouched — capitalisation included, exactly as it was printed before #930.
+  return text === before ? message : sentenceCase(text.trim());
+}
+
+/**
  * #516 item 5 — the cutter key the first Generate should apply. Reads the preview's current pick;
  * when the preview has not landed yet (`loading`/`idle`) it waits for it, so a Generate pressed
  * before the preview finished still picks the cutter and builds the program in one press. Resolves
@@ -2678,7 +2710,15 @@ export function EngravePanel(): JSX.Element {
   // the run is CURRENT (`staleSince` null): an edit re-opens Generate, and the new run's verdict
   // replaces this one. `firstRunError` (#724 B2) is the one owner of "which error".
   const currentRunError = run.staleSince === null ? firstRunError(run) : null;
-  const runFix: PanelFix | null = currentRunError === null ? null : findingFix(currentRunError);
+  // #930 — the sweep's refusal to cut into the vise is answered in the HOLDING step (seat the
+  // blank high enough, or take it off the jaws), so that is the field the Fix opens. The plan's
+  // own holding group is where the vise row lives.
+  const runFix: PanelFix | null =
+    currentRunError === null
+      ? null
+      : currentRunError.code === 'tool-into-fixture'
+        ? { group: 'engrave-group-hold', openWizardStep: 'holding' }
+        : findingFix(currentRunError);
   // #785 follow-up — the too-big refusal's one-click grid: the run stopped on it, and the finding
   // carries the pitch that fits. The button beside the sentence writes that pitch onto the goal's
   // grid and presses Generate in the same click, so the refusal turns into a choice.
@@ -4846,10 +4886,12 @@ export function EngravePanel(): JSX.Element {
       <details data-testid="engrave-vise-card" style={{ marginTop: 4 }}>
         <summary style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, fontSize: 12, color: '#c8d3de' }}>
           <span>
-            Vise — <span style={TAG} data-testid="engrave-vise-badge">{viseBadge(vise)}</span> blank on the {vise.seat}
+            Vise — <span style={TAG} data-testid="engrave-vise-badge">{viseBadge(vise)}</span> blank on the{' '}
+            {job.sacrificial.under === null ? '' : `${fmt(job.sacrificial.under.thickness)} mm board on the `}
+            {vise.seat}
             {vise.stockProud >= 0
-              ? `, ${vise.stockProud} mm proud of the jaw tops`
-              : `, ${-vise.stockProud} mm below the jaw tops`}
+              ? `, ${fmt(vise.stockProud)} mm proud of the jaw tops`
+              : `, ${fmt(-vise.stockProud)} mm below the jaw tops`}
           </span>
           <span style={MUTED}>Edit</span>
         </summary>
@@ -5420,7 +5462,9 @@ export function EngravePanel(): JSX.Element {
                 style={{ ...MUTED, color: runPitchFinding !== null ? SEVERITY_COLOR.warning : SEVERITY_COLOR.error }}
                 data-testid="engrave-run-errors"
               >
-                {firstRunErrorText ?? `${runErrors.length} error${runErrors.length === 1 ? '' : 's'} outstanding.`}
+                {firstRunErrorText === null
+                  ? `${runErrors.length} error${runErrors.length === 1 ? '' : 's'} outstanding.`
+                  : operatorRunError(firstRunErrorText)}
                 {runErrors.length > 1 && ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'})`}
                 {/* #888 — the budget's three presses, in the operator's words, each saying what it
                     costs: coarsen, thicken the layers, or split the depth into two setups. The
@@ -5506,6 +5550,20 @@ export function EngravePanel(): JSX.Element {
                   </>
                 )}
               </p>
+            )}
+            {/* #930 — THE CODE STAYS IN THE FOLD. The sentence above is the operator's; the sweep's
+                own words — the program, the checkpoint, the obstacle id — are the technical record,
+                one press away. */}
+            {firstRunErrorText !== null && operatorRunError(firstRunErrorText) !== firstRunErrorText && (
+              <details data-testid="engrave-run-error-technical" style={{ margin: '0 0 6px' }}>
+                <summary style={{ ...MUTED, cursor: 'pointer', listStyle: 'none' }}>Technical</summary>
+                <p style={{ ...MUTED, margin: '2px 0 0', lineHeight: 1.45 }}>
+                  {firstRunErrorText}
+                  {runErrors.length > 1
+                    ? ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'}; the first is shown)`
+                    : ''}
+                </p>
+              </details>
             )}
             {/* #888 — THE NUMBERS UNDER TECHNICAL. The sentence above says what the goal is in the
                 operator's terms; the moves, cells, pitch, step-down and budget that made the

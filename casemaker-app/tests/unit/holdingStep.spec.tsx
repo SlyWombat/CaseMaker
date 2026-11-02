@@ -48,7 +48,7 @@ import {
   type LocationView,
   type MachineRecord,
 } from '@/platform/locationClient';
-import type { EngraveJob, EngraveTargetObject, JobStockEntry } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject, JobStockEntry, ViseParams } from '@/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, 'fixtures', 'location-doc.json');
@@ -295,7 +295,9 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     openHolding(dj({ length: 40, width: 40, thickness: 25 }));
 
     expect(radio('block').checked).toBe(true);
-    expect(rowText('block')).toContain('the sides free; for a block taller than the jaws');
+    // #930 — the line states this stock's own seat, proud and grip, not the option's category.
+    expect(rowText('block')).toContain('25 mm on the vise body — 5 mm proud of the jaw tops');
+    expect(rowText('block')).toContain('the jaws hold its bottom 20 mm');
     const job = useEngraveJobStore.getState().job;
     expect(jobVise(job).seat).toBe('floor');
     expect(jobVise(job).stockProud).toBeCloseTo(5, 6);
@@ -415,6 +417,50 @@ describe('#684 — a saved setup is the operator’s, not the stock’s recommen
     expect(currentMount(a)).toBe('ledge');
   });
 
+  // #930 — THE WALK'S CASE. The location's vise is MEASURED (the machine's own reading), not the
+  // operator's saved setup; a new job seeded from it must still arrive in the mount its numbers
+  // call for. The old rule only accepted `default`, so the arrival never ran: a thin blank left
+  // the ledge radio disabled with nothing selected, and Create wrote the job into that ledge.
+  describe('a MEASURED vise is the machine’s calibration, not this job’s setup', () => {
+    /** The job the location's measured vise actually seeds: the machine's reading, not a saved one. */
+    function measuredJob(stock: Partial<EngraveJob['stock']>): EngraveJob {
+      const job = dj(stock);
+      const measured = (DOC.machines[0] as { fixtures: { vise: ViseParams } }).fixtures.vise;
+      return { ...job, workholding: { kind: 'vise', vise: { ...measured } } };
+    }
+
+    it('a 1.5 mm blank arrives on the waste board, with the board named in the job', () => {
+      seedLocation(machineWith(null));
+      openHolding(measuredJob({ length: 60.3, width: 20.1, thickness: 1.5 }));
+
+      expect(radio('board').checked).toBe(true);
+      expect(radio('ledge').disabled).toBe(true);
+      const job = useEngraveJobStore.getState().job;
+      expect(jobVise(job).seat).toBe('ledge');
+      expect(job.sacrificial.under?.thickness).toBe(2);
+      expect(jobVise(job).stockProud).toBeCloseTo(0.4, 6);
+      // The jaw numbers are still the machine's reading — the arrival changed the seat only.
+      expect(jobVise(job).source).toBe('measured');
+      expect(jobVise(job).proudSource).toBe('seat');
+      // …and Create is live: the stock's mount is selected.
+      expect((screen.getByTestId('engrave-setup-next') as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.queryByTestId('start-wizard-holding-unblock')).toBeNull();
+    });
+
+    it('the 36 mm stick arrives on the vise body, 16 mm proud, and the line says so', () => {
+      seedLocation(machineWith(null));
+      openHolding(measuredJob({ length: 100, width: 36, thickness: 36 }));
+
+      expect(radio('block').checked).toBe(true);
+      expect(rowText('block')).toContain('36 mm on the vise body — 16 mm proud of the jaw tops');
+      expect(rowText('block')).toContain('the jaws hold its bottom 20 mm');
+      const job = useEngraveJobStore.getState().job;
+      expect(jobVise(job).seat).toBe('floor');
+      expect(jobVise(job).stockProud).toBeCloseTo(16, 6);
+      expect((screen.getByTestId('engrave-setup-next') as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+
   it('a default vise with no board takes the recommendation', () => {
     const a = defaultSetupAnswers(dj({ thickness: 2 }));
     const next = applyRecommendedMount(a, 2);
@@ -422,6 +468,30 @@ describe('#684 — a saved setup is the operator’s, not the stock’s recommen
     expect(next.sacrificial.under?.thickness).toBe(2);
     expect(next.workholding).toBe('vise');
     expect(next.vise.stockProud).toBeCloseTo(0.9, 6);
+  });
+
+  // #930 — WHEN NOTHING IS SELECTED, CREATE DOES NOT LAND A JOB IN IT. A saved setup the stock no
+  // longer fits (a 1.5 mm blank still seated on the ledge) leaves the ledge radio disabled and no
+  // radio selected; the wizard has to say why and keep the press off until a mount is chosen.
+  it('a hold the stock cannot sit in disables Create with its reason, and choosing a mount clears it', () => {
+    seedLocation(machineWith(null));
+    const job = dj({ length: 60.3, width: 20.1, thickness: 1.5 });
+    const saved = { ...jobVise(job), seat: 'ledge' as const, source: 'saved' as const };
+    openHolding({ ...job, workholding: { kind: 'vise', vise: saved } });
+
+    expect(radio('ledge').disabled).toBe(true);
+    expect(radio('ledge').checked).toBe(false);
+    const create = screen.getByTestId('engrave-setup-next') as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    expect(screen.getByTestId('start-wizard-holding-unblock').textContent).toBe(
+      'it would sit 1.6 mm below the jaw tops.',
+    );
+
+    act(() => {
+      fireEvent.click(radio('board'));
+    });
+    expect((screen.getByTestId('engrave-setup-next') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId('start-wizard-holding-unblock')).toBeNull();
   });
 
   it('seatedProud counts the board under the part and the seat under it', () => {

@@ -11,7 +11,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { StartWizard } from '@/components/welcome/StartWizard';
-import { WORK_STOCK_MARGIN_MM, WORK_STOCK_SKIN_MM } from '@/engine/cnc/stockProposal';
 import { PCB_STANDARD_THICKNESS_MM, jobItemCount } from '@/engine/cnc/stockStart';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -166,7 +165,7 @@ endsolid tet
 `;
 
 describe('#897 — the question comes first, and it sizes the blank', () => {
-  it('a line of text proposes its extent plus the margin, and the sentence says so', async () => {
+  it('a line of text proposes the house’s stock, and the sentence says so', async () => {
     openWizard();
     toQuestion();
     fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Hello' } });
@@ -174,20 +173,16 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     expect(progress()).toContain('Stock');
-    // The step says where the starting numbers came from.
+    // #930 — THE HOUSE'S STOCK, not a plate sized from the line: the shop cuts 36 × 36 × 100 mm
+    // hardwood sticks, and a first job keeps every default.
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
-      'Sized from the text',
+      'The house’s stock: a 36 × 36 × 100 mm hardwood stick',
     );
-    // The house material for a job that has not named one (#879), and the thickness rule is the
-    // ONE function: the line's depth plus the stated skin.
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('hardwood');
-    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe(
-      String(2 + WORK_STOCK_SKIN_MM),
-    );
-    const length = Number((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value);
-    const width = Number((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value);
-    expect(length).toBeGreaterThan(2 * WORK_STOCK_MARGIN_MM);
-    expect(width).toBeGreaterThan(2 * WORK_STOCK_MARGIN_MM);
+    expect(screen.getByTestId('start-wizard-form-block').getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('100');
+    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('36');
+    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('36');
 
     await leaveStock();
     // The hold follows from the blank the work asked for, and the last step creates the line.
@@ -200,10 +195,10 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     expect(job.labels).toHaveLength(1);
     expect(job.labels[0]).toMatchObject({ text: 'Hello', depth: 2 });
     expect(job.stock.material).toBe('hardwood');
-    expect(job.stock.thickness).toBe(2 + WORK_STOCK_SKIN_MM);
+    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([100, 36, 36]);
   });
 
-  it('a job that states its own material keeps it, and the blank is still sized by the work', () => {
+  it('a job that states its own material keeps it, and the blank is still the house’s stock', () => {
     const base = defaultEngraveJob();
     useEngraveJobStore.setState({ job: { ...base, stock: { ...base.stock, material: 'brass' } } });
     openWizard();
@@ -214,7 +209,7 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     // The proposal sizes the blank; it does not overrule the piece the job has named.
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('brass');
     // …and because the step's answer still MATCHES the proposal, the sentence it came from stays.
-    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('Sized from the text');
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The house’s stock');
   });
 
   it('a mesh is seated on the blank its own box proposed, not on the one it was read against', async () => {

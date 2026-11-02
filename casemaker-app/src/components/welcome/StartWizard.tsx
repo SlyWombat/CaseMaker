@@ -15,6 +15,7 @@ import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { newItemDepthFor, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useLocationStore } from '@/store/locationStore';
+import { machineForJob } from '@/platform/bedProfiles';
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { useFlightRecorderStore } from '@/store/flightRecorderStore';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -30,7 +31,7 @@ import { addOperationOfType, jobHasOperations } from '@/components/panels/operat
 import type { Project } from '@/types/project';
 import type { BracketHold, EngraveJob, JobStockEntry, RotaryChuck, StockHold, TapeHold } from '@/types/engraveJob';
 import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
-import { facingSeed, facingShopFrom, jobItemCount, rodDimsOf } from '@/engine/cnc/stockStart';
+import { facingShopFrom, jobItemCount, rodDimsOf } from '@/engine/cnc/stockStart';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import '@/store/stockEntryFollow';
 import {
@@ -45,12 +46,12 @@ import {
 import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
-import { currentMount, mechanismOf, rodViseProblem } from './holdingMounts';
+import { currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem } from './holdingMounts';
 import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
 import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
-import { proposedMaterialFor, workShapeFor } from './workShape';
+import { proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
 
 /**
  * #681 — the ONE cutting-job wizard.
@@ -261,6 +262,9 @@ export function StartWizard(): JSX.Element {
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
   // #682 — step 1 wears the location's machine (name, nickname and address) without a picker.
   const machines = useLocationStore((s) => s.location?.machines ?? null);
+  // #930 — the stock step judges whether a facing pass can clear the jaws, which needs the
+  // machine's own state: the vise's jaw tops only matter while the vise is what is on the pins.
+  const location = useLocationStore((s) => s.location);
   const setMachineCalibration = useSettingsStore((s) => s.setMachineCalibration);
   const job = useEngraveJobStore((s) => s.job);
 
@@ -282,6 +286,9 @@ export function StartWizard(): JSX.Element {
   const [projectCreatedHere, setProjectCreatedHere] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingStock | null>(null);
+  // #930 — the reason the Holding step has no selected mount (its own sentence), so Create can say
+  // why it is disabled instead of landing a job in a hold the step refused.
+  const [mountBlocked, setMountBlocked] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [confirmReplace, setConfirmReplace] = useState<{ pending: PendingStock; items: number } | null>(null);
@@ -330,7 +337,13 @@ export function StartWizard(): JSX.Element {
     void fontEpoch; // a parsed face changes the MEASUREMENT, not the choice or the job
     return workShapeFor(operationChoice, job);
   }, [operationChoice, job, fontEpoch]);
-  const proposal = useMemo(() => proposeStock(work), [work]);
+  const proposal = useMemo(() => proposedStockFor(work, job, proposeStock(work)), [work, job]);
+  // #930 — whether the vise's jaws are the fixture over this blank: with no machine record the
+  // app's own vise model is, and a bed job has no jaw tops to clear.
+  const viseOnPins = useMemo(() => {
+    const now = machineNow(machineForJob(location, job.machineId));
+    return now === null || now.mount === 'vise';
+  }, [location, job.machineId]);
   // The material the proposal's blank opens on: the house's, the job's own, or the board's.
   const proposalMaterial = useMemo(
     () => (proposal === null ? null : proposedMaterialFor(proposal, job)),
@@ -339,7 +352,12 @@ export function StartWizard(): JSX.Element {
   const onStockPending = useCallback(
     (next: PendingStock | null) => {
       setPending(next);
+      // Only a NEW job compares against the work's proposal (its seed); a re-entry's stock is the
+      // job's own answer, and reporting it is not an edit (#930: the house's proposal exists for
+      // every operation now, so comparing a started job's own numbers against it would mark them
+      // "edited" and lose the template sentence).
       if (
+        !jobStarted &&
         next !== null &&
         proposal !== null &&
         proposalMaterial !== null &&
@@ -348,7 +366,7 @@ export function StartWizard(): JSX.Element {
         setStockEdited(true);
       }
     },
-    [proposal, proposalMaterial],
+    [jobStarted, proposal, proposalMaterial],
   );
 
   // Declared before the opening-starter effect that calls it: a function declaration hoists, but
@@ -464,6 +482,7 @@ export function StartWizard(): JSX.Element {
   /** Holding is always seeded from the job as it now stands, so Back and forth cannot go stale. */
   function enterHolding(): void {
     setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
+    setMountBlocked(null);
     setStep('holding');
   }
 
@@ -589,10 +608,14 @@ export function StartWizard(): JSX.Element {
       const seeded = useEngraveJobStore.getState().job;
       // #432 slice 4 — the facing choice comes from the finish (decision Q6), SEEDED here rather
       // than interpreted at Generate: a job with no key must keep planning as it did before #432.
-      const facing = facingSeed(
+      // #930 — and only when the pass can run clear of the jaws: a blank seated at or below them,
+      // or standing proud by less than the pass, is never faced (the 2026-11-02 walk's failure).
+      const facing = facingForSeat(
         entry.finish,
         seeded.stock.material,
+        seeded.stock,
         facingShopFrom(useShopDefaultsStore.getState().defaults),
+        viseOnPins,
       );
       // The empty design: a stock pick brings no lines. (A design file brings its own items.)
       store.replace({
@@ -694,10 +717,14 @@ export function StartWizard(): JSX.Element {
             : 'user',
       );
       const after = useEngraveJobStore.getState().job;
-      const facing = facingSeed(
+      // #930 — the same jaw rule as the new-job route: a pass deeper than the blank stands proud
+      // is not seeded, because it would put the cutter into the jaws.
+      const facing = facingForSeat(
         p.choice.entry.finish,
         after.stock.material,
+        after.stock,
         facingShopFrom(useShopDefaultsStore.getState().defaults),
+        viseOnPins,
       );
       store.replace({ ...after, stockEntry: p.choice.entry, facing });
       settled();
@@ -935,6 +962,7 @@ export function StartWizard(): JSX.Element {
           onBedHold={applyBedHolding}
           onHold={applyStockHold}
           onMoveItemsToTop={applyMoveItemsToTop}
+          onMountBlocked={setMountBlocked}
         />
       )}
 
@@ -1034,6 +1062,11 @@ export function StartWizard(): JSX.Element {
               {holdingBlock}.
             </p>
           )}
+          {holdingBlock === null && mountBlocked !== null && (
+            <p style={UNBLOCK} data-testid="start-wizard-holding-unblock">
+              {mountBlocked}.
+            </p>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {/* #726 P10 — step 1 has no Back, and no footer Cancel: the header's ✕ is the one way
                 out every step carries; the footer offers only what moves the flow. */}
@@ -1079,7 +1112,11 @@ export function StartWizard(): JSX.Element {
                 type="button"
                 className="sw-btn sw-btn--primary"
                 data-testid="engrave-setup-next"
-                disabled={holdingBlock !== null || operationCreateBlocked(operationChoice) !== null}
+                disabled={
+                  holdingBlock !== null ||
+                  mountBlocked !== null ||
+                  operationCreateBlocked(operationChoice) !== null
+                }
                 onClick={next}
               >
                 {doneStep
