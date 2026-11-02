@@ -549,12 +549,6 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0).max(1),
     fallback: 0.35,
   },
-  'efficiency.minWrittenFraction': {
-    label: 'least share of its swept strip a program must remove (chosen)',
-    unit: 'x',
-    rule: z.number().min(0).max(1),
-    fallback: 0.5,
-  },
   // ── #926 (end)
 };
 
@@ -737,14 +731,8 @@ export function machineTiming(map: ShopDefaults | null): MachineTiming {
  * takes the resolved numbers rather than the map: it is in the sim worker's import graph and does
  * not read the house document itself.
  */
-export function efficiencyThresholds(map: ShopDefaults | null): {
-  maxAirFraction: number;
-  minWrittenFraction: number;
-} {
-  return {
-    maxAirFraction: readDefault(map, 'efficiency.maxAirFraction').value,
-    minWrittenFraction: readDefault(map, 'efficiency.minWrittenFraction').value,
-  };
+export function efficiencyThresholds(map: ShopDefaults | null): { maxAirFraction: number } {
+  return { maxAirFraction: readDefault(map, 'efficiency.maxAirFraction').value };
 }
 
 function firstIssue(error: z.ZodError): string {

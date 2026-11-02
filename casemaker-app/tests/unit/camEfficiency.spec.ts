@@ -10,7 +10,6 @@ import {
   estimateIRCycleSeconds,
   HOP_Z,
   travelStatsOf,
-  writtenFraction,
   type CamMove,
   type CamOperation,
   type RapidEstimate,
@@ -203,15 +202,5 @@ describe('#926 efficiency: the swept strip and the written fraction', () => {
     expect(deep.sweptAreaMm2!).toBeCloseTo(10 * (0.3 + 2 * 2 * Math.tan((15 * Math.PI) / 180)), 6);
   });
 
-  it('the written fraction divides the removed volume by the deepest cut and the swept area', () => {
-    expect(writtenFraction({ sweptAreaMm2: 1000, deepestCutMm: 2 }, 800)).toBeCloseTo(0.4, 9);
-    // Nothing removed, no sweep, no depth, or no measurement: no fraction rather than a number.
-    expect(writtenFraction({ sweptAreaMm2: 1000, deepestCutMm: 2 }, null)).toBeNull();
-    expect(writtenFraction({ sweptAreaMm2: 1000, deepestCutMm: 2 }, 0)).toBeNull();
-    expect(writtenFraction({ sweptAreaMm2: null, deepestCutMm: 2 }, 800)).toBeNull();
-    expect(writtenFraction({ sweptAreaMm2: 1000, deepestCutMm: 0 }, 800)).toBeNull();
-    // An engine that reports more removed than the strip covers (a thick part, a cutter wider than
-    // its stated width) clamps to 1 rather than reading over 100 %.
-    expect(writtenFraction({ sweptAreaMm2: 1000, deepestCutMm: 2 }, 5000)).toBe(1);
-  });
+
 });

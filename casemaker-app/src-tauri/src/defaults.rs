@@ -440,11 +440,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("margins.breakthroughMm", 0.3, "mm", "chosen, not measured: how far a through-cut may pass below the part's underside; seeds each new job"),
     ("margins.measuredThicknessToleranceMm", 0.05, "mm", "not measured: the +/- a caliper-measured stock thickness adds to a job's Z budget; provisional until the bench measures it (#208)"),
     // ── #447 (end)
-    // ── #926 (begin) — the two efficiency thresholds the run sheet judges a program against.
-    // Chosen, not measured: the first corpus run that shows a good program near either value is
-    // what moves them, and `defaultsClient.ts` states the same bounds and fallbacks.
-    ("efficiency.maxAirFraction", 0.35, "x", "chosen, not measured: the share of a program's cycle that may be spent in rapid (air) moves before the run sheet warns, naming the airiest operation. 0.35 is provisional; the first corpus run that shows a good program near it moves it (#926)"),
-    ("efficiency.minWrittenFraction", 0.5, "x", "chosen, not measured: the least share of the strip a program's path sweeps that the program must actually remove before the run sheet warns that it mostly cuts air. 0.5 is provisional; the first corpus run that shows a good program near it moves it (#926)"),
+    // ── #926 — the air-time threshold the run sheet judges a program against. Chosen, not measured:
+    // 0.35 sits above the corpus's worst good program (26.3 %), and the first run that shows a good
+    // program near it moves it. `defaultsClient.ts` states the same bound and fallback.
+    ("efficiency.maxAirFraction", 0.35, "x", "chosen, not measured: the share of a program's cycle that may be spent in rapid (air) moves before the run sheet warns, naming the airiest operation. 0.35 sits above the corpus's worst good program (26.3 %); the first corpus run that shows a good program near it moves it (#926)"),
     // ── #926 (end)
     // ── #448 (begin) — the vise's chosen tunables and the clamp band. Each is the number the code
     // compiled before, and `defaultsClient.ts` states the same bounds and fallbacks. The vise's
@@ -1179,8 +1178,8 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0 to 10 mm",
         )),
         // ── #447 (end)
-        // #926 — the efficiency thresholds: a fraction of a cycle, and a fraction of a strip.
-        "efficiency.maxAirFraction" | "efficiency.minWrittenFraction" => Some(need(
+        // #926 — the air-time threshold: a fraction of a cycle.
+        "efficiency.maxAirFraction" => Some(need(
             n.is_some_and(|v| (0.0..=1.0).contains(&v)),
             "0 to 1 (a fraction)",
         )),

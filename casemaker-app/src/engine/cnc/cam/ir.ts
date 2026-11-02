@@ -961,27 +961,6 @@ export function efficiencyOf(ir: ToolpathIR, rapid: RapidEstimate): ProgramEffic
   };
 }
 
-/**
- * #926 — the fraction of the swept strip a program actually removed material from: the removed
- * volume, divided by the deepest cut to make it an area, against {@link EfficiencyMeasure.sweptAreaMm2}.
- *
- * `removedVolumeMm3` is the sweep's own figure (an exact-engine program states it); a caller
- * without one passes null and gets null — a redundancy claim is never inferred from the CAM alone.
- * The division by the deepest cut is the one approximation in the measure and it is stated in the
- * sheet: a program whose cuts are all one depth gets the exact area, and a program mixing a 0.5 mm
- * engrave with a 6 mm cut-out's floors reads its removed area against the deepest cut.
- */
-export function writtenFraction(
-  measure: Pick<EfficiencyMeasure, 'sweptAreaMm2' | 'deepestCutMm'>,
-  removedVolumeMm3: number | null,
-): number | null {
-  if (removedVolumeMm3 === null || !(removedVolumeMm3 > 0)) return null;
-  if (measure.sweptAreaMm2 === null || !(measure.sweptAreaMm2 > 0)) return null;
-  if (!(measure.deepestCutMm > 0)) return null;
-  const removedArea = removedVolumeMm3 / measure.deepestCutMm;
-  return Math.max(0, Math.min(1, removedArea / measure.sweptAreaMm2));
-}
-
 /** The machine state two IRs must share for their moves to belong to one program. */
 const SHARED_HEADER = ['frame', 'toolNumber', 'spindleRpm', 'air', 'safeZ', 'hopZ'] as const;
 

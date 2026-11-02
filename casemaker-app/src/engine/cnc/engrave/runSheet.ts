@@ -1,6 +1,5 @@
 import type { ProbeFitInstrument } from '@/engine/cnc/probeFitDiagram';
 import {
-  writtenFraction,
   type CamPassStep,
   type EfficiencyMeasure,
   type ProgramEfficiency,
@@ -2279,15 +2278,14 @@ export interface RunSheetOptions {
    */
   blankToleranceMm?: number;
   /**
-   * #926 — the two shop thresholds the efficiency warning uses: the air-time fraction a program
-   * may spend in rapids, and the least share of its swept strip a program must actually remove.
-   * Resolved by the caller from the shop defaults (`efficiencyThresholds(defaults)` in
-   * `platform/defaultsClient.ts`), never read here — this module is in the sim worker's import
-   * graph and a threshold is a shop setting, not a constant. Absent: the sheet prints the measures
-   * and raises no threshold warning, because a check with no setting to check against would be a
-   * second, compiled-in one.
+   * #926 — the shop threshold the efficiency warning uses: the air-time fraction a program may
+   * spend in rapids. Resolved by the caller from the shop defaults
+   * (`efficiencyThresholds(defaults)` in `platform/defaultsClient.ts`), never read here — this
+   * module is in the sim worker's import graph and a threshold is a shop setting, not a constant.
+   * Absent: the sheet prints the measures and raises no threshold warning, because a check with no
+   * setting to check against would be a second, compiled-in one.
    */
-  efficiencyThresholds?: { maxAirFraction: number; minWrittenFraction: number };
+  efficiencyThresholds?: { maxAirFraction: number };
   /**
    * #475 — the measured surface readings, in the plan's order (the order {@link surfaceSpreadSteps}
    * prints). The registration step supplies them from the run it measured
@@ -3206,32 +3204,29 @@ function efficiencyStep(measure: EfficiencyMeasure, whose: string): RunSheetStep
 }
 
 /**
- * #926 — the swept strip and, when the run's sweep is in hand, how much of it the program actually
- * removed. This is the redundant-removal measure: a pass that writes far less than its path sweeps
- * is a pass mostly cutting air.
+ * #926 — the swept strip, and the volume the run's sweep actually removed when that is in hand.
  *
- * The removed volume is the sweep's own (`ProgramSweepSummary.removedVolume`), never inferred from
- * the CAM; without it the sheet prints the strip alone. The area comparison divides by the
- * program's deepest cut — stated, because a program that mixes depths reads its removed area
- * against the deepest one.
+ * TWO FACTS, NO JUDGEMENT. The strip is what the path sweeps (Σ path length × the cutter's width
+ * at that depth); the removed volume is the sweep's own. They are printed for a reader to weigh,
+ * not turned into a ratio: the IR cannot tell a legitimate step-over overlap from a redundant
+ * re-cut, so a "written fraction" would call every raster pocket wasteful (measured on the corpus:
+ * a 0.4 mm step-over on a 3.175 mm cutter reads ~13 % however correct it is). A judgement needs
+ * the sweep's written cells per pass, which is a later slice.
  */
 function sweptStep(measure: EfficiencyMeasure, removedVolumeMm3: number | null): RunSheetStep | null {
-  if (measure.sweptAreaMm2 === null) return null;
-  const written = writtenFraction(measure, removedVolumeMm3);
-  const basis =
-    `the strip is Σ (path length × the cutter's width at that depth) on the feed moves, and the ` +
-    `removed area is the sweep's ${fmtNum(removedVolumeMm3 ?? 0)} mm³ over the deepest cut`;
+  // A rotary program's depths are radii, not -Z: `deepestCutMm` reads 0 for it, and "at up to 0 mm
+  // deep" would be a false statement about the cut. The step is omitted rather than given a
+  // rotary depth this measure does not compute; the efficiency step still states the cycle.
+  if (measure.sweptAreaMm2 === null || measure.deepestCutMm <= 0) return null;
   return {
     text:
       `The feed path sweeps ${fmtNum(measure.sweptAreaMm2)} mm² of stock at up to ` +
-      `${fmtNum(measure.deepestCutMm)} mm deep` +
-      (written === null
-        ? '.'
-        : `, and the sweep removed ${pct(written)} of it — ${basis}.`),
+      `${fmtNum(measure.deepestCutMm)} mm deep — the strip is Σ (path length × the cutter's width ` +
+      'at that depth) on the feed moves' +
+      (removedVolumeMm3 === null ? '.' : `; the sweep removed ${fmtNum(removedVolumeMm3)} mm³.`),
     value:
-      written === null
-        ? `${fmtNum(measure.sweptAreaMm2)} mm² swept`
-        : `${pct(written)} of the swept strip removed`,
+      `${fmtNum(measure.sweptAreaMm2)} mm² swept` +
+      (removedVolumeMm3 === null ? '' : ` · ${fmtNum(removedVolumeMm3)} mm³ removed`),
   };
 }
 
@@ -4532,13 +4527,18 @@ export function buildRunSheet(
   } else {
     cutSteps.push({ text: 'Cutting parameters were not resolved for this job.' });
   }
-  // #926 — what the cycle estimate says about program 1's time and material. Placed after the
-  // branch chain so a drill, thread or plain engrave program all state it, and stated for EVERY
-  // program of the run below. A stored result from before the measure has none and gains no step.
+  // #926 — what the cycle estimate says about program 1's time and material, RIGHT AFTER the
+  // program's opening sentence (its parameters, whichever branch set them): the sheet's order is
+  // the operator's order, so a statement about the program must not push a physical instruction —
+  // the saw, "Stay at the machine" — off the end of the section.
   if (generated.cam?.efficiency !== undefined) {
-    cutSteps.push(efficiencyStep(generated.cam.efficiency, `Program ${roughNumber ?? 1}, ${header.fileName} — `));
+    const steps = [
+      efficiencyStep(generated.cam.efficiency, `Program ${roughNumber ?? 1}, ${header.fileName} — `),
+    ];
     const swept = sweptStep(generated.cam.efficiency, removedVolumeAt(firstEngravingIndex));
-    if (swept !== null) cutSteps.push(swept);
+    if (swept !== null) steps.push(swept);
+    const at = programParams === null ? cutSteps.length : cutSteps.indexOf(programParams) + 1;
+    cutSteps.splice(at, 0, ...steps);
   }
   // #437 item 8 — a two-tool job has a SECOND program, and its numbers are its own: a different
   // cutter in the same material, with a different feed and its own pass count. Printing one
@@ -4773,11 +4773,15 @@ export function buildRunSheet(
       }
       const opened = programSections[sectionStart];
       if (opened !== undefined && turn.length > 0) opened.steps = [...turn, ...opened.steps];
-      // #926 — every program states its own efficiency, not only program 1's.
+      // #926 — every program states its own efficiency, not only program 1's, and it goes right
+      // after the section's opening sentence ("Program N is …"): the section's last step must stay
+      // the last physical action (the saw, "Stay at the machine").
       if (opened !== undefined && program.cam?.efficiency !== undefined) {
-        opened.steps.push(efficiencyStep(program.cam.efficiency, `Program ${number}’s `));
+        const steps = [efficiencyStep(program.cam.efficiency, `Program ${number}’s `)];
         const swept = sweptStep(program.cam.efficiency, removedVolumeAt(programIndex(program)));
-        if (swept !== null) opened.steps.push(swept);
+        if (swept !== null) steps.push(swept);
+        const opening = opened.steps.findIndex((step) => step.text.startsWith(`Program ${number} is`));
+        opened.steps.splice(opening >= 0 ? opening + 1 : Math.min(opened.steps.length, turn.length + 1), 0, ...steps);
       }
     }
   }
@@ -4842,24 +4846,20 @@ export function buildRunSheet(
   // the sweep engine and is a later issue.
   const thresholds = options.efficiencyThresholds;
   if (thresholds !== undefined) {
-    const checks: { label: string; measure: ProgramEfficiency; removed: number | null }[] = [];
+    const checks: { label: string; measure: ProgramEfficiency }[] = [];
     if (generated.programs === undefined) {
       if (generated.cam?.efficiency !== undefined) {
-        checks.push({ label: `Program 1, ${header.fileName}`, measure: generated.cam.efficiency, removed: null });
+        checks.push({ label: `Program 1, ${header.fileName}`, measure: generated.cam.efficiency });
       }
     } else {
       for (const [i, program] of runPrograms.entries()) {
         const measure = program.cam?.efficiency;
         if (measure !== undefined) {
-          checks.push({
-            label: `Program ${i + 1} (${cutterNameForKey(program.toolKey)})`,
-            measure,
-            removed: removedVolumeAt(programIndex(program)),
-          });
+          checks.push({ label: `Program ${i + 1} (${cutterNameForKey(program.toolKey)})`, measure });
         }
       }
     }
-    for (const { label, measure, removed } of checks) {
+    for (const { label, measure } of checks) {
       if (measure.airFraction > thresholds.maxAirFraction) {
         const airiest = [...measure.operations].sort((a, b) => b.airFraction - a.airFraction)[0];
         pushWarning(
@@ -4870,16 +4870,6 @@ export function buildRunSheet(
               ? ''
               : ` Operation ${airiest.number} (${airiest.name}) is the airiest at ${pct(airiest.airFraction)}.`) +
             ' Shorten the hops, or order the neighbouring cuts so the tool enters next to where it stopped.',
-        );
-      }
-      const written = writtenFraction(measure, removed);
-      if (written !== null && written < thresholds.minWrittenFraction) {
-        pushWarning(
-          'efficiency-air-cut',
-          `${label} removes ${pct(written)} of the strip its path sweeps — under the ` +
-            `${pct(thresholds.minWrittenFraction)} the shop warns at (efficiency.minWrittenFraction in ` +
-            'location.json). This program mostly cuts air: an earlier pass has already cut most of it, ' +
-            'or the step-over is wider than the cutter.',
         );
       }
     }

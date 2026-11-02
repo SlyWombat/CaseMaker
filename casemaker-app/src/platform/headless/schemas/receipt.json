@@ -242,6 +242,139 @@
                             "minimum": 0,
                             "type": "integer"
                           },
+                          "efficiency": {
+                            "description": "The program’s efficiency measures (#926).",
+                            "properties": {
+                              "airFraction": {
+                                "description": "Rapid seconds over cycle seconds.",
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              "commandedFeedSeconds": {
+                                "description": "Feed distance over commanded feed, s.",
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              "cutMm": {
+                                "description": "XY cutting travel, mm.",
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              "cycleSeconds": {
+                                "description": "The cycle estimate the figures were taken from, s.",
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              "deepestCutMm": {
+                                "description": "Deepest feed Z, mm below the stock top.",
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              "feedSeconds": {
+                                "description": "Seconds in feed runs, through the per-run trapezoid.",
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              "feedUtilisation": {
+                                "anyOf": [
+                                  {
+                                    "minimum": 0,
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "Commanded feed time over feed time, or null."
+                              },
+                              "hopCount": {
+                                "description": "XY traverses at the hop height.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "hopSeconds": {
+                                "description": "Seconds spent on those hops.",
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              "rapidCutRatio": {
+                                "anyOf": [
+                                  {
+                                    "minimum": 0,
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "Rapid over cutting travel, or null."
+                              },
+                              "rapidMm": {
+                                "description": "XY rapid travel, mm.",
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              "rapidSeconds": {
+                                "description": "Seconds in rapid (air) moves.",
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              "sweptAreaMm2": {
+                                "anyOf": [
+                                  {
+                                    "minimum": 0,
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "Area the cutter sweeps on its feed moves, mm², or null."
+                              },
+                              "tourBoundMm": {
+                                "anyOf": [
+                                  {
+                                    "minimum": 0,
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "MST lower bound on the air path, mm, or null."
+                              },
+                              "tourExcess": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "How far past the bound the air path runs, or null."
+                              }
+                            },
+                            "required": [
+                              "cycleSeconds",
+                              "rapidSeconds",
+                              "feedSeconds",
+                              "airFraction",
+                              "hopCount",
+                              "hopSeconds",
+                              "commandedFeedSeconds",
+                              "feedUtilisation",
+                              "rapidMm",
+                              "cutMm",
+                              "rapidCutRatio",
+                              "sweptAreaMm2",
+                              "deepestCutMm",
+                              "tourBoundMm",
+                              "tourExcess"
+                            ],
+                            "type": "object"
+                          },
                           "estimatedSeconds": {
                             "description": "Estimated cutting time, in seconds.",
                             "minimum": 0,

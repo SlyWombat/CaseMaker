@@ -11,8 +11,8 @@
     },
     {
       "path": "<location>",
-      "sha256": "2074a056178700c50df58e87c00e4f578bdd749f721e63f23c7b8bf60c7aace0",
-      "bytes": 61641
+      "sha256": "99a8601390adaeed998bdc8a3677d058224a4a4aa06e32084bad37e66fb078d6",
+      "bytes": 61274
     }
   ],
   "outputs": [
@@ -28,8 +28,8 @@
     },
     {
       "path": "<out>/single-barrel-run-sheet.md",
-      "sha256": "6b29451b2cbbddcd0797f482016ce32447d5a1d7d28fed6195fa8526d83241ba",
-      "bytes": 18689
+      "sha256": "4cbfaeb50363c3418e38a75cb13a300387935e0fd13c606ff9bfb0a49e155861",
+      "bytes": 18627
     }
   ],
   "diagnostics": [

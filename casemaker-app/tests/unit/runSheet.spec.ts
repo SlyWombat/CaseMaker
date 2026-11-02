@@ -2473,7 +2473,7 @@ describe('#926 the sheet prints the efficiency measures and warns on the shop th
       ],
     });
     const sheet = buildRunSheet(job, withEfficiency(job, efficiency), NO_SIM, NOW, undefined, {
-      efficiencyThresholds: { maxAirFraction: 0.25, minWrittenFraction: 0.5 },
+      efficiencyThresholds: { maxAirFraction: 0.25 },
     });
     const warning = warningText(sheet).find((t) => t.startsWith('Program 1') && t.includes('in air'));
     expect(warning).toBeTruthy();
@@ -2487,50 +2487,10 @@ describe('#926 the sheet prints the efficiency measures and warns on the shop th
     const over = withEfficiency(job, measure());
     expect(warningText(buildRunSheet(job, over, NO_SIM, NOW)).some((t) => t.includes('in air'))).toBe(false);
     const under = buildRunSheet(job, over, NO_SIM, NOW, undefined, {
-      efficiencyThresholds: { maxAirFraction: 0.5, minWrittenFraction: 0.5 },
+      efficiencyThresholds: { maxAirFraction: 0.5 },
     });
     expect(warningText(under).some((t) => t.includes('of its cycle in air'))).toBe(false);
   });
 
-  it('warns that a program mostly cuts air when it removes too little of its swept strip', () => {
-    const job = dj();
-    const efficiency = measure();
-    const program = {
-      setupIndex: 1,
-      toolKey: job.toolKey,
-      nc: NC,
-      frameNc: null,
-      cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2, efficiency },
-    };
-    const generated: RunSheetGenerated = { ...stubGenerated(job), programs: [program] };
-    const sim: RunSheetSim = {
-      diagnostics: [],
-      programs: [
-        {
-          index: 0,
-          program: 1,
-          label: 'program 1',
-          toolKey: job.toolKey,
-          outcome: 'swept',
-          engine: 'exact',
-          count: 10,
-          // 200 mm³ over the 1 mm deepest cut is 200 mm² removed against a 1 000 mm² strip: 20 %.
-          removedVolume: 200,
-          errorCount: 0,
-          diagnostics: [],
-          notes: [],
-          fromBlank: false,
-          fromBlankCode: null,
-          gridPitchMm: null,
-        },
-      ],
-    };
-    const sheet = buildRunSheet(job, generated, sim, NOW, undefined, {
-      efficiencyThresholds: { maxAirFraction: 0.5, minWrittenFraction: 0.5 },
-    });
-    const warning = warningText(sheet).find((t) => t.includes('This program mostly cuts air'));
-    expect(warning).toBeTruthy();
-    expect(warning).toContain('removes 20 % of the strip its path sweeps');
-    expect(warning).toContain('under the 50 % the shop warns at (efficiency.minWrittenFraction in location.json)');
-  });
+
 });

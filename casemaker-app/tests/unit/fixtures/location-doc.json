@@ -1072,14 +1072,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "x",
-      "note": "chosen, not measured: the share of a program's cycle that may be spent in rapid (air) moves before the run sheet warns, naming the airiest operation. 0.35 is provisional; the first corpus run that shows a good program near it moves it (#926)"
-    },
-    "efficiency.minWrittenFraction": {
-      "value": 0.5,
-      "source": "seeded",
-      "setAt": null,
-      "unit": "x",
-      "note": "chosen, not measured: the least share of the strip a program's path sweeps that the program must actually remove before the run sheet warns that it mostly cuts air. 0.5 is provisional; the first corpus run that shows a good program near it moves it (#926)"
+      "note": "chosen, not measured: the share of a program's cycle that may be spent in rapid (air) moves before the run sheet warns, naming the airiest operation. 0.35 sits above the corpus's worst good program (26.3 %); the first corpus run that shows a good program near it moves it (#926)"
     },
     "bracket.originOffsetXMm": {
       "value": 0.0,
