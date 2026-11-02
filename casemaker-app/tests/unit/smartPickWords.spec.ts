@@ -18,7 +18,7 @@ import type { CandidatePlan, EvaluatedItem, PinchFact, PlanEvaluation } from '@/
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ToolShape } from '@/engine/cnc/tool';
 
-function entry(key: string, shape: ToolShape, tip: number): ToolLibraryEntry {
+function entry(key: string, shape: ToolShape, tip: number, halfAngleDeg: number | null = null): ToolLibraryEntry {
   return {
     key,
     provenance: 'test',
@@ -32,8 +32,8 @@ function entry(key: string, shape: ToolShape, tip: number): ToolLibraryEntry {
       tipDiameter: tip,
       diameter: shape === 'flat' ? tip : 3.175,
       cornerRadius: null,
-      angle: null,
-      halfAngle: null,
+      angle: halfAngleDeg === null ? null : halfAngleDeg * 2,
+      halfAngle: halfAngleDeg,
       fluteLength: 12,
       shoulderLength: null,
       stickout: null,
@@ -47,7 +47,7 @@ const TOOLS = [
   entry('inv:flat-1', 'flat', 1),
   entry('inv:corn-0-6', 'flat', 0.6),
   entry('cat:corn-0-6', 'flat', 0.6),
-  entry('inv:engraver-0-1', 'engraving', 0.1),
+  entry('inv:engraver-0-1', 'engraving', 0.1, 30),
 ];
 
 function pinch(over: Partial<PinchFact> = {}): PinchFact {
@@ -186,6 +186,42 @@ describe('#766 C the words say what the measurement says', () => {
     const pending = explainSmartPick(pickOf({ chosen: refused, runnable: null }), TOOLS);
     expect(pending.verdict).toContain('No plan the search tried posts');
     expect(pending.verdict).toContain('a V-bit is not a rest cutter here');
+  });
+
+  it('#j10 — the verdict states the strokes the plan joins, and the merge the alternative would cost', () => {
+    const traceOutcome = (mergedPairs: number): Partial<PlanEvaluation> => ({
+      traces: {
+        mergedPairs,
+        worstOverlapMm: mergedPairs === 0 ? 0 : 1.175,
+        worstDeepenMm: mergedPairs === 0 ? 0 : 0.1,
+      },
+    });
+    const vPlan = plan([['inv:engraver-0-1', ['clear']]]);
+    const flatPlan = plan([['inv:flat-2', ['clear']]]);
+    const v = scored(vPlan, evaluation([item({ fidelity: 1 })], traceOutcome(0)));
+    const wide = scored(flatPlan, evaluation([item({ fidelity: 1 })], traceOutcome(8)));
+
+    // j10's own bar: the V keeps every stroke separate; the flat the search rejected would join 8.
+    const words = explainSmartPick(pickOf({ chosen: v, considered: [v, wide] }), TOOLS);
+    expect(words.verdict).toContain(
+      'The ⌀0.1 mm 60° V keeps every stroke separate; a ⌀2 mm flat would merge 8 pairs.',
+    );
+
+    // The chosen plan's own count, when no tied alternative merges more strokes.
+    const merging = scored(flatPlan, evaluation([item({ fidelity: 1 })], traceOutcome(8)));
+    expect(explainSmartPick(pickOf({ chosen: merging, considered: [merging] }), TOOLS).verdict).toContain(
+      'The ⌀2 mm flat leaves 8 pairs of strokes merged.',
+    );
+
+    // A plan that lost on fidelity first is not the merge's alternative: the ranking never weighed it.
+    const lower = scored(flatPlan, evaluation([item({ fidelity: 0.9 })], traceOutcome(8)));
+    expect(explainSmartPick(pickOf({ chosen: v, considered: [v, lower] }), TOOLS).verdict).not.toContain(
+      'would merge',
+    );
+
+    // A job with no trace work says nothing about strokes.
+    const noTraces = explainSmartPick(pickOf({ chosen: scored(vPlan, evaluation([item({ fidelity: 1 })])) }), TOOLS);
+    expect(noTraces.verdict).not.toContain('stroke');
   });
 
   it('#766 review — the CLI asks for the registry keys; the panel never sees them', () => {

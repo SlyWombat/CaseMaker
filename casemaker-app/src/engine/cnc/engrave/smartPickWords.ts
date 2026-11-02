@@ -47,6 +47,55 @@ export function planLabel(
 
 const pct = (v: number): string => `${Math.round(Math.max(0, Math.min(1, v)) * 100)} %`;
 
+/**
+ * #j10 — a cutter as the trace sentence names it. A cone's included angle is part of its identity
+ * ("the ⌀0.1 mm 60° V"), which `cutterWord`'s rest marker is not; a flat is just its width. The
+ * trace work's cutter is the one the plan assigns trace items to (a rest cutter owns none).
+ */
+function traceCutterWords(
+  plan: Pick<CandidatePlan, 'cutters'>,
+  tools: readonly ToolLibraryEntry[],
+  article: 'the' | 'a',
+): string {
+  const owner = plan.cutters.find((c) => c.items.length > 0) ?? plan.cutters[0];
+  const entry = owner === undefined ? undefined : tools.find((t) => t.key === owner.key);
+  const d = entry === undefined ? null : statedCuttingSize(entry.tool);
+  const cone = entry === undefined ? null : vCone(entry.tool);
+  const size = d === null ? 'cutter' : `⌀${Number(d.toFixed(3))} mm`;
+  if (cone !== null) return `${article} ${size} ${Number((cone.halfAngleDeg * 2).toFixed(2))}° V`;
+  return `${article} ${size} flat`;
+}
+
+/**
+ * #j10 — THE STROKES THE CHOSEN CUTTER JOINS, and the merge the search rejected.
+ * `measureTraceMerge` runs on every trace job's plans (coarse verdicts included), so the verdict
+ * states the count the ranking used. The alternative quoted is the worst MERGING plan whose
+ * measured fidelity ties the chosen one — the plan the merge outranked, never one that lost on
+ * fidelity first. Empty for a job with no trace work, whose plans carry no outcome.
+ */
+function mergeWords(pick: SmartPick, tools: readonly ToolLibraryEntry[]): string {
+  const chosen = pick.chosen.evaluation.traces;
+  if (chosen === undefined) return '';
+  const chosenKey = planKey(pick.chosen.plan);
+  let worst: { plan: CandidatePlan; pairs: number } | null = null;
+  for (const p of pick.considered) {
+    if (planKey(p.plan) === chosenKey) continue;
+    if (!p.evaluation.ok) continue; // a plan the generator refuses is no alternative to quote
+    if (Math.abs(p.worstFidelity - pick.chosen.worstFidelity) > FIDELITY_TIE + 1e-12) continue;
+    const t = p.evaluation.traces;
+    if (t === undefined || t.mergedPairs <= chosen.mergedPairs) continue;
+    if (worst === null || t.mergedPairs > worst.pairs) worst = { plan: p.plan, pairs: t.mergedPairs };
+  }
+  const count = (n: number): string => `${n} pair${n === 1 ? '' : 's'}`;
+  const alt =
+    worst === null ? '' : `; ${traceCutterWords(worst.plan, tools, 'a')} would merge ${count(worst.pairs)}`;
+  const sentence =
+    chosen.mergedPairs === 0
+      ? `${traceCutterWords(pick.chosen.plan, tools, 'the')} keeps every stroke separate${alt}.`
+      : `${traceCutterWords(pick.chosen.plan, tools, 'the')} leaves ${count(chosen.mergedPairs)} of strokes merged${alt}.`;
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+}
+
 /** An item name as a sentence names it: a label already carries its quotes, an id does not. */
 const quoted = (name: string): string => (name.startsWith('"') && name.endsWith('"') ? name : `"${name}"`);
 
@@ -275,7 +324,12 @@ export function explainSmartPick(
   const seconds = chosen.evaluation.seconds;
   const verdict = pick.runnable === null
     ? `No plan the search tried posts; the best-measured one (${pct(chosen.worstFidelity)} on the worst item) is refused: ${chosen.evaluation.refusal ?? 'the generator refuses it'}.`
-    : `Chosen by simulation: ${pct(chosen.worstFidelity)} fidelity on the worst item, ${chosen.evaluation.toolChanges} tool change${chosen.evaluation.toolChanges === 1 ? '' : 's'}${seconds === null ? '' : `, about ${Math.round(seconds)} s`}.`;
+    : (() => {
+        const base = `Chosen by simulation: ${pct(chosen.worstFidelity)} fidelity on the worst item, ${chosen.evaluation.toolChanges} tool change${chosen.evaluation.toolChanges === 1 ? '' : 's'}${seconds === null ? '' : `, about ${Math.round(seconds)} s`}.`;
+        // #j10 — the strokes the plan joins are part of why it was chosen, so they are metered.
+        const merges = mergeWords(pick, tools);
+        return merges === '' ? base : `${base} ${merges}`;
+      })();
   return {
     plan: planLabel(chosen.plan, tools),
     verdict,
