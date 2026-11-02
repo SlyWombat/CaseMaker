@@ -539,6 +539,8 @@ describe('#826 the diagnostic switches', () => {
         endstops: { xMin: false, xMax: false, yMin: false, yMax: false, zMin: false },
         probe: false,
         calibrate: false,
+        // The bench line's C slot 0: the wireless probe charger's output (#884).
+        probeChargerOn: true,
         estop: false,
         rssi: -40,
       },
@@ -561,6 +563,8 @@ describe('#826 the diagnostic switches', () => {
         endstops: { xMin: true, xMax: false, yMin: false, yMax: true, zMin: false },
         probe: true,
         calibrate: false,
+        // The bench line's C slot 0: the wireless probe charger's output (#884).
+        probeChargerOn: true,
         estop: true,
         rssi: -77,
       },

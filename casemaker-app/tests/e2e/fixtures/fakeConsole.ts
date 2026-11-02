@@ -319,7 +319,7 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
       const lines = files.map(
         (f) => `${f.name}${f.directory === true ? '/' : ''} ${f.size} ${f.stamp ?? '19800101000000'}`,
       );
-      return [...frame(PTYPE_REPLY, lines.length === 0 ? '' : `${lines.join('\r\n')}\r\n`), frame(PTYPE_LOAD_FINISH, '')];
+      return [...frame(PTYPE_REPLY, lines.length === 0 ? '' : `${lines.join('\r\n')}\r\n`), ...frame(PTYPE_LOAD_FINISH, '')];
     }
     m = /^rm (.+) -e$/.exec(lineText);
     if (m !== null) {
@@ -332,7 +332,7 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
       files = files.filter((f) => f.name !== name);
       return [
         ...frame(PTYPE_REPLY, held ? 'ok\r\n' : 'rm: cannot remove: no such file\r\n'),
-        frame(PTYPE_LOAD_FINISH, ''),
+        ...frame(PTYPE_LOAD_FINISH, ''),
       ];
     }
     return frame(PTYPE_REPLY, 'ok\r\n');

@@ -179,8 +179,12 @@ export type MachineProbeResult =
        * server that cannot hear broadcasts (a bridged container) still reaches it over TCP;
        * `manual` is an address the operator typed. The screen states this so "Online" always says
        * how the app knows.
+       *
+       * OPTIONAL for a caller that CONSTRUCTS a result rather than probes (a spec, a harness): the
+       * three probe paths always set it, and the store reads an absent route as `manual` — an
+       * address someone gave it — rather than inventing a search it did not run.
        */
-      route: MachineProbeRoute;
+      route?: MachineProbeRoute;
       /**
        * The machine's own coordinate frame, read during the check (#279, decision 28's measured
        * tier). Null when it could not be read — which is a normal answer, not a failure: the

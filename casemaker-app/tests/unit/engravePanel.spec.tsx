@@ -5489,28 +5489,6 @@ describe('EngravePanel — the Cut step’s simulation stall (#895)', () => {
     });
   }
 
-  function fakeGenerate(): () => number {
-    let calls = 0;
-    setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async () => {
-        calls += 1;
-        return {
-          ok: false,
-          stage: 'findings',
-          findings: [],
-          feeds: null,
-          cam: null,
-          nc: null,
-          verify: null,
-          programs: [],
-          errors: [{ stage: 'findings', message: 'nothing to post' }],
-        } as unknown as EngraveGenerated;
-      },
-      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
-    }));
-    return () => calls;
-  }
-
   it('a stalled sweep’s press is the row’s own Simulate, and it re-sweeps without generating', async () => {
     // #895 — the stall press and #893's "Simulation not started" press are ONE control: the
     // program is already on screen, so "again" is the sweep and the check, not another Generate.

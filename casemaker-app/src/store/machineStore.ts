@@ -219,7 +219,7 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
     const slice: MachineSlice = {
       machine: result.kind === 'found' ? result.observation : null,
       outcome: result.kind,
-      route: result.kind === 'found' ? result.route : null,
+      route: result.kind === 'found' ? (result.route ?? 'manual') : null,
       // #726 W24 — EVERY reader gets one sentence. An 'unavailable' probe is already a sentence;
       // an 'error' probe's detail is the bare reason (`probeMachine`), so the sentence is built
       // here, once — the Machines page prints `reason` raw, and the start wizard must not prefix it
