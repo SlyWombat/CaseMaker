@@ -88,7 +88,7 @@ import { registrationTouches } from '@/engine/cnc/plan';
 import { faceUpOf, planFromSetups, setupsSettings } from '@/engine/cnc/setups';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { clearanceZOf, rotaryOf } from '@/engine/cnc/machine';
-import { planRegistrationAttempt } from './EngraveSetupsSection';
+import { planRegistrationAttempt } from './registrationAttempt';
 import { EngraveCentreFind } from './EngraveCentreFind';
 import { RotaryAxisTap } from '@/components/manage/RotaryAxisTap';
 import type { RegistrationAttempt } from './EngraveSetupRow';

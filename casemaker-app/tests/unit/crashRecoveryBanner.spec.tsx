@@ -4,7 +4,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import { CrashRecoveryBanner, crashBannerSentence } from '@/components/layout/CrashRecoveryBanner';
+import { CrashRecoveryBanner } from '@/components/layout/CrashRecoveryBanner';
+import { crashBannerSentence } from '@/components/layout/crashBannerSentence';
 import {
   __resetFlightRecorderStoreForTests,
   CRASH_BANNER_CONFIRM_MS,
