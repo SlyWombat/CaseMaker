@@ -478,11 +478,11 @@ before this exit.**
 |---|---|
 | **WP-20** `docs/bench/milestone-1-clean-samples.md` filled with the measured results, photos and run records; every feeds row used flipped to `measured` and committed; each cnc-guide section the samples exercised flipped to Available; #767 fully ticked or re-filed; the Milestone 1 issue closed with the six lines each pointing at its evidence |
 
-### 4.4 Sample acceptance numbers (proposed — the repo has none; hardwood)
+### 4.4 Sample acceptance numbers (accepted by the maintainer 2026-11-02, as written; hardwood)
 
 Written as the operator's checklist; a caliper reads 0.01 mm, so each number has an instrument.
 Hardwood moves and tears, so depth is ±0.1 mm, not the ±0.05 a plastic would allow. Adjust after the
-first part and record the adjustment on #943.
+first part only with the reason recorded on #943.
 
 | Property | Number | Instrument |
 |---|---|---|
