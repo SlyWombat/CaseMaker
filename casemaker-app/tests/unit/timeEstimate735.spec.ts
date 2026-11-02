@@ -51,7 +51,7 @@ function benchJob(): EngraveJob {
 }
 
 describe('#735 item 4 — j02’s predicted time is the toolpath’s cycle time', () => {
-  it('pins the measured breakdown: 792 mm cutting, 88 mm rapid, 120.391 s = the sheet’s 2 min 0 s', async () => {
+  it('pins the measured breakdown: 792 mm cutting, 88 mm rapid, 132.391 s = the sheet’s 2 min 12 s', async () => {
     const job = benchJob();
     const g = await generate(tl, job);
     expect(g.ok, `${g.stage}: ${JSON.stringify(g.errors)}`).toBe(true);
@@ -66,25 +66,27 @@ describe('#735 item 4 — j02’s predicted time is the toolpath’s cycle time'
     // The travel the model times. These are the numbers a changed model or CAM would move.
     expect(cam.cutMm).toBeCloseTo(792.2462876250668, 6);
     expect(cam.rapidMm).toBeCloseTo(88.37017435417084, 6);
-    expect(cam.estimatedSeconds).toBeCloseTo(120.3911614112349, 6);
+    // #927 — 120.391 s of moves plus the 12 s spindle ramp the profile now prices.
+    expect(cam.estimatedSeconds).toBeCloseTo(132.3911614112349, 6);
 
     // ...and the model's own overhead stays the planning margin it claims to be. With no
     // acceleration the same travel is 792.246 mm at F500 plus 28 mm of plunge at F200 (16 plunges,
-    // measured from the IR) = 103.47 s. The estimate is 16.92 s over that: 162 feed runs' start and
-    // stop (56 under v²/a = 0.463 mm) plus every rapid's own trapezoid (9.69 s of the 120.39).
+    // measured from the IR) = 103.47 s. The estimate is 28.92 s over that: 162 feed runs' start and
+    // stop (56 under v²/a = 0.463 mm), every rapid's own trapezoid (9.69 s of the moves) and the
+    // 12 s spindle ramp.
     const noAccel = cam.cutMm! / (500 / 60) + 28 / (200 / 60);
-    expect(cam.estimatedSeconds - noAccel).toBeGreaterThan(10);
-    expect(cam.estimatedSeconds - noAccel).toBeLessThan(20);
+    expect(cam.estimatedSeconds - noAccel).toBeGreaterThan(20);
+    expect(cam.estimatedSeconds - noAccel).toBeLessThan(35);
 
-    // 2.0065 min rounds to the manifest's predicted 2.0 min.
-    expect(Math.round((cam.estimatedSeconds / 60) * 10) / 10).toBe(2.0);
+    // 2.2065 min rounds to 2.2 min — #927's terms took it off the manifest's old 2.0.
+    expect(Math.round((cam.estimatedSeconds / 60) * 10) / 10).toBe(2.2);
 
     // The operator sees the same figure in the file's header and on the sheet's header — one
     // number, three surfaces (`estimateIRCycleSeconds`' contract).
-    expect(g.nc).toContain(';@MKR|TIME|seconds=120');
-    expect(formatDuration(cam.estimatedSeconds)).toBe('2 min 0 s');
+    expect(g.nc).toContain(';@MKR|TIME|seconds=132');
+    expect(formatDuration(cam.estimatedSeconds)).toBe('2 min 12 s');
     const sheet = buildRunSheet(job, g, null);
-    expect(sheet.header.estimatedTime).toBe('2 min 0 s');
+    expect(sheet.header.estimatedTime).toBe('2 min 12 s');
     // ...and the note beside it says what the number is: the Z1's rapid model, a planning estimate.
     expect(sheet.header.estimatedTimeNote).toContain('1200 mm/min XY');
     expect(sheet.header.estimatedTimeNote).toContain('a planning estimate, not a measured cycle time');
