@@ -721,6 +721,22 @@ export interface EngraveTargetObject {
    */
   bandMm?: Mm;
   /**
+   * #898 — HOW THE PART'S UNDERSIDE IS MADE. Absent is today's cut: the surface program runs to
+   * the mesh's own depth and the part's underside is whatever the mesh says. Present:
+   *
+   *   - `flat` stops the cut at the mesh's bottom plane (plus an optional SKIN left to break out),
+   *     so the part keeps the blank's own flat bottom — the elephant that is designed to lie flat.
+   *     Its freeing (a skin, or tabs on the footprint) is stated beside it;
+   *   - `flipped-tabs` cuts the part from both sides at its WIDEST line, held by tabs to the
+   *     surrounding stock that are cut off by hand — the panther that is shaped all over;
+   *   - `plinth` stops the cut a stated height above the blank's bottom, leaving a base the part
+   *     stands on.
+   *
+   * The default is PROPOSED from the mesh (its flat bottom's share and its undercuts), never
+   * written silently: an absent block means the operator has not chosen.
+   */
+  underside?: GoalUnderside;
+  /**
    * #672 — a PNG goal's relief map: the depth the darkest (or, inverted, the lightest) tone is cut
    * to and which end of the greys sits at the top face. Absent = the engine's labelled defaults.
    */
@@ -751,6 +767,41 @@ export interface EngraveGoalChamfer {
   widthMm: Mm;
   /** The V-bit's library key; absent while none is chosen (no chamfer program is posted). */
   toolKey?: string;
+}
+
+/** #898 — where the part's underside comes from. See {@link EngraveTargetObject.underside}. */
+export type GoalUndersideKind = 'flat' | 'flipped-tabs' | 'plinth';
+
+/**
+ * #898 — the underside choice, one per goal mesh. Every field but `kind` is that choice's own
+ * number: a flat part's skin or tabs, a plinth's height. Absent keys take the labelled defaults
+ * (`goalUnderside.ts`), so a stored block states only what the operator changed.
+ */
+export interface GoalUnderside {
+  kind: GoalUndersideKind;
+  /**
+   * `flat`: the material left between the cut's floor and the part's bottom before it is broken
+   * out and sanded, mm. 0 (the default) cuts exactly to the mesh's bottom plane; a positive skin
+   * stops the cut short of it by that much over the whole footprint.
+   */
+  skinMm?: Mm;
+  /**
+   * `flat`: the bridges left by the cut that frees the part from the surrounding stock. Absent
+   * (the default) frees it by the skin alone; present, N tabs of `widthMm` at the cut's floor are
+   * left on the footprint's outline, and the run sheet lists them.
+   */
+  tabs?: { count: number; widthMm: Mm; thicknessMm: Mm };
+  /**
+   * `plinth`: how far above the blank's BOTTOM the cut stops, mm — the base the part stands on.
+   * Absent asks for the default (`UNDERSIDE_PLINTH_MM`).
+   */
+  plinthMm?: Mm;
+  /**
+   * #898 — WHO CHOSE: `'proposed'` is the app's own reading of the mesh (the operator accepted the
+   * proposal), `'user'` is a choice made by hand. Absent reads as `'user'` for a document that
+   * states the block without it.
+   */
+  source?: 'proposed' | 'user';
 }
 
 /**

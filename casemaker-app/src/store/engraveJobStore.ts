@@ -270,6 +270,8 @@ export type TargetObjectPatch = Partial<
   relief?: Partial<EngraveReliefSettings>;
   /** #829 — a goal's 3D chamfer (`undefined` removes it: square edges). */
   chamfer?: EngraveGoalChamfer;
+  /** #898 — the goal's underside choice (`undefined` removes it: the cut as the mesh is). */
+  underside?: EngraveTargetObject['underside'];
   /** #672 — a picture's placed size in millimetres (the width field; the aspect is the row's). */
   size?: EngraveTargetObject['size'];
   /**
@@ -2365,6 +2367,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // #829 — an empty chamfer field REMOVES the block: square edges serialise like a goal that
         // never asked for a bevel.
         if ('chamfer' in patch && patch.chamfer === undefined) delete next.chamfer;
+        // #898 — 'not chosen' REMOVES the underside block, so a goal back on the plain cut
+        // serialises exactly as one that never carried it.
+        if ('underside' in patch && patch.underside === undefined) delete next.underside;
         // #785 — the top-band choice is stored only when it is ON, so a goal that never chose it
         // serialises without gaining a key (and turning it off returns the refusal).
         if ('cutWithinReach' in patch && patch.cutWithinReach !== true) delete next.cutWithinReach;

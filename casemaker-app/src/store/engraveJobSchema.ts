@@ -996,6 +996,44 @@ const targetObjectSchema = z
       .max(200)
       .optional()
       .describe('Depth band this side of a split goal cuts, mm from its setup’s work top; omit to cut the whole depth.'),
+    // #898 — the goal's UNDERSIDE choice. Optional, so every pre-#898 document round-trips as
+    // today's cut; a stored block states the kind and that kind's own numbers.
+    underside: z
+      .object({
+        kind: z
+          .enum(['flat', 'flipped-tabs', 'plinth'])
+          .describe("Where the part's underside comes from: flat on the stock's bottom, flipped and held by tabs, or on a plinth."),
+        skinMm: z
+          .number()
+          .finite()
+          .min(0)
+          .max(5)
+          .optional()
+          .describe('A flat underside: material left under the bottom plane to break out, mm; omit to cut exactly to the mesh’s bottom.'),
+        tabs: z
+          .object({
+            count: z.number().int().min(1).max(16).describe('How many tabs hold the part to the stock.'),
+            widthMm: z.number().finite().positive().max(20).describe('Tab width along the outline, mm.'),
+            thicknessMm: z.number().finite().positive().max(10).describe('Tab height above the cut’s floor, mm.'),
+          })
+          .strict()
+          .optional()
+          .describe('A flat underside: the bridges left by the freeing cut; omit to free it by the skin alone.'),
+        plinthMm: z
+          .number()
+          .finite()
+          .min(0)
+          .max(200)
+          .optional()
+          .describe('A plinth: how far above the blank’s bottom the cut stops, mm; omit for the default.'),
+        source: z
+          .enum(['proposed', 'user'])
+          .optional()
+          .describe("Who chose: 'proposed' (accepted the app's reading of the mesh) or 'user' (a hand choice); omit as 'user'."),
+      })
+      .strict()
+      .optional()
+      .describe("Where the part's underside comes from (flat on the stock bottom, flipped with tabs, or a plinth); omit for today's cut (#898)."),
     surface: surfaceSettingsSchema
       .optional()
       .describe('The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.'),

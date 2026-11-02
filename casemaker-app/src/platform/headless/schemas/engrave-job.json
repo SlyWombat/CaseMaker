@@ -6457,6 +6457,75 @@
             }
           },
           "type": "object"
+        },
+        "underside": {
+          "additionalProperties": false,
+          "description": "Where the part's underside comes from (flat on the stock bottom, flipped with tabs, or a plinth); omit for today's cut (#898).",
+          "properties": {
+            "kind": {
+              "description": "Where the part's underside comes from: flat on the stock's bottom, flipped and held by tabs, or on a plinth.",
+              "enum": [
+                "flat",
+                "flipped-tabs",
+                "plinth"
+              ],
+              "type": "string"
+            },
+            "plinthMm": {
+              "description": "A plinth: how far above the blank’s bottom the cut stops, mm; omit for the default.",
+              "maximum": 200,
+              "minimum": 0,
+              "type": "number"
+            },
+            "skinMm": {
+              "description": "A flat underside: material left under the bottom plane to break out, mm; omit to cut exactly to the mesh’s bottom.",
+              "maximum": 5,
+              "minimum": 0,
+              "type": "number"
+            },
+            "source": {
+              "description": "Who chose: 'proposed' (accepted the app's reading of the mesh) or 'user' (a hand choice); omit as 'user'.",
+              "enum": [
+                "proposed",
+                "user"
+              ],
+              "type": "string"
+            },
+            "tabs": {
+              "additionalProperties": false,
+              "description": "A flat underside: the bridges left by the freeing cut; omit to free it by the skin alone.",
+              "properties": {
+                "count": {
+                  "description": "How many tabs hold the part to the stock.",
+                  "maximum": 16,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "thicknessMm": {
+                  "description": "Tab height above the cut’s floor, mm.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 10,
+                  "type": "number"
+                },
+                "widthMm": {
+                  "description": "Tab width along the outline, mm.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 20,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "count",
+                "widthMm",
+                "thicknessMm"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
         }
       },
       "required": [
@@ -6723,6 +6792,75 @@
                 "type": "number"
               }
             },
+            "type": "object"
+          },
+          "underside": {
+            "additionalProperties": false,
+            "description": "Where the part's underside comes from (flat on the stock bottom, flipped with tabs, or a plinth); omit for today's cut (#898).",
+            "properties": {
+              "kind": {
+                "description": "Where the part's underside comes from: flat on the stock's bottom, flipped and held by tabs, or on a plinth.",
+                "enum": [
+                  "flat",
+                  "flipped-tabs",
+                  "plinth"
+                ],
+                "type": "string"
+              },
+              "plinthMm": {
+                "description": "A plinth: how far above the blank’s bottom the cut stops, mm; omit for the default.",
+                "maximum": 200,
+                "minimum": 0,
+                "type": "number"
+              },
+              "skinMm": {
+                "description": "A flat underside: material left under the bottom plane to break out, mm; omit to cut exactly to the mesh’s bottom.",
+                "maximum": 5,
+                "minimum": 0,
+                "type": "number"
+              },
+              "source": {
+                "description": "Who chose: 'proposed' (accepted the app's reading of the mesh) or 'user' (a hand choice); omit as 'user'.",
+                "enum": [
+                  "proposed",
+                  "user"
+                ],
+                "type": "string"
+              },
+              "tabs": {
+                "additionalProperties": false,
+                "description": "A flat underside: the bridges left by the freeing cut; omit to free it by the skin alone.",
+                "properties": {
+                  "count": {
+                    "description": "How many tabs hold the part to the stock.",
+                    "maximum": 16,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "thicknessMm": {
+                    "description": "Tab height above the cut’s floor, mm.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 10,
+                    "type": "number"
+                  },
+                  "widthMm": {
+                    "description": "Tab width along the outline, mm.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 20,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "count",
+                  "widthMm",
+                  "thicknessMm"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
             "type": "object"
           }
         },

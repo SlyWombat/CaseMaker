@@ -78,6 +78,7 @@ import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
+import { undersideClearBaseZ, undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { primitiveHeightfield, surfacePrimitiveWord, surfacePrimitivesOf, type SurfacePrimitive } from '@/engine/cnc/engrave/primitiveSurface';
@@ -4772,13 +4773,18 @@ export async function generateGoalProgram(
     toolDiameterMm: cuttingDiameter(tool) ?? 0,
     stepOverMm: ringStepOverMm > 0 ? ringStepOverMm : 0,
   });
+  // #898 — THE PART'S BASE PLANE, and the CLEAR BAND's floor under it. A flat underside's SKIN
+  // raises the band's floor by that much, so the band leaves the skin connecting the part to the
+  // surrounding stock rather than freeing it.
+  const partBaseZ = goal.position.z - placedSize(goal).z;
+  const bandBaseFloorZ = undersideClearBaseZ(goal) ?? partBaseZ;
   const sampleClear =
     clear === null
       ? {}
       : {
           clear,
           stockRect: { xMin: 0, xMax: job.stock.length, yMin: 0, yMax: job.stock.width },
-          baseZ: goal.position.z - placedSize(goal).z,
+          baseZ: bandBaseFloorZ,
         };
 
   const feeds: SurfaceFeeds = {
@@ -4896,14 +4902,23 @@ export async function generateGoalProgram(
   // placement's top (not the blank's) so the same number splits the goal in the flipped frame,
   // where the goal's own top is the stock's underside. Absent on every goal that has not been split.
   const statedBandMm = goal.bandMm !== undefined && goal.bandMm > 0 ? goal.bandMm : null;
+  // #898 — THE UNDERSIDE'S FLOOR. A goal that says where its underside comes from cuts to that
+  // floor: a flat part stops at its own bottom plane (plus any skin), a plinth a stated height
+  // above the blank's bottom. The sampler's clamp does the rest — cells below the floor are cut
+  // flat there — so nothing under the part is machined. A split side's own band wins: it is the
+  // more specific statement, and the two can then never disagree about the floor.
+  const undersideFloor = goal.underside === undefined ? null : undersideFloorZ(goal, job.stock);
   const topBandMm = statedBandMm === null && bandMm !== null && bandMm > 0 ? bandMm : null;
   const depthLimitZ =
-    statedBandMm !== null ? goal.position.z - statedBandMm : topBandMm === null ? null : -topBandMm;
+    statedBandMm !== null
+      ? goal.position.z - statedBandMm
+      : undersideFloor ?? (topBandMm === null ? null : -topBandMm);
 
   // #862 — THE CLEAR BAND'S WALL, as the rim finish is told it: from the stock top down to the
-  // band's own floor — the goal's base plane, or the #785 top-band clamp when the operator chose
-  // to cut only what the cutter reaches. A job with no band has no wall to finish.
-  const bandBaseZ = goal.position.z - placedSize(goal).z;
+  // band's own floor — the goal's base plane (raised by a flat underside's skin, #898), or the
+  // #785 top-band clamp when the operator chose to cut only what the cutter reaches. A job with
+  // no band has no wall to finish.
+  const bandBaseZ = bandBaseFloorZ;
   const bandFloorZ =
     clear === null ? null : depthLimitZ === null ? bandBaseZ : Math.max(bandBaseZ, depthLimitZ);
 
@@ -5699,6 +5714,10 @@ export async function generateGoalProgram(
       finishStepOverMm: feeds.finishStepOver,
       stockToLeaveMm: stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM,
       roughingLayers: surfaced.roughingLayers,
+      // #898 — the underside choice this program cut to, when the goal states one.
+      ...(goal.underside === undefined
+        ? {}
+        : { underside: { kind: goal.underside.kind, floorZ: depthLimitZ } }),
       rough:
         roughProgram === null
           ? null

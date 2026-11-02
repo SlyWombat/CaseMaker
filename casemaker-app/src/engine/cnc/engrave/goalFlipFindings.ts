@@ -41,7 +41,7 @@ export interface GoalSurfaceOffer {
 const RING_PITCH_MM = 0.3;
 
 /** The goal's triangles in the WORK frame — the placement the CAM cuts, shared with the sampler. */
-function workMesh(goal: EngraveTargetObject): CoverageMesh | null {
+export function goalWorkMesh(goal: EngraveTargetObject): CoverageMesh | null {
   let mesh;
   try {
     mesh = targetObjectMesh(goal);
@@ -68,7 +68,7 @@ function measuredGoal(goal: EngraveTargetObject): boolean {
 /** The measure and the plan for one goal, or null when there is nothing to measure. */
 export function goalSurfaceOffer(job: EngraveJob, goal: EngraveTargetObject): GoalSurfaceOffer | null {
   if (!measuredGoal(goal)) return null;
-  const mesh = workMesh(goal);
+  const mesh = goalWorkMesh(goal);
   if (mesh === null) return null;
   const field = sampleCoverageField(mesh, RING_PITCH_MM);
   const facts = coverageTriangles(mesh, field, {});

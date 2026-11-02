@@ -20,6 +20,12 @@ import {
   turnsPatch,
   type FaceDirection,
 } from '@/engine/cnc/engrave/goalOrientation';
+import {
+  goalUndersideCached,
+  UNDERSIDE_CHOICES,
+  undersideFor,
+  undersideSentence,
+} from '@/engine/cnc/engrave/goalUnderside';
 import { rememberGoalPlacement, undoGoalPlacement, useGoalTransformUndo } from '@/store/goalTransformUndo';
 import { useViewportStore } from '@/store/viewportStore';
 import {
@@ -30,7 +36,7 @@ import {
   resetRotationPatch,
 } from '@/engine/cnc/engrave/goalPlacement';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
-import type { EngraveSurfaceSettings, EngraveTargetObject } from '@/types/engraveJob';
+import type { EngraveSurfaceSettings, EngraveTargetObject, GoalUndersideKind } from '@/types/engraveJob';
 
 /**
  * The reference object the 3D primitives are positioned against (#435).
@@ -674,6 +680,11 @@ export function EngraveTargetObjectRow({
   const moldGoal = goal && target.goalMode === 'mold' && target.format !== 'png';
   const settings = target.surface ?? {};
   const feedsWords = surface?.feeds?.typed === true ? 'typed here' : 'the feeds row';
+  // #898 — the underside control (a part goal only) and, when nothing is chosen, the app's own
+  // reading of the mesh. Cached on the mesh's facts, so a render does not re-measure it.
+  const showsUnderside = goal && target.format !== 'png' && target.goalMode !== 'mold';
+  const undersideOffer = showsUnderside ? goalUndersideCached(target) : null;
+  const undersideChosen = showsUnderside ? undersideSentence(target) : null;
 
   const setSurface = (patch: Partial<EngraveSurfaceSettings>): void => onChange({ surface: patch });
 
@@ -813,6 +824,51 @@ export function EngraveTargetObjectRow({
             <option value="none">nothing</option>
           </select>
         </label>
+      )}
+
+      {/* #898 — WHERE THE PART'S UNDERSIDE COMES FROM. Nothing chosen is today's cut (the mesh's
+          own depth); the app proposes one of the three from the mesh — its flat bottom's share of
+          the footprint, or the area that faces down above it — and the operator's press stores
+          the choice. The sentence under it says what the chosen kind does. */}
+      {showsUnderside && (
+        <>
+          <label style={ROW_INLINE}>
+            <span style={{ fontSize: 11, color: '#9aa4b0' }}>underside</span>
+            <select
+              value={target.underside?.kind ?? ''}
+              data-testid={`engrave-target-underside-${index}`}
+              aria-label="Where the part’s underside comes from"
+              title="How the part's underside is made: stop at its own flat bottom (one setup), cut it from both sides with holding tabs, or leave a plinth. Not chosen is the cut as the mesh is."
+              onChange={(e) => {
+                const kind = e.target.value;
+                onChange({
+                  underside:
+                    kind === ''
+                      ? undefined
+                      : undersideFor(kind as GoalUndersideKind, target.underside),
+                });
+              }}
+            >
+              <option value="">
+                {undersideOffer === null ? 'not chosen' : `not chosen — the app proposes ${UNDERSIDE_CHOICES.find((c) => c.kind === undersideOffer.kind)?.label ?? undersideOffer.kind}`}
+              </option>
+              {UNDERSIDE_CHOICES.map((choice) => (
+                <option key={choice.kind} value={choice.kind}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {undersideChosen !== null ? (
+            <p data-testid={`engrave-target-underside-why-${index}`} style={MUTED}>
+              {undersideChosen}
+            </p>
+          ) : undersideOffer !== null ? (
+            <p data-testid={`engrave-target-underside-why-${index}`} style={MUTED}>
+              The mesh reads as {UNDERSIDE_CHOICES.find((c) => c.kind === undersideOffer.kind)?.label ?? undersideOffer.kind}: {undersideOffer.reason}.
+            </p>
+          ) : null}
+        </>
       )}
 
       {/* #829 — CHAMFER THE PART'S EDGES: a V-bit follows the mesh's top rim after the surfacing

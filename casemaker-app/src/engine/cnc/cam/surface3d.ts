@@ -899,6 +899,12 @@ export interface GoalSurfaceFacts {
   finishStepOverMm: number;
   /** Roughing allowance left on the goal surface, mm. */
   stockToLeaveMm: number;
+  /**
+   * #898 — the UNDERSIDE choice this program cut to: its kind and the work-Z floor it set (`null`
+   * when the choice carries no floor of its own). Absent when the goal states no underside, or on
+   * a result stored before the field.
+   */
+  underside?: { kind: 'flat' | 'flipped-tabs' | 'plinth'; floorZ: number | null } | null;
   /** Z layers the roughing pass stepped through. */
   roughingLayers: number;
   /**

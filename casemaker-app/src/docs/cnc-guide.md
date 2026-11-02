@@ -930,6 +930,26 @@ object's size, the blank-fit check and the drawn mesh all read the same turn, so
 cut and the picture agree. The fields are absent by default, and a job that states none round-trips
 and cuts exactly as before; the rotary relief does not read them (its seam is the Y position).
 
+**The part's Underside (#898).** A goal mesh says where the part's underside comes from. Not
+chosen is the cut as the mesh is; the row proposes one of three from the mesh itself and the press
+stores the choice:
+
+- **flat on the stock's bottom** — the part stops at its own bottom plane and keeps the blank's
+  flat bottom (the elephant that is designed to lie flat). One setup. Its **skin** leaves that
+  much material between the part and the surrounding stock in the clear band, so the part comes
+  out held and is freed by breaking the skin out; tabs on the footprint are the other freeing
+  (the run sheet lists them).
+- **flipped, held by tabs** — two setups split at the part's widest line, each cutting its own
+  band; the tabs joining the part to the surrounding stock survive both setups and are cut off by
+  hand after, and the run sheet says so (the panther that is shaped all over).
+- **on a plinth** — the cut stops a stated height above the blank's bottom, leaving a base the
+  part stands on. One setup.
+
+The proposal reads two numbers: the share of the footprint that is one flat face at the mesh's
+lowest Z (0.35 and up proposes flat), and the area that faces down above that lowest Z (2% and up
+proposes the flip). The row says which number decided it; nothing is written until the operator
+chooses.
+
 Two more finishing passes can be switched on in the goal's Technical fold, and they run in this
 order after the parallel finish:
 
