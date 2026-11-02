@@ -32,8 +32,8 @@ import {
 /** The run's memory facts, sent before its first plan (see the module comment). */
 export interface PoolBeginRequest {
   kind: 'begin';
-  /** The largest level's covered cells: the per-planner peak's cost estimate. */
-  maxLevelCells: number;
+  /** The largest level's planner grid cells: the per-planner peak's cost driver. */
+  levelGridCells: number;
   /** #889's budget for this program; absent → the core rule alone. */
   memory?: LevelPlanMemory;
 }
@@ -127,7 +127,7 @@ export class AdaptivePool {
    * batch, so no level is ever in flight when this runs.
    */
   private onBegin(message: PoolBeginRequest): void {
-    const levelBytes = estimateLevelPlannerBytes(message.maxLevelCells);
+    const levelBytes = estimateLevelPlannerBytes(message.levelGridCells);
     if (message.memory === undefined) {
       // A batch with no budget (a pass the CAM did not estimate) keeps the run's last budgeted
       // size when there was one, so a later pass cannot undo a phone's one-planner rule; with

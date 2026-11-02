@@ -17,7 +17,9 @@ import {
 } from '@/engine/jobs/adaptivePool';
 import type { PoolPlanMessage, PoolPlanReply } from '@/workers/adaptivePool.worker';
 import type { PoolSizing } from '@/engine/jobs/poolSizing';
-import { portLevelPlanner } from '@/workers/sim/levelPlannerPort';
+import { portLevelPlanner, plannerGridCells } from '@/workers/sim/levelPlannerPort';
+import { RegionGeometry, MaterialGrid } from '@/engine/cnc/cam/adaptiveGrid';
+import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import {
   adaptivePoolSize,
   deviceMemoryPoolCap,
@@ -79,8 +81,8 @@ describe('#881 — the memory bound', () => {
   it('buys only the planners the budget leaves room for', () => {
     // 640 MB budget, 400 MB already the program's own estimate, 60 MB the largest level:
     // 240 MB spare pays for four planners.
-    const levelBytes = estimateLevelPlannerBytes(314_572);
-    expect(levelBytes).toBe(LEVEL_PLANNER_BASE_BYTES + 50_331_520);
+    const levelBytes = estimateLevelPlannerBytes(786_432);
+    expect(levelBytes).toBe(LEVEL_PLANNER_BASE_BYTES + 50_331_648);
     expect(
       memoryBoundPoolSize({ budgetBytes: 640 * MiB, parentBytes: 400 * MiB, levelBytes, coreCap: 8 }),
     ).toBe(4);
@@ -126,6 +128,65 @@ describe('#881 — the memory bound', () => {
         deviceMemoryGb: 2,
       }),
     ).toBe(1);
+  });
+});
+
+describe('#881 — a level’s planner grid', () => {
+  const settings = adaptiveSettings(null).settings;
+
+  it('is the grid planAdaptive builds: the region’s box at the measuring resolution', () => {
+    const region: [number, number][][] = [
+      [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+        [0, 10],
+      ],
+    ];
+    const shared = { tool: MILL, settings, feed: 900, plungeFeed: 300 };
+    const flat = cuttingRadiusForSweep(MILL);
+    if (!flat.ok) throw new Error(flat.reason);
+    const h = Math.min((settings.engagementFraction * 2 * flat.radius) / 6, flat.radius / 12);
+    const grid = new MaterialGrid(new RegionGeometry(region), h);
+    expect(plannerGridCells(region, shared)).toBe(grid.nx * grid.ny);
+  });
+
+  it('is zero where the planner would refuse before allocating', () => {
+    expect(plannerGridCells([], { tool: MILL, settings, feed: 900, plungeFeed: 300 })).toBe(0);
+    const ball = { ...MILL, shape: 'ball' as const };
+    expect(
+      plannerGridCells(
+        [
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+          ],
+        ],
+        { tool: ball, settings, feed: 900, plungeFeed: 300 },
+      ),
+    ).toBe(0);
+  });
+
+  it('grows with a lighter engagement and shrinks with a larger cutter', () => {
+    const region: [number, number][][] = [
+      [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+        [0, 10],
+      ],
+    ];
+    const base = plannerGridCells(region, { tool: MILL, settings, feed: 900, plungeFeed: 300 });
+    const lighter = plannerGridCells(region, {
+      tool: MILL,
+      settings: { ...settings, engagementFraction: settings.engagementFraction / 2 },
+      feed: 900,
+      plungeFeed: 300,
+    });
+    const larger = plannerGridCells(region, { tool: flatEndMill(6.35), settings, feed: 900, plungeFeed: 300 });
+    expect(lighter).toBeGreaterThan(base);
+    expect(larger).toBeLessThan(base);
   });
 });
 
@@ -203,7 +264,7 @@ describe('#881 — the pool spawns to the stated budget', () => {
 
     const begin: PoolMessage = {
       kind: 'begin',
-      maxLevelCells: 314_572,
+      levelGridCells: 786_432,
       memory: { budgetBytes: 640 * MiB, parentBytes: 400 * MiB },
     };
     port.postMessage(begin);
@@ -243,7 +304,7 @@ describe('#881 — the pool spawns to the stated budget', () => {
     const port = pool.beginRun();
     port.postMessage({
       kind: 'begin',
-      maxLevelCells: 314_572,
+      levelGridCells: 786_432,
       memory: { budgetBytes: 640 * MiB, parentBytes: 400 * MiB },
     } satisfies PoolMessage);
     await delivered(() => FakeWorker.spawned.length === 4);
@@ -251,7 +312,7 @@ describe('#881 — the pool spawns to the stated budget', () => {
 
     port.postMessage({
       kind: 'begin',
-      maxLevelCells: 314_572,
+      levelGridCells: 786_432,
       memory: { budgetBytes: 256 * MiB, parentBytes: 200 * MiB },
     } satisfies PoolMessage);
     // 56 MB spare over a 60 MB level buys nothing: one planner, the floor.
@@ -266,12 +327,12 @@ describe('#881 — the pool spawns to the stated budget', () => {
     const port = pool.beginRun();
     port.postMessage({
       kind: 'begin',
-      maxLevelCells: 314_572,
+      levelGridCells: 786_432,
       memory: { budgetBytes: 256 * MiB, parentBytes: 200 * MiB },
     } satisfies PoolMessage);
     await delivered(() => FakeWorker.spawned.length === 1);
     // A rest pass names no budget: the phone's one planner is not undone by it.
-    port.postMessage({ kind: 'begin', maxLevelCells: 314_572 } satisfies PoolMessage);
+    port.postMessage({ kind: 'begin', levelGridCells: 786_432 } satisfies PoolMessage);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(FakeWorker.spawned.length).toBe(1);
     expect(pool.planners).toBe(1);

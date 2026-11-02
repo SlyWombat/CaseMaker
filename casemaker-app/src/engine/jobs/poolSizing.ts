@@ -39,14 +39,20 @@ export function adaptivePoolSize(
 export const LEVEL_PLANNER_BASE_BYTES = 12 * 1024 * 1024;
 
 /**
- * #881 — bytes per covered cell one planner's level costs: the mask, its polygons and the sweep
- * path the level builds, and the moves it hands back (packed, 33 bytes each). A conservative
- * upper bound for the memory bound; the CDP probe measures the real figure and this number is
- * re-stated with it in the hand-in.
+ * #881 — bytes per cell of ONE planner's measuring grid. `planAdaptive` allocates its material,
+ * target, clearance and distance-field arrays over the region's box at
+ * `h = min(engagement cap / 6, radius / 12)`, and that grid — not the goal's covered cells — is
+ * what a planner's memory tracks.
+ *
+ * Measured in Chromium through the CDP probe (2026-11-02, 40 × 40 mm chamfered block, 1 mm flat
+ * cutter, 0.3 mm pitch): the largest level's grid was 1,926,544 cells and the busiest of eight
+ * planners peaked at 128.4 MB used + backing, against 81–107 MB for the rest. 64 bytes a cell plus
+ * the base below covers the busiest (135 MB against its 128.4 MB reading) and leaves the others a
+ * margin. The final #881 reading on the post-#889 tree re-states this number with its own data.
  */
-export const LEVEL_PLANNER_BYTES_PER_CELL = 160;
+export const LEVEL_PLANNER_BYTES_PER_CELL = 64;
 
-/** What ONE planner's largest level is estimated to cost, bytes: the base plus its cells. */
+/** What ONE planner's largest level is estimated to cost, bytes: the base plus its grid cells. */
 export function estimateLevelPlannerBytes(cells: number): number {
   const n = Number.isFinite(cells) ? Math.max(0, cells) : 0;
   return LEVEL_PLANNER_BASE_BYTES + n * LEVEL_PLANNER_BYTES_PER_CELL;

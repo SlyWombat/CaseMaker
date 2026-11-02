@@ -14,14 +14,48 @@ import type { LevelPlanRequest, LevelPlanResult, LevelPlanShared, LevelPlanner }
 import type { PoolPlanReply, PoolReply } from '@/workers/adaptivePool.worker';
 import type { PoolSizing } from '@/engine/jobs/poolSizing';
 import { unpackMoves } from '@/engine/cnc/cam/movePack';
+import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
+import type { Polygons } from '@/engine/cnc/cam/pocket';
 
 /**
- * #881 — the run's memory facts, posted before the batch's plans. `maxLevelCells` is the largest
- * level's covered cells; `memory` is absent when the CAM has no budget to state.
+ * #881 — ONE LEVEL'S PLANNER GRID, exactly as `planAdaptive` builds it: the region's bounding
+ * box at the planner's measuring resolution (`h = min(engagement cap / 6, radius / 12)`). This is
+ * the level's real memory driver — the planner allocates several arrays over this grid — so the
+ * pool sizes on it, not on the goal's covered cells. A region with no room for the cutter (or a
+ * non-flat tool) allocates nothing: `planAdaptive` refuses before building the grid.
+ */
+export function plannerGridCells(region: Polygons, shared: LevelPlanShared): number {
+  const flat = cuttingRadiusForSweep(shared.tool);
+  if (!flat.ok) return 0;
+  const r = flat.radius;
+  const cap = shared.settings.engagementFraction * 2 * r;
+  const h = Math.min(cap / 6, r / 12);
+  if (!(h > 0)) return 0;
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const contour of region) {
+    if (contour.length < 3) continue;
+    for (const [x, y] of contour) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return 0;
+  return (Math.ceil((maxX - minX) / h) + 2) * (Math.ceil((maxY - minY) / h) + 2);
+}
+
+/**
+ * #881 — the run's memory facts, posted before the batch's plans. `levelGridCells` is the largest
+ * level's planner grid (see {@link plannerGridCells}); `memory` is absent when the CAM has no
+ * budget to state.
  */
 interface OutgoingBegin {
   kind: 'begin';
-  maxLevelCells: number;
+  levelGridCells: number;
   memory?: NonNullable<LevelPlanShared['memory']>;
 }
 
@@ -42,8 +76,10 @@ export function portLevelPlanner(port: MessagePort, onSized?: (sizing: PoolSizin
   return {
     planLevels(requests, shared, onPlanned) {
       if (requests.length === 0) return Promise.resolve([]);
-      let maxLevelCells = 0;
-      for (const request of requests) maxLevelCells = Math.max(maxLevelCells, request.cells ?? 0);
+      let levelGridCells = 0;
+      for (const request of requests) {
+        levelGridCells = Math.max(levelGridCells, plannerGridCells(request.region, shared));
+      }
       return new Promise<readonly LevelPlanResult[]>((resolve) => {
         const results: (LevelPlanResult | undefined)[] = new Array(requests.length);
         let done = 0;
@@ -77,7 +113,7 @@ export function portLevelPlanner(port: MessagePort, onSized?: (sizing: PoolSizin
         port.start();
         const begin: OutgoingBegin = {
           kind: 'begin',
-          maxLevelCells,
+          levelGridCells,
           ...(shared.memory === undefined ? {} : { memory: shared.memory }),
         };
         port.postMessage(begin);
