@@ -123,6 +123,49 @@ describe('#829 a goal chamfers its own edges', () => {
     expect(out.programs[1]!.nc).toMatch(/G1 Z-1(?:\.0+)? F/);
     // The V program is a real posted file, not a placeholder.
     expect(out.programs[1]!.nc).toContain('M02');
+    // #911 follow-up — AND IT IS CHECKED LIKE ANY OTHER 2.5D FILE: the verifier's own report and
+    // its air-trace frame, so the run sheet does not read it as a failed verification and the
+    // upload gate accepts it. Both are absent before this fix (verify null, frameNc null).
+    const v = out.programs[1]!;
+    expect(v.verify).not.toBeNull();
+    expect(v.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(v.frameNc).not.toBeNull();
+    expect(v.frameVerify?.findings.filter((f) => f.severity === 'error') ?? []).toEqual([]);
+    // The run-sheet reading — a checked V program's dry run and no "did not pass verification" —
+    // is asserted once #911's `surfaceCheck` marker is on main; the marker is what makes the
+    // SURFACE program's missing frame read as by design, and the chamfer's own section then takes
+    // the frame path this program's `frameNc` feeds. Validated against 868ef204 locally: §6 reads
+    // "its check is the material sweep", §8 traces program 2's outline in the air, and the phrase
+    // "did not pass verification" is gone from the sheet.
+  }, 120_000);
+
+  it('withholds the V program when the verifier refuses it, and says why', async () => {
+    // A clamp standing over the part: every chamfer cut runs under its top, which is the
+    // verifier's own `clamp-in-path` error. The bevel's file is withheld; the goal is still
+    // surfaced, and the warning carries the verifier's sentence.
+    const target = goalTarget({ chamfer: { widthMm: 1, toolKey: VKEY } });
+    const job = goalJob(target);
+    const clamp = {
+      id: 'clamp-test',
+      kind: 'clamp' as const,
+      label: 'the clamp over the part',
+      fix: 'move the clamp clear of the part',
+      min: [28, 18] as [number, number],
+      max: [42, 32] as [number, number],
+      topZ: 30,
+    };
+    const mount = {
+      obstacles: [clamp],
+      uncertainty: 0,
+      fixture: { boxes: [], source: 'default' as const, uncertainty: 0 },
+    };
+    const out = await generateGoalProgram(job, target, BALL, [], null, { ...SHOP, mount });
+    expect(out.ok).toBe(true);
+    expect(out.programs).toHaveLength(1);
+    const finding = out.findings.find((f) => f.code === 'goal-chamfer-verify');
+    expect(finding?.severity).toBe('warning');
+    expect(finding?.message).toContain('the verifier refused the V-bit’s program');
+    expect(finding?.message).toContain('clamp');
   }, 120_000);
 
   it('surfaces the goal and says why the edges are square when no V is chosen', async () => {

@@ -5663,6 +5663,49 @@ export async function generateGoalProgram(
       });
       return null;
     }
+    // #911 follow-up — THE V-BIT'S PROGRAM IS CHECKED LIKE ANY OTHER 2.5D FILE. Its surfacing
+    // siblings are judged by the material sweep (`surfaceCheck`); a bevel is a small, ordinary
+    // program, so it takes the 2.5D verifier's own report and — when the trace can clear the mount
+    // — its air-trace frame, exactly as the facing and 2D files do. Before this it carried neither,
+    // so the run sheet told the operator "did not pass verification — do not run" on a good bevel
+    // and the upload gate refused the file (`programUploadProblem`'s "never none").
+    const chamferSetup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+    const chamferLimit = jobDepthLimit(job, effectiveMargins(job, MARGIN_DEFAULTS).boundaryMargin);
+    const chamferVerify = verifyProgram(chamferPosted.text, {
+      setup: chamferSetup,
+      machine: mill,
+      tool: entry.tool,
+      dialect: postKey(mill),
+      depthLimit: chamferLimit,
+      minRapidZ: chamferIr.hopZ,
+      ...mountCtx(shop.mount, job.jawClearance),
+    });
+    const chamferErrors = chamferVerify.findings.filter((f) => f.severity === 'error');
+    if (chamferErrors.length > 0) {
+      // A refused bevel withholds its file rather than handing over an unchecked program: the
+      // surfacing still posts, and the warning names the verifier's own sentence.
+      chamferFindings.push({
+        severity: 'warning',
+        code: 'goal-chamfer-verify',
+        labelId: goal.id,
+        message:
+          `${who} are not chamfered: the verifier refused the V-bit’s program — ` +
+          `${chamferErrors.map((f) => f.message).join('; ')}`,
+      });
+      return null;
+    }
+    // #747 — a frame that cannot clear the mount is WITHHELD, not guessed at: the program itself
+    // is verified, so its file still posts and the sheet says the trace is missing and why.
+    const chamferFrame = frameProgram(
+      chamferIr,
+      { ...ctx, toolKey: entry.key },
+      mill,
+      chamferSetup,
+      entry.tool,
+      chamferLimit,
+      shop.mount,
+      job.jawClearance,
+    );
     return {
       kind: 'engrave',
       setupIndex: 1,
@@ -5670,10 +5713,12 @@ export async function generateGoalProgram(
       toolKey: entry.key,
       nc: chamferPosted.text,
       frame: 'flat',
-      verify: null,
+      verify: chamferVerify,
       surfaceCheck: null,
-      frameNc: null,
-      frameVerify: null,
+      frameNc: 'error' in chamferFrame ? null : chamferFrame.nc,
+      frameVerify: 'error' in chamferFrame ? null : chamferFrame.verify,
+      frameZ: 'error' in chamferFrame ? null : chamferFrame.z,
+      frameError: 'error' in chamferFrame ? chamferFrame.error : null,
       programHash: programHash(chamferPosted.text),
       cam: summarize(chamferIr),
     };

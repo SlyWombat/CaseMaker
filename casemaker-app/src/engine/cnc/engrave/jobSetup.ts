@@ -397,9 +397,12 @@ export type JobFindingCode =
   // #829 — THE 3D CHAMFER THE GOAL ASKS FOR. `goal-chamfer-no-cutter` is the WARNING that names
   // why no V program was posted (no V-bit chosen, one the library does not hold, or one with no
   // cone/feeds), and `goal-chamfer-no-rim` the WARNING that the mesh has no top rim to bevel.
-  // Neither refuses the goal: it is surfaced either way, with its edges left square and said so.
+  // `goal-chamfer-verify` (the #911 follow-up) is the WARNING that the posted V program failed the
+  // 2.5D verifier and its file was withheld. None of them refuses the goal: it is surfaced either
+  // way, with its edges left square and said so.
   | 'goal-chamfer-no-cutter'
   | 'goal-chamfer-no-rim'
+  | 'goal-chamfer-verify'
   // #847 — THE REST PASS AFTER A 3D FINISH. `goal-rest-pass` is the INFO naming the smaller owned
   // ball that took the material the finish's ball could not enter, with the volume it left and what
   // the rest still leaves. `goal-rest-uncut` is the WARNING when nothing owned lowers that
