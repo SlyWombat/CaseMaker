@@ -27,6 +27,7 @@
 import type { GcodeEvent, HomeEvent, MoveEvent, ParseResult, Pos, ProbeEvent, TloCalibrateEvent, ToolChangeEvent } from '../gcode/types';
 import { EventStore, eventStoreOf } from '../gcode/eventStore';
 import { insideEnvelope, type Mill, type MillProfile } from '../machine';
+import { AirMoveStore } from './airMoveStore';
 import { CheckpointStore } from './checkpointStore';
 import type { Setup, StartingTool } from '../setup';
 
@@ -618,7 +619,8 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Mill):
     if (w === undefined || rank[severity] > rank[w]) worst.set(code, severity);
     if (n <= DIAGNOSTIC_CAP) diagnostics.push({ severity, code, line, step, message });
   };
-  const airMoves: AirMove[] = [];
+  // #902 — packed, like the timeline's own checkpoints.
+  const airMoves = new AirMoveStore();
   let sawLaser = false;
   let sawRotary = false;
   /** #241 — a CUTTING move changed A (see `TimelineSummary.rotaryClass`). */
@@ -863,9 +865,10 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Mill):
 
   events.seal();
   order.seal();
+  airMoves.seal();
   return {
     events: events.view(),
-    airMoves,
+    airMoves: airMoves.view(),
     segments,
     pauses,
     checkpoints: order.view(),
