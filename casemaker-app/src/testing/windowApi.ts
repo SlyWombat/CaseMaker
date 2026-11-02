@@ -17,6 +17,8 @@ import {
   waitForIdle,
 } from '@/engine/jobs/JobScheduler';
 import { resetSeed, setSeededIds } from '@/utils/id';
+import { GRBL_PRESETS } from '@/engine/cnc/machine';
+import { machineRecordFromPreset } from '@/platform/genericMachines';
 import { triggerExport } from '@/engine/exportTrigger';
 import { isZUp } from '@/engine/coords';
 import { serializeProject, parseProject } from '@/store/persistence';
@@ -227,6 +229,13 @@ export interface CaseMakerTestApi {
    * Returns the module's id so a spec can open its card in Manage › Accessories.
    */
   rotaryTapSeed(): { machineId: string; moduleId: string };
+  /**
+   * #877 e2e — A STATED PRESET IN THE LOCATION, and the open job pointed at it. The record is the
+   * one the preset picker writes (`machineRecordFromPreset`), so the sheet and the preview read
+   * the same profile a person choosing Shapeoko would. Returns the profile id the job now names,
+   * or a reason the id is not a shipped stated preset.
+   */
+  statedMachineSeed(profileId: string): { machineId: string } | { reason: string };
   getEngraveRunState(): {
     phase: string;
     stale: boolean;
@@ -690,6 +699,20 @@ export function installCaseMakerTestApi(): void {
         etag: '"e2e"',
       } as never);
       return { machineId: machine.id, moduleId: module.id };
+    },
+    statedMachineSeed(profileId) {
+      const model = GRBL_PRESETS.find((p) => p.id === profileId);
+      if (model === undefined) return { reason: `${profileId} is not a shipped stated preset` };
+      const record = machineRecordFromPreset(model, { id: 'e2e-stated', now: '2026-11-01T00:00:00.000Z' });
+      useLocationStore.setState({
+        status: 'ready',
+        location: { machines: [record], accessories: [], stock: [], tools: [] } as never,
+        etag: '"e2e"',
+      } as never);
+      // The job names the PROFILE (`machineRecordByProfile` matches on it), which is also what
+      // `jobMachine` resolves the model from.
+      useEngraveJobStore.setState((s) => ({ job: { ...s.job, machineId: model.id } }));
+      return { machineId: model.id };
     },
     getEngraveRunState() {
       const r = useEngraveRunStore.getState();
