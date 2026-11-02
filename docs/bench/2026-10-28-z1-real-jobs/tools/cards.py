@@ -22,8 +22,8 @@ SAMPLES = [
     ('S1', 936, 'Flagship text job on the stick', 'the app’s default job, run from the GUI at bench session S2'),
     ('S2', 938, 'Hardwood flat-cutter feed coupon', 'four programs on disk (card s2); the row flips to measured when the bench fills the record'),
     ('S3', 939, 'Pocket and four bores on the 36 × 100 face', 'job file committed (card s3); cut at bench session S5'),
-    ('S4', 940, 'Two-cutter job: pocket, then V text on its floor', 'the job file is written in this column after S3'),
-    ('S5', 941, 'Chamfer the top edges, then a through-slot', 'the job files are written in this column after S4'),
+    ('S4', 940, 'Two-cutter job: pocket, then V text on its floor', 'job file committed (card s4); cut at bench session S5/S6'),
+    ('S5', 941, 'Chamfer the top edges, then a through-slot', 'job file committed (card s5); cut at bench session S6'),
 ]
 
 CARDS = [
@@ -118,4 +118,10 @@ CARDS = [
     dict(id='s3', title='Sample 3: a pocket and four bores on the stick', job='../../939-pocket-bores.job.json',
          kind='design', input='committed', material='hardwood', location='k3',
          source='Sample 3 (#939) — a 20 × 10 × 3.0 pocket (r 2), a ⌀8 × 3.0 pocket and four ⌀3.2 × 6 bores'),
+    dict(id='s4', title='Sample 4: a pocket, then the initials on its floor', job='../../940-two-cutter.job.json',
+         kind='design', input='committed', material='hardwood', location='k3',
+         source='Sample 4 (#940) — a 24 × 24 × 6 pocket (r 3), then "CM" 10 mm 0.8 into its floor; the app picks each program’s cutter'),
+    dict(id='s5', title='Sample 5: the top edges chamfered, then a through-slot', job='../../941-chamfer-slot.job.json',
+         kind='design', input='committed', material='hardwood', location='k3',
+         source='Sample 5 (#941) — a 1 × 45° bevel on the stock’s edges, then a 6 × 10 slot across the full 36 mm width (the cutter leaves the stock)'),
 ]
