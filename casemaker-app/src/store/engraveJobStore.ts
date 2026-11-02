@@ -452,16 +452,22 @@ export function newThreadDepthMm(): number {
  * Which way a NEW line reads on this job's blank (#700).
  *
  * The badge route clamps the blank with its long side along Y and lays its name out along it
- * (#383); the badge's own pocket keep-out is what identifies that blank here. Everywhere else the
- * job's first line is the precedent — a line added beside a rotated one reads the same way — and a
- * job with no lines takes the default (along X). Pure, so the store action and any later caller
- * ask one question.
+ * (#383); the badge's own pocket keep-out is what identifies that blank here. A line added beside
+ * one already there reads the same way — the first line is the precedent.
+ *
+ * #930 — A JOB WITH NO LINES YET TAKES THE STOCK'S LONGER FACE AXIS: the shop's stick lies along
+ * the jaws (100 mm in Y against 36 in X), and a first line read along the 36 mm side is shrunk to
+ * thumbnail size by `blankLabelSeed` — the operator path failing its own purpose. A square or
+ * X-long stock keeps the old default (along X).
  */
 function textAlongFor(job: EngraveJob): 'x' | 'y' {
   if ((job.keepOuts ?? []).some((k) => k.id === BADGE_POCKET_KEEP_OUT_ID && k.enabled)) return 'y';
   const face = job.labels[0];
-  const rotation = face === undefined ? 0 : ((face.rotation % 180) + 180) % 180;
-  return rotation === 90 ? 'y' : 'x';
+  if (face !== undefined) {
+    const rotation = ((face.rotation % 180) + 180) % 180;
+    return rotation === 90 ? 'y' : 'x';
+  }
+  return job.stock.width > job.stock.length ? 'y' : 'x';
 }
 
 /**

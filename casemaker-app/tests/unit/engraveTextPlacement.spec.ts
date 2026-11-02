@@ -149,4 +149,39 @@ describe('#700 the wizard’s engrave text', () => {
     expect(job.labels[0]!.rotation).toBe(0);
     insideMargin(job, job.labels[0]!);
   });
+
+  // #930 — THE HOUSE'S STICK IS LONGER IN Y THAN IN X (36 between the jaws, 100 along them). A
+  // wizard line read along the 36 mm side is shrunk to thumbnail size; a job with no lines yet
+  // takes the blank's longer face axis, and the line gets the size it would have had on the long
+  // side. A square or X-long blank keeps the old default (along X).
+  it('#930 — a job with no lines reads its first line along the blank’s longer face axis', () => {
+    const store = useEngraveJobStore.getState();
+    const freshJob = (length: number, width: number): EngraveJob => {
+      store.reset();
+      const base = useEngraveJobStore.getState().job;
+      // The wizard's stock step clears the demo lines before the operation is created.
+      useEngraveJobStore.getState().replace({ ...base, labels: [], shapes: [] });
+      useEngraveJobStore.getState().setStock({ length, width, thickness: 36 }, 'computed');
+      useEngraveJobStore.getState().addEngraveText('Zoomba', { depth: 0.5, font: DEFAULT_FONT_ID });
+      return useEngraveJobStore.getState().job;
+    };
+
+    // The house stick: 36 across X, 100 along Y — the line turns to read along Y.
+    const stick = freshJob(36, 100);
+    expect(stick.labels[0]!.rotation).toBe(90);
+    insideMargin(stick, stick.labels[0]!);
+    const sizeAlongY = stick.labels[0]!.size;
+
+    // The same stick lying the other way (100 along X): the line reads along X, and the size it
+    // gets here is the size the turned line above must also have.
+    const alongX = freshJob(100, 36);
+    expect(alongX.labels[0]!.rotation).toBe(0);
+    expect(sizeAlongY).toBe(alongX.labels[0]!.size);
+    // A larger number than the 36 mm side could hold: the long side is what sized it.
+    expect(sizeAlongY).toBeGreaterThan(36 / 6);
+
+    // A square blank keeps the old default.
+    const square = freshJob(50, 50);
+    expect(square.labels[0]!.rotation).toBe(0);
+  });
 });
