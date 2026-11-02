@@ -1221,19 +1221,21 @@ describe('#819 the finished screen', () => {
     useRunRecordStore.setState({ imported: [recordWith(250)] });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
     expect(screen.getByTestId('engrave-cut-actual-time').textContent).toBe(
-      'Took 4 min 30 s against 4 min 10 s predicted — 8 % over.',
+      'The run recorded on 2026-11-02 took 4 min 30 s against 4 min 10 s predicted — 8 % over.',
     );
 
     // A record with no estimate says so rather than inventing a percentage.
     cleanup();
     useRunRecordStore.setState({ imported: [recordWith(null)] });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
-    expect(screen.getByTestId('engrave-cut-actual-time').textContent).toBe('Took 4 min 30 s — no estimate recorded.');
+    expect(screen.getByTestId('engrave-cut-actual-time').textContent).toBe(
+      'The run recorded on 2026-11-02 took 4 min 30 s — no estimate recorded.',
+    );
 
-    // No record at all: one honest line, not a blank card.
+    // No record at all: the PROGRAM has an estimate, so the line says what is missing — the run.
     cleanup();
     useRunRecordStore.setState({ imported: [] });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
-    expect(screen.getByTestId('engrave-cut-actual-time').textContent).toBe('No estimate recorded for this job.');
+    expect(screen.getByTestId('engrave-cut-actual-time').textContent).toBe('No timed run recorded for this job yet.');
   });
 });

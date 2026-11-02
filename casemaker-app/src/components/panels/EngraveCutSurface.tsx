@@ -334,19 +334,22 @@ function TurnStockControl({ job }: { job: EngraveJob }): JSX.Element {
  *
  * Both figures are the RECORD's own — the machine's elapsed (or the operator's minutes) and the
  * cycle estimate written when the program was posted — so the sentence can never set one job's
- * clock against another job's prediction. The percentage is rounded to the whole number the
- * example uses; a record with no estimate says so rather than printing a bare clock.
+ * clock against another job's prediction. The line says WHICH run it is: this is the last SAVED
+ * record, which is the run just finished only when its record was saved afterwards, so it is
+ * dated (`cutOn`). The percentage is rounded to the whole number the example uses; a record with
+ * no estimate says so rather than printing a bare clock.
  */
 function actualTimeSentence(run: RunRecord | null): string {
-  if (run === null) return 'No estimate recorded for this job.';
+  if (run === null) return 'No timed run recorded for this job yet.';
   const actual = runSeconds(run);
-  if (actual === null) return 'No estimate recorded for this job.';
+  if (actual === null) return 'No timed run recorded for this job yet.';
+  const when = run.cutOn === null ? 'The recorded run' : `The run recorded on ${run.cutOn}`;
   if (run.estimatedSeconds === null || run.estimatedSeconds <= 0) {
-    return `Took ${formatDuration(actual)} — no estimate recorded.`;
+    return `${when} took ${formatDuration(actual)} — no estimate recorded.`;
   }
   const pct = Math.round(((actual - run.estimatedSeconds) / run.estimatedSeconds) * 100);
   const direction = pct === 0 ? 'on the estimate' : `${Math.abs(pct)} % ${pct > 0 ? 'over' : 'under'}`;
-  return `Took ${formatDuration(actual)} against ${formatDuration(run.estimatedSeconds)} predicted — ${direction}.`;
+  return `${when} took ${formatDuration(actual)} against ${formatDuration(run.estimatedSeconds)} predicted — ${direction}.`;
 }
 
 export function EngraveCutSurface({
