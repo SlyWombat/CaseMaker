@@ -41,6 +41,8 @@ def arg_parse():
     p.add_argument('--location', default=os.path.expanduser('~/casemaker-manager/demo-build/location.json'))
     p.add_argument('--catalogue', default=os.path.expanduser('~/casemaker-manager/demo-build/catalogue.json'))
     p.add_argument('--out', default=os.path.expanduser('~/casemaker-manager/demo-build'))
+    p.add_argument('--meshes', default=os.environ.get('CM_MESHES', '/mnt/c/projects/Case Maker/samples/3d'),
+                   help='where the shop-owned mesh files live (the committed 3D jobs carry no bytes)')
     p.add_argument('--only', help='comma-separated card ids (debug)')
     p.add_argument('--timeout', type=int, default=1800, help='seconds per job (default 1800)')
     return p.parse_args()
@@ -67,6 +69,27 @@ def read_json(path, default=None):
         return json.load(open(path))
     except (OSError, ValueError):
         return default
+
+
+def materialise_job(job_path, rundir, meshes):
+    """The committed 3D jobs carry no mesh bytes: the meshes are shop-owned local inputs. Put the
+    file the job names back in, by the job's own sha256, into the run directory (never the repo)."""
+    import hashlib
+    j = read_json(job_path)
+    if not j:
+        return job_path
+    t = j.get('targetObject') or (j.get('targetObjects') or [None])[0]
+    if not t or t.get('data') or not t.get('name'):
+        return job_path
+    src = os.path.join(meshes, t['name'])
+    raw = open(src, 'rb').read()
+    got = hashlib.sha256(raw).hexdigest()
+    if got != t.get('sha256'):
+        raise SystemExit(f'{src}: sha256 {got} is not the job\'s {t.get("sha256")}; refusing to cut another mesh')
+    t['data'] = base64.b64encode(raw).decode()
+    out = os.path.join(rundir, 'job.json')
+    json.dump(j, open(out, 'w'))
+    return out
 
 
 def load_receipt(rundir):
@@ -133,7 +156,8 @@ def design_verdict(rc, dc):
     if measured == 0:
         return 'unchecked', 'the design has no measurable item for the interim check (chamfers and cut-outs are not modelled); #924’s oracle is needed', numbers
     if problems:
-        return 'deviates', '; '.join(problems), numbers
+        more = f'; and {len(problems) - 3} more item(s)' if len(problems) > 3 else ''
+        return 'deviates', '; '.join(problems[:3]) + more, numbers
     return 'match', f"verifier 0 errors; {measured} measured item(s) at their floor; no cut outside the design", numbers
 
 
@@ -156,7 +180,8 @@ def goal_verdict(rc, gc):
     if rc['verifierErrors']:
         problems.append(f"the verifier reports {rc['verifierErrors']} error(s)")
     if problems:
-        return 'deviates', '; '.join(problems), numbers
+        more = f'; and {len(problems) - 3} more item(s)' if len(problems) > 3 else ''
+        return 'deviates', '; '.join(problems[:3]) + more, numbers
     return 'match', f"zero cut-into the goal; coverage {cover} %", numbers
 
 
@@ -213,8 +238,10 @@ def run_card(c, args, sha, loc, cat):
     card['figures'] = []
     card['problems'] = []
 
+    run_job = materialise_job(job, rundir, args.meshes)
+    job = run_job if run_job != job else job   # the design check and goal reader take the same bytes
     if not os.path.exists(receipt_path):
-        r = sh(['npm', 'run', '-s', 'casemaker', '--', 'cut', job, '--out', rundir,
+        r = sh(['npm', 'run', '-s', 'casemaker', '--', 'cut', run_job, '--out', rundir,
                 '--json', '--location', loc], os.path.join(args.repo, 'casemaker-app'), args.timeout)
         open(receipt_path, 'w').write(r['stdout'])
         open(os.path.join(rundir, 'stderr.txt'), 'w').write(r['stderr'])
@@ -326,14 +353,23 @@ def job_stock(job_path):
 
 
 def page(cards, args, sha, loc, cat):
-    counts = {k: sum(1 for c in cards if c.get('verdict') == k) for k in PILL}
+    # The gate table keeps computed verdicts only; a card the interim check cannot measure waits in
+    # its own appendix until #924's oracle can say something about it.
+    gate = [c for c in cards if c.get('verdict') != 'unchecked']
+    waiting = [c for c in cards if c.get('verdict') == 'unchecked']
+    counts = {k: sum(1 for c in gate if c.get('verdict') == k) for k in PILL}
     head = open(os.path.join(HERE, 'page-head.html')).read()
     rows = []
-    for c in cards:
+    for c in gate:
         pill_cls, pill_txt = PILL.get(c.get('verdict'), PILL['error'])
         rows.append(f"<tr><td>{html.escape(c['id'])}</td><td>{html.escape(c['title'])}</td>"
                     f"<td>{html.escape(c['kind'])}</td><td><span class=\"pill {pill_cls}\">{pill_txt}</span></td>"
                     f"<td>{html.escape((c.get('sentence') or '')[:180])}</td></tr>")
+    waiting_section = ('<section class="panel"><h2>Appendix — an objective reference exists but the '
+                       'interim check cannot measure it (waits on #924)</h2><ul class="findings">' +
+                       ''.join(f'<li><span class="pill right">Not checkable</span><p><b>{html.escape(c["id"])}</b> '
+                               f'{html.escape(c["title"])} — <span class="notes">{html.escape(c.get("sentence") or "")}</span></p></li>'
+                               for c in waiting) + '</ul></section>') if waiting else ''
     body = [f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{head}
 <style>.frames {{ grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }} .card {{ white-space: normal; }}</style>
 </head><body><div class="wrap">
@@ -353,7 +389,6 @@ def page(cards, args, sha, loc, cat):
     <li><span class="pill ok">Matches the design</span><b>{counts['match']}</b></li>
     <li><span class="pill gap">Deviates</span><b>{counts['deviates']}</b></li>
     <li><span class="pill fail">Refused</span><b>{counts['refused']}</b></li>
-    <li><span class="pill right">Not checkable</span><b>{counts['unchecked']}</b></li>
     <li><span class="pill cant">Not run</span><b>{counts['error']}</b></li>
   </ul>
 </header>
@@ -368,8 +403,9 @@ def page(cards, args, sha, loc, cat):
 <section class="panel"><h2>All cards</h2><div class="tablewrap"><table>
 <tr><th>id</th><th>job</th><th>check</th><th>verdict</th><th>what the check says</th></tr>
 {''.join(rows)}
-</table></div></section>''']
-    for c in cards:
+</table></div></section>
+{waiting_section}''']
+    for c in gate:
         pill_cls, pill_txt = PILL.get(c.get('verdict'), PILL['error'])
         figs = ''.join(figure(cap, src) for cap, src in c.get('figures', []))
         facts = []
@@ -423,9 +459,20 @@ marked on their cards and never moved. No machine was used.</footer></div></body
 def main():
     args = arg_parse()
     os.environ['CM_LOCATION'] = args.location          # read by render.py at import
-    sha = git_sha(args.repo)
-    if args.sha and not sha.startswith(args.sha):
-        sys.exit(f'--sha {args.sha} is not the repo HEAD {sha}; check the worktree out first')
+    head = git_sha(args.repo)
+    sha = head
+    if args.sha:
+        # The page states the sha the APP was built from. This column's tooling commits sit on top
+        # of it; that is only sound while the app itself is byte-identical.
+        if not args.sha.startswith(head) and head != args.sha:
+            ok = subprocess.run(['git', '-C', args.repo, 'merge-base', '--is-ancestor', args.sha, head]).returncode == 0
+            diff = subprocess.run(['git', '-C', args.repo, 'diff', '--name-only', args.sha, head, '--',
+                                   'casemaker-app/src', 'casemaker-app/src-tauri', 'casemaker-app/scripts',
+                                   'casemaker-app/package.json', 'casemaker-app/package-lock.json'],
+                                  capture_output=True, text=True).stdout.strip()
+            if not ok or diff:
+                sys.exit(f'--sha {args.sha} is not {head} and the app differs: {diff or "not an ancestor"}')
+        sha = args.sha
     loc = read_json(args.location) or {}
     cat = read_json(args.catalogue) or {}
     only = set(args.only.split(',')) if args.only else None
@@ -450,7 +497,7 @@ def main():
                 'appendix': [{'card': a, 'why': b} for a, b in APPENDIX],
                 'cards': [{k: v for k, v in c.items() if k not in ('design', 'figures')} for c in out_cards]}
     json.dump(manifest, open(os.path.join(args.out, 'manifest.json'), 'w'), indent=1)
-    print(f'page: {page_path}')
+    print(f'page: {page_path} (app sha {sha}, worktree HEAD {head})')
     print(f'manifest: {os.path.join(args.out, "manifest.json")}')
     bad = [c['id'] for c in out_cards if c.get('verdict') == 'error']
     if bad:
