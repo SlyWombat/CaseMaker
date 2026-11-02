@@ -55,6 +55,63 @@ export const REST_THIRD_TOOL_KEY = 'rest.thirdToolPct';
  */
 export const REST_VISIBLE_DEPTH_KEY = 'rest.visibleDepthMm';
 
+/**
+ * #912 — THE SLOWEST A REST PASS MAY BE AND STILL BE WORTH THE CUT, seconds of cutting per mm³ of
+ * material it takes. A 3D finish leaves material where its ball cannot enter; a rest pass exists
+ * to take a leftover that would show, not to spend an afternoon on a few cubic millimetres. The
+ * demo wolf's ⌀0.5 pass wanted 6 h 53 min to take 803 mm³ to 717 mm³ — about 4 min 48 s for each
+ * mm³ it took — while the passes worth running in the same set were the photo relief's (8.6 s a
+ * mm³) and the mouse shell's (3.7 s a mm³). A minute a cubic millimetre separates them.
+ */
+export const REST_ABSURD_SECONDS_PER_MM3 = 60;
+
+/**
+ * #912 — WHAT A REST PASS IS JUDGED BY: the material it takes, the seconds it spends taking it,
+ * the leftover it would leave and whether that leftover would show. The pass is chosen by this
+ * outcome rather than by the residual alone, and a pass past {@link REST_ABSURD_SECONDS_PER_MM3}
+ * is not run at all (the run states its numbers instead).
+ */
+export interface RestOutcome {
+  /** What the pass takes, mm³. */
+  removedMm3: number;
+  /** Seconds of cutting for each mm³ it takes. */
+  secondsPerMm3: number;
+  /** The residual it would leave, mm³ — the tie-break at equal outcomes. */
+  residualMm3: number;
+  /** Its estimated cutting time, s. */
+  seconds: number;
+  /** Whether the leftover it would leave would still show (the shop's `rest.visibleDepthMm`). */
+  visibleAfter: boolean;
+}
+
+/** A pass's outcome, from the numbers its own plan measured. */
+export function restOutcome(
+  removedMm3: number,
+  residualMm3: number,
+  seconds: number,
+  visibleAfter: boolean,
+): RestOutcome {
+  return { removedMm3, residualMm3, seconds, secondsPerMm3: seconds / Math.max(removedMm3, 1e-12), visibleAfter };
+}
+
+/** Past the bar: skip it and state its numbers rather than spend the machine's afternoon. */
+export function restOutcomeAbsurd(outcome: RestOutcome): boolean {
+  return !(outcome.secondsPerMm3 <= REST_ABSURD_SECONDS_PER_MM3);
+}
+
+/**
+ * Whether `a` is the BETTER pass than `b` (null: any pass is better than none). What the leftover
+ * would show comes first — a pass that hides it beats one that does not, whatever their rates —
+ * then the better outcome (seconds a mm³), then the lower residual and time.
+ */
+export function restOutcomeBetter(a: RestOutcome, b: RestOutcome | null): boolean {
+  if (b === null) return true;
+  if (a.visibleAfter !== b.visibleAfter) return !a.visibleAfter;
+  if (Math.abs(a.secondsPerMm3 - b.secondsPerMm3) > 1e-9) return a.secondsPerMm3 < b.secondsPerMm3;
+  if (a.residualMm3 < b.residualMm3 - 1e-9) return true;
+  return Math.abs(a.residualMm3 - b.residualMm3) <= 1e-9 && a.seconds < b.seconds;
+}
+
 export interface RestMachiningSettings {
   /**
    * How far the rest pass reaches back into the first cutter's territory, mm. The band BOTH programs

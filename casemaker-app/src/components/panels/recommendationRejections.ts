@@ -23,7 +23,8 @@ export type ActionableExclusion =
   | 'no-catalogue-row'
   | 'unknown-size'
   | 'metal-line'
-  | 'job-shape';
+  | 'job-shape'
+  | 'inlay-cone';
 
 /** A rejection the operator can act on, and the shape its row needs. */
 export type ActionableRejection = ToolCandidate & { excluded: ActionableExclusion };
@@ -35,7 +36,8 @@ export function isActionableRejection(c: ToolCandidate): c is ActionableRejectio
     c.excluded === 'no-catalogue-row' ||
     c.excluded === 'unknown-size' ||
     c.excluded === 'metal-line' ||
-    c.excluded === 'job-shape'
+    c.excluded === 'job-shape' ||
+    c.excluded === 'inlay-cone'
   );
 }
 
@@ -48,7 +50,7 @@ export interface RejectionGroups {
 
 type NoCatalogueRow = ToolCandidate & { excluded: 'no-catalogue-row' };
 type Individual = ToolCandidate & {
-  excluded: 'broken' | 'no-feeds' | 'unknown-size' | 'metal-line' | 'job-shape';
+  excluded: 'broken' | 'no-feeds' | 'unknown-size' | 'metal-line' | 'job-shape' | 'inlay-cone';
 };
 
 const isNoCatalogueRow = (c: ToolCandidate): c is NoCatalogueRow => c.excluded === 'no-catalogue-row';
@@ -57,7 +59,8 @@ const isIndividual = (c: ToolCandidate): c is Individual =>
   c.excluded === 'no-feeds' ||
   c.excluded === 'unknown-size' ||
   c.excluded === 'metal-line' ||
-  c.excluded === 'job-shape';
+  c.excluded === 'job-shape' ||
+  c.excluded === 'inlay-cone';
 
 export function groupRejections(candidates: readonly ToolCandidate[]): RejectionGroups {
   return {

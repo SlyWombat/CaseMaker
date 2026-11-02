@@ -111,7 +111,11 @@ import {
 import {
   restSeamFacts,
   thirdToolAdvice,
+  restOutcome,
+  restOutcomeAbsurd,
+  restOutcomeBetter,
   REST_MACHINING_FALLBACK,
+  type RestOutcome,
   type RestSettingSource,
   type SeamCutter,
   type SeamFacts,
@@ -191,7 +195,7 @@ import { type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
 import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
 import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
-import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
+import { FRAME_Z, formatDuration, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { unfacedBands } from '@/engine/cnc/mounts/inPath';
@@ -5317,9 +5321,18 @@ export async function generateGoalProgram(
   const finishName = finishTool.radius > 0 ? `${Number((finishTool.radius * 2).toFixed(2))} mm ${tool.shape === 'ball' || tool.shape === 'bull' ? 'ball' : 'cutter'}` : tool.name;
   const mm3 = (v: number): string => String(Number(v.toFixed(v >= 10 ? 1 : v >= 1 ? 2 : 3)));
   const mm2 = (v: number): string => String(Number(v.toFixed(2)));
-  const restPick = ((): { entry: ToolLibraryEntry; plan: SurfaceRestPlan; rpm: number } | null => {
+  type RestCandidate = {
+    entry: ToolLibraryEntry;
+    plan: SurfaceRestPlan;
+    rpm: number;
+    /** #912 — the pass's outcome: what it takes, its seconds a mm³, and what it would leave. */
+    outcome: RestOutcome;
+  };
+  // #912 — a pass too slow for the material it takes is kept only to be stated, never run.
+  let absurdRest: RestCandidate | null = null;
+  const restPick = ((): RestCandidate | null => {
     if (finishResidual.cells === 0 || !(finishTool.radius > 0)) return null;
-    let best: { entry: ToolLibraryEntry; plan: SurfaceRestPlan; rpm: number } | null = null;
+    let best: RestCandidate | null = null;
     const seenRadius = new Set<number>();
     for (const entry of shop.tools ?? []) {
       if (entry.key === job.toolKey) continue;
@@ -5367,14 +5380,29 @@ export async function generateGoalProgram(
         // below still states what the finish left.
         continue;
       }
-      // The simulated outcome: the material the ball still leaves above the goal, then time.
-      if (plan.moves.length === 0 || !(plan.residual.volumeMm3 < finishResidual.volumeMm3 - 1e-9)) continue;
-      const better =
-        best === null ||
-        plan.residual.volumeMm3 < best.plan.residual.volumeMm3 - 1e-9 ||
-        (Math.abs(plan.residual.volumeMm3 - best.plan.residual.volumeMm3) <= 1e-9 &&
-          plan.estimatedSeconds < best.plan.estimatedSeconds);
-      if (better) best = { entry, plan, rpm: restResolved.params.rpm };
+      // #912 — THE OUTCOME, NOT JUST THE RESIDUAL. What the pass takes, how long it takes to
+      // take it, and whether the leftover it leaves would still show; a pass past the absurd
+      // rate is not run at all (the sentence below states what it would have cost).
+      const removedMm3 = finishResidual.volumeMm3 - plan.residual.volumeMm3;
+      if (plan.moves.length === 0 || !(removedMm3 > 1e-9)) continue;
+      const scored: RestCandidate = {
+        entry,
+        plan,
+        rpm: restResolved.params.rpm,
+        outcome: restOutcome(
+          removedMm3,
+          plan.residual.volumeMm3,
+          plan.estimatedSeconds,
+          restResidualVisible(plan.residual, visibleDepthMm, visibleShare).visible,
+        ),
+      };
+      if (restOutcomeAbsurd(scored.outcome)) {
+        // Keep the least wasteful absurd pass for the sentence: the one that takes the most for
+        // its time (the lowest seconds a mm³), not the last one tried.
+        if (absurdRest === null || scored.outcome.secondsPerMm3 < absurdRest.outcome.secondsPerMm3) absurdRest = scored;
+        continue;
+      }
+      if (restOutcomeBetter(scored.outcome, best?.outcome ?? null)) best = scored;
     }
     return best;
   })();
@@ -5390,7 +5418,24 @@ export async function generateGoalProgram(
     const look = visibility.visible
       ? ` — past the ${mm2(visibleDepthMm)} mm or ${pct(visibleShare)} % that marks a leftover visible —`
       : ` — under the ${mm2(visibleDepthMm)} mm and ${pct(visibleShare)} % that marks a leftover visible —`;
-    if (restPick === null) {
+    if (restPick === null && absurdRest !== null) {
+      // #912 — THE PASS THAT WOULD NOT PAY. It was measured and scored like every other; its
+      // outcome (minutes a cubic millimetre) is past the bar, so it is skipped and the numbers
+      // are stated rather than an afternoon of the machine's time being spent on them.
+      const slowed = absurdRest;
+      const restTool = slowed.entry.tool;
+      const restDiameter = Number((cuttingDiameter(restTool) ?? 0).toFixed(2));
+      restFindings.push({
+        severity: visibility.visible ? 'warning' : 'info',
+        code: 'goal-rest-uncut',
+        labelId: goal.id,
+        message:
+          `${left}${look} a rest pass with the ${restTool.name} (⌀${restDiameter} mm) would take about ` +
+          `${formatDuration(slowed.plan.estimatedSeconds)} to take ${mm3(slowed.outcome.removedMm3)} mm³ of it ` +
+          `(about ${mm2(slowed.outcome.secondsPerMm3)} s for each mm³ it takes) — past the minute a cubic ` +
+          `millimetre that marks a pass not worth the cut — so it is skipped and the leftover stands.`,
+      });
+    } else if (restPick === null) {
       const suggestion = suggestedRestRadiusMm(
         surfaced.heightfield,
         finishResidual,
@@ -5481,7 +5526,8 @@ export async function generateGoalProgram(
           labelId: goal.id,
           message:
             `${left}; a rest pass with the ${restTool.name} (⌀${restDiameter} mm) cuts those concavities — ` +
-            `${restPick.plan.moves.length.toLocaleString('en-US')} moves, about ${Math.round(restPick.plan.estimatedSeconds)} s — ` +
+            `${restPick.plan.moves.length.toLocaleString('en-US')} moves, about ${Math.round(restPick.plan.estimatedSeconds)} s, ` +
+            `${mm2(restPick.outcome.secondsPerMm3)} s for each mm³ it takes — ` +
             `and leaves ${mm3(restPick.plan.residual.volumeMm3)} mm³.`,
         });
       }

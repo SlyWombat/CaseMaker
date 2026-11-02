@@ -159,6 +159,23 @@ export function inlayMarked(
 }
 
 /**
+ * #912 — THE V THE JOB'S INLAY PAIR WAS BUILT FOR, as tan(half-angle), or null when no enabled
+ * male item states one (or two male items state different ones). A male plug mates with the
+ * female's wall because both are the SAME flank: a cone of another angle cannot close the pair,
+ * so the cutter pick must respect this BEFORE a cutter is chosen, rather than choose any V and
+ * warn afterwards (the demo's j11 male picked a 20° engraver for a 30° plug).
+ */
+export function inlayPairConeTan(job: EngraveJob): number | null {
+  let tan: number | null = null;
+  for (const { item, mark } of inlayMarked(job)) {
+    if (!item.enabled || item.construction || mark.role !== 'male' || mark.tanHalf === undefined) continue;
+    if (tan === null) tan = mark.tanHalf;
+    else if (Math.abs(tan - mark.tanHalf) > 1e-6) return null;
+  }
+  return tan;
+}
+
+/**
  * Mirror a region item in Y about the blank's centre line — the glue-up flip about the X axis.
  *
  * The transform is exact: the position's Y becomes `width − y`, the rotation NEGATES (a mirror

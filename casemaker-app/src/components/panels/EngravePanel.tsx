@@ -4611,7 +4611,10 @@ export function EngravePanel(): JSX.Element {
                             : c.excluded === 'job-shape'
                               ? // #702 — the job's own SHAPE gate, in the finding's words.
                                 (c.refusal ?? 'the job’s own operations refuse it')
-                              : 'no cutting parameters for this material';
+                              : c.excluded === 'inlay-cone'
+                                ? // #912 — the inlay pair's cone, in the pick's own words.
+                                  (c.refusal ?? 'the inlay pair was built for a different V angle')
+                                : 'no cutting parameters for this material';
                   return (
                     <div
                       key={c.key}

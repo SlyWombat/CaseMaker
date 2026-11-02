@@ -373,6 +373,8 @@ function exclusionWords(excluded: ToolCandidate['excluded'] | null, note: string
   // the switch.
   if (excluded === 'metal-line') return note ?? 'the job’s own material check refuses it';
   if (excluded === 'job-shape') return note ?? 'the job’s own operations refuse its shape';
+  // #912 — the inlay pair's cone, in the pick's own words.
+  if (excluded === 'inlay-cone') return note ?? 'the inlay pair was built for a different V angle';
   return null;
 }
 

@@ -82,7 +82,7 @@ import { conditionRank, type ConditionSummary } from '@/engine/cnc/toolCondition
 import type { EngraveAnyItem, EngraveJob, EngravePrimitive, StockMaterial } from '@/types/engraveJob';
 import { vCone } from '@/engine/cnc/vProfile';
 import { cutterRefusedOnMaterial } from './cutterMaterial';
-import { inlayMarked } from './inlay';
+import { inlayMarked, inlayPairConeTan } from './inlay';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import { faceCutterPick, kindOnlyPick, raisedGapSentence } from './cutterPlan';
 import { pureGoalObject } from './jobSetup';
@@ -108,7 +108,8 @@ export type ToolExclusion =
   | 'no-catalogue-row'
   | 'unknown-size'
   | 'metal-line'
-  | 'job-shape';
+  | 'job-shape'
+  | 'inlay-cone';
 
 export interface ToolCandidate {
   key: string;
@@ -127,7 +128,7 @@ export interface ToolCandidate {
   condition: ConditionSummary | null;
   /**
    * Why it was excluded before measuring, if it was: 'not-flat' | 'no-feeds' | 'broken' |
-   * 'no-catalogue-row' | 'unknown-size' | 'metal-line' | 'job-shape'.
+   * 'no-catalogue-row' | 'unknown-size' | 'metal-line' | 'job-shape' | 'inlay-cone'.
    */
   excluded?: ToolExclusion;
   /**
@@ -586,6 +587,8 @@ export function recommendTool(
       : (job.cutouts ?? []).some((cutout) => cutout.enabled)
         ? 'the job has a cut-out, and a cut-out profiles with a flat end mill'
         : null;
+  // #912 — the pair's cone, read once: every candidate must match it or be set aside by name.
+  const pairConeTan = inlayPairConeTan(job);
   // #728 — the SAME item set `validateJob` checks: every list, enabled, construction skipped.
   const needsCone =
     ([...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])] as EngraveAnyItem[]).some(
@@ -697,6 +700,27 @@ export function recommendTool(
       usable.tool.shape !== 'flat' ? needsFlat : vCone(tool) === null ? needsCone : null;
     if (shapeRefusal !== null) {
       return { ...base, qualifies: false, excluded: 'job-shape' as const, refusal: shapeRefusal };
+    }
+    // #912 — THE PICK RESPECTS THE PLUG'S CONE. A male inlay half was built for the female's V
+    // angle; a cone of another angle cannot close the pair. The program's own warning says so
+    // after the fact (jobSetup's `inlay-cone-mismatch`); handing that cutter back as the pick is
+    // the demo's j11 defect — a 20° engraver chosen for a 30° plug, warned about afterwards.
+    if (pairConeTan !== null) {
+      const cone = vCone(tool);
+      const pairDeg = Number(((2 * Math.atan(pairConeTan) * 180) / Math.PI).toFixed(1));
+      if (cone === null || Math.abs(cone.tanHalf - pairConeTan) > 1e-6) {
+        const thisDeg =
+          cone === null ? null : Number(((2 * Math.atan(cone.tanHalf) * 180) / Math.PI).toFixed(1));
+        return {
+          ...base,
+          qualifies: false,
+          excluded: 'inlay-cone' as const,
+          refusal:
+            thisDeg === null
+              ? `the inlay pair was built for a ${pairDeg}° V, and this cutter states no cone`
+              : `the inlay pair was built for a ${pairDeg}° V; this cutter is ${thisDeg}°`,
+        };
+      }
     }
     // #455 — what the catalogue LISTS this cutter for, before what numbers exist. A cutter the
     // catalogue lists and does not list for this material is out by name, with the vendor's own

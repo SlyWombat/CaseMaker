@@ -50,6 +50,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { cuttingDiameter, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
 import { catalogueCoverageFor, catalogueStandingFor, feedsFor, feedsToolForSurface, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
+import { inlayPairConeTan } from './inlay';
 import { threadGeometry } from '@/engine/cnc/cam/threadMill';
 import { threadMillFit } from './threadFit';
 import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_FINISH_TIP_OPS, sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
@@ -698,6 +699,12 @@ export function planCutters(
   // ---- cones: chamfers and V-carves ----------------------------------------------------------
   const coneWork = byKind('cone');
   if (coneWork.length > 0) {
+    // #912 — THE PAIR'S CONE. A male inlay half was built for the female's V angle; a cone of
+    // another angle cannot close the pair, so it is never the cone pick (the recommendation's
+    // own copy of this gate excludes it by name too).
+    const pairConeTan = inlayPairConeTan(job);
+    const pairDeg =
+      pairConeTan === null ? null : Number(((2 * Math.atan(pairConeTan) * 180) / Math.PI).toFixed(1));
     const chamfers = (job.chamfers ?? []).filter((c) => usable(c) && coneWork.some((w) => w.id === c.id));
     const named = (id: string) =>
       [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])].find((i) => i.id === id);
@@ -705,6 +712,9 @@ export function planCutters(
       const cone = vCone(c.tool);
       const flute = vFluteLength(c.tool);
       if (cone === null || flute === null) return 'states no usable cone';
+      if (pairConeTan !== null && Math.abs(cone.tanHalf - pairConeTan) > 1e-6) {
+        return `its ${r3(cone.halfAngleDeg * 2)}° cone is not the ${String(pairDeg)}° V the inlay pair was built for`;
+      }
       const flank = flute * cone.tanHalf;
       for (const ch of chamfers) {
         if (ch.width > flank + 1e-9) return `its cone reaches ${r3(flank)} mm, not the ${ch.width} mm chamfer`;
@@ -744,7 +754,17 @@ export function planCutters(
       const why = [chamfers.length > 0 ? 'a chamfer is a cone’s flank' : '', coneWork.length > chamfers.length ? 'a V-carve is a cone’s flank' : ''].filter(Boolean).join('; ');
       add(pick, coneWork, `${why} — ${pick.tool.shape} ${dia(pick.diameter)} reaches them`);
     } else {
-      for (const w of coneWork) unassigned.push({ id: w.id, name: w.name, reason: `no cone in the list reaches this cut for this material${whyNoShape(['engraving', 'chamfer'])}` });
+      // #912 — say the pair's cone when that is what excludes every candidate, rather than
+      // "no cone reaches this cut" (which would be untrue: cones reach it, the wrong ones).
+      const anyPairCone = (c: Candidate): boolean => {
+        const cone = vCone(c.tool);
+        return cone !== null && (pairConeTan === null || Math.abs(cone.tanHalf - pairConeTan) <= 1e-6);
+      };
+      const reason =
+        pairConeTan !== null && !candidates.some(anyPairCone)
+          ? `the inlay pair was built for a ${String(pairDeg)}° V, and the list holds no ${String(pairDeg)}° cone for this cut${whyNoShape(['engraving', 'chamfer'])}`
+          : `no cone in the list reaches this cut for this material${whyNoShape(['engraving', 'chamfer'])}`;
+      for (const w of coneWork) unassigned.push({ id: w.id, name: w.name, reason });
     }
   }
 
