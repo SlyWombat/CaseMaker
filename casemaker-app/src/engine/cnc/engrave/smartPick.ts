@@ -361,12 +361,26 @@ export function candidatePlans(
       const reach = reachOf(t);
       return reach === null || goalDepth <= reach + 1e-9;
     };
-    const balls = tools
-      .filter((t) => t.tool.shape === 'ball' || t.tool.shape === 'bull')
-      .filter((t) => (stated(t.tool) ?? 0) > 0 && materialRefusal(job, t, catalogue, conditions, table ?? undefined, { ownedVouches: true }) === null)
+    // #902 — ONE CANDIDATE PER CUTTING SIZE, LARGEST CUTTING FIRST. A goal's ball is ranked by the
+    // diameter that CUTS (a ⌀6 engraving ball cuts 0.5–2 mm), but duplicates of one size filled all
+    // six slots: the ⌀6 and ⌀4 plain balls and the ⌀6-shank engravers are four slots at two sizes,
+    // so the ⌀2/⌀3.175 balls a fine grid can finish with never entered the search — the wolf and
+    // the elephant then failed the finishing tip field's own budget (#540) on every candidate while
+    // a smaller ball would have planned. Dedupe before the cap; six distinct cutting sizes span the
+    // library's balls.
+    const balls: ToolLibraryEntry[] = [];
+    const seenCut = new Set<number>();
+    for (const t of tools
+      .filter((entry) => entry.tool.shape === 'ball' || entry.tool.shape === 'bull')
+      .filter((entry) => (stated(entry.tool) ?? 0) > 0 && materialRefusal(job, entry, catalogue, conditions, table ?? undefined, { ownedVouches: true }) === null)
       .filter(reachesGoal)
-      .sort((a, b) => byDiameter(b, a))
-      .slice(0, 6);
+      .sort((a, b) => byDiameter(b, a))) {
+      const size = Number((stated(t.tool) ?? 0).toFixed(3));
+      if (seenCut.has(size)) continue;
+      seenCut.add(size);
+      balls.push(t);
+      if (balls.length === 6) break;
+    }
     for (const ball of balls) add({ cutters: [{ key: ball.key, items: ids }], source: { [ball.key]: sourceOf(ball) } });
     // #869 — AND THE SAME BALL WITH A FLAT ROUGHING BEFORE IT. A flat takes a deeper step-down and
     // a wider step-over than the ball, so the bulk comes off faster, and the adaptive clearing

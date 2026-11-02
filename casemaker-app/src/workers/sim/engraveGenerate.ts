@@ -166,7 +166,7 @@ import {
   generateSurface3dIR,
   estimateGoalMoves,
   goalMemoryBudgetMb,
-  GOAL_BYTES_PER_MOVE,
+  goalProgramMb,
   tipStencilCells,
   type GoalMoveEstimate,
   moldHeightfield,
@@ -4926,7 +4926,7 @@ export async function generateGoalProgram(
   type MoveEstimate = GoalMoveEstimate & { depth: number; cells: number; pitch: number };
   const movesAt = (pitchMm: number, stepDown = feeds.stepDown): MoveEstimate => {
     const sampled = sampleGoalHeightfield(goal, sampleAt(pitchMm));
-    if (sampled.coveredCount === 0) return { rough: 0, finish: 0, moves: 0, mb: 0, depth: 0, cells: 0, pitch: sampled.pitch };
+    if (sampled.coveredCount === 0) return { rough: 0, finish: 0, moves: 0, gridCells: sampled.nx * sampled.ny, mb: 0, depth: 0, cells: 0, pitch: sampled.pitch };
     // The mould's field, as the CAM will cut it (`generateSurface3dForGoal`).
     const hf = isMold(goal)
       ? moldHeightfield(sampled, goal.position.y, goal.position.z - placedSize(goal).z)
@@ -4953,7 +4953,8 @@ export async function generateGoalProgram(
               const r = rough === null ? 0 : estimateGoalMoves(hf, { ...rough.feeds, stepDown }, allowanceMm, null, null, surfaceToolFor(rough.tool)).rough;
               const f = estimateGoalMoves(hf, feeds, allowanceMm, null, rim).finish;
               const moves = r + f;
-              return { rough: r, finish: f, moves, mb: (moves * GOAL_BYTES_PER_MOVE) / (1024 * 1024) };
+              // #902 — the same re-priced estimate: program through post+simulation, plus the grid.
+              return { rough: r, finish: f, moves, gridCells: hf.nx * hf.ny, mb: goalProgramMb(moves, hf.nx * hf.ny) };
             })(),
           };
     return { ...estimate, depth: hf.topZ - hf.minZ, cells: hf.coveredCount, pitch: hf.pitch };
@@ -5021,7 +5022,8 @@ export async function generateGoalProgram(
     const firstBandMm = Number((moveEstimate.depth / 2).toFixed(3));
     const secondBandMm = Number((moveEstimate.depth - firstBandMm).toFixed(3));
     const splitMoves = Math.max(movesForBand(firstBandMm), movesForBand(secondBandMm));
-    const splitMb = (splitMoves * GOAL_BYTES_PER_MOVE) / (1024 * 1024);
+    // #902 — the split halves the PROGRAM, not the grid: both sides run on the same grid anchors.
+    const splitMb = goalProgramMb(splitMoves, moveEstimate.gridCells);
     const splitReachFits =
       cutterReach === null || Math.max(firstBandMm, secondBandMm) <= cutterReach.mm - GOAL_BAND_CLEARANCE_MM + 1e-9;
     const suggestedSplit =
@@ -5042,6 +5044,8 @@ export async function generateGoalProgram(
       // itself is stated in MB, the unit the run is refused in.
       budgetMoves: moveEstimate.moves,
       budgetCells: moveEstimate.cells,
+      // #902 — the sampled grid's cells: the anchors the budget now prices scale with them.
+      budgetGridCells: moveEstimate.gridCells,
       budgetMb: moveEstimate.mb,
       budgetLimitMb: budgetMb,
       budgetPitchMm: moveEstimate.pitch,

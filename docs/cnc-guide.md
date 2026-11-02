@@ -990,8 +990,10 @@ in it; `goal-reach-unrecorded` is the info that stands in the refusal's place wh
 recorded at all (an assumption stated, nothing blocked — the sweep's holder gate is the guard);
 `goal-program-too-big` refuses, by name and with the numbers, a goal whose program would exceed
 the app's stated memory budget (640 MB on a computer, 256 MB on a phone — the program is held whole
-through the post and the simulation, about 1 KB per move; each roughing level is counted by the
-material it really removes, and straight runs of a pass are one move each); and
+through the post and the simulation: about 110 bytes a move for the packed move, its simulated line
+and its text, plus the goal grid's own anchors, which scale with the grid's cells; each roughing
+level is counted by the material it really removes, and straight runs of a pass are one move each);
+and
 `goal-object-no-toolpath` is the info a *mixed* job (a goal beside ordinary items) gets — the item
 program cuts, the goal is validated and previewed, and no 3D cut is posted for it.
 

@@ -29,7 +29,7 @@ import {
   planGoalOvercut,
   goalMemoryBudgetMb,
   GOAL_MEMORY_BUDGET_MB,
-  GOAL_BYTES_PER_MOVE,
+  goalProgramMb,
   type GoalHeightfield,
   type SurfaceFeeds,
   type SurfaceTool,
@@ -466,7 +466,7 @@ describe('#889 — the goal estimate counts what the CAM will write', () => {
       expect(e.rough).toBe(roughing.moves.length);
       expect(e.finish).toBeGreaterThanOrEqual(finishing.moves.length);
       expect(e.moves).toBe(e.rough + e.finish);
-      expect(e.mb).toBeCloseTo((e.moves * GOAL_BYTES_PER_MOVE) / 1048576, 6);
+      expect(e.mb).toBeCloseTo(goalProgramMb(e.moves, e.gridCells), 6);
     }
   });
 

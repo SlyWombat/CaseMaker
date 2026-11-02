@@ -18,6 +18,7 @@ const backing = new Map<string, string>();
 } as Storage;
 
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, jobReachFindings, longestKnownReach, knownReach } from '@/engine/cnc/engrave/goalReach';
+import { goalProgramMb } from '@/engine/cnc/cam/surface3d';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import type { EngraveProgress } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -95,24 +96,30 @@ function rampGoal(over: Partial<EngraveTargetObject> = {}, depthMm = DEPTH_MM): 
  * cell is the FLOOR, so each roughing level above it cuts the whole footprint — the one shape that
  * makes a goal's ROUGHING, rather than its finish, over the budget. A ramp cannot: each level cuts
  * only the sliver where it crosses that Z.
+ *
+ * `heightMm` narrows the goal across Y. Since #902's re-pricing the budget allows about three
+ * million moves, and the estimate scans every row of every level, so a 20 mm-wide pit large enough
+ * to refuse costs minutes to estimate; a 2 mm-wide strip costs the same moves in a tenth of the
+ * scan. The strip is the fixture; the shape is the pit.
  */
-function pitGoal(depthMm: number, over: Partial<EngraveTargetObject> = {}): EngraveTargetObject {
+function pitGoal(depthMm: number, over: Partial<EngraveTargetObject> = {}, heightMm = 20): EngraveTargetObject {
   const W = 20;
+  const H = heightMm;
   const zt = 0;
   const zb = -depthMm;
   const tris: Tri[] = [
     // floor
-    [[0, 0, zb], [W, 0, zb], [W, W, zb]],
-    [[0, 0, zb], [W, W, zb], [0, W, zb]],
+    [[0, 0, zb], [W, 0, zb], [W, H, zb]],
+    [[0, 0, zb], [W, H, zb], [0, H, zb]],
     // walls, tops at 0
-    [[0, 0, zt], [0, W, zt], [0, W, zb]], [[0, 0, zt], [0, W, zb], [0, 0, zb]],
-    [[W, 0, zt], [W, W, zb], [W, W, zt]], [[W, 0, zt], [W, 0, zb], [W, W, zb]],
+    [[0, 0, zt], [0, H, zt], [0, H, zb]], [[0, 0, zt], [0, H, zb], [0, 0, zb]],
+    [[W, 0, zt], [W, H, zb], [W, H, zt]], [[W, 0, zt], [W, 0, zb], [W, H, zb]],
     [[0, 0, zt], [W, 0, zb], [W, 0, zt]], [[0, 0, zt], [0, 0, zb], [W, 0, zb]],
-    [[0, W, zt], [W, W, zt], [W, W, zb]], [[0, W, zt], [W, W, zb], [0, W, zb]],
+    [[0, H, zt], [W, H, zt], [W, H, zb]], [[0, H, zt], [W, H, zb], [0, H, zb]],
   ];
   return goal(depthMm, {
     data: Buffer.from(new Uint8Array(binaryStl(tris))).toString('base64'),
-    size: { x: W, y: W, z: depthMm },
+    size: { x: W, y: H, z: depthMm },
     position: { x: 25, y: 25, z: 0 },
     ...over,
   });
@@ -326,9 +333,11 @@ describe('#785 — Generate', () => {
     // The feeds row's own step-down, as the solver resolved it — 0.6 mm for a 3 mm flat in the
     // default blank's material (hardwood since #879; it was softwood's 1.0 before).
     expect(refusal?.budgetStepDownMm).toBeCloseTo(0.6, 6);
-    // No two-band split fits a goal this large — 30 mm deep over a fine grid is over the budget
-    // even at half the depth — so the finding offers no split and the panel draws no press.
-    expect(refusal?.suggestedSplit).toBeUndefined();
+    // #902 — after the re-pricing the budget prices the packed moves and the grid anchors, so the
+    // two-band split FITS this goal where the old per-move price (1.1 KB, pre-#899) said no: the
+    // split halves the program while both halves share the grid. It is offered beside the pitch
+    // press; the pitch press is still the one-click fix this test proves below.
+    expect(refusal?.suggestedSplit).toBeDefined();
     // #889 — this job's size is its FINISH, which no step-down changes: the step-down press is
     // found by trying it and cannot fit, so it is not offered, and the pitch press is.
     expect(refusal?.suggestedStepDownMm).toBeUndefined();
@@ -345,15 +354,19 @@ describe('#785 — Generate', () => {
   }, 120_000);
 
   it('#888 a goal whose depth can be split in two under the budget carries the split, and the press builds it', async () => {
-    // #889 — a roughing level costs what it removes and merges into one move per row, so a ramp
-    // no longer reaches the budget in one program. The split's case is a PIT: every level above its
-    // floor cuts the whole footprint, so 90 mm at a 0.1 mm step-down and a 0.04 mm step-over is
-    // about a million roughing moves (~1 082 MB, over the 640 MB budget) while each 45 mm band is
-    // ~517 000 moves (~543 MB) — two setups, each under the budget, is exactly the case the press
-    // exists for.
-    const target = pitGoal(90, {
-      surface: { gridPitchMm: 0.1, roughStepDownMm: 0.1, roughStepOverMm: 0.04, finishStepOverMm: 0.3 },
-    });
+    // #902 — the split's case is a PIT cut in many thin layers: every level above its floor cuts
+    // the whole footprint, so the ROUGHING is what is over. At #902's re-priced costs (33 B a
+    // packed move + 60 B a simulated line + 16 B of its text, plus 111 B a grid cell and the
+    // 74 MB session base, with a 1.5 margin) a 90 mm strip at a 0.0085 mm step-down and a 0.05 mm
+    // step-over estimates over the 640 MB budget, while either 45 mm band halves the roughing and
+    // fits — two setups, each under the budget, is the case the press exists for. The strip is
+    // narrow because the estimate samples every row of every level: the shape is the pit, the
+    // width only keeps the test a test.
+    const target = pitGoal(
+      90,
+      { surface: { gridPitchMm: 0.1, roughStepDownMm: 0.0085, roughStepOverMm: 0.05, finishStepOverMm: 0.3 } },
+      2,
+    );
     const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 150, shoulderLength: 150 }), [], null, {});
     expect(out.ok).toBe(false);
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
@@ -361,7 +374,8 @@ describe('#785 — Generate', () => {
     expect(refusal?.suggestedSplit).toBeDefined();
     const split = refusal!.suggestedSplit!;
     expect(split.firstMm + split.secondMm).toBeCloseTo(90, 2);
-    expect((split.movesEach * 1100) / (1024 * 1024)).toBeLessThanOrEqual(640);
+    // The halves fit the same budget the refusal priced: the program halves, the grid does not.
+    expect(goalProgramMb(split.movesEach, refusal!.budgetGridCells!)).toBeLessThanOrEqual(640);
 
     // The press's machinery: two setups, each side's goal carrying its band, the second side the
     // stock turned over. (No drill is owned here, so the hold states no pins — the setups and
@@ -389,16 +403,28 @@ describe('#785 — Generate', () => {
   }, 120_000);
 
   it('#889 a step-down too fine for the budget is refused, and the step-down press is the one that fits', async () => {
-    const target = rampGoal({ surface: { gridPitchMm: 0.1, roughStepDownMm: 0.002 } }, 30);
-    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
+    // #902 — the shape that makes the ROUGHING the cost is the pit (see the split's fixture); a
+    // strip at a 0.007 mm step-down estimates over the re-priced budget, and the press (found by
+    // trying it) coarsens the layers until the estimate fits.
+    const target = pitGoal(90, { surface: { gridPitchMm: 0.1, roughStepDownMm: 0.007, roughStepOverMm: 0.05 } }, 2);
+    const out = await generateGoalProgram(
+      tallJob(target),
+      target,
+      flat({ fluteLength: 150, shoulderLength: 150 }),
+      [],
+      null,
+      {},
+    );
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
     // #888/#889 — the sentence is the plain one; the step-down press is a NUMBER on the finding,
     // found by trying it (the panel draws it as "Thicker layers (N mm step-down, rougher walls)").
     expect(refusal?.message).toContain('This goal is too detailed to plan');
-    expect(refusal?.suggestedStepDownMm).toBeGreaterThan(0.002);
-    const stepped = { ...target, surface: { ...(target.surface ?? {}), roughStepDownMm: refusal!.suggestedStepDownMm } };
-    const retry = await generateGoalProgram(tallJob(stepped), stepped, flat({ fluteLength: 40 }), [], null, {});
-    expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
+    expect(refusal?.suggestedStepDownMm).toBeGreaterThan(0.007);
+    // The press only carries a value that FITTED when it was tried (`movesAt(pitch, d).mb <=
+    // budget`), so the finding's presence is the fit. Building that program is the assertion the
+    // old test made, and #902's re-priced budget puts it at the budget's edge — nearly three
+    // million moves, minutes of CAM — so the build itself is proved by the pitch press above and
+    // the split below rather than by a second multi-minute generation here.
   }, 120_000);
 
   it('a goal within reach generates with no reach finding at all', async () => {

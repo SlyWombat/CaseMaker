@@ -90,10 +90,15 @@ export const REST_TOLERANCE_MM = 0.01;
  * cells), so a large ball on a fine grid is billions of inner-loop ops with no cutoff — enough to
  * hang the worker. Above this cap {@link finishTipField} REFUSES honestly (it states the op count
  * and the fix), mirroring the exact sweep's `sweep-budget-exceeded` rather than running to a hang.
- * 300 M evaluations is comfortably past any real small-ball/coarse-grid job yet well under the
- * ~2.8 billion a 3 mm ball at 0.1 mm over a near-cap grid would cost.
+ *
+ * #902 — RE-PRICED FROM MEASUREMENT, as the memory budget was. The field runs about 0.45 G
+ * evaluations a second on the maintainer's desktop (measured 2026-11-02, the elephant's goal at
+ * 0.1 mm: a ⌀4 ball 510 M ops in 1.2 s, a ⌀6 ball 1.36 G in 3.0 s), so the old 300 M cap refused a
+ * second's work — and refused the elephant itself, whose only balls that reach 31.7 mm are the
+ * ⌀4/⌀6 pair. 1.5 G is a few seconds; the true blow-ups stay refused (a ⌀6 ball at 0.02 mm over a
+ * 4 M-cell grid is over a trillion).
  */
-export const DEFAULT_MAX_FINISH_TIP_OPS = 300_000_000;
+export const DEFAULT_MAX_FINISH_TIP_OPS = 1_500_000_000;
 
 /**
  * #671 — the crease angle the PENCIL pass follows when the operation states none, degrees. The
@@ -148,22 +153,60 @@ export interface GoalHeightfield {
 /**
  * #785, #889 — THE GOAL PROGRAM'S STATED MEMORY BUDGET, in MB. A goal program is held whole at
  * every stage after the CAM: its moves (packed, 33 bytes each), its posted text, and then the
- * simulation that checks it — which reads the text back into its own per-line records and is by
- * far the largest cost. Measured on the 50 mm panther (Node, 2026-11-01): about 1 KB of heap per
- * posted line through the simulation, against 33 bytes for the packed move and some 16 for its
- * line of text. {@link GOAL_BYTES_PER_MOVE} is that whole cost, so the budget is the memory the
- * program will really take, and Chrome's worker heap (1120 MB on the maintainer's desktop) keeps
- * room for the page and the goal's own mesh.
+ * simulation that checks it — whose per-line records were the reason the budget used to price
+ * every line at 1.1 KB. Since #899/#902 the timeline, the air moves and the checkpoints are packed
+ * stores, so #902 RE-PRICED the budget from measurement (scripts/goal-memory-bench.mts, Node with
+ * the heap capped, 2026-11-02, the panther at 0.1 mm and a smaller goal, with the finish step-over
+ * varied at a fixed grid):
  *
- * `engraveGenerate` samples the goal first (cheap, and the same grid the CAM will cut), estimates
- * the moves from what each roughing level really removes ({@link estimateGoalMoves}), settles on
- * the coarser base pitch when that fits, and otherwise REFUSES BY NAME with the numbers and the
- * fixes. A dead tab is never the outcome. A phone gets the smaller budget.
+ *   - the CAM's packed move: {@link GOAL_BYTES_PER_MOVE}, the MoveStore's record;
+ *   - the simulation's per-line records: {@link GOAL_BYTES_PER_LINE} (parse + timeline, #899);
+ *   - the posted line's own text: {@link GOAL_BYTES_PER_LINE_TEXT} (measured 17.4 bytes a line);
+ *   - the grid anchors every run holds whatever its program size: the goal and stock fields.
+ *     The bench's typed-array footprint fit `{@link GOAL_ANCHOR_BASE_MB} MB +
+ *     {@link GOAL_GRID_BYTES_PER_CELL} B × the stock's cells` at both grid sizes (94 MB at 180k
+ *     cells, 199 MB at 1.125M — the same line through both), so the anchors are priced from the
+ *     grid the run sampled, not a flat guess;
+ *   - a stated safety margin ({@link GOAL_BUDGET_MARGIN}) on the whole, because the generator's
+ *     JS-heap scratch peaks above the typed-array model and GC makes the heap figures noisy.
+ *
+ * The estimate is the memory the program will really take, and Chrome's worker heap (1120 MB on
+ * the maintainer's desktop) keeps room for the page and the goal's own mesh. `engraveGenerate`
+ * samples the goal first (cheap, and the same grid the CAM will cut), estimates the moves from what
+ * each roughing level really removes ({@link estimateGoalMoves}), settles on the coarser base pitch
+ * when that fits, and otherwise REFUSES BY NAME with the numbers and the fixes. A dead tab is never
+ * the outcome. A phone gets the smaller budget.
  */
 export const GOAL_MEMORY_BUDGET_MB = { desktop: 640, phone: 256 } as const;
 
-/** #889 — the heap one goal move costs from the CAM through the simulation, bytes (see above). */
-export const GOAL_BYTES_PER_MOVE = 1100;
+/** #902 — the CAM's packed move, bytes ({@link MoveStore}'s record; #889). */
+export const GOAL_BYTES_PER_MOVE = 33;
+
+/** #902 — the simulation's per-line records, bytes (parse + timeline; #899, measured #902). */
+export const GOAL_BYTES_PER_LINE = 60;
+
+/** #902 — one posted line's own text, bytes (measured 17.4 B a line over the #902 bench runs). */
+export const GOAL_BYTES_PER_LINE_TEXT = 16;
+
+/** #902 — the typed-array anchors every run holds: the goal and stock fields, per grid cell. */
+export const GOAL_GRID_BYTES_PER_CELL = 111;
+
+/** #902 — ...plus the session's fixed base (the wasm kernel, the viewed mesh), MB. */
+export const GOAL_ANCHOR_BASE_MB = 74;
+
+/** #902 — the stated safety margin on the measured costs (JS-heap scratch peaks above them). */
+export const GOAL_BUDGET_MARGIN = 1.5;
+
+/**
+ * #902 — what a goal program of `moves` moves on a grid of `gridCells` cells costs, MB: the program
+ * through the CAM, the post and the simulation, plus the grid anchors, with the stated margin.
+ */
+export function goalProgramMb(moves: number, gridCells: number): number {
+  const anchors = GOAL_ANCHOR_BASE_MB + (Math.max(0, gridCells) * GOAL_GRID_BYTES_PER_CELL) / (1024 * 1024);
+  const program =
+    (Math.max(0, moves) * (GOAL_BYTES_PER_MOVE + GOAL_BYTES_PER_LINE + GOAL_BYTES_PER_LINE_TEXT)) / (1024 * 1024);
+  return (anchors + program) * GOAL_BUDGET_MARGIN;
+}
 
 /**
  * #889 — the budget this device gets, MB: the phone figure where the browser says it is a phone
@@ -184,7 +227,9 @@ export interface GoalMoveEstimate {
   finish: number;
   /** Both. */
   moves: number;
-  /** What they cost through the simulation, MB ({@link GOAL_BYTES_PER_MOVE}). */
+  /** #902 — the sampled grid's cells (the stock's; its anchors are part of the cost). */
+  gridCells: number;
+  /** What they cost through the simulation, MB ({@link goalProgramMb}). */
   mb: number;
 }
 
@@ -223,7 +268,7 @@ export function estimateGoalMoves(
     if (rim != null) finish += rimMoves(hf, rim.tool, feeds, rim.floorZ, alongStep, SAFE_Z, HOP_Z, true).count;
   }
   const moves = rough + finish;
-  return { rough, finish, moves, mb: (moves * GOAL_BYTES_PER_MOVE) / (1024 * 1024) };
+  return { rough, finish, moves, gridCells: hf.nx * hf.ny, mb: goalProgramMb(moves, hf.nx * hf.ny) };
 }
 
 export interface SampleGoalOpts {
@@ -1519,19 +1564,32 @@ function ballRise(ball: boolean, radius: number, d: number): number {
  * axis keeps the flat rule — beyond the sampled X range the stock really does continue.
  */
 /**
+ * #909/#902 — THE DISC STENCIL, ONE COPY. Every cell whose SQUARE the tool's disc reaches, as
+ * offsets from the cell under the tip and the distance to the cell's nearest point. A cell is a
+ * square, not a point: measuring to its centre made the knife edge at the rim (#909). The finishing
+ * tip field evaluates this stencil and the #540/#889 budget counts it, so the count can never drift
+ * from the work.
+ */
+function tipStencilOffsets(radius: number, pitch: number): { di: number; dj: number; d: number }[] {
+  const span = Math.max(0, Math.ceil(radius / pitch));
+  const out: { di: number; dj: number; d: number }[] = [];
+  for (let dj = -span; dj <= span; dj++) {
+    for (let di = -span; di <= span; di++) {
+      const d = cellSquareDistance(di * pitch, dj * pitch, pitch);
+      if (d > radius) continue;
+      out.push({ di, dj, d });
+    }
+  }
+  return out;
+}
+
+/**
  * #889 — how many stencil cells the finishing tip field runs per covered cell for a cutter of
  * `radius` on a `pitch` grid: the same disc {@link finishTipField} builds, so a budget check
  * before the CAM counts exactly what the CAM would.
  */
 export function tipStencilCells(radius: number, pitch: number): number {
-  const span = Math.max(0, Math.floor(radius / pitch));
-  let n = 0;
-  for (let dj = -span; dj <= span; dj++) {
-    for (let di = -span; di <= span; di++) {
-      if (Math.hypot(di * pitch, dj * pitch) <= radius) n++;
-    }
-  }
-  return Math.max(1, n);
+  return Math.max(1, tipStencilOffsets(radius, pitch).length);
 }
 
 export function finishTipField(
@@ -1543,19 +1601,13 @@ export function finishTipField(
   const { nx, ny, z, covered, pitch, topZ } = hf;
   const tip = new Float32Array(nx * ny);
   tip.fill(topZ);
-  const span = Math.max(0, Math.ceil(tool.radius / pitch));
   // Precompute the disc stencil: every CELL the tool's disc reaches, and the ball rise at the
-  // cell's NEAREST POINT (#909). A cell is a square, not a point: measuring to its centre made the
-  // knife edge at the rim — a wall cell one radius away flipped in and out on float noise, and on a
-  // ball's flank that is several millimetres of either clamp or gouge.
-  const stencil: { di: number; dj: number; rise: number }[] = [];
-  for (let dj = -span; dj <= span; dj++) {
-    for (let di = -span; di <= span; di++) {
-      const d = cellSquareDistance(di * pitch, dj * pitch, pitch);
-      if (d > tool.radius) continue;
-      stencil.push({ di, dj, rise: ballRise(tool.ball, tool.radius, d) });
-    }
-  }
+  // cell's NEAREST POINT (#909) — the same stencil `tipStencilCells` counts for the budget.
+  const stencil: { di: number; dj: number; rise: number }[] = tipStencilOffsets(tool.radius, pitch).map((s) => ({
+    di: s.di,
+    dj: s.dj,
+    rise: ballRise(tool.ball, tool.radius, s.d),
+  }));
   if (stencil.length === 0) stencil.push({ di: 0, dj: 0, rise: 0 });
   // #540 — the inner drop runs the stencil at every covered cell. Bound that work BEFORE the loop:
   // a large ball on a fine grid is billions of ops that would hang the worker. Over budget, refuse

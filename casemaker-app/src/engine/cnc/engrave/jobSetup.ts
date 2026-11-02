@@ -580,6 +580,8 @@ export interface JobFinding {
    */
   budgetMoves?: number;
   budgetCells?: number;
+  /** #902 — the sampled grid's cells: the grid anchors priced into `budgetMb` scale with them. */
+  budgetGridCells?: number;
   budgetMb?: number;
   budgetLimitMb?: number;
   budgetPitchMm?: number;

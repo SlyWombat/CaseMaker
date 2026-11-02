@@ -40,6 +40,14 @@ interface Args {
   width: number;
   thickness: number;
   toolDiaMm: number;
+  /**
+   * #902 — the program-size knobs, for the per-line measurement: at a FIXED grid pitch, halving
+   * the finish step-over doubles the posted lines and leaves the goal grid, mesh and sim's own
+   * stock fields unchanged, so the sweep phase's slope in line count is the per-line cost.
+   */
+  finishStepMm?: number;
+  roughStepMm?: number;
+  stepDownMm?: number;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -61,6 +69,9 @@ function parseArgs(argv: readonly string[]): Args {
     else if (flag === '--width') args.width = Number(value);
     else if (flag === '--thickness') args.thickness = Number(value);
     else if (flag === '--tool-dia') args.toolDiaMm = Number(value);
+    else if (flag === '--finish-step') args.finishStepMm = Number(value);
+    else if (flag === '--rough-step') args.roughStepMm = Number(value);
+    else if (flag === '--step-down') args.stepDownMm = Number(value);
     else continue;
     i++;
   }
@@ -119,7 +130,12 @@ async function main(): Promise<void> {
     rotation: 0,
     enabled: true,
     role: 'goal',
-    surface: { gridPitchMm: args.cellMm },
+    surface: {
+      gridPitchMm: args.cellMm,
+      ...(args.finishStepMm === undefined ? {} : { finishStepOverMm: args.finishStepMm }),
+      ...(args.roughStepMm === undefined ? {} : { roughStepOverMm: args.roughStepMm }),
+      ...(args.stepDownMm === undefined ? {} : { roughStepDownMm: args.stepDownMm }),
+    },
   };
   sample('mesh-load');
 
