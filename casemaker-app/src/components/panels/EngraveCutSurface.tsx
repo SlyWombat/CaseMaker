@@ -76,6 +76,9 @@ import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useStockStore } from '@/store/stockStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useRunRecordStore } from '@/store/runRecordStore';
+import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
+import { runSeconds, type RunRecord } from '@/engine/cnc/engrave/runRecord';
 import {
   formHolds,
   holdCutFaceWords,
@@ -326,6 +329,26 @@ function TurnStockControl({ job }: { job: EngraveJob }): JSX.Element {
   );
 }
 
+/**
+ * #927 — THE DONE CARD'S ONE TIME LINE: what the cut took against the estimate it was cut under.
+ *
+ * Both figures are the RECORD's own — the machine's elapsed (or the operator's minutes) and the
+ * cycle estimate written when the program was posted — so the sentence can never set one job's
+ * clock against another job's prediction. The percentage is rounded to the whole number the
+ * example uses; a record with no estimate says so rather than printing a bare clock.
+ */
+function actualTimeSentence(run: RunRecord | null): string {
+  if (run === null) return 'No estimate recorded for this job.';
+  const actual = runSeconds(run);
+  if (actual === null) return 'No estimate recorded for this job.';
+  if (run.estimatedSeconds === null || run.estimatedSeconds <= 0) {
+    return `Took ${formatDuration(actual)} — no estimate recorded.`;
+  }
+  const pct = Math.round(((actual - run.estimatedSeconds) / run.estimatedSeconds) * 100);
+  const direction = pct === 0 ? 'on the estimate' : `${Math.abs(pct)} % ${pct > 0 ? 'over' : 'under'}`;
+  return `Took ${formatDuration(actual)} against ${formatDuration(run.estimatedSeconds)} predicted — ${direction}.`;
+}
+
 export function EngraveCutSurface({
   job,
   report,
@@ -367,6 +390,11 @@ export function EngraveCutSurface({
     () => (machine === null ? null : { host: machine.host, port: machine.port }),
     [machine],
   );
+  // #927 — the last measured run of THIS job's program, out of the record files this browser has
+  // been handed (the panel's "Open run record…", plus whatever the readback committed). The Done
+  // card prints its clock beside the estimate the record itself carries.
+  const importedRecords = useRunRecordStore((s) => s.imported);
+  const lastMeasuredRun = lastTimedRun(job.name, allRuns(importedRecords));
   /**
    * #457 — the surface this job's registration measured on THIS machine, and what stands above it.
    * Session state (#494): a reload forgets it, and the lasers then say "no registration recorded"
@@ -848,6 +876,11 @@ export function EngraveCutSurface({
   if (runOver && target !== null) {
     return (
       <div data-testid="engrave-cut-surface">
+        {/* #927 — the ONE line the done screen adds: the last measured run's clock against the
+            estimate its record carries. Nothing else on the card changes. */}
+        <p style={{ margin: '0 0 6px', fontSize: 12, color: '#9aa4b0' }} data-testid="engrave-cut-actual-time">
+          {actualTimeSentence(lastMeasuredRun)}
+        </p>
         <EngraveMachineRun target={target} onProgramLine={onProgramLine} />
       </div>
     );

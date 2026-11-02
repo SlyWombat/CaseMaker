@@ -35,6 +35,8 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore, saveBlocker } from '@/store/engraveRunStore';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
+import { useRunRecordStore } from '@/store/runRecordStore';
+import { buildRunRecord, withActualSeconds } from '@/engine/cnc/engrave/runRecord';
 import { clearStoredBaseline, resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetMachineChange, useMachineChangeStore } from '@/store/machineChangeStore';
 import { resetManageMode, useManageModeStore } from '@/store/manageModeStore';
@@ -328,6 +330,7 @@ beforeEach(() => {
   shelfItems = [shelfItem()];
   resetRunConfirmStore();
   resetMachineRunStore();
+  useRunRecordStore.setState({ imported: [] });
   resetEngraveReleaseStore();
   useEngraveJobStore.getState().reset();
   resetEngravePackageStore();
@@ -1158,23 +1161,24 @@ describe('#656 from the cutter prompt to the cut', () => {
 
 // #819 — THE ENDED RUN OWNS THE SCREEN, AND ONLY WHEN IT IS THIS JOB'S.
 describe('#819 the finished screen', () => {
+  const ended = (jobId: string | undefined) => ({
+    running: false,
+    filename: 'job.nc',
+    programHash: P1.programHash,
+    progress: null,
+    lines: [],
+    outcome: { kind: 'finished', last: { line: 10, percent: 100, elapsedS: 12 }, homed: true, vacuumOff: true },
+    stopAsked: false,
+    paused: false,
+    toolWaiting: null,
+    context: jobId === undefined ? { nc: NC1 } : { nc: NC1, jobId },
+    end: { kind: 'finished', lines: ['bookkeeping the card must not draw'], offcut: null, stockQuestion: null },
+    pendingStock: null,
+  });
+
   it('a finished run gives the Cut screen to its Done card — one line and one action — and a foreign run does not', () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);
-    const ended = (jobId: string | undefined) => ({
-      running: false,
-      filename: 'job.nc',
-      programHash: P1.programHash,
-      progress: null,
-      lines: [],
-      outcome: { kind: 'finished', last: { line: 10, percent: 100, elapsedS: 12 }, homed: true, vacuumOff: true },
-      stopAsked: false,
-      paused: false,
-      toolWaiting: null,
-      context: jobId === undefined ? { nc: NC1 } : { nc: NC1, jobId },
-      end: { kind: 'finished', lines: ['bookkeeping the card must not draw'], offcut: null, stockQuestion: null },
-      pendingStock: null,
-    });
 
     // This job's run: the steps give way to the card and its one action.
     useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended(job.id) } as never });
@@ -1196,5 +1200,40 @@ describe('#819 the finished screen', () => {
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
     expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
     expect(screen.getByTestId('engrave-cut-go')).toBeTruthy();
+  });
+
+  // #927 — THE DONE CARD'S ONE TIME LINE. The last measured run of this job's program, against the
+  // estimate that run's own record carries: 270 s against 250 s is 8 % over.
+  it('#927 prints the last measured run against its record’s estimate, and says so when there is none', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    const recordWith = (estimatedSeconds: number | null) => {
+      const cam = estimatedSeconds === null ? null : { operations: 1, cuttingMoves: 10, estimatedSeconds, passes: 1 };
+      const built = buildRunRecord(
+        job,
+        { ...generated([P1]), cam } as unknown as Parameters<typeof buildRunRecord>[1],
+        new Date('2026-11-02T00:00:00.000Z'),
+      );
+      return withActualSeconds(built, 270);
+    };
+
+    useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended(job.id) } as never });
+    useRunRecordStore.setState({ imported: [recordWith(250)] });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    expect(screen.getByTestId('engrave-cut-actual-time').textContent).toBe(
+      'Took 4 min 30 s against 4 min 10 s predicted — 8 % over.',
+    );
+
+    // A record with no estimate says so rather than inventing a percentage.
+    cleanup();
+    useRunRecordStore.setState({ imported: [recordWith(null)] });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    expect(screen.getByTestId('engrave-cut-actual-time').textContent).toBe('Took 4 min 30 s — no estimate recorded.');
+
+    // No record at all: one honest line, not a blank card.
+    cleanup();
+    useRunRecordStore.setState({ imported: [] });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    expect(screen.getByTestId('engrave-cut-actual-time').textContent).toBe('No estimate recorded for this job.');
   });
 });
