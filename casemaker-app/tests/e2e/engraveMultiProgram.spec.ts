@@ -15,6 +15,7 @@
 
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { flatEndMill } from '@/engine/cnc/tool';
+import { toolDisplayName } from '../../src/engine/cnc/toolDisplay';
 import { test, expect } from './fixtures/caseMaker';
 
 /** #792 — Save .nc… / Run sheet… / Open run record… are File ▾ items now; open the menu first. */
@@ -45,6 +46,9 @@ const SHORT: ToolLibraryEntry = {
 
 /** The skim the job takes, mm — deeper than the facing cutter's stated shoulder. */
 const FACE_DEPTH = 0.5;
+
+/** #887 — the sheet names a cutter in words, never its `user:` key; derive the same words here. */
+const SHORT_WORDS = toolDisplayName(SHORT.tool);
 
 /** Everything `HouseHealthSchema` requires; nothing has been imported on this fake machine. */
 const HEALTH = {
@@ -111,13 +115,14 @@ test('#744 — a later program’s cutter collision blocks Save, naming that pro
   await expect(await menuItem(page, 'engrave-save')).toBeDisabled();
   // #803 — the reason is the File ▾ item's own tooltip (the menu is open from the disabled check).
   const blocked = page.getByTestId('engrave-save');
-  await expect(blocked).toHaveAttribute('title', /the facing pass \(user:744-short-flat\)/);
+  const facingSentence = `the facing pass (${SHORT_WORDS})`;
+  await expect(blocked).toHaveAttribute('title', new RegExp(facingSentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   await expect(blocked).toHaveAttribute('title', /shoulder length of 0\.1/);
 
   const state = await page.evaluate(() => window.__caseMaker!.getEngraveRunState());
   expect(state.programs).toBe(2);
   expect(state.canSave).toBe(false);
-  expect(state.saveReason).toContain('the facing pass (user:744-short-flat)');
+  expect(state.saveReason).toContain(facingSentence);
   expect(state.saveReason).toContain('shoulder length of 0.1');
   // The same sentence is what Upload and Release would state: their gates all begin at `saveBlocker`.
 });
