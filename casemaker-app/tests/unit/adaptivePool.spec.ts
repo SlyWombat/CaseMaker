@@ -15,7 +15,9 @@ import {
   lastPoolSizing,
   type PoolMessage,
 } from '@/engine/jobs/adaptivePool';
-import type { PoolPlanReply } from '@/workers/adaptivePool.worker';
+import type { PoolPlanMessage, PoolPlanReply } from '@/workers/adaptivePool.worker';
+import type { PoolSizing } from '@/engine/jobs/poolSizing';
+import { portLevelPlanner } from '@/workers/sim/levelPlannerPort';
 import {
   adaptivePoolSize,
   deviceMemoryPoolCap,
@@ -23,8 +25,37 @@ import {
   memoryBoundPoolSize,
   LEVEL_PLANNER_BASE_BYTES,
 } from '@/engine/jobs/poolSizing';
+import {
+  planLevel,
+  roughingAdaptiveMoves,
+} from '@/engine/cnc/cam/rough3d';
+import { adaptiveSettings } from '@/engine/cnc/cam/adaptive';
+import { HOP_Z, SAFE_Z } from '@/engine/cnc/cam/ir';
+import { packMoves } from '@/engine/cnc/cam/movePack';
+import type { GoalHeightfield, SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 
 const MiB = 1024 * 1024;
+const FEEDS: SurfaceFeeds = { feed: 900, plungeFeed: 300, stepDown: 0.5, roughStepOver: 1.429, finishStepOver: 0.3 };
+const MILL: Tool = flatEndMill(3.175);
+
+/** A flat plateau (the adaptiveReuse fixture): every level clears the same cells. */
+function plateau(cells = 24, pitch = 0.5, floorZ = -2.5): GoalHeightfield {
+  const z = new Float32Array(cells * cells).fill(floorZ);
+  return {
+    nx: cells,
+    ny: cells,
+    x0: 0,
+    y0: 0,
+    pitch,
+    topZ: 0,
+    minZ: floorZ,
+    z,
+    covered: new Uint8Array(cells * cells).fill(1),
+    coveredCount: cells * cells,
+    resolutionNote: 'fixture',
+  };
+}
 
 describe('#881 — the level pool size', () => {
   it('is one fewer than the machine has, capped at eight', () => {
@@ -106,6 +137,8 @@ interface FakeWorkerStatic {
 
 class FakeWorker {
   static spawned: FakeWorker[] = [];
+  /** When set, a plan message is really planned (the end-to-end test); else it is only recorded. */
+  static plan = false;
   readonly name: string;
   onmessage: ((event: { data: PoolPlanReply }) => void) | null = null;
   onerror: ((event: { preventDefault?: () => void }) => void) | null = null;
@@ -120,6 +153,17 @@ class FakeWorker {
 
   postMessage(message: Record<string, unknown>): void {
     this.posted.push(message);
+    // A plan reaches a planner here: compute it exactly as the real worker does, packed.
+    if (FakeWorker.plan && 'id' in message) {
+      const { id, request, shared } = message as unknown as PoolPlanMessage;
+      queueMicrotask(() => {
+        const plan = planLevel(shared, request);
+        const reply: PoolPlanReply = plan.ok
+          ? { id, result: { ok: true, moves: packMoves(plan.moves), maxEngagementMm: plan.maxEngagementMm } }
+          : { id, result: { ok: false, reason: plan.reason } };
+        this.onmessage?.({ data: reply });
+      });
+    }
   }
 
   terminate(): void {
@@ -141,6 +185,7 @@ describe('#881 — the pool spawns to the stated budget', () => {
 
   beforeEach(() => {
     FakeWorker.spawned = [];
+    FakeWorker.plan = false;
     forgetPoolSizing();
     realWorker = (globalThis as { Worker?: unknown }).Worker;
     (globalThis as { Worker: unknown }).Worker = FakeWorker;
@@ -213,6 +258,41 @@ describe('#881 — the pool spawns to the stated budget', () => {
     await delivered(() => FakeWorker.spawned.length === 5);
     expect(first.every((w) => w.terminated)).toBe(true);
     expect(pool.decision?.planners).toBe(1);
+    pool.dispose();
+  });
+
+  it('plans a whole goal through the real port and pool, byte-identical to the serial run', async () => {
+    FakeWorker.plan = true;
+    const hf = plateau();
+    const opts = {
+      tool: MILL,
+      adaptive: adaptiveSettings(null).settings,
+      safeZ: SAFE_Z,
+      hopZ: HOP_Z,
+    };
+    const serial = await roughingAdaptiveMoves(hf, FEEDS, 0.3, opts);
+    if (!serial.ok) throw new Error(serial.reason);
+
+    const pool = new AdaptivePool(3);
+    const port = pool.beginRun();
+    let stated: PoolSizing | null = null;
+    const planner = portLevelPlanner(port, (sizing) => {
+      stated = sizing;
+    });
+    const pooled = await roughingAdaptiveMoves(hf, FEEDS, 0.3, {
+      ...opts,
+      planner,
+      memory: { budgetBytes: 640 * MiB, parentBytes: 10 * MiB },
+    });
+    if (!pooled.ok) throw new Error(pooled.reason);
+    // The levels really went through the channel (the workers answered), the CAM assembled the
+    // same moves in level order, and the pool stated the size it settled on.
+    expect(FakeWorker.spawned.length).toBeGreaterThan(0);
+    expect(FakeWorker.spawned.some((w) => w.posted.some((m) => 'id' in m))).toBe(true);
+    expect(pooled.result.moves).toEqual(serial.result.moves);
+    expect(pooled.result.maxEngagementMm).toEqual(serial.result.maxEngagementMm);
+    expect(stated).not.toBeNull();
+    expect(pool.decision?.planners).toBe(stated!.planners);
     pool.dispose();
   });
 });
