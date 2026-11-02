@@ -41,7 +41,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { planFlipSetups, splitGoalForBudget } from '@/engine/cnc/engrave/goalFlipSetups';
 import { jobFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFaceCached, NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
-import { millModelById } from '@/engine/cnc/machine';
+import { millModelById, workOriginOf } from '@/engine/cnc/machine';
 import { machineDisplayName } from '@/platform/locationClient';
 import { machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
 import { mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
@@ -2556,8 +2556,12 @@ export function EngravePanel(): JSX.Element {
     const probeName = probeNameFor(machineRecord);
     // #845 — the dialect: a machine whose model names the GRBL post is run from its owner's own
     // sender, and the sheet says so. Makera machines write the app's own dialect and print nothing.
-    const modelPost = machineRecord?.profileId == null ? undefined : millModelById(machineRecord.profileId)?.post;
+    const machineModel = machineRecord?.profileId == null ? undefined : millModelById(machineRecord.profileId);
+    const modelPost = machineModel?.post;
     const dialectName = modelPost === 'grbl' ? 'GRBL 1.1' : undefined;
+    // #877 — a stated machine's body speaks to the operator's own sender: its origin convention
+    // decides the zeroing steps, and its probe/M491/PRB steps are replaced.
+    const statedOrigin = machineModel?.frameState === 'stated' ? workOriginOf(machineModel) : undefined;
     // #788 — the sheet's probe steps draw the head diagram for the probe this job will use; none
     // checked out means none drawn.
     const sheetProbe = machineRecord === null ? null : probeFor(machineRecord);
@@ -2601,6 +2605,7 @@ export function EngravePanel(): JSX.Element {
             machineDisplayName(machineRecordByProfile(job.machineId), jobMachine(job)) ?? undefined,
           probeName: probeName ?? undefined,
           dialectName,
+          statedOrigin,
           ...(sheetProbe === null ? {} : { probeInstrument: probeInstrumentOf(sheetProbe) }),
           mountName,
           bedName,

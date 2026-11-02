@@ -94,7 +94,7 @@ import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { clearanceZOf, rotaryOf } from '@/engine/cnc/machine';
+import { clearanceZOf, rotaryOf, type WorkOrigin } from '@/engine/cnc/machine';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
 import { NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
@@ -1414,6 +1414,8 @@ function facingSteps(
   job: EngraveJob,
   generated: RunSheetGenerated,
   faceFile: string,
+  /** #877 — a stated GRBL machine: the re-touch and the cutter change are the sender's, no M491. */
+  stated: boolean,
 ): RunSheetStep[] {
   const facing = job.facing!;
   // #432 slice 4 — the SAME reader the panel uses: a printed blank's implied finish counts, so a
@@ -1509,6 +1511,28 @@ function facingSteps(
   // that yields a Z0 for the engraving program at all: the G10 L2 that writes that Z0 zeroes the
   // tool-length offset to the CURRENT tool (#387), so the engraving cutter has to be fitted and
   // calibrated before the line is written. The old step stopped at the re-touch and never said so.
+  if (stated) {
+    // #877 — a sender has no tool-length sensor and no PRB: each cutter is zeroed in the sender.
+    steps.push({
+      text:
+        'Then measure the top the skim left. Touch off on the faced surface at the registration ' +
+        `point and note the reading: ${fmtNum(facing.depth)} mm below your FIRST reading is what the ` +
+        'skim should have taken, and that is only what was EXPECTED — the number you write down is ' +
+        'what the touch measures. If it sits far from that expectation the skim did not run as ' +
+        'planned: stop and check it.',
+    });
+    steps.push({
+      text:
+        'Take the facing cutter out and fit the engraving cutter — the one this job was designed ' +
+        `around, the cutter ${runSheetFileName(job.name)} was posted for. With it fitted, zero Z in ` +
+        'your sender on the faced top.',
+      record: 'Z zero with the engraving cutter (mm)',
+    });
+    steps.push({
+      text: `Home again if your sender needs it, then load ${runSheetFileName(job.name)} — the file uses the zero you just set.`,
+    });
+    return steps;
+  }
   steps.push({
     text:
       'Then measure the top the skim left. Home the machine, select G54 and run G92.1, and fit the ' +
@@ -1540,6 +1564,34 @@ function facingSteps(
     record: 'Z0 for the program (mm)',
   });
   return steps;
+}
+
+/**
+ * #877 — THE ORIGIN IN A SENDER'S WORDS. A stated machine is run from the operator's own sender
+ * (UGS, Candle, gSender), so the zero is set there: X and Y on the piece's edges at the machine's
+ * stated convention, Z on its top face. The G10 L20 P1 line is the aside for a person who types
+ * offsets instead — the same numbers, written into G54, the WCS the file is posted against.
+ */
+function senderOriginSteps(origin: WorkOrigin, onBoard: boolean): RunSheetStep[] {
+  const piece = onBoard ? 'part' : 'blank';
+  const at =
+    origin === 'top-centre'
+      ? `the ${piece}’s XY centre (X and Y on its centre lines), and Z on its top face`
+      : `the ${piece}’s front-left corner (X on the left edge, Y on the front edge), and Z on its top face`;
+  return [
+    {
+      text:
+        `Zero X, Y and Z in your sender at ${at}. The file is posted against G54, and every move in ` +
+        'it is relative to that zero.',
+      value: origin === 'top-centre' ? 'G54 · stock centre, Z0 on the top' : 'G54 · stock front-left, Z0 on the top',
+    },
+    {
+      text:
+        'If you write the offsets instead of using the sender’s buttons: G10 L20 P1 X0 Y0 Z0 writes ' +
+        'this zero into G54.',
+      code: 'G10 L20 P1 X0 Y0 Z0',
+    },
+  ];
 }
 
 function registrationSteps(
@@ -2290,6 +2342,13 @@ export interface RunSheetOptions {
    */
   dialectName?: string;
   /**
+   * #877 — THE MACHINE'S ORIGIN CONVENTION, when it is a STATED machine: one this app writes
+   * files for and never drives, so the sheet speaks to the operator's own sender instead of the
+   * Z1's probe, `M491` tool-length calibration and PRB arithmetic. Present only for a stated
+   * machine; absent on every Makera profile, whose body is unchanged.
+   */
+  statedOrigin?: WorkOrigin;
+  /**
    * #604 — the found position from the registration: how far the measured blank sits from the
    * plan's nominal origin. Absent: no registration has run on this machine, and no found-position
    * section prints — an unregistered job's sheet is unchanged.
@@ -2579,7 +2638,7 @@ function restPassSteps(facts: RestPassFacts): RunSheetStep[] {
  * sections (the rest section, the reachability table), so a number written into this text is a stale
  * claim the first time one is added.
  */
-function restSwapSteps(facts: RestPassFacts, labels?: RestProgramLabels): RunSheetStep[] {
+function restSwapSteps(facts: RestPassFacts, labels: RestProgramLabels | undefined, stated: boolean): RunSheetStep[] {
   const { rough, rest } = facts;
   const dia = `⌀ ${fmtDiameter(rest.diameter)} mm`;
   // #419 — the pair is not always the run's first two files. When the caller supplies the run's
@@ -2619,26 +2678,42 @@ function restSwapSteps(facts: RestPassFacts, labels?: RestProgramLabels): RunShe
       unverified: '#443',
     },
     ...(travelSentence === null ? [] : [{ text: travelSentence }]),
-    {
-      text:
-        'Calibrate the new cutter’s length the same way as the first (M491) and record its PRB. This ' +
-        'is a reading of THIS cutter alone: the Z0 below compares it with the tool that set Z0, and ' +
-        'that reference reading was written down when the origin was set, so neither is re-taken here.',
-      code: 'M491',
-      record: 'the new cutter’s PRB (mm)',
-      unverified: '#443',
-    },
-    {
-      text:
-        `Set Z0 for ${restWord} from those two readings, NOT by touching the surface again: ` +
-        'Z0 = the surface Z you recorded when you set the origin + (this cutter’s PRB − the PRB of ' +
-        'the tool that set Z0, recorded there beside it). The surface has been cut since that ' +
-        `reading, so touching it off again would sink every one of the ${restPoss} floors by ` +
-        `${roughPoss} own depth.`,
-      value: 'Z0 = surface + (cutter PRB − reference PRB)',
-      record: `Z0 for ${restWord} (mm)`,
-      unverified: '#443',
-    },
+    ...(stated
+      ? [
+          {
+            // #877 — a sender has no PRB: the rest cutter is zeroed in the sender, and on an UNCUT
+            // reference. Zeroing on the floor the rough left would sink every rest floor by exactly
+            // that depth, which is the same error the Z1's PRB formula exists to avoid.
+            text:
+              `Change to ${rest.key} (${dia}) and zero Z in your sender with it fitted, on an UNCUT ` +
+              `reference — the top face where ${rough.nc} did not cut — not on the floor it left, or ` +
+              `every one of the ${restPoss} floors sinks by the rough’s own depth.`,
+            record: `Z zero with ${rest.key} (mm)`,
+            unverified: '#443',
+          },
+        ]
+      : [
+          {
+            text:
+              'Calibrate the new cutter’s length the same way as the first (M491) and record its PRB. This ' +
+              'is a reading of THIS cutter alone: the Z0 below compares it with the tool that set Z0, and ' +
+              'that reference reading was written down when the origin was set, so neither is re-taken here.',
+            code: 'M491',
+            record: 'the new cutter’s PRB (mm)',
+            unverified: '#443',
+          },
+          {
+            text:
+              `Set Z0 for ${restWord} from those two readings, NOT by touching the surface again: ` +
+              'Z0 = the surface Z you recorded when you set the origin + (this cutter’s PRB − the PRB of ' +
+              'the tool that set Z0, recorded there beside it). The surface has been cut since that ' +
+              `reading, so touching it off again would sink every one of the ${restPoss} floors by ` +
+              `${roughPoss} own depth.`,
+            value: 'Z0 = surface + (cutter PRB − reference PRB)',
+            record: `Z0 for ${restWord} (mm)`,
+            unverified: '#443',
+          },
+        ]),
     // #437 item 8 — program 2 has its own dry run, and it belongs HERE rather than in the Dry run
     // section: its frame can only be run after the cutter change and the new Z0, and a step in §8
     // would tell the operator to run a file whose Z0 does not exist yet. A null frame is not
@@ -2785,8 +2860,8 @@ function restProgramParamsStep(rest: RestProgram, number: number): RunSheetStep 
  * cutter's feeds, in the order they happen. The narrative (what each cutter is FOR, what it left,
  * the chained simulation) is the earlier "Two tools, one blank" section and is not repeated here.
  */
-function restProgramSectionSteps(facts: RestPassFacts, labels: RestProgramLabels): RunSheetStep[] {
-  const steps = restSwapSteps(facts, labels);
+function restProgramSectionSteps(facts: RestPassFacts, labels: RestProgramLabels, stated: boolean): RunSheetStep[] {
+  const steps = restSwapSteps(facts, labels, stated);
   // `restSwapSteps` always ends [frame step, load step]; the program's own numbers belong before
   // the dry run that first loads one of its files.
   steps.splice(steps.length - 2, 0, restProgramParamsStep(facts.rest, labels.rest));
@@ -3312,7 +3387,7 @@ function restRoughProgramSection(program: RunSheetProgram, facts: RestPassFacts,
 }
 
 /** A rest program's own section: who it is, then the measured pair's swap and its own numbers. */
-function restProgramSection(program: RunSheetProgram, facts: RestPassFacts, labels: RestProgramLabels): RunSheetStep[] {
+function restProgramSection(program: RunSheetProgram, facts: RestPassFacts, labels: RestProgramLabels, stated: boolean): RunSheetStep[] {
   return [
     {
       text:
@@ -3321,7 +3396,7 @@ function restProgramSection(program: RunSheetProgram, facts: RestPassFacts, labe
       value: `program ${labels.rest}`,
     },
     ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
-    ...restProgramSectionSteps(facts, labels),
+    ...restProgramSectionSteps(facts, labels, stated),
     ...throughCutSteps(program.through),
     ...neckSawSteps(program.neck),
   ];
@@ -3685,6 +3760,9 @@ export function buildRunSheet(
     ...(options.dialectName !== undefined ? { dialect: options.dialectName } : {}),
   };
 
+  // #877 — A STATED MACHINE: the operator's own sender sets the zeros. Its body is written in the
+  // sender's words (no probe, no `M491`, no PRB); every Makera profile keeps the body above.
+  const statedOrigin = options.statedOrigin;
   // ---- 1 · What you need ---------------------------------------------------------------------
   const needSteps: RunSheetStep[] = [
     {
@@ -3703,11 +3781,23 @@ export function buildRunSheet(
       text: "Record the cutter's flute length and its stick-out from the collet.",
       record: 'flute length (mm) / stick-out (mm)',
     },
-    {
-      text:
-        'The Z1 low-profile vise, and the wired probe that ships with the machine — a mechanical ' +
-        'touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.',
-    },
+    // #877 — a stated machine has neither the Z1's vise nor Makera's probe: name the workholding
+    // the job is set up in, and leave the zeroing method to the operator's own sender.
+    ...(statedOrigin !== undefined
+      ? [
+          {
+            text:
+              'The workholding this job is set up in, and the touch-off your sender uses for Z — a ' +
+              'probe, a touch plate, or a feeler on the top face.',
+          },
+        ]
+      : [
+          {
+            text:
+              'The Z1 low-profile vise, and the wired probe that ships with the machine — a mechanical ' +
+              'touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.',
+          },
+        ]),
   ];
   // #434 — a drill's cutting end is a POINT, so the hole is its full diameter only a point length
   // above the tip. State the point and its provenance before the bit is loaded: §7's depths are
@@ -3892,7 +3982,19 @@ export function buildRunSheet(
   // `M491` is run from the app's own console or from Makera Studio (the harness `tools/z1/`
   // drives the same command): naming only Studio said the app cannot do it, which stopped being
   // true when the desktop build learned to talk to the machine.
-  const cutterSteps: RunSheetStep[] = facingRun
+  const cutterSteps: RunSheetStep[] = statedOrigin !== undefined
+    ? [
+        {
+          text:
+            'Fit the cutter with its collar. With it fitted, zero Z in your sender on the stock’s top face — the file uses that zero.',
+          record: 'Z zero with this cutter (mm)',
+        },
+        {
+          text:
+            'A T1 M6 line in the file changes nothing if your sender already holds this cutter.',
+        },
+      ]
+    : facingRun
     ? [
         {
           text:
@@ -3955,7 +4057,9 @@ export function buildRunSheet(
   const registrationRefused =
     'refuse' in
     registrationFor(job, options.scan?.tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: options.scan.tipDiameterMm });
-  const originSteps: RunSheetStep[] = [
+  const originSteps: RunSheetStep[] = statedOrigin !== undefined
+    ? senderOriginSteps(statedOrigin, onBoard)
+    : [
     // #432 review R1 — a facing job probes the origin before any cutter is fitted, and the probe's
     // own reading is what every cutter's Z0 below is worked out against. The step exists only for
     // that job: a plain job may set Z0 with either the probe or the cutter (see the Z0 step).
@@ -4372,7 +4476,7 @@ export function buildRunSheet(
   // #410 — the second program's routine joins THIS section, not the narrative one: it is a sequence
   // of things done at the machine, in order, after the first file has run to its end.
   if (options.restPass !== undefined && !restInOwnSection) {
-    cutSteps.push(...restSwapSteps(options.restPass));
+    cutSteps.push(...restSwapSteps(options.restPass, undefined, options.statedOrigin !== undefined));
   }
   // #737 — the saw comes after the run's last cut, never before it: the neck is only cut in that
   // last program, so the part is still on it until the file ends. Program 1's own fact (the
@@ -4402,7 +4506,7 @@ export function buildRunSheet(
         programSections.push({
           id: `cut-${number}`,
           title: `Cut, program ${number} — ${rest.rest.key} (rest)`,
-          steps: restProgramSection(program, rest, restLabels),
+          steps: restProgramSection(program, rest, restLabels, options.statedOrigin !== undefined),
         });
       } else if (restRough !== null) {
         programSections.push({
@@ -4528,7 +4632,7 @@ export function buildRunSheet(
           {
             id: 'facing',
             title: 'Face the stock top',
-            steps: facingSteps(job, generated, runSheetFaceFileName(job.name)),
+            steps: facingSteps(job, generated, runSheetFaceFileName(job.name), statedOrigin !== undefined),
           },
         ];
 
