@@ -596,7 +596,9 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     // pins. Hovering one draws it, with the cost line — there is no pretend selection.
     const row = screen.getByTestId('engrave-setup-mount-row-bed-tape');
     expect(row.getAttribute('data-disabled')).toBe('true');
-    fireEvent.mouseOver(row);
+    // #705/#897 — the preview follows pointer MOVEMENT over the row (a pointer resting on one as
+    // the step opens must not preview it), so the browser's first move is what draws it.
+    fireEvent.mouseMove(row);
     expect(screen.getByTestId('engrave-setup-holding-picture').getAttribute('data-mount')).toBe('bed-tape');
     expect(screen.getByTestId('engrave-setup-holding-note').textContent).toContain(
       'needs the vise off the pins',

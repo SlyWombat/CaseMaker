@@ -2686,7 +2686,12 @@ function MountRow({
   option: MountOption;
   checked: boolean;
   onChoose: () => void;
-  /** #705 — the picture follows the option under the pointer or focus, disabled ones included. */
+  /**
+   * #705 — the picture follows the option under the pointer or focus, disabled ones included.
+   * #878/#897 — it follows MOVEMENT over the row, not mere containment: the welcome page's
+   * starters sit under this list, so a pointer that happens to rest on a row as the step opens
+   * would otherwise replace the picture of the mount the job is actually in.
+   */
   onPreview: (mount: HoldingMount | null) => void;
   onMachineChange: () => void;
   boardControl: JSX.Element | null;
@@ -2703,7 +2708,7 @@ function MountRow({
     <div
       data-testid={`engrave-setup-mount-row-${option.mount}`}
       data-disabled={option.disabled}
-      onMouseEnter={() => onPreview(option.mount)}
+      onMouseMove={() => onPreview(option.mount)}
       onMouseLeave={() => onPreview(null)}
       onFocus={() => onPreview(option.mount)}
       onBlur={() => onPreview(null)}

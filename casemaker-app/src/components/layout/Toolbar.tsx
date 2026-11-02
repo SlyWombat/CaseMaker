@@ -347,8 +347,10 @@ export function Toolbar() {
   // is not drawn. What stays is what makes sense before any work exists: Manage (the house and its
   // cutters), Load, Docs and settings, in one short row that fits every width without a menu.
   // The full toolbar is back the moment `welcomeMode` flips off, which every way into a flow does
-  // (`setProject`, `loadBuiltinBoard`, the wizard).
-  if (welcomeMode) {
+  // (`setProject`, `loadBuiltinBoard`, the wizard) — and on MANAGE, which is not the welcome page
+  // even while no project exists: its controls sit there disabled, as they always did, and the
+  // slim row must not follow the operator into it.
+  if (welcomeMode && !manageOpen) {
     return (
       <div className="toolbar-buttons toolbar-buttons--welcome" data-testid="toolbar-welcome">
         {manageBtn}
