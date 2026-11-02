@@ -156,6 +156,7 @@ async function readbackRunBody(argv: string[], options: CommandOptions): Promise
       target: args.history,
       dryRun: args.dryRun,
       feeds: null,
+      history: null,
       run: {
         job: run.job,
         ncFile: run.ncFile,

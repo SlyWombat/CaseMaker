@@ -197,6 +197,7 @@ async function readbackFeedsBody(argv: string[], options: CommandOptions): Promi
       record: recordPath,
       target: args.feeds,
       dryRun: args.dryRun,
+      history: null,
       feeds: {
         measurement: {
           material: measurement.material,

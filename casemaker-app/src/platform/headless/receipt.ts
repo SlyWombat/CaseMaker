@@ -354,11 +354,26 @@ export const readbackRunSchema = z
 export const readbackDetailsSchema = z
   .object({
     section: z.enum(['feeds', 'run']).describe('Which readback ran.'),
-    record: z.string().describe('The record file that was read.'),
+    record: z.string().nullable().describe('The record file that was read, or null for a history listing.'),
     target: z.string().describe('The source file the record is applied to.'),
     dryRun: z.boolean().describe('Whether the write was rehearsed and skipped.'),
     feeds: readbackFeedsSchema.nullable().describe('The feeds readback’s details, or null for `run`.'),
-    run: readbackRunSchema.nullable().describe('The run readback’s details, or null for `feeds`.'),
+    run: readbackRunSchema.nullable().describe('The run readback’s details, or null for `feeds` or a history listing.'),
+    // #927 — `casemaker readback run --list`: every measured run the history holds, the estimate the
+    // record carried beside the machine's own elapsed (the `P:` clock), so the model's error is
+    // visible to the next job. Null for an applied record.
+    history: z
+      .array(
+        z.object({
+          job: z.string().describe('The job the run record names.'),
+          ncFile: z.string().describe('The program file the run cut.'),
+          cutOn: z.string().describe('The date the run was cut (YYYY-MM-DD).'),
+          estimatedSeconds: z.number().nonnegative().nullable().describe('The estimate the record carries, seconds, or null.'),
+          actualSeconds: z.number().nonnegative().nullable().describe("The machine's own elapsed time for the run, seconds, or null."),
+        }),
+      )
+      .nullable()
+      .describe('Every measured run in the history, predicted beside actual, or null for an applied record.'),
   })
   .describe('The readback command’s own details.');
 
@@ -835,7 +850,27 @@ function locationLines(receipt: Extract<Receipt, { command: 'location' }>): stri
 
 function readbackLines(receipt: Extract<Receipt, { command: 'readback' }>): string[] {
   const { details } = receipt;
-  const lines = [`${details.record}  ->  ${details.target}${details.dryRun ? '  (dry run)' : ''}`];
+  const lines = [
+    `${details.record ?? '(history)'}  ->  ${details.target}${details.dryRun ? '  (dry run)' : ''}`,
+  ];
+  if (details.history !== null) {
+    lines.push(`  measured     ${details.history.length} run(s) in the history`);
+    for (const h of details.history) {
+      // The error is the actual against the estimate: positive means the machine took longer than
+      // the model said, which is the direction the model has been wrong in (#927).
+      const error =
+        h.estimatedSeconds === null || h.actualSeconds === null || h.estimatedSeconds === 0
+          ? ''
+          : `  (${h.actualSeconds >= h.estimatedSeconds ? '+' : ''}` +
+            `${Math.round((h.actualSeconds / h.estimatedSeconds - 1) * 100)} %)`;
+      lines.push(
+        `  ${h.cutOn}  ${h.job}  ${h.ncFile}: ` +
+          `${h.estimatedSeconds === null ? 'no estimate' : `${Math.round(h.estimatedSeconds)} s predicted`}, ` +
+          `${h.actualSeconds === null ? 'no actual' : `${h.actualSeconds} s actual`}${error}`,
+      );
+    }
+    return lines;
+  }
   if (details.feeds !== null) {
     const feeds = details.feeds;
     if (feeds.measurement !== null) {

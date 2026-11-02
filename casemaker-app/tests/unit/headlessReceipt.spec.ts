@@ -131,6 +131,7 @@ describe('#478 the receipt schema', () => {  it('accepts a receipt each command 
           record: 'record.json',
           target: 'feeds.ts',
           dryRun: true,
+          history: null,
           feeds: {
             measurement: {
               material: 'PLA',
@@ -566,6 +567,7 @@ describe('#478 the human output is rendered from the receipt', () => {
         record: 'record.json',
         target: 'feeds.ts',
         dryRun: false,
+        history: null,
         feeds: {
           measurement: {
             material: 'PLA',
@@ -603,6 +605,7 @@ describe('#478 the human output is rendered from the receipt', () => {
         target: 'runHistory.ts',
         dryRun: true,
         feeds: null,
+        history: null,
         run: {
           job: 'Badge',
           ncFile: 'badge.nc',

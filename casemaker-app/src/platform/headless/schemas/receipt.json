@@ -1637,9 +1637,75 @@
               ],
               "description": "The feeds readback’s details, or null for `run`."
             },
+            "history": {
+              "anyOf": [
+                {
+                  "items": {
+                    "properties": {
+                      "actualSeconds": {
+                        "anyOf": [
+                          {
+                            "minimum": 0,
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The machine's own elapsed time for the run, seconds, or null."
+                      },
+                      "cutOn": {
+                        "description": "The date the run was cut (YYYY-MM-DD).",
+                        "type": "string"
+                      },
+                      "estimatedSeconds": {
+                        "anyOf": [
+                          {
+                            "minimum": 0,
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The estimate the record carries, seconds, or null."
+                      },
+                      "job": {
+                        "description": "The job the run record names.",
+                        "type": "string"
+                      },
+                      "ncFile": {
+                        "description": "The program file the run cut.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "job",
+                      "ncFile",
+                      "cutOn",
+                      "estimatedSeconds",
+                      "actualSeconds"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Every measured run in the history, predicted beside actual, or null for an applied record."
+            },
             "record": {
-              "description": "The record file that was read.",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The record file that was read, or null for a history listing."
             },
             "run": {
               "anyOf": [
@@ -1795,7 +1861,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The run readback’s details, or null for `feeds`."
+              "description": "The run readback’s details, or null for `feeds` or a history listing."
             },
             "section": {
               "description": "Which readback ran.",
@@ -1816,7 +1882,8 @@
             "target",
             "dryRun",
             "feeds",
-            "run"
+            "run",
+            "history"
           ],
           "type": "object"
         },
