@@ -14,8 +14,16 @@
  *   - everywhere else                             → `null` (the ordinary floor rule stands).
  *
  * Pure arithmetic, no wasm: point-in-polygon is even-odd, a kerf is a distance to a segment,
- * and a tab span is an interval in the contour's own arc length. That is what lets the verifier
- * stay cheap enough to run on the whole file.
+ * and a tab span is an interval in the contour's own arc length.
+ *
+ * #912 — A MASK THAT ANSWERS IN CONSTANT WORK. The verifier consults the mask at every cutting
+ * move, tens of thousands of times on a real file. The first cut answered each query by walking
+ * EVERY segment of every kerf and recomputing each contour's perimeter: on the demo's coaster
+ * (j21) that was 28.5 minutes of the run, 93 % of it inside this file. The geometry is now
+ * prepared once — segments with their arcs, edges bucketed by row, both in a uniform grid — so a
+ * query costs the few segments near the point. The answers are unchanged, segment for segment:
+ * a segment within the cutter's radius of the point necessarily shares its grid cell or one
+ * beside it, and an even-odd ray crosses only edges whose y range contains the point's row.
  */
 
 import type { ThroughMask } from '../verify';
@@ -108,15 +116,88 @@ function inTabSpan(spans: readonly ProfileSpan[], s: number, perimeter: number):
   return false;
 }
 
-/** The contour's closed length, mm. */
-function perimeterOf(contour: Polygons[number]): number {
-  let perimeter = 0;
+/** One contour's segments with their cumulative arc, prepared once (#912). */
+interface PreparedContour {
+  /** Flat: ax, ay, bx, by, len, arcStart per segment. */
+  segs: number[];
+  perimeter: number;
+  /** Segment indices by grid cell (key from {@link cellKey}). */
+  cells: Map<number, number[]>;
+}
+
+/** A through region's edges, bucketed by the rows of cells they cross (#912). */
+interface PreparedRegion {
+  /** Flat: x1, y1, x2, y2 per edge. */
+  edges: number[];
+  /** Edge indices by row band (key from {@link cellKey}). */
+  bands: Map<number, number[]>;
+  extraDepth: number;
+}
+
+/** One grid cell, as a number. The sizes here are far below 2^26 in each axis. */
+function cellKey(cx: number, cy: number): number {
+  return (cx + 4096) * 8192 + (cy + 4096);
+}
+
+/**
+ * The grid cell size a prepared geometry uses: strictly wider than the cutter's acceptance
+ * radius (`toolRadius + 1e-6`), so any segment within it shares the point's cell or one beside
+ * it; never under 2 mm.
+ */
+function cellSizeFor(toolRadius: number): number {
+  return Math.max(2, toolRadius + 0.001);
+}
+
+/** Prepare one cut-out contour: segments, arcs, and the cell buckets its segments cross. */
+function prepareContour(contour: Polygons[number], cell: number): PreparedContour {
+  const segs: number[] = [];
+  const cells = new Map<number, number[]>();
+  let arc = 0;
   for (let i = 0; i < contour.length; i++) {
     const a = contour[i]!;
     const b = contour[(i + 1) % contour.length]!;
-    perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const id = segs.length / 6;
+    segs.push(a[0], a[1], b[0], b[1], len, arc);
+    // Every cell the segment's bounding box crosses. A point ON the segment shares one of them.
+    const x0 = Math.floor(Math.min(a[0], b[0]) / cell);
+    const x1 = Math.floor(Math.max(a[0], b[0]) / cell);
+    const y0 = Math.floor(Math.min(a[1], b[1]) / cell);
+    const y1 = Math.floor(Math.max(a[1], b[1]) / cell);
+    for (let cx = x0; cx <= x1; cx++) {
+      for (let cy = y0; cy <= y1; cy++) {
+        const key = cellKey(cx, cy);
+        const list = cells.get(key);
+        if (list === undefined) cells.set(key, [id]);
+        else list.push(id);
+      }
+    }
+    arc += len;
   }
-  return perimeter;
+  return { segs, perimeter: arc, cells };
+}
+
+/** Prepare one through region for even-odd tests: edges bucketed by the row bands they span. */
+function prepareRegion(region: MaskRegion, cell: number): PreparedRegion {
+  const edges: number[] = [];
+  const bands = new Map<number, number[]>();
+  for (const contour of region.polygons) {
+    for (let i = 0, j = contour.length - 1; i < contour.length; j = i++) {
+      const [xi, yi] = contour[i]!;
+      const [xj, yj] = contour[j]!;
+      const id = edges.length / 4;
+      edges.push(xi, yi, xj, yj);
+      const y0 = Math.floor(Math.min(yi, yj) / cell);
+      const y1 = Math.floor(Math.max(yi, yj) / cell);
+      for (let cy = y0; cy <= y1; cy++) {
+        const key = cellKey(0, cy);
+        const list = bands.get(key);
+        if (list === undefined) bands.set(key, [id]);
+        else list.push(id);
+      }
+    }
+  }
+  return { edges, bands, extraDepth: region.extraDepth ?? 0 };
 }
 
 /**
@@ -130,43 +211,99 @@ export function buildThroughMask(geometry: MaskGeometry): ThroughMask | null {
   if (regions.length === 0 && drills.length === 0 && cutouts.length === 0) return null;
   const throughLimit = geometry.thickness + geometry.breakthrough;
 
+  // #912 — prepare once, answer cheap. A kerf's cell size is its cutter's radius (2 mm at
+  // least): a segment within that radius of a point necessarily crosses the point's cell or one
+  // beside it, so a query reads the 3×3 block and finds every candidate. Nothing about the
+  // ANSWERS changes: the candidates are then measured with the same closest-point arithmetic and
+  // in the same segment order, so an equal-distance tie still resolves to the first segment.
+  const preparedCutouts = cutouts.map((cutout) => {
+    const cell = cellSizeFor(cutout.toolRadius);
+    return {
+      cutout,
+      cell,
+      contours: cutout.path.map((contour) => prepareContour(contour, cell)),
+      // Scratch for candidate ids and their de-duplication, reused across queries.
+      stamp: new Int32Array(0),
+      seen: new Int32Array(0),
+      counter: 0,
+    };
+  });
+  const preparedRegions = regions.map((region) => {
+    const cell = 2;
+    return { cell, prepared: prepareRegion(region, cell) };
+  });
+
   return (x: number, y: number): number | null => {
     // The kerf first, because its tab spans must LOWER the limit inside the band.
-    for (const cutout of cutouts) {
-      for (let c = 0; c < cutout.path.length; c++) {
-        const contour = cutout.path[c]!;
+    for (const prepared of preparedCutouts) {
+      const { cutout, cell } = prepared;
+      const qx = Math.floor(x / cell);
+      const qy = Math.floor(y / cell);
+      for (let c = 0; c < prepared.contours.length; c++) {
+        const contour = prepared.contours[c]!;
         const spans = cutout.spans[c] ?? [];
-        const perimeter = perimeterOf(contour);
-        // The arc is the one at the NEAREST point on the path, not the first segment within the
-        // cutter radius. On a polygonised arc a span end is a fraction of a millimetre from the
-        // previous vertex; returning that earlier segment's arc read the plunge at the span's end
-        // as inside the tab (it is 0.3 mm back from the end) and refused the through cut as too
-        // deep. The nearest point to a span end is the end itself, at distance 0.
-        let arc = 0;
+        const limit = cutout.toolRadius + 1e-6;
+        // Candidates in the 3×3 block, deduplicated by a stamp so a segment registered in several
+        // cells is measured once; ordered by segment index (the first equal-distance one wins, as
+        // the one-pass version did).
+        if (prepared.stamp.length < contour.segs.length / 6) {
+          prepared.stamp = new Int32Array(contour.segs.length / 6);
+          prepared.seen = new Int32Array(contour.segs.length / 6);
+        }
+        prepared.counter++;
+        let count = 0;
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            const list = contour.cells.get(cellKey(qx + dx, qy + dy));
+            if (list === undefined) continue;
+            for (const id of list) {
+              if (prepared.seen[id] === prepared.counter) continue;
+              prepared.seen[id] = prepared.counter;
+              prepared.stamp[count++] = id;
+            }
+          }
+        }
+        if (count === 0) continue;
+        const ids = prepared.stamp.subarray(0, count);
+        ids.sort();
         let bestDistance = Infinity;
         let bestArc = 0;
-        for (let i = 0; i < contour.length; i++) {
-          const a = contour[i]!;
-          const b = contour[(i + 1) % contour.length]!;
-          const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
-          const hit = closestOnSegment(x, y, a, b);
-          if (hit.distance <= cutout.toolRadius + 1e-6 && hit.distance < bestDistance) {
+        for (const id of ids) {
+          const base = id * 6;
+          const ax = contour.segs[base]!;
+          const ay = contour.segs[base + 1]!;
+          const bx = contour.segs[base + 2]!;
+          const by = contour.segs[base + 3]!;
+          const len = contour.segs[base + 4]!;
+          const arcStart = contour.segs[base + 5]!;
+          const hit = closestOnSegment(x, y, [ax, ay], [bx, by]);
+          if (hit.distance <= limit && hit.distance < bestDistance) {
             bestDistance = hit.distance;
-            bestArc = arc + hit.t * length;
+            bestArc = arcStart + hit.t * len;
           }
-          arc += length;
         }
-        if (bestDistance <= cutout.toolRadius + 1e-6) {
-          return inTabSpan(spans, bestArc, perimeter)
+        if (bestDistance <= limit) {
+          return inTabSpan(spans, bestArc, contour.perimeter)
             ? geometry.thickness - cutout.tabHeight
             : throughLimit;
         }
       }
     }
-    for (const region of regions) {
-      if (pointInPolygons(region.polygons, x, y)) {
-        return throughLimit + (region.extraDepth ?? 0);
+    for (const { cell, prepared } of preparedRegions) {
+      const key = cellKey(0, Math.floor(y / cell));
+      const list = prepared.bands.get(key);
+      let inside = false;
+      if (list !== undefined) {
+        for (const id of list) {
+          const base = id * 4;
+          const xi = prepared.edges[base]!;
+          const yi = prepared.edges[base + 1]!;
+          const xj = prepared.edges[base + 2]!;
+          const yj = prepared.edges[base + 3]!;
+          if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+        }
       }
+      if (inside) return throughLimit + prepared.extraDepth;
     }
     for (const drill of drills) {
       for (const [hx, hy] of drill.holes) {
