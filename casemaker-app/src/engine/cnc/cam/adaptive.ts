@@ -62,7 +62,7 @@
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { HOP_Z, SAFE_Z, estimateCycleSeconds, toolNumberFor, type CamMove, type CamOperation, type RapidEstimate, type ToolpathIR } from './ir';
 import type { Polygons } from './pocket';
-import { MaterialGrid, RegionGeometry, distanceField, type P2 } from './adaptiveGrid';
+import { MaterialGrid, RegionGeometry, bandRowsFor, distanceBand, forEachDistanceBand, type P2 } from './adaptiveGrid';
 import { cuttingRadiusForSweep, type Tool } from '../tool';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -289,7 +289,7 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
   if (!anyAllowed) {
     return { ok: false, code: 'adaptive-no-room', reason: `no part of the region is wide enough for the ${fmt(D)} mm cutter` };
   }
-  grid.setTargets(distanceField(allowed, grid.nx, grid.ny, h), r);
+  grid.setTargetsBanded(allowed, r);
   const targetArea = grid.totalTargets * h * h;
   const neck = subGridNeck(grid, clearance, r, s.neckAreaMm2);
   if (neck !== null) {
@@ -300,7 +300,7 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
     };
   }
 
-  const comps = components(allowed, clearance, grid);
+  const { comps, label } = components(allowed, clearance, grid);
   // Equal levels, none deeper than the step-down, so every level's entry descends the same height.
   const nLevels = Math.max(1, Math.ceil(input.depth / s.stepDownMm - 1e-9));
   const levels = Array.from({ length: nLevels }, (_, k) => r3((-input.depth * (k + 1)) / nLevels));
@@ -456,11 +456,26 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
       if (!walk()) return stepLimit(maxSteps);
       continue;
     }
-    // No restart: an area with no entry yet that still has material to clear.
-    const dist = distanceField(grid.target, grid.nx, grid.ny, h);
-    const comp = comps.find((c, idx) => !entered.has(idx) && c.cells.some((k) => dist[k]! <= r));
-    if (comp === undefined) break;
-    entered.add(comps.indexOf(comp));
+    // No restart: an area with no entry yet that still has material to clear. #908 — the test is
+    // a capped distance field read band by band (cap r: every comparison here is against r), over
+    // the component LABELS `components()` already built — the same cells the old per-component
+    // scan visited, without a whole-grid Float64Array.
+    const needed = new Uint8Array(comps.length);
+    forEachDistanceBand(grid.target, grid.nx, grid.ny, h, r, bandRowsFor(Math.ceil(r / h) + 1), (band) => {
+      for (let j = band.row0; j < band.row1; j++) {
+        const row = j * grid.nx;
+        for (let i = 0; i < grid.nx; i++) {
+          const k = row + i;
+          const comp = label[k]!;
+          if (comp < 0 || needed[comp] === 1) continue;
+          if (band.within(k, r)) needed[comp] = 1;
+        }
+      }
+    });
+    const compIdx = comps.findIndex((_, idx) => !entered.has(idx) && needed[idx] === 1);
+    if (compIdx < 0) break;
+    const comp = comps[compIdx]!;
+    entered.add(compIdx);
     const e = planEntry(geom, comp.best, comp.bestClearance, r, D, helixR, levelStep, tanA, s.entryClearanceMm);
     if (!e.ok) return { ok: false, code: 'adaptive-no-entry', reason: e.reason };
     if (e.helixRefused !== undefined) findings.push({ code: 'adaptive-helix-refused', severity: 'info', message: e.helixRefused });
@@ -542,17 +557,35 @@ function subGridNeck(grid: MaterialGrid, clearance: Float64Array, r: number, nec
   const h = grid.h;
   const loose = new Uint8Array(grid.material.length);
   for (let k = 0; k < loose.length; k++) if (grid.material[k] === 1 && clearance[k]! >= r - 0.75 * h) loose[k] = 1;
-  const toLoose = distanceField(loose, grid.nx, grid.ny, h);
-  const toTarget = distanceField(grid.target, grid.nx, grid.ny, h);
+  // #908 — the two fields are computed band by band: each is capped at the threshold it is
+  // compared against (r + h and 3h), so every comparison reads an exact value, and the memory is
+  // one band of each rather than two whole-grid Float64Arrays.
+  const looseCap = r + h;
+  const targetCap = 3 * h;
+  const bandRows = Math.max(
+    bandRowsFor(Math.ceil(looseCap / h) + 1),
+    bandRowsFor(Math.ceil(targetCap / h) + 1),
+  );
   let n = 0;
   let sx = 0;
   let sy = 0;
-  for (let k = 0; k < loose.length; k++) {
-    if (grid.material[k] !== 1 || grid.target[k] === 1 || toLoose[k]! > r + h || toTarget[k]! <= 3 * h) continue;
-    const i = k % grid.nx;
-    sx += grid.cx(i);
-    sy += grid.cy((k - i) / grid.nx);
-    n++;
+  for (let j0 = 0; j0 < grid.ny; j0 += bandRows) {
+    const j1 = Math.min(grid.ny, j0 + bandRows);
+    // Two fields, one scan: each is exact at the threshold it is read against (r + h and 3h).
+    const looseBand = distanceBand(loose, grid.nx, grid.ny, h, looseCap, j0, j1);
+    const targetBand = distanceBand(grid.target, grid.nx, grid.ny, h, targetCap, j0, j1);
+    for (let j = j0; j < j1; j++) {
+      const row = j * grid.nx;
+      for (let i = 0; i < grid.nx; i++) {
+        const k = row + i;
+        if (grid.material[k] !== 1 || grid.target[k] === 1) continue;
+        if (looseBand.within(k, looseCap) && !targetBand.within(k, targetCap)) {
+          sx += grid.cx(i);
+          sy += grid.cy(j);
+          n++;
+        }
+      }
+    }
   }
   const area = n * h * h;
   return area > neckAreaMm2 ? { area, at: [sx / n, sy / n] } : null;
@@ -590,14 +623,22 @@ function badSettings(s: AdaptiveSettings): string | null {
 }
 
 interface Component {
-  cells: number[];
   /** The roomiest cell centre, and its distance to the nearest edge. */
   best: P2;
   bestClearance: number;
 }
 
-/** The separate areas the cutter's centre can roam (8-connected), roomiest first. */
-function components(allowed: Uint8Array, clearance: Float64Array, grid: MaterialGrid): Component[] {
+/**
+ * The separate areas the cutter's centre can roam (8-connected), roomiest first. #908 — the
+ * component LABELS come back too: the planner's no-restart test asks which component each cell of
+ * a capped distance band belongs to, and rebuilding the labels per iteration would cost a whole
+ * grid pass each time.
+ */
+function components(
+  allowed: Uint8Array,
+  clearance: Float64Array,
+  grid: MaterialGrid,
+): { comps: Component[]; label: Int32Array } {
   const { nx, ny } = grid;
   const label = new Int32Array(allowed.length).fill(-1);
   const out: (Component & { bestK: number })[] = [];
@@ -605,12 +646,11 @@ function components(allowed: Uint8Array, clearance: Float64Array, grid: Material
   for (let start = 0; start < allowed.length; start++) {
     if (allowed[start] !== 1 || label[start] !== -1) continue;
     const id = out.length;
-    const comp = { cells: [] as number[], best: [0, 0] as P2, bestClearance: -1, bestK: start };
+    const comp = { best: [0, 0] as P2, bestClearance: -1, bestK: start };
     label[start] = id;
     stack.push(start);
     while (stack.length > 0) {
       const k = stack.pop()!;
-      comp.cells.push(k);
       if (clearance[k]! > comp.bestClearance) {
         comp.bestClearance = clearance[k]!;
         comp.bestK = k;
@@ -632,9 +672,26 @@ function components(allowed: Uint8Array, clearance: Float64Array, grid: Material
     }
     out.push(comp);
   }
-  return out
-    .sort((a, b) => b.bestClearance - a.bestClearance || a.bestK - b.bestK)
-    .map((c) => ({ cells: c.cells, best: [grid.cx(c.bestK % nx), grid.cy(Math.floor(c.bestK / nx))] as P2, bestClearance: c.bestClearance }));
+  // The roomiest component first; the labels are remapped to that order so a label IS the index
+  // into `comps`.
+  const sorted = out
+    .map((c, oldId) => ({ c, oldId }))
+    .sort((a, b) => b.c.bestClearance - a.c.bestClearance || a.c.bestK - b.c.bestK);
+  const rank = new Int32Array(out.length);
+  sorted.forEach((entry, idx) => {
+    rank[entry.oldId] = idx;
+  });
+  for (let k = 0; k < label.length; k++) {
+    const id = label[k]!;
+    if (id >= 0) label[k] = rank[id]!;
+  }
+  return {
+    comps: sorted.map(({ c }) => ({
+      best: [grid.cx(c.bestK % nx), grid.cy(Math.floor(c.bestK / nx))] as P2,
+      bestClearance: c.bestClearance,
+    })),
+    label,
+  };
 }
 
 /**

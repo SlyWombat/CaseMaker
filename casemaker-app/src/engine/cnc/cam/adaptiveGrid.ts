@@ -181,6 +181,30 @@ export class MaterialGrid {
   }
 
   /**
+   * #908 — as {@link setTargets}, with the distance field computed in bands (the whole-grid field
+   * was a full Float64Array per level; this keeps one band's worth). `radius` is the threshold AND
+   * the cap — the band is exact at every value the comparison can take.
+   */
+  setTargetsBanded(allowed: Uint8Array, radius: number): void {
+    let count = 0;
+    const bandRows = bandRowsFor(Math.ceil(radius / this.h) + 1);
+    forEachDistanceBand(allowed, this.nx, this.ny, this.h, radius, bandRows, (band) => {
+      for (let j = band.row0; j < band.row1; j++) {
+        const row = j * this.nx;
+        for (let i = 0; i < this.nx; i++) {
+          const k = row + i;
+          if (this.material[k] === 1 && band.within(k, radius)) {
+            this.target[k] = 1;
+            count++;
+          }
+        }
+      }
+    });
+    this.remainingTargets = count;
+    this.totalTargets = count;
+  }
+
+  /**
    * The standing cells the capsule from `a` to `b` (radius `r`) covers that the disc at `a` does
    * not — what moving the tool from `a` to `b` removes, given that everything under the tool at `a`
    * is already gone. With `stamp` the cells are removed.
@@ -375,4 +399,182 @@ export function distanceField(feature: Uint8Array, nx: number, ny: number, h: nu
   const out = new Float64Array(n);
   for (let k = 0; k < n; k++) out[k] = g[k]! >= INF / 2 ? Infinity : Math.sqrt(g[k]!) * h;
   return out;
+}
+
+/**
+ * #908 — THE SAME EXACT TRANSFORM OVER A ROW BAND: rows [row0, row1) of the grid, every column.
+ * The result is (row1 − row0) × nx, row-major, in mm, with Infinity where no feature is inside the
+ * band. The horizontal pass is the full row, so a cell's value is EXACT whenever its nearest
+ * feature lies inside the band's rows; otherwise the value is the distance to the nearest feature
+ * INSIDE the band — which can only be farther than the true one, never closer.
+ */
+export function distanceFieldRows(
+  feature: Uint8Array,
+  nx: number,
+  _ny: number,
+  row0: number,
+  row1: number,
+  h: number,
+): Float64Array {
+  const INF = 1e20;
+  const rows = row1 - row0;
+  const n = nx * rows;
+  const g = new Float64Array(n);
+  for (let j = 0; j < rows; j++) {
+    const src = (row0 + j) * nx;
+    for (let i = 0; i < nx; i++) g[j * nx + i] = feature[src + i] === 1 ? 0 : INF;
+  }
+  const size = Math.max(nx, rows);
+  const f = new Float64Array(size);
+  const d = new Float64Array(size);
+  const v = new Int32Array(size);
+  const z = new Float64Array(size + 1);
+  const pass = (len: number): void => {
+    let k = 0;
+    v[0] = 0;
+    z[0] = -INF;
+    z[1] = INF;
+    for (let q = 1; q < len; q++) {
+      let s = (f[q]! + q * q - (f[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
+      while (s <= z[k]!) {
+        k--;
+        s = (f[q]! + q * q - (f[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
+      }
+      k++;
+      v[k] = q;
+      z[k] = s;
+      z[k + 1] = INF;
+    }
+    k = 0;
+    for (let q = 0; q < len; q++) {
+      while (z[k + 1]! < q) k++;
+      const dq = q - v[k]!;
+      d[q] = dq * dq + f[v[k]!]!;
+    }
+  };
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < rows; j++) f[j] = g[j * nx + i]!;
+    pass(rows);
+    for (let j = 0; j < rows; j++) g[j * nx + i] = d[j]!;
+  }
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < nx; i++) f[i] = g[j * nx + i]!;
+    pass(nx);
+    for (let i = 0; i < nx; i++) g[j * nx + i] = d[i]!;
+  }
+  const out = new Float64Array(n);
+  for (let k = 0; k < n; k++) out[k] = g[k]! >= INF / 2 ? Infinity : Math.sqrt(g[k]!) * h;
+  return out;
+}
+
+/**
+ * #908 — ONE BAND OF A CAPPED DISTANCE FIELD. The field is computed band by band with a halo of
+ * `ceil(cap / h) + 1` rows, so a cell whose true nearest feature is within `cap` mm has that
+ * feature inside the band and its value is exact. A value above the cap is NOT an error — it means
+ * "farther than the cap", which is why the band does not expose it: the honest question a consumer
+ * can ask is a comparison against a threshold, and that threshold must be within the cap. Asking a
+ * capped band about a larger threshold is a bug, and `within` says so instead of answering.
+ */
+export interface DistanceBand {
+  /** The band's rows in the full grid: `row0` inclusive, `row1` exclusive. */
+  readonly row0: number;
+  readonly row1: number;
+  /** The cap the band was computed with, mm. */
+  readonly capMm: number;
+  /** Whether the distance at grid cell `k` (inside this band) is at most `thresholdMm`. */
+  within(k: number, thresholdMm: number): boolean;
+  /**
+   * The exact distance at grid cell `k`, for a consumer that needs the number rather than a
+   * comparison. Throws when the value is past the cap — the band cannot say how far it really is.
+   */
+  distance(k: number): number;
+}
+
+/** The rows a band size should have for a given halo: enough to amortise the halo, bounded. */
+export function bandRowsFor(haloRows: number): number {
+  return Math.min(512, Math.max(64, 4 * haloRows));
+}
+
+/**
+ * #908 — ONE BAND of a capped field over rows [row0, row1) with this cap's halo. The exactness
+ * argument is {@link DistanceBand}'s; several fields over the SAME band rows can be built with this
+ * and consumed together, which is what `subGridNeck` needs (two caps, one cell scan).
+ */
+export function distanceBand(
+  feature: Uint8Array,
+  nx: number,
+  ny: number,
+  h: number,
+  capMm: number,
+  row0: number,
+  row1: number,
+): DistanceBand {
+  if (!(Number.isFinite(capMm) && capMm >= 0)) {
+    throw new Error(`a distance cap of ${capMm} mm is not a finite, non-negative number`);
+  }
+  const halo = Math.ceil(capMm / h) + 1;
+  const firstRow = Math.max(0, row0 - halo);
+  const lastRow = Math.min(ny, row1 + halo);
+  const field = distanceFieldRows(feature, nx, ny, firstRow, lastRow, h);
+  return {
+    row0,
+    row1,
+    capMm,
+    within(k: number, thresholdMm: number): boolean {
+      if (!(thresholdMm <= capMm)) {
+        throw new Error(
+          `a distance band capped at ${capMm} mm was asked whether ${thresholdMm} mm is reached: ` +
+            'a capped field is only exact within its cap',
+        );
+      }
+      const row = Math.floor(k / nx);
+      if (row < row0 || row >= row1) {
+        throw new Error(`cell ${k} (row ${row}) is outside the band [${row0}, ${row1})`);
+      }
+      // The raw value is read, not `distance`: a value past the cap is the honest "farther than
+      // the threshold" answer, and every threshold is within the cap by the check above.
+      return field[(row - firstRow) * nx + (k - row * nx)]! <= thresholdMm;
+    },
+    distance(k: number): number {
+      const row = Math.floor(k / nx);
+      if (row < row0 || row >= row1) {
+        throw new Error(`cell ${k} (row ${row}) is outside the band [${row0}, ${row1})`);
+      }
+      const value = field[(row - firstRow) * nx + (k - row * nx)]!;
+      if (value > capMm) {
+        throw new Error(
+          `cell ${k} is ${value} mm from its nearest feature, past the band's ${capMm} mm cap: ` +
+            'the band knows only that it is farther',
+        );
+      }
+      return value;
+    },
+  };
+}
+
+/**
+ * #908 — A DISTANCE FIELD COMPUTED IN BANDS, CAPPED AT `capMm`. `visit` receives each band in
+ * order; the band's memory is O((bandRows + 2 × halo) × nx), not O(nx × ny). With
+ * `halo = ceil(capMm / h) + 1`, a feature outside a cell's padded band is farther than `capMm`
+ * from it, so every value ≤ `capMm` is the exact one — and every consumer here compares against a
+ * threshold ≤ `capMm`. What must not erode: a comparison whose threshold is above the cap, which
+ * `DistanceBand.within` refuses.
+ */
+export function forEachDistanceBand(
+  feature: Uint8Array,
+  nx: number,
+  ny: number,
+  h: number,
+  capMm: number,
+  bandRows: number,
+  visit: (band: DistanceBand) => void,
+): void {
+  if (!(Number.isFinite(capMm) && capMm >= 0)) {
+    throw new Error(`a distance cap of ${capMm} mm is not a finite, non-negative number`);
+  }
+  const rows = Math.max(1, Math.floor(bandRows));
+  for (let j0 = 0; j0 < ny; j0 += rows) {
+    const j1 = Math.min(ny, j0 + rows);
+    visit(distanceBand(feature, nx, ny, h, capMm, j0, j1));
+  }
 }
