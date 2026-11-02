@@ -217,12 +217,20 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
   const paths = path === undefined ? defaultDocPaths() : typeof path === 'string' ? [path] : path;
   const fs = builtin<FsLike>('node:fs');
   const found = paths.find((p) => fs.existsSync(p));
-  if (found === undefined) return null; // no documents on this machine — the built-ins carry the run
+  if (found === undefined) {
+    // #922 — a run with no document to read is "no table was stated" too, not "keep whatever a
+    // PREVIOUS call in this process installed". Without this a long-lived caller (the MCP server,
+    // a spec that calls `bootstrap`/`loadLocation` more than once) that later reads no location
+    // would silently resolve feeds against the last location it DID read.
+    installLocationFeedsTable(null);
+    return null; // no documents on this machine — the built-ins carry the run
+  }
 
   let raw: string;
   try {
     raw = fs.readFileSync(found, 'utf8');
   } catch {
+    installLocationFeedsTable(null);
     return null;
   }
 
