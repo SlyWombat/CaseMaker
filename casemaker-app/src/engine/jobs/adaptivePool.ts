@@ -111,9 +111,9 @@ export class AdaptivePool {
     this.out = null;
   }
 
-  /** The number of planners this run settled on (after `begin`; the core cap before). */
+  /** The number of planners actually running (the core cap before any worker exists). */
   get planners(): number {
-    return this.sizing?.planners ?? this.coreCap;
+    return this.slots.length === 0 ? this.coreCap : this.slots.length;
   }
 
   /** The run's decision — null until a `begin` with a budget arrives. */
@@ -129,8 +129,12 @@ export class AdaptivePool {
   private onBegin(message: PoolBeginRequest): void {
     const levelBytes = estimateLevelPlannerBytes(message.maxLevelCells);
     if (message.memory === undefined) {
+      // A batch with no budget (a pass the CAM did not estimate) keeps the run's last budgeted
+      // size when there was one, so a later pass cannot undo a phone's one-planner rule; with
+      // no earlier budget the core rule alone decides.
+      const keep = this.sizing?.planners ?? this.coreCap;
       this.sizing = null;
-      this.resizeWorkers(this.coreCap);
+      this.resizeWorkers(keep);
       return;
     }
     const decision = sizePool({

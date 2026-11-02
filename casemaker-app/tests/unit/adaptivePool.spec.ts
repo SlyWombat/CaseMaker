@@ -261,6 +261,24 @@ describe('#881 — the pool spawns to the stated budget', () => {
     pool.dispose();
   });
 
+  it('keeps a budgeted size when a later pass has no estimate of its own', async () => {
+    const pool = new AdaptivePool(8);
+    const port = pool.beginRun();
+    port.postMessage({
+      kind: 'begin',
+      maxLevelCells: 314_572,
+      memory: { budgetBytes: 256 * MiB, parentBytes: 200 * MiB },
+    } satisfies PoolMessage);
+    await delivered(() => FakeWorker.spawned.length === 1);
+    // A rest pass names no budget: the phone's one planner is not undone by it.
+    port.postMessage({ kind: 'begin', maxLevelCells: 314_572 } satisfies PoolMessage);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(FakeWorker.spawned.length).toBe(1);
+    expect(pool.planners).toBe(1);
+    expect(pool.decision).toBeNull();
+    pool.dispose();
+  });
+
   it('plans a whole goal through the real port and pool, byte-identical to the serial run', async () => {
     FakeWorker.plan = true;
     const hf = plateau();
