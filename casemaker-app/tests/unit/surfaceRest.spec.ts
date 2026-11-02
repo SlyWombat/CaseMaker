@@ -63,7 +63,7 @@ const RAPID: RapidEstimate = { xyMmPerMin: 5000, zMmPerMin: 1000, accelMmPerS2: 
 describe('#847 planSurfaceRest', () => {
   it('cuts only the tight concavity, and a smaller ball leaves less than the finish did', () => {
     const hf = valley();
-    const finishResidual = surfaceResidual(hf, finishTipField(hf, { ball: true, radius: 3 }, 1e9), 0, 1e-6);
+    const finishResidual = surfaceResidual(hf, finishTipField(hf, { ball: true, radius: 3 }), 0, 1e-6);
     const plan = planSurfaceRest({
       heightfield: hf,
       residual: finishResidual,
@@ -90,7 +90,7 @@ describe('#847 planSurfaceRest', () => {
 
   it('a rest pass that lowers nothing is recognisably no better: a ball as big as the finish', () => {
     const hf = valley();
-    const finishTip = finishTipField(hf, { ball: true, radius: 3 }, 1e9);
+    const finishTip = finishTipField(hf, { ball: true, radius: 3 });
     const finishResidual = surfaceResidual(hf, finishTip, 0, 1e-6);
     // The SAME radius: its tip field is the finish's own, so the residual cannot drop. (The goal
     // path never offers such a candidate; this pins the comparison the pick makes.)
@@ -110,7 +110,7 @@ describe('#847 planSurfaceRest', () => {
 describe('#847 restResidualVisible', () => {
   it('the leftover is visible past the depth the shop states, or past its stated share', () => {
     const hf = valley();
-    const res = surfaceResidual(hf, finishTipField(hf, { ball: true, radius: 3 }, 1e9), 0, 1e-6);
+    const res = surfaceResidual(hf, finishTipField(hf, { ball: true, radius: 3 }), 0, 1e-6);
     // The valley leaves material 1.5 mm up: past a 0.1 mm depth, under a 10 mm one.
     expect(res.removedMm3).toBeGreaterThan(0);
     expect(restResidualVisible(res, 0.1, 1).visible).toBe(true);
@@ -125,8 +125,8 @@ describe('#847 suggestedRestRadiusMm', () => {
   it('names a smaller ball that would reach what the finish left', () => {
     const hf = valley();
     const finishTool = { ball: true, radius: 3 };
-    const finishResidual = surfaceResidual(hf, finishTipField(hf, finishTool, 1e9), 0, 1e-6);
-    const radius = suggestedRestRadiusMm(hf, finishResidual, finishTool, 0, 1e-6, 1e9);
+    const finishResidual = surfaceResidual(hf, finishTipField(hf, finishTool), 0, 1e-6);
+    const radius = suggestedRestRadiusMm(hf, finishResidual, finishTool, 0, 1e-6);
     expect(radius).not.toBeNull();
     expect(radius as number).toBeLessThan(3);
     expect(radius as number).toBeGreaterThan(0);
@@ -135,8 +135,8 @@ describe('#847 suggestedRestRadiusMm', () => {
   it('there is nothing to suggest when the finish already reached the goal', () => {
     const hf = valley();
     const finishTool = { ball: true, radius: 0.5 };
-    const finishResidual = surfaceResidual(hf, finishTipField(hf, finishTool, 1e9), 0, 1);
+    const finishResidual = surfaceResidual(hf, finishTipField(hf, finishTool), 0, 1);
     expect(finishResidual.cells).toBe(0);
-    expect(suggestedRestRadiusMm(hf, finishResidual, finishTool, 0, 1, 1e9)).toBeNull();
+    expect(suggestedRestRadiusMm(hf, finishResidual, finishTool, 0, 1)).toBeNull();
   });
 });

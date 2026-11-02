@@ -2099,18 +2099,18 @@ export function EngravePanel(): JSX.Element {
   // #670 — THE TEXTURE: the numbers the CAM runs with and the strokes they derive, from the same
   // module the plan calls. Derived once per shape edit, not per render of every row.
   const textureById = useMemo(() => {
-    const map = new Map<string, { numbers: TextureNumbers; strokes: number; capped: boolean }>();
+    const map = new Map<string, { numbers: TextureNumbers; strokes: number }>();
     for (const shape of job.shapes) {
       if (shape.texture === undefined) continue;
       const numbers = textureNumbers(shape.texture, shape.depth);
       const derived = textureStrokes(shape, numbers);
-      map.set(shape.id, { numbers, strokes: derived.paths.length, capped: derived.capped });
+      map.set(shape.id, { numbers, strokes: derived.paths.length });
     }
     return map;
   }, [job.shapes]);
   const textureFor = (
     shape: EngraveShape,
-  ): { numbers: TextureNumbers; strokes: number; capped: boolean } | undefined =>
+  ): { numbers: TextureNumbers; strokes: number } | undefined =>
     shape.texture === undefined ? undefined : textureById.get(shape.id);
   // #674 — a prism's derived numbers, from the same `prismNumbers` the plan, the finding and the
   // sheet read. Cheap arithmetic, so no memo.

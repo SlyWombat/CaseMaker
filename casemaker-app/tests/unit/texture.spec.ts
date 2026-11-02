@@ -27,7 +27,6 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import {
-  DEFAULT_MAX_TEXTURE_STROKES,
   DEFAULT_TEXTURE_PITCH_MM,
   DEFAULT_TEXTURE_SEED,
   DEFAULT_TEXTURE_STROKE_MM,
@@ -322,14 +321,14 @@ describe('the plan — a texture is traces, never a pocket', () => {
     expect(toPartPlan(textureJob(rect('construction', { construction: true }))).traces).toEqual([]);
   });
 
-  it('caps a crowded pattern and says so to the caller', () => {
+  it('emits every stroke a crowded pattern asks for — there is no path cap (#916)', () => {
+    // A 38 × 28 region at a 0.2 mm pitch is tens of thousands of strokes; all of them are the
+    // plan, because the memory budget (not a hidden count) bounds an oversized texture.
     const dense = rect('dense', { width: 38, height: 28, texture: { pattern: 'stipple', pitchMm: 0.2 } });
     const numbers = textureNumbers(dense.texture, dense.depth);
-    const capped = textureStrokes(dense, numbers);
-    expect(capped.capped).toBe(true);
-    expect(capped.paths.length).toBe(DEFAULT_MAX_TEXTURE_STROKES);
-    // Under the cap nothing is flagged.
-    expect(textureStrokes(rect(), textureNumbers(rect().texture, 0.8)).capped).toBe(false);
+    const strokes = textureStrokes(dense, numbers);
+    expect(strokes.paths.length).toBeGreaterThan(20_000);
+    expect(new Set(strokes.paths).size).toBe(strokes.paths.length);
   });
 });
 
@@ -381,13 +380,6 @@ describe('findings — a marked region that cannot cut, named', () => {
     expect(f).toBeDefined();
     expect(f!.severity).toBe('warning');
     expect(textureStrokes(tiny, textureNumbers(tiny.texture, tiny.depth)).paths).toEqual([]);
-  });
-
-  it('warns when the cap shortens a crowded pattern', () => {
-    const dense = rect('dense', { width: 38, height: 28, texture: { pattern: 'stipple', pitchMm: 0.2 } });
-    const f = find(textureJob(dense), 'texture-crowded');
-    expect(f).toBeDefined();
-    expect(f!.message).toContain(String(DEFAULT_MAX_TEXTURE_STROKES));
   });
 
   it('raises none of them for a plain V-bit stipple', () => {

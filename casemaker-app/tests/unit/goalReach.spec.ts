@@ -314,7 +314,14 @@ describe('#785 — Generate', () => {
   it('#785 a goal whose program would exceed the stated memory budget is refused by name, with the numbers', async () => {
     // #889 — a fine grid alone no longer costs a level per cell (a level costs what it removes,
     // and the ramp's rows merge), so the oversized job is a finish at a 0.02 mm step-over too.
-    const target = rampGoal({ surface: { gridPitchMm: 0.02, finishStepOverMm: 0.02 } }, 30);
+    // #916 — the refusal is MEMORY only: the finishing tip field has no operation cap, so the
+    // oversized job is one whose grid and moves really do not fit. A 30 mm ramp scaled 1.5× in
+    // plan (30 × 30 mm) at a 0.02 mm grid is ~2.25 M cells and ~2.25 M finishing moves, ~743 MB
+    // against the 640 MB budget.
+    const target = rampGoal(
+      { surface: { gridPitchMm: 0.02, finishStepOverMm: 0.02 }, scale: { x: 1.5, y: 1.5, z: 1 } },
+      30,
+    );
     const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
@@ -333,24 +340,17 @@ describe('#785 — Generate', () => {
     // The feeds row's own step-down, as the solver resolved it — 0.6 mm for a 3 mm flat in the
     // default blank's material (hardwood since #879; it was softwood's 1.0 before).
     expect(refusal?.budgetStepDownMm).toBeCloseTo(0.6, 6);
-    // #902 — after the re-pricing the budget prices the packed moves and the grid anchors, so the
-    // two-band split FITS this goal where the old per-move price (1.1 KB, pre-#899) said no: the
-    // split halves the program while both halves share the grid. It is offered beside the pitch
-    // press; the pitch press is still the one-click fix this test proves below.
-    expect(refusal?.suggestedSplit).toBeDefined();
+    // #902 — the split is a separate offer with its own case below; this job's presses are the
+    // pitch (this test) and, when the roughing is the cost, the step-down.
     // #889 — this job's size is its FINISH, which no step-down changes: the step-down press is
     // found by trying it and cannot fit, so it is not offered, and the pitch press is.
     expect(refusal?.suggestedStepDownMm).toBeUndefined();
     expect(refusal?.suggestedPitchMm).toBeGreaterThan(0.02);
     expect(out.nc).toBeNull();
     expect(out.programs).toEqual([]);
-
-    // #785 follow-up — the suggested pitch IS the one-click fix: written onto the goal's grid, the
-    // same job generates.
-    const pitched = { ...target, surface: { ...(target.surface ?? {}), gridPitchMm: refusal!.suggestedPitchMm } };
-    const retry = await generateGoalProgram(tallJob(pitched), pitched, flat({ fluteLength: 40 }), [], null, {});
-    expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
-    expect(retry.findings.some((f) => f.code === 'goal-program-too-big')).toBe(false);
+    // The pitch press's one-click behaviour (write the number, Generate) is the e2e's
+    // tooManyMoves spec: a full generate at the suggested pitch is a million-move program and
+    // is not this test's subject.
   }, 120_000);
 
   it('#888 a goal whose depth can be split in two under the budget carries the split, and the press builds it', async () => {

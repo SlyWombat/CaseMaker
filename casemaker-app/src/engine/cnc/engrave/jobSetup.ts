@@ -287,13 +287,12 @@ export type JobFindingCode =
   // Surface textures (#670). A texture is a pattern of stroke TRACES over one simple region:
   // `texture-shape` is the region kind that cannot hold one (a profile with holes, or a half that
   // is also an inlay), `texture-through` the surface finish that is not a cut-through,
-  // `texture-tool` the cutter the trace path refuses by name, and the two warnings say the
-  // pattern came out empty or was capped (`texture-empty`, `texture-crowded`).
+  // `texture-tool` the cutter the trace path refuses by name, and `texture-empty` says the
+  // pattern came out empty. #916 — there is no path cap, so no `texture-crowded`.
   | 'texture-shape'
   | 'texture-through'
   | 'texture-tool'
   | 'texture-empty'
-  | 'texture-crowded'
   // Flutes and prisms (#674). `flute-tool` is the cutter the trace path refuses; `flute-short` a
   // path whose two ramps overlap, so the groove never reaches the stated depth. A prism's five are
   // the cone its sides need (`prism-needs-cone`), a height past what that cone's flank reaches
@@ -2693,16 +2692,6 @@ export function validateJob(
         message:
           `${who}’s ${numbers.pattern} pattern comes out empty at a ${fmt3(numbers.pitchMm)} mm ` +
           'pitch over this region; widen the region or narrow the pitch.',
-      });
-    } else if (strokes.capped) {
-      findings.push({
-        severity: 'warning',
-        code: 'texture-crowded',
-        labelId: item.id,
-        message:
-          `${who}’s pattern wants more than the 4000-` +
-          `${numbers.pattern === 'scallop' ? 'run' : 'stroke'} cap at a ${fmt3(numbers.pitchMm)} mm ` +
-          'pitch; the program cuts the first 4000. Widen the pitch to cut the whole region.',
       });
     }
   }

@@ -16,11 +16,12 @@ const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.
 test.setTimeout(240_000);
 
 /**
- * The empty job with the block as its goal, set up to exceed the app's memory budget. The defaults
+ * The empty job with the block as its goal, set up to exceed the app's MEMORY budget. The defaults
  * make the FINISH the cost (a 0.02 mm grid and step-over); `gridPitch`/`finishStepOver`/`stepDown`
  * override them. A fine step-down makes the ROUGHING the cost instead (#889); a scaled-up goal at
  * a fine finish keeps the memory the cost while half of it is still too big, which is the "no
- * split possible" case.
+ * split possible" case. #916 — the budget is memory only: the finishing tip field is priced in the
+ * grid anchors and has no operation cap, so a long field is progress plus Cancel, never a refusal.
  */
 async function budgetBlocker(
   page: import('@playwright/test').Page,
@@ -78,7 +79,9 @@ async function budgetBlocker(
 
 test('#832/#888/#889 — the budget blocker draws only the presses that help, and the pitch press changes the plan', async ({ cm, page }) => {
   await cm.ready();
-  await budgetBlocker(page);
+  // #916 — the refusal is the MEMORY budget; a scaled block at the 0.02 mm grid and step-over
+  // (~2.9 M finishing moves, ~1040 MB) is over it, and no step-down changes a finish.
+  await budgetBlocker(page, { scalePct: '160' });
   // #889 — this job is over on its FINISH, which no step-down changes, so the step-down press is
   // not drawn (the unit suite pins the same rule on the finding).
   await expect(page.getByTestId('engrave-generate-at-stepdown')).toHaveCount(0);
@@ -105,27 +108,25 @@ test('#832/#888/#889 — the step-down press writes the number it states onto th
 
 test('#888 — the split press BUILDS two setups, each side with its own depth band', async ({ cm, page }) => {
   await cm.ready();
-  // The step-down is PINNED: the split's numbers are the point, and the feeds row follows the
-  // default blank's material (#879 moved it to hardwood, whose 0.3 mm step leaves no split).
-  // The finish is what is over here, so the split must leave each band under the budget: half the
-  // finish has to fit, which means the whole must be under twice the budget. At 100 % the block's
-  // job is ~1.30 GB — just over that twice-the-budget line — so the goal is scaled to 97 %:
-  // ~1.22 GB, over the 640 MB it is judged against, while each band's half-finish plus its
-  // roughing fits.
-  await budgetBlocker(page, { stepDown: '0.5', scalePct: '97' });
+  // #902 — the split's case is a job whose ROUGHING is over the budget on a grid the finishing
+  // tip field can carry (0.1 mm; a split of a tip-over job would refuse again on the same grid,
+  // which is why that press is withheld). The block is scaled to 200 % (40 × 40 × 12 mm): 0.01 mm
+  // levels make ~5.6 M roughing moves (~1030 MB), while either 6 mm band halves the roughing
+  // (~596 MB) and fits — so the press exists, and each side's band is half the 12 mm depth.
+  await budgetBlocker(page, { gridPitch: '0.1', finishStepOver: '0.3', stepDown: '0.01', roughStepOver: '0.01', scalePct: '200' });
   const press = page.getByTestId('engrave-split-goal');
   await expect(press).toBeVisible();
   await expect(press).toHaveText('Split into two setups');
   await press.click();
 
   // The press writes the job's setups before the run starts: two sides, one goal each, each with
-  // half the 6 mm depth as its band.
+  // half the 12 mm depth as its band.
   const setups = await page.evaluate(() => window.__caseMaker!.engraveSetups());
   expect(setups).toHaveLength(2);
   expect(setups.every((s) => s.goalId !== null)).toBe(true);
   for (const setup of setups) {
-    expect(setup.bandMm ?? 0).toBeGreaterThan(2.5);
-    expect(setup.bandMm ?? 0).toBeLessThan(3.5);
+    expect(setup.bandMm ?? 0).toBeGreaterThan(5.5);
+    expect(setup.bandMm ?? 0).toBeLessThan(6.5);
   }
   expect(setups[0]!.bandMm).toBeCloseTo(setups[1]!.bandMm ?? 0, 1);
   // The press also pressed Generate. The page closes with this test, taking the worker (and the

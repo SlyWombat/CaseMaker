@@ -160,14 +160,12 @@ import { concatToolpathIR, estimateCycleSeconds, HOP_Z, SAFE_Z, raiseTravelOver,
 import {
   DEFAULT_GRID_PITCH_MM,
   DEFAULT_MAX_CELLS,
-  DEFAULT_MAX_FINISH_TIP_OPS,
   DEFAULT_STOCK_TO_LEAVE_MM,
   generateSurface3dForGoal,
   generateSurface3dIR,
   estimateGoalMoves,
   goalMemoryBudgetMb,
   goalProgramMb,
-  tipStencilCells,
   type GoalMoveEstimate,
   moldHeightfield,
   REST_TOLERANCE_MM,
@@ -4970,31 +4968,26 @@ export async function generateGoalProgram(
       moveBudgetBound = true;
     }
   }
-  // The finishing tip field's own cap (#540) is the other budget the CAM holds. When the run
-  // has no coarser grid to settle on, it is refused here too, by name with the same presses,
-  // rather than failing inside the CAM.
-  const radius = (cuttingDiameter(tool) ?? 0) / 2;
-  const tipOpsOf = (e: MoveEstimate): number => e.cells * tipStencilCells(radius, e.pitch);
-  const tipFits = (e: MoveEstimate): boolean => tipOpsOf(e) <= DEFAULT_MAX_FINISH_TIP_OPS;
-  const tipOver = cutPitchMm === basePitchMm && !tipFits(moveEstimate);
-  if (moveEstimate.mb > budgetMb || tipOver) {
-    // The two presses, each found by trying it: the pitch that fits BOTH budgets — this one and
-    // the tip field's — and, at the pitch the run settled on, the step-down that fits. The counts
-    // are not proportional to either number any more (a level costs what it removes), so each is
-    // stepped up by a quarter until the estimate fits; a press that never fits within a dozen
-    // steps, or cannot help, is not offered.
+  // #916 — ONE BUDGET: MEMORY. The finishing tip field is a typed array of the grid the run
+  // already samples — priced in `goalProgramMb`'s measured anchors — and its work is not refused by
+  // an operation count: the CAM reports the field's rows as progress and the operator can Cancel.
+  if (moveEstimate.mb > budgetMb) {
+    // The presses, each found by trying it: the pitch that fits this budget and, at the pitch the
+    // run settled on, the step-down that fits. The counts are not proportional to either number
+    // any more (a level costs what it removes), so each is stepped up by a quarter until the
+    // estimate fits; a press that never fits within a dozen steps, or cannot help, is not offered.
     const round2Up = (v: number): number => Math.ceil(v * 100) / 100;
     let suggestedPitch: number | undefined;
     for (let p = round2Up(moveEstimate.pitch * 1.25), n = 0; n < 12; p = round2Up(p * 1.25), n++) {
       const e = movesAt(p);
-      if (e.mb <= budgetMb && tipFits(e)) {
+      if (e.mb <= budgetMb) {
         suggestedPitch = p;
         break;
       }
     }
     let suggestedStepDown: number | undefined;
-    // The step-down changes the roughing only: no help when the tip field is what is over.
-    for (let d = round2Up(feeds.stepDown * 1.25), n = 0; n < 12 && !tipOver; d = round2Up(d * 1.25), n++) {
+    // The step-down changes the roughing only: it cannot help a job whose finish is the cost.
+    for (let d = round2Up(feeds.stepDown * 1.25), n = 0; n < 12; d = round2Up(d * 1.25), n++) {
       if (movesAt(cutPitchMm, d).mb <= budgetMb) {
         suggestedStepDown = d;
         break;
@@ -5099,10 +5092,8 @@ export async function generateGoalProgram(
           mode: 'auto',
           material: job.stock.material,
           depthRatio: readDefault(shop.defaults ?? null, 'rough3d.adaptiveDepthRatio').value,
-          cellBudget: readDefault(shop.defaults ?? null, 'rough3d.compareCellBudget').value,
-          // #846 — the planning budget: the adaptive is planned one level at a time, so above
-          // this much work the goal keeps the raster and the line says why.
-          planBudget: readDefault(shop.defaults ?? null, 'rough3d.planBudgetCellLevels').value,
+          // #916 — both roughs are planned and measured on every 'auto' run; the old work-count
+          // caps that skipped the comparison are gone.
           adaptive: adaptiveSettings(shop.defaults ?? null).settings,
           // #881 — THE POOL'S MEMORY BOUND. #889's budget is the page's allowance for the whole
           // program; the program's own estimate is the parent, and the port sizes each planner's
@@ -5118,33 +5109,31 @@ export async function generateGoalProgram(
                 },
               }),
         },
-        // #785 — the CAM's own layer/scan-line counts, as Generate's progress words.
+        // #785 — the CAM's own layer/scan-line counts, as Generate's progress words. #916 — the
+        // finishing tip field's rows and the scallop contours report too, so no long pass is a
+        // silent wait and Cancel is always the answer to one.
         onProgress: (p) =>
           onProgress?.({
             stage: p.pass,
-            label: `${p.pass === 'rough' ? 'roughing level' : 'finishing row'} ${p.done} of ${p.total}`,
+            label:
+              p.pass === 'rough'
+                ? `roughing level ${p.done} of ${p.total}`
+                : p.pass === 'finish'
+                  ? `finishing row ${p.done} of ${p.total}`
+                  : p.pass === 'tip'
+                    ? `finishing safety field row ${p.done} of ${p.total}`
+                    : `scallop contour ${p.done} of ${p.total}`,
             done: p.done,
             total: p.total,
           }),
       },
     });
   let surfaced: Surfaced;
-  let budgetBound = false;
   onProgress?.({ stage: 'sample', label: 'sampling the goal' });
   try {
     surfaced = await surfaceAt(cutPitchMm);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    // The finishing tip field's own cap (#540) is a cost limit, not a fault: settle at the grid
-    // the job would have used and let the finding below state the pitch the run really took.
-    const budget = refinedPitchMm !== basePitchMm && /tip evaluations/.test(message) && /budget/.test(message);
-    if (!budget) return fail('cam', message, resolved);
-    try {
-      surfaced = await surfaceAt(basePitchMm);
-      budgetBound = true;
-    } catch (e2) {
-      return fail('cam', e2 instanceof Error ? e2.message : String(e2), resolved);
-    }
+    return fail('cam', e instanceof Error ? e.message : String(e), resolved);
   }
   if (surfaced === null) {
     return fail('cam', `the goal "${goal.name}" lies at or above the stock top, so there is no surface to cut`, resolved);
@@ -5161,11 +5150,11 @@ export async function generateGoalProgram(
   const settledPitchMm = surfaced.heightfield.pitch;
   if (finishStepOverMm > 0 && settledPitchMm > finishStepOverMm + 1e-9) {
     const trim = (n: number): string => String(Number(n.toFixed(4)));
+    // #916 — the two reasons a settled grid is coarser than the finish are both MEMORY, and both
+    // are stated: the program's budget, or the heightfield's own cell cap.
     const why = moveBudgetBound
       ? `the program would exceed the app's ${budgetMb} MB memory budget at that spacing`
-      : budgetBound
-        ? `a ball at that spacing would ask the finishing tip field for more than its ${DEFAULT_MAX_FINISH_TIP_OPS.toLocaleString('en-US')} evaluations`
-        : `the heightfield's ${DEFAULT_MAX_CELLS.toLocaleString('en-US')} cells settle the grid there`;
+      : `the heightfield's ${DEFAULT_MAX_CELLS.toLocaleString('en-US')} cells settle the grid there`;
     gridFindings.push({
       severity: 'warning',
       code: 'goal-finish-finer-than-grid',
@@ -5407,7 +5396,6 @@ export async function generateGoalProgram(
         finishTool,
         0,
         REST_TOLERANCE_MM,
-        DEFAULT_MAX_FINISH_TIP_OPS,
       );
       restFindings.push({
         // Information unless the leftover would show: the noise rule above.
@@ -5878,10 +5866,7 @@ async function generateSurfacePrimitiveProgram(
           mode: 'auto',
           material: job.stock.material,
           depthRatio: readDefault(shop.defaults ?? null, 'rough3d.adaptiveDepthRatio').value,
-          cellBudget: readDefault(shop.defaults ?? null, 'rough3d.compareCellBudget').value,
-          // #846 — the planning budget: the adaptive is planned one level at a time, so above
-          // this much work the goal keeps the raster and the line says why.
-          planBudget: readDefault(shop.defaults ?? null, 'rough3d.planBudgetCellLevels').value,
+          // #916 — measure both roughs, always (no work-count caps).
           adaptive: adaptiveSettings(shop.defaults ?? null).settings,
           ...(planner === undefined ? {} : { planner }),
         },
@@ -6021,7 +6006,7 @@ function pathBbox(ir: ToolpathIR): { min: [number, number]; max: [number, number
  * work the run really does; a stage that fails or is refused simply gets no later event.
  */
 export interface EngraveProgress {
-  stage: 'prepare' | 'items' | 'sample' | 'rough' | 'finish' | 'post' | 'verify' | 'done';
+  stage: 'prepare' | 'items' | 'sample' | 'rough' | 'finish' | 'tip' | 'scallop' | 'post' | 'verify' | 'done';
   label: string;
   done?: number;
   total?: number;

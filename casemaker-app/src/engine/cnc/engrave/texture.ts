@@ -56,13 +56,6 @@ export const DEFAULT_TEXTURE_STROKE_MM = 1;
 /** The seed a texture runs with when the operator states none — labelled, and stored on save. */
 export const DEFAULT_TEXTURE_SEED = 1;
 
-/**
- * The most paths one texture emits. Past it the plan keeps the first `maxStrokes` in generation
- * order and `texture-crowded` says so: the preview unions the swept cones per stroke, so the cap
- * is also the picture's cost bound.
- */
-export const DEFAULT_MAX_TEXTURE_STROKES = 4000;
-
 /** Segments per semicircular bump of a scallop row — 0.019·r chord error. */
 export const SCALLOP_ARC_SEGMENTS = 8;
 
@@ -125,20 +118,18 @@ export function textureCarries(kind: string): boolean {
 export interface TextureStrokes {
   /** One polyline per stroke (stipple: one segment) or clipped run of a row (scallop). */
   paths: [Mm, Mm][][];
-  /** True when the pattern wanted more than the cap; the first `maxStrokes` are emitted. */
-  capped: boolean;
 }
 
 /**
  * Derive a texture's strokes from the shape and its numbers. Pure: the same shape and numbers
  * always give the same paths, in the same order, so the program is byte-identical run to run.
+ *
+ * #916 — EVERY STROKE THE PATTERN ASKS FOR IS EMITTED. There is no path cap: a plan must cut what
+ * it was asked to cut, and the run's memory budget is the bound — an oversized texture is priced
+ * and refused by name like any oversized program, not silently truncated.
  */
-export function textureStrokes(
-  shape: EngraveShape,
-  numbers: TextureNumbers,
-  maxStrokes: number = DEFAULT_MAX_TEXTURE_STROKES,
-): TextureStrokes {
-  if (!(numbers.depthMm > 0) || !(numbers.pitchMm > 0)) return { paths: [], capped: false };
+export function textureStrokes(shape: EngraveShape, numbers: TextureNumbers): TextureStrokes {
+  if (!(numbers.depthMm > 0) || !(numbers.pitchMm > 0)) return { paths: [] };
   const inside = insideOf(shape);
   const box = worldBounds(shape);
   // A stroke's centre can sit half a stroke plus a jittered cell outside the box and still reach
@@ -150,19 +141,13 @@ export function textureStrokes(
   const maxY = box.maxY + reach;
 
   const paths: [Mm, Mm][][] = [];
-  let capped = false;
 
-  /** Clip one candidate polyline and keep its inside runs; false when the cap is reached. */
-  const emit = (points: readonly [Mm, Mm][]): boolean => {
+  /** Clip one candidate polyline and keep its inside runs. */
+  const emit = (points: readonly [Mm, Mm][]): void => {
     for (const run of clipPolyline(points, inside)) {
       if (run.length < 2 || polylineLength(run) < MIN_STROKE_MM) continue;
-      if (paths.length >= maxStrokes) {
-        capped = true;
-        return false;
-      }
       paths.push(run);
     }
-    return true;
   };
 
   if (numbers.pattern === 'scallop') {
@@ -170,7 +155,7 @@ export function textureStrokes(
     const step = numbers.pitchMm;
     const row0 = Math.floor(minY / step);
     const row1 = Math.ceil(maxY / step);
-    outer: for (let row = row0; row <= row1; row++) {
+    for (let row = row0; row <= row1; row++) {
       const cy = row * step;
       // One row is one polyline of chained bumps: bump k spans [k·step − r, k·step + r], and its
       // end point is the next bump's start, so the chain reads as a continuous scalloped line.
@@ -186,9 +171,9 @@ export function textureStrokes(
         }
       }
       if (points.length < 2) continue;
-      if (!emit(points)) break outer;
+      emit(points);
     }
-    return { paths, capped };
+    return { paths };
   }
 
   // Stipple. The grid is anchored to the stock's origin, not to the region: a cell's numbers are a
@@ -201,7 +186,7 @@ export function textureStrokes(
   const j0 = Math.floor(minY / cell);
   const j1 = Math.ceil(maxY / cell);
   const half = numbers.strokeMm / 2;
-  outer: for (let j = j0; j <= j1; j++) {
+  for (let j = j0; j <= j1; j++) {
     for (let i = i0; i <= i1; i++) {
       const rng = cellRandom(numbers.seed, i, j);
       const cx = (i + 0.5 + (rng() - 0.5) * 2 * JITTER) * cell;
@@ -209,10 +194,10 @@ export function textureStrokes(
       const angle = rng() * Math.PI;
       const dx = Math.cos(angle) * half;
       const dy = Math.sin(angle) * half;
-      if (!emit([[cx - dx, cy - dy], [cx + dx, cy + dy]])) break outer;
+      emit([[cx - dx, cy - dy], [cx + dx, cy + dy]]);
     }
   }
-  return { paths, capped };
+  return { paths };
 }
 
 /**

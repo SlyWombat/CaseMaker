@@ -755,7 +755,7 @@ describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539
   });
 });
 
-describe('generateSurface3dIR — the finishing pass has a compute budget (#540)', () => {
+describe('generateSurface3dIR — the finishing pass has no operation-count budget (#916)', () => {
   const buildIr = async (opts: Record<string, unknown>) =>
     await generateSurface3dIR({
       heightfield: sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.1 }),
@@ -770,13 +770,14 @@ describe('generateSurface3dIR — the finishing pass has a compute budget (#540)
       opts,
     });
 
-  it('refuses honestly rather than running the billions of ops when over budget', async () => {
-    await expect(buildIr({ maxFinishTipOps: 1 })).rejects.toThrow(/budget/i);
-  });
-
-  it('produces the finishing pass under a generous budget', async () => {
-    const { finishing } = await buildIr({ maxFinishTipOps: 1_000_000_000 });
+  it('builds the field and reports its rows as progress', async () => {
+    const events: { pass: string; done: number; total: number }[] = [];
+    const { finishing } = await buildIr({ onProgress: (p: (typeof events)[number]) => events.push(p) });
     expect(finishing.moves.length).toBeGreaterThan(0);
+    const tip = events.filter((e) => e.pass === 'tip');
+    expect(tip.length).toBeGreaterThan(0);
+    expect(tip[0]!.done).toBe(0);
+    expect(tip.at(-1)!.done).toBe(tip.at(-1)!.total - 1);
   });
 });
 

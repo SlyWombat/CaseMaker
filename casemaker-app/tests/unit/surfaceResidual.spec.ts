@@ -45,7 +45,7 @@ function valley(): GoalHeightfield {
 describe('#847 surfaceResidual', () => {
   it('a ball wider than the valley cannot reach its floor, and the rise is measured with its volume', () => {
     const hf = valley();
-    const big = finishTipField(hf, { ball: true, radius: 3 }, 1e9);
+    const big = finishTipField(hf, { ball: true, radius: 3 });
     const res = surfaceResidual(hf, big, 0, 1e-6);
     expect(res.cells).toBeGreaterThan(0);
     expect(res.volumeMm3).toBeGreaterThan(0);
@@ -57,11 +57,11 @@ describe('#847 surfaceResidual', () => {
 
   it('a ball that fits the valley leaves no residual, and the stock-to-leave is not residual', () => {
     const hf = valley();
-    const small = finishTipField(hf, { ball: true, radius: 0.5 }, 1e9);
+    const small = finishTipField(hf, { ball: true, radius: 0.5 });
     // The small ball's rise at this V is half a cell of wall (0.5 mm); under a 1 mm tolerance the
     // finish has reached everything the job means to cut — the mask is empty, not the volume zero.
     expect(surfaceResidual(hf, small, 0, 1).cells).toBe(0);
-    const big = finishTipField(hf, { ball: true, radius: 3 }, 1e9);
+    const big = finishTipField(hf, { ball: true, radius: 3 });
     // An allowance above every rise counts as intended material, not residual.
     expect(surfaceResidual(hf, big, 10, 1e-6).cells).toBe(0);
   });

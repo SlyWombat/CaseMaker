@@ -167,18 +167,19 @@ describe('#846 — the choice, stated', () => {
     expect(note!).toContain('both were measured');
   });
 
-  it('a shallow wooden goal keeps the raster and says why', async () => {
+  it('a shallow wooden goal keeps the raster when the measured time is shorter', async () => {
+    // #916 — there is no cell budget to force the rule path any more: both roughs are planned and
+    // measured, and this shallow goal's shorter simulated time is the raster's.
     const r = await run(await bowlHeightfield(1), {
       mode: 'auto',
       material: 'pla',
-      // Force the rule path so the wording is the rule's.
-      cellBudget: 100,
       adaptive: adaptiveSettings(null).settings,
     });
     expect(r.ir.operations[0]!.name).not.toContain('(adaptive)');
-    const note = r.notes.find((n) => n.includes('Raster roughing chosen by rule'));
+    const note = r.notes.find((n) => n.includes('Raster roughing chosen'));
     expect(note).toBeDefined();
-    expect(note!).toContain('skipped above 100 cells');
+    expect(note!).toContain('the shorter simulated time wins');
+    expect(note!).toContain('both were measured');
   });
 
   it('a legacy plan (no roughing option) is the raster, with no new note', async () => {

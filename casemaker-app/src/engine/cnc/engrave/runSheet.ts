@@ -37,7 +37,6 @@ import { vCone } from '@/engine/cnc/vProfile';
 import type { Tool } from '@/engine/cnc/tool';
 import { inlayGlueGap, inlayMarked, inlayMm, inlayNumbers } from './inlay';
 import {
-  DEFAULT_MAX_TEXTURE_STROKES,
   textureNumbers,
   textureOperationName,
   textureStrokes,
@@ -2970,11 +2969,7 @@ function textureSteps(job: EngraveJob): RunSheetStep[] {
       text:
         `${name}: ${pattern}. ${count} — ${detail} — cut ${fmtNum(numbers.depthMm)} mm deep, each ` +
         "one a trace at the cutter's own centre line." +
-        (numbers.pattern === 'stipple' ? ' The stored seed lays the same pattern every run.' : '') +
-        (strokes.capped
-          ? ` The pattern wants more than the ${DEFAULT_MAX_TEXTURE_STROKES}-path cap; the first ` +
-            `${DEFAULT_MAX_TEXTURE_STROKES} are cut.`
-          : ''),
+        (numbers.pattern === 'stipple' ? ' The stored seed lays the same pattern every run.' : ''),
       value:
         `${pattern} · ${count} · ${fmtNum(numbers.pitchMm)} mm pitch · ${fmtNum(numbers.depthMm)} mm deep`,
     });

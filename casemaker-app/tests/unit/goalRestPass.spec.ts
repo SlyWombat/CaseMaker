@@ -107,8 +107,8 @@ function goalTarget(): EngraveTargetObject {
     position: { x: 30, y: 20, z: 0 },
     rotation: 0,
     size: { x: 20, y: 10, z: 5 },
-    // A 0.5 mm grid keeps the ⌀6 ball's tip field inside its evaluation budget in a unit test;
-    // the notch is 6 mm wide, so the concavity is still many cells across.
+    // A 0.5 mm grid keeps the pair's grid small enough for a unit test (#916: the tip field has
+    // no operation cap); the notch is 6 mm wide, so the concavity is still many cells across.
     surface: { gridPitchMm: 0.5 },
   } as EngraveTargetObject;
 }

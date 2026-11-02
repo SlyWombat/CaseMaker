@@ -86,21 +86,6 @@ export const DEFAULT_STOCK_TO_LEAVE_MM = 0.3;
 export const REST_TOLERANCE_MM = 0.01;
 
 /**
- * The finishing tip-field compute budget (#540): the ball drop is O(covered cells × disc-stencil
- * cells), so a large ball on a fine grid is billions of inner-loop ops with no cutoff — enough to
- * hang the worker. Above this cap {@link finishTipField} REFUSES honestly (it states the op count
- * and the fix), mirroring the exact sweep's `sweep-budget-exceeded` rather than running to a hang.
- *
- * #902 — RE-PRICED FROM MEASUREMENT, as the memory budget was. The field runs about 0.45 G
- * evaluations a second on the maintainer's desktop (measured 2026-11-02, the elephant's goal at
- * 0.1 mm: a ⌀4 ball 510 M ops in 1.2 s, a ⌀6 ball 1.36 G in 3.0 s), so the old 300 M cap refused a
- * second's work — and refused the elephant itself, whose only balls that reach 31.7 mm are the
- * ⌀4/⌀6 pair. 1.5 G is a few seconds; the true blow-ups stay refused (a ⌀6 ball at 0.02 mm over a
- * 4 M-cell grid is over a trillion).
- */
-export const DEFAULT_MAX_FINISH_TIP_OPS = 1_500_000_000;
-
-/**
  * #671 — the crease angle the PENCIL pass follows when the operation states none, degrees. The
  * mark is a change of slope across one grid cell sharper than this: a 90° wall's foot marks a
  * line; a cylinder, a dome and a ramp do not.
@@ -114,12 +99,6 @@ export const DEFAULT_PENCIL_CREASE_DEG = 20;
  * ~82.6°, and the pass's note says so when the clamp binds.
  */
 export const MAX_SCALLOP_CROWDING = 8;
-
-/**
- * #671 — the scallop pass's contour cap. Each contour is a marching-squares walk of the distance
- * field; past this many the pass REFUSES by name (as #540's tip budget does) rather than spin.
- */
-export const DEFAULT_MAX_SCALLOP_CONTOURS = 4000;
 
 /**
  * A TOP-Z HEIGHTFIELD over an (x, y) grid in the WORK frame (z = 0 = stock top). `z[j*nx + i]` is
@@ -166,7 +145,10 @@ export interface GoalHeightfield {
  *     The bench's typed-array footprint fit `{@link GOAL_ANCHOR_BASE_MB} MB +
  *     {@link GOAL_GRID_BYTES_PER_CELL} B × the stock's cells` at both grid sizes (94 MB at 180k
  *     cells, 199 MB at 1.125M — the same line through both), so the anchors are priced from the
- *     grid the run sampled, not a flat guess;
+ *     grid the run sampled, not a flat guess. The fit is the WHOLE run's typed arrays, taken while
+ *     the bench drove the real generate, so the finishing tip field's own Float32Arrays are
+ *     inside it (#916): the field's memory is priced here, and its work is no longer refused on an
+ *     operation count. It runs with progress (a row at a time) and the operator's Cancel.
  *   - a stated safety margin ({@link GOAL_BUDGET_MARGIN}) on the whole, because the generator's
  *     JS-heap scratch peaks above the typed-array model and GC makes the heap figures noisy.
  *
@@ -768,11 +750,9 @@ export interface SurfaceFeeds {
 
 /**
  * #846 — HOW THE ROUGH IS CLEARED. Absent → the raster exactly as before (a
- * legacy plan stays byte-identical). 'auto' measures both roughs when the goal
- * is small enough to afford it and decides on simulated time and engagement;
- * above the cell budget it decides by the stated rule and says the comparison
- * was skipped. The two numbers are the shop's (`rough3d.adaptiveDepthRatio`,
- * `rough3d.compareCellBudget`).
+ * legacy plan stays byte-identical). 'auto' plans BOTH roughs and decides on
+ * simulated time and engagement — the whole comparison, on a real goal, with
+ * progress and Cancel (#916 removed the work caps that used to skip it).
  */
 export interface RoughingOptions {
   mode?: 'auto' | 'raster' | 'adaptive';
@@ -780,14 +760,6 @@ export interface RoughingOptions {
   material?: StockMaterial | null;
   /** Depth (× the cutter's ⌀) from which a goal counts as deep; absent → 1.5. */
   depthRatio?: number;
-  /** Covered cells above which both roughs are not both planned; absent → 1,000,000. */
-  cellBudget?: number;
-  /**
-   * #846 — THE PLANNING BUDGET, in cell-levels (covered cells × roughing layers): the adaptive
-   * rough is planned one level at a time at roughly 100 µs per cell-level, so a real goal costs
-   * minutes. Above this the raster runs instead and the line says why. Absent → 500,000.
-   */
-  planBudget?: number;
   /** The adaptive planner's shop settings; absent → the shop fallbacks. */
   adaptive?: AdaptiveSettings;
   /** The rapid model, for the time comparison. */
@@ -815,8 +787,6 @@ export interface SurfaceOpts {
   safeZ?: number;
   /** Intra-pass hop above the stock top, mm; absent → {@link HOP_Z}. */
   hopZ?: number;
-  /** Finishing tip-field op budget; absent → {@link DEFAULT_MAX_FINISH_TIP_OPS} (#540). */
-  maxFinishTipOps?: number;
   /**
    * #671 — add the SCALLOP pass after the parallel finish: offset contours of the goal's
    * footprint, spaced so the step measured ALONG THE SURFACE is the finishing step-over. Absent
@@ -827,14 +797,14 @@ export interface SurfaceOpts {
   pencil?: boolean;
   /** #671 — the crease angle the pencil pass follows, degrees; absent → {@link DEFAULT_PENCIL_CREASE_DEG}. */
   pencilCreaseDeg?: number;
-  /** #671 — the scallop contour cap; absent → {@link DEFAULT_MAX_SCALLOP_CONTOURS}. */
-  maxScallopContours?: number;
   /**
    * #785 — PROGRESS OUT OF THE LONG LOOPS, so Generate can say "roughing level 41 of 112" instead
-   * of "working". Called once per roughing Z layer and once per finishing scan line, at the start
-   * of the work that line will do; the CAM's output is byte-for-byte unchanged.
+   * of "working". Called once per roughing Z layer, once per finishing scan line, once per grid
+   * row of the finishing tip field, and once per scallop contour, at the start of the work that
+   * unit will do; the CAM's output is byte-for-byte unchanged. #916 — these passes have no
+   * operation-count caps: the progress and the operator's Cancel are what bound a long run.
    */
-  onProgress?: (p: { pass: 'rough' | 'finish'; done: number; total: number }) => void;
+  onProgress?: (p: { pass: 'rough' | 'finish' | 'tip' | 'scallop'; done: number; total: number }) => void;
   /**
    * #862 — FINISH THE CLEAR-BAND WALL. A goal sampled with a clear ring (#764) is cut out of the
    * stock as a plateau, and its outer edge is a vertical wall between the band floor and the stock
@@ -992,20 +962,11 @@ export interface GoalSurfaceFacts {
 }
 
 /**
- * #846 — the roughing numbers' LABELLED FALLBACKS (the shop's `rough3d.*`
- * defaults are the real source; these are what a caller with no location gets).
- * `DEFAULT_ADAPTIVE_DEPTH_RATIO`: the goal is "deep" at 1.5× the cutter's ⌀.
- * `DEFAULT_COMPARE_CELL_BUDGET`: below a million covered cells both roughs are
- * planned and compared on simulated time; above it the rule decides and the
- * line says the comparison was skipped.
- * `DEFAULT_PLAN_BUDGET_CELL_LEVELS`: the adaptive rough is planned ONE LEVEL AT A
- * TIME at roughly 100 µs per cell-level, so a real goal costs minutes; above half
- * a million cell-levels (covered cells × roughing layers) the raster runs instead
- * and the line says why.
+ * #846 — the roughing number's LABELLED FALLBACK (the shop's `rough3d.adaptiveDepthRatio` is the
+ * real source; this is what a caller with no location gets): the goal is "deep" at 1.5× the
+ * cutter's ⌀.
  */
 export const DEFAULT_ADAPTIVE_DEPTH_RATIO = 1.5;
-export const DEFAULT_COMPARE_CELL_BUDGET = 1_000_000;
-export const DEFAULT_PLAN_BUDGET_CELL_LEVELS = 500_000;
 
 interface RoughChoice {
   kind: 'raster' | 'adaptive';
@@ -1081,68 +1042,30 @@ async function chooseRough(
     };
   }
 
-  // 'auto' — THE PLANNING BUDGET FIRST. The adaptive plan costs one planAdaptive per roughing
-  // level (~100 µs per cell-level, measured), so a real goal would spend minutes here. Above the
-  // budget the goal keeps the raster, and this line is the reason the sheet quotes.
-  const planWork = hf.coveredCount * Math.max(1, raster.layers);
-  const planBudget = opts?.planBudget ?? DEFAULT_PLAN_BUDGET_CELL_LEVELS;
-  if (planWork > planBudget) {
-    return {
-      kind: 'raster',
-      moves: raster.moves,
-      layers: raster.layers,
-      note:
-        `Raster roughing chosen: the adaptive rough is planned one level at a time, and this goal would need ` +
-        `${planWork.toLocaleString('en')} cell-levels (${hf.coveredCount.toLocaleString('en')} covered cells × ` +
-        `${raster.layers} layer${raster.layers === 1 ? '' : 's'}) — above the shop’s rough3d.planBudgetCellLevels ` +
-        `of ${planBudget.toLocaleString('en')}; the raster runs instead.`,
-    };
-  }
-
-  // 'auto' — measure both when the goal is small enough, otherwise decide by rule.
-  const budget = opts?.cellBudget ?? DEFAULT_COMPARE_CELL_BUDGET;
+  // 'auto' — MEASURE BOTH, ALWAYS, and decide on the outcome. #916 removed the work-count caps
+  // that used to skip the comparison above a million cells or half a million cell-levels: a
+  // skipped comparison decided by rule, not by what the two roughs would do. The adaptive plan is
+  // real work (one level at a time) and runs with the same per-layer progress every pass reports,
+  // and the operator's Cancel terminates the worker.
   const depthRatio = opts?.depthRatio ?? DEFAULT_ADAPTIVE_DEPTH_RATIO;
   const deep = ratio >= depthRatio;
-  if (hf.coveredCount <= budget) {
-    const a = await runAdaptive();
-    if (!a.ok) return refusal(a.reason);
-    const tRaster = estimateCycleSeconds(raster.moves, rapid);
-    const tAdaptive = estimateCycleSeconds(a.result.moves, rapid);
-    // The rule (deep or metal) prefers the capped engagement; on a shallow
-    // woody goal the measured time decides.
-    const byRule = deep || metal;
-    const adaptive = byRule || tAdaptive < tRaster;
-    return {
-      kind: adaptive ? 'adaptive' : 'raster',
-      moves: adaptive ? a.result.moves : raster.moves,
-      layers: adaptive ? a.result.layers : raster.layers,
-      note:
-        `${adaptive ? 'Adaptive' : 'Raster'} roughing chosen: ${mins(adaptive ? tAdaptive : tRaster)} vs the ` +
-        `${adaptive ? 'raster’s' : 'adaptive'} ${mins(adaptive ? tRaster : tAdaptive)}` +
-        `${adaptive ? `, max engagement ${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap${reuseWords(a.result.reusedLevels)}` : ''} ` +
-        `(${ruleLine}; ${byRule ? 'the depth and material rule prefers the capped engagement' : 'the shorter simulated time wins'}; both were measured at ${hf.coveredCount.toLocaleString('en')} covered cells).`,
-    };
-  }
-  if (deep || metal) {
-    const a = await runAdaptive();
-    if (!a.ok) return refusal(a.reason);
-    return {
-      kind: 'adaptive',
-      moves: a.result.moves,
-      layers: a.result.layers,
-      note:
-        `Adaptive roughing chosen by rule: ${ruleLine} (rough3d.adaptiveDepthRatio ${depthRatio}×), max engagement ` +
-        `${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap${reuseWords(a.result.reusedLevels)}; the comparison was skipped above ` +
-        `${budget.toLocaleString('en')} cells (rough3d.compareCellBudget).`,
-    };
-  }
+  const a = await runAdaptive();
+  if (!a.ok) return refusal(a.reason);
+  const tRaster = estimateCycleSeconds(raster.moves, rapid);
+  const tAdaptive = estimateCycleSeconds(a.result.moves, rapid);
+  // The rule (deep or metal) prefers the capped engagement; on a shallow
+  // woody goal the measured time decides.
+  const byRule = deep || metal;
+  const adaptive = byRule || tAdaptive < tRaster;
   return {
-    kind: 'raster',
-    moves: raster.moves,
-    layers: raster.layers,
+    kind: adaptive ? 'adaptive' : 'raster',
+    moves: adaptive ? a.result.moves : raster.moves,
+    layers: adaptive ? a.result.layers : raster.layers,
     note:
-      `Raster roughing chosen by rule: ${ruleLine} (rough3d.adaptiveDepthRatio ${depthRatio}×); the comparison was ` +
-      `skipped above ${budget.toLocaleString('en')} cells (rough3d.compareCellBudget).`,
+      `${adaptive ? 'Adaptive' : 'Raster'} roughing chosen: ${mins(adaptive ? tAdaptive : tRaster)} vs the ` +
+      `${adaptive ? 'raster’s' : 'adaptive'} ${mins(adaptive ? tRaster : tAdaptive)}` +
+      `${adaptive ? `, max engagement ${r3n(a.result.maxEngagementMm)} mm under the ${r3n(a.result.capMm)} mm cap${reuseWords(a.result.reusedLevels)}` : ''} ` +
+      `(${ruleLine}; ${byRule ? 'the depth and material rule prefers the capped engagement' : 'the shorter simulated time wins'}; both were measured at ${hf.coveredCount.toLocaleString('en')} covered cells).`,
   };
 }
 
@@ -1178,9 +1101,6 @@ export async function generateSurface3dIR(args: Surface3dArgs): Promise<Surface3
   const alongStep = positive(opts.alongStepMm) ? (opts.alongStepMm as number) : hf.pitch;
   const safeZ = opts.safeZ ?? SAFE_Z;
   const hopZ = opts.hopZ ?? HOP_Z;
-  const maxFinishTipOps = positive(opts.maxFinishTipOps)
-    ? (opts.maxFinishTipOps as number)
-    : DEFAULT_MAX_FINISH_TIP_OPS;
 
   // #869 — THE ROUGH MAY BE ANOTHER CUTTER. Its feeds are its own row's (a flat's step-down and
   // step-over, not the ball's flat proxy), and its operation is named with its own tool number;
@@ -1226,7 +1146,10 @@ export async function generateSurface3dIR(args: Surface3dArgs): Promise<Surface3
   const roughMoves = rough.moves;
   // #671 — ONE tip field, four passes: the finishing raster, the scallop contours and the pencil
   // paths all ride the same gouge-safe drop, so no pass can promise a depth another one refuses.
-  const tip = finishTipField(hf, tool, maxFinishTipOps);
+  // #916 — the field reports its rows as `tip` progress; it has no operation-count refusal.
+  const tip = finishTipField(hf, tool, {
+    onRow: (done, total) => opts.onProgress?.({ pass: 'tip', done, total }),
+  });
   const finishRaster = finishingMoves(
     hf,
     tip,
@@ -1299,14 +1222,8 @@ export async function generateSurface3dIR(args: Surface3dArgs): Promise<Surface3
   // field, spaced so the step measured ALONG THE SURFACE is the finishing step-over.
   let scallop: Surface3dResult['scallop'] = null;
   if (opts.scallop === true && hf.coveredCount > 0) {
-    const pass = scallopMoves(
-      hf,
-      tip,
-      feeds,
-      alongStep,
-      safeZ,
-      hopZ,
-      positive(opts.maxScallopContours) ? (opts.maxScallopContours as number) : DEFAULT_MAX_SCALLOP_CONTOURS,
+    const pass = scallopMoves(hf, tip, feeds, alongStep, safeZ, hopZ, (done, total) =>
+      opts.onProgress?.({ pass: 'scallop', done, total }),
     );
     if (pass.contours > 0) {
       const operation: CamOperation = {
@@ -1583,45 +1500,32 @@ function tipStencilOffsets(radius: number, pitch: number): { di: number; dj: num
   return out;
 }
 
-/**
- * #889 — how many stencil cells the finishing tip field runs per covered cell for a cutter of
- * `radius` on a `pitch` grid: the same disc {@link finishTipField} builds, so a budget check
- * before the CAM counts exactly what the CAM would.
- */
-export function tipStencilCells(radius: number, pitch: number): number {
-  return Math.max(1, tipStencilOffsets(radius, pitch).length);
-}
-
 export function finishTipField(
   hf: GoalHeightfield,
   tool: SurfaceTool,
-  maxOps: number,
-  opts: { wrapRows?: boolean } = {},
+  opts: {
+    wrapRows?: boolean;
+    /** #916 — progress out of the long loop: called at the start of each grid row's work. */
+    onRow?: (done: number, total: number) => void;
+  } = {},
 ): Float32Array {
   const { nx, ny, z, covered, pitch, topZ } = hf;
   const tip = new Float32Array(nx * ny);
   tip.fill(topZ);
   // Precompute the disc stencil: every CELL the tool's disc reaches, and the ball rise at the
-  // cell's NEAREST POINT (#909) — the same stencil `tipStencilCells` counts for the budget.
+  // cell's NEAREST POINT (#909).
   const stencil: { di: number; dj: number; rise: number }[] = tipStencilOffsets(tool.radius, pitch).map((s) => ({
     di: s.di,
     dj: s.dj,
     rise: ballRise(tool.ball, tool.radius, s.d),
   }));
   if (stencil.length === 0) stencil.push({ di: 0, dj: 0, rise: 0 });
-  // #540 — the inner drop runs the stencil at every covered cell. Bound that work BEFORE the loop:
-  // a large ball on a fine grid is billions of ops that would hang the worker. Over budget, refuse
-  // honestly (stating the op count and the way out), as the exact sweep raises sweep-budget-exceeded.
-  const ops = hf.coveredCount * stencil.length;
-  if (ops > maxOps) {
-    throw new Error(
-      `3D finishing would need ${ops} tip evaluations (${hf.coveredCount} covered cells × ` +
-        `${stencil.length} stencil cells for a ${(tool.radius * 2).toFixed(2)} mm cutter at a ` +
-        `${pitch.toFixed(4)} mm grid), over the ${maxOps} budget. Use a coarser grid (a larger flat ` +
-        `pitch) or a smaller ball so the finishing pass fits the budget.`,
-    );
-  }
+  // #916 — NO OPERATION-COUNT REFUSAL. The field is a Float32Array of the grid the run already
+  // holds (its memory is priced in `goalProgramMb`'s measured anchors); the work is a few seconds
+  // for a big ball on a fine grid, reported a row at a time. The operator's Cancel terminates the
+  // worker, so a truly huge field is stopped by the person, not by a hidden cap.
   for (let j = 0; j < ny; j++) {
+    opts.onRow?.(j, ny);
     for (let i = 0; i < nx; i++) {
       const idx = j * nx + i;
       if (covered[idx] === 0) continue;
@@ -2413,8 +2317,6 @@ export interface SurfaceRestArgs {
   alongStepMm?: number;
   safeZ?: number;
   hopZ?: number;
-  /** The rest ball's tip-field op budget; absent → {@link DEFAULT_MAX_FINISH_TIP_OPS}. */
-  maxFinishTipOps?: number;
   onRow?: (done: number, total: number) => void;
 }
 
@@ -2446,8 +2348,7 @@ export function planSurfaceRest(args: SurfaceRestArgs): SurfaceRestPlan {
   const alongStep = positive(args.alongStepMm) ? (args.alongStepMm as number) : hf.pitch;
   const safeZ = args.safeZ ?? SAFE_Z;
   const hopZ = args.hopZ ?? HOP_Z;
-  const maxOps = positive(args.maxFinishTipOps) ? (args.maxFinishTipOps as number) : DEFAULT_MAX_FINISH_TIP_OPS;
-  const tip = finishTipField(hf, tool, maxOps);
+  const tip = finishTipField(hf, tool);
   const region = dilateMask(hf, residual.mask, tool.radius);
   const moves = finishingMoves(hf, tip, feeds, alongStep, safeZ, hopZ, args.onRow, region, GOAL_MERGE_TOLERANCE_MM);
   return {
@@ -2471,20 +2372,12 @@ export function suggestedRestRadiusMm(
   finishTool: SurfaceTool,
   stockToLeaveMm: number,
   toleranceMm: number,
-  maxOps: number = DEFAULT_MAX_FINISH_TIP_OPS,
 ): number | null {
   if (finishResidual.cells === 0 || !(finishTool.radius > 0)) return null;
   let radius = finishTool.radius / 2;
   // Down to a ball no wider than the grid's own cell: smaller than that, the grid cannot tell.
   for (let n = 0; n < 8 && radius >= hf.pitch / 2; n++) {
-    let tip: Float32Array;
-    try {
-      tip = finishTipField(hf, { ball: true, radius }, maxOps);
-    } catch {
-      // Over the tip-field budget: a smaller ball is cheaper, so the next halving may fit.
-      radius /= 2;
-      continue;
-    }
+    const tip = finishTipField(hf, { ball: true, radius });
     const after = surfaceResidual(hf, tip, stockToLeaveMm, toleranceMm);
     if (after.volumeMm3 < finishResidual.volumeMm3 - 1e-9) return radius;
     radius /= 2;
@@ -2722,7 +2615,8 @@ function scallopMoves(
   alongStep: number,
   safeZ: number,
   hopZ: number,
-  maxContours: number,
+  /** #916 — progress out of the contour loop: one call per level, before its work. */
+  onLevel: (done: number, total: number) => void,
 ): { moves: CamMove[]; contours: number; clamped: boolean } {
   const moves: CamMove[] = [];
   if (hf.coveredCount === 0) return { moves, contours: 0, clamped: false };
@@ -2745,29 +2639,17 @@ function scallopMoves(
       if (hf.covered[j * hf.nx + i] === 1) slope[j * hf.nx + i] = slopeAt(hf, i, j);
     }
   }
-  // The work, bounded BEFORE the loop: every level walks the grid (the band scan and the marching
-  // squares). Refuse honestly rather than grind a worker, as #540's tip budget does.
-  const estimatedLevels = Math.min(maxContours, Math.ceil((maxD * MAX_SCALLOP_CROWDING) / step) + 1);
-  const ops = estimatedLevels * hf.nx * hf.ny;
-  if (ops > 4_000_000_000) {
-    throw new Error(
-      `3D scallop finishing would need about ${ops} grid evaluations (${estimatedLevels} contours over a ` +
-        `${hf.nx}×${hf.ny} grid), which is too much for one pass. Use a coarser grid pitch, a larger ` +
-        'step-over, or a smaller goal.',
-    );
-  }
+  // #916 — NO OPERATION-COUNT REFUSAL. The level loop is bounded by the geometry (its step never
+  // falls below `step / MAX_SCALLOP_CROWDING`), and every level reports progress before it walks
+  // the grid; the operator's Cancel terminates the worker if the pass is longer than they want.
+  const estimatedLevels = Math.ceil((maxD * MAX_SCALLOP_CROWDING) / step) + 1;
 
   const levels: number[] = [];
   let d = step / 2;
   let delta = step;
   let clamped = false;
   while (d < maxD) {
-    if (levels.length > maxContours) {
-      throw new Error(
-        `3D scallop finishing would need more than ${maxContours} contours at a ${step} mm surface ` +
-          `step-over over a ${maxD.toFixed(2)} mm footprint. Use a larger step-over, or a coarser grid.`,
-      );
-    }
+    onLevel(levels.length, estimatedLevels);
     levels.push(d);
     let s = 0;
     for (let k = 0; k < D.length; k++) {

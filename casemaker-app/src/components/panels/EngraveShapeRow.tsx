@@ -10,7 +10,6 @@ import type { ShapePatch } from '@/store/engraveJobStore';
 import type { EngraveShape, TexturePattern } from '@/types/engraveJob';
 import type { InlayNumbers } from '@/engine/cnc/engrave/inlay';
 import {
-  DEFAULT_MAX_TEXTURE_STROKES,
   textureOperationName,
   type TextureNumbers,
 } from '@/engine/cnc/engrave/texture';
@@ -131,7 +130,7 @@ export interface EngraveShapeRowProps {
    * #670 — the texture's own facts, present on a region carrying a texture marker: the numbers
    * the CAM runs with, how many strokes the pattern derives, and whether the cap shortened it.
    */
-  texture?: { numbers: TextureNumbers; strokes: number; capped: boolean } | null;
+  texture?: { numbers: TextureNumbers; strokes: number } | null;
   /**
    * #674 — the prism's own facts, present on a region carrying a prism marker: the numbers the plan
    * derives (the base, the slope's width either side, the margin where the cut meets the top face)
@@ -542,7 +541,7 @@ export function EngraveShapeRow({
                 value={fmt(texture.numbers.pitchMm)}
                 data-testid={`engrave-shape-texture-pitch-${index}`}
                 aria-label={`Shape ${index + 1} texture pitch`}
-                title="Stroke and row spacing, mm. Past a few thousand strokes the pattern is capped: widen the pitch."
+                title="Stroke and row spacing, mm. Finer spacing makes more, denser strokes."
                 style={NUM}
                 onChange={(e) => {
                   const v = Number(e.target.value);
@@ -592,7 +591,7 @@ export function EngraveShapeRow({
             )}
           </div>
           <p
-            style={{ ...MUTED, ...(texture.strokes === 0 ? { color: SEVERITY_COLOR.error } : texture.capped ? { color: SEVERITY_COLOR.warning } : null) }}
+            style={{ ...MUTED, ...(texture.strokes === 0 ? { color: SEVERITY_COLOR.error } : null) }}
             data-testid={`engrave-shape-texture-note-${index}`}
           >
             {texture.strokes === 0
@@ -602,10 +601,7 @@ export function EngraveShapeRow({
                 (texture.numbers.pattern === 'stipple'
                   ? ` and a ${fmt(texture.numbers.strokeMm)} mm stroke (${texture.numbers.strokeSource}), seed ${texture.numbers.seed}`
                   : '') +
-                `, cut ${fmt(texture.numbers.depthMm)} mm deep.` +
-                (texture.capped
-                  ? ` More than the ${DEFAULT_MAX_TEXTURE_STROKES}-${texture.numbers.pattern === 'scallop' ? 'run' : 'stroke'} cap: the first ${DEFAULT_MAX_TEXTURE_STROKES} are cut.`
-                  : '')}
+                `, cut ${fmt(texture.numbers.depthMm)} mm deep.`}
           </p>
         </div>
       )}

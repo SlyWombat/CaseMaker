@@ -52,7 +52,6 @@ import { catalogueCoverageFor, catalogueStandingFor, feedsFor, feedsToolForSurfa
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { threadGeometry } from '@/engine/cnc/cam/threadMill';
 import { threadMillFit } from './threadFit';
-import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_FINISH_TIP_OPS, sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import { jobHasItems, pureGoalObject } from './jobSetup';
@@ -529,8 +528,6 @@ export function planCutters(
   catalogue: readonly FeedCatalogueRow[],
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
-  /** The shop's `sim.columnFlatPitchYMm` (the goal finish's grid), for the ball's budget check. */
-  gridPitchMm?: number | null,
 ): CutterPlan {
   // #834 — A JOB WHOSE WORK IS ON ITS FACES. The face pick is one flat end, and the plan's one
   // cutter owns no ITEMS (there are none): the indexed program cuts the face list the job states.
@@ -615,35 +612,14 @@ export function planCutters(
   const ballWork = byKind('ball');
   if (ballWork.length > 0) {
     const needed = deepest(ballWork);
-    // #762 — THE BALL IS JUDGED BY THE FINISHING BUDGET (#540): the tip field costs covered cells ×
-    // the ball's own disc stencil, so the choice is the LARGEST ball whose stencil at this job's
-    // grid stays under the budget — the biggest ball that fits finishes fastest, and one past the
-    // budget is refused by the generator. The grid is sampled here exactly as the finishing pass
-    // will sample it; when the goal's bytes are not in hand (a reloaded job whose blob is still in
-    // the mesh store) the check is skipped and the smallest ball stands.
-    const goal = pureGoalObject(job);
-    const pitch = job.targetObject?.surface?.gridPitchMm ?? (gridPitchMm !== null && gridPitchMm !== undefined && gridPitchMm > 0 ? gridPitchMm : DEFAULT_GRID_PITCH_MM);
-    let coveredCount: number | null = null;
-    if (goal !== null) {
-      try {
-        coveredCount = sampleGoalHeightfield(goal, { pitchMm: pitch }).coveredCount;
-      } catch {
-        coveredCount = null;
-      }
-    }
-    const stencilCells = (diameter: number): number => {
-      const radius = diameter / 2;
-      const span = Math.max(0, Math.floor(radius / pitch));
-      let n = 0;
-      for (let dj = -span; dj <= span; dj++) for (let di = -span; di <= span; di++) if (Math.hypot(di * pitch, dj * pitch) <= radius) n++;
-      return Math.max(1, n);
-    };
-    const budgetOk = (c: Candidate): boolean =>
-      coveredCount === null || coveredCount * stencilCells(c.diameter) <= DEFAULT_MAX_FINISH_TIP_OPS;
+    // #916 — THE BALL IS CHOSEN BY ITS OUTCOME, NOT A FINISHING BUDGET. The finishing tip field is
+    // priced in memory (the run's grid anchors) and runs with progress and Cancel; it is not
+    // refused by its operation count, so the pick is the largest ball that reaches the goal's
+    // depth — the one that finishes fastest — with the smallest as the fallback.
     const balls = candidates.filter((c) => (c.tool.shape === 'ball' || c.tool.shape === 'bull') && c.diameter > 0 && reaches(c, needed));
-    const pick = bestOf(balls.filter(budgetOk), deeperFirst) ?? bestOf(balls, smallerFirst);
+    const pick = bestOf(balls, deeperFirst) ?? bestOf(balls, smallerFirst);
     if (pick !== null) {
-      add(pick, ballWork, `a 3D goal is surfaced by a ball — ${dia(pick.diameter)} is the largest that reaches ${r3(needed)} mm and fits the finishing budget`);
+      add(pick, ballWork, `a 3D goal is surfaced by a ball — ${dia(pick.diameter)} is the largest that reaches ${r3(needed)} mm`);
       // #869 — THE ROUGH IS A FLAT, AND ITS OWN PROGRAM. The rule names the flat nearest the
       // ball's size: the finish must lift whatever the rough leaves, and the flat closest to the
       // ball leaves the least extra stock for it. The search measures the alternatives.

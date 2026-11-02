@@ -443,18 +443,6 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0.1).max(20),
     fallback: 1.5,
   },
-  'rough3d.compareCellBudget': {
-    label: 'covered cells above which the two roughs are not both planned (chosen)',
-    unit: 'cells',
-    rule: z.number().min(1000).max(50_000_000),
-    fallback: 1_000_000,
-  },
-  'rough3d.planBudgetCellLevels': {
-    label: 'planning work (covered cells × roughing layers) above which the goal keeps the raster (chosen)',
-    unit: 'cell-levels',
-    rule: z.number().min(10_000).max(100_000_000),
-    fallback: 500_000,
-  },
   'rest.overlapMm': {
     label: 'rest-machining overlap, at least',
     unit: 'mm',

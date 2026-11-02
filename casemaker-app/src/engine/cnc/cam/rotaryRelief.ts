@@ -285,7 +285,6 @@ export function sampleGoalRadialField(
 import type { Tool } from '@/engine/cnc/tool';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import {
-  DEFAULT_MAX_FINISH_TIP_OPS,
   DEFAULT_STOCK_TO_LEAVE_MM,
   finishTipField,
   finishingMoves,
@@ -342,8 +341,6 @@ export interface RotaryReliefArgs {
   rapid: RapidEstimate;
   /** Roughing allowance, mm; absent → {@link DEFAULT_STOCK_TO_LEAVE_MM}. */
   stockToLeaveMm?: number;
-  /** The finishing tip field's budget; absent → {@link DEFAULT_MAX_FINISH_TIP_OPS}. */
-  maxFinishTipOps?: number;
 }
 
 export interface RotaryReliefResult {
@@ -406,7 +403,7 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
   // Finishing: the flat goal's parallel finish over the map view.
   // The map's around axis is a circle: the tip field's rows WRAP, or the pass on the seam rides
   // on the stock's surface and leaves the allowance standing in one hairline column.
-  const tip = finishTipField(hf, surfaceTool, args.maxFinishTipOps ?? DEFAULT_MAX_FINISH_TIP_OPS, {
+  const tip = finishTipField(hf, surfaceTool, {
     wrapRows: true,
   });
   const finish = finishingMoves(hf, tip, feeds, hf.pitch, SAFE_Z, HOP_Z);

@@ -41,8 +41,9 @@ test('#830 — the sweep names its stage, and a worker killed mid-sweep is repor
   // #889 — the sweep got much faster (levels cost what they remove and merge into packed moves),
   // so at the block's own size the run reaches "Program ready" before the kill lands, and the kill
   // then hits an idle worker. The goal is scaled to 3× and put on a 0.1 mm grid: about 410 000
-  // moves, still under both budgets (the tip-field cap and 640 MB), and the large mesh makes the
-  // sweep's own checkpoints heavy enough that it is reliably still running when the kill fires.
+  // moves, still under the 640 MB memory budget (#916: the tip field has no operation cap), and
+  // the large mesh makes the sweep's own checkpoints heavy enough that it is reliably still
+  // running when the kill fires.
   await page.getByTestId('engrave-target-scale-0').fill('300');
   await page.getByTestId('engrave-target-technical-0').click();
   await page.getByTestId('engrave-target-surface-gridPitchMm-0').fill('0.1');

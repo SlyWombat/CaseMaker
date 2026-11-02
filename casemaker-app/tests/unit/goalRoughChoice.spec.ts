@@ -3,13 +3,13 @@
  *
  * The chooser (#846) was wired into surface primitives only; a mesh goal — where most 3D
  * roughing happens — still always rastered. These tests pin the goal path's wiring through
- * `generateGoalProgram`, with the decision read from the shop's own two `rough3d.*` numbers:
+ * `generateGoalProgram`:
  *
  *   - a DEEP PLA goal on a FLAT cutter chooses the adaptive rough and states that both roughs
  *     were measured;
- *   - a SHALLOW softwood goal keeps the raster by the rule, saying the comparison was skipped —
- *     the cell budget it quotes is the shop default handed in below, which is the wiring under
- *     test;
+ *   - a SHALLOW softwood goal keeps the raster on the measured time, stating that both were
+ *     measured (#916 removed the work-count caps that used to skip the comparison);
+ *   - a goal past the OLD planning budget still plans both roughs — the cap is gone;
  *   - over the planning budget the goal keeps the raster and quotes the budget — the adaptive
  *     plan is one level at a time and costs minutes on a real goal;
  *   - a BALL goal states that the adaptive rough cannot run (the 2D engine sweeps a flat end
@@ -22,7 +22,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
-import { generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { Tool } from '@/engine/cnc/tool';
@@ -95,20 +95,6 @@ function jobFor(depth: number, material: StockMaterial): EngraveJob {
   };
 }
 
-/** The shop default under test: a cell budget small enough that the rule decides alone (its
- *  own rule floor is 1000 cells, so this is the smallest value the registry accepts). */
-const SMALL_BUDGET: EngraveShopOpts = {
-  defaults: {
-    'rough3d.compareCellBudget': {
-      value: 1000,
-      source: 'seeded',
-      setAt: '2026-11-01',
-      unit: 'cells',
-      note: null,
-    },
-  },
-};
-
 describe('#846 — the goal path chooses its rough, and says so', () => {
   it('a deep PLA goal on a flat cutter posts the adaptive rough, with both roughs measured', async () => {
     const job = jobFor(5, 'pla');
@@ -124,43 +110,31 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
     expect(note!).toMatch(/max engagement .* mm under the .* mm cap/);
   });
 
-  it('a shallow softwood goal keeps the raster by the rule, quoting the shop’s own budget', async () => {
+  it('a shallow softwood goal decides on the measured time, and states that both were measured', async () => {
     const job = jobFor(1, 'softwood');
-    const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, SMALL_BUDGET);
+    const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, {});
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
     expect(out.nc!).not.toContain('(adaptive)');
     const note = (out.surface3d?.notes ?? []).find((n) => n.includes('roughing chosen'));
     expect(note, 'the chooser must state its choice').toBeDefined();
-    expect(note!).toContain('Raster roughing chosen by rule');
-    // The budget in the sentence is the shop default handed in, not the built-in fallback.
-    expect(note!).toContain('skipped above 1,000 cells');
-    expect(note!).toContain('rough3d.compareCellBudget');
+    expect(note!).toContain('Raster roughing chosen');
+    expect(note!).toContain('the shorter simulated time wins');
+    expect(note!).toContain('both were measured');
   });
 
-  it('over the planning budget the goal keeps the raster, quoting the budget', async () => {
+  it('a goal over the old planning budget still plans both roughs — no work-count cap', async () => {
+    // 8 mm deep at a 0.1 mm grid is ~640k cell-levels, past the old 500,000 cap that kept the
+    // raster without planning the adaptive at all; #916 removed the cap, so both are planned and
+    // measured and the deep PLA rule chooses the adaptive.
     const job = jobFor(8, 'pla');
-    // The budget's own rule floor is 10,000 cell-levels; this goal plans more than that, so the
-    // adaptive rough is not planned at all.
-    const tight: EngraveShopOpts = {
-      defaults: {
-        'rough3d.planBudgetCellLevels': {
-          value: 10_000,
-          source: 'seeded',
-          setAt: '2026-11-01',
-          unit: 'cell-levels',
-          note: null,
-        },
-      },
-    };
-    const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, tight);
+    const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, {});
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
-    expect(out.nc).not.toBeNull();
-    expect(out.nc!).not.toContain('(adaptive)');
-    const note = (out.surface3d?.notes ?? []).find((n) => n.includes('planBudgetCellLevels'));
-    expect(note, 'the budget must be stated, not silent').toBeDefined();
-    expect(note!).toContain('above the shop’s rough3d.planBudgetCellLevels of 10,000');
-    expect(note!).toContain('the raster runs instead');
+    expect(out.nc!).toContain('3D rough (adaptive)');
+    const note = (out.surface3d?.notes ?? []).find((n) => n.includes('roughing chosen'));
+    expect(note, 'the chooser must state its choice').toBeDefined();
+    expect(note!).toContain('both were measured');
+    expect(note!).not.toContain('planBudgetCellLevels');
   });
 
   it('a ball goal states that the adaptive rough cannot run and keeps the raster', async () => {
