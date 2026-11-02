@@ -33,7 +33,7 @@ describe('documentation mirrors', () => {
     // Otherwise a document can go stale in the app with nothing to catch it.
     const index = readFileSync(join(ROOT, 'casemaker-app/src/docs/index.ts'), 'utf8');
     const served = [...index.matchAll(/from '\.\/([\w.-]+\.md)\?raw'/g)].map((m) => m[1]!);
-    expect(served.length, 'index.ts should import six docs').toBe(6);
+    expect(served.length, 'index.ts should import seven docs').toBe(7);
     for (const name of served) {
       const path = `casemaker-app/src/docs/${name}`;
       const listed = DOC_PAIRS.some((p) => p.canonical === path || p.mirror === path);

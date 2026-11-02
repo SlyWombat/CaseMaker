@@ -1,135 +1,68 @@
 # Getting Started
 
-A 10-minute walkthrough from zero to "enclosure STL on disk."
+A first run, start to finish: install the app, open it, make a case, export it for printing, and
+cut a hardwood name plate on the CNC. Ten minutes, no prior experience needed.
 
-## 0. The fast path — no install at all
+Building Case Maker from source, or running its test suites, isn't here — see **For developers**
+in the docs list for that.
 
-Case Maker runs entirely in the browser: **<https://electricrv.ca/casemaker>**.
+## 1. Install
 
-1. On the **Start a New Project** screen, search for your board (30 built-ins,
-   plus anything you import or enable from an online source).
-2. Click a card to see its specs, connector inventory, and provenance in the
-   detail rail. Boards marked **★** have a curated quickstart recipe.
-3. Click **★ Create from quickstart** (or **Blank shell**) — the case
-   generates around the board's real connector and mounting-hole geometry.
-4. Tweak parameters, then **Export → STL** and slice.
+Case Maker runs two ways:
 
-Board not in the library? **Import board JSON** on the same screen, or open
-**Sources** and add the community library. To author your own profile, point
-Claude Code at the
-[community library's AGENT.md](https://github.com/SlyWombat/casemaker-library/blob/main/AGENT.md)
-and it will walk you through measuring, authoring, testing, and publishing it.
+- **In a browser, no install.** Open **<https://electricrv.ca/casemaker>**. Nothing to download;
+  your projects save to the browser and export normally.
+- **As a desktop app.** Download the installer for your platform and run it. The desktop app adds
+  offline use and, on a machine with a CNC attached, direct control of the cut.
 
-The rest of this guide covers running the app from source.
+Either way opens to the same welcome page.
 
-## 1. Dependencies
+## 2. Open the app
 
-| Tool | Required version | Why |
-| --- | --- | --- |
-| Node.js | 22.12+ (24 LTS recommended) | Vite 8 + Vitest 4 |
-| npm | bundled with Node 22.12+ | install / run scripts |
-| A modern browser | Chrome, Edge, Firefox, Safari | runtime (WebGL2 + WebAssembly) |
-| (optional) Rust toolchain | stable, ≥ 1.75 | required only to build the **desktop** app via Tauri |
+The welcome page offers four things to make:
 
-> **Note:** Case Maker has **no Python, no OpenSCAD, no slicer dependency**. Everything runs in the browser via Three.js + Manifold WASM. A slicer (PrusaSlicer / Bambu / OrcaSlicer / Cura) is needed only to print the STL/3MF you export.
+- **Cases that fit the board** — pick a board and the shell grows around its ports, holes and
+  standoffs.
+- **Racks sized to your gear** — a snap-together 10-inch rack, resized to fit your printer.
+- **Toolboxes that stack** — bins and lids that register on each other, with inserts pocketed to
+  your own tools.
+- **Cut it on the CNC** — carve hardwood: a name plate, a coaster, a pocket, an engraving.
 
-## 2. Install
+This walkthrough tries the first and the last. The **User Manual** covers all four, each with its
+own worked example.
 
-```bash
-git clone https://github.com/SlyWombat/case-maker.git
-cd case-maker/casemaker-app
-npm ci
-```
+## 3. Make a case
 
-The `npm ci` step downloads Three.js, Manifold-3d, React, Vite, Playwright, Tauri CLI, and dev dependencies (~700 packages, ~250MB on disk).
+1. Click **Cases that fit the board**.
+2. Search for a board — try "rpi-4b" for a Raspberry Pi 4B — and click its card. A detail panel
+   shows its connectors and mounting holes.
+3. Click **★ Create from quickstart**. The shell generates around the board's real geometry: ports
+   lined up with connectors, standoffs under the mounting holes.
+4. In the sidebar, drag the **Wall thickness** slider — the shell rebuilds as you move it.
+5. Under **Case parameters → Joint**, try **Snap-fit**. Catches appear on the shell and the lid
+   without any further setup.
 
-## 3. First render
+## 4. Export it
 
-```bash
-npm run dev
-```
+Open **Export** and click **STL (binary)**. The file is in millimetres, upright, ready to drop
+into a slicer — no rotation or unit conversion needed.
 
-1. Open <http://localhost:8000> in your browser.
-2. The **board picker** greets you: search "rpi-4b" and click the Raspberry
-   Pi 4B card, then **★ Create from quickstart**.
-3. Drag the **Wall thickness** slider (sidebar → Case parameters) from
-   2mm → 3mm — the case rebuilds in ~50ms.
-4. Toggle individual ports under **Port cutouts** to see USB/HDMI cutouts
-   disappear and reappear.
-5. Under **Case parameters → Joint**, select **Snap-fit** — snap catches
-   populate automatically.
-6. Open **Export** and click **STL (binary)**. Save to disk.
-7. Drag the file into your slicer of choice. PrusaSlicer / Bambu / OrcaSlicer / Cura all open it. The model is in mm, Z-up — no rotation required.
-8. Slice with default 0.2mm layer height. Print. Confirm a real Pi 4B fits the bosses.
+## 5. Cut a hardwood name plate
 
-If anything went wrong, see [Troubleshooting](#troubleshooting) below.
+1. Back on the welcome page, click **Cut it on the CNC**.
+2. A cutting job opens already set up: a block of hardwood with three lines of text carved into
+   it, sized to fit a small CNC bed. Nothing to build from scratch for this first look.
+3. Click **Generate**. The app plans the cut, checks it against the stock, and runs a simulated
+   pass — watch the simulation sweep across the block.
+4. When it finishes, the job is ready to post as G-code for a CNC machine, the same way the case
+   above was ready to export as an STL.
 
-## 4. Run the test suites
-
-```bash
-npm test                 # Vitest unit tests (~1.5s)
-npm run test:e2e         # Playwright E2E (~60s, requires Chromium)
-npm run typecheck        # TypeScript --noEmit
-npm run lint             # ESLint
-```
-
-The Playwright suite spins up the Vite dev server on port 8000 automatically. If port 8000 is taken, set `VITE_PORT=8001 npm run test:e2e` (or change [`vite.config.ts`](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/vite.config.ts)).
-
-## 5. Build the production bundle
-
-```bash
-npm run build            # outputs to casemaker-app/dist/
-npm run preview          # serves the bundle on http://localhost:8000
-```
-
-## 6. Build the desktop app (optional)
-
-Requires the Rust toolchain. On Linux:
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-npm run tauri:build      # produces .msi / .exe / .deb / .AppImage / .dmg per OS
-```
-
-If you don't have Rust locally, push to `main` and grab the Windows installer from the **Windows installer** GitHub Actions workflow artifacts.
-
-## Troubleshooting
-
-> **Note:** Most issues are caught by `npm run typecheck` and the test suites. Run those first.
-
-- **`npm install` fails on WSL with `sharp` ENOENT** — your project lives under `/mnt/c/...` (a Windows-mounted drive). Move the working copy into your Linux home (`~/casemaker-app`) and reinstall.
-- **`Module not found: manifold-3d/manifold.wasm?url`** — you skipped `vite-plugin-wasm`. Reinstall dev deps.
-- **Worker silently fails after editing `ProjectCompiler.ts`** — open `window.__caseMaker.getJobError()` and `getLastDiag()` in the browser console. A common cause is a dropped import (`buildExternalAssetOps`).
-- **Port 8000 already in use** — set `VITE_PORT=8001 npm run dev`, or change the port in **Settings** in the UI.
-
-## Demo samples — from a committed project to a printed part
-
-You don't have to author anything to see the whole pipeline. The repo ships a committed sample
-project, `docs/bench/bench-sample.caseproj.json` (an ESP32 DevKit V1 case), that round-trips
-byte-for-byte — the same file the headless test pins in `docs/bench/bench-sample.receipt.json`.
-
-**Board/case → export for print, in the app:**
-
-1. Open the app ([electricrv.ca/casemaker](https://electricrv.ca/casemaker) or `npm run dev`) and
-   use **Load** to open `docs/bench/bench-sample.caseproj.json`.
-2. The case rebuilds around the ESP32 DevKit V1: check the **Case parameters** panel and the
-   **Port cutouts** (USB and the two GPIO headers are already wired from the board's components).
-3. Drag the **Wall thickness** slider once to feel the rebuild, then put it back.
-4. Open **Export** and click **STL (binary)**. The file is named
-   `ESP32_DevKit_V1_CLI_sample.stl`; a `-PRINT-NOTES.txt` sidecar travels with it.
-
-*Victory:* the exported STL opens in your slicer, Z-up, millimetres, no rotation — the same bytes
-the headless `export` writes for the same project.
-
-**The same project, headless** — the copy-paste twin is in the CNC guide's
-[§8.6](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/cnc-guide.md), where
-`npm run casemaker -- export ../docs/bench/bench-sample.caseproj.json --out /tmp/casemaker-sample`
-writes the identical STL from the command line.
+That's the shape of every project in Case Maker: pick what you're making, let the app do the
+geometry, check the result, then export or cut it.
 
 ## Next steps
 
-- [User Manual](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/user-manual.md) — every parameter, every joint type
-- [Technical Reference](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/technical-reference.md) — module API, coordinate system, adding new boards
-- [CHANGELOG](https://github.com/SlyWombat/CaseMaker/blob/main/CHANGELOG.md) — what shipped in each phase
-- [CONTRIBUTING](https://github.com/SlyWombat/CaseMaker/blob/main/CONTRIBUTING.md) — how to add a board profile or fix a bug
+- **User Manual** — all four capabilities, each with a worked example, the main options, and
+  common questions
+- **For developers** — build the app from source, run its test suites, or drive a job from the
+  command line

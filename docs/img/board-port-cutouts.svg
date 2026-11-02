@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 260" role="img" aria-labelledby="t d">
+  <title id="t">A board's connectors lined up with the shell's port cutouts</title>
+  <desc id="d">A PCB inside a case shell, with the shell's near wall cut away so each edge connector on the board is shown aligned with its own rectangular cutout in the wall.</desc>
+  <style>
+    .bg { fill: #0b1326; }
+    .shell { fill: #16213a; stroke: #adc6ff; stroke-width: 2; }
+    .board { fill: #1c2a4a; stroke: #4edea3; stroke-width: 2; }
+    .conn { fill: #4edea3; opacity: 0.85; }
+    .cutout { fill: #0b1326; stroke: #adc6ff; stroke-width: 1.5; stroke-dasharray: 3 3; }
+    .align { stroke: #adc6ff; stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.7; }
+    .label { fill: #dae2fd; font: 13px system-ui, sans-serif; }
+    .label-accent { fill: #adc6ff; font: 13px system-ui, sans-serif; font-weight: 600; }
+  </style>
+  <rect class="bg" width="480" height="260"/>
+
+  <!-- Shell outline, near wall shown as a thin frame so the board reads as "inside" -->
+  <rect class="shell" x="40" y="40" width="300" height="180" rx="6"/>
+  <rect x="48" y="48" width="284" height="164" rx="3" fill="#0b1326"/>
+
+  <!-- Board -->
+  <rect class="board" x="80" y="70" width="200" height="120" rx="2"/>
+  <text class="label" x="150" y="135">board</text>
+
+  <!-- Three edge connectors on the right edge of the board -->
+  <rect class="conn" x="272" y="85" width="16" height="22"/>
+  <rect class="conn" x="272" y="120" width="16" height="14"/>
+  <rect class="conn" x="272" y="150" width="16" height="22"/>
+
+  <!-- Alignment lines to the wall cutouts -->
+  <path class="align" d="M288 96 L340 96"/>
+  <path class="align" d="M288 127 L340 127"/>
+  <path class="align" d="M288 161 L340 161"/>
+
+  <!-- Cutouts in the wall (shown proud of the shell, as if the wall were cut away for this view) -->
+  <rect class="cutout" x="340" y="86" width="20" height="20"/>
+  <rect class="cutout" x="340" y="120" width="20" height="14"/>
+  <rect class="cutout" x="340" y="151" width="20" height="20"/>
+
+  <text class="label-accent" x="365" y="98">port cutout</text>
+  <text class="label" x="365" y="134">clearance: cutoutMargin</text>
+  <text class="label-accent" x="365" y="164">port cutout</text>
+
+  <text class="label" x="48" y="235">Every side-facing connector gets a cutout the same size as itself, plus a small margin.</text>
+</svg>

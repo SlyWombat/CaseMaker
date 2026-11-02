@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 280" role="img" aria-labelledby="t d">
+  <title id="t">Work origin and holding on a block of stock</title>
+  <desc id="d">A rectangular block of stock gripped between vise jaws, with its front-left-top corner marked as the work origin and three short arrows from that corner labelled X, Y and Z.</desc>
+  <style>
+    .bg { fill: #0b1326; }
+    .bed { fill: #141b2e; stroke: #2a3350; stroke-width: 1.5; }
+    .jaw { fill: #1c2a4a; stroke: #e9a0ff; stroke-width: 2; }
+    .stock { fill: #22304f; stroke: #dae2fd; stroke-width: 2; }
+    .axis { stroke: #e9a0ff; stroke-width: 2; }
+    .origin { fill: #e9a0ff; }
+    .label { fill: #dae2fd; font: 13px system-ui, sans-serif; }
+    .label-accent { fill: #e9a0ff; font: 13px system-ui, sans-serif; font-weight: 600; }
+  </style>
+  <rect class="bg" width="480" height="280"/>
+
+  <!-- Bed -->
+  <rect class="bed" x="40" y="190" width="400" height="20" rx="2"/>
+
+  <!-- Vise jaws -->
+  <rect class="jaw" x="130" y="120" width="18" height="90"/>
+  <rect class="jaw" x="332" y="120" width="18" height="90"/>
+  <text class="label" x="110" y="230">fixed jaw</text>
+  <text class="label" x="330" y="230">moving jaw</text>
+
+  <!-- Stock block, isometric-ish simple box -->
+  <polygon class="stock" points="160,150 310,150 330,130 180,130"/>
+  <rect class="stock" x="160" y="150" width="150" height="60"/>
+  <polygon class="stock" points="310,150 330,130 330,190 310,210"/>
+  <text class="label" x="195" y="185">stock</text>
+
+  <!-- Work origin marker at front-left-top corner -->
+  <circle class="origin" cx="160" cy="150" r="5"/>
+  <text class="label-accent" x="90" y="145">work origin (X0 Y0 Z0)</text>
+
+  <!-- Axis arrows from the origin -->
+  <path class="axis" d="M160 150 L205 150" marker-end="url(#ax)"/>
+  <text class="label-accent" x="205" y="145">X</text>
+
+  <path class="axis" d="M160 150 L178 135" marker-end="url(#ax)"/>
+  <text class="label-accent" x="178" y="128">Y</text>
+
+  <path class="axis" d="M160 150 L160 105" marker-end="url(#ax)"/>
+  <text class="label-accent" x="150" y="100">Z</text>
+
+  <text class="label" x="40" y="255">What the app plans always starts from this corner — holding the stock the same way on the machine keeps the cut lined up.</text>
+
+  <defs>
+    <marker id="ax" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#e9a0ff"/>
+    </marker>
+  </defs>
+</svg>

@@ -42,6 +42,7 @@ export const DOC_PAIRS = [
   },
   { canonical: 'casemaker-app/src/docs/getting-started.md', mirror: 'docs/getting-started.md' },
   { canonical: 'casemaker-app/src/docs/cnc-guide.md', mirror: 'docs/cnc-guide.md' },
+  { canonical: 'casemaker-app/src/docs/developers.md', mirror: 'docs/developers.md' },
 ];
 
 /**
