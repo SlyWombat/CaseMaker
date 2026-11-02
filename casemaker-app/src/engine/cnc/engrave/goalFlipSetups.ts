@@ -143,14 +143,38 @@ export interface DowelHold {
 }
 
 /** The narrowest drill the shop owns, or null when it owns none. */
+/**
+ * #911 — THE DRILL THE LOCATING HOLES ARE MADE WITH: a pin's size, not the catalogue's finest.
+ * The first cut picked the NARROWEST drill, which on a shop that owns a 0.2 mm one proposed
+ * ⌀0.2 × 35 locating holes — a hole no dowel fits and no hand can find. The rule now prefers a
+ * drill a locating pin is made for (⌀2.5–6 mm, the LARGEST in that band: a pin wants strength),
+ * then an end mill of that size when the shop owns no drill there, then the old narrowest-drill
+ * answer (a shop whose only drills are outside the band), then a small end mill, so a job is
+ * never left without a hold it could actually use.
+ */
 export function ownedDrill(tools?: readonly { key: string; tool: Tool }[]): { tool: Tool; key: string } | null {
-  let best: { tool: Tool; key: string; d: number } | null = null;
-  for (const entry of tools ?? getTools()) {
-    if (entry.tool.shape !== 'drill') continue;
+  const entries = tools ?? getTools();
+  let pinDrill: { tool: Tool; key: string; d: number } | null = null;
+  let pinMill: { tool: Tool; key: string; d: number } | null = null;
+  let anyDrill: { tool: Tool; key: string; d: number } | null = null;
+  let smallMill: { tool: Tool; key: string; d: number } | null = null;
+  for (const entry of entries) {
     const d = cuttingDiameter(entry.tool);
     if (d === null || !(d > 0)) continue;
-    if (best === null || d < best.d) best = { tool: entry.tool, key: entry.key, d };
+    const pinSized = d >= 2.5 && d <= 6;
+    if (entry.tool.shape === 'drill') {
+      if (anyDrill === null || d < anyDrill.d) anyDrill = { tool: entry.tool, key: entry.key, d };
+      if (pinSized && (pinDrill === null || d > pinDrill.d)) pinDrill = { tool: entry.tool, key: entry.key, d };
+      continue;
+    }
+    if (entry.tool.shape === 'flat' && pinSized && (pinMill === null || d > pinMill.d)) {
+      pinMill = { tool: entry.tool, key: entry.key, d };
+    }
+    if (entry.tool.shape === 'flat' && d <= 6 && (smallMill === null || d < smallMill.d)) {
+      smallMill = { tool: entry.tool, key: entry.key, d };
+    }
   }
+  const best = pinDrill ?? pinMill ?? anyDrill ?? smallMill;
   return best === null ? null : { tool: best.tool, key: best.key };
 }
 

@@ -16,6 +16,7 @@
  */
 
 import { targetObjectMesh } from '@/engine/import/targetObject';
+import type { Tool } from '@/engine/cnc/tool';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { placeTarget } from './targetPlace';
 import { jobMount, jobTargetObjects, type JobFinding } from './jobSetup';
@@ -101,7 +102,13 @@ export function sidesSentence(plan: FlipPlan): string {
  * The finding for one goal: nothing when the target is not a goal; an INFO when the top setup
  * leaves less than the small amount; a WARNING with the split, and the plan when one is worth it.
  */
-export function goalFlipFindings(job: EngraveJob, goal: EngraveTargetObject): JobFinding[] {
+export function goalFlipFindings(
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  /** #911 — the LOCATION's cutters, so the hold sentence names the shop's own drill (or says
+   *  there is none among them), rather than the app's default registry. */
+  tools?: readonly { key: string; tool: Tool }[],
+): JobFinding[] {
   const offer = goalSurfaceOffer(job, goal);
   if (offer === null) return [];
   const { plan, first } = offer;
@@ -132,7 +139,8 @@ export function goalFlipFindings(job: EngraveJob, goal: EngraveTargetObject): Jo
   const split =
     `${facingWords} of its surface faces away from the tool — downward faces and undercuts — and ` +
     `${shadowWords} lies in an overhang's shadow, so it is not cut from this side.`;
-  const hold = plan.sides.length > 1 ? dowelHold(job, goal, plan.sides[1]!.rotate?.about ?? 'x') : null;
+  const hold =
+    plan.sides.length > 1 ? dowelHold(job, goal, plan.sides[1]!.rotate?.about ?? 'x', tools) : null;
   const holdWords =
     plan.sides.length <= 1
       ? ''
@@ -162,10 +170,10 @@ export function goalFlipFindings(job: EngraveJob, goal: EngraveTargetObject): Jo
  * `jobReachFindings`. A ROTARY job is not judged by the flat frame (its goal's local Z is radial,
  * the same rule the reach check states): the rotary's own checks and the sweep judge it.
  */
-export function jobFlipFindings(job: EngraveJob): JobFinding[] {
+export function jobFlipFindings(job: EngraveJob, tools?: readonly { key: string; tool: Tool }[]): JobFinding[] {
   if (rotaryMapOf(job) !== null) return [];
   const out: JobFinding[] = [];
-  for (const goal of jobTargetObjects(job)) out.push(...cachedFlipFindings(job, goal));
+  for (const goal of jobTargetObjects(job)) out.push(...cachedFlipFindings(job, goal, tools));
   return out;
 }
 
@@ -197,11 +205,15 @@ function cacheKey(job: EngraveJob, goal: EngraveTargetObject): string {
   ].join('|');
 }
 
-function cachedFlipFindings(job: EngraveJob, goal: EngraveTargetObject): JobFinding[] {
+function cachedFlipFindings(
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  tools?: readonly { key: string; tool: Tool }[],
+): JobFinding[] {
   const key = cacheKey(job, goal);
   const hit = flipCache.get(key);
   if (hit !== undefined) return hit;
-  const computed = goalFlipFindings(job, goal);
+  const computed = goalFlipFindings(job, goal, tools);
   flipCache.set(key, computed);
   if (flipCache.size > FLIP_CACHE_MAX) {
     const first = flipCache.keys().next().value;

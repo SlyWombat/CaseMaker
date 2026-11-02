@@ -1162,7 +1162,9 @@ export function EngravePanel(): JSX.Element {
     ...jobReachFindings(job, tool, tools.map((e) => e.tool), tools),
     // #872 — WHAT THE TOP SETUP LEAVES UNREACHED, stated beside the reach check: the share the
     // sentence measures, the split, and the flip plan's one press when a side earns its setup.
-    ...jobFlipFindings(job),
+    // #911 — the location's cutters travel with the finding: its hold sentence names the shop's
+    // own drill (or says there is none among them), never the app's default registry.
+    ...jobFlipFindings(job, tools),
     // #513 — the bed: a job planned on a bed that is not there now (`bed-changed`, a WARNING here
     // with its two presses — the Cut gate makes it the error), a mount the bed does not have, a
     // stock that leaves the board, an unmeasured datum the mount's registration would need. A bed
@@ -1991,7 +1993,9 @@ export function EngravePanel(): JSX.Element {
     const sides = finding.goalFlipSides;
     const goal = job.targetObject;
     if (sides === undefined || sides.length < 2 || goal === undefined) return;
-    const result = planFlipSetups(job, goal, sides);
+    // #911 — the LOCATION's cutters, not the module's default registry: the shop's own drill is
+    // the one a locating hole is made with (and the one the sentence may name).
+    const result = planFlipSetups(job, goal, sides, tools);
     if (!result.ok) {
       setTargetError(result.reason);
       return;
