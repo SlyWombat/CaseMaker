@@ -15,13 +15,14 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { Z1 } from '@/engine/cnc/machine';
+import { SHAPEOKO_4, Z1 } from '@/engine/cnc/machine';
 import { DEFAULT_VISE, VISE_FLOOR_DEPTH } from '@/engine/cnc/fixture';
 import { VISE_BASE_THICKNESS } from '@/engine/cnc/drawnVise';
 import { BED_PLATE_THICKNESS } from '@/engine/cnc/bedScene';
 import { noneSacrificial } from '@/engine/cnc/sacrificial';
 import {
   machineBedPlate,
+  statedWorkAreaBox,
   VISE_FIXED_FACE_MACHINE_X,
   VISE_JAW_CENTER_MACHINE_Y,
 } from '@/engine/cnc/bedPlate';
@@ -72,5 +73,30 @@ describe('#557 machineBedPlate', () => {
     expect(box.min[0]).toBe(-25);
     expect(box.max[0]).toBe(175);
     expect(box.max[0] - box.min[0]).toBe(200);
+  });
+});
+
+// #877 — a stated machine has no bed plate and no pins to place one by. Its work area is the
+// envelope its owner stated, drawn around the stock so the travel can be compared with the job.
+describe('#877 statedWorkAreaBox', () => {
+  it('is the stated envelope, centred on the stock and standing from its underside', () => {
+    const stock = { length: 100, width: 60, thickness: 12 };
+    const box = statedWorkAreaBox(stock, SHAPEOKO_4);
+    const sizeX = SHAPEOKO_4.envelope.x.max - SHAPEOKO_4.envelope.x.min;
+    const sizeY = SHAPEOKO_4.envelope.y.max - SHAPEOKO_4.envelope.y.min;
+    const sizeZ = SHAPEOKO_4.envelope.z.max - SHAPEOKO_4.envelope.z.min;
+    expect(box.max[0] - box.min[0]).toBeCloseTo(sizeX, 6);
+    expect(box.max[1] - box.min[1]).toBeCloseTo(sizeY, 6);
+    expect(box.max[2] - box.min[2]).toBeCloseTo(sizeZ, 6);
+    // Centred on the stock in XY, based at the stock's own underside (the work frame's −thickness).
+    expect(box.min[0]).toBeCloseTo(stock.length / 2 - sizeX / 2, 6);
+    expect(box.min[1]).toBeCloseTo(stock.width / 2 - sizeY / 2, 6);
+    expect(box.min[2]).toBeCloseTo(-stock.thickness, 6);
+  });
+
+  it('a stock wider than the travel shows as wider than the box', () => {
+    const wide = { length: SHAPEOKO_4.envelope.x.max - SHAPEOKO_4.envelope.x.min + 50, width: 60, thickness: 12 };
+    const box = statedWorkAreaBox(wide, SHAPEOKO_4);
+    expect(wide.length).toBeGreaterThan(box.max[0] - box.min[0]);
   });
 });

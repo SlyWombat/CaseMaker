@@ -54,6 +54,26 @@ export const VISE_JAW_CENTER_MACHINE_Y: Mm =
   viseFrameFromPins(PIN_PAIR[0]!).jawStartY + Z1_VISE.jawLength / 2;
 
 /**
+ * #877 — A STATED MACHINE'S WORK AREA, in the WORK frame: the envelope the owner stated, centred on
+ * the stock and standing from the stock's underside. It is NOT a bed plate and nothing is placed by
+ * it — there is no fixture to place — it exists so "does this stock fit the travel" can be seen.
+ * The camera deliberately does not frame it (it dwarfs the stock).
+ */
+export function statedWorkAreaBox(
+  stock: { length: number; width: number; thickness: number },
+  machine: SizedMachine,
+): BedPlateBox {
+  const sizeX = machine.envelope.x.max - machine.envelope.x.min;
+  const sizeY = machine.envelope.y.max - machine.envelope.y.min;
+  const sizeZ = Math.max(1, machine.envelope.z.max - machine.envelope.z.min);
+  const base = -stock.thickness;
+  return {
+    min: [stock.length / 2 - sizeX / 2, stock.width / 2 - sizeY / 2, base],
+    max: [stock.length / 2 + sizeX / 2, stock.width / 2 + sizeY / 2, base + sizeZ],
+  };
+}
+
+/**
  * The machine's bed plate (its usable work envelope) as one box in the WORK frame, sized from the
  * machine profile's own envelope and placed so the vise — already drawn at its work-frame position
  * by `viseBody` — sits on it at its real machine position.

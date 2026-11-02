@@ -131,6 +131,10 @@ function activeSceneBoundsFromStores(): { center: THREE.Vector3; diag: number } 
   const bedBox: SceneBox | null = engraveActive
     ? (() => {
         const job = useEngraveJobStore.getState().job;
+        // #877 — a stated machine has no bed plate this app can place (its work area is drawn as a
+        // wireframe in the preview and is deliberately NOT framed: it dwarfs the stock). The stock
+        // and the as-cut picture frame the view, exactly as a no-machine job does.
+        if (jobMachine(job, null).frameState === 'stated') return null;
         // #779 — the measured placement when the record has one; the pins otherwise.
         return machineBedPlate(jobVise(job), job.sacrificial, jobMachine(job, null), visePlacementFrame(job.machineId));
       })()

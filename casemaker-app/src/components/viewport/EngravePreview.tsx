@@ -41,7 +41,7 @@ import type { EngravePreviewChamferBand, EngravePreviewLost, EngravePreviewOutli
 import type { EngravePreviewRegistrationBand } from '@/workers/sim/engraveRegistration';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { machineBedPlate } from '@/engine/cnc/bedPlate';
+import { machineBedPlate, statedWorkAreaBox } from '@/engine/cnc/bedPlate';
 import { jobVise } from '@/engine/cnc/fixture';
 import { BED_COLOR } from '@/engine/cnc/bedScene';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
@@ -678,14 +678,47 @@ function MachineBed() {
   const frame = useVisePlacementFrame(job.machineId);
   // Memoised on the job and the frame: the box changes only when they do, so a scrub or a camera
   // move rebuilds nothing (`renderer.info.memory.geometries` must stay bounded — #197).
-  const { centre, size } = useMemo(() => {
-    const box = machineBedPlate(jobVise(job), job.sacrificial, jobMachine(job, null), frame);
+  const { centre, size, stated } = useMemo(() => {
+    const machine = jobMachine(job, null);
+    if (machine.frameState === 'stated') {
+      // #877 — THE STATED WORK AREA, NOT A FIXTURE. The owner gave the machine's envelope; the app
+      // knows no bed plate, no pins and no vise to place anything by. The honest picture is the
+      // envelope itself as a faint wireframe around the stock — "does my stock fit the travel" is
+      // answerable — and it stays OUT of the camera framing (Viewport) because it dwarfs the stock.
+      const box = statedWorkAreaBox(job.stock, machine);
+      return {
+        centre: [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2] as [number, number, number],
+        size: [box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]] as [number, number, number],
+        stated: true,
+      };
+    }
+    const box = machineBedPlate(jobVise(job), job.sacrificial, machine, frame);
     return {
       centre: [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2] as [number, number, number],
       size: [box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]] as [number, number, number],
+      stated: false,
     };
   }, [job, frame]);
   if (!(size[0] > 0 && size[1] > 0 && size[2] > 0)) return null;
+  if (stated) {
+    return (
+      <group name="engrave-work-area">
+        <mesh position={centre} name="engrave-work-area-box">
+          <boxGeometry args={size} />
+          <meshBasicMaterial wireframe transparent opacity={0.16} color="#9fb2c6" depthWrite={false} />
+        </mesh>
+        <Html
+          position={[centre[0] - size[0] / 2, centre[1] - size[1] / 2, centre[2] + size[2] / 2]}
+          center
+          style={{ pointerEvents: 'none' }}
+        >
+          <div data-testid="engrave-work-area-label" style={{ fontSize: 10, color: '#9fb2c6', whiteSpace: 'nowrap' }}>
+            work area (stated)
+          </div>
+        </Html>
+      </group>
+    );
+  }
   return (
     <mesh position={centre} name="engrave-bed-plate">
       <boxGeometry args={size} />
@@ -886,6 +919,9 @@ export function EngravePreview() {
   // #604 — the found position: the registration's offset/rotation move the drawn stock (and the
   // design on it) so the viewport shows where the blank actually sits, not where the plan assumed.
   const job = useEngraveJobStore((s) => s.job);
+  // #877 — a STATED machine (one this app writes files for and never drives) has no Z1 vise and no
+  // Z1 bed to draw: its jaws would be a fixture it does not have. The stock alone is the picture.
+  const machineStated = useMemo(() => jobMachine(job, null).frameState === 'stated', [job]);
   // #716 — the rotary view. `map` (the default) draws the stock's surface unrolled, exactly as the
   // CAM authors it; `stock` wraps the SAME meshes onto the cylinder. A flat job is always `null`
   // here and takes every branch as it did before this slice.
@@ -1063,7 +1099,7 @@ export function EngravePreview() {
 
       {wrapRadius === null &&
         rotary === null &&
-        preview.fixture.map((jaw) => <Jaw key={jaw.id} mesh={jaw.mesh} name={`engrave-${jaw.id}`} />)}
+        !machineStated && preview.fixture.map((jaw) => <Jaw key={jaw.id} mesh={jaw.mesh} name={`engrave-${jaw.id}`} />)}
 
       {/* #549 — blocked items' design outlines, drawn after the floors and fixture so they read
           over the clipped preview as the "here is where you put it" overlay. */}
