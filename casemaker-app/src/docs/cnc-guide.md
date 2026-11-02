@@ -930,7 +930,7 @@ object's size, the blank-fit check and the drawn mesh all read the same turn, so
 cut and the picture agree. The fields are absent by default, and a job that states none round-trips
 and cuts exactly as before; the rotary relief does not read them (its seam is the Y position).
 
-**The part's Underside (#898).** A goal mesh says where the part's underside comes from. Not
+**The part's Underside.** A goal mesh says where the part's underside comes from. Not
 chosen is the cut as the mesh is; the row proposes one of three from the mesh itself and the press
 stores the choice:
 

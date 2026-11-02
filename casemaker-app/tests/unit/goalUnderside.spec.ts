@@ -201,10 +201,11 @@ describe('#898 — the cut floor each kind gives', () => {
     expect(phf.minZ).toBeCloseTo(pfloor, 5);
   });
 
-  it('the generated program carries the underside and its floor', () => {
+  it('the generated program carries the underside and its floor', async () => {
     const goal = goalOf(flatBasedStl(), FLAT, { underside: { kind: 'plinth', plinthMm: 4 } });
     const tool: Tool = flatEndMill(3, { name: 'flat', fluteLength: 40 });
-    const out = generateGoalProgram(jobOf(goal), goal, tool, [], null, {});
+    // #881 — the generator is async: the result is awaited before it is read.
+    const out = await generateGoalProgram(jobOf(goal), goal, tool, [], null, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.surface3d?.underside).toEqual({ kind: 'plinth', floorZ: -16 });
     // The posted program never goes below the plinth's floor (Z words, the file's own frame).
