@@ -161,7 +161,7 @@ import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import { generateChamfer3d, type Chamfer3dCut } from '@/engine/cnc/cam/chamfer3d';
 import { targetRim } from '@/engine/cnc/engrave/targetRim';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { concatToolpathIR, efficiencyOf, estimateCycleSeconds, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStatsOf, type CamMove, type CamOperation, type CamPassStep, type ProgramEfficiency, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, efficiencyOf, estimateCycleSeconds, estimateCycleTerms, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStatsOf, type CamMove, type CamOperation, type CamPassStep, type CycleTerms, type ProgramEfficiency, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
   DEFAULT_GRID_PITCH_MM,
   DEFAULT_MAX_CELLS,
@@ -435,6 +435,12 @@ export interface EngraveCamSummary {
    * exists still reads, and a caller that has no IR to measure says nothing rather than inventing.
    */
   efficiency?: ProgramEfficiency;
+  /**
+   * #927 — the cycle estimate as NAMED TERMS: the moves, the inter-operation entry rapids, and the
+   * spindle ramp. `estimatedSeconds` above is their total, so a reader can say which part moved
+   * when the number changes. OPTIONAL on the usual older-result terms.
+   */
+  cycle?: CycleTerms;
 }
 
 /**
@@ -2989,7 +2995,8 @@ function fmtArea(mm2: number): string {
 function summarize(ir: ToolpathIR, rapid: RapidEstimate): EngraveCamSummary {
   let cuttingMoves = 0;
   let passes = 0;
-  let estimatedSeconds = 0;
+  // #927 — the program's cycle, as named terms: moves + inter-operation entries + spindle ramp.
+  const cycle = estimateCycleTerms(ir, rapid);
   let roughOperations = 0;
   let finishOperations = 0;
   let throughOperations = 0;
@@ -3002,7 +3009,6 @@ function summarize(ir: ToolpathIR, rapid: RapidEstimate): EngraveCamSummary {
     if (op.passKind === 'rough') roughOperations++;
     else if (op.passKind === 'finish') finishOperations++;
     else if (op.passKind === 'through') throughOperations++;
-    estimatedSeconds += op.estimatedSeconds;
     const zs = new Set<number>();
     for (const m of op.moves) {
       if (m.kind !== 'feed') continue;
@@ -3032,7 +3038,7 @@ function summarize(ir: ToolpathIR, rapid: RapidEstimate): EngraveCamSummary {
   return {
     operations: ir.operations.length,
     cuttingMoves,
-    estimatedSeconds,
+    estimatedSeconds: cycle.totalSeconds,
     passes,
     rapidMm: travel.rapidMm,
     cutMm: travel.cutMm,
@@ -3044,6 +3050,7 @@ function summarize(ir: ToolpathIR, rapid: RapidEstimate): EngraveCamSummary {
     ...(everyOperationDeclared && passSteps.length > 0 ? { passSteps } : {}),
     // #926 — measured on the same IR, with the same rapid model the cycle estimate above uses.
     efficiency: efficiencyOf(ir, rapid),
+    cycle,
   };
 }
 

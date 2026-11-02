@@ -96,7 +96,7 @@ import {
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
 import { buildRunSheet, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
-import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
+import { buildRunRecord, isMeasuredRun, runSeconds, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { surfaceSpreadFor, firstRegistrationFor } from '@/store/engraveRegistrationStore';
@@ -2649,8 +2649,18 @@ export function EngravePanel(): JSX.Element {
           // #451 — the shop's `runSheet.blankToleranceMm`: how far a measured blank may differ
           // before the sheet says "change the job and regenerate".
           blankToleranceMm: shopDefault('runSheet.blankToleranceMm').value,
-          // #926 — the two efficiency thresholds the sheet judges a program against.
+          // #926 — the air-time threshold the sheet judges a program against.
           efficiencyThresholds: efficiencyThresholds(shopDefaults),
+          // #927 — the last imported run's clock beside its estimate, so the sheet's §9 shows the
+          // model's error on this job. Only a run with a number (machine elapsed or minutes) prints.
+          lastRun:
+            lastMeasured !== null && runSeconds(lastMeasured) !== null && lastMeasured.cutOn !== null
+              ? {
+                  actualSeconds: runSeconds(lastMeasured)!,
+                  at: lastMeasured.cutOn,
+                  estimatedSeconds: lastMeasured.estimatedSeconds,
+                }
+              : undefined,
         },
       ),
     );
