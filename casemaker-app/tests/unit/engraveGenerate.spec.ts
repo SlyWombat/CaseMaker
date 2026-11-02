@@ -1391,9 +1391,12 @@ describe('a V-bit trace job (#405)', () => {
       angle: 60,
       halfAngle: 30,
     });
-    const g = await generate(tl, traceJob([title()], { tool: byCode }));
+    // Hardwood has no V-bit row at all, so the feeds gate still stands (PLA's V row would take the
+    // starting-value fallback for a 0.1 mm tip).
+    const hardwood = (j: EngraveJob): EngraveJob => ({ ...j, stock: { ...j.stock, material: 'hardwood' } });
+    const g = await generate(tl, hardwood(traceJob([title()], { tool: byCode })));
     expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
-    expect(g.ok).toBe(false); // feeds: no V row for a 0.1 mm tip
+    expect(g.ok).toBe(false); // feeds: no V row for hardwood at any tip
 
     const owned = bit30({
       name: 'Single Flute Engraving Bit for Metal - 1/8" Shank 60° * 0.1mm',
@@ -1402,7 +1405,7 @@ describe('a V-bit trace job (#405)', () => {
       angle: 60,
       halfAngle: 30,
     });
-    const g2 = await generate(tl, traceJob([title()], { tool: owned }));
+    const g2 = await generate(tl, hardwood(traceJob([title()], { tool: owned })));
     expect(g2.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
   });
 

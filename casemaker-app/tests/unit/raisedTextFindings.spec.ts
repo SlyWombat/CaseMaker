@@ -72,6 +72,21 @@ describe('#765 the raised-text warning names only the joined pinches', () => {
     expect(finding.message).toContain('Use a cutter no wider than 1.08 mm at the top face, or text 34 mm or more.');
   });
 
+  it('says no library cutter separates the letters when every one opens wider than the gap', () => {
+    // The caller's library holds a 0.2 mm flat (its narrowest) and a 3.175 mm one; the tightest
+    // gap is 0.15 mm. No cutter the shop can fit separates the pair, and the sentence says so.
+    const finding = raisedTextPinchFindings(
+      [detail({ pinches: [pinch({ gapMm: 0.15 })] })],
+      flatEndMill(3.175),
+      [flatEndMill(0.2, { name: '0.2 mm flat' }), flatEndMill(3.175, { name: '3.175 mm flat' })],
+    )[0]!;
+    expect(finding.message).toContain('No cutter in the library separates these letters at this size');
+    expect(finding.message).toContain('"0.2 mm flat"');
+    expect(finding.message).toContain('opens 0.2 mm at the top face');
+    expect(finding.message).toContain('the tightest gap is 0.15 mm');
+    expect(finding.message).toContain('Enlarge the text');
+  });
+
   it('names only the joined pairs, and says how many separate', () => {
     const loss = RAISED_EDGE_LOSS_TOLERANCE_MM;
     const finding = raisedTextPinchFindings(

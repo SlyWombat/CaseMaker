@@ -28,7 +28,7 @@ import { printedLayerGridOf, voidCeilingFor } from '@/engine/cnc/layerStack';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel } from '@/engine/cnc/engrave/jobSetup';
 import { statedCuttingSize, type Tool } from '@/engine/cnc/tool';
-import { vCone } from '@/engine/cnc/vProfile';
+import { grooveWidthAt, vCone } from '@/engine/cnc/vProfile';
 import { aabbOfProfile, pOffset, type Profile } from '@/engine/compiler/profile';
 import type {
   EngraveAnyItem,
@@ -1332,6 +1332,10 @@ function pairGapMm(
 export function raisedTextPinchFindings(
   details: readonly RaisedTextDetail[],
   tool: Tool | null,
+  /** The cutters the shop can put in the spindle, when the caller has them: the sentence says
+   *  whether ANY of them opens narrower than the tightest gap, not just whether the chosen one
+   *  does. Absent: the advice states the width a cutter would need, without the library claim. */
+  library?: readonly Tool[] | null,
 ): JobFinding[] {
   const cutter = cutterPhrase(tool);
   const cone = tool === null ? null : vCone(tool);
@@ -1364,10 +1368,37 @@ export function raisedTextPinchFindings(
         : losses.length === 0
           ? ` The other ${separated} separate.`
           : ` The other ${separated} separate, taking up to ${fmtMm(Math.max(...losses.map((p) => p.edgeLossMm)))} mm off the letters' edges.`;
+    // THE LIBRARY'S OWN ANSWER. The width a cone opens at the top face is a function of its tip,
+    // its angle and the same cut depth (`m.cutterRadius` inverts to it); a flat's is its diameter.
+    // When every cutter the caller can fit opens wider than the tightest gap, no cutter separates
+    // these letters at this size, and the sentence says that instead of offering a bit that does
+    // not exist.
+    let narrowest: { name: string; widthMm: number } | null = null;
+    if (library !== undefined && library !== null && tool !== null) {
+      const depth =
+        cone === null ? null : Math.max(0, (2 * m.cutterRadius - 2 * cone.tipRadius) / (2 * cone.tanHalf));
+      for (const entry of library) {
+        const entryCone = vCone(entry);
+        const width =
+          entryCone !== null && depth !== null
+            ? grooveWidthAt(entryCone, depth)
+            : entry.shape === 'flat'
+              ? statedCuttingSize(entry)
+              : null;
+        if (width === null || !(width > 0)) continue;
+        if (narrowest === null || width < narrowest.widthMm) narrowest = { name: entry.name, widthMm: width };
+      }
+    }
     const advice =
-      minSize !== null
-        ? `Use ${narrower}, or text ${minSize} mm or more.`
-        : `Use ${narrower}, or space the letters apart.`;
+      narrowest !== null && narrowest.widthMm > tightest + 1e-9
+        ? `No cutter in the library separates these letters at this size — the narrowest, "${narrowest.name}", ` +
+          `opens ${fmtMm(narrowest.widthMm)} mm at the top face, and the tightest gap is ${gap} mm. ` +
+          (minSize !== null
+            ? `Enlarge the text (${minSize} mm or more) or reduce the depth.`
+            : 'Enlarge the text or reduce the depth.')
+        : minSize !== null
+          ? `Use ${narrower}, or text ${minSize} mm or more.`
+          : `Use ${narrower}, or space the letters apart.`;
     return [
       {
         severity: 'warning' as const,

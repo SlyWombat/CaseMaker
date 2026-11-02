@@ -170,11 +170,17 @@ describe('#910 1 — a ball is fed from its own catalogue row', () => {
     });
   }
 
-  it('a ⌀6 ball with no Makera id is still refused, and the refusal says why', () => {
+  it('a ⌀6 ball with no Makera id is fed from the flat band, labelled (feeds fallback)', () => {
+    // #910 refused this cutter for want of its own row. The feeds fallback stands the material's
+    // nearest flat band in — a ball is fed through a flat of its cutting diameter (#723 P2-3) —
+    // so an owned cutter with no Makera id is cut on labelled starting values, not refused.
     const anonymous = { key: 'inv:ball-6', tool: { ...BALL_6x32.tool, id: null }, provenance: 'owned' } as ToolLibraryEntry;
     const why = materialRefusal(elephant(), anonymous, CATALOGUE, null, undefined, { ownedVouches: true });
-    expect(why).toContain('no cutting parameters for inv:ball-6');
-    expect(why).toContain('6 mm');
+    expect(why).toBeNull();
+    const feeds = feedsFor(CATALOGUE, 'hardwood', feedsToolForSurface(anonymous.tool), jobMachine(elephant()), undefined);
+    expect(feeds.ok).toBe(true);
+    if (!feeds.ok) return;
+    expect(feeds.provenance).toContain('Starting values for hardwood, not measured for this cutter');
   });
 });
 
@@ -187,10 +193,12 @@ describe('#910 2 — the search states its refusal', () => {
     });
     expect(result.refused).toBe(true);
     if (result.refused !== true) throw new Error('expected a refusal');
+    // Both are refused for REACH now: the anonymous ball's feeds come from the fallback, so its
+    // 32 mm flute is the limit (the panther needs 50.12 mm); the short ball reaches 22 mm.
     expect(result.candidates.map((c) => c.key)).toEqual(['inv:ball-6', 'cat:short']);
-    expect(result.candidates[0]!.reason).toContain('no cutting parameters');
+    expect(result.candidates[0]!.reason).toBe('it reaches 32 mm, and the work is 50.12 mm deep');
     expect(result.candidates[1]!.reason).toBe('it reaches 22 mm, and the work is 50.12 mm deep');
-    expect(result.reason).toContain('inv:ball-6 — no cutting parameters');
+    expect(result.reason).toContain('inv:ball-6 — it reaches 32 mm');
     expect(result.reason).toContain('cat:short — it reaches 22 mm');
   });
 

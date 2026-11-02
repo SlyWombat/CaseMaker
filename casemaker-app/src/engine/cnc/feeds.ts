@@ -1263,22 +1263,44 @@ type EntryChoice =
        * MATERIAL (Route A, #347), or none at this DIAMETER (#910). False: the table answered.
        */
       catalogueOnly: false | 'material' | 'diameter';
+      /**
+       * The row is the material's STARTING-TABLE row for this cutter's kind, standing in for a
+       * diameter the table has no band at — not a row for this cutter (the feeds-fallback rule).
+       * The asked-for diameter is kept so the provenance sentence can state both.
+       */
+      starting?: { askedMm: number };
     }
   | { ok: false; reason: string; cause: 'no-feeds' };
+
+/** How far a diameter lies outside a row's band, mm — 0 when it is inside. */
+function bandDistance(entry: FeedsEntry, diameter: number): number {
+  if (diameter < entry.minDiameter) return entry.minDiameter - diameter;
+  if (diameter > entry.maxDiameter) return diameter - entry.maxDiameter;
+  return 0;
+}
+
+/** The material's row of this kind nearest the cutter's diameter — the fallback's own row. */
+function nearestRow(rows: readonly FeedsEntry[], diameter: number): FeedsEntry {
+  return rows.reduce((best, e) => (bandDistance(e, diameter) < bandDistance(best, diameter) ? e : best));
+}
 
 /**
  * Which row `feedsFor` resolves this job against, or why there is none (#310, Route A of #347).
  *
  * The plain case is a row of `table`: a material the starting table covers, at a diameter inside
- * one of its ranges. A material with rows but not at THIS diameter is the old refusal, unchanged.
+ * one of its ranges. A material with rows of this kind but none at THIS diameter does not refuse
+ * the cutter: its nearest band stands in as the material's starting values for the kind, labelled
+ * as not this cutter's own row (the feeds-fallback rule — an owned cutter with no row, the ⌀1 corn
+ * in PLA, is cut on labelled starting values rather than refused).
  *
- * The other case is a material the starting table has NO row for at all — a metal or a plastic the
- * machine's profile declares and this app has never measured. There the row has to come from the
- * user's OWN synced catalogue, and it is the WHOLE answer: nothing sits underneath it, so a vendor
- * number this job cannot use is a REFUSAL rather than a field that yields to a starting value. That
- * is the one difference from the catalogue tier inside `feedsFor`, which stands ABOVE a starting row
- * and passes a number over when it cannot use it (#325). No row, and no material this app can cut
- * at all: the job is refused and the reason names what is missing.
+ * The other case is a material the starting table has NO row of this kind for at all — a metal or
+ * a plastic the machine's profile declares and this app has never measured, and no band to stand
+ * in. There the row has to come from the user's OWN synced catalogue, and it is the WHOLE answer:
+ * nothing sits underneath it, so a vendor number this job cannot use is a REFUSAL rather than a
+ * field that yields to a starting value. That is the one difference from the catalogue tier inside
+ * `feedsFor`, which stands ABOVE a starting row and passes a number over when it cannot use it
+ * (#325). No row, and no material this app can cut at all: the job is refused, the reason names
+ * what is missing, and it points at Manage › Feeds as the place to record it.
  */
 function entryFor(
   snapshot: FeedCatalogue,
@@ -1294,36 +1316,40 @@ function entryFor(
     (e) => e.material === material && (e.edge ?? 'flat') === edge && diameter >= e.minDiameter && diameter <= e.maxDiameter,
   );
   if (entry) return { ok: true, entry, catalogueOnly: false };
-  if (table.some((e) => e.material === material && (e.edge ?? 'flat') === edge)) {
-    const refused: EntryChoice = {
-      ok: false,
-      cause: 'no-feeds',
-      reason: `no cutting parameters for a ${num3(diameter)} mm ${edge === 'v' ? 'V-bit' : 'cutter'} in ${material}`,
-    };
+  const kindRows = table.filter((e) => e.material === material && (e.edge ?? 'flat') === edge);
+  if (kindRows.length > 0) {
     // #910 — THE CUTTER'S OWN ROW ANSWERS A DIAMETER THE TABLE DOES NOT REACH. The starting table
     // covers hardwood to 3.2 mm; Makera's ⌀4 and ⌀6 balls carry their own hardwood rows, and those
     // rows were never read, so every such ball was refused. When the cutter carries a Makera id
     // whose row covers this material and every one of its numbers is usable here, that row is the
-    // answer — the same catalogue-only row Route A builds. Anything less keeps the old refusal.
+    // answer — the same catalogue-only row Route A builds.
     const own = catalogueCoverageFor(snapshot.rows, material, tool);
-    if (own.kind !== 'covered') return refused;
-    if (CATALOGUE_FIELDS.some((field) => catalogueRefusal(field, own.row[field], machine, refuseFraction) !== null)) {
-      return refused;
+    if (
+      own.kind === 'covered' &&
+      !CATALOGUE_FIELDS.some((field) => catalogueRefusal(field, own.row[field], machine, refuseFraction) !== null)
+    ) {
+      return {
+        ok: true,
+        entry: catalogueOnlyRow(
+          material,
+          diameter,
+          own.row,
+          tool,
+          snapshot,
+          own.via === null ? null : material,
+          catalogueFractions(table, diameter),
+          'diameter',
+        ),
+        catalogueOnly: 'diameter',
+      };
     }
-    return {
-      ok: true,
-      entry: catalogueOnlyRow(
-        material,
-        diameter,
-        own.row,
-        tool,
-        snapshot,
-        own.via === null ? null : material,
-        catalogueFractions(table, diameter),
-        'diameter',
-      ),
-      catalogueOnly: 'diameter',
-    };
+    // THE FEEDS FALLBACK — a row this cutter does not have, but a KIND row the material does. The
+    // nearest band stands in, and `feedsFor` labels it "starting values for <material>, not
+    // measured for this cutter": an owned cutter with no row is cut on the table's seeded values
+    // rather than refused (the ⌀1 mm corn in PLA, whose catalogue rows are carbon-fibre and PCB).
+    // A vendor row this job cannot use does not veto the fallback — the operator's own cutter is
+    // vouched for — and the catalogue tier above still merges every field of it this job CAN use.
+    return { ok: true, entry: nearestRow(kindRows, diameter), catalogueOnly: false, starting: { askedMm: diameter } };
   }
   // A V-bit whose material has no table row goes on to the catalogue exactly as a flat end mill
   // does (#732). Makera's rows are keyed by `g_ID` and state the same four numbers whatever the
@@ -1348,10 +1374,10 @@ function entryFor(
       ok: false,
       cause: 'no-feeds',
       reason:
-        `no cutting parameters for ${named}: the starting table has no row for ${label}, and ` +
-        `${CATALOGUE_LABEL}'s rows are matched by Makera's own cutter id — which this cutter does ` +
-        `not carry, so no row of theirs can name it. Pick a material the starting table covers, or ` +
-        `a cutter Makera sells.`,
+        `no cutting parameters for ${named}: the starting table has no ${edge === 'v' ? 'V-bit' : 'cutter'} row ` +
+        `for ${label} at any diameter, and ${CATALOGUE_LABEL}'s rows are matched by Makera's own cutter id — ` +
+        `which this cutter does not carry, so no row of theirs can name it. Record a row for this cutter ` +
+        `and material in Manage › Feeds, or pick a cutter Makera sells.`,
     };
   }
   if (coverage.kind === 'unlisted') {
@@ -1359,10 +1385,11 @@ function entryFor(
       ok: false,
       cause: 'no-feeds',
       reason:
-        `no cutting parameters for ${named}: the starting table has no row for ${label}, and ` +
-        `${CATALOGUE_LABEL} has no row for ${tool.name} in it. A material the starting table does ` +
-        `not cover is cut on the vendor's own numbers for that exact cutter and material, never on ` +
-        `a guess — sync the catalogue, or pick a material the table covers.` +
+        `no cutting parameters for ${named}: the starting table has no ${edge === 'v' ? 'V-bit' : 'cutter'} row ` +
+        `for ${label} at any diameter, and ${CATALOGUE_LABEL} has no row for ${tool.name} in it. A material ` +
+        `the starting table does not cover is cut on the vendor's own numbers for that exact cutter and ` +
+        `material, never on a guess — record a row in Manage › Feeds, sync the catalogue, or pick a material ` +
+        `the table covers.` +
         syncedSentence(snapshot),
     };
   }
@@ -1374,10 +1401,10 @@ function entryFor(
       ok: false,
       cause: 'no-feeds',
       reason:
-        `no cutting parameters for ${named}: the starting table has no row for ${label}, and ` +
-        `${CATALOGUE_LABEL} lists ${tool.name} for ${listMaterials(coverage.listedFor)}, not ` +
-        `${label}. Makera states no numbers for this pair — sync a catalogue that has one, or pick ` +
-        `a material it lists.` +
+        `no cutting parameters for ${named}: the starting table has no ${edge === 'v' ? 'V-bit' : 'cutter'} row ` +
+        `for ${label} at any diameter, and ${CATALOGUE_LABEL} lists ${tool.name} for ` +
+        `${listMaterials(coverage.listedFor)}, not ${label}. Makera states no numbers for this pair — ` +
+        `record a row in Manage › Feeds, sync a catalogue that has one, or pick a material it lists.` +
         syncedSentence(snapshot),
     };
   }
@@ -1395,8 +1422,9 @@ function entryFor(
       cause: 'no-feeds',
       reason:
         `${CATALOGUE_LABEL} states a ${fieldLabel} of ${row[field]} ${unit} for ${tool.name} in ` +
-        `${label}, which this job cannot use — ${why} — and the starting table has no row for ` +
-        `${label} to answer it instead.`,
+        `${label}, which this job cannot use — ${why} — and the starting table has no ` +
+        `${edge === 'v' ? 'V-bit' : 'cutter'} row for ${label} to answer it instead. Record a row in ` +
+        `Manage › Feeds with a value this machine can use.`,
     };
   }
   return {
@@ -1424,6 +1452,26 @@ function catalogueOnlyNote(entry: FeedsEntry, missing: 'material' | 'diameter'):
 /** Three decimals at most, trailing zeros dropped — the vocabulary every sentence outside obeys. */
 function num3(n: number): string {
   return String(Number(n.toFixed(3)));
+}
+
+/**
+ * THE FEEDS FALLBACK'S OWN SENTENCE: the starting table's row for the cutter's kind is answering,
+ * not a row for this cutter. It says which band stood in, the diameter it stood in for, and where
+ * to record the cutter's own numbers — the one thing the operator can do to replace it.
+ */
+function startingValuesNote(
+  entry: FeedsEntry,
+  material: StockMaterial,
+  edge: 'flat' | 'v',
+  askedMm: number,
+): string {
+  const kind = edge === 'v' ? 'V-bit' : 'cutter';
+  return (
+    ` Starting values for ${MATERIAL_LABELS[material]}, not measured for this cutter — the table's ` +
+    `nearest ${kind} row (${num3(entry.minDiameter)}–${num3(entry.maxDiameter)} mm) stands in for ` +
+    `this ${num3(askedMm)} mm ${kind}. Record a row for the cutter and material in Manage › Feeds ` +
+    'to replace them.'
+  );
 }
 
 /**
@@ -1459,6 +1507,12 @@ export type FeedsResult =
       sources: Record<keyof CutParams, FieldSource>;
       /** One sentence for the panel: where this row's numbers came from. */
       provenance: string;
+      /**
+       * Set when the row is the material's STARTING-TABLE band standing in for a diameter this
+       * cutter has no row at — the feeds fallback. The run sheet and the receipt state it by
+       * these numbers, so nothing has to parse the provenance sentence.
+       */
+      starting?: { material: StockMaterial; askedMm: number; bandMm: readonly [number, number] };
       /**
        * What the machine moved, and what the catalogue could not answer (#325). Both are warnings
        * by construction: an error is a refusal and returns `ok: false` instead.
@@ -1567,6 +1621,8 @@ export function feedsFor(
   const choice = entryFor(snapshot, material, tool, diameter, machine, table, edge, refuseFraction);
   if (!choice.ok) return { ok: false, cause: choice.cause, reason: choice.reason };
   const { entry, catalogueOnly } = choice;
+  const startingNote =
+    choice.starting === undefined ? '' : startingValuesNote(entry, material, edge, choice.starting.askedMm);
 
   // #310 — the catalogue rung. A row a coupon has measured is NOT eligible: "a catalogue row never
   // overrides a measured row" is the rule this tier exists under, and it is the difference between
@@ -1732,9 +1788,21 @@ export function feedsFor(
   const answered = row !== null && used.size > 0;
   const provenance =
     (answered && row ? catalogueProvenance(row, tool, entry, ignored, snapshot, mappedFor) : entry.provenance) +
-    (catalogueOnly === false ? '' : catalogueOnlyNote(entry, catalogueOnly));
+    (catalogueOnly === false ? '' : catalogueOnlyNote(entry, catalogueOnly)) +
+    startingNote;
 
   // The row DID answer (`answered`) rather than merely existing: a vendor row whose numbers were
   // all passed over supplied nothing, and the panel's "Makera's numbers" label would be false.
-  return { ok: true, params, entry, catalogue: answered ? row : null, sources, provenance, diagnostics };
+  return {
+    ok: true,
+    params,
+    entry,
+    catalogue: answered ? row : null,
+    sources,
+    provenance,
+    diagnostics,
+    ...(choice.starting === undefined
+      ? {}
+      : { starting: { material, askedMm: choice.starting.askedMm, bandMm: [entry.minDiameter, entry.maxDiameter] as const } }),
+  };
 }

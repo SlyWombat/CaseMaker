@@ -257,14 +257,16 @@ describe('a catalogue row supplies the four numbers Makera states', () => {
     expect(res.provenance).toContain('no row at this diameter');
   });
 
-  it('still refuses a diameter the table does not reach when the cutter has no row of its own', () => {
+  it('feeds a diameter past the table’s bands from the nearest band, labelled (feeds fallback)', () => {
     setFeedCatalogue([{ ...HARDWOOD_ROW, cutterId: '999999999999' }]);
     const anonymous = feedsFor(feedCatalogueRows(), 'hardwood', flatEndMill(6), Z1);
-    expect(anonymous.ok).toBe(false);
-    if (anonymous.ok) throw new Error('expected a refusal');
-    expect(anonymous.reason).toContain('6 mm');
+    expect(anonymous.ok).toBe(true);
+    if (!anonymous.ok) throw new Error('expected the starting-value fallback');
+    expect(anonymous.provenance).toContain('Starting values for hardwood, not measured for this cutter');
+    // A Makera id the catalogue has no row for takes the same fallback: the row is the material’s
+    // nearest band, not the cutter’s own.
     const unlisted = feedsFor(feedCatalogueRows(), 'hardwood', flatEndMill(6, { id: '888888888888' }), Z1);
-    expect(unlisted.ok).toBe(false);
+    expect(unlisted.ok).toBe(true);
   });
 });
 
@@ -558,7 +560,7 @@ describe('a material the starting table has no row for is answered by the catalo
     if (res.ok) throw new Error('expected a refusal');
     expect(res.reason).toContain('which this job cannot use');
     expect(res.reason).toContain('not a positive number');
-    expect(res.reason).toContain('no row for Aluminium 6061');
+    expect(res.reason).toContain('no cutter row for Aluminium 6061');
   });
 
   it('refuses an rpm far past the ceiling the same way, rather than clamping it', () => {

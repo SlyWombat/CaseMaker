@@ -155,13 +155,17 @@ describe('recommendTool (#211)', () => {
     expect(candidate(rec, 'flat').excluded).toBeUndefined();
   });
 
-  it('excludes a cutter with no feeds row and never measures it', () => {
+  it('excludes a cutter with no row of its kind at any diameter, and never measures it', () => {
+    // The default job is hardwood, which has no V-bit row at any tip: a V-bit candidate has no
+    // numbers of its kind to fall back to, so it is excluded before it is measured. (A flat of
+    // any diameter is fed by the fallback now — that case is `feedsFallback.spec.ts`.)
     const job = jobWithLabel('l1', 'CASE', 1);
     const measure = vi.fn((_key: string) => [row('l1', 1)]);
-    const rec = recommendTool(job, [tool('big', 5.0), tool('flat', 1.0)], [], measure);
+    const engraver = tool('v', 0.3, { shape: 'engraving', tipDiameter: 0.3, halfAngle: 15, angle: 30 });
+    const rec = recommendTool(job, [engraver, tool('flat', 1.0)], [], measure);
     expect(measure).toHaveBeenCalledTimes(1);
     expect(measure).toHaveBeenCalledWith('flat');
-    expect(candidate(rec, 'big').excluded).toBe('no-feeds');
+    expect(candidate(rec, 'v').excluded).toBe('no-feeds');
   });
 
   // #325 — and a handed row the machine cannot run does NOT take the cutter out of the list. This

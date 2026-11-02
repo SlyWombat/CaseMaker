@@ -153,12 +153,16 @@ describe('feedsFor selects a row by cutting diameter', () => {
     expect(small.entry.maxDiameter).toBe(1.6);
   });
 
-  it('a 6 mm cutter has no row: refused, never extrapolated', () => {
+  it('a 6 mm cutter is fed from the nearest band, labelled starting values not extrapolated', () => {
+    // Softwood's flat rows stop at 3.2 mm. The feeds fallback stands the nearest band in rather
+    // than refusing; the provenance says the row is not this cutter's own.
     const res = feedsFor([], 'softwood', flatEndMill(6), Z1);
-    expect(res.ok).toBe(false);
-    if (res.ok) throw new Error('expected a refusal');
-    expect(res.reason).toContain('6 mm');
-    expect(res.reason).toContain('softwood');
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('expected the starting-value fallback');
+    expect(res.provenance).toContain('Starting values for softwood, not measured for this cutter');
+    expect(res.provenance).toContain('1.6–3.2 mm');
+    expect(res.params.feed).toBe(500);
+    expect(res.params.stepDown).toBe(1.0);
   });
 
   it('a ball-nose is refused by cuttingRadiusForSweep, with its reason', () => {
@@ -192,15 +196,17 @@ describe('feedsFor and the V-bit row (#405)', () => {
     expect(res.entry.provenance).toContain('coupon is what');
   });
 
-  it('selects on the EDGE: a 0.4 mm flat end mill takes the V row for nothing', () => {
+  it('selects on the EDGE: a 0.4 mm flat end mill takes the flat band, never the V row', () => {
     // The V row's range (0.3–0.5 mm) covers the flat's diameter, and its numbers were written for
     // a cutter that engages its flank. Were the edge not part of selection, this flat end mill
-    // would run a cone's feed. It has no flat PLA row at 0.4 mm, so the honest answer is a refusal.
+    // would run a cone's feed. It has no flat PLA row at 0.4 mm, so the fallback's nearest FLAT
+    // band (0.8–1.6 mm) stands in — not the V row.
     const flat = flatEndMill(0.4);
     const res = feedsFor([], 'pla', flat, Z1);
-    expect(res.ok).toBe(false);
-    if (res.ok) throw new Error('expected a refusal');
-    expect(res.reason).toContain('0.4 mm');
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('expected the flat-band fallback');
+    expect(res.provenance).toContain('nearest cutter row (0.5–0.8 mm)');
+    expect(res.params.stepDown).toBe(0.2); // the flat PLA row's, never the V row's 1.0
   });
 
   it('refuses a V-bit in a material with no V row, by the catalogue rule every cutter obeys', () => {
@@ -216,10 +222,10 @@ describe('feedsFor and the V-bit row (#405)', () => {
     expect(res.reason).not.toContain('never a cone');
   });
 
-  it('refuses the metal bit’s 0.1 mm tip: outside every V row, so no numbers, no job', () => {
+  it('feeds the metal bit’s 0.1 mm tip from the V band, labelled as not this cutter’s row', () => {
     // The 60° bit is a METAL cutter (the `(Metal)` line by name). Its 0.1 mm tip falls outside the
-    // V row's 0.3–0.5 mm range — a tip, not a shank — so a PLA job on it is refused rather than
-    // handed a feed invented for a different cone. Supporting the geometry is not licensing the job.
+    // V row's 0.3–0.5 mm range — a tip, not a shank. The feeds fallback stands the nearest V band
+    // in and says so; a job is not handed these numbers as if a coupon had measured this cone.
     const metal = flatEndMill(0.1, {
       name: 'Engraving V-bit 60° 0.1 (Metal)',
       typeText: 'Engraving',
@@ -230,9 +236,10 @@ describe('feedsFor and the V-bit row (#405)', () => {
       angle: 60,
     });
     const res = feedsFor([], 'pla', metal, Z1);
-    expect(res.ok).toBe(false);
-    if (res.ok) throw new Error('expected a refusal');
-    expect(res.reason).toContain('V-bit');
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('expected the V-band fallback');
+    expect(res.provenance).toContain('Starting values for PLA, not measured for this cutter');
+    expect(res.provenance).toContain('V-bit row (0.3–0.5 mm)');
   });
 });
 

@@ -633,7 +633,9 @@ describe('EngravePanel — the Generate blocker (#688)', () => {
     act(() => setInventoryEntries([{ key: V_KEY, tool: V_TOOL, provenance: 'EngravePanel blocker spec' }]));
     act(() => {
       const job = defaultEngraveJob();
-      job.stock = { ...job.stock, material: 'pla' };
+      // Hardwood has no V-bit row at any tip: the feeds gate still refuses this engraver (a
+      // material with its own kind row would take the starting-value fallback instead).
+      job.stock = { ...job.stock, material: 'hardwood' };
       job.toolKey = V_KEY;
       job.tool = V_TOOL;
       job.sources = { ...job.sources, tool: 'user' };
@@ -647,7 +649,7 @@ describe('EngravePanel — the Generate blocker (#688)', () => {
     expect(screen.getByTestId('engrave-feeds-refused').textContent).toContain('V-bit');
     // …and now at the button too, in words that name the cutter and the material (§3.6's copy).
     expect(screen.getByTestId('engrave-generate-blocker').textContent).toBe(
-      'No feeds for the ⌀ 0.2 mm 30° engraver on PLA — choose a flat end mill Open the cutter list',
+      'No feeds for the ⌀ 0.2 mm 30° engraver on hardwood — choose a flat end mill Open the cutter list',
     );
 
     fireEvent.click(screen.getByTestId('engrave-generate-fix'));

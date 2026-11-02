@@ -2432,7 +2432,7 @@ export function engraveRegions(
     // read the shank as the cutter.
     ...tipFindings,
     ...engFindings,
-    ...raisedTextPinchFindings(raisedDetails, raisedJudgeTool),
+    ...raisedTextPinchFindings(raisedDetails, raisedJudgeTool, shop.tools?.map((e) => e.tool) ?? null),
     // #860 — a MALE inlay half: the plug's faces judged against the pocket it fills, and what its
     // own erosion removes. Empty on every job but a male half.
     ...inlayPlugFaceFindings(measureInlayPlugs(tl, plan), shop.lostDetailWarnRatio ?? null),

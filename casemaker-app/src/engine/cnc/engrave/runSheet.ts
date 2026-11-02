@@ -4367,7 +4367,7 @@ export function buildRunSheet(
         ? `${generated.cam?.passes ?? 0} depth passes — ` +
           passSteps.map((t) => `${t.passes} × ${fmtNum(t.stepMm)} mm`).join(', ')
         : `${generated.cam?.passes ?? 1} × ${fmtNum(passSteps?.[0]?.stepMm ?? params.stepDown)} mm passes`;
-    const step: RunSheetStep =
+    let step: RunSheetStep =
       surfaceFacts !== null
         ? {
             text: `Spindle, feed and plunge. Vacuum ${params.air ? 'on' : 'off'}.`,
@@ -4389,6 +4389,15 @@ export function buildRunSheet(
                 `plunge · ${passesText} · ` +
                 `${fmtNum(params.stepOver)} mm step-over`,
             };
+    // THE FEEDS FALLBACK IS SAID ON THE SHEET: these numbers are the material's starting band,
+    // not a row for this cutter. The receipt carries the same source as its own diagnostic.
+    if (generated.feeds !== null && generated.feeds.ok && generated.feeds.starting !== undefined) {
+      const st = generated.feeds.starting;
+      const note =
+        `starting values for ${MATERIAL_LABELS[st.material]}, not measured for this cutter — ` +
+        'record a row in Manage › Feeds';
+      step = { ...step, value: step.value === undefined ? note : `${step.value} · ${note}` };
+    }
     cutSteps.push(step);
     programParams = step;
     // #668 — a bore program states its helix pitch beside the parameters it was cut with: the

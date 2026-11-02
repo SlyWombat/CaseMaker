@@ -138,7 +138,8 @@ import {
 import { MARGIN_DEFAULTS } from '../../../src/engine/cnc/engrave/depthBounds';
 import { engraveRegions, measureEngraving, raisedTextMeasure } from '../../../src/workers/sim/engraveGenerate';
 import { cuttingDiameter } from '../../../src/engine/cnc/tool';
-import { feedsFor, type CutParams, type FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
+import { feedsFor, feedsToolForSurface, type CutParams, type FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
+import { MATERIAL_LABELS } from '../../../src/engine/cnc/materials';
 import { jobMachine } from '../../../src/engine/cnc/calibration';
 import { executeProfile } from '../../../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from '../engravePreviewSvg';
@@ -1334,6 +1335,40 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       if (d !== null && d > 0) {
         noteProvenance(provenance(`tool.${program.toolKey}.diameter`, d, 'mm', 'seeded'));
       }
+    }
+    // THE FEEDS FALLBACK IS STATED IN THE RECEIPT: a program's numbers are the material's starting
+    // band standing in for a row its cutter does not have. The run sheet says it in the cut line;
+    // the receipt says it here, once per cutter. The job's own cutter has no registry entry (it
+    // travels as `job.tool`), so it is resolved from the snapshot.
+    const startingKeys = new Set<string>();
+    for (const program of generated.programs) {
+      if ((program.kind ?? 'engrave') === 'facing' || startingKeys.has(program.toolKey)) continue;
+      const entry = entryFor(program.toolKey);
+      const programTool =
+        entry?.tool ??
+        (program.toolKey === job.toolKey && job.tool !== undefined && job.tool !== null ? job.tool : null);
+      if (programTool === null) continue;
+      const programFeeds = feedsFor(
+        catalogueRows,
+        job.stock.material,
+        feedsToolForSurface(programTool),
+        jobMachine(job),
+        undefined,
+      );
+      if (!programFeeds.ok || programFeeds.starting === undefined) continue;
+      startingKeys.add(program.toolKey);
+      const st = programFeeds.starting;
+      runDiagnostics.push(
+        diagnostic(
+          'feeds-starting-values',
+          'info',
+          `${program.toolKey}: starting values for ${MATERIAL_LABELS[st.material]}, not measured for this cutter — ` +
+            `the table's nearest ${st.bandMm[0]}–${st.bandMm[1]} mm band stands in for this ${st.askedMm} mm cutter. ` +
+            'Record a row for the cutter and material in Manage › Feeds to replace them.',
+          'findings',
+          job.name,
+        ),
+      );
     }
 
     // #410 — THE PREDICTED CUT, DRAWN AT THE CUTTER'S REAL WIDTH. The table says a percentage; a

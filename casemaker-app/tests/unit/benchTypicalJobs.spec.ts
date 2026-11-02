@@ -1005,11 +1005,12 @@ describe.skipIf(!existsSync(REAL_JOBS))('#766 slice E the demo set’s no-cutter
    */
   const CHOICES_ON_2026_10_30 = [
     // Was refused with "Setup 1 assigns an item that is not in it: g1" — the goal-item seam.
-    // #869 — THE MEASURED WINNER IS NOW A SPLIT: a ⌀3.175 flat roughs the relief before the ⌀2
-    // ball finishes it, and it beats the single ⌀2×30-ball plan (same fidelity) on measured run
-    // time — the flat's wider step-over is what wins. Both photo-relief jobs take the same plan.
-    { job: 'j07-photo-relief.json', chosen: 'inv:kz-ball-nose-2-12', worst: 100 },
-    { job: 'j07-photo-relief-1mm-ball.json', chosen: 'inv:kz-ball-nose-2-12', worst: 100 },
+    // THE FEEDS FALLBACK WIDENED THE FIELD: the ⌀2×30 ball carries no Makera row, so it used to be
+    // refused for feeds; now it is fed from the material's starting band and its SINGLE-ball plan
+    // (100 % fidelity, 0 tool changes) beats the split flat+⌀2 plan on measured run time. Both
+    // photo-relief jobs take it.
+    { job: 'j07-photo-relief.json', chosen: 'inv:demo-ball-nose-2-30', worst: 100 },
+    { job: 'j07-photo-relief-1mm-ball.json', chosen: 'inv:demo-ball-nose-2-30', worst: 100 },
     // The mouse shell: the same seam, on an STL goal whose 26 mm stock needs the long ball. #785 —
     // the 1 mm ball has a 4 mm flute and the goal is 17.255 mm deep, so it cannot reach it (the
     // holder would enter the part); the 30 mm-flute ball is the candidate that both reaches and

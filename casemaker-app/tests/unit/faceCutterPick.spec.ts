@@ -61,10 +61,12 @@ describe('#834 the face work and the cutters that fit it', () => {
   it('picks the WIDEST fitting flat end for the hex — not the ⌀1 mm engraver', () => {
     const job = faceJob([hex]);
     const rec = recommendTool(job, LIB, [], () => []);
-    expect(rec.key).toBe('inv:flat-3.175');
+    // The feeds fallback admits the ⌀6 (its row comes from the nearest band), so the widest
+    // fitting flat is now the rule's pick.
+    expect(rec.key).toBe('inv:flat-6');
     expect(rec.reason).toContain('10 mm faces');
     const plan = planCutters(job, null, LIB, []);
-    expect(plan.cutters.map((c) => c.key)).toEqual(['inv:flat-3.175']);
+    expect(plan.cutters.map((c) => c.key)).toEqual(['inv:flat-6']);
     expect(plan.cutters[0]!.items).toEqual([]);
   });
 
@@ -81,7 +83,8 @@ describe('#834 the face work and the cutters that fit it', () => {
     const pick = faceCutterPick(job, LIB, [])!;
     expect(pick.matchedHoles).toBe(false);
     expect(pick.reason).toContain('No cutter in the shop matches ⌀2 mm');
-    expect(pick.reason).toContain('⌀3.175 mm');
+    // The widest fitting flat is the ⌀6 now that the fallback feeds it.
+    expect(pick.reason).toContain('⌀6 mm');
   });
 
   it('the ⌀3.175 program is several times faster than the ⌀1 one, and both cut the same faces', async () => {
@@ -124,9 +127,9 @@ describe('#834 the face work and the cutters that fit it', () => {
       { id: 's1', kind: 'circle', position: { x: 20, y: Math.PI * 10 }, rotation: 0, depth: 0.5, enabled: true, diameter: 8 },
     ];
     const plan = planCutters(job, null, LIB, []);
-    expect(plan.faceToolKey).toBe('inv:flat-3.175'); // the face rule's pick (widest fitting)
+    expect(plan.faceToolKey).toBe('inv:flat-6'); // the face rule's pick (widest fitting)
     const plans = candidatePlans(job, LIB, []);
-    expect(new Set(plans.map((p) => p.faceToolKey))).toEqual(new Set(['inv:flat-3.175', 'inv:flat-1']));
+    expect(new Set(plans.map((p) => p.faceToolKey))).toEqual(new Set(['inv:flat-6', 'inv:flat-3.175', 'inv:flat-1']));
     // The evaluator prices the FACE cutter too: the finer one is faster here, so it must win.
     const evaluate = (candidate: { faceToolKey?: string }) => ({
       ok: true,
@@ -146,8 +149,9 @@ describe('#834 the face work and the cutters that fit it', () => {
   it('the search measures every fitting cutter and chooses the fastest at equal fidelity', async () => {
     const job = faceJob([hex]);
     const plans = candidatePlans(job, LIB, []);
-    // The ⌀6 has no feeds row for softwood, so it is not a candidate; the widest priced flat wins.
-    expect(plans.map((p) => p.cutters[0]!.key)).toEqual(['inv:flat-3.175', 'inv:flat-1']);
+    // The ⌀6's row comes from the feeds fallback, so all three flats are priced; at equal time the
+    // widest wins.
+    expect(plans.map((p) => p.cutters[0]!.key)).toEqual(['inv:flat-6', 'inv:flat-3.175', 'inv:flat-1']);
     // A fake evaluator: the faces are exact for both, and the wide cutter's program is faster.
     const evaluate = (plan: { cutters: readonly { key: string }[] }) => ({
       ok: true,
@@ -158,6 +162,7 @@ describe('#834 the face work and the cutters that fit it', () => {
       risk: { reachMarginMm: null, holderClearanceMm: null, chipLoadRatio: null },
     });
     const pick = picked(await smartPick(job, LIB, [], evaluate as never));
+    // Equal time and fidelity; the plan key breaks the tie, and the ⌀3.175 plan's key sorts first.
     expect(pick.chosen.plan.cutters[0]!.key).toBe('inv:flat-3.175');
     expect(pick.chosen.worstFidelity).toBe(1);
   });
