@@ -29,7 +29,8 @@ The welcome page offers four things to make:
 - **Cut it on the CNC** — carve hardwood: a name plate, a coaster, a pocket, an engraving.
 
 This walkthrough tries the first and the last. The **User Manual** covers all four, each with its
-own worked example.
+own worked example. (The CNC side is withheld on the public site unless the address carries
+`?BETA=yes`; the desktop app shows it without the switch.)
 
 ## 3. Make a case
 
@@ -39,21 +40,23 @@ own worked example.
 3. Click **★ Create from quickstart**. The shell generates around the board's real geometry: ports
    lined up with connectors, standoffs under the mounting holes.
 4. In the sidebar, drag the **Wall thickness** slider — the shell rebuilds as you move it.
-5. Under **Case parameters → Joint**, try **Snap-fit**. Catches appear on the shell and the lid
-   without any further setup.
+5. Under **Case parameters → Joint type**, try **Snap-fit**. Catches appear on the shell and the
+   lid without any further setup.
 
 ## 4. Export it
 
-Open **Export** and click **STL (binary)**. The file is in millimetres, upright, ready to drop
-into a slicer — no rotation or unit conversion needed.
+Open **Export** and click **STL (ASCII)** — the default, readable format. The file is in
+millimetres, upright, ready to drop into a slicer — no rotation or unit conversion needed.
 
-## 5. Cut a hardwood name plate
+## 5. Cut a hardwood job
 
-1. Back on the welcome page, click **Cut it on the CNC**.
-2. A cutting job opens already set up: a block of hardwood with three lines of text carved into
-   it, sized to fit a small CNC bed. Nothing to build from scratch for this first look.
-3. Click **Generate**. The app plans the cut, checks it against the stock, and runs a simulated
-   pass — watch the simulation sweep across the block.
+1. Back on the welcome page, click **Cut it on the CNC**. This opens a short wizard: Machine, What
+   are you cutting?, Stock, Holding.
+2. Walk through it without picking anything new, and press **Create the job** on the last step. A
+   fresh job already carries three lines of engraved text on a 100 × 60 × 12 mm hardwood block —
+   nothing to build from scratch for this first look.
+3. In the Job panel, click **Generate**. The app plans the cut, checks it against the stock, and
+   runs a simulated pass — watch the simulation sweep across the block.
 4. When it finishes, the job is ready to post as G-code for a CNC machine, the same way the case
    above was ready to export as an STL.
 

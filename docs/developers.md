@@ -11,15 +11,15 @@ working on the app itself.
 | Node.js | 22.12+ (24 LTS recommended) | Vite 8 + Vitest 4 |
 | npm | bundled with Node 22.12+ | install / run scripts |
 | A modern browser | Chrome, Edge, Firefox, Safari | runtime (WebGL2 + WebAssembly) |
-| (optional) Rust toolchain | stable, ≥ 1.75 | required only to build the **desktop** app via Tauri |
+| (optional) Rust toolchain | stable, ≥ 1.90 | required only to build the **desktop** app via Tauri |
 
 > **Note:** Case Maker has **no Python, no OpenSCAD, no slicer dependency**. Everything runs in the browser via Three.js + Manifold WASM. A slicer (PrusaSlicer / Bambu / OrcaSlicer / Cura) is needed only to print the STL/3MF you export.
 
 ## Install
 
 ```bash
-git clone https://github.com/SlyWombat/case-maker.git
-cd case-maker/casemaker-app
+git clone https://github.com/SlyWombat/CaseMaker.git
+cd CaseMaker/casemaker-app
 npm ci
 ```
 
@@ -31,16 +31,17 @@ The `npm ci` step downloads Three.js, Manifold-3d, React, Vite, Playwright, Taur
 npm run dev
 ```
 
-1. Open <http://localhost:8000> in your browser.
+1. Open <http://localhost:5173> in your browser (Vite's default; set `CASEMAKER_PORT` to use a
+   different one).
 2. The **board picker** greets you: search "rpi-4b" and click the Raspberry
    Pi 4B card, then **★ Create from quickstart**.
 3. Drag the **Wall thickness** slider (sidebar → Case parameters) from
    2mm → 3mm — the case rebuilds in ~50ms.
 4. Toggle individual ports under **Port cutouts** to see USB/HDMI cutouts
    disappear and reappear.
-5. Under **Case parameters → Joint**, select **Snap-fit** — snap catches
+5. Under **Case parameters → Joint type**, select **Snap-fit** — snap catches
    populate automatically.
-6. Open **Export** and click **STL (binary)**. Save to disk.
+6. Open **Export** and click **STL (ASCII)** (the default). Save to disk.
 7. Drag the file into your slicer of choice. PrusaSlicer / Bambu / OrcaSlicer / Cura all open it. The model is in mm, Z-up — no rotation required.
 8. Slice with default 0.2mm layer height. Print. Confirm a real Pi 4B fits the bosses.
 
@@ -49,19 +50,23 @@ If anything went wrong, see [Troubleshooting](#troubleshooting) below.
 ## Run the test suites
 
 ```bash
-npm test                 # Vitest unit tests (~1.5s)
-npm run test:e2e         # Playwright E2E (~60s, requires Chromium)
+npm test                 # Vitest unit tests (9k+ tests, about 11-13 min)
+npm run test:e2e         # Playwright E2E (about 242 tests, about 20 min, requires Chromium)
 npm run typecheck        # TypeScript --noEmit
 npm run lint             # ESLint
 ```
 
-The Playwright suite spins up the Vite dev server on port 8000 automatically. If port 8000 is taken, set `VITE_PORT=8001 npm run test:e2e` (or change [`vite.config.ts`](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/vite.config.ts)).
+The Playwright suite spins up its own dev server on a port derived from the checkout's own path
+(5300-5399), so two worktrees' runs rarely collide; `CASEMAKER_PORT` overrides it if you need a
+specific port. There's no `VITE_PORT` — that's not read anywhere in this project. The **App port**
+in Settings is a different thing again: it's the desktop build's own embedded server (default
+**8000**), not the dev server.
 
 ## Build the production bundle
 
 ```bash
 npm run build            # outputs to casemaker-app/dist/
-npm run preview          # serves the bundle on http://localhost:8000
+npm run preview          # serves the bundle on http://localhost:5173 (or CASEMAKER_PORT)
 ```
 
 ## Build the desktop app (optional)
@@ -71,8 +76,11 @@ Requires the Rust toolchain. On Linux:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
-npm run tauri:build      # produces .msi / .exe / .deb / .AppImage / .dmg per OS
+npm run tauri:build      # produces the Windows NSIS installer (.exe)
 ```
+
+That's the only bundle target configured by default. A Linux `.deb` needs an explicit
+`npm run tauri:build -- --bundles deb`; there's no `.dmg` or `.AppImage` target set up.
 
 If you don't have Rust locally, the **Windows installer** GitHub Actions workflow builds one from a tag or a manual run.
 
@@ -96,7 +104,8 @@ for the full list of subcommands and what each one writes.
 - **`npm install` fails on WSL with `sharp` ENOENT** — your project lives under `/mnt/c/...` (a Windows-mounted drive). Move the working copy into your Linux home (`~/casemaker-app`) and reinstall.
 - **`Module not found: manifold-3d/manifold.wasm?url`** — you skipped `vite-plugin-wasm`. Reinstall dev deps.
 - **Worker silently fails after editing `ProjectCompiler.ts`** — open `window.__caseMaker.getJobError()` and `getLastDiag()` in the browser console. A common cause is a dropped import (`buildExternalAssetOps`).
-- **Port 8000 already in use** — set `VITE_PORT=8001 npm run dev`, or change the port in **Settings** in the UI.
+- **Port 5173 already in use** — set `CASEMAKER_PORT=5174 npm run dev`. (The **App port** in
+  Settings is the desktop server's own port, 8000 by default, and is separate from this.)
 
 ## Next steps
 
