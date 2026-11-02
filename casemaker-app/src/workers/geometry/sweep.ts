@@ -1011,7 +1011,9 @@ export function checkAirMoves(
     }
   }
   if (unchecked > 0) {
-    diagnostics.push({ severity: 'warning', code: 'air-moves-unchecked', message: `${unchecked} air move(s) near the stock not checked: more than ${MAX_AIR_CHECKS} in the job` });
+    // #925 — an unchecked air move below the stock top is a gap in the gate, not a nicety: error,
+    // never downgraded, so it blocks Upload exactly like a proven gouge does.
+    diagnostics.push({ severity: 'error', code: 'air-moves-unchecked', message: `${unchecked} air move(s) near the stock not checked: more than ${MAX_AIR_CHECKS} in the job` });
   }
   for (const pf of prefixes) {
     for (const g of pf.groups.values()) {
