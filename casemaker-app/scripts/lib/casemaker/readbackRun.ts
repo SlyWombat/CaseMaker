@@ -36,15 +36,17 @@ interface Args {
   record?: string;
   history: string;
   dryRun: boolean;
+  list: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { history: DEFAULT_HISTORY, dryRun: false };
+  const args: Args = { history: DEFAULT_HISTORY, dryRun: false, list: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === undefined) continue;
     if (a === '--history') args.history = resolve(argv[++i] ?? '');
     else if (a === '--dry-run') args.dryRun = true;
+    else if (a === '--list') args.list = true;
     else if (a === '--') continue;
     else if (a.startsWith('--')) throw new Error(`unknown flag "${a}"`);
     else if (args.record === undefined) args.record = a;
@@ -58,7 +60,9 @@ function fail(message: string): never {
   throw new CliExit(1);
 }
 
-const USAGE = 'usage: casemaker readback run <record.json> [--history <runHistory.ts>] [--dry-run]';
+const USAGE =
+  'usage: casemaker readback run <record.json> [--history <runHistory.ts>] [--dry-run]\n' +
+  '       casemaker readback run --list [--history <runHistory.ts>]';
 
 /**
  * Apply a filled run record to the machine-written region of `runHistory.ts` (#277).
@@ -87,6 +91,50 @@ async function readbackRunBody(argv: string[], options: CommandOptions): Promise
   } catch (e) {
     fail(`${(e as Error).message}\n${USAGE}`);
     throw e; // unreachable; `fail` exits
+  }
+  // ---------------------------------------------------------------------------------------------
+  // --list (#927): every measured run in the history, the estimate the record carried beside the
+  // machine's own elapsed. Nothing is written and no record file is read.
+  // ---------------------------------------------------------------------------------------------
+  if (args.list) {
+    if (args.record !== undefined) fail(`--list reads the history and takes no record file\n${USAGE}`);
+    let source: string;
+    let runs: RunRecord[];
+    try {
+      source = readFileSync(args.history, 'utf8');
+      runs = extractMeasuredRuns(source, args.history);
+    } catch (e) {
+      fail((e as Error).message);
+      throw e; // unreachable; `fail` exits
+    }
+    out.emitReceipt({
+      version: RECEIPT_VERSION,
+      command: 'readback',
+      ok: true,
+      stage: 'listed',
+      gate: null,
+      inputs: [fileReceipt(args.history)],
+      outputs: [],
+      diagnostics: [],
+      provenance: [],
+      refusals: [],
+      details: {
+        section: 'run',
+        record: null,
+        target: args.history,
+        dryRun: true,
+        feeds: null,
+        run: null,
+        history: runs.map((r) => ({
+          job: r.job,
+          ncFile: r.ncFile,
+          cutOn: r.cutOn ?? '',
+          estimatedSeconds: r.estimatedSeconds,
+          actualSeconds: r.actualSeconds,
+        })),
+      },
+    });
+    return 0;
   }
   if (!args.record) fail(USAGE);
 
