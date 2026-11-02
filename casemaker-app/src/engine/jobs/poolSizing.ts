@@ -134,4 +134,16 @@ export function mbOf(bytes: number): number {
   return Math.round(bytes / (1024 * 1024));
 }
 
+/**
+ * #881 — THE TECHNICAL LINE's words: how many planners the run actually had, and which limit set
+ * the number. Memory-bound reads as the manager asked for — "Planned on 2 workers: the memory
+ * allows 2 of 7." — and a core-bound run says so, rather than pretending the budget decided.
+ */
+export function poolPlannerSentence(sizing: PoolSizing): string {
+  const n = sizing.planners;
+  const workers = `${n} worker${n === 1 ? '' : 's'}`;
+  if (n < sizing.coreCap) return `Planned on ${workers}: the memory allows ${n} of ${sizing.coreCap}.`;
+  return `Planned on ${workers} (the machine’s cores allow no more).`;
+}
+
 export type { LevelPlanMemory };

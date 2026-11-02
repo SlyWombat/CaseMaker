@@ -16,7 +16,6 @@ import {
   type PoolMessage,
 } from '@/engine/jobs/adaptivePool';
 import type { PoolPlanMessage, PoolPlanReply } from '@/workers/adaptivePool.worker';
-import type { PoolSizing } from '@/engine/jobs/poolSizing';
 import { portLevelPlanner, plannerGridCells } from '@/workers/sim/levelPlannerPort';
 import { RegionGeometry, MaterialGrid } from '@/engine/cnc/cam/adaptiveGrid';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
@@ -25,7 +24,9 @@ import {
   deviceMemoryPoolCap,
   estimateLevelPlannerBytes,
   memoryBoundPoolSize,
+  poolPlannerSentence,
   LEVEL_PLANNER_BASE_BYTES,
+  type PoolSizing,
 } from '@/engine/jobs/poolSizing';
 import {
   planLevel,
@@ -103,8 +104,24 @@ describe('#881 — the memory bound', () => {
     ).toBe(1);
   });
 
-  it('lets the device lie about itself only downwards', () => {
-    const huge = estimateLevelPlannerBytes(0);
+  it('says which limit set the number, in the Technical line', () => {
+    const base: PoolSizing = {
+      planners: 2,
+      coreCap: 7,
+      budgetBytes: 640 * MiB,
+      parentBytes: 200 * MiB,
+      levelBytes: 100 * MiB,
+    };
+    expect(poolPlannerSentence(base)).toBe('Planned on 2 workers: the memory allows 2 of 7.');
+    expect(poolPlannerSentence({ ...base, planners: 1 })).toBe(
+      'Planned on 1 worker: the memory allows 1 of 7.',
+    );
+    expect(poolPlannerSentence({ ...base, planners: 7 })).toBe(
+      'Planned on 7 workers (the machine’s cores allow no more).',
+    );
+  });
+
+  it('lets the device lie about itself only downwards', () => {    const huge = estimateLevelPlannerBytes(0);
     expect(deviceMemoryPoolCap(2)).toBe(1);
     expect(deviceMemoryPoolCap(4)).toBe(2);
     expect(deviceMemoryPoolCap(8)).toBe(Number.POSITIVE_INFINITY);
