@@ -541,15 +541,31 @@ export function candidatePlans(
   // still prefers a flat that cuts the text faster, so this only wins where it is the only thing
   // that cuts at all. Cones with an unstated reach are tried: the generator says when one is too
   // shallow, and refusing them here is what hid #762's answer.
+  // #766 fix — A V CARVES TEXT TOO, and (j10) TRACES TOO. On a job whose flat work is text or
+  // line art, a flat can fill the strokes in: a 3.175 flat joins strokes 2 mm apart into one
+  // groove, while a 0.5 mm V keeps each as its own V groove and cuts the text as a V-carve (j14's
+  // dog tag read cleanly with a 60° engraver where small flats lost whole characters). A cone
+  // also cuts regions as V-carves; what it cannot do is drill, cut a part free, or mill a thread.
+  // So it is offered the flat work when the job has line art or is all text and none of those
+  // (j10: 49 strokes, the label and the seed head, no cut-out); a job of pockets alone keeps its
+  // flats, because a V would make sloped walls no design here asks for. The evaluator's
+  // stroke-merge measure then decides, and the ranking still prefers a flat that cuts them
+  // cleanly and faster where both are equal.
   const labelIds = new Set(job.labels.filter((l) => l.enabled && l.construction !== true).map((l) => l.id));
+  const hasTraceWork = (job.traces ?? []).some((t) => t.enabled && !t.construction);
   const allText = flatWork.length > 0 && flatWork.every((w) => labelIds.has(w.id));
-  if (allText) {
-    const textCones = tools
+  const coneIncapable =
+    (job.cutouts ?? []).some((c) => c.enabled) ||
+    (job.drills ?? []).some((d) => d.enabled) ||
+    (job.threads ?? []).some((t) => t.enabled);
+  const engravingOnly = flatWork.length > 0 && !coneIncapable && (hasTraceWork || allText);
+  if (engravingOnly) {
+    const engravers = tools
       .filter((t) => vCone(t.tool) !== null)
       .filter((t) => gate(t))
       .sort(byDiameter)
-      .slice(0, 2);
-    for (const cone of textCones) add(withOthers([{ key: cone.key, items: flatItems }]));
+      .slice(0, 3);
+    for (const cone of engravers) add(withOthers([{ key: cone.key, items: flatItems }]));
   }
   // #842 — every plan that did not choose a face cutter of its own rides the rule's, so the
   // evaluator writes one to the setup either way.
@@ -656,6 +672,9 @@ export const FIDELITY_TIE = 0.001;
  *  2. #765 — the field standing in the joined PINCHES, so a plan that leaves the letters' gaps
  *     bridged cannot win on a high field-area percentage; then how many stay joined.
  *  3. The worst item's fidelity, then the mean, each within {@link FIDELITY_TIE}.
+ *  4. The TRACES the plan merges (and how far a merged neighbour cuts a stroke below its own
+ *     floor), at equal fidelity: a cutter that fills the strokes in loses to one that keeps them
+ *     apart, before the run's time is considered.
  */
 export function byFidelity(a: ScoredPlan, b: ScoredPlan): number {
   const ca = a.counterStandingMm2 ?? 0;
@@ -667,6 +686,21 @@ export function byFidelity(a: ScoredPlan, b: ScoredPlan): number {
   if (a.raisedJoined !== b.raisedJoined) return a.raisedJoined - b.raisedJoined;
   if (Math.abs(a.worstFidelity - b.worstFidelity) > FIDELITY_TIE + 1e-12) return b.worstFidelity - a.worstFidelity;
   if (Math.abs(a.meanFidelity - b.meanFidelity) > FIDELITY_TIE + 1e-12) return b.meanFidelity - a.meanFidelity;
+  // THE STROKES A PLAN MERGES. A trace is a line the cutter follows; when two strokes' capsules
+  // touch, the groove fills in and small forms disappear (the plan's own `trace-self-overlap`
+  // warning), and a merged shallower stroke is cut to the deeper one's floor. At equal measured
+  // fidelity, the cutter that keeps the strokes apart wins; the run's cost decides only after.
+  const ta = a.evaluation.traces;
+  const tb = b.evaluation.traces;
+  const mergedA = ta?.mergedPairs ?? 0;
+  const mergedB = tb?.mergedPairs ?? 0;
+  if (mergedA !== mergedB) return mergedA - mergedB;
+  const overlapA = ta?.worstOverlapMm ?? 0;
+  const overlapB = tb?.worstOverlapMm ?? 0;
+  if (Math.abs(overlapA - overlapB) > 1e-9) return overlapA - overlapB;
+  const deepenA = ta?.worstDeepenMm ?? 0;
+  const deepenB = tb?.worstDeepenMm ?? 0;
+  if (Math.abs(deepenA - deepenB) > 1e-9) return deepenA - deepenB;
   return 0;
 }
 
@@ -781,10 +815,13 @@ export async function smartPick(
   };
   const byShape = new Map<string, ScoredPlan>();
   for (const s of ordered()) if (!byShape.has(lastShape(s.plan))) byShape.set(lastShape(s.plan), s);
-  const shapeFallbacks = [...byShape.keys()]
-    .sort((a, b) => Number(a.split(':')[0]) - Number(b.split(':')[0]))
-    .slice(0, fullFinalists)
-    .map((k) => byShape.get(k)!);
+  // The best plan of each last-cutter shape, RANKED BY THE SAME OBJECTIVE and capped: when a job
+  // has more shape groups than the cap (a cone is a candidate for engraving-only work now, so a
+  // job with traces and text has one more), the group that would have posted best is kept, not
+  // whichever sorts first by cutter count.
+  const shapeFallbacks = [...byShape.values()]
+    .sort((a, b) => byObjective(a, b, toolChangeSeconds))
+    .slice(0, fullFinalists);
   for (const s of shapeFallbacks) if (!fullDone.has(planKey(s.plan))) fullList.push(s);
   fullTotal = fullList.filter((s) => !fullDone.has(planKey(s.plan))).length;
   for (const finalist of fullList) if (!fullDone.has(planKey(finalist.plan))) await full(finalist.plan);

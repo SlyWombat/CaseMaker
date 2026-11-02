@@ -40,7 +40,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import type { Tool } from '@/engine/cnc/tool';
+import { traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { vCone, vDepthLimit } from '@/engine/cnc/vProfile';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
@@ -51,7 +51,8 @@ import {
   type CutterPlanLike,
 } from '@/engine/cnc/engrave/measuredPick';
 import { kindedWork } from '@/engine/cnc/engrave/cutterPlan';
-import { toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import { toPartPlan, tracePaths, traceSelfOverlaps, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import { lineSlotWidth } from '@/engine/cnc/engrave/slot';
 import { PRIOR_REFUSAL_CODES } from '@/engine/cnc/engrave/programSweep';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -201,6 +202,13 @@ export interface PlanEvaluation {
     /** Feed per tooth vs the catalogue's chip load. `null` until the feeds table carries one. */
     chipLoadRatio: number | null;
   };
+  /**
+   * THE TRACES THE PLAN MERGES: two strokes whose cutter sweeps touch are one wider groove, and a
+   * wider groove also cuts the shallower stroke down to the deeper one's floor. Absent when the
+   * job has no traces. Measured from geometry at COARSE (no generation needed) and carried into
+   * FULL, so the pick ranks it in both stages.
+   */
+  traces?: TraceOutcome;
   /**
    * FULL only: the swept comparison for the whole run, when every program could be swept on the
    * stock the previous one left. Null at coarse, and null with `sweepNote` when the chain broke.
@@ -528,6 +536,99 @@ function measureReach(job: EngraveJob, plan: CandidatePlan, tools: readonly Tool
   return margin;
 }
 
+/** Above this many trace segments a plan's merge measure goes per trace, not across traces. */
+const MAX_MERGE_SEGMENTS = 3000;
+
+/** What a plan's cutter widths do to the drawn strokes — see {@link measureTraceMerge}. */
+export interface TraceOutcome {
+  /** Pairs of stroke segments whose swept capsules overlap, summed over the plan's cutters. */
+  mergedPairs: number;
+  /** The worst of those overlaps, mm (0 when none). */
+  worstOverlapMm: number;
+  /** How much deeper than its own floor a merged neighbour cuts the shallower stroke, mm. */
+  worstDeepenMm: number;
+}
+
+/**
+ * THE TRACES THE PLAN WOULD MERGE. `traceSelfOverlapFindings` judges ONE trace item at a time;
+ * a wide cutter also joins DIFFERENT traces (j10: the dandelion's 2-point tufts and rays merge
+ * into one plateau under a 3.175 flat), and that is the case a pick must see. Every trace a
+ * cutter owns is gathered into one path set — group ids offset per item, so a bold stroke's own
+ * passes still do not count against each other — and `traceSelfOverlaps` tests the capsules with
+ * the cutter's widest half-opening. When two merged paths belong to strokes of different depths,
+ * the deeper groove takes the shallower stroke down by their depth difference.
+ */
+export function measureTraceMerge(
+  job: EngraveJob,
+  plan: CandidatePlan,
+  tools: readonly ToolLibraryEntry[],
+): TraceOutcome | undefined {
+  const traces = (job.traces ?? []).filter((t) => t.enabled && !t.construction);
+  if (traces.length === 0) return undefined;
+  let mergedPairs = 0;
+  let worstOverlapMm = 0;
+  let worstDeepenMm = 0;
+  for (const cutter of plan.cutters) {
+    const tool = toolFor(tools, cutter.key);
+    if (tool === null) continue;
+    const owned = traces.filter((t) => cutter.items.includes(t.id));
+    if (owned.length === 0) continue;
+    const paths: [number, number][][] = [];
+    const closed: boolean[] = [];
+    const groups: number[] = [];
+    const depthOfPath: number[] = [];
+    const perItem: { paths: [number, number][][]; closed: boolean[]; groups: number[]; depth: number; radius: number }[] = [];
+    let radiusMax = 0;
+    let groupOffset = 0;
+    let segments = 0;
+    for (const item of owned) {
+      if (lineSlotWidth(item, tool) !== null) continue;
+      const radius = traceRadiusAt(tool, item.depth);
+      if (radius === null) continue;
+      const t = tracePaths(item, tool);
+      perItem.push({ paths: t.paths, closed: t.closed, groups: t.groups, depth: item.depth, radius });
+      t.paths.forEach((path, i) => {
+        paths.push(path);
+        closed.push(t.closed[i] ?? false);
+        groups.push((t.groups[i] ?? 0) + groupOffset);
+        depthOfPath.push(item.depth);
+        segments += path.length >= 2 ? (t.closed[i] ?? false ? path.length : path.length - 1) : 0;
+      });
+      groupOffset += t.groups.reduce((m, g) => Math.max(m, g), 0) + 1;
+      radiusMax = Math.max(radiusMax, radius);
+    }
+    if (paths.length === 0) continue;
+    // The pair test is quadratic. A trace job of ordinary size (j10: ~60 segments) is trivial; an
+    // imported drawing with thousands of segments would make every candidate plan pay n², so past
+    // the cap each trace is measured ALONE — the same test `traceSelfOverlapFindings` runs — and
+    // the cross-trace pairs (the ones a wide flat joins) are left unmeasured rather than growing
+    // the search's cost without bound.
+    // Each overlap carries the depths of the two strokes it joins: in the gathered test from the
+    // path map; in the per-trace fallback both are the trace's own depth (one item has one depth,
+    // so nothing there can be deepened by a neighbour).
+    const measured =
+      segments > MAX_MERGE_SEGMENTS
+        ? perItem.flatMap((m) =>
+            traceSelfOverlaps(m.paths, m.closed, m.radius, m.groups).map((o) => ({ o, da: m.depth, db: m.depth })),
+          )
+        : traceSelfOverlaps(paths, closed, radiusMax, groups).map((o) => ({
+            o,
+            da: depthOfPath[o.a.path] ?? 0,
+            db: depthOfPath[o.b.path] ?? 0,
+          }));
+    for (const { o, da, db } of measured) {
+      // A pair that TOUCHES is a joint the drawing means — two strokes meeting at a point (j10's
+      // tufts start on their rays' ends). The merge that matters is a near-miss along a length,
+      // which is exactly the pair the same-path adjacency rule does not cover.
+      if (o.distance <= 1e-6) continue;
+      mergedPairs += 1;
+      worstOverlapMm = Math.max(worstOverlapMm, o.overlap);
+      worstDeepenMm = Math.max(worstDeepenMm, Math.abs(da - db));
+    }
+  }
+  return { mergedPairs, worstOverlapMm, worstDeepenMm };
+}
+
 function baseVerdict(plan: CandidatePlan): Pick<PlanEvaluation, 'toolChanges' | 'risk'> {
   return {
     // #869 — a goal's rough is one more bit in the spindle before the first program, and its
@@ -547,6 +648,7 @@ function evaluateCoarse(job: EngraveJob, plan: CandidatePlan, ctx: EvalContext):
     return { ...base, ok: false, refusal: 'a multi-setup job is not evaluated by one plan yet', items: [], seconds: null };
   }
   const reach = measureReach(job, plan, ctx.tools);
+  const traces = measureTraceMerge(job, plan, ctx.tools);
   return {
     ...base,
     ok: true,
@@ -554,6 +656,7 @@ function evaluateCoarse(job: EngraveJob, plan: CandidatePlan, ctx: EvalContext):
     items: measureItems(job, plan, ctx, ctx.tools),
     seconds: null,
     risk: { reachMarginMm: reach, holderClearanceMm: reach, chipLoadRatio: null },
+    ...(traces === undefined ? {} : { traces }),
   };
 }
 
