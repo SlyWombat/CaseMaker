@@ -141,6 +141,46 @@ function feedCuts(nc: string): { x: number; z: number }[] {
   return cuts;
 }
 
+/** The XY distance the posted file travels while cutting (every G1 step, modal position). */
+function cutPathLength(nc: string): number {
+  let x = 0;
+  let y = 0;
+  let px = 0;
+  let py = 0;
+  let len = 0;
+  let started = false;
+  for (const line of nc.split('\n')) {
+    const t = line.trim();
+    if (!/^G[01]\b/.test(t)) continue;
+    const mx = t.match(/X(-?\d+(?:\.\d+)?)/);
+    if (mx) x = Number(mx[1]);
+    const my = t.match(/Y(-?\d+(?:\.\d+)?)/);
+    if (my) y = Number(my[1]);
+    if (t.startsWith('G1') && started) len += Math.hypot(x - px, y - py);
+    started = t.startsWith('G1');
+    px = x;
+    py = y;
+  }
+  return len;
+}
+
+/** Distinct 0.5 mm XY cells the posted file cuts through — the ground it sweeps, not its moves. */
+function cutCells(nc: string): number {
+  const seen = new Set<string>();
+  let x = 0;
+  let y = 0;
+  for (const line of nc.split('\n')) {
+    const t = line.trim();
+    if (!/^G1\b/.test(t)) continue;
+    const mx = t.match(/X(-?\d+(?:\.\d+)?)/);
+    if (mx) x = Number(mx[1]);
+    const my = t.match(/Y(-?\d+(?:\.\d+)?)/);
+    if (my) y = Number(my[1]);
+    seen.add(`${Math.round(x / 0.5)},${Math.round(y / 0.5)}`);
+  }
+  return seen.size;
+}
+
 describe('#847 the goal follows its finish with a rest pass', () => {
   it('cuts a ⌀2 rest program over the notch only, and the residual drops', async () => {
     const target = goalTarget();
@@ -169,8 +209,13 @@ describe('#847 the goal follows its finish with a rest pass', () => {
     const restCuts = feedCuts(out.programs[1]!.nc);
     expect(restCuts.filter((m) => Math.abs(m.x - 30) <= 1.5 && m.z < -3.5).length).toBeGreaterThan(0);
     // A partial pass: the rest ball cuts the concavities (the notch, and the fillet the ⌀6 ball
-    // leaves around the part's base), not the whole surface again.
-    expect(restCuts.length).toBeLessThan(feedCuts(out.programs[0]!.nc).length);
+    // leaves around the part's base), not the whole surface again. Measure the GROUND it sweeps,
+    // not its move count: the finish's raster merges long rows into few moves while the rest
+    // contours a narrow region in many short ones. The #909 footprint-correct tip field leaves a
+    // wider fillet at the base (the ball cannot reach the cell columns' near edges), so the rest
+    // follows a little more of it — still a fraction of the surface.
+    expect(cutCells(out.programs[1]!.nc)).toBeLessThan(cutCells(out.programs[0]!.nc));
+    expect(cutPathLength(out.programs[1]!.nc)).toBeLessThan(cutPathLength(out.programs[0]!.nc));
   }, 180_000);
 
   it('with no smaller ball owned, the finish still posts and the run states what it left', async () => {

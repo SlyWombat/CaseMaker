@@ -455,7 +455,9 @@ function keyParts(key: string): { pass: number; rapid: boolean; x: number; y: nu
  *  - the rounded corner's vertical wall, which the finish clears as a full-depth column at one
  *    raster row: y = 38.7 in one file, y = 39.2 in the other.
  */
-const inDomeZone = (x: number, y: number): boolean => Math.hypot(x - DOME.x, y - DOME.y) <= 9.9;
+// #909 — the clamp now reaches over the cutter's whole footprint, so a run can end a little
+// further past the cap's rim; the zone carries two cutter radii of slack (10.5 mm from the centre).
+const inDomeZone = (x: number, y: number): boolean => Math.hypot(x - DOME.x, y - DOME.y) <= 10.5;
 const inCornerZone = (x: number, y: number): boolean => x >= 59.5 && y >= 38;
 const zoneOf = (x: number, y: number): 'dome' | 'corner' | 'other' =>
   inDomeZone(x, y) ? 'dome' : inCornerZone(x, y) ? 'corner' : 'other';
@@ -628,13 +630,15 @@ describe('#873 STEP accuracy: one solid, two files, the same cut', () => {
      * equivalence, not byte identity. #889 re-pinned the counts: merged level runs and the rough's
      * crossings of finished points take each program from about 1.2 M moves to about 13,500.
      */
-    expect(a.moves).toBe(13_496);
-    expect(b.moves).toBe(13_596);
-    expect(a.moves - b.moves).toBe(-100);
-    expect(cmp.sharedUnique).toBe(9_559);
-    expect(cmp.identicalZ).toBe(1_033);
-    expect(cmp.maxDz).toBeCloseTo(0.019, 4);
-    expect(cmp.maxDzKey).toBe('1|G1|52.900|18.500');
+    // #909 re-pinned: the rim's laps now test the wall's foot over the CUTTER'S DISC, so the
+    // corner no longer gets a full-depth column and the two programs are a little shorter.
+    expect(a.moves).toBe(12_862);
+    expect(b.moves).toBe(12_997);
+    expect(a.moves - b.moves).toBe(-135);
+    expect(cmp.sharedUnique).toBe(9_735);
+    expect(cmp.identicalZ).toBe(1_075);
+    expect(cmp.maxDz).toBeCloseTo(0.02, 4);
+    expect(cmp.maxDzKey).toBe('1|G1|47.100|11.500');
     expect(cmp.overBar).toBe(0);
     expect(cmp.maxDz).toBeLessThanOrEqual(bar);
 
@@ -651,9 +655,11 @@ describe('#873 STEP accuracy: one solid, two files, the same cut', () => {
       const p = keyParts(key);
       expect(zoneOf(p.x, p.y), key).not.toBe('other');
     }
-    expect(cmp.onlyA.length).toBe(208);
-    expect(cmp.onlyB.length).toBe(310);
-    expect(cmp.multiplicity).toHaveLength(224);
+    // #909 re-pinned: the footprint clamp moves the rough's runs, and the rim fix removed the
+    // corner's differences (see below), so every remaining difference is on the dome.
+    expect(cmp.onlyA.length).toBe(262);
+    expect(cmp.onlyB.length).toBe(371);
+    expect(cmp.multiplicity).toHaveLength(185);
     for (const m of cmp.multiplicity) {
       const p = keyParts(m.key);
       expect(p.pass, m.key).toBe(1);
@@ -664,7 +670,9 @@ describe('#873 STEP accuracy: one solid, two files, the same cut', () => {
       const p = keyParts(key);
       return zoneOf(p.x, p.y) === 'corner';
     });
-    expect(corner.sort()).toEqual(['2|G0|59.995|38.700', '2|G0|59.995|39.200', '2|G1|59.995|38.700', '2|G1|59.995|39.200']);
+    // #909 — the corner no longer differs: the rim laps' foot test covers the cutter's disc, so
+    // neither file cuts the full-depth column there any more.
+    expect(corner).toEqual([]);
   });
 
   it('sweeps both programs to the same goal surface inside the oracle band', async () => {
@@ -726,23 +734,15 @@ describe('#873 STEP accuracy: one solid, two files, the same cut', () => {
     expect(awayOver).toBe(0);
     expect(awayMax).toBeLessThanOrEqual(bar);
 
-    // The corner tie: 50 cells over the bar, all in the wall band. The 25 inside the stock are the
-    // rough pass's 0.3 mm leave left standing where the finish's row moved; the 25 outside carry
-    // no material. Both are the same tie the program comparison pinned above.
-    expect(insideMax).toBeCloseTo(0.3, 5);
-    expect(insideMax).toBeGreaterThan(0.29);
-    expect(insideOver).toBe(25);
-    expect(outsideOver).toBe(25);
-    expect(over.length).toBe(50);
-    const bx = [Math.min(...over.map((c) => c.x)), Math.max(...over.map((c) => c.x))];
-    const by = [Math.min(...over.map((c) => c.y)), Math.max(...over.map((c) => c.y))];
-    expect(bx[0]).toBeCloseTo(59.55, 3);
-    expect(bx[1]).toBeCloseTo(60.45, 3);
-    expect(by[0]).toBeCloseTo(38.25, 3);
-    expect(by[1]).toBeCloseTo(38.95, 3);
-    for (const cell of over) {
-      expect(cell.x >= 59.5 && cell.y >= 38, `${cell.x},${cell.y}`).toBe(true);
-    }
+    // #909 — THE CORNER TIE IS GONE. The rim's laps used to read the wall's foot from a 3×3 window,
+    // missing the part a ball's radius away at the rounded corner; they cut a full-depth column
+    // there (a 10 mm gouge the goal-overcut check now catches). With the foot taken over the
+    // cutter's whole disc, the laps stop at the part's surface and the two sweeps agree INSIDE the
+    // stock too: no cell is over the bar any more.
+    expect(insideMax).toBeCloseTo(0.019, 4);
+    expect(insideOver).toBe(0);
+    expect(outsideOver).toBe(0);
+    expect(over.length).toBe(0);
 
     // The oracle's own measure, both sweeps judged against the SAME fine 3MF goal at the same
     // 0.05 mm band. The 3MF's finer tessellation reaches 13.25 mm² more of the 4,490 mm² of
@@ -759,11 +759,13 @@ describe('#873 STEP accuracy: one solid, two files, the same cut', () => {
     console.log(describe('STEP', covA));
     console.log(describe('3MF ', covB));
 
-    expect(covA.fraction).toBeCloseTo(0.63035, 5);
-    expect(covB.fraction).toBeCloseTo(0.62842, 5);
+    // #909 re-pinned: neither program cuts the corner's full-depth column now, so both cover more
+    // of the goal; the 3MF's finer tessellation still reaches further (22.749 mm² more).
+    expect(covA.fraction).toBeCloseTo(0.637075, 5);
+    expect(covB.fraction).toBeCloseTo(0.63377, 5);
     expect(Math.abs(covA.fraction - covB.fraction)).toBeLessThanOrEqual(0.005);
-    expect(covA.missedAreaMm2).toBeCloseTo(151.994, 2);
-    expect(covB.missedAreaMm2).toBeCloseTo(165.247, 2);
+    expect(covA.missedAreaMm2).toBeCloseTo(105.708, 2);
+    expect(covB.missedAreaMm2).toBeCloseTo(128.456, 2);
     expect(covA.facingAwayAreaMm2).toBeCloseTo(2392.073, 2);
     expect(covB.facingAwayAreaMm2).toBeCloseTo(2392.073, 2);
   }, 300_000);

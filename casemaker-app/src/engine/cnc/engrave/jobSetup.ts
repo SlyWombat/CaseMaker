@@ -90,6 +90,11 @@ export type JobFindingCode =
   | 'depth-exceeds-stock'
   | 'no-items'
   | 'tool-missing'
+  // #909 — the PLAN cuts into the goal: a pass's swept tip (the rough, the finish or the rest)
+  // goes below the goal's own surface. The oracle compares the simulation with the plan, so this
+  // is the comparison it cannot make; an error, because material cut from the part cannot be put
+  // back.
+  | 'goal-overcut'
   // #740 — a POINTED cutter whose tip the record does not state. A V-bit's tip is the width that
   // reaches the design; for a chamfer and an engraver `diameter` is the shank, so there is no honest
   // geometry sentence to write about the item. Raised where the plane model would otherwise judge

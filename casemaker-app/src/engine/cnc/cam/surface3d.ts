@@ -202,12 +202,18 @@ export function estimateGoalMoves(
   alongStepMm?: number | null,
   /** #862's rim laps, when the run will cut them: the band floor and the finishing cutter. */
   rim?: { floorZ: number; tool: SurfaceTool } | null,
+  /**
+   * #909 — the ROUGH cutter's own tip. The clamp is taken over its whole disc, so the estimate
+   * counts the moves the CAM will really write. Absent: the per-column clamp of a caller that
+   * states no cutter.
+   */
+  roughTool?: SurfaceTool | null,
 ): GoalMoveEstimate {
   const alongStep = positive(alongStepMm) ? (alongStepMm as number) : hf.pitch;
   // A step-down the roughing cannot layer is the CAM's own named refusal; it is not counted here.
   const rough = hf.coveredCount === 0 || !(feeds.stepDown > 0)
     ? 0
-    : roughingMoves(hf, feeds, allowanceMm, alongStep, SAFE_Z, HOP_Z, undefined, true).count;
+    : roughingMoves(hf, feeds, allowanceMm, alongStep, SAFE_Z, HOP_Z, undefined, true, roughTool ?? null).count;
   let finish = 0;
   if (hf.coveredCount > 0) {
     for (const j of rasterRows(hf, feeds.finishStepOver)) {
@@ -688,6 +694,16 @@ export interface SurfaceTool {
 }
 
 /**
+ * #909 — the tool's swept tip shape, as the tip fields and the roughing clamp read it. The tip
+ * fields have taken the whole disc into account since #540; the roughing clamp now does too.
+ */
+export function surfaceToolFor(tool: Tool): SurfaceTool {
+  const d = cuttingDiameter(tool);
+  const radius = d !== null && d > 0 ? d / 2 : 0;
+  return { radius, ball: tool.shape === 'ball' || tool.shape === 'bull' };
+}
+
+/**
  * The feeds a surfacing program runs at — the job's ordinary 2.5D feeds, HANDED IN unchanged.
  * NONE of these is tuned for 3D engagement (slice F, #536); the module labels them and never
  * invents one.
@@ -974,7 +990,9 @@ async function chooseRough(
   opts: RoughingOptions | undefined,
   onLayer: (done: number, total: number) => void,
 ): Promise<RoughChoice> {
-  const raster = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ, onLayer);
+  // #909 — the raster is clamped over the rough cutter's own disc (a flat's disc; a ball's drop),
+  // never its centre column: see `roughClampField`.
+  const raster = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ, onLayer, false, surfaceToolFor(tool));
   const mode = opts?.mode ?? 'raster';
   if (mode === 'raster') return { kind: 'raster', moves: raster.moves, layers: raster.layers, note: null };
   const flat = cuttingRadiusForSweep(tool);
@@ -1445,11 +1463,8 @@ export async function generateSurface3dForGoal(args: {
     isMold(args.target)
       ? moldHeightfield(sampled, args.target.position.y, args.target.position.z - placedSize(args.target).z)
       : sampled;
-  const surfaceToolOf = (tool: Tool): SurfaceTool => {
-    const d = cuttingDiameter(tool);
-    const radius = d !== null && d > 0 ? d / 2 : 0;
-    return { radius, ball: tool.shape === 'ball' || tool.shape === 'bull' };
-  };
+  // #909 — one conversion, shared with the rough clamp: the tool's swept tip shape.
+  const surfaceToolOf = surfaceToolFor;
   const result = await generateSurface3dIR({
     heightfield,
     tool: surfaceToolOf(args.tool),
@@ -1474,6 +1489,18 @@ export async function generateSurface3dForGoal(args: {
     opts: args.opts,
   });
   return { ...result, heightfield };
+}
+
+/**
+ * #909 — THE DISTANCE FROM A POINT TO A GRID CELL'S SQUARE. A cell is a `pitch`-wide square
+ * centred on its sample; the cutter reaches the cell when its disc reaches any part of that
+ * square, so the distance measured is to the square's NEAREST point (0 inside it). Measuring to the
+ * centre instead put a knife edge at the disc's rim, where the ball's flank is steepest.
+ */
+function cellSquareDistance(dx: number, dy: number, pitch: number): number {
+  const ex = Math.max(0, Math.abs(dx) - pitch / 2);
+  const ey = Math.max(0, Math.abs(dy) - pitch / 2);
+  return Math.hypot(ex, ey);
 }
 
 /** The height a ball of `radius` rises above its tip at radial distance `d` (0 for a flat tool). */
@@ -1516,12 +1543,15 @@ export function finishTipField(
   const { nx, ny, z, covered, pitch, topZ } = hf;
   const tip = new Float32Array(nx * ny);
   tip.fill(topZ);
-  const span = Math.max(0, Math.floor(tool.radius / pitch));
-  // Precompute the disc stencil: offsets within the tool radius and the ball rise there.
+  const span = Math.max(0, Math.ceil(tool.radius / pitch));
+  // Precompute the disc stencil: every CELL the tool's disc reaches, and the ball rise at the
+  // cell's NEAREST POINT (#909). A cell is a square, not a point: measuring to its centre made the
+  // knife edge at the rim — a wall cell one radius away flipped in and out on float noise, and on a
+  // ball's flank that is several millimetres of either clamp or gouge.
   const stencil: { di: number; dj: number; rise: number }[] = [];
   for (let dj = -span; dj <= span; dj++) {
     for (let di = -span; di <= span; di++) {
-      const d = Math.hypot(di * pitch, dj * pitch);
+      const d = cellSquareDistance(di * pitch, dj * pitch, pitch);
       if (d > tool.radius) continue;
       stencil.push({ di, dj, rise: ballRise(tool.ball, tool.radius, d) });
     }
@@ -1654,6 +1684,136 @@ export function restResidualVisible(
   return { visible: residual.deepestMm > depth + 1e-9 || share > fraction + 1e-9, share };
 }
 
+/** #909 — what a goal-vs-plan over-cut check found. */
+export interface GoalOvercutReport {
+  /** The deepest point of the planned cut below the goal's own surface, mm; 0 when none. */
+  worstMm: number;
+  /** Covered cells the planned cut reaches below the goal. */
+  cells: number;
+  /** The worst point, in work XY, and the goal and cut Z there; null when there is none. */
+  at: { x: number; y: number; goalZ: number; cutZ: number } | null;
+  /** Which of the caller's stages made the worst cut (an index into `stages`); null when none. */
+  stage: number | null;
+}
+
+/**
+ * #909 — DOES THE PLAN CUT INTO THE PART? The oracle compares the SIMULATION with the PLAN, so a
+ * plan that gouges the goal passes it on every job (the 2026-11-02 demo: the rough cut up to
+ * 7.1 mm into the mouse shell, and the finished part sat a median 0.77 mm under the goal). This is
+ * the comparison the oracle cannot make: the plan's own removal, stamped by the cutter's whole
+ * footprint exactly as the passes cut it, against the goal's heightfield.
+ *
+ * Every stage's feed moves — the rough, the finish, the rest — are stamped cell by cell: a flat's
+ * disc at its tip Z, a ball's rise at the cell's nearest point. Any covered cell whose planned cut
+ * stands below the goal by more than the tolerance is an over-cut — material the part needs, which
+ * no later pass can put back.
+ */
+export function planGoalOvercut(
+  hf: GoalHeightfield,
+  stages: readonly { moves: readonly CamMove[]; tool: SurfaceTool }[],
+  toleranceMm = 0.001,
+): GoalOvercutReport {
+  const { nx, ny, z, covered, pitch, x0, y0 } = hf;
+  if (hf.coveredCount === 0 || stages.length === 0) {
+    return { worstMm: 0, cells: 0, at: null, stage: null };
+  }
+  const cut = new Float32Array(nx * ny);
+  cut.fill(Infinity);
+  // Which stage made each cell's lowest cut, so a refusal can name the pass that gouges rather
+  // than blaming the roughing whatever it was (#909).
+  const cutStage = new Uint8Array(nx * ny);
+  cutStage.fill(255);
+  /**
+   * Stamp one feed LINE: every cell whose SQUARE lies within the cutter's radius of the segment
+   * takes the lowest tip the cutter reaches there. A line's Z ramps between its two moves, as the
+   * machine interpolates it; the lowest point over a cell is at the segment's nearest approach to
+   * it or at an end (a flat's disc: exactly; a ball's rise only makes the ends safer).
+   */
+  const stampStage = (moves: readonly CamMove[], tool: SurfaceTool, stageIndex: number): void => {
+    if (!(tool.radius > 0)) return;
+    const r = tool.radius;
+    /**
+     * #909 — THE MODEL'S OWN SKIN, mm. A pass that follows the goal's outline holds the cutter a
+     * radius off the region's own edges, but a planner's straight chords can pass just inside a
+     * cell's square at a corner: the adaptive walk takes fifth-of-a-radius steps, and the chord
+     * between two allowed points dips up to r/200 inside the wall (its midpoint is checked, so the
+     * real dip is a quarter of that). A graze thinner than this is the grid's resolution, not a
+     * gouge — no machine holds a sub-0.01 mm sliver of a wall, and the goal's columns are 0.1 mm
+     * squares or larger. Real over-cuts, the mouse's 7.1 mm among them, are orders of magnitude
+     * deeper and stay refused.
+     */
+    const skin = Math.max(0.01, r / 100);
+    const stampSegment = (sx: number, sy: number, sz: number, ex: number, ey: number, ez: number): void => {
+      const dx = ex - sx;
+      const dy = ey - sy;
+      const dz = ez - sz;
+      const len2 = dx * dx + dy * dy;
+      const iLo = Math.max(0, Math.floor((Math.min(sx, ex) - r - x0) / pitch));
+      const iHi = Math.min(nx - 1, Math.ceil((Math.max(sx, ex) + r - x0) / pitch));
+      const jLo = Math.max(0, Math.floor((Math.min(sy, ey) - r - y0) / pitch));
+      const jHi = Math.min(ny - 1, Math.ceil((Math.max(sy, ey) + r - y0) / pitch));
+      for (let j = jLo; j <= jHi; j++) {
+        const cy = y0 + j * pitch;
+        for (let i = iLo; i <= iHi; i++) {
+          const k = j * nx + i;
+          if (covered[k] === 0) continue;
+          const cx = x0 + i * pitch;
+          // The segment's nearest approach to this cell, clamped to its ends; the cell's SQUARE is
+          // what the cutter reaches, so the distance is measured to its nearest point (#909).
+          const t = len2 > 0 ? Math.max(0, Math.min(1, ((cx - sx) * dx + (cy - sy) * dy) / len2)) : 0;
+          const d = cellSquareDistance(cx - (sx + dx * t), cy - (sy + dy * t), pitch);
+          if (d > r - skin) continue;
+          const reached = sz + dz * t + ballRise(tool.ball, r, d);
+          if (reached < (cut[k] as number)) {
+            cut[k] = reached;
+            cutStage[k] = Math.min(254, stageIndex);
+          }
+        }
+      }
+    };
+    let prevX = 0;
+    let prevY = 0;
+    let prevZ = 0;
+    for (const move of moves) {
+      if (move.kind !== 'feed') {
+        prevX = move.x;
+        prevY = move.y;
+        prevZ = move.z;
+        continue;
+      }
+      stampSegment(prevX, prevY, prevZ, move.x, move.y, move.z);
+      prevX = move.x;
+      prevY = move.y;
+      prevZ = move.z;
+    }
+  };
+  stages.forEach((stage, index) => stampStage(stage.moves, stage.tool, index));
+  const tol = Number.isFinite(toleranceMm) && toleranceMm > 0 ? toleranceMm : 0;
+  let worstMm = 0;
+  let cells = 0;
+  let at: GoalOvercutReport['at'] = null;
+  let stage: number | null = null;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
+      if (covered[k] === 0) continue;
+      const reached = cut[k] as number;
+      if (!Number.isFinite(reached)) continue;
+      const goalZ = z[k] as number;
+      const below = goalZ - reached; // positive: the plan cuts below the goal's surface
+      if (!(below > tol)) continue;
+      cells += 1;
+      if (below > worstMm) {
+        worstMm = below;
+        at = { x: x0 + i * pitch, y: y0 + j * pitch, goalZ, cutZ: reached };
+        const which = cutStage[k] as number;
+        stage = which === 255 ? null : which;
+      }
+    }
+  }
+  return { worstMm, cells, at, stage };
+}
+
 /**
  * Contiguous runs of cuttable columns in grid-row `j`, as `[iStart, iEnd]` inclusive pairs. With
  * `only` (#847), a cell is cuttable only where the mask says so — the rest pass's own region.
@@ -1737,9 +1897,15 @@ export function dilateMask(hf: GoalHeightfield, mask: Uint8Array, radiusMm: numb
 
 /**
  * RASTER ROUGHING in step-down layers (stage 2a). For each Z layer from the top down, the tool
- * rasters the footprint; at each sample its tip rides at the layer Z, clamped UP to `H + allowance`
- * so it never reaches the goal surface. A sample where the clamp reaches the stock top has no
- * material to remove and opens a gap — the pass retracts and re-enters.
+ * rasters the footprint; at each sample its tip rides at the layer Z, clamped UP to the lowest tip
+ * that keeps the cutter's whole FOOTPRINT at or above the goal plus the allowance, so it never
+ * reaches the goal surface. A sample where the clamp reaches the stock top has no material to
+ * remove and opens a gap — the pass retracts and re-enters.
+ *
+ * #909 — THE CLAMP IS THE DISC, NOT THE CENTRE. A flat end mill cuts every column under its disc
+ * at the tip Z; clamping only the centre column let the disc pass below a higher neighbour's
+ * surface — a wall the centre could not see — and the rough gouged up to 7 mm into the part on the
+ * demo's mouse shell. The field is taken once per pass by `roughClampField`.
  *
  * #889 — A LEVEL CUTS WHAT IT REMOVES. A sample whose clamp held the tip at or above the level
  * before this one was finished there; a segment between two finished samples was already cut,
@@ -1758,6 +1924,107 @@ export function dilateMask(hf: GoalHeightfield, mask: Uint8Array, radiusMm: numb
  */
 export const ROUGH_CROSS_LIFT_MM = 1;
 
+/**
+ * #909 — THE ROUGHING CLAMP, TAKEN OVER THE CUTTER'S WHOLE DISC. Per covered cell: the lowest tip
+ * that keeps the tool's footprint at or above the goal plus the allowance — the same
+ * `max(surface − rise)` the finishing tip field uses, plus the allowance on the goal cells. Uncut
+ * (stock) cells and the grid's outside clamp to the stock top exactly as the finishing field does,
+ * so the tool also stays off the blank outside the cleared band. Without a stated cutter (a caller
+ * that passes none), the legacy per-column clamp is returned.
+ */
+function roughClampField(
+  hf: GoalHeightfield,
+  tool: SurfaceTool | null,
+  allowance: number,
+  alongStep: number,
+): Float32Array {
+  const { nx, ny, z, covered, pitch, topZ } = hf;
+  const field = new Float32Array(nx * ny);
+  if (tool === null || !(tool.radius > 0)) {
+    for (let k = 0; k < field.length; k++) {
+      field[k] = covered[k] === 0 ? topZ : (z[k] as number) + allowance;
+    }
+    return field;
+  }
+  // #909 — THE CLAMP IS THE CUTTER'S WHOLE REACH, NOT ITS CENTRE COLUMN, and it is taken as the
+  // SEPARABLE MAX over the square that CONTAINS the disc. The square is conservative (it reaches a
+  // disc's corner distance diagonally), so the tip it produces is never below the exact disc's —
+  // it can only leave more material, which the finish lifts. Its cost is O(cells) whatever the
+  // cutter's size, which the planning budget needs: the estimate runs it once per pitch it tries,
+  // and an exact disc on a 0.02 mm grid is billions of ops.
+  //
+  // A flat's disc reaches half a sample past each sampled centre (the program is sampled every
+  // `alongStep`), so its square is widened by that; a ball's surface ends at its radius.
+  const radius = tool.ball ? tool.radius : tool.radius + Math.max(0, alongStep) / 2;
+  const need = new Float32Array(nx * ny);
+  for (let k = 0; k < need.length; k++) {
+    need[k] = covered[k] === 0 ? topZ : (z[k] as number) + allowance;
+  }
+  const span = Math.max(0, Math.ceil(radius / pitch));
+  return squareMax(need, nx, ny, span);
+}
+
+/**
+ * #909 — the max of `src` over a (2·span+1)² square, in two separable passes (rows, then
+ * columns) with a monotonic deque, O(nx·ny) whatever the span.
+ */
+function squareMax(src: Float32Array, nx: number, ny: number, span: number): Float32Array {
+  const n = nx * ny;
+  const row = new Float32Array(n);
+  // Rows: max over [i-span, i] (forward) and [i, i+span] (backward), combined.
+  const fwd = new Float32Array(n);
+  const bwd = new Float32Array(n);
+  const dq = new Int32Array(Math.max(nx, ny) + 1);
+  for (let j = 0; j < ny; j++) {
+    const base = j * nx;
+    let head = 0;
+    let tail = 0;
+    for (let i = 0; i < nx; i++) {
+      const v = src[base + i] as number;
+      while (tail > head && (src[base + (dq[tail - 1] as number)] as number) <= v) tail--;
+      dq[tail++] = i;
+      while ((dq[head] as number) < i - span) head++;
+      fwd[base + i] = src[base + (dq[head] as number)] as number;
+    }
+    head = 0;
+    tail = 0;
+    for (let i = nx - 1; i >= 0; i--) {
+      const v = src[base + i] as number;
+      while (tail > head && (src[base + (dq[tail - 1] as number)] as number) <= v) tail--;
+      dq[tail++] = i;
+      while ((dq[head] as number) > i + span) head++;
+      bwd[base + i] = src[base + (dq[head] as number)] as number;
+    }
+    for (let i = 0; i < nx; i++) row[base + i] = Math.max(fwd[base + i] as number, bwd[base + i] as number);
+  }
+  // Columns: the same, on `row`.
+  const out = new Float32Array(n);
+  const colFwd = new Float32Array(n);
+  const colBwd = new Float32Array(n);
+  for (let i = 0; i < nx; i++) {
+    let head = 0;
+    let tail = 0;
+    for (let j = 0; j < ny; j++) {
+      const v = row[j * nx + i] as number;
+      while (tail > head && (row[(dq[tail - 1] as number) * nx + i] as number) <= v) tail--;
+      dq[tail++] = j;
+      while ((dq[head] as number) < j - span) head++;
+      colFwd[j * nx + i] = row[(dq[head] as number) * nx + i] as number;
+    }
+    head = 0;
+    tail = 0;
+    for (let j = ny - 1; j >= 0; j--) {
+      const v = row[j * nx + i] as number;
+      while (tail > head && (row[(dq[tail - 1] as number) * nx + i] as number) <= v) tail--;
+      dq[tail++] = j;
+      while ((dq[head] as number) > j + span) head++;
+      colBwd[j * nx + i] = row[(dq[head] as number) * nx + i] as number;
+    }
+    for (let j = 0; j < ny; j++) out[j * nx + i] = Math.max(colFwd[j * nx + i] as number, colBwd[j * nx + i] as number);
+  }
+  return out;
+}
+
 function roughingMoves(
   hf: GoalHeightfield,
   feeds: SurfaceFeeds,
@@ -1768,6 +2035,11 @@ function roughingMoves(
   onLayer?: (done: number, total: number) => void,
   /** #889 — count the moves without holding them (the budget's estimate); `moves` is then empty. */
   countOnly = false,
+  /**
+   * #909 — the rough cutter's own tip; the clamp is taken over its disc. Absent: the per-column
+   * clamp of a caller that states no cutter.
+   */
+  tool: SurfaceTool | null = null,
 ): { moves: CamMove[]; layers: number; count: number } {
   // #889 — packed, and collinear feeds merged on the way in: a level's flat stretches are one
   // move each, not one per cell.
@@ -1788,12 +2060,10 @@ function roughingMoves(
     );
   }
   const { pitch, x0, y0, topZ, minZ } = hf;
-  // The clamp surface: how high the tool must stay at each covered column.
-  const floorAt = (i: number, j: number): number => {
-    const idx = j * hf.nx + i;
-    if (hf.covered[idx] === 0) return topZ; // no goal here: nothing to remove
-    return (hf.z[idx] as number) + allowance;
-  };
+  // #909 — the clamp surface: the lowest tip that keeps the rough cutter's whole disc at or above
+  // the goal plus the allowance, per covered column (see `roughClampField`).
+  const clampField = roughClampField(hf, tool, allowance, alongStep);
+  const floorAt = (i: number, j: number): number => clampField[j * hf.nx + i] as number;
   // Layers: step down from the top until the deepest clamp (minZ + allowance) is reached.
   const deepest = minZ + allowance;
   const levels: number[] = [];
@@ -2541,17 +2811,23 @@ function rimMoves(
     .map((loop) => decimateLoop(loop, along))
     .filter((loop) => loop.length >= 2);
   if (paths.length === 0) return { moves: [], laps: 0, tip: null, count: 0 };
-  // The wall's foot at a contour point: the highest covered cell around it (the boundary cell the
-  // contour runs through, and its neighbours if a rounded corner puts the point between cells).
+  // The wall's foot at a contour point: the highest covered cell the CUTTER'S DISC reaches there
+  // (cells as squares). A 3×3 window read only the corner's own band cells and missed the part a
+  // ball's radius away: at a tight corner (a band narrower than the tool) the lap's flank then cut
+  // the part's rounded edge down to the floor — a 10 mm gouge on the STEP-accuracy fixture (#909).
+  const footReach = tool.radius + hf.pitch;
+  const footSpan = Math.max(1, Math.ceil(footReach / hf.pitch));
   const footAt = (x: number, y: number): number => {
     const i = Math.round((x - hf.x0) / hf.pitch);
     const j = Math.round((y - hf.y0) / hf.pitch);
     let foot = -Infinity;
-    for (let dj = -1; dj <= 1; dj++) {
-      for (let di = -1; di <= 1; di++) {
+    for (let dj = -footSpan; dj <= footSpan; dj++) {
+      for (let di = -footSpan; di <= footSpan; di++) {
         const ii = i + di;
         const jj = j + dj;
         if (ii < 0 || jj < 0 || ii >= hf.nx || jj >= hf.ny) continue;
+        const d = cellSquareDistance(di * hf.pitch, dj * hf.pitch, hf.pitch);
+        if (d > footReach) continue;
         const k = jj * hf.nx + ii;
         if (hf.covered[k] === 1) foot = Math.max(foot, hf.z[k] as number);
       }
