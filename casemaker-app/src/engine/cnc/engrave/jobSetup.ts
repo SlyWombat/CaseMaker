@@ -549,6 +549,12 @@ export interface JobFinding {
    */
   goalFlipSides?: Face[];
   /**
+   * #914 — on `goal-unreached`, each flip side's BAND in mm, aligned with `goalFlipSides`: how
+   * deep below that side's stock top face the chosen cutter reaches. Null where the side reaches
+   * its whole depth, so the setups engine floors only the sides the plan says end short.
+   */
+  goalFlipBands?: (number | null)[];
+  /**
    * #872 — on `goal-unreached`, the share of the goal's surface the SIDES' union reaches
    * geometrically (0…1). The sentence states it; the panel does not have to recompute it.
    */

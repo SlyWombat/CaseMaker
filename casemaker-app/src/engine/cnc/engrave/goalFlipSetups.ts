@@ -251,12 +251,19 @@ export type FlipSetupsResult =
  * Convert a plan's faces into the document's side setups. Side 1 is the job's current setup,
  * materialised with its goal; each later side gets the goal in its own work frame and a setup
  * with the orientation, the mount and — where the hold exists — the pin reference.
+ *
+ * #914 — `bandsMm` (aligned with `faces`) turns a plan's reach bands into each side's goal floor:
+ * a side whose band ends short of the goal's depth gets that band as its `bandMm`, measured — as
+ * the generator reads it — down from the goal's OWN top. In every setup's work frame the stock's
+ * top face is z = 0 (the origin is the turned stock's top), so the band from that face is simply
+ * `−bandMm` in work Z and the goal's own band is `position.z + band`.
  */
 export function planFlipSetups(
   job: EngraveJob,
   target: EngraveTargetObject,
   faces: readonly Face[],
   tools?: readonly { key: string; tool: Tool }[],
+  bandsMm?: readonly (number | null)[],
 ): FlipSetupsResult {
   if (faces.length < 2) return { ok: false, reason: 'a flip plan needs at least two sides' };
   if (job.setups !== undefined) return { ok: false, reason: 'this job already states its setups' };
@@ -284,7 +291,16 @@ export function planFlipSetups(
   const setups: JobSetup[] = [];
   const goals: EngraveTargetObject[] = [];
 
-  const firstGoal: EngraveTargetObject = { ...target, id: newId('goal'), setupId: base.id };
+  // #914 — the plan's band for a side, as the goal's own floor. Absent/null, or a band that would
+  // not reach below the goal's own top, states nothing and leaves the goal as it was.
+  const banded = (goal: EngraveTargetObject, index: number): EngraveTargetObject => {
+    const band = bandsMm?.[index];
+    if (band == null || !(band > 0)) return goal;
+    const depth = goal.position.z + band;
+    return depth > 0 ? { ...goal, bandMm: Number(depth.toFixed(3)) } : goal;
+  };
+
+  const firstGoal: EngraveTargetObject = banded({ ...target, id: newId('goal'), setupId: base.id }, 0);
   goals.push(firstGoal);
   setups.push({
     id: base.id,
@@ -294,13 +310,13 @@ export function planFlipSetups(
     tools: [job.toolKey],
   });
 
-  for (const { turned } of laterTurns) {
+  for (const [index, { turned }] of laterTurns.entries()) {
     if (!turned.ok) continue; // unreachable: checked above
     const id = newId('setup');
     // `orient` returns [row, row, row]; this module works on the flat row-major form.
     const R = turned.matrix.flat() as unknown as Mat3;
     const placed = goalForSetup(target, stock, R);
-    const goal: EngraveTargetObject = { ...placed, id: newId('goal'), setupId: id };
+    const goal: EngraveTargetObject = banded({ ...placed, id: newId('goal'), setupId: id }, index + 1);
     goals.push(goal);
     const pins = hold === null ? undefined : pinsFor(hold, stock, R);
     setups.push({

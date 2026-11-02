@@ -73,7 +73,7 @@ function statedReach(tool: Tool): number | null {
  * catalogue match needs a stated vendor id on BOTH sides: `id: null`/`'0'` is the post's way of
  * saying "this cutter has no Makera id", and two no-id cutters must never be taken for each other.
  */
-export function knownReach(tool: Tool, entries: readonly ToolLibraryEntry[]): ToolReach | null {
+export function knownReach(tool: Tool, entries: readonly { key: string; tool: Tool }[]): ToolReach | null {
   const stated = statedReach(tool);
   if (stated !== null) return { mm: stated, source: 'stated', catalogueName: null };
   const id = vendorId(tool);

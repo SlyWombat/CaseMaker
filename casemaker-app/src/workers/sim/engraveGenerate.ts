@@ -4725,8 +4725,10 @@ export async function generateGoalProgram(
   const reachBlocking = reachFindings.filter((f) => f.severity === 'error');
   // #872 — WHAT THE TOP SETUP LEAVES UNREACHED. Measured geometrically here (faces pointing away,
   // the shadow band) and paired with the flip plan that finishes it; inform-only, so it rides
-  // with the findings on every path that posts a program.
-  const coverageFindings = goalFlipFindings(job, goal);
+  // with the findings on every path that posts a program. #914 — the chosen cutter's own reach
+  // bounds each side's band, so the plan states what this cutter can cut rather than what the
+  // geometry alone allows.
+  const coverageFindings = goalFlipFindings(job, goal, shop.tools ?? [], tool);
   if (reachBlocking.length > 0) {
     return {
       ...base,

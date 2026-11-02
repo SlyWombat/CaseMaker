@@ -90,6 +90,21 @@ function relief(): CoverageMesh {
 const VISE: MountSpec = { kind: 'vise', viseOpeningMm: 120 };
 const TAPE: MountSpec = { kind: 'tape' };
 
+/** A blank the sphere sits centred in, its top on the stock's top face: 15 mm clear of every side. */
+const WIDE = { x: 60, y: 60, z: 32 };
+
+/** The UV sphere on the stock's top face, centred in an `sx × sy` blank. */
+function centeredSphere(r: number, sx: number, sy: number): CoverageMesh {
+  const base = sphere(r);
+  const positions = new Float32Array(base.positions);
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i] = positions[i]! + (sx / 2 - r);
+    positions[i + 1] = positions[i + 1]! + (sy / 2 - r);
+    positions[i + 2] = positions[i + 2]! - 2 * r;
+  }
+  return { positions, indices: base.indices };
+}
+
 function plan(mesh: CoverageMesh, over: Partial<FlipPlanInput> = {}) {
   return goalFlipPlan({
     mesh,
@@ -140,5 +155,47 @@ describe('#872 the flip plan', () => {
     // Every side-up orientation stands the 60 mm stock across a 30 mm opening: none is offered.
     const reasons = p.dropped.filter((d) => d.reason.includes('opening'));
     expect(reasons.length).toBeGreaterThan(0);
+  });
+});
+
+describe('#914 the reach-aware flip plan', () => {
+  // The sphere centred on the stock's top face, 15 mm clear of every side face: the upper half is
+  // visible from the top, the lower half from the flip, and each half runs 15 mm to the equator.
+  const mesh = (): CoverageMesh => centeredSphere(15, WIDE.x, WIDE.y);
+
+  it('a cutter that reaches the whole depth plans exactly the geometric sides', () => {
+    const geometric = plan(mesh(), { stockSize: WIDE });
+    const reaching = plan(mesh(), { stockSize: WIDE, reachMm: 40 });
+    expect(reaching.sides.map((s) => s.faceUp)).toEqual(geometric.sides.map((s) => s.faceUp));
+    expect(reaching.reachedFraction).toBeCloseTo(geometric.reachedFraction, 9);
+    expect(reaching.sides.every((s) => s.remainderMm === 0)).toBe(true);
+    expect(reaching.sides.every((s) => s.beyondReachMm2 === 0)).toBe(true);
+    expect(reaching.stopped).toBe('target-reached');
+  });
+
+  it('a short cutter states each side’s band and its remainder, and stops at the reach limit', () => {
+    const p = plan(mesh(), { stockSize: WIDE, reachMm: 10 });
+    expect(p.sides.map((s) => s.faceUp)).toEqual(['top', 'bottom']);
+    // The top side sees the sphere's upper half: 15 mm to its equator. The flipped side's frame
+    // puts the same equator 17 mm down — the sphere sits 2 mm off the blank's bottom.
+    expect(p.sides[0]!.needMm).toBeCloseTo(15, 1);
+    expect(p.sides[1]!.needMm).toBeCloseTo(17, 1);
+    // A 10 mm reach keeps 1 mm clear for the holder: a 9 mm band on each side.
+    for (const side of p.sides) {
+      expect(side.bandMm).toBeCloseTo(9, 6);
+      expect(side.remainderMm).toBeCloseTo(side.needMm - 9, 6);
+      expect(side.beyondReachMm2).toBeGreaterThan(0);
+    }
+    expect(p.stopped).toBe('reach-limit');
+    // The two caps cannot reach the equatorial band, so the plan does not claim the target.
+    expect(p.reachedFraction).toBeLessThan(FLIP_TARGET_FRACTION);
+    expect(p.reachedFraction).toBeGreaterThan(0.4);
+    // No goal setting states a finishing step-over: the seam's floor stands.
+    expect(p.seamMm).toBe(0.5);
+  });
+
+  it('the seam follows the goal’s finishing step-over when it states one', () => {
+    const p = plan(mesh(), { stockSize: WIDE, reachMm: 10, finishStepOverMm: 0.8 });
+    expect(p.seamMm).toBe(0.8);
   });
 });

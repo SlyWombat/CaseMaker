@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clearTargetObjectMeshCache, readTargetObjectFile, targetObjectMesh } from '@/engine/import/targetObject';
 import { goalForSetup, planFlipSetups, reholdSetupGoals, turnsOfMatrix } from '@/engine/cnc/engrave/goalFlipSetups';
+import { goalSideNeedMm } from '@/engine/cnc/engrave/goalReach';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -146,6 +147,24 @@ describe('#872 the flip setup conversion', () => {
     const { job, goal } = await sphereJob();
     const result = planFlipSetups({ ...job, setups: [] }, goal, ['top', 'bottom'], [DRILL]);
     expect(result.ok).toBe(false);
+  });
+
+  it('#914 — a side the plan says ends short carries its band, from its own stock top', async () => {
+    const { job, goal } = await sphereJob();
+    // A blank 6 mm thicker than the sphere, so the flipped side's goal top sits 6 mm below ITS
+    // stock top: the band has to be stated from the goal's own top (the generator's floor).
+    const thick = { ...job, stock: { ...job.stock, thickness: STOCK.thickness + 6 } };
+    const result = planFlipSetups(thick, goal, ['top', 'bottom'], [DRILL], [null, 10]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The top side reaches its whole depth (null): no floor is stated.
+    expect(result.goals[0]!.bandMm).toBeUndefined();
+    // The flipped goal's own top is 6 mm below its stock top, so a 10 mm band from that face is
+    // 4 mm from the goal's own top.
+    expect(result.goals[1]!.position.z).toBeCloseTo(-6, 6);
+    expect(result.goals[1]!.bandMm).toBeCloseTo(4, 6);
+    // What the generator reads: the side's band reaches 10 mm below its stock top.
+    expect(goalSideNeedMm(result.goals[1]!)).toBeCloseTo(10, 6);
   });
 });
 

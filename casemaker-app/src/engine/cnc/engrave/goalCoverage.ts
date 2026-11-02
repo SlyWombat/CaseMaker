@@ -90,6 +90,8 @@ export interface TriangleFacts {
   nz: number;
   /** The unit normal in the setup frame — the plan compares directions to spot one flat face. */
   normal: [number, number, number];
+  /** Its lowest point in the setup frame, mm — the depth a side must reach to cut all of it (#914). */
+  lowZ: number;
   /** The goal's own top at the centroid's cell, or null outside the grid. */
   goalTop: number | null;
   /** The first class that applies: facing away, or shadowed; otherwise visible (tolerance aside). */
@@ -114,23 +116,24 @@ export function coverageTriangles(mesh: CoverageMesh, goal: GoalHeightfield, opt
       (tri.ay + tri.by + tri.cy) / 3,
       (tri.az + tri.bz + tri.cz) / 3,
     ];
+    const lowZ = Math.min(tri.az, tri.bz, tri.cz);
     const goalTop = goalTopAt(goal, centre[0], centre[1]);
     if (!(area > 0)) {
-      out.push({ areaMm2: 0, centre, nz, normal, goalTop, cls: 'facingAway' });
+      out.push({ areaMm2: 0, centre, nz, normal, lowZ, goalTop, cls: 'facingAway' });
       continue;
     }
     if (nz < facingDown) {
-      out.push({ areaMm2: area, centre, nz, normal, goalTop, cls: 'facingAway' });
+      out.push({ areaMm2: area, centre, nz, normal, lowZ, goalTop, cls: 'facingAway' });
       continue;
     }
     // The face's own highest point over its cell: its top vertex, plus what its own slope adds
     // across one cell. Only a surface ABOVE that is an overhang.
     const high = Math.max(tri.az, tri.bz, tri.cz) + (Number.isFinite(slope) ? slope * goal.pitch : 0);
     if (goalTop !== null && goalTop > high + shadowMm) {
-      out.push({ areaMm2: area, centre, nz, normal, goalTop, cls: 'shadowed' });
+      out.push({ areaMm2: area, centre, nz, normal, lowZ, goalTop, cls: 'shadowed' });
       continue;
     }
-    out.push({ areaMm2: area, centre, nz, normal, goalTop, cls: 'visible' });
+    out.push({ areaMm2: area, centre, nz, normal, lowZ, goalTop, cls: 'visible' });
   }
   return out;
 }
