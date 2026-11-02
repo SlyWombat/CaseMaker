@@ -8,12 +8,13 @@
  * not.
  *
  * This test is the gate that keeps it that way: a hand-in that pastes "(`/Fabrication.md` §7.5)"
- * or "(#535)" into the guide fails here, in the suite every hand-in runs.
+ * or "(#535)" into a manual fails here, in the suite every hand-in runs.
  *
  * TWO THINGS ARE OUT OF SCOPE HERE:
  *  - image references — the image lint owns them (a figure must be bundled, never remote);
- *  - the developer documents (Technical Reference, Contributing), which may keep file paths and
- *    have not been rewritten yet; this lint does not hold them to the rule.
+ *  - the FOR DEVELOPERS page, which may name repo paths (a builder needs them) but still carries
+ *    no issue numbers. The developer-internal documents (Technical Reference, Contributing) are
+ *    not held to either rule yet.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -23,20 +24,29 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 /**
- * The end-user documents this lint holds. The User Manual and Getting Started join this list when
- * their own rewrite lands; they are being rewritten to the same rule.
+ * The end-user documents this lint holds: the Guide, the User Manual and Getting Started.
  */
-const END_USER = ['casemaker-app/src/docs/cnc-guide.md'];
+const END_USER = [
+  'casemaker-app/src/docs/cnc-guide.md',
+  'casemaker-app/src/docs/user-manual.md',
+  'casemaker-app/src/docs/getting-started.md',
+];
+
+/**
+ * The For Developers page: a builder may meet repo paths (and needs them to clone and build), but
+ * an issue number is still tracker provenance, not a fact. Only the issue rule applies here.
+ */
+const DEVELOPERS_PAGE = 'casemaker-app/src/docs/developers.md';
 
 /** A `.md` a reader may meet: a link from one in-app document to another. */
-const IN_APP_DOC = /(user-manual|getting-started|technical-reference|CHANGELOG|CONTRIBUTING|cnc-guide)\.md$/;
+const IN_APP_DOC = /(user-manual|getting-started|technical-reference|developers|CHANGELOG|CONTRIBUTING|cnc-guide)\.md$/;
 
 /**
  * The same link, spelled as the full GitHub address the app renders. The URL happens to contain
  * `docs/`, but it is a link a reader can follow — not a path pointing into a checkout.
  */
 const IN_APP_DOC_URL =
-  /https?:\/\/github\.com\/[^)\s]+\/(?:docs|casemaker-app\/src\/docs)\/(?:user-manual|getting-started|technical-reference|CHANGELOG|CONTRIBUTING|cnc-guide)\.md/g;
+  /https?:\/\/github\.com\/[^)\s]+\/(?:docs|casemaker-app\/src\/docs)\/(?:user-manual|getting-started|technical-reference|developers|CHANGELOG|CONTRIBUTING|cnc-guide)\.md/g;
 
 function docText(rel: string): string {
   return readFileSync(join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
@@ -95,4 +105,11 @@ describe('#880 the end-user documents carry no tracker entries and no repo paths
       expect(art, 'a box drawn in characters is a figure the app should draw (src/docs/img/)').toEqual([]);
     });
   }
+
+  it(`${DEVELOPERS_PAGE}: a builder document may keep paths, never issue numbers`, () => {
+    expect(
+      offendingLines(docText(DEVELOPERS_PAGE), /#\d{2,4}\b/),
+      'the For Developers page may name repo paths, but an issue number is tracker provenance',
+    ).toEqual([]);
+  });
 });

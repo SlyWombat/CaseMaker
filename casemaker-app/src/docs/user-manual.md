@@ -182,7 +182,7 @@ tools.
 4. Add **Dividers** to split the bin into bays sized to your own tools — a socket set, a
    screwdriver, a wrench. Each divider is its own printed part.
 
-   ![A toolbox bin with its lid above it and dividers inside the bin forming pockets of different sizes](img/toolbox-tray-dividers.svg)
+   ![A toolbox bin with its lid above it and dividers inside the bin forming pockets of different sizes](img/toolbox-bin-dividers.svg)
    *The bin's dividers pocket it to whatever you're storing.*
 5. Export. The bin, the lid, and each divider export as separate parts — they print without
    supports and assemble by registering on each other, no connector needed.
