@@ -143,8 +143,23 @@ fn windows_bind_exclusive(addr: SocketAddr) -> std::io::Result<TcpListener> {
         sin_zero: [u8; 8],
     }
 
+    /// #900 — `WSADATA` as winsock2.h declares it: the two version WORDs, the two fixed-size
+    /// description buffers (257 and 129 bytes, the NUL included) and the vendor pointer. Written
+    /// out rather than declared as an opaque buffer so its size is the API's own.
+    #[repr(C)]
+    struct WsaData {
+        w_version: u16,
+        w_high_version: u16,
+        sz_description: [u8; 257],
+        sz_system_status: [u8; 129],
+        i_max_sockets: u16,
+        i_max_udp_dg: u16,
+        lp_vendor_info: *mut u8,
+    }
+
     #[link(name = "ws2_32")]
     extern "system" {
+        fn WSAStartup(w_version_requested: u16, lp_wsa_data: *mut WsaData) -> i32;
         fn socket(af: i32, ty: i32, protocol: i32) -> usize;
         fn setsockopt(s: usize, level: i32, optname: i32, optval: *const u8, optlen: i32) -> i32;
         fn bind(s: usize, name: *const SockAddrIn, namelen: i32) -> i32;
@@ -156,6 +171,33 @@ fn windows_bind_exclusive(addr: SocketAddr) -> std::io::Result<TcpListener> {
     /// Winsock reports through WSA functions, not through the Win32 last-error `std` reads.
     fn wsa_error() -> std::io::Error {
         std::io::Error::from_raw_os_error(unsafe { WSAGetLastError() })
+    }
+
+    /// #900 — WINSOCK IS STARTED BEFORE THE FIRST RAW CALL, ONCE.
+    ///
+    /// Loading ws2_32 does not initialise Winsock: every function in it answers `WSANOTINITIALISED`
+    /// (os error 10093) until `WSAStartup` has run. `std::net` does that lazily on its own first
+    /// socket, and in the GUI the WebView or another std socket has usually got there first — which
+    /// is why this only ever broke `casemaker --headless`: a headless start binds the server before
+    /// anything else touches the network, and the raw `socket()` below failed at once.
+    ///
+    /// The result is kept for the process's life: `WSAStartup` is reference-counted, and a second
+    /// call would only add a reference nothing ever releases. A failure is remembered too, so every
+    /// bind reports the same code rather than retrying.
+    static WINSOCK: std::sync::OnceLock<Result<(), i32>> = std::sync::OnceLock::new();
+    // SAFETY: `WsaData` is the API's own out-struct; a successful call overwrites all of it, and a
+    // failed one leaves the zeroed buffer we passed, which is never read.
+    let winsock = *WINSOCK.get_or_init(|| unsafe {
+        let mut data: WsaData = std::mem::zeroed();
+        // MAKEWORD(2, 2) — the last Winsock version Windows has ever required.
+        match WSAStartup(0x0202, &mut data) {
+            0 => Ok(()),
+            // `WSAStartup` returns the failure code in its return value, not in `WSAGetLastError`.
+            code => Err(code),
+        }
+    });
+    if let Err(code) = winsock {
+        return Err(std::io::Error::from_raw_os_error(code));
     }
 
     let ipv4 = match addr.ip() {
@@ -775,6 +817,57 @@ mod tests {
             hijack(port).is_ok(),
             "the port is free once the listener is dropped"
         );
+    }
+
+    /// #900 — A FRESH PROCESS MUST BE ABLE TO START THE HEADLESS LISTENER.
+    ///
+    /// Inside this harness Winsock is always already running — the test above creates a std socket
+    /// first, and so do the other tests — which is exactly why the bug shipped: a HEADLESS start
+    /// binds before anything else touches the network, and `socket()` then fails with
+    /// `WSANOTINITIALISED` (os error 10093). A test in this process cannot see that, so the real
+    /// body runs in a spawned child of the test binary, filtered to this one test, where
+    /// `bind_listener` is the FIRST network call the process makes.
+    #[cfg(windows)]
+    #[test]
+    fn the_headless_listener_binds_in_a_process_that_never_touched_winsock() {
+        use std::process::Command;
+
+        let exe = std::env::current_exe().expect("the test binary's path");
+        let out = Command::new(exe)
+            // Run ONLY the child body (a substring filter, which matches its full path
+            // `server::tests::winsock_is_cold_in_this_process`), single-threaded so nothing else
+            // in the harness can touch a socket before it.
+            .args(["winsock_is_cold_in_this_process", "--test-threads=1"])
+            .env("CASEMAKER_WSA_COLD_CHILD", "1")
+            .output()
+            .expect("spawn the test binary as a fresh process");
+        assert!(
+            out.status.success(),
+            "bind_listener failed in a fresh process (WSAStartup not run?):\n{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "the child ran no test:\n{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
+
+    /// The child body of the fresh-process test above. A normal suite run never executes it: the
+    /// filter only selects it in the spawned process, which is marked by the environment variable.
+    /// It binds BEFORE any other network call, which is the whole point.
+    #[cfg(windows)]
+    #[test]
+    fn winsock_is_cold_in_this_process() {
+        if std::env::var_os("CASEMAKER_WSA_COLD_CHILD").is_none() {
+            return;
+        }
+        let listener = bind_listener(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .expect("bind_listener in a process that never touched Winsock");
+        let addr = listener.local_addr().expect("the bound address");
+        assert!(addr.port() > 0);
+        drop(listener);
     }
 
     /// #838 — the hijacker's half: a Winsock socket with `SO_REUSEADDR` set, binding the loopback
