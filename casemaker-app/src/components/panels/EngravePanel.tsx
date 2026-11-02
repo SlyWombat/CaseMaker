@@ -1019,7 +1019,7 @@ export function EngravePanel(): JSX.Element {
    * made where the item is actually cut — the setup's `tools` and `toolItems` — and the job's own
    * key follows when it was the one replaced, so the program, the row and the sentence agree.
    */
-  const useDeeperVCutter = (labelId: string, newKey: string): void => {
+  const swapInDeeperVCutter = (labelId: string, newKey: string): void => {
     const current = useEngraveJobStore.getState().job;
     const fromKey = (() => {
       for (const setup of current.setups ?? []) {
@@ -1049,7 +1049,7 @@ export function EngravePanel(): JSX.Element {
   /**
    * #856 — THE V-CARVE'S ONE PRESS: when a V-carve is cut short of the material it asks for, and
    * the house owns a V-bit whose cone reaches that material, the item's row offers it. The button
-   * names the cutter; pressing swaps the bit that owns the item (see `useDeeperVCutter`).
+   * names the cutter; pressing swaps the bit that owns the item (see `swapInDeeperVCutter`).
    */
   const vCarveDeeperAction = (f: JobFinding): JSX.Element | null => {
     if (f.code !== 'vcarve-depth-beyond-cone' || f.severity !== 'warning' || f.materialMm === undefined || f.labelId === undefined) {
@@ -1067,7 +1067,7 @@ export function EngravePanel(): JSX.Element {
     if (best === null) return null;
     const chosen = best as { key: string; name: string };
     return (
-      <button type="button" data-testid={`engrave-vcarve-deeper-tool-${f.labelId}`} onClick={() => useDeeperVCutter(f.labelId!, chosen.key)}>
+      <button type="button" data-testid={`engrave-vcarve-deeper-tool-${f.labelId}`} onClick={() => swapInDeeperVCutter(f.labelId!, chosen.key)}>
         Use the {chosen.name}
       </button>
     );
@@ -1135,6 +1135,9 @@ export function EngravePanel(): JSX.Element {
   // #730 — the record for THIS job's machine (its `machineId` is a profile id), not the house's
   // first machine: two machines give two beds.
   const locationView = useLocationStore((s) => s.location);
+  // The memo is real: this build has no React compiler, so the eslint compiler rule's
+  // "could not preserve" is a false positive on a stable store record and a string key.
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- see above; the memo is load-bearing
   const locationMachine = useMemo(() => machineForJob(locationView, job.machineId), [locationView, job.machineId]);
   const bedFacts = useMemo(
     () =>
@@ -2094,12 +2097,15 @@ export function EngravePanel(): JSX.Element {
   // so an ordinary job pays one array scan and nothing else. Memoised because the derivation
   // mirrors and copies the whole marked document; `tools` is a dependency because `jobTool`
   // resolves through the registry when the job carries no snapshot.
+  // #930 lint fix — the memo stays: this build has no React compiler, so the rule's "dependency
+  // may be modified later" would cost a geometry derivation on every render of the panel.
   const maleInlay = useMemo((): InlayMaleResult | null => {
     const inlayTool = toolForJob(job, tools);
     if (inlayTool === null) return null;
     if (!inlayMarked(job).some((entry) => entry.mark.role === 'female' && entry.item.enabled)) return null;
     const inlayCone = vCone(inlayTool);
     return inlayCone === null ? null : inlayMaleJob(job, inlayCone);
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- real memo; no React compiler in this build
   }, [job, tools]);
   const maleRefusal = maleInlay !== null && !maleInlay.ok ? maleInlay.reason : null;
   const saveMaleInlay = async (): Promise<void> => {
@@ -2518,6 +2524,8 @@ export function EngravePanel(): JSX.Element {
   // render pays nothing for a verification pass it does not show; pressing the tab changes `mode`,
   // which rebuilds this on the next render. Nothing is stored: every visit re-runs `collect()`,
   // rather than replaying a verdict from an edit ago.
+  // #930 lint fix — the memo stays: this build has no React compiler, and Cut must not rebuild
+  // the whole preflight hub on every render while it is up (every keystroke, every store tick).
   const preflight = useMemo(
     () =>
       mode === 'cut'
@@ -2542,6 +2550,7 @@ export function EngravePanel(): JSX.Element {
             bedChanged: bedChangedSentence(job, locationMachine),
           })
         : null,
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- real memo; no React compiler in this build
     [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem, bedFacts, locationMachine],
   );
 
@@ -2733,8 +2742,9 @@ export function EngravePanel(): JSX.Element {
    */
   const saveStallReport = (): void => {
     const runState = useEngraveRunStore.getState();
+    const at = new Date().getTime();
     const report = buildSimStallReport({
-      at: Date.now(),
+      at,
       jobName: job.name,
       message: currentRunError?.message ?? '',
       progress: useSimStore.getState().progress,
@@ -2743,7 +2753,7 @@ export function EngravePanel(): JSX.Element {
       diagnostics: runState.simDiagnostics,
       crumbs: flightCrumbs(),
     });
-    void saveText(JSON.stringify(report, null, 2), simStallReportFileName(Date.now()), 'application/json');
+    void saveText(JSON.stringify(report, null, 2), simStallReportFileName(at), 'application/json');
   };
   const runPitchFinding =
     run.staleSince === null
