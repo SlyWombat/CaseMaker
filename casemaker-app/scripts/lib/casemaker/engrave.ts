@@ -143,7 +143,7 @@ import { jobMachine } from '../../../src/engine/cnc/calibration';
 import { executeProfile } from '../../../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
-import { KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
+import { efficiencyThresholds, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
 import { bootstrap, loadCatalogue, type LoadedCatalogue } from '../../../src/platform/headless/bootstrap';
 import { defaultEngraveJob } from '../../../src/engine/cnc/engrave/defaults';
 import { tabSettings } from '../../../src/engine/cnc/cam/tabSettings';
@@ -1240,7 +1240,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // absent, this is the wall clock the command has always used.
       options.now ?? new Date(),
       MARGIN_DEFAULTS,
-      opts.sheetOptions ?? {},
+      { ...(opts.sheetOptions ?? {}), efficiencyThresholds: efficiencyThresholds(shopDefaults) },
     );
     if (sheet.header.fileName !== names[firstEngraving]!.ncFile) {
       fail(`run sheet file name drifted: expected ${names[firstEngraving]!.ncFile}, got ${sheet.header.fileName}`);
@@ -1285,6 +1285,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
                 rapidMm: cam.rapidMm ?? null,
                 cutMm: cam.cutMm ?? null,
                 baselineRapidMm: cam.baselineRapidMm ?? null,
+                // #926 — measured by `summarize`; absent only on a stored result from before it.
+                efficiency: cam.efficiency,
               },
         sim: {
           ok: true,

@@ -126,6 +126,31 @@ export const engraveCamSchema = z
       .nonnegative()
       .nullable()
       .describe('Rapid travel the pre-#487 ordering would have spent, mm, or null.'),
+    /**
+     * #926 — the program's efficiency measures. OPTIONAL: a receipt written before the field
+     * existed still parses and round-trips (the committed 176-g32 fixture is one), and every run
+     * this build emits carries it because `summarize` always measures.
+     */
+    efficiency: z
+      .object({
+        cycleSeconds: z.number().nonnegative().describe('The cycle estimate the figures were taken from, s.'),
+        rapidSeconds: z.number().nonnegative().describe('Seconds in rapid (air) moves.'),
+        feedSeconds: z.number().nonnegative().describe('Seconds in feed runs, through the per-run trapezoid.'),
+        airFraction: z.number().nonnegative().describe('Rapid seconds over cycle seconds.'),
+        hopCount: z.number().int().nonnegative().describe('XY traverses at the hop height.'),
+        hopSeconds: z.number().nonnegative().describe('Seconds spent on those hops.'),
+        commandedFeedSeconds: z.number().nonnegative().describe('Feed distance over commanded feed, s.'),
+        feedUtilisation: z.number().nonnegative().nullable().describe('Commanded feed time over feed time, or null.'),
+        rapidMm: z.number().nonnegative().describe('XY rapid travel, mm.'),
+        cutMm: z.number().nonnegative().describe('XY cutting travel, mm.'),
+        rapidCutRatio: z.number().nonnegative().nullable().describe('Rapid over cutting travel, or null.'),
+        sweptAreaMm2: z.number().nonnegative().nullable().describe('Area the cutter sweeps on its feed moves, mm², or null.'),
+        deepestCutMm: z.number().nonnegative().describe('Deepest feed Z, mm below the stock top.'),
+        tourBoundMm: z.number().nonnegative().nullable().describe('MST lower bound on the air path, mm, or null.'),
+        tourExcess: z.number().nullable().describe('How far past the bound the air path runs, or null.'),
+      })
+      .describe('The program’s efficiency measures (#926).')
+      .optional(),
   })
   .describe('The CAM summary for one program.');
 
@@ -639,6 +664,18 @@ function engraveLines(receipt: Extract<Receipt, { command: 'engrave' }>): string
           `  travel     ${cam.rapidMm.toFixed(1)} mm rapid / ${cam.cutMm.toFixed(1)} mm cut ` +
             `(${ratio(cam.rapidMm)}); pre-#487 order ${cam.baselineRapidMm.toFixed(1)} mm ` +
             `(${ratio(cam.baselineRapidMm)})`,
+        );
+      }
+      // #926 — what the program spends its time on, so a receipt is judged on more than "it ran".
+      if (cam.efficiency !== undefined) {
+        const e = cam.efficiency;
+        const share = (v: number): string => `${Math.round(v * 100)} %`;
+        lines.push(
+          `  efficiency ${share(e.airFraction)} in air (${Math.round(e.rapidSeconds)} s of ` +
+            `${Math.round(e.cycleSeconds)} s), ${e.hopCount} hop${e.hopCount === 1 ? '' : 's'} ` +
+            `(${Math.round(e.hopSeconds)} s), feed at ` +
+            `${e.feedUtilisation === null ? '—' : share(e.feedUtilisation)} of commanded` +
+            (e.tourExcess === null ? '' : `, air path ${share(e.tourExcess)} past the tour bound`),
         );
       }
     }

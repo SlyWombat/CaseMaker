@@ -55,7 +55,7 @@ import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type 
 import { slotFacts, type SlotCutterOption } from '@/engine/cnc/engrave/slot';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
-import { readDefault } from '@/platform/defaultsClient';
+import { efficiencyThresholds, readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTargetObjects, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 // #835 — one setup's own work, measured and written back into that setup only.
@@ -2649,6 +2649,8 @@ export function EngravePanel(): JSX.Element {
           // #451 — the shop's `runSheet.blankToleranceMm`: how far a measured blank may differ
           // before the sheet says "change the job and regenerate".
           blankToleranceMm: shopDefault('runSheet.blankToleranceMm').value,
+          // #926 — the two efficiency thresholds the sheet judges a program against.
+          efficiencyThresholds: efficiencyThresholds(shopDefaults),
         },
       ),
     );

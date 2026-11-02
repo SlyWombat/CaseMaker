@@ -161,7 +161,7 @@ import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import { generateChamfer3d, type Chamfer3dCut } from '@/engine/cnc/cam/chamfer3d';
 import { targetRim } from '@/engine/cnc/engrave/targetRim';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { concatToolpathIR, estimateCycleSeconds, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStatsOf, type CamMove, type CamOperation, type CamPassStep, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, efficiencyOf, estimateCycleSeconds, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStatsOf, type CamMove, type CamOperation, type CamPassStep, type ProgramEfficiency, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
   DEFAULT_GRID_PITCH_MM,
   DEFAULT_MAX_CELLS,
@@ -428,6 +428,13 @@ export interface EngraveCamSummary {
    * the sheet prints its pre-#735 wording from `passes` and the feeds row.
    */
   passSteps?: CamPassStep[];
+  /**
+   * #926 — the program's efficiency measures (air fraction, hops, feed utilisation, the swept
+   * strip, the tour bound), from `efficiencyOf` on the SAME IR the counts above were taken from.
+   * OPTIONAL for the same reason as the travel numbers: a stored result from before the field
+   * exists still reads, and a caller that has no IR to measure says nothing rather than inventing.
+   */
+  efficiency?: ProgramEfficiency;
 }
 
 /**
@@ -2979,7 +2986,7 @@ function fmtArea(mm2: number): string {
 }
 
 /** Count what the panel reports: operations, cutting moves, estimated seconds, depth passes. */
-function summarize(ir: Pick<ToolpathIR, 'operations' | 'ordering'>): EngraveCamSummary {
+function summarize(ir: ToolpathIR, rapid: RapidEstimate): EngraveCamSummary {
   let cuttingMoves = 0;
   let passes = 0;
   let estimatedSeconds = 0;
@@ -3035,6 +3042,8 @@ function summarize(ir: Pick<ToolpathIR, 'operations' | 'ordering'>): EngraveCamS
     finishOperations,
     throughOperations,
     ...(everyOperationDeclared && passSteps.length > 0 ? { passSteps } : {}),
+    // #926 — measured on the same IR, with the same rapid model the cycle estimate above uses.
+    efficiency: efficiencyOf(ir, rapid),
   };
 }
 
@@ -4594,7 +4603,7 @@ export function generateRotaryGoalProgram(
     resolutionNote: field.resolutionNote,
     bbox: pathBbox(relief.ir),
   };
-  const cam = summarize(relief.ir);
+  const cam = summarize(relief.ir, mill.rapidEstimate);
   const program: EngraveProgram = {
     kind: 'engrave',
     setupIndex: 1,
@@ -5282,7 +5291,7 @@ export async function generateGoalProgram(
     bbox: pathBbox(ir),
   });
   const surfaceCheck: SurfaceProgramCheck = checkOf(finishIr, splitRough ? 0 : surfaced.roughingLayers);
-  const cam = summarize(finishIr);
+  const cam = summarize(finishIr, mill.rapidEstimate);
   const program: EngraveProgram = {
     kind: 'engrave',
     setupIndex: 1,
@@ -5312,7 +5321,7 @@ export async function generateGoalProgram(
           frameNc: null,
           frameVerify: null,
           programHash: programHash(roughNc),
-          cam: summarize(roughIr),
+          cam: summarize(roughIr, mill.rapidEstimate),
         };
 
   // #847 — WHAT THE FINISH LEFT, AND THE REST PASS THAT TAKES IT. The measurement is the finish's
@@ -5531,7 +5540,7 @@ export async function generateGoalProgram(
           frameNc: null,
           frameVerify: null,
           programHash: programHash(postedRest.text),
-          cam: summarize(restIr),
+          cam: summarize(restIr, mill.rapidEstimate),
         };
         restFacts = {
           toolKey: restPick.entry.key,
@@ -5675,7 +5684,7 @@ export async function generateGoalProgram(
       frameNc: null,
       frameVerify: null,
       programHash: programHash(chamferPosted.text),
-      cam: summarize(chamferIr),
+      cam: summarize(chamferIr, mill.rapidEstimate),
     };
   })();
 
@@ -6006,7 +6015,7 @@ async function generateSurfacePrimitiveProgram(
       ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
     ]),
     feeds: resolved,
-    cam: summarize(surfaced.ir),
+    cam: summarize(surfaced.ir, mill.rapidEstimate),
     nc,
     verify: null,
     surfaceCheck,
@@ -6478,7 +6487,7 @@ async function generateFaceProgram(
         stage: 'done',
         findings: [],
         feeds: fineFeeds,
-        cam: summarize(fineIr),
+        cam: summarize(fineIr, mill.rapidEstimate),
         nc: postedFine.text,
         frame: 'rotary',
         verify: fineVerify,
@@ -6568,7 +6577,7 @@ async function generateFaceProgram(
     });
   }
 
-  const cam = summarize(ir);
+  const cam = summarize(ir, mill.rapidEstimate);
   const one: Omit<EngraveGenerated, 'programs'> = {
     ...base,
     ok: true,
@@ -8069,7 +8078,7 @@ async function generateOneProgram(
   // physically sits 2 mm below the faced top in BOTH frames. A shift here would double-lower the
   // cut by the full facing depth once that re-touch lands.
   const minRapidZ = ir.hopZ;
-  const cam = summarize(ir);
+  const cam = summarize(ir, mill.rapidEstimate);
   if (shop.finish != null && (cam.roughOperations ?? 0) + (cam.finishOperations ?? 0) > 0) {
     // V regions and drills emit no `passKind`, so the ids are exactly the items this program split.
     finishFacts = {
@@ -8280,7 +8289,7 @@ async function generateOneProgram(
         stage: 'done',
         findings: [],
         feeds,
-        cam: summarize(neckIr),
+        cam: summarize(neckIr, mill.rapidEstimate),
         nc: postedNeck.text,
         frame: neckIr.frame,
         verify: neckVerify,
