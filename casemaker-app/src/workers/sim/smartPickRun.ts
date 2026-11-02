@@ -130,6 +130,8 @@ export async function runSmartPick(
     if (e instanceof SupersededError) return null;
     throw e;
   }
+  // #910 — a stated refusal: no plan to summarise (the pre-check above normally answers first).
+  if (pick.refused === true) return null;
   const chosen = pick.chosen;
   return {
     jobKey,

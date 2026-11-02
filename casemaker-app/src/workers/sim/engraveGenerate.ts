@@ -49,7 +49,6 @@ import {
   cuttingForTrace,
   cuttingRadiusForSweep,
   drillPointAngle,
-  flatEndMill,
   pointLength,
   statedCuttingSize,
   tipNotRecorded,
@@ -5782,7 +5781,7 @@ async function generateSurfacePrimitiveProgram(
   // The job's 2.5D feeds, reused unchanged (the goal path's rule): a ball or bull resolves through
   // a FLAT PROXY of its cutting diameter, because `feedsFor` cannot feed a shape it cannot trace.
   const isRound = tool.shape === 'ball' || tool.shape === 'bull';
-  const feedTool = isRound ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)` }) : tool;
+  const feedTool = feedsToolForSurface(tool);
   const resolved = feedsFor(catalogue, job.stock.material, feedTool, mill, job.cutOverride, shop.feeds ?? undefined);
   if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
 

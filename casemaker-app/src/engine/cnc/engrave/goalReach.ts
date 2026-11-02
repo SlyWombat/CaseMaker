@@ -112,6 +112,18 @@ export function goalNeedMm(goal: EngraveTargetObject): number {
   return base < 0 ? -base : 0;
 }
 
+/**
+ * #910 — how deep THIS SIDE's program cuts below the stock top, mm: {@link goalNeedMm}, floored at
+ * the side's band when the goal is one half of a split over two mountings (#888's `bandMm`, which
+ * the generator measures down from the goal's own top, `position.z`). This, not the stock's
+ * thickness, is what a cutter must reach to finish the goal from this side.
+ */
+export function goalSideNeedMm(goal: EngraveTargetObject): number {
+  const need = goalNeedMm(goal);
+  if (goal.bandMm === undefined || !(goal.bandMm > 0)) return need;
+  return Math.min(need, Math.max(0, goal.bandMm - goal.position.z));
+}
+
 const mm3 = (v: number): string => String(Number(v.toFixed(3)));
 
 /** How the reach is named in a sentence — the cutter's own record or the catalogue's number. */
@@ -165,7 +177,8 @@ export function goalReachFindings(
       },
     ];
   }
-  if (need <= mine.mm + 1e-9) return [];
+  // #910 — a split side (#888's `bandMm`) cuts only its band, so the band is what must be reached.
+  if (goalSideNeedMm(goal) <= mine.mm + 1e-9) return [];
 
   const band = Number((mine.mm - GOAL_BAND_CLEARANCE_MM).toFixed(3));
   const longest = longestKnownReach(owned, entries);

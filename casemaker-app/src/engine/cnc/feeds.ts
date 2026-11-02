@@ -1199,6 +1199,8 @@ function catalogueOnlyRow(
   snapshot: FeedCatalogue,
   mappedFor: StockMaterial | null,
   fractions: { stepOver: number; peck: number },
+  /** What the starting table lacks: any row for the material, or one at this diameter (#910). */
+  missing: 'material' | 'diameter',
 ): FeedsEntry {
   const rowMaterial = MATERIAL_LABELS[catalogueMaterialFor(row.material) ?? material];
   const mapped =
@@ -1224,7 +1226,9 @@ function catalogueOnlyRow(
     status: 'unmeasured',
     provenance:
       `${CATALOGUE_LABEL}'s row for ${tool.name} in ${rowMaterial} — the whole answer ` +
-      `for this material, because this app's starting table has no row for it.` +
+      (missing === 'material'
+        ? `for this material, because this app's starting table has no row for it.`
+        : `for this cutter, because this app's starting table has no ${MATERIAL_LABELS[material]} row at ${num3(diameter)} mm.`) +
       syncedSentence(snapshot) +
       mapped,
   };
@@ -1251,7 +1255,15 @@ function changedGeometryReason(
 
 /** The row a job resolves against, and whether that row came from the catalogue alone (#347). */
 type EntryChoice =
-  | { ok: true; entry: FeedsEntry; catalogueOnly: boolean }
+  | {
+      ok: true;
+      entry: FeedsEntry;
+      /**
+       * Whether the row came from the catalogue alone, and why: the table has no row for the
+       * MATERIAL (Route A, #347), or none at this DIAMETER (#910). False: the table answered.
+       */
+      catalogueOnly: false | 'material' | 'diameter';
+    }
   | { ok: false; reason: string; cause: 'no-feeds' };
 
 /**
@@ -1283,10 +1295,34 @@ function entryFor(
   );
   if (entry) return { ok: true, entry, catalogueOnly: false };
   if (table.some((e) => e.material === material && (e.edge ?? 'flat') === edge)) {
-    return {
+    const refused: EntryChoice = {
       ok: false,
       cause: 'no-feeds',
       reason: `no cutting parameters for a ${num3(diameter)} mm ${edge === 'v' ? 'V-bit' : 'cutter'} in ${material}`,
+    };
+    // #910 — THE CUTTER'S OWN ROW ANSWERS A DIAMETER THE TABLE DOES NOT REACH. The starting table
+    // covers hardwood to 3.2 mm; Makera's ⌀4 and ⌀6 balls carry their own hardwood rows, and those
+    // rows were never read, so every such ball was refused. When the cutter carries a Makera id
+    // whose row covers this material and every one of its numbers is usable here, that row is the
+    // answer — the same catalogue-only row Route A builds. Anything less keeps the old refusal.
+    const own = catalogueCoverageFor(snapshot.rows, material, tool);
+    if (own.kind !== 'covered') return refused;
+    if (CATALOGUE_FIELDS.some((field) => catalogueRefusal(field, own.row[field], machine, refuseFraction) !== null)) {
+      return refused;
+    }
+    return {
+      ok: true,
+      entry: catalogueOnlyRow(
+        material,
+        diameter,
+        own.row,
+        tool,
+        snapshot,
+        own.via === null ? null : material,
+        catalogueFractions(table, diameter),
+        'diameter',
+      ),
+      catalogueOnly: 'diameter',
     };
   }
   // A V-bit whose material has no table row goes on to the catalogue exactly as a flat end mill
@@ -1365,8 +1401,8 @@ function entryFor(
   }
   return {
     ok: true,
-    entry: catalogueOnlyRow(material, diameter, row, tool, snapshot, mappedFor, catalogueFractions(table, diameter)),
-    catalogueOnly: true,
+    entry: catalogueOnlyRow(material, diameter, row, tool, snapshot, mappedFor, catalogueFractions(table, diameter), 'material'),
+    catalogueOnly: 'material',
   };
 }
 
@@ -1375,9 +1411,11 @@ function entryFor(
  * the vendor's and which are the app's, because on a material the starting table does not cover
  * there is nothing else to say where the app's own values came from.
  */
-function catalogueOnlyNote(entry: FeedsEntry): string {
+function catalogueOnlyNote(entry: FeedsEntry, missing: 'material' | 'diameter'): string {
   return (
-    ` This material has no row in the starting table, so this row is the whole answer: its four ` +
+    (missing === 'material'
+      ? ` This material has no row in the starting table, so this row is the whole answer: its four `
+      : ` The starting table has no row at this diameter, so this row is the whole answer: its four `) +
     `numbers as the vendor states them, with this app's ${entry.params.stepOverFraction} × cutter ` +
     `step-over, a ${entry.params.peckFraction} × cutter-diameter peck and air.`
   );
@@ -1478,8 +1516,11 @@ export type FeedsResult =
  * A flat cutter is returned unchanged, so an item job's numbers do not move.
  */
 export function feedsToolForSurface(tool: Tool): Tool {
+  // #910 — THE PROXY KEEPS THE CUTTER'S IDENTITY. Makera's rows are keyed by its id (`vendorId`);
+  // a proxy without one could never read the ball's own row, so a ⌀4 or ⌀6 ball — whose diameter
+  // the starting table does not reach — was refused on every material the table covers.
   return tool.shape === 'ball' || tool.shape === 'bull'
-    ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)` })
+    ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)`, id: tool.id, number: tool.number })
     : tool;
 }
 
@@ -1691,7 +1732,7 @@ export function feedsFor(
   const answered = row !== null && used.size > 0;
   const provenance =
     (answered && row ? catalogueProvenance(row, tool, entry, ignored, snapshot, mappedFor) : entry.provenance) +
-    (catalogueOnly ? catalogueOnlyNote(entry) : '');
+    (catalogueOnly === false ? '' : catalogueOnlyNote(entry, catalogueOnly));
 
   // The row DID answer (`answered`) rather than merely existing: a vendor row whose numbers were
   // all passed over supplied nothing, and the panel's "Makera's numbers" label would be false.

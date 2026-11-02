@@ -47,8 +47,8 @@
 
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { cuttingDiameter, flatEndMill, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
-import { catalogueCoverageFor, catalogueStandingFor, feedsFor, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
+import { cuttingDiameter, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
+import { catalogueCoverageFor, catalogueStandingFor, feedsFor, feedsToolForSurface, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { threadGeometry } from '@/engine/cnc/cam/threadMill';
 import { threadMillFit } from './threadFit';
@@ -56,12 +56,13 @@ import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_FINISH_TIP_OPS, sampleGoalHeightfiel
 import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import { jobHasItems, pureGoalObject } from './jobSetup';
+import { goalSideNeedMm } from './goalReach';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { faceChordMm } from '@/engine/cnc/rotary/faceOps';
 import { fmtMm } from '@/workers/sim/engraveGeometry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { CutterReach, Reachability } from './reachability';
 
 /** What an item asks of its cutter. One class per shape of work, not one per document list. */
@@ -338,6 +339,18 @@ export function faceCutterPick(
 }
 
 /**
+ * #910 — ONE SIDE OF A GOAL CUT FROM SEVERAL SIDES: the job `setupWorkJob` builds for a single
+ * setup, holding that side's goal and no item work. `pureGoalObject` answers null for it (it states
+ * a setup), so without this the search saw no work at all on a flip's side.
+ */
+function sideGoalObject(job: EngraveJob): EngraveTargetObject | null {
+  const t = job.targetObject;
+  if (t === undefined || job.targetObjects !== undefined || job.setups?.length !== 1) return null;
+  if ((t.role ?? 'reference') !== 'goal' || !t.enabled) return null;
+  return jobHasItems(job) ? null : t;
+}
+
+/**
  * Every enabled piece of work and the class of cutter it needs, in the setup's own item order.
  * The depth each needs is the cutter's REACH, not the document's `depth` field: a through cut
  * reaches the stock's underside plus the breakthrough, a thread adds its run-out, and a chamfer is
@@ -351,9 +364,15 @@ export function kindedWork(job: EngraveJob): KindedItem[] {
   const isCone = (item: { inlay?: unknown; vCarveDepth?: string }): boolean =>
     item.inlay !== undefined || item.vCarveDepth === 'variable';
 
-  const goal = pureGoalObject(job);
+  const goal = pureGoalObject(job) ?? sideGoalObject(job);
   if (goal !== null) {
-    push(goal.id, goal.name, 'ball', job.stock.thickness, 'a 3D goal is surfaced by a ball');
+    // #910 — the ball must reach the GOAL's depth from this side, not the blank's thickness: a
+    // 32 mm figure in 33 mm stock asked for a 33 mm reach and refused every 32 mm ball. One side
+    // of a flip (`setupWorkJob`'s one-setup job) needs only that side's depth — its band, when the
+    // goal is split over two mountings. A rotary relief's local Z is radial, so it keeps the
+    // stock's number (the reach check skips it too).
+    const need = goal.format === 'png' || rotaryMapOf(job) !== null ? job.stock.thickness : goalSideNeedMm(goal);
+    push(goal.id, goal.name, 'ball', need, 'a 3D goal is surfaced by a ball');
     return out;
   }
 
@@ -482,12 +501,11 @@ export function materialRefusal(
   // design). The gate asks the same question for the same cutter, so a ball or a thread that
   // passes the catalogue's own check is eligible here too.
   if (tool.shape === 'thread') return null;
-  const feedTool =
-    tool.shape === 'ball' || tool.shape === 'bull'
-      ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)` })
-      : tool;
-  if (!feedsFor(catalogue, job.stock.material, feedTool, jobMachine(job), undefined, table).ok) {
-    return `no cutting parameters for ${entry.key} in ${MATERIAL_LABELS[job.stock.material]}`;
+  // #910 — the generator's own proxy (`feedsToolForSurface`), which keeps the ball's Makera id, so
+  // the gate reads the same row the goal program will: a ⌀6 ball's own hardwood row, not nothing.
+  const feeds = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), jobMachine(job), undefined, table);
+  if (!feeds.ok) {
+    return `no cutting parameters for ${entry.key} in ${MATERIAL_LABELS[job.stock.material]}: ${feeds.reason}`;
   }
   return null;
 }

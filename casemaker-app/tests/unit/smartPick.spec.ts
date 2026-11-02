@@ -13,6 +13,7 @@ import type { CandidatePlan, PlanEvaluation } from '@/workers/sim/planEvaluate';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { Tool, ToolShape } from '@/engine/cnc/tool';
 import type { EngraveJob } from '@/types/engraveJob';
+import { picked } from './helpers/picked';
 
 function entry(key: string, shape: ToolShape, over: Partial<Tool> = {}): ToolLibraryEntry {
   return {
@@ -161,7 +162,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       'inv:corn-0-6+inv:flat-1': 0.2,
       'inv:flat-2+inv:flat-1+inv:corn-0-6': 0.8,
     };
-    const pick = await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06, V_01]), [], fakeEvaluator(scores));
+    const pick = picked(await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06, V_01]), [], fakeEvaluator(scores)));
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'inv:engraver-0-3']);
     expect(pick.chosen.worstFidelity).toBe(1);
     expect(pick.runnable).toBe(pick.chosen);
@@ -176,36 +177,36 @@ describe('#766 B the chosen plan is the best measured one', () => {
       'inv:flat-2+inv:flat-1': { toolChanges: 1, seconds: 90 } as Partial<PlanEvaluation>,
       'inv:flat-2+inv:corn-0-6': { toolChanges: 1, seconds: 120 } as Partial<PlanEvaluation>,
     };
-    const pick = await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over));
+    const pick = picked(await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over)));
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2']);
   });
 
   it('an owned plan within the buy margin stands, and a catalogue plan that truly measures better is chosen', async () => {
     // Within the margin: the owned 0.6 stands.
-    const near = await smartPick(
+    const near = picked(await smartPick(
       coinJob(),
       tools([FLAT_2, FLAT_06, FLAT_06_CAT]),
       [],
       fakeEvaluator({ 'inv:flat-2': 0.86, 'inv:flat-2+inv:corn-0-6': 0.86, 'inv:flat-2+cat:corn-0-6': 0.87, 'cat:corn-0-6': 0.5, 'inv:corn-0-6': 0.5, 'inv:flat-2+inv:corn-0-6+inv:flat-2': 0.5 }),
       { buyThisMargin: 0.02 },
-    );
+    ));
     expect(near.chosen.owned).toBe(true);
     expect(near.buyThis).toBeNull();
 
     // Beyond it: the catalogue plan is chosen AND named as the buy.
-    const clear = await smartPick(
+    const clear = picked(await smartPick(
       coinJob(),
       tools([FLAT_2, FLAT_1, FLAT_06_CAT]),
       [],
       fakeEvaluator({ 'inv:flat-2': 0.6, 'inv:flat-2+inv:flat-1': 0.6, 'inv:flat-2+cat:corn-0-6': 0.86, 'cat:corn-0-6': 0.5, 'inv:flat-1': 0.5, 'inv:flat-1+cat:corn-0-6': 0.5 }),
       { buyThisMargin: 0.02 },
-    );
+    ));
     expect(clear.chosen.owned).toBe(false);
     expect(clear.buyThis?.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'cat:corn-0-6']);
   });
 
   it('a refused plan with the best measured fidelity is still the answer, with the refusal stated', async () => {
-    const pick = await smartPick(
+    const pick = picked(await smartPick(
       coinJob(),
       tools([FLAT_2, FLAT_1, FLAT_06, V_01]),
       [],
@@ -213,7 +214,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
         { 'inv:flat-2': 0.19, 'inv:flat-2+inv:flat-1': 0.6, 'inv:flat-2+inv:corn-0-6': 0.86, 'inv:flat-2+inv:engraver-0-3': 1, 'inv:flat-1': 0.3, 'inv:corn-0-6': 0.5, 'inv:flat-1+inv:corn-0-6': 0.7, 'inv:corn-0-6+inv:flat-1': 0.2, 'inv:flat-2+inv:flat-1+inv:corn-0-6': 0.8 },
         { 'inv:flat-2+inv:engraver-0-3': { ok: false, refusal: 'a V-bit is not a rest cutter here' } },
       ),
-    );
+    ));
     // POSTING FIRST: the refused V plan is the best-MEASURED sentence, and the plan that posts
     // (the 0.6 corn pair) is what is handed over.
     expect(pick.bestMeasured.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'inv:engraver-0-3']);
@@ -230,7 +231,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       'inv:corn-0-6': { seconds: 16790, toolChanges: 0 },
       'inv:flat-2+inv:corn-0-6': { seconds: 167, toolChanges: 1 },
     };
-    const pick = await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over));
+    const pick = picked(await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over)));
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'inv:corn-0-6']);
   });
 
@@ -245,7 +246,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       if (planKey(plan) === planKey(rule)) return verdictForPlan;
       return { ...verdictForPlan, ok: false, refusal: 'refused for the test' };
     };
-    const pick = await smartPick(coinJob(), entries, [], evaluate);
+    const pick = picked(await smartPick(coinJob(), entries, [], evaluate));
     expect(pick.rule).not.toBeNull();
     expect(pick.runnable).not.toBeNull();
     expect(planKey(pick.chosen.plan)).toBe(planKey(rule));

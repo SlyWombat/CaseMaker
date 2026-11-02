@@ -28,6 +28,7 @@ import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobMachine } from '@/engine/cnc/calibration';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob } from '@/types/engraveJob';
+import { picked } from './helpers/picked';
 
 const DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pick857');
 
@@ -147,7 +148,7 @@ describe('#857 a raised glyph’s counters count in the pick', () => {
   it('the coin’s ranking: a ⌀0.3 V rest wins over every corn-rest plan, because it keeps the counters open', { timeout: 600_000 }, async () => {
     clearPlanEvaluations();
     const job = coin();
-    const pick = await smartPick(job, TOOLS, [], (p, level) => evaluate(job, p, level), { maxCandidates: 16 });
+    const pick = picked(await smartPick(job, TOOLS, [], (p, level) => evaluate(job, p, level), { maxCandidates: 16 }));
     expect(pick.runnable, pick.notes.join(' ')).not.toBeNull();
     // The V rest after a clearance flat: the search's answer, not a rule's. Which flat clears is the
     // run time's call (with this four-cutter library the ⌀1.9 is in the V pairings and is faster;

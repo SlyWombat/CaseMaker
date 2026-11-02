@@ -20,6 +20,7 @@ import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { Tool, ToolShape } from '@/engine/cnc/tool';
 import type { EngraveJob } from '@/types/engraveJob';
+import { picked } from './helpers/picked';
 
 function entry(key: string, shape: ToolShape, over: Partial<Tool> = {}): ToolLibraryEntry {
   return {
@@ -89,7 +90,7 @@ describe('#765/#766 the coin’s raised "Software"', () => {
     const job = coin();
     const evaluate = async (plan: CandidatePlan, level: 'coarse' | 'full'): Promise<PlanEvaluation> =>
       await evaluatePlan(job, plan, { tl, tools: TOOLS, catalogue: [], shop, calibration: null }, { level });
-    const pick = await smartPick(job, TOOLS, [], evaluate, { maxCandidates: 8, fullFinalists: 2 });
+    const pick = picked(await smartPick(job, TOOLS, [], evaluate, { maxCandidates: 8, fullFinalists: 2 }));
 
     expect(pick.runnable, 'a posting plan is handed over').not.toBeNull();
     const run = pick.runnable!;

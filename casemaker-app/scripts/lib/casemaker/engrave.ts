@@ -1536,6 +1536,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           toolChangeSeconds: readDefault(shopDefaults, 'toolChange.seconds').value,
         });
         const searchMs = Date.now() - searchStart;
+        // #910 — every cutter refused before a plan existed: the reasons ARE the answer.
+        if (pick.refused === true) {
+          for (const c of pick.candidates) out.progress(`  refused   ${c.key} — ${c.reason}`);
+          return `${label}: ${pick.reason}`;
+        }
         const words = explainSmartPick(pick, searchTools, { cutterKeys: true });
         out.progress(`  pick      ${words.verdict}`);
         words.cutters.forEach((line, i) => out.progress(`  cutter ${i + 1}   ${line}`));
@@ -1675,6 +1680,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation | Promise<PlanEvaluation> =>
           evaluatePlan(sub, plan, { tl, tools, catalogue: catalogueRows, shop, calibration: null }, { level });
         const pick = await smartPick(sub, tools, catalogueRows, evaluate);
+        if (pick.refused === true) {
+          out.progress(`  setup ${setupIndex + 1}      ${pick.reason}`);
+          continue;
+        }
         const chosen = pick.runnable;
         if (chosen === null) {
           // No substitute can be measured; the run's own refusal still names the key.

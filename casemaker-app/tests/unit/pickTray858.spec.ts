@@ -31,6 +31,7 @@ import { clearPlanEvaluations, evaluatePlan, type CandidatePlan, type PlanEvalua
 import { KNOWN_DEFAULTS, ShopDefaultsSchema, readDefault } from '@/platform/defaultsClient';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob } from '@/types/engraveJob';
+import { picked } from './helpers/picked';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIR = join(HERE, 'fixtures', 'pick857');
@@ -57,9 +58,11 @@ const keys = (s: ScoredPlan): string => s.plan.cutters.map((c) => c.key).join('+
 async function pickFor(job: EngraveJob) {
   clearPlanEvaluations();
   const ctx = { tl, tools: TOOLS, catalogue: [], shop: { tools: TOOLS }, calibration: null };
-  return smartPick(job, TOOLS, [], async (p: CandidatePlan, level) => await evaluatePlan(job, p, ctx, { level }), {
-    toolChangeSeconds: SEED.value,
-  });
+  return picked(
+    await smartPick(job, TOOLS, [], async (p: CandidatePlan, level) => await evaluatePlan(job, p, ctx, { level }), {
+      toolChangeSeconds: SEED.value,
+    }),
+  );
 }
 
 describe('#858 a tool change has a cost, and time decides at equal fidelity', () => {
@@ -86,7 +89,7 @@ describe('#858 a tool change has a cost, and time decides at equal fidelity', ()
     const evaluate = (p: CandidatePlan): PlanEvaluation =>
       p.cutters.length === 1 ? verdict(1000, 0, 1 - FIDELITY_TIE / 2) : verdict(950, 1, 1);
     const pickWith = async (change: number) =>
-      keys((await smartPick(job, TOOLS, [], evaluate, { toolChangeSeconds: change })).chosen);
+      keys(picked(await smartPick(job, TOOLS, [], evaluate, { toolChangeSeconds: change })).chosen);
     // 950 + 40 < 1000: the change is worth it. 950 + 91.4 > 1000: it is not — and the 0.05 %
     // fidelity difference is inside the tie, so it does not decide either way.
     expect(await pickWith(40)).toContain('+');

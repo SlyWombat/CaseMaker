@@ -41,7 +41,7 @@ import {
   reachOf,
   type PlannedCutter,
 } from './cutterPlan';
-import { goalNeedMm } from './goalReach';
+import { goalSideNeedMm } from './goalReach';
 import { jobHasItems, jobTargetObjects, pureGoalObject } from './jobSetup';
 import { bossBeforeThread } from './threadFit';
 
@@ -123,8 +123,32 @@ export interface SmartPickOptions {
   toolChangeSeconds?: number;
 }
 
+/** One library cutter the search could not use, and why — the refusal's evidence (#910). */
+export interface CandidateRefusal {
+  key: string;
+  reason: string;
+  /** True when the cutter is simply the wrong shape for every piece of the job's work. */
+  shapeOnly?: boolean;
+}
+
+/**
+ * #910 — THE SEARCH HAD NOTHING TO MEASURE: every cutter in the library was refused before a plan
+ * could be built. It used to throw one bare sentence, which dropped why each cutter was out — and
+ * the reasons are the answer (a ⌀6 ball refused for feeds it in fact has, a ball refused for a
+ * reach the goal never needed). This is a stated result, never an exception.
+ */
+export interface SmartPickRefusal {
+  refused: true;
+  /** One sentence for the panel and the CLI. */
+  reason: string;
+  /** Every cutter the library offered, with the gate that refused it. */
+  candidates: readonly CandidateRefusal[];
+}
+
 /** The search's answer: the plan to run, what was close, and what to buy. */
 export interface SmartPick {
+  /** Discriminates a pick from a {@link SmartPickRefusal}. */
+  refused?: false;
   /**
    * The QUICK RULE's plan (#211/#760/#762 — `planCutters`' kind plan), which is the first candidate
    * the search scores. The panel's provisional answer is a view of this plan, so this is what its
@@ -329,7 +353,7 @@ export function candidatePlans(
     const ids = ballWork.map((w) => w.id);
     const goalDepth = jobTargetObjects(job).reduce((deepest, target) => {
       if ((target.role ?? 'reference') !== 'goal' || !target.enabled || target.format === 'png') return deepest;
-      const depth = goalNeedMm(target);
+      const depth = goalSideNeedMm(target);
       return Number.isFinite(depth) && depth > deepest ? depth : deepest;
     }, 0);
     const reachesGoal = (t: ToolLibraryEntry): boolean => {
@@ -682,7 +706,7 @@ export async function smartPick(
   opts: SmartPickOptions = {},
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[] | null,
-): Promise<SmartPick> {
+): Promise<SmartPick | SmartPickRefusal> {
   const maxCandidates = opts.maxCandidates ?? 16;
   const fullFinalists = Math.max(1, opts.fullFinalists ?? 3);
   const margin = opts.buyThisMargin ?? 0.02;
@@ -692,7 +716,23 @@ export async function smartPick(
   const exactWhenEmpty = faceWorkOf(job) !== null;
   const plans = candidatePlans(job, tools, catalogue, conditions, table).slice(0, maxCandidates);
   if (plans.length === 0) {
-    throw new Error('the search found no candidate cutter plan for this job');
+    const candidates = candidateRefusals(job, tools, catalogue, conditions, table);
+    // The sentence names every cutter of the right shape and why it is out; the wrong-shaped rest
+    // are counted (a full library is a hundred drills and flats), and listed in `candidates`.
+    const named = candidates.filter((c) => c.shapeOnly !== true);
+    const others = candidates.length - named.length;
+    const parts = [
+      ...named.map((c) => `${c.key} — ${c.reason}`),
+      ...(others === 0 ? [] : [`${others} other cutter${others === 1 ? ' is' : 's are'} not the shape this work needs`]),
+    ];
+    return {
+      refused: true,
+      reason:
+        parts.length === 0
+          ? 'the search found no candidate cutter plan for this job: the tool library offers no cutters'
+          : `the search found no candidate cutter plan for this job: ${parts.join('; ')}`,
+      candidates,
+    };
   }
   // #785 — the search's own progress. `total` is the level's candidate list; the counts are
   // reported BEFORE each evaluation, because that call is the seconds-long work.
@@ -787,6 +827,40 @@ export async function smartPick(
   }
   const rule = rulePlan === null ? null : (verdicts.get(planKey(rulePlan)) ?? null);
   return { rule, chosen, runnable, bestMeasured, runnerUp, buyThis, considered: all, notes };
+}
+
+/**
+ * #910 — why each library cutter is not a candidate for this job, by the gates `candidatePlans`
+ * applies: the work's cutter shape, the material/broken/catalogue/feeds gate, then the reach the
+ * work needs.
+ */
+export function candidateRefusals(
+  job: EngraveJob,
+  tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[],
+  conditions?: ReadonlyMap<string, ConditionSummary> | null,
+  table?: readonly FeedsEntry[] | null,
+): CandidateRefusal[] {
+  const work = kindedWork(job);
+  const shapes: Record<string, readonly string[]> = { ball: ['ball', 'bull'], flat: ['flat'], thread: ['thread'] };
+  const fits = (entry: ToolLibraryEntry, kind: string): boolean =>
+    kind === 'cone' ? vCone(entry.tool) !== null : (shapes[kind] ?? []).includes(entry.tool.shape);
+  const mm = (v: number): string => `${Number(v.toFixed(3))} mm`;
+  return tools.map((entry) => {
+    const mine = work.filter((w) => fits(entry, w.kind));
+    if (mine.length === 0) {
+      const kinds = [...new Set(work.map((w) => w.kind))].join(' or ');
+      return { key: entry.key, shapeOnly: true, reason: `a ${entry.tool.shape} cutter does none of this job's work (it needs ${kinds || 'no cutter'})` };
+    }
+    const material = materialRefusal(job, entry, catalogue, conditions, table ?? undefined, { ownedVouches: true });
+    if (material !== null) return { key: entry.key, reason: material };
+    const need = mine.reduce((m, w) => Math.max(m, w.reachMm), 0);
+    const reach = reachOf(entry);
+    if (reach !== null && need > reach + 1e-9) {
+      return { key: entry.key, reason: `it reaches ${mm(reach)}, and the work is ${mm(need)} deep` };
+    }
+    return { key: entry.key, reason: 'it passes every gate, but no plan the search builds uses it' };
+  });
 }
 
 function sameCutters(a: CandidatePlan, b: CandidatePlan): boolean {

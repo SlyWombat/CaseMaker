@@ -244,14 +244,27 @@ describe('a catalogue row supplies the four numbers Makera states', () => {
     expect(res.params.feed).toBe(500);
   });
 
-  it('is not applied to a cutter the table does not cover — the tier does not widen coverage', () => {
-    // A 6 mm Makera cutter: the catalogue may well have rows for it, and the app still refuses,
-    // because every wood row of the starting table stops at 3.2 mm.
+  it('#910 — answers a diameter the table does not reach from the cutter’s own row', () => {
+    // A 6 mm Makera cutter: every wood row of the starting table stops at 3.2 mm, so the cutter's
+    // own catalogue row is the whole answer, and the provenance says why.
     setFeedCatalogue([{ ...HARDWOOD_ROW, cutterId: '999999999999', rpm: 10000, feed: 1000 }]);
     const res = feedsFor(feedCatalogueRows(), 'hardwood', flatEndMill(6, { id: '999999999999' }), Z1);
-    expect(res.ok).toBe(false);
-    if (res.ok) throw new Error('expected a refusal');
-    expect(res.reason).toContain('6 mm');
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.params.rpm).toBe(10000);
+    expect(res.params.feed).toBe(1000);
+    expect(res.catalogue?.cutterId).toBe('999999999999');
+    expect(res.sources.feed).toBe('catalogue');
+    expect(res.provenance).toContain('no row at this diameter');
+  });
+
+  it('still refuses a diameter the table does not reach when the cutter has no row of its own', () => {
+    setFeedCatalogue([{ ...HARDWOOD_ROW, cutterId: '999999999999' }]);
+    const anonymous = feedsFor(feedCatalogueRows(), 'hardwood', flatEndMill(6), Z1);
+    expect(anonymous.ok).toBe(false);
+    if (anonymous.ok) throw new Error('expected a refusal');
+    expect(anonymous.reason).toContain('6 mm');
+    const unlisted = feedsFor(feedCatalogueRows(), 'hardwood', flatEndMill(6, { id: '888888888888' }), Z1);
+    expect(unlisted.ok).toBe(false);
   });
 });
 

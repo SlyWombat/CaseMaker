@@ -17,6 +17,7 @@ import { clearPlanEvaluations, evaluatePlan, type EvalContext } from '@/workers/
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveFaceOp, EngraveJob } from '@/types/engraveJob';
+import { picked } from './helpers/picked';
 
 // The shop's own wood/plastic flat ends: the built-in ⌀3.175 is Makera's (Metal) line, which the
 // material rule refuses on a wooden blank — a real shop reaches for its own bits here.
@@ -135,7 +136,7 @@ describe('#834 the face work and the cutters that fit it', () => {
       toolChanges: 0,
       risk: { reachMarginMm: null, holderClearanceMm: null, chipLoadRatio: null },
     });
-    const pick = await smartPick(job, LIB, [], evaluate as never);
+    const pick = picked(await smartPick(job, LIB, [], evaluate as never));
     expect(pick.chosen.plan.faceToolKey).toBe('inv:flat-1');
     // …and the plan is written where the face program reads it: the first setup's faceToolKey.
     const applied = applyCutterPlanToJob(job, pick.chosen.plan);
@@ -156,7 +157,7 @@ describe('#834 the face work and the cutters that fit it', () => {
       toolChanges: 0,
       risk: { reachMarginMm: null, holderClearanceMm: null, chipLoadRatio: null },
     });
-    const pick = await smartPick(job, LIB, [], evaluate as never);
+    const pick = picked(await smartPick(job, LIB, [], evaluate as never));
     expect(pick.chosen.plan.cutters[0]!.key).toBe('inv:flat-3.175');
     expect(pick.chosen.worstFidelity).toBe(1);
   });
