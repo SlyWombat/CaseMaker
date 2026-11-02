@@ -26,7 +26,9 @@
  * toplevel the same way `evaluateOp` does. Everything it is given is plain data.
  */
 
-import type { Timeline, Checkpoint, AirMove } from '@/engine/cnc/emulator/timeline';
+import type { Timeline, Checkpoint, AirMove, ToolState } from '@/engine/cnc/emulator/timeline';
+import { CheckpointStore, checkpointStoreOf } from '@/engine/cnc/emulator/checkpointStore';
+import { eventLine, eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import { DIAGNOSTIC_CAP } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
 import type { ObstacleBox, Setup } from '@/engine/cnc/setup';
@@ -124,8 +126,12 @@ export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timel
   const q = (n: number): number => Math.round(n * 1000) / 1000;
   /** Two moves are on the same level when their un-lifted Z agrees within the axis precision. */
   const SAME_LEVEL_MM = 0.001;
-  const checkpoints: Checkpoint[] = [];
-  let current: Checkpoint | null = null;
+  // #899 — packed, like the timeline's own (`checkpointStore.ts`).
+  const checkpoints = new CheckpointStore(eventStoreOf(timeline.events));
+  /** The current run's key; `current < 0` before the first. */
+  let current = -1;
+  let curSegment = 0;
+  let curA: number | null = null;
   /**
    * #653 — THE RUN'S FIRST Z, not the running minimum. Grouping against `current.z` (updated to the
    * minimum) let a DESCENDING 1 µm staircase chain without bound: every step sat within one quantum
@@ -134,62 +140,66 @@ export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timel
    * quanta), measured from the level the run STARTED at, so a run spans at most that.
    */
   let currentStart = 0;
-  for (const cp of timeline.checkpoints) {
-    for (let k = 0; k < cp.steps.length; k++) {
-      const x0 = cp.xy[k * 4] as number;
-      const y0 = cp.xy[k * 4 + 1] as number;
-      const x1 = cp.xy[k * 4 + 2] as number;
-      const y1 = cp.xy[k * 4 + 3] as number;
-      let uz0 = q((cp.zs[k * 2] as number) - surfaceLift(plane, z0, x0, y0));
-      let uz1 = q((cp.zs[k * 2 + 1] as number) - surfaceLift(plane, z0, x1, y1));
-      // #634 — ONE LEVEL. On a level feed the two ends differ only by the rounding residual of the
-      // 3-dp posted text (≤ half a micrometre each); below the axis precision that is not a ramp,
-      // and reading it as one made every XY feed a hull (`nonConstantZ`) instead of a 2-D capsule.
-      // A genuine ramp — a 3D relief move — differs by far more than this and is untouched.
-      // (One and a half quanta: two rounding residuals can differ by a full one, plus float noise.)
-      if ((x0 !== x1 || y0 !== y1) && Math.abs(uz0 - uz1) <= SAME_LEVEL_MM * 1.5) {
-        const level = Math.min(uz0, uz1);
-        uz0 = level;
-        uz1 = level;
+  const visit = (segment: number, tool: ToolState, a: number | null, step: number, x0: number, y0: number, x1: number, y1: number, z0In: number, z1In: number): void => {
+    let uz0 = q(z0In - surfaceLift(plane, z0, x0, y0));
+    let uz1 = q(z1In - surfaceLift(plane, z0, x1, y1));
+    // #634 — ONE LEVEL. On a level feed the two ends differ only by the rounding residual of the
+    // 3-dp posted text (≤ half a micrometre each); below the axis precision that is not a ramp,
+    // and reading it as one made every XY feed a hull (`nonConstantZ`) instead of a 2-D capsule.
+    // A genuine ramp — a 3D relief move — differs by far more than this and is untouched.
+    // (One and a half quanta: two rounding residuals can differ by a full one, plus float noise.)
+    if ((x0 !== x1 || y0 !== y1) && Math.abs(uz0 - uz1) <= SAME_LEVEL_MM * 1.5) {
+      const level = Math.min(uz0, uz1);
+      uz0 = level;
+      uz1 = level;
+    }
+    const z = Math.min(uz0, uz1);
+    const zKey = Math.round(z * 1000);
+    // #634 — SAME LEVEL WITHIN THE AXIS PRECISION, not "same integer micrometre". The un-lift is
+    // exact against the IR but runs on the 3-dp posted text, so every move carries a rounding
+    // residual up to half the last digit; an absolute key makes moves of ONE level straddle a
+    // bucket boundary at random (452 of them on the off-grid fixture). A tolerance groups a run
+    // of one level deterministically; a genuine step below a micrometre is below what the machine
+    // can hold and merging it costs nothing the band can see.
+    // #240 (R4) — A travels with the bucket and splits it: a run is one face at one Z. Every
+    // flat program has `null` here, so this is inert for them.
+    if (current < 0 || curSegment !== segment || curA !== a || Math.abs(z - currentStart) > SAME_LEVEL_MM * 1.5) {
+      currentStart = z;
+      current = checkpoints.open(segment, tool, zKey, a, z);
+      curSegment = segment;
+      curA = a;
+    }
+    checkpoints.add(step, x0, y0, x1, y1, uz0, uz1);
+    if (uz0 !== uz1 && (x0 !== x1 || y0 !== y1)) checkpoints.markLastNonConstantZ();
+    if (z < checkpoints.lastZ) checkpoints.setLastZ(z);
+  };
+  const packed = checkpointStoreOf(timeline.checkpoints);
+  if (packed !== null) {
+    for (let k = 0; k < packed.length; k++) {
+      const segment = packed.segmentOf(k);
+      const tool = packed.toolOf(k);
+      const a = packed.aOf(k);
+      packed.forEachCut(packed.moveStart(k), packed.moveEnd(k), (c) => visit(segment, tool, a, c.step, c.x0, c.y0, c.x1, c.y1, c.z0, c.z1));
+    }
+  } else {
+    for (const cp of timeline.checkpoints) {
+      for (let k = 0; k < cp.steps.length; k++) {
+        visit(
+          cp.segment,
+          cp.tool,
+          cp.a,
+          cp.steps[k] as number,
+          cp.xy[k * 4] as number,
+          cp.xy[k * 4 + 1] as number,
+          cp.xy[k * 4 + 2] as number,
+          cp.xy[k * 4 + 3] as number,
+          cp.zs[k * 2] as number,
+          cp.zs[k * 2 + 1] as number,
+        );
       }
-      const z = Math.min(uz0, uz1);
-      const zKey = Math.round(z * 1000);
-      // #634 — SAME LEVEL WITHIN THE AXIS PRECISION, not "same integer micrometre". The un-lift is
-      // exact against the IR but runs on the 3-dp posted text, so every move carries a rounding
-      // residual up to half the last digit; an absolute key makes moves of ONE level straddle a
-      // bucket boundary at random (452 of them on the off-grid fixture). A tolerance groups a run
-      // of one level deterministically; a genuine step below a micrometre is below what the machine
-      // can hold and merging it costs nothing the band can see.
-      // #240 (R4) — A travels with the bucket and splits it: a run is one face at one Z. Every
-      // flat program has `null` here, so this is inert for them.
-      if (
-        current === null ||
-        current.segment !== cp.segment ||
-        current.a !== cp.a ||
-        Math.abs(z - currentStart) > SAME_LEVEL_MM * 1.5
-      ) {
-        currentStart = z;
-        current = {
-          segment: cp.segment,
-          tool: cp.tool,
-          zKey,
-          a: cp.a,
-          z,
-          run: checkpoints.length,
-          steps: [],
-          xy: [],
-          zs: [],
-          nonConstantZ: false,
-        };
-        checkpoints.push(current);
-      }
-      current.steps.push(cp.steps[k] as number);
-      current.xy.push(x0, y0, x1, y1);
-      current.zs.push(uz0, uz1);
-      if (uz0 !== uz1 && (x0 !== x1 || y0 !== y1)) current.nonConstantZ = true;
-      if (z < current.z) current.z = z;
     }
   }
+  checkpoints.seal();
   // #634 — THE AIR MOVES ARE IN THE LIFTED FRAME TOO. Their endpoints come from the runner state =
   // the file as posted: a retract out of a cut starts at the FEED's end (−d + lift) while the
   // un-lifted floor is at −d. Wherever the plane sits BELOW the lowest touch (lift < 0), that
@@ -206,7 +216,7 @@ export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timel
     // (lifted) move beside the un-lifted image so those checks read the motion the machine makes.
     lifted: { from: m.from, to: m.to },
   }));
-  return { ...timeline, checkpoints, airMoves, summary: { ...timeline.summary, checkpoints: checkpoints.length } };
+  return { ...timeline, checkpoints: checkpoints.view(), airMoves, summary: { ...timeline.summary, checkpoints: checkpoints.length } };
 }
 
 /**
@@ -1402,7 +1412,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       // below the stock top is flagged, because only one of those would remove material at all (the
       // arm above skips the rest as no-ops), and `checkAirMoves` leaves probe buckets out of the
       // material it credits for the same reason.
-      const line = cp.steps.length > 0 ? (timeline.events[cp.steps[0] as number]?.line ?? 0) : 0;
+      const line = cp.steps.length > 0 ? (eventLine(timeline.events, cp.steps[0] as number) ?? 0) : 0;
       probeDiag.push({
         severity: 'error',
         code: 'probe-fitted-cut',
@@ -1620,7 +1630,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         const z0 = cp.zs[2 * k] as number;
         const z1 = cp.zs[2 * k + 1] as number;
         if (crosses(x0, z0, x1, z1)) {
-          jawHits.push({ line: timeline.events[cp.steps[k] as number]?.line ?? 0, x: Math.min(x0, x1), z: Math.min(z0, z1), kind: 'cut' });
+          jawHits.push({ line: eventLine(timeline.events, cp.steps[k] as number) ?? 0, x: Math.min(x0, x1), z: Math.min(z0, z1), kind: 'cut' });
           break;
         }
       }
@@ -1665,7 +1675,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         const p0: [number, number, number] = [cp.xy[4 * k] as number, cp.xy[4 * k + 1] as number, cp.zs[2 * k] as number];
         const p1: [number, number, number] = [cp.xy[4 * k + 2] as number, cp.xy[4 * k + 3] as number, cp.zs[2 * k + 1] as number];
         if (segmentEntersTailstock(p0, p1, radius, span)) {
-          hits.push({ line: timeline.events[cp.steps[k] as number]?.line ?? 0, kind: 'cut' });
+          hits.push({ line: eventLine(timeline.events, cp.steps[k] as number) ?? 0, kind: 'cut' });
           break;
         }
       }

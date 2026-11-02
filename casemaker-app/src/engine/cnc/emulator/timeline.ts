@@ -25,7 +25,9 @@
  */
 
 import type { GcodeEvent, HomeEvent, MoveEvent, ParseResult, Pos, ProbeEvent, TloCalibrateEvent, ToolChangeEvent } from '../gcode/types';
+import { EventStore, eventStoreOf } from '../gcode/eventStore';
 import { insideEnvelope, type Mill, type MillProfile } from '../machine';
+import { CheckpointStore } from './checkpointStore';
 import type { Setup, StartingTool } from '../setup';
 
 export type ToolState = number | 'unknown';
@@ -589,12 +591,19 @@ export function g28Clearance(ev: HomeEvent, before: MachineState, m: MillProfile
 }
 
 export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Mill): Timeline {
-  const events: GcodeEvent[] = [];
+  // #899 — the events and the checkpoints are PACKED (`eventStore.ts`, `checkpointStore.ts`) and
+  // handed back through the same `GcodeEvent[]` / `Checkpoint[]` views: about 60 bytes a line where
+  // the objects cost about 1.5 KB.
+  const events = new EventStore();
   const diagnostics: TimelineDiagnostic[] = [];
   const segments: Segment[] = [];
   const pauses: PausePoint[] = [];
-  let current: Checkpoint | null = null;
-  const order: Checkpoint[] = [];
+  const order = new CheckpointStore(events);
+  /** The current checkpoint's key, or `current < 0` before the first. */
+  let current = -1;
+  let curSegment = -1;
+  let curA: number | null = null;
+  let curZKey = 0;
   const snapshots: MachineState[] = [];
   let cuttingMoves = 0;
   let unswept = 0;
@@ -758,12 +767,12 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Mill):
           // to it later is a new, later checkpoint (see `Checkpoint.run`). A is keyed EXACTLY,
           // not quantised: an indexed job holds it constant word-for-word, and a wrap job's A is
           // unwound degrees, where any change is a cut on a different face (R4).
-          let cp = current && current.segment === seg.index && current.a === m.a && current.zKey === zKey ? current : null;
-          if (!cp) {
-            cp = { segment: seg.index, tool: state.tool, zKey, a: m.a, z, run: order.length, steps: [], xy: [], zs: [], nonConstantZ: false };
-            order.push(cp);
+          if (!(current >= 0 && curSegment === seg.index && curA === m.a && curZKey === zKey)) {
+            current = order.open(seg.index, state.tool, zKey, m.a, z);
+            curSegment = seg.index;
+            curA = m.a;
+            curZKey = zKey;
           }
-          current = cp;
           if (toW[0] === null || toW[1] === null) {
             unswept++;
             diag('warning', 'cut-unknown-xy', i, m.line, 'a cutting move to an X or Y the program never established: not swept, nothing can be invented for it (the picture has a gap here)');
@@ -773,17 +782,23 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Mill):
               warnedFromXY = true;
               diag('info', 'cut-from-unknown-xy', i, m.line, 'a cutting move from an X,Y the program never established is swept as a plunge at its end point only');
             }
-            cp.steps.push(i);
-            cp.xy.push(fromKnown ? (fromW[0] as number) : toW[0], fromKnown ? (fromW[1] as number) : toW[1], toW[0], toW[1]);
-            cp.zs.push(fromKnown && fromW[2] !== null ? fromW[2] : toW[2], toW[2]);
+            order.add(
+              i,
+              fromKnown ? (fromW[0] as number) : toW[0],
+              fromKnown ? (fromW[1] as number) : toW[1],
+              toW[0],
+              toW[1],
+              fromKnown && fromW[2] !== null ? fromW[2] : toW[2],
+              toW[2],
+            );
             // A RAMP changes Z while travelling in X,Y; the lowest-Z rule over-removes along
             // it, and the picture says so. A vertical plunge (no X,Y travel) is not a ramp: the
             // column from its lowest end up is exactly what the tool removes, so it is not
             // flagged (the first version flagged every plunge inside a bucket). A move whose
             // start Z is unknown cannot be called a ramp either.
-            if (fromKnown && fromW[2] !== null && toW[2] !== fromW[2] && (fromW[0] !== toW[0] || fromW[1] !== toW[1])) cp.nonConstantZ = true;
+            if (fromKnown && fromW[2] !== null && toW[2] !== fromW[2] && (fromW[0] !== toW[0] || fromW[1] !== toW[1])) order.markLastNonConstantZ();
           }
-          if (z < cp.z) cp.z = z;
+          if (z < order.lastZ) order.setLastZ(z);
         }
       }
       if (!segHasMove) seg.tool = state.tool;
@@ -800,7 +815,11 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Mill):
   // no `M490.2`). Its events run as parsed, and any position they touch that only a frame could
   // supply is the timeline's own "unknown" — the honest answer, not the Z1's numbers.
   const framed: MillProfile | undefined = machine !== undefined && machine.frameState === 'read' ? machine : undefined;
-  for (const src of parse.events) {
+  // Read the parser's store directly when it is one: no view, no cache, one event at a time.
+  const source = eventStoreOf(parse.events);
+  const sourceLength = source !== null ? source.length : parse.events.length;
+  for (let si = 0; si < sourceLength; si++) {
+    const src = (source !== null ? source.at(si) : parse.events[si]) as GcodeEvent;
     if (framed === undefined) {
       process(src);
     } else if (src.kind === 'tool-change' && !framed.hasATC && isRealToolChange(state, src.tool) !== false) {
@@ -825,7 +844,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Mill):
     const idx = Math.min(i, events.length - 1);
     const snapIdx = Math.floor((idx + 1) / SNAPSHOT_EVERY);
     let s = snapshots[snapIdx] as MachineState;
-    for (let k = snapIdx * SNAPSHOT_EVERY; k <= idx; k++) s = applyEvent(s, events[k] as GcodeEvent, setup);
+    for (let k = snapIdx * SNAPSHOT_EVERY; k <= idx; k++) s = applyEvent(s, events.at(k), setup);
     return s;
   };
 
@@ -842,12 +861,14 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Mill):
     );
   }
 
+  events.seal();
+  order.seal();
   return {
-    events,
+    events: events.view(),
     airMoves,
     segments,
     pauses,
-    checkpoints: order,
+    checkpoints: order.view(),
     diagnostics,
     stateAt,
     summary: {

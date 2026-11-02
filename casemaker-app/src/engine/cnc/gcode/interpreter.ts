@@ -22,9 +22,10 @@
  */
 
 import { tessellateArc, type Plane } from './arcs';
-import { classifyLine, codeParts, parseWords, splitCommands, splitLines, stripComment, type Word } from './lexer';
+import { EventStore } from './eventStore';
+import { classifyLine, codeParts, parseWords, splitCommands, stripComment, type Word } from './lexer';
 import { parseCmRecord, parseMkrRecord } from './mkrHeader';
-import type { Diagnostic, Frame, GcodeEvent, MkrHeader, MkrRecord, MoveEvent, ParseResult, Pos } from './types';
+import type { Diagnostic, Frame, MkrHeader, MkrRecord, MoveEvent, ParseResult, Pos } from './types';
 
 const INCH = 25.4;
 
@@ -78,7 +79,8 @@ class Interp {
     this.dialect = dialect;
   }
 
-  readonly events: GcodeEvent[] = [];
+  // #899 — packed: about 35 bytes a move instead of an object of about 500 (see `eventStore.ts`).
+  readonly events = new EventStore();
   readonly diagnostics: Diagnostic[] = [];
   readonly headerRecords: MkrRecord[] = [];
   /**
@@ -885,8 +887,20 @@ class Interp {
 /** Lower a G-code program to events, collecting every diagnostic. Never throws. */
 export function parseGcode(source: string, opts: { dialect?: GcodeDialect } = {}): ParseResult {
   const it = new Interp(opts.dialect);
-  const lines = splitLines(source);
-  for (let i = 0; i < lines.length; i++) it.handleLine(lines[i] as string, i + 1);
+  // #899 — line by line, without the array of every line `splitLines` builds (a string object per
+  // line, held until the last one is read). The same breaks: `\r\n`, `\n` or a lone `\r`, and the
+  // text after the last break is a line even when it is empty.
+  let start = 0;
+  let lineNo = 0;
+  const n = source.length;
+  for (let i = 0; i < n; i++) {
+    const c = source.charCodeAt(i);
+    if (c !== 10 && c !== 13) continue;
+    it.handleLine(source.slice(start, i), ++lineNo);
+    if (c === 13 && source.charCodeAt(i + 1) === 10) i++;
+    start = i + 1;
+  }
+  it.handleLine(source.slice(start), lineNo + 1);
   // A `;@CM|` line is header data too (#332), so a file carrying only ours still has a header.
   const cm: MkrHeader['cm'] | undefined =
     it.cmToolKey !== null || it.cmRotaryRadius !== null || it.cmStartTool !== null
@@ -899,7 +913,7 @@ export function parseGcode(source: string, opts: { dialect?: GcodeDialect } = {}
   const header: MkrHeader | null =
     it.headerRecords.length > 0 || cm !== undefined ? { records: it.headerRecords, ...(cm ? { cm } : {}) } : null;
   return {
-    events: it.events,
+    events: it.events.seal().view(),
     diagnostics: it.diagnostics,
     header,
     summary: {
