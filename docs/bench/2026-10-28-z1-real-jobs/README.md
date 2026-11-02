@@ -28,6 +28,11 @@ own sweep against the job's design, and the page says so.
 docs/bench/2026-10-28-z1-real-jobs/tools/build.sh <sha>
 ```
 
+The two stick-scale goal jobs (`j28-panther-stick`, `j29-elephant-stick`) carry no mesh bytes: the
+meshes stay shop-owned local inputs in `samples/3d/`, and `build.py` puts the named file back into a
+copy of the job in the run directory, refusing unless its SHA-256 is the job's own. `--meshes`
+(default `/mnt/c/projects/Case Maker/samples/3d`, or `CM_MESHES`) says where they live.
+
 `CM_REPO` (default `~/projects/cm-wt/944-demo-page`), `CM_PY` (default
 `~/casemaker-manager/venv/bin/python`, needs numpy + PIL) and `--location` / `--out` override the
 defaults. The location is the bench location document — the shop's own cutters plus the full Makera
