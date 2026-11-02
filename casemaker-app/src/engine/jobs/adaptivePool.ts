@@ -20,7 +20,7 @@
 
 import type { LevelPlanRequest, LevelPlanMemory, LevelPlanShared } from '@/engine/cnc/cam/rough3d';
 import type { PoolPlanReply, PoolSizedReply } from '@/workers/adaptivePool.worker';
-import { packTransfers } from '@/engine/cnc/cam/movePack';
+import { moveBufferTransfers } from '@/engine/cnc/cam/moveWire';
 import {
   adaptivePoolSize,
   estimateLevelPlannerBytes,
@@ -220,8 +220,9 @@ export class AdaptivePool {
     slot.busyWith = null;
     this.idle.push(index);
     this.pending.delete(reply.id);
-    // #881 — forward packed moves as TRANSFERRED buffers: the pool never copies a level's moves.
-    if (reply.result.ok) this.out?.postMessage(reply, packTransfers(reply.result.moves));
+    // #881 — forward the level's MoveStore buffers as TRANSFERRED: the pool never copies a
+    // level's moves. #889's storage is already the wire form.
+    if (reply.result.ok) this.out?.postMessage(reply, moveBufferTransfers(reply.result.moves));
     else this.out?.postMessage(reply);
     this.pump();
   }

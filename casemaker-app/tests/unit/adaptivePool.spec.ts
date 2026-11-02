@@ -34,7 +34,7 @@ import {
 } from '@/engine/cnc/cam/rough3d';
 import { adaptiveSettings } from '@/engine/cnc/cam/adaptive';
 import { HOP_Z, SAFE_Z } from '@/engine/cnc/cam/ir';
-import { packMoves } from '@/engine/cnc/cam/movePack';
+import { moveBuffersOf } from '@/engine/cnc/cam/moveWire';
 import type { GoalHeightfield, SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 
@@ -237,7 +237,7 @@ class FakeWorker {
       queueMicrotask(() => {
         const plan = planLevel(shared, request);
         const reply: PoolPlanReply = plan.ok
-          ? { id, result: { ok: true, moves: packMoves(plan.moves), maxEngagementMm: plan.maxEngagementMm } }
+          ? { id, result: { ok: true, moves: moveBuffersOf(plan.moves), maxEngagementMm: plan.maxEngagementMm } }
           : { id, result: { ok: false, reason: plan.reason } };
         this.onmessage?.({ data: reply });
       });

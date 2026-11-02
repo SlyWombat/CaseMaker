@@ -13,7 +13,7 @@
 import type { LevelPlanRequest, LevelPlanResult, LevelPlanShared, LevelPlanner } from '@/engine/cnc/cam/rough3d';
 import type { PoolPlanReply, PoolReply } from '@/workers/adaptivePool.worker';
 import type { PoolSizing } from '@/engine/jobs/poolSizing';
-import { unpackMoves } from '@/engine/cnc/cam/movePack';
+import { MoveStore } from '@/engine/cnc/cam/moveStore';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 
@@ -94,10 +94,10 @@ export function portLevelPlanner(port: MessagePort, onSized?: (sizing: PoolSizin
           // ids the planner handed out when it posted them.
           const slot = idToSlot.get(id);
           if (slot === undefined || results[slot] !== undefined) return;
-          // #881 — the wire form is packed buffers (transferred); the CAM consumes moves until
-          // #889 moves its storage to the packed arrays themselves.
+          // #881 — the wire form is #889's MoveStore arrays (transferred); the CAM consumes the
+          // same `CamMove[]` the in-process path produces, now built from the store's view.
           results[slot] = result.ok
-            ? { ok: true, moves: unpackMoves(result.moves), maxEngagementMm: result.maxEngagementMm }
+            ? { ok: true, moves: MoveStore.fromBuffers(result.moves).view(), maxEngagementMm: result.maxEngagementMm }
             : result;
           done++;
           onPlanned?.(done, requests.length);

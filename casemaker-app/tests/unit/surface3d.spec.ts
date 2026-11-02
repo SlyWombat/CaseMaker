@@ -445,11 +445,11 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
 });
 
 describe('#889 — the goal estimate counts what the CAM will write', () => {
-  it('counts the roughing exactly and bounds the finishing from above', () => {
+  it('counts the roughing exactly and bounds the finishing from above', async () => {
     for (const tris of [domeTris(5), rampTris()]) {
       const hf = sampleGoalHeightfield(goal(tris), { pitchMm: 0.1 });
       const allowance = 0.3;
-      const { roughing, finishing } = generateSurface3dIR({
+      const { roughing, finishing } = await generateSurface3dIR({
         heightfield: hf,
         tool: FLAT_TOOL,
         toolObj: flatEndMill(2, { name: 'flat' }),
@@ -469,7 +469,7 @@ describe('#889 — the goal estimate counts what the CAM will write', () => {
     }
   });
 
-  it('counts the rim laps into the finish when the run clears a band', () => {
+  it('counts the rim laps into the finish when the run clears a band', async () => {
     const hf = sampleGoalHeightfield(goal(domeTris(5)), {
       pitchMm: 0.1,
       clear: { kind: 'ring', widthMm: 3 },
@@ -477,7 +477,7 @@ describe('#889 — the goal estimate counts what the CAM will write', () => {
       baseZ: -5,
     });
     const rim = { floorZ: -5 };
-    const { finishing } = generateSurface3dIR({
+    const { finishing } = await generateSurface3dIR({
       heightfield: hf,
       tool: BALL,
       toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
@@ -558,10 +558,10 @@ describe('#889 — the roughing removes exactly what the cell-by-cell ride remov
     ['a near-sphere cap', () => domeTris(8), 0.5],
     ['a ramp', () => rampTris(), 1],
   ] as const) {
-    it(`${name}: the swept rough is the ride's, cell for cell, with fewer moves`, () => {
+    it(`${name}: the swept rough is the ride's, cell for cell, with fewer moves`, async () => {
       const hf = sampleGoalHeightfield(goal(tris()), { pitchMm: 0.1 });
       const allowance = 0.3;
-      const { roughing } = generateSurface3dIR({
+      const { roughing } = await generateSurface3dIR({
         heightfield: hf,
         tool: FLAT_TOOL,
         toolObj: flatEndMill(2, { name: 'flat' }),
