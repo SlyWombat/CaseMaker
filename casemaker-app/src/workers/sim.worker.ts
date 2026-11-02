@@ -20,7 +20,7 @@ import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
-import { createSimSession, type SimDesign, type SimFrame, type SimLoadOpts, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
+import { checkpointInfoArrays, createSimSession, type SimDesign, type SimFrame, type SimLoadOpts, type SimLoadResult, type SimLoadResultWire, type SimPath, type SimSession } from './sim/session';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
@@ -130,7 +130,7 @@ const api = {
   cancelEngravePick(gen: number): void {
     if (gen + 1 > latestEditGen) latestEditGen = gen + 1;
   },
-  async simLoad(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts, onProgress?: (done: number, total: number, memoryMB?: number | null) => void): Promise<SimLoadResult> {
+  async simLoad(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts, onProgress?: (done: number, total: number, memoryMB?: number | null) => void): Promise<SimLoadResultWire> {
     // #896 — the sweep's progress carries THIS worker's heap, so a long goal sweep says what it
     // is holding while it holds it.
     const withMemory =
@@ -138,7 +138,24 @@ const api = {
     const result = (await getSession()).load(gcodeText, setup, tool, machineId, { ...opts, onProgress: withMemory });
     if (!result.ok) return result;
     const m = result.meshes;
-    return Comlink.transfer(result, buffersOf([m.stock, m.result, m.removal, ...m.gouges.map((g) => g.mesh)]));
+    const buffers = buffersOf([m.stock, m.result, m.removal, ...m.gouges.map((g) => g.mesh)]);
+    // #902 — the checkpoints' typed arrays, when `result.checkpoints` is a packed view: sent as
+    // the arrays themselves (transferred, zero-copy) instead of letting Comlink's structured clone
+    // walk the view index by index, which costs the same per-object build this was meant to avoid.
+    // `simClient.ts`'s `loadSim` is the one place that turns them back into `CheckpointInfo[]`.
+    const packedCps = checkpointInfoArrays(result.checkpoints);
+    if (packedCps === null) return Comlink.transfer(result, buffers);
+    buffers.push(
+      packedCps.segment.buffer,
+      packedCps.z.buffer,
+      packedCps.firstStep.buffer,
+      packedCps.lastStep.buffer,
+      packedCps.moveCount.buffer,
+      packedCps.nonConstantZ.buffer,
+      packedCps.aNull.buffer,
+      packedCps.a.buffer,
+    );
+    return Comlink.transfer({ ...result, checkpoints: packedCps }, buffers);
   },
   /** The stock and the removal so far at checkpoint `k`; null if `gen` is stale or nothing is loaded. */
   async simFrameAt(k: number, gen: number, design?: SimDesign): Promise<SimFrame | null> {

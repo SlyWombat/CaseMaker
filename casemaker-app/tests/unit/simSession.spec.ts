@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tl } from './helpers/manifoldExec';
-import { createSimSession, type SimFrame, type SimLoadOk } from '@/workers/sim/session';
+import { checkpointInfoArrays, createSimSession, type SimFrame, type SimLoadOk } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { STOCK_CACHE } from '@/workers/geometry/playback';
 import { capsuleArea, MAX_CHECKPOINTS } from '@/workers/geometry/sweep';
@@ -48,6 +48,18 @@ function meshVolume(m: NodeMeshOutput): number {
     v += (a[0]! * (b[1]! * d[2]! - b[2]! * d[1]!) - a[1]! * (b[0]! * d[2]! - b[2]! * d[0]!) + a[2]! * (b[0]! * d[1]! - b[1]! * d[0]!));
   }
   return v / 6;
+}
+
+/**
+ * #902 — `checkpoints` may now be a lazy view over packed typed arrays (`checkpointInfoView`),
+ * which `structuredClone` cannot clone directly (it is a Proxy, not plain data): the REAL boundary
+ * (`sim.worker.ts`'s `simLoad`) sends the arrays themselves instead of the view. These two tests
+ * run the fake/in-process clients directly, skipping that rewrite, so they apply it themselves —
+ * proving the same "no wasm handle, nothing live" guarantee the wire actually carries.
+ */
+function wireSafe<T extends { checkpoints: unknown }>(info: T): T {
+  const packed = checkpointInfoArrays(info.checkpoints as never);
+  return packed === null ? info : { ...info, checkpoints: packed };
 }
 
 function loaded(src: string, s: Setup = setup(), t = tool, machine: string | null = null) {
@@ -107,7 +119,7 @@ describe('what a load returns', () => {
     const { session, r } = loaded(THREE);
     expect(r.count).toBe(3);
     expect(Object.keys(r).sort()).toEqual(['axisClamped', 'checkpoints', 'count', 'diagnostics', 'meshes', 'ok', 'pauses', 'radius', 'segments', 'stats', 'stockTopZ', 'summary']);
-    expect(() => structuredClone({ ...r, meshes: undefined })).not.toThrow();
+    expect(() => structuredClone({ ...wireSafe(r), meshes: undefined })).not.toThrow();
     const all = [r.meshes.stock, r.meshes.result, r.meshes.removal, ...r.meshes.gouges.map((g) => g.mesh)].filter((m): m is NodeMeshOutput => m !== null);
     expect(all).toHaveLength(3);
     for (const m of all) {
@@ -700,7 +712,8 @@ describe('simStore: plain data and meshes, never jobStore.nodes', () => {
     expect(store.getState().k).toBe(1);
     expect(store.getState().frame?.k).toBe(1);
     // Nothing in the state is a wasm handle: it survives a structured clone intact.
-    expect(() => structuredClone({ i: store.getState().info, m: store.getState().meshes, f: store.getState().frame })).not.toThrow();
+    const info = store.getState().info;
+    expect(() => structuredClone({ i: info && 'checkpoints' in info ? wireSafe(info) : info, m: store.getState().meshes, f: store.getState().frame })).not.toThrow();
     await store.getState().dispose();
     expect(store.getState().status).toBe('idle');
     expect(store.getState().meshes).toBeNull();

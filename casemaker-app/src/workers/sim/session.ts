@@ -59,7 +59,8 @@ import { manifoldOfTriangles, meshOutputOf, type NodeMeshOutput } from '../geome
 import { createPlayback, type Playback } from '../geometry/playback';
 import { boxSolid, isDenseForExactSweep, sweepTimeline, unliftTimeline, type SweepDiagnostic, type SweepOpts, type SweepResult, type SweepStats } from '../geometry/sweep';
 import { columnSweep, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
-import { checkpointStoreOf } from '@/engine/cnc/emulator/checkpointStore';
+import { checkpointInfoArraysOf, checkpointStoreOf, type PackedCheckpointInfoArrays } from '@/engine/cnc/emulator/checkpointStore';
+import { packedSource, packedView, type PackedSource } from '@/engine/cnc/gcode/packedView';
 import { eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import type { ParseResult } from '@/engine/cnc/gcode/types';
 import type { FlatField } from '../geometry/carriedField';
@@ -205,6 +206,18 @@ export interface SimLoadRefused {
 }
 
 export type SimLoadResult = SimLoadOk | SimLoadRefused;
+
+/**
+ * #902 — `SimLoadOk` AS IT CROSSES COMLINK: `checkpoints` may ride as the raw
+ * `PackedCheckpointInfoArrays` instead of the `CheckpointInfo[]` view, so the typed arrays cross
+ * by structured clone (or transfer) rather than the view being walked index by index while it
+ * serialises. `sim.worker.ts`'s `simLoad` sends whichever `checkpointInfoArrays` finds; the one
+ * place that knows this shape is `simClient.ts`'s `loadSim`, which turns it back into the
+ * `CheckpointInfo[]` every other reader expects (`checkpointInfoView`), so `SimWorkerApi` is the
+ * only seam this wire shape is visible at.
+ */
+export type SimLoadOkWire = Omit<SimLoadOk, 'checkpoints'> & { checkpoints: CheckpointInfo[] | PackedCheckpointInfoArrays };
+export type SimLoadResultWire = SimLoadOkWire | SimLoadRefused;
 
 /**
  * The whole tool path, with the kind and time of every move (#197, `/Simulation.md` §8). The
@@ -540,9 +553,58 @@ class GrowF64 {
 }
 
 /**
+ * #902 — the `PackedCheckpointInfoArrays` behind a `checkpointInfoView`-built `CheckpointInfo[]`,
+ * so the Comlink boundary (`sim.worker.ts`) can send the typed arrays across instead of the view:
+ * crossing a `PackedSource` proxy by structured clone still walks it index by index, the same cost
+ * the eager object build used to pay, while the arrays themselves clone (or transfer) as raw bytes.
+ */
+class CheckpointInfoSource implements PackedSource<CheckpointInfo> {
+  readonly data: PackedCheckpointInfoArrays;
+  constructor(data: PackedCheckpointInfoArrays) {
+    this.data = data;
+  }
+  get length(): number {
+    return this.data.count;
+  }
+  at(i: number): CheckpointInfo {
+    const d = this.data;
+    const n = d.moveCount[i] as number;
+    return {
+      segment: d.segment[i] as number,
+      z: d.z[i] as number,
+      run: i,
+      firstStep: (n > 0 ? d.firstStep[i] : undefined) as number,
+      lastStep: (n > 0 ? d.lastStep[i] : undefined) as number,
+      moveCount: n,
+      nonConstantZ: (d.nonConstantZ[i] as number) !== 0,
+      a: (d.aNull[i] as number) !== 0 ? null : (d.a[i] as number),
+    };
+  }
+}
+
+/** #902 — `PackedCheckpointInfoArrays` → the `CheckpointInfo[]` a client reads, built lazily. */
+export function checkpointInfoView(data: PackedCheckpointInfoArrays): CheckpointInfo[] {
+  return packedView<CheckpointInfo>(new CheckpointInfoSource(data));
+}
+
+/**
+ * #902 — the raw arrays behind a `checkpointInfoView`, or null for an ordinary `CheckpointInfo[]`
+ * (a hand-built result, or one the far side of Comlink has already rehydrated). `sim.worker.ts`
+ * uses this to send the arrays themselves across the boundary.
+ */
+export function checkpointInfoArrays(checkpoints: readonly CheckpointInfo[]): PackedCheckpointInfoArrays | null {
+  const s = packedSource<CheckpointInfoSource>(checkpoints);
+  return s instanceof CheckpointInfoSource ? s.data : null;
+}
+
+/**
  * What the client is told about each checkpoint. #899 — read from the packed checkpoints without
  * making each one's move arrays; a checkpoint with no moves reports `undefined` steps, exactly as
- * reading `steps[0]` of its empty array did.
+ * reading `steps[0]` of its empty array did. #902 — the packed branch now extracts the fields as
+ * typed arrays ONCE (`checkpointInfoArraysOf`) and hands back a LAZY view over them
+ * (`checkpointInfoView`) rather than materialising one `CheckpointInfo` object per checkpoint: the
+ * same ~180 MB at 2M checkpoints this used to allocate up front is now the arrays alone (~1/3 the
+ * bytes) and the objects are made only for the checkpoints a reader actually touches.
  */
 function checkpointInfos(timeline: Timeline): CheckpointInfo[] {
   const packed = checkpointStoreOf(timeline.checkpoints);
@@ -558,22 +620,7 @@ function checkpointInfos(timeline: Timeline): CheckpointInfo[] {
       a: cp.a,
     }));
   }
-  const out = new Array<CheckpointInfo>(packed.length);
-  for (let k = 0; k < packed.length; k++) {
-    const start = packed.moveStart(k);
-    const n = packed.moveEnd(k) - start;
-    out[k] = {
-      segment: packed.segmentOf(k),
-      z: packed.zOf(k),
-      run: k,
-      firstStep: (n > 0 ? packed.stepOf(start) : undefined) as number,
-      lastStep: (n > 0 ? packed.stepOf(start + n - 1) : undefined) as number,
-      moveCount: n,
-      nonConstantZ: packed.nonConstantZOf(k),
-      a: packed.aOf(k),
-    };
-  }
-  return out;
+  return checkpointInfoView(checkpointInfoArraysOf(packed));
 }
 
 /** Delete every handle a `SweepResult` owns, each exactly once. */

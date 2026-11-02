@@ -392,3 +392,62 @@ export function checkpointStoreOf(checkpoints: readonly Checkpoint[]): Checkpoin
   const s = packedSource<unknown>(checkpoints);
   return s instanceof CheckpointStore ? s : null;
 }
+
+/**
+ * #902 — the client's `CheckpointInfo[]` (`session.ts`), as plain typed arrays rather than one
+ * object per checkpoint: `session.ts`'s own `checkpointInfos` reads these fields off this very
+ * store (`segmentOf`, `zOf`, `stepOf`, `nonConstantZOf`, `aOf`) to build each `CheckpointInfo`; this
+ * extracts them ONCE, per field, instead of per object. `firstStep`/`lastStep` carry -1 for a
+ * checkpoint with no moves (`moveCount` is then 0), the sentinel `session.ts`'s view turns back
+ * into `undefined`, exactly as reading `cp.steps[0]` of an empty array did.
+ *
+ * Plain numeric arrays, with no reference to `CheckpointInfo` or to `session.ts`: the sim worker
+ * sends them across Comlink by structured clone (or transfer) instead of cloning N objects, and
+ * `session.ts`'s `checkpointInfoView` turns them back into the `CheckpointInfo[]` shape on the far
+ * side, in the one place that knows the wire format.
+ */
+export interface PackedCheckpointInfoArrays {
+  count: number;
+  segment: Int32Array;
+  z: Float64Array;
+  /** -1 when that checkpoint has no moves. */
+  firstStep: Int32Array;
+  /** -1 when that checkpoint has no moves. */
+  lastStep: Int32Array;
+  moveCount: Int32Array;
+  /** 0/1. */
+  nonConstantZ: Uint8Array;
+  /** 1 when this checkpoint's `a` is null; `a[k]` is then meaningless. */
+  aNull: Uint8Array;
+  a: Float64Array;
+}
+
+/** Extract {@link PackedCheckpointInfoArrays} from a sealed store, one scan, typed arrays only. */
+export function checkpointInfoArraysOf(store: CheckpointStore): PackedCheckpointInfoArrays {
+  const n = store.length;
+  const out: PackedCheckpointInfoArrays = {
+    count: n,
+    segment: new Int32Array(n),
+    z: new Float64Array(n),
+    firstStep: new Int32Array(n),
+    lastStep: new Int32Array(n),
+    moveCount: new Int32Array(n),
+    nonConstantZ: new Uint8Array(n),
+    aNull: new Uint8Array(n),
+    a: new Float64Array(n),
+  };
+  for (let k = 0; k < n; k++) {
+    const start = store.moveStart(k);
+    const m = store.moveEnd(k) - start;
+    out.segment[k] = store.segmentOf(k);
+    out.z[k] = store.zOf(k);
+    out.firstStep[k] = m > 0 ? store.stepOf(start) : -1;
+    out.lastStep[k] = m > 0 ? store.stepOf(start + m - 1) : -1;
+    out.moveCount[k] = m;
+    out.nonConstantZ[k] = store.nonConstantZOf(k) ? 1 : 0;
+    const a = store.aOf(k);
+    if (a === null) out.aNull[k] = 1;
+    else out.a[k] = a;
+  }
+  return out;
+}

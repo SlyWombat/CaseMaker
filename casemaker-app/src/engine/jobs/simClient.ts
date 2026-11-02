@@ -16,7 +16,7 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
-import type { SimDesign } from '@/workers/sim/session';
+import { checkpointInfoView, type SimDesign } from '@/workers/sim/session';
 import type { EngraveProgress, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { EngravePickSummary } from '@/workers/sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -403,7 +403,14 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
           },
           onProgress === undefined ? undefined : Comlink.proxy(onProgress),
         )
-        .then(async (r) => {
+        .then(async (wire): Promise<SimLoadResult> => {
+          // #902 — the one place that knows the wire shape: `checkpoints` crossed as the raw
+          // typed arrays (`checkpointInfoArrays`, `sim.worker.ts`'s `simLoad`) whenever the sim
+          // worker's own timeline packed them, and is turned back into the `CheckpointInfo[]`
+          // every other reader expects before anything past this point sees it.
+          const r: SimLoadResult = wire.ok && !Array.isArray(wire.checkpoints)
+            ? { ...wire, checkpoints: checkpointInfoView(wire.checkpoints) }
+            : (wire as SimLoadResult);
           // #224: the warm-up is part of the load, not the first scrub. Awaiting `simWarmup`
           // keeps this promise pending (so the UI stays "loading") until the anchor chain is
           // built; only then does the caller go ready and accept scrubs.
