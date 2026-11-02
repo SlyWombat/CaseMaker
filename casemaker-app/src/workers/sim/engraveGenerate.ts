@@ -44,6 +44,10 @@ import { version as CAM_VERSION } from '../../../package.json';
 import { dialectOf, type Mill } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { catalogueCoverageFor, feedsFor, feedsToolForSurface, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+// #922 — the one call shape every `shop.feeds ?? undefined` resolution below now uses: one options
+// object (`shop`, already built by whichever caller — the worker or the CLI) instead of that
+// fragment copied at each site. See the module doc in `engrave/feeds.ts`.
+import { engraveFeedsFor } from '@/engine/cnc/engrave/feeds';
 import {
   cuttingDiameter,
   cuttingForTrace,
@@ -1865,7 +1869,7 @@ export function engraveRegions(
   // the feeds gate owns that sentence, and the note is skipped.
   let requestedStepOver: number | null = null;
   if (cone !== null && tool !== null) {
-    const requested = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride, shop.feeds ?? undefined);
+    const requested = engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride);
     if (requested.ok) requestedStepOver = requested.params.stepOver;
   }
 
@@ -4088,7 +4092,7 @@ async function generateRestPair(
   // refusal is stated there — where a later cutter with no items of its own is the one asking for
   // a rest pass — rather than guessed from a whole-setup measurement.)
 
-  const roughFeeds = feedsFor(catalogue, job.stock.material, roughTool, mill, job.cutOverride, shop.feeds ?? undefined);
+  const roughFeeds = engraveFeedsFor(shop, catalogue, job.stock.material, roughTool, mill, job.cutOverride);
   const roughDiameter = cuttingDiameter(roughTool) ?? 0;
   const overlapRead = shop.rest?.overlap ?? {
     value: REST_MACHINING_FALLBACK.overlap,
@@ -4217,14 +4221,7 @@ async function generateRestPair(
     // rests a 6 mm pocket at 1.5375 mm). Raise the shortfall on THIS program, where the run's
     // tagging names it `program 2 (…)`.
     const restDepthFindings = restDepthShortfallFindings(design.plan, restTool);
-    const restFeeds = feedsFor(
-      catalogue,
-      job.stock.material,
-      restTool,
-      mill,
-      undefined,
-      shop.feeds ?? undefined,
-    );
+    const restFeeds = engraveFeedsFor(shop, catalogue, job.stock.material, restTool, mill, undefined);
     const restDiameter = cuttingDiameter(restTool) ?? 0;
     const restCutterRef: SeamCutter = {
       key: restRef.toolKey,
@@ -4497,7 +4494,7 @@ export function generateRotaryGoalProgram(
     );
   }
   const mill = jobMachine(job, calibration);
-  const resolved = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), mill, job.cutOverride, shop.feeds ?? undefined);
+  const resolved = engraveFeedsFor(shop, catalogue, job.stock.material, feedsToolForSurface(tool), mill, job.cutOverride);
   if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
   const settings = goal.surface ?? {};
   const stockToLeaveMm = settings.stockToLeaveMm ?? shop.finish?.stockToLeaveMm.value ?? undefined;
@@ -4763,7 +4760,7 @@ export async function generateGoalProgram(
   // Feeds — the job's 2.5D feeds, reused unchanged (slice F tunes 3D engagement, #536). A ball/bull
   // is refused by `feedsFor` (it cannot trace), so its feeds come through the shared FLAT proxy
   // (feedsToolForSurface); a flat cutter resolves directly.
-  const resolved = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), mill, job.cutOverride, shop.feeds ?? undefined);
+  const resolved = engraveFeedsFor(shop, catalogue, job.stock.material, feedsToolForSurface(tool), mill, job.cutOverride);
   if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
 
   // #535 — the goal operation's own settings, each falling back to the default it overrides: the
@@ -4828,7 +4825,7 @@ export async function generateGoalProgram(
   const roughResolved =
     roughTool === null
       ? null
-      : feedsFor(catalogue, job.stock.material, roughTool, mill, job.cutOverride, shop.feeds ?? undefined);
+      : engraveFeedsFor(shop, catalogue, job.stock.material, roughTool, mill, job.cutOverride);
   if (roughEntryDefined && roughEntry === undefined) {
     roughFindings.push({
       severity: 'warning',
@@ -5382,14 +5379,7 @@ export async function generateGoalProgram(
       const bucket = Math.round(radius * 1000);
       if (seenRadius.has(bucket)) continue;
       seenRadius.add(bucket);
-      const restResolved = feedsFor(
-        catalogue,
-        job.stock.material,
-        feedsToolForSurface(candidate),
-        mill,
-        job.cutOverride,
-        shop.feeds ?? undefined,
-      );
+      const restResolved = engraveFeedsFor(shop, catalogue, job.stock.material, feedsToolForSurface(candidate), mill, job.cutOverride);
       if (!restResolved.ok) continue;
       const restFeeds: SurfaceFeeds = {
         feed: restResolved.params.feed,
@@ -5658,7 +5648,7 @@ export async function generateGoalProgram(
       cuts.push({ id: goal.id, name: 'the part’s edge', chain, depth: width / cone.tanHalf });
     }
     if (cuts.length === 0) return null;
-    const chamferFeeds = feedsFor(catalogue, job.stock.material, entry.tool, mill, job.cutOverride, shop.feeds ?? undefined);
+    const chamferFeeds = engraveFeedsFor(shop, catalogue, job.stock.material, entry.tool, mill, job.cutOverride);
     if (!chamferFeeds.ok) {
       chamferFindings.push({
         severity: 'warning',
@@ -5916,7 +5906,7 @@ async function generateSurfacePrimitiveProgram(
   // a FLAT PROXY of its cutting diameter, because `feedsFor` cannot feed a shape it cannot trace.
   const isRound = tool.shape === 'ball' || tool.shape === 'bull';
   const feedTool = feedsToolForSurface(tool);
-  const resolved = feedsFor(catalogue, job.stock.material, feedTool, mill, job.cutOverride, shop.feeds ?? undefined);
+  const resolved = engraveFeedsFor(shop, catalogue, job.stock.material, feedTool, mill, job.cutOverride);
   if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
 
   const field = primitiveHeightfield(primitive, {
@@ -6301,7 +6291,7 @@ async function generateFaceProgram(
   }
   if (tool === null) return fail('feeds', 'the job has no usable cutter', { findings: documentFindings });
   const mill = jobMachine(job, calibration);
-  const feeds = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride, shop.feeds ?? undefined);
+  const feeds = engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride);
   if (!feeds.ok) return fail('feeds', feeds.reason, { feeds, findings: documentFindings });
   const map = rotaryMapOf(job);
   if (map === null) return fail('findings', 'the face operations need the rotary chuck', { findings: documentFindings });
@@ -6443,7 +6433,7 @@ async function generateFaceProgram(
       if (operations.length === 0) continue;
       let n = 1;
       for (const op of operations) op.number = n++;
-      const fineFeeds = feedsFor(catalogue, job.stock.material, group.entry.tool, mill, job.cutOverride, shop.feeds ?? undefined);
+      const fineFeeds = engraveFeedsFor(shop, catalogue, job.stock.material, group.entry.tool, mill, job.cutOverride);
       if (!fineFeeds.ok) {
         uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
         continue;
@@ -7694,7 +7684,7 @@ async function generateOneProgram(
   } else {
     const usable = cuttingForTrace(tool);
     if (!usable.ok) return stop('feeds', { message: usable.reason });
-    const resolved = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride, shop.feeds ?? undefined);
+    const resolved = engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride);
     if (!resolved.ok) return stop('feeds', { feeds: resolved, message: resolved.reason });
     feeds = resolved;
     // #711 — THE TAPE HOLD RULE (#707 BM-4, design §3.4): the tape must cover `holdRatio × the
@@ -7714,7 +7704,7 @@ async function generateOneProgram(
       const hold = readDefault(shop.defaults ?? null, 'tape.holdRatio');
       // #727 F9 — the pieces are freed by the PROFILE pass, which resolves the same row with the
       // slotting context (`feeds.ts`); its step-down is what the released piece's bite is judged at.
-      const slottingRow = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride, shop.feeds ?? undefined, { slotting: true });
+      const slottingRow = engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride, { slotting: true });
       findings.push(
         ...tapeHoldFindings({
           stock: job.stock,
@@ -7735,15 +7725,7 @@ async function generateOneProgram(
     const profileFeeds =
       profiles.length === 0
         ? null
-        : feedsFor(
-            catalogue,
-            job.stock.material,
-            tool,
-            mill,
-            job.cutOverride,
-            shop.feeds ?? undefined,
-            { slotting: true },
-          );
+        : engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride, { slotting: true });
     if (profileFeeds !== null && !profileFeeds.ok) {
       return stop('feeds', { feeds: profileFeeds, message: profileFeeds.reason });
     }
