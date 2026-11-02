@@ -37,6 +37,8 @@
  */
 
 import type { Timeline, Checkpoint } from '@/engine/cnc/emulator/timeline';
+import { checkpointStoreOf } from '@/engine/cnc/emulator/checkpointStore';
+import { eventLine, eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import { partToWork } from '@/engine/cnc/frames';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { sectionRadiusAt } from '@/engine/cnc/rotary/wrap';
@@ -548,7 +550,8 @@ export const COLUMN_MAX_ANCHORS = 32;
 export interface ColumnParameterisation {
   readonly kind: 'rotary' | 'flat';
   /** Build the initial grid from the setup, the cutter and the program's own extent. */
-  buildGrid(setup: Setup, cutter: ColumnCutter, moves: readonly CutMove[], res: ColumnResolution): ColumnGrid;
+  /** `moves` is read once, in order (#899: the sweep hands a lazy walk, not an array). */
+  buildGrid(setup: Setup, cutter: ColumnCutter, moves: Iterable<CutMove>, res: ColumnResolution): ColumnGrid;
   /**
    * Subtract one move. `crossed` is set when the model cannot hold the cut (rotary: a genuine
    * axis crossing), `clamped` when a shallow axis dip was clamped and the sweep may continue.
@@ -1646,7 +1649,7 @@ export function flatMovesOf(cp: Checkpoint, timeline: Timeline): CutMove[] {
     const z1 = cp.zs[i * 2 + 1] as number;
     out.push({
       step,
-      line: timeline.events[step]?.line ?? -1,
+      line: eventLine(timeline.events, step) ?? -1,
       u0: x0,
       u1: x1,
       v0: y0,
@@ -1673,7 +1676,7 @@ export function rotaryMovesOf(cp: Checkpoint, timeline: Timeline): CutMove[] {
     const aStart = timeline.stateAt(step - 1).a;
     out.push({
       step,
-      line: timeline.events[step]?.line ?? -1,
+      line: eventLine(timeline.events, step) ?? -1,
       u0: x0,
       u1: x1,
       v0: aStart ?? aEnd ?? 0,
@@ -1684,6 +1687,72 @@ export function rotaryMovesOf(cp: Checkpoint, timeline: Timeline): CutMove[] {
     });
   }
   return out;
+}
+
+/**
+ * #899 — checkpoint k's `CutMove`s, made on call: exactly what `flatMovesOf` / `rotaryMovesOf` make
+ * for it, read straight from the packed checkpoints when the timeline has them. A rotary move's
+ * two A values are resolved once, here, for the whole program.
+ */
+function checkpointMoves(timeline: Timeline, rotary: boolean): (k: number) => CutMove[] {
+  const packed = checkpointStoreOf(timeline.checkpoints);
+  let rotaryA: Float64Array | null = null;
+  let offsets: Int32Array | null = null;
+  if (rotary) {
+    const count = timeline.checkpoints.length;
+    offsets = new Int32Array(count + 1);
+    for (let k = 0; k < count; k++) {
+      const n = packed !== null ? packed.moveEnd(k) - packed.moveStart(k) : (timeline.checkpoints[k] as Checkpoint).steps.length;
+      offsets[k + 1] = (offsets[k] as number) + n;
+    }
+    rotaryA = new Float64Array(2 * (offsets[count] as number));
+    for (let k = 0; k < count; k++) {
+      const cp = packed !== null ? null : (timeline.checkpoints[k] as Checkpoint);
+      const n = (offsets[k + 1] as number) - (offsets[k] as number);
+      for (let i = 0; i < n; i++) {
+        const step = packed !== null ? packed.stepOf(packed.moveStart(k) + i) : (cp?.steps[i] as number);
+        const aEnd = timeline.stateAt(step).a;
+        const aStart = timeline.stateAt(step - 1).a;
+        const o = 2 * ((offsets[k] as number) + i);
+        rotaryA[o] = aStart ?? aEnd ?? 0;
+        rotaryA[o + 1] = aEnd ?? aStart ?? 0;
+      }
+    }
+  }
+  const events = eventStoreOf(timeline.events);
+  const make = (k: number, i: number, step: number, x0: number, y0: number, x1: number, y1: number, z0: number, z1: number): CutMove => {
+    const line = (events !== null ? (step >= 0 && step < events.length ? events.lineAt(step) : undefined) : timeline.events[step]?.line) ?? -1;
+    if (rotaryA !== null && offsets !== null) {
+      const o = 2 * ((offsets[k] as number) + i);
+      return { step, line, u0: x0, u1: x1, v0: rotaryA[o] as number, v1: rotaryA[o + 1] as number, z: Math.min(z0, z1), z0, z1 };
+    }
+    return { step, line, u0: x0, u1: x1, v0: y0, v1: y1, z: Math.min(z0, z1), z0, z1 };
+  };
+  return (k: number): CutMove[] => {
+    const out: CutMove[] = [];
+    if (packed !== null) {
+      const start = packed.moveStart(k);
+      packed.forEachCut(start, packed.moveEnd(k), (c, j) => out.push(make(k, j - start, c.step, c.x0, c.y0, c.x1, c.y1, c.z0, c.z1)));
+      return out;
+    }
+    const cp = timeline.checkpoints[k] as Checkpoint;
+    for (let i = 0; i < cp.steps.length; i++) {
+      out.push(
+        make(
+          k,
+          i,
+          cp.steps[i] as number,
+          cp.xy[i * 4] as number,
+          cp.xy[i * 4 + 1] as number,
+          cp.xy[i * 4 + 2] as number,
+          cp.xy[i * 4 + 3] as number,
+          cp.zs[i * 2] as number,
+          cp.zs[i * 2 + 1] as number,
+        ),
+      );
+    }
+    return out;
+  };
 }
 
 function zeroStats(): SweepStats {
@@ -1789,13 +1858,18 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     }
   }
 
-  // Resolve every checkpoint's moves once. `stateAt` is snapshotted (O(512)), not recomputed.
-  const perCheckpoint = timeline.checkpoints.map((cp) => (rotary ? rotaryMovesOf(cp, timeline) : flatMovesOf(cp, timeline)));
-  const allMoves = perCheckpoint.flat();
+  // #899 — every checkpoint's moves are made WHEN THEY ARE SWEPT (`movesOf`), not all up front:
+  // held for the session, one `CutMove` object per line was most of the column engine's memory. A
+  // rotary move's A at each end is read through `stateAt` once here (snapshotted, O(512)) and kept
+  // as two doubles, so a replay never walks the program again.
+  const movesOf = checkpointMoves(timeline, rotary);
+  const allMoves = function* (): IterableIterator<CutMove> {
+    for (let k = 0; k < timeline.checkpoints.length; k++) yield* movesOf(k);
+  };
   const tBuild = performance.now();
   let grid: ColumnGrid;
   try {
-    grid = param.buildGrid(setup, cutter, allMoves, res);
+    grid = param.buildGrid(setup, cutter, allMoves(), res);
   } catch (e) {
     return { ok: false, diagnostics: [{ severity: 'error', code: rotary ? 'rotary-stock' : 'flat-stock', message: e instanceof Error ? e.message : String(e) }] };
   }
@@ -1848,7 +1922,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
         const dz = Math.abs((cp.zs[i * 2 + 1] as number) - (cp.zs[i * 2] as number));
         if (dz > worst) {
           worst = dz;
-          worstLine = timeline.events[cp.steps[i] as number]?.line ?? -1;
+          worstLine = eventLine(timeline.events, cp.steps[i] as number) ?? -1;
           worstStroke = Math.hypot(x1 - x0, y1 - y0);
         }
       }
@@ -1921,13 +1995,13 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   // length, `holder-unproven` when the record states neither.
   if (resolved.kind === 'thread-envelope') {
     let deepest: number | null = null;
-    for (const m of allMoves) if (m.z < grid.initial) deepest = Math.max(deepest ?? 0, grid.initial - m.z);
+    for (const m of allMoves()) if (m.z < grid.initial) deepest = Math.max(deepest ?? 0, grid.initial - m.z);
     const neck = holderGate(tool, deepest);
     if (neck) diagnostics.push(neck);
   }
   const tGrid = performance.now();
 
-  const count = perCheckpoint.length;
+  const count = timeline.checkpoints.length;
   // #895 — the window restarts at every checkpoint, so this is a stall bound, not a deadline.
   const stallMs = opts?.stallMs;
   let lastProgressAt = performance.now();
@@ -1947,7 +2021,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const spanSweep = rotary && resolved.kind === 'flat' && opts?.noSpanSweep !== true;
 
   for (let k = 0; k < count; k++) {
-    for (const m of perCheckpoint[k] as CutMove[]) {
+    for (const m of movesOf(k)) {
       const r = (spanSweep ? applyRotaryPureAFlat(grid, m, cutter) : null) ?? param.applyMove(grid, m, cutter);
       ops += r.written;
       if (r.crossed) {
@@ -2077,7 +2151,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     const scratch: ColumnGrid = { ...grid, h: (a >= 0 ? (anchors.get(a) as Float32Array) : grid.h).slice() };
     const from = a >= 0 ? a : 0;
     if (a < 0) scratch.h.fill(grid.initial);
-    for (let i = from; i <= kk; i++) for (const m of perCheckpoint[i] as CutMove[]) param.applyMove(scratch, m, cutter);
+    for (let i = from; i <= kk; i++) for (const m of movesOf(i)) param.applyMove(scratch, m, cutter);
     return scratch;
   };
   const meshAt = (k: number): NodeMeshOutput => param.mesh(gridAt(k), displayRes);

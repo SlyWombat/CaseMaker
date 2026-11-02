@@ -59,6 +59,9 @@ import { manifoldOfTriangles, meshOutputOf, type NodeMeshOutput } from '../geome
 import { createPlayback, type Playback } from '../geometry/playback';
 import { boxSolid, isDenseForExactSweep, sweepTimeline, unliftTimeline, type SweepDiagnostic, type SweepOpts, type SweepResult, type SweepStats } from '../geometry/sweep';
 import { columnSweep, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
+import { checkpointStoreOf } from '@/engine/cnc/emulator/checkpointStore';
+import { eventStoreOf } from '@/engine/cnc/gcode/eventStore';
+import type { ParseResult } from '@/engine/cnc/gcode/types';
 import type { FlatField } from '../geometry/carriedField';
 import { unionRemoval } from './engraveRest';
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
@@ -516,6 +519,63 @@ export interface SimSessionHooks {
   onDispose?(what: 'playback' | 'sweep'): void;
 }
 
+/** A growable Float64 list (#899): `push` like an array, `done` is the filled part. */
+class GrowF64 {
+  private buf: Float64Array;
+  private n = 0;
+  constructor(width: number) {
+    this.buf = new Float64Array(1024 * width);
+  }
+  push(...v: number[]): void {
+    if (this.n + v.length > this.buf.length) {
+      const next = new Float64Array(Math.max(this.buf.length * 2, this.n + v.length));
+      next.set(this.buf.subarray(0, this.n));
+      this.buf = next;
+    }
+    for (let i = 0; i < v.length; i++) this.buf[this.n++] = v[i] as number;
+  }
+  done(): Float64Array {
+    return this.buf.subarray(0, this.n);
+  }
+}
+
+/**
+ * What the client is told about each checkpoint. #899 — read from the packed checkpoints without
+ * making each one's move arrays; a checkpoint with no moves reports `undefined` steps, exactly as
+ * reading `steps[0]` of its empty array did.
+ */
+function checkpointInfos(timeline: Timeline): CheckpointInfo[] {
+  const packed = checkpointStoreOf(timeline.checkpoints);
+  if (packed === null) {
+    return timeline.checkpoints.map((cp): CheckpointInfo => ({
+      segment: cp.segment,
+      z: cp.z,
+      run: cp.run,
+      firstStep: cp.steps[0] as number,
+      lastStep: cp.steps[cp.steps.length - 1] as number,
+      moveCount: cp.steps.length,
+      nonConstantZ: cp.nonConstantZ,
+      a: cp.a,
+    }));
+  }
+  const out = new Array<CheckpointInfo>(packed.length);
+  for (let k = 0; k < packed.length; k++) {
+    const start = packed.moveStart(k);
+    const n = packed.moveEnd(k) - start;
+    out[k] = {
+      segment: packed.segmentOf(k),
+      z: packed.zOf(k),
+      run: k,
+      firstStep: (n > 0 ? packed.stepOf(start) : undefined) as number,
+      lastStep: (n > 0 ? packed.stepOf(start + n - 1) : undefined) as number,
+      moveCount: n,
+      nonConstantZ: packed.nonConstantZOf(k),
+      a: packed.aOf(k),
+    };
+  }
+  return out;
+}
+
 /** Delete every handle a `SweepResult` owns, each exactly once. */
 export function disposeSweep(sweep: SweepResult): void {
   sweep.stock.delete();
@@ -780,17 +840,22 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       }
       rapid = machine.rapidEstimate;
     }
-    // #845 — READ THE FILE AS ITS MACHINE'S POST WROTE IT: a GRBL file's `M0` pause and `M8`
-    // coolant are its own dialect, and the Z1 firmware model refuses them as unknown codes.
-    const parse = parseGcode(gcodeText, { dialect: machine === undefined ? 'z1' : postKey(machine) });
     // The LIFTED timeline (the file as posted) and, when the package speaks the surface frame, its
     // surface-frame image: the same program with the lift taken back out, re-bucketed — the flat
     // program a flat post would have produced. The SWEEP takes the image; the viewport draws the
     // file (the timelines share their events).
-    const timeline = buildTimeline(parse, setupArg, machine);
+    //
+    // #899 — the parse is read inside its own scope so nothing holds it past the timeline: its
+    // packed events are a second copy of the program, and the sweep should not run beside them.
+    const { timeline, parserDiagnostics } = ((): { timeline: Timeline; parserDiagnostics: ParseResult['diagnostics'] } => {
+      // #845 — READ THE FILE AS ITS MACHINE'S POST WROTE IT: a GRBL file's `M0` pause and `M8`
+      // coolant are its own dialect, and the Z1 firmware model refuses them as unknown codes.
+      const parse = parseGcode(gcodeText, { dialect: machine === undefined ? 'z1' : postKey(machine) });
+      return { timeline: buildTimeline(parse, setupArg, machine), parserDiagnostics: parse.diagnostics };
+    })();
     const surfaceTimeline = surface === null ? timeline : unliftTimeline(timeline, surface);
     const diagnostics: SimDiagnostic[] = [
-      ...parse.diagnostics.map((d): SimDiagnostic => ({ source: 'parser', severity: d.severity, code: d.code, message: d.message, line: d.line })),
+      ...parserDiagnostics.map((d): SimDiagnostic => ({ source: 'parser', severity: d.severity, code: d.code, message: d.message, line: d.line })),
       ...timeline.diagnostics.map((d): SimDiagnostic => ({ source: 'runner', severity: d.severity, code: d.code, message: d.message, line: d.line, step: d.step })),
     ];
     // A WRAPPED rotary job — one whose cutting moves change A — is swept by the COLUMN engine
@@ -879,16 +944,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         radius: col.radius,
         axisClamped: col.axisClamped,
         count: col.count,
-        checkpoints: surfaceTimeline.checkpoints.map((cp): CheckpointInfo => ({
-          segment: cp.segment,
-          z: cp.z,
-          run: cp.run,
-          firstStep: cp.steps[0] as number,
-          lastStep: cp.steps[cp.steps.length - 1] as number,
-          moveCount: cp.steps.length,
-          nonConstantZ: cp.nonConstantZ,
-          a: cp.a,
-        })),
+        checkpoints: checkpointInfos(surfaceTimeline),
         pauses: surfaceTimeline.pauses,
         segments: surfaceTimeline.segments,
         // #817 — the column engine's removal ghost is the stock minus what it left, built here
@@ -983,16 +1039,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         radius: sweep.radius,
         axisClamped: null,
         count: playback.count,
-        checkpoints: surfaceTimeline.checkpoints.map((cp): CheckpointInfo => ({
-          segment: cp.segment,
-          z: cp.z,
-          run: cp.run,
-          firstStep: cp.steps[0] as number,
-          lastStep: cp.steps[cp.steps.length - 1] as number,
-          moveCount: cp.steps.length,
-          nonConstantZ: cp.nonConstantZ,
-          a: cp.a,
-        })),
+        checkpoints: checkpointInfos(surfaceTimeline),
         pauses: surfaceTimeline.pauses,
         segments: surfaceTimeline.segments,
         meshes,
@@ -1180,8 +1227,9 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const to = Math.max(from, Math.min(last, Math.trunc(toStep)));
     const pts: number[] = [];
     let s = l.timeline.stateAt(from);
+    const store = eventStoreOf(l.timeline.events);
     for (let i = from; i <= to; i++) {
-      if (i > from) s = applyEvent(s, l.timeline.events[i] as Parameters<typeof applyEvent>[1], l.setup);
+      if (i > from) s = applyEvent(s, (store !== null ? store.at(i) : l.timeline.events[i]) as Parameters<typeof applyEvent>[1], l.setup);
       const [x, y, z] = s.work;
       if (x !== null && y !== null && z !== null) pts.push(x, y, unliftZ(x, y, z));
     }
@@ -1221,17 +1269,20 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const l = live;
     if (!l || l.timeline.events.length === 0) return empty();
     const events = l.timeline.events;
-    const xyz: number[] = [];
-    const step: number[] = [];
-    const kind: number[] = [];
-    const t: number[] = [];
-    const line: number[] = [];
-    const a: number[] = [];
+    // #899 — read the packed events directly, and write the vertices into typed arrays: a 2M-line
+    // program's path held as eight number arrays was another 130 MB before the copy.
+    const store = eventStoreOf(events);
+    const xyz = new GrowF64(3);
+    const step = new GrowF64(1);
+    const kind = new GrowF64(1);
+    const t = new GrowF64(1);
+    const line = new GrowF64(1);
+    const a = new GrowF64(1);
     let anyA = false;
     let cum = 0;
     let s = l.timeline.stateAt(-1); // the state before step 0
     for (let i = 0; i < events.length; i++) {
-      const ev = events[i] as Parameters<typeof applyEvent>[1];
+      const ev = (store !== null ? store.at(i) : events[i]) as Parameters<typeof applyEvent>[1];
       const from = s.work;
       s = applyEvent(s, ev, l.setup);
       if (ev.kind !== 'move') continue;
@@ -1264,12 +1315,12 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       a.push(s.a ?? Number.NaN);
     }
     return {
-      xyz: Float32Array.from(xyz),
-      step: Uint32Array.from(step),
-      kind: Uint8Array.from(kind),
-      t: Float32Array.from(t),
-      line: Uint32Array.from(line),
-      ...(anyA ? { a: Float64Array.from(a) } : {}),
+      xyz: Float32Array.from(xyz.done()),
+      step: Uint32Array.from(step.done()),
+      kind: Uint8Array.from(kind.done()),
+      t: Float32Array.from(t.done()),
+      line: Uint32Array.from(line.done()),
+      ...(anyA ? { a: a.done().slice() } : {}),
       rapidsTimed: rapid !== null,
     };
   };
