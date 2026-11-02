@@ -198,6 +198,8 @@ test('the goal on flat stock: item draws the part in the cleared blank, mold dra
   await shoot(page, 'goal-mold.png');
   // The VOLUMES above are what prove the picture follows the mode (closed forms, read off the
   // drawing the scene renders). The pixel counts are only the "the removed layer is on screen in
-  // both" sanity check: they swing with the camera and the lighting, so no ratio is asserted.
-  expect(itemPixels).toBeGreaterThan(moldPixels);
+  // both" sanity check, asserted where each is taken: they swing with the camera and the lighting,
+  // and — #876 — the rotate compass's graduated ticks cover a handful of the few hundred orange
+  // pixels in BOTH views, so a ratio between them flipped without either drawing changing. No
+  // ratio is asserted.
 });
