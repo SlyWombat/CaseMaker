@@ -1,0 +1,26 @@
+{
+  "work": {
+    "ok": true,
+    "band": 0.08855824184906741,
+    "levels": [
+      {
+        "z": -0.1,
+        "predictedArea": 245.40779245500931,
+        "simulatedArea": 246.1142307385404,
+        "underCut": 0,
+        "overCut": 0,
+        "underBbox": null,
+        "overBbox": null
+      }
+    ],
+    "worst": {
+      "underCut": 0,
+      "overCut": 0,
+      "underAt": null,
+      "overAt": null
+    },
+    "areaFloor": 0.03982753146896676,
+    "frame": "work"
+  },
+  "surface": null
+}

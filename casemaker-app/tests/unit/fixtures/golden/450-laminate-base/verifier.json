@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "findings": [],
+  "stats": {
+    "lines": 6196,
+    "cuttingMoves": 5835,
+    "deepestZ": -0.1,
+    "bbox": {
+      "min": [
+        2.067,
+        7.07,
+        -0.1
+      ],
+      "max": [
+        101.075,
+        123.4,
+        17
+      ]
+    }
+  }
+}

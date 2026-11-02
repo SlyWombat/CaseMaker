@@ -1,0 +1,35 @@
+{
+  "work": {
+    "ok": true,
+    "band": 0.08862200171415091,
+    "levels": [
+      {
+        "z": -0.394,
+        "predictedArea": 286.5127971794509,
+        "simulatedArea": 285.07363600396945,
+        "underCut": 0,
+        "overCut": 0,
+        "underBbox": null,
+        "overBbox": null
+      },
+      {
+        "z": -0.399,
+        "predictedArea": 95.00681042020102,
+        "simulatedArea": 95.09104491692854,
+        "underCut": 0,
+        "overCut": 0,
+        "underBbox": null,
+        "overBbox": null
+      }
+    ],
+    "worst": {
+      "underCut": 0,
+      "overCut": 0,
+      "underAt": null,
+      "overAt": null
+    },
+    "areaFloor": 0.03989973561515641,
+    "frame": "work"
+  },
+  "surface": null
+}
