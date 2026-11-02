@@ -163,6 +163,12 @@ export function buildRunRecord(
   job: EngraveJob,
   generated: RunSheetGenerated,
   now: Date = new Date(),
+  /**
+   * #927 — the machine's elapsed seconds for this program's last clean run, when the caller has
+   * one. A file written AFTER a run can carry the actual the estimate is checked against; a file
+   * written before it passes null and the operator's `minutes` is the only clock the file holds.
+   */
+  actualSeconds: number | null = null,
 ): RunRecord {
   const tool = jobTool(job);
   const nc = generated.nc;
@@ -195,7 +201,7 @@ export function buildRunRecord(
     generatedOn: now.toISOString().slice(0, 10),
     cutOn: null,
     minutes: null,
-    actualSeconds: null,
+    actualSeconds: actualSeconds !== null && actualSeconds > 0 ? actualSeconds : null,
     cutter: { fluteLengthMm: null, stickOutMm: null },
     stockProudMm: null,
     depths: recordDepths(toPartPlan(job)).map((d) => ({

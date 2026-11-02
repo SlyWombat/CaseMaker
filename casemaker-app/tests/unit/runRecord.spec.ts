@@ -164,6 +164,16 @@ describe('runRecord (#277)', () => {
     expect(back.ok && back.run.estimatedSeconds).toBe(0);
   });
 
+  it('#927 a record written after a run carries the machine’s elapsed seconds', () => {
+    const job = dj();
+    const run = buildRunRecord(job, stubGenerated(job), NOW, 136);
+    expect(run.actualSeconds).toBe(136);
+    // Still not a measured run: the machine timed it, and the date is the writer's to state.
+    expect(run.cutOn).toBeNull();
+    expect(isMeasuredRun(run)).toBe(false);
+    expect(buildRunRecord(job, stubGenerated(job), NOW, 0).actualSeconds).toBeNull();
+  });
+
   it('#927 round-trips the machine’s actual seconds and keeps a person’s minutes apart from it', () => {
     const job = dj();
     const run = buildRunRecord(job, stubGenerated(job), NOW);
