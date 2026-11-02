@@ -113,7 +113,6 @@ import {
   type RunSheetOptions,
 } from '../../../src/engine/cnc/engrave/runSheet';
 import { releaseFileName } from '../../../src/engine/cnc/engrave/release';
-import { drillSettings } from '../../../src/engine/cnc/cam/drillBit';
 import { parseEngraveJob } from '../../../src/store/engraveJobSchema';
 import { simulationProblem } from '../../../src/engine/cnc/simGate';
 import {
@@ -138,7 +137,12 @@ import {
 import { MARGIN_DEFAULTS } from '../../../src/engine/cnc/engrave/depthBounds';
 import { engraveRegions, measureEngraving, raisedTextMeasure } from '../../../src/workers/sim/engraveGenerate';
 import { cuttingDiameter } from '../../../src/engine/cnc/tool';
-import { feedsFor, type CutParams, type FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
+import type { CutParams, FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
+// #922 — the one call shape feeds/step-down/rpm resolution now goes through, and the table this
+// run installed from the location (`bootstrap` → `loadLocation` → `installLocationFeedsTable`),
+// read back in the shape `EngraveShopOpts.feeds` wants — the same thing `engraveRunStore` sends the
+// worker for the browser's own Generate.
+import { engraveFeedsFor, engraveShopOpts } from '../../../src/engine/cnc/engrave/feeds';
 import { jobMachine } from '../../../src/engine/cnc/calibration';
 import { executeProfile } from '../../../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from '../engravePreviewSvg';
@@ -531,29 +535,21 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    */
   const shopDefaults = boot.location?.defaults ?? null;
   /**
-   * #733 — THE SHOP THE GENERATOR CANNOT READ FOR ITSELF. Its realm has no tool registry (the
-   * location lives on this side), so a setup whose LATER cutter is a `user:`/`inv:` key resolves
-   * nowhere without the snapshot. Passing it is what lets one job document post one program per
-   * cutter instead of the operator splitting the job into one file per cutter.
+   * #922 — ONE SHOP OBJECT, ONE BUILDER, FOR BOTH DOORS. `engraveShopOpts` (`engine/cnc/engrave/
+   * feeds.ts`) is built field-for-field to match what `engraveRunStore.ts` sends the worker for the
+   * browser's own Generate — `tests/unit/pipelineIdentity.spec.ts`'s `appShop` is the reference both
+   * now mirror. Before this the CLI's own `shop` literal here set only `tools`, `drill` and `rest`,
+   * so every other field a posted program's numbers depend on (the feeds table, `lostDetailWarnRatio`,
+   * `peckClearanceMm`, the whole `defaults` map, the condition summaries, and — the one that actually
+   * split j13's program in two — the FINISH allowance) fell back to the generator's own labelled
+   * fallback instead of the location's real numbers, so `casemaker cut` posted a different program
+   * than the app's Generate for the identical job and location (#922).
    *
-   * #733 item 2 — AND THE LOCATION'S DRILL POINT ANGLE. A drill-shaped cutter states no angle of
-   * its own; the shop's `drill.pointAngleDeg` is what puts the tip at the right depth, and the
-   * simulation refuses the file without it. The browser resolves it the same way (#434,
-   * `drillSettings(shopDefaults)` in `engraveRunStore`); this side did not, so every drill job
-   * stopped at `tool-refused` or planned at the 118° fallback whatever the location said.
+   * `tools`/`drill` were already resolved here for #432/#733 (the generator's realm has no tool
+   * registry, and a drill-shaped cutter needs the shop's own point angle); the builder folds them
+   * in too, so this is the one place the CLI assembles the bag the generator reads.
    */
-  const shop: EngraveShopOpts = {
-    tools: getTools(),
-    drill: drillSettings(shopDefaults),
-    // #847 — the goal path's rest numbers, from the location in the same way the app's run store
-    // reads them. The 2D pair's own band is derived in `restSeamFacts`; these are the values a 3D
-    // goal's rest pass (and the visibility of a leftover it cannot cut) runs with.
-    rest: {
-      overlap: readDefault(shopDefaults, REST_OVERLAP_KEY),
-      thirdToolPct: readDefault(shopDefaults, REST_THIRD_TOOL_KEY),
-      visibleDepth: readDefault(shopDefaults, REST_VISIBLE_DEPTH_KEY),
-    },
-  };
+  const shop: EngraveShopOpts = engraveShopOpts(shopDefaults);
   if (boot.location !== null) {
     const where = boot.location;
     recordInput(where.path);
@@ -1799,7 +1795,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     const namedKey = args.tool ?? null;
     const named = namedKey === null ? null : entryFor(namedKey);
     const namedFeeds =
-      named === null ? null : feedsFor(catalogueRows, job.stock.material, named.tool, jobMachine(job), undefined);
+      named === null ? null : engraveFeedsFor(shop, catalogueRows, job.stock.material, named.tool, jobMachine(job), undefined);
     for (const { row, cutters } of unreachable) {
       const item = (job.vectors ?? []).find((v) => v.id === row.itemId);
       if (item) item.enabled = false;
@@ -2049,13 +2045,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // `restChosen` is non-null in this branch, so `restTool` resolved — this is the type's own guard,
       // and it fails rather than falling through, because a rest program without its cutter is not one.
       if (restTool === null) fail(`--rest "${restChosen.key}" did not resolve to a cutter`);
-      const restFeeds = feedsFor(catalogueRows, job.stock.material, restTool, jobMachine(job), undefined);
+      const restFeeds = engraveFeedsFor(shop, catalogueRows, job.stock.material, restTool, jobMachine(job), undefined);
       const stepOver2 = restFeeds.ok ? restFeeds.params.stepOver : null;
       // The FIRST cutter's step-over shapes the residue the band has to make cuttable, so it comes
       // from the same feeds table through the same resolver as the second one — never from a number
       // typed into this file.
       const tool1 = jobTool(job);
-      const roughFeeds = tool1 === null ? null : feedsFor(catalogueRows, job.stock.material, tool1, jobMachine(job), undefined);
+      const roughFeeds = tool1 === null ? null : engraveFeedsFor(shop, catalogueRows, job.stock.material, tool1, jobMachine(job), undefined);
       const stepOver1 = roughFeeds !== null && roughFeeds.ok ? roughFeeds.params.stepOver : null;
       // The stored number and where it came from, together — never the number alone (#436).
       const overlapRead = readDefault(shopDefaults, REST_OVERLAP_KEY);
