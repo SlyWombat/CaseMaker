@@ -334,9 +334,16 @@ def main():
     # Labels: the glyph geometry is the app's font engine's, but the BOX still says whether the
     # cut reached the label's depth and never passed it. atDepth is the fraction of box cells at
     # depth ±0.05 (mostly empty between glyphs), reachRatio the deepest cell over the depth.
+    # A V-inlay job cuts its labels as cones, so a label's box says nothing about the glyph floor.
+    has_inlay = any(it.get('inlay') is not None for key in ('labels', 'shapes', 'combined', 'vectors')
+                    for it in (job.get(key) or []))
     label_report = []
     for l, m in zip(labels, label_masks):
         d = float(l.get('depth') or 0)
+        if has_inlay:
+            label_report.append({'id': l['id'], 'kind': 'label', 'inlay': True,
+                                 'note': 'V-inlay label — the app’s oracle measures it, not this check'})
+            continue
         if not m.any() or d <= 0:
             label_report.append({'id': l['id'], 'kind': 'label', 'note': 'no box or depth'})
             continue
