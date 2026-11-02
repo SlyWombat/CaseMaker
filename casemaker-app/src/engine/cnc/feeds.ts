@@ -1421,6 +1421,26 @@ function catalogueOnlyNote(entry: FeedsEntry, missing: 'material' | 'diameter'):
   );
 }
 
+/**
+ * #669/#941 — the sentence a CHAMFER's resolved row gets instead of the row's own generic text
+ * (`entry.provenance`, `catalogueProvenance`'s fallback when no catalogue row answered). #669's
+ * substitution is correct — a cone's flank engages like a flat end mill, so it is fed from the
+ * FLAT row at its cutting diameter rather than a V row (keyed to an engraver's tip, a width no
+ * chamfer states) — but the generic "Starting value…"/"Measured on a coupon…" text names neither
+ * the row it landed on nor the substitution that put it there. This sentence names both: which
+ * material/diameter band answered, and the chamfer's own cone-base diameter that matched it
+ * (`diameter`, from `feedRowDiameter` — the shank, never the tip). `entry.provenance`'s own text
+ * follows, so a measured row still says it was measured and a starting row still says so.
+ */
+function chamferProvenance(tool: Tool, material: StockMaterial, diameter: number, entry: FeedsEntry): string {
+  return (
+    `${tool.name} is a chamfer: its cone flank engages like a flat end mill, so it is fed from the ` +
+    `${MATERIAL_LABELS[material]} flat ${num3(entry.minDiameter)}–${num3(entry.maxDiameter)} mm row, ` +
+    `matched on the cone's ${num3(diameter)} mm base (#669) — never a V row, which no chamfer reads. ` +
+    entry.provenance
+  );
+}
+
 /** Three decimals at most, trailing zeros dropped — the vocabulary every sentence outside obeys. */
 function num3(n: number): string {
   return String(Number(n.toFixed(3)));
@@ -1555,7 +1575,8 @@ export function feedsFor(
   // engraver's TIP (0.3–0.5 mm); a chamfer's tip is a point or a small flat, a diameter no V row
   // carries, and on wood there is no V row at all. What a chamfer pass actually engages is the
   // cone's flank up to its cutting diameter, which is the width a flat row is written for, so that
-  // row's numbers stand and the source sentence below says which row they came from.
+  // row's numbers stand — and {@link chamferProvenance}, below, is what names the row and the
+  // substitution rather than letting the row's own generic text stand in for it (#941).
   const chamfer = tool.shape === 'chamfer';
   const edge: 'flat' | 'v' = !chamfer && usable.tool.shape === 'v' ? 'v' : 'flat';
   // A chamfer's row is matched on the cone's BASE (`diameter` — the shank Makera writes there),
@@ -1730,9 +1751,17 @@ export function feedsFor(
   // The row answers this job only if at least one of its numbers survived (#325): a row we passed
   // over entirely supplied nothing, and `catalogue: null` is how the panel is told so.
   const answered = row !== null && used.size > 0;
+  // #941 — the chamfer sentence below only fires on a REAL starting-table row (`catalogueOnly ===
+  // false`): `catalogueOnlyRow`'s own `entry.provenance` already names the vendor's row and the
+  // tool it is for (there is no generic-constant bug to fix there), and its `minDiameter`/
+  // `maxDiameter` are both just the resolved diameter — not a band — so wrapping it in "the flat
+  // X–X mm row" would read oddly over a sentence that was already specific.
   const provenance =
-    (answered && row ? catalogueProvenance(row, tool, entry, ignored, snapshot, mappedFor) : entry.provenance) +
-    (catalogueOnly === false ? '' : catalogueOnlyNote(entry, catalogueOnly));
+    (answered && row
+      ? catalogueProvenance(row, tool, entry, ignored, snapshot, mappedFor)
+      : chamfer && catalogueOnly === false
+        ? chamferProvenance(tool, material, diameter, entry)
+        : entry.provenance) + (catalogueOnly === false ? '' : catalogueOnlyNote(entry, catalogueOnly));
 
   // The row DID answer (`answered`) rather than merely existing: a vendor row whose numbers were
   // all passed over supplied nothing, and the panel's "Makera's numbers" label would be false.
