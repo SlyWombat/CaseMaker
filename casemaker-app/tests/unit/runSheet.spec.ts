@@ -2398,11 +2398,47 @@ describe('#740 the cutter step states a tip the record actually records', () => 
 // #926 — the efficiency measures and the two shop thresholds. The measure itself is `ir.ts`'s; these
 // tests hold the SHEET to it: a step that states the basis, and a warning that names the airiest
 // operation and the setting it was judged against.
+describe('#927 the record section states the predicted time, and a last run beside it', () => {
+  const recordText = (sheet: RunSheet): string[] => section(sheet, 'record').steps.map((s) => s.text);
+
+  it('asks for the wall clock beside the cycle estimate it corrects', () => {
+    const text = recordText(sheetFor(dj())).find((t) => t.includes('Wall-clock minutes'));
+    expect(text).toBeTruthy();
+    // stubGenerated's cam says 95 s; the sheet states the same figure the header prints.
+    expect(text).toContain('the cycle estimate is 1 min 35 s');
+  });
+
+  it('prints the last recorded run’s clock against its estimate, over or under the model', () => {
+    const sheet = sheetFor(dj(), NO_SIM, NC, {
+      lastRun: { actualSeconds: 136, at: '2026-10-18', estimatedSeconds: 94 },
+    });
+    const text = recordText(sheet).find((t) => t.includes('last recorded run'));
+    expect(text).toBeTruthy();
+    expect(text).toContain('took 2 min 16 s against 1 min 34 s predicted');
+    expect(text).toContain('45 % over the model');
+    const under = sheetFor(dj(), NO_SIM, NC, {
+      lastRun: { actualSeconds: 80, at: '2026-10-18', estimatedSeconds: 94 },
+    });
+    expect(recordText(under).find((t) => t.includes('last recorded run'))).toContain('15 % under the model');
+  });
+
+  it('says nothing about a last run when none is imported, and nothing invented when it has no estimate', () => {
+    const plain = recordText(sheetFor(dj())).find((t) => t.includes('Wall-clock minutes'));
+    expect(plain).not.toContain('last recorded run');
+    const bare = sheetFor(dj(), NO_SIM, NC, {
+      lastRun: { actualSeconds: 136, at: '2026-10-18', estimatedSeconds: null },
+    });
+    expect(recordText(bare).find((t) => t.includes('last recorded run'))).toContain('no estimate was recorded');
+  });
+});
+
 describe('#926 the sheet prints the efficiency measures and warns on the shop thresholds', () => {
   const measure = (over: Partial<ProgramEfficiency> = {}): ProgramEfficiency => ({
     cycleSeconds: 100,
     rapidSeconds: 40,
     feedSeconds: 60,
+    entrySeconds: 0,
+    spinUpSeconds: 0,
     airFraction: 0.4,
     hopCount: 10,
     hopSeconds: 12,
@@ -2457,6 +2493,8 @@ describe('#926 the sheet prints the efficiency measures and warns on the shop th
           cycleSeconds: 40,
           rapidSeconds: 4,
           feedSeconds: 36,
+          entrySeconds: 0,
+          spinUpSeconds: 0,
           airFraction: 0.1,
           hopCount: 2,
           hopSeconds: 1,

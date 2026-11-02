@@ -106,6 +106,14 @@ export interface RunRecord {
   cutOn: string | null;
   /** Wall-clock minutes the cut took, start to finish. */
   minutes: number | null;
+  /**
+   * #927 — the MACHINE's own elapsed time for the run, seconds, from `P:`'s third field. It is the
+   * actual the estimate is checked against: the machine starts its clock at play, so it includes
+   * the spindle ramp and the rapids, and it is not a person's reading. Null when the run was not
+   * played from the app, or the machine reported none. `minutes` above stays the operator's own
+   * wall clock and is never overwritten by this.
+   */
+  actualSeconds: number | null;
   /** The cutter's flute length and stick-out, mm (§9, section 1's blank). */
   cutter: { fluteLengthMm: number | null; stickOutMm: number | null };
   /** The measured stock proud of the jaws, mm (§9, section 3's blank). */
@@ -187,6 +195,7 @@ export function buildRunRecord(
     generatedOn: now.toISOString().slice(0, 10),
     cutOn: null,
     minutes: null,
+    actualSeconds: null,
     cutter: { fluteLengthMm: null, stickOutMm: null },
     stockProudMm: null,
     depths: recordDepths(toPartPlan(job)).map((d) => ({
@@ -221,7 +230,28 @@ export function isMeasuredRun(run: RunRecord): boolean {
  * estimate. A dated record with no `minutes` has no number to put there.
  */
 export function isTimedRun(run: RunRecord): boolean {
-  return isMeasuredRun(run) && typeof run.minutes === 'number' && run.minutes > 0;
+  return (
+    isMeasuredRun(run) &&
+    ((typeof run.minutes === 'number' && run.minutes > 0) ||
+      (typeof run.actualSeconds === 'number' && run.actualSeconds > 0))
+  );
+}
+
+/**
+ * #927 — the record with the machine's elapsed time attached. The date is the machine's, written
+ * with the time: a timed run with no date is exactly the undated result `isMeasuredRun` exists to
+ * refuse, and the machine can date its own finish. Nothing a person wrote is touched.
+ */
+export function withActualSeconds(run: RunRecord, seconds: number, now: Date = new Date()): RunRecord {
+  if (!(seconds > 0)) return run;
+  return { ...run, actualSeconds: seconds, cutOn: run.cutOn ?? now.toISOString().slice(0, 10) };
+}
+
+/** The run's wall clock in seconds, from the machine's elapsed or a person's minutes; null with neither. */
+export function runSeconds(run: RunRecord): number | null {
+  if (typeof run.actualSeconds === 'number' && run.actualSeconds > 0) return run.actualSeconds;
+  if (typeof run.minutes === 'number' && run.minutes > 0) return run.minutes * 60;
+  return null;
 }
 
 /** A `null`, or a finite number greater than zero. */
@@ -383,6 +413,7 @@ export function parseRunRecord(raw: unknown): RunRecordParseResult {
     generatedOn: typeof r.generatedOn === 'string' ? r.generatedOn : '',
     cutOn: isIsoDate(r.cutOn) ? r.cutOn : null,
     minutes,
+    actualSeconds: numberOrNull(r.actualSeconds),
     cutter: { fluteLengthMm: flute, stickOutMm: stickOut },
     stockProudMm: stockProud,
     depths,

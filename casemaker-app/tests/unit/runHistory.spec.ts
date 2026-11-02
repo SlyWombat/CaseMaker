@@ -58,6 +58,7 @@ function run(ncFile: string, cutOn: string | null, minutes: number | null): RunR
     generatedOn: '2026-10-04',
     cutOn,
     minutes,
+    actualSeconds: null,
     cutter: { fluteLengthMm: null, stickOutMm: null },
     stockProudMm: null,
     depths: [],

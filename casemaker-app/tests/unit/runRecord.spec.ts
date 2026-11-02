@@ -23,6 +23,8 @@ import {
   RUN_RECORD_KIND,
   RUN_RECORD_SCHEMA_VERSION,
   serializeRunRecord,
+  runSeconds,
+  withActualSeconds,
   type RunRecord,
 } from '@/engine/cnc/engrave/runRecord';
 import {
@@ -143,7 +145,10 @@ describe('runRecord (#277)', () => {
     expect(run.depths.map((d) => d.id)).toEqual(recordDepths(plan).map((d) => d.id));
     expect(run.depths.map((d) => d.planned)).toEqual(recordDepths(plan).map((d) => d.depth));
     // §9's three fixed rows follow the depth blanks — legible, finish, notes.
+    // #927 — the wall clock is the first of those rows: the number the cycle estimate is checked
+    // against is asked on the sheet, not only described in the record file's instructions.
     expect(record.steps.slice(depthRows.length).map((s) => s.record)).toEqual([
+      'minutes',
       'yes / no',
       'clean / fuzzy / burnt',
       'notes',
@@ -159,6 +164,30 @@ describe('runRecord (#277)', () => {
     expect(back.ok && back.run.estimatedSeconds).toBe(0);
   });
 
+  it('#927 round-trips the machine’s actual seconds and keeps a person’s minutes apart from it', () => {
+    const job = dj();
+    const run = buildRunRecord(job, stubGenerated(job), NOW);
+    expect(run.actualSeconds).toBeNull();
+    // The machine finished at a date of its own: withActualSeconds writes the date with the time,
+    // because an undated result is exactly what parseRunRecord refuses.
+    const timed = withActualSeconds(run, 136, new Date('2026-10-18T09:30:00Z'));
+    expect(timed.actualSeconds).toBe(136);
+    expect(timed.cutOn).toBe('2026-10-18');
+    expect(timed.minutes).toBeNull();
+    expect(runSeconds(timed)).toBe(136);
+    expect(isTimedRun(timed)).toBe(true);
+    const back = parseRunRecord(JSON.parse(serializeRunRecord(timed)));
+    expect(back.ok && back.run.actualSeconds).toBe(136);
+    // A person's minutes are not overwritten, and runSeconds prefers the machine's own clock.
+    const both = withActualSeconds({ ...run, minutes: 2.5 }, 136);
+    expect(both.minutes).toBe(2.5);
+    expect(runSeconds(both)).toBe(136);
+    expect(runSeconds({ ...run, minutes: 2.5 })).toBe(150);
+    expect(runSeconds(run)).toBeNull();
+    // A non-positive elapsed changes nothing.
+    expect(withActualSeconds(run, 0)).toBe(run);
+  });
+
   it('#926 carries the efficiency block it printed, and an older record reads as not recorded', () => {
     const job = dj();
     const generated = stubGenerated(job);
@@ -166,6 +195,8 @@ describe('runRecord (#277)', () => {
       cycleSeconds: 100,
       rapidSeconds: 40,
       feedSeconds: 60,
+      entrySeconds: 0,
+      spinUpSeconds: 0,
       airFraction: 0.4,
       hopCount: 10,
       hopSeconds: 12,

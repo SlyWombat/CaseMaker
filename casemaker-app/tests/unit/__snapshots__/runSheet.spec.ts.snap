@@ -316,6 +316,10 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
           "text": "Measured floor depth — Engrave "first chips"",
         },
         {
+          "record": "minutes",
+          "text": "Wall-clock minutes the run took (start to finish) — the cycle estimate is 1 min 35 s.",
+        },
+        {
           "record": "yes / no",
           "text": "Is the text legible?",
         },
@@ -628,6 +632,10 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
         {
           "record": "measured depth (mm)",
           "text": "Measured floor depth — Engrave "first chips"",
+        },
+        {
+          "record": "minutes",
+          "text": "Wall-clock minutes the run took (start to finish) — the cycle estimate is 1 min 35 s.",
         },
         {
           "record": "yes / no",

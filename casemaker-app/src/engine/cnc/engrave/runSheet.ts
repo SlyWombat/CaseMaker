@@ -1,6 +1,7 @@
 import type { ProbeFitInstrument } from '@/engine/cnc/probeFitDiagram';
 import {
   type CamPassStep,
+  type CycleTerms,
   type EfficiencyMeasure,
   type ProgramEfficiency,
   type RapidEstimate,
@@ -208,6 +209,12 @@ export interface RunSheetCamSummary {
    * the sheet then prints no efficiency step rather than inventing one.
    */
   efficiency?: ProgramEfficiency;
+  /**
+   * #927 — the cycle estimate as named terms (moves, inter-operation entries, spindle ramp), when
+   * the caller's summary carries them. `estimatedSeconds` is their total; the sheet prints the
+   * split so a reader can see which term moved.
+   */
+  cycle?: CycleTerms;
 }
 
 /**
@@ -2286,6 +2293,12 @@ export interface RunSheetOptions {
    * setting to check against would be a second, compiled-in one.
    */
   efficiencyThresholds?: { maxAirFraction: number };
+  /**
+   * #927 — the LAST measured run of this job, when one is imported: its wall clock and the estimate
+   * that run carried. §9 prints them beside the new predicted time, so the model's error is
+   * visible to the next job rather than only to the last one. Absent: no previous run, no line.
+   */
+  lastRun?: { actualSeconds: number; at: string; estimatedSeconds: number | null };
   /**
    * #475 — the measured surface readings, in the plan's order (the order {@link surfaceSpreadSteps}
    * prints). The registration step supplies them from the run it measured
@@ -4889,6 +4902,25 @@ export function buildRunSheet(
     text: `Measured floor depth — ${item.name}`,
     record: 'measured depth (mm)',
   }));
+  // #927 — the wall clock is the number the model is checked against, so the sheet asks for it
+  // beside the estimate it corrects. A last run already in hand prints its own comparison: the
+  // model's error reaches the NEXT job, not only the operator who timed the last one.
+  const predictedSeconds = generated.cam?.estimatedSeconds ?? null;
+  const last = options.lastRun;
+  recordSteps.push({
+    text:
+      (predictedSeconds === null
+        ? 'Wall-clock minutes the run took (start to finish)'
+        : `Wall-clock minutes the run took (start to finish) — the cycle estimate is ${formatDuration(predictedSeconds)}`) +
+      (last === undefined
+        ? '.'
+        : ` The last recorded run on ${last.at} took ${formatDuration(last.actualSeconds)}` +
+          (last.estimatedSeconds === null || last.estimatedSeconds <= 0
+            ? ' (no estimate was recorded against it).'
+            : ` against ${formatDuration(last.estimatedSeconds)} predicted — ${pct(Math.abs(last.actualSeconds - last.estimatedSeconds) / last.estimatedSeconds)} ` +
+              `${last.actualSeconds >= last.estimatedSeconds ? 'over' : 'under'} the model.`)),
+    record: 'minutes',
+  });
   recordSteps.push(
     { text: 'Is the text legible?', record: 'yes / no' },
     { text: 'Surface finish', record: 'clean / fuzzy / burnt' },
