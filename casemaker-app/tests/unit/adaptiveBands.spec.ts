@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ArrayByteMeter,
   MaterialGrid,
   RegionGeometry,
   bandRowsFor,
@@ -18,6 +19,8 @@ import {
   distanceField,
   forEachDistanceBand,
 } from '@/engine/cnc/cam/adaptiveGrid';
+import { adaptiveSettings, planAdaptive } from '@/engine/cnc/cam/adaptive';
+import { flatEndMill } from '@/engine/cnc/tool';
 
 const MI = 4;
 
@@ -161,5 +164,49 @@ describe('#908 — the consumers’ equality with the whole-grid reference', () 
       expect(gridBand.totalTargets).toBe(gridRef.totalTargets);
       expect(gridBand.remainingTargets).toBe(gridRef.remainingTargets);
     }
+  });
+});
+
+describe('#908 — the planner’s self-reported high-water mark', () => {
+  it('meters live, peak and scoped allocations exactly', () => {
+    const m = new ArrayByteMeter();
+    m.add(100);
+    m.add(50);
+    expect(m.live).toBe(150);
+    expect(m.peak).toBe(150);
+    m.release(50);
+    m.during(80, () => {
+      expect(m.live).toBe(180);
+      m.release(0);
+    });
+    expect(m.live).toBe(100);
+    expect(m.peak).toBe(180);
+    m.release(100);
+    expect(m.live).toBe(0);
+  });
+
+  it('reports one level’s typed arrays, and the banding keeps the peak far below the whole grid', () => {
+    const region: [number, number][][] = [
+      [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+        [0, 10],
+      ],
+    ];
+    const out = planAdaptive({
+      tool: flatEndMill(2),
+      region,
+      depth: 1,
+      settings: adaptiveSettings(null).settings,
+    });
+    if (!out.ok) throw new Error(out.reason);
+    const { gridCells, peakArrayBytes } = out.plan.stats;
+    expect(gridCells).toBeGreaterThan(50_000);
+    // The persistent arrays alone are ~16 bytes a cell (material, target, allowed, clearance,
+    // label, stuck). The whole-grid fields this replaced added ~32 more (two live distance fields
+    // plus the transform's transients); the banded planner stays well under that.
+    expect(peakArrayBytes).toBeGreaterThan(16 * gridCells);
+    expect(peakArrayBytes).toBeLessThan(40 * gridCells);
   });
 });

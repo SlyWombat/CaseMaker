@@ -165,7 +165,15 @@ export interface LevelPlanRequest {
 }
 
 export type LevelPlanResult =
-  | { ok: true; moves: CamMove[]; maxEngagementMm: number }
+  | {
+      ok: true;
+      moves: CamMove[];
+      maxEngagementMm: number;
+      /** #908 — the level's typed-array high-water mark, bytes (AdaptivePlan.stats). */
+      peakArrayBytes: number;
+      /** #908 — the level's grid cells (nx × ny), so a reported peak can be stated per cell. */
+      gridCells: number;
+    }
   | { ok: false; reason: string };
 
 /**
@@ -219,7 +227,13 @@ export function planLevel(shared: LevelPlanShared, request: LevelPlanRequest): L
     ...(shared.provenance !== undefined ? { provenance: shared.provenance } : {}),
   });
   if (!planned.ok) return { ok: false, reason: planned.reason };
-  return { ok: true, moves: planned.plan.moves, maxEngagementMm: planned.plan.stats.maxStepEngagement };
+  return {
+    ok: true,
+    moves: planned.plan.moves,
+    maxEngagementMm: planned.plan.stats.maxStepEngagement,
+    peakArrayBytes: planned.plan.stats.peakArrayBytes,
+    gridCells: planned.plan.stats.gridCells,
+  };
 }
 
 export interface AdaptiveRoughResult {
@@ -344,6 +358,9 @@ export async function roughingAdaptiveMoves(
   // The last planned level's plan, which the reused levels share (#868).
   let lastPlanMoves: CamMove[] = [];
   let lastPlanMax = 0;
+  // #908 — the shared plan's own cost, so a reused level reports the plan it really used.
+  let lastPlanPeak = 0;
+  let lastPlanGrid = 0;
   for (const slot of slots) {
     if (!slot.cleared) {
       if (pooledPlans === null) {
@@ -354,18 +371,28 @@ export async function roughingAdaptiveMoves(
     }
     let plan: LevelPlanResult;
     if (slot.requestIndex === null) {
-      plan = { ok: true, moves: lastPlanMoves, maxEngagementMm: lastPlanMax };
+      plan = {
+        ok: true,
+        moves: lastPlanMoves,
+        maxEngagementMm: lastPlanMax,
+        peakArrayBytes: lastPlanPeak,
+        gridCells: lastPlanGrid,
+      };
     } else if (pooledPlans !== null) {
       plan = pooledPlans[slot.requestIndex]!;
       if (plan.ok) {
         lastPlanMoves = plan.moves;
         lastPlanMax = plan.maxEngagementMm;
+        lastPlanPeak = plan.peakArrayBytes;
+        lastPlanGrid = plan.gridCells;
       }
     } else {
       plan = planLevel(shared, requests[slot.requestIndex]!);
       if (plan.ok) {
         lastPlanMoves = plan.moves;
         lastPlanMax = plan.maxEngagementMm;
+        lastPlanPeak = plan.peakArrayBytes;
+        lastPlanGrid = plan.gridCells;
       }
       done++;
       report();

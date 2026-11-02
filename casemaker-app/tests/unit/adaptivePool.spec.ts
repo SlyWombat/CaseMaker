@@ -80,13 +80,29 @@ describe('#881 — the level pool size', () => {
 
 describe('#881 — the memory bound', () => {
   it('buys only the planners the budget leaves room for', () => {
-    // 640 MB budget, 400 MB already the program's own estimate, 60 MB the largest level:
-    // 240 MB spare pays for four planners.
+    // 640 MB budget, 400 MB already the program's own estimate, an 89.5 MB level:
+    // 240 MB spare pays for two planners (three would need 269 MB).
     const levelBytes = estimateLevelPlannerBytes(786_432);
-    expect(levelBytes).toBe(LEVEL_PLANNER_BASE_BYTES + 50_331_648);
+    expect(levelBytes).toBe(LEVEL_PLANNER_BASE_BYTES + 26_738_688);
     expect(
       memoryBoundPoolSize({ budgetBytes: 640 * MiB, parentBytes: 400 * MiB, levelBytes, coreCap: 8 }),
-    ).toBe(4);
+    ).toBe(2);
+  });
+
+  it('allows the panther-class mound two planners — the goal the calibration exists for', () => {
+    // The #908 measurement: 5,067,850-cell levels, the program's estimate 18,995,900 B, a
+    // 640 MB budget. The first model (12 MB + 64 B/cell) allowed 1; the measured calibration
+    // allows 2, with the model's own arithmetic still under the budget.
+    const levelBytes = estimateLevelPlannerBytes(5_067_850);
+    expect(levelBytes).toBe(239_415_764);
+    const size = memoryBoundPoolSize({
+      budgetBytes: 640 * MiB,
+      parentBytes: 18_995_900,
+      levelBytes,
+      coreCap: 8,
+    });
+    expect(size).toBe(2);
+    expect(size * levelBytes + 18_995_900).toBeLessThanOrEqual(640 * MiB);
   });
 
   it('never exceeds the cores, however much room the budget leaves', () => {
@@ -237,7 +253,17 @@ class FakeWorker {
       queueMicrotask(() => {
         const plan = planLevel(shared, request);
         const reply: PoolPlanReply = plan.ok
-          ? { id, result: { ok: true, moves: moveBuffersOf(plan.moves), maxEngagementMm: plan.maxEngagementMm } }
+          ? {
+              id,
+              result: {
+                ok: true,
+                moves: moveBuffersOf(plan.moves),
+                maxEngagementMm: plan.maxEngagementMm,
+                peakArrayBytes: plan.peakArrayBytes,
+                gridCells: plan.gridCells,
+                usedHeapBytes: null,
+              },
+            }
           : { id, result: { ok: false, reason: plan.reason } };
         this.onmessage?.({ data: reply });
       });
@@ -287,13 +313,8 @@ describe('#881 — the pool spawns to the stated budget', () => {
     port.postMessage(begin);
     await delivered(() => FakeWorker.spawned.length > 0);
 
-    expect(FakeWorker.spawned.map((w) => w.name)).toEqual([
-      'rough-pool-0',
-      'rough-pool-1',
-      'rough-pool-2',
-      'rough-pool-3',
-    ]);
-    expect(pool.decision?.planners).toBe(4);
+    expect(FakeWorker.spawned.map((w) => w.name)).toEqual(['rough-pool-0', 'rough-pool-1']);
+    expect(pool.decision?.planners).toBe(2);
     expect(lastPoolSizing()?.budgetBytes).toBe(640 * MiB);
     pool.dispose();
     expect(FakeWorker.spawned.every((w) => w.terminated)).toBe(true);
@@ -324,7 +345,7 @@ describe('#881 — the pool spawns to the stated budget', () => {
       levelGridCells: 786_432,
       memory: { budgetBytes: 640 * MiB, parentBytes: 400 * MiB },
     } satisfies PoolMessage);
-    await delivered(() => FakeWorker.spawned.length === 4);
+    await delivered(() => FakeWorker.spawned.length === 2);
     const first = [...FakeWorker.spawned];
 
     port.postMessage({
@@ -332,8 +353,8 @@ describe('#881 — the pool spawns to the stated budget', () => {
       levelGridCells: 786_432,
       memory: { budgetBytes: 256 * MiB, parentBytes: 200 * MiB },
     } satisfies PoolMessage);
-    // 56 MB spare over a 60 MB level buys nothing: one planner, the floor.
-    await delivered(() => FakeWorker.spawned.length === 5);
+    // 56 MB spare over an 89.5 MB level buys nothing: one planner, the floor.
+    await delivered(() => FakeWorker.spawned.length === 3);
     expect(first.every((w) => w.terminated)).toBe(true);
     expect(pool.decision?.planners).toBe(1);
     pool.dispose();

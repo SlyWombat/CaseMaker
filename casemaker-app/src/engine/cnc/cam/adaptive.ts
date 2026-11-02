@@ -62,7 +62,7 @@
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { HOP_Z, SAFE_Z, estimateCycleSeconds, toolNumberFor, type CamMove, type CamOperation, type RapidEstimate, type ToolpathIR } from './ir';
 import type { Polygons } from './pocket';
-import { MaterialGrid, RegionGeometry, bandRowsFor, distanceBand, forEachDistanceBand, type P2 } from './adaptiveGrid';
+import { ArrayByteMeter, MaterialGrid, RegionGeometry, bandRowsFor, distanceBand, forEachDistanceBand, type P2 } from './adaptiveGrid';
 import { cuttingRadiusForSweep, type Tool } from '../tool';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -212,6 +212,14 @@ export interface AdaptivePlan {
     /** Grid cell size, mm, and the planner's step length, mm. */
     cell: number;
     step: number;
+    /** #908 — the level's grid cells (nx × ny), so the peak can be stated per cell. */
+    gridCells: number;
+    /**
+     * #908 — the high-water mark of the typed arrays the planner held at once, bytes. Exact for
+     * the arrays the planner allocates (the browser cannot read a planner mid-level); the JS
+     * objects it also builds — moves, ops — are not counted.
+     */
+    peakArrayBytes: number;
   };
 }
 
@@ -269,10 +277,15 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
   }
   const grid = new MaterialGrid(geom, h);
   const n = grid.nx * grid.ny;
+  // #908 — the level's own typed-array high-water mark, reported in the stats (the browser cannot
+  // read a planner mid-level; this is exact for the arrays the planner allocates).
+  const meter = new ArrayByteMeter();
+  meter.add(grid.material.byteLength + grid.target.byteLength);
 
   // Where the cutter's centre may stand, cell by cell (exact), and the area it reaches from there.
   const allowed = new Uint8Array(n);
   const clearance = new Float64Array(n);
+  meter.add(allowed.byteLength + clearance.byteLength);
   let anyAllowed = false;
   for (let j = 0; j < grid.ny; j++) {
     for (let i = 0; i < grid.nx; i++) {
@@ -289,9 +302,9 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
   if (!anyAllowed) {
     return { ok: false, code: 'adaptive-no-room', reason: `no part of the region is wide enough for the ${fmt(D)} mm cutter` };
   }
-  grid.setTargetsBanded(allowed, r);
+  grid.setTargetsBanded(allowed, r, meter);
   const targetArea = grid.totalTargets * h * h;
-  const neck = subGridNeck(grid, clearance, r, s.neckAreaMm2);
+  const neck = subGridNeck(grid, clearance, r, s.neckAreaMm2, meter);
   if (neck !== null) {
     return {
       ok: false,
@@ -301,6 +314,7 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
   }
 
   const { comps, label } = components(allowed, clearance, grid);
+  meter.add(label.byteLength);
   // Equal levels, none deeper than the step-down, so every level's entry descends the same height.
   const nLevels = Math.max(1, Math.ceil(input.depth / s.stepDownMm - 1e-9));
   const levels = Array.from({ length: nLevels }, (_, k) => r3((-input.depth * (k + 1)) / nLevels));
@@ -440,6 +454,7 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
 
   const entered = new Set<number>();
   const stuck = new Uint8Array(n);
+  meter.add(stuck.byteLength);
   for (;;) {
     // A restart next to standing material, from a disc that is already clear.
     const restart: P2 | null = pos === null ? null : findRestart(grid, geom, r, step, pos, stuck, (q) => bestStep(q, heading) !== null);
@@ -471,7 +486,7 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
           if (band.within(k, r)) needed[comp] = 1;
         }
       }
-    });
+    }, meter);
     const compIdx = comps.findIndex((_, idx) => !entered.has(idx) && needed[idx] === 1);
     if (compIdx < 0) break;
     const comp = comps[compIdx]!;
@@ -540,6 +555,8 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
         restarts,
         cell: h,
         step,
+        gridCells: n,
+        peakArrayBytes: meter.peak,
       },
     },
   };
@@ -553,9 +570,16 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
  * corner leaves along its edge. Cutting there would be a full-width slot, so it is refused rather than
  * silently left standing.
  */
-function subGridNeck(grid: MaterialGrid, clearance: Float64Array, r: number, neckAreaMm2: number): { area: number; at: P2 } | null {
+function subGridNeck(
+  grid: MaterialGrid,
+  clearance: Float64Array,
+  r: number,
+  neckAreaMm2: number,
+  meter?: ArrayByteMeter,
+): { area: number; at: P2 } | null {
   const h = grid.h;
   const loose = new Uint8Array(grid.material.length);
+  meter?.add(loose.byteLength);
   for (let k = 0; k < loose.length; k++) if (grid.material[k] === 1 && clearance[k]! >= r - 0.75 * h) loose[k] = 1;
   // #908 — the two fields are computed band by band: each is capped at the threshold it is
   // compared against (r + h and 3h), so every comparison reads an exact value, and the memory is
@@ -572,21 +596,27 @@ function subGridNeck(grid: MaterialGrid, clearance: Float64Array, r: number, nec
   for (let j0 = 0; j0 < grid.ny; j0 += bandRows) {
     const j1 = Math.min(grid.ny, j0 + bandRows);
     // Two fields, one scan: each is exact at the threshold it is read against (r + h and 3h).
-    const looseBand = distanceBand(loose, grid.nx, grid.ny, h, looseCap, j0, j1);
-    const targetBand = distanceBand(grid.target, grid.nx, grid.ny, h, targetCap, j0, j1);
-    for (let j = j0; j < j1; j++) {
-      const row = j * grid.nx;
-      for (let i = 0; i < grid.nx; i++) {
-        const k = row + i;
-        if (grid.material[k] !== 1 || grid.target[k] === 1) continue;
-        if (looseBand.within(k, looseCap) && !targetBand.within(k, targetCap)) {
-          sx += grid.cx(i);
-          sy += grid.cy(j);
-          n++;
+    const looseBand = distanceBand(loose, grid.nx, grid.ny, h, looseCap, j0, j1, meter);
+    const targetBand = distanceBand(grid.target, grid.nx, grid.ny, h, targetCap, j0, j1, meter);
+    try {
+      for (let j = j0; j < j1; j++) {
+        const row = j * grid.nx;
+        for (let i = 0; i < grid.nx; i++) {
+          const k = row + i;
+          if (grid.material[k] !== 1 || grid.target[k] === 1) continue;
+          if (looseBand.within(k, looseCap) && !targetBand.within(k, targetCap)) {
+            sx += grid.cx(i);
+            sy += grid.cy(j);
+            n++;
+          }
         }
       }
+    } finally {
+      looseBand.release();
+      targetBand.release();
     }
   }
+  meter?.release(loose.byteLength);
   const area = n * h * h;
   return area > neckAreaMm2 ? { area, at: [sx / n, sy / n] } : null;
 }

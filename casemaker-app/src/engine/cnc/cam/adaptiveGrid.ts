@@ -185,7 +185,7 @@ export class MaterialGrid {
    * was a full Float64Array per level; this keeps one band's worth). `radius` is the threshold AND
    * the cap — the band is exact at every value the comparison can take.
    */
-  setTargetsBanded(allowed: Uint8Array, radius: number): void {
+  setTargetsBanded(allowed: Uint8Array, radius: number, meter?: ArrayByteMeter): void {
     let count = 0;
     const bandRows = bandRowsFor(Math.ceil(radius / this.h) + 1);
     forEachDistanceBand(allowed, this.nx, this.ny, this.h, radius, bandRows, (band) => {
@@ -199,7 +199,7 @@ export class MaterialGrid {
           }
         }
       }
-    });
+    }, meter);
     this.remainingTargets = count;
     this.totalTargets = count;
   }
@@ -402,11 +402,47 @@ export function distanceField(feature: Uint8Array, nx: number, ny: number, h: nu
 }
 
 /**
+ * #908 — EXACT TYPED-ARRAY ACCOUNTING for one level: every large array the planner allocates is
+ * added while it is alive and released when it is no longer referenced, so `peak` is the true
+ * high-water mark of the arrays that exist together. That is the number #881's pool sizes on; the
+ * browser cannot read a planner mid-level (its JS thread answers CDP only between levels), so the
+ * planner reports its own.
+ */
+export class ArrayByteMeter {
+  /** Bytes of tracked arrays alive right now. */
+  live = 0;
+  /** The largest `live` has been. */
+  peak = 0;
+
+  add(bytes: number): void {
+    this.live += bytes;
+    if (this.live > this.peak) this.peak = this.live;
+  }
+
+  release(bytes: number): void {
+    this.live -= bytes;
+  }
+
+  /** Meter an allocation that is freed before `work` returns (the transform's scratch arrays). */
+  during<T>(bytes: number, work: () => T): T {
+    this.add(bytes);
+    try {
+      return work();
+    } finally {
+      this.release(bytes);
+    }
+  }
+}
+
+/**
  * #908 — THE SAME EXACT TRANSFORM OVER A ROW BAND: rows [row0, row1) of the grid, every column.
  * The result is (row1 − row0) × nx, row-major, in mm, with Infinity where no feature is inside the
  * band. The horizontal pass is the full row, so a cell's value is EXACT whenever its nearest
  * feature lies inside the band's rows; otherwise the value is the distance to the nearest feature
  * INSIDE the band — which can only be farther than the true one, never closer.
+ *
+ * `meter` accounts the transform's own arrays: the returned field stays LIVE (the caller owns and
+ * releases it), the transform's scratch (`g`, the 1-D passes) is metered only while it exists.
  */
 export function distanceFieldRows(
   feature: Uint8Array,
@@ -415,20 +451,23 @@ export function distanceFieldRows(
   row0: number,
   row1: number,
   h: number,
+  meter?: ArrayByteMeter,
 ): Float64Array {
   const INF = 1e20;
   const rows = row1 - row0;
   const n = nx * rows;
   const g = new Float64Array(n);
-  for (let j = 0; j < rows; j++) {
-    const src = (row0 + j) * nx;
-    for (let i = 0; i < nx; i++) g[j * nx + i] = feature[src + i] === 1 ? 0 : INF;
-  }
   const size = Math.max(nx, rows);
   const f = new Float64Array(size);
   const d = new Float64Array(size);
   const v = new Int32Array(size);
   const z = new Float64Array(size + 1);
+  const scratchBytes = g.byteLength + f.byteLength + d.byteLength + v.byteLength + z.byteLength;
+  meter?.add(scratchBytes);
+  for (let j = 0; j < rows; j++) {
+    const src = (row0 + j) * nx;
+    for (let i = 0; i < nx; i++) g[j * nx + i] = feature[src + i] === 1 ? 0 : INF;
+  }
   const pass = (len: number): void => {
     let k = 0;
     v[0] = 0;
@@ -463,7 +502,10 @@ export function distanceFieldRows(
     for (let i = 0; i < nx; i++) g[j * nx + i] = d[i]!;
   }
   const out = new Float64Array(n);
+  meter?.add(out.byteLength);
   for (let k = 0; k < n; k++) out[k] = g[k]! >= INF / 2 ? Infinity : Math.sqrt(g[k]!) * h;
+  // The returned field is live (its owner releases it); the scratch arrays are not.
+  meter?.release(scratchBytes);
   return out;
 }
 
@@ -488,6 +530,8 @@ export interface DistanceBand {
    * comparison. Throws when the value is past the cap — the band cannot say how far it really is.
    */
   distance(k: number): number;
+  /** Give the band's field back to the meter: call once the band will not be read again. */
+  release(): void;
 }
 
 /** The rows a band size should have for a given halo: enough to amortise the halo, bounded. */
@@ -508,6 +552,7 @@ export function distanceBand(
   capMm: number,
   row0: number,
   row1: number,
+  meter?: ArrayByteMeter,
 ): DistanceBand {
   if (!(Number.isFinite(capMm) && capMm >= 0)) {
     throw new Error(`a distance cap of ${capMm} mm is not a finite, non-negative number`);
@@ -515,11 +560,17 @@ export function distanceBand(
   const halo = Math.ceil(capMm / h) + 1;
   const firstRow = Math.max(0, row0 - halo);
   const lastRow = Math.min(ny, row1 + halo);
-  const field = distanceFieldRows(feature, nx, ny, firstRow, lastRow, h);
+  const field = distanceFieldRows(feature, nx, ny, firstRow, lastRow, h, meter);
+  let released = false;
   return {
     row0,
     row1,
     capMm,
+    release(): void {
+      if (released) return;
+      released = true;
+      meter?.release(field.byteLength);
+    },
     within(k: number, thresholdMm: number): boolean {
       if (!(thresholdMm <= capMm)) {
         throw new Error(
@@ -568,6 +619,7 @@ export function forEachDistanceBand(
   capMm: number,
   bandRows: number,
   visit: (band: DistanceBand) => void,
+  meter?: ArrayByteMeter,
 ): void {
   if (!(Number.isFinite(capMm) && capMm >= 0)) {
     throw new Error(`a distance cap of ${capMm} mm is not a finite, non-negative number`);
@@ -575,6 +627,11 @@ export function forEachDistanceBand(
   const rows = Math.max(1, Math.floor(bandRows));
   for (let j0 = 0; j0 < ny; j0 += rows) {
     const j1 = Math.min(ny, j0 + rows);
-    visit(distanceBand(feature, nx, ny, h, capMm, j0, j1));
+    const band = distanceBand(feature, nx, ny, h, capMm, j0, j1, meter);
+    try {
+      visit(band);
+    } finally {
+      band.release();
+    }
   }
 }

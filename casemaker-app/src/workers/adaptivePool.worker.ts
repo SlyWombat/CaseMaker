@@ -20,7 +20,21 @@ export interface PoolPlanMessage {
 }
 
 export type PackedLevelPlanResult =
-  | { ok: true; moves: MoveBuffers; maxEngagementMm: number }
+  | {
+      ok: true;
+      moves: MoveBuffers;
+      maxEngagementMm: number;
+      /** #908 — the planner's own typed-array high-water mark for this level, bytes. */
+      peakArrayBytes: number;
+      /** #908 — the level's grid cells, so the peak can be judged per cell. */
+      gridCells: number;
+      /**
+       * #908 — this worker's used JS heap right after the level finished, bytes, where the
+       * browser reports it (Chromium). It is an END-of-level reading, not the peak: a dedicated
+       * worker answers nothing while its JS thread is inside the synchronous plan.
+       */
+      usedHeapBytes: number | null;
+    }
   | { ok: false; reason: string };
 
 export interface PoolPlanReply {
@@ -37,6 +51,13 @@ export interface PoolSizedReply {
 /** Everything the pool sends back up the channel. */
 export type PoolReply = PoolPlanReply | PoolSizedReply;
 
+/** #908 — the worker's own heap, where the browser exposes it (the sim worker's #896 pattern). */
+function usedHeapBytes(): number | null {
+  const mem = (performance as unknown as { memory?: { usedJSHeapSize?: number } }).memory;
+  const used = mem?.usedJSHeapSize;
+  return used === undefined ? null : used;
+}
+
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<PoolPlanMessage>) => void) | null;
   postMessage: (message: PoolPlanReply, transfer?: ArrayBuffer[]) => void;
@@ -51,7 +72,17 @@ scope.onmessage = (event) => {
   }
   const buffers = moveBuffersOf(plan.moves);
   scope.postMessage(
-    { id, result: { ok: true, moves: buffers, maxEngagementMm: plan.maxEngagementMm } },
+    {
+      id,
+      result: {
+        ok: true,
+        moves: buffers,
+        maxEngagementMm: plan.maxEngagementMm,
+        peakArrayBytes: plan.peakArrayBytes,
+        gridCells: plan.gridCells,
+        usedHeapBytes: usedHeapBytes(),
+      },
+    },
     moveBufferTransfers(buffers),
   );
 };

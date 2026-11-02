@@ -66,6 +66,14 @@ interface OutgoingPlan {
   shared: LevelPlanShared;
 }
 
+/** #908 — the largest per-level typed-array peak this run's pool has reported, with its grid. */
+let lastPeak: { peakArrayBytes: number; gridCells: number; usedHeapBytes: number | null } | null = null;
+
+/** The pool's own measurement of the costliest level so far (null before any level). */
+export function lastLevelPeak(): { peakArrayBytes: number; gridCells: number; usedHeapBytes: number | null } | null {
+  return lastPeak;
+}
+
 /**
  * Wrap the sim worker's port as the CAM's planner. `onSized` hears the pool's answer to the
  * `begin` — the number of planners the budget allowed — whenever a budgeted batch is planned;
@@ -76,6 +84,8 @@ export function portLevelPlanner(port: MessagePort, onSized?: (sizing: PoolSizin
   return {
     planLevels(requests, shared, onPlanned) {
       if (requests.length === 0) return Promise.resolve([]);
+      // A batch is a run: the previous program's peak must not be quoted for this one.
+      lastPeak = null;
       let levelGridCells = 0;
       for (const request of requests) {
         levelGridCells = Math.max(levelGridCells, plannerGridCells(request.region, shared));
@@ -96,9 +106,26 @@ export function portLevelPlanner(port: MessagePort, onSized?: (sizing: PoolSizin
           if (slot === undefined || results[slot] !== undefined) return;
           // #881 — the wire form is #889's MoveStore arrays (transferred); the CAM consumes the
           // same `CamMove[]` the in-process path produces, now built from the store's view.
-          results[slot] = result.ok
-            ? { ok: true, moves: MoveStore.fromBuffers(result.moves).view(), maxEngagementMm: result.maxEngagementMm }
-            : result;
+          if (result.ok) {
+            // #908 — the planner's own per-level measurement rides back with the plan; keep the
+            // largest this run has seen so the run can state what a level really cost.
+            if (result.peakArrayBytes > (lastPeak?.peakArrayBytes ?? 0)) {
+              lastPeak = {
+                peakArrayBytes: result.peakArrayBytes,
+                gridCells: result.gridCells,
+                usedHeapBytes: result.usedHeapBytes,
+              };
+            }
+            results[slot] = {
+              ok: true,
+              moves: MoveStore.fromBuffers(result.moves).view(),
+              maxEngagementMm: result.maxEngagementMm,
+              peakArrayBytes: result.peakArrayBytes,
+              gridCells: result.gridCells,
+            };
+          } else {
+            results[slot] = result;
+          }
           done++;
           onPlanned?.(done, requests.length);
           if (done === requests.length) {

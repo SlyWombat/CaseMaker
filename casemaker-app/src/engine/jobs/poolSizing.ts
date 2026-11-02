@@ -31,26 +31,33 @@ export function adaptivePoolSize(
 }
 
 /**
- * #881 — one planner's own cost before its level: the worker's module, the job's shared settings
- * and the planner's fixed tables. Measured in Chromium on the bench goal: about 10.4 MB across
- * eight idle planners; 12 MB allows a little for the busiest. Calibrated with the #881 CDP probe
- * (scripts/cdpHeap.mts), which reads each worker target rather than node RSS.
+ * #881, #908 — ONE PLANNER'S FIXED COST, bytes: the worker's module, the plan's request and
+ * moves, and the V8 heap it is holding at its peak. Measured through the #881 CDP probe: the
+ * busiest of eight planners on a 1.93 M-cell level peaked at 128.4 MB, of which #908's exact
+ * typed-array meter accounted 33.7 MB — the rest (about 95 MB) is this fixed part. On the 5.07 M
+ * panther level the same split was 150.5 MB total against 88.8 MB of arrays (about 62 MB fixed).
+ * 64 MB is the conservative end of that measured spread; the per-cell term below carries the
+ * rest of each population's peak.
  */
-export const LEVEL_PLANNER_BASE_BYTES = 12 * 1024 * 1024;
+export const LEVEL_PLANNER_BASE_BYTES = 64 * 1024 * 1024;
 
 /**
- * #881 — bytes per cell of ONE planner's measuring grid. `planAdaptive` allocates its material,
- * target, clearance and distance-field arrays over the region's box at
- * `h = min(engagement cap / 6, radius / 12)`, and that grid — not the goal's covered cells — is
- * what a planner's memory tracks.
+ * #881, #908 — bytes per cell of ONE planner's measuring grid. `planAdaptive` works over the
+ * region's box at `h = min(engagement cap / 6, radius / 12)`, and that grid — not the goal's
+ * covered cells — is what a planner's memory tracks.
  *
- * Measured in Chromium through the CDP probe (2026-11-02, 40 × 40 mm chamfered block, 1 mm flat
- * cutter, 0.3 mm pitch): the largest level's grid was 1,926,544 cells and the busiest of eight
- * planners peaked at 128.4 MB used + backing, against 81–107 MB for the rest. 64 bytes a cell plus
- * the base below covers the busiest (135 MB against its 128.4 MB reading) and leaves the others a
- * margin. The final #881 reading on the post-#889 tree re-states this number with its own data.
+ * Calibrated from the planner's own exact typed-array meter (#908) and the CDP probe, on two
+ * populations (2026-11-02):
+ *   - 40 × 40 mm chamfered block, 1 mm flat, 0.3 pitch: 1,926,544-cell levels; busiest planner
+ *     128.4 MB total, 33.7 MB of it arrays;
+ *   - 40 × 30 × 2 mm panther relief, 0.24 pitch: 5,067,850-cell levels; planner 150.5 MB total,
+ *     88.8 MB of it arrays (17.5 bytes a cell, exact).
+ * 64 MB + 34 bytes a cell covers both peaks (129.5 MB and 236.3 MB estimated against 128.4 and
+ * 150.5 measured) and leaves the panther's two planners inside the 640 MB budget. A first cut of
+ * this model (12 MB + 64 bytes a cell) put the panther at one planner — safe, but it gave the
+ * goal #881 exists for no parallelism at all.
  */
-export const LEVEL_PLANNER_BYTES_PER_CELL = 64;
+export const LEVEL_PLANNER_BYTES_PER_CELL = 34;
 
 /** What ONE planner's largest level is estimated to cost, bytes: the base plus its grid cells. */
 export function estimateLevelPlannerBytes(cells: number): number {
