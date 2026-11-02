@@ -13,13 +13,21 @@ import numpy as np
 from PIL import Image
 
 S = os.path.dirname(os.path.abspath(__file__))
-LOC = json.load(open(os.path.join(S, 'location.json')))
+# The location document the run used: --location <file>, else $CM_LOCATION. Stripped from argv so
+# both this script and design_check.py (which imports it) keep their positional arguments.
+if '--location' in sys.argv:
+    _i = sys.argv.index('--location')
+    _loc_path = sys.argv[_i + 1]
+    del sys.argv[_i:_i + 2]
+else:
+    _loc_path = os.environ.get('CM_LOCATION') or os.path.join(S, 'location.json')
+LOC = json.load(open(_loc_path))
 TOOLS = {'inv:' + i['id']: i['tool'] for i in LOC['inventory']}
 
 COLOURS = {
     'pla': (235, 140, 40), 'petg': (60, 130, 200), 'plastic': (200, 40, 40), 'acrylic': (170, 215, 235),
     'aluminium-6061': (190, 195, 200), 'aluminium-7075': (190, 195, 200), 'brass': (205, 170, 80),
-    'abs': (230, 230, 225), 'copper': (200, 120, 80),
+    'abs': (230, 230, 225), 'copper': (200, 120, 80), 'hardwood': (196, 150, 100), 'softwood': (222, 190, 140), 'mdf': (170, 130, 90),
 }
 LIGHT = np.array([-0.45, -0.55, 0.70]); LIGHT /= np.linalg.norm(LIGHT)
 
@@ -106,15 +114,23 @@ def parse_nc(path):
 
 
 def nc_tool(path):
+    """The program's cutter. The app's own key (;@CM|TOOL|key=) wins over Makera's header line, which
+    the app writes first: the header's type words ('Ball Nose', 'Ball Nose Engraving') used to fall
+    through to a flat, so ball programs were swept as flats (fixed 2026-11-02)."""
+    mkr = None
     for line in open(path):
         m = re.search(r';@CM\|TOOL\|key=(\S+)', line)
-        if m:
-            return TOOLS.get(m.group(1).strip())
+        if m and TOOLS.get(m.group(1).strip()):
+            return TOOLS[m.group(1).strip()]
         m = re.search(r';@MKR\|TOOL\|.*\|type=([^|]+)\|.*\|diameter=([\d.]+)\|tipdiameter=([\d.]+)', line)
-        if m:  # a Makera Studio program (the source's own .nc)
-            kind = {'Flat End': 'flat', 'Ball End': 'ball'}.get(m.group(1), 'flat')
-            return {'shape': kind, 'diameter': float(m.group(2)), 'tipDiameter': float(m.group(3))}
-    return None
+        if m and mkr is None:  # a Makera Studio program (the source's own .nc)
+            t = m.group(1).lower()
+            kind = 'ball' if 'ball' in t else 'flat'
+            mkr = {'shape': kind, 'diameter': float(m.group(2)), 'tipDiameter': float(m.group(3))}
+        if line.startswith(('G', 'M', 'T')) and not line.startswith(';'):
+            if mkr is not None:
+                break
+    return mkr
 
 
 def sweep_flat(H, res, ncs, stock):
@@ -214,7 +230,7 @@ def view_matrix(az, el):
     return Rx @ Rz
 
 
-def heightfield_points(H, res, T, colour):
+def heightfield_points(H, res, T, colour, cap=None):
     ny_, nx_ = H.shape
     xs = np.arange(nx_) * res; ys = np.arange(ny_) * res
     X, Y = np.meshgrid(xs, ys)
@@ -223,6 +239,9 @@ def heightfield_points(H, res, T, colour):
     N = np.stack([-gx, -gy, np.ones_like(H)], -1); N /= np.linalg.norm(N, axis=-1, keepdims=True)
     pts = np.stack([X[solid], Y[solid], H[solid]], -1)
     cols = shade(N[solid], colour)
+    if cap is not None:   # a two-colour laminate: below the cap the core colour shows
+        core = shade(N[solid], cap[1]); deep = (H[solid] < -cap[0])
+        cols[deep] = core[deep]
     # walls: drop from each cell to its lowest 4-neighbour (outside = bed)
     Hp = np.pad(np.where(solid, H, -T - 0.0), 1, constant_values=-T)
     lows = np.minimum.reduce([Hp[:-2, 1:-1], Hp[2:, 1:-1], Hp[1:-1, :-2], Hp[1:-1, 2:]])
@@ -243,6 +262,8 @@ def heightfield_points(H, res, T, colour):
         dirs = np.array([[0, -1, 0], [0, 1, 0], [-1, 0, 0], [1, 0, 0]], float)
         wn = dirs[np.argmin(nb, -1)][rep]
         wall_cols = shade(wn, tuple(int(c * 0.9) for c in colour))
+        if cap is not None:
+            wc2 = shade(wn, tuple(int(c * 0.9) for c in cap[1])); wall_cols[z < -cap[0]] = wc2[z < -cap[0]]
         pts = np.concatenate([pts, wall_pts]); cols = np.concatenate([cols, wall_cols])
     return pts, cols
 
@@ -261,14 +282,25 @@ def render_flat(job, outdir, ncs):
     st = job['stock']; L, W, T = st['length'], st['width'], st['thickness']
     res = max(0.05, min(0.1, max(L, W) / 1500))
     colour = COLOURS.get(st['material'], (200, 200, 200))
+    cap = None
+    lam = (st.get('colour') or {})
+    if lam.get('kind') == 'laminate':
+        colour = tuple(job.get('_benchColours', {}).get('cap', (240, 205, 20))); cap = (lam.get('capMm', 0.2), tuple(job.get('_benchColours', {}).get('core', (25, 25, 25))))
     H0 = np.zeros((int(round(W / res)) + 1, int(round(L / res)) + 1))
     H = sweep_flat(H0.copy(), res, ncs, st) if ncs else H0
+    # The blank's real form: a disc is the circle of its diameter, centred in its L x W box; every cell
+    # outside it is not material (drawn as bed), before and after.
+    if st.get('shape') == 'disc':
+        D = st.get('diameter') or min(L, W)
+        yy, xx = np.mgrid[0:H0.shape[0], 0:H0.shape[1]] * res
+        outside = np.hypot(xx - L / 2, yy - W / 2) > D / 2
+        H0 = np.where(outside, -T - 1, H0); H = np.where(outside, -T - 1, H)
     view = view_matrix(-30, 35)
     bp, bc = bed_points(L, W, T, res)
     fit = None
     for tag, field in (('before', H0), ('after', H)):
         if tag == 'after' and not ncs: break
-        p, c = heightfield_points(np.maximum(field, -T - 1), res, T, colour)
+        p, c = heightfield_points(np.maximum(field, -T - 1), res, T, colour, cap)
         P = np.concatenate([bp, p]); C = np.concatenate([bc, c])
         if fit is None:
             Pv = P @ view.T; fit = (Pv[:, :2].min(0), Pv[:, :2].max(0))
@@ -276,11 +308,11 @@ def render_flat(job, outdir, ncs):
         Image.fromarray(img).save(os.path.join(outdir, tag + '.png'))
     if ncs:
         top = view_matrix(0, 90)
-        p, c = heightfield_points(np.maximum(H, -T - 1), res, T, colour)
+        p, c = heightfield_points(np.maximum(H, -T - 1), res, T, colour, cap)
         P = np.concatenate([bp, p]); C = np.concatenate([bc, c])
         img, _ = splat(P, C, top, size=(int(600 * max(1, L / W)) if L >= W else 600, 600) if False else (900, 600), pix=2)
         Image.fromarray(img).save(os.path.join(outdir, 'after-top.png'))
-    removed = float(np.sum(H0 - np.maximum(H, -T)) * res * res)
+    removed = float(np.sum(np.maximum(H0, -T) - np.maximum(H, -T)) * res * res)
     return {'res': res, 'removedMm3': round(removed, 1)}
 
 

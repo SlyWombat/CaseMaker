@@ -1,5 +1,50 @@
 # Z1 demo jobs, cut for real (2026-10-28, re-run 2026-10-29)
 
+## The card rule and the one command (2026-11-02, #944)
+
+The published page is the gate. **A card stays only if its reference is objective and drawn on the
+card beside the simulated result**, and its verdict is computed, never judged by eye:
+
+- **2.5D** — the job's own design: the design outline overlaid on the swept "after" (`overlay.png`),
+  with the design check's under/over numbers per item and per label box.
+- **3D** — the app's own goal heightfield: the goal rendered from the same view, the cell-by-cell
+  deviation map, and the coverage percentage.
+- **Reference program** (j01) — Makera's own `TopClamp.nc` swept on the same blank, beside the
+  design check of the job.
+- **No photo decides a verdict.** The maker's page is the provenance line only. Material proxies are
+  retired: the as-filed job is judged, and refused is refused. The five hardwood samples (#936–#941)
+  join the page as their job files are committed.
+
+Verdicts: **Matches the design** (verifier 0 errors; every measured item at its floor and nothing cut
+outside the design — 3D: zero cut-into the goal and coverage ≥ 95 %), **Deviates** (the number and
+where), **Refused** (the app's sentence), **Not checkable** (the interim check has no measurable item
+— chamfers and plain cut-outs need #924's oracle). Until #924 lands, the design check is this repo's
+own sweep against the job's design, and the page says so.
+
+**One command rebuilds the page on a given sha** (the worktree must be checked out at that sha; its
+`HEAD` is what the page states):
+
+```sh
+docs/bench/2026-10-28-z1-real-jobs/tools/build.sh <sha>
+```
+
+`CM_REPO` (default `~/projects/cm-wt/944-demo-page`), `CM_PY` (default
+`~/casemaker-manager/venv/bin/python`, needs numpy + PIL) and `--location` / `--out` override the
+defaults. The location is the bench location document — the shop's own cutters plus the full Makera
+library (134 entries, 129 with Makera ids), the demo runs' convention — with the synced
+`catalogue.json` beside it. The k3 house service's export (`/api/v1/export`) carries only the 29
+owned cutters and no Makera ids, so every metal or laminate job refuses at feeds on it; that is a
+statement about the shop's data, not the app. Both paths are arguments, never baked into a script. Per
+card `build.py` runs `casemaker cut`, sweeps the posted `.nc` independently (`render.py`), runs
+`design_check.py` or the goal pair (`goal-hf.mts` + `goal_check.py`), and writes `page.html` and
+`manifest.json` into the build directory. Rebuild on every T3 and publish once per wave.
+
+Not reproducible here, so listed on the page and not cards: j06 (the wolf model is CC BY-NC-ND), j08
+(rotary carving cannot be described yet), j09 (PCB, needs a login), j26 (posted NC halves with no
+design to check them against).
+
+---
+
 This run replaces `docs/bench/2026-10-27-z1-typical-jobs/` as the record of whether Case Maker can make the 18 typical jobs and the seven jobs of the second set. The 2026-10-27 run counted "a program was written and passed its own simulation" as success, and most of its inputs were stand-ins that did not resemble the parts. In this run, each job models the part in the maker's photo or file. Every card was then compared by eye with that photo. The cards were first run on 2026-10-28; the **2026-10-29 re-run on main 207e8a11** is the current verdict, and the first-run tables below are kept as history.
 
 - Main **207e8a11** (re-run), `casemaker cut <job> --json --location <bench location>`.
