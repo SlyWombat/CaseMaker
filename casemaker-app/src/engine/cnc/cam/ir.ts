@@ -444,6 +444,20 @@ export interface RapidEstimate {
   zMmPerMin: number;
   /** Acceleration, mm/s², applied to every timed move — rapid and feed alike. */
   accelMmPerS2: number;
+  /**
+   * #927 — the spindle's ramp, SECONDS from rest to the profile's working speed, when the machine
+   * states a measured one. The Z1's is 12 s: the 2026-10-15 185-v-groove cut trace ramps `S:36.8`
+   * to `S:12000` in about 12 s (17:18:08 → 17:18:20). The field is OPTIONAL and `null` means NOT
+   * MEASURED, in the house's usual sense: a machine that states none gets no spin-up term rather
+   * than an invented one, and the sheet says the estimate excludes it.
+   *
+   * It lives here, on the machine's timing model, because the post's `TIME` line and the run plan
+   * read the estimate through this object; `MillProfile.spinUpSeconds` is the profile's own home
+   * for the number and every framed profile sets both from one constant (a spec holds them equal).
+   */
+  spinUpSeconds?: number | null;
+  /** Where the spin-up time came from; present exactly when {@link spinUpSeconds} is. */
+  spinUpSource?: string;
   /** Where those numbers came from, in words, for the panel and the run sheet to quote. */
   source: string;
 }
@@ -460,8 +474,10 @@ export interface RapidEstimate {
  * way, so the only rapid that leaves any generator with all three axes moving is an operation's
  * ENTRY move, the previous operation's `safeZ` down to this operation's first start at `HOP_Z`.
  * That is the FIRST move of its operation, which `estimateCycleSeconds` skips (the IR carries no
- * start point), so the estimate times no combined rapid at all and the inter-operation travel is
- * left UNPRICED — the error is a move missing, not a leg over-charged. The drawn clock walks every
+ * start point). #927 prices it at the PROGRAM level instead: `estimateCycleTerms` times operation
+ * i's first move from operation i-1's last move, where the machine really is. `estimateCycleSeconds`
+ * itself still times only the moves it can place, so a per-operation number never charges a move
+ * that belongs to the gap between operations. The drawn clock walks every
  * move whose endpoints it knows and does time that rapid; the rule below is what the two share
  * (#281).
  */
@@ -607,15 +623,94 @@ export function estimateCycleSeconds(
 }
 
 /**
- * The whole-program cycle estimate: every operation's `estimateCycleSeconds`, summed (#242).
- * The post writes `Math.round` of this into `TIME`, and `CamOperation.estimatedSeconds` for
- * each operation is the same function, so the panel, the sheet and the header agree.
+ * The whole-program cycle estimate: every operation's `estimateCycleSeconds`, summed (#242), PLUS
+ * the two terms the per-operation sum cannot see (#927) — see {@link estimateCycleTerms}. The post
+ * writes `Math.round` of this into `TIME`, and `CamOperation.estimatedSeconds` for each operation is
+ * the moves-only function, so the header is the whole program's honest clock and each operation's
+ * own number remains what that operation's moves cost.
  */
 export function estimateIRCycleSeconds(ir: ToolpathIR, rapid: RapidEstimate): number {
-  return ir.operations.reduce(
-    (s, op) => s + estimateCycleSeconds(op.moves, rapid, ir.rotary?.radius),
-    0,
-  );
+  return estimateCycleTerms(ir, rapid).totalSeconds;
+}
+
+/**
+ * #927 — THE PROGRAM'S CYCLE, AS NAMED TERMS.
+ *
+ * The per-operation estimate could time only each operation's own moves: an operation's FIRST move
+ * has no start point inside the IR, and `estimateCycleSeconds` skips it. For operation 2 onward
+ * that start point is not missing at all — it is the previous operation's last move, which is where
+ * the machine really is when the entry rapid begins — so the inter-operation travel IS priceable,
+ * and leaving it out was a known hole (1.17-1.55x low on the 10-17 runs). The spindle ramp is the
+ * other hole: the machine's own elapsed clock starts at play, and the spindle takes seconds to
+ * reach the command.
+ *
+ *   - `movesSeconds` — Σ `estimateCycleSeconds` per operation, exactly as before.
+ *   - `entrySeconds` — operation i's first move timed from operation i-1's last move, the same
+ *     rapid model and trapezoid as every other rapid. Operation 1's entry is NOT priced: before it
+ *     the machine is wherever the operator left it, which no IR states.
+ *   - `spinUpSeconds` — the machine's measured ramp, once per program; 0 when the profile states
+ *     none (an unmeasured ramp is not invented).
+ *
+ * The terms are what the panel, the run sheet and the post print, and `efficiencyOf` times the
+ * same entries into its air figures, so the estimate and the efficiency split cannot disagree.
+ */
+export interface CycleTerms {
+  /** The operations' own moves, `estimateCycleSeconds` summed, s. */
+  movesSeconds: number;
+  /** The inter-operation entry rapids, timed from each previous operation's last move, s. */
+  entrySeconds: number;
+  /** The spindle ramp at the program's RPM, from the profile's rate; 0 when it states none. */
+  spinUpSeconds: number;
+  /** moves + entry + spin-up — what `estimateIRCycleSeconds` and `TIME` carry. */
+  totalSeconds: number;
+}
+
+/**
+ * #927 — one inter-operation entry, as a typed move: from `from` to `to` on the SAME rapid model
+ * and through the same trapezoid as every rapid inside an operation. Shared by the cycle terms and
+ * by `efficiencyOf` so the entry is priced once, the same way, in both.
+ */
+function entryMoveSeconds(
+  from: CamMove,
+  to: CamMove,
+  rapid: RapidEstimate,
+  rotaryRadius: number | undefined,
+): { seconds: number; mm: number } {
+  const dx = to.x - from.x;
+  const dy =
+    rotaryRadius === undefined
+      ? to.y - from.y
+      : (((to.a ?? 0) - (from.a ?? 0)) * Math.PI * rotaryRadius) / 180;
+  const dz = to.z - from.z;
+  return {
+    seconds: moveSeconds(Math.hypot(dx, dy, dz), rapidRate(rapid, dx, dy, dz), rapid.accelMmPerS2),
+    mm: Math.hypot(dx, dy),
+  };
+}
+
+/** #927 — the program's cycle as named terms; see {@link CycleTerms}. */
+export function estimateCycleTerms(ir: ToolpathIR, rapid: RapidEstimate): CycleTerms {
+  let movesSeconds = 0;
+  let entrySeconds = 0;
+  for (const [i, op] of ir.operations.entries()) {
+    movesSeconds += estimateCycleSeconds(op.moves, rapid, ir.rotary?.radius);
+    if (i === 0) continue;
+    const from = ir.operations[i - 1]!.moves.at(-1);
+    const to = op.moves[0];
+    if (from !== undefined && to !== undefined) {
+      entrySeconds += entryMoveSeconds(from, to, rapid, ir.rotary?.radius).seconds;
+    }
+  }
+  const spinUpSeconds =
+    typeof rapid.spinUpSeconds === 'number' && rapid.spinUpSeconds > 0 && ir.spindleRpm > 0
+      ? rapid.spinUpSeconds
+      : 0;
+  return {
+    movesSeconds,
+    entrySeconds,
+    spinUpSeconds,
+    totalSeconds: movesSeconds + entrySeconds + spinUpSeconds,
+  };
 }
 
 /**
@@ -634,12 +729,19 @@ export function estimateIRCycleSeconds(ir: ToolpathIR, rapid: RapidEstimate): nu
  * efficiency is being judged. There is no second time model here.
  */
 export interface EfficiencyMeasure {
-  /** The cycle estimate these figures were taken from, s. */
+  /**
+   * The cycle estimate these figures were taken from, s: the moves, the inter-operation entries
+   * and the spindle ramp (#927), so it equals `estimateCycleTerms`'s total.
+   */
   cycleSeconds: number;
-  /** Seconds spent in RAPID moves — the air. */
+  /** Seconds spent in RAPID moves — the air, including the inter-operation entries. */
   rapidSeconds: number;
   /** Seconds spent in feed runs, through the per-run trapezoid. */
   feedSeconds: number;
+  /** #927 — the inter-operation entry rapids inside `rapidSeconds`, s. */
+  entrySeconds: number;
+  /** #927 — the spindle ramp charged once per program, s; 0 when the machine states no time. */
+  spinUpSeconds: number;
   /** `rapidSeconds / cycleSeconds`, 0 when the program has no time. The AIR-TIME FRACTION. */
   airFraction: number;
   /**
@@ -765,6 +867,8 @@ function mstLowerBound(points: readonly (readonly [number, number])[]): number |
 interface EfficiencyTally {
   rapidSeconds: number;
   feedSeconds: number;
+  entrySeconds: number;
+  spinUpSeconds: number;
   hopCount: number;
   hopSeconds: number;
   commandedFeedSeconds: number;
@@ -864,12 +968,14 @@ function tallyOperation(
 
 /** A tally's numbers as the measure, with the ratios derived once. */
 function measureOf(tally: EfficiencyTally): EfficiencyMeasure {
-  const cycleSeconds = tally.rapidSeconds + tally.feedSeconds;
+  const cycleSeconds = tally.rapidSeconds + tally.feedSeconds + tally.spinUpSeconds;
   const tourBoundMm = mstLowerBound(tally.entries);
   return {
     cycleSeconds,
     rapidSeconds: tally.rapidSeconds,
     feedSeconds: tally.feedSeconds,
+    entrySeconds: tally.entrySeconds,
+    spinUpSeconds: tally.spinUpSeconds,
     airFraction: cycleSeconds > 0 ? tally.rapidSeconds / cycleSeconds : 0,
     hopCount: tally.hopCount,
     hopSeconds: tally.hopSeconds,
@@ -896,6 +1002,8 @@ export function operationEfficiency(
   const tally: EfficiencyTally = {
     rapidSeconds: 0,
     feedSeconds: 0,
+    entrySeconds: 0,
+    spinUpSeconds: 0,
     hopCount: 0,
     hopSeconds: 0,
     commandedFeedSeconds: 0,
@@ -920,6 +1028,8 @@ export function efficiencyOf(ir: ToolpathIR, rapid: RapidEstimate): ProgramEffic
   const total: EfficiencyTally = {
     rapidSeconds: 0,
     feedSeconds: 0,
+    entrySeconds: 0,
+    spinUpSeconds: 0,
     hopCount: 0,
     hopSeconds: 0,
     commandedFeedSeconds: 0,
@@ -931,7 +1041,19 @@ export function efficiencyOf(ir: ToolpathIR, rapid: RapidEstimate): ProgramEffic
   };
   let tourBound = 0;
   let bounded = 0;
+  let previousOp: CamOperation | null = null;
   for (const op of ir.operations) {
+    // #927 — the entry rapid from the previous operation's last move to this operation's first.
+    if (previousOp !== null) {
+      const from = previousOp.moves.at(-1);
+      const to = op.moves[0];
+      if (from !== undefined && to !== undefined) {
+        const entry = entryMoveSeconds(from, to, rapid, ir.rotary?.radius);
+        total.rapidSeconds += entry.seconds;
+        total.rapidMm += entry.mm;
+        total.entrySeconds += entry.seconds;
+      }
+    }
     const measure = operationEfficiency(op, rapid, ir.tool, ir.hopZ, ir.rotary?.radius);
     operations.push(measure);
     total.rapidSeconds += measure.rapidSeconds;
@@ -947,7 +1069,11 @@ export function efficiencyOf(ir: ToolpathIR, rapid: RapidEstimate): ProgramEffic
       tourBound += measure.tourBoundMm;
       bounded++;
     }
+    previousOp = op;
   }
+  // #927 — the spindle ramp, from the machine's timing model; 0 when the profile states none.
+  const spinUp = estimateCycleTerms(ir, rapid).spinUpSeconds;
+  total.spinUpSeconds = spinUp;
   const program = measureOf(total);
   // The program's own bound is the sum of the operations', not an MST over all of their entries:
   // a program is a sequence of tours, and one MST across them would let the bound ignore the

@@ -278,6 +278,17 @@ export interface MillProfile extends MachineIdentity {
    */
   rapidEstimate: RapidEstimate;
   /**
+   * #927 — THE SPINDLE'S RAMP, seconds from rest to the profile's working speed, when this model
+   * states a measured one; `null`/absent means NOT MEASURED and the estimate prices no spin-up.
+   *
+   * The number's home is here, on the profile; the ESTIMATE reads it through
+   * {@link RapidEstimate.spinUpSeconds}, and every framed profile sets both from one constant so a
+   * spec can hold them equal. `#935`'s D3 air session replaces the value with its own timing.
+   */
+  spinUpSeconds?: number | null;
+  /** Where {@link spinUpSeconds} came from, in words; present exactly when that is. */
+  spinUpSource?: string;
+  /**
    * The axes' step resolution, from the controller's own steps-per-mm (#221). This is the
    * MACHINE's number, not a shop tunable: one X/Y microstep is `1 / xyPerMm` mm, and a V-carve
    * whose colour-plane groove is narrower than a few of them cannot be resolved into the two
@@ -670,6 +681,15 @@ const MAKERA_MATERIALS: StockMaterial[] = [
  * held separately, as a saved record with provenance, in `calibration.ts`.** Nothing below is
  * typed twice: every position in `toolChange` that the firmware derives, is derived here.
  */
+/**
+ * #927 — the Z1 spindle's ramp, seconds, and where it came from. The profile carries it twice on
+ * purpose: `spinUpSeconds` is the profile's home for the number, `rapidEstimate.spinUpSeconds` is
+ * where the cycle estimate reads it; one constant keeps the two from drifting.
+ */
+const Z1_SPIN_UP_SECONDS = 12;
+const Z1_SPIN_UP_SOURCE =
+  'the 2026-10-15 185-v-groove cut trace: S:36.8 at 17:18:08.262 to S:12011.7 at 17:18:20.296, ~12 s from rest to 12000 rpm (docs/bench/traces/2026-10-15-185-cut.log); a speed-field read, not the D3 timed run';
+
 export const Z1: MillProfile = {
   id: 'Z1',
   name: 'Makera Z1',
@@ -697,7 +717,16 @@ export const Z1: MillProfile = {
     zMmPerMin: 600,
     accelMmPerS2: 150,
     source: 'config read 2026-10-07 + stopwatch 2026-10-08',
+    // #927 — the same number as the profile's own field below, set from one constant.
+    spinUpSeconds: Z1_SPIN_UP_SECONDS,
+    spinUpSource: Z1_SPIN_UP_SOURCE,
   },
+  // #927 — the spindle's ramp at this machine's working speed, read from the 2026-10-15 cut trace:
+  // `S:36.8` at 17:18:08.262 and `S:12011.7` at 17:18:20.296, with the intermediate samples between
+  // (5568.6, 9834.0, 11162.4, 11748.3, 11927.8) — about 12 s from rest to 12 000 rpm. A READ OF THE
+  // SPEED FIELD, not the D3 timed air run; #935's D3 session replaces it with its own timing.
+  spinUpSeconds: Z1_SPIN_UP_SECONDS,
+  spinUpSource: Z1_SPIN_UP_SOURCE,
   // The firmware's SHIPPED defaults (`configZ1.default`, /Makera-Parity.md §11.3), not a device
   // read: both keys answer *not in config*, and the compiled-in `firm` source is silent over the
   // bridge (#208 B7). One X/Y step is 1/1600 mm = 0.625 µm.
@@ -1707,7 +1736,15 @@ export const millProfileSchema = z.object({
     zMmPerMin: finite.positive(),
     accelMmPerS2: finite.positive(),
     source: z.string().min(1),
+    // #927 — the spindle ramp, optional and positive when stated: a zero-second ramp is a claim the
+    // field may not make (a machine that states none omits it, or writes null).
+    spinUpSeconds: finite.positive().nullable().optional(),
+    spinUpSource: z.string().min(1).optional(),
   }),
+  // #927 — the same number on the profile itself; see the interface field. Optional: a profile that
+  // has never timed its spindle states neither, and the estimate then prices no ramp.
+  spinUpSeconds: finite.positive().nullable().optional(),
+  spinUpSource: z.string().min(1).optional(),
   // #221 — the axes' own step resolution. Positive like every other motion number; a zero would
   // claim infinitely fine steps, which is a claim about hardware this field cannot make. `null`
   // where the controller's configuration has never been read (#773), which a reader must handle.
@@ -1820,7 +1857,15 @@ export const millModelSchema = z.object({
     zMmPerMin: finite.positive(),
     accelMmPerS2: finite.positive(),
     source: z.string().min(1),
+    // #927 — the spindle ramp, optional and positive when stated: a zero-second ramp is a claim the
+    // field may not make (a machine that states none omits it, or writes null).
+    spinUpSeconds: finite.positive().nullable().optional(),
+    spinUpSource: z.string().min(1).optional(),
   }),
+  // #927 — the same number on the profile itself; see the interface field. Optional: a profile that
+  // has never timed its spindle states neither, and the estimate then prices no ramp.
+  spinUpSeconds: finite.positive().nullable().optional(),
+  spinUpSource: z.string().min(1).optional(),
   hasATC: z.boolean(),
   toolSlots: z.number().int().nonnegative(),
   rotaryEnvelope: z.object({ diameter: finite.positive(), length: finite.positive() }).optional(),

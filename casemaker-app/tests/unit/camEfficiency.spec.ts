@@ -186,6 +186,38 @@ describe('#926 efficiency: path length against the tour’s lower bound', () => 
   });
 });
 
+describe('#927 efficiency equals the corrected cycle estimate', () => {
+  it('counts the inter-operation entry rapid in the air, and the total matches the estimate terms', () => {
+    // Two operations 40 mm apart in X; the entry rapid runs at the X/Y rate over its 3D length.
+    const program = ir([
+      [rapid(0, 0, HOP_Z), cut(0, 0, -1, 200), cut(5, 0, -1, 200), rapid(5, 0, 5)],
+      [rapid(45, 0, HOP_Z), cut(45, 0, -1, 200), cut(50, 0, -1, 200)],
+    ]);
+    const measure = efficiencyOf(program, RAPID);
+    expect(measure.entrySeconds).toBeGreaterThan(0);
+    expect(measure.cycleSeconds).toBeCloseTo(estimateIRCycleSeconds(program, RAPID), 9);
+    // The entry's own move is part of rapidSeconds, not of the feeds.
+    expect(measure.rapidSeconds).toBeGreaterThan(measure.entrySeconds);
+    expect(measure.spinUpSeconds).toBe(0);
+  });
+
+  it('charges the spindle ramp once per program and keeps it in the cycle, not in the air', () => {
+    // A hop gives the program real air to divide: the ramp must dilute its share, not hide it.
+    const program = ir([
+      [rapid(0, 0, HOP_Z), cut(0, 0, -1, 200), cut(5, 0, -1, 200), rapid(5, 0, HOP_Z), rapid(20, 0, HOP_Z)],
+    ]);
+    const timed = { ...RAPID, spinUpSeconds: 12, spinUpSource: 'spec' };
+    const plain = efficiencyOf(program, RAPID);
+    const withRamp = efficiencyOf(program, timed);
+    expect(withRamp.spinUpSeconds).toBe(12);
+    expect(withRamp.cycleSeconds).toBeCloseTo(plain.cycleSeconds + 12, 9);
+    expect(withRamp.rapidSeconds).toBeCloseTo(plain.rapidSeconds, 9);
+    expect(withRamp.feedSeconds).toBeCloseTo(plain.feedSeconds, 9);
+    // The air fraction's denominator grew, so the same air is a smaller share.
+    expect(withRamp.airFraction).toBeLessThan(plain.airFraction);
+  });
+});
+
 describe('#926 efficiency: the swept strip and the written fraction', () => {
   it('a flat cutter sweeps its diameter over the cutting path', () => {
     const measure = efficiencyOf(ir([[cut(0, 0, -1, 200), cut(10, 0, -1, 200)]]), RAPID);

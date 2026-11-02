@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   estimateCycleSeconds,
+  estimateCycleTerms,
   estimateIRCycleSeconds,
   estimateSeconds,
   HOP_Z,
@@ -209,7 +210,68 @@ describe('estimateCycleSeconds (#242, #281)', () => {
       ],
     };
     const summed = ir.operations.reduce((s, o) => s + o.estimatedSeconds, 0);
-    expect(estimateIRCycleSeconds(ir, RAPID)).toBeCloseTo(summed, 9);
+    // #927 — the per-operation numbers are their own moves; the PROGRAM adds the entries between
+    // them and the spindle ramp, so the total is the parts plus those two named terms.
+    const terms = estimateCycleTerms(ir, RAPID);
+    expect(terms.movesSeconds).toBeCloseTo(summed, 9);
+    expect(terms.entrySeconds).toBeGreaterThan(0);
+    expect(estimateIRCycleSeconds(ir, RAPID)).toBeCloseTo(summed + terms.entrySeconds + terms.spinUpSeconds, 9);
+  });
+
+  it('#927 prices the inter-operation entry rapid from the previous operation’s last move', () => {
+    const op = (number: number, moves: CamMove[]): CamOperation => ({
+      number,
+      name: `op${number}`,
+      labelId: `l${number}`,
+      depth: 1,
+      moves,
+      estimatedSeconds: estimateCycleSeconds(moves, RAPID),
+    });
+    const ir: ToolpathIR = {
+      frame: 'flat',
+      tool: flatEndMill(1),
+      toolNumber: 1,
+      spindleRpm: 12000,
+      air: false,
+      safeZ: SAFE_Z,
+      hopZ: HOP_Z,
+      operations: [
+        op(1, [rapid(0, 0, 1), cut(0, 0, -1, 200), rapid(0, 0, SAFE_Z)]),
+        // The entry is (0,0,SAFE_Z) → (40,0,HOP_Z): 40 mm in XY and 4 mm down, timed at the X/Y
+        // rate over its whole 3D length — the same rule every other rapid follows.
+        op(2, [rapid(40, 0, HOP_Z), cut(40, 0, -1, 200)]),
+      ],
+    };
+    const terms = estimateCycleTerms(ir, RAPID);
+    const distance = Math.hypot(40, 0, SAFE_Z - HOP_Z);
+    expect(terms.entrySeconds).toBeCloseTo(trap(distance, 1200, 150), 9);
+  });
+
+  it('#927 prices the spindle ramp once per program when the machine states one', () => {
+    const ir: ToolpathIR = {
+      frame: 'flat',
+      tool: flatEndMill(1),
+      toolNumber: 1,
+      spindleRpm: 12000,
+      air: false,
+      safeZ: SAFE_Z,
+      hopZ: HOP_Z,
+      operations: [
+        {
+          number: 1,
+          name: 'op1',
+          labelId: 'l1',
+          depth: 1,
+          moves: [rapid(0, 0, 1), cut(0, 0, -1, 200), cut(5, 0, -1, 200)],
+          estimatedSeconds: 0,
+        },
+      ],
+    };
+    expect(estimateCycleTerms(ir, RAPID).spinUpSeconds).toBe(0);
+    const timed = { ...RAPID, spinUpSeconds: 12, spinUpSource: 'spec' };
+    const terms = estimateCycleTerms(ir, timed);
+    expect(terms.spinUpSeconds).toBe(12);
+    expect(terms.totalSeconds).toBeCloseTo(terms.movesSeconds + terms.entrySeconds + 12, 9);
   });
 });
 
