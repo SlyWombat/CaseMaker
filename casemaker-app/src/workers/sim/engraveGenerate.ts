@@ -5097,7 +5097,19 @@ export async function generateGoalProgram(
           // this much work the goal keeps the raster and the line says why.
           planBudget: readDefault(shop.defaults ?? null, 'rough3d.planBudgetCellLevels').value,
           adaptive: adaptiveSettings(shop.defaults ?? null).settings,
-          ...(planner === undefined ? {} : { planner }),
+          // #881 — THE POOL'S MEMORY BOUND. #889's budget is the page's allowance for the whole
+          // program; the program's own estimate is the parent, and the port sizes each planner's
+          // level from its own measuring grid. `moveEstimate` is read at call time, so a run that
+          // settled on the coarser pitch states the coarser program.
+          ...(planner === undefined
+            ? {}
+            : {
+                planner,
+                memory: {
+                  budgetBytes: budgetMb * 1024 * 1024,
+                  parentBytes: moveEstimate.mb * 1024 * 1024,
+                },
+              }),
         },
         // #785 — the CAM's own layer/scan-line counts, as Generate's progress words.
         onProgress: (p) =>

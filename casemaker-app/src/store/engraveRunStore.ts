@@ -30,6 +30,7 @@ import {
 } from '@/platform/flightRecorder';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { ProgramOracle } from './engraveRunGate';
+import { forgetPoolSizing } from '@/engine/jobs/adaptivePool';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SimStatus } from './simStore';
@@ -39,8 +40,7 @@ import type { CarriedField, FlatField } from '@/workers/geometry/carriedField';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import { useLocationStore } from './locationStore';
-import { isVShape } from '@/engine/cnc/vProfile';
-import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
+import { isVShape } from '@/engine/cnc/vProfile';import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import {
   combineCopperSides,
@@ -634,6 +634,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         }
       };
       try {
+        // #881 — a new run forgets the last pool decision; the pool states its own size again
+        // only if this program's planning is budgeted.
+        forgetPoolSizing();
         generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress);
       } finally {
         clearStall();
