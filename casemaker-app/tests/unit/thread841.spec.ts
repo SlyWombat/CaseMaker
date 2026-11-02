@@ -343,12 +343,13 @@ describe('#841 a mismatched cutter informs and offers the nearest owned one', ()
 });
 
 describe('#841 the internal metric thread is byte-identical to before', () => {
-  // sha256(posted program + JSON(plan notes)), computed on main at 6dac1161 before #841.
+  // sha256(posted program + JSON(plan notes)), computed on main at 6dac1161 before #841 and
+  // re-pinned by #927: the only changed line in each program is its `;@MKR|TIME` record.
   const BEFORE: Record<string, string> = {
-    'M2.5': 'a488e0055dff501eb1094b599f588f72fbde6da9bde3a4cff8716d2784015cac',
-    M3: '6309b012004829448a1cc5cafd850e3ecf2162eb854eef9605b3b65231414fc7',
-    M5: '7de862944898f884e69c8805ceb9e9a4041e2c03a1dfc4a72a91d94841c2210e',
-    M6: '0b79bbc7a1552ff6bfdd1f1837d004a4cea107f7a72b4ccbde4d4128c2cd8fd2',
+    'M2.5': 'b784cf5d1e61609d9f24b672b03301863b408e3f55f4ab9a06231d6afd9f935b',
+    M3: '336b77dd54fb892b0676ada4c57592ab3c13edce6ddbf06fab20d2a01809268e',
+    M5: 'f2b78ade4a11342303a8b5fd88b76a910ddec6358b62b581f767704210074468',
+    M6: '48e4e17f6a01f560814bc83a28d30134fff5f8607c749cf15bd9965bf11a0abc',
   };
   it.each([
     ['M2.5', 1.6],
@@ -371,7 +372,7 @@ describe('#841 the internal metric thread is byte-identical to before', () => {
     const tool = flatEndMill(2.4, { id: null, name: M3_MILL.name, typeText: 'Thread mill', shape: 'thread', tipDiameter: 2.4, diameter: 3.175, fluteLength: 9, cornerRadius: null });
     const g = await generate(tl, { ...parsed.job, tool });
     expect(g.ok).toBe(true);
-    expect(createHash('sha256').update(g.nc!).digest('hex')).toBe('2eaae63301a15e91792e114d8968b5a3b0cf9b62d8e88fdef9ac5b733ce9d7ec');
+    expect(createHash('sha256').update(g.nc!).digest('hex')).toBe('e6b843a7eb62721d7435252ffb5d16887333bce8a5fb186c1894ca441fcf08b1');
   });
 });
 

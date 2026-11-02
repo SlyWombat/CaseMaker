@@ -124,8 +124,9 @@ describe('#869 the goal’s split, generated', () => {
     // goal POSTS on purpose (packed moves, merged collinear feeds, the chunked body), so the pin
     // is the post-#889 value; the split-vs-one-cutter difference is asserted below. Re-pinned when
     // #889 merged only LEVEL lines (a merged slope sweeps high in the column engine). Re-pinned
-    // by #909: the single-cutter plan's rough is clamped over its ball's footprint.
-    expect(programHash(out.nc!)).toBe('ad990822');
+    // by #909: the single-cutter plan's rough is clamped over its ball's footprint. Re-pinned by
+    // #927: only the `;@MKR|TIME` line moved (266 s → 280 s).
+    expect(programHash(out.nc!)).toBe('aa35ab5a');
   });
 
   it('a roughToolKey posts the flat’s rough first and the ball’s finish second', async () => {

@@ -229,7 +229,8 @@ describe('#848 existing thread outputs are byte-identical', () => {
   afterEach(() => resetRegistry());
   const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 
-  // sha256 of the posted programs, computed on main at 376589b0 before #848.
+  // sha256 of the posted programs, computed on main at 376589b0 before #848 and re-pinned by
+  // #927: the only changed line in each program is its `;@MKR|TIME` record.
   // #879 — THE FIXTURE PINS ITS MATERIAL. These bytes were taken on a softwood blank; since #879
   // the shipped default is hardwood, whose feeds row steps down and feeds differently. The pin is
   // about the THREAD code being unchanged, so the material it was computed on is stated here.
@@ -249,7 +250,7 @@ describe('#848 existing thread outputs are byte-identical', () => {
     };
     const g1 = await generate(tl, rod, null, [], undefined, { defaults: DEFAULTS });
     expect(g1.ok).toBe(true);
-    expect(sha(g1.nc!)).toBe('b2a740f275be6175fa41f092d31c1922fb6d925a6aa863c48e028a4e34c33fd8');
+    expect(sha(g1.nc!)).toBe('2fbd081d479ee093d70038c9120b120927c84d95355567cda936d74be1ae3fdd');
 
     // A thread mill beside a pocket that raises no boss keeps the named mill FIRST (#786 4c).
     const pocketJob: EngraveJob = {
@@ -268,8 +269,8 @@ describe('#848 existing thread outputs are byte-identical', () => {
     expect(plan.cutters.map((c) => c.key)).toEqual([M8.key, FLAT.key]);
     const g2 = await generate(tl, applyCutterPlanToJob(pocketJob, plan), null, [], undefined, { tools: TOOLS, defaults: DEFAULTS });
     expect(g2.programs.map((p) => sha(p.nc))).toEqual([
-      'b8590983e6746fd5c95ea00a1540642fca17ab9ff2a1b9fe48684008f8ad1962',
-      '570812a4b165d00e4bdb81009676dbcbea6ca36cee310a59099d18f4e1bbb5d7',
+      'c9788de31095ef2b871582a320d835186a5e2421c545f0681ba207936f393349',
+      '99d6dd22729ef9051e424e65269ada191a9bf05cf63bc1a6d23960cd27ecac9e',
     ]);
   }, 120_000);
 });
