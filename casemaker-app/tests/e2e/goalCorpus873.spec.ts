@@ -16,32 +16,35 @@ const RELIEF = fileURLToPath(new URL('../fixtures/goals/relief-plate.stl', impor
 test.setTimeout(600_000);
 
 /**
- * Walk the wizard to a goal job: a made blank sized for the part, a vise hold, and Surface a mesh
- * with the file picked. The wizard applies the goal to the job, so the panel opens on it.
+ * Walk the wizard to a goal job: the question first — Surface a mesh, with the file picked — then a
+ * made blank sized for the part, then the vise hold. The last step's button creates the goal, so
+ * the panel opens on it. #897 — the work comes before the blank it sizes.
  */
 async function wizardGoal(page: import('@playwright/test').Page, file: string, stock: { length: number; width: number; thickness: number }): Promise<void> {
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
-  await page.getByTestId('start-wizard-next').click(); // machine → stock
+  await expect(page.getByTestId('start-wizard-progress')).toContainText('Machine');
+  await page.getByTestId('start-wizard-next').click(); // machine → the question
 
-  await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
+  // What: Surface a mesh, and the file. The pick is shown by name, never "No file chosen" (#870).
+  await expect(page.getByTestId('start-wizard-progress')).toContainText('What are you cutting?');
+  await page.getByTestId('engrave-setup-what-surface').click();
+  const name = file.split(/[\\/]/).pop()!;
+  await page.getByTestId('start-wizard-op-surface-file').setInputFiles(file);
+  await expect(page.getByTestId('start-wizard-op-field')).toContainText(name);
+  await page.getByTestId('start-wizard-operation-next').click(); // the question → stock
+
+  // Stock: a made blank sized for the part.
+  await expect(page.getByTestId('start-wizard-progress')).toContainText('Stock');
   await page.getByTestId('start-wizard-make-length').fill(String(stock.length));
   await page.getByTestId('start-wizard-make-width').fill(String(stock.width));
   await page.getByTestId('start-wizard-make-thickness').fill(String(stock.thickness));
   await page.getByTestId('start-wizard-stock-next').click(); // → holding
 
-  // Holding: the vise (the shipped default) is the first mount; continue.
+  // Holding: the vise (the shipped default) is the mount; the last step's button creates the job.
+  await expect(page.getByTestId('start-wizard-progress')).toContainText('Holding');
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
-  await page.getByTestId('engrave-setup-next').click(); // → what
-
-  // What: Surface a mesh, and the file.
-  await expect(page.getByTestId('engrave-setup-step-what')).toBeVisible();
-  await page.getByTestId('engrave-setup-what-surface').click();
-  const name = file.split(/[\\/]/).pop()!;
-  await page.getByTestId('start-wizard-op-surface-file').setInputFiles(file);
-  const chooser = page.getByTestId('start-wizard-op-field');
-  await expect(chooser).toContainText(name); // #870: the pick is shown, never "No file chosen"
-  await page.getByTestId('start-wizard-create').click();
+  await page.getByTestId('engrave-setup-next').click();
   await expect(page.getByTestId('start-wizard')).toHaveCount(0);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 }
