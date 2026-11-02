@@ -18,18 +18,18 @@
   "outputs": [
     {
       "path": "<out>/single-barrel.nc",
-      "sha256": "d3fbb8aa3a86d1a2ee378c0842d5f0ca1fcbb7fa63774ac6fee9096147c54652",
+      "sha256": "b36363c8c30629e94390432aeebc1f2fa7bb632aba29cb9ef4fa0421f7c601c8",
       "bytes": 11696
     },
     {
       "path": "<out>/single-barrel-frame.nc",
-      "sha256": "b573ca2a1be9301b8ad0588ec7ec41300db0322757831cebf9e7af1866d7dc55",
+      "sha256": "37176862eddbe6c7fa252d2f8793b5543644a900538f751c86f97b127920509b",
       "bytes": 1254
     },
     {
       "path": "<out>/single-barrel-run-sheet.md",
-      "sha256": "4cbfaeb50363c3418e38a75cb13a300387935e0fd13c606ff9bfb0a49e155861",
-      "bytes": 18627
+      "sha256": "f2fc362df190ae8d339a519c6c2c52af0a93614a76c81ca0511d4c5834183774",
+      "bytes": 18754
     }
   ],
   "diagnostics": [
@@ -107,26 +107,26 @@
           "operations": 2,
           "cuttingMoves": 305,
           "passes": 2,
-          "estimatedSeconds": 120.10557460458003,
+          "estimatedSeconds": 135.79723664228672,
           "rapidMm": 308.72731156457826,
           "cutMm": 357.07405121549573,
           "baselineRapidMm": 308.72731156457826,
           "efficiency": {
-            "cycleSeconds": 120.10557460458006,
-            "rapidSeconds": 32.38291208035282,
+            "cycleSeconds": 135.79723664228675,
+            "rapidSeconds": 36.0745741180595,
             "feedSeconds": 87.72266252422725,
-            "airFraction": 0.26962039178419567,
+            "airFraction": 0.2656502813314687,
             "hopCount": 47,
             "hopSeconds": 18.116245413686137,
             "commandedFeedSeconds": 72.84888614585947,
             "feedUtilisation": 0.8304454521742322,
-            "rapidMm": 237.67323872320665,
+            "rapidMm": 308.72731156457826,
             "cutMm": 357.0740512154956,
-            "rapidCutRatio": 0.6656133032186365,
+            "rapidCutRatio": 0.8646030438606699,
             "sweptAreaMm2": 298.47762268725137,
             "deepestCutMm": 1,
             "tourBoundMm": 182.63739831461035,
-            "tourExcess": 0.3013393801952424
+            "tourExcess": 0.6903838666863069
           }
         },
         "sim": {
@@ -138,8 +138,8 @@
         },
         "sheet": {
           "file": "single-barrel-run-sheet.md",
-          "ncHash": "d3fbb8aa",
-          "estimatedTime": "2 min 0 s"
+          "ncHash": "b36363c8",
+          "estimatedTime": "2 min 16 s"
         },
         "previews": [],
         "images": []
