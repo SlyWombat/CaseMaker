@@ -90,6 +90,34 @@ function rampGoal(over: Partial<EngraveTargetObject> = {}, depthMm = DEPTH_MM): 
   });
 }
 
+/**
+ * #888/#889 — THE SPLIT'S GOAL: an open-top box (a pit). Its topmost surface at every interior
+ * cell is the FLOOR, so each roughing level above it cuts the whole footprint — the one shape that
+ * makes a goal's ROUGHING, rather than its finish, over the budget. A ramp cannot: each level cuts
+ * only the sliver where it crosses that Z.
+ */
+function pitGoal(depthMm: number, over: Partial<EngraveTargetObject> = {}): EngraveTargetObject {
+  const W = 20;
+  const zt = 0;
+  const zb = -depthMm;
+  const tris: Tri[] = [
+    // floor
+    [[0, 0, zb], [W, 0, zb], [W, W, zb]],
+    [[0, 0, zb], [W, W, zb], [0, W, zb]],
+    // walls, tops at 0
+    [[0, 0, zt], [0, W, zt], [0, W, zb]], [[0, 0, zt], [0, W, zb], [0, 0, zb]],
+    [[W, 0, zt], [W, W, zb], [W, W, zt]], [[W, 0, zt], [W, 0, zb], [W, W, zb]],
+    [[0, 0, zt], [W, 0, zb], [W, 0, zt]], [[0, 0, zt], [0, 0, zb], [W, 0, zb]],
+    [[0, W, zt], [W, W, zt], [W, W, zb]], [[0, W, zt], [W, W, zb], [0, W, zb]],
+  ];
+  return goal(depthMm, {
+    data: Buffer.from(new Uint8Array(binaryStl(tris))).toString('base64'),
+    size: { x: W, y: W, z: depthMm },
+    position: { x: 25, y: 25, z: 0 },
+    ...over,
+  });
+}
+
 function tallJob(target: EngraveTargetObject): EngraveJob {
   return {
     ...defaultEngraveJob(),
@@ -317,21 +345,23 @@ describe('#785 — Generate', () => {
   }, 120_000);
 
   it('#888 a goal whose depth can be split in two under the budget carries the split, and the press builds it', async () => {
-    // 20 × 20 mm at 0.05 mm (plus the clear ring) is ~330 000 cells; 60 mm deep at the row's
-    // 1.0 mm step-down is ~61 levels, so the one program is ~20 M moves — over the 12 M budget —
-    // while each 30 mm band is ~10.6 M: two setups, each under the budget, is exactly the case
-    // the press exists for.
-    // The step-down is PINNED on the goal: the split's numbers are the point, not the feeds
-    // row, which follows the default blank's material (#879 moved it to hardwood).
-    const target = rampGoal({ surface: { gridPitchMm: 0.05, roughStepDownMm: 1.0 } }, 60);
-    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 80 }), [], null, {});
+    // #889 — a roughing level costs what it removes and merges into one move per row, so a ramp
+    // no longer reaches the budget in one program. The split's case is a PIT: every level above its
+    // floor cuts the whole footprint, so 90 mm at a 0.1 mm step-down and a 0.04 mm step-over is
+    // about a million roughing moves (~1 082 MB, over the 640 MB budget) while each 45 mm band is
+    // ~517 000 moves (~543 MB) — two setups, each under the budget, is exactly the case the press
+    // exists for.
+    const target = pitGoal(90, {
+      surface: { gridPitchMm: 0.1, roughStepDownMm: 0.1, roughStepOverMm: 0.04, finishStepOverMm: 0.3 },
+    });
+    const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 150, shoulderLength: 150 }), [], null, {});
     expect(out.ok).toBe(false);
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
+    expect(refusal?.budgetMb).toBeGreaterThan(640);
     expect(refusal?.suggestedSplit).toBeDefined();
     const split = refusal!.suggestedSplit!;
-    expect(split.firstMm + split.secondMm).toBeCloseTo(60, 2);
-    expect(split.movesEach).toBeLessThanOrEqual(12_000_000);
-    expect(refusal?.budgetMoves).toBeGreaterThan(12_000_000);
+    expect(split.firstMm + split.secondMm).toBeCloseTo(90, 2);
+    expect((split.movesEach * 1100) / (1024 * 1024)).toBeLessThanOrEqual(640);
 
     // The press's machinery: two setups, each side's goal carrying its band, the second side the
     // stock turned over. (No drill is owned here, so the hold states no pins — the setups and
@@ -362,7 +392,9 @@ describe('#785 — Generate', () => {
     const target = rampGoal({ surface: { gridPitchMm: 0.1, roughStepDownMm: 0.002 } }, 30);
     const out = generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
-    expect(refusal?.message).toContain('raise the step-down to about');
+    // #888/#889 — the sentence is the plain one; the step-down press is a NUMBER on the finding,
+    // found by trying it (the panel draws it as "Thicker layers (N mm step-down, rougher walls)").
+    expect(refusal?.message).toContain('This goal is too detailed to plan');
     expect(refusal?.suggestedStepDownMm).toBeGreaterThan(0.002);
     const stepped = { ...target, surface: { ...(target.surface ?? {}), roughStepDownMm: refusal!.suggestedStepDownMm } };
     const retry = generateGoalProgram(tallJob(stepped), stepped, flat({ fluteLength: 40 }), [], null, {});

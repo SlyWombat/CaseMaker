@@ -120,8 +120,10 @@ describe('#869 the goal’s split, generated', () => {
     expect(out.programs).toHaveLength(1);
     expect(out.programs[0]!.toolKey).toBe(BALL.key);
     expect(out.surface3d?.rough ?? null).toBeNull();
-    // The promise that a goal without a rough is untouched: the posted file's hash.
-    expect(programHash(out.nc!)).toBe('a57ad2d8');
+    // The promise that a goal without a rough is untouched: the posted file's hash. #889 changed
+    // goal POSTS on purpose (packed moves, merged collinear feeds, the chunked body), so the pin
+    // is the post-#889 value; the split-vs-one-cutter difference is asserted below.
+    expect(programHash(out.nc!)).toBe('443d7b67');
   });
 
   it('a roughToolKey posts the flat’s rough first and the ball’s finish second', () => {

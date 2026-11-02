@@ -5001,9 +5001,17 @@ export function generateGoalProgram(
     // builds a job that refuses again. A goal already cutting a band (a split side, or the
     // #785 top-band cut) is not split. The band arithmetic is the #888 model (levels across every
     // cell); #889's exact per-level count estimates the RUN, not a hypothetical half-depth one.
+    // The band estimate is proportional to #889's own: the roughing work per level (its exact
+    // full-depth count over the levels it runs) times the band's levels, plus HALF the finish —
+    // each setup finishes only the surface its band exposes. The pre-#889 model (cells × levels)
+    // is not used: a raster level merges into one move per row, so that model overstated a band
+    // by orders of magnitude and the press was never offered.
+    const levelsFull = Math.max(1, Math.ceil((moveEstimate.depth + allowanceMm) / feeds.stepDown));
+    const roughPerLevel = moveEstimate.rough / levelsFull;
+    const finishEach = moveEstimate.finish / 2;
     const levelsForBand = (bandMm: number): number =>
       Math.max(1, Math.ceil((bandMm + allowanceMm) / feeds.stepDown));
-    const movesForBand = (bandMm: number): number => moveEstimate.cells * (levelsForBand(bandMm) + 1);
+    const movesForBand = (bandMm: number): number => roughPerLevel * levelsForBand(bandMm) + finishEach;
     const firstBandMm = Number((moveEstimate.depth / 2).toFixed(3));
     const secondBandMm = Number((moveEstimate.depth - firstBandMm).toFixed(3));
     const splitMoves = Math.max(movesForBand(firstBandMm), movesForBand(secondBandMm));
