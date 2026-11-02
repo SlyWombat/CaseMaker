@@ -18,7 +18,8 @@
  * {@link MoveStore.append}.
  *
  * #889 item 3 — COLLINEAR FEEDS MERGE ON THE WAY IN. A raster emits one step per grid cell; along a
- * flat or straight stretch every one of those steps lies on the same line. With a positive
+ * level stretch every one of those steps lies on the same line. Only LEVEL lines merge (see
+ * `openLine`: the column sweep reads a long sloped move high). With a positive
  * `mergeToleranceMm`, a feed that continues the previous feed's line (same feed rate, moving
  * forward, every dropped point within the tolerance of the segment that replaces it) REPLACES the
  * previous end point instead of adding a move. The guarantee: each dropped point lies within half
@@ -208,7 +209,12 @@ export class MoveStore {
     const vy = (this.ys[i] as number) - ay;
     const vz = (this.zs[i] as number) - az;
     const len = Math.sqrt(vx * vx + vy * vy + vz * vz);
-    if (!(len > 1e-9)) {
+    // LEVEL lines only. The column sweep reads a ramping move's floor at three points (its foot
+    // and its two ends, #758); for a ball on a long sloped move the true lowest point lies between
+    // them, so a merged slope would be swept up to tenths of a millimetre high — a finish the
+    // simulation says leaves material the machine removes. A level move is read exactly, and the
+    // roughing's levels are where the moves were.
+    if (!(len > 1e-9) || Math.abs(vz) > this.halfTol) {
       this.lineOpen = false;
       return;
     }

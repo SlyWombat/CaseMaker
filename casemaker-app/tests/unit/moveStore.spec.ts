@@ -60,11 +60,11 @@ describe('#889 — MoveStore', () => {
   it('merges collinear feeds of one rate, and every dropped point stays within the tolerance', () => {
     const tol = GOAL_MERGE_TOLERANCE_MM;
     const raw: CamMove[] = [{ kind: 'rapid', x: 0, y: 5, z: 1 }, { kind: 'feed', x: 0, y: 5, z: -2, f: 300 }];
-    // A gently curving row: straight for 40 samples (with sub-tolerance wobble), then bending.
+    // A row level for 90 samples, then bending away.
     for (let i = 1; i <= 120; i++) {
       const x = i * 0.1;
-      const wobble = i <= 40 ? (i % 2 === 0 ? 0.0004 : -0.0004) : 0;
-      const bend = i > 40 ? 0.02 * (i - 40) ** 1.5 * 0.01 : 0;
+      const wobble = 0;
+      const bend = i > 90 ? 0.02 * (i - 90) ** 1.5 * 0.01 : 0;
       raw.push({ kind: 'feed', x, y: 5, z: -2 + wobble + bend, f: 800 });
     }
     const store = new MoveStore({ mergeToleranceMm: tol });
@@ -84,6 +84,14 @@ describe('#889 — MoveStore', () => {
       const a = seg === 0 ? merged[1]! : feeds[seg - 1]!;
       expect(toSegment(p, a, feeds[seg]!)).toBeLessThanOrEqual(tol + 1e-12);
     }
+  });
+
+  it('merges only level lines: a straight slope keeps every sample (the sweep reads long slopes high)', () => {
+    const store = new MoveStore({ mergeToleranceMm: 0.002 });
+    store.push({ kind: 'rapid', x: 0, y: 0, z: 1 });
+    store.push({ kind: 'feed', x: 0, y: 0, z: 0, f: 300 });
+    for (let i = 1; i <= 50; i++) store.push({ kind: 'feed', x: i * 0.1, y: 0, z: -i * 0.05, f: 800 });
+    expect(store.length).toBe(52);
   });
 
   it('never merges across a rate change, a rapid, a turn back, or with merging off', () => {

@@ -29,6 +29,7 @@ import {
   goalMemoryBudgetMb,
   GOAL_MEMORY_BUDGET_MB,
   GOAL_BYTES_PER_MOVE,
+  type GoalHeightfield,
   type SurfaceFeeds,
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
@@ -40,6 +41,7 @@ import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill as makeFlatTool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
+import { HOP_Z } from '@/engine/cnc/cam/ir';
 import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
 import { stubSetup, type Setup } from '@/engine/cnc/setup';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -499,6 +501,90 @@ describe('#889 — the goal estimate counts what the CAM will write', () => {
     expect(goalMemoryBudgetMb({ userAgent: 'x', userAgentData: { mobile: true } })).toBe(GOAL_MEMORY_BUDGET_MB.phone);
     expect(goalMemoryBudgetMb(null)).toBe(GOAL_MEMORY_BUDGET_MB.desktop);
   });
+});
+
+/**
+ * The pre-#889 raster roughing, kept here as the reference: every level rides every covered
+ * sample at max(level, surface + allowance), one move per sample. #889's roughing skips the
+ * segments a level only repeats; it must remove exactly what this removed.
+ */
+function ridingRoughReference(hf: GoalHeightfield, feeds: SurfaceFeeds, allowance: number): CamMove[] {
+  const moves: CamMove[] = [];
+  const levels: number[] = [];
+  const deepest = hf.minZ + allowance;
+  for (let L = hf.topZ - feeds.stepDown; L > deepest + 1e-9; L -= feeds.stepDown) levels.push(L);
+  levels.push(deepest);
+  const stride = Math.max(1, Math.round(feeds.roughStepOver / hf.pitch));
+  const rows: number[] = [];
+  for (let j = 0; j < hf.ny; j += stride) rows.push(j);
+  if (rows[rows.length - 1] !== hf.ny - 1) rows.push(hf.ny - 1);
+  for (const L of levels) {
+    let flip = false;
+    for (const j of rows) {
+      const y = hf.y0 + j * hf.pitch;
+      const cols: number[] = [];
+      for (let i = 0; i < hf.nx; i++) cols.push(i);
+      if (flip) cols.reverse();
+      let open = false;
+      for (const i of cols) {
+        const k = j * hf.nx + i;
+        const clamp = hf.covered[k] === 0 ? hf.topZ : (hf.z[k] as number) + allowance;
+        const tip = Math.max(L, clamp);
+        const x = hf.x0 + i * hf.pitch;
+        if (hf.covered[k] === 1 && tip < hf.topZ - 1e-9) {
+          if (!open) moves.push({ kind: 'rapid', x, y, z: HOP_Z }, { kind: 'feed', x, y, z: tip, f: feeds.plungeFeed });
+          else moves.push({ kind: 'feed', x, y, z: tip, f: feeds.feed });
+          open = true;
+        } else if (open) {
+          const last = moves[moves.length - 1]!;
+          moves.push({ kind: 'rapid', x: last.x, y: last.y, z: HOP_Z });
+          open = false;
+        }
+      }
+      if (open) {
+        const last = moves[moves.length - 1]!;
+        moves.push({ kind: 'rapid', x: last.x, y: last.y, z: HOP_Z });
+      }
+      flip = !flip;
+    }
+  }
+  return moves;
+}
+
+describe('#889 — the roughing removes exactly what the cell-by-cell ride removed', () => {
+  // The share of the ride's moves the roughing may keep: a 1 mm ramp has two levels to skip from.
+  for (const [name, tris, share] of [
+    ['a hemisphere', () => domeTris(5), 0.5],
+    ['a near-sphere cap', () => domeTris(8), 0.5],
+    ['a ramp', () => rampTris(), 1],
+  ] as const) {
+    it(`${name}: the swept rough is the ride's, cell for cell, with fewer moves`, () => {
+      const hf = sampleGoalHeightfield(goal(tris()), { pitchMm: 0.1 });
+      const allowance = 0.3;
+      const { roughing } = generateSurface3dIR({
+        heightfield: hf,
+        tool: FLAT_TOOL,
+        toolObj: flatEndMill(2, { name: 'flat' }),
+        toolNumber: 1,
+        spindleRpm: 12000,
+        air: true,
+        feeds: FEEDS,
+        rapid: RAPID,
+        labelId: 'goal-1',
+        opts: { stockToLeaveMm: allowance },
+      });
+      const reference = ridingRoughReference(hf, FEEDS, allowance);
+      const cutter: ColumnCutter = { radius: 1.0, tanHalf: null };
+      const ours = sweep(prism(40, 40, 12), cutter, roughing.moves, hf.pitch);
+      const ride = sweep(prism(40, 40, 12), cutter, reference, hf.pitch);
+      expect(ours.h.length).toBe(ride.h.length);
+      let worst = 0;
+      for (let k = 0; k < ours.h.length; k++) worst = Math.max(worst, Math.abs((ours.h[k] as number) - (ride.h[k] as number)));
+      // The merge tolerance, and nothing more.
+      expect(worst).toBeLessThanOrEqual(0.002 + 1e-6);
+      expect(roughing.moves.length).toBeLessThan(reference.length * share);
+    });
+  }
 });
 
 describe('generateSurface3dIR — roughing never breaches the goal', () => {

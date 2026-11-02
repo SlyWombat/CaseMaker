@@ -1721,16 +1721,22 @@ export function dilateMask(hf: GoalHeightfield, mask: Uint8Array, radiusMm: numb
  * material to remove and opens a gap — the pass retracts and re-enters.
  *
  * #889 — A LEVEL CUTS WHAT IT REMOVES. A sample whose clamp held the tip at or above the level
- * before this one was finished there; this level no longer rides it cell by cell (on a 50 mm goal
- * that ride was more than half of every move). A span is cut from its first to its last sample
- * that still has material above the tip, a finished stretch inside it is crossed at its own highest
- * tip, and collinear feeds are merged as they are written.
+ * before this one was finished there; a segment between two finished samples was already cut,
+ * identically, at an earlier level, so this level skips it (on a 50 mm goal that repeated ride
+ * was more than half of every move). Every other segment is cut exactly as before, so the roughing
+ * removes what it always did (see `writeSpan`), and collinear feeds are merged as they are written.
  *
  * #738 — every hop out of a cut is TWO moves, as the house rule in `ir.ts` (`rapidRate`) states:
  * a Z-only retract at the point the cut stopped, then the next span's XY traverse at `hopZ`. A
  * single `G0 X.. Z..` from a cut depth climbs away diagonally through material the program has
  * not removed yet, which the geometry check refuses (j06/j07 on the bench).
  */
+/**
+ * #889 — how far over the finished tips a roughing crossing's chords may run, mm, where it follows
+ * a curved stretch on chords (see `cross` in `roughingMoves`).
+ */
+export const ROUGH_CROSS_LIFT_MM = 1;
+
 function roughingMoves(
   hf: GoalHeightfield,
   feeds: SurfaceFeeds,
@@ -1784,39 +1790,160 @@ function roughingMoves(
   const spanTip: number[] = [];
   const spanCuts: boolean[] = [];
   /**
-   * #889 — write one span (a stretch of the run where the tip stands below the stock top). Only the
-   * stretch from the first to the last point this level removes material at is cut. Between two
-   * such points, the points already finished at an earlier level (their tip did not move: the
-   * clamp held them above the previous level) are crossed at their highest tip instead of ridden
-   * cell by cell. A span this level removes nothing at is not cut at all.
+   * #889 — write one span (a stretch of the run where the tip stands below the stock top).
+   *
+   * THE INVARIANT: every segment the cell-by-cell ride would cut at this level is either cut here
+   * exactly as that ride cut it, or was already cut, identically, at an earlier level. A point
+   * whose clamp held its tip at or above the level before this one is FINISHED: its tip is the
+   * same at this level as at the last. A segment between two finished points is therefore the
+   * very segment an earlier level cut (the level at which the later of the two was finished,
+   * where that point still removed material and the segment was written) — repeating it removes
+   * nothing, so it is skipped. Every segment with an unfinished end is written as the ride wrote
+   * it, the flat's whole disc along it. So the roughing removes exactly what the ride did, and a
+   * cell holds no more than the allowance it always held.
+   *
+   * Skipped segments are crossed on at most three moves that never pass below a finished tip
+   * (`cross`), along the ride's own XY, so the crossing cuts nothing the ride did not. The span is entered at its
+   * first point and left from its last, as the ride was. A span this level writes no segment of
+   * is not cut at all.
    */
   const writeSpan = (y: number): void => {
-    let first = -1;
-    let last = -1;
-    for (let k = 0; k < spanCuts.length; k++) {
-      if (!spanCuts[k]) continue;
-      if (first === -1) first = k;
-      last = k;
-    }
-    if (first !== -1) {
-      moves.rapid(spanX[first] as number, y, hopZ);
-      moves.feed(spanX[first] as number, y, spanTip[first] as number, feeds.plungeFeed);
-      let prev = first;
-      for (let k = first + 1; k <= last; k++) {
-        if (!spanCuts[k]) continue;
-        if (k > prev + 1) {
-          // The finished stretch prev+1 .. k-1 is crossed at its own highest tip: up over its
-          // first point, level to its last, then on into the next cut. Every point of the
-          // crossing is at or above the cell-by-cell ride it replaces over the same XY, so it
-          // is never deeper than that ride was, and it is two moves whatever the stretch's length.
-          let top = -Infinity;
-          for (let q = prev + 1; q < k; q++) top = Math.max(top, spanTip[q] as number);
-          moves.feed(spanX[prev + 1] as number, y, top, feeds.feed);
-          if (k - 1 > prev + 1) moves.feed(spanX[k - 1] as number, y, top, feeds.feed);
-        }
-        moves.feed(spanX[k] as number, y, spanTip[k] as number, feeds.feed);
-        prev = k;
+    const n = spanX.length;
+    const needed = (k: number): boolean => (spanCuts[k] as boolean) || (spanCuts[k + 1] as boolean);
+    /**
+     * Cross the finished points after `from` (written) up to `to`, along the ride's own XY and
+     * never below the ride, in at most three moves. The path is the lowest of three lines, each of
+     * which clears every finished tip between: the line from `from` at the least slope that clears
+     * them, the line into `to` likewise (when `to` is landed on at its own tip), and the level at
+     * the stretch's highest tip. Each line is over every tip, so their lowest is too; the ride
+     * between two points is their straight segment, so a path over the points is over the ride and
+     * cuts nothing the ride did not. Over a steep wall it is up, level and down. Where those three
+     * moves run more than a twentieth longer than the ride (a dome's flank), chords lifted a little
+     * over the tips take their place, at about the ride's own length. `to` is landed on at its own tip when
+     * `landExact`; otherwise (the span's end, where the retract follows) only cleared.
+     */
+    const cross = (from: number, to: number, landExact: boolean): void => {
+      const x0s = spanX[from] as number;
+      const dir = (spanX[to] as number) >= x0s ? 1 : -1;
+      const u = (q: number): number => ((spanX[q] as number) - x0s) * dir;
+      const U = u(to);
+      const zA = spanTip[from] as number;
+      const zB = spanTip[to] as number;
+      const last = landExact ? to - 1 : to; // the tips the path must clear
+      let H = Math.max(zA, landExact ? zB : -Infinity);
+      let sA = -Infinity;
+      let sB = Infinity;
+      for (let q = from + 1; q <= last; q++) {
+        const zq = spanTip[q] as number;
+        const uq = u(q);
+        H = Math.max(H, zq);
+        sA = Math.max(sA, (zq - zA) / uq);
+        if (landExact) sB = Math.min(sB, (zB - zq) / (U - uq));
       }
+      if (sA === -Infinity) {
+        // Nothing between: the ride's own segment.
+        moves.feed(spanX[to] as number, y, zB, feeds.feed);
+        return;
+      }
+      const lines: { z0: number; s: number }[] = [{ z0: zA, s: sA }, { z0: H, s: 0 }];
+      if (landExact) lines.push({ z0: zB - sB * U, s: sB });
+      const f = (uu: number): number => {
+        let m = Infinity;
+        for (const l of lines) m = Math.min(m, l.z0 + l.s * uu);
+        return m;
+      };
+      // The envelope's corners: where two of the lines cross inside the stretch, kept only where
+      // the lowest line changes there.
+      const cuts: number[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        for (let j = i + 1; j < lines.length; j++) {
+          const li = lines[i]!;
+          const lj = lines[j]!;
+          if (Math.abs(li.s - lj.s) < 1e-12) continue;
+          const uc = (lj.z0 - li.z0) / (li.s - lj.s);
+          if (uc > 1e-9 && uc < U - 1e-9 && Math.abs(li.z0 + li.s * uc - f(uc)) < 1e-9) cuts.push(uc);
+        }
+      }
+      cuts.sort((p, q) => p - q);
+      // The ride's own length over the stretch, and the envelope's: past a twentieth longer (a
+      // dome's flank, where few corners cannot hug the curve), the stretch is crossed on chords
+      // instead — each lifted ROUGH_CROSS_LIFT_MM over a later tip, as far as no tip between rises
+      // above it — which keep about the ride's length in a few more moves. (Measured: the
+      // near-sphere's rough within 1 % of the ride's time; the 50 mm panther at 0.1 mm in budget.)
+      let rideLen = 0;
+      for (let q = from + 1; q <= to; q++) {
+        rideLen += Math.hypot(u(q) - u(q - 1), (spanTip[q] as number) - (spanTip[q - 1] as number));
+      }
+      let envLen = 0;
+      {
+        let qu = 0;
+        let qz = zA;
+        for (const uc of [...cuts, U]) {
+          const zc = uc === U ? (landExact ? zB : f(U)) : f(uc);
+          envLen += Math.hypot(uc - qu, zc - qz);
+          qu = uc;
+          qz = zc;
+        }
+      }
+      if (envLen > rideLen * 1.05) {
+        const lifted = (q: number): number => Math.min(topZ, (spanTip[q] as number) + ROUGH_CROSS_LIFT_MM);
+        const at = (q: number): number => (q === to && landExact ? zB : lifted(q));
+        let a = from;
+        let ha = zA;
+        let bound = -Infinity; // the least slope a chord from the anchor needs to clear the tips so far
+        let lastOk = -1;
+        let e = a + 1;
+        while (e <= to) {
+          const du = u(e) - u(a);
+          if ((at(e) - ha) / du >= bound - 1e-12) {
+            lastOk = e;
+            bound = Math.max(bound, ((spanTip[e] as number) - ha) / du);
+            e++;
+            continue;
+          }
+          moves.feed(spanX[lastOk] as number, y, lifted(lastOk), feeds.feed);
+          a = lastOk;
+          ha = lifted(lastOk);
+          bound = -Infinity;
+          for (let q = a + 1; q < e; q++) bound = Math.max(bound, ((spanTip[q] as number) - ha) / (u(q) - u(a)));
+        }
+        moves.feed(spanX[to] as number, y, at(to), feeds.feed);
+        return;
+      }
+      let pu = 0;
+      let pz = zA;
+      for (const uc of cuts) {
+        if (uc - pu < 1e-9) continue;
+        const zc = f(uc);
+        // Skip a corner the path runs straight through.
+        const zNext = f(Math.min(U, uc + 1e-3));
+        const sIn = (zc - pz) / (uc - pu);
+        const sOut = (zNext - zc) / Math.max(1e-12, Math.min(U, uc + 1e-3) - uc);
+        if (Math.abs(sIn - sOut) < 1e-9) continue;
+        moves.feed(x0s + dir * uc, y, zc, feeds.feed);
+        pu = uc;
+        pz = zc;
+      }
+      moves.feed(spanX[to] as number, y, landExact ? zB : f(U), feeds.feed);
+    };
+    let any = false;
+    for (let k = 0; k + 1 < n && !any; k++) any = needed(k);
+    if (n === 1) any = spanCuts[0] as boolean;
+    if (any) {
+      // Entered at the span's first point and left from its last, as the ride was: only the
+      // segments between finished points are crossed instead of ridden.
+      moves.rapid(spanX[0] as number, y, hopZ);
+      moves.feed(spanX[0] as number, y, spanTip[0] as number, feeds.plungeFeed);
+      let lastWritten = 0;
+      for (let k = 0; k + 1 < n; k++) {
+        if (!needed(k)) continue;
+        if (lastWritten !== k) cross(lastWritten, k, true);
+        moves.feed(spanX[k + 1] as number, y, spanTip[k + 1] as number, feeds.feed);
+        lastWritten = k + 1;
+      }
+      // The finished points after the last written one: crossed to the span's end, and the
+      // retract made from there, over them, as the ride's was from the span's last point.
+      if (lastWritten < n - 1) cross(lastWritten, n - 1, false);
       retract(hopZ);
     }
     spanX.length = 0;

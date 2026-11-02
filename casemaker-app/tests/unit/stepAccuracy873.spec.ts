@@ -449,11 +449,13 @@ function keyParts(key: string): { pass: number; rapid: boolean; x: number; y: nu
  * The two places the inspection found a difference between the files:
  *  - the dome, where the rough pass's "surface + 0.3 mm" contour crosses the stock top and one
  *    raster row lands on opposite sides of the tessellated cap (the dome's rim radius is
- *    sqrt(76) = 8.718 mm; the zone allows a cell of slack);
+ *    sqrt(76) = 8.718 mm). #889 — a tie there now moves the end of a merged level run, which lies
+ *    where the cap first comes under the 1 mm cutter's disc: the zone is the rim plus one cutter
+ *    diameter and a cell, 9.9 mm;
  *  - the rounded corner's vertical wall, which the finish clears as a full-depth column at one
  *    raster row: y = 38.7 in one file, y = 39.2 in the other.
  */
-const inDomeZone = (x: number, y: number): boolean => Math.hypot(x - DOME.x, y - DOME.y) <= 8.8;
+const inDomeZone = (x: number, y: number): boolean => Math.hypot(x - DOME.x, y - DOME.y) <= 9.9;
 const inCornerZone = (x: number, y: number): boolean => x >= 59.5 && y >= 38;
 const zoneOf = (x: number, y: number): 'dome' | 'corner' | 'other' =>
   inDomeZone(x, y) ? 'dome' : inCornerZone(x, y) ? 'corner' : 'other';
@@ -609,32 +611,30 @@ describe('#873 STEP accuracy: one solid, two files, the same cut', () => {
     /**
      * The two programs cannot be text-identical: each is a raster laid over its own tessellation,
      * so an edge that sits within half a cell of a raster row resolves to one side in one file
-     * and the other side in the other. The inspection found exactly TWO such places:
+     * and the other side in the other. The ties sit at the same TWO places they always did:
      *
-     *  - PASS 1 (the 3-D rough, 24 levels). At nine raster rows across the dome (y = 17 .. 23),
-     *    the row where the "surface + 0.3 mm" contour crosses the stock top splits one 0.1 mm
-     *    column apart: the STEP side at x = 43.4/46.6 .. 48.4, the 3MF side at 43.3/46.7 .. 48.5.
-     *    The STEP program therefore carries two extra G1 cut points on each of those rows at
-     *    every level: 18 keys × 24 levels = +432 moves. Each file also carries 18 G0 rapids at
-     *    its own split positions, so the rapids do not move the count.
-     *  - PASS 2 (the 3-D finish). The finish clears the rounded corner's vertical wall as a
-     *    full-depth column at one raster row: 24 cuts from z = -0.5 to the stock bottom at -12
-     *    in 0.5 mm steps. The STEP program's column is at y = 38.7; the 3MF program's is at
-     *    y = 39.2 (it still takes the wall's top four cuts at 38.7). So at (59.995, 38.7) the
-     *    STEP program makes 24 G1 moves where the 3MF program makes 4: +20 moves.
+     *  - the dome, where the rough pass's "surface + 0.3 mm" contour crosses the stock top and a
+     *    raster row lands on opposite sides of the tessellated cap. #889 — the rough's level
+     *    stretches and the finish's level floor are now merged into single moves, so a tie there
+     *    moves the END of a level run; that end is where the cap first comes under the cutter's
+     *    disc, so the zone reaches one cutter diameter past the rim (`inDomeZone`). All 224
+     *    multiplicity differences are rough G1 moves on the dome, where a run ends or a crossing
+     *    turns one cell over;
+     *  - the rounded corner's vertical wall, which the finish clears as a full-depth column at one
+     *    raster row: y = 38.7 in one file, y = 39.2 in the other.
      *
-     * 452 = 432 + 20. Every difference is one of those two ties, and at every XY both programs
-     * visit exactly once (48,842 of them) the posted Z agrees to at most 0.019 mm — the STEP's
-     * own dome sag — and never past the 0.05 bar. The assertion below is that equivalence, not
-     * byte identity; it is stronger than it looks because the numbers are exact.
+     * At every XY both programs visit exactly once (9,559 of them) the posted Z agrees to at most
+     * 0.019 mm — the STEP's own dome sag — and never past the 0.05 bar. The assertion below is that
+     * equivalence, not byte identity. #889 re-pinned the counts: merged level runs and the rough's
+     * crossings of finished points take each program from about 1.2 M moves to about 13,500.
      */
-    expect(a.moves).toBe(1_206_294);
-    expect(b.moves).toBe(1_205_842);
-    expect(a.moves - b.moves).toBe(452);
-    expect(cmp.sharedUnique).toBe(48_842);
-    expect(cmp.identicalZ).toBe(43_690);
+    expect(a.moves).toBe(13_496);
+    expect(b.moves).toBe(13_596);
+    expect(a.moves - b.moves).toBe(-100);
+    expect(cmp.sharedUnique).toBe(9_559);
+    expect(cmp.identicalZ).toBe(1_033);
     expect(cmp.maxDz).toBeCloseTo(0.019, 4);
-    expect(cmp.maxDzKey).toBe('2|G1|50.500|13.500');
+    expect(cmp.maxDzKey).toBe('1|G1|52.900|18.500');
     expect(cmp.overBar).toBe(0);
     expect(cmp.maxDz).toBeLessThanOrEqual(bar);
 
@@ -651,23 +651,20 @@ describe('#873 STEP accuracy: one solid, two files, the same cut', () => {
       const p = keyParts(key);
       expect(zoneOf(p.x, p.y), key).not.toBe('other');
     }
-    expect(cmp.onlyA.length).toBe(37); // 18 G1 + 18 G0 on the dome, 1 G0 at the corner
-    expect(cmp.onlyB.length).toBe(19); // 18 G0 on the dome, 1 G0 at the corner
-    expect(cmp.multiplicity).toEqual([{ key: '2|G1|59.995|38.700', a: 24, b: 4 }]);
-    const roughDome = (keys: string[]): { g1: number; g0: number } => {
-      const out = { g1: 0, g0: 0 };
-      for (const key of keys) {
-        const p = keyParts(key);
-        if (p.pass === 1 && zoneOf(p.x, p.y) === 'dome') {
-          if (p.rapid) out.g0 += 1;
-          else out.g1 += 1;
-        }
-      }
-      return out;
-    };
-    expect(roughDome(cmp.onlyA)).toEqual({ g1: 18, g0: 18 });
-    expect(roughDome(cmp.onlyB)).toEqual({ g1: 0, g0: 18 });
-    expect(cmp.multiplicity[0]!.a - cmp.multiplicity[0]!.b).toBe(20);
+    expect(cmp.onlyA.length).toBe(208);
+    expect(cmp.onlyB.length).toBe(310);
+    expect(cmp.multiplicity).toHaveLength(224);
+    for (const m of cmp.multiplicity) {
+      const p = keyParts(m.key);
+      expect(p.pass, m.key).toBe(1);
+      expect(p.rapid, m.key).toBe(false);
+      expect(zoneOf(p.x, p.y), m.key).toBe('dome');
+    }
+    const corner = differing.filter((key) => {
+      const p = keyParts(key);
+      return zoneOf(p.x, p.y) === 'corner';
+    });
+    expect(corner.sort()).toEqual(['2|G0|59.995|38.700', '2|G0|59.995|39.200', '2|G1|59.995|38.700', '2|G1|59.995|39.200']);
   });
 
   it('sweeps both programs to the same goal surface inside the oracle band', async () => {
