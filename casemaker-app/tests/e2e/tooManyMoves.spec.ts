@@ -16,11 +16,16 @@ const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.
 test.setTimeout(240_000);
 
 /**
- * The empty job with the block as its goal and a grid and finish fine enough to exceed the app's
- * memory budget. `stepDown` writes the goal's own step-down; a fine step makes even half the depth
- * too big, which is the "no split possible" case.
+ * The empty job with the block as its goal, set up to exceed the app's memory budget. The defaults
+ * make the FINISH the cost (a 0.02 mm grid and step-over); `gridPitch`/`finishStepOver`/`stepDown`
+ * override them. A fine step-down makes the ROUGHING the cost instead (#889), and a fine enough
+ * step also makes half the depth too big, which is the "no split possible" case.
  */
-async function budgetBlocker(page: import('@playwright/test').Page, stepDown?: string): Promise<void> {
+async function budgetBlocker(
+  page: import('@playwright/test').Page,
+  opts: { stepDown?: string; gridPitch?: string; finishStepOver?: string; roughStepOver?: string; scalePct?: string } = {},
+): Promise<void> {
+  const { stepDown, gridPitch = '0.02', finishStepOver = '0.02', roughStepOver, scalePct } = opts;
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
@@ -44,11 +49,13 @@ async function budgetBlocker(page: import('@playwright/test').Page, stepDown?: s
   await (await chooser).setFiles(STL);
   await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
 
-  // The goal's own roughing: fine enough that the estimate is over the app's budget.
+  // The goal's own grid, finish and roughing: fine enough that the estimate is over the budget.
   await page.getByTestId('engrave-target-technical-0').click();
-  await page.getByTestId('engrave-target-surface-gridPitchMm-0').fill('0.02');
-  await page.getByTestId('engrave-target-surface-finishStepOverMm-0').fill('0.02');
+  await page.getByTestId('engrave-target-surface-gridPitchMm-0').fill(gridPitch);
+  await page.getByTestId('engrave-target-surface-finishStepOverMm-0').fill(finishStepOver);
   if (stepDown !== undefined) await page.getByTestId('engrave-target-surface-roughStepDownMm-0').fill(stepDown);
+  if (roughStepOver !== undefined) await page.getByTestId('engrave-target-surface-roughStepOverMm-0').fill(roughStepOver);
+  if (scalePct !== undefined) await page.getByTestId('engrave-target-scale-0').fill(scalePct);
 
   await page.getByTestId('engrave-generate').click();
 
@@ -56,30 +63,36 @@ async function budgetBlocker(page: import('@playwright/test').Page, stepDown?: s
   // made the decision are under Technical.
   const line = page.getByTestId('engrave-run-errors');
   await expect(line).toBeVisible({ timeout: 180_000 });
-  await expect(line).toContainText('This goal is too detailed to plan at 0.02 mm in one go');
+  await expect(line).toContainText(`This goal is too detailed to plan at ${gridPitch} mm in one go`);
   await expect(line).toContainText('Choose one:');
   await expect(line).not.toContainText('▸ Fix');
   await expect(page.getByTestId('engrave-run-refused')).toHaveText('Not generated: the goal is over the planning budget.');
   await expect(page.getByTestId('engrave-run-toolpath')).toHaveCount(0);
-  await expect(page.getByTestId('engrave-run-budget-technical')).toContainText('12,000,000');
+  // #889 — the budget is stated in MB (the move count is beside it, not the limit).
+  await expect(page.getByTestId('engrave-run-budget-technical')).toContainText('640 MB');
   await expect(page.getByTestId('engrave-generate-at-pitch')).toBeVisible();
-  await expect(page.getByTestId('engrave-generate-at-stepdown')).toBeVisible();
   // SEVERITY_COLOR.warning (#e0c07a), not the error red (#f0b4ad).
   await expect(line).toHaveCSS('color', 'rgb(224, 192, 122)');
 }
 
-test('#832/#888 — the budget blocker names every press, and the pitch press changes the plan', async ({ cm, page }) => {
+test('#832/#888/#889 — the budget blocker draws only the presses that help, and the pitch press changes the plan', async ({ cm, page }) => {
   await cm.ready();
   await budgetBlocker(page);
+  // #889 — this job is over on its FINISH, which no step-down changes, so the step-down press is
+  // not drawn (the unit suite pins the same rule on the finding).
+  await expect(page.getByTestId('engrave-generate-at-stepdown')).toHaveCount(0);
   const pitchText = (await page.getByTestId('engrave-generate-at-pitch').textContent()) ?? '';
   const pitchMm = Number(/\(([\d.]+) mm\)/.exec(pitchText)?.[1]);
   await page.getByTestId('engrave-generate-at-pitch').click();
   await expect(page.getByTestId('engrave-target-surface-gridPitchMm-0')).toHaveValue(String(pitchMm));
 });
 
-test('#832/#888 — the step-down press writes the number it states onto the goal', async ({ cm, page }) => {
+test('#832/#888/#889 — the step-down press writes the number it states onto the goal', async ({ cm, page }) => {
   await cm.ready();
-  await budgetBlocker(page);
+  // #889 — the step-down press exists for a job whose size is its ROUGHING: a coarse grid keeps
+  // the finish's tip field under its cap (so the step-down can help at all), and a very fine
+  // step-down is what puts the rough over the budget.
+  await budgetBlocker(page, { gridPitch: '0.1', finishStepOver: '0.3', stepDown: '0.01', roughStepOver: '0.01' });
   const stepText = (await page.getByTestId('engrave-generate-at-stepdown').textContent()) ?? '';
   const stepMm = Number(/\(([\d.]+) mm step-down/.exec(stepText)?.[1]);
   await page.getByTestId('engrave-generate-at-stepdown').click();
@@ -90,7 +103,12 @@ test('#888 — the split press BUILDS two setups, each side with its own depth b
   await cm.ready();
   // The step-down is PINNED: the split's numbers are the point, and the feeds row follows the
   // default blank's material (#879 moved it to hardwood, whose 0.3 mm step leaves no split).
-  await budgetBlocker(page, '0.5');
+  // The finish is what is over here, so the split must leave each band under the budget: half the
+  // finish has to fit, which means the whole must be under twice the budget. At 100 % the block's
+  // job is ~1.30 GB — just over that twice-the-budget line — so the goal is scaled to 97 %:
+  // ~1.22 GB, over the 640 MB it is judged against, while each band's half-finish plus its
+  // roughing fits.
+  await budgetBlocker(page, { stepDown: '0.5', scalePct: '97' });
   const press = page.getByTestId('engrave-split-goal');
   await expect(press).toBeVisible();
   await expect(press).toHaveText('Split into two setups');
@@ -114,7 +132,7 @@ test('#888 — no split is offered when two bands would not fit the budget', asy
   await cm.ready();
   // A finer step-down doubles the levels: half the depth is still over the budget, so there is
   // no split to make and the press is not drawn.
-  await budgetBlocker(page, '0.2');
+  await budgetBlocker(page, { stepDown: '0.2' });
   await expect(page.getByTestId('engrave-generate-at-pitch')).toBeVisible();
   await expect(page.getByTestId('engrave-split-goal')).toHaveCount(0);
 });

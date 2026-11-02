@@ -38,15 +38,27 @@ test('#830 — the sweep names its stage, and a worker killed mid-sweep is repor
   await (await chooser).setFiles(STL);
   await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
 
+  // #889 — the sweep got much faster (levels cost what they remove and merge into packed moves),
+  // so at the block's own size the run reaches "Program ready" before the kill lands, and the kill
+  // then hits an idle worker. The goal is scaled to 3× and put on a 0.1 mm grid: about 410 000
+  // moves, still under both budgets (the tip-field cap and 640 MB), and the large mesh makes the
+  // sweep's own checkpoints heavy enough that it is reliably still running when the kill fires.
+  await page.getByTestId('engrave-target-scale-0').fill('300');
+  await page.getByTestId('engrave-target-technical-0').click();
+  await page.getByTestId('engrave-target-surface-gridPitchMm-0').fill('0.1');
+
   await page.getByTestId('engrave-generate').click();
   const progress = page.getByTestId('engrave-generate-progress');
   await expect(progress).toBeVisible({ timeout: 120_000 });
   // The simulation's own stage: which program of the sweep, never a bare "Working…".
   await expect(progress).toContainText(/simulating program \d+ of \d+/i, { timeout: 120_000 });
   fs.mkdirSync(OUT, { recursive: true });
-  await page.screenshot({ path: path.join(OUT, 'simulating-stage.png') });
 
-  // Kill the worker the way the browser would (a wasm trap, an OOM kill) — NOT the app's Cancel.
+  // Kill the worker the way the browser would (a wasm trap, an OOM kill) — NOT the app's Cancel —
+  // as soon as the stage is named. #889 made the sweep much faster (a level costs what it removes,
+  // and the moves are packed), and a screenshot of the stage sat here long enough for the run to
+  // reach "Program ready" first; the kill then hit an idle worker and no stop was reported. The
+  // stopped state is captured below (worker-stopped.png).
   await page.evaluate(async () => {
     // A variable, so TypeScript does not try to resolve a dev-server URL at compile time.
     const moduleUrl = '/src/engine/jobs/simClient.ts';
