@@ -371,6 +371,26 @@ export function planUndersideFlip(
 }
 
 /**
+ * #898 — THE ONE PRESS'S PLAN for a goal: a goal whose underside is `flipped-tabs` uses its own
+ * two-sided plan — the silhouette plane, each side a tab band short of it — because that is the
+ * underside its owner chose; every other goal keeps the coverage plan's sides. The answer has the
+ * shape the panel's press already handles, so the press does not branch.
+ */
+export function planFlipForGoal(
+  job: EngraveJob,
+  target: EngraveTargetObject,
+  faces: readonly Face[],
+  tools?: readonly { key: string; tool: Tool }[],
+): FlipSetupsResult {
+  if (target.underside?.kind === 'flipped-tabs') {
+    const planned = planUndersideFlip(job, target, tools);
+    if (!planned.ok) return planned;
+    return { ok: true, setups: planned.plan.setups, goals: planned.plan.goals, hold: planned.plan.hold };
+  }
+  return planFlipSetups(job, target, faces, tools);
+}
+
+/**
  * #891 — THE SIDES FOLLOW THE BLANK. A flip plan's later goals were placed through the stock box
  * the plan was built for; a THICKNESS change moves a flipped side's work frame (its origin is the
  * turned stock's top), so the goal that side cuts is re-derived from setup 1's own goal through

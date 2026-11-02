@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { crossSectionPolylines, goalUndersideOffer, silhouettePlane, undersideClearBaseZ, undersideFloorZ, undersideSentence, UNDERSIDE_PLINTH_MM, UNDERSIDE_TAB_THICKNESS_MM } from '@/engine/cnc/engrave/goalUnderside';
-import { planUndersideFlip } from '@/engine/cnc/engrave/goalFlipSetups';
+import { planFlipForGoal, planUndersideFlip } from '@/engine/cnc/engrave/goalFlipSetups';
 import { sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
@@ -277,6 +277,25 @@ describe('#898 — flipped, held by tabs', () => {
     // A faceted ⌀20 sphere: within 5% of π r² (48 facets).
     expect(disc).toBeGreaterThan(Math.PI * 100 * 0.95);
     expect(disc).toBeLessThan(Math.PI * 100 * 1.05);
+  });
+
+  it('the one press plans the two tab sides for a flipped goal, and the coverage sides otherwise', () => {
+    const tabs = goalOf(sphereStl(), SPHERE, { underside: { kind: 'flipped-tabs', tabs: { count: 3, widthMm: 4, thicknessMm: 1 } } });
+    const viaTabs = planFlipForGoal(jobOf(tabs, 30), tabs, ['top', 'bottom']);
+    expect(viaTabs.ok, viaTabs.ok ? '' : viaTabs.reason).toBe(true);
+    if (viaTabs.ok) {
+      // The underside plan's bands: each side short of the silhouette plane by the tab half.
+      expect(viaTabs.goals[0]!.bandMm).toBeDefined();
+      expect(viaTabs.goals[1]!.bandMm).toBeDefined();
+    }
+    // A goal with no underside keeps the coverage plan untouched (its goals carry no band).
+    const plain = goalOf(sphereStl(), SPHERE);
+    const viaCoverage = planFlipForGoal(jobOf(plain, 30), plain, ['top', 'bottom']);
+    expect(viaCoverage.ok).toBe(true);
+    if (viaCoverage.ok) {
+      expect(viaCoverage.goals[0]!.bandMm).toBeUndefined();
+      expect(viaCoverage.goals[1]!.bandMm).toBeUndefined();
+    }
   });
 
   it('the default tab band is the labelled half-thickness', () => {

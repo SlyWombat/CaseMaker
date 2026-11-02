@@ -40,7 +40,7 @@ import { setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/en
 import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { planFlipSetups, splitGoalForBudget } from '@/engine/cnc/engrave/goalFlipSetups';
+import { planFlipForGoal, splitGoalForBudget } from '@/engine/cnc/engrave/goalFlipSetups';
 import { jobFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFaceCached, NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { millModelById, workOriginOf } from '@/engine/cnc/machine';
@@ -1993,9 +1993,11 @@ export function EngravePanel(): JSX.Element {
     const sides = finding.goalFlipSides;
     const goal = job.targetObject;
     if (sides === undefined || sides.length < 2 || goal === undefined) return;
+    // #898 — a goal whose underside is flipped-tabs plans its own two sides (the silhouette plane
+    // and the tab band); every other goal keeps the coverage plan's sides.
     // #911 — the LOCATION's cutters, not the module's default registry: the shop's own drill is
     // the one a locating hole is made with (and the one the sentence may name).
-    const result = planFlipSetups(job, goal, sides, tools);
+    const result = planFlipForGoal(job, goal, sides, tools);
     if (!result.ok) {
       setTargetError(result.reason);
       return;
