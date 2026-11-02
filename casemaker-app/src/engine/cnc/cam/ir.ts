@@ -23,7 +23,8 @@
  *     the flat post refuses a move that has one, and the rotary post refuses one that has not.
  */
 
-import type { Tool } from '../tool';
+import { cuttingDiameter, type Tool } from '../tool';
+import { vCone } from '../vProfile';
 
 /**
  * One straight move, every axis resolved (#240 for `a`).
@@ -615,6 +616,370 @@ export function estimateIRCycleSeconds(ir: ToolpathIR, rapid: RapidEstimate): nu
     (s, op) => s + estimateCycleSeconds(op.moves, rapid, ir.rotary?.radius),
     0,
   );
+}
+
+/**
+ * #926 — WHAT THE PROGRAM SPENDS ITS TIME AND ITS MATERIAL ON, per operation and as a program.
+ *
+ * The gate says a correct program that is three times slower than it needs to be no longer passes
+ * without comment (#943 gate statement 8). The cycle estimate alone cannot say that: a program can
+ * be slow because it is in the air, because its feed runs never reach the commanded feed, because
+ * its tour backtracks, or because a pass re-cuts what an earlier pass removed. These are those
+ * four, from data already in hand.
+ *
+ * EVERY TIME HERE IS THE CYCLE ESTIMATE'S OWN. The same trapezoid ({@link moveSeconds}), the same
+ * per-run rule and corner constant, the same rapid rate ({@link rapidRate}) — so
+ * `rapidSeconds + feedSeconds` equals {@link estimateCycleSeconds} on the same moves to the last
+ * bit, and the panel, the sheet and the post's `TIME` cannot disagree about a program whose
+ * efficiency is being judged. There is no second time model here.
+ */
+export interface EfficiencyMeasure {
+  /** The cycle estimate these figures were taken from, s. */
+  cycleSeconds: number;
+  /** Seconds spent in RAPID moves — the air. */
+  rapidSeconds: number;
+  /** Seconds spent in feed runs, through the per-run trapezoid. */
+  feedSeconds: number;
+  /** `rapidSeconds / cycleSeconds`, 0 when the program has no time. The AIR-TIME FRACTION. */
+  airFraction: number;
+  /**
+   * The program's hop count: XY-only rapids at the hop height. That is a stroke ending, a raise to
+   * `hopZ`, a traverse, and a plunge — the moves that exist only to get from one stroke or loop to
+   * the next inside an operation.
+   */
+  hopCount: number;
+  /** Seconds those hops took, through the same trapezoid as every other rapid. */
+  hopSeconds: number;
+  /**
+   * Σ feed distance / its commanded feed, s — what the cutting would take with no acceleration at
+   * all. The denominator of {@link feedUtilisation}.
+   */
+  commandedFeedSeconds: number;
+  /**
+   * `commandedFeedSeconds / feedSeconds`: how close the runs run to the feed they command. A 1 mm
+   * stroke at F1000 that never reaches 1000 mm/min pays for its ramps and reads well below 1.
+   * NULL when the program does no feed time (nothing to divide).
+   */
+  feedUtilisation: number | null;
+  /** XY rapid travel, mm — the same measure #487's report uses. */
+  rapidMm: number;
+  /** XY cutting travel, mm. */
+  cutMm: number;
+  /** `rapidMm / cutMm`, or null when the program cuts nothing. */
+  rapidCutRatio: number | null;
+  /**
+   * The area the cutter's own width sweeps on its feed moves, mm²: Σ (XY length × cutting width at
+   * the move's Z). Overlaps are counted each time a pass covers them again, which is the point —
+   * the material a program actually removes cannot exceed the strip its path sweeps, and a pass
+   * that removes far less than its strip is a pass mostly cutting air.
+   *
+   * The width is the cutter's cutting diameter, or for a V the cone's width at that depth
+   * (`vCone`), capped at the cutter's body. NULL when the cutter states no cutting width, so a
+   * caller never divides by an invented one.
+   */
+  sweptAreaMm2: number | null;
+  /** The deepest feed Z the program reaches, mm below the stock top (0 when it never cuts). */
+  deepestCutMm: number;
+  /**
+   * The lower bound on the air path, mm: the length of the minimum spanning tree over the
+   * program's loop entry points. Any path that visits every entry is at least this long, and the
+   * ordering's tour (`rapidMm`) is such a path — so `rapidMm / tourBoundMm - 1` is how far past a
+   * bound the tour runs, not a comparison with another program. NULL when fewer than two distinct
+   * entries, and on a program with more than {@link TOUR_BOUND_MAX_POINTS} of them: an MST over
+   * tens of thousands of trace entries is neither cheap nor a tour, and a bound that does not
+   * describe the thing it judges is worse than none.
+   */
+  tourBoundMm: number | null;
+  /** `rapidMm / tourBoundMm - 1`, or null without a bound. */
+  tourExcess: number | null;
+}
+
+/** One operation's efficiency, named so a warning can say WHICH operation. */
+export interface OperationEfficiency extends EfficiencyMeasure {
+  /** The operation's 1-based number, as the post and the sheet number it. */
+  number: number;
+  /** The operation's own name (`[T1]Engrave "CASE" 2.0mm`). */
+  name: string;
+}
+
+/**
+ * A program's efficiency: the sum of its operations, with the ratios recomputed over the sums so
+ * the program's air fraction is the program's seconds, not the mean of its operations' fractions.
+ */
+export interface ProgramEfficiency extends EfficiencyMeasure {
+  operations: OperationEfficiency[];
+}
+
+/** Above this many loop entries the tour bound is not computed (see {@link EfficiencyMeasure.tourBoundMm}). */
+const TOUR_BOUND_MAX_POINTS = 4096;
+
+/**
+ * The cutter's cutting width, mm, at `depth` below the stock top — the width of the strip its
+ * centre path sweeps there. A V widens with depth (`vCone`); every other shape is its cutting
+ * diameter. Null when the record states neither.
+ */
+function cuttingWidthAt(tool: Tool, depth: number): number | null {
+  const cone = vCone(tool);
+  if (cone !== null) {
+    const radius = cone.tipRadius + Math.max(0, depth) * cone.tanHalf;
+    const capped = cone.outerRadius === undefined ? radius : Math.min(radius, cone.outerRadius);
+    return 2 * capped;
+  }
+  return cuttingDiameter(tool);
+}
+
+/** The MST length over distinct points, mm; null below two points or above the cap. */
+function mstLowerBound(points: readonly (readonly [number, number])[]): number | null {
+  const seen = new Set<string>();
+  const unique: [number, number][] = [];
+  for (const p of points) {
+    const key = `${p[0].toFixed(6)},${p[1].toFixed(6)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push([p[0], p[1]]);
+  }
+  if (unique.length < 2) return null;
+  if (unique.length > TOUR_BOUND_MAX_POINTS) return null;
+  const n = unique.length;
+  const inTree = new Array<boolean>(n).fill(false);
+  const best = new Array<number>(n).fill(Infinity);
+  best[0] = 0;
+  let total = 0;
+  for (let step = 0; step < n; step++) {
+    let pick = -1;
+    for (let i = 0; i < n; i++) if (!inTree[i] && (pick < 0 || best[i]! < best[pick]!)) pick = i;
+    const p = unique[pick]!;
+    inTree[pick] = true;
+    total += best[pick]!;
+    for (let i = 0; i < n; i++) {
+      if (inTree[i]) continue;
+      const q = unique[i]!;
+      const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (d < best[i]!) best[i] = d;
+    }
+  }
+  return total;
+}
+
+/** The running sum one operation's moves contribute to an {@link EfficiencyMeasure}. */
+interface EfficiencyTally {
+  rapidSeconds: number;
+  feedSeconds: number;
+  hopCount: number;
+  hopSeconds: number;
+  commandedFeedSeconds: number;
+  rapidMm: number;
+  cutMm: number;
+  sweptAreaMm2: number | null;
+  deepestCutMm: number;
+  entries: [number, number][];
+}
+
+/**
+ * Walk one operation's moves exactly as {@link estimateCycleSeconds} does and accumulate the
+ * #926 figures. The timing branches below are that function's, moved rather than re-derived; if
+ * the two ever drift, `efficiencyOf`'s cycle and the posted estimate stop agreeing and the
+ * efficiency spec fails.
+ */
+function tallyOperation(
+  moves: readonly CamMove[],
+  rapid: RapidEstimate,
+  tool: Tool,
+  hopZ: number,
+  rotaryRadius: number | undefined,
+  tally: EfficiencyTally,
+): void {
+  let previous: CamMove | null = null;
+  let run: { f: number; length: number; ux: number; uy: number } | null = null;
+  const endRun = (): void => {
+    if (run !== null) {
+      tally.feedSeconds += moveSeconds(run.length, run.f, rapid.accelMmPerS2);
+      run = null;
+    }
+  };
+  for (const move of moves) {
+    if (previous === null) {
+      // The IR carries no start point (the estimate skips this move for the same reason), but a
+      // feed that begins a program is still an entry the tour has to reach — and it still reaches
+      // its own depth.
+      if (move.kind === 'feed') {
+        tally.entries.push([move.x, move.y]);
+        tally.deepestCutMm = Math.max(tally.deepestCutMm, -move.z);
+      }
+      previous = move;
+      continue;
+    }
+    const dx = move.x - previous.x;
+    const dy =
+      rotaryRadius === undefined
+        ? move.y - previous.y
+        : (((move.a ?? 0) - (previous.a ?? 0)) * Math.PI * rotaryRadius) / 180;
+    const dz = move.z - previous.z;
+    const distance = Math.hypot(dx, dy, dz);
+    const xy = Math.hypot(dx, dy);
+    if (move.kind === 'feed') {
+      tally.commandedFeedSeconds += (distance / move.f) * 60;
+      const width = cuttingWidthAt(tool, -move.z);
+      if (width !== null) tally.sweptAreaMm2 = (tally.sweptAreaMm2 ?? 0) + xy * width;
+      tally.cutMm += xy;
+      tally.deepestCutMm = Math.max(tally.deepestCutMm, -move.z);
+      const carriesDirection = xy > 1e-9;
+      if (run !== null && run.f === move.f) {
+        if (carriesDirection) {
+          const ux = dx / xy;
+          const uy = dy / xy;
+          const hasDirection = run.ux !== 0 || run.uy !== 0;
+          if (!hasDirection || ux * run.ux + uy * run.uy >= JUNCTION_COS) {
+            run.length += distance;
+            run.ux = ux;
+            run.uy = uy;
+          } else {
+            endRun();
+            run = { f: move.f, length: distance, ux, uy };
+          }
+        } else {
+          run.length += distance;
+        }
+      } else {
+        endRun();
+        run = { f: move.f, length: distance, ux: carriesDirection ? dx / xy : 0, uy: carriesDirection ? dy / xy : 0 };
+        // A feed run that follows a RAPID is a loop entry: the tool travelled in the air to get
+        // here. A run split at a corner or a feed change is not a new entry.
+        if (previous.kind === 'rapid') tally.entries.push([move.x, move.y]);
+      }
+    } else {
+      endRun();
+      const seconds = moveSeconds(distance, rapidRate(rapid, dx, dy, dz), rapid.accelMmPerS2);
+      tally.rapidSeconds += seconds;
+      tally.rapidMm += xy;
+      if (dz === 0 && xy > 1e-9 && Math.abs(move.z - hopZ) < 1e-9) {
+        tally.hopCount++;
+        tally.hopSeconds += seconds;
+      }
+    }
+    previous = move;
+  }
+  endRun();
+}
+
+/** A tally's numbers as the measure, with the ratios derived once. */
+function measureOf(tally: EfficiencyTally): EfficiencyMeasure {
+  const cycleSeconds = tally.rapidSeconds + tally.feedSeconds;
+  const tourBoundMm = mstLowerBound(tally.entries);
+  return {
+    cycleSeconds,
+    rapidSeconds: tally.rapidSeconds,
+    feedSeconds: tally.feedSeconds,
+    airFraction: cycleSeconds > 0 ? tally.rapidSeconds / cycleSeconds : 0,
+    hopCount: tally.hopCount,
+    hopSeconds: tally.hopSeconds,
+    commandedFeedSeconds: tally.commandedFeedSeconds,
+    feedUtilisation: tally.feedSeconds > 0 ? tally.commandedFeedSeconds / tally.feedSeconds : null,
+    rapidMm: tally.rapidMm,
+    cutMm: tally.cutMm,
+    rapidCutRatio: tally.cutMm > 0 ? tally.rapidMm / tally.cutMm : null,
+    sweptAreaMm2: tally.sweptAreaMm2,
+    deepestCutMm: tally.deepestCutMm,
+    tourBoundMm,
+    tourExcess: tourBoundMm !== null && tourBoundMm > 0 ? tally.rapidMm / tourBoundMm - 1 : null,
+  };
+}
+
+/** One operation's efficiency — {@link ProgramEfficiency.operations} as its own call. */
+export function operationEfficiency(
+  operation: Pick<CamOperation, 'number' | 'name' | 'moves'>,
+  rapid: RapidEstimate,
+  tool: Tool,
+  hopZ: number,
+  rotaryRadius?: number,
+): OperationEfficiency {
+  const tally: EfficiencyTally = {
+    rapidSeconds: 0,
+    feedSeconds: 0,
+    hopCount: 0,
+    hopSeconds: 0,
+    commandedFeedSeconds: 0,
+    rapidMm: 0,
+    cutMm: 0,
+    sweptAreaMm2: null,
+    deepestCutMm: 0,
+    entries: [],
+  };
+  tallyOperation(operation.moves, rapid, tool, hopZ, rotaryRadius, tally);
+  return { number: operation.number, name: operation.name, ...measureOf(tally) };
+}
+
+/**
+ * #926 — a whole program's efficiency, operation by operation and summed.
+ *
+ * The tour bound is summed over the operations' own bounds: each operation is its own tour (its
+ * loops are visited inside it), so the program's bound is the sum of the parts it is made of.
+ */
+export function efficiencyOf(ir: ToolpathIR, rapid: RapidEstimate): ProgramEfficiency {
+  const operations: OperationEfficiency[] = [];
+  const total: EfficiencyTally = {
+    rapidSeconds: 0,
+    feedSeconds: 0,
+    hopCount: 0,
+    hopSeconds: 0,
+    commandedFeedSeconds: 0,
+    rapidMm: 0,
+    cutMm: 0,
+    sweptAreaMm2: null,
+    deepestCutMm: 0,
+    entries: [],
+  };
+  let tourBound = 0;
+  let bounded = 0;
+  for (const op of ir.operations) {
+    const measure = operationEfficiency(op, rapid, ir.tool, ir.hopZ, ir.rotary?.radius);
+    operations.push(measure);
+    total.rapidSeconds += measure.rapidSeconds;
+    total.feedSeconds += measure.feedSeconds;
+    total.hopCount += measure.hopCount;
+    total.hopSeconds += measure.hopSeconds;
+    total.commandedFeedSeconds += measure.commandedFeedSeconds;
+    total.rapidMm += measure.rapidMm;
+    total.cutMm += measure.cutMm;
+    if (measure.sweptAreaMm2 !== null) total.sweptAreaMm2 = (total.sweptAreaMm2 ?? 0) + measure.sweptAreaMm2;
+    total.deepestCutMm = Math.max(total.deepestCutMm, measure.deepestCutMm);
+    if (measure.tourBoundMm !== null) {
+      tourBound += measure.tourBoundMm;
+      bounded++;
+    }
+  }
+  const program = measureOf(total);
+  // The program's own bound is the sum of the operations', not an MST over all of their entries:
+  // a program is a sequence of tours, and one MST across them would let the bound ignore the
+  // travel between operations entirely.
+  const tourBoundMm = bounded > 0 ? tourBound : null;
+  return {
+    ...program,
+    tourBoundMm,
+    tourExcess: tourBoundMm !== null && tourBoundMm > 0 ? total.rapidMm / tourBoundMm - 1 : null,
+    operations,
+  };
+}
+
+/**
+ * #926 — the fraction of the swept strip a program actually removed material from: the removed
+ * volume, divided by the deepest cut to make it an area, against {@link EfficiencyMeasure.sweptAreaMm2}.
+ *
+ * `removedVolumeMm3` is the sweep's own figure (an exact-engine program states it); a caller
+ * without one passes null and gets null — a redundancy claim is never inferred from the CAM alone.
+ * The division by the deepest cut is the one approximation in the measure and it is stated in the
+ * sheet: a program whose cuts are all one depth gets the exact area, and a program mixing a 0.5 mm
+ * engrave with a 6 mm cut-out's floors reads its removed area against the deepest cut.
+ */
+export function writtenFraction(
+  measure: Pick<EfficiencyMeasure, 'sweptAreaMm2' | 'deepestCutMm'>,
+  removedVolumeMm3: number | null,
+): number | null {
+  if (removedVolumeMm3 === null || !(removedVolumeMm3 > 0)) return null;
+  if (measure.sweptAreaMm2 === null || !(measure.sweptAreaMm2 > 0)) return null;
+  if (!(measure.deepestCutMm > 0)) return null;
+  const removedArea = removedVolumeMm3 / measure.deepestCutMm;
+  return Math.max(0, Math.min(1, removedArea / measure.sweptAreaMm2));
 }
 
 /** The machine state two IRs must share for their moves to belong to one program. */
