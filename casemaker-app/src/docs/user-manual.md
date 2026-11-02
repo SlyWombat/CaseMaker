@@ -1,346 +1,288 @@
 # User Manual
 
-Every panel, every parameter, every export option. For a quick start, see [Getting Started](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/getting-started.md).
+What Case Maker makes, with a worked example for each, the main options, and the questions that
+come up most. For a first run in ten minutes, see **Getting Started** instead.
 
-## Workflow at a glance
+## Install, files and export
 
-1. Pick a **board** in the board picker — 30 built-in profiles (Raspberry Pi,
-   Arduino, ESP32 devkits, touch panels, QuinLED, sensors, cameras, …), plus
-   boards you import or enable from online sources. Boards marked **★** apply
-   a curated quickstart recipe; otherwise you get a blank parametric shell.
-2. Adjust **case parameters** until the geometry suits your print and assembly.
-3. Toggle individual **port cutouts** if you don't need them all.
-4. Select a **joint type** for the lid (flat / snap-fit / screw-down).
-5. Optionally turn on **ventilation** for thermal designs.
-6. **Export** STL or 3MF and slice for printing.
+Case Maker runs in a browser at **<https://electricrv.ca/casemaker>**, no install, or as a desktop
+app you download and run — either way opens to the same welcome page. The desktop app adds
+offline use and, on a machine with a CNC attached, direct control of the cut.
 
-## Board library & sources
+**Saving and loading.** **Save** writes a project file holding the whole parametric model — board,
+case parameters, ports, external assets — or, for a CNC job, the stock, the cutter and every
+operation. **Load** reopens one. A project opens fine on a machine that doesn't have the exact
+board installed; it carries its own copy.
 
-The picker's catalog merges three source tiers, resolved in priority order:
-
-- **Built-in** — 30 profiles bundled with the app, each schema-validated with
-  a manufacturer source URL.
-- **My library** — profiles you imported (**Import board JSON**) or saved
-  from the Board editor's **Save to library**. Stored in this browser;
-  **Export JSON** from the detail rail to share one.
-- **Online sources** — any URL serving a board index (a JSON array or
-  `{name, boards, templates}`), managed under **Sources**. The official
-  community library is offered one click away; sources cache locally so the
-  picker works offline, refresh weekly in the background, and can be
-  disabled or removed at any time.
-
-Every card carries its **origin** — **BUILT-IN**, **LOCAL**, or the name of
-the online source it came from — so a board you added is never mistaken for
-one bundled with the app. The detail rail repeats it in words.
-
-> **No fit guarantee:** profiles are measured by humans and printers vary —
-> treat the first print of any case as a test article and check critical
-> dimensions against your real board first. The picker states a profile's
-> origin and how its dimensions were measured; neither is a promise for your
-> hardware. There is deliberately no "verified" badge, because we cannot
-> audit a third-party profile's accuracy.
-
-If two sources provide the same board id, the higher tier wins and the
-Sources panel shows what's shadowed. Projects embed a full copy of their
-board profile, so a saved project opens fine on a machine without the board
-installed. To contribute a profile to the community library, follow
-[casemaker-library's AGENT.md](https://github.com/SlyWombat/casemaker-library/blob/main/AGENT.md) —
-Claude Code can drive the whole flow, from measuring to the pull request.
-
-The case rebuilds in real time — every slider, every toggle, every dropdown triggers a Manifold CSG rebuild on a worker thread. Slider drags debounce to 200ms; everything else is instant.
-
-## Parameter dictionary
-
-All dimensions in **millimeters**. Coordinate frame is **Z-up**; the PCB sits at world origin offset by `wallThickness + internalClearance` on X/Y and `floorThickness` on Z.
-
-### Case parameters (the **Case Parameters** panel)
-
-| Parameter | Default | Range | Description |
-| :--- | :--- | :--- | :--- |
-| `wallThickness` | 2.0 mm | 1–6 | Outer-wall thickness on all four sides |
-| `floorThickness` | 2.0 mm | 1–6 | Bottom-floor thickness |
-| `lidThickness` | 2.0 mm | 1–6 | Top-lid thickness |
-| `internalClearance` | 0.5 mm | 0–3 | Gap between PCB edge and inner cavity wall |
-| `zClearance` | 5.0 mm | 0–50 | Headroom above the PCB top — bump for HATs/heatsinks |
-| `joint` | `flat-lid` | enum | One of `flat-lid`, `snap-fit`, `sliding`, `screw-down` |
-| `fit` | `tight` | enum | Print-fit variant for the snap interfaces (snap catches + board snap clips), and for the rack's plate-tab ledges: `tight` (the as-designed number), `standard` (+0.10 mm relief) or `loose` (+0.25 mm). Shown only when a snap interface is active. The relief is added to the mating **cut** — never to both printed halves, which would cancel — and never along the retention axis, so the snap still clicks at the same height. Print the coupon (`npm run fit:coupon`) before trusting a grade. |
-| `bosses.enabled` | `true` | bool | Whether to generate mounting bosses at the board's hole positions |
-| `bosses.insertType` | `self-tap` | enum | `self-tap`, `heat-set-m2.5`, `heat-set-m3`, `pass-through` |
-| `bosses.outerDiameter` | 5.0 mm | — | Outer diameter of each boss; auto-grows to keep ≥1 mm wall around the hole |
-| `bosses.holeDiameter` | 2.5 mm | — | Pilot hole diameter; **ignored for heat-set inserts** (forced to spec) |
-| `ventilation.enabled` | `false` | bool | Cut vent holes through the +y wall |
-| `ventilation.pattern` | `slots` | enum | `slots` (vertical) or `hex` (triangular grid) |
-| `ventilation.coverage` | 0 | 0–1 | Fraction of available wall area used by the pattern |
-
-### Board parameters (the **Board editor** panel, custom boards only)
-
-| Parameter | Description |
-| :--- | :--- |
-| `pcb.size.x/y/z` | Bounding box of the PCB in mm; `z` is PCB thickness (typically 1.6) |
-| `mountingHoles[]` | Each hole: `{ x, y, diameter }` in PCB-local mm |
-| `components[]` | Each component: kind (USB-C, HDMI, …), facing wall, AABB position + size |
-
-> **Note:** Built-in board profiles are read-only. Click **Clone & edit** to create an editable custom copy.
-
-### App settings (the **App settings** panel)
-
-| Setting | Default | Description |
-| :--- | :--- | :--- |
-| `port` | 8000 | TCP port the embedded HTTP server serves the app on (1024–65535). **App server** section, desktop builds only. Written to `config.json`; it applies the **next** time the app starts, and the panel says so while a change is pending. |
-| `bindToAll` | `false` | If true, the embedded server binds to `0.0.0.0` instead of `127.0.0.1`, so other devices on the LAN can reach it. Also applies at the next start. |
-| `exportFormat` | `stl-ascii` | Default export file format (STL binary/ASCII, 3MF). |
-| `exportLayout` | `print-ready` | `print-ready` flips the lid for the slicer; `assembled` stacks both halves for viewing. |
-
-> **Changing the port changes the app's origin** — its saved settings, library and run records live
-> under the address the app is served from, so they do not follow it to a new port. The panel warns
-> while a change is pending, and the change takes effect the next time the app starts. A browser on
-> the LAN can **read** these two settings and cannot **write** them: they belong to the machine Case
-> Maker runs on, and only Case Maker's own window can change them.
-
-> **The depth margins** (CNC builds) — the boundary margin, Z tolerance, minimum floor, edge margin,
-> breakthrough and jaw clearance — are the same dialog's second half; see the CNC guide.
-
-## Joint types
-
-### `flat-lid`
-
-The lid is a flat plate the same X/Y size as the case rim. It rests on top with a 2 mm visual lift. Use this when the lid will be permanently glued or when you don't need a re-openable case.
-
-### `snap-fit`
-
-The lid has a downward-facing lip ring that drops inside the case cavity with a 0.2 mm friction fit. Lip depth is 4 mm, lip wall thickness ≈ `wallThickness − 0.6 mm`.
-
-> **Note:** The default friction is **first-pass and unprinted**. See [issue #2](https://github.com/SlyWombat/case-maker/issues/2). Reduce to 0.15 mm if your lid drops in too easily; raise to 0.25 mm if it won't seat.
-
-### `sliding`
-
-The lid is Y-inset by 4 mm so it slides between two horizontal rails on the inner +y/-y walls. Suitable for cases that need to be re-opened often without screw hardware.
-
-### `screw-down`
-
-The mounting bosses extend to the full inner-cavity height (touching the lid). The lid plate has 4 corner holes whose diameter matches the chosen insert variant:
-
-| Insert | Hole diameter | Lid clearance hole |
-| :--- | :--- | :--- |
-| `self-tap` | 2.5 mm | 2.9 mm |
-| `heat-set-m2.5` | 3.6 mm | 2.9 mm |
-| `heat-set-m3` | 4.2 mm | 3.4 mm |
-| `pass-through` | 3.2 mm | 3.4 mm |
-
-For heat-set inserts, drop the brass insert into the boss with a soldering iron at 220°C before driving the screw.
-
-## Port cutouts
-
-Side-facing components on the loaded board (USB-C, HDMI, RJ-45, etc.) automatically generate port cutouts. The **Port cutouts** panel lets you disable individual ports if your build won't use them — for example, an RJ-45 that's blocked by a hat.
-
-A port's cutout box inflates by `cutoutMargin` (default 0.5 mm) on the perpendicular axes and pierces the wall on the facing axis. Edit the per-component margin in the custom-board component editor.
-
-## Magnet pockets and the nameplate
-
-The **Features** panel has two magnet sections.
-
-**Magnet pockets** cut blind pockets for disc magnets into any case face. Each row sets the face, the magnet size (6 × 2, 6 × 3, 8 × 2, 8 × 3, 10 × 2, 10 × 3 or 12 × 3 mm), how the magnet is held, how many pockets sit in a row, and the row's centre (U and V, in mm from the face's corner). A top-face pocket is cut into the lid.
-
-| Hold | Pocket |
-| :--- | :--- |
-| **glue** | Open, disc Ø + 0.5 mm, disc thickness + 0.4 mm deep. Glue the magnet in. |
-| **press** | Open, disc Ø + 0.1 mm: printed holes come out a little small, so this lands as a light press fit. |
-| **captured** | Closed at the face by a 0.6 mm skin. The panel states the height to pause the print at (0.2 mm layers): drop the magnet in, then resume, and the next layers roof it over. Only the case floor and the lid can be captured; on a side wall the pocket would print on its edge, so it is cut open for glue and the panel says so. |
-
-Case walls are usually thinner than a pocket plus its 1 mm backing, so a round boss is added on the inside of the wall behind each pocket. The panel says when a pocket runs off its face.
-
-**When a pocket or its boss lands on something.** Each pocket and the boss behind it are checked against the board and its connectors, the board standoffs, latches, the hinge and the lid, and each pocket against the port cutouts. The check uses the real shapes, not boxes around them, so a pocket that only comes near a port's corner is not flagged. A clash is stated with the size of the overlap and where it is ("they overlap 5 × 5 × 3.4 mm around X 7.5, Y 7.5, Z 1.7 mm"), and the panel offers the nearest spot on the face that clears it — **Move to u … mm, v … mm**. A row of pockets, or the nameplate's pockets, moves together. Nothing is moved until you choose to, and a clash never stops an export.
-
-**Nameplate** adds a separate plate carrying text, held on by magnets. Set its face, centre, size, thickness, text and the number of magnets (1 to 4). The plate has pockets on its back, and the case face has pockets at exactly the same centres, so one magnet in each pulls the plate home; set each pair so they attract. The plate exports as its own part, laid back down on the bed with the text on top. If the plate is too thin for the magnet under the text, or the text is wider than the plate, the panel says by how much.
-
-**The fits are provisional.** No magnet coupon has been printed and measured yet. Print `fit-coupon-magnet-sizes.stl` (`npm run fit:coupon -- magnet-sizes`): one pocket of every size, labelled 62, 63, 82, 83, 102, 103, 123. Press a magnet of each size in and note which ones do not seat or fall out.
-
-## Stacking connector
-
-Two printed cases can be locked together — one stacked on the other, or a case
-on a base plate — with a small printed key. In the **Features** panel, under
-**Stacking connector**:
-
-- **Walls.** Tick the walls (front, back, left, right) that get a socket. Each
-  socket is a dovetail channel in a pad standing 4.2 mm off the wall. **Shift**
-  moves it along the wall from the centre, in millimetres.
-- **Key.** *Short* (24 mm) joins two parts that touch. *Long* (40 mm) reaches
-  across a 16 mm gap, for a case standing on rugged feet or a hanger held off the
-  wall.
-- **Keys to print.** Each key is its own part in the export (0 to 8), already
-  lying flat — print it as it comes, no supports.
-- **Key fit.** Tight, standard or loose; by default the case's own fit. A looser
-  key is smaller; the socket never changes, so a loose key can be reprinted for a
-  case that is already printed. The summary under it gives the gap per face and
-  how much of the key sits under each lip. These numbers are provisional until
-  the stacking-connector fit coupon has been printed.
-
-**Using it.** Slide a key down into the lower part's socket from the top. It
-stops half in, half out with a click — that is the parked position. Lower the
-upper part straight down onto it: the proud half goes up into the pocket in the
-upper part's socket, and the key clicks again at the seam. Pushed all the way
-into one socket instead, the key sits flush for storage (when the case is tall
-enough — the panel says so if it is not). The key locks the parts against sliding
-apart; lifting the top one off takes a firm pull against the click. Sockets on
-the same walls of both parts must line up, so give both cases the same shifts.
-
-**Registering a stack.** Tick **register stacked cases (skirt + rim ridge)** and the lid's top carries a raised ring just inside the wall, while the floor's underside gets a matching groove — the floor and wall left outside it form the telescoping skirt. Set one case on another and it settles square with no key in it. This is registration only: it squares the stack and holds nothing down, so keys still do the retaining. The ring's height follows the floor's thickness, so a thin floor gets a shallow ridge rather than a floor cut through.
-
-**Matching two cases.** **Same shift on every wall** puts one shift on all four walls, so two projects set the same way line up without adjusting each wall separately.
-
-**A base plate.** **Export a base plate** adds a shallow tray on the case's own footprint, its rim carrying the same sockets, so a single case can sit on one. The plate is the lower part of the pair: the key parks half-proud out of its rim and the case drops onto it.
-
-**When a socket lands on something.** If a socket would run into a port, a vent,
-a hinge, a latch, a magnet pocket, the nameplate or another feature on that wall,
-the panel says so and offers the nearest clear position — **Move to … mm**. The
-check uses the socket's real pad and each feature's real shape. The socket is
-still cut where you put it until you choose to move it. A wall too short for the
-receiving pocket is also stated: that case can be the bottom of a stack, not the
-top.
-
-**Brim and ribbing.** On a protective case, the alignment brim and the rugged
-ribbing run along the whole wall, so no position clears them. The panel then
-offers **Cut a pad cut-out at … mm**: a notch through the brim and ribbing the
-width of the pad plus 0.5 mm each side, where the socket stands. Only the brim
-and ribbing are notched; the wall and the seal inside the rim are not cut.
-**Remove the pad cut-out** puts them back.
-
-## External assets (STL / 3MF import)
-
-The **External assets** panel imports binary STL, ASCII STL, or 3MF meshes. Per asset, you choose visibility:
-
-- **`reference`** — translucent gold render in the scene; not part of the case CSG. Use for fitment checks.
-- **`subtract`** — boolean-subtracted from the shell. Use for custom cutouts (a fan grille, a logo).
-- **`union`** — boolean-added to the shell. Use for stiffeners or extensions.
-
-Mesh data is base64-stored inside the project file (`.caseproj.json`), so saved projects round-trip cleanly.
-
-## Floor grid and dividers
-
-The **Features** panel's **Floor grid and dividers** section cuts a grid of square, blind sockets into the case floor. Drop-in dividers plug into the sockets to split the inside of the case into bays. Each divider prints as its own part, and you can lift it out again later.
-
-**The grid.** Tick **Socket grid in the floor**. The defaults are 5 × 5 mm sockets on a 12 mm pitch in both directions, cut 2 mm deep. The pitch, the socket size and the depth can all be changed. A socket always keeps 1.2 mm of floor under it, so the case stays sealed. The case floor defaults to 2 mm, so turning the grid on thickens the floor to 3.2 mm, and the panel says so. Change the floor back in **Case parameters** if you prefer: the sockets are then cut shallower, and the panel states the depth they actually get and offers to thicken the floor again.
-
-The grid starts 3 mm in from the cavity wall. Sockets that would land under the board, its overhanging connectors, a mounted display or a standoff are left out, with 1 mm to spare. On a rounded case, sockets that would cross into a rounded corner are left out too. A case sized tightly around its board has no room for a socket. In that case the panel says so and offers to widen one side of the cavity, always a side with no port cutouts on it, by just enough for a bay two sockets each way.
-
-**Dividers.** Click **+ Divider along X** or **+ Divider along Y**. A new divider goes on the longest clear run of sockets that crosses nothing already there. While there is no divider the other way yet, it also leaves a clear line for one, so the order you add them in does not decide whether both fit. You place it on a grid line, so it always lands in sockets:
-
-| Field | Meaning |
-| :--- | :--- |
-| **Row** / **Column** | The grid line the wall stands on, counted from 1 at the front (−Y) wall for a divider along X, or at the left (−X) wall for one along Y. |
-| **From** | The first socket the wall covers, counted from 1. |
-| **Sockets** | How many sockets the wall covers, first to last (at least 2). The two tenons sit in the end sockets. |
-
-A divider is `(sockets − 1) × pitch + 9.6 mm` long, 2.4 mm thick, and as tall as the cavity's inside height less 1 mm, so it clears the lid. The panel states all three numbers for each divider.
-
-**Clashes are stated, not refused.** If a divider runs into the board or a standoff, ends in the wall, has a tenon with no socket under it, or crosses another divider, the panel names the clash ("Divider 2: it runs into the board from X 14.7 mm to 84.3 mm") and offers **Move to row N**, the nearest grid line where the divider seats cleanly. A divider is also checked against a snap-fit lid's lip, the vents, a HAT board that reaches past the host board, and the split-for-print seam, with the size of the overlap. When no grid line clears it (an end against the lid's lip, say), the panel offers to drop sockets from the end that clashes — **Shorten to N sockets**. When a new divider crosses one already standing, it offers **Shorten Divider 1 to N sockets** to make room. A clashing divider still exports.
-
-**Fit.** Each tenon is 0.3 mm smaller than the socket. That number is provisional: nothing has been printed to settle it yet. The grid's **Fit** follows the case's print fit unless you pick one for the grid. Tight adds nothing, Standard adds 0.1 mm and Loose adds 0.25 mm to the socket, so the clearance is 0.3, 0.4 or 0.55 mm. The relief goes on the socket, the cut, never on the tenon. If a divider will not drop in, go one grade looser.
-
-**Printing.** In the export, each divider is listed under accessories as **Divider (along X)** or **Divider (along Y)**. Each one is exported lying on its side: the wall face is on the bed, the tenons point sideways, and nothing needs supports.
-
-## Export
-
-Three formats:
+**Exporting.** Three formats, for the 3D capabilities (cases, racks, toolboxes):
 
 | Format | When to use |
 | :--- | :--- |
-| **STL (binary)** | Default for slicers — smallest file size, fastest to write. |
-| **STL (ASCII)** | Human-readable; useful for diffs and source-control inspection. |
-| **3MF** | Modern open format, supports units (mm), required by some slicers. Carries the slicer assignment too: a two-colour badge opens as **one object whose two parts are already on their own extruders**, so there is nothing to pair up by hand. |
+| **STL (binary)** | Default for slicers — smallest file, fastest to write. |
+| **STL (ASCII)** | Human-readable; useful for diffs and inspection. |
+| **3MF** | Carries units and, on a two-colour part, the extruder assignment — nothing to pair up by hand. |
 
-> **Note:** Always **press Export, not browser-Save** — the on-screen mesh isn't directly the export. Triggering Export forces a flush + rebuild + worker call.
+Always use the app's own **Export**, not a browser save of the preview — Export forces a rebuild
+first, so the file matches what's on screen. The CNC side exports a program (G-code) instead; see
+**Cut it on the CNC** below.
 
-**The file name carries the fit grade.** When the project's snap fit is not the default, every file an export writes is suffixed with it — `mycase-loose.stl`, `mycase-loose-PRINT-NOTES.txt`, `mycase-lid-loose.stl` — and the print notes repeat what that grade means. So printing two grades and keeping whichever seats needs no renaming by hand. A `tight` fit (the default) adds nothing, which is why projects saved before the setting existed get exactly the names they always did.
+**Settings.** The **App settings** panel covers the embedded server's port (desktop builds,
+default **8000**) and whether it's reachable from other devices on the network, plus the default
+export format and layout. A port change applies the next time the app starts, and the panel says
+so while it's pending.
 
-## Save / load projects
+---
 
-- **Save** writes a `.caseproj.json` file containing the entire parametric model (board profile copy, case params, ports, external assets). The schema is versioned (`schemaVersion: 1`) and validated on load.
-- **Load** picks any `.caseproj.json` and restores the project. Out-of-date schemas are rejected with a clear error.
+## Cases that fit the board
 
-## Undo / redo
+Pick a board and the shell grows around its ports, holes and standoffs.
 
-50-state history (project-state only — UI selection is excluded). Shortcuts:
+### Worked example: a Raspberry Pi case
 
-- `Ctrl+Z` — undo
-- `Ctrl+Shift+Z` or `Ctrl+Y` — redo
-- Suppressed when typing in inputs / textareas
+1. On the welcome page, click **Cases that fit the board**.
+2. Search for a board — "rpi-4b" finds the Raspberry Pi 4B — and click its card. The detail panel
+   shows its connectors, mounting holes and where its measurements came from.
+3. Click **★ Create from quickstart**. The shell generates around the board's real geometry: wall
+   around the PCB outline, bosses under the mounting holes, a cutout behind every connector that
+   faces an outer wall.
 
-## Coordinate system
+   ![A board sitting in a case shell, with the shell's side wall cut away to show each connector lined up with its own cutout](img/board-port-cutouts.svg)
+   *Port cutouts line up with the connectors behind them.*
+4. In the sidebar, open **Case parameters** and drag **Wall thickness** — the shell rebuilds live
+   as you move it, usually in under 100 ms.
+5. Under **Port cutouts**, turn off anything you don't need — a header pin block hidden under a
+   HAT, say.
+6. Under **Case parameters → Joint**, choose a joint for the lid:
 
-Z is up. PCB origin is at world `(wallThickness + internalClearance, wallThickness + internalClearance, floorThickness)`. The case spans:
+   ![A case shell and its lid apart, with a close-up of a snap-fit lip dropping into the cavity wall](img/case-parts-joint.svg)
+   *The snap-fit lid's lip drops inside the case wall.*
 
-- **X:** 0 → `pcb.x + 2·(wall + clearance)`
-- **Y:** 0 → `pcb.y + 2·(wall + clearance)`
-- **Z:** 0 → `floor + pcb.z + zClearance`
+   - **flat-lid** — a plain plate on top; glue it or leave it loose.
+   - **snap-fit** — a lip on the lid drops into the cavity with a friction fit; no hardware.
+   - **sliding** — the lid slides in between two rails; easy to reopen often.
+   - **screw-down** — bosses reach the lid, which gets four screw holes.
+7. Open **Export** and choose a format. The file is upright, in millimetres, ready for a slicer —
+   no rotation needed.
 
-The lid sits on top with a 2 mm visual lift. Slicers ingest the model exactly as exported — no rotation needed.
+### Main options
 
-## Tolerance comparison reference
+All dimensions are in millimetres; the model is Z-up, with the board sitting at the wall-plus-
+clearance offset from the origin.
 
-> **Note:** These are starting points. Print one test cube and measure with calipers before committing.
+| Parameter | Default | Range | What it does |
+| :--- | :--- | :--- | :--- |
+| Wall thickness | 2.0 mm | 1–6 | Outer-wall thickness on all four sides |
+| Floor thickness | 2.0 mm | 1–6 | Bottom-floor thickness |
+| Lid thickness | 2.0 mm | 1–6 | Top-lid thickness |
+| Internal clearance | 0.5 mm | 0–3 | Gap between the board's edge and the inner cavity wall |
+| Z clearance | 5.0 mm | 0–50 | Headroom above the board — raise this for tall connectors or an add-on board |
+| Joint | flat-lid | — | flat-lid, snap-fit, sliding, or screw-down (see above) |
+| Fit | tight | — | Printed clearance for snap interfaces and tabs: tight (as designed), standard (+0.10 mm) or loose (+0.25 mm). Print a fit coupon before trusting a grade on a new printer. |
+| Mounting bosses | on | — | Posts at the board's hole positions, for self-tapping screws, heat-set inserts, or a plain pass-through hole |
+| Ventilation | off | — | Vent slots or a hex grid cut through one wall |
 
-| Feature | Loose fit (FDM, 0.4mm nozzle) | Tight fit |
-| :--- | :--- | :--- |
-| Snap-fit lip-to-cavity | 0.4 mm | 0.2 mm |
-| Pass-through screw clearance | 0.5 mm above thread OD | 0.2 mm above thread OD |
-| Heat-set insert pocket | spec dia (3.6 / 4.2 mm) | spec dia − 0.1 mm |
-| PCB-edge to inner wall | 1.0 mm | 0.5 mm |
+**Board library.** The picker merges three sources: built-in profiles, boards you've imported or
+saved yourself, and any online library you've added under **Sources**. Every card states its
+origin, so an imported board is never mistaken for a built-in one. Profiles are measured by
+people and printers vary — treat a first print as a test article and check the critical
+dimensions against your own board.
 
-## Slicer guidance
+**Magnet pockets and the nameplate.** The **Features** panel cuts pockets for disc magnets into
+any face, held by glue, a press fit, or captured under a thin skin the print pauses for. A
+**nameplate** is a separate magnetic plate carrying text, matched to pockets on the case so it
+seats home on its own magnets. A clash with a port, a standoff or another feature is stated with
+its size and location, and the panel offers the nearest clear spot — nothing moves until you
+choose to.
 
-- **Print orientation:** lay the case open-side-up so the floor and bosses print on the bed without supports. The lid prints flat-side-down separately.
-- **Layer height:** 0.2 mm works for the default geometry; drop to 0.12 mm if your snap-fit lip needs better dimensional accuracy.
-- **Walls:** at least 3 perimeters for snap-fit lids — the lip flexes under load.
-- **Infill:** 15% gyroid is plenty for an enclosure; raise to 30% if you'll be plugging cables in/out frequently. Racks are a different load case — see below.
+**Stacking connector.** A printed key locks two cases together, one on top of the other, through a
+dovetail socket on the walls you choose. A **registration ring** on the lid and a matching groove
+on the floor square a stack with no key fitted yet; the key still does the holding. A base plate
+can carry the same sockets, for a case that sits on something other than another case.
 
-### Racks — a different load case
+**Floor grid and dividers.** A grid of blind sockets in the floor takes drop-in dividers that
+split the inside into bays — each divider is its own printed part, liftable later. The grid skips
+sockets under the board or a standoff, with room to spare, and a divider that runs into something
+is stated and offered a nearby line that clears it.
 
-Everything above is written for an **enclosure**: a small box that sits on a desk
-and carries nothing but itself. A rack carries 5–10 kg of equipment, so the
-settings change. Print racks in **PETG**, not PLA — about 25 °C more heat
-headroom (Tg ≈ 80–85 °C against 55–60) and far better creep resistance under
-sustained load. It is roughly half the stiffness of PLA (E ≈ 2.0 GPa against
-≈ 3.5); the rib geometry is already designed for the lower modulus.
+**External assets.** Import an STL or 3MF mesh and use it as a reference overlay, subtract it from
+the shell (a custom cutout), or add it to the shell (a stiffener or extension).
 
-**Infill pattern: gyroid.** Not because it wins a benchmark, but because it has
-no self-crossings (no nozzle collision, no over-extruded ridge where lines
-meet), it extrudes as continuous curves, and it is near-isotropic. That last
-point is the one that matters: every rack part is loaded differently — side
-panels in bending, the plate tabs in shear across layers, the wall-mount ears in
-tension — and one profile prints all of them. Grid and triangles are stronger
-*along* their line direction and weaker across it, which is only worth having if
-you can align the pattern per part. **Cubic** is a fine faster substitute.
+### Common questions
 
-**Infill percent, by part:**
+**Why doesn't my board's connector line up with the cutout?** Profiles are measured, not
+guaranteed — check the board's measurement source in the detail rail, and compare a critical
+dimension against your real board before committing a print.
 
-| Part | Infill | Why |
-| :--- | :--- | :--- |
-| Side panels (250 × 275 × 20) | 40% | The only parts thick enough for infill to dominate mass and time. The M5 bosses live here and the whole load path runs through them. |
-| Bottom plate (5 mm + floor ribs) | 30–40% | ~25 layers at 0.2 mm, ~15 of them sparse. The infill's job is shear-coupling the two skins so the plate acts as one section — it is not carrying the bending itself. |
-| Shelf decks (3 mm + upstand ribs) | 30–40% | ~15 layers total, ~5 sparse. Almost pure skin and rib; the percent barely moves the mass, so pick 40 and stop thinking about it. |
-| One-piece fused export (1.09–1.58 kg) | 25% | Here 40% against 25% is hours and hundreds of grams. The skins still do the work, so this is a budget decision, not a strength one. |
+**The snap-fit lid won't click shut, or falls out too easily.** The default fit is a starting
+point. Print a fit coupon, then choose standard or loose (looser drops in more easily) under
+**Case parameters → Fit**.
 
-Do not go above ~50%. Past that you are adding mass and print time to a region
-that is not carrying load, and you start fighting over-extrusion where the
-infill meets the perimeter.
+**Can I reuse a board I've customised?** Yes — **Clone & edit** any built-in board to get an
+editable copy, or **Export JSON** your own profile to share it.
 
-**The settings that matter more than infill:**
+---
 
-- **Perimeters: 4–5.** Every loaded section in a rack is a thin-walled beam and
-  the perimeters are its flanges. Going 2 → 4 walls does more for a shelf than
-  15% → 50% infill does.
-- **Top/bottom solid layers: 5 / 5.** On a 3 mm deck this *is* most of the part.
-- **Layer adhesion is where a rack actually fails**, not the infill. The
-  wall-mount ears cantilever the whole loaded box and the plate tabs load in
-  shear across layer lines. Run PETG at the hot end of its range and cut the fan
-  on everything that is not an overhang. That buys more real strength than any
-  infill change available to you.
-- **Ensure vertical shell thickness: on** — it matters on the ribs and around
-  the tab bores.
-- Large flat PETG panels want a brim and no draft on the printer.
+## Racks sized to your gear
 
-**Stay on a 0.4 mm nozzle.** A 1.5 kg part begs for 0.6, but the geometry blocks
-it: the outboard wall of the plate tab bore is 1.8 mm, and the snap tabs and
-keystone latch shoulders are finer still. Possible if you re-check every thin
-wall in the slicer preview first; not a free win.
+A snap-together rack, resized to fit the hardware going in it.
+
+### Worked example: a 10-inch rack
+
+1. On the welcome page, click **Racks sized to your gear**, or enable the **Rack** panel from the
+   sidebar on an existing project.
+2. Choose a mode — a printed rail or a standard U-mount rail — then set the rack's width, depth
+   and slot count. A fit indicator tells you whether the current size suits the gear you're
+   mounting.
+
+   ![A rack's rear rail, front-on, showing the two columns of mounting holes on a fixed pitch and a blank panel slotted into one slot height](img/rack-u-rails.svg)
+   *The U-rail's hole pitch sets where every panel mounts.*
+3. Turn on a wall mount if the rack needs to hang rather than stand, and set the mounting
+   guidance it shows you.
+4. Add a fan or an accessory card for anything that needs its own cutout or clearance.
+5. Export the whole rack as one fused part, or as its separate panels — the **assembled export**
+   toggle switches between them.
+
+### Main options
+
+- **Width, depth and slot count** set the rack's overall size; the panel keeps the slot pitch
+  fixed so standard 1U gear always lines up.
+- **Notches** add per-plate cutouts where a specific accessory needs one.
+- **Fans and accessories** are added as cards, each with its own clearance and cutout.
+- **Wall mount** turns on mounting ears and shows guidance for where to anchor them.
+
+### Common questions
+
+**What should I print a rack in?** PETG, not hardwood or PLA — a rack carries real load (5–10 kg
+of gear) and needs more heat resistance and creep resistance than an enclosure does. Use a gyroid
+or cubic infill (near-isotropic, so it doesn't matter which part is loaded which way): 40% for the
+side panels that carry the mounting bosses, 30–40% for the bottom plate and shelf decks, 25% for a
+one-piece fused export. Run 4–5 perimeters — a rack's thin sections are beams, and the perimeters
+are their flanges — and don't skimp on layer adhesion: it's where a loaded rack actually fails,
+more than the infill percentage ever will.
+
+**Why won't my rack fit the gear I measured?** Check the fit indicator while you adjust width,
+depth and slot count — it states whether the current size suits what you've told it you're
+mounting, before you commit to a print.
+
+---
+
+## Toolboxes that stack
+
+Bins and lids that register on each other with no connector, and inserts pocketed to your own
+tools.
+
+### Worked example: a toolbox with a tray
+
+1. On the welcome page, click **Toolboxes that stack**, or enable the **Toolbox** panel from the
+   sidebar.
+2. Set the toolbox's width — the bin, lid and tray all resize together.
+3. Add dividers to the tray to pocket it for your own tools — a socket set, a screwdriver, a
+   wrench.
+
+   ![A toolbox bin with its lid above it and a tray of dividers forming pockets of different sizes](img/toolbox-tray-dividers.svg)
+   *A tray's dividers pocket it to whatever you're storing.*
+4. Export the bin, the lid and the tray as separate parts — they print without supports and
+   assemble by registering on each other, no connector needed.
+
+### Main options
+
+- **Width** drives the whole toolbox's proportions; the bin, lid and tray stay sized to fit each
+  other as it changes.
+- **Pegs and dividers** in the tray are added one at a time, each sized to the tool it's meant to
+  hold.
+
+### Common questions
+
+**Do the bins need a clip or a catch to stay stacked?** No — the parts register on each other by
+their own geometry. Nothing fastens them; lifting the top one off is a plain lift.
+
+**Can I design a tray for a specific set of tools?** Yes — add a divider per tool and size each
+pocket to it; there's no fixed layout.
+
+---
+
+## Cut it on the CNC
+
+Carve hardwood on the CNC — a name plate, a coaster, a pocket, an engraving.
+
+### Worked example: the starter name plate
+
+1. On the welcome page, click **Cut it on the CNC**. A job opens already set up: a block of
+   hardwood with three lines of text carved into it — nothing to build from scratch for a first
+   look.
+2. Check the stock and cutter in the sidebar — a job states its stock size, material and the
+   cutter it's planned for.
+3. Click **Generate**. The app plans the toolpath, checks it against the stock and the holding,
+   then runs a simulated pass so you can watch it sweep across the block before anything real
+   happens.
+4. Once it's checked out, the job is ready to post as a program for a CNC machine — the CNC
+   equivalent of the **Export** button on the other three capabilities.
+
+### Main options
+
+**Stock and cutter.** Every job states a stock block (material, width, length, thickness) and a
+cutter. Hardwood is the default material; picking a different one adjusts the feeds the app plans
+for it.
+
+**Work origin and holding.** A job's zero point sits at a known corner of the stock, and the
+holding (a vise, by default) is shown alongside it, so what the app plans matches where the
+material actually sits on the machine.
+
+![A block of stock held in a vise, with the work-origin corner marked and arrows naming the X, Y and Z axes from that corner](img/cnc-work-origin-holding.svg)
+*Work origin and holding: where zero is, and what's holding the stock.*
+
+**Simulating.** Generate always runs a full simulated pass before a job is considered ready — a
+pass that doesn't match the design, or that the chosen cutter can't physically reach, is refused
+rather than silently produced.
+
+### Exporting from FreeCAD
+
+A part modelled in FreeCAD imports cleanly if it's exported the right way:
+
+![A simple flow diagram: a FreeCAD model, an arrow to STEP for a 3D part to carve or DXF for a flat profile, both arriving at Case Maker](img/freecad-export-path.svg)
+*FreeCAD's two export paths: STEP for a 3D part, DXF for a flat one.*
+
+- **A 3D part to carve** — export **STEP**: select the Body or Part, then *File → Export → STEP*.
+  One solid per file; union an assembly into a single solid first. If STEP isn't available, 3MF is
+  the fallback — it carries millimetres correctly. Only use STL or OBJ when the mesh is fine
+  enough to hold the detail you need (roughly 0.01 mm deviation or better); either format loses
+  the exact surfaces STEP and 3MF keep.
+- **A flat profile, pocket or engraving** — export **DXF**, in millimetres, with closed outlines.
+  SVG works too, but check its pixel scale carries over correctly.
+- **Before you export**, put the side you want cut facing +Z — or use **Lay it flat** or
+  place-on-face after importing. Set your model's units to millimetres; Case Maker states the
+  units it assumed on import, so check that line matches what you exported.
+
+Most other CAD tools export the same two formats the same way: Fusion 360 and SolidWorks both
+offer STEP directly from their export menu for 3D parts, and DXF for sketches; Inkscape exports
+DXF for flat vector work if you set its document units to millimetres first.
+
+### Common questions
+
+**Why was my Generate refused?** The app checks the planned cut against the stock, the cutter's
+reach and the holding before it will call a job ready — the message names which of those it
+failed, and usually suggests a fix (a different cutter, a resized goal, cutting from both sides).
+
+**My imported part looks right but won't carve correctly — why?** Check that the side you want
+cut is facing +Z, and that the unit Case Maker reports on import matches what you actually
+exported — a model exported in inches read as millimetres is 25× too large.
+
+---
+
+## Coordinate system and undo
+
+Every capability shares the same ground rules once you're past the welcome page.
+
+**Coordinate system.** Z is always up. For the 3D capabilities, the model's origin sits at one
+corner, with the part spanning positive X, Y and Z from there — what you see on screen is exactly
+what exports, with no rotation needed for a slicer. For a CNC job, the work origin is a stated
+corner of the stock, shown alongside the holding that's meant to match it.
+
+**Undo and redo.** `Ctrl+Z` undoes, `Ctrl+Shift+Z` (or `Ctrl+Y`) redoes, with a deep history of
+project changes — UI selection itself isn't part of it. Both are suppressed while you're typing in
+a text field.
+
+**Tolerances.** Every printed fit in this manual — snap-fit, screw clearance, heat-set inserts,
+tray tenons — is a starting point, not a guarantee. Print one test piece and measure it with
+callipers before committing a full build; the fit grade (tight, standard, loose) in each panel is
+there so you don't have to redesign anything to try a looser one.

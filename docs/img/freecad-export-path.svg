@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 240" role="img" aria-labelledby="t d">
+  <title id="t">FreeCAD's two export paths into Case Maker</title>
+  <desc id="d">A flow diagram: a FreeCAD model box with two arrows, one labelled STEP going to a 3D-part box and one labelled DXF going to a flat-profile box, both arrows then arriving at a Case Maker box.</desc>
+  <style>
+    .bg { fill: #0b1326; }
+    .node { fill: #16213a; stroke: #e9a0ff; stroke-width: 2; }
+    .node-end { fill: #1c2a4a; stroke: #dae2fd; stroke-width: 2; }
+    .arrow { stroke: #e9a0ff; stroke-width: 2; fill: none; }
+    .label { fill: #dae2fd; font: 13px system-ui, sans-serif; }
+    .label-accent { fill: #e9a0ff; font: 13px system-ui, sans-serif; font-weight: 600; }
+    .title-text { fill: #dae2fd; font: 14px system-ui, sans-serif; font-weight: 600; }
+  </style>
+  <rect class="bg" width="480" height="240"/>
+
+  <!-- FreeCAD model -->
+  <rect class="node" x="30" y="100" width="120" height="50" rx="6"/>
+  <text class="title-text" x="45" y="130">FreeCAD model</text>
+
+  <!-- Arrow to STEP path (3D part) -->
+  <path class="arrow" d="M150 115 L230 60" marker-end="url(#fa)"/>
+  <text class="label-accent" x="165" y="80">STEP</text>
+  <rect class="node" x="230" y="25" width="150" height="50" rx="6"/>
+  <text class="label" x="245" y="47">3D part to carve</text>
+  <text class="label" x="245" y="63">(one solid per file)</text>
+
+  <!-- Arrow to DXF path (flat profile) -->
+  <path class="arrow" d="M150 135 L230 185" marker-end="url(#fa)"/>
+  <text class="label-accent" x="165" y="175">DXF</text>
+  <rect class="node" x="230" y="160" width="150" height="50" rx="6"/>
+  <text class="label" x="245" y="182">Flat profile, mm</text>
+  <text class="label" x="245" y="198">(closed outlines)</text>
+
+  <!-- Both arrive at Case Maker -->
+  <path class="arrow" d="M380 50 L420 110" marker-end="url(#fa)"/>
+  <path class="arrow" d="M380 185 L420 125" marker-end="url(#fa)"/>
+  <rect class="node-end" x="400" y="105" width="70" height="30" rx="5"/>
+  <text class="label" x="407" y="124" font-size="11">Case Maker</text>
+
+  <defs>
+    <marker id="fa" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#e9a0ff"/>
+    </marker>
+  </defs>
+</svg>

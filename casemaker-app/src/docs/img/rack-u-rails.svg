@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 280" role="img" aria-labelledby="t d">
+  <title id="t">A rack's U-rail hole pitch and a mounted blank panel</title>
+  <desc id="d">The front-on view of a rack's two rear rails, each with a column of mounting holes on a fixed, even pitch, and a single blank panel bolted across one slot height between them.</desc>
+  <style>
+    .bg { fill: #0b1326; }
+    .rail { fill: #16213a; stroke: #4edea3; stroke-width: 2; }
+    .hole { fill: #0b1326; stroke: #4edea3; stroke-width: 1.5; }
+    .panel { fill: #1c2a4a; stroke: #dae2fd; stroke-width: 2; }
+    .pitch { stroke: #4edea3; stroke-width: 1; opacity: 0.7; }
+    .label { fill: #dae2fd; font: 13px system-ui, sans-serif; }
+    .label-accent { fill: #4edea3; font: 13px system-ui, sans-serif; font-weight: 600; }
+  </style>
+  <rect class="bg" width="480" height="280"/>
+
+  <!-- Left rail -->
+  <rect class="rail" x="90" y="30" width="26" height="220" rx="3"/>
+  <!-- Right rail -->
+  <rect class="rail" x="364" y="30" width="26" height="220" rx="3"/>
+
+  <!-- Holes on a fixed pitch, nine per side -->
+  <g>
+    <circle class="hole" cx="103" cy="46" r="5"/>
+    <circle class="hole" cx="103" cy="68" r="5"/>
+    <circle class="hole" cx="103" cy="90" r="5"/>
+    <circle class="hole" cx="103" cy="112" r="5"/>
+    <circle class="hole" cx="103" cy="134" r="5"/>
+    <circle class="hole" cx="103" cy="156" r="5"/>
+    <circle class="hole" cx="103" cy="178" r="5"/>
+    <circle class="hole" cx="103" cy="200" r="5"/>
+    <circle class="hole" cx="103" cy="222" r="5"/>
+
+    <circle class="hole" cx="377" cy="46" r="5"/>
+    <circle class="hole" cx="377" cy="68" r="5"/>
+    <circle class="hole" cx="377" cy="90" r="5"/>
+    <circle class="hole" cx="377" cy="112" r="5"/>
+    <circle class="hole" cx="377" cy="134" r="5"/>
+    <circle class="hole" cx="377" cy="156" r="5"/>
+    <circle class="hole" cx="377" cy="178" r="5"/>
+    <circle class="hole" cx="377" cy="200" r="5"/>
+    <circle class="hole" cx="377" cy="222" r="5"/>
+  </g>
+
+  <!-- Pitch dimension markers between two holes -->
+  <path class="pitch" d="M120 112 L140 112 M140 112 L140 134 M120 134 L140 134"/>
+  <text class="label-accent" x="144" y="128">slot pitch</text>
+
+  <!-- A blank panel mounted across one slot height -->
+  <rect class="panel" x="116" y="100" width="248" height="22" rx="2"/>
+  <text class="label" x="200" y="115">1U blank</text>
+
+  <text class="label" x="90" y="265">Every panel bolts to the same holes, so a shelf, a faceplate or a blank all line up the same way.</text>
+</svg>

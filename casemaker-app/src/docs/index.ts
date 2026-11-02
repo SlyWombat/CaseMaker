@@ -1,6 +1,7 @@
 import { featureSim } from '@/platform/features';
 import gettingStartedRaw from './getting-started.md?raw';
 import userManualRaw from './user-manual.md?raw';
+import developersRaw from './developers.md?raw';
 import technicalReferenceRaw from './technical-reference.md?raw';
 import changelogRaw from './CHANGELOG.md?raw';
 import contributingRaw from './CONTRIBUTING.md?raw';
@@ -18,11 +19,14 @@ const cncDocs: DocEntry[] = featureSim
   ? [{ id: 'cnc-guide', title: 'CNC Guide', source: cncGuideRaw }]
   : [];
 
+// The reader's three docs come first; the three "For developers" docs — building from source,
+// the module map, and contributing — follow as one group (#880).
 export const DOCS: ReadonlyArray<DocEntry> = [
   { id: 'user-manual', title: 'User Manual', source: userManualRaw },
   { id: 'getting-started', title: 'Getting Started', source: gettingStartedRaw },
-  { id: 'technical-reference', title: 'Technical Reference', source: technicalReferenceRaw },
   { id: 'changelog', title: 'Changelog', source: changelogRaw },
+  { id: 'developers', title: 'For developers', source: developersRaw },
+  { id: 'technical-reference', title: 'Technical Reference', source: technicalReferenceRaw },
   { id: 'contributing', title: 'Contributing', source: contributingRaw },
   ...cncDocs,
 ];

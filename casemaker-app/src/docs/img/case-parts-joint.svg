@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" role="img" aria-labelledby="t d">
+  <title id="t">Case shell, lid, and the snap-fit joint</title>
+  <desc id="d">A case shell with its lid lifted above it, and a magnified cross-section showing the lid's lip dropping inside the shell's cavity wall for a friction fit.</desc>
+  <style>
+    .bg { fill: #0b1326; }
+    .line { stroke: #dae2fd; stroke-width: 2; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+    .fill-shell { fill: #16213a; stroke: #adc6ff; stroke-width: 2; }
+    .fill-lid { fill: #1c2a4a; stroke: #adc6ff; stroke-width: 2; }
+    .accent { stroke: #adc6ff; stroke-width: 2; fill: none; }
+    .dim { stroke: #dae2fd; stroke-width: 1; opacity: 0.55; }
+    .label { fill: #dae2fd; font: 13px system-ui, sans-serif; }
+    .label-accent { fill: #adc6ff; font: 13px system-ui, sans-serif; font-weight: 600; }
+  </style>
+  <rect class="bg" width="480" height="300"/>
+
+  <!-- Shell -->
+  <path class="fill-shell" d="M60 200 L60 120 Q60 110 70 110 L190 110 Q200 110 200 120 L200 200 Z"/>
+  <text class="label" x="75" y="225">Shell</text>
+
+  <!-- Lid, lifted above -->
+  <rect class="fill-lid" x="55" y="60" width="150" height="18" rx="2"/>
+  <path class="line" d="M70 78 L70 95 M190 78 L190 95" stroke-dasharray="4 4"/>
+  <text class="label" x="75" y="55">Lid</text>
+
+  <!-- Arrow down showing lid seats into shell -->
+  <path class="accent" d="M130 90 L130 108" marker-end="url(#arrow)"/>
+
+  <!-- Magnified detail callout -->
+  <circle class="dim" cx="185" cy="88" r="14"/>
+  <path class="dim" d="M196 80 L300 40"/>
+  <path class="dim" d="M196 96 L300 190"/>
+
+  <!-- Cross-section detail box -->
+  <rect x="300" y="40" width="150" height="150" rx="4" fill="#111a2e" stroke="#adc6ff" stroke-width="1.5" opacity="0.9"/>
+  <text class="label-accent" x="310" y="60">Snap-fit lip</text>
+
+  <!-- wall -->
+  <rect x="320" y="80" width="16" height="90" class="fill-shell"/>
+  <!-- lip dropping in -->
+  <path d="M340 75 L340 150 L352 150 L352 140 L358 140 L358 95 L352 95 L352 75 Z" fill="#1c2a4a" stroke="#adc6ff" stroke-width="2"/>
+  <path class="dim" d="M336 80 L336 170" stroke-dasharray="3 3"/>
+  <text class="label" x="365" y="100">lip</text>
+  <text class="label" x="300" y="100">wall</text>
+  <text class="label" x="310" y="178">friction fit, no hardware</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#adc6ff"/>
+    </marker>
+  </defs>
+</svg>
