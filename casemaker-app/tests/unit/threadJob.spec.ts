@@ -171,7 +171,7 @@ describe('#445 the document findings', () => {
   it('a good thread: the pilot is a WARNING, never a silent assumption', () => {
     const findings = validateJob(jobWith());
     expect(findings.filter((f) => f.code.startsWith('thread-')).map((f) => f.code)).toEqual(['thread-pilot-unproven']);
-    expect(findings.find((f) => f.code === 'thread-pilot-unproven')!.message).toMatch(/⌀4\.134 mm pilot.*at least 5\.8 mm deep.*ALREADY/);
+    expect(findings.find((f) => f.code === 'thread-pilot-unproven')!.message).toMatch(/no pilot drill.*⌀4\.134 mm.*at least 5\.8 mm deep/);
   });
 
   it('refuses a tool that is not a thread mill', () => {

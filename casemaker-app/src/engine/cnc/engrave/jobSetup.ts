@@ -40,7 +40,7 @@ import {
   type SweptCut,
 } from '@/engine/cnc/engrave/partPlan';
 import { fmtPitch, nearestThreadSize, threadDims } from '@/engine/cnc/threadTable';
-import { threadBoss, threadMillFit } from './threadFit';
+import { threadBoss, threadMillFit, threadPilot } from './threadFit';
 import { PCB_DRILL_SLACK_MM } from '@/engine/import/pcbCutters';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { orient } from '@/engine/cnc/setups/orient';
@@ -341,6 +341,7 @@ export type JobFindingCode =
   | 'thread-too-deep'
   | 'thread-through-unavailable'
   | 'thread-pilot-unproven'
+  | 'thread-pilot-drilled'
   | 'thread-flute-unproven'
   // #841 — the cutter's named pitch, and an external thread's boss.
   | 'thread-pitch-mismatch'
@@ -3098,15 +3099,31 @@ export function validateJob(
         });
       }
 
-      if (!external) findings.push({
-        severity: 'warning',
-        code: 'thread-pilot-unproven',
-        labelId: thread.id,
-        message:
-          `${who} assumes a ⌀${minor} mm pilot (${thread.size} basic minor) at least ` +
-          `${Number((thread.depth + pitch).toFixed(3))} mm deep is ALREADY in the blank. This program ` +
-          `cuts the thread only and never the pilot (D1); drill and measure the pilot first.`,
-      });
+      if (!external) {
+        // #902 — the counterpart of the boss check above: a pilot this job's OWN shapes model
+        // (an earlier drill) is PROVEN rather than assumed; one it does not model gets the plain
+        // sentence, not a vague "unproven".
+        const neededPilotDepth = Number((thread.depth + pitch).toFixed(3));
+        const pilot = threadPilot(job, thread.position, minor, neededPilotDepth);
+        if (pilot === null) {
+          findings.push({
+            severity: 'warning',
+            code: 'thread-pilot-unproven',
+            labelId: thread.id,
+            message: `${who} has no pilot drill for the thread; add one before threading ` +
+              `(a ⌀${minor} mm hole, ${thread.size} basic minor, at least ${neededPilotDepth} mm deep).`,
+          });
+        } else {
+          findings.push({
+            severity: 'info',
+            code: 'thread-pilot-drilled',
+            labelId: thread.id,
+            message:
+              `${who} is cut into ${pilot.what}, which this job bores ` +
+              `${pilot.boredBy.earlier ? 'in an earlier program' : 'first'}.`,
+          });
+        }
+      }
 
       if (threadTool !== null && threadTool.fluteLength === null) {
         findings.push({

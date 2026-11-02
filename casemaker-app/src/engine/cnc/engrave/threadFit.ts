@@ -186,6 +186,47 @@ export function threadBoss(job: EngraveJob, position: { x: number; y: number }):
   return null;
 }
 
+export interface ThreadPilot {
+  diameterMm: number;
+  /** The words a sentence names it by: `circle "pilot" (⌀2.5 mm)`. */
+  what: string;
+  /** The item that bores it, and whether it happens in an EARLIER program of the run. */
+  boredBy: { id: string; earlier: boolean };
+}
+
+/**
+ * #902 — the pilot hole an INTERNAL thread at `position` already has modelled, or null. The
+ * counterpart of {@link threadBoss} for the hole a tapped thread needs rather than the boss an
+ * external one stands on: a plain circle POCKET (no `prism`, not a `construction` reference — see
+ * `threadBoss`'s own "a plain circle pocket is a hole, not a boss") centred on the thread's axis,
+ * wide enough for the minor-diameter pilot and deep enough for the thread plus its run-out.
+ *
+ * `job.cutEarlier` is the same construction-copy list `threadBoss.raisedBy.earlier` reads: present
+ * when THIS program's own sub-job already carries the pilot as an earlier program's cut.
+ */
+export function threadPilot(
+  job: EngraveJob,
+  position: { x: number; y: number },
+  minorMm: number,
+  neededDepthMm: number,
+): ThreadPilot | null {
+  const near = (a: number, b: number) => Math.abs(a - b) <= AXIS_EPS;
+  const earlier = new Set(job.cutEarlier ?? []);
+  for (const sh of job.shapes) {
+    if (sh.kind !== 'circle' || !sh.enabled) continue;
+    if (sh.construction === true || sh.prism !== undefined) continue;
+    if (!near(sh.position.x, position.x) || !near(sh.position.y, position.y)) continue;
+    if (sh.diameter + 1e-6 < minorMm) continue;
+    if (sh.depth + 1e-6 < neededDepthMm) continue;
+    return {
+      diameterMm: sh.diameter,
+      what: `circle${sh.name ? ` "${sh.name}"` : ''} (⌀${sh.diameter} mm)`,
+      boredBy: { id: sh.id, earlier: earlier.has(sh.id) },
+    };
+  }
+  return null;
+}
+
 /**
  * #848 — THE BOSS IS CUT BEFORE ITS THREAD. Reorders a plan's cutters so that a thread mill whose
  * external threads stand on a boss ANOTHER cutter of the plan raises comes after that cutter. Every

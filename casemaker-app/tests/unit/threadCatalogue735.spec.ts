@@ -141,7 +141,7 @@ describe('#735 item 2 — the thread program’s S/F come from the catalogue row
     expect(g.ok, `${g.stage}: ${JSON.stringify(g.errors)}`).toBe(true);
     const pilot = g.findings.find((f) => f.code === 'thread-pilot-unproven');
     expect(pilot?.severity).toBe('warning');
-    expect(pilot?.message).toContain('assumes a');
+    expect(pilot?.message).toContain('no pilot drill');
     expect(pilot?.message).toContain('pilot');
     expect(g.nc).not.toBeNull();
   });

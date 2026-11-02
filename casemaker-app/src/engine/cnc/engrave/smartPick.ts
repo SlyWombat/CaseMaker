@@ -152,8 +152,19 @@ export interface SmartPick {
   notes: string[];
 }
 
-const byDiameter = (a: ToolLibraryEntry, b: ToolLibraryEntry): number =>
-  (stated(a.tool) ?? 0) - (stated(b.tool) ?? 0);
+/**
+ * #902 — among cutters of the SAME stated width, one whose reach is KNOWN (a flute or shoulder
+ * length the record states) sorts first. Diameter alone ties a fully-specified real cutter with
+ * a built-in placeholder of the same width ("1 mm flat end… lengths unknown", `toolLibrary.ts`),
+ * and `Array.prototype.sort` is stable — so without this, which one `interesting()` (and the
+ * rest/clearance choices below) ends up holding depends only on which happened to be registered
+ * first, not on which one a holder-gate finding can actually clear.
+ */
+const byDiameter = (a: ToolLibraryEntry, b: ToolLibraryEntry): number => {
+  const d = (stated(a.tool) ?? 0) - (stated(b.tool) ?? 0);
+  if (d !== 0) return d;
+  return Number(reachOf(a) === null) - Number(reachOf(b) === null);
+};
 
 /** The canonical identity of a plan, for dedupe and for the evaluator's cache. */
 export function planKey(plan: CandidatePlan): string {
