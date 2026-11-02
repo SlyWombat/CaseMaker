@@ -124,6 +124,11 @@ test('#890 — a new job dismisses the previous session’s crash prompt', async
   await cm.ready();
   await expect(page.getByTestId('crash-banner')).toBeVisible();
 
+  // The toolbar's New belongs to a PRINT project (a CNC section, #686, hides it): open a board so
+  // the button is the one a person returning to the picker would press.
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+  });
   page.once('dialog', (dialog) => void dialog.accept());
   await page.getByTestId('new-project').click();
 
