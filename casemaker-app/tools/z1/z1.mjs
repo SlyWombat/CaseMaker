@@ -151,7 +151,7 @@ MOTION AND THE CONSOLE (#302). Two commands send a line you typed, which can mov
 
   node tools/z1/z1.mjs send    <host> "<line>" --i-am-at-the-machine [--trace <file>]
   node tools/z1/z1.mjs console <host> [--i-am-at-the-machine] [--interval <ms>] [--trace <file>]
-  node tools/z1/z1.mjs run     <host> <path> --i-am-at-the-machine [--interval <ms>] [--no-progress <ms>] [--trace <file>] [--json]
+  node tools/z1/z1.mjs run     <host> <path> --i-am-at-the-machine [--interval <ms>] [--no-progress <ms>] [--capture <file>] [--trace <file>] [--json]
 
 \`send\` refuses to run without --i-am-at-the-machine (/Fabrication.md §8: motion needs a person at
 the machine), and \`run\` asks for the same flag for the same reason. \`console\` asks for it once, in
@@ -192,7 +192,13 @@ before it sends \`M332\` — the one line it sends that the program did not ask 
 program never ran its own vacuum-off; if the abort goes unanswered, \`M332\` waits for a status poll to
 read \`Idle\` instead, and is NOT sent if none does. Three polls (\`run.missLimit\`) in a row with no reply at all end it
 too, non-zero: the socket is gone, and this tool cannot claim it stopped anything. The physical stop
-is still the stop.`);
+is still the stop.
+
+\`--capture <file>\` (#208 D3, #927, #935) writes one JSON record of the run: the wall clock from
+\`play\` to the last reply, every status poll with its own time and the machine's \`P:\` fields (state,
+percent, line, elapsed seconds), the outcome, the trace path, and \`config-get sd junction_deviation\`
+read on the same connection after the run. That is what the time model is checked against: the
+machine's own elapsed beside the wall clock. A normal \`run\` writes no capture.`);
 }
 
 /** The trace file for a session: one dated file per day unless --trace says otherwise. */
@@ -660,6 +666,11 @@ async function main() {
             let seenProgress = false;
             let misses = 0;
             let outcome = 'left';
+            // D3 (#208, #927, #935): every status reply, timestamped, so the machine's own `P:`
+            // elapsed can be compared with the wall clock and with the estimate. Captured only when
+            // asked for — a normal run writes nothing.
+            const capturePath = typeof flags.capture === 'string' ? resolve(flags.capture) : null;
+            const trail = [];
             let last = { state: null, line: null, percent: null, elapsedS: null };
             // The status poll's floor is measured from the PREVIOUS send, and the first one from `play`:
             // a `?` a second after starting a file is exactly the rate that faulted the controller on
@@ -708,6 +719,8 @@ async function main() {
                 }
                 const p = P.readJobProgress(out.text);
                 last = p;
+                trail.push({ n: polls, at: new Date().toISOString(), ms: Date.now() - playSentAt,
+                             state: p.state, percent: p.percent, line: p.line, elapsedS: p.elapsedS });
                 if (p.percent !== null) seenProgress = true;
                 process.stderr.write(
                   `  ${String(polls).padStart(3)}  ${p.state ?? '?'}  ${(p.percent === null ? '   ' : `${p.percent}`).padStart(3)}%` +
@@ -780,6 +793,36 @@ async function main() {
                 process.exitCode = 130;
                 break;
               }
+            }
+            if (capturePath !== null) {
+              // D3's companion key: the controller's own junction deviation, read (never set), on the
+              // connection the run already has. A refused read leaves it null — the capture's timing
+              // numbers stand without it.
+              let junctionDeviation = null;
+              try {
+                const jd = await P.readConfigKey(transport, conn, 'junction_deviation', { source: 'sd', windowMs: 2000 });
+                junctionDeviation = jd.ok ? jd.value : null;
+              } catch {
+                junctionDeviation = null;
+              }
+              const record = {
+                version: 1,
+                at: new Date().toISOString(),
+                host,
+                program: positional[2],
+                playLine,
+                intervalMs,
+                outcome,
+                polls,
+                wallSeconds: Math.round(((Date.now() - playSentAt) / 1000) * 1000) / 1000,
+                machineElapsedS: last.elapsedS,
+                junctionDeviation,
+                trace: file,
+                trail,
+              };
+              mkdirSync(dirname(capturePath), { recursive: true });
+              writeFileSync(capturePath, JSON.stringify(record, null, 2) + '\n');
+              process.stderr.write(`capture: ${capturePath} (${trail.length} poll(s), ${record.wallSeconds} s wall)\n`);
             }
             const why =
               outcome === 'finished'
