@@ -30,15 +30,17 @@ export const PROPOSED_TEXT_SIZE_MM = 10;
  * pocket proposed nothing at all. A first job is cut from the stick the shop has on the shelf, so
  * that is what the blank step opens on; the operator can change every number.
  *
- * The stick stands on its 36 × 100 face: 100 mm along X (between the jaws), 36 mm along Y, 36 mm
- * tall. That is the `block` form — squared stock — and its height is what puts it on the vise's
+ * THE STICK LIES ALONG THE JAWS: 100 mm along Y (the jaws are 100 mm long, a calipered product
+ * constant), 36 mm along X (between them). The other way round — 100 mm between the jaws — would
+ * need a maximum opening nobody has measured, so only this orientation rests on known numbers.
+ * That is the `block` form, worked on its 36 × 100 face; its 36 mm height puts it on the vise's
  * body (16 mm above the jaw tops) rather than on the 3.1 mm ledge.
  */
 export const HOUSE_STOCK = {
   form: 'block' as const,
   material: 'hardwood' as const,
-  length: 100,
-  width: 36,
+  length: 36,
+  width: 100,
   thickness: 36,
 } as const;
 

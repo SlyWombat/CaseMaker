@@ -180,8 +180,9 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     );
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('hardwood');
     expect(screen.getByTestId('start-wizard-form-block').getAttribute('aria-pressed')).toBe('true');
-    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('100');
-    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('36');
+    // The stick lies ALONG the jaws: 36 mm between them (X), 100 mm along them (Y), 36 tall.
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('36');
+    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('100');
     expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('36');
 
     await leaveStock();
@@ -195,7 +196,7 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     expect(job.labels).toHaveLength(1);
     expect(job.labels[0]).toMatchObject({ text: 'Hello', depth: 2 });
     expect(job.stock.material).toBe('hardwood');
-    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([100, 36, 36]);
+    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([36, 100, 36]);
   });
 
   it('a job that states its own material keeps it, and the blank is still the house’s stock', () => {

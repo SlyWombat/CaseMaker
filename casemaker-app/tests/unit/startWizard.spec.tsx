@@ -626,8 +626,9 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
       'The house’s stock: a 36 × 36 × 100 mm hardwood stick',
     );
-    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('100');
-    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('36');
+    // The stick lies ALONG the jaws: 36 mm between them (X), 100 mm along them (Y), 36 tall.
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('36');
+    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('100');
     expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('36');
 
     // …and the sentence goes the moment a number is the operator's own.

@@ -449,7 +449,7 @@ describe('#684 — a saved setup is the operator’s, not the stock’s recommen
 
     it('the 36 mm stick arrives on the vise body, 16 mm proud, and the line says so', () => {
       seedLocation(machineWith(null));
-      openHolding(measuredJob({ length: 100, width: 36, thickness: 36 }));
+      openHolding(measuredJob({ length: 36, width: 100, thickness: 36 }));
 
       expect(radio('block').checked).toBe(true);
       expect(rowText('block')).toContain('36 mm on the vise body — 16 mm proud of the jaw tops');
