@@ -54,7 +54,7 @@ import {
 import type { Tool } from '../tool';
 import { cuttingDiameter, cuttingRadiusForSweep } from '../tool';
 import { adaptiveSettings, type AdaptiveSettings } from './adaptive';
-import { roughingAdaptiveMoves, type LevelPlanner } from './rough3d';
+import { roughingAdaptiveMoves, type LevelPlanMemory, type LevelPlanner } from './rough3d';
 import { isMetalMaterial } from '../materials';
 import { GOAL_MERGE_TOLERANCE_MM, MoveStore } from './moveStore';
 import type { StockMaterial } from '@/types/engraveJob';
@@ -736,6 +736,11 @@ export interface RoughingOptions {
    * the adaptive rough uses it: the raster and the finishing passes have no independent levels.
    */
   planner?: LevelPlanner;
+  /**
+   * #881 — the budget the pool may size itself against: the page's stated memory (#889) and the
+   * program's own estimate. Absent → the pool's core rule alone.
+   */
+  memory?: LevelPlanMemory;
 }
 
 export interface SurfaceOpts {
@@ -989,6 +994,7 @@ async function chooseRough(
       hopZ,
       onLayer,
       ...(opts?.planner !== undefined ? { planner: opts.planner } : {}),
+      ...(opts?.memory !== undefined ? { memory: opts.memory } : {}),
     });
   // #868 — levels whose region repeated were not walked again; say so when it happened.
   const reuseWords = (reused: number): string =>

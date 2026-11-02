@@ -10,6 +10,7 @@
 
 import { planLevel, type LevelPlanRequest, type LevelPlanShared } from '@/engine/cnc/cam/rough3d';
 import { packMoves, packTransfers, type PackedMoves } from '@/engine/cnc/cam/movePack';
+import type { PoolSizing } from '@/engine/jobs/poolSizing';
 
 export interface PoolPlanMessage {
   id: number;
@@ -25,6 +26,15 @@ export interface PoolPlanReply {
   id: number;
   result: PackedLevelPlanResult;
 }
+
+/** #881 — the pool's answer to a `begin`: how many planners the budget allowed. */
+export interface PoolSizedReply {
+  kind: 'sized';
+  sizing: PoolSizing;
+}
+
+/** Everything the pool sends back up the channel. */
+export type PoolReply = PoolPlanReply | PoolSizedReply;
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<PoolPlanMessage>) => void) | null;

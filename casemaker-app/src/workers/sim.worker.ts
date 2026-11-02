@@ -26,6 +26,7 @@ import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } fr
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
 import { portLevelPlanner } from './sim/levelPlannerPort';
+import type { PoolSizing } from '@/engine/jobs/poolSizing';
 import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
 import { evaluatePlan } from './sim/planEvaluate';
 import { runSmartPick, type EngravePickSummary } from './sim/smartPickRun';
@@ -42,6 +43,12 @@ let session: SimSession | null = null;
  * Set once per worker lifetime by `setLevelPlanner`; absent, every level is planned here.
  */
 let levelPlanner: LevelPlanner | null = null;
+/**
+ * #881 — how many planners the last budgeted batch was allowed, as the pool stated it. The
+ * worker cannot apply the core rule itself (no `matchMedia` here), so it reports the pool's own
+ * answer — the run's Technical line quotes it.
+ */
+let levelPoolSizing: PoolSizing | null = null;
 async function getSession(): Promise<SimSession> {
   session ??= createSimSession(await getToplevel());
   return session;
@@ -92,7 +99,13 @@ const api = {
    * side), so no copy is made and the channel dies with this worker.
    */
   setLevelPlanner(port: MessagePort): void {
-    levelPlanner = portLevelPlanner(port);
+    levelPlanner = portLevelPlanner(port, (sizing) => {
+      levelPoolSizing = sizing;
+    });
+  },
+  /** #881 — how many planners the last budgeted batch allowed; null before one has run. */
+  levelPoolSizing(): PoolSizing | null {
+    return levelPoolSizing;
   },
   /**
    * Disposes any existing session first. A refused load leaves none — except when the runner

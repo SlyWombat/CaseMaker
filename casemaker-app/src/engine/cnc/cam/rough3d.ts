@@ -143,6 +143,8 @@ export interface AdaptiveRoughOptions {
    * a plan, which is what makes a parallel plan byte-identical to the serial one.
    */
   planner?: LevelPlanner;
+  /** #881 — the budget the pool may size itself against (`LevelPlanShared.memory`). */
+  memory?: LevelPlanMemory;
 }
 
 /** #881 — one level's planning request: plain data, so it can cross to a pool worker. */
@@ -166,6 +168,19 @@ export type LevelPlanResult =
   | { ok: true; moves: CamMove[]; maxEngagementMm: number }
   | { ok: false; reason: string };
 
+/**
+ * #881 — WHAT THE RUN MAY SPEND. The pool sizes itself from these numbers: each planner holds one
+ * level at a time, so `planners × largest level + parent` must stay inside the page's budget.
+ * #889 states the budget (640 MB on a computer, 256 MB on a phone) and the CAM states the
+ * program's own estimate; absent, the pool keeps its core rule alone.
+ */
+export interface LevelPlanMemory {
+  /** The page's stated budget for this program, bytes. */
+  budgetBytes: number;
+  /** The parent's estimated peak while the pool runs — the program the CAM is assembling, bytes. */
+  parentBytes: number;
+}
+
 /** The arguments every level shares — the same ones `planAdaptive` takes. */
 export interface LevelPlanShared {
   tool: Tool;
@@ -173,6 +188,8 @@ export interface LevelPlanShared {
   feed: number;
   plungeFeed: number;
   provenance?: AdaptiveProvenance;
+  /** #881 — the budget the pool may size itself against; absent → cores alone decide. */
+  memory?: LevelPlanMemory;
 }
 
 /**
@@ -263,6 +280,7 @@ export async function roughingAdaptiveMoves(
     feed: feeds.feed,
     plungeFeed: feeds.plungeFeed,
     ...(opts.provenance !== undefined ? { provenance: opts.provenance } : {}),
+    ...(opts.memory !== undefined ? { memory: opts.memory } : {}),
   };
 
   // ── THE SLOTS, in level order ────────────────────────────────────────────────────────────────

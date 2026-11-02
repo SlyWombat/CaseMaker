@@ -2,19 +2,41 @@
  * #881 — THE ROUGHING LEVEL POOL (main thread).
  *
  * `roughingAdaptiveMoves` plans each level independently; on a real goal that is the whole cost of
- * Generate. This pool runs those plans on `hardwareConcurrency - 1` dedicated workers (capped, and
- * one on a phone), fed over a MessagePort the sim worker holds. The sim worker never spawns
- * anything itself — nested workers are unreliable in WebKitGTK and Safari — and the main thread
- * only relays messages, so a blocked planner cannot freeze the UI.
+ * Generate. This pool runs those plans on dedicated workers, fed over a MessagePort the sim worker
+ * holds. The sim worker never spawns anything itself — nested workers are unreliable in WebKitGTK
+ * and Safari — and the main thread only relays messages, so a blocked planner cannot freeze the UI.
  *
  * A run is one MessageChannel: `beginRun()` returns the sim worker's end, the pool keeps the
  * other, and every request that arrives on it is handed to a free worker. `dispose()` (the app's
  * cancel path, `terminateSim`) kills the workers, so a cancelled Generate leaves nothing running.
+ *
+ * #881 — THE SIZE IS BUDGETED, NOT JUST COUNTED. Before its first plan the sim worker sends a
+ * `begin` message naming the largest level's cell count and, when #889 has stated one, the
+ * program's memory budget and the parent's own estimate. The pool then spawns exactly the number
+ * `memoryBoundPoolSize` allows — cores, the page's budget and `navigator.deviceMemory`, whichever
+ * is tightest — and waits to spawn at all until it knows: a `begin` with no budget keeps the core
+ * rule, and a pool spawned without one (an old caller) starts at the core cap on its first plan.
  */
 
-import type { LevelPlanRequest, LevelPlanShared } from '@/engine/cnc/cam/rough3d';
-import type { PoolPlanReply } from '@/workers/adaptivePool.worker';
+import type { LevelPlanRequest, LevelPlanMemory, LevelPlanShared } from '@/engine/cnc/cam/rough3d';
+import type { PoolPlanReply, PoolSizedReply } from '@/workers/adaptivePool.worker';
 import { packTransfers } from '@/engine/cnc/cam/movePack';
+import {
+  adaptivePoolSize,
+  estimateLevelPlannerBytes,
+  reportedDeviceMemory,
+  sizePool,
+  type PoolSizing,
+} from '@/engine/jobs/poolSizing';
+
+/** The run's memory facts, sent before its first plan (see the module comment). */
+export interface PoolBeginRequest {
+  kind: 'begin';
+  /** The largest level's covered cells: the per-planner peak's cost estimate. */
+  maxLevelCells: number;
+  /** #889's budget for this program; absent → the core rule alone. */
+  memory?: LevelPlanMemory;
+}
 
 /** One level's work, as it arrives from the sim worker. */
 export interface PoolPlanRequest {
@@ -24,24 +46,26 @@ export interface PoolPlanRequest {
   shared: LevelPlanShared;
 }
 
-/**
- * How many planners to run: one fewer than the machine's cores (the sim worker keeps one busy
- * assembling), never more than eight, and one on a phone — a coarse pointer is the app's own
- * signal that the device is a handset whose cores and battery are not ours to spend.
- */
-export function adaptivePoolSize(
-  nav: { hardwareConcurrency?: number } | undefined = typeof navigator === 'undefined' ? undefined : navigator,
-  coarsePointer: boolean = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches,
-): number {
-  if (coarsePointer) return 1;
-  const cores = Math.max(1, Math.floor(nav?.hardwareConcurrency ?? 2));
-  return Math.min(8, Math.max(1, cores - 1));
-}
+/** Everything the sim worker sends down the channel. */
+export type PoolMessage = PoolBeginRequest | PoolPlanRequest;
 
 interface WorkerSlot {
   worker: Worker;
   /** The request it is planning, or null while idle. */
   busyWith: number | null;
+}
+
+/** The last decision a run stated, for the Technical line; null until a budgeted run begins. */
+let lastSizing: PoolSizing | null = null;
+
+/** What the last budgeted run allowed (the panel's Technical line reads this). */
+export function lastPoolSizing(): PoolSizing | null {
+  return lastSizing;
+}
+
+/** A test's reset — the panel's line must not outlive the run it describes. */
+export function forgetPoolSizing(): void {
+  lastSizing = null;
 }
 
 export class AdaptivePool {
@@ -52,10 +76,13 @@ export class AdaptivePool {
   private readonly pending = new Map<number, PoolPlanRequest>();
   private out: MessagePort | null = null;
 
-  private readonly size: number;
+  /** The core rule's answer: the most workers this machine may have. */
+  private readonly coreCap: number;
+  /** What the last `begin` said this run may spend; null → no budget stated. */
+  private sizing: PoolSizing | null = null;
 
-  constructor(size: number = adaptivePoolSize()) {
-    this.size = size;
+  constructor(coreCap: number = adaptivePoolSize()) {
+    this.coreCap = Math.max(1, Math.floor(coreCap));
   }
 
   /** Start a run: the returned port goes to the sim worker, transferred. */
@@ -63,9 +90,12 @@ export class AdaptivePool {
     this.dispose();
     const channel = new MessageChannel();
     this.out = channel.port1;
-    this.out.onmessage = (event: MessageEvent<PoolPlanRequest>) => this.enqueue(event.data);
+    this.out.onmessage = (event: MessageEvent<PoolMessage>) => {
+      const message = event.data;
+      if (message.kind === 'begin') this.onBegin(message);
+      else this.enqueue(message);
+    };
     this.out.start();
-    this.ensureWorkers();
     return channel.port2;
   }
 
@@ -76,13 +106,66 @@ export class AdaptivePool {
     this.idle.length = 0;
     this.queue.length = 0;
     this.pending.clear();
+    this.sizing = null;
     this.out?.close();
     this.out = null;
   }
 
-  private ensureWorkers(): void {
-    if (this.slots.length > 0 || this.size <= 0) return;
-    for (let i = 0; i < this.size; i++) this.slots.push(this.newSlot(i));
+  /** The number of planners this run settled on (after `begin`; the core cap before). */
+  get planners(): number {
+    return this.sizing?.planners ?? this.coreCap;
+  }
+
+  /** The run's decision — null until a `begin` with a budget arrives. */
+  get decision(): PoolSizing | null {
+    return this.sizing;
+  }
+
+  /**
+   * A run's memory facts: size the pool from them and spawn it. Every `planLevels` batch begins
+   * with one, so a later program in the same worker may re-size the pool — the CAM awaits each
+   * batch, so no level is ever in flight when this runs.
+   */
+  private onBegin(message: PoolBeginRequest): void {
+    const levelBytes = estimateLevelPlannerBytes(message.maxLevelCells);
+    if (message.memory === undefined) {
+      this.sizing = null;
+      this.resizeWorkers(this.coreCap);
+      return;
+    }
+    const decision = sizePool({
+      budgetBytes: message.memory.budgetBytes,
+      parentBytes: message.memory.parentBytes,
+      levelBytes,
+      coreCap: this.coreCap,
+      ...(reportedDeviceMemory() === undefined ? {} : { deviceMemoryGb: reportedDeviceMemory() }),
+    });
+    this.sizing = decision;
+    lastSizing = decision;
+    // The sim worker cannot apply the core rule itself (a worker has no `matchMedia`), so the
+    // pool states the answer back: it is the one authority on how many planners were allowed.
+    this.out?.postMessage({ kind: 'sized', sizing: decision } satisfies PoolSizedReply);
+    this.resizeWorkers(decision.planners);
+  }
+
+  /**
+   * Spawn exactly `size` workers (idle and waiting), replacing any others. A resize with a level
+   * in flight keeps the pool it has: the size takes effect when the pool is next idle, and a
+   * running level is never terminated to satisfy a budget it has already spent.
+   */
+  private resizeWorkers(size: number): void {
+    const wanted = Math.max(1, Math.floor(size));
+    if (this.slots.length === wanted) return;
+    if (this.slots.some((slot) => slot.busyWith !== null)) return;
+    for (const slot of this.slots) slot.worker.terminate();
+    this.slots = [];
+    this.idle.length = 0;
+    for (let i = 0; i < wanted; i++) {
+      this.slots.push(this.newSlot(i));
+      // A fresh worker is idle: without this the queue never reaches one.
+      this.idle.push(i);
+    }
+    this.pump();
   }
 
   private newSlot(index: number): WorkerSlot {
@@ -104,6 +187,8 @@ export class AdaptivePool {
     if (this.out === null) return;
     // The id is the SIM WORKER's, so its replies can be matched back to its own request array.
     this.pending.set(message.id, message);
+    // A caller that never sent a `begin` (an older sim worker) still gets its core-sized pool.
+    if (this.slots.length === 0) this.resizeWorkers(this.coreCap);
     // #881 — LONGEST FIRST. Every level is independent and the pool assembles by index, so the
     // order jobs leave this queue has no effect on the result — only on the makespan's tail. The
     // level's cell count is the cost estimate, and the biggest levels start first.
@@ -155,3 +240,6 @@ export class AdaptivePool {
     this.pump();
   }
 }
+
+// Keep the core rule importable from here as before (the spec and any caller that predates it).
+export { adaptivePoolSize };

@@ -11,8 +11,19 @@
  */
 
 import type { LevelPlanRequest, LevelPlanResult, LevelPlanShared, LevelPlanner } from '@/engine/cnc/cam/rough3d';
-import type { PoolPlanReply } from '@/workers/adaptivePool.worker';
+import type { PoolPlanReply, PoolReply } from '@/workers/adaptivePool.worker';
+import type { PoolSizing } from '@/engine/jobs/poolSizing';
 import { unpackMoves } from '@/engine/cnc/cam/movePack';
+
+/**
+ * #881 — the run's memory facts, posted before the batch's plans. `maxLevelCells` is the largest
+ * level's covered cells; `memory` is absent when the CAM has no budget to state.
+ */
+interface OutgoingBegin {
+  kind: 'begin';
+  maxLevelCells: number;
+  memory?: NonNullable<LevelPlanShared['memory']>;
+}
 
 interface OutgoingPlan {
   kind: 'plan';
@@ -21,17 +32,28 @@ interface OutgoingPlan {
   shared: LevelPlanShared;
 }
 
-/** Wrap the sim worker's port as the CAM's planner. */
-export function portLevelPlanner(port: MessagePort): LevelPlanner {
+/**
+ * Wrap the sim worker's port as the CAM's planner. `onSized` hears the pool's answer to the
+ * `begin` — the number of planners the budget allowed — whenever a budgeted batch is planned;
+ * the run's Technical line states it.
+ */
+export function portLevelPlanner(port: MessagePort, onSized?: (sizing: PoolSizing) => void): LevelPlanner {
   let nextId = 1;
   return {
     planLevels(requests, shared, onPlanned) {
       if (requests.length === 0) return Promise.resolve([]);
+      let maxLevelCells = 0;
+      for (const request of requests) maxLevelCells = Math.max(maxLevelCells, request.cells ?? 0);
       return new Promise<readonly LevelPlanResult[]>((resolve) => {
         const results: (LevelPlanResult | undefined)[] = new Array(requests.length);
         let done = 0;
-        const onMessage = (event: MessageEvent<PoolPlanReply>): void => {
-          const { id, result } = event.data;
+        const onMessage = (event: MessageEvent<PoolReply>): void => {
+          const data = event.data;
+          if ('kind' in data && data.kind === 'sized') {
+            onSized?.(data.sizing);
+            return;
+          }
+          const { id, result } = data as PoolPlanReply;
           // The id is the request's own position among this run's ids; map it back through the
           // ids the planner handed out when it posted them.
           const slot = idToSlot.get(id);
@@ -53,6 +75,12 @@ export function portLevelPlanner(port: MessagePort): LevelPlanner {
         const idsUsed: number[] = [];
         port.addEventListener('message', onMessage);
         port.start();
+        const begin: OutgoingBegin = {
+          kind: 'begin',
+          maxLevelCells,
+          ...(shared.memory === undefined ? {} : { memory: shared.memory }),
+        };
+        port.postMessage(begin);
         for (const [slot, request] of requests.entries()) {
           const id = nextId++;
           idToSlot.set(id, slot);
