@@ -38,7 +38,10 @@ def arg_parse():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--repo', required=True, help='the worktree checked out at the sha to judge')
     p.add_argument('--sha', help='the sha the page states (default: the repo HEAD; must match it)')
-    p.add_argument('--location', default=os.path.expanduser('~/casemaker-manager/demo-build/location.json'))
+    p.add_argument('--location', default=os.path.expanduser('~/casemaker-manager/demo-build/location.json'),
+                   help='the demo full-library location (demo cards: any catalogue cutter may be chosen)')
+    p.add_argument('--k3-location', default=os.path.expanduser('~/casemaker-manager/demo-build/k3/location.json'),
+                   help='the k3 house export (sample cards: owned cutters only, as the bench will run them)')
     p.add_argument('--catalogue', default=os.path.expanduser('~/casemaker-manager/demo-build/catalogue.json'))
     p.add_argument('--out', default=os.path.expanduser('~/casemaker-manager/demo-build'))
     p.add_argument('--meshes', default=os.environ.get('CM_MESHES', '/mnt/c/projects/Case Maker/samples/3d'),
@@ -226,8 +229,19 @@ def goal_picture(prefix, stock):
     return out_path
 
 
-def run_card(c, args, sha, loc, cat):
+def card_location(c, args):
+    """The location a card is judged on: the sample cards are real cuts, so they run on the k3 house
+    export (owned cutters only); the demo cards keep the full-library demo location."""
+    path = args.k3_location if c.get('location') == 'k3' else args.location
+    doc = read_json(path) or {}
+    return path, doc
+
+
+def run_card(c, args, sha, cat):
     rid = c['id']
+    loc, loc_doc = card_location(c, args)
+    os.environ['CM_LOCATION'] = loc
+    c = dict(c, locationName=str(loc_doc.get('name')), locationCutters=len(loc_doc.get('inventory') or []))
     job = os.path.join(JOBS, c['job'])
     rundir = os.path.join(args.out, 'runs', sha, rid)
     assets = os.path.join(rundir, 'assets')
@@ -353,6 +367,7 @@ def job_stock(job_path):
 
 
 def page(cards, args, sha, loc, cat):
+    k3 = read_json(args.k3_location) or {}
     # The gate table keeps computed verdicts only; a card the interim check cannot measure waits in
     # its own appendix until #924's oracle can say something about it.
     gate = [c for c in cards if c.get('verdict') != 'unchecked']
@@ -379,8 +394,9 @@ def page(cards, args, sha, loc, cat):
   the job’s own design (outline overlay and under/over numbers), the app’s goal heightfield (deviation map and
   coverage), or a reference program swept the same way. No maker’s photo decides a verdict; the source line is
   provenance only.</p>
-  <p class="meta">Case Maker main <b>{html.escape(sha)}</b> · location {html.escape(str(loc.get('id')))} “{html.escape(str(loc.get('name')))}”,
-  {len(loc.get('inventory') or [])} cutters in the location · catalogue {len(cat.get('tools') or [])} cutters / {len(cat.get('feeds') or [])} feed rows,
+  <p class="meta">Case Maker main <b>{html.escape(sha)}</b> · demo cards on {html.escape(str(loc.get('id')))} “{html.escape(str(loc.get('name')))}”
+  ({len(loc.get('inventory') or [])} cutters) · sample cards on “{html.escape(str(k3.get('name')))}” ({len(k3.get('inventory') or [])} owned cutters, the k3 export) ·
+  catalogue {len(cat.get('tools') or [])} cutters / {len(cat.get('feeds') or [])} feed rows,
   synced {html.escape(str(cat.get('syncedAt')))} · built {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · no machine was used</p>
   <p class="meta">The design check is this repo’s own sweep against the job’s design until #924 lands (the app’s
   independent oracle). The page is rebuilt on the pinned sha at every wave end; one command rebuilds it —
@@ -448,7 +464,7 @@ def page(cards, args, sha, loc, cat):
                       f"<tr><th>item</th><th>kind</th><th>depth mm</th><th>left</th><th>deep/over</th><th>reach</th></tr>{irows}</table></div></details>")
         body.append(f'''<article class="job" id="{html.escape(c['id'])}">
   <div class="job-head">
-    <p class="eyebrow">{html.escape(c['material'])} · {html.escape(c['kind'])} check · {html.escape(c['job'])}{' · local-input' if c.get('input') == 'local' else ''}</p>
+    <p class="eyebrow">{html.escape(c['material'])} · {html.escape(c['kind'])} check · {html.escape(c['job'])}{' · local-input' if c.get('input') == 'local' else ''} · {html.escape(str(c.get('locationName', '')))} ({c.get('locationCutters', 0)} cutters)</p>
     <h2>{html.escape(c['title'])}</h2>
     <p class="src">{html.escape(c['id'])} · source: {html.escape(c.get('source', ''))}</p>
   </div>
@@ -489,7 +505,7 @@ def main():
     for i, c in enumerate(todo, 1):
         print(f'[{i}/{len(todo)}] {c["id"]} {c["job"]}', flush=True)
         try:
-            card = run_card(c, args, sha, args.location, cat)
+            card = run_card(c, args, sha, cat)
         except Exception as e:                        # keep going: one broken card must not lose the page
             card = dict(c, verdict='error', sentence=f'{type(e).__name__}: {e}', figures=[], numbers={})
         print(f'    {card.get("verdict")}: {card.get("sentence")}', flush=True)
@@ -499,6 +515,10 @@ def main():
     manifest = {'sha': sha, 'builtAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
                 'location': {'path': args.location, 'id': loc.get('id'), 'name': loc.get('name'),
                              'cutters': len(loc.get('inventory') or [])},
+                'k3Location': {'path': args.k3_location,
+                               'id': (read_json(args.k3_location) or {}).get('id'),
+                               'name': (read_json(args.k3_location) or {}).get('name'),
+                               'cutters': len((read_json(args.k3_location) or {}).get('inventory') or [])},
                 'catalogue': {'path': args.catalogue, 'syncedAt': cat.get('syncedAt'),
                               'cutters': len(cat.get('tools') or []), 'rows': len(cat.get('feeds') or [])},
                 'appendix': [{'card': a, 'why': b} for a, b in APPENDIX],
