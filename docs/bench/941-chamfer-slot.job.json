@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 3,
+  "id": "job-941-chamfer-slot",
+  "name": "Milestone 1 sample 5: chamfer the top edges, then a through-slot",
+  "machineId": "Z1",
+  "stock": {
+    "length": 36,
+    "width": 100,
+    "thickness": 36,
+    "material": "hardwood"
+  },
+  "labels": [],
+  "shapes": [
+    {
+      "id": "stick",
+      "kind": "rect",
+      "position": {
+        "x": 18,
+        "y": 50
+      },
+      "rotation": 0,
+      "depth": 36,
+      "enabled": true,
+      "width": 36,
+      "height": 100,
+      "cornerRadius": 0,
+      "construction": true
+    },
+    {
+      "id": "slot",
+      "kind": "rect",
+      "position": {
+        "x": 18,
+        "y": 50
+      },
+      "rotation": 0,
+      "depth": 10,
+      "enabled": true,
+      "width": 36,
+      "height": 6,
+      "cornerRadius": 0
+    }
+  ],
+  "toolKey": "",
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": 16,
+      "seat": "floor",
+      "fixedJawThickness": 10,
+      "movingJawThickness": 10,
+      "jawLength": 100,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 0.5
+    }
+  },
+  "minFloor": 1,
+  "edgeMargin": 0,
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "jawClearance": 0,
+  "customFonts": [],
+  "chamfers": [
+    {
+      "kind": "chamfer",
+      "id": "bevel",
+      "enabled": true,
+      "of": "stick",
+      "side": "outside",
+      "width": 1
+    }
+  ]
+}

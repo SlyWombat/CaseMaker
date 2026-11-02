@@ -43,6 +43,7 @@ import { parseGcode, setupFromHeader, stubSetup, type Setup } from '@/engine/cnc
 import { toolFromMkrRecord } from '@/engine/cnc/tool';
 import type { Vec3 } from '@/types/units';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { NO_TOOL_KEY } from '@/engine/cnc/toolRegistry';
 import {
   buildRunSheet,
   runSheetDiagramSvg,
@@ -618,6 +619,61 @@ m1Sample3.drills = [
 m1Sample3.workholding = { kind: 'vise', vise: { ...m1Base.workholding.vise } };
 writeFileSync(join(outDir, '939-pocket-bores.job.json'), JSON.stringify(m1Sample3, null, 2) + '\n');
 console.log('\n#939 sample 3 job written: 939-pocket-bores.job.json');
+
+// ---------------------------------------------------------------------------------------------
+// #940 — sample 4: one job, two cutters — a pocket, then the initials on its floor
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The pocket is 24 x 24 x 6 (r 3) and the initials "CM" are 10 mm cap, 0.8 mm into its floor — a
+ * label's depth is measured from the stock's TOP face (#748), so 6.8. No cutter is named: the app's
+ * one-job path (#746) picks each program's cutter, and on 3c58b91e it picks a 3.175 flat for the
+ * pocket and flat-1.0 for the initials. Pinning the V/chamfer bit fails the pocket (a 90° cone
+ * reaches 1.588 mm), so the app's own plan is the only one that posts.
+ */
+const m1Sample4 = defaultEngraveJob();
+m1Sample4.id = 'job-940-two-cutter';
+m1Sample4.name = 'Milestone 1 sample 4: pocket and V-carved initials on its floor';
+m1Sample4.stock = { ...M1_STICK, material: 'hardwood' };
+m1Sample4.toolKey = NO_TOOL_KEY;
+m1Sample4.labels = [
+  { id: 'initials', text: 'CM', font: 'barlow', weight: 'bold', size: 10, position: { x: 18, y: 50 }, rotation: 0, depth: 6.8, enabled: true },
+];
+m1Sample4.shapes = [
+  { id: 'pocket', kind: 'rect', position: { x: 18, y: 50 }, rotation: 0, depth: 6, enabled: true, width: 24, height: 24, cornerRadius: 3 },
+];
+m1Sample4.workholding = { kind: 'vise', vise: { ...m1Base.workholding.vise } };
+writeFileSync(join(outDir, '940-two-cutter.job.json'), JSON.stringify(m1Sample4, null, 2) + '\n');
+console.log('\n#940 sample 4 job written: 940-two-cutter.job.json');
+
+// ---------------------------------------------------------------------------------------------
+// #941 — sample 5: the edges leave the stock — a 1 x 45° bevel, then a through-slot
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The bevel is the OUTSIDE of a construction rect the size of the stock's top face (the #941
+ * adaptation of j16's part-outline chamfer). The slot is 6 mm wide and 10 mm deep across the full
+ * 36 mm width, so its exits are outside the stock: `edgeMargin` 0 is the design's own statement
+ * that the cut reaches the edge, and `jawClearance` 0 is needed because the plan-view jaw check is
+ * 2D and cannot see that the slot's floor (10 below the top) is still 6 mm ABOVE the jaw tops
+ * (stockProud 16 on the floor seat). Both are recorded in the job file, not hidden.
+ */
+const m1Sample5 = defaultEngraveJob();
+m1Sample5.id = 'job-941-chamfer-slot';
+m1Sample5.name = 'Milestone 1 sample 5: chamfer the top edges, then a through-slot';
+m1Sample5.stock = { ...M1_STICK, material: 'hardwood' };
+m1Sample5.toolKey = NO_TOOL_KEY;
+m1Sample5.labels = [];
+m1Sample5.edgeMargin = 0;
+m1Sample5.jawClearance = 0;
+m1Sample5.shapes = [
+  { id: 'stick', kind: 'rect', position: { x: 18, y: 50 }, rotation: 0, depth: 36, enabled: true, width: 36, height: 100, cornerRadius: 0, construction: true },
+  { id: 'slot', kind: 'rect', position: { x: 18, y: 50 }, rotation: 0, depth: 10, enabled: true, width: 36, height: 6, cornerRadius: 0 },
+];
+m1Sample5.chamfers = [{ kind: 'chamfer', id: 'bevel', enabled: true, of: 'stick', side: 'outside', width: 1 }];
+m1Sample5.workholding = { kind: 'vise', vise: { ...m1Base.workholding.vise } };
+writeFileSync(join(outDir, '941-chamfer-slot.job.json'), JSON.stringify(m1Sample5, null, 2) + '\n');
+console.log('\n#941 sample 5 job written: 941-chamfer-slot.job.json');
 
 // ---------------------------------------------------------------------------------------------
 // #185 — the V-groove reach test: HAND-WRITTEN, because the pipeline cannot generate it
