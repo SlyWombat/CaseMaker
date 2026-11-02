@@ -5,12 +5,12 @@
 // stamp reads "no date" rather than a date the card made up.
 //
 // The card is the fake console's: `ls -e -s` answers its seeded listing and `rm` takes an entry
-// away, through the house HTTP bridge the app itself uses. Nothing here ships.
-import { houseServerPort } from '../../scripts/e2ePort';
+// away, through the LAN bridge the app itself uses. Nothing here ships.
+import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 
-test.use({ baseURL: `http://127.0.0.1:${houseServerPort()}` });
+test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 
 const STATUS = '<Idle|MPos:-1,-1,-1|WPos:0,0,0>';
 

@@ -2,13 +2,13 @@
 // below Console and could not be reached at all: `.mmain` is `overflow: hidden` and the Machines
 // page never wrapped its body in `.mscroll` (Tools and Accessories already did). The wrapper is
 // the fix; this walk is the proof a person can get to the bottom of the card at 1280×800.
-import { houseServerPort } from '../../scripts/e2ePort';
+import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect } from './fixtures/caseMaker';
 
 // The machine card's Files console exists only where the app can open a socket to a machine, so
-// this spec runs against the house-mode server Playwright starts beside the web one — the same
+// this spec runs against the LAN server Playwright starts beside the web one — the same
 // door `runStates.spec.ts` uses.
-test.use({ baseURL: `http://127.0.0.1:${houseServerPort()}` });
+test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 
 test('#885 — the Machines page scrolls, so the files on the card can be reached', async ({ cm, page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
