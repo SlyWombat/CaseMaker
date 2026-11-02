@@ -29,7 +29,8 @@
  */
 import ManifoldModule, { type ManifoldToplevel } from 'manifold-3d';
 
-import { FeedCatalogueSchema, withCatalogueGeometry, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { FeedCatalogueSchema, withCatalogueGeometry, type FeedCatalogueRow, type StoredFeedRow } from '@/engine/cnc/feeds';
+import { installLocationFeedsTable } from '@/engine/cnc/engrave/feeds';
 import { ToolLibrarySchema, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '@/engine/fonts/registry';
@@ -189,6 +190,14 @@ export interface LoadedLocation {
   accessories: FixtureRecord[];
   /** The shop's tunable defaults (#416/#417); null for a house file or a document without them. */
   defaults: ShopDefaults | null;
+  /**
+   * #922 — the location's own feeds table (its `feeds` section), already installed as what
+   * `feedsFor` resolves against by default (`installLocationFeedsTable`, called below). Empty for
+   * a house file, which has no such section, or a location that states none; carried here too so a
+   * caller that builds its own `EngraveShopOpts.feeds` (the CLI does, to match the browser's worker
+   * call) reads it from the same place rather than reaching into `engine/cnc/feeds.ts` itself.
+   */
+  feeds: readonly StoredFeedRow[];
 }
 
 /**
@@ -225,6 +234,7 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
   let kind: LoadedLocation['kind'];
   let defaults: ShopDefaults | null;
   let accessories: FixtureRecord[];
+  let feeds: StoredFeedRow[];
   const location = checkLocationImport(raw);
   if (location.kind === 'refused') throw new LocationDocumentError(`${found}: ${location.reason}`);
   if (location.kind === 'location') {
@@ -238,6 +248,11 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
     // #436 — the shop's own rest-machining numbers live here, not in the source. A document that
     // predates the section reads as `{}`, which `readDefault` answers with the labelled fallback.
     defaults = location.doc.defaults;
+    // #922 — the shop's own feeds table, exactly as `store/feedTableStore.ts` reads it for the
+    // browser. A document from before #450 slice 2 reads as `[]` (the schema's own default), which
+    // `installLocationFeedsTable` below reads the same way an absent service answer does: the
+    // compiled starting table stands.
+    feeds = location.doc.feeds;
     name = location.doc.name;
     kind = 'location';
   } else {
@@ -264,10 +279,19 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
     name = null;
     kind = 'house';
     defaults = null;
+    // A house file (pre-#412) has no feeds section at all — not "states none", but "does not say",
+    // the same distinction `accessories`/`stock` already draw. The compiled table stands.
+    feeds = [];
   }
   setRegistry(tools);
   setInventoryEntries(inventory.map(inventoryEntryFor));
-  return { path: found, kind, name, tools, inventory, machines, stock, accessories, defaults };
+  // #922 — install the shop's own table (or clear it, for a house file) as what `feedsFor` resolves
+  // against by default, the same way `store/feedTableStore.ts` does for the browser after every
+  // read. This is what makes `casemaker cut` resolve feeds, step-down and rpm against the location's
+  // real numbers instead of the compiled starting table, for a pick as well as for a generated
+  // program — see `engrave/feeds.ts`'s module doc.
+  installLocationFeedsTable(feeds);
+  return { path: found, kind, name, tools, inventory, machines, stock, accessories, defaults, feeds };
 }
 
 // ---------------------------------------------------------------------------------------------
