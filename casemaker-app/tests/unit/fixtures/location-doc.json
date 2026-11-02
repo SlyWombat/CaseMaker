@@ -928,6 +928,27 @@
       "unit": "mm",
       "note": "chosen, not measured: how far a measured blank may differ from the job's stated size before the sheet says change the job and regenerate"
     },
+    "rough3d.adaptiveDepthRatio": {
+      "value": 1.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: how deep a goal must cut, as a multiple of the cutter's diameter, before the adaptive rough is preferred to the raster by rule"
+    },
+    "rough3d.compareCellBudget": {
+      "value": 1000000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "cells",
+      "note": "chosen, not measured: above this many covered cells the two roughs are not both planned; the depth rule chooses and the run sheet says the comparison was skipped"
+    },
+    "rough3d.planBudgetCellLevels": {
+      "value": 500000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "cell-levels",
+      "note": "chosen, not measured: above this much planning work (covered cells x roughing layers) the goal keeps the raster, because the adaptive rough is planned one level at a time and costs about 100 us per cell-level \u2014 13.8 minutes on a 2.4M cell-level goal, measured 2026-11-01"
+    },
     "run.missLimit": {
       "value": 3.0,
       "source": "seeded",
