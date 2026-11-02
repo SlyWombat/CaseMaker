@@ -33,6 +33,7 @@ import {
 } from '@/engine/cnc/fixture';
 import { ROD_VISE_MAX_LENGTH_MM } from '@/engine/cnc/stockStart';
 import { rotaryStockFits } from '@/engine/cnc/setups/plan';
+import { millModelById } from '@/engine/cnc/machine';
 import type { SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { TAPE_DEFAULTS, defaultBracketHold, defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
 import {
@@ -349,6 +350,9 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
   const boardMm = args.boardMm ?? DEFAULT_BOARD_MM;
   const now = machineNow(machine);
   const current: MachineMountKind = now?.mount ?? 'vise';
+  // #877 — a STATED machine has no fourth axis. Its rod stock must not be judged against the Z1's
+  // envelope: the fallback is for "no machine described", not for "this machine has none".
+  const stated = machine?.profileId != null && millModelById(machine.profileId)?.frameState === 'stated';
   const envelope = args.rotaryEnvelope ?? Z1_ROTARY_ENVELOPE;
   const out: MountOption[] = [];
 
@@ -420,6 +424,10 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         reason: `it would sit ${fmt(below)} mm below the jaw tops`,
         escape: null,
       });
+      continue;
+    }
+    if (mount === 'rotary' && stated) {
+      out.push({ ...base, hint: null, disabled: true, reason: 'this machine has no fourth axis', escape: null });
       continue;
     }
     if (mount === 'rotary' && !rotaryStockFits(stock, args.round === true, envelope)) {

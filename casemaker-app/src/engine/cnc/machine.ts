@@ -1060,6 +1060,24 @@ export function holderOf(machine: Mill): HolderProfile | null {
 }
 
 /**
+ * #877 — WHAT A MACHINE CAN DO ABOUT A FOURTH AXIS, for every caller that used to write
+ * `rotaryOf(...)?.envelope ?? <the Z1's numbers>`. That fallback confused "no machine described"
+ * with "a machine that has none": a STATED machine states three axes and its owner is never
+ * offered a chuck, so the Z1's envelope must not be applied to its rod stock.
+ */
+export type RotaryCapability =
+  | { kind: 'framed'; envelope: { diameter: number; length: number } }
+  | { kind: 'none' }
+  | { kind: 'unknown' };
+
+export function rotaryCapability(machine: Mill | MillModel): RotaryCapability {
+  if (machine.frameState === 'read') {
+    return machine.rotary === undefined ? { kind: 'unknown' } : { kind: 'framed', envelope: machine.rotary.envelope };
+  }
+  return { kind: machine.frameState === 'stated' ? 'none' : 'unknown' };
+}
+
+/**
  * #845 — the rotary module a machine carries, if any. A stated machine states three axes
  * (`RotaryProfile` is a framed profile's), so it answers none: `undefined` is the same word a Z1
  * without the module uses, and every rotary reader already handles it.

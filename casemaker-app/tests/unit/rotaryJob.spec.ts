@@ -403,6 +403,21 @@ describe('the Holding step’s rotary option (#240 §2)', () => {
     expect(rotary!.escape).toBeNull();
   });
 
+  it('#877 — a stated machine has no fourth axis, and its rod is not judged against the Z1’s envelope', () => {
+    const options = mountOptions({
+      // The fixture location's machine, re-stated as a shipped GRBL preset.
+      machine: { ...rotaryMachine(), profileId: 'grbl:shapeoko-4' },
+      accessories: [...LOCATION_DOC.accessories, ROTARY],
+      // A rod that WOULD fit the Z1's ⌀80 × 150 envelope: the refusal must not be the stock's.
+      stock: { length: 60, width: 60, thickness: 60 },
+      round: true,
+    });
+    const rotary = options.find((o) => o.mount === 'rotary');
+    expect(rotary).toBeDefined();
+    expect(rotary!.disabled).toBe(true);
+    expect(rotary!.reason).toBe('this machine has no fourth axis');
+  });
+
   it('is available when the stock is round and fits the module', () => {
     const options = mountOptions({
       machine: rotaryMachine(),
