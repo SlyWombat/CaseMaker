@@ -101,7 +101,7 @@ describe('#880 the end-user documents carry no tracker entries and no repo paths
     it(`${doc}: diagrams are drawn, not typed`, () => {
       const text = docText(doc);
       const fenced = [...text.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1] ?? '');
-      const art = fenced.filter((block) => /[┌┐└┘─│├┤┬┴┼▶═║╔╗╚╝╠╣]/.test(block) || /\+\-{2,}/.test(block));
+      const art = fenced.filter((block) => /[┌┐└┘─│├┤┬┴┼▶═║╔╗╚╝╠╣]/.test(block) || /\+-{2,}/.test(block));
       expect(art, 'a box drawn in characters is a figure the app should draw (src/docs/img/)').toEqual([]);
     });
   }

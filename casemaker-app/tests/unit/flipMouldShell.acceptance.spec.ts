@@ -492,7 +492,7 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     // left, carried into its frame by the app's maps.
     const setup = toSetup(job, Z1);
     const session = createSimSession(tl);
-    let sideTwoStock = 0;
+    let sideTwoStock: number;
     let blankStock = 0;
     try {
       const r1 = session.load(out.programs[0]!.nc, setup, BALL_TOOL, Z1.id);

@@ -326,7 +326,7 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
       // A path arrives with the Controller's escaping, where 0x01 is a space; the name is the
       // last segment (`/sd/gcodes/<name>`), and removing a file the card does not hold answers
       // the shell's own refusal, which the app must not read as a delete.
-      const path = m[1]!.replace(/\u0001/g, ' ');
+      const path = m[1]!.replaceAll('\u0001', ' ');
       const name = path.slice(path.lastIndexOf('/') + 1);
       const held = files.some((f) => f.name === name);
       files = files.filter((f) => f.name !== name);
