@@ -31,7 +31,7 @@ import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { statedCuttingSize as stated } from '@/engine/cnc/tool';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
-import {
+import { cutterReachesAllCorners, orderCutterEntries,
   faceCutterOptions,
   faceWorkOf,
   goalRoughOptions,
@@ -258,7 +258,9 @@ export function candidatePlans(
   const seen = new Set<string>();
   const add = (given: CandidatePlan): void => {
     // #848 — a thread mill whose boss another cutter of the plan raises is cut AFTER that cutter.
-    const ordered = bossBeforeThread(job, given.cutters);
+    // #941 — THE JOB'S CUTTING ORDER APPLIES TO EVERY CANDIDATE: a stock-rim bevel precedes the
+    // cut that frees its edge, so the measured pick cannot post an order the rule forbids.
+    const ordered = orderCutterEntries(job, bossBeforeThread(job, given.cutters), (key) => tools.find((t) => t.key === key)?.tool.shape ?? null);
     const plan = ordered === given.cutters ? given : { ...given, cutters: [...ordered] };
     const key = planKey(plan);
     if (seen.has(key)) return;
@@ -525,6 +527,9 @@ export function candidatePlans(
   }
   // Rough + rest pairs: the rest owns no items — it is measured against the earlier program.
   for (const clearance of clearances.slice(0, 3)) {
+    // #941 — the rest is planned only when the clearance cutter cannot reach the design's
+    // corners; when it can, the corners are already right and the second program is not offered.
+    if (cutterReachesAllCorners(job, (stated(clearance.tool) ?? 0) / 2)) continue;
     for (const rest of restChoices) {
       if ((stated(rest.tool) ?? 0) >= (stated(clearance.tool) ?? 0) - 1e-9) continue;
       add(withOthers([{ key: clearance.key, items: flatItems }, { key: rest.key, items: [] }]));

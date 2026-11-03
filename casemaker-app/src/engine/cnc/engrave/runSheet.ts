@@ -95,6 +95,9 @@ import {
 import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
 import { cutterNameForKey, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor } from '@/engine/cnc/toolRegistry';
+import { setupTools, toolItemsFor } from '@/engine/cnc/engrave/jobSetup';
+import { cuttingDiameter } from '@/engine/cnc/tool';
+import { cutterReachesAllCorners } from '@/engine/cnc/engrave/cutterPlan';
 import { finishSourceWords, type FinishSettingSource } from '@/engine/cnc/engrave/finishPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, jobVise, viseEnvelope } from '@/engine/cnc/fixture';
@@ -2585,6 +2588,11 @@ function restPassSteps(facts: RestPassFacts): RunSheetStep[] {
     value: `${pct(rough.share)} of the design, ${dia(rough.diameter)}`,
   });
   steps.push({ text: rest.reason, value: dia(rest.diameter) });
+  // #941 — the slot-rest rule, stated: the corners are why. A rest planned for another reason
+  // carries no cornerRule and says nothing here.
+  if (facts.cornerRule !== undefined && facts.cornerRule !== null) {
+    steps.push({ text: facts.cornerRule, value: 'planned for the corners' });
+  }
 
   // The items program 1 does not contain at all. Saying so is the point: the operator's copy of the
   // first program has fewer regions in it than the file they imported, and an absence that is never
@@ -3460,7 +3468,9 @@ function chamferSteps(facts: RunSheetChamferFacts): RunSheetStep[] {
   return facts.items.map((item) => {
     const when =
       item.side === 'outside'
-        ? 'before the profile cuts the part free'
+        ? // #941 — the stock-edge bevel runs BEFORE the cut that frees its edge, and the programs
+          // are ordered that way; the sentence states the rule, not just the old intent.
+          'before any cut that frees its edge — the stock still supports it'
         : 'after the pocket that opens the rim';
     return {
       text:
@@ -3487,8 +3497,46 @@ function coreSteps(facts: RunSheetCoreFacts): RunSheetStep[] {
   }));
 }
 
+/**
+ * #941 — WHY A REST PROGRAM EXISTS, in the sheet's own words. A rest program is a cutter the setup
+ * assigned no items: it re-cuts the earlier program's leftovers. The plan offers it only when the
+ * rough cutter cannot reproduce the design's corners; when that is why, the sheet says so on the
+ * rest program's own section. (Runs whose first program is the rough state it in the "Two tools,
+ * one blank" narrative instead — `options.restPass` — so this is skipped there.)
+ */
+function restRuleFor(
+  job: EngraveJob,
+  programs: readonly RunSheetProgram[],
+  index: number,
+  restPassPresent: boolean,
+): string | null {
+  if (restPassPresent) return null;
+  const program = programs[index];
+  if (program === undefined) return null;
+  const setup = jobSetups(job)[program.setupIndex - 1];
+  if (setup === undefined) return null;
+  const keys = setupTools(setup, job);
+  const toolIndex = keys.indexOf(program.toolKey);
+  if (toolIndex < 0) return null;
+  if (toolItemsFor(setup, program.toolKey, toolIndex).length > 0) return null;
+  const roughKey = programs[index - 1]?.toolKey;
+  if (roughKey === undefined) return null;
+  const rough = entryFor(roughKey)?.tool ?? null;
+  const diameter = rough === null ? null : (cuttingDiameter(rough) ?? rough.tipDiameter ?? 0);
+  if (diameter === null || !(diameter > 0)) return null;
+  if (cutterReachesAllCorners(job, diameter / 2)) return null;
+  return (
+    `The rest pass is planned because the design’s corners are sharper than the rough cutter’s radius: ` +
+    `the ${Number(diameter.toFixed(2))} mm cutter cannot reproduce them, so this program cuts the inside corners.`
+  );
+}
+
 /** A later engraving program that carries no drill or rest facts of its own. */
-function engraveProgramSectionSteps(program: RunSheetProgram, number: number): RunSheetStep[] {
+function engraveProgramSectionSteps(
+  program: RunSheetProgram,
+  number: number,
+  restRule: string | null = null,
+): RunSheetStep[] {
   const cam = program.cam;
   return [
     {
@@ -3503,6 +3551,8 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
           ? 'no CAM summary was recorded'
           : `${cam.operations} operation${cam.operations === 1 ? '' : 's'} · about ${formatDuration(cam.estimatedSeconds)}`,
     },
+    // #941 — the slot-rest rule, on the rest program's own section: the corners are why.
+    ...(restRule === null ? [] : [{ text: restRule, value: 'planned for the corners' }]),
     // #940 — A LATER PROGRAM'S FEEDS ARE ITS OWN. Program 1's row is the sheet's opening feeds
     // step; a second program on another cutter (the sample-4 V-bit) states the row it ran and
     // where that row came from, so a substitution (a chamfer fed from a flat band at its base)
@@ -4832,7 +4882,11 @@ export function buildRunSheet(
             program.neckOnly === true
               ? `Cut, program ${number} — the neck for parting (${cutterNameForKey(program.toolKey)})`
               : `Cut, program ${number} — ${cutterNameForKey(program.toolKey)}`,
-          steps: engraveProgramSectionSteps(program, number),
+          steps: engraveProgramSectionSteps(
+            program,
+            number,
+            restRuleFor(job, runPrograms, number - 1, options.restPass !== undefined),
+          ),
         });
       }
       const opened = programSections[sectionStart];
