@@ -1,6 +1,6 @@
 # Run sheet — single
 
-Generated 2026-11-02 · file `single.nc` · sha256 `d3ab1a68` · estimated cutting time 4 min 56 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time.)
+Generated 2026-11-02 · file `single.nc` · sha256 `f510a4ce` · estimated cutting time «cycle» (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time.)
 
 ## 1 · What you need
 
@@ -67,7 +67,7 @@ Generated 2026-11-02 · file `single.nc` · sha256 `d3ab1a68` · estimated cutti
 ## 7 · Cut
 
 1. Spindle, feed, plunge, passes and step-down. Vacuum on. — **12000 RPM · 500 mm/min feed · 200 mm/min plunge · 2 depth passes — 1 × 0.998 mm, 1 × 0.985 mm · 0.3 mm step-over**
-2. Program 1, single.nc — the cycle is 4 min 56 s: 19 % of it in air, 92 hops taking 29 s, and the feed running at 85 % of the rate it commands. The air path is 359.303 mm against a 128.586 mm lower bound for visiting its loop entries — 179 % past it. Those are the cycle estimate's own trapezoids on the job machine's rapid model — the same clock the file is posted with. — **19 % in air · 92 hops · feed at 85 %**
+2. Program 1, single.nc — the cycle is «cycle»: 19 % of it in air, 92 hops taking 29 s, and the feed running at 85 % of the rate it commands. The air path is 359.303 mm against a 128.586 mm lower bound for visiting its loop entries — 179 % past it. Those are the cycle estimate's own trapezoids on the job machine's rapid model — the same clock the file is posted with. — **19 % in air · 92 hops · feed at 85 %**
 3. The feed path sweeps 1188.245 mm² of stock at up to 0.998 mm deep — the strip is Σ (path length × the cutter's width at that depth) on the feed moves. — **1188.245 mm² swept**
 4. the toolpath is ordered by proximity: the cutter finishes each contour to its depth before entering the next, takes each entry at the point nearest where it just was, and cuts the pocket rings inside-out so the wall is the last thing it touches. The file spends 359.303 mm in the air against 1154.418 mm cutting (0.311 : 1). The previous ordering spent 537.075 mm (0.465 : 1) on the same cut. — **359.303 mm rapid · 1154.418 mm cut**
 5. Pocket outline "Single Barrel" (19 contours, 10.531×66.915mm) — over "Magnet pocket", only 1.51 mm of material (deepest cut there 1.2 mm) — at the colour plane the cone reaches 0.3 mm radius: the floor is 0.05 mm inside the design each side, the surface 0.214 mm outside it; pass pitch 0.25 mm at the colour plane, from the requested 0.359 mm — clamped to the cutter’s 0.25 mm tip radius: a wider pitch would leave a ridge of the top colour down strokes narrower than two passes apart. — **0.985 mm deep · plane radius 0.3 mm · floor inset 0.05 mm · surface outset 0.214 mm**
@@ -95,7 +95,7 @@ Generated 2026-11-02 · file `single.nc` · sha256 `d3ab1a68` · estimated cutti
 
 1. Measured floor depth — Pocket outline "Single Barrel" (19 contours, 10.531×66.915mm) — \_\_\_\_\_\_\_\_  *(measured depth (mm))*
 2. Measured floor depth — Pocket outline "br" (5 contours, 13.773×21.04mm) — \_\_\_\_\_\_\_\_  *(measured depth (mm))*
-3. Wall-clock minutes the run took (start to finish) — the cycle estimate is 4 min 56 s. — \_\_\_\_\_\_\_\_  *(minutes)*
+3. Wall-clock minutes the run took (start to finish) — the cycle estimate is «cycle». — \_\_\_\_\_\_\_\_  *(minutes)*
 4. Is the text legible? — \_\_\_\_\_\_\_\_  *(yes / no)*
 5. Surface finish — \_\_\_\_\_\_\_\_  *(clean / fuzzy / burnt)*
 6. Anything that went wrong — \_\_\_\_\_\_\_\_  *(notes)*

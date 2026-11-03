@@ -62,7 +62,7 @@ import { tl } from './helpers/manifoldExec';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { designJobFor } from '@/engine/cnc/engrave/fromDesign';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
-import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
+import { buildRunSheet, formatDuration } from '@/engine/cnc/engrave/runSheet';
 import { viseForNewJob } from '@/engine/cnc/fixture';
 import { Z1 } from '@/engine/cnc/machine';
 import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
@@ -208,7 +208,14 @@ function oracleOf(job: EngraveJob, gen: EngraveGenerated, surface: SurfaceFrame 
   }
 }
 
-async function record(c: Case): Promise<{ nc: string; verify: unknown; work: OracleReport; surface: OracleReport | null; sheet: string }> {
+async function record(c: Case): Promise<{
+  job: EngraveJob;
+  gen: EngraveGenerated;
+  nc: string;
+  verify: unknown;
+  work: OracleReport;
+  surface: OracleReport | null;
+}> {
   const job = c.job();
   const gen = await generate(tl, job);
   if (!gen.ok || gen.nc === null || gen.verify === null) {
@@ -225,15 +232,21 @@ async function record(c: Case): Promise<{ nc: string; verify: unknown; work: Ora
   // no simulation at all. The band sentences were never in the goldens before this; they are the
   // app's own sheet as of the same change.
   const work = oracleOf(job, gen, null);
-  return {
-    nc: gen.nc,
-    verify: gen.verify,
-    work,
-    surface,
-    sheet: renderRunSheetMarkdown(
-      buildRunSheet(job, gen, { diagnostics: [], oracleBand: work.band, sliverWidthMm: work.sliverWidthMm }, NOW),
-    ),
-  };
+  return { job, gen, nc: gen.nc, verify: gen.verify, work, surface };
+}
+
+/**
+ * THE SHEET AS THE GOLDEN PINS IT (#921). The header hash is the CALLER's — the program's path
+ * bytes, so the sheet cannot move when only the estimate does — and the cycle estimate's own words
+ * (`formatDuration`) are replaced by a placeholder: the number is pinned once, in
+ * `time-seconds.json`, with its band; the sheet is pinned for everything else it says. The count is
+ * checked so a sheet that stopped printing the estimate is still a failure.
+ */
+const CYCLE_PLACEHOLDER = '«cycle»';
+function sheetPin(sheet: string, seconds: number): { text: string; printed: number } {
+  const words = formatDuration(seconds);
+  const printed = sheet.split(words).length - 1;
+  return { text: sheet.split(words).join(CYCLE_PLACEHOLDER), printed };
 }
 
 /** One-line account of the first difference, so a failure names the artefact and the line. */
@@ -327,18 +340,47 @@ describe('the frozen badge artefacts (#921)', () => {
     it(`${c.name}: posts the same program, verdicts and sheet`, async () => {
       const a = await record(c);
       const { text, seconds } = splitTime(a.nc);
+      const pathHash = createHash('sha256').update(text, 'utf8').digest('hex');
+      const sim = { diagnostics: [], oracleBand: a.work.band, sliverWidthMm: a.work.sliverWidthMm };
+      // The app's own sheet, with the header hash over the bytes this spec pins (#921).
+      const sheet = renderRunSheetMarkdown(buildRunSheet(a.job, a.gen, sim, NOW, undefined, { fileHash: pathHash.slice(0, 8) }));
+      const pinnedSheet = sheetPin(sheet, seconds);
       pin(c.name, 'program.nc.sha256', pathPin(a.nc));
       pinTime(c.name, seconds);
       pin(c.name, 'verifier.json', JSON.stringify(a.verify, null, 2) + '\n');
       pin(c.name, 'oracle.json', JSON.stringify({ work: a.work, surface: a.surface }, null, 2) + '\n');
-      pin(c.name, 'run-sheet.md', a.sheet);
+      pin(c.name, 'run-sheet.md', pinnedSheet.text);
+      expect(pinnedSheet.printed, `${c.name}: the sheet prints the cycle estimate`).toBeGreaterThan(0);
 
       // RED-FIRST, ON THE PROGRAM'S OWN BYTES: an estimator-only change — the same program with a
-      // different TIME number — leaves the path pin bit-identical and lands outside the TIME band,
-      // so exactly one artefact moves. (A change to anything else moves the path pin.)
+      // different TIME number, and the estimate that stamps it — leaves the path pin and the
+      // pinned sheet bit-identical and lands outside the TIME band, so exactly ONE artefact moves.
+      // (A change to anything else moves the path pin or the sheet.)
       const movedSeconds = seconds + Math.ceil(timeBand(seconds)) + 1;
-      const moved = a.nc.replace(TIME_LINE, `;@MKR|TIME|seconds=${movedSeconds}`);
-      expect(splitTime(moved).text, `${c.name}: a TIME-only change must not move the path bytes`).toBe(text);
+      const movedNc = a.nc.replace(TIME_LINE, `;@MKR|TIME|seconds=${movedSeconds}`);
+      expect(splitTime(movedNc).text, `${c.name}: a TIME-only change must not move the path bytes`).toBe(text);
+      // The estimate stamps the header/step durations (`estimatedSeconds`) AND the §7 efficiency
+      // sentence (`efficiency.cycleSeconds`) — the same clock, so a TIME-only change moves both.
+      const movedGen = {
+        ...a.gen,
+        nc: movedNc,
+        cam:
+          a.gen.cam === null
+            ? null
+            : {
+                ...a.gen.cam,
+                estimatedSeconds: movedSeconds,
+                ...(a.gen.cam.efficiency === undefined
+                  ? {}
+                  : { efficiency: { ...a.gen.cam.efficiency, cycleSeconds: movedSeconds } }),
+              },
+      };
+      const movedSheet = renderRunSheetMarkdown(
+        buildRunSheet(a.job, movedGen, sim, NOW, undefined, { fileHash: pathHash.slice(0, 8) }),
+      );
+      expect(sheetPin(movedSheet, movedSeconds).text, `${c.name}: a TIME-only change must not move a sheet byte`).toBe(
+        pinnedSheet.text,
+      );
       expect(
         withinTimeBand(seconds, movedSeconds),
         `${c.name}: a TIME change past ± ${timeBand(seconds).toFixed(2)} s must fail the TIME pin`,
