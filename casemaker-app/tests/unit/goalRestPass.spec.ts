@@ -13,6 +13,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { finishStepOverForCusp } from '@/engine/cnc/cam/surface3d';
 
 type P = [number, number, number];
 
@@ -215,7 +216,16 @@ describe('#847 the goal follows its finish with a rest pass', () => {
     // wider fillet at the base (the ball cannot reach the cell columns' near edges), so the rest
     // follows a little more of it — still a fraction of the surface.
     expect(cutCells(out.programs[1]!.nc)).toBeLessThan(cutCells(out.programs[0]!.nc));
-    expect(cutPathLength(out.programs[1]!.nc)).toBeLessThan(cutPathLength(out.programs[0]!.nc));
+    // #945 — the rest ball's own step-over is now derived from ITS radius against the same band,
+    // not reused from the catalogue (the describe block below), so it can run FINER than the
+    // finish's own derived default when the rest ball is proportionally much smaller than the
+    // finish's — as it is here (⌀2 against ⌀6). This fixture's residual is not only the notch but
+    // also the fillet the ⌀6 ball leaves around the whole part's base (the comment above), so the
+    // rest's path length is no longer reliably SHORTER than the finish's own merged-raster one:
+    // measured directly (2026-11-03), 1552 mm against the finish's 1528 mm — close parity, not a
+    // blowout. Bounded here rather than compared "less than", so a real regression (the rest pass
+    // running away) still fails this.
+    expect(cutPathLength(out.programs[1]!.nc)).toBeLessThan(cutPathLength(out.programs[0]!.nc) * 1.5);
   }, 180_000);
 
   it('with no smaller ball owned, the finish still posts and the run states what it left', async () => {
@@ -256,5 +266,59 @@ describe('#847 the goal follows its finish with a rest pass', () => {
     expect(note?.message).toContain('under the 5 mm');
     expect(note?.message).toContain('marks a leftover visible');
     expect(note?.message).toMatch(/a ball of about ⌀\d+(?:\.\d+)? mm would reach it/);
+  }, 180_000);
+});
+
+/**
+ * #945 — THE REST PASS'S OWN STEP-OVER, DERIVED FROM ITS OWN (SMALLER) RADIUS, NOT REUSED FROM
+ * THE CATALOGUE. Before this fix, `restFeeds.finishStepOver` fell straight back to
+ * `restResolved.params.stepOver` — the rest ball's own feeds row, exactly as the catalogue states
+ * it, with no regard for the leftover-visible band the rest pass exists to hold. The rest ball's
+ * whole job is reaching into a concavity the finish's own (larger) ball could not, so leaving ITS
+ * row-to-row cusp un-adapted defeats the pass exactly where it matters — the real #945 diagnosis
+ * found this un-adapted cusp responsible for most of a real job's top-surface leftover. The fix
+ * is "one rule, two call sites": the SAME `finishStepOverForCusp` the main finish's own default
+ * already uses (surface3d.ts), called again here against the rest candidate's OWN radius and the
+ * same band, capped by `Math.min` against its own feeds row so a candidate this does not help
+ * never runs coarser than it did before.
+ *
+ * `GoalRestFacts.residualMm3` is NOT the right metric to assert this on: it is computed from the
+ * ball's gouge-safe TIP FIELD (`surfaceResidual`), a continuous, step-over-independent measure of
+ * what a perfect sweep could reach — confirmed directly (temporarily reverting just this fix and
+ * re-running this fixture) to be byte-identical whether the stride is 0.5 mm or 1.0 mm. The
+ * row-to-row CUSP this fix is about is a property of the DISCRETE raster `finishingMoves` actually
+ * cuts (`rasterRows(hf, feeds.finishStepOver)`), not of that continuous field — the posted
+ * program's own move count is.
+ */
+describe('#945 the rest pass’s own step-over is derived from ITS radius, not reused from the catalogue', () => {
+  it('rasters at the derived stride, not the catalogue’s coarser one — roughly double the rows over the same residual', async () => {
+    const target = goalTarget();
+    const out = await generateGoalProgram(goalJob(target), target, BALL6, [], null, { tools: [REST_ENTRY], feeds: SHOP_FEEDS });
+    expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
+    expect(out.programs).toHaveLength(2);
+
+    // Closed-form, this fixture's own numbers: REST_ENTRY's ⌀2 ball (radius 1 mm), the shop's
+    // 0.1 mm leftover-visible band (REST_MACHINING_FALLBACK.visibleDepth — no `rest` settings
+    // passed here), this goal's own 0.5 mm grid pitch (`goalTarget()`'s `surface.gridPitchMm`).
+    const derivedStepOverMm = finishStepOverForCusp(1, 0.1, 0.5);
+    expect(derivedStepOverMm).toBe(0.5);
+    // SHOP_FEEDS's own stepOverFraction (0.45) × this ball's 2 mm diameter — the catalogue row
+    // this fix stops reusing as-is. At this same 0.5 mm pitch it rounds to a 2-cell, 1.0 mm
+    // stride (`Math.round(0.9 / 0.5)`): twice as wide as the derived one.
+    const catalogueStepOverMm = 0.45 * 2;
+    expect(catalogueStepOverMm).toBeCloseTo(0.9, 9);
+    expect(derivedStepOverMm as number).toBeLessThan(catalogueStepOverMm);
+
+    // THE WIRING: `rasterRows`' stride is `Math.round(stepOver / pitch)`, so halving the
+    // step-over (1.0 mm → 0.5 mm) exactly doubles the row count over the same residual region,
+    // and so the posted moves/cutting time. Measured directly on this fixture (2026-11-03): 861
+    // moves / 258 s before this fix (the catalogue's 0.9 mm, 1.0 mm stride); 1721 moves / 512 s
+    // after (the derived 0.5 mm stride) — both bounds below sit comfortably under the "after"
+    // figure and well above "before", so a regression back to the catalogue's own step-over
+    // fails this.
+    const rest = out.surface3d?.rest;
+    expect(rest).not.toBeNull();
+    expect(rest?.moves ?? 0).toBeGreaterThan(1500);
+    expect(rest?.seconds ?? 0).toBeGreaterThan(450);
   }, 180_000);
 });
