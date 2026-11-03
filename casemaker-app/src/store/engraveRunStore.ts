@@ -29,6 +29,7 @@ import {
   type WorkFacts,
 } from '@/platform/flightRecorder';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import type { ProgramOracle } from './engraveRunGate';
 import { forgetPoolSizing } from '@/engine/jobs/adaptivePool';
 import type { SimDiagnostic } from '@/workers/sim/session';
@@ -131,7 +132,13 @@ export type EngraveRunClient = {
     /** #785 — stage progress for the panel and the flight recorder. */
     onProgress?: (progress: EngraveProgress) => void,
   ) => Promise<EngraveGenerated>;
-  simOracle: (predicted: OraclePredicted[], pcb?: PcbCopperTopologyInput | null) => Promise<OracleReport>;
+  // #924 activation — the generator's own raw design items ride the oracle call the same way
+  // `predicted` does; additive, so a caller that sends none runs exactly as it did before.
+  simOracle: (
+    predicted: OraclePredicted[],
+    pcb?: PcbCopperTopologyInput | null,
+    designItems?: DesignCheckItem[],
+  ) => Promise<OracleReport>;
   /**
    * #785 — stop the run's worker; the store has already orphaned the run (see `cancelGenerate`).
    * OPTIONAL so a fake client (a test, a preview-only build) need not implement a stop it has no
@@ -894,7 +901,16 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           const predicted = program.predicted ?? (isFirst ? generated.predicted : undefined);
           if (predicted === undefined) return;
           if (!isFirst && predicted.length === 0) return;
-          const report = await client.simOracle([...predicted]);
+          // #924 activation — the program's own raw design items ride the same call `predicted`
+          // does, so the app's OWN Generate runs the design-side check (#924) against this file's
+          // sweep. Read off the generated program rather than the walk's `SweepProgram` view (which
+          // carries only what the loader needs); same fallback as `predicted` above — a result
+          // stored before the per-program field existed hands program 1 the run's top-level list —
+          // and a program with no items runs exactly as it did before (the check is only defined
+          // for V-carve/flat engrave items).
+          const designItems =
+            generated.programs[index]?.designItems ?? (isFirst ? generated.designItems : undefined);
+          const report = await client.simOracle([...predicted], undefined, designItems);
           if (mine !== seq) return;
           oracles.push({ index, report });
         },
