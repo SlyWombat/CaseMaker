@@ -1430,6 +1430,7 @@ describe('#948 the goal check’s line', () => {
     ran: true,
     reason: null,
     maxCutIntoAt: null,
+    passCoverage: 0.95,
     goalCells: 100,
     pitchMm: 0.1,
     cutIntoFloorMm: 0.01,
@@ -1495,5 +1496,44 @@ describe('#948 the goal check’s line', () => {
   it('a 2.5D run has no goal line at all', () => {
     drawWithOracle(OK_ORACLE);
     expect(screen.queryByTestId('engrave-cut-goal')).toBeNull();
+  });
+
+  // #948 — THE PAGE'S TOP-SURFACE COVERAGE FACT under the goal line, in the page's own words. The
+  // MEASURED figure is the checker's arithmetic on `leftoverFractions[0]` (j29's 16.42 % left over
+  // > 0.1 mm → 83.58 %); `passCoverage` is the number the check JUDGED AGAINST (the shop's
+  // `goal.passCoverage` default, 0.95) and is printed as the pass line, never as the reading. No
+  // reach line: the report carries no reach field yet, and a "not stated" sentence on every goal
+  // run would be noise (the manager's ruling, 2026-11-03).
+  it('prints the measured coverage and the pass line, in the page’s words', () => {
+    drawWithOracle({
+      ...OK_ORACLE,
+      goalCutInto: goal({ passCoverage: 0.95, leftoverFractions: [0.1642, 0.0503, 0] }),
+    });
+    const coverage = screen.getByTestId('engrave-cut-goal-coverage');
+    expect(coverage.textContent).toBe('Top-surface coverage: 83.58 % (the pass line is 95 %)');
+    expect(screen.queryByTestId('engrave-cut-goal-reach')).toBeNull();
+    // The goal line itself is unchanged by the fact.
+    expect(screen.getByTestId('engrave-cut-goal').textContent).toBe('Matches the design (goal)');
+  });
+
+  // #948 review (A) — AN UNCHECKED GOAL IS NEVER A PASS MARK. `ok` stays true in the report (the run
+  // is not wrong), but with `ran: false` the goal state renders neutral "not checked" — the goal
+  // line's state is decided on `ran` BEFORE `ok`, so a green tick can never stand for a check that
+  // did not run. No coverage fact either: its numbers are zero by construction.
+  it('states no coverage fact, and a neutral not-checked goal state, for a check that did not run', () => {
+    drawWithOracle({
+      ...OK_ORACLE,
+      goalCutInto: goal({
+        ok: true,
+        ran: false,
+        reason: 'a radial goal is sampled in its own map frame, which this run did not check',
+      }),
+    });
+    expect(screen.queryByTestId('engrave-cut-goal-coverage')).toBeNull();
+    const line = screen.getByTestId('engrave-cut-goal');
+    expect(line.dataset.state).toBe('not-checked');
+    expect(line.dataset.state).not.toBe('match');
+    expect(line.textContent).toContain('Goal not checked:');
+    expect(line.textContent).not.toContain('Matches the design');
   });
 });
