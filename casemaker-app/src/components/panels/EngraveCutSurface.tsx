@@ -376,6 +376,13 @@ type CutVerdict =
   | 'stale'
   | 'stopped'
   | 'passed'
+  /**
+   * #948 review — the program checked and the run is not wrong, but the GOAL was never compared
+   * (`goalCutInto.ran === false`: a radial or exact-engine sweep the check could not sample). A
+   * fourth state so the headline does not read as a pass for a check that did not happen; neutral
+   * wherever it is styled.
+   */
+  | 'goal-unchecked'
   | 'failed'
   | 'not-checked'
   | 'simulating'
@@ -460,6 +467,8 @@ function cutVerdict(v: {
   simStopped: boolean;
   /** The oracle's verdict, or null when no report was made (not run / not reached). */
   oracleOk: boolean | null;
+  /** The goal check's own state: null with no goal report, else whether the comparison ran. */
+  goalRan: boolean | null;
   simStatus: string | null;
   phase: string;
 }): CutVerdict {
@@ -472,7 +481,13 @@ function cutVerdict(v: {
   // #925 — THE DESIGN CHECK'S SEVERITY: only an ERROR fails. A warning the sweep raised (a note
   // that did not undermine the verdict) leaves a passed oracle passed.
   if (v.designErrorCount > 0) return 'failed';
-  if (v.oracleOk !== null) return v.oracleOk ? 'passed' : 'failed';
+  if (v.oracleOk !== null) {
+    if (!v.oracleOk) return 'failed';
+    // #948 review (A) — A GOAL NOBODY COMPARED IS NOT A PASS for the goal. The run's `ok` stays
+    // true (the program is not wrong), but the headline is what the operator reads first and what
+    // the milestone gate quotes, so it must not head with the pass sentence.
+    return v.goalRan === false ? 'goal-unchecked' : 'passed';
+  }
   if (v.simStatus === 'ready') return 'not-checked';
   if (v.simStatus === 'refused' || v.simStatus === 'error') return 'failed';
   if (v.phase === 'simulating') return 'simulating';
@@ -914,6 +929,8 @@ export function EngraveCutSurface({
   // line; the document and verifier errors are the rest.
   const designErrorCount = simErrors(runSimDiagnostics).length;
   const otherErrorCount = runErrorCodes({ ...runView, simDiagnostics: [] }).length;
+  const goalCheck = runOracle?.goalCutInto ?? null;
+  const goalNotComparedWhy = goalCheck?.reason ?? 'the check did not run for this program';
   const verdict = cutVerdict({
     hasProgram: pkg !== null,
     packageCurrent,
@@ -923,6 +940,7 @@ export function EngraveCutSurface({
     designErrorCount,
     simStopped: runSimStopped,
     oracleOk: runOracle === null ? null : runOracle.ok,
+    goalRan: goalCheck === null ? null : goalCheck.ran,
     simStatus: runSimStatus,
     phase: runPhase,
   });
@@ -1016,7 +1034,9 @@ export function EngraveCutSurface({
       ? `the machine no longer holds ${jobMountWords(frozenMount)}`
       : onlyPackageStale
         ? 'the program is older than the design'
-        : verdict === 'failed'
+        : verdict === 'goal-unchecked'
+          ? `Program checked — the goal was not compared (${goalNotComparedWhy})`
+          : verdict === 'failed'
           ? 'did not pass'
           : verdict === 'stopped'
             ? 'the simulation stopped before it finished'
