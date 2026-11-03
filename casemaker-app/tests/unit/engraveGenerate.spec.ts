@@ -1420,36 +1420,39 @@ describe('a V-bit trace job (#405)', () => {
       ...over,
     });
 
-  it('REFUSES Makera’s metal FLAT end mill on PLA — the check is not V-scoped (#407)', async () => {
+  it('feeds Makera’s metal FLAT end mill on PLA as a labelled fallback, not a refusal (#954)', async () => {
     const flat = metalFlat();
     const job = traceJob([title()], { toolKey: 'flat-3.175x12-metal', tool: flat });
     const g = await generate(tl, job);
-    expect(g.ok).toBe(false);
-    expect(g.stage).toBe('findings');
-    expect(g.nc).toBeNull();
-    const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
-    expect(refusal).toBeDefined();
-    expect(refusal!.severity).toBe('error');
-    // #690 — the refusal NAMES the cutter, in the one display form the app prints.
-    expect(refusal!.message).toContain(toolDisplayName(flat));
-    expect(refusal!.message).toContain('PLA');
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.nc).not.toBeNull();
+    const finding = g.findings.find((f) => f.code === 'tool-metal-line');
+    expect(finding).toBeDefined();
+    expect(finding!.severity).toBe('info');
+    // The finding NAMES the cutter, in the one display form the app prints, and states the
+    // fallback the feeds came from.
+    expect(finding!.message).toContain(toolDisplayName(flat));
+    expect(finding!.message).toContain('PLA');
+    expect(finding!.message).toContain('Makera publishes no feed row');
+    expect(finding!.message).toContain('measure them');
   });
 
-  it('downgrades a FLAT metal cutter refusal to a warning and unblocks when overridden (#572)', async () => {
-    // A FLAT cutter's "(Metal)" name still refuses (its geometry IS ground for metal). This bit's
-    // 1.0 mm diameter sits inside the starting table's 0.8–1.6 flat band, so the feeds resolve; the
-    // double-confirmed override is what lets it cut PLA.
+  it('needs no override: the fallback already feeds the pair, so #572’s override is inert (#954)', async () => {
+    // A 1.0 mm metal flat sits inside the starting table's 0.8–1.6 flat band, so the fallback
+    // answers; the job runs with or without the old double-confirmed override, and the finding is
+    // informational either way.
     const flat = metalFlat({ name: '1.0mm Flat End(Metal)', tipDiameter: 1.0, diameter: 1.0 });
-    const refused = await generate(tl, traceJob([title()], { toolKey: 'flat-1.0-metal', tool: flat }));
-    expect(refused.ok).toBe(false);
-    expect(refused.findings.find((f) => f.code === 'tool-metal-line')!.severity).toBe('error');
-
+    const plain = await generate(tl, traceJob([title()], { toolKey: 'flat-1.0-metal', tool: flat }));
+    expect(plain.ok).toBe(true);
     const overridden = await generate(tl, traceJob([title()], { toolKey: 'flat-1.0-metal', tool: flat, metalLineOverride: true }));
     expect(overridden.ok).toBe(true);
-    const finding = overridden.findings.find((f) => f.code === 'tool-metal-line');
-    expect(finding).toBeDefined();
-    expect(finding!.severity).toBe('warning');
-    expect(finding!.message).toContain('chosen despite the material mismatch');
+    for (const g of [plain, overridden]) {
+      const finding = g.findings.find((f) => f.code === 'tool-metal-line');
+      expect(finding).toBeDefined();
+      expect(finding!.severity).toBe('info');
+      expect(finding!.message).toContain('labelled starting point');
+    }
   });
 
   it('does not refuse the same metal FLAT on a metal blank (#407)', async () => {
@@ -1463,9 +1466,10 @@ describe('a V-bit trace job (#405)', () => {
     expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
   });
 
-  it('refuses a `-M-`-coded FLAT end mill on WOOD too (#407)', async () => {
-    // The code half of `isMetalTool` was already correct; the reach is what #407 fixes. A flat whose
-    // NAME says nothing about the line is still refused when its box code carries the segment.
+  it('identifies a `-M-`-coded FLAT end mill on WOOD too — and falls back, labelled (#407/#954)', async () => {
+    // The code half of `isMetalTool` is unchanged: a flat whose NAME says nothing about the line is
+    // still ON it when its box code carries the segment. #954 — that now states the fallback, not
+    // a refusal.
     const coded = flatEndMill(3.175, { id: 'C1-BIT-FLAT-M-3.175-12', name: 'Flat End 3.175' });
     const job = traceJob([title()], {
       toolKey: 'flat-3.175x12-metal',
@@ -1473,12 +1477,12 @@ describe('a V-bit trace job (#405)', () => {
       stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'hardwood' },
     });
     const g = await generate(tl, job);
-    expect(g.ok).toBe(false);
-    expect(g.stage).toBe('findings');
-    const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
-    expect(refusal).toBeDefined();
-    expect(refusal!.severity).toBe('error');
-    expect(refusal!.message).toContain(toolDisplayName(coded));
+    expect(g.ok).toBe(true);
+    const finding = g.findings.find((f) => f.code === 'tool-metal-line');
+    expect(finding).toBeDefined();
+    expect(finding!.severity).toBe('info');
+    expect(finding!.message).toContain(toolDisplayName(coded));
+    expect(finding!.message).toContain('Makera publishes no feed row');
   });
 
   it('is swept by the COLUMN engine, and the run sheet says so (#405)', async () => {
@@ -1654,7 +1658,10 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     tool: flatEndMill(3.175, { number: 2, name: '3.175 mm flat (facing)' }),
     provenance: 'this spec’s own facing cutter',
   };
-  const SHOP: EngraveShopOpts = { tools: [FACING, ...TOOL_LIBRARY] };
+  // #954 — the metal-line flat is a candidate now; the tests below are about the NON-metal rule,
+  // so the list leaves it out and their subject stays the user's own facing cutter.
+  const NON_METAL_LIBRARY = TOOL_LIBRARY.filter((e) => e.key !== 'flat-3.175x12-metal');
+  const SHOP: EngraveShopOpts = { tools: [FACING, ...NON_METAL_LIBRARY] };
 
   /** One described copy, and the summary table the run store hands the worker (#442's pattern). */
   function copy(condition: Condition): ToolCopy {
@@ -1913,14 +1920,16 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.facingError).toMatch(/no flat end mill/);
   });
 
-  it('will not default to a metal-line cutter on a non-metal blank', async () => {
-    // The built-in 3.175 flat is `3.175*12mm Flat End(Metal)` — bigger than the 1 mm, and still not
-    // the facing default on softwood. With it as the ONLY flat, the file is refused by name.
+  it('faces with the metal-line cutter as the labelled fallback (#954)', async () => {
+    // The built-in 3.175 flat is `3.175*12mm Flat End(Metal)`; #954 makes it a candidate on a
+    // non-metal blank, fed from the material's starting band and stated as a fallback. With it as
+    // the ONLY flat, the facing pass is posted with it.
     const metalOnly = TOOL_LIBRARY.filter((e) => e.key === 'flat-3.175x12-metal');
     const g = await generate(tl, faced(), null, [], undefined, { tools: metalOnly });
     expect(g.ok).toBe(true);
-    expect(g.facingNc).toBeNull();
-    expect(g.facingError).toMatch(/for Metal/);
+    expect(g.facingNc, g.facingError ?? '').not.toBeNull();
+    expect(g.facingToolKey).toBe('flat-3.175x12-metal');
+    expect(g.facingError).toBeNull();
   });
 
   // #432 review R10 — the condition table reaches the pick THROUGH the shop options. The store
@@ -1928,7 +1937,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   // pass it the way `engraveRunStore` does and read the file the worker actually posted.
   it('skips the facing cutter the bench marks broken, through `shop.conditions`', async () => {
     const g = await generate(tl, faced(), null, [], undefined, {
-      tools: [FACING, ...TOOL_LIBRARY],
+      tools: [FACING, ...NON_METAL_LIBRARY],
       conditions: conditionsOf(['user:facing-3.175', 'broken']),
     });
     expect(g.ok, JSON.stringify({ errors: g.errors, facingError: g.facingError })).toBe(true);
@@ -1976,7 +1985,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
       ],
       facing: { enabled: true, depth: 0.5 },
     };
-    const g = await engraveGenerate(tl, job, MILL, [], null, undefined, { tools: [FACING, ...TOOL_LIBRARY] });
+    const g = await engraveGenerate(tl, job, MILL, [], null, undefined, { tools: [FACING, ...NON_METAL_LIBRARY] });
     expect(g.ok).toBe(true);
     expect(g.facingNc, `${g.facingError} ${JSON.stringify(g.facingVerify?.findings.slice(0, 3))}`).not.toBeNull();
     expect(g.facingToolKey).toBe('user:facing-3.175');

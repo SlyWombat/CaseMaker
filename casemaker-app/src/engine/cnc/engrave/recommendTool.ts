@@ -81,7 +81,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { conditionRank, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveAnyItem, EngraveJob, EngravePrimitive, StockMaterial } from '@/types/engraveJob';
 import { vCone } from '@/engine/cnc/vProfile';
-import { cutterRefusedOnMaterial } from './cutterMaterial';
+import { cutterOnMetalLine } from './cutterMaterial';
 import { inlayMarked, inlayPairConeTan } from './inlay';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import { faceCutterPick, kindOnlyPick, raisedGapSentence } from './cutterPlan';
@@ -673,25 +673,13 @@ export function recommendTool(
     if (condition !== null && condition.usable === 0) {
       return { ...base, qualifies: false, excluded: 'broken' as const };
     }
-    // #699b — A CUTTER ONE OF THE JOB'S OWN GATES REFUSES IS NEVER THE COMPUTED PICK. Makera's
-    // "for Metal" line is refused on a blank that is not metal (#572): the program raises
-    // `tool-metal-line` as an error and will not run, so handing that cutter back as the default
-    // pick is a dead end — exactly the k3 walk, where the house's metal 1 mm flat won a tie with
-    // the plain one and Generate then refused it on PLA. The predicate is the SAME one the
-    // program uses (`cutterRefusedOnMaterial`), so this filter and the finding cannot disagree;
-    // and the operator's double-confirmed override (#572) keeps the cutter in the list, because
-    // the job's gate allows it then. #732 — a pair Makera's catalogue has a feed row for is not
-    // refused at all; the coverage computed once here is the same verdict `catalogueStandingFor`
-    // uses below, so the two cannot disagree about what the catalogue covers.
+    // #954 — A "for Metal" CUTTER IS A LABELLED FALLBACK, NOT A REFUSAL. The line is a name (see
+    // `cutterMaterial.ts`), not a physical bar; a metal-line cutter on wood or plastic is fed from
+    // the material's own starting band (`feedsFor` labels it), so it stays a candidate. The
+    // programme states the fallback and the numbers are measured before they are trusted. The
+    // refusal survives only where the feeds have no band to stand in — `feedsFor`'s own gate below.
     const coverage = catalogueCoverageFor(catalogue, job.stock.material, tool);
-    if (cutterRefusedOnMaterial(tool, job.stock.material, job.metalLineOverride, coverage.kind === 'covered')) {
-      return {
-        ...base,
-        qualifies: false,
-        excluded: 'metal-line' as const,
-        refusal: `on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}`,
-      };
-    }
+    const metalFallback = cutterOnMetalLine(tool, job.stock.material, coverage.kind === 'covered');
     // #702 — a cutter one of the job's own SHAPE gates refuses is not the pick either. A flat end
     // mill is the only shape a bore or a cut-out accepts; a cone (`vCone`) is the only one a
     // variable-depth V-carve or an inlay half accepts. The sentence is the gate's own, so the
@@ -728,7 +716,9 @@ export function recommendTool(
     // rest-pair's second tool comes from these same survivors (`finerThan`), so the rule covers it
     // without a second copy.
     const catalogueStanding = catalogueStandingFor(coverage, job.stock.material, tool.name);
-    if (!catalogueStanding.recommend) {
+    // #954 — the metal-line fallback keeps the cutter in even when the catalogue lists it for
+    // other materials: the starting band answers for the pair, labelled.
+    if (!catalogueStanding.recommend && !metalFallback) {
       return {
         ...base,
         qualifies: false,
