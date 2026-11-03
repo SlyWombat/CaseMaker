@@ -50,6 +50,9 @@ import {
   type OracleSliceAt,
 } from '@/engine/cnc/engrave/oracle';
 import { computeCopperTopology, type PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
+import { checkDesignReach, checkGoalCutInto, type DesignCheckItem, type GoalCutIntoOptions } from '@/engine/cnc/engrave/designCheck';
+import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import type { CarriedField } from '../geometry/carriedField';
@@ -1151,7 +1154,39 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     return { ...report, copper, ok: report.ok && copper.ok, frame: surfaceFrame === null ? 'work' : 'surface' };
   };
 
-  const oracle = (predicted: readonly OraclePredicted[], pcb: PcbCopperTopologyInput | null = null): OracleReport => {
+  /**
+   * #924 — merges the independent design-side check and the goal cut-into check into a report
+   * already computed from the CAM's own prediction, the same way {@link withCopper} merges the
+   * copper topology check: `ok` folds in whichever of the two the caller supplied inputs for.
+   * Both are OPTIONAL and additive — no caller passes `designItems`/`goal` yet (#924's own
+   * wiring gap, see `designCheck.ts`'s header), so today this is a no-op on every real job; a
+   * caller that starts supplying raw design geometry or a goal heightfield gets the check for
+   * free, with no further change here.
+   */
+  const withDesignChecks = (
+    report: OracleReport,
+    sliceAt: OracleSliceAt,
+    designItems?: readonly DesignCheckItem[],
+    goal?: { heightfield: GoalHeightfield; sweptTop: ResultTop; opts?: GoalCutIntoOptions },
+  ): OracleReport => {
+    let out = report;
+    if (designItems !== undefined && designItems.length > 0) {
+      const designCheck = checkDesignReach(tl, designItems, sliceAt, {});
+      out = { ...out, designCheck, ok: out.ok && designCheck.ok };
+    }
+    if (goal !== undefined) {
+      const goalCutInto = checkGoalCutInto(goal.heightfield, goal.sweptTop, goal.opts);
+      out = { ...out, goalCutInto, ok: out.ok && goalCutInto.ok };
+    }
+    return out;
+  };
+
+  const oracle = (
+    predicted: readonly OraclePredicted[],
+    pcb: PcbCopperTopologyInput | null = null,
+    designItems?: readonly DesignCheckItem[],
+    goal?: { heightfield: GoalHeightfield; sweptTop: ResultTop; opts?: GoalCutIntoOptions },
+  ): OracleReport => {
     // #623 — the frame the loaded program speaks. A flat post is judged exactly as it always was;
     // a surface post is read with its lift taken back out at each XY, which is the only way a
     // correct tilt-following file can match the flat prediction (and the flat post's mismatch).
@@ -1179,7 +1214,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       const band = columnOracleBand(worstContours(l.timeline), grid);
       const sliceAt = gridSliceAt(tl, grid);
       const report = computeOracle(tl, sliceAt, predicted, band, grid);
-      return withCopper(report, sliceAt, band, pcb);
+      return withDesignChecks(withCopper(report, sliceAt, band, pcb), sliceAt, designItems, goal);
     }
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
     // #708 — AN INDEXED ROTARY SWEEP IS JUDGED A FACE AT A TIME. Its removal is in the STOCK frame
@@ -1200,7 +1235,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // un-lift recovers, coincides with the work frame. No shear: the removal is never tilted.
     const band = oracleBand(worstContours(l.timeline));
     const sliceAt = removalSliceAt(removal);
-    return withCopper(computeOracle(tl, sliceAt, predicted, band), sliceAt, band, pcb);
+    return withDesignChecks(withCopper(computeOracle(tl, sliceAt, predicted, band), sliceAt, band, pcb), sliceAt, designItems, goal);
   };
 
   const levelCut = (zSlice: number): { region: CrossSectionInstance | null; bandMm: number } | null => {

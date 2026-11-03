@@ -1,0 +1,222 @@
+/**
+ * #924 — the independent design-side oracle (`src/engine/cnc/engrave/designCheck.ts`).
+ *
+ * GATE: every check here is validated against something that is NOT the function under test —
+ * a numerical quadrature for the two volume closed forms, the documented real #741 measurements
+ * for the regression fixture, and a hand-built simulated region (never the design's own eroded
+ * shape reused as if it were independent) for the 2D reach check — the whole point of #924 being
+ * that these do not share math with `oracle.ts`/`engraveGenerate.ts`.
+ */
+import { describe, expect, it } from 'vitest';
+
+import { tl } from './helpers/manifoldExec';
+import {
+  checkDesignReach,
+  checkGoalCutInto,
+  checkVolumeAgreement,
+  flatCapsuleVolumeMm3,
+  vGrooveVolumeMm3,
+  type DesignCheckItem,
+} from '@/engine/cnc/engrave/designCheck';
+import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { ORACLE_AREA_FLOOR } from '@/engine/cnc/engrave/oracle';
+
+const CS = tl.CrossSection;
+
+/** A `nx x ny` square outline, CCW, centred on the origin — the raw "design" for the fixtures below. */
+function square(nx: number, ny: number) {
+  return [[[-nx / 2, -ny / 2], [nx / 2, -ny / 2], [nx / 2, ny / 2], [-nx / 2, ny / 2]] as [number, number][]];
+}
+
+describe('checkDesignReach — gate statement 5, against a hand-built simulated region', () => {
+  it('passes when the simulation removed exactly the design’s own reachable region', () => {
+    const r = 1;
+    const item: DesignCheckItem = { itemId: 'pocket', design: square(20, 10), depth: 2, r };
+    const design = CS.ofPolygons(item.design);
+    const reachable = design.offset(-r, 'Round', 2, 64);
+    try {
+      const report = checkDesignReach(tl, [item], (z) => (z <= -2 + 0.01 ? reachable.offset(0, 'Round', 2, 64) : null), {});
+      expect(report.ok).toBe(true);
+      expect(report.worst.unreached).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+      expect(report.worst.tooFar).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+    } finally {
+      design.delete();
+      reachable.delete();
+    }
+  });
+
+  it('catches a reachable design area the simulation left uncut', () => {
+    const r = 1;
+    const item: DesignCheckItem = { itemId: 'pocket', design: square(20, 10), depth: 2, r };
+    const design = CS.ofPolygons(item.design);
+    // The simulation only removed the LEFT half of the reachable region — a real under-cut.
+    const half = CS.ofPolygons([[[-10, -5], [0, -5], [0, 5], [-10, 5]]]);
+    const reachable = design.offset(-r, 'Round', 2, 64);
+    const simulated = CS.intersection([reachable, half]);
+    try {
+      const report = checkDesignReach(tl, [item], (z) => (z <= -2 + 0.01 ? simulated.offset(0, 'Round', 2, 64) : null), {});
+      expect(report.ok).toBe(false);
+      expect(report.worst.unreached).toBeGreaterThan(ORACLE_AREA_FLOOR);
+      expect(report.worst.unreachedAt?.itemId).toBe('pocket');
+    } finally {
+      design.delete();
+      half.delete();
+      reachable.delete();
+      simulated.delete();
+    }
+  });
+
+  it('the #741 shape: a flank widened past the shank over-cuts beyond r + band and is caught', () => {
+    // The design is a narrow 30 mm V-trace footprint at the tip (a thin slot, tip radius 0.05 mm —
+    // the bench's 0.1 mm-tip chamfer). The (buggy) simulated region is the UNCAPPED cone's mouth at
+    // 5.1 mm depth — more than 10x wider than the tip reach plus any sane band, exactly the shape
+    // #741 reported (the engine kept widening the flank past the shank).
+    const r = 0.05;
+    const item: DesignCheckItem = { itemId: 'v-trace', design: [[[-15, -r], [15, -r], [15, r], [-15, r]]], depth: 5.1, r };
+    const design = CS.ofPolygons(item.design);
+    const buggyMouthHalfWidth = 5.1 * Math.tan((45 * Math.PI) / 180); // tanHalf for a 90 deg cone, uncapped at 5.1 mm
+    const simulated = CS.ofPolygons([[[-15, -buggyMouthHalfWidth], [15, -buggyMouthHalfWidth], [15, buggyMouthHalfWidth], [-15, buggyMouthHalfWidth]]]);
+    try {
+      const report = checkDesignReach(tl, [item], (z) => (z <= -5.1 + 0.01 ? simulated.offset(0, 'Round', 2, 64) : null), {});
+      expect(report.ok).toBe(false);
+      expect(report.worst.tooFar).toBeGreaterThan(ORACLE_AREA_FLOOR);
+      expect(report.worst.tooFarAt?.itemId).toBe('v-trace');
+    } finally {
+      design.delete();
+      simulated.delete();
+    }
+  });
+});
+
+describe('flatCapsuleVolumeMm3 / vGrooveVolumeMm3 — gate statement 6, against independent numerical quadrature', () => {
+  /** Volume of {x: dist(x,segment)<=r, 0<=z<=d}, by brute-force grid quadrature — never the closed form's own algebra, and never `capsuleArea`/`capsuleContours` (`workers/geometry/sweep.ts`). */
+  function quadratureFlatCapsule(length: number, r: number, d: number, cells = 400): number {
+    const xMin = -r - 0.5, xMax = length + r + 0.5, yMin = -r - 0.5, yMax = r + 0.5;
+    const dx = (xMax - xMin) / cells, dy = (yMax - yMin) / cells;
+    let area = 0;
+    for (let i = 0; i < cells; i++) {
+      const x = xMin + (i + 0.5) * dx;
+      const cx = Math.max(0, Math.min(length, x));
+      for (let j = 0; j < cells; j++) {
+        const y = yMin + (j + 0.5) * dy;
+        if (Math.hypot(x - cx, y) <= r) area += dx * dy;
+      }
+    }
+    return area * d;
+  }
+
+  /** Volume of a straight V stroke (uncapped cone) by quadrature over (x, z): at each z the footprint is a capsule of radius z*tan(a). */
+  function quadratureVGroove(length: number, halfAngleDeg: number, d: number, zSteps = 300, cells = 200): number {
+    const t = Math.tan((halfAngleDeg * Math.PI) / 180);
+    const dz = d / zSteps;
+    let volume = 0;
+    for (let s = 0; s < zSteps; s++) {
+      const z = (s + 0.5) * dz;
+      const r = z * t;
+      if (r <= 0) continue;
+      volume += quadratureFlatCapsule(length, r, dz, cells);
+    }
+    return volume;
+  }
+
+  it('flat capsule: a point trace (L=0) reduces to a plain cylinder, exactly', () => {
+    const r = 1.5875, d = 2;
+    expect(flatCapsuleVolumeMm3(0, r, d)).toBeCloseTo(Math.PI * r * r * d, 9);
+  });
+
+  it('flat capsule: agrees with independent quadrature for a real trace (the badge’s 0.3 mm V, treated as a flat stand-in at its tip radius)', () => {
+    const closed = flatCapsuleVolumeMm3(20, 0.15, 1);
+    const quad = quadratureFlatCapsule(20, 0.15, 1);
+    expect(closed).toBeCloseTo(quad, 1);
+    expect(Math.abs(closed - quad) / closed).toBeLessThan(0.01);
+  });
+
+  it('V groove: agrees with independent quadrature for the #741 inlay stroke (30 deg half-angle, 30 mm run)', () => {
+    const closed = vGrooveVolumeMm3(30, 15, 4.99);
+    const quad = quadratureVGroove(30, 15, 4.99);
+    expect(Math.abs(closed - quad) / closed).toBeLessThan(0.02);
+  });
+
+  it('V groove: agrees with independent quadrature for the bench’s 90 deg chamfer stroke', () => {
+    const closed = vGrooveVolumeMm3(30, 45, 1.5375);
+    const quad = quadratureVGroove(30, 45, 1.5375);
+    expect(Math.abs(closed - quad) / closed).toBeLessThan(0.02);
+  });
+});
+
+describe('checkVolumeAgreement — the #741 regression: the real measured excess must fail', () => {
+  it('the real #741 numbers (j11 star female, 1431 vs 971 mm³, +47 %) are flagged', () => {
+    // #741's own documented measurement (`docs/reviews/2026-11-02-cnc-review/03-simulation-gate.md`
+    // §2): the uncapped (buggy) simulator removed 1431 mm³ where the capped, correct cone removes
+    // 971 mm³ — the independent figure here plays the analytic side, the buggy run plays the
+    // "simulated" side, exactly as a live check would see them.
+    const report = checkVolumeAgreement('j11 star female pocket', 1431, 971);
+    expect(report.ok).toBe(false);
+    expect(report.excessFraction).toBeCloseTo(0.4737, 3);
+    expect(report.sentence).toContain('j11 star female pocket');
+  });
+
+  it('the real #741 numbers (j11 inlay 30°, 5089 vs 3067 mm³, +66 %) are flagged', () => {
+    const report = checkVolumeAgreement('j11 inlay 30°', 5089, 3067);
+    expect(report.ok).toBe(false);
+    expect(report.excessFraction).toBeGreaterThan(0.6);
+  });
+
+  it('an in-tolerance run (float/approximation drift only) passes', () => {
+    const report = checkVolumeAgreement('badge', 100.3, 100);
+    expect(report.ok).toBe(true);
+  });
+});
+
+describe('checkGoalCutInto — #924’s 3D half, ported from tools/goal_check.py', () => {
+  function flatGoal(nx: number, ny: number, pitch: number, z: number): GoalHeightfield {
+    const n = nx * ny;
+    return {
+      nx,
+      ny,
+      x0: 0,
+      y0: 0,
+      pitch,
+      topZ: 0,
+      minZ: z,
+      z: new Float32Array(n).fill(z),
+      covered: new Uint8Array(n).fill(1),
+      coveredCount: n,
+      resolutionNote: `${pitch} mm grid`,
+    };
+  }
+
+  it('a swept surface that exactly matches the goal passes, full coverage', () => {
+    const goal = flatGoal(10, 10, 0.5, -2);
+    const report = checkGoalCutInto(goal, () => -2);
+    expect(report.ok).toBe(true);
+    expect(report.coverageFraction).toBe(1);
+    expect(report.cutIntoFraction).toBe(0);
+  });
+
+  it('a rough pass that cuts into the goal by more than the floor is caught, as the demo page found (#909)', () => {
+    const goal = flatGoal(10, 10, 0.5, -2);
+    // Half the cells are gouged 0.5 mm below the goal — well past the 0.01 mm floor.
+    const report = checkGoalCutInto(goal, (x) => (x < 2.5 ? -2.5 : -2));
+    expect(report.ok).toBe(false);
+    expect(report.cutIntoFraction).toBeGreaterThan(0);
+    expect(report.maxCutIntoMm).toBeCloseTo(0.5, 6);
+    expect(report.sentence).toContain('cut into');
+  });
+
+  it('material left standing above the goal is reported as leftover, not cut-into', () => {
+    const goal = flatGoal(10, 10, 0.5, -2);
+    const report = checkGoalCutInto(goal, () => -1.5); // 0.5 mm high everywhere
+    expect(report.cutIntoFraction).toBe(0);
+    expect(report.ok).toBe(true); // cut-into is the correctness gate; leftover is reported, not refused
+    expect(report.leftoverFractions[1]).toBeGreaterThan(0); // past the 0.3 mm band
+    expect(report.maxLeftoverMm).toBeCloseTo(0.5, 6);
+  });
+
+  it('a cell outside the resultTop sampler (unreached) is excluded from the denominator, not counted as cut-into', () => {
+    const goal = flatGoal(10, 10, 0.5, -2);
+    const report = checkGoalCutInto(goal, (x) => (x < 2.5 ? null : -2));
+    expect(report.goalCells).toBeLessThan(goal.coveredCount);
+    expect(report.ok).toBe(true);
+  });
+});
