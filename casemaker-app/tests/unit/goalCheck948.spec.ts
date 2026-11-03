@@ -12,6 +12,11 @@
  * same numbers a direct call to `checkGoalCutInto` produces from the same two halves, and a
  * deliberately gouged program does not pass.
  *
+ * The leftover bands and the pass line are read with the PAGE's own point rule (`sweptTopExact`,
+ * `sweptPoint.ts`): the cutter stamped along the posted program at each goal cell's centre, which
+ * reproduces `goal_check.py`'s coverage on the same program (relief 99.32 %, figure@j29 48.64 %)
+ * while cut-into stays on the conservative column read.
+ *
  * The relief case's zero cut-into is not this spec's invention: the bench's own `goal_check.py`,
  * run on the same posted program and the same 0.1 mm heightfield, reports 0.00 % cut-into / max
  * 0.000 mm too. The swept top is read as the HIGHEST column touching the goal cell (see
@@ -274,6 +279,13 @@ describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
       expect(report.goalCutInto?.sentence).toContain('coverage');
       expect(report.goalCutInto?.sentence).toContain('95');
       expect(report.ok).toBe(false);
+      // #948 — THE COVERAGE IS THE PAGE'S OWN READ, cell for cell. `goal_check.py` stamps the
+      // cutter along this posted program at each goal cell's centre: 11744 of 22865 cells are more
+      // than 0.1 mm above the goal (0.5136234419418325, i.e. 48.64 % coverage). The column grid's
+      // max-of-four read gave 30.71 % — 18 points away — so the leftover must use the page's rule.
+      expect(
+        Math.abs((report.goalCutInto?.leftoverFractions[0] ?? 0) - 0.5136234419418325),
+      ).toBeLessThanOrEqual(1 / (report.goalCutInto?.goalCells ?? 1));
     } finally {
       session.dispose();
     }
@@ -338,6 +350,12 @@ describe('#948 the live session’s swept top', () => {
       expect(report.goalCutInto?.cutIntoFraction).toBe(0);
       expect(report.goalCutInto?.maxCutIntoMm).toBe(0);
       expect(report.goalCutInto?.maxCutIntoAt).toBeNull();
+      // #948 — the leftover read is the page's own point rule, cell for cell: `goal_check.py` on
+      // this same posted program leaves 824 of 120701 cells more than 0.1 mm above the goal
+      // (0.006826786853464346). The app must answer with the same count.
+      expect(
+        Math.abs((report.goalCutInto?.leftoverFractions[0] ?? 0) - 0.006826786853464346),
+      ).toBeLessThanOrEqual(1 / (report.goalCutInto?.goalCells ?? 1));
       expect(report.goalCutInto?.maxLeftoverMm).toBe(3);
       // And the merge left the report's other verdicts alone.
       expect(report.ok).toBe(true);

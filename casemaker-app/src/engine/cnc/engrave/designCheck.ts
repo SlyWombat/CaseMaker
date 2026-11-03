@@ -361,6 +361,13 @@ export interface GoalCutIntoOptions {
   /** Overrides {@link GOAL_CUT_INTO_FLOOR_MM}. */
   cutIntoFloorMm?: number;
   /**
+   * #948 — the sampler the LEFTOVER bands and the pass line are read with. The page judges them
+   * from the swept top at each goal cell's centre (its own stamp); a caller that can reproduce
+   * that read for the same program hands it here, and `sweptTop` stays the cut-into judge. Absent:
+   * `sweptTop` answers both (the pre-#948 reading).
+   */
+  leftoverTop?: ResultTop;
+  /**
    * #948 — the top-surface coverage the run must reach to pass, 0–1: the share of the goal's
    * covered cells standing within {@link GOAL_LEFTOVER_BANDS_MM}[0] of the goal. The shop's
    * `goal.passCoverage`; absent → {@link GOAL_PASS_COVERAGE_FALLBACK}.
@@ -438,6 +445,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
   let withinBoth = 0;
   let covered = 0;
 
+  const leftoverTop = opts.leftoverTop ?? sweptTop;
   for (let j = 0; j < goal.ny; j++) {
     for (let i = 0; i < goal.nx; i++) {
       const k = j * goal.nx + i;
@@ -458,12 +466,15 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
           maxCutIntoAt = { x, y };
         }
       }
+      // #948 — the leftover bands and the pass line read the page's own point of the sweep; the
+      // cut-into figures above stay on the conservative read.
+      const dLeft = (leftoverTop(x, y) ?? top) - goalTop;
       for (let b = 0; b < GOAL_LEFTOVER_BANDS_MM.length; b++) {
-        if (d > GOAL_LEFTOVER_BANDS_MM[b]!) leftoverCounts[b]! += 1;
+        if (dLeft > GOAL_LEFTOVER_BANDS_MM[b]!) leftoverCounts[b]! += 1;
       }
-      if (d > GOAL_LEFTOVER_BANDS_MM[0]!) {
-        leftoverVolumeMm3 += d * cellArea;
-        maxLeftover = Math.max(maxLeftover, d);
+      if (dLeft > GOAL_LEFTOVER_BANDS_MM[0]!) {
+        leftoverVolumeMm3 += dLeft * cellArea;
+        maxLeftover = Math.max(maxLeftover, dLeft);
       }
       if (Math.abs(d) <= cutIntoFloorMm) withinBoth++;
     }
