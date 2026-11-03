@@ -11,6 +11,12 @@
  * The grid is the page's own checker's (`docs/bench/2026-10-28-z1-real-jobs/tools/goal-hf.mts`):
  * 0.1 mm, capped at 20 M cells. What the check does with the pair is `designCheck.ts`'s
  * `checkGoalCutInto`, ported from the same run's `goal_check.py`.
+ *
+ * LENIENT DIRECTION, STATED: the swept top is the HIGHEST column touching a goal cell
+ * (`session.sweptTop`), so an over-cut NARROWER than one sim cell is hidden by its highest
+ * neighbour and reads as not cut. The check catches what the grid can resolve — a cutter-footprint
+ * gouge is pinned by the positive-control test — and `GoalCutIntoReport.pitchMm` states the
+ * resolution it was judged at. Leftover is correspondingly read a half cell high.
  */
 
 import { isMold, moldHeightfield, sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/cam/surface3d';
