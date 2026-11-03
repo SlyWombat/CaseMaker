@@ -18,6 +18,7 @@ import html
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.request
@@ -314,6 +315,16 @@ def run_card(c, args, sha, cat):
             card['verdict'], card['sentence'] = 'error', 'the goal heightfield could not be sampled (not a mesh goal?)'
             return card
         card['verdict'], card['sentence'], card['numbers'] = goal_verdict(rc, gc)
+        # The app's own second coverage number, from its `goal-unreached` warning: the share of the
+        # WHOLE goal surface this setup reproduces (top-facing and reachable), as against this card's
+        # top-heightfield coverage. Read from the receipt, never re-derived here.
+        reach = None
+        for w in rc['warnings']:
+            m = re.search(r"reproduces (\d+(?:\.\d+)?) % of the goal's surface", w)
+            if m:
+                reach = float(m.group(1))
+                break
+        card['numbers']['wholeSurfacePct'] = reach
         if len(rc['programs']) > 1:
             card['sentence'] += ' (goal check: side 1 only)'
     elif kind == 'goal':
@@ -437,7 +448,9 @@ def page(cards, args, sha, loc, cat):
             if 'coveragePct' in n:
                 facts += [('Goal surface', f"{c.get('goalSize', {}).get('x', '?')} × {c.get('goalSize', {}).get('y', '?')} mm"),
                           ('Cut into the goal', f"{n['cutIntoPct']} % · {n['cutIntoAreaMm2']} mm² · max {n['maxCutIntoMm']} mm"),
-                          ('Coverage', f"{n['coveragePct']} %"),
+                          ('Top-surface coverage', f"{n['coveragePct']} % (the card’s pass line)"),
+                          ('Whole-surface reach', f"{n['wholeSurfacePct']} % from this setup (the remainder: under-faces and undercuts)"
+                           if n.get('wholeSurfacePct') is not None else 'not stated by the app for this setup'),
                           ('Leftover', f"{n['leftover0p1Pct']} % > 0.1 mm · {n['leftover0p3Pct']} % > 0.3 mm"),
                           ('Smallest cutter', f"⌀{n['idealCutterMm']} mm")]
         else:
