@@ -57,6 +57,7 @@ import { engraveShopOpts } from '@/engine/cnc/engrave/feeds';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { resolvedFeedsTable, setLocatedFeedTable, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import type { Tool } from '@/engine/cnc/tool';
 import { NO_TOOL_KEY, getTools, resetRegistry, setRegistry } from '@/engine/cnc/toolRegistry';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
@@ -68,6 +69,10 @@ import type { EngraveJob } from '@/types/engraveJob';
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import { HUMAN, type CommandOptions } from '../../scripts/lib/casemaker/output';
 import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
+import { readTargetObjectFile } from '@/engine/import/targetObject';
+import type { EngraveTargetObject } from '@/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
@@ -492,4 +497,101 @@ describe.skipIf(!HAVE_STICK)('#922 one pipeline — the stick goal job', () => {
   it('j29-elephant-stick posts the same programs from both paths', async () => {
     await expectSameStickGoal();
   }, 600_000);
+});
+
+/**
+ * #914/#898 part 2 — A FLIP-PLAN JOB (`job.setups.length === 2`), both doors, byte for byte.
+ *
+ * Built here with `planFlipSetups` (#872 slice 3) rather than a static fixture, on `relief-plate.stl`
+ * (`tests/fixtures/goals/`, ~40 × 30 × 7 mm: a 4 mm plate and a 3 mm boss) and a 10 mm-thick stock —
+ * chosen DELIBERATELY SHALLOW so NEITHER side needs a `bandMm` floor: setup 1's own `goalNeedMm` is
+ * the relief's ~7 mm depth, and setup 2's (the flipped side's) unbanded need is the stock's full
+ * thickness (a flipped flush-top goal's farthest point is always the stock thickness away — #914's
+ * own measurement on the real stick figure, 36 mm of 36 mm stock) — 10 mm here, comfortably inside
+ * the owned ⌀3.175 ball's 21 mm usable band either way. A deeper goal would need `bandMm` wired into
+ * each side's own goal copy first (`planFlipSetups` does not do this yet — #914's own report flags
+ * it as an open risk for the real elephant/panther flip, separate from this program-identity case).
+ */
+async function flipGoalJobPath(): Promise<string> {
+  const bytes = readFileSync(join(HERE, '..', 'fixtures', 'goals', 'relief-plate.stl'));
+  const read = await readTargetObjectFile(new File([bytes], 'relief-plate.stl'), 'goal-relief-914');
+  if (!read.ok) throw new Error(read.error);
+  const stock = { length: 60, width: 50, thickness: 10, material: 'pla' as const };
+  const target: EngraveTargetObject = {
+    id: read.id,
+    name: read.name,
+    format: read.format,
+    sha256: read.sha256,
+    data: read.data,
+    size: read.size,
+    position: { x: stock.length / 2, y: stock.width / 2, z: 0 },
+    rotation: 0,
+    enabled: true,
+    role: 'goal',
+  };
+  const base = defaultEngraveJob();
+  const job: EngraveJob = {
+    ...base,
+    name: 'flip-914-relief',
+    labels: [],
+    shapes: [],
+    drills: [],
+    stock,
+    toolKey: 'inv:kz-ball-nose-3-175-22',
+    targetObject: target,
+  };
+  const plan = planFlipSetups(job, target, ['top', 'bottom'], house.inventory as { key: string; tool: Tool }[]);
+  if (!plan.ok) throw new Error(`flip-914: planFlipSetups refused: ${plan.reason}`);
+  const { targetObject: _t, ...rest } = job;
+  const twoSetupJob: EngraveJob = { ...rest, setups: plan.setups, targetObjects: plan.goals };
+  const path = join(SCRATCH, 'flip-914-relief.job.json');
+  writeFileSync(path, JSON.stringify(twoSetupJob));
+  return path;
+}
+
+async function expectSameFlipGoal(): Promise<void> {
+  const jobPath = await flipGoalJobPath();
+  const boot = await bootstrap({ location: benchLocation() });
+  const catalogue = loadCatalogue(join(SCRATCH, 'catalogue.json'));
+  setLocatedFeedTable((JSON.parse(readFileSync(benchLocation(), 'utf8')) as { feeds: [] }).feeds);
+  const parsed = parseEngraveJob(JSON.parse(readFileSync(jobPath, 'utf8')));
+  if (!parsed.ok) throw new Error(`flip-914: ${parsed.errors.join('; ')}`);
+  const job = parsed.job;
+  const tool = jobTool(job);
+  if (tool === null) throw new Error(`flip-914: the job's cutter ${job.toolKey} is not in the location's registry`);
+
+  const cli = await cut('flip-914', jobPath);
+  const worker = await engraveGenerate(
+    boot.manifold,
+    job,
+    tool,
+    catalogue?.rows ?? [],
+    null,
+    undefined,
+    appShop(boot.location?.defaults ?? null),
+  );
+  if (!worker.ok || worker.programs.length === 0) {
+    throw new Error(
+      `flip-914: the app's path stopped at ${worker.stage} (${worker.errors.map((e) => e.message).join('; ') || 'no error message'}) ` +
+        `while the CLI ${cli.code === 0 ? `posted ${cli.ncs.length} program(s)` : `refused: ${JSON.stringify(cli.receipt.refusals)}`}`,
+    );
+  }
+  expect(cli.code, `flip-914: casemaker cut exited ${cli.code}: ${JSON.stringify(cli.receipt.refusals)}`).toBe(0);
+  // THE FIRST FACT: a two-setup job posts (at least) two programs from EACH door, not one.
+  expect(worker.programs.length, 'flip-914: the flip plan is two setups, so at least two programs').toBeGreaterThanOrEqual(2);
+  expect(cli.ncs, 'flip-914: both paths post the same number of programs').toHaveLength(worker.programs.length);
+  worker.programs.forEach((program, i) => {
+    const cliNc = cli.ncs[i]!;
+    if (program.nc === cliNc) return;
+    throw new Error(
+      `flip-914 program ${i + 1} (setup ${program.setupIndex}): the app and the CLI post different programs — ` +
+        `worker ${summary(program.nc)} | CLI ${summary(cliNc)}; first difference at ${firstDifference(program.nc, cliNc)}`,
+    );
+  });
+}
+
+describe('#914/#898 one pipeline — a flip-plan (two-setup) goal job', () => {
+  it('a top+bottom flip job posts the same programs from both paths', async () => {
+    await expectSameFlipGoal();
+  }, 300_000);
 });
