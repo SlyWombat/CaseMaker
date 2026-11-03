@@ -28,7 +28,7 @@ import {
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveGenerated, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
-import { goalCutIntoUnchecked, type DesignCheckItem, type GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
+import { goalCutIntoUnchecked, type DesignCheckItem, type DesignCheckReport, type GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 import {
   conditionForKey,
@@ -269,6 +269,44 @@ describe('engraveRunStore (#206)', () => {
     it('a board’s copper report never supplies the goal check', () => {
       const combined = store.combineOracles([report()], report({ goalCutInto: check('copper') }));
       expect('goalCutInto' in combined).toBe(false);
+    });
+  });
+
+  // #947 gate 7 / #924 — THE OTHER TWO PIECES OF THE ORACLE'S EVIDENCE travel with the goal check,
+  // the same way. Without them the Simulate footer and the run sheet read `undefined`: the sliver
+  // width sentence never appears, and a failed design check is a cross with no sentence behind it.
+  describe('#947/#924 the sliver width and the design check on the combined report', () => {
+    const report = (over: Partial<OracleReport> = {}): OracleReport => ({
+      ok: true,
+      band: 0.016,
+      levels: [],
+      worst: { underCut: 0, overCut: 0 },
+      ...over,
+    });
+    const design = (ok: boolean): DesignCheckReport => ({
+      ok,
+      band: 0.016,
+      levels: [],
+      worst: { unreached: ok ? 0 : 1, tooFar: 0 },
+      areaFloor: 0.001,
+    });
+
+    it('carries the sliver width from the last program that ran the comparison', () => {
+      const combined = store.combineOracles([report({ sliverWidthMm: 0.01 }), report()], null);
+      expect(combined.sliverWidthMm).toBe(0.01);
+      expect('sliverWidthMm' in store.combineOracles([report(), report()], null)).toBe(false);
+    });
+
+    it('carries the design check, and a failing one wins the carry', () => {
+      expect(store.combineOracles([report({ designCheck: design(true) })], null).designCheck?.ok).toBe(true);
+      // The run is red because program 1 failed its design check; the carried check must be the
+      // one that explains the cross, not a later program's passing one.
+      const mixed = store.combineOracles(
+        [report({ ok: false, designCheck: design(false) }), report({ designCheck: design(true) })],
+        null,
+      );
+      expect(mixed.designCheck?.ok).toBe(false);
+      expect('designCheck' in store.combineOracles([report()], null)).toBe(false);
     });
   });
 

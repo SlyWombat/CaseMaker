@@ -26,6 +26,7 @@ import { rowSummary } from '@/components/panels/engraveRowText';
 import type { RotaryNeckFacts } from '@/engine/cnc/rotary/neck';
 import { copperSentence } from '@/engine/cnc/engrave/pcbWords';
 import type { CopperTopologyReport } from '@/engine/cnc/engrave/pcbTopology';
+import type { DesignCheckReport } from '@/engine/cnc/engrave/designCheck';
 
 /** What the load did: a full sweep, the runner only (sweep refused), or nothing at all. */
 export type SimRunOutcome = 'swept' | 'path-only' | 'refused';
@@ -81,6 +82,14 @@ export interface SimCoverageInput {
    * this check — then the sentence says nothing about it, the same way `oracleBand` does.
    */
   sliverWidthMm?: number;
+  /**
+   * #924 / #947 gate statement 5 — the design-side check's own report (`OracleReport.designCheck`),
+   * computed from the RAW design rather than the CAM's plan. Its verdict is already folded into
+   * the tick the operator reads; this sentence states the numbers behind that cross, so a run that
+   * fails the design check is not an unexplained red mark with 0/0 under/over. Absent when the
+   * caller supplied no raw design geometry (every non-V/flat-engrave job today).
+   */
+  designCheck?: DesignCheckReport;
   /**
    * Labels of the fixture obstacles the sweep was given (#204), in order. Empty means no fixture
    * was modelled — the default setup, where `fixture-unchecked` reports the workholding is not an
@@ -353,7 +362,26 @@ export function coverageSummaryLine(input: SimCoverageInput): string {
  */
 export function coverageDisclaimer(input: SimCoverageInput): string[] {
   const out = coverageSentences(input);
+  // #924/#947 gate 5 — the design-side check's own numbers, so the verdict it folds into the tick
+  // is explained rather than an unexplained cross.
+  if (input.designCheck !== undefined) out.push(designCheckSentence(input.designCheck));
   return input.copper === undefined ? out : [...out, copperSentence(input.copper)];
+}
+
+/**
+ * #924 — WHAT THE DESIGN-SIDE CHECK FOUND, in the operator's own numbers: the raw design against
+ * the sweep (not the CAM's own opening), the band it was judged to, and the two areas gate
+ * statement 5 asks about — design not reached, and material cut outside it.
+ */
+function designCheckSentence(check: DesignCheckReport): string {
+  const mm2 = (v: number): string => String(Number(v.toFixed(2)));
+  const band = Number(check.band.toFixed(3));
+  const grid = check.gridNote === undefined ? '' : ` (${check.gridNote})`;
+  return (
+    `The design-side check ${check.ok ? 'passed' : 'failed'}: the raw design against this sweep, not the CAM’s plan, ` +
+    `at a band of ${band} mm${grid} — ${mm2(check.worst.unreached)} mm² of the design not reached and ` +
+    `${mm2(check.worst.tooFar)} mm² cut outside it.`
+  );
 }
 
 function coverageSentences(input: SimCoverageInput): string[] {

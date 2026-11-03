@@ -111,6 +111,7 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 // re-worded, so the sheet and the panel cannot disagree about what the sweep did not see.
 import { coverageDisclaimer, type SimCoverageInput, type SimRunOutcome } from '@/components/panels/simCoverage';
 import type { CopperTopologyReport } from '@/engine/cnc/engrave/pcbTopology';
+import type { DesignCheckReport } from '@/engine/cnc/engrave/designCheck';
 // #737 — the neck's facts are the ROTARY module's (the span, the saw line and the floor, from
 // `rotaryFreeSpan`): the coverage sentence the sheet and the panel print quotes them, never a
 // second reading of the job.
@@ -661,6 +662,13 @@ export interface RunSheetSim {
    * it ignored. Omitted when the oracle that produced the band did not state one.
    */
   sliverWidthMm?: number;
+  /**
+   * #924 / #947 gate statement 5 — the design-side check's own report, computed from the RAW
+   * design rather than the CAM's plan. Its verdict is already folded into the run's tick; the
+   * sheet states the numbers behind it (design not reached, material outside it, the band) so a
+   * failed check is not an unexplained cross. Omitted when no raw design was supplied.
+   */
+  designCheck?: DesignCheckReport;
   /**
    * #744 — EVERY program's sweep, in cut order, as the shared walk summarised it
    * (`engine/cnc/engrave/programSweep.ts`). The sheet's §8 then reads the run rather than its first
@@ -1384,6 +1392,7 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
     engine: sim?.engine,
     oracleBand: sim?.oracleBand,
     sliverWidthMm: sim?.sliverWidthMm,
+    ...(sim?.designCheck === undefined ? {} : { designCheck: sim.designCheck }),
     // #743 P-6 — the copper's own verdict, when the run is a board (the sheet names the shorts).
     ...(sim?.copper === undefined ? {} : { copper: sim.copper }),
     fixtureLabels: envelope.boxes.map((b) => b.label),

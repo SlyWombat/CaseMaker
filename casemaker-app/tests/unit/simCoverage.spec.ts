@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { coverageDisclaimer, type SimCoverageInput, type SimSweptProgram } from '@/components/panels/simCoverage';
+import type { DesignCheckReport } from '@/engine/cnc/engrave/designCheck';
 
 const base: SimCoverageInput = {
   outcome: 'swept',
@@ -40,6 +41,30 @@ describe('coverageDisclaimer', () => {
   it('says nothing about a sliver width when the oracle report has none', () => {
     const s = text({ oracleBand: 0.1 });
     expect(s).not.toContain('Boundary slivers');
+  });
+
+  // #924/#947 gate 5 — THE DESIGN CHECK'S OWN NUMBERS. Its verdict is folded into the tick the
+  // operator reads; without this sentence a failed check is an unexplained cross with 0/0
+  // under/over and no way to read what failed.
+  it('states the design-side check’s own numbers, passed or failed (#924)', () => {
+    const check = (ok: boolean): DesignCheckReport => ({
+      ok,
+      band: 0.016,
+      gridNote: 'a 0.1 mm grid',
+      levels: [],
+      worst: { unreached: 0.42, tooFar: 0.03 },
+      areaFloor: 0.001,
+    });
+    const failed = text({ oracleBand: 0.016, designCheck: check(false) });
+    expect(failed).toContain('The design-side check failed');
+    expect(failed).toContain('0.42 mm² of the design not reached');
+    expect(failed).toContain('0.03 mm² cut outside it');
+    expect(failed).toContain('band of 0.016 mm (a 0.1 mm grid)');
+    expect(text({ oracleBand: 0.016, designCheck: check(true) })).toContain('The design-side check passed');
+  });
+
+  it('says nothing about a design check when the run supplied none', () => {
+    expect(text({ oracleBand: 0.1 })).not.toContain('design-side check');
   });
 
   it('names the obstacles it was given: fixture labels and sacrificial material', () => {

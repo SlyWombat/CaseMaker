@@ -250,6 +250,20 @@ export function combineOracles(reports: readonly OracleReport[], copper: OracleR
     (last, r) => (r.goalCutInto === undefined ? last : r),
     null,
   );
+  // #947 gate 7 / #924 — THE REST OF THE ORACLE'S EVIDENCE TRAVELS TOO, the same way. The sliver
+  // width is the constant every flat comparison that ran the open states; the design-side check is
+  // whose verdict the `ok` above already folds, so without it a failed run shows an unexplained
+  // cross with 0/0 under/over and no sentence. A FAILING design check wins the carry (it is the
+  // one the operator must be able to read); otherwise the last program's stands.
+  const sliver = reports.reduce<OracleReport | null>(
+    (last, r) => (r.sliverWidthMm === undefined ? last : r),
+    null,
+  );
+  const design = reports.reduce<OracleReport | null>((carried, r) => {
+    if (r.designCheck === undefined) return carried;
+    if (!r.designCheck.ok) return r;
+    return carried !== null && carried.designCheck?.ok === false ? carried : r;
+  }, null);
   return {
     ok: failing.length === 0 && (copper === null || copper.ok),
     band: Math.max(...all.map((r) => r.band)),
@@ -266,6 +280,8 @@ export function combineOracles(reports: readonly OracleReport[], copper: OracleR
     ...(locus.frame === undefined ? {} : { frame: locus.frame }),
     ...(copper?.copper === undefined ? {} : { copper: copper.copper }),
     ...(goal?.goalCutInto === undefined ? {} : { goalCutInto: goal.goalCutInto }),
+    ...(sliver?.sliverWidthMm === undefined ? {} : { sliverWidthMm: sliver.sliverWidthMm }),
+    ...(design?.designCheck === undefined ? {} : { designCheck: design.designCheck }),
   };
 }
 
