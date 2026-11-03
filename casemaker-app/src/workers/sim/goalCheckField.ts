@@ -12,11 +12,13 @@
  * 0.1 mm, capped at 20 M cells. What the check does with the pair is `designCheck.ts`'s
  * `checkGoalCutInto`, ported from the same run's `goal_check.py`.
  *
- * LENIENT DIRECTION, STATED: the swept top is the HIGHEST column touching a goal cell
- * (`session.sweptTop`), so an over-cut NARROWER than one sim cell is hidden by its highest
- * neighbour and reads as not cut. The check catches what the grid can resolve — a cutter-footprint
- * gouge is pinned by the positive-control test — and `GoalCutIntoReport.pitchMm` states the
- * resolution it was judged at. Leftover is correspondingly read a half cell high.
+ * LENIENT DIRECTION, STATED: the swept top for CUT-INTO is the HIGHEST of the four columns whose
+ * centres bracket a goal cell (`session.sweptTop`), so a cell reads cut only when all four are
+ * below the goal. A gouge up to one column (0.1 mm) wide is therefore NOT seen — a fine V-tip or
+ * ball mark of one column's width leaves a neighbour at the goal's level and the cell reads
+ * clean; a gouge two columns wide reads as one line of cells. `GoalCutIntoReport.pitchMm` states
+ * the resolution it was judged at; the positive control is a cutter-footprint plunge, far wider.
+ * (The LEFTOVER bands are read with the page's own stamp and carry no such band.)
  */
 
 import { isMold, moldHeightfield, sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/cam/surface3d';

@@ -37,6 +37,7 @@ import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import { checkGoalCutInto, goalCutIntoUnchecked } from '@/engine/cnc/engrave/designCheck';
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { flatEndMill } from '@/engine/cnc/tool';
 import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
 import { Z1 } from '@/engine/cnc/machine';
 import type { Tool } from '@/engine/cnc/tool';
@@ -164,6 +165,134 @@ describe('#948 the goal check’s plain input', () => {
     expect('unchecked' in input).toBe(true);
     if ('unchecked' in input) expect(input.unchecked).toContain('could not be sampled');
   });
+});
+
+describe('#948 the conservative read’s stated limit', () => {
+  it('a gouge one column wide is not seen; two columns wide reads as one line of cells', () => {
+    // The cut-into read takes the HIGHEST of the four columns whose centres bracket a goal cell,
+    // so a cell reads cut only when all four are below the goal. Two parallel 0.1 mm cuts, one
+    // column apart, make a two-column gouge — seen where both bracketing columns are cut — and a
+    // single cut leaves a clean neighbour, which is the limit A's review asked to pin.
+    const job = defaultEngraveJob();
+    const nc = [
+      'G21 G90',
+      'S1000 M3',
+      'G0 X50 Y20 Z5',
+      'G1 Z-0.2 F200',
+      'G1 Y40 F300',
+      'G0 Z5',
+      'M2',
+    ].join('\n');
+    // A ball routes to the COLUMN engine (a plain flat program of this size goes exact, which has
+    // no grid to read); a 0.2 mm ball cuts a disc a couple of columns wide on the 0.1 mm grid, so
+    // its EDGE column has a clean neighbour (the one-column limit) and its middle has an adjacent
+    // pair (the two-column case).
+    const tool: Tool = {
+      ...flatEndMill(3.175, { name: '0.1 mm ball', fluteLength: 5 }),
+      shape: 'ball',
+      typeText: 'Ball Nose',
+      tipDiameter: 0.2,
+      cornerRadius: 0.1,
+    };
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(nc, toSetup(job, Z1), tool, Z1.id);
+      expect(load.ok).toBe(true);
+      if (!load.ok) return;
+      const f = load.flatField ?? null;
+      expect(f).not.toBeNull();
+      if (f === null) return;
+      const top = session.sweptTop();
+      expect(top).not.toBeNull();
+      if (top === null) return;
+      const cellX = (i: number): number => f.u0 + i * f.du;
+      const cellY = (j: number): number => f.v0 + j * f.dv;
+      // Find a row where a lowered column has a clean neighbour on its left (the one-column
+      // limit), and a row with two adjacent lowered columns (the two-column gouge).
+      const lowered = (i: number, j: number): boolean => (f.top[j * f.nu + i] as number) < -0.1;
+      let single: { i: number; j: number } | null = null;
+      let pair: { i: number; j: number } | null = null;
+      for (let j = 1; j < f.nv - 1; j++) {
+        for (let i = 1; i < f.nu - 1; i++) {
+          if (!lowered(i, j)) continue;
+          if (lowered(i + 1, j) && pair === null) pair = { i, j };
+          if (!lowered(i - 1, j) && single === null) single = { i, j };
+        }
+        if (single !== null && pair !== null) break;
+      }
+      expect(single).not.toBeNull();
+      expect(pair).not.toBeNull();
+      if (single === null || pair === null) return;
+      // One column wide: the midpoint between the gouged column and its clean neighbour sits in
+      // the clean column's half, so the highest bracketing column is the goal's level — not seen.
+      expect(top((cellX(single.i) + cellX(single.i - 1)) / 2, cellY(single.j))).toBe(0);
+      // Two columns wide: the midpoint between the two gouged columns has both bracketing columns
+      // cut — read as cut, and at the highest of the two (the conservative rule).
+      const a = f.top[pair.j * f.nu + pair.i] as number;
+      const b = f.top[pair.j * f.nu + pair.i + 1] as number;
+      const seen = top((cellX(pair.i) + cellX(pair.i + 1)) / 2, cellY(pair.j));
+      expect(seen).toBeCloseTo(Math.max(a, b), 6);
+      expect(seen).toBeLessThan(-0.1);
+    } finally {
+      session.dispose();
+    }
+  }, 240_000);
+});
+
+describe('#948 a surface post is read in the work frame', () => {
+  it('the same cut posted flat and lifted against a fitted plane sweeps to the same top', () => {
+    // A's review note 6: `withGoalCheck` also runs on the `frame: 'surface'` branch, and a goal
+    // is a document-frame surface — so the sweep's top must have the fitted lift taken back out.
+    // The session un-lifts the posted program before the column sweep (the same timeline the
+    // volumetric oracle reads), so the conservative read AND the page-rule field are work-frame.
+    const job = defaultEngraveJob();
+    const ball: Tool = {
+      number: 1,
+      id: 'ball2',
+      name: '2 mm ball',
+      typeText: 'Ball',
+      shape: 'ball',
+      handleDiameter: 6,
+      tipDiameter: 2,
+      diameter: 6,
+      cornerRadius: 1,
+      angle: null,
+      halfAngle: null,
+      fluteLength: 30,
+      shoulderLength: 30,
+      stickout: null,
+      centreCutting: null,
+    };
+    const lift = (x: number): number => 2 + 0.01 * x;
+    const nc = ['G21 G90', 'S1000 M3', 'G0 X10 Y10 Z1', 'G1 Z-0.5 F100', 'G1 X30 F300', 'M2'].join('\n');
+    const ncLifted = [
+      'G21 G90',
+      'S1000 M3',
+      'G0 X10 Y10 Z1',
+      `G1 Z${(-0.5 + lift(10)).toFixed(3)} F100`,
+      `G1 X30 Z${(-0.5 + lift(30)).toFixed(3)} F300`,
+      'M2',
+    ].join('\n');
+    const surface = { plane: { offset: 2, slopeX: 0.01, slopeY: 0 }, z0: 0 };
+    const read = (src: string, opts?: Parameters<ReturnType<typeof createSimSession>['load']>[4]) => {
+      const session = createSimSession(tl);
+      try {
+        const load = session.load(src, toSetup(job, Z1), ball, Z1.id, opts);
+        expect(load.ok).toBe(true);
+        const top = session.sweptTop();
+        expect(top).not.toBeNull();
+        const field = session.sweptFieldExact({ nx: 21, ny: 1, x0: 10, y0: 10, pitch: 1 });
+        expect(field).not.toBeNull();
+        return { top: top?.(15, 10) ?? null, field: field?.[10] ?? null };
+      } finally {
+        session.dispose();
+      }
+    };
+    const flat = read(nc);
+    const lifted = read(ncLifted, { surface });
+    expect(lifted.top).toBeCloseTo(flat.top as number, 6);
+    expect(lifted.field).toBeCloseTo(flat.field as number, 6);
+  }, 240_000);
 });
 
 describe('#948 the pass line — zero cut-into is not the whole verdict', () => {
