@@ -51,6 +51,7 @@ import {
 } from '@/engine/cnc/engrave/oracle';
 import { computeCopperTopology, type PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import { checkDesignReach, checkGoalCutInto, goalCutIntoUnchecked, type DesignCheckItem, type GoalCutIntoOptions } from '@/engine/cnc/engrave/designCheck';
+import type { WholeSurfaceReach } from '@/engine/cnc/engrave/goalWholeSurface';
 import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
@@ -481,6 +482,12 @@ export type GoalCheckInput =
       sweptTop: ResultTop;
       /** #948 — the page's own point read of the same sweep, for the leftover bands. */
       sweptTopExact?: ResultTop;
+      /**
+       * #948 review §4.1 — the whole-surface field, formed from every proposed setup's sweep
+       * (`unionWholeSurface`). The pass line judges it when present; the single top setup's
+       * producer hands its one-setup union, whose fraction is its top-surface number.
+       */
+      wholeSurface?: WholeSurfaceReach | null;
       opts?: GoalCutIntoOptions;
     }
   | { unchecked: string; opts?: GoalCutIntoOptions };
@@ -1240,6 +1247,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         : checkGoalCutInto(goal.heightfield, goal.sweptTop, {
             ...goal.opts,
             ...(goal.sweptTopExact === undefined ? {} : { leftoverTop: goal.sweptTopExact }),
+            ...(goal.wholeSurface === undefined || goal.wholeSurface === null ? {} : { wholeSurface: goal.wholeSurface }),
           });
     return { ...report, goalCutInto, ok: report.ok && goalCutInto.ok };
   };

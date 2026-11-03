@@ -38,6 +38,7 @@ import {
   type OracleSliceAt,
 } from '@/engine/cnc/engrave/oracle';
 import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import type { WholeSurfaceReach } from './goalWholeSurface';
 import { goalTopAt, type ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 
 type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
@@ -373,6 +374,12 @@ export interface GoalCutIntoOptions {
    * `goal.passCoverage`; absent → {@link GOAL_PASS_COVERAGE_FALLBACK}.
    */
   passCoverage?: number;
+  /**
+   * #948 review §4.1 — THE WHOLE-SURFACE FIELD, when the caller formed it from every proposed
+   * setup's sweep (`unionWholeSurface`). The pass line judges THIS when present; absent, the
+   * top-surface coverage stands (today's single-setup read, which the caller states).
+   */
+  wholeSurface?: WholeSurfaceReach | null;
 }
 
 export interface GoalCutIntoReport {
@@ -417,6 +424,12 @@ export interface GoalCutIntoReport {
    * to know the constant; the measured value is `1 − leftoverFractions[0]`.
    */
   passCoverage: number;
+  /**
+   * #948 review §4.1 — the whole-surface read the pass line judged, when the caller formed it
+   * from every proposed setup's sweep (`unionWholeSurface`); absent when only the top surface was
+   * read. The Cut card prints it beside the top-surface number, one definition each.
+   */
+  wholeSurface?: WholeSurfaceReach;
   medianDeltaMm: number;
   sentence: string;
 }
@@ -494,14 +507,32 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
   const surfaceCoverage = 1 - (leftoverFractions[0] ?? 0);
   const passPct = Number((passCoverage * 100).toFixed(2));
   const surfacePct = Number((surfaceCoverage * 100).toFixed(2));
-  const coverageOk = surfaceCoverage + 1e-9 >= passCoverage;
+  // #948 review §4.1 — THE PASS LINE IS THE WHOLE-SURFACE REACH when the caller formed it from
+  // the proposed setups; absent, the top-surface read stands (a single top setup's own number).
+  const whole = opts.wholeSurface ?? null;
+  const judgedCoverage = whole === null ? surfaceCoverage : whole.fraction;
+  const judgedPct = Number((judgedCoverage * 100).toFixed(2));
+  const coverageOk = judgedCoverage + 1e-9 >= passCoverage;
   const ok = cutIntoCells === 0 && coverageOk;
+  // The read's own words: which surface was judged, how many setups formed it, and — when a
+  // plan excludes one — the face it excludes, as a job fact with its share.
+  const excludedWords =
+    whole === null || whole.excludedFace === null
+      ? ''
+      : `; ${whole.excludedFace} (${Number(((whole.excludedCells / Math.max(whole.coveredCells, 1)) * 100).toFixed(2))} % of the surface) is excluded by design`;
+  const setupsWords =
+    whole === null
+      ? ''
+      : whole.setups <= 1
+        ? `; one top setup, so the top surface is the whole surface this setup can reach${excludedWords}`
+        : `; ${whole.setups} setups formed it${excludedWords}`;
+  const wholeClause = whole === null ? '' : ` (whole-surface coverage ${judgedPct} %${setupsWords})`;
   const sentence =
     cutIntoCells > 0
-      ? `goal check: ${(cutIntoFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(cutIntoCells, cellArea).toFixed(1)} mm²) cut into by up to ${maxCutInto.toFixed(3)} mm — ${cutIntoVolumeMm3.toFixed(1)} mm³ over-cut.`
+      ? `goal check: ${(cutIntoFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(cutIntoCells, cellArea).toFixed(1)} mm²) cut into by up to ${maxCutInto.toFixed(3)} mm — ${cutIntoVolumeMm3.toFixed(1)} mm³ over-cut${whole === null ? '' : `; whole-surface coverage ${judgedPct} %${setupsWords}`}.`
       : coverageOk
-        ? `goal check: no cell cut more than ${cutIntoFloorMm} mm into the goal (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
-        : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal).`;
+        ? `goal check: no cell cut more than ${cutIntoFloorMm} mm into the goal (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm)${wholeClause}.`
+        : `goal check: coverage ${whole === null ? surfacePct : judgedPct} % of ${whole === null ? "the goal's top surface" : "the goal's whole surface"} — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal${setupsWords}).`;
 
   return {
     ok,
@@ -520,6 +551,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
     maxLeftoverMm: maxLeftover,
     coverageFraction,
     passCoverage,
+    ...(whole === null ? {} : { wholeSurface: whole }),
     medianDeltaMm,
     sentence,
   };

@@ -703,6 +703,11 @@ describe.skipIf(!HAVE_STICK)('#948 the stick goal’s two programs read the page
         const combined = combineOracles(reports, null).goalCutInto;
         expect(combined?.ran).toBe(true);
         expect(combined?.cutIntoFraction).toBe(0);
+        // §4.1 — a single top setup reads its top-surface number as its whole-surface reach,
+        // stated; the pass line now judges that number.
+        expect(combined?.wholeSurface?.fraction).toBeCloseTo(1 - (combined?.leftoverFractions[0] ?? 0), 6);
+        expect(combined?.wholeSurface?.setups).toBe(1);
+        expect(combined?.sentence).toContain('one top setup');
         // The page's stamp on BOTH programs: 25345 of 156996 cells (coverage 83.86 %).
         expect(combined?.goalCells).toBe(156996);
         expect(Math.abs((combined?.leftoverFractions[0] ?? 0) - 25345 / 156996)).toBeLessThanOrEqual(1 / 156996);
