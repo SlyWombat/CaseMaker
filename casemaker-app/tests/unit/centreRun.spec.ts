@@ -248,6 +248,10 @@ describe('#932 a zero release distance', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain('nothing to release');
-    expect(fake.lines.some((l) => l.startsWith('G38.5'))).toBe(false);
+    // The refused line never reaches the wire…
+    expect(fake.lines.some((l) => /^G38\.5 Z0( |$)/.test(l))).toBe(false);
+    // …and #933's stop path still backs the triggered stylus off, with the compiled distance: a
+    // release setting of 0 must not leave the probe down for the epilogue's home.
+    expect(fake.lines.filter((l) => l.startsWith('G38.5'))).toEqual(['G38.5 Z3 F100']);
   });
 });
