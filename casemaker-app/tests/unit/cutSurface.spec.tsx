@@ -1538,6 +1538,57 @@ describe('#948 the goal check’s line', () => {
     expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('matches the design');
   });
 
+  // #948 review §4.1 — THE WHOLE-SURFACE REACH FACT: the pass line's own metric, one definition,
+  // beside the top-surface coverage. A single top setup states the identity (its top number IS its
+  // whole-surface reach); the excluded underside is named with its share, never silently subtracted.
+  it('prints the whole-surface reach, its definition and the named underside', () => {
+    const grid = { nx: 10, ny: 10, x0: 0, y0: 0, pitch: 1 };
+    drawWithOracle({
+      ...OK_ORACLE,
+      goalCutInto: goal({
+        wholeSurface: {
+          fraction: 0.8386,
+          reachedCells: 84,
+          cells: 100,
+          coveredCells: 100,
+          excludedCells: 0,
+          excludedAreaMm2: 0,
+          excludedFace: null,
+          setups: 1,
+          grid,
+        },
+      }),
+    });
+    const reach = screen.getByTestId('engrave-cut-goal-whole-surface');
+    expect(reach.textContent).toBe(
+      'Whole-surface reach: 83.86 % after one top setup, so the top surface is the whole surface (the pass line is 95 %)',
+    );
+    // The top-surface fact stays beside it: the two numbers are one definition each.
+    expect(screen.getByTestId('engrave-cut-goal-coverage')).not.toBeNull();
+  });
+
+  it('names the excluded underside and the setups that formed the whole-surface reach', () => {
+    drawWithOracle({
+      ...OK_ORACLE,
+      goalCutInto: goal({
+        wholeSurface: {
+          fraction: 1,
+          reachedCells: 80,
+          cells: 80,
+          coveredCells: 100,
+          excludedCells: 20,
+          excludedAreaMm2: 20,
+          excludedFace: 'the 10 × 2 face on the stock bottom',
+          setups: 2,
+          grid: { nx: 10, ny: 10, x0: 0, y0: 0, pitch: 1 },
+        },
+      }),
+    });
+    expect(screen.getByTestId('engrave-cut-goal-whole-surface').textContent).toBe(
+      'Whole-surface reach: 100 % after 2 setups (the pass line is 95 %); the 10 × 2 face on the stock bottom (20 % of the surface) excluded by design',
+    );
+  });
+
   // #948 — THE REPORT'S OWN FAILURE when `ok` is false for COVERAGE, not for a cut into the part:
   // j29 on the milestone's job reads ok false, zero cut-into cells, 46.49 % coverage, and the line
   // used to fall through to the cut-into branch and print "Cuts 0 mm into the design". It states
