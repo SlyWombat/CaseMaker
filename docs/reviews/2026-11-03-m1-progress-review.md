@@ -258,13 +258,10 @@ before closing.
 
 ## 4. Decisions waiting on you
 
-1. **Coverage pass line for the elephant and panther** (#943 state line, asked 11-03 11:20): the card's
-   number is **top-surface** coverage (what a single top setup can reach; undercuts excluded by
-   construction) — 82.7 % / 82.5 % today — or **whole-surface** (the sculpture, needing #914's turns and
-   #898's tabs, about a week more). My read of your own words: the elephant lies flat by design, so
-   top-surface ≥ 95 % is its honest line; the panther is a sculpture, and the plan said "after all
-   setups", so whole-surface ≥ 95 % after the setups the app proposes is its line. Either way the ~17 %
-   gap today is a plan-side shortfall (the rest pass ignores the cusp step-over), which B is fixing.
+1. ~~Coverage pass line~~ **Answered (maintainer, 2026-11-03, on #943):** "the elephant also has areas that
+   cannot be reached from the top; the panther should be >95 % once flips are in place." Both figures are
+   judged whole-surface ≥ 95 % after all the setups the app proposes; the elephant's underside on the stock
+   bottom is excluded by design. #914 and #898 part 2 are therefore on the critical path to line 1b.
 2. **Are the 36 × 36 × 100 sticks planed or rough-sawn?** Default taken: planed (no facing pass). If
    rough-sawn, facing and the re-touch return to Sample 1.
 3. **The app picks a ⌀1 flat (`flat-1.0`) for Sample 1 that the k3 house does not own** (its 29 cutters
