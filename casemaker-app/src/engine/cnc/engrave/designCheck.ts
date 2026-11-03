@@ -58,6 +58,32 @@ export interface DesignCheckItem {
   r: number;
 }
 
+/**
+ * #924 activation finding — extra padding, beyond an item's own `r + band`, the "too far" clip
+ * keeps around its `grown` bbox before comparing against the whole program's slice. Generous
+ * compared to ordinary feature sizes (so a genuine over-cut right at the item's own edge is never
+ * clipped away) while almost never reaching a neighbouring document item (text/shapes are placed
+ * with real gaps between them; see `checkDesignReach`'s own note on why this clip exists at all).
+ */
+const LOCAL_SLICE_PAD_MM = 1;
+
+/** `box` grown by `pad` on every side. */
+function padBbox(box: OracleBbox, pad: number): OracleBbox {
+  return { min: [box.min[0] - pad, box.min[1] - pad], max: [box.max[0] + pad, box.max[1] + pad] };
+}
+
+/** A single CCW rectangle contour spanning `box`. */
+function rectPolygon(box: OracleBbox): OraclePolygon[] {
+  return [
+    [
+      [box.min[0], box.min[1]],
+      [box.max[0], box.min[1]],
+      [box.max[0], box.max[1]],
+      [box.min[0], box.max[1]],
+    ],
+  ];
+}
+
 export interface DesignCheckOptions {
   /**
    * Extra tolerance beyond each item's own `r` for the "no simulated point lies too far out" side,
@@ -149,7 +175,25 @@ export function checkDesignReach(
         if (unreached > 0) unreachedBbox = bboxOf(reachable);
       } else {
         unreachedCS = CS.difference([reachable, sliceCS]);
-        tooFarCS = CS.difference([sliceCS, grown]);
+        // #924 activation finding — `sliceAt` is the WHOLE PROGRAM's cut at this Z (`gridSliceAt`/
+        // `removalSliceAt`, never scoped to one item), so on a multi-item job with two items cut to
+        // similar depths (ordinary V-carved text: a neighbouring letter's groove is still open at
+        // THIS item's shallower z, same cone geometry), comparing it directly against this item's
+        // own `grown` reads every OTHER item's material as this one's over-cut. Clipped to a pad
+        // around THIS item's own bbox before the difference — generous enough that a genuine
+        // over-cut near this item's own boundary still shows, but a neighbour's letter metres away
+        // does not. Confirmed against the real badge job (#924 activation): unclipped, an ordinary
+        // passing item read 71 mm² of "too far" that was entirely "br"'s own strokes.
+        const localPad = item.r + band + LOCAL_SLICE_PAD_MM;
+        const localBox = padBbox(bboxOf(grown), localPad);
+        const localCS = CS.ofPolygons(rectPolygon(localBox));
+        const localSlice = sliceCS.intersect(localCS);
+        localCS.delete();
+        try {
+          tooFarCS = CS.difference([localSlice, grown]);
+        } finally {
+          localSlice.delete();
+        }
         unreached = Math.max(0, unreachedCS.area());
         tooFar = Math.max(0, tooFarCS.area());
         if (unreached > 0) unreachedBbox = bboxOf(unreachedCS);
