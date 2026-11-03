@@ -289,6 +289,8 @@ describe('engraveRunStore (#206)', () => {
       levels: [],
       worst: { unreached: ok ? 0 : 1, tooFar: 0 },
       areaFloor: 0.001,
+      pitchMm: 0.02,
+      sentence: '',
     });
 
     it('carries the sliver width from the last program that ran the comparison', () => {
