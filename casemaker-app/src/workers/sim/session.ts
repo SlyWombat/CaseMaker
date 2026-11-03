@@ -1174,12 +1174,31 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
   const withDesignChecks = (
     report: OracleReport,
     sliceAt: OracleSliceAt,
+    /**
+     * #924 hotfix — THIS SWEEP'S OWN measured tolerance (`oracleBand`/`columnOracleBand`'s, the
+     * same number `withCopper` above already reads), not a hand-set default. `checkDesignReach`
+     * previously got `{}` and fell back to its OWN hardcoded `SWEEP_SIMPLIFY_EPS_MM + 2 *
+     * ARC_CHORD_TOLERANCE_MM` — the `simplifyLevels === 1` case — regardless of how many contours
+     * this particular sweep actually simplified. `oracleBand`'s formula scales that term by
+     * `SWEEP_TOLERANCES.simplifyLevels(contours)`, which grows with contour count (#786's chunked
+     * union tree, one simplify pass per chunk and per tree level): a job with few contours (a
+     * one-word badge, a single laminate shape) keeps `levels === 1` and the hardcoded default
+     * happened to match it by coincidence, masking this gap through #924's own activation proof.
+     * A job with many contours (three real text labels, each letter stroke its own contour) needs
+     * a wider band than the hardcoded default allows, and the design check read every one of those
+     * extra, genuinely-tolerable simplify levels as "too far"/"unreached" — `tests/e2e/engrave.
+     * spec.ts:180`'s regression. Passing the SAME band the CAM-prediction oracle already compares
+     * against keeps the two checks answering the same "is this within the sweep's own
+     * approximation" question; it is the sweep's measured numerical tolerance, never the CAM's
+     * offset geometry, so #924's independence from the CAM's own prediction is unaffected.
+     */
+    band: number,
     designItems?: readonly DesignCheckItem[],
     goal?: { heightfield: GoalHeightfield; sweptTop: ResultTop; opts?: GoalCutIntoOptions },
   ): OracleReport => {
     let out = report;
     if (designItems !== undefined && designItems.length > 0) {
-      const designCheck = checkDesignReach(tl, designItems, sliceAt, {});
+      const designCheck = checkDesignReach(tl, designItems, sliceAt, { band });
       out = { ...out, designCheck, ok: out.ok && designCheck.ok };
     }
     if (goal !== undefined) {
@@ -1222,7 +1241,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       const band = columnOracleBand(worstContours(l.timeline), grid);
       const sliceAt = gridSliceAt(tl, grid);
       const report = computeOracle(tl, sliceAt, predicted, band, grid);
-      return withDesignChecks(withCopper(report, sliceAt, band, pcb), sliceAt, designItems, goal);
+      return withDesignChecks(withCopper(report, sliceAt, band, pcb), sliceAt, band, designItems, goal);
     }
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
     // #708 — AN INDEXED ROTARY SWEEP IS JUDGED A FACE AT A TIME. Its removal is in the STOCK frame
@@ -1243,7 +1262,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // un-lift recovers, coincides with the work frame. No shear: the removal is never tilted.
     const band = oracleBand(worstContours(l.timeline));
     const sliceAt = removalSliceAt(removal);
-    return withDesignChecks(withCopper(computeOracle(tl, sliceAt, predicted, band), sliceAt, band, pcb), sliceAt, designItems, goal);
+    return withDesignChecks(withCopper(computeOracle(tl, sliceAt, predicted, band), sliceAt, band, pcb), sliceAt, band, designItems, goal);
   };
 
   const levelCut = (zSlice: number): { region: CrossSectionInstance | null; bandMm: number } | null => {

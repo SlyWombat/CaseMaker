@@ -56,6 +56,12 @@ export interface DesignCheckItem {
   depth: number;
   /** This item's own cutter effective radius at that depth, mm — the wall a cutter of this size cannot enter. Per-item, since one job can mix tools. */
   r: number;
+  /**
+   * A design footprint that explains removal near other items but is not graded itself (a drilled
+   * hole: its disc from the job's own hole centres and radius). Without it, a hole beside a label
+   * reads as that label's "too far".
+   */
+  allowOnly?: true;
 }
 
 /**
@@ -144,79 +150,103 @@ export function checkDesignReach(
   let worstUnreachedAt: { itemId?: string; z: number; bbox: OracleBbox } | null = null;
   let worstTooFarAt: { itemId?: string; z: number; bbox: OracleBbox } | null = null;
 
-  for (const item of items) {
-    if (item.design.length === 0 || item.depth <= 0) continue;
-    const z = -item.depth;
-    let designCS: CrossSectionInstance | null = null;
-    let reachable: CrossSectionInstance | null = null;
-    let grown: CrossSectionInstance | null = null;
-    let sliceCS: CrossSectionInstance | null = null;
-    let unreachedCS: CrossSectionInstance | null = null;
-    let tooFarCS: CrossSectionInstance | null = null;
+  // "Too far" is removal no design item cut at least this deep accounts for. Every item's allowance
+  // (its design grown by its own r + band) is built once; a graded item is then compared against the
+  // union of its own and every other allowance that reaches its depth and its local box, so a
+  // neighbouring item, a deeper pocket or a drilled hole is never charged to it.
+  const usable = items.filter((it) => it.design.length > 0 && it.depth > 0);
+  const allowances = usable.map((it) => {
+    const cs = CS.ofPolygons(it.design);
     try {
-      const segments = segmentsForRadius(Math.max(item.r, item.r + band));
-      designCS = CS.ofPolygons(item.design);
-      // Side 1: a point the tool can physically enter (>= r from the design's own outline) must be
-      // inside the simulated region. A single erosion by the cutter's RAW radius — not the CAM's
-      // `offset(offset(design, -planeRadius), tipRadius)` (#584) two-stage reach.
-      reachable = designCS.offset(-item.r, 'Round', 2, segments);
-      // Side 2: nothing simulated may stand more than r + band from the design.
-      grown = designCS.offset(item.r + band, 'Round', 2, segments);
-      sliceCS = sliceAt(z + 0.001);
-
-      const reachableArea = Math.max(0, reachable.area());
-      let unreached: number;
-      let tooFar: number;
-      let unreachedBbox: OracleBbox | null = null;
-      let tooFarBbox: OracleBbox | null = null;
-      if (sliceCS === null) {
-        unreached = reachableArea;
-        tooFar = 0;
-        if (unreached > 0) unreachedBbox = bboxOf(reachable);
-      } else {
-        unreachedCS = CS.difference([reachable, sliceCS]);
-        // #924 activation finding — `sliceAt` is the WHOLE PROGRAM's cut at this Z (`gridSliceAt`/
-        // `removalSliceAt`, never scoped to one item), so on a multi-item job with two items cut to
-        // similar depths (ordinary V-carved text: a neighbouring letter's groove is still open at
-        // THIS item's shallower z, same cone geometry), comparing it directly against this item's
-        // own `grown` reads every OTHER item's material as this one's over-cut. Clipped to a pad
-        // around THIS item's own bbox before the difference — generous enough that a genuine
-        // over-cut near this item's own boundary still shows, but a neighbour's letter metres away
-        // does not. Confirmed against the real badge job (#924 activation): unclipped, an ordinary
-        // passing item read 71 mm² of "too far" that was entirely "br"'s own strokes.
-        const localPad = item.r + band + LOCAL_SLICE_PAD_MM;
-        const localBox = padBbox(bboxOf(grown), localPad);
-        const localCS = CS.ofPolygons(rectPolygon(localBox));
-        const localSlice = sliceCS.intersect(localCS);
-        localCS.delete();
-        try {
-          tooFarCS = CS.difference([localSlice, grown]);
-        } finally {
-          localSlice.delete();
-        }
-        unreached = Math.max(0, unreachedCS.area());
-        tooFar = Math.max(0, tooFarCS.area());
-        if (unreached > 0) unreachedBbox = bboxOf(unreachedCS);
-        if (tooFar > 0) tooFarBbox = bboxOf(tooFarCS);
-      }
-
-      levels.push({ itemId: item.itemId, z, reachableArea, unreached, tooFar, unreachedBbox, tooFarBbox });
-      if (unreached > worstUnreached) {
-        worstUnreached = unreached;
-        worstUnreachedAt = unreachedBbox === null ? null : { itemId: item.itemId, z, bbox: unreachedBbox };
-      }
-      if (tooFar > worstTooFar) {
-        worstTooFar = tooFar;
-        worstTooFarAt = tooFarBbox === null ? null : { itemId: item.itemId, z, bbox: tooFarBbox };
-      }
+      const grownAll = cs.offset(it.r + band, 'Round', 2, segmentsForRadius(Math.max(it.r, it.r + band)));
+      return { item: it, grown: grownAll, box: bboxOf(grownAll) };
     } finally {
-      designCS?.delete();
-      reachable?.delete();
-      grown?.delete();
-      sliceCS?.delete();
-      unreachedCS?.delete();
-      tooFarCS?.delete();
+      cs.delete();
     }
+  });
+  const overlaps = (a: OracleBbox, b: OracleBbox): boolean =>
+    a.min[0] <= b.max[0] && b.min[0] <= a.max[0] && a.min[1] <= b.max[1] && b.min[1] <= a.max[1];
+
+  try {
+    for (const item of usable) {
+      if (item.allowOnly === true) continue;
+      const z = -item.depth;
+      let designCS: CrossSectionInstance | null = null;
+      let reachable: CrossSectionInstance | null = null;
+      let grown: CrossSectionInstance | null = null;
+      let sliceCS: CrossSectionInstance | null = null;
+      let unreachedCS: CrossSectionInstance | null = null;
+      let tooFarCS: CrossSectionInstance | null = null;
+      try {
+        const segments = segmentsForRadius(Math.max(item.r, item.r + band));
+        designCS = CS.ofPolygons(item.design);
+        // Side 1: a point the tool can physically enter (>= r from the design's own outline) must be
+        // inside the simulated region. A single erosion by the cutter's RAW radius — not the CAM's
+        // `offset(offset(design, -planeRadius), tipRadius)` (#584) two-stage reach.
+        reachable = designCS.offset(-item.r, 'Round', 2, segments);
+        // Side 2: nothing simulated may stand more than r + band from the design.
+        grown = designCS.offset(item.r + band, 'Round', 2, segments);
+        sliceCS = sliceAt(z + 0.001);
+
+        const reachableArea = Math.max(0, reachable.area());
+        let unreached: number;
+        let tooFar: number;
+        let unreachedBbox: OracleBbox | null = null;
+        let tooFarBbox: OracleBbox | null = null;
+        if (sliceCS === null) {
+          unreached = reachableArea;
+          tooFar = 0;
+          if (unreached > 0) unreachedBbox = bboxOf(reachable);
+        } else {
+          unreachedCS = CS.difference([reachable, sliceCS]);
+          // #924 activation finding — `sliceAt` is the WHOLE PROGRAM's cut at this Z (`gridSliceAt`/
+          // `removalSliceAt`, never scoped to one item), so on a multi-item job with two items cut to
+          // similar depths (ordinary V-carved text: a neighbouring letter's groove is still open at
+          // THIS item's shallower z, same cone geometry), comparing it directly against this item's
+          // own `grown` reads every OTHER item's material as this one's over-cut. Clipped to a pad
+          // around THIS item's own bbox before the difference — generous enough that a genuine
+          // over-cut near this item's own boundary still shows, but a neighbour's letter metres away
+          // does not. Confirmed against the real badge job (#924 activation): unclipped, an ordinary
+          // passing item read 71 mm² of "too far" that was entirely "br"'s own strokes.
+          const localPad = item.r + band + LOCAL_SLICE_PAD_MM;
+          const localBox = padBbox(bboxOf(grown), localPad);
+          const localCS = CS.ofPolygons(rectPolygon(localBox));
+          const localSlice = sliceCS.intersect(localCS);
+          localCS.delete();
+          const others = allowances
+            .filter((a) => a.item !== item && a.item.depth >= item.depth - 1e-6 && overlaps(a.box, localBox))
+            .map((a) => a.grown);
+          try {
+            tooFarCS = CS.difference([localSlice, grown, ...others]);
+          } finally {
+            localSlice.delete();
+          }
+          unreached = Math.max(0, unreachedCS.area());
+          tooFar = Math.max(0, tooFarCS.area());
+          if (unreached > 0) unreachedBbox = bboxOf(unreachedCS);
+          if (tooFar > 0) tooFarBbox = bboxOf(tooFarCS);
+        }
+
+        levels.push({ itemId: item.itemId, z, reachableArea, unreached, tooFar, unreachedBbox, tooFarBbox });
+        if (unreached > worstUnreached) {
+          worstUnreached = unreached;
+          worstUnreachedAt = unreachedBbox === null ? null : { itemId: item.itemId, z, bbox: unreachedBbox };
+        }
+        if (tooFar > worstTooFar) {
+          worstTooFar = tooFar;
+          worstTooFarAt = tooFarBbox === null ? null : { itemId: item.itemId, z, bbox: tooFarBbox };
+        }
+      } finally {
+        designCS?.delete();
+        reachable?.delete();
+        grown?.delete();
+        sliceCS?.delete();
+        unreachedCS?.delete();
+        tooFarCS?.delete();
+      }
+    }
+  } finally {
+    for (const a of allowances) a.grown.delete();
   }
 
   const areaFloor = ORACLE_AREA_FLOOR;

@@ -2265,6 +2265,9 @@ export function engraveRegions(
   const cutoutMask: MaskCutout[] = [];
   const cutoutCuts: CutRegion[] = [];
   const cutoutPredicted: OraclePredicted[] = [];
+  // #924 hotfix — each cut-out's footprint for the design check, from its raw outline: the band
+  // within inset + the cutter's diameter of the outline, either side. Allowance only, never graded.
+  const cutoutAllowances: DesignCheckItem[] = [];
   const tabFindings: JobFinding[] = [];
   // #218/#750 — the bottom face's removal for the loose-piece analysis: each CONTOUR's kerf,
   // less the material that contour's own placed tabs keep, and each cut-out that cut itself free.
@@ -2293,6 +2296,19 @@ export function engraveRegions(
     for (const c of plan.cutouts) {
       const outlineCS = executeProfile(tl, c.outline);
       const outline = outlineCS.toPolygons() as Polygons;
+      if (outline.length > 0) {
+        const w = c.inset + 2 * radius;
+        const outer = outlineCS.offset(w, 'Round', 2, segmentsForRadius(w));
+        const inner = outlineCS.offset(-w, 'Round', 2, segmentsForRadius(w));
+        const ring = tl.CrossSection.difference([outer, inner]);
+        const ringPolygons = ring.toPolygons() as Polygons;
+        outer.delete();
+        inner.delete();
+        ring.delete();
+        if (ringPolygons.length > 0 && c.depth > 0) {
+          cutoutAllowances.push({ itemId: c.id, design: ringPolygons, depth: c.depth, r: 0, allowOnly: true });
+        }
+      }
       outlineCS.delete();
       if (outline.length === 0) {
         // #218 — a referenced outline that resolves to nothing has no path to cut. Without this
@@ -2510,6 +2526,19 @@ export function engraveRegions(
   // finding states the shortfall); a stated flute shorter than the cone keeps its refusal, so its
   // depth is left alone and `generateEngrave`'s guard still stops it.
   const vLimit = tool === null ? null : vDepthLimit(tool);
+  // #924 hotfix — AN ISOLATION FRAME IS NOT A DOCUMENT ENGRAVE ITEM FOR THIS CHECK. `job.combined`
+  // frames flagged `isolation` (`pcbIsolation.ts`'s own test, `kind === 'frame' && isolation ===
+  // true`) are cut with a cone exactly like an ordinary V-carve, so they land in `plan.engraves`
+  // and `vCarveById` indistinguishably from one — but what they bound is a channel around a COPPER
+  // shape, not a design region the raw-design reach check has any business grading: a two-layer
+  // board can carry hundreds of them (one per isolated net), and `checkDesignReach`'s per-item
+  // offset/difference/area work on that many items is what timed out `tests/e2e/
+  // pcbTwoSided.spec.ts:19` (Generate never completed). Excluded the same way thread and drill
+  // items already are — by never reaching `allDesignItems` — rather than disabled per job, so an
+  // isolation frame mixed into an otherwise ordinary job still leaves its sibling V-carves checked.
+  const isolationFrameIds = new Set(
+    (job.combined ?? []).filter((c) => c.kind === 'frame' && c.isolation === true).map((c) => c.id),
+  );
   // #924 activation — one design-check item per region below, built from the SAME `design`/
   // `depth` this region already carries (never a second derivation that could disagree with it).
   // A V-carve's `r` is its OWN `planeRadius` (`vCarveById`'s, computed per item from its own
@@ -2519,8 +2548,8 @@ export function engraveRegions(
   // only at the very floor and is too narrow a bound for material above it — using it understated
   // the reach and read ordinary badge text as over-cut by tens of mm² in the first draft of this
   // commit). A flat item's `r` is the cutter's own constant cutting radius. Left out (not pushed)
-  // when the design is empty, when this program's tool states no radius, or when the item cuts no
-  // material (depth <= 0) — never guessed at.
+  // when the design is empty, when this program's tool states no radius, when the item cuts no
+  // material (depth <= 0), or when the item is an isolation frame (above) — never guessed at.
   const allDesignItems: DesignCheckItem[] = [];
   const regions: EngraveRegion[] = plan.engraves.map((e) => {
     const vCarve = vCarveById.get(e.id);
@@ -2535,7 +2564,7 @@ export function engraveRegions(
     const depth = clampToCone ? floor + vLimit.limitMm : e.depth;
     const design = designOf(e);
     const designR = vCarve !== undefined ? vCarve.planeRadius : radius;
-    if (design.length > 0 && designR !== null && designR >= 0 && depth > 0) {
+    if (design.length > 0 && designR !== null && designR >= 0 && depth > 0 && !isolationFrameIds.has(e.id)) {
       allDesignItems.push({ itemId: e.id, design, depth, r: designR });
     }
     return {
@@ -2574,6 +2603,11 @@ export function engraveRegions(
         : null;
     const drillRadius = boreRadius ?? radius ?? drillToolRadius;
     const depth = d.through ? throughDepth : d.depth;
+    const holePolygons = drillRadius === null ? [] : drillPolygons(tl, d.holes, drillRadius);
+    // #924 hotfix — the hole explains the removal beside a neighbouring item but is not graded.
+    if (holePolygons.length > 0 && depth > 0) {
+      allDesignItems.push({ itemId: d.id, design: holePolygons, depth, r: 0, allowOnly: true });
+    }
     regions.push({
       id: d.id,
       text: '',
@@ -2581,7 +2615,7 @@ export function engraveRegions(
       // the same division of labour `toPartPlan` documents (#220).
       name: drillRadius === null ? d.name : `${d.name} ⌀${drillRadius * 2}`,
       depth,
-      polygons: drillRadius === null ? [] : drillPolygons(tl, d.holes, drillRadius),
+      polygons: holePolygons,
       drill: {
         holes: d.holes.map(([x, y]) => [x, y] as [number, number]),
         ...(boreRadius === null ? {} : { bore: { radius: boreRadius } }),
@@ -2594,6 +2628,7 @@ export function engraveRegions(
       ...(d.through ? { through: true as const, stockThickness: job.stock.thickness } : {}),
     });
   }
+  allDesignItems.push(...cutoutAllowances);
 
   // #287 — a single-line trace cuts the region its cutter SWEEPS (#270): one entry per trace, at
   // the trace's own floor. The builder is the same `traceCutRegions` the void warning uses, so the
