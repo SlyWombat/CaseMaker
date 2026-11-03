@@ -84,6 +84,12 @@ Generated 2026-11-02 · file `single.nc` · sha256 `d3ab1a68` · estimated cutti
 6. two or more strokes of Pocket outline "br" (5 contours, 13.773×21.04mm) are closer than 0.429 mm (2 × the 0.214 mm surface wall offset): their V openings merge at the top face and leave a ridge of the top colour below the colour plane.
 7. Imported vector "Single Barrel" "single › Single Barrel" 10.531×66.915 cuts 0.985 mm deep over "Magnet pocket" — a 1.51 mm membrane with nothing under it — so expect chatter and a rough finish there. Moving the cut clear of the void will finish better.
 8. Imported vector "br" "single › br" 13.773×21.04 cuts 0.998 mm deep over "Magnet pocket" — a 1.51 mm membrane with nothing under it — so expect chatter and a rough finish there. Moving the cut clear of the void will finish better.
+9. Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).
+10. Checked against the CAM's predicted regions at every level the plan cuts to — and, where the job cuts a V-bit trace, whose groove is a different width at each depth, at one derived level just under the top face, where that groove is widest.
+11. The comparison's band is 0.089 mm: a boundary that disagrees by less than that is the two engines' own resolution, not a CAM error.
+12. Boundary slivers under 0.01 mm are not counted: past the band, a disagreement that thin anywhere along its own length is read as the CAM's own ring against the design's opening, not a cut that missed or strayed.
+13. Not checked: the spindle body, head and gantry; anything on the bed other than the declared stock, workholding and sacrificial material.
+14. The modelled fixture is a shipped default.
 
 ## 9 · Record afterwards
 

@@ -82,6 +82,12 @@ Generated 2026-11-02 · file `design.nc` · sha256 `c7cc29b8` · estimated cutti
 5. Pocket outline "br" (5 contours, 15.076×23.031mm): pitch 0.15 mm, clamped to the cutter's 0.15 mm tip radius from the requested 0.244 mm — a wider pitch would leave a ridge of the top colour down strokes narrower than two passes apart.
 6. two or more strokes of Pocket outline "(Like the Whiskey)" (21 contours, 6.212×49.969mm) are closer than 0.107 mm (2 × the 0.054 mm surface wall offset): their V openings merge at the top face and leave a ridge of the top colour below the colour plane.
 7. two or more strokes of Pocket outline "Single Barrel" (19 contours, 7.864×49.969mm) are closer than 0.107 mm (2 × the 0.054 mm surface wall offset): their V openings merge at the top face and leave a ridge of the top colour below the colour plane.
+8. Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).
+9. Checked against the CAM's predicted regions at every level the plan cuts to — and, where the job cuts a V-bit trace, whose groove is a different width at each depth, at one derived level just under the top face, where that groove is widest.
+10. The comparison's band is 0.089 mm: a boundary that disagrees by less than that is the two engines' own resolution, not a CAM error.
+11. Boundary slivers under 0.01 mm are not counted: past the band, a disagreement that thin anywhere along its own length is read as the CAM's own ring against the design's opening, not a cut that missed or strayed.
+12. Not checked: the spindle body, head and gantry; anything on the bed other than the declared stock, workholding and sacrificial material.
+13. The modelled fixture is a shipped default.
 
 ## 9 · Record afterwards
 

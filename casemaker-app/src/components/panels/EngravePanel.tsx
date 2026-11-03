@@ -2607,6 +2607,9 @@ export function EngravePanel(): JSX.Element {
           diagnostics: run.simDiagnostics,
           engine: run.simEngine ?? undefined,
           oracleBand: run.oracle?.band,
+          // #947 gate statement 7 — the width the oracle did not count, so the sheet's band
+          // sentence can say so.
+          sliverWidthMm: run.oracle?.sliverWidthMm,
           ...(run.oracle?.copper === undefined ? {} : { copper: run.oracle.copper }),
           programs: run.simPrograms,
         },

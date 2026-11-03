@@ -639,6 +639,14 @@ export interface RunSheetSim {
    */
   oracleBand?: number;
   /**
+   * #947 gate statement 7 — the width under which a boundary disagreement is read as the CAM's own
+   * ring against the design's opening, not a cut that missed (`OracleReport.sliverWidthMm`), mm.
+   * Carried for the same reason as `oracleBand`: the sheet's band sentence says what was not
+   * counted, so a "matches the design" verdict can be weighed against the narrowest disagreement
+   * it ignored. Omitted when the oracle that produced the band did not state one.
+   */
+  sliverWidthMm?: number;
+  /**
    * #744 — EVERY program's sweep, in cut order, as the shared walk summarised it
    * (`engine/cnc/engrave/programSweep.ts`). The sheet's §8 then reads the run rather than its first
    * file: each program's diagnostics are carried under its label, and the coverage sentence states
@@ -1360,6 +1368,7 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
     outcome: sim?.outcome ?? 'swept',
     engine: sim?.engine,
     oracleBand: sim?.oracleBand,
+    sliverWidthMm: sim?.sliverWidthMm,
     // #743 P-6 — the copper's own verdict, when the run is a board (the sheet names the shorts).
     ...(sim?.copper === undefined ? {} : { copper: sim.copper }),
     fixtureLabels: envelope.boxes.map((b) => b.label),

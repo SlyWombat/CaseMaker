@@ -170,12 +170,19 @@ async function record(c: Case): Promise<{ nc: string; verify: unknown; work: Ora
     if (!lifted.ok || lifted.nc === null) throw new Error(`${c.name}: the surface post was refused: ${lifted.errors.map((e) => e.message).join('; ')}`);
     surface = oracleOf(job, lifted, c.tilt);
   }
+  // #947 gate statement 7 — the sheet now states the oracle's band AND the sliver width under the
+  // band, so the frozen sheet is built with the report the app hands it (`EngravePanel`), not with
+  // no simulation at all. The band sentences were never in the goldens before this; they are the
+  // app's own sheet as of the same change.
+  const work = oracleOf(job, gen, null);
   return {
     nc: gen.nc,
     verify: gen.verify,
-    work: oracleOf(job, gen, null),
+    work,
     surface,
-    sheet: renderRunSheetMarkdown(buildRunSheet(job, gen, null, NOW)),
+    sheet: renderRunSheetMarkdown(
+      buildRunSheet(job, gen, { diagnostics: [], oracleBand: work.band, sliverWidthMm: work.sliverWidthMm }, NOW),
+    ),
   };
 }
 

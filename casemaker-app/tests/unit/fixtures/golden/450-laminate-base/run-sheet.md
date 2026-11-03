@@ -85,6 +85,12 @@ Generated 2026-11-02 · file `Untitled-engrave-job.nc` · sha256 `b99a38c8` · e
 4. Engrave "F600": pitch 0.15 mm, clamped to the cutter's 0.15 mm tip radius from the requested 0.18 mm — a wider pitch would leave a ridge of the top colour down strokes narrower than two passes apart.
 5. Engrave "F800": pitch 0.15 mm, clamped to the cutter's 0.15 mm tip radius from the requested 0.18 mm — a wider pitch would leave a ridge of the top colour down strokes narrower than two passes apart.
 6. Engrave "F1000": pitch 0.15 mm, clamped to the cutter's 0.15 mm tip radius from the requested 0.18 mm — a wider pitch would leave a ridge of the top colour down strokes narrower than two passes apart.
+7. Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).
+8. Checked against the CAM's predicted regions at every level the plan cuts to — and, where the job cuts a V-bit trace, whose groove is a different width at each depth, at one derived level just under the top face, where that groove is widest.
+9. The comparison's band is 0.089 mm: a boundary that disagrees by less than that is the two engines' own resolution, not a CAM error.
+10. Boundary slivers under 0.01 mm are not counted: past the band, a disagreement that thin anywhere along its own length is read as the CAM's own ring against the design's opening, not a cut that missed or strayed.
+11. Not checked: the spindle body, head and gantry; anything on the bed other than the declared stock, workholding and sacrificial material.
+12. The modelled fixture is a shipped default.
 
 ## 10 · Record afterwards
 

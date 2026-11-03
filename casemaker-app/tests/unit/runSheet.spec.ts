@@ -2400,6 +2400,28 @@ describe('#740 the cutter step states a tip the record actually records', () => 
 // #926 — the efficiency measures and the two shop thresholds. The measure itself is `ir.ts`'s; these
 // tests hold the SHEET to it: a step that states the basis, and a warning that names the airiest
 // operation and the setting it was judged against.
+describe('#947 the sheet states the oracle’s band and the sliver width under it', () => {
+  const warnings = (sheet: RunSheet): string[] => section(sheet, 'warnings').steps.map((s) => s.text);
+
+  it('prints the band, and the sliver width when the report carries one', () => {
+    const sheet = sheetFor(dj(), { diagnostics: [], oracleBand: 0.016, sliverWidthMm: 0.01 });
+    const text = warnings(sheet);
+    expect(text.some((t) => t.includes("The comparison's band is 0.016 mm"))).toBe(true);
+    expect(
+      text.some((t) => t.includes('Boundary slivers under 0.01 mm are not counted')),
+    ).toBe(true);
+  });
+
+  it('says nothing about slivers when the oracle states none, and nothing at all without a band', () => {
+    const bandOnly = warnings(sheetFor(dj(), { diagnostics: [], oracleBand: 0.016 }));
+    expect(bandOnly.some((t) => t.includes("The comparison's band is 0.016 mm"))).toBe(true);
+    expect(bandOnly.some((t) => t.includes('Boundary slivers under'))).toBe(false);
+    const noSim = warnings(sheetFor(dj()));
+    expect(noSim.some((t) => t.includes("comparison's band"))).toBe(false);
+    expect(noSim.some((t) => t.includes('Boundary slivers under'))).toBe(false);
+  });
+});
+
 describe('#927 the record section states the predicted time, and a last run beside it', () => {
   const recordText = (sheet: RunSheet): string[] => section(sheet, 'record').steps.map((s) => s.text);
 
