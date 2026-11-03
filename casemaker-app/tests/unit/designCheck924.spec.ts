@@ -23,6 +23,9 @@ import { ORACLE_AREA_FLOOR } from '@/engine/cnc/engrave/oracle';
 
 const CS = tl.CrossSection;
 
+/** A flat cutter of radius `r`, as `designCutterOf` reads one. */
+const flat = (r: number) => ({ tipRadius: r, tanHalf: 0, maxRadius: r });
+
 /** A `nx x ny` square outline, CCW, centred on the origin — the raw "design" for the fixtures below. */
 function square(nx: number, ny: number) {
   return [[[-nx / 2, -ny / 2], [nx / 2, -ny / 2], [nx / 2, ny / 2], [-nx / 2, ny / 2]] as [number, number][]];
@@ -31,7 +34,7 @@ function square(nx: number, ny: number) {
 describe('checkDesignReach — gate statement 5, against a hand-built simulated region', () => {
   it('passes when the simulation removed exactly the design’s own reachable region', () => {
     const r = 1;
-    const item: DesignCheckItem = { itemId: 'pocket', design: square(20, 10), depth: 2, r };
+    const item: DesignCheckItem = { itemId: 'pocket', design: square(20, 10), depth: 2, cutter: flat(r) };
     const design = CS.ofPolygons(item.design);
     const reachable = design.offset(-r, 'Round', 2, 64);
     try {
@@ -47,7 +50,7 @@ describe('checkDesignReach — gate statement 5, against a hand-built simulated 
 
   it('catches a reachable design area the simulation left uncut', () => {
     const r = 1;
-    const item: DesignCheckItem = { itemId: 'pocket', design: square(20, 10), depth: 2, r };
+    const item: DesignCheckItem = { itemId: 'pocket', design: square(20, 10), depth: 2, cutter: flat(r) };
     const design = CS.ofPolygons(item.design);
     // The simulation only removed the LEFT half of the reachable region — a real under-cut.
     const half = CS.ofPolygons([[[-10, -5], [0, -5], [0, 5], [-10, 5]]]);
@@ -66,25 +69,38 @@ describe('checkDesignReach — gate statement 5, against a hand-built simulated 
     }
   });
 
-  it('the #741 shape: a flank widened past the shank over-cuts beyond r + band and is caught', () => {
-    // The design is a narrow 30 mm V-trace footprint at the tip (a thin slot, tip radius 0.05 mm —
-    // the bench's 0.1 mm-tip chamfer). The (buggy) simulated region is the UNCAPPED cone's mouth at
-    // 5.1 mm depth — more than 10x wider than the tip reach plus any sane band, exactly the shape
-    // #741 reported (the engine kept widening the flank past the shank).
-    const r = 0.05;
-    const item: DesignCheckItem = { itemId: 'v-trace', design: [[[-15, -r], [15, -r], [15, r], [-15, r]]], depth: 5.1, r };
-    const design = CS.ofPolygons(item.design);
-    const buggyMouthHalfWidth = 5.1 * Math.tan((45 * Math.PI) / 180); // tanHalf for a 90 deg cone, uncapped at 5.1 mm
-    const simulated = CS.ofPolygons([[[-15, -buggyMouthHalfWidth], [15, -buggyMouthHalfWidth], [15, buggyMouthHalfWidth], [-15, buggyMouthHalfWidth]]]);
+  // #741's own numbers: a 90° ⌀3.175 chamfer bit (tip 0.1 mm, cone 1.54 mm tall) 5.1 mm deep. The
+  // real bit's flank stops at its body; the engine's bug kept the cone widening to the top face.
+  // The floor's tip trace is the same either way, so only a level above the cone can tell them apart.
+  const V90 = { tipRadius: 0.05, tanHalf: 1, maxRadius: 3.175 / 2 };
+  const trace: DesignCheckItem = { itemId: 'v-trace', design: [[[-15, -0.05], [15, -0.05], [15, 0.05], [-15, 0.05]]], depth: 5.1, cutter: V90 };
+  /** The removal at level z: the trace grown by the flank's widening there, capped at the body or not. */
+  const sweptAt = (capped: boolean) => (z: number) => {
+    const h = z + 5.1;
+    if (h < 0) return null;
+    const widen = capped ? Math.min(h, V90.maxRadius - V90.tipRadius) : h;
+    const slot = CS.ofPolygons(trace.design);
     try {
-      const report = checkDesignReach(tl, [item], (z) => (z <= -5.1 + 0.01 ? simulated.offset(0, 'Round', 2, 64) : null), {});
-      expect(report.ok).toBe(false);
-      expect(report.worst.tooFar).toBeGreaterThan(ORACLE_AREA_FLOOR);
-      expect(report.worst.tooFarAt?.itemId).toBe('v-trace');
+      return slot.offset(widen, 'Round', 2, 64);
     } finally {
-      design.delete();
-      simulated.delete();
+      slot.delete();
     }
+  };
+
+  it('#741: the real bit, its flank stopped at the body, passes at every level', () => {
+    const report = checkDesignReach(tl, [trace], sweptAt(true), {});
+    expect(report.ok, report.sentence).toBe(true);
+  });
+
+  it('#741: the flank widened past the body is caught above the cone, not at the floor', () => {
+    const report = checkDesignReach(tl, [trace], sweptAt(false), {});
+    expect(report.ok).toBe(false);
+    expect(report.worst.tooFarAt?.itemId).toBe('v-trace');
+    const failing = report.levels.filter((l) => l.tooFar > ORACLE_AREA_FLOOR);
+    // Nothing at the floor: the defect lives only where the real cone has ended.
+    expect(failing.every((l) => l.z > -5.1 + 1.5375)).toBe(true);
+    expect(report.levels.find((l) => l.z < -5)!.tooFar).toBe(0);
+    expect(report.sentence).toContain('v-trace is cut');
   });
 });
 
