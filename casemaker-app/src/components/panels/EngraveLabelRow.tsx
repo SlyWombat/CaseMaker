@@ -45,6 +45,12 @@ const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad
 
 export interface EngraveLabelRowProps {
   label: EngraveLabel;
+  /**
+   * #940b — the job's cone, when it has one: the V-carve depth control's data (the level pitch and,
+   * for the variable cut, the cutter that pockets the core flat). Null/absent — a flat job, or a
+   * caller with no cone in hand — draws no control, exactly like the shape row (#665).
+   */
+  vCarve?: { pitchMm: number | null; coreCutterName: string | null } | null;
   /** Position of this row in `job.labels`; only used for stable test ids. */
   index: number;
   /** Largest depth this stock allows: `thickness − minFloor`, mm. */
@@ -98,6 +104,7 @@ export interface EngraveLabelRowProps {
 export function EngraveLabelRow({
   label,
   index,
+  vCarve = null,
   maxDepth,
   maxDepthWhy = 'the stock thickness less the minimum floor',
   onChange,
@@ -344,7 +351,47 @@ export function EngraveLabelRow({
           />
           <span>mm</span>
         </label>
+        {/* #940b — THE TEXT'S V-CARVE DEPTH, the shape row's own control (#665), with a third
+            state the label needs: "not set". A label that has never stated one must be able to go
+            back to not stating it — an explicit value marks the text as V-bit work in a
+            multi-cutter plan, and a control that could only choose between two explicit values
+            would make that marking a one-way door. A construction label cuts nothing, so it gets
+            no control. */}
+        {vCarve !== null && label.construction !== true && (
+          <label style={FIELD_LABEL}>
+            <span>V-carve depth</span>
+            <select
+              value={label.vCarveDepth ?? ''}
+              data-testid={`engrave-label-vcarve-depth-${index}`}
+              aria-label={`Label ${index + 1} V-carve depth`}
+              title="Not set: the plan cuts the text with the job's cutter — a cone cuts its V either way, and in a multi-cutter plan the text is not claimed for the V-bit. Plane cuts one constant floor at the colour plane. Variable follows the design's width down to its centre, level by level; where the V's width runs out, the middle is left standing and the setup's flat end mill pockets it at the cap, in its own program."
+              onChange={(e) =>
+                onChange({
+                  vCarveDepth: e.target.value === 'plane' || e.target.value === 'variable' ? e.target.value : undefined,
+                })
+              }
+            >
+              <option value="">not set</option>
+              <option value="plane">plane (one depth)</option>
+              <option value="variable">variable (the medial axis)</option>
+            </select>
+          </label>
+        )}
       </div>
+
+      {/* #940b — the variable V-carve's own sentence, in the shape row's words (#665/#677): the
+          level pitch, the depth it reaches at the centre, and the cutter that pockets the core. */}
+      {vCarve !== null && label.construction !== true && label.vCarveDepth === 'variable' && (
+        <p style={MUTED} data-testid={`engrave-label-vcarve-note-${index}`}>
+          The V follows the design’s width —{' '}
+          {vCarve.pitchMm === null ? 'the level pitch comes from the feeds row' : `${mm(vCarve.pitchMm)} mm per level`}{' '}
+          — down to {mm(label.depth)} mm at the centre. Where the V cannot reach, the middle
+          stands as a core:{' '}
+          {vCarve.coreCutterName === null
+            ? 'add a flat end mill to the setup and that cutter pockets it at that depth in its own program.'
+            : `${vCarve.coreCutterName} pockets it flat at that depth in its own program, after the V-carve.`}
+        </p>
+      )}
 
       {/* #742 — the label's inlay half: the glue gap, the derived plug numbers, the refusal when
           no male can be made, and the action that saves the male blank as its own job. */}

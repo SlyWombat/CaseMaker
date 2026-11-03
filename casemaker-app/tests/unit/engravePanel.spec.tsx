@@ -5575,3 +5575,76 @@ describe('EngravePanel — the Cut step’s simulation stall (#895)', () => {
     expect(screen.getByTestId('engrave-generate-cancel')).toBeTruthy();
   });
 });
+
+// #940b — THE LABEL'S V-CARVE DEPTH. C's label document field (`EngraveLabel.vCarveDepth`) gets the
+// shape row's own control: the same two states and words, plus "not set" — the state a label that
+// has never stated one is in, and the only way back to it (an explicit value marks the text as
+// V-bit work in a multi-cutter plan). Absent = unchanged, and the field survives save/reload.
+describe('EngravePanel — the label’s V-carve depth (#940b)', () => {
+  const V_TOOL = flatEndMill(3.175, {
+    name: '3.175 mm 90° V',
+    typeText: 'Chamfer',
+    shape: 'chamfer',
+    tipDiameter: null,
+    diameter: 3.175,
+    angle: 90,
+    halfAngle: null,
+  });
+
+  function showWithCone(over: Partial<ReturnType<typeof defaultEngraveJob>> = {}): void {
+    act(() => {
+      useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), toolKey: 'test:v-90', tool: V_TOOL, ...over } });
+    });
+    render(<EngravePanel />);
+    expand('engrave-label');
+  }
+
+  it('offers the shape row’s control, not set by default, and writes the label', () => {
+    showWithCone();
+    const select = screen.getByTestId('engrave-label-vcarve-depth-0') as HTMLSelectElement;
+    expect(select.value).toBe('');
+    expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual([
+      ['', 'not set'],
+      ['plane', 'plane (one depth)'],
+      ['variable', 'variable (the medial axis)'],
+    ]);
+
+    fireEvent.change(select, { target: { value: 'variable' } });
+    expect(useEngraveJobStore.getState().job.labels[0]!.vCarveDepth).toBe('variable');
+    expect(screen.getByTestId('engrave-label-vcarve-note-0').textContent).toContain('add a flat end mill');
+
+    fireEvent.change(select, { target: { value: 'plane' } });
+    expect(useEngraveJobStore.getState().job.labels[0]!.vCarveDepth).toBe('plane');
+    expect(screen.queryByTestId('engrave-label-vcarve-note-0')).toBeNull();
+
+    // Back to not set: the key is cleared, not pinned to a value.
+    fireEvent.change(select, { target: { value: '' } });
+    expect(useEngraveJobStore.getState().job.labels[0]!.vCarveDepth).toBeUndefined();
+  });
+
+  it('survives save and reload, and a label that never set it round-trips without the key', () => {
+    showWithCone();
+    fireEvent.change(screen.getByTestId('engrave-label-vcarve-depth-0'), { target: { value: 'variable' } });
+    const saved = JSON.parse(JSON.stringify(useEngraveJobStore.getState().job)) as unknown;
+    const reloaded = parseEngraveJob(saved);
+    expect(reloaded.ok).toBe(true);
+    if (reloaded.ok) expect(reloaded.job.labels[0]!.vCarveDepth).toBe('variable');
+    // Absent = unchanged: a document that never states it parses without the key.
+    const clean = parseEngraveJob(JSON.parse(JSON.stringify(defaultEngraveJob())) as unknown);
+    expect(clean.ok).toBe(true);
+    if (clean.ok) expect('vCarveDepth' in clean.job.labels[0]!).toBe(false);
+  });
+
+  it('is not offered to a flat cutter, nor to a construction label', () => {
+    render(<EngravePanel />);
+    expand('engrave-label');
+    expect(screen.queryByTestId('engrave-label-vcarve-depth-0')).toBeNull();
+  });
+
+  it('is not offered on a construction label', () => {
+    const job = defaultEngraveJob();
+    job.labels[0]!.construction = true;
+    showWithCone(job);
+    expect(screen.queryByTestId('engrave-label-vcarve-depth-0')).toBeNull();
+  });
+});
