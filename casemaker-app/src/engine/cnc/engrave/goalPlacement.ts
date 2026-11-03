@@ -56,6 +56,66 @@ export function resetRotationPatch() {
   return turnsPatch({ x: 0, y: 0, z: 0 });
 }
 
+/**
+ * #949 — A GOAL THAT DOES NOT FIT THE BLANK IS REFUSED, not clipped.
+ *
+ * The sampler clips a goal's grid to the stock (#784), and a clipped goal's finish pass runs
+ * exactly along the stock edge — where the vise's jaws are, so the fixture check refuses the
+ * program anyway (#923). The refusal belongs here, before the toolpath is built, with the overhang
+ * named per side: the operator scales the figure in the app (the stick-scale figures already are)
+ * or re-places it. A goal that fits is untouched; the tolerance absorbs float noise at an exact
+ * edge, not a real overhang.
+ *
+ * `rect` is the blank's top-face rectangle in the WORK frame — the same clip the sampler uses —
+ * so a goal is judged against the stock the program would really cut on.
+ */
+export interface GoalOverhang {
+  fits: boolean;
+  /** The sides the goal extends past, by how much (mm). Empty when it fits. */
+  sides: { side: 'left' | 'right' | 'front' | 'back'; mm: number }[];
+  /** The CAM's refusal sentence, naming the overhang and the fixes. Empty when the goal fits. */
+  sentence: string;
+}
+
+export function goalStockOverhang(
+  target: Pick<
+    EngraveTargetObject,
+    'format' | 'scale' | 'size' | 'rotation' | 'rotationX' | 'rotationY' | 'position'
+  > & { name?: string },
+  rect: { xMin: number; xMax: number; yMin: number; yMax: number },
+  toleranceMm = 1e-6,
+): GoalOverhang {
+  const size = placedSize(target);
+  const gxMin = target.position.x - size.x / 2;
+  const gxMax = target.position.x + size.x / 2;
+  const gyMin = target.position.y - size.y / 2;
+  const gyMax = target.position.y + size.y / 2;
+  const sides = (
+    [
+      { side: 'left' as const, mm: rect.xMin - gxMin },
+      { side: 'right' as const, mm: gxMax - rect.xMax },
+      { side: 'front' as const, mm: rect.yMin - gyMin },
+      { side: 'back' as const, mm: gyMax - rect.yMax },
+    ] as const
+  ).filter((s) => s.mm > toleranceMm);
+  if (sides.length === 0) return { fits: true, sides: [], sentence: '' };
+  const list =
+    sides.length === 1
+      ? `${fmt1(sides[0]!.mm)} mm past the ${sides[0]!.side} edge`
+      : `${sides
+          .slice(0, -1)
+          .map((s) => `${fmt1(s.mm)} mm past the ${s.side} edge`)
+          .join(', ')} and ${fmt1(sides.at(-1)!.mm)} mm past the ${sides.at(-1)!.side} edge`;
+  return {
+    fits: false,
+    sides: sides.map((s) => ({ ...s })),
+    sentence:
+      `The goal object "${target.name ?? 'the goal object'}" is larger than the blank: ${list}. A goal clipped to the ` +
+      "stock would run its finish along the stock's edge, where the mount holds it, so it is " +
+      'refused: move it inward, scale it down (Fit to the stock), or use a larger blank.',
+  };
+}
+
 export interface GoalFit {
   fits: boolean;
   /** The axis with the least room when it fits, or the axis that is over when it does not. */
