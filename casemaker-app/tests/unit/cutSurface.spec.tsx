@@ -1418,3 +1418,82 @@ describe('#931 the Cut step against the simulation', () => {
     expect(screen.queryByTestId('engrave-cut-verdict')).toBeNull();
   });
 });
+
+// #948 — THE GOAL CHECK'S LINE. The demo page's cards print the 3D goal verdict beside the 2.5D
+// one; the Cut card prints the same three facts in one line under the gate's verdict: a pass, the
+// worst cut-into with where it is, or the check saying it did not run (never a silent pass). The
+// report states all three (`ran`/`reason`/`maxCutIntoAt`, C's #948 shape), so these pin the line's
+// three states and its absence on a 2.5D run.
+describe('#948 the goal check’s line', () => {
+  const goal = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    ok: true,
+    ran: true,
+    reason: null,
+    maxCutIntoAt: null,
+    goalCells: 100,
+    pitchMm: 0.1,
+    cutIntoFloorMm: 0.01,
+    cutIntoFraction: 0,
+    cutIntoAreaMm2: 0,
+    cutIntoVolumeMm3: 0,
+    maxCutIntoMm: 0,
+    leftoverFractions: [0, 0, 0],
+    leftoverVolumeMm3: 0,
+    maxLeftoverMm: 0,
+    coverageFraction: 0.96,
+    medianDeltaMm: 0,
+    sentence: 'goal check: no cell cut more than 0.01 mm into the goal (96.0 % of the goal within 0.01 mm).',
+    ...over,
+  });
+
+  function drawWithOracle(oracle: unknown): void {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({
+      simStatus: 'ready',
+      simDiagnostics: [],
+      oracle: oracle as never,
+      phase: 'ready',
+      staleSince: null,
+      simStopped: false,
+    });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+  }
+
+  it('a passed goal check matches the design, in the page’s own words', () => {
+    drawWithOracle({ ...OK_ORACLE, goalCutInto: goal() });
+    const line = screen.getByTestId('engrave-cut-goal');
+    expect(line.textContent).toBe('Matches the design (goal)');
+    expect(line.dataset.state).toBe('match');
+  });
+
+  it('a cut-into goal says how deep and where the worst cell is', () => {
+    drawWithOracle({
+      ok: false,
+      band: 0.016,
+      levels: [],
+      worst: { underCut: 0, overCut: 0 },
+      goalCutInto: goal({ ok: false, maxCutIntoMm: 0.243, maxCutIntoAt: { x: 12.35, y: 8.1 } }),
+    });
+    const line = screen.getByTestId('engrave-cut-goal');
+    expect(line.textContent).toBe('Cuts 0.243 mm into the design at 12.35, 8.1');
+    expect(line.dataset.state).toBe('cut-into');
+  });
+
+  it('a check that did not run says why — never a silent pass', () => {
+    drawWithOracle({
+      ...OK_ORACLE,
+      goalCutInto: goal({ ran: false, reason: 'a radial goal is sampled in its own map frame, which this run did not check' }),
+    });
+    const line = screen.getByTestId('engrave-cut-goal');
+    expect(line.textContent).toBe(
+      'Goal not checked: a radial goal is sampled in its own map frame, which this run did not check',
+    );
+    expect(line.dataset.state).toBe('not-checked');
+  });
+
+  it('a 2.5D run has no goal line at all', () => {
+    drawWithOracle(OK_ORACLE);
+    expect(screen.queryByTestId('engrave-cut-goal')).toBeNull();
+  });
+});
