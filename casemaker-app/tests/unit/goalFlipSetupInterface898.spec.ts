@@ -111,12 +111,14 @@ describe('#898 part 2 — programIndexesFor reads the generator’s OWN posted l
 });
 
 describe('#898 part 2 — stockBottomExclusion: the elephant’s underside, a named first case', () => {
+  // Built in the WORK-FRAME convention every real goal mesh uses (top flush at z = 0, the stock's
+  // own floor at z = −h) — `stockBottomExclusion` anchors on that floor, not the mesh's own min.
   function box(w: number, d: number, h: number): CoverageMesh {
     const p: number[] = [];
     const quad = (a: number[], b: number[], c: number[], d2: number[]): void => {
       p.push(...a, ...b, ...c, ...a, ...c, ...d2);
     };
-    const [x0, x1, y0, y1, z0, z1] = [0, w, 0, d, 0, h];
+    const [x0, x1, y0, y1, z0, z1] = [0, w, 0, d, -h, 0];
     quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]); // top
     quad([x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [x0, y0, z0]); // bottom (flat, facing down)
     quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
@@ -131,7 +133,7 @@ describe('#898 part 2 — stockBottomExclusion: the elephant’s underside, a na
 
   it('a flat-bottomed box: the whole bottom face is the exclusion', () => {
     const mesh = box(40, 30, 20);
-    const excluded = stockBottomExclusion(mesh);
+    const excluded = stockBottomExclusion(mesh, 20);
     expect(excluded).not.toBeNull();
     expect(excluded!.reason).toBe('stock-bottom');
     expect(excluded!.areaMm2).toBeCloseTo(40 * 30, 1);
@@ -141,10 +143,11 @@ describe('#898 part 2 — stockBottomExclusion: the elephant’s underside, a na
     const p: number[] = [];
     const r = 15;
     const rings = 16, segs = 32;
+    // Work-frame convention: top flush at z = 0, the stock's own floor at z = −2r.
     const at = (i: number, j: number): [number, number, number] => {
       const phi = (i / rings) * Math.PI;
       const theta = (j / segs) * 2 * Math.PI;
-      return [r + r * Math.sin(phi) * Math.cos(theta), r + r * Math.sin(phi) * Math.sin(theta), r - r * Math.cos(phi)];
+      return [r + r * Math.sin(phi) * Math.cos(theta), r + r * Math.sin(phi) * Math.sin(theta), -(r + r * Math.cos(phi))];
     };
     for (let i = 0; i < rings; i++) {
       for (let j = 0; j < segs; j++) {
@@ -155,7 +158,7 @@ describe('#898 part 2 — stockBottomExclusion: the elephant’s underside, a na
     const positions = new Float32Array(p);
     const indices = new Uint32Array(positions.length / 3);
     for (let i = 0; i < indices.length; i++) indices[i] = i;
-    const excluded = stockBottomExclusion({ positions, indices });
+    const excluded = stockBottomExclusion({ positions, indices }, 2 * r);
     // Discretised at 16×32, no triangle near the pole is within 3° of straight down (the facets
     // are coarser than that), so the sphere's true curvature means this named first case does
     // not apply at all — distinguishing it from a box, whose whole bottom face qualifies.
@@ -194,7 +197,10 @@ describe('#898 part 2 — stockBottomExclusion: the elephant’s underside, a na
       positions[i + 2] = z;
     }
     const coverageMesh: CoverageMesh = { positions, indices: mesh.indices };
-    const excluded = stockBottomExclusion(coverageMesh);
+    // j29's own stock: 36 mm thick — the plane this function anchors on, not the goal's own
+    // lowest point (which sits a few mm clear of it; see this function's own doc for why that
+    // distinction is the fix, not a style choice).
+    const excluded = stockBottomExclusion(coverageMesh, 36);
     const facts = coverageTriangles(coverageMesh, sampleCoverageField(coverageMesh, 0.3), {});
     const totalMm2 = facts.reduce((a, f) => a + f.areaMm2, 0);
     // eslint-disable-next-line no-console

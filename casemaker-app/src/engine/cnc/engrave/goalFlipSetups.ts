@@ -180,31 +180,38 @@ export interface ExcludedSurface {
  * BY DESIGN, not refused for lack of a holdable side. The maintainer named the elephant's
  * underside as the first case (#943 review §4.1: "the elephant's underside on the stock bottom is
  * excluded by design"). This looks for exactly that shape: a FLAT face (within
- * `STOCK_BOTTOM_FLAT_DEG` of straight down) sitting at the mesh's own lowest Z — the plane the
- * part's base actually rests on. A goal with no such face at its minimum (nothing flat there)
- * returns null.
+ * `STOCK_BOTTOM_FLAT_DEG` of straight down) sitting at the STOCK's own bottom plane
+ * (`z ≈ −stockThicknessMm`, setup 1's own work-frame convention — top at 0). A goal with no such
+ * face there (nothing flat at the stock's own bottom) returns null.
+ *
+ * NOT THE MESH'S OWN MINIMUM. An earlier version of this function anchored on the mesh's lowest
+ * vertex, which is WRONG whenever the goal does not reach all the way to the stock's physical
+ * floor: on the real stick figure (36 mm stock, ~27 mm goal depth) the goal's lowest point sits 9
+ * mm clear of the stock bottom, and that 9 mm clearance means a FLIPPED setup reaches those faces
+ * easily (9 mm is well inside a 21 mm band) — crediting them as both "excluded" and "reached"
+ * would double-count the same area. Anchoring on the stock's own floor instead of the mesh's
+ * minimum is why `stockThicknessMm` is a required input, not an optional one.
  *
  * THIS IS A NAMED FIRST CASE, not a general "any excluded region" system: a shape whose true
  * stock-bottom contact is NOT flat (curved feet, three point-contacts) is not detected, and this
  * function says so by returning null rather than guessing at a shape it has not seen. Extend it
  * when a second shape needs a different rule.
  */
-export function stockBottomExclusion(mesh: CoverageMesh, pitchMm = 0.3): ExcludedSurface | null {
+export function stockBottomExclusion(mesh: CoverageMesh, stockThicknessMm: number, pitchMm = 0.3): ExcludedSurface | null {
   const field = sampleCoverageField(mesh, pitchMm);
   // `{}` — the default classification is irrelevant here: this reads `nz`/`areaMm2`/`centre`
   // directly, never `cls` (`coverageTriangles`' own `facingDeg` means "tilt down PAST VERTICAL",
   // a near-90° test for its purpose; "flat", for this function, means near nz = −1, straight
   // down, a much narrower band this function tests for itself).
   const facts = coverageTriangles(mesh, field, {});
-  let minZ = Infinity;
-  for (const f of facts) if (f.areaMm2 > 0) minZ = Math.min(minZ, f.centre[2]);
-  if (!(minZ < Infinity)) return null;
-  const atMinimum = 0.5; // mm — the mesh's own slop at its lowest point, not a tuned tolerance
+  const stockBottomZ = -stockThicknessMm;
+  const atTheFloor = 0.5; // mm — slop around the stock's own bottom plane, not a tuned tolerance
   const straightDown = -Math.cos((STOCK_BOTTOM_FLAT_DEG * Math.PI) / 180);
   let areaMm2 = 0;
   for (const f of facts) {
+    if (!(f.areaMm2 > 0)) continue;
     if (f.nz > straightDown) continue; // not within STOCK_BOTTOM_FLAT_DEG of straight down
-    if (f.centre[2] > minZ + atMinimum) continue;
+    if (f.centre[2] > stockBottomZ + atTheFloor) continue; // not at the stock's own floor
     areaMm2 += f.areaMm2;
   }
   return areaMm2 > 0 ? { reason: 'stock-bottom', areaMm2 } : null;
