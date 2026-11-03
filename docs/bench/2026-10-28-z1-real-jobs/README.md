@@ -15,6 +15,10 @@ card beside the simulated result**, and its verdict is computed, never judged by
   retired: the as-filed job is judged, and refused is refused. The five hardwood samples (#936–#941)
   join the page as their job files are committed.
 
+Every card also carries a one-line **bench reading**: the same job built on the k3 house's own 29
+cutters (`--owned-only`), with the cutters and the verdict — a card that passes with a built-in also
+says what the bench would cut it with. The gate itself stays on the whole Makera catalogue.
+
 Verdicts: **Matches the design** (verifier 0 errors; every measured item at its floor and nothing cut
 outside the design — 3D: zero cut-into the goal and coverage ≥ the shop's `goal.passCoverage`, seeded
 95 % and read by both the app's goal check and `goal_check.py` from the location), **Deviates** (the
@@ -28,6 +32,11 @@ own sweep against the job's design, and the page says so.
 ```sh
 docs/bench/2026-10-28-z1-real-jobs/tools/build.sh <sha>
 ```
+
+**What git keeps is `manifest.json` and `verdicts.md`** (the table above, gate and bench columns);
+the built `page.html` is published as an artifact and is not committed — it is 2.8 MB with its inline
+images, and a rebuild would add that to the repo every time. The build still writes `page.html` into
+the build directory for the publish.
 
 The two stick-scale goal jobs (`j28-panther-stick`, `j29-elephant-stick`) carry no mesh bytes: the
 meshes stay shop-owned local inputs in `samples/3d/`, and `build.py` puts the named file back into a

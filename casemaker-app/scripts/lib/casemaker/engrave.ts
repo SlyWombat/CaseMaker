@@ -199,6 +199,8 @@ interface Args {
   /** #743 P-4b — the blank the board is cut from, mm; the Gerber files do not say. */
   blank?: { length: number; width: number; thickness: number };
   turn?: DesignReadingDirection;
+  /** #944 — measure only the location's OWNED cutters (`inv:`): the bench's real cuts. */
+  ownedOnly?: boolean;
   tool?: string;
   rest?: string;
   overlap?: number;
@@ -250,7 +252,8 @@ function parseArgs(argv: string[]): Args {
         );
       }
       args.thirdTool = parsed.data;
-    } else if (a === '--location') args.location = argv[++i];
+    } else if (a === '--owned-only') args.ownedOnly = true;
+    else if (a === '--location') args.location = argv[++i];
     else if (a === '--turn') {
       const v = argv[++i];
       if (v !== 'ccw' && v !== 'cw') throw new Error(`--turn must be "ccw" or "cw", not "${v}"`);
@@ -268,7 +271,7 @@ function fail(message: string): never {
 }
 
 const USAGE =
-  'usage: casemaker cut <job.json> [--out <dir>]\n' +
+  'usage: casemaker cut <job.json> [--owned-only] [--out <dir>]\n' +
   '       casemaker cut --coupon <coupon-spec.json> [--out <dir>]\n' +
   '       casemaker cut --from-gerber <file> [<file> ...] --blank <L>x<W>x<T> [--out <dir>]\n' +
   '       casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
@@ -650,9 +653,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // label's letters is not one that "keeps every item intact", and the pick must see the gap
     // the finding will quote. One `PartPlan` build serves every candidate.
     const raised = raisedTextMeasure(tl, job);
+    // #944 — the BENCH reading is what the shop can really cut: `--owned-only` measures just the
+    // location's own `inv:` cutters, never a built-in or vendor-library one. The gate run keeps
+    // the whole catalogue; this flag is only for the bench pass.
+    const candidates = args.ownedOnly === true ? getTools().filter((e) => e.key.startsWith('inv:')) : getTools();
     return reachabilityFor(
       job,
-      getTools(),
+      candidates,
       catalogueRows,
       (key) => {
         const entry = entryFor(key);

@@ -49,6 +49,8 @@ def arg_parse():
                    help='where the shop-owned mesh files live (the committed 3D jobs carry no bytes)')
     p.add_argument('--only', help='comma-separated card ids (debug)')
     p.add_argument('--timeout', type=int, default=1800, help='seconds per job (default 1800)')
+    p.add_argument('--no-bench', action='store_true',
+                   help='skip the bench reading (the same job on the k3 owned inventory)')
     return p.parse_args()
 
 
@@ -177,6 +179,7 @@ def goal_verdict(rc, gc):
     pass_pct = gc.get('passCoveragePct', 95.0)
     numbers = {'cutIntoPct': cut, 'cutIntoAreaMm2': gc['cutIntoAreaMm2'], 'maxCutIntoMm': gc['maxCutIntoMm'],
                'coveragePct': cover, 'leftover0p1Pct': gc['leftover0p1Pct'], 'leftover0p3Pct': gc['leftover0p3Pct'],
+               'idealLeftoverPct': gc.get('idealLeftover0p3Pct'), 'beyondReachPct': gc.get('beyondReach0p3Pct'),
                'idealCutterMm': gc['idealCutter'], 'goalCells': gc['goalCells'],
                'verifierErrors': rc['verifierErrors']}
     problems = []
@@ -260,7 +263,8 @@ def run_card(c, args, sha, cat):
     job = run_job if run_job != job else job   # the design check and goal reader take the same bytes
     if not os.path.exists(receipt_path):
         r = sh(['npm', 'run', '-s', 'casemaker', '--', 'cut', run_job, '--out', rundir,
-                '--json', '--location', loc], os.path.join(args.repo, 'casemaker-app'), args.timeout)
+                '--json', '--location', loc] + (['--owned-only'] if c.get('owned') else []),
+               os.path.join(args.repo, 'casemaker-app'), args.timeout)
         open(receipt_path, 'w').write(r['stdout'])
         open(os.path.join(rundir, 'stderr.txt'), 'w').write(r['stderr'])
         json.dump({'exit': r['exit'], 'wall': r['wall'], 'timeout': r['timeout']},
@@ -277,6 +281,10 @@ def run_card(c, args, sha, cat):
     card['warnings'] = rc['warnings']
     ncs = sorted(os.path.join(rundir, f) for f in os.listdir(rundir)
                  if f.endswith('.nc') and not f.endswith('-frame.nc'))
+    card['cutters'] = []
+    for nc in ncs:
+        m = re.search(r';@CM\|TOOL\|key=(\S+)', open(nc).read())
+        card['cutters'].append(m.group(1) if m else '?')
 
     # Render before/after from the same sweep the checks use.
     subprocess.run([sys.executable, os.path.join(HERE, 'render.py'), '--location', loc, job, assets, *ncs],
@@ -430,6 +438,11 @@ def page(cards, args, sha, loc, cat):
   3D: zero cut-into the goal, coverage ≥ 95 %), <b>Deviates</b> (with the numbers and where), or <b>Refused</b>
   (the app’s sentence). Photo-judged verdicts and material proxies are retired; the as-filed job is judged.</p>
   <p>Not reproducible here, so not cards: {html.escape('; '.join(f'{a} — {b}' for a, b in APPENDIX))}.</p>
+  <p>The three coverage numbers, defined once: <b>top-surface coverage</b> is the share of the goal's top
+  heightfield the sweep leaves within 0.1 mm of it — the card's pass line (95 %); <b>whole-surface reach</b>
+  is the app's own figure for the share of the whole goal surface one setup reproduces, the rest facing
+  away or in an overhang's shadow; <b>ideal leftover</b> is what a ball of the smallest chosen cutting
+  diameter must leave above 0.3 mm at its own geometric limit. Leftover above that floor is the plan's.</p>
   <h3>The five hardwood samples (#936–#941, the 36 × 36 × 100 sticks)</h3>
   <p>A sample joins the card table below as soon as its job file is committed; until then this is what
   the bench has and what is still missing. The bench sessions run from the app, and their cards are
@@ -457,6 +470,8 @@ def page(cards, args, sha, loc, cat):
                           ('Whole-surface reach', f"{n['wholeSurfacePct']} % from this setup (the remainder: under-faces and undercuts)"
                            if n.get('wholeSurfacePct') is not None else 'not stated by the app for this setup'),
                           ('Leftover', f"{n['leftover0p1Pct']} % > 0.1 mm · {n['leftover0p3Pct']} % > 0.3 mm"),
+                          ('Ideal leftover', f"{n.get('idealLeftoverPct', '—')} % above 0.3 mm — the smallest chosen ball's own floor"
+                           if n.get('idealLeftoverPct') is not None else 'not measured'),
                           ('Smallest cutter', f"⌀{n['idealCutterMm']} mm")]
         else:
             if 'measuredItems' in n:
@@ -480,6 +495,14 @@ def page(cards, args, sha, loc, cat):
                 f"<td>{html.escape('%.3f' % i['reachRatio'] if 'reachRatio' in i else '—')}</td></tr>" for i in items)
             detail = (f"<details><summary>Every measured item</summary><div class=\"tablewrap\"><table>"
                       f"<tr><th>item</th><th>kind</th><th>depth mm</th><th>left</th><th>deep/over</th><th>reach</th></tr>{irows}</table></div></details>")
+        b = c.get('bench') or {}
+        bench_line = (
+            '<p class="bench"><b>Bench (k3, owned cutters only):</b> '
+            + (', '.join(html.escape(x) for x in b.get('cutters') or []) or 'no program')
+            + ' — <b>' + html.escape(PILL.get(b.get('verdict'), PILL['error'])[1]) + '</b>'
+            + (f" · {html.escape(b.get('sentence') or '')}" if b.get('sentence') else '')
+            + '</p>'
+        ) if b else ''
         body.append(f'''<article class="job" id="{html.escape(c['id'])}">
   <div class="job-head">
     <p class="eyebrow">{html.escape(c['material'])} · {html.escape(c['kind'])} check · {html.escape(c['job'])}{' · local-input' if c.get('input') == 'local' else ''} · {html.escape(str(c.get('locationName', '')))} ({c.get('locationCutters', 0)} cutters)</p>
@@ -487,6 +510,7 @@ def page(cards, args, sha, loc, cat):
     <p class="src">{html.escape(c['id'])} · source: {html.escape(c.get('source', ''))}</p>
   </div>
   <p><span class="pill {pill_cls}">{pill_txt}</span> <span class="notes">{html.escape(c.get('sentence') or '')}</span></p>
+  {bench_line}
   <div class="frames">{figs}</div>
   <dl class="facts">{facts_html}</dl>
   {detail}
@@ -527,9 +551,33 @@ def main():
         except Exception as e:                        # keep going: one broken card must not lose the page
             card = dict(c, verdict='error', sentence=f'{type(e).__name__}: {e}', figures=[], numbers={})
         print(f'    {card.get("verdict")}: {card.get("sentence")}', flush=True)
+        # #944 review §4.3 — the BENCH reading: the same job on the k3 house's OWNED inventory,
+        # so a card that passes with a built-in also says what the bench would cut it with.
+        if not args.no_bench:
+            bench = dict(c, id=f'{c["id"]}-bench', location='k3', owned=True)
+            try:
+                bcard = run_card(bench, args, sha, cat)
+            except Exception as e:
+                bcard = dict(bench, verdict='error', sentence=f'{type(e).__name__}: {e}', cutters=[])
+            card['bench'] = {'cutters': bcard.get('cutters') or [], 'verdict': bcard.get('verdict'),
+                             'sentence': bcard.get('sentence') or bcard.get('refusal') or ''}
+            print(f'    bench: {bcard.get("verdict")}: {", ".join(bcard.get("cutters") or []) or "no program"}', flush=True)
         out_cards.append(card)
     page_path = os.path.join(args.out, 'page.html')
     open(page_path, 'w').write(page(out_cards, args, sha, loc, cat))
+    # The HTML is the published artifact's source, not a repo file (2.8 MB with its inline images per
+    # rebuild). What git keeps is this verdict table and manifest.json.
+    def pill(card):
+        return PILL.get(card.get('verdict'), PILL['error'])[1]
+    vrows = [f'- the page states main `{sha}`', '',
+             '| card | kind | gate verdict | bench (k3, owned cutters only) | what the gate says |',
+             '|---|---|---|---|---|']
+    for c in out_cards:
+        b = c.get('bench') or {}
+        vrows.append(f"| {c['id']} | {c['kind']} | {pill(c)} | "
+                     f"{', '.join(b.get('cutters') or []) or 'no program'} — {pill(b) if b else '—'} | "
+                     f"{(c.get('sentence') or '').replace('|', '/')} |")
+    open(os.path.join(args.out, 'verdicts.md'), 'w').write('\n'.join(vrows) + '\n')
     manifest = {'sha': sha, 'builtAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
                 'location': {'path': args.location, 'id': loc.get('id'), 'name': loc.get('name'),
                              'cutters': len(loc.get('inventory') or [])},
