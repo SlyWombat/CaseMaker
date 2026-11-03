@@ -672,6 +672,9 @@ describe('#760 a job that names no cutter is given one, the way the design route
     const firstLine = run.progress.find((l) => l.includes('cutter 1'));
     const secondLine = run.progress.find((l) => l.includes('cutter 2'));
     expect(firstLine, run.progress.join('\n')).toBeDefined();
+    // #954 — the built-in ⌀3.175 (Metal) flat is a candidate now (a labelled fallback, not a
+    // refusal), but a fallback is not an equal of a row: the simulated search keeps the fixture's
+    // own (rowed) cutter as cutter 1, with the finer 1 mm rest as cutter 2.
     expect([FIRST, SECOND].some((k) => firstLine!.includes(k))).toBe(true);
     if (run.receipt!.command !== 'engrave') throw new Error('expected the engrave receipt');
     const programs = run.receipt!.details.programs;

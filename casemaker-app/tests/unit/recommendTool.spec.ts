@@ -779,11 +779,13 @@ describe('recommendTool — the computed pick states its size and its material r
     expect(rec.reason).toBe('No cutter in the list states a cutting diameter.');
   });
 
-  // #699b — THE HOUSE'S OTHER 1 mm FLAT IS THE PROBLEM. The k3 walk on 4674e81a picked the
-  // 3.175*1*3mm Flat End(Metal): the two cutters tie on stated size, and the metal key sorts first,
-  // so nothing but a gate keeps it out of the pick — and the job's own #572 check refuses it on
-  // PLA. This is the fixture that holds both halves: the recommender names the plain flat, and the
-  // badge + text job generates through the real pipeline with no blocking finding.
+  // #699b — THE HOUSE'S OTHER 1 mm FLAT, AND WHAT #954 CHANGED. The k3 walk on 4674e81a picked the
+  // 3.175*1*3mm Flat End(Metal): the two cutters tie on stated size and the metal key sorts first.
+  // The #699b rule kept it out with a gate; #954 removes that gate (a metal-line cutter is not
+  // barred from wood — the pair's missing feed row is a labelled fallback), so the tie decides
+  // again and the pick is the metal cutter, carrying the fallback note and an info finding. The
+  // fixture now holds both halves of THAT truth: the pick, and the badge + text job posting
+  // through the real pipeline with no blocking finding.
   describe('never picks a cutter the job’s own gates refuse (#699b)', () => {
     const METAL_PLA_ID = '900000000703';
     const PLAIN_PLA_ID = '900000000704';
@@ -809,18 +811,22 @@ describe('recommendTool — the computed pick states its size and its material r
     // gate live by not claiming Makera rates this bit for PLA.
     const gateCatalogue = [plasticRow(PLAIN_PLA_ID)];
 
-    it('picks the plain 1 mm flat, and the metal one carries its own refusal', () => {
+    it('picks the plain 1 mm flat: the metal one is a candidate, ranked below by its fallback (#954)', () => {
       const rec = recommendTool(badgeJob(), [metalFlat(), plainFlat()], gateCatalogue, (_key) => [
         row('name', 1),
       ]);
 
-      // The tie that used to send the metal cutter to the pick: one stated size, and the metal
-      // key sorts first, so only the gate can separate them.
+      // The tie again: one stated size, and the metal key sorts first — under #954 there is no
+      // gate left to separate them, so the tie decides, and the note states the fallback.
       const metal = candidate(rec, 'inv:kz-metal-flat-1');
       expect(metal.diameter).toBe(candidate(rec, 'inv:kz-plain-flat-1').diameter);
-      expect(metal.excluded).toBe('metal-line');
-      expect(metal.refusal).toContain('for Metal');
-      expect(metal.refusal).toContain('PLA');
+      // #954 — the pair is no longer refused (both cutters are candidates with the fallback note),
+      // but a labelled fallback is not an equal of a row: at the tie the rowed plain cutter wins,
+      // though the metal key sorts first. The recommendation state itself is unchanged.
+      expect(metal.excluded).toBeUndefined();
+      expect(metal.refusal).toBeUndefined();
+      expect(metal.fallbackFed).toBe(true);
+      expect(candidate(rec, 'inv:kz-plain-flat-1').fallbackFed).toBe(false);
       expect(rec.key).toBe('inv:kz-plain-flat-1');
       expect(rec.compromise).toBe(false);
     });
@@ -838,22 +844,28 @@ describe('recommendTool — the computed pick states its size and its material r
       expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
     });
 
-    it('the gate is the job’s own: Generate refuses the metal flat on the same job', async () => {
-      // The other half of the claim: the cutter the old rule picked is not merely a preference —
-      // the program will not run it on PLA.
+    it('the gate is the job’s own: Generate posts the metal flat on PLA with the labelled fallback (#954)', async () => {
+      // The other half of the claim: the cutter the old rule picked is now a CANDIDATE — the
+      // program runs it on PLA and states the fallback in an info finding (the refusal became the
+      // #455 labelled-fallback band).
       const job: EngraveJob = { ...badgeJob(), toolKey: 'inv:kz-metal-flat-1', tool: metalFlat().tool };
       const g = await generate(tl, job, null, gateCatalogue);
-      expect(g.ok).toBe(false);
-      expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(true);
+      expect(g.ok).toBe(true);
+      const line = g.findings.find((f) => f.code === 'tool-metal-line');
+      expect(line?.severity).toBe('info');
+      expect(line?.message).toContain('Makera publishes no feed row');
+      expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
     });
 
-    it('keeps the metal cutter when the operator has acknowledged the pair (#572)', () => {
-      // The override is the operator's decision: the job's gate then allows the pair, so the
-      // recommendation must not keep refusing it.
+    it('keeps the metal cutter a candidate when the operator has acknowledged the pair (#572, #954)', () => {
+      // The override's job was to lift the #572 gate. #954 removed the gate, so the override has
+      // nothing left to lift: the metal cutter is a candidate either way, and the fallback rank —
+      // not the override, which is about the gate, not the order — keeps the rowed plain cutter
+      // the pick while the two tie.
       const job: EngraveJob = { ...badgeJob(), metalLineOverride: true };
       const rec = recommendTool(job, [metalFlat(), plainFlat()], gateCatalogue, (_key) => [row('name', 1)]);
       expect(candidate(rec, 'inv:kz-metal-flat-1').excluded).toBeUndefined();
-      expect(rec.key).toBe('inv:kz-metal-flat-1');
+      expect(rec.key).toBe('inv:kz-plain-flat-1');
     });
   });
 

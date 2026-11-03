@@ -71,6 +71,7 @@ import {
   catalogueCoverageFor,
   catalogueStandingFor,
   feedsFor,
+  metalLineFallbackNote,
   type FeedCatalogueRow,
   type FeedsEntry,
 } from '@/engine/cnc/feeds';
@@ -168,6 +169,13 @@ export interface ToolCandidate {
    * believe a cutter that the program will warn about.
    */
   raised?: RaisedTextMeasurement[];
+  /**
+   * #954 — true when this cutter's feeds for the job's material are a LABELLED FALLBACK (Makera
+   * publishes no row for the pair; the numbers are this app's starting point to measure). A
+   * fallback is not an equal of a row: at one diameter it ranks below a rowed cutter, however it
+   * sorts by key or time. Optional so a hand-built test candidate stays as it reads.
+   */
+  fallbackFed?: boolean;
 }
 
 /**
@@ -230,23 +238,27 @@ function rankOf(c: ToolCandidate): number {
 }
 
 /**
- * Largest diameter wins; ties go to the better-kept copy, then a known reach, then by key for
- * determinism (#211, #442). Condition is a TIEBREAK and not a priority: a bigger cutter that keeps
- * the detail is still preferred to a fresh small one — it cuts stiffer and clears faster, and a
- * slightly worn end mill still cuts — but between two cutters of one diameter, the bench prefers
- * the one it has not worn out.
+ * Largest diameter wins; ties go to the better-kept copy, then a known reach, then a ROWED cutter
+ * over one fed by a labelled fallback, then by key for determinism (#211, #442, #954). Condition is
+ * a TIEBREAK and not a priority: a bigger cutter that keeps the detail is still preferred to a
+ * fresh small one — it cuts stiffer and clears faster, and a slightly worn end mill still cuts —
+ * but between two cutters of one diameter, the bench prefers the one it has not worn out. The
+ * fallback rank is the same rule the search applies (`smartPick`'s `byObjective`): a cutter whose
+ * numbers are the app's starting point to measure is not an equal of one Makera or the shop rates.
  */
 function byBestForRecommendation(a: ToolCandidate, b: ToolCandidate): number {
   if (a.diameter !== b.diameter) return b.diameter - a.diameter;
   if (rankOf(a) !== rankOf(b)) return rankOf(a) - rankOf(b);
   if (a.reachKnown !== b.reachKnown) return a.reachKnown ? -1 : 1;
+  if ((a.fallbackFed === true) !== (b.fallbackFed === true)) return a.fallbackFed === true ? 1 : -1;
   return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
 }
 
-/** The compromise pick is the SMALLEST cutter; condition then key break ties for determinism. */
+/** The compromise pick is the SMALLEST cutter; condition, the fallback rank, then key break ties. */
 function bySmallest(a: ToolCandidate, b: ToolCandidate): number {
   if (a.diameter !== b.diameter) return a.diameter - b.diameter;
   if (rankOf(a) !== rankOf(b)) return rankOf(a) - rankOf(b);
+  if ((a.fallbackFed === true) !== (b.fallbackFed === true)) return a.fallbackFed === true ? 1 : -1;
   return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
 }
 
@@ -651,7 +663,10 @@ export function recommendTool(
     // An unknown reach cannot be shown to foul, so it stays OK (the note above carries it).
     const reachOk = reach === null || deepestAny <= reach;
     const condition = conditions?.get(entry.key) ?? null;
-    const base = { key: entry.key, diameter, worst: null, reachKnown, reachOk, condition } as const;
+    // #954 — the feeds' own predicate, so the rank and the note cannot disagree about a pair the
+    // catalogue does not rate.
+    const fallbackFed = metalLineFallbackNote(tool, job.stock.material, catalogue) !== null;
+    const base = { key: entry.key, diameter, worst: null, reachKnown, reachOk, condition, fallbackFed } as const;
 
     const usable = cuttingForTrace(tool);
     if (!usable.ok) return { ...base, qualifies: false, excluded: 'not-flat' as const };

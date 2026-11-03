@@ -97,13 +97,17 @@ describe('#834 the face work and the cutters that fit it', () => {
     expect(tThin / tWide).toBeGreaterThan(2);
   }, 240_000);
 
-  it('a metal-line cutter on wood is refused by the face program too', async () => {
+  it('a metal-line cutter on wood posts through the face program, with the labelled fallback (#954)', async () => {
     const job = faceJob([hex]);
     job.workholding = { kind: 'rotary-chuck', rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } };
     const metal = getTools().find((t) => t.key === 'flat-3.175x12-metal')!.tool;
     const g = await engraveGenerate(tl, job, metal, [], null);
-    expect(g.ok).toBe(false);
-    expect(g.findings.some((f) => f.code === 'tool-metal-line' && f.severity === 'error')).toBe(true);
+    // #954 — the pair is not refused: Makera publishes no feed row for a metal-line cutter in
+    // wood, so the feeds use the starting band and the finding states the labelled fallback.
+    expect(g.ok).toBe(true);
+    const line = g.findings.find((f) => f.code === 'tool-metal-line');
+    expect(line?.severity).toBe('info');
+    expect(line?.message).toContain('Makera publishes no feed row');
   });
 
   it('a full evaluation of a face plan posts and prices the program', async () => {
