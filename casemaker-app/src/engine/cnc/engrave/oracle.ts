@@ -322,6 +322,36 @@ export function oracleBand(contours: number): number {
 }
 
 /**
+ * #947 — a disagreement the `-band`/`+band` comparison still reports can itself be a hairline: the
+ * CAM posts a toolpath as independent RING CONTOURS (`pocketLoops`), each offset and traced on its
+ * own, while the prediction is the design's direct morphological OPENING, one round trip
+ * (`engravableProfile`). At a reflex corner of the design (an inside elbow, where two strokes
+ * meet) the two constructions can disagree by a boundary sliver even though every ring is
+ * individually correct and every stroke is fully reached — #947's own measurement (0.0223 mm² of
+ * area, but fully gone by 0.016 mm of WIDTH anywhere, confirmed by eroding the disagreement region
+ * itself through a range of widths until it vanished) is exactly this shape: real in area because
+ * it runs the length of the design's own boundary, but not in width.
+ *
+ * The rule: a disagreement region is material actually left (or cut outside the plan) only if it
+ * is wider than this threshold somewhere, not merely nonzero in area. `computeOracle` tests this
+ * by morphologically OPENING the raw disagreement region at this width (erode by half, dilate back
+ * by half) before measuring its area, so a sliver thinner than the threshold everywhere collapses
+ * to nothing while a genuinely fat region (#741's widened flank, a real missed stroke) survives at
+ * very close to its own area.
+ *
+ * FIXED at twice the chord tolerance already named for every arc in this file — not a multiple of
+ * `band` itself: `band` grows large on a coarse column grid (`columnOracleBand`) or a dense sweep
+ * (more `simplifyLevels`), and the #408 suite deliberately sizes its defects as a SMALL FRACTION
+ * of band past the existing `-band`/`+band` step (the suite's own words: "about the smallest shift
+ * the oracle can promise to see"), so any threshold that scales WITH band ends up swallowing
+ * exactly those defects at the band sizes the suite exercises. A fixed, small width tied to the one
+ * tolerance that bounds every offset's own polygon error regardless of band does not have that
+ * problem, and #947's measured sliver is well within it (its own 0.016 mm band was already enough
+ * to erase it, and no deliberately-sized defect in this file's suite is anywhere near this width).
+ */
+export const ORACLE_SLIVER_WIDTH_MM = 2 * ARC_CHORD_TOLERANCE_MM;
+
+/**
  * What the engine that swept the run can say about one level, as a CrossSection the CALLER of
  * `sliceAt` owns and the oracle deletes. `null` means it cut nothing at or below this level — an
  * empty region, which the oracle reports as an area of 0 without asking a `CrossSection` to be
@@ -615,6 +645,22 @@ function bboxOf(cs: CrossSectionInstance): OracleBbox {
 }
 
 /**
+ * #947 — morphologically OPEN a disagreement region at `width` (erode by half, dilate back by
+ * half): a sliver thinner than `width` everywhere collapses to nothing, while a region with a
+ * genuinely fat part survives at very close to its own area (clipped only at the fat part's own
+ * sharp corners, the same bounded approximation every offset in this file already accepts). The
+ * caller owns and deletes the result; the one intermediate CrossSection is always freed here.
+ */
+function openSliver(region: CrossSectionInstance, width: number, segments: number): CrossSectionInstance {
+  const eroded = region.offset(-width / 2, 'Round', 2, segments);
+  try {
+    return eroded.offset(width / 2, 'Round', 2, segments);
+  } finally {
+    eroded.delete();
+  }
+}
+
+/**
  * Compare the simulated side against `predicted`, level by level. Every CrossSection is deleted
  * exactly once, on both the success and the throw path.
  */
@@ -713,6 +759,8 @@ export function computeOracle(
     let sliceCS: CrossSectionInstance | null = null;
     let underCS: CrossSectionInstance | null = null;
     let overCS: CrossSectionInstance | null = null;
+    let underOpened: CrossSectionInstance | null = null;
+    let overOpened: CrossSectionInstance | null = null;
     try {
       if (parts.length === 1) {
         predictedCS = parts.shift() as CrossSectionInstance; // ownership moved out of `parts`
@@ -742,10 +790,16 @@ export function computeOracle(
       } else {
         underCS = CS.difference([shrunk, sliceCS]);
         overCS = CS.difference([sliceCS, grown]);
-        underCut = Math.max(0, underCS.area());
-        overCut = Math.max(0, overCS.area());
-        if (underCut > 0) underBbox = bboxOf(underCS);
-        if (overCut > 0) overBbox = bboxOf(overCS);
+        // #947 — the raw difference can be a boundary hairline between two independent offset
+        // constructions, not material actually left; only the part of it wider than
+        // `ORACLE_SLIVER_WIDTH_MM` survives the open and counts.
+        const sliverSegments = segmentsForRadius(ORACLE_SLIVER_WIDTH_MM / 2);
+        underOpened = openSliver(underCS, ORACLE_SLIVER_WIDTH_MM, sliverSegments);
+        overOpened = openSliver(overCS, ORACLE_SLIVER_WIDTH_MM, sliverSegments);
+        underCut = Math.max(0, underOpened.area());
+        overCut = Math.max(0, overOpened.area());
+        if (underCut > 0) underBbox = bboxOf(underOpened);
+        if (overCut > 0) overBbox = bboxOf(overOpened);
       }
 
       levels.push({ z, predictedArea, simulatedArea, underCut, overCut, underBbox, overBbox });
@@ -766,6 +820,8 @@ export function computeOracle(
       sliceCS?.delete();
       underCS?.delete();
       overCS?.delete();
+      underOpened?.delete();
+      overOpened?.delete();
     }
   }
 
