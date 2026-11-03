@@ -64,7 +64,7 @@ Generated 2026-11-02 · file `design.nc` · sha256 `c7cc29b8` · estimated cutti
 
 ## 7 · Cut
 
-1. Spindle, feed, plunge, passes and step-down. Vacuum on. — **12000 RPM · 500 mm/min feed · 200 mm/min plunge · 3 × 1 mm passes · 0.18 mm step-over**
+1. Spindle, feed, plunge, passes and step-down. Vacuum on. — **12000 RPM · 500 mm/min feed · 200 mm/min plunge · 3 depth passes — 1 × 0.399 mm, 2 × 0.394 mm · 0.18 mm step-over**
 2. Program 1, design.nc — the cycle is 6 min 55 s: 19 % of it in air, 153 hops taking 42 s, and the feed running at 81 % of the rate it commands. The air path is 515.814 mm against a 174.29 mm lower bound for visiting its loop entries — 196 % past it. Those are the cycle estimate's own trapezoids on the job machine's rapid model — the same clock the file is posted with. — **19 % in air · 153 hops · feed at 81 %**
 3. The feed path sweeps 843.724 mm² of stock at up to 0.399 mm deep — the strip is Σ (path length × the cutter's width at that depth) on the feed moves. — **843.724 mm² swept**
 4. the toolpath is ordered by proximity: the cutter finishes each contour to its depth before entering the next, takes each entry at the point nearest where it just was, and cuts the pocket rings inside-out so the wall is the last thing it touches. The file spends 515.814 mm in the air against 1647.748 mm cutting (0.313 : 1). The previous ordering spent 802.87 mm (0.487 : 1) on the same cut. — **515.814 mm rapid · 1647.748 mm cut**

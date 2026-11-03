@@ -67,7 +67,7 @@ Generated 2026-11-02 · file `Untitled-engrave-job.nc` · sha256 `b99a38c8` · e
 
 ## 8 · Cut
 
-1. Spindle, feed, plunge, passes and step-down. Vacuum on. — **12000 RPM · 500 mm/min feed · 200 mm/min plunge · 4 × 1 mm passes · 0.18 mm step-over**
+1. Spindle, feed, plunge, passes and step-down. Vacuum on. — **12000 RPM · 500 mm/min feed · 200 mm/min plunge · 4 × 0.1 mm passes · 0.18 mm step-over**
 2. Program 1, Untitled-engrave-job.nc — the cycle is 6 min 10 s: 18 % of it in air, 153 hops taking 34 s, and the feed running at 78 % of the rate it commands. The air path is 387.454 mm against a 138.847 mm lower bound for visiting its loop entries — 179 % past it. Those are the cycle estimate's own trapezoids on the job machine's rapid model — the same clock the file is posted with. — **18 % in air · 153 hops · feed at 78 %**
 3. The feed path sweeps 513.243 mm² of stock at up to 0.1 mm deep — the strip is Σ (path length × the cutter's width at that depth) on the feed moves. — **513.243 mm² swept**
 4. the toolpath is ordered by proximity: the cutter finishes each contour to its depth before entering the next, takes each entry at the point nearest where it just was, and cuts the pocket rings inside-out so the wall is the last thing it touches. The file spends 387.454 mm in the air against 1451.521 mm cutting (0.267 : 1). The previous ordering spent 870.37 mm (0.6 : 1) on the same cut. — **387.454 mm rapid · 1451.521 mm cut**
