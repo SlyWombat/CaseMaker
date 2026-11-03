@@ -13,6 +13,7 @@ import {
   packageStaleness,
   type FrozenProgram,
 } from '@/engine/cnc/engrave/package';
+import { SIMULATOR_VERSION } from '@/workers/geometry/simVersion';
 import { embedSource } from '@/engine/cnc/engrave/jobSources';
 import {
   JOB_FILE_EXTENSION,
@@ -72,7 +73,11 @@ function withPackage(job: EngraveJob): { doc: EngraveJob; programs: FrozenProgra
     package: {
       jobId: job.id,
       frozenAt: AT,
-      hash: packageHash(jobHash, programs),
+      // #925 — a real freeze (`freezePackage`) always folds in the current simulator version; this
+      // fixture builds the package block by hand (the same shape, bypassing that function), so it
+      // must do the same or `packageStaleness` reads it as a pre-#925, unversioned package and
+      // stales it on every test here.
+      hash: packageHash(jobHash, programs, SIMULATOR_VERSION),
       jobHash,
       programs,
       setups: jobSetups(job),
