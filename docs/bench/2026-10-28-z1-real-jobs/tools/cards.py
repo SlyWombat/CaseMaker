@@ -19,7 +19,7 @@ APPENDIX = [
 # CARDS when its job file is committed; until then the page lists it here with what is still missing,
 # so the same page gates the bench and shows what it cannot yet judge.
 SAMPLES = [
-    ('S1', 936, 'Flagship text job on the stick', 'the app’s default job, run from the GUI at bench session S2'),
+    ('S1', 936, 'Flagship text job on the stick', 'job file committed (card s1); the job the maintainer cuts first, at bench session S2'),
     ('S2', 938, 'Hardwood flat-cutter feed coupon', 'four programs on disk (card s2); the row flips to measured when the bench fills the record'),
     ('S3', 939, 'Pocket and four bores on the 36 × 100 face', 'job file committed (card s3); cut at bench session S5'),
     ('S4', 940, 'Two-cutter job: pocket, then V text on its floor', 'job file committed (card s4); cut at bench session S5/S6'),
@@ -112,6 +112,9 @@ CARDS = [
     # only), the way the bench runs them. Sample 2's card is its row's own value (F1000) — the four
     # values F400/F700/F1000/F1200 are the coupon's programs, and the row is measured when the bench
     # fills the record.
+    dict(id='s1', title='Sample 1: the flagship text job on the stick', job='../../936-flagship-text.job.json',
+         kind='design', input='committed', material='hardwood', location='k3',
+         source='Sample 1 (#936) — "CASE" / "MAKER" / "first chips" along the 100 mm axis, 8 / 7 / 6 mm, 2 / 1 / 0.5 mm deep'),
     dict(id='s2', title='Hardwood feed coupon: F1000, the row’s own value', job='../../938-hardwood-flat-cutter-feed-coupon-F1000.job.json',
          kind='design', input='committed', material='hardwood', location='k3',
          source='Sample 2 (#938) — four cells F400/F700/F1000/F1200 on flat-1.0, 9 mm text, 1.0 mm deep'),
