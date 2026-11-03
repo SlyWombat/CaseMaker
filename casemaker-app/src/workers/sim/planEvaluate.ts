@@ -42,6 +42,7 @@ import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { Tool } from '@/engine/cnc/tool';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { readDefault } from '@/platform/defaultsClient';
 import { vCone, vDepthLimit } from '@/engine/cnc/vProfile';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { goalCheckForProgram } from '@/engine/cnc/engrave/goalCheckInput';
@@ -681,7 +682,10 @@ function sweepPlan(
       // swept top is paired with the goal's sampled heightfield (the same sampling the run's own
       // oracle does), so a plan that gouges the goal cannot pass on the plan alone.
       if (i === gen.programs.length - 1) {
-        const goal = goalCheckForProgram(applied, gen.surface3d != null);
+        // #948 — the same pass line the run's own oracle uses, read from the shop opts here.
+        const goal = goalCheckForProgram(applied, gen.surface3d != null, {
+          passCoverage: readDefault(ctx.shop.defaults ?? null, 'goal.passCoverage').value,
+        });
         report = session.oracle(
           gen.predicted,
           null,

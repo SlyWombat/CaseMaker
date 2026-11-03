@@ -348,9 +348,24 @@ export const GOAL_CUT_INTO_FLOOR_MM = 0.01;
 /** The leftover-material reporting bands `goal_check.py` prints (0.1 / 0.3 / 1 mm), kept here so the app's sentence matches the bench tool's. */
 export const GOAL_LEFTOVER_BANDS_MM = [0.1, 0.3, 1] as const;
 
+/**
+ * #948 — THE PASS LINE's LABELLED FALLBACK: the share of the goal's top surface that must stand
+ * within the 0.1 mm band (the first leftover band) for the run to pass. It is the demo page's own
+ * rule — "zero cut-into AND top-surface coverage ≥ 95 %" — and the shop owns it as
+ * `goal.passCoverage` (seeded 0.95); this is the number a caller with no location reads, labelled
+ * as a fallback.
+ */
+export const GOAL_PASS_COVERAGE_FALLBACK = 0.95;
+
 export interface GoalCutIntoOptions {
   /** Overrides {@link GOAL_CUT_INTO_FLOOR_MM}. */
   cutIntoFloorMm?: number;
+  /**
+   * #948 — the top-surface coverage the run must reach to pass, 0–1: the share of the goal's
+   * covered cells standing within {@link GOAL_LEFTOVER_BANDS_MM}[0] of the goal. The shop's
+   * `goal.passCoverage`; absent → {@link GOAL_PASS_COVERAGE_FALLBACK}.
+   */
+  passCoverage?: number;
 }
 
 export interface GoalCutIntoReport {
@@ -387,6 +402,14 @@ export interface GoalCutIntoReport {
   maxLeftoverMm: number;
   /** Share of covered cells within the cut-into floor on both sides — the coverage % the acceptance asks for. */
   coverageFraction: number;
+  /**
+   * #948 — the TOP-SURFACE coverage the pass line was judged at, 0–1: the share of covered cells
+   * standing within {@link GOAL_LEFTOVER_BANDS_MM}[0] (0.1 mm) of the goal — the demo page's
+   * `coveragePct` = 100 − 100 × `leftoverFractions[0]`. NOT the same band as
+   * {@link coverageFraction}. The report states the number it judged against so a reader never has
+   * to know the constant; the measured value is `1 − leftoverFractions[0]`.
+   */
+  passCoverage: number;
   medianDeltaMm: number;
   sentence: string;
 }
@@ -402,6 +425,7 @@ export interface GoalCutIntoReport {
  */
 export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opts: GoalCutIntoOptions = {}): GoalCutIntoReport {
   const cutIntoFloorMm = opts.cutIntoFloorMm ?? GOAL_CUT_INTO_FLOOR_MM;
+  const passCoverage = opts.passCoverage ?? GOAL_PASS_COVERAGE_FALLBACK;
   const cellArea = goal.pitch * goal.pitch;
   const deltas: number[] = [];
   let cutIntoCells = 0;
@@ -451,10 +475,22 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
   const cutIntoFraction = cutIntoCells / n;
   const leftoverFractions = leftoverCounts.map((c) => c / n);
   const coverageFraction = withinBoth / n;
-  const ok = cutIntoCells === 0;
-  const sentence = ok
-    ? `goal check: no cell cut more than ${cutIntoFloorMm} mm into the goal (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
-    : `goal check: ${(cutIntoFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(cutIntoCells, cellArea).toFixed(1)} mm²) cut into by up to ${maxCutInto.toFixed(3)} mm — ${cutIntoVolumeMm3.toFixed(1)} mm³ over-cut.`;
+  // #948 — THE PASS LINE. The page's rule is zero cut-into AND top-surface coverage ≥ the pass
+  // line, where coverage is the share standing within the FIRST leftover band (0.1 mm) of the
+  // goal — `1 − leftoverFractions[0]`, never `coverageFraction` (a different band). A run that
+  // cut nothing into the goal but left 16 % of it standing above the goal is the page's
+  // "Deviates", so it is not this check's pass either.
+  const surfaceCoverage = 1 - (leftoverFractions[0] ?? 0);
+  const passPct = Number((passCoverage * 100).toFixed(2));
+  const surfacePct = Number((surfaceCoverage * 100).toFixed(2));
+  const coverageOk = surfaceCoverage + 1e-9 >= passCoverage;
+  const ok = cutIntoCells === 0 && coverageOk;
+  const sentence =
+    cutIntoCells > 0
+      ? `goal check: ${(cutIntoFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(cutIntoCells, cellArea).toFixed(1)} mm²) cut into by up to ${maxCutInto.toFixed(3)} mm — ${cutIntoVolumeMm3.toFixed(1)} mm³ over-cut.`
+      : coverageOk
+        ? `goal check: no cell cut more than ${cutIntoFloorMm} mm into the goal (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
+        : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal).`;
 
   return {
     ok,
@@ -472,6 +508,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
     leftoverVolumeMm3,
     maxLeftoverMm: maxLeftover,
     coverageFraction,
+    passCoverage,
     medianDeltaMm,
     sentence,
   };
@@ -487,7 +524,7 @@ function cutIntoAreaMm2(cells: number, cellArea: number): number {
  * that could not run, and it is never reported as a pass either (the sentence says what was not
  * compared). A caller that can sample the swept top calls {@link checkGoalCutInto} instead.
  */
-export function goalCutIntoUnchecked(reason: string): GoalCutIntoReport {
+export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL_PASS_COVERAGE_FALLBACK): GoalCutIntoReport {
   return {
     ok: true,
     ran: false,
@@ -504,6 +541,7 @@ export function goalCutIntoUnchecked(reason: string): GoalCutIntoReport {
     leftoverVolumeMm3: 0,
     maxLeftoverMm: 0,
     coverageFraction: 0,
+    passCoverage,
     medianDeltaMm: 0,
     sentence: `goal check: not run — ${reason}. Nothing was compared against the goal here, so this is not a pass.`,
   };

@@ -475,7 +475,7 @@ export function denseFlatRoutesToColumn(timeline: Timeline, tool: Tool, opts?: S
  */
 export type GoalCheckInput =
   | { heightfield: GoalHeightfield; sweptTop: ResultTop; opts?: GoalCutIntoOptions }
-  | { unchecked: string };
+  | { unchecked: string; opts?: GoalCutIntoOptions };
 
 export interface SimSession {
   load(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult;
@@ -1192,7 +1192,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     if (goal === undefined) return report;
     const goalCutInto =
       'unchecked' in goal
-        ? goalCutIntoUnchecked(goal.unchecked)
+        ? goalCutIntoUnchecked(goal.unchecked, goal.opts?.passCoverage)
         : checkGoalCutInto(goal.heightfield, goal.sweptTop, goal.opts);
     return { ...report, goalCutInto, ok: report.ok && goalCutInto.ok };
   };

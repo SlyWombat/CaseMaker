@@ -445,6 +445,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // program near it moves it. `defaultsClient.ts` states the same bound and fallback.
     ("efficiency.maxAirFraction", 0.35, "x", "chosen, not measured: the share of a program's cycle that may be spent in rapid (air) moves before the run sheet warns, naming the airiest operation. 0.35 sits above the corpus's worst good program (26.3 %); the first corpus run that shows a good program near it moves it (#926)"),
     // ── #926 (end)
+    // ── #948 — the goal pass line: the demo page's own rule, "zero cut-into AND top-surface
+    // coverage >= 95 %". A fraction of the goal's covered cells within 0.1 mm of the goal.
+    ("goal.passCoverage", 0.95, "x", "chosen, not measured: the share of a goal's top surface that must stand within 0.1 mm of it for the run to pass — the demo page's coverage rule (#948); a corpus run that shows a good goal job near it moves it"),
+    // ── #948 (end)
     // ── #448 (begin) — the vise's chosen tunables and the clamp band. Each is the number the code
     // compiled before, and `defaultsClient.ts` states the same bounds and fallbacks. The vise's
     // PRODUCT geometry (jaw widths, ledge, body depth) is the accessory record Z1_VISE in fixture.ts,
@@ -1180,6 +1184,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         // ── #447 (end)
         // #926 — the air-time threshold: a fraction of a cycle.
         "efficiency.maxAirFraction" => Some(need(
+            n.is_some_and(|v| (0.0..=1.0).contains(&v)),
+            "0 to 1 (a fraction)",
+        )),
+        "goal.passCoverage" => Some(need(
             n.is_some_and(|v| (0.0..=1.0).contains(&v)),
             "0 to 1 (a fraction)",
         )),

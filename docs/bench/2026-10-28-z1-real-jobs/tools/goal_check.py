@@ -21,6 +21,11 @@ import render as R
 
 CUT_INTO = 0.01
 
+# #948 — THE PASS LINE comes from the shop's own defaults (`goal.passCoverage`, seeded 0.95), the
+# same key the app's goal check reads, so the page's verdict and the app's cannot name different
+# rules. A location exported before the seed carries no key: read the seed value as the fallback.
+PASS_COVERAGE = float((getattr(R, 'LOC', {}).get('defaults') or {}).get('goal.passCoverage', {}).get('value', 0.95))
+
 
 def cutter(tool):
     """(radius, z-offset function of r) for the program's cutter, cutting size as render.tool_kernel."""
@@ -116,6 +121,7 @@ def main():
     def pct(m): return round(float(np.sum(m)) / n * 100, 2)
     s = {
         'goalCells': int(C.sum()), 'pitchMm': p, 'goalMinZ': round(float(G[C].min()), 3), 'stockThickness': T,
+        'passCoveragePct': round(PASS_COVERAGE * 100, 2),
         'programs': progs,
         'cutIntoPct': pct(d < -CUT_INTO), 'cutIntoAreaMm2': round(float(np.sum(d < -CUT_INTO)) * a, 1),
         'cutInto0p1Pct': pct(d < -0.1), 'cutInto0p5AreaMm2': round(float(np.sum(d < -0.5)) * a, 1),

@@ -31,6 +31,7 @@ import {
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
+import { goalPassCoverage } from '@/platform/defaultsClient';
 import type { ProgramOracle } from './engraveRunGate';
 import { forgetPoolSizing } from '@/engine/jobs/adaptivePool';
 import type { SimDiagnostic } from '@/workers/sim/session';
@@ -926,7 +927,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // worker samples the goal's heightfield and pairs it with this program's live sweep.
           // `surface3d` is set only on the goal path (the flat goal and the rotary relief), so an
           // item job sends nothing and runs exactly as before.
-          const goal = goalCheckForProgram(job, generated.surface3d != null);
+          // #948 — the pass line is the SHOP's `goal.passCoverage`, read here and handed over with
+          // the goal, so the worker's check judges against the number the page's checker reads.
+          const goal = goalCheckForProgram(job, generated.surface3d != null, {
+            passCoverage: goalPassCoverage(shopDefaults),
+          });
           const report = await client.simOracle([...predicted], undefined, designItems, goal);
           if (mine !== seq) return;
           oracles.push({ index, report });

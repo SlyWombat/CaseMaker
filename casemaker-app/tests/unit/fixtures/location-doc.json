@@ -1074,6 +1074,13 @@
       "unit": "x",
       "note": "chosen, not measured: the share of a program's cycle that may be spent in rapid (air) moves before the run sheet warns, naming the airiest operation. 0.35 sits above the corpus's worst good program (26.3 %); the first corpus run that shows a good program near it moves it (#926)"
     },
+    "goal.passCoverage": {
+      "value": 0.95,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the share of a goal's top surface that must stand within 0.1 mm of it for the run to pass — the demo page's coverage rule (#948); a corpus run that shows a good goal job near it moves it"
+    },
     "bracket.originOffsetXMm": {
       "value": 0.0,
       "source": "seeded",

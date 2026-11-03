@@ -204,11 +204,16 @@ describe('checkGoalCutInto — #924’s 3D half, ported from tools/goal_check.py
     expect(report.sentence).toContain('cut into');
   });
 
-  it('material left standing above the goal is reported as leftover, not cut-into', () => {
+  it('material left standing above the goal is reported as leftover, and #948’s pass line fails it', () => {
     const goal = flatGoal(10, 10, 0.5, -2);
     const report = checkGoalCutInto(goal, () => -1.5); // 0.5 mm high everywhere
     expect(report.cutIntoFraction).toBe(0);
-    expect(report.ok).toBe(true); // cut-into is the correctness gate; leftover is reported, not refused
+    // #948 — the pass line is zero cut-into AND top-surface coverage ≥ 95 %; nothing here is
+    // within 0.1 mm of the goal, so a run the page reads as Deviates is not this check's pass.
+    expect(report.passCoverage).toBe(0.95);
+    expect(report.leftoverFractions[0]).toBe(1);
+    expect(report.ok).toBe(false);
+    expect(report.sentence).toContain('coverage');
     expect(report.leftoverFractions[1]).toBeGreaterThan(0); // past the 0.3 mm band
     expect(report.maxLeftoverMm).toBeCloseTo(0.5, 6);
   });
