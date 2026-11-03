@@ -63,6 +63,7 @@ import { checkpointStoreOf } from '@/engine/cnc/emulator/checkpointStore';
 import { eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import type { ParseResult } from '@/engine/cnc/gcode/types';
 import type { FlatField } from '../geometry/carriedField';
+import { routeEngine } from './routeEngine';
 import { unionRemoval } from './engraveRest';
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
@@ -884,8 +885,17 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // `dense-3d-refused` for crossing `MAX_CHECKPOINTS`, leaving a 3D/relief file path-only, but
     // the FLAT dexel draws it — `denseFlatRoutesToColumn` gates this on a genuine flat end mill and
     // on its not being a rest pass, so a ball/bull (#532) and a rest pass keep their old refusals.
+    // #928 — the decision above is `routeEngine`'s frozen table (`routeEngine.ts`), read off the
+    // same four axes: tool shape, rotary class, exact-sweep density and the rest-pass seed kind.
     const rotaryClass = timeline.summary.rotaryClass;
-    if (rotaryClass === 'wrapped' || sweepsOnColumn(tool) || denseFlatRoutesToColumn(surfaceTimeline, tool, routingOpts)) {
+    const toEngine = routeEngine({
+      toolShape: tool.shape,
+      rotaryClass,
+      isDenseForExactSweep: isDenseForExactSweep(surfaceTimeline),
+      flatCuttingRadiusOk: cuttingRadiusForSweep(tool).ok,
+      hasPriorRemoval: Boolean(routingOpts?.priorRemoval),
+    });
+    if (toEngine === 'column') {
       // A rest pass is measured against the material a previous program left, and only the exact
       // sweeper can start from it. Silently sweeping the blank instead would draw a cut nobody is
       // going to make, so the pair is refused by name (#410). EITHER seed clears it: the carried
