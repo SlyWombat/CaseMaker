@@ -206,6 +206,37 @@ test('a 75 mm goal on a 43 × 32 blank: Lay it flat, a quarter turn on the X rin
   await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'failed');
   await expect(page.getByTestId('engrave-cut-verdict-fix')).toHaveText('Open the Holding step');
 });
+
+// #949 — THE OVERSIZED GOAL IS REFUSED AT THE CAM, BEFORE A TOOLPATH EXISTS. The 30 × 24 column
+// stands 75 tall but fits the 43 × 32 blank until it is moved to x 36: 8 mm of its width then lies
+// past the right edge, where a clipped toolpath's finish would run along the jaws. The CAM refuses
+// with its own sentence (the side, the amount, the three fixes) and posts nothing.
+//
+// FIXME (#949, the surface half): the refusal is `generated.errors` with stage 'cam' and NO surface
+// prints it — `runErrorCodes`/`firstRunError` read findings, the verifier and the simulation only,
+// so the operator sees "Not generated." and no sentence. This case pins the acceptance for the
+// surface fix (the sentence beside Generate, and Cut reading the same run as "did not pass"); flip
+// `test.fixme` to `test` in that change.
+test.fixme('#949 — the CAM refusal sentence reaches the operator, before any toolpath', async ({ cm, page }) => {
+  await cm.ready();
+  const job = tallJob();
+  job.targetObject!.position.x = 36;
+  await openJob(page, job);
+  await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
+
+  await page.getByTestId('engrave-generate').click();
+  const errors = page.getByTestId('engrave-run-errors');
+  await expect(errors).toContainText('larger than the blank', { timeout: 120_000 });
+  await expect(errors).toContainText(/mm past the (left|right|front|back) edge/);
+  await expect(errors).toContainText('Fit to the stock');
+  // No toolpath was built for the clipped goal: the row never ticks (the refusal is at the CAM).
+  await expect(page.getByTestId('engrave-run-toolpath')).not.toHaveAttribute('data-state', 'tick');
+
+  await page.getByTestId('cnc-mode-cut').click();
+  await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
+  await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'failed');
+  await expect(page.getByTestId('engrave-cut-verdict-sentence')).toContainText('larger than the blank');
+});
 // #876 — THE RING'S GRADUATED SCALE AND ZONE SNAP. The cursor's radius picks the precision, as
 // the maintainer asked (PrusaSlicer's model): a drag whose pointer stays on the scale band tracks
 // the ticks and lands exactly on a major line; the same angular drag with the pointer outside the
