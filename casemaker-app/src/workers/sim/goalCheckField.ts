@@ -88,7 +88,14 @@ export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInp
   } catch (e) {
     return { unchecked: `the goal could not be sampled (${e instanceof Error ? e.message : String(e)})` };
   }
-  return { heightfield, sweptTop, ...(goal.opts === undefined ? {} : { opts: goal.opts }) };
+  // #948 — the page's own point read of the same sweep, for the leftover bands.
+  const sweptTopExact = live.sweptTopExact();
+  return {
+    heightfield,
+    sweptTop,
+    ...(sweptTopExact === null ? {} : { sweptTopExact }),
+    ...(goal.opts === undefined ? {} : { opts: goal.opts }),
+  };
 }
 
 /** Test hook: a goal replaced under the same key must not serve a stale field. */
