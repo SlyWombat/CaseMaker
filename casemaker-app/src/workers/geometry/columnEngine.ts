@@ -2056,8 +2056,10 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     const unchecked = fixtureUncheckedDiagnostic(setup.workholding, preparedFixture.boxes.length > 0);
     if (unchecked) diagnostics.push(unchecked);
   }
-  // The cutter's widest reach over the material already cut (#405/#923): shared below with the
-  // gouge check so both treat the tool's envelope the same generous way, computed once.
+  // The cutter's widest reach over the material already cut (#405): used by the air-move GOUGE
+  // check below, where the worst case over the whole stock depth is right (a rapid's tip can be
+  // anywhere in Z). #923's fixture/holder check does NOT reuse this — it computes a per-move,
+  // depth-dependent reach instead (see the #923 bounce comment further down).
   const gougeRadius = cutterReach(cutter, Math.max(0, grid.initial - grid.base));
   const tGrid = performance.now();
 
@@ -2117,7 +2119,18 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       // checkpoint column does (#204: "the column rises from cp.z past the top").
       if (!rotary && preparedFixture.boxes.length > 0) {
         const moveZLo = m.z0 !== undefined && m.z1 !== undefined ? Math.min(m.z0, m.z1) : m.z;
-        const toolHit = columnFixtureHit([m.u0, m.v0], [m.u1, m.v1], gougeRadius, moveZLo, fixtureZTop, preparedFixture.boxes);
+        // #923 bounce (e2e `goalTransform.spec.ts`) — NOT `gougeRadius`: that is the cutter's
+        // widest reach across the WHOLE stock thickness, right for the air-move gouge check
+        // below (a rapid can be at any Z), but wrong here. A cutting move's tip is AT `moveZLo`;
+        // the only part of the cutter that can be anywhere near the fixture is the part between
+        // the tip and `fixtureZTop`, so the reach to ask for is `cutterReach(cutter, fixtureZTop
+        // − moveZLo)` — the cutter's width `fixtureZTop − moveZLo` mm above ITS OWN tip, not above
+        // the stock's deepest possible cut. For a ball/V/drill doing a shallow 3D-finish pass
+        // near the top, that is a few mm, not the whole blank, and using the whole blank's reach
+        // inflated the box into the shank/body radius for every move, however shallow — a false
+        // `tool-into-fixture` on jobs that never put the shank anywhere near the jaws.
+        const toolRadius = cutterReach(cutter, Math.max(0, fixtureZTop - moveZLo));
+        const toolHit = columnFixtureHit([m.u0, m.v0], [m.u1, m.v1], toolRadius, moveZLo, fixtureZTop, preparedFixture.boxes);
         if (toolHit) {
           fixtureDiag.push({
             severity: 'error',
@@ -2170,8 +2183,10 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   // trace's own retract a gouge, because columns just outside the groove (0.84 mm wide at 1 mm
   // deep) still stand at the top and the cone's widest reach is 3× that — and the honest test for
   // both shapes is one expression, since `surfaceAboveTip` is 0 inside a flat's radius.
-  // `gougeRadius` was computed earlier (#923), alongside the fixture check, so both treat the
-  // tool's envelope the same way.
+  // `gougeRadius` was computed earlier (#923), alongside the fixture prep below it — this is its
+  // only use now; the fixture/holder check computes its own per-move, depth-dependent reach
+  // instead (see the #923 bounce comment in the main loop above), because THIS check's "anywhere
+  // in the stock" worst case is wrong for a move whose own Z is known and shallow.
   const gouges: { step: number; line: number }[] = [];
   {
     let checked = 0;
@@ -2193,7 +2208,10 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       // itself is cheap (a handful of box comparisons) when there is nothing to hit.
       if (!rotary && preparedFixture.boxes.length > 0) {
         const airZLo = Math.min(mv.from[2], mv.to[2]);
-        const airHit = columnFixtureHit([mv.from[0], mv.from[1]], [mv.to[0], mv.to[1]], gougeRadius, airZLo, fixtureZTop, preparedFixture.boxes);
+        // #923 bounce — same fix as the cutting-move check above: the reach to ask for is at
+        // THIS move's own Z, not the whole stock's depth.
+        const airRadius = cutterReach(cutter, Math.max(0, fixtureZTop - airZLo));
+        const airHit = columnFixtureHit([mv.from[0], mv.from[1]], [mv.to[0], mv.to[1]], airRadius, airZLo, fixtureZTop, preparedFixture.boxes);
         if (airHit) {
           const spindleOff = mv.kind === 'feed-spindle-off';
           fixtureDiag.push(
