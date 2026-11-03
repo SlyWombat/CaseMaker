@@ -64,11 +64,17 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 import {
   ROTARY_NO_MODULE_REFUSAL,
   ROTARY_UNMEASURED_REFUSAL,
+  firstRunError,
+  runErrorCodes,
   programFrame,
   requiredAckCodes,
   surfaceRepostBlocker,
   withPeriod,
 } from '@/store/engraveRunGate';
+import { findingFix, fixActionLabel, fixIsOffered } from './findingFix';
+import { operatorRunError } from './runErrorWords';
+import { useStartWizardStore } from '@/store/startWizardStore';
+import { useCncModeStore } from '@/store/cncModeStore';
 import { useManageModeStore } from '@/store/manageModeStore';
 import { domeAcceptSentence, surfaceDomeAssumption, surfaceTiltWords } from '@/engine/cnc/engrave/surfaceSpread';
 import { pcbSurfaceBudget, pcbSurfaceSentence } from '@/engine/cnc/engrave/pcbBudget';
@@ -352,6 +358,54 @@ function actualTimeSentence(run: RunRecord | null): string {
   return `${when} took ${formatDuration(actual)} against ${formatDuration(run.estimatedSeconds)} predicted — ${direction}.`;
 }
 
+/**
+ * #931 — WHAT THE GATE FOUND, in the three states Cut must show.
+ *
+ * Design's four ticks derive the same facts (`EngravePanel.tsx`'s `rowSimulated`/`rowOracle`); this
+ * is their one-sentence form, and the two surfaces must never disagree about the same run.
+ *
+ * THE ONE PLACE #925 JOINS THE GATE: when A's design-check severity lands, `passed` gains its term
+ * in this function (`oracleOk && designCheck.ok`, or whatever #925 names it) — the summary, the
+ * body sentence and the fix all read this verdict, so nothing else in the surface changes.
+ */
+type CutVerdict =
+  | 'no-program'
+  | 'stale'
+  | 'stopped'
+  | 'passed'
+  | 'failed'
+  | 'not-checked'
+  | 'simulating'
+  | 'not-simulated';
+
+function cutVerdict(v: {
+  hasProgram: boolean;
+  packageCurrent: boolean;
+  staleSince: number | null;
+  /** The pipeline refused before a program existed (`generated.ok === false`). */
+  runRefused: boolean;
+  /** Errors across the document findings, the verifier and the sweep (`runErrorCodes`). */
+  errorCount: number;
+  simStopped: boolean;
+  /** The oracle's verdict, or null when no report was made (not run / not reached). */
+  oracleOk: boolean | null;
+  simStatus: string | null;
+  phase: string;
+}): CutVerdict {
+  // An edit since the run makes every verdict below a statement about an older design.
+  if (v.staleSince !== null) return 'stale';
+  if (v.runRefused || v.errorCount > 0) return 'failed';
+  if (!v.hasProgram) return 'no-program';
+  if (!v.packageCurrent) return 'stale';
+  if (v.simStopped) return 'stopped';
+  // #925 joins HERE.
+  if (v.oracleOk !== null) return v.oracleOk ? 'passed' : 'failed';
+  if (v.simStatus === 'ready') return 'not-checked';
+  if (v.simStatus === 'refused' || v.simStatus === 'error') return 'failed';
+  if (v.phase === 'simulating') return 'simulating';
+  return 'not-simulated';
+}
+
 export function EngraveCutSurface({
   job,
   report,
@@ -451,9 +505,16 @@ export function EngraveCutSurface({
   // the registration's fitted plane is what the release gate compares the frozen package against.
   const spreadMeasurement = useSurfaceSpread(job.id, target);
   const generate = useEngraveRunStore((s) => s.generate);
-  // #656 — the verdict the one screen prints: the run store's oracle for the current package (a
-  // re-post replaces it, and the sentence follows).
+  /** #656 — the verdict the one screen prints: the run store's oracle for the current package (a
+   * re-post replaces it, and the sentence follows). */
   const runOracle = useEngraveRunStore((s) => s.oracle);
+  // #931 — the rest of the run's verdict, for step 1's one sentence: the sweep's own state and its
+  // diagnostics (the collision's sentence lives there), and whether the pipeline ever posted.
+  const runSimDiagnostics = useEngraveRunStore((s) => s.simDiagnostics);
+  const runSimStatus = useEngraveRunStore((s) => s.simStatus);
+  const runSimStopped = useEngraveRunStore((s) => s.simStopped);
+  const runPhase = useEngraveRunStore((s) => s.phase);
+  const runErrorText = useEngraveRunStore((s) => s.error);
   // #535 — a goal program is checked by the dexel sweep, not the 2.5D oracle; the one screen's
   // verdict line states that check and the grid it ran on, never the oracle's vacuous 0/0.
   const runSurfaceProgram = useEngraveRunStore((s) => s.generated?.surface3d != null);
@@ -747,7 +808,47 @@ export function EngraveCutSurface({
   // action live there, so step 1 stays open until the machine is right.
   const checked = (green || onlyPackageStale) && (!ackRequired || acknowledged) && !mountMismatch;
   const frozen = packageCurrent && !mountMismatch;
-  const fitDone = checked && frozen;
+  // #931 — WHAT THE SIMULATION SAID, for step 1's summary and its body. One view of the run, so
+  // the sentence Cut prints is the same one Design's run rows read (`firstRunError`'s owner).
+  const runView = {
+    generated,
+    oracle: runOracle,
+    simDiagnostics: runSimDiagnostics,
+    simStatus: runSimStatus,
+    phase: runPhase,
+    acknowledged,
+    staleSince: staleSince ?? null,
+    error: runErrorText,
+  };
+  const firstError = firstRunError(runView);
+  const runErrorCount = runErrorCodes(runView).length;
+  const verdict = cutVerdict({
+    hasProgram: pkg !== null,
+    packageCurrent,
+    staleSince: staleSince ?? null,
+    runRefused: generated !== null && !generated.ok,
+    errorCount: runErrorCount,
+    simStopped: runSimStopped,
+    oracleOk: runOracle === null ? null : runOracle.ok,
+    simStatus: runSimStatus,
+    phase: runPhase,
+  });
+  const verdictFix = verdict === 'failed' && firstError !== null ? findingFix(firstError) : null;
+  // The press does what the fix names: a wizard step opens where the fix lives; every other target
+  // is a control in the Design panel, so the press shows it.
+  const verdictFixLabel =
+    verdictFix === null ? null : verdictFix.openWizardStep !== undefined ? fixActionLabel(verdictFix) : 'Show it in Design';
+  const applyVerdictFix = (): void => {
+    if (verdictFix === null) return;
+    if (verdictFix.openWizardStep !== undefined) {
+      useStartWizardStore.getState().openWizard(verdictFix.openWizardStep);
+    } else {
+      useCncModeStore.getState().show('design');
+    }
+  };
+  // Step 1 is DONE only when the gate passed: a program that was never simulated, stopped, or
+  // failed keeps the step open — that is the whole point of this issue.
+  const fitDone = checked && frozen && verdict === 'passed';
   const registrationPlan = job.setups?.[0]?.registration?.plan ?? null;
   // A registration is a measurement on THIS machine; with no machine connected, a record for this
   // job still says the blank was registered in this session.
@@ -800,7 +901,9 @@ export function EngraveCutSurface({
   // this long. Warnings, notes and the clearance state still ride it.
   const readiness: string[] = [];
   if (checked) readiness.push('Program checked');
-  if (frozen) readiness.push('matches the design');
+  // #931 — "matches the design" is the ORACLE's word, earned only by a passed run. `frozen` says
+  // the package still describes this job; it says nothing about whether anything checked it.
+  if (verdict === 'passed') readiness.push('matches the design');
   if (cutEstimate !== null) readiness.push(cutEstimate);
   if (warningWords !== null) readiness.push(warningWords);
   if (noteCount > 0) readiness.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
@@ -812,12 +915,22 @@ export function EngraveCutSurface({
       ? `the machine no longer holds ${jobMountWords(frozenMount)}`
       : onlyPackageStale
         ? 'the program is older than the design'
-        : report.errorCount > 0
-          ? `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}` +
-            (warningWords === null ? '' : ` · ${warningWords}`)
-          : ackRequired
-            ? 'clearance not acknowledged'
-            : 'clear';
+        : verdict === 'failed'
+          ? 'did not pass'
+          : verdict === 'stopped'
+            ? 'the simulation stopped before it finished'
+            : verdict === 'simulating'
+              ? 'simulating…'
+              : verdict === 'not-checked'
+                ? 'not checked against the design yet'
+                : verdict === 'not-simulated'
+                  ? 'not simulated'
+                  : report.errorCount > 0
+                    ? `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}` +
+                      (warningWords === null ? '' : ` · ${warningWords}`)
+                    : ackRequired
+                      ? 'clearance not acknowledged'
+                      : 'clear';
 
   const step2Summary = ((): string => {
     if (registrationPlan === null) return '';
@@ -894,6 +1007,41 @@ export function EngraveCutSurface({
       {/* #524/#689 — the Cut surface as a four-line checklist: Checked → Frozen → Register the
           blank → Run. Each line is one sentence; only the step the operator is on has a body. */}
       <Step number={1} title="Fit and clamp" done={fitDone} current={currentStep === 1} summary={step1Summary}>
+        {/* #931 — THE GATE'S VERDICT, before anything else step 1 asks. Only a passed run earns
+            "matches the design"; a failed one says so with the first sentence the run produced and
+            the press that resolves it; a run that never finished says which. */}
+        {verdict === 'failed' ||
+        verdict === 'stopped' ||
+        verdict === 'simulating' ||
+        verdict === 'not-checked' ||
+        verdict === 'not-simulated' ? (
+          <div style={{ ...BOX, marginTop: 6 }} data-testid="engrave-cut-verdict" data-state={verdict}>
+            <p
+              style={verdict === 'failed' ? WARN : MUTED}
+              data-testid="engrave-cut-verdict-line"
+            >
+              {verdict === 'failed'
+                ? 'The simulation did not pass.'
+                : verdict === 'stopped'
+                  ? 'The simulation stopped before it finished.'
+                  : verdict === 'simulating'
+                    ? 'The simulation is running…'
+                    : verdict === 'not-checked'
+                      ? 'The program has not been checked against the design yet.'
+                      : 'The program has not been simulated.'}
+            </p>
+            {verdict === 'failed' && firstError !== null && (
+              <p style={MUTED} data-testid="engrave-cut-verdict-sentence">
+                {operatorRunError(firstError.message)}
+              </p>
+            )}
+            {verdict === 'failed' && verdictFix !== null && fixIsOffered(verdictFix) && verdictFixLabel !== null && (
+              <button type="button" data-testid="engrave-cut-verdict-fix" onClick={applyVerdictFix}>
+                {verdictFixLabel}
+              </button>
+            )}
+          </div>
+        ) : null}
         {/* #695 — the frozen job's mount is gone from the machine. One sentence, one action; the
             same check the wizard makes (`profileHolds`) decides whether this is here at all. */}
         {mountMismatch && (

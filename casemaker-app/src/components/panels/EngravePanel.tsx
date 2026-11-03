@@ -49,6 +49,7 @@ import { machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '
 import { mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { findingFix, fixActionLabel, fixIsOffered, type PanelFix } from './findingFix';
+import { operatorRunError } from './runErrorWords';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
@@ -258,38 +259,6 @@ const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad
 /** A leading letter, uppercased — the engine's reasons are clauses, the panel prints sentences. */
 function sentenceCase(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-/**
- * #930 — A RUN'S FAILURE, IN THE OPERATOR'S WORDS.
- *
- * The sweep's message names the program, the checkpoint and the obstacle by their internal ids —
- * `the facing pass (flat-1.0): checkpoint 0: the cutter drives 0.477 mm³ into the fixture 'Vise
- * moving jaw (right)' (vise-moving-jaw)` — which is a developer's sentence, not a person's. This
- * keeps the fact (what would be cut, how much, by what) and drops the ids; the raw sentence is
- * kept under Technical. A finding's own sentence (a verifier refusal) has no ids and passes
- * through unchanged.
- */
-function operatorRunError(message: string): string {
-  const before = message;
-  let text = message
-    // `(flat-1.0)`, `(vise-moving-jaw)` — parenthesised registry keys and obstacle ids.
-    .replace(/\s*\([a-z0-9]+(?:[.-][a-z0-9]+)+\)/gi, '')
-    // `checkpoint 3:` is the sweep's own coordinate, not a place on the part.
-    .replace(/\bcheckpoint \d+:\s*/gi, '');
-  // The program's label keeps its name ("the facing pass") and becomes the subject of the clause.
-  text = text.replace(/^(.+?):\s+the cutter drives\b/i, '$1 would cut');
-  text = text.replace(/\bthe cutter drives\b/i, 'the cutter would cut');
-  // A named obstacle is a fixture with a label: "into the fixture 'Vise moving jaw (right)'" →
-  // "into the vise's moving jaw (right)".
-  text = text.replace(/into the fixture 'Vise ([^']+)'/g, (_m, rest: string) => {
-    const lower = rest.charAt(0).toLowerCase() + rest.slice(1);
-    return `into the vise’s ${lower}`;
-  });
-  text = text.replace(/into the fixture '([^']+)'/g, 'into the $1');
-  // A finding's own sentence (a verifier refusal) is already the operator's and passes through
-  // untouched — capitalisation included, exactly as it was printed before #930.
-  return text === before ? message : sentenceCase(text.trim());
 }
 
 /**
@@ -2722,12 +2691,7 @@ export function EngravePanel(): JSX.Element {
   // #930 — the sweep's refusal to cut into the vise is answered in the HOLDING step (seat the
   // blank high enough, or take it off the jaws), so that is the field the Fix opens. The plan's
   // own holding group is where the vise row lives.
-  const runFix: PanelFix | null =
-    currentRunError === null
-      ? null
-      : currentRunError.code === 'tool-into-fixture'
-        ? { group: 'engrave-group-hold', openWizardStep: 'holding' }
-        : findingFix(currentRunError);
+  const runFix: PanelFix | null = currentRunError === null ? null : findingFix(currentRunError);
   // #785 follow-up — the too-big refusal's one-click grid: the run stopped on it, and the finding
   // carries the pitch that fits. The button beside the sentence writes that pitch onto the goal's
   // grid and presses Generate in the same click, so the refusal turns into a choice.
@@ -3628,7 +3592,6 @@ export function EngravePanel(): JSX.Element {
           type="button"
           data-testid="cnc-mode-cut"
           aria-pressed={mode === 'cut'}
-          title="Ask every preflight owner about this job and show what they say."
           style={{ flex: 1, padding: 6 }}
           onClick={() => showMode('cut')}
         >

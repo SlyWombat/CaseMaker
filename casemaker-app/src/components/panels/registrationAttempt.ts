@@ -153,7 +153,7 @@ export function planRegistrationAttempt(args: {
         }
         return {
           kind: 'need-datum',
-          message: 'tap the jaw first — Measure… on the machine card, or run the registration: its first touch is that tap',
+          message: 'tap the jaw first — run the registration: its first touch is that tap',
           mountTap: args.mountTap,
         };
       }

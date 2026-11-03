@@ -397,7 +397,7 @@ describe('#471 registration — planned only after approval, refused with the en
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain('tap the jaw first — Measure… on the machine card');
+    expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain('tap the jaw first — run the registration');
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 

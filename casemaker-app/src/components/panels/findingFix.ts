@@ -41,6 +41,12 @@ export interface PanelFix {
 export function findingFix(f: { code: string; labelId?: string }): PanelFix | null {
   const code = f.code;
   if (PROGRAM_DEFECT_CODES.has(code)) return null;
+  // #931 — A CUT THAT WOULD REACH THE VISE IS ANSWERED IN HOLDING (the seat, the board under the
+  // part, the blank's height). The sweep's own refusal names the obstacle in its message; the fix
+  // is the hold, on both surfaces — Design's run row and Cut's step 1 read this one mapping.
+  if (code === 'tool-into-fixture') {
+    return { group: 'engrave-group-hold', openWizardStep: 'holding' };
+  }
   if (HOLD_FIX_CODES.has(code)) {
     return { group: 'engrave-group-hold', openWizardStep: 'holding' };
   }

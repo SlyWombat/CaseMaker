@@ -35,6 +35,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore, saveBlocker } from '@/store/engraveRunStore';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
+import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { buildRunRecord, withActualSeconds } from '@/engine/cnc/engrave/runRecord';
 import { clearStoredBaseline, resetLocationStore, useLocationStore } from '@/store/locationStore';
@@ -100,6 +101,20 @@ function generated(programs: EngraveProgram[]): EngraveGenerated {
     programs,
     errors: [],
   } as unknown as EngraveGenerated;
+}
+
+/** #931 — a run that PASSED: the state the green-surface tests intend (never simulated otherwise). */
+const OK_ORACLE = { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } };
+
+function passRun(): void {
+  useEngraveRunStore.setState({
+    simStatus: 'ready',
+    simDiagnostics: [],
+    oracle: OK_ORACLE as never,
+    phase: 'ready',
+    staleSince: null,
+    simStopped: false,
+  });
 }
 
 function row(
@@ -330,6 +345,7 @@ beforeEach(() => {
   shelfItems = [shelfItem()];
   resetRunConfirmStore();
   resetMachineRunStore();
+  resetStartWizard();
   useRunRecordStore.setState({ imported: [] });
   resetEngraveReleaseStore();
   useEngraveJobStore.getState().reset();
@@ -394,6 +410,7 @@ describe('#419 §3 the Cut surface', () => {
   it('freezes on green, once, and says what the package holds and what the shelf did', async () => {
     const job = defaultEngraveJob();
     const made = generated([P1]);
+    passRun();
     draw({ job, report: reportOf(), pkg: null, generated: made });
     giveStatement();
 
@@ -453,6 +470,7 @@ describe('#419 §3 the Cut surface', () => {
       ...generated([P1]),
       cam: { operations: 1, cuttingMoves: 1, estimatedSeconds: 86, passes: 1 },
     };
+    passRun();
     draw({ job, report: reportOf(), pkg, generated: made });
 
     const step1 = screen.getByTestId('engrave-cut-step-1-summary').textContent ?? '';
@@ -490,6 +508,7 @@ describe('#419 §3 the Cut surface', () => {
     const pkg = frozen(job, [P1]);
     // Clear with one warning the operator can read in the line: the rows stay folded.
     const warning = row('warning', 'note-x', 'a note');
+    passRun();
     draw({ job, report: reportOf([warning]), pkg, generated: generated([P1]), canDrive: true });
     const details = screen.getByTestId('engrave-cut-details') as HTMLDetailsElement;
     expect(details.open).toBe(false);
@@ -871,6 +890,7 @@ describe('#419 §3 the Cut surface', () => {
     const red = reportOf([row('error', 'tool-too-big', 'the cutter cannot reach the label')]);
 
     // A red gate folds the Register step (it is not the current step yet).
+    passRun();
     const view = draw({ job, report: red, pkg, generated: gen, canDrive: true });
     expect(screen.getByTestId('engrave-cut-step-2')).toHaveProperty('open', false);
 
@@ -1014,6 +1034,7 @@ describe('#419 §3 the Cut surface', () => {
     const pkg = frozen(job, [P1]);
     // The package was frozen for the job's vise setup; the machine's active bed holds the rotary.
     useLocationStore.setState({ status: 'ready', location: locationWith('rotary'), etag: '"loc-1"' } as never);
+    passRun();
     draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
 
     // Step 1 is the open step; its one sentence names the disagreement, with the one action.
@@ -1098,8 +1119,6 @@ describe('#419 §3 the Cut surface', () => {
 
 // #656 — THE CHAIN AND THE ONE SCREEN, at the Cut surface's own level.
 describe('#656 from the cutter prompt to the cut', () => {
-  const OK_ORACLE = { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } };
-
   it('continues on its own: a measured tilt re-posts the frozen package once', async () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);
@@ -1214,7 +1233,7 @@ describe('#819 the finished screen', () => {
         { ...generated([P1]), cam } as unknown as Parameters<typeof buildRunRecord>[1],
         new Date('2026-11-02T00:00:00.000Z'),
       );
-      return withActualSeconds(built, 270);
+      return withActualSeconds(built, 270, new Date('2026-11-02T00:00:00.000Z'));
     };
 
     useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended(job.id) } as never });
@@ -1237,5 +1256,92 @@ describe('#819 the finished screen', () => {
     useRunRecordStore.setState({ imported: [] });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
     expect(screen.getByTestId('engrave-cut-actual-time').textContent).toBe('No timed run recorded for this job yet.');
+  });
+});
+
+
+// #931 — THE CUT STEP TELLS THE TRUTH ABOUT THE SIMULATION. Design's four ticks and Cut step 1
+// read one derivation: "matches the design" is the oracle's word and only a passed run earns it; a
+// failed one states the first sentence the run produced and offers the press that resolves it; a
+// run that never finished says which; a stopped run is not a failed one.
+describe('#931 the Cut step against the simulation', () => {
+  const FAILED = {
+    source: 'sweep' as const,
+    severity: 'error' as const,
+    code: 'tool-into-fixture',
+    message:
+      'the facing pass (flat-1.0): checkpoint 0: the cutter drives 0.477 mm³ into the fixture ' +
+      "'Vise moving jaw (right)' (vise-moving-jaw)",
+  };
+
+  it('a program never simulated is not “matches the design”', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+
+    const summary = screen.getByTestId('engrave-cut-step-1-summary').textContent ?? '';
+    expect(summary).not.toContain('matches the design');
+    expect(summary).toContain('not simulated');
+    expect(screen.getByTestId('engrave-cut-verdict').dataset.state).toBe('not-simulated');
+    expect(screen.getByTestId('engrave-cut-verdict-line').textContent).toBe('The program has not been simulated.');
+    // The step is not done, so the cut does not open on Register.
+    expect((screen.getByTestId('engrave-cut-step-1') as HTMLDetailsElement).open).toBe(true);
+    expect((screen.getByTestId('engrave-cut-step-2') as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it('a failed sweep says “did not pass”, in the operator’s words, and its press opens Holding', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({
+      simStatus: 'ready',
+      simDiagnostics: [FAILED] as never,
+      oracle: null,
+      phase: 'blocked',
+      staleSince: null,
+    });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+
+    const summary = screen.getByTestId('engrave-cut-step-1-summary').textContent ?? '';
+    expect(summary).toContain('did not pass');
+    expect(summary).not.toContain('matches the design');
+    // The same words Design's `engrave-run-errors` prints: no ids, the obstacle in operator terms.
+    expect(screen.getByTestId('engrave-cut-verdict-sentence').textContent).toBe(
+      'The facing pass would cut 0.477 mm³ into the vise’s moving jaw (right)',
+    );
+    const fix = screen.getByTestId('engrave-cut-verdict-fix');
+    expect(fix.textContent).toBe('Open the Holding step');
+    fireEvent.click(fix);
+    expect(useStartWizardStore.getState().open).toBe(true);
+    expect(useStartWizardStore.getState().initialStep).toBe('holding');
+  });
+
+  it('a passed run earns “matches the design”, and only then', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    passRun();
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('matches the design');
+    expect(screen.queryByTestId('engrave-cut-verdict')).toBeNull();
+  });
+
+  it('a stopped simulation is not a failed one, and offers no fix', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({
+      simStatus: null,
+      simStopped: true,
+      simDiagnostics: [],
+      oracle: null,
+      phase: 'blocked',
+      staleSince: null,
+    });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain(
+      'the simulation stopped before it finished',
+    );
+    expect(screen.getByTestId('engrave-cut-verdict').dataset.state).toBe('stopped');
+    expect(screen.queryByTestId('engrave-cut-verdict-fix')).toBeNull();
   });
 });
