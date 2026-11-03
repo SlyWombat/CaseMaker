@@ -554,7 +554,9 @@ setup's flat end mill pockets it flat at that depth, in its own program after th
 **flat bottom**. The pocket's wall is tangent to the V's sloped flank at the floor, so the
 two programs meet without a step. A setup that names no flat end mill after the V leaves the core
 standing, and `vcarve-variable-core` says so with its area. A flat end mill on a variable-depth
-region is refused by name (`vcarve-variable-needs-cone`).
+region is refused by name (`vcarve-variable-needs-cone`). An **Engrave text** row carries the same
+V-carve depth choice — `plane` (the constant floor) or `variable` (the width-following map above) —
+so lettering can be given the V-bit while another cutter pockets the blank around it.
 
 **Image to relief** makes a picture into a 3D surface. The **Surface a mesh** picker takes
 a **PNG** as well as a mesh: the file is embedded in the job by its bytes (never the sampled
