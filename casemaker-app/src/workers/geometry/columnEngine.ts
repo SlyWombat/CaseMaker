@@ -42,12 +42,23 @@ import { eventLine, eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import { partToWork } from '@/engine/cnc/frames';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { sectionRadiusAt } from '@/engine/cnc/rotary/wrap';
-import type { Setup } from '@/engine/cnc/setup';
+import type { ObstacleBox, Setup } from '@/engine/cnc/setup';
 import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/engine/cnc/tool';
+import { holderOf, type Mill } from '@/engine/cnc/machine';
 import type { NodeMeshOutput } from './meshOutput';
 import { applyCarriedField, applyPriorTops, fieldOfGrid, type CarriedField } from './carriedField';
 import type { SweepDiagnostic, SweepStats } from './sweep';
-import { MAX_GOUGES, holderGate } from './sweep';
+import {
+  MAX_GOUGES,
+  holderGate,
+  OVERSHOOT_MM,
+  DiagnosticFolder,
+  prepareFixtureBoxes,
+  holderVsFixtureUnproven,
+  fixtureUncheckedDiagnostic,
+  columnFixtureHit,
+  formatVolume,
+} from './sweep';
 // Type-only (erased): the CAM module is not pulled into the worker graph (§4's plain-data rule).
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
@@ -648,6 +659,13 @@ export interface ColumnSweepOpts {
    * off and no finding is raised.
    */
   rampThresholdMm?: number | null;
+  /**
+   * The machine, so the holder's collet-nut dimensions are known (#923): `holderOf(machine)`
+   * feeds the same `holder-into-fixture` / `holder-vs-fixture-unproven` logic the exact sweeper
+   * already has (`SweepOpts.machine`). Absent: the nut's size is not known, same as the exact
+   * sweeper's own `holder === null` case.
+   */
+  machine?: Mill;
 }
 
 export interface ColumnSweepOk {
@@ -1999,6 +2017,48 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     const neck = holderGate(tool, deepest);
     if (neck) diagnostics.push(neck);
   }
+  // #923 — fixture and holder collision, raised with the SAME codes and severities as the exact
+  // sweeper's own (`tool-into-fixture`, `rapid-into-fixture`, `feed-into-fixture`,
+  // `holder-into-fixture`, `holder-vs-fixture-unproven`, `fixture-unchecked`), built from the
+  // same obstacle boxes (`prepareFixtureBoxes`, `sweep.ts`). `setup.fixture` only ever models the
+  // VISE on a flat (prism) job — a rotary job's chuck/jaws/tailstock are the half-space bands
+  // checked below (#729/#241 slice 4), never `setup.fixture` (#723 R-4 review), so this whole
+  // mechanism is a no-op for a rotary program, same as the exact sweeper's `fixture-unchecked`
+  // note already implies for a workholding it does not model as boxes.
+  //
+  // NO MANIFOLD HERE (see the file header): this engine holds no wasm handle, so the hit test
+  // below is `columnFixtureHit` — a move's own bounding box, grown by the cutter's widest reach,
+  // against each obstacle box — instead of the exact sweeper's tool-region-vs-Manifold-boolean.
+  // That can only ADD a collision at a diagonal move's corners where the true swept shape falls
+  // short of its bounding box, never miss one, which is the file's own conservative direction
+  // (the uncertainty band, the axis-clamp rule) applied to one more check.
+  const preparedFixture = rotary ? { boxes: [] as ObstacleBox[], top: Number.NEGATIVE_INFINITY, tallest: null as ObstacleBox | null } : prepareFixtureBoxes(setup.fixture);
+  const fixtureTopZ = preparedFixture.top;
+  const fixtureStockTopZ = grid.initial;
+  const fixtureZTop = Math.max(fixtureStockTopZ, fixtureTopZ) + OVERSHOOT_MM;
+  const fixtureHolder = opts?.machine === undefined ? null : holderOf(opts.machine);
+  // Same bound as `holderGate` already uses (#314): the nut face can only sit AT OR ABOVE
+  // `tip + nutOffset` at any seating, never lower, so testing there is the safe (never-optimistic)
+  // bound; `null` means the nut cannot be placed at all, and `holder-vs-fixture-unproven` below
+  // (or `holder-unproven` from `holderGate`) already says so.
+  const fixtureNutOffset = tool.shoulderLength ?? tool.fluteLength;
+  const fixtureDiag = new DiagnosticFolder();
+  if (!rotary) {
+    const unproven = holderVsFixtureUnproven({
+      fixturePresent: preparedFixture.boxes.length > 0,
+      fixtureTop: fixtureTopZ,
+      topZ: fixtureStockTopZ,
+      tallest: preparedFixture.tallest,
+      uncertainty: setup.fixture?.uncertainty ?? 0,
+      holderKnown: fixtureHolder !== null,
+    });
+    if (unproven) fixtureDiag.push(unproven);
+    const unchecked = fixtureUncheckedDiagnostic(setup.workholding, preparedFixture.boxes.length > 0);
+    if (unchecked) diagnostics.push(unchecked);
+  }
+  // The cutter's widest reach over the material already cut (#405/#923): shared below with the
+  // gouge check so both treat the tool's envelope the same generous way, computed once.
+  const gougeRadius = cutterReach(cutter, Math.max(0, grid.initial - grid.base));
   const tGrid = performance.now();
 
   const count = timeline.checkpoints.length;
@@ -2050,6 +2110,41 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
         clampedMoves++;
         clampedWorst = Math.min(clampedWorst, r.clamped.z);
       }
+      // #923 — `tool-into-fixture` / `holder-into-fixture`, per cutting move (a flat job's x/y
+      // are `u`/`v` directly; a rotary job never reaches here, guarded above). The move's own
+      // lowest Z (a ramp's deep end, matching `ramp-over-removed`'s own convention) up through
+      // `fixtureZTop` is the column the tool body occupies, exactly as the exact sweeper's
+      // checkpoint column does (#204: "the column rises from cp.z past the top").
+      if (!rotary && preparedFixture.boxes.length > 0) {
+        const moveZLo = m.z0 !== undefined && m.z1 !== undefined ? Math.min(m.z0, m.z1) : m.z;
+        const toolHit = columnFixtureHit([m.u0, m.v0], [m.u1, m.v1], gougeRadius, moveZLo, fixtureZTop, preparedFixture.boxes);
+        if (toolHit) {
+          fixtureDiag.push({
+            severity: 'error',
+            code: 'tool-into-fixture',
+            checkpoint: k,
+            line: m.line,
+            step: m.step,
+            message: `checkpoint ${k}: the cutter drives ${formatVolume(toolHit.volume)} mm³ into the fixture '${toolHit.box.label}' (${toolHit.box.id})`,
+          });
+        }
+        if (fixtureHolder !== null && fixtureNutOffset !== null) {
+          const nutRadius = fixtureHolder.nutDiameter / 2;
+          const nutZLo = moveZLo + fixtureNutOffset;
+          const nutZHi = nutZLo + fixtureHolder.nutLength;
+          const nutHit = columnFixtureHit([m.u0, m.v0], [m.u1, m.v1], nutRadius, nutZLo, nutZHi, preparedFixture.boxes);
+          if (nutHit) {
+            fixtureDiag.push({
+              severity: 'error',
+              code: 'holder-into-fixture',
+              checkpoint: k,
+              line: m.line,
+              step: m.step,
+              message: `checkpoint ${k}: the collet nut (⌀${fixtureHolder.nutDiameter} mm), placed at the lowest it can sit at any seating — its face ${fixtureNutOffset} mm above the tip — overlaps the fixture by ${formatVolume(nutHit.volume)} mm³`,
+            });
+          }
+        }
+      }
     }
     if (k % anchorEvery === anchorEvery - 1 || k === count - 1) anchors.set(k, grid.h.slice());
     lastProgressAt = performance.now();
@@ -2075,7 +2170,8 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   // trace's own retract a gouge, because columns just outside the groove (0.84 mm wide at 1 mm
   // deep) still stand at the top and the cone's widest reach is 3× that — and the honest test for
   // both shapes is one expression, since `surfaceAboveTip` is 0 inside a flat's radius.
-  const gougeRadius = cutterReach(cutter, Math.max(0, grid.initial - grid.base));
+  // `gougeRadius` was computed earlier (#923), alongside the fixture check, so both treat the
+  // tool's envelope the same way.
   const gouges: { step: number; line: number }[] = [];
   {
     let checked = 0;
@@ -2090,6 +2186,23 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     const airDeadline = stallMs === undefined ? null : performance.now() + stallMs;
     for (const mv of timeline.airMoves) {
       checked++;
+      // #923 — `rapid-into-fixture` / `feed-into-fixture`: tested before the "wholly above the
+      // stock" cull below, because a fixture box can rise above the stock top
+      // (`holder-vs-fixture-unproven` exists for exactly that case) and an air move entirely
+      // above the stock can still be entirely INSIDE that risen obstacle. `columnFixtureHit`
+      // itself is cheap (a handful of box comparisons) when there is nothing to hit.
+      if (!rotary && preparedFixture.boxes.length > 0) {
+        const airZLo = Math.min(mv.from[2], mv.to[2]);
+        const airHit = columnFixtureHit([mv.from[0], mv.from[1]], [mv.to[0], mv.to[1]], gougeRadius, airZLo, fixtureZTop, preparedFixture.boxes);
+        if (airHit) {
+          const spindleOff = mv.kind === 'feed-spindle-off';
+          fixtureDiag.push(
+            spindleOff
+              ? { severity: 'error', code: 'feed-into-fixture', line: mv.line, step: mv.step, message: `line ${mv.line}: a feed move with the spindle off drives the tool ${formatVolume(airHit.volume)} mm³ into the fixture` }
+              : { severity: 'error', code: 'rapid-into-fixture', line: mv.line, step: mv.step, message: `line ${mv.line}: a rapid drives the tool ${formatVolume(airHit.volume)} mm³ into the fixture` },
+          );
+        }
+      }
       const tip = Math.min(mv.from[2], mv.to[2]);
       if (tip > grid.initial) continue; // wholly above the stock
       if (!outOfTime && airDeadline !== null && checked % 256 === 0 && performance.now() > airDeadline) outOfTime = true;
@@ -2116,6 +2229,9 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     stats.airMovesChecked = checked;
     if (gouges.length > 0) diagnostics.push({ severity: 'error', code: 'rapid-through-stock', message: `${gouges.length} rapid${gouges.length === 1 ? '' : 's'} pass through material still present at that point in the program (first at line ${gouges[0]?.line})` });
   }
+  // #923 — the fixture checks fold together (one bad label must not print hundreds of lines),
+  // same as the exact sweeper's own `fixtureDiag.finish()`, and go in after the stock gates.
+  diagnostics.push(...fixtureDiag.finish());
   const tAir = performance.now();
 
   const stockGrid: ColumnGrid = { ...grid, h: new Float32Array(grid.h.length).fill(grid.initial) };

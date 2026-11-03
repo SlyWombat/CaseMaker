@@ -926,9 +926,11 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       // lift this replaces could not be exact.
       // #817 — the column engine seeds its grid from the earlier column programs' remaining tops;
       // without them the carried field (#723 P2-2b) is the seed, exactly as before.
+      // #923 — the machine, so the column engine's fixture/holder check knows the collet nut's
+      // dimensions, the same way `machine` already reaches `sweepTimeline` below.
       const columnOpts = hasFieldPrior
-        ? { ...routingOpts, priorTops: opts?.priorFields ?? null }
-        : { ...routingOpts, carried: opts?.carried ?? null };
+        ? { ...routingOpts, priorTops: opts?.priorFields ?? null, machine }
+        : { ...routingOpts, carried: opts?.carried ?? null, machine };
       const col = columnSweep(surfaceTimeline, tool, setupArg, columnOpts);
       if (!col.ok) {
         // Same contract as a refused exact sweep (#194): keep the runner's work, draw the path,
@@ -989,7 +991,12 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
               } satisfies FlatField,
             }
           : {}),
-        ...(setupArg.fixture ? { fixtureSource: setupArg.fixture.source, fixtureUncertainty: setupArg.fixture.uncertainty } : {}),
+        // #923 — this stamp now means what it says: `columnSweep` only builds and tests the
+        // fixture boxes for a FLAT job (a rotary job's obstacle is the chuck/jaws half-space
+        // bands, never `setup.fixture` — #723 R-4 review), so guarding on `!col.grid.kind ===
+        // 'rotary'` keeps this from claiming a check that never ran on the one path that
+        // doesn't honour `setup.fixture`.
+        ...(setupArg.fixture && col.grid.kind !== 'rotary' ? { fixtureSource: setupArg.fixture.source, fixtureUncertainty: setupArg.fixture.uncertainty } : {}),
       };
     }
     // The EXACT 2.5D sweep: the surface-frame (un-lifted) program on the un-seated stock — the flat
