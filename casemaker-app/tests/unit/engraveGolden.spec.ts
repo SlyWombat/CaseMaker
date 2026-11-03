@@ -14,8 +14,17 @@
 //
 // WHAT IS PINNED, per input, under `fixtures/golden/<case>/`:
 //
-//   program.nc.sha256  the posted program as byte count + sha256. The text is 100–200 kB, so the
-//                      hash is the pin; a failure names the expected and actual hash and size.
+//   program.nc.sha256  the posted program's PATH bytes — the text with its ONE
+//                      `;@MKR|TIME|seconds=<N>` record removed — as byte count + sha256. Everything
+//                      else (path, feeds, every other `;@MKR` tag) is in the pinned bytes exactly as
+//                      posted. The text is 100–200 kB, so the hash is the pin; a failure names the
+//                      expected and actual hash and size.
+//   time-seconds.json  that TIME record's own number (`{ "seconds": N }`), with a band: ±2 %,
+//                      floored at ±2 s. The estimate is a pure estimate (`estimateIRCycleSeconds`,
+//                      post/z1.ts's `mkr('TIME', …)`); an estimator-only change moves this number
+//                      and no toolpath, so it moves THIS pin and never the hash. The band absorbs
+//                      rounding and float drift across Node/OS; a real estimator change moves the
+//                      number past it.
 //   verifier.json      the pipeline's own `VerifyReport` on that text (`EngraveGenerated.verify`).
 //   oracle.json        the oracle's numbers: the WORK frame for every job, and — for the badge
 //                      only — the SURFACE frame against the 10-24 run-6 plane. The other two jobs
@@ -32,17 +41,21 @@
 //
 //   CASEMAKER_UPDATE_GOLDEN=1 npx vitest run tests/unit/engraveGolden.spec.ts
 //
-// rewrites every expectation. That is allowed only when a landing INTENDS to change what is
-// posted — a feeds row, a post change, a changed default — with a review note on the landing
-// naming which artefact moved and why. The diff is then read artefact by artefact. Bytes that
-// move without that note are the defect this spec exists to catch.
+// rewrites every expectation — with one rule that keeps an estimator change from churning the
+// golden: the PATH pin is rewritten whenever the path bytes differ (an unchanged path writes the
+// same file, so no diff), and the TIME pin KEEPS its committed number while the new estimate is
+// inside its band, rewriting it only when the estimate moved past it. The run logs which one moved,
+// so the landing note can say "TIME only" instead of "the hash changed". That is allowed only when
+// a landing INTENDS to change what is posted — a feeds row, a post change, a changed default — with
+// a review note naming which artefact moved and why. The diff is then read artefact by artefact.
+// Bytes that move without that note are the defect this spec exists to catch.
 
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { generate } from './helpers/engravePipeline';
 import { tl } from './helpers/manifoldExec';
@@ -144,6 +157,43 @@ const CASES: readonly Case[] = [
   { name: 'single-thin', job: singleThinJob, tilt: null },
 ];
 
+/**
+ * THE TIME RECORD — `;@MKR|TIME|seconds=<N>` (post/z1.ts's `mkr('TIME', …)`), ONE anchored line:
+ * the post's cycle estimate, and nothing else in the file matches it. The path pin strips it; the
+ * number is pinned on its own with the band below.
+ */
+const TIME_LINE = /^;@MKR\|TIME\|seconds=(\d+)$/;
+
+/** The program split into its path bytes (no TIME record) and the estimated seconds. */
+function splitTime(nc: string): { text: string; seconds: number } {
+  const lines = nc.split('\n');
+  const hits = lines.map((line, index) => ({ line, index })).filter(({ line }) => TIME_LINE.test(line));
+  if (hits.length !== 1) {
+    throw new Error(
+      `the program carries ${hits.length} records matching ${TIME_LINE} — the golden expects exactly one`,
+    );
+  }
+  const seconds = Number(TIME_LINE.exec(hits[0]!.line)![1]);
+  return { text: lines.filter((_, index) => index !== hits[0]!.index).join('\n'), seconds };
+}
+
+/**
+ * THE TIME PIN'S BAND: ±2 %, floored at ±2 s (#921 review). `estimateIRCycleSeconds` runs from tens
+ * of seconds to several minutes on these fixtures, so a flat ±2 s is too tight on the long jobs and
+ * a flat 2 % too loose on the short ones; the floor covers both. The band absorbs rounding and
+ * float drift across Node/OS, not a real estimator change.
+ */
+const TIME_FRACTION = 0.02;
+const TIME_FLOOR_SECONDS = 2;
+
+function timeBand(pinned: number): number {
+  return Math.max(TIME_FLOOR_SECONDS, pinned * TIME_FRACTION);
+}
+
+function withinTimeBand(pinned: number, actual: number): boolean {
+  return Math.abs(actual - pinned) <= timeBand(pinned);
+}
+
 function oracleOf(job: EngraveJob, gen: EngraveGenerated, surface: SurfaceFrame | null): OracleReport {
   const tool = jobTool(job);
   if (tool === null) throw new Error(`${job.name}: the job names no resolvable cutter`);
@@ -198,6 +248,16 @@ function firstDifference(expected: string, actual: string): string {
     : `${e.length} lines → ${a.length} lines`;
 }
 
+/** Read a committed expectation, or the "no committed expectation" error. */
+function expected(caseName: string, file: string): string {
+  const path = join(GOLDEN, caseName, file);
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    throw new Error(`${caseName}/${file}: no committed expectation — regenerate with CASEMAKER_UPDATE_GOLDEN=1`);
+  }
+}
+
 function pin(caseName: string, file: string, actual: string): void {
   const path = join(GOLDEN, caseName, file);
   if (UPDATE) {
@@ -205,16 +265,59 @@ function pin(caseName: string, file: string, actual: string): void {
     writeFileSync(path, actual);
     return;
   }
-  let expected: string;
-  try {
-    expected = readFileSync(path, 'utf8');
-  } catch {
-    throw new Error(`${caseName}/${file}: no committed expectation — regenerate with CASEMAKER_UPDATE_GOLDEN=1`);
-  }
-  if (expected !== actual) {
+  const pinned = expected(caseName, file);
+  if (pinned !== actual) {
     throw new Error(
-      `${caseName}/${file} changed at ${firstDifference(expected, actual)} — a frozen artefact moved; ` +
+      `${caseName}/${file} changed at ${firstDifference(pinned, actual)} — a frozen artefact moved; ` +
         'see the header before regenerating',
+    );
+  }
+}
+
+/** The path pin: the program's bytes without its TIME record, as sha256 + byte count. */
+function pathPin(nc: string): string {
+  const { text } = splitTime(nc);
+  const hash = createHash('sha256').update(text, 'utf8').digest('hex');
+  return `sha256 ${hash} (${Buffer.byteLength(text, 'utf8')} bytes)\n`;
+}
+
+/**
+ * The TIME pin, as its own number and with its own band. On regeneration the committed number is
+ * KEPT while the estimate is inside the band (no churn from rounding drift), and rewritten with a
+ * logged "TIME moved" when it is not — the mechanical distinction the review asked for.
+ */
+function pinTime(caseName: string, seconds: number): void {
+  const file = 'time-seconds.json';
+  const path = join(GOLDEN, caseName, file);
+  if (UPDATE) {
+    let pinned: number | null;
+    try {
+      pinned = (JSON.parse(readFileSync(path, 'utf8')) as { seconds: number }).seconds;
+    } catch {
+      pinned = null;
+    }
+    if (pinned !== null && withinTimeBand(pinned, seconds)) {
+      console.log(
+        `golden ${caseName}: TIME ${seconds} s is inside the pinned ${pinned} s ± ${timeBand(pinned).toFixed(2)} s — pin kept`,
+      );
+      return;
+    }
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ seconds }, null, 2) + '\n');
+    console.log(
+      pinned === null
+        ? `golden ${caseName}: TIME pinned at ${seconds} s`
+        : `golden ${caseName}: TIME moved ${pinned} → ${seconds} s (past ± ${timeBand(pinned).toFixed(2)} s) — pin rewritten`,
+    );
+    return;
+  }
+  const pinned = (JSON.parse(expected(caseName, file)) as { seconds: number }).seconds;
+  const band = timeBand(pinned);
+  if (!withinTimeBand(pinned, seconds)) {
+    throw new Error(
+      `${caseName}/${file}: the posted TIME is ${seconds} s, outside the pinned ${pinned} s ± ${band.toFixed(2)} s ` +
+        `(±2 %, floored at ±2 s) — the estimate moved, the path pin did not. ` +
+        'Regenerate deliberately if that is intended (the header states the rule).',
     );
   }
 }
@@ -223,11 +326,23 @@ describe('the frozen badge artefacts (#921)', () => {
   for (const c of CASES) {
     it(`${c.name}: posts the same program, verdicts and sheet`, async () => {
       const a = await record(c);
-      const hash = createHash('sha256').update(a.nc, 'utf8').digest('hex');
-      pin(c.name, 'program.nc.sha256', `sha256 ${hash} (${Buffer.byteLength(a.nc, 'utf8')} bytes)\n`);
+      const { text, seconds } = splitTime(a.nc);
+      pin(c.name, 'program.nc.sha256', pathPin(a.nc));
+      pinTime(c.name, seconds);
       pin(c.name, 'verifier.json', JSON.stringify(a.verify, null, 2) + '\n');
       pin(c.name, 'oracle.json', JSON.stringify({ work: a.work, surface: a.surface }, null, 2) + '\n');
       pin(c.name, 'run-sheet.md', a.sheet);
+
+      // RED-FIRST, ON THE PROGRAM'S OWN BYTES: an estimator-only change — the same program with a
+      // different TIME number — leaves the path pin bit-identical and lands outside the TIME band,
+      // so exactly one artefact moves. (A change to anything else moves the path pin.)
+      const movedSeconds = seconds + Math.ceil(timeBand(seconds)) + 1;
+      const moved = a.nc.replace(TIME_LINE, `;@MKR|TIME|seconds=${movedSeconds}`);
+      expect(splitTime(moved).text, `${c.name}: a TIME-only change must not move the path bytes`).toBe(text);
+      expect(
+        withinTimeBand(seconds, movedSeconds),
+        `${c.name}: a TIME change past ± ${timeBand(seconds).toFixed(2)} s must fail the TIME pin`,
+      ).toBe(false);
     }, 60_000);
   }
 });
