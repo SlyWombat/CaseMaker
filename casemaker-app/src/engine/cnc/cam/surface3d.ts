@@ -1794,6 +1794,9 @@ export function planGoalOvercut(
           consider(1);
           if (len2 > 0) {
             // Where the disc's edge (point-centre) reaches the cell at all: A t² + B t + C = 0.
+            // Kept alongside the square-boundary candidates below: a harmless extra try, re-checked
+            // the same way, and it still catches the ordinary case the square roots do not bother
+            // with (a segment passing close to the cell's own centre).
             const px = sx - cx;
             const py = sy - cy;
             const B = 2 * (px * dx + py * dy);
@@ -1810,7 +1813,7 @@ export function planGoalOvercut(
                 // d(t)² = p² + len2·w² (p = the point's own perpendicular distance, at t0), solving
                 // d/dw [sz + dz·(t0+w) − √(r² − p² − len2·w²)] = 0 gives w = −dz·R0 / (L·√(len2+dz²))
                 // where R0² = r² − p², L = √len2 (negative when R0² < 0: the line never reaches the
-                // cell at t0's own perpendicular, so no interior root — the boundary candidates above
+                // cell at t0's own perpendicular, so no interior root — the boundary candidates
                 // already cover that case).
                 const qx = cx - (sx + dx * t0);
                 const qy = cy - (sy + dy * t0);
@@ -1824,6 +1827,60 @@ export function planGoalOvercut(
                     consider(t0 + w);
                   }
                 }
+              }
+            }
+          }
+          // #945 (maintainer review, 2026-11-03) — THE ADMITTED ROOTS WERE FOUND IN THE WRONG
+          // MODEL. `consider` admits by `cellSquareDistance` (the segment's distance to the cell's
+          // SQUARE footprint, shrunk by half a pitch on each side), but every candidate t below used
+          // to be found from `px, py = sx − cx, sy − cy` — distance to the cell's CENTRE POINT, a
+          // circle of radius `r` around a single point, not the dilated SQUARE this cell's
+          // admission actually is. For a segment that moves AWAY from the cell in XY while
+          // dropping fast in Z (a steep diagonal between two raster columns straddling a wall), the
+          // point-circle's two roots can sit at the segment's very start — already admitted, so no
+          // root ever falls further along the segment, inside the square's wider reach, where the
+          // same descent has gone much deeper. A scratch spec (the review's) found exactly this: a
+          // 3.545 mm gouge the old roots never proposed as a candidate, because nothing asked
+          // `consider` to check it.
+          //
+          // The fix adds candidates at the SQUARE's own admission boundary — the dilated square
+          // (the cell's square, grown by ρ = r − skin on every side) a segment must cross to stop
+          // being admitted at all: four corner QUARTER-CIRCLES (candidates `r−skin` from a real
+          // corner) and four straight edge OFFSETS (candidates `r−skin` out from a flat side). Every
+          // root this proposes is re-checked by `consider` against the real `cellSquareDistance`
+          // exactly as the old point-circle roots were — an extra candidate only ever adds a point
+          // to try, it cannot admit anything on its own.
+          if (len2 > 0) {
+            const rho = r - skin;
+            if (rho > 0) {
+              const h = pitch / 2;
+              // Each corner's own quarter-circle: the same point-circle quadratic as before, just
+              // centred on a corner instead of the cell centre, and sized to the admission radius
+              // ρ rather than the tool's full radius r (a corner IS a point for this purpose — the
+              // square's distance function equals point-distance to the nearest corner exactly in
+              // that corner's own quadrant).
+              for (const cornerX of [cx - h, cx + h]) {
+                for (const cornerY of [cy - h, cy + h]) {
+                  const px = sx - cornerX;
+                  const py = sy - cornerY;
+                  const B = 2 * (px * dx + py * dy);
+                  const C = px * px + py * py - rho * rho;
+                  const disc = B * B - 4 * len2 * C;
+                  if (disc > 0) {
+                    const sq = Math.sqrt(disc);
+                    consider((-B - sq) / (2 * len2));
+                    consider((-B + sq) / (2 * len2));
+                  }
+                }
+              }
+              // Each flat edge's own offset line: on a vertical (left/right) edge the square's
+              // distance is purely horizontal, so the boundary is the line x = cx ± (h + ρ) — one
+              // linear solve, not a circle. The symmetric pair solves the top/bottom edges.
+              if (Math.abs(dx) > 1e-12) {
+                for (const edgeX of [cx - h - rho, cx + h + rho]) consider((edgeX - sx) / dx);
+              }
+              if (Math.abs(dy) > 1e-12) {
+                for (const edgeY of [cy - h - rho, cy + h + rho]) consider((edgeY - sy) / dy);
               }
             }
           }
