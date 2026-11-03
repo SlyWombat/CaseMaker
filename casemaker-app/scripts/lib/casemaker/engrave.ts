@@ -135,7 +135,7 @@ import {
   type ReachRow,
 } from '../../../src/engine/cnc/engrave/reachability';
 import { MARGIN_DEFAULTS } from '../../../src/engine/cnc/engrave/depthBounds';
-import { engraveRegions, measureEngraving, raisedTextMeasure } from '../../../src/workers/sim/engraveGenerate';
+import { engraveRegions, measureEngraving, raisedTextMeasure, supportingFloors } from '../../../src/workers/sim/engraveGenerate';
 import { cuttingDiameter } from '../../../src/engine/cnc/tool';
 import type { CutParams, FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
 // #922 — the one call shape feeds/step-down/rpm resolution now goes through, and the table this
@@ -1541,8 +1541,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // #766 D — `smartPick` is async: the evaluator may be (the Design panel's worker one
         // yields between plans so an edit can cancel the run); the CLI's is synchronous.
         // #858 — a tool change costs the shop's `toolChange.seconds` (the seed, or the location's own).
+        // #940 — the document's supporting floors, so a V-carve's reach is measured from the
+        // floor it is cut into rather than from the stock top.
         const pick = await smartPick(job, searchTools, catalogueRows, evaluate, {
           toolChangeSeconds: readDefault(shopDefaults, 'toolChange.seconds').value,
+          floors: supportingFloors(tl, toPartPlan(job)),
         });
         const searchMs = Date.now() - searchStart;
         // #910 — every cutter refused before a plan existed: the reasons ARE the answer.
@@ -1688,7 +1691,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         if (sub === null) continue;
         const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation | Promise<PlanEvaluation> =>
           evaluatePlan(sub, plan, { tl, tools, catalogue: catalogueRows, shop: pickShop, calibration: null }, { level });
-        const pick = await smartPick(sub, tools, catalogueRows, evaluate);
+        const pick = await smartPick(sub, tools, catalogueRows, evaluate, {
+          // #940 — the same floors rule on a dead-cutter substitution.
+          floors: supportingFloors(tl, toPartPlan(sub)),
+        });
         if (pick.refused === true) {
           out.progress(`  setup ${setupIndex + 1}      ${pick.reason}`);
           continue;

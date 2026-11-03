@@ -72,6 +72,11 @@ export interface SmartPickRequest {
   table?: readonly FeedsEntry[] | null;
   /** #785 — the search's progress: the level being measured and the candidate about to be tried. */
   onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void;
+  /**
+   * #940 — the document's SUPPORTING FLOORS (#748), computed where a Manifold toplevel is in hand:
+   * a cone's reach is the cut below its item's floor, not the stock-top depth.
+   */
+  floors?: ReadonlyMap<string, number> | null;
 }
 
 /**
@@ -105,7 +110,7 @@ export async function runSmartPick(
 ): Promise<EngravePickSummary | null> {
   const { job, tools, catalogue, conditions, shop } = request;
   const table = request.table ?? shop.feeds ?? null;
-  if (candidatePlans(job, tools, catalogue, conditions, table).length === 0) return null;
+  if (candidatePlans(job, tools, catalogue, conditions, table, request.floors).length === 0) return null;
   const jobKey = smartPickKey(job, { tools, catalogue, conditions, shop });
   const guarded: Evaluate = async (plan, level) => {
     await yieldTo();
@@ -122,6 +127,7 @@ export async function runSmartPick(
       {
         onProgress: request.onProgress,
         ...(shop.toolChangeSeconds === undefined || shop.toolChangeSeconds === null ? {} : { toolChangeSeconds: shop.toolChangeSeconds }),
+        ...(request.floors === undefined || request.floors === null ? {} : { floors: request.floors }),
       },
       conditions,
       table,

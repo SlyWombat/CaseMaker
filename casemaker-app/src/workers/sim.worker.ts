@@ -24,7 +24,8 @@ import { createSimSession, type SimDesign, type SimFrame, type SimLoadOpts, type
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
-import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
+import { engraveGenerate as runEngraveGenerate, supportingFloors, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
+import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { portLevelPlanner } from './sim/levelPlannerPort';
 import type { PoolSizing } from '@/engine/jobs/poolSizing';
 import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
@@ -252,8 +253,10 @@ const api = {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     const tl = await getToplevel();
     const ctx = { tl, tools, catalogue, shop, calibration: null, conditions, table: shop.feeds ?? null };
+    // #940 — the document's supporting floors, computed here where the toplevel lives.
+    const floors = supportingFloors(tl, toPartPlan(job));
     return runSmartPick(
-      { job, tools, catalogue, conditions, shop, table: shop.feeds ?? null, onProgress },
+      { job, tools, catalogue, conditions, shop, table: shop.feeds ?? null, onProgress, floors },
       (plan, level) => evaluatePlan(job, plan, ctx, { level }),
       () => latestEditGen > gen,
     );

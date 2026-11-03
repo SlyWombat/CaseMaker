@@ -171,6 +171,16 @@ const labelSchema = z.object({
   inlay: inlayMarkSchema
     .optional()
     .describe('This label is one half of a V-carve inlay; omit for an ordinary label.'),
+  // #940 — a label's V-carve depth, as a region's (#665). Optional, so a pre-#940 document keeps
+  // no key, and it is also the marker that gives the text a V-bit in a multi-cutter plan.
+  vCarveDepth: z
+    .enum(['plane', 'variable'])
+    .optional()
+    .describe(
+      "A V-carved text's depth, as a region's: 'plane' (absent — the constant floor) or " +
+        "'variable' (the medial-axis depth map). It also marks the text as V-bit work when the " +
+        'plan splits cutters.',
+    ),
 });
 
 /**
