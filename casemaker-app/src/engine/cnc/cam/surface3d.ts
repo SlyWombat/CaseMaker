@@ -1686,11 +1686,16 @@ export function finishTipField(
   if (ops > maxOps) {
     throw new Error(
       `3D finishing would need ${ops} tip evaluations (${hf.coveredCount} covered cells × ` +
-        `${stencil.length} stencil cells for a ${(tool.radius * 2).toFixed(2)} mm cutter at a ` +
-        `${pitch.toFixed(4)} mm grid), over the ${maxOps} budget. Use a coarser grid (a larger flat ` +
-        `pitch) or a smaller ball so the finishing pass fits the budget.`,
+        `${stencil.length} stencil cells for a ${(tool.radius * 2).toFixed(2)} mm ` +
+        `cutter at a ${pitch.toFixed(4)} mm grid), over the ${maxOps} budget. Use a coarser grid (a ` +
+        `larger flat pitch) or a smaller ball so the finishing pass fits the budget.`,
     );
   }
+  const rowOf = (jj: number): number | null => {
+    if (jj >= 0 && jj < ny) return jj;
+    if (opts.wrapRows === true) return ((jj % ny) + ny) % ny;
+    return null;
+  };
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
       const idx = j * nx + i;
@@ -1701,15 +1706,13 @@ export function finishTipField(
       for (const s of stencil) {
         const ii = i + s.di;
         const rawJ = j + s.dj;
-        let jj = rawJ;
         if (ii < 0 || ii >= nx) {
           // Off the grid in X is uncut stock at the top face — the tool rides on it.
           best = Math.max(best, topZ - s.rise);
           continue;
         }
-        if (opts.wrapRows === true) {
-          jj = ((rawJ % ny) + ny) % ny;
-        } else if (rawJ < 0 || rawJ >= ny) {
+        const jj = rowOf(rawJ);
+        if (jj === null) {
           best = Math.max(best, topZ - s.rise);
           continue;
         }

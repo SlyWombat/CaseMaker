@@ -7,12 +7,14 @@
  * cutter leaves there — `z(sample) + profile(distance)`, with the profile the cutter's own
  * (flat: 0; ball: `R − √(R² − d²)`; cone: `(d − tip)/tan(halfAngle)`; drill: `d/tan(59°)`).
  *
- * The column grid's top answers a different question — a 0.1 mm piecewise-constant surface read
- * conservatively — which is right for cut-into (never claim a cell was gouged on the strength of
- * a neighbour) and wrong for leftover (the highest touching column reads the surface up to half a
- * cell high, and the coverage percentage moves with it). So the goal check carries TWO reads:
- * the session's conservative `sweptTop` for cut-into, and this one — the page's own stamp — for
- * the leftover bands and the pass line.
+ * #945 — THIS STAMP IS THE VERDICT, NOT ONLY THE LEFTOVER READ. The column grid's top answers a
+ * different question (a 0.1 mm piecewise-constant read, one column lenient and carrying the
+ * half-cell slope bias the old finish rode); judging cut-into on it while the page judged its own
+ * stamp made the app and the page disagree at cliff edges. The goal check now reads cut-into, the
+ * leftover bands and the pass line off this one field, and reports the conservative column read
+ * beside it as a stated diagnostic (`GoalCutIntoReport.columnCutInto`). Every program of the run
+ * is folded into it — `exactSweptField`'s caller min-folds each program's stamp, so a rough that
+ * gouges under a clean finish still reads.
  *
  * It is computed as a FIELD on the goal grid, not per point: one Float32Array the size of the
  * goal (a few hundred KB on the biggest job), every move sampled on the page's own grid
@@ -23,6 +25,7 @@
 
 import type { Timeline } from '@/engine/cnc/emulator/timeline';
 import type { Tool } from '@/engine/cnc/tool';
+import { designCutterOf } from '@/engine/cnc/engrave/designCheck';
 
 /** The page's move sampling, mm: one sample every 0.05 mm of XY travel plus |Δz|. */
 const SAMPLE_MM = 0.05;
@@ -37,31 +40,37 @@ interface StampProfile {
 }
 
 /**
- * The cutter's stamp, exactly as `goal_check.py`'s `cutter()` reads it. A shape the page does not
- * model is a flat disc at the stated cutting diameter.
+ * The cutter's stamp, exactly as `goal_check.py`'s `cutter()` reads it — WITH THE CUTTER READ OFF
+ * THE TOOL RECORD, the way `designCutterOf` reads it (the tip, the half angle, the body radius
+ * where the flank stops, the ball radius), never off the CAM's own cone (`VCone`,
+ * `grooveRadiusAt`): a cutter-model bug shared by the CAM and this stamp would otherwise read as
+ * no cut-into. A shape the record does not model is a flat disc at the stated cutting diameter.
  */
 export function stampProfile(tool: Tool): StampProfile {
-  const shape = tool.shape;
-  if (shape === 'engraving' || shape === 'chamfer') {
-    const diameter = tool.diameter ?? 3.175;
-    const ang = tool.halfAngle !== null && tool.halfAngle !== undefined ? 2 * tool.halfAngle : (tool.angle ?? 30);
-    const tan = Math.tan((Math.PI * Math.abs(ang)) / 360);
-    const tipR = shape === 'chamfer' ? 0 : (tool.tipDiameter ?? 0) / 2;
-    return {
-      radius: diameter / 2,
-      profile: (r) => (r <= tipR ? 0 : (r - tipR) / tan),
-    };
-  }
-  const diameter = tool.tipDiameter ?? tool.diameter ?? 1;
-  const radius = diameter / 2;
-  if (shape === 'ball') {
-    return { radius, profile: (r) => radius - Math.sqrt(Math.max(radius * radius - r * r, 0)) };
-  }
-  if (shape === 'drill') {
+  // The drill keeps the page's own 59° point model; `designCutterOf` does not describe a drill.
+  if (tool.shape === 'drill') {
+    const radius = (tool.tipDiameter ?? tool.diameter ?? 1) / 2;
     const tan = Math.tan((59 * Math.PI) / 180);
     return { radius, profile: (r) => r / tan };
   }
-  return { radius, profile: () => 0 };
+  const cutter = designCutterOf(tool);
+  if (cutter === null) return { radius: (tool.tipDiameter ?? tool.diameter ?? 1) / 2, profile: () => 0 };
+  if (cutter.ballRadius !== undefined) {
+    const R = cutter.ballRadius;
+    return { radius: R, profile: (r) => R - Math.sqrt(Math.max(R * R - r * r, 0)) };
+  }
+  if (cutter.tanHalf > 0) {
+    // A cone widens until the body's radius; above the cap the flank stops, so the stamp's surface
+    // is flat there rather than the page's unbounded cone. The disc is the body when the record
+    // states one, else the historical 3.175 mm default the page's own cutter() assumes.
+    const capH = Number.isFinite(cutter.maxRadius) ? Math.max(0, (cutter.maxRadius - cutter.tipRadius) / cutter.tanHalf) : Infinity;
+    const radius = Number.isFinite(cutter.maxRadius) ? cutter.maxRadius : (tool.diameter ?? 3.175) / 2;
+    return {
+      radius,
+      profile: (r) => (r <= cutter.tipRadius ? 0 : Math.min((r - cutter.tipRadius) / cutter.tanHalf, capH)),
+    };
+  }
+  return { radius: cutter.tipRadius, profile: () => 0 };
 }
 
 /**

@@ -478,7 +478,10 @@ export function denseFlatRoutesToColumn(timeline: Timeline, tool: Tool, opts?: S
 export type GoalCheckInput =
   | {
       heightfield: GoalHeightfield;
-      /** The conservative read — cut-into is judged on it (#948's max-of-four column read). */
+      /**
+       * The conservative column read — the STATED DIAGNOSTIC since #945 (one column lenient, and
+       * it carries the half-cell slope bias). The verdict is the exact stamp below.
+       */
       sweptTop: ResultTop;
       /** #948 — the page's own point read of the same sweep, for the leftover bands. */
       sweptTopExact?: ResultTop;
@@ -534,11 +537,13 @@ export interface SimSession {
     goal?: GoalCheckInput,
   ): OracleReport;
   /**
-   * #948 — THE LIVE SWEEP'S TOP, as a work-frame sampler the goal check reads: the highest column
-   * touching the queried point on the FLAT grid (the same grid `SimLoadOk.flatField` exposes),
-   * null outside it, and NULL when the live sweep has no flat top at all — an exact-engine sweep,
-   * or a rotary column whose grid is the map frame. A caller then states the goal check as
-   * UNCHECKED with a reason (`goalCutIntoUnchecked`); it never reports a silent pass.
+   * #948 — THE LIVE SWEEP'S TOP, as a work-frame sampler: the highest column touching the queried
+   * point on the FLAT grid (the same grid `SimLoadOk.flatField` exposes), null outside it, and
+   * NULL when the live sweep has no flat top at all — an exact-engine sweep, or a rotary column
+   * whose grid is the map frame. A caller then states the goal check as UNCHECKED with a reason
+   * (`goalCutIntoUnchecked`); it never reports a silent pass. Since #945 this is the goal check's
+   * stated DIAGNOSTIC (one column lenient, half-cell slope bias); the verdict is
+   * {@link sweptFieldExact}.
    */
   sweptTop(): ResultTop | null;
   /**

@@ -125,6 +125,7 @@ it('a 70° ramp: the finish generation posts, cut-into stays zero, and the lefto
     // The oracle's own read: nothing into the goal (the floor is 0.01 mm).
     expect(gc?.cutIntoFraction).toBe(0);
     expect(gc?.maxCutIntoMm).toBe(0);
+    console.log('RAMP945', JSON.stringify({ left: gc?.leftoverFractions, maxLeft: gc?.maxLeftoverMm, cut: gc?.cutIntoFraction, maxCut: gc?.maxCutIntoMm, at: gc?.maxCutIntoAt, med: gc?.medianDeltaMm }));
     // The leftover is the raster's own step-over cusp (≈ 0.41 mm at this cutter's spacing), NOT
     // the pitch bias: the pre-fix field posted 12.68 % over 0.3 mm and 0.545 mm max here.
     expect(gc?.leftoverFractions[1]).toBeLessThan(0.02);

@@ -412,24 +412,27 @@ describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
       expect(load.ok).toBe(true);
       const report = session.oracle(g.predicted, null, g.designItems, goalInputFor(session, goalCheckForProgram(job, true) as SimGoalCheck));
       expect(report.goalCutInto?.ran).toBe(true);
-      // Nothing is cut INTO the goal; the run fails the pass line because too much of the goal's
-      // top surface is never reached from this side.
-      expect(report.goalCutInto?.cutIntoFraction).toBe(0);
+      // #945 — the finish drops the ball on the surface it touches, so a handful of cells read a
+      // SUB-CELL dip: the page's own checker on this program finds 6 of 22865 cells below the goal
+      // (max 0.0299 mm), the app's stamp 2 — none above the 0.1 mm finish tolerance (the page's
+      // `cutInto0p1Pct` is 0.0). The run still fails the pass line: too much of the goal's top
+      // surface is never reached from this side.
+      expect(report.goalCutInto?.cutIntoFraction).toBeLessThanOrEqual(10 / 22865);
+      expect(report.goalCutInto?.maxCutIntoMm ?? 0).toBeLessThanOrEqual(0.05);
       expect(report.goalCutInto?.passCoverage).toBe(0.95);
       expect(report.goalCutInto?.leftoverFractions[0]).toBeGreaterThan(0.05);
       expect(report.goalCutInto?.ok).toBe(false);
-      expect(report.goalCutInto?.sentence).toContain('coverage');
-      expect(report.goalCutInto?.sentence).toContain('95');
+      // The sentence names the deepest of the sub-cell dips (the page's own read states 0.03 % too);
+      // the run fails on the coverage pin asserted below.
+      expect(report.goalCutInto?.sentence).toContain('cut into');
       expect(report.ok).toBe(false);
-      // #948 — THE COVERAGE IS THE PAGE'S OWN READ, cell for cell. `goal_check.py` stamps the
-      // cutter along this posted program at each goal cell's centre: 10863 of 22865 cells are more
-      // than 0.1 mm above the goal (0.475092936802974, i.e. 52.49 % coverage). The program MOVED in
-      // the wave — B's ball-nose finish step-over rule (#945, 439774bf on cand/wave2) re-posts it —
-      // so the page's stamp was re-taken on the new program and never adjusted to the app. The
-      // column grid's max-of-four read gives 66.23 % leftover, i.e. 33.77 % coverage — 18.7 points
-      // away — so the leftover must use the page's rule.
+      // #948/#945 — THE COVERAGE IS THE PAGE'S OWN READ, cell for cell. `goal_check.py` stamps the
+      // cutter along this posted program at each goal cell's centre: 5884 of 22865 cells are more
+      // than 0.1 mm above the goal (0.25733654056418104, i.e. 74.27 % coverage — re-taken
+      // 2026-11-03 on the #945 contact-point finish, from 52.49 %). The app's stamp must answer
+      // the same question the same way; the column grid's max-of-four read is the diagnostic.
       expect(
-        Math.abs((report.goalCutInto?.leftoverFractions[0] ?? 0) - 10863 / 22865),
+        Math.abs((report.goalCutInto?.leftoverFractions[0] ?? 0) - 5884 / 22865),
       ).toBeLessThanOrEqual(1 / (report.goalCutInto?.goalCells ?? 1));
     } finally {
       session.dispose();
@@ -475,10 +478,18 @@ describe('#948 the live session’s swept top', () => {
       expect(input.heightfield.pitch).toBe(GOAL_CHECK_PITCH_MM);
       expect(GOAL_CHECK_MAX_CELLS).toBe(20_000_000);
 
-      const direct = checkGoalCutInto(
-        sampleGoalHeightfield(target, { pitchMm: GOAL_CHECK_PITCH_MM, maxCells: GOAL_CHECK_MAX_CELLS }),
-        top as NonNullable<ReturnType<SimSession['sweptTop']>>,
-      );
+      // #945 — the report judges cut-into on the page's own stamp too; the direct call must read
+      // the same two halves, not the column top the report no longer uses for the verdict.
+      const hfSample = sampleGoalHeightfield(target, { pitchMm: GOAL_CHECK_PITCH_MM, maxCells: GOAL_CHECK_MAX_CELLS });
+      const exactField = session.sweptFieldExact(hfSample);
+      expect(exactField).not.toBeNull();
+      const stampTop = (x: number, y: number): number | null => {
+        const i = Math.round((x - hfSample.x0) / hfSample.pitch);
+        const j = Math.round((y - hfSample.y0) / hfSample.pitch);
+        if (i < 0 || j < 0 || i >= hfSample.nx || j >= hfSample.ny) return null;
+        return exactField![j * hfSample.nx + i]!;
+      };
+      const direct = checkGoalCutInto(hfSample, stampTop);
       const report = session.oracle(g.predicted, null, g.designItems, input);
       expect(report.goalCutInto).toBeDefined();
       expect(report.goalCutInto?.ran).toBe(true);
@@ -508,6 +519,27 @@ describe('#948 the live session’s swept top', () => {
       session.dispose();
     }
   }, 240_000);
+
+  it('#945 — pins the change of read: a sub-column gouge the stamp sees and the max-of-four read hid', () => {
+    // A FLAT 3 × 3 goal at the page's pitch. The gouge is narrower than one column: only the centre
+    // cell's own stamp point is below the goal, so the four columns the conservative read brackets
+    // that point with all read the uncut top — it cannot see this by construction, and the page's
+    // own point stamp can. This is the pair of reads the goal check now states.
+    const nx = 3;
+    const ny = 3;
+    const pitch = GOAL_CHECK_PITCH_MM;
+    const z = new Float32Array(nx * ny);
+    const covered = new Uint8Array(nx * ny).fill(1);
+    const goal: GoalHeightfield = { nx, ny, pitch, x0: 0, y0: 0, z, topZ: 0, covered, coveredCount: nx * ny };
+    const pointStamp = (x: number, y: number): number =>
+      Math.abs(x - 0.1) < 1e-6 && Math.abs(y - 0.1) < 1e-6 ? -0.05 : 0;
+    const maxOfFour = (): number => 0;
+    const onStamp = checkGoalCutInto(goal, pointStamp);
+    expect(onStamp.cutIntoFraction).toBeCloseTo(1 / 9, 6);
+    expect(onStamp.maxCutIntoMm).toBeCloseTo(0.05, 6);
+    expect(onStamp.maxCutIntoAt).toEqual({ x: 0.1, y: 0.1 });
+    expect(checkGoalCutInto(goal, maxOfFour).cutIntoFraction).toBe(0);
+  });
 
   it('catches a deliberate gouge: a feed 0.2 mm below the goal reads back as cut-into', async () => {
     // The acceptance's positive case: a program that DOES cut into the goal must not read as a
@@ -631,9 +663,9 @@ const HAVE_STICK = existsSync(DEMO_LOCATION) && existsSync(ELEPHANT);
  * #948 — THE APP READS THE PAGE'S NUMBER ON THE TWO-PROGRAM STICK JOB.
  *
  * The elephant stick goal posts TWO programs — the ⌀2 ball finish and the ⌀0.5 rest — and the
- * page's checker stamps BOTH onto ONE goal field (`np.minimum` per cell): 25345 of 156996 cells
- * are more than 0.1 mm above the goal (0.16143723406965782 leftover, i.e. 83.86 % coverage, under
- * the 95 % pass line). The finish alone reads 51.87 %; the rest alone would read a near-empty
+ * page's checker stamps BOTH onto ONE goal field (`np.minimum` per cell): 10982 of 156996 cells
+ * are more than 0.1 mm above the goal (0.06995082677265663 leftover, i.e. 93.00 % coverage, under
+ * the 95 % pass line) on the #945 contact-point finish (it was 25345 / 83.86 % before it). The finish alone reads 51.87 %; the rest alone would read a near-empty
  * surface. The app must therefore judge the run's accumulated field, not the last program's own
  * stamp — and the walk must run the goal check on EVERY program of a goal job, even one with no
  * predicted regions (the rest program carries none). This test is that number, cell for cell.
@@ -702,16 +734,21 @@ describe.skipIf(!HAVE_STICK)('#948 the stick goal’s two programs read the page
         expect(reports[1]?.goalCutInto?.ran).toBe(true);
         const combined = combineOracles(reports, null).goalCutInto;
         expect(combined?.ran).toBe(true);
-        expect(combined?.cutIntoFraction).toBe(0);
+        // #945 — the page's own checker on these two programs reads 2034 of 156996 cells below the
+        // goal (1.296 %, max 0.0191 mm) and NONE above the 0.1 mm tolerance. The app's stamp
+        // answers the same: the same fraction and depth, sub-cell dips only.
+        expect(Math.abs((combined?.cutIntoFraction ?? 0) - 2034 / 156996)).toBeLessThanOrEqual(1 / 156996);
+        expect(combined?.maxCutIntoMm ?? 0).toBeLessThanOrEqual(0.02);
         // §4.1 — a single top setup reads its top-surface number as its whole-surface reach,
         // stated; the pass line now judges that number.
         expect(combined?.wholeSurface?.fraction).toBeCloseTo(1 - (combined?.leftoverFractions[0] ?? 0), 6);
         expect(combined?.wholeSurface?.setups).toBe(1);
         expect(combined?.sentence).toContain('one top setup');
-        // The page's stamp on BOTH programs: 25345 of 156996 cells (coverage 83.86 %).
+        // The page's stamp on BOTH programs, re-taken 2026-11-03 on the #945 contact-point finish:
+        // 10982 of 156996 cells (0.06995082677265663 leftover, i.e. 93.00 % coverage — from 83.86 %).
         expect(combined?.goalCells).toBe(156996);
-        expect(Math.abs((combined?.leftoverFractions[0] ?? 0) - 25345 / 156996)).toBeLessThanOrEqual(1 / 156996);
-        // 83.86 % is under the 95 % pass line: the stick goal is not a pass from the top alone.
+        expect(Math.abs((combined?.leftoverFractions[0] ?? 0) - 10982 / 156996)).toBeLessThanOrEqual(1 / 156996);
+        // 93.00 % is still under the 95 % pass line: the stick goal is not a pass from the top alone.
         expect(combined?.ok).toBe(false);
       } finally {
         session.dispose();
