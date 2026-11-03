@@ -125,10 +125,18 @@ describe('#869 the goal’s split, generated', () => {
     // is the post-#889 value; the split-vs-one-cutter difference is asserted below. Re-pinned when
     // #889 merged only LEVEL lines (a merged slope sweeps high in the column engine). Re-pinned
     // by #909: the single-cutter plan's rough is clamped over its ball's footprint. Re-pinned by
-    // #927: only the `;@MKR|TIME` line moved (266 s → 280 s). Re-pinned by #945: the finish
-    // raster now steps a steep column pair instead of posting it as one diagonal move — this
-    // fixture's ramp has at least one such pair.
-    expect(programHash(out.nc!)).toBe('da7e66c7');
+    // #927: only the `;@MKR|TIME` line moved (266 s → 280 s). Re-pinned by #945's cut-into fix:
+    // the finish raster now steps a steep column pair instead of posting it as one diagonal move
+    // — this fixture's ramp has at least one such pair. Re-pinned AGAIN by #945's coverage fix:
+    // the ball's own default finish step-over is now DERIVED from its radius and the shop's
+    // leftover-visible band (`finishStepOverForCusp`, surface3d.ts) rather than reused from the
+    // 2.5D pocketing row — for this 3 mm ball (r 1.5 mm) against the fallback 0.1 mm band at the
+    // fallback 0.1 mm grid, that derives 1.0 mm, tighter than the pre-fix ~1.35 mm 2.5D default
+    // (the compiled PLA row's 0.45 fraction of the 3 mm proxy), so the finish raster's row count —
+    // and the posted file — changed. Verified against a clean revert: this job states no
+    // `surface.finishStepOverMm`, and the old pin (`da7e66c7`) is exactly what `git stash` here
+    // reproduces.
+    expect(programHash(out.nc!)).toBe('c03b471f');
   });
 
   it('a roughToolKey posts the flat’s rough first and the ball’s finish second', async () => {
