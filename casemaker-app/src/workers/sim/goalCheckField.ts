@@ -88,8 +88,18 @@ export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInp
   } catch (e) {
     return { unchecked: `the goal could not be sampled (${e instanceof Error ? e.message : String(e)})` };
   }
-  // #948 — the page's own point read of the same sweep, for the leftover bands.
-  const sweptTopExact = live.sweptTopExact();
+  // #948 — the page's own read of the same sweep, stamped onto the goal's grid, for the leftover
+  // bands and the pass line. The conservative `sweptTop` stays the cut-into judge.
+  const field = live.sweptFieldExact(heightfield);
+  const sweptTopExact =
+    field === null
+      ? null
+      : (x: number, y: number): number | null => {
+          const i = Math.round((x - heightfield.x0) / heightfield.pitch);
+          const j = Math.round((y - heightfield.y0) / heightfield.pitch);
+          if (i < 0 || j < 0 || i >= heightfield.nx || j >= heightfield.ny) return null;
+          return field[j * heightfield.nx + i]!;
+        };
   return {
     heightfield,
     sweptTop,

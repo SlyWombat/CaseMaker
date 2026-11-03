@@ -54,7 +54,7 @@ import { checkDesignReach, checkGoalCutInto, goalCutIntoUnchecked, type DesignCh
 import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
-import { exactSweptTop } from './sweptPoint';
+import { exactSweptField } from './sweptPoint';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import type { CarriedField } from '../geometry/carriedField';
 
@@ -535,13 +535,13 @@ export interface SimSession {
    */
   sweptTop(): ResultTop | null;
   /**
-   * #948 — THE PAGE'S OWN READ of the live sweep: the swept top at a point computed from the
-   * program's cutting moves and the cutter's shape, exactly as `goal_check.py` stamps it (the
+   * #948 — THE PAGE'S OWN READ of the live sweep, as a field on the GOAL's grid: the cutter
+   * stamped along the program's cutting moves, exactly as `goal_check.py` computes it (the
    * leftover bands and the pass line are judged on this; cut-into stays on {@link sweptTop},
    * which is conservative). Null for a sweep the goal check does not run on (a rotary or
    * exact-engine sweep), and when the session holds no tool to name the cutter.
    */
-  sweptTopExact(): ResultTop | null;
+  sweptFieldExact(goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null;
   /**
    * #857 — the region the CURRENT sweep has cut at or below `zSlice` (work frame), with the band
    * the oracle would judge it in: the same slice the volumetric comparison reads, handed to a
@@ -1366,15 +1366,18 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * same question the same way for leftover/coverage. The conservative `sweptTop` stays the
    * cut-into judge.
    */
-  let exactTopFor: object | null = null;
-  let exactTopValue: ResultTop | null = null;
-  const sweptTopExact = (): ResultTop | null => {
+  let exactFor: object | null = null;
+  let exactKey = '';
+  let exactValue: Float32Array | null = null;
+  const sweptFieldExact = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null => {
     const l = live;
     if (l === null || l.kind !== 'column' || l.column.grid.kind !== 'flat') return null;
-    if (exactTopFor === l) return exactTopValue;
-    exactTopValue = exactSweptTop(l.timeline, l.tool);
-    exactTopFor = l;
-    return exactTopValue;
+    const key = `${goal.nx},${goal.ny},${goal.x0},${goal.y0},${goal.pitch}`;
+    if (exactFor === l && exactKey === key) return exactValue;
+    exactValue = exactSweptField(goal, l.timeline, l.tool);
+    exactFor = l;
+    exactKey = key;
+    return exactValue;
   };
 
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);
@@ -1504,7 +1507,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     oracle,
     levelCut,
     sweptTop,
-    sweptTopExact,
+    sweptFieldExact,
     dispose,
     get loaded() {
       return live !== null;
