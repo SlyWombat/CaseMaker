@@ -1015,6 +1015,7 @@ function readyGenerated(nc: string): EngraveGenerated {
     facingError: null,
     facingCam: null,
     predicted: [],
+    designItems: [],
     // #419 J3 — the same program, as the run's list of one.
     programs: [
       {
@@ -2880,6 +2881,7 @@ describe('EngravePanel (#432 review R11) — the facing row', () => {
         air: true,
       },
       predicted: [],
+      designItems: [],
       programs: [],
       errors: [],
       ...over,
@@ -2989,6 +2991,7 @@ describe('EngravePanel — the release step routing (#469)', () => {
       facingError: null,
       facingCam: null,
       predicted: [],
+      designItems: [],
       programs,
       errors: [],
       ...over,

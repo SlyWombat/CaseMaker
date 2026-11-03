@@ -64,6 +64,7 @@ const NOTHING: EngraveGenerated = {
   facingError: null,
   facingCam: null,
   predicted: [],
+  designItems: [],
   programs: [],
   errors: [],
 };
@@ -100,6 +101,7 @@ function clean(): EngraveGenerated {
     facingError: null,
   facingCam: null,
     predicted: [],
+    designItems: [],
     // #744 — a run of one program is the shape the walk reads; `nc` above is that program's file.
     programs: [
       {

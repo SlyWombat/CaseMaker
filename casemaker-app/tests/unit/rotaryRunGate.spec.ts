@@ -87,6 +87,7 @@ function emptyResult(programs: EngraveProgram[] = []): EngraveGenerated {
     facingError: null,
     facingCam: null,
     predicted: [],
+    designItems: [],
     programs,
     errors: [],
   };

@@ -48,6 +48,7 @@ function generated(): EngraveGenerated {
     facingError: null,
     facingCam: null,
     predicted: [],
+    designItems: [],
     programs: [ROTARY_PROGRAM],
     errors: [],
   };
