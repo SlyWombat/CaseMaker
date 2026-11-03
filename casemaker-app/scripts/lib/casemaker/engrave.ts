@@ -152,7 +152,10 @@ import { jobMachine } from '../../../src/engine/cnc/calibration';
 import { executeProfile } from '../../../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
-import { efficiencyThresholds, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
+import { efficiencyThresholds, goalPassCoverage, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
+import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
+import { goalInputFor } from '../../../src/workers/sim/goalCheckField';
+import type { OracleReport } from '../../../src/engine/cnc/engrave/oracle';
 import { bootstrap, loadCatalogue, type LoadedCatalogue } from '../../../src/platform/headless/bootstrap';
 import { defaultEngraveJob } from '../../../src/engine/cnc/engrave/defaults';
 import { tabSettings } from '../../../src/engine/cnc/cam/tabSettings';
@@ -170,10 +173,12 @@ import { fileReceipt } from './receiptFiles';
 import {
   diagnostic,
   gateForStage,
+  goalBlockFromReport,
   provenance,
   provenanceForDefault,
   RECEIPT_VERSION,
   type EngraveDetails,
+  type EngraveGoal,
   type EngraveProgram,
   type Receipt,
   type ReceiptDiagnostic,
@@ -467,6 +472,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
 
   /** Emit the run's one receipt. `ok` is the run's, not a program's. */
   function emit(): void {
+    // #953 — the run's goal read: the LAST program whose report carried one, matching
+    // `combineOracles` (#948). Undefined for a job with no goal.
+    const runGoal = [...programs].reverse().find((p) => p.goal !== undefined && p.goal !== null)?.goal;
     out.emitReceipt({
       version: RECEIPT_VERSION,
       command: 'engrave',
@@ -483,7 +491,18 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // #513 — the bed rides only when the document names one. Omitting the null keeps every
       // receipt for a job without a bed byte-identical to the pre-#513 output (the committed
       // bench receipts rewrite to themselves).
-      details: { kind, outDir, programs, coupon, pair, ...(bed === null ? {} : { bed }) },
+      // #953 — and the RUN's goal read rides only for a goal job: the last program whose report
+      // carried one (#948's rule — the final surface's verdict, not the rough's), omitted entirely
+      // for a job with no goal so those receipts stay byte-identical.
+      details: {
+        kind,
+        outDir,
+        programs,
+        coupon,
+        pair,
+        ...(runGoal === undefined || runGoal === null ? {} : { goal: runGoal }),
+        ...(bed === null ? {} : { bed }),
+      },
     });
   }
 
@@ -888,6 +907,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
      * retained here.
      */
     session: SimSession;
+    /**
+     * #953 — the goal check every program of a goal job carries, or undefined for a job with no
+     * goal. The CLI runs it over each program's own live sweep, exactly as the run store does, so
+     * the receipt's verdict is the one the Cut card shows.
+     */
+    goalCheck: SimGoalCheck | undefined;
+    /** #953 — each program's own oracle report, in cut order (empty for a job with no goal). */
+    goalOracles: { index: number; report: OracleReport }[];
   }
   type PrepareResult = Prepared | { ok: false; failure: EngraveFailure };
 
@@ -1021,6 +1048,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // #393 gate; this command supplies its synchronous session load and its own shop drill point.
     // The web run store runs the same function, so the two realms cannot disagree about what
     // "every program swept" means.
+    // #953 — THE GOAL CHECK, AS THE RECEIPT CARRIES IT. One input for the run (the goal target and
+    // the shop's pass line), and each program's report taken while its own sweep is the live one —
+    // the run store's rule, so the CLI and the Cut card judge the same file the same way.
+    const goalCheck = goalCheckForProgram(job, generated.surface3d != null, {
+      passCoverage: goalPassCoverage(shopDefaults),
+    });
+    const goalOracles: { index: number; report: OracleReport }[] = [];
+    const firstEngraving = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
     const sweptBox: { load: SimLoadOk | null } = { load: null };
     // #749 — WHICH PROGRAM WAS BEING SWEPT, so a kernel crash can name it. The walk itself is
     // shared with the app and does not catch a load that throws; this boundary does, because the
@@ -1055,8 +1090,21 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
             ...(drillPoint === null ? {} : { drillPointDefault: drillPoint }),
           });
         },
-        afterLoad: ({ index, result }) => {
+        afterLoad: ({ index, program, result }) => {
           if (index === sweptIndex) sweptBox.load = result;
+          if (goalCheck === undefined) return;
+          // The run store's per-program evidence, field for field: the walk's own `predicted`, with
+          // the run's top-level list for the first engraving program, and the design items off the
+          // generated program (the walk view does not carry them).
+          const predicted = program.predicted ?? (index === firstEngraving ? generated.predicted : undefined);
+          const designItems =
+            generated.programs[index]?.designItems ?? (index === firstEngraving ? generated.designItems : undefined);
+          goalOracles.push({
+            index,
+            // The worker's own conversion, so the CLI samples the goal and pairs it with the live
+            // sweep exactly as the app's worker does (`goalInputFor` caches the heightfield).
+            report: session.oracle([...(predicted ?? [])], undefined, designItems, goalInputFor(session, goalCheck)),
+          });
         },
         initialRemoval: opts.priorRemoval === undefined ? [] : [opts.priorRemoval],
       });
@@ -1156,6 +1204,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       removal,
       simNotes,
       session,
+      goalCheck,
+      goalOracles,
     };
   }
 
@@ -1286,6 +1336,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       const swept = i === sweptIndex;
       const sweep = sweeps[i]!;
       const cam = program.cam;
+      // #953 — this program's own goal verdict, from the report taken while its sweep was live.
+      // Undefined for a job with no goal (the field is then omitted); null for a goal job whose
+      // program ran no check (a facing pass), never an invented verdict.
+      const goalCutInto = prepared.goalOracles.find((o) => o.index === i)?.report.goalCutInto;
+      const goalBlock: EngraveGoal | null | undefined =
+        prepared.goalCheck === undefined
+          ? undefined
+          : goalCutInto === undefined
+            ? null
+            : goalBlockFromReport(goalCutInto);
       written.push({
         name: job.name,
         stage: generated.stage,
@@ -1317,6 +1377,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         sheet: swept ? sheetEntry : null,
         previews: [],
         images: [],
+        // #953 — the program's own goal check (a goal job only — see `goalBlock` above).
+        ...(goalBlock === undefined ? {} : { goal: goalBlock }),
       });
       if (!swept) {
         // The swept program's reports are already in `generatedDiagnostics`; every other program's

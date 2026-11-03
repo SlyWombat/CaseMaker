@@ -18,6 +18,7 @@ import {
   receiptJson,
   receiptSchema,
   renderReceipt,
+  type EngraveGoal,
   type Receipt,
 } from '@/platform/headless/receipt';
 
@@ -627,5 +628,39 @@ describe('#478 the human output is rendered from the receipt', () => {
     expect(run).toContain('  measured     14 min 30 s on 2026-10-18  ·  flat-1.0');
     expect(run).toContain('  depth        text: posted 0.6 mm, measured 0.62 mm');
     expect(run).toContain('(dry run — runHistory.ts not written)');
+  });
+});
+
+// #953 — the goal block the CLI writes for a goal job, and the ABSENCE of it for every other job
+// (the byte-identical rule #513 set for the bed).
+describe('#953 the receipt carries the goal report', () => {
+  const block: EngraveGoal = {
+    ran: true,
+    reason: null,
+    cutIntoFraction: 0.0123,
+    maxCutIntoMm: 0.21,
+    maxCutIntoAt: { x: 4.5, y: -2 },
+    leftoverFractions: [0.162, 0.02, 0.001],
+    passCoverage: 0.95,
+    wholeSurface: null,
+    columnCutInto: null,
+    sentence: 'Cuts 0.21 mm into the design at 4.5, -2.',
+  };
+
+  it("a goal job's receipt round-trips the block, per program and for the run", () => {
+    const receipt = engraveReceipt() as Extract<Receipt, { command: 'engrave' }>;
+    receipt.details.programs[0]!.goal = block;
+    receipt.details.goal = block;
+    const parsed = parseReceipt(JSON.parse(receiptJson(receipt))) as Extract<Receipt, { command: 'engrave' }>;
+    expect(parsed.details.programs[0]!.goal).toEqual(block);
+    expect(parsed.details.goal).toEqual(block);
+  });
+
+  it('a job with no goal omits the block entirely', () => {
+    const json = JSON.parse(receiptJson(engraveReceipt())) as {
+      details: { goal?: unknown; programs: { goal?: unknown }[] };
+    };
+    expect(json.details).not.toHaveProperty('goal');
+    expect(json.details.programs[0]).not.toHaveProperty('goal');
   });
 });
