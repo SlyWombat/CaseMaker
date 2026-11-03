@@ -758,7 +758,10 @@ describe('generateSurface3dIR — roughing never breaches the goal', () => {
 describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539)', () => {
   // The pure-goal dispatch runs before the item pipeline's validateJob, so it must gate on the same
   // goal-object-oversize/zero-volume check itself rather than sampling and posting an unmakeable goal.
-  it('#784 cuts a goal larger than the stock CLIPPED to the blank and says what lies outside', async () => {
+  // #949 — #784 CLIPPED here; the clip ran the goal's finish along the stock edge, where the
+  // vise's jaws sit, and #923's fixture check then refused the program. The CAM now refuses it
+  // before building any toolpath, with the overhang named.
+  it('#949 refuses a goal larger than the stock, naming the overhang (#784 clipped it before)', async () => {
     const job: EngraveJob = {
       ...defaultEngraveJob(),
       labels: [],
@@ -767,16 +770,14 @@ describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539
       targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 }, size: { x: 200, y: 30, z: 5 } }),
     };
     const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
-    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
-    const warn = out.findings.find((f) => f.code === 'goal-object-oversize');
-    expect(warn?.severity).toBe('warning');
-    expect(warn?.message).toContain('past the left edge');
-    expect(warn?.message).toContain('past the right edge');
-    expect(out.nc).not.toBeNull();
-    // The program cuts the stock's own X span, not 50 mm of air either side of it.
-    const xs = [...(out.nc ?? '').matchAll(/X(-?\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]));
-    expect(Math.min(...xs)).toBeGreaterThanOrEqual(-0.001);
-    expect(Math.max(...xs)).toBeLessThanOrEqual(100.001);
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe('cam');
+    const message = out.errors.map((e) => e.message).join('; ');
+    expect(message).toContain('larger than the blank');
+    expect(message).toContain('50 mm past the left edge');
+    expect(message).toContain('50 mm past the right edge');
+    expect(message).toContain('Fit to the stock');
+    expect(out.nc).toBeNull();
   });
 
   it('returns a blocking finding for a zero-volume (flat) goal', async () => {
