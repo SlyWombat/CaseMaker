@@ -38,6 +38,7 @@
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
+import { goalStockOverhang } from '@/engine/cnc/engrave/goalPlacement';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
 import { decodePng } from '@/engine/import/png';
@@ -1461,6 +1462,16 @@ export async function generateSurface3dForGoal(args: {
   };
   opts?: SurfaceOpts;
 }): Promise<(Surface3dResult & { heightfield: GoalHeightfield }) | null> {
+  // #949 — A GOAL THAT DOES NOT FIT IS REFUSED, NOT CLIPPED. A clipped goal's finish runs along
+  // the stock edge where the jaws are (the clip is the stock rectangle), so the program would be
+  // refused by the fixture check anyway; the refusal belongs here, before a toolpath exists, with
+  // the overhang named. A MOLD is exempt: its cavity is cut clipped by design (#721/#786), and its
+  // own findings state the lost rim. A picture is exempt too: its frame is the blank's face.
+  const clip = args.sample?.clip ?? null;
+  if (clip !== null && args.target.format !== 'png' && !isMold(args.target)) {
+    const overhang = goalStockOverhang(args.target, clip);
+    if (!overhang.fits) throw new Error(overhang.sentence);
+  }
   const sampled = sampleGoalHeightfield(args.target, args.sample);
   if (sampled.coveredCount === 0) return null;
   // #721 — a MOLD is the same part turned over and sunk from the stock top. The part's base is its

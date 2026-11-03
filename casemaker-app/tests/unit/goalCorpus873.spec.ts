@@ -271,6 +271,33 @@ describe('#909 the goal corpus: the plan never cuts into the part', () => {
   }
 });
 
+describe('#949 an oversized goal is refused at the CAM, not clipped along the jaws', () => {
+  it('a figure larger than its blank is refused, and the sentence names the overhang', async () => {
+    // The figure is ~34 mm tall and wider than this blank on both axes: the exact shape of the
+    // goalTransform e2e's case (a 75 mm goal on a 43 × 32 blank), small enough for a unit test.
+    const imported = await read('figure.stl');
+    const stock = { length: 20, width: 20, thickness: 10 };
+    const target = targetOf(imported, stock);
+    const job = goalJob(target, stock);
+    const g = await generate(tl, job);
+    expect(g.ok, 'the CAM must refuse, not clip').toBe(false);
+    expect(g.stage).toBe('cam');
+    const message = g.errors.map((e) => e.message).join(' ');
+    expect(message).toContain('larger than the blank');
+    expect(message).toMatch(/\d+(?:\.\d+)? mm past the (left|right|front|back) edge/);
+    // The refusal names the fixes, so the row's own advice and the CAM's cannot diverge.
+    expect(message).toContain('Fit to the stock');
+  });
+
+  it('the same figure on a blank that holds it still generates — a fitting goal is untouched', async () => {
+    const imported = await read('figure.stl');
+    const size = imported.size;
+    const stock = { length: size.x + 4, width: size.y + 4, thickness: 20 };
+    const g = await generate(tl, goalJob(targetOf(imported, stock), stock));
+    expect(g.ok, JSON.stringify(g.errors)).toBe(true);
+  });
+});
+
 describe('#873 the goal corpus: generated, swept, and measured against the goal', () => {
   // THE BASELINE, measured 2026-11-01 on main + manifold 3.5.4 with the recommendation's own
   // cutter (`flat-1.0`): the coverage fraction and the cycle estimate are pinned as NUMBERS, so a
