@@ -308,6 +308,8 @@ export function SimPanel() {
           // #947 — the sliver width the band coarsens to, when the flat comparison ran; the
           // coverage sentence names it then (and says nothing where the field is absent).
           sliverWidthMm: jobSurfaceRun ? undefined : run.oracle?.sliverWidthMm,
+          // #924/#947 gate 5 — the design check's own numbers, so its folded verdict is explained.
+          designCheck: jobSurfaceRun ? undefined : run.oracle?.designCheck,
           ...(jobSurfaceRun || run.oracle?.copper === undefined ? {} : { copper: run.oracle.copper }),
           fixtureLabels:
             rotary === null

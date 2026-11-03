@@ -2614,6 +2614,8 @@ export function EngravePanel(): JSX.Element {
           // #947 gate statement 7 — the width the oracle did not count, so the sheet's band
           // sentence can say so.
           sliverWidthMm: run.oracle?.sliverWidthMm,
+          // #924/#947 gate 5 — the design check's own numbers, so its folded verdict is explained.
+          ...(run.oracle?.designCheck === undefined ? {} : { designCheck: run.oracle.designCheck }),
           ...(run.oracle?.copper === undefined ? {} : { copper: run.oracle.copper }),
           programs: run.simPrograms,
         },
