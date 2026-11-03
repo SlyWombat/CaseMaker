@@ -73,6 +73,15 @@ export interface SimCoverageInput {
    */
   oracleBand?: number;
   /**
+   * #947 gate statement 7 — the width (`OracleReport.sliverWidthMm`) a boundary disagreement had
+   * to clear, past the band above, before it counted as material left or cut outside the plan: a
+   * CAM ring and the design's own opening can disagree by a hairline at a reflex corner even when
+   * every stroke is fully reached, and a disagreement that thin is read as that hairline, not a
+   * defect. Undefined on a hand-built report or the rotary/column-dexel path, which never runs
+   * this check — then the sentence says nothing about it, the same way `oracleBand` does.
+   */
+  sliverWidthMm?: number;
+  /**
    * Labels of the fixture obstacles the sweep was given (#204), in order. Empty means no fixture
    * was modelled — the default setup, where `fixture-unchecked` reports the workholding is not an
    * obstacle yet.
@@ -174,11 +183,20 @@ function neckSentence(input: SimCoverageInput): string | null {
  */
 function oracleSentences(input: SimCoverageInput): string[] {
   if (input.oracleBand === undefined) return [];
-  return [
+  const sentences = [
     "Checked against the CAM's predicted regions at every level the plan cuts to — and, where the job cuts a V-bit trace, whose groove is a different width at each depth, at one derived level just under the top face, where that groove is widest.",
     // §4 — at most three decimals, trailing zeros dropped (`0.1`, never `0.100`).
     `The comparison's band is ${Number(input.oracleBand.toFixed(3))} mm: a boundary that disagrees by less than that is the two engines' own resolution, not a CAM error.`,
   ];
+  // #947 gate statement 7 — the second, narrower coarsening past the band above: a disagreement
+  // can still be a boundary hairline between the CAM's own ring and the design's opening, not
+  // material actually left or cut outside the plan.
+  if (input.sliverWidthMm !== undefined) {
+    sentences.push(
+      `Boundary slivers under ${Number(input.sliverWidthMm.toFixed(3))} mm are not counted: past the band, a disagreement that thin anywhere along its own length is read as the CAM's own ring against the design's opening, not a cut that missed or strayed.`,
+    );
+  }
+  return sentences;
 }
 
 /**
