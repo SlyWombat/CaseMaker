@@ -27,6 +27,7 @@ import type { EvaluatedItem, PlanEvaluation } from '@/workers/sim/planEvaluate';
 import type { CandidatePlan, PinchFact } from '@/workers/sim/planEvaluate';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { metalLineFallbackNote } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { statedCuttingSize as stated } from '@/engine/cnc/tool';
@@ -91,6 +92,13 @@ export interface ScoredPlan {
   raisedJoined: number;
   /** True when every cutter in the plan is an owned one. */
   owned: boolean;
+  /**
+   * #954 — true when any of the plan's cutters is fed from a LABELLED FALLBACK (Makera publishes
+   * no row for the pair, so the numbers are this app's starting point to measure). A fallback is
+   * not an equal of a vendor or measured row: at equal fidelity a plan fed by one ranks below a
+   * plan fed by rows, whatever the time — see {@link byObjective}.
+   */
+  fallbackFed: boolean;
   /** The item the worst fidelity belongs to, for the sentence. */
   worstItem: EvaluatedItem | null;
 }
@@ -596,7 +604,7 @@ function fidelityOf(
   return { worst, mean: sum / evaluation.items.length, worstItem };
 }
 
-function toScored(plan: CandidatePlan, evaluation: PlanEvaluation, exactWhenEmpty = false): ScoredPlan {
+function toScored(plan: CandidatePlan, evaluation: PlanEvaluation, exactWhenEmpty = false, fallbackFed = false): ScoredPlan {
   const { worst, mean, worstItem } = fidelityOf(evaluation, exactWhenEmpty);
   let raisedStandingMm2 = 0;
   let raisedJoined = 0;
@@ -621,6 +629,7 @@ function toScored(plan: CandidatePlan, evaluation: PlanEvaluation, exactWhenEmpt
     counterStandingMm2: Math.round(counterStandingMm2 * 1e6) / 1e6,
     raisedJoined,
     owned: plan.cutters.every((c) => plan.source[c.key] !== 'catalogue'),
+    fallbackFed,
     worstItem,
   };
 }
@@ -697,6 +706,11 @@ export function planCostSeconds(evaluation: PlanEvaluation, toolChangeSeconds: n
 function byObjective(a: ScoredPlan, b: ScoredPlan, toolChangeSeconds: number = TOOL_CHANGE_SECONDS): number {
   const fidelity = byFidelity(a, b);
   if (fidelity !== 0) return fidelity;
+  // #954 — A LABELLED FALLBACK IS NOT AN EQUAL OF A ROW. At equal fidelity, the plan fed by
+  // Makera's or the shop's own numbers outranks one whose feeds are the app's starting point for
+  // an unrated pair — before the clock, because the fallback's numbers are a guess and a shorter
+  // guess is not a better plan.
+  if (a.fallbackFed !== b.fallbackFed) return a.fallbackFed ? 1 : -1;
   const cost = (s: ScoredPlan): number => planCostSeconds(s.evaluation, toolChangeSeconds);
   const ca = round6(cost(a));
   const cb = round6(cost(b));
@@ -721,6 +735,17 @@ export async function smartPick(
   const fullFinalists = Math.max(1, opts.fullFinalists ?? 3);
   const margin = opts.buyThisMargin ?? 0.02;
   const notes: string[] = [];
+  // #954 — the cutters whose feeds are this app's labelled starting point for the pair. The rank
+  // uses the SAME predicate the feeds table writes its note with, so the two cannot disagree.
+  const fallbackFedKeys = new Set(
+    tools
+      .filter((entry) => metalLineFallbackNote(entry.tool, job.stock.material, catalogue) !== null)
+      .map((entry) => entry.key),
+  );
+  const planFedFromFallback = (plan: CandidatePlan): boolean =>
+    plan.cutters.some((c) => fallbackFedKeys.has(c.key)) ||
+    (plan.faceToolKey !== undefined && fallbackFedKeys.has(plan.faceToolKey)) ||
+    (plan.goalRoughKey !== undefined && fallbackFedKeys.has(plan.goalRoughKey));
   const rulePlan = rulePlanOf(job, tools, catalogue, conditions, table, opts.floors);
   // #834 — a face job's plans have no items to score; their fidelity is the face's (see fidelityOf).
   const exactWhenEmpty = faceWorkOf(job) !== null;
@@ -757,12 +782,14 @@ export async function smartPick(
   // COARSE FIRST — measure-only: every candidate is scored cheaply, and the top few are promoted
   // to a FULL evaluation, which is the level that says whether a plan actually posts.
   const verdicts = new Map<string, ScoredPlan>();
-  for (const plan of plans) verdicts.set(planKey(plan), toScored(plan, await evaluateAsync(plan, 'coarse'), exactWhenEmpty));
+  for (const plan of plans) {
+    verdicts.set(planKey(plan), toScored(plan, await evaluateAsync(plan, 'coarse'), exactWhenEmpty, planFedFromFallback(plan)));
+  }
   // COARSE ok IS NOT POSTING: it says the plan is structurally evaluable. Only a full verdict's
   // `ok` is the generator's fact (slice A's seam), so the posting pool is drawn from this set.
   const fullDone = new Set<string>();
   const full = async (plan: CandidatePlan): Promise<ScoredPlan> => {
-    const scoredFull = toScored(plan, await evaluateAsync(plan, 'full'), exactWhenEmpty);
+    const scoredFull = toScored(plan, await evaluateAsync(plan, 'full'), exactWhenEmpty, planFedFromFallback(plan));
     verdicts.set(planKey(plan), scoredFull);
     fullDone.add(planKey(plan));
     return scoredFull;

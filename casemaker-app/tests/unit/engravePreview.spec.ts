@@ -268,11 +268,10 @@ describe('engravePreview (#205)', () => {
     job.labels = [{ ...job.labels[0]!, text: 'MAKER', size: 4, depth: 1 }];
     job.toolKey = 'flat-3.175x12-metal';
     const p = buildPreview(job);
-    // #407 — the built-in 3.175 mm row is Makera's `(Metal)` line and the only built-in at that
-    // diameter, so the default softwood blank IS refused: `engraveRegions` reports
-    // `tool-metal-line` beside the recommendation this case is about. Asserted, so the refused
-    // pair is never silently treated as a valid job — there is no plain-named built-in to use.
-    expect(p.findings.some((f) => f.code === 'tool-metal-line' && f.severity === 'error')).toBe(true);
+    // #407/#954 — the built-in 3.175 mm row is Makera's `(Metal)` line and the only built-in at
+    // that diameter: the pair carries the labelled-fallback info (there is no plain-named
+    // built-in to use), beside the recommendation this case is about.
+    expect(p.findings.some((f) => f.code === 'tool-metal-line' && f.severity === 'info')).toBe(true);
     expect(p.recommendation.key).toBe('flat-1.0');
     expect(p.recommendation.compromise).toBe(true);
     expect(p.recommendation.reason).toMatch(/Try \d+ mm or more\.|Choose a smaller cutter\./);

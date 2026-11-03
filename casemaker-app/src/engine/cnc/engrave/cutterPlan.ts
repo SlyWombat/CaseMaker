@@ -48,7 +48,7 @@
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { cuttingDiameter, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
-import { catalogueCoverageFor, catalogueStandingFor, feedsFor, feedsToolForSurface, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
+import { catalogueCoverageFor, catalogueStandingFor, feedsFor, feedsToolForSurface, metalLineFallbackNote, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { inlayPairConeTan } from './inlay';
 import { threadGeometry } from '@/engine/cnc/cam/threadMill';
@@ -243,12 +243,23 @@ function faceCutterFits(entry: ToolLibraryEntry, facts: FaceWorkFacts, matchHole
 }
 
 /** Largest stated diameter first; the key breaks a tie, so the pick is deterministic. */
-const widestFirst = (a: ToolLibraryEntry, b: ToolLibraryEntry): number => {
-  const da = statedCuttingSize(a.tool) ?? 0;
-  const db = statedCuttingSize(b.tool) ?? 0;
-  if (db !== da) return db - da;
-  return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
-};
+/**
+ * #954 — `widestFirst` with the feeds' own rank before the key: at one width a cutter fed by a
+ * LABELLED FALLBACK (Makera publishes no row for the pair) sorts after one fed by a row. The same
+ * rule the recommendation and the search apply; the predicate is `metalLineFallbackNote`, so the
+ * rank and the feeds note cannot disagree.
+ */
+const widestFirstFor =
+  (material: EngraveJob['stock']['material'], catalogue: readonly FeedCatalogueRow[]) =>
+  (a: ToolLibraryEntry, b: ToolLibraryEntry): number => {
+    const da = statedCuttingSize(a.tool) ?? 0;
+    const db = statedCuttingSize(b.tool) ?? 0;
+    if (db !== da) return db - da;
+    const fa = metalLineFallbackNote(a.tool, material, catalogue) !== null;
+    const fb = metalLineFallbackNote(b.tool, material, catalogue) !== null;
+    if (fa !== fb) return fa ? 1 : -1;
+    return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+  };
 
 /**
  * #834 — THE CUTTER FOR A JOB WHOSE WORK IS ITS FACES. A hex face on ⌀20 is 10 mm wide; the largest
@@ -297,6 +308,7 @@ export function faceCutterOptions(
   const eligible = tools.filter(
     (entry) => materialRefusal(job, entry, catalogue, conditions, table, { ownedVouches }) === null,
   );
+  const widestFirst = widestFirstFor(job.stock.material, catalogue);
   const matched = eligible.filter((e) => faceCutterFits(e, facts, true)).sort(widestFirst);
   if (matched.length > 0) return { facts, candidates: matched, matchedHoles: true };
   const chordOnly = eligible.filter((e) => faceCutterFits(e, facts, false)).sort(widestFirst);
@@ -550,6 +562,8 @@ interface Candidate {
   tool: Tool;
   diameter: number;
   reach: number | null;
+  /** #954 — fed by the labelled fallback for this job's material (ranks after a rowed cutter). */
+  fallbackFed: boolean;
 }
 
 /**
@@ -614,6 +628,7 @@ export function planCutters(
       tool: entry.tool,
       diameter: statedCuttingSize(entry.tool) ?? cuttingDiameter(entry.tool) ?? 0,
       reach: reachOf(entry),
+      fallbackFed: metalLineFallbackNote(entry.tool, job.stock.material, catalogue) !== null,
     });
   }
   /** The first material refusal among the entries of a shape, for a kind that had no pick. */
@@ -630,7 +645,15 @@ export function planCutters(
   const bestOf = (list: Candidate[], better: (a: Candidate, b: Candidate) => number): Candidate | null =>
     list.length === 0
       ? null
-      : [...list].sort((a, b) => better(a, b) || (a.entry.key < b.entry.key ? -1 : a.entry.key > b.entry.key ? 1 : 0))[0]!;
+      : [
+          ...list,
+        ].sort(
+          (a, b) =>
+            better(a, b) ||
+            // #954 — at one outcome a rowed cutter outranks one fed by the labelled fallback.
+            (a.fallbackFed !== b.fallbackFed ? (a.fallbackFed ? 1 : -1) : 0) ||
+            (a.entry.key < b.entry.key ? -1 : a.entry.key > b.entry.key ? 1 : 0),
+        )[0]!;
 
   const byKind = (kind: WorkKind) => work.filter((w) => w.kind === kind);
   const ids = (list: KindedItem[]) => list.map((w) => w.id);
