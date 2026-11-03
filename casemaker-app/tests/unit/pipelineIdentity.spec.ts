@@ -35,6 +35,12 @@
 // RED on one line today (the rest program's tool key: `cat:` vs `inv:` of the same cutter) and is
 // committed as `it.fails`; see the case's own header for the exact registry difference.
 //
+// THE TWO-SETUP GOAL JOB is the flip plan's shape through C's setup interface (`goalFlipSetups.ts`):
+// two saved setups and one goal per side, one goal program per side in setup order. The case pins
+// the program COUNT PER SETUP and the bytes per door. The interface already agrees on 2026-11-03
+// (the sphere flip: one program per side, both doors byte-identical), so this is the live guard
+// that B's flip plan (#945) will land against.
+//
 // THE FIVE SAMPLE JOBS (docs/bench/936-flagship-text, 938-stick-base, 939-pocket-bores,
 // 940-two-cutter, 941-chamfer-slot) run the same comparison per program. Three of them name no
 // cutter: the APP's measured search (`smartPick`, the function the panel's picker runs) chooses the
@@ -49,7 +55,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
 import { bootstrap, loadCatalogue, type HeadlessBootstrap } from '@/platform/headless/bootstrap';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
@@ -57,6 +63,9 @@ import { engraveShopOpts } from '@/engine/cnc/engrave/feeds';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { resolvedFeedsTable, setLocatedFeedTable, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
 import { NO_TOOL_KEY, getTools, resetRegistry, setRegistry } from '@/engine/cnc/toolRegistry';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
@@ -64,7 +73,7 @@ import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { engraveGenerate, supportingFloors, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { pickForEngrave } from '@/workers/sim/smartPickRun';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import { HUMAN, type CommandOptions } from '../../scripts/lib/casemaker/output';
 import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
@@ -83,6 +92,7 @@ const ELEPHANT = join(REPO, 'samples', '3d', 'lfs_elephant.stl');
 const HAVE_STICK = existsSync(DEMO_LOCATION) && existsSync(ELEPHANT);
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'casemaker-identity-922-'));
+afterEach(() => clearTargetObjectMeshCache());
 afterAll(() => {
   rmSync(SCRATCH, { recursive: true, force: true });
   resetRegistry();
@@ -479,6 +489,108 @@ describe('#922 one pipeline', () => {
   it('j13-tool-tray posts the same program from both paths (red on 2026-11-02)', async () => {
     await expectSameProgram('j13', join(JOBS, 'j13-tool-tray.json'));
   }, 120_000);
+});
+
+/**
+ * #945/#922 — THE TWO-SETUP GOAL JOB, built through C's setup interface. `planFlipSetups` writes
+ * the flip as saved setups plus one goal per side (each with its `setupId`), and the CAM posts one
+ * goal program per side, in setup order. Both doors must post the SAME programs — the count per
+ * setup and the bytes — because the operator runs the flip as files on one machine.
+ *
+ * The corpus sphere is the shape (a goal that fits its blank), flipped top + bottom on a 40 × 40 ×
+ * 30 blank. C's interface already posts the same two programs from both doors (measured
+ * 2026-11-03 on main fc43a78c: 15.4 s), so the case is the live guard B's flip plan (#945) lands
+ * against — a divergence in either door's setup path turns it red.
+ */
+async function twoSetupGoalJob(): Promise<EngraveJob> {
+  const bytes = readFileSync(join(HERE, '..', 'fixtures', 'goals', 'near-sphere.stl'));
+  const read = await readTargetObjectFile(new File([bytes], 'near-sphere.stl'), 'g-sphere');
+  if (!read.ok) throw new Error(`near-sphere.stl: ${read.error}`);
+  const goal: EngraveTargetObject = {
+    id: read.id,
+    name: read.name,
+    format: read.format,
+    sha256: read.sha256,
+    data: read.data,
+    size: read.size,
+    // Slightly right of centre, so the flip is distinguishable from the identity.
+    position: { x: 22, y: 18, z: 0 },
+    rotation: 0,
+    enabled: true,
+    role: 'goal',
+  };
+  const base = defaultEngraveJob();
+  const job: EngraveJob = {
+    ...base,
+    name: 'two-setup-goal',
+    labels: [],
+    shapes: [],
+    drills: [],
+    stock: { length: 40, width: 40, thickness: 30, material: 'pla' },
+    // The built-in flat mill the location always holds: the case is the two-setup SHAPE (counts
+    // and bytes), not a cutter pick.
+    toolKey: 'flat-1.0',
+    targetObject: goal,
+  };
+  // The shop's own cutters: the hold's locating holes are drilled with one the location holds.
+  const plan = planFlipSetups(job, goal, ['top', 'bottom'], getTools());
+  if (!plan.ok) throw new Error(`the flip plan is refused: ${plan.reason}`);
+  const { targetObject: _one, ...rest } = job;
+  return { ...rest, setups: plan.setups, targetObjects: plan.goals };
+}
+
+async function expectSameTwoSetupGoal(): Promise<void> {
+  // The registry first: the plan's locating drill comes from the location's own cutters.
+  const boot = await bootstrap({ location: benchLocation() });
+  const job = await twoSetupGoalJob();
+  const jobPath = join(SCRATCH, 'two-setup-goal.job.json');
+  writeFileSync(jobPath, JSON.stringify(job));
+  const catalogue = loadCatalogue(join(SCRATCH, 'catalogue.json'));
+  setLocatedFeedTable((JSON.parse(readFileSync(benchLocation(), 'utf8')) as { feeds: [] }).feeds);
+  const shop = appShop(boot.location?.defaults ?? null);
+  const tool = jobTool(job);
+  if (tool === null) throw new Error(`two-setup-goal: the job's cutter ${job.toolKey} is not in the location's registry`);
+
+  const cli = await cut('two-setup-goal', jobPath);
+  const worker = await engraveGenerate(boot.manifold, job, tool, catalogue?.rows ?? [], null, undefined, shop);
+  if (!worker.ok || worker.programs.length === 0) {
+    throw new Error(
+      `two-setup-goal: the app's path stopped at ${worker.stage} (${worker.errors.map((e) => e.message).join('; ') || 'no error message'}) ` +
+        `while the CLI ${cli.code === 0 ? `posted ${cli.ncs.length} program(s)` : `refused: ${JSON.stringify(cli.receipt.refusals)}`}`,
+    );
+  }
+  expect(cli.code, `two-setup-goal: casemaker cut exited ${cli.code}: ${JSON.stringify(cli.receipt.refusals)}`).toBe(0);
+
+  // PER SETUP — the count each side posts, in setup order, then the bytes in cut order.
+  const counts = new Map<number, number>();
+  for (const program of worker.programs) {
+    const index = program.setupIndex ?? 1;
+    counts.set(index, (counts.get(index) ?? 0) + 1);
+  }
+  expect(
+    [...counts.entries()].sort((a, b) => a[0] - b[0]),
+    'the sphere flip posts one program for each of the two sides',
+  ).toEqual([
+    [1, 1],
+    [2, 1],
+  ]);
+  expect(cli.ncs, 'two-setup-goal: both doors post the same number of programs').toHaveLength(worker.programs.length);
+  worker.programs.forEach((program, i) => {
+    const cliNc = cli.ncs[i]!;
+    if (program.nc === cliNc) return;
+    const key = /^;@CM\|TOOL\|key=(.+)$/m.exec(program.nc)?.[1] ?? 'no key';
+    const cliKey = /^;@CM\|TOOL\|key=(.+)$/m.exec(cliNc)?.[1] ?? 'no key';
+    throw new Error(
+      `two-setup-goal program ${i + 1} (setup ${program.setupIndex ?? 1}): the app (${key}) and the CLI (${cliKey}) post different programs — ` +
+        `worker ${summary(program.nc)} | CLI ${summary(cliNc)}; first difference at ${firstDifference(program.nc, cliNc)}`,
+    );
+  });
+}
+
+describe('#922 one pipeline — the two-setup goal job (the flip plan’s shape)', () => {
+  it('a flipped goal posts the same programs per setup from both paths', async () => {
+    await expectSameTwoSetupGoal();
+  }, 600_000);
 });
 
 // #922 — THE STICK GOAL JOB. Was RED on 2026-11-03 (cand/wave2) on ONE line: both doors post the
