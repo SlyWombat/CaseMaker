@@ -28,6 +28,13 @@
 // j13 IS COMMITTED SKIPPED: it is red today, and main stays green until Session B's fix lands
 // against it. Unskip the j13 case in the same change that makes the two paths agree.
 //
+// THE STICK GOAL JOB (j29-elephant-stick, the demo page's elephant) is the same comparison on the
+// demo's full-library location (the same document the demo page's cards are judged on, local-only,
+// so the case skips without it), with the programme COUNT as the first fact and the house's own
+// tool list on the app's side — the catalogue's `cat:` definitions ahead of the inventory. It is
+// RED on one line today (the rest program's tool key: `cat:` vs `inv:` of the same cutter) and is
+// committed as `it.fails`; see the case's own header for the exact registry difference.
+//
 // THE FIVE SAMPLE JOBS (docs/bench/936-flagship-text, 938-stick-base, 939-pocket-bores,
 // 940-two-cutter, 941-chamfer-slot) run the same comparison per program. Three of them name no
 // cutter: the APP's measured search (`smartPick`, the function the panel's picker runs) chooses the
@@ -36,8 +43,9 @@
 // two doors' shop objects feed the same search — and the failure message names the program and the
 // key so B can see which side took a different cutter.
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -48,7 +56,7 @@ import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { resolvedFeedsTable, setLocatedFeedTable, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
-import { NO_TOOL_KEY, getTools, resetRegistry } from '@/engine/cnc/toolRegistry';
+import { NO_TOOL_KEY, getTools, resetRegistry, setRegistry } from '@/engine/cnc/toolRegistry';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -67,6 +75,11 @@ const JOBS = join(REPO, 'docs', 'bench', '2026-10-28-z1-real-jobs', 'jobs');
 const BADGE = join(HERE, 'fixtures', 'badge-2026-10-24-vbit.job.json');
 const LOCATION_FIXTURE = join(HERE, 'fixtures', 'location-doc.json');
 const HOUSE = join(HERE, 'fixtures', 'ball863', 'house-cutters.json');
+/** The demo page's full-library location beside its catalogue (the same pair the bench builds on). */
+const DEMO_LOCATION = process.env.CASEMAKER_DEMO_LOCATION ?? join(homedir(), 'casemaker-manager', 'demo-build', 'location.json');
+/** The elephant mesh is shop-owned (never committed); j29 carries its sha256, not its bytes. */
+const ELEPHANT = join(REPO, 'samples', '3d', 'lfs_elephant.stl');
+const HAVE_STICK = existsSync(DEMO_LOCATION) && existsSync(ELEPHANT);
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'casemaker-identity-922-'));
 afterAll(() => {
@@ -148,8 +161,8 @@ interface CliRun {
   ncs: string[];
 }
 
-/** Run `casemaker cut <job> --location <the bench location>` exactly as the CLI does. */
-async function cut(name: string, jobPath: string): Promise<CliRun> {
+/** Run `casemaker cut <job> --location <location>` exactly as the CLI does. */
+async function cut(name: string, jobPath: string, location: string = benchLocation()): Promise<CliRun> {
   const outDir = join(SCRATCH, 'out', name);
   mkdirSync(outDir, { recursive: true });
   let receipt: Receipt | null = null;
@@ -158,7 +171,7 @@ async function cut(name: string, jobPath: string): Promise<CliRun> {
     sink: { progress: () => {}, receipt: (r) => (receipt = r) },
   };
   const code = await engraveJobMain(
-    [relative(process.cwd(), jobPath), '--out', outDir, '--location', relative(process.cwd(), benchLocation())],
+    [relative(process.cwd(), jobPath), '--out', outDir, '--location', relative(process.cwd(), location)],
     options,
   );
   expect(receipt, 'the command must emit a receipt').not.toBeNull();
@@ -370,6 +383,94 @@ describe('#922 one pipeline — the five bench samples', () => {
   }
 });
 
+/** j29 with the checkout's local-only elephant mesh injected; throws when the copy is stale. */
+function stickJobPath(): string {
+  const job = JSON.parse(readFileSync(join(JOBS, 'j29-elephant-stick.json'), 'utf8')) as {
+    targetObject: { sha256?: string; data?: string };
+  };
+  const bytes = readFileSync(ELEPHANT);
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  if (job.targetObject.sha256 !== undefined && job.targetObject.sha256 !== sha) {
+    throw new Error('j29: samples/3d/lfs_elephant.stl is not the mesh the job names (sha256 differs)');
+  }
+  job.targetObject.sha256 = sha;
+  job.targetObject.data = bytes.toString('base64');
+  const path = join(SCRATCH, 'j29-elephant-stick.job.json');
+  writeFileSync(path, JSON.stringify(job));
+  return path;
+}
+
+/**
+ * j29 on the demo's full-library location, both doors program by program — COUNT first, then bytes.
+ *
+ * WHAT THE TWO DOORS SEE (measured 2026-11-03, cand/wave2). Both post TWO programs — the ⌀2 ball
+ * `inv:lib-161032205031` and the ⌀0.5 ball of the same family — so the count agrees. The REST
+ * cutter is chosen from each side's own registry, and the registries are not the same document:
+ *
+ *   * the app's house serves `/tools`, which carries the catalogue's own `cat:` definitions, and
+ *     the inventory's `inv:` possessions are appended after them. Two entries describe the same
+ *     physical cutter (id 161032055031, the 6 × 0.5 × 30.5 ball), and the rest pick takes the
+ *     FIRST of the equal-geometry candidates — the `cat:` one.
+ *   * the CLI's `--location` registry holds only the inventory, so its pick names
+ *     `inv:lib-161032055031`.
+ *
+ * The programs are otherwise identical: this failure is one line — the `;@CM|TOOL|key=` header
+ * (line 11) — with the same 111 997 lines and the same S/F/Z. The order sensitivity is what makes
+ * it the registry, not the generator: with the `cat:` rows appended after the inventory the two
+ * doors post byte-identical files (the same run, checked on 2026-11-03). So the fix is one cutter
+ * identity across the two doors (dedupe by physical cutter, or load the catalogue's `cat:` rows on
+ * the CLI side too), not a rest-planner change.
+ */
+async function expectSameStickGoal(): Promise<void> {
+  const jobPath = stickJobPath();
+  const boot = await bootstrap({ location: DEMO_LOCATION });
+  const catalogue = loadCatalogue(join(dirname(DEMO_LOCATION), 'catalogue.json'));
+  setLocatedFeedTable((JSON.parse(readFileSync(DEMO_LOCATION, 'utf8')) as { feeds: [] }).feeds);
+  const parsed = parseEngraveJob(JSON.parse(readFileSync(jobPath, 'utf8')));
+  if (!parsed.ok) throw new Error(`j29: ${parsed.errors.join('; ')}`);
+  const defaults = boot.location?.defaults ?? null;
+  // THE APP'S HOUSE: the service's tool list carries the catalogue's own `cat:` definitions beside
+  // the location's inventory (the demo house serves both), so the app's picker sees them. The
+  // CLI's `--location` registry has only the inventory.
+  if (catalogue !== null) {
+    const cat = (JSON.parse(readFileSync(join(dirname(DEMO_LOCATION), 'catalogue.json'), 'utf8')) as {
+      tools: Parameters<typeof setRegistry>[0];
+    }).tools;
+    setRegistry([...cat, ...getTools()]);
+  }
+  const shop = appShop(defaults);
+  // The app's door: the job as the panel holds it (a named cutter, no measured setup written back).
+  const job = await appPrepared(parsed.job, appPickShop(defaults), boot.manifold, catalogue?.rows ?? []);
+  const tool = jobTool(job);
+  if (tool === null) throw new Error(`j29: the job's cutter ${job.toolKey} is not in the location's registry`);
+
+  const cli = await cut('j29', jobPath, DEMO_LOCATION);
+  const worker = await engraveGenerate(boot.manifold, job, tool, catalogue?.rows ?? [], null, undefined, shop);
+  if (!worker.ok || worker.programs.length === 0) {
+    throw new Error(
+      `j29: the app's path stopped at ${worker.stage} (${worker.errors.map((e) => e.message).join('; ') || 'no error message'}) ` +
+        `while the CLI ${cli.code === 0 ? `posted ${cli.ncs.length} program(s)` : `refused: ${JSON.stringify(cli.receipt.refusals)}`}`,
+    );
+  }
+  expect(cli.code, `j29: casemaker cut exited ${cli.code}: ${JSON.stringify(cli.receipt.refusals)}`).toBe(0);
+  const cliKeys = cli.ncs.map((nc) => /^;@CM\|TOOL\|key=(.+)$/m.exec(nc)?.[1] ?? 'no key');
+  expect(
+    worker.programs.length,
+    `the app posts ${worker.programs.length} program(s) (${worker.programs.map((p) => p.toolKey).join(', ')}); ` +
+      `the CLI posts ${cli.ncs.length} (${cliKeys.join(', ')})`,
+  ).toBe(cli.ncs.length);
+  expect(cli.ncs, 'j29: the goal job is two programs — the ⌀2 ball and the ⌀0.5 rest').toHaveLength(2);
+  worker.programs.forEach((program, i) => {
+    const cliNc = cli.ncs[i]!;
+    if (program.nc === cliNc) return;
+    const key = /^;@CM\|TOOL\|key=(.+)$/m.exec(program.nc)?.[1] ?? 'no key';
+    throw new Error(
+      `j29 program ${i + 1}: the app (${key}) and the CLI (${cliKeys[i]}) post different programs — ` +
+        `worker ${summary(program.nc)} | CLI ${summary(cliNc)}; first difference at ${firstDifference(program.nc, cliNc)}`,
+    );
+  });
+}
+
 describe('#922 one pipeline', () => {
   it('the committed 10-24 badge job posts the same program from both paths', async () => {
     await expectSameProgram('badge', BADGE);
@@ -391,4 +492,17 @@ describe('#922 one pipeline', () => {
   it('j13-tool-tray posts the same program from both paths (red on 2026-11-02)', async () => {
     await expectSameProgram('j13', join(JOBS, 'j13-tool-tray.json'));
   }, 120_000);
+});
+
+// #922 — THE STICK GOAL JOB. RED on 2026-11-03 (cand/wave2), and the red is ONE LINE: both doors
+// post the same two programs (the ⌀2 ball and the ⌀0.5 rest), and the rest program differs only in
+// its `;@CM|TOOL|key=` header — the app names the catalogue's `cat:` definition, the CLI the
+// inventory's `inv:` possession, of the same physical cutter (id 161032055031). See
+// `expectSameStickGoal` for the registry difference and why it is order-sensitive. C's fix aligns
+// the two doors' cutter identity and flips this case to `it`; the full-library location and the
+// elephant mesh are local-only, so it skips without them.
+describe.skipIf(!HAVE_STICK)('#922 one pipeline — the stick goal job', () => {
+  it.fails('j29-elephant-stick posts the same programs from both paths (red on 2026-11-03)', async () => {
+    await expectSameStickGoal();
+  }, 600_000);
 });
