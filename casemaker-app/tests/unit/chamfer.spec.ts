@@ -272,7 +272,7 @@ describe('chamfer geometry and findings (#669)', () => {
     expect(pocket).toContain('0.5 mm below the top face');
     expect(pocket).toContain('after the pocket');
     expect(pocket).toContain('Tip 0.2 mm (stated)');
-    expect(part).toContain('before the profile cuts the part free');
+    expect(part).toContain('before any cut that frees its edge');
 
     // The house bit states NO tip: the sheet says so, in the tip's own place, because a real
     // flat would mark the wall at the bevel's bottom by its radius.

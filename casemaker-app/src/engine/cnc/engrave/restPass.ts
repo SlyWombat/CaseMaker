@@ -519,6 +519,12 @@ export interface RestPassFacts {
    */
   overlap: number;
   /**
+   * #941 — WHY THIS REST PASS IS PLANNED, when the design's corners are the reason: the rough
+   * cutter's radius is wider than the design states, so the corners need the second program.
+   * Absent when the corners are not the reason (or a legacy caller states none).
+   */
+  cornerRule?: string | null;
+  /**
    * The band, where it came from, and what THIS pair of cutters says about it (#436). The sheet
    * needs all three together: the number means one thing when the job's own geometry produced it
    * and another when somebody chose it, and on a chosen default the second half is the whole

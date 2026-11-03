@@ -63,7 +63,7 @@ import { faceChordMm } from '@/engine/cnc/rotary/faceOps';
 import { fmtMm } from '@/workers/sim/engraveGeometry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import type { EngraveJob, EngraveShape, EngraveTargetObject } from '@/types/engraveJob';
 import type { CutterReach, Reachability } from './reachability';
 
 /** What an item asks of its cutter. One class per shape of work, not one per document list. */
@@ -102,6 +102,194 @@ export interface PlannedCutter {
   reachMm: number;
   /** The rule that chose it, for the CLI's sentence. */
   reason: string;
+}
+
+/**
+ * #941 — an item's axis-aligned bounds in the stock frame, for the chamfer-order rule: a cut
+ * whose bounds reach one of the stock's outer sides frees the edge a stock-rim bevel runs along.
+ * The four shape kinds all state their size and centre; rotation is expanded into the box.
+ */
+function shapeBounds(shape: EngraveShape): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  const rad = (shape.rotation * Math.PI) / 180;
+  const c = Math.abs(Math.cos(rad));
+  const s = Math.abs(Math.sin(rad));
+  let hx: number;
+  let hy: number;
+  switch (shape.kind) {
+    case 'rect':
+      hx = shape.width / 2;
+      hy = shape.height / 2;
+      break;
+    case 'circle':
+      hx = shape.diameter / 2;
+      hy = shape.diameter / 2;
+      break;
+    case 'slot':
+      hx = shape.length / 2;
+      hy = shape.width / 2;
+      break;
+    case 'polygon': {
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const [px, py] of shape.points) {
+        const x = shape.position.x + px * cos - py * sin;
+        const y = shape.position.y + px * sin + py * cos;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+      return minX === Infinity ? null : { minX, minY, maxX, maxY };
+    }
+    default:
+      return null;
+  }
+  const bx = hx * c + hy * s;
+  const by = hx * s + hy * c;
+  return {
+    minX: shape.position.x - bx,
+    minY: shape.position.y - by,
+    maxX: shape.position.x + bx,
+    maxY: shape.position.y + by,
+  };
+}
+
+/**
+ * #941 — THE BEVELS THAT RUN ALONG THE STOCK'S OWN OUTLINE: a chamfer whose `of` is a construction
+ * shape. They are the ones a through-cut can free (the sample-5 slot exits straight through the
+ * top edges), so they rank before that cut and the generator posts them as their own programs.
+ */
+export function stockRimChamferIds(job: EngraveJob): Set<string> {
+  return new Set(
+    (job.chamfers ?? [])
+      .filter((c) => usable(c) && job.shapes.some((s) => s.id === c.of && s.construction === true))
+      .map((c) => c.id),
+  );
+}
+
+/**
+ * #941 — A REST PASS IS PLANNED ONLY WHEN THE SLOT'S OWN CUTTER CANNOT REACH ITS CORNERS.
+ *
+ * A design corner is reproduced exactly when its radius is at least the cutter's radius; a
+ * sharper corner is the rest pass's job. Only the shape kinds that state their corners can be
+ * certified (rect `cornerRadius`, slot end radius `width / 2`, polygon vertices are sharp); a
+ * circle has none, and typeset text / traces are not certifiable from the document — those keep
+ * the rest, the conservative answer.
+ */
+export function cutterReachesAllCorners(job: EngraveJob, radiusMm: number): boolean {
+  if ((job.labels?.length ?? 0) > 0) return false;
+  if ((job.vectors?.length ?? 0) > 0) return false;
+  if ((job.traces?.length ?? 0) > 0) return false;
+  if ((job.combined?.length ?? 0) > 0) return false;
+  for (const shape of job.shapes) {
+    // A CONSTRUCTION shape is not cut: its corners are a reference, not a design edge.
+    if (!shape.enabled || shape.construction === true) continue;
+    let corner: number;
+    switch (shape.kind) {
+      case 'rect':
+        corner = shape.cornerRadius;
+        break;
+      case 'slot':
+        corner = shape.width / 2;
+        break;
+      case 'polygon':
+        corner = 0;
+        break;
+      case 'circle':
+        continue;
+    }
+    if (corner < radiusMm - 1e-9) return false;
+  }
+  return true;
+}
+
+/** A plan cutter as the ordering rule reads it: the key and the item ids it owns. */
+export interface CutterOrderEntry {
+  key: string;
+  items: readonly string[];
+}
+
+/**
+ * #941 — THE JOB'S CUTTING ORDER, one rule for the kind plan and every candidate plan.
+ *
+ * `validateJob`'s chamfer-order has two halves, and they are CONSTRAINTS on the order, not a
+ * shape rank: a pocket is cut before the bevel on its rim, and a part's edge before its cut-out
+ * frees it. The old rank (flats lead, cones follow) expressed the first and contradicted the
+ * second — the sample-5 slot outran the bevel it exits through — while a single cutter owning both
+ * a pocket bevel and a part-edge bevel must sit BETWEEN the pocket and the cut-out.
+ *
+ * The base order is the old rank, byte for byte; when the job has no stock-rim bevel it is the
+ * answer. Otherwise three constraints are applied over it, stably:
+ *   - a stock-rim bevel runs BEFORE every cut that frees the stock's edge;
+ *   - a pocket-rim bevel runs AFTER the cutter that owns its rim;
+ *   - a rest pass (a cutter owning no items) runs AFTER every cutter with flat items — the work
+ *     it re-cuts.
+ * A cycle (a document that states contradictory edges) falls back to the base order rather than
+ * dropping a program.
+ */
+export function orderCutterEntries<E extends CutterOrderEntry>(
+  job: EngraveJob,
+  cutters: readonly E[],
+  shapeOf: (key: string) => string | null,
+): E[] {
+  const oldRank = (c: E): number => {
+    const shape = shapeOf(c.key);
+    return shape === 'flat' ? 0 : shape === 'engraving' || shape === 'chamfer' ? 1 : shape === 'thread' ? 2 : 3;
+  };
+  const stockRim = stockRimChamferIds(job);
+  // No stock-rim bevel: the caller's own order stands. `planCutters` sorts by the old rank
+  // itself (the merge's order); a candidate plan keeps the order it was built in — re-sorting a
+  // goal's ball/V pair here once flipped a plan's cutters for a chamfer that is not on the stock.
+  if (stockRim.size === 0) return [...cutters];
+  const base = cutters.map((_, i) => i).sort((a, b) => oldRank(cutters[a]!) - oldRank(cutters[b]!));
+  const owners = new Map<string, number>();
+  cutters.forEach((c, i) => {
+    for (const id of c.items) if (!owners.has(id)) owners.set(id, i);
+  });
+  const eps = 1e-6;
+  const freeing = new Set<number>();
+  for (const shape of job.shapes) {
+    if (!usable(shape) || shape.construction === true) continue;
+    const b = shapeBounds(shape);
+    if (b === null) continue;
+    if (b.minX <= eps || b.maxX >= job.stock.length - eps || b.minY <= eps || b.maxY >= job.stock.width - eps) {
+      const at = owners.get(shape.id);
+      if (at !== undefined) freeing.add(at);
+    }
+  }
+  const preds = cutters.map(() => new Set<number>());
+  const before = (a: number, b: number): void => {
+    if (a !== b) preds[b]!.add(a);
+  };
+  cutters.forEach((c, i) => {
+    if (!c.items.some((id) => stockRim.has(id))) return;
+    for (const e of freeing) before(i, e);
+  });
+  for (const ch of job.chamfers ?? []) {
+    if (!usable(ch) || stockRim.has(ch.id) || ch.of === undefined) continue;
+    const rim = owners.get(ch.of);
+    const bevel = owners.get(ch.id);
+    if (rim !== undefined && bevel !== undefined) before(rim, bevel);
+  }
+  const flatOwners = cutters
+    .map((c, i) => (shapeOf(c.key) === 'flat' && c.items.length > 0 ? i : -1))
+    .filter((i) => i >= 0);
+  cutters.forEach((c, i) => {
+    if (c.items.length === 0) for (const f of flatOwners) before(f, i);
+  });
+  const emitted = new Set<number>();
+  const out: E[] = [];
+  while (out.length < cutters.length) {
+    const next = base.find((i) => !emitted.has(i) && [...preds[i]!].every((p) => emitted.has(p)));
+    if (next === undefined) return base.map((i) => cutters[i]!); // a contradictory document: base order
+    emitted.add(next);
+    out.push(cutters[next]!);
+  }
+  return out;
 }
 
 export interface CutterPlan {
@@ -961,12 +1149,14 @@ export function planCutters(
 
   // ---- one program per cutter, in cutting order ---------------------------------------------
   // A pocket is cut before the bevel on its rim, and a part's edge before its cut-out frees it
-  // (`validateJob`'s chamfer-order): flats lead, a cone follows, a thread is independent, and a
-  // goal's ball is its own job. Same-key cutters merge into one program.
-  const rank = (shape: string): number =>
-    shape === 'flat' ? 0 : shape === 'engraving' || shape === 'chamfer' ? 1 : shape === 'thread' ? 2 : 3;
+  // (`validateJob`'s chamfer-order). The old rank (flats lead, cones follow) expressed the first
+  // half and contradicted the second: every flat, including the through-cut that frees the edge,
+  // outran a chamfer on the STOCK's rim. #941 — `orderCutterEntries` is the one rule: a bevel
+  // whose `of` is a construction shape ranks BEFORE any cut whose item reaches the stock's outer
+  // rectangle; an interior pocket keeps its lead over a bevel on its own rim; a job with no
+  // stock-rim chamfer keeps the old rank byte for byte. Same-key cutters merge into one program.
   const merged: PlannedCutter[] = [];
-  for (const c of [...cutters].sort((a, b) => rank(a.shape) - rank(b.shape))) {
+  for (const c of cutters) {
     const same = merged.find((m) => m.key === c.key);
     if (same === undefined) merged.push({ ...c, items: [...c.items] });
     else {
@@ -975,15 +1165,21 @@ export function planCutters(
       same.reason = `${same.reason}; ${c.reason}`;
     }
   }
+  const oldShapeRank = (shape: string): number =>
+    shape === 'flat' ? 0 : shape === 'engraving' || shape === 'chamfer' ? 1 : shape === 'thread' ? 2 : 3;
+  const ordered =
+    stockRimChamferIds(job).size === 0
+      ? [...merged].sort((a, b) => oldShapeRank(a.shape) - oldShapeRank(b.shape))
+      : orderCutterEntries(job, merged, (key) => merged.find((m) => m.key === key)?.shape ?? null);
   notes.push(
-    merged.length <= 1
+    ordered.length <= 1
       ? 'one cutter takes all the work'
-      : `${merged.length} cutters, one program each: ${merged.map((m) => `${m.key} (${m.items.length})`).join(', ')}`,
+      : `${ordered.length} cutters, one program each: ${ordered.map((m) => `${m.key} (${m.items.length})`).join(', ')}`,
   );
   // #842 — the mixed job's face program keeps its own cutter when the face rule names one that
   // the item cutters do not already serve.
   return {
-    cutters: merged,
+    cutters: ordered,
     unassigned,
     notes,
     ...(faceToolKey === undefined ? {} : { faceToolKey }),
