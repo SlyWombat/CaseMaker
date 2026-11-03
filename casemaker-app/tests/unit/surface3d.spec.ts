@@ -437,7 +437,9 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
   });
 
   it('a round cutter roughs and finishes, and the IR names both operations', async () => {
-    const job = goalJob({ surface: { roughStepDownMm: 0.5, gridPitchMm: 0.4 } });
+    // #945 b — the scallop pass is opt-OUT by default on a sloped goal (this ramp has one); turned
+    // off here because this test counts ROUGH/FINISH operations, not the scallop pass.
+    const job = goalJob({ surface: { roughStepDownMm: 0.5, gridPitchMm: 0.4, scallop: false } });
     const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175, { shape: 'ball' }), [], null, {});
     expect(out.ok).toBe(true);
     expect(out.cam?.operations).toBe(2);
@@ -922,6 +924,20 @@ describe('generateSurface3dIR — the scallop and pencil passes (#671)', () => {
     expect(on.notes.join(' ')).toContain('pencil pass');
   });
 
+  it('#945 b — the whole-job slope gate: opts.scallop true still adds nothing on a flat goal', async () => {
+    // A single flat-topped box (no step): the heightfield's top is one constant Z over the whole
+    // covered footprint, so `maxGoalSlope` reads exactly 0 and the gate beside `scallopMoves`'s
+    // call site skips the pass even though it was explicitly asked for.
+    const flatHf = sampleGoalHeightfield(goal(boxTris(0, 20, 0, 20, -2, 0)), { pitchMm: 0.4 });
+    const flatOn = await build(flatHf, { scallop: true });
+    expect(flatOn.scallop).toBeNull();
+
+    // The step fixture (a real wall) still gets it, same opts, same call — the control.
+    const stepHf = sampleGoalHeightfield(goal(stepTris()), { pitchMm: 0.4 });
+    const stepOn = await build(stepHf, { scallop: true });
+    expect(stepOn.scallop?.facts.contours ?? 0).toBeGreaterThan(0);
+  });
+
   it('spaces the scallop contours by the slope’s secant: a steep face needs more of them', async () => {
     const gentle = await build(sampleGoalHeightfield(goal(rampTrisK(0.05)), { pitchMm: 0.4 }), { scallop: true });
     const steep = await build(sampleGoalHeightfield(goal(rampTrisK(1)), { pitchMm: 0.4 }), { scallop: true });
@@ -1030,8 +1046,8 @@ describe('generateGoalProgram — the extra finishing passes reach the program a
     expect(surface).toContain('pencil pass');
   });
 
-  it('absent means off: the old two-pass program, and its check says two passes', async () => {
-    const job = stepJob();
+  it('#945 b — an explicit false opts out: the old two-pass program, and its check says two passes', async () => {
+    const job = stepJob({ scallop: false });
     const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
     expect(out.ok).toBe(true);
     expect(out.programs[0]!.surfaceCheck?.passes).toHaveLength(2);
@@ -1040,6 +1056,68 @@ describe('generateGoalProgram — the extra finishing passes reach the program a
     const texts = buildRunSheet(job, out, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const surface = texts.find((t) => t.includes('Surface a mesh'));
     expect(surface).not.toContain('scallop pass');
+  });
+
+  it('#945 b — absent means ON when the goal has slope anywhere: the scallop pass runs unasked', async () => {
+    const job = stepJob(); // no `surface` block at all — the pre-#945 "absent" case
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    expect(out.ok).toBe(true);
+    expect(out.programs[0]!.surfaceCheck?.passes).toEqual([
+      '[T1] 3D rough — 0.3 mm to leave',
+      '[T1] 3D finish',
+      '[T1] 3D scallop',
+    ]);
+    expect(out.surface3d?.scallop?.contours ?? 0).toBeGreaterThan(0);
+    // The pencil pass is unaffected by this fix: still opt-in, still absent.
+    expect(out.surface3d?.pencil ?? null).toBeNull();
+    const texts = buildRunSheet(job, out, null).sections.flatMap((s) => s.steps.map((st) => st.text));
+    const surface = texts.find((t) => t.includes('Surface a mesh'));
+    expect(surface).toContain('scallop pass');
+  });
+
+  it('#945 b — absent on a goal with NO slope anywhere still adds nothing: the whole-job gate', async () => {
+    // A single flat-topped box: `stepTris()`'s plateau alone, with no second, lower box to form a
+    // step — so the heightfield's own top is one constant Z over its whole covered footprint, and
+    // `maxGoalSlope` (surface3d.ts) reads exactly 0. `clearAround: 'none'` turns off the default
+    // clear RING (#764) deliberately: that ring is itself a real wall in the heightfield (its own
+    // floor meets the part's top at a cliff), so with the ring left on this same job DOES get the
+    // scallop pass regardless of how flat the part's own top is — see the next test, which pins
+    // that as a stated limitation rather than leaving it a silent surprise.
+    const flatJob: EngraveJob = {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      targetObject: goal(boxTris(0, 20, 0, 20, -2, 0), {
+        position: { x: 50, y: 30, z: 0 },
+        surface: { clearAround: 'none' },
+      }),
+    };
+    const out = await generateGoalProgram(flatJob, flatJob.targetObject!, makeFlatTool(3.175), [], null, {});
+    expect(out.ok).toBe(true);
+    expect(out.programs[0]!.surfaceCheck?.passes).toHaveLength(2);
+    expect(out.surface3d?.scallop ?? null).toBeNull();
+  });
+
+  it('#945 b — the default clear ring makes even a flat-topped goal’s own edge a real wall, so the scallop pass correctly still runs', async () => {
+    // Same flat box as above, but WITHOUT disabling the ring (`clearAround` defaults to 'ring',
+    // and any known cutter diameter makes it wide enough to apply — `goalClearBand`,
+    // engraveGenerate.ts). The ring's own floor meets the part's flat top at a real cliff in the
+    // heightfield — `maxGoalSlope` correctly reads that as slope, it is not a false positive. This
+    // is NOT wasted work: that cliff is the part's OWN edge, not the ring's outer boundary
+    // `rimMoves` (#862) already laps (ring floor to stock top) — without the scallop pass the
+    // raster's row ends alone would leave this edge terraced, same as any wall this pass exists
+    // for. The practical effect: almost every default-ring job gets the scallop pass even when the
+    // part's own top is flat, which is why the "nothing extra" test above has to turn the ring off
+    // to isolate the gate's own zero-slope case.
+    const flatJob: EngraveJob = {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      targetObject: goal(boxTris(0, 20, 0, 20, -2, 0), { position: { x: 50, y: 30, z: 0 } }),
+    };
+    const out = await generateGoalProgram(flatJob, flatJob.targetObject!, makeFlatTool(3.175), [], null, {});
+    expect(out.ok).toBe(true);
+    expect(out.surface3d?.scallop?.contours ?? 0).toBeGreaterThan(0);
   });
 
   it('round-trips the three settings; a crease outside 1–80° is refused', () => {

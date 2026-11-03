@@ -6449,7 +6449,7 @@
                   "type": "number"
                 },
                 "scallop": {
-                  "description": "Add a scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface; omit for off.",
+                  "description": "A scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface, so the raster’s flat-span cusp bound also holds on a slope. On by default (#945); set false to omit it.",
                   "type": "boolean"
                 },
                 "stockToLeaveMm": {
@@ -6785,7 +6785,7 @@
                     "type": "number"
                   },
                   "scallop": {
-                    "description": "Add a scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface; omit for off.",
+                    "description": "A scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface, so the raster’s flat-span cusp bound also holds on a slope. On by default (#945); set false to omit it.",
                     "type": "boolean"
                   },
                   "stockToLeaveMm": {

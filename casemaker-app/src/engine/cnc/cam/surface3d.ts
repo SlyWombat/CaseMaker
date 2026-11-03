@@ -825,7 +825,12 @@ export interface SurfaceOpts {
   /**
    * #671 — add the SCALLOP pass after the parallel finish: offset contours of the goal's
    * footprint, spaced so the step measured ALONG THE SURFACE is the finishing step-over. Absent
-   * or false leaves today's program byte for byte.
+   * or false leaves today's program byte for byte. #945 b — `engraveGenerate.ts`'s goal dispatch
+   * now passes `true` here BY DEFAULT (opt-out on the job, via `surface.scallop: false`); this
+   * flag itself is still a plain, caller-set boolean at this API's own level — a direct caller of
+   * `generateSurface3dIR`/`generateSurface3dForGoal` that never sets it still gets `false`. Even
+   * `true` adds nothing on a heightfield with no slope anywhere (`maxGoalSlope(hf) === 0`): see
+   * the gate beside `scallopMoves`'s call site.
    */
   scallop?: boolean;
   /** #671 — add the PENCIL pass after the scallop: one path along every concave crease. */
@@ -1308,8 +1313,40 @@ export async function generateSurface3dIR(args: Surface3dArgs): Promise<Surface3
 
   // #671 — THE SCALLOP PASS: offset contours of the goal's footprint, each projected onto the tip
   // field, spaced so the step measured ALONG THE SURFACE is the finishing step-over.
+  //
+  // #945 b — A WHOLE-JOB SLOPE GATE, so a genuinely flat goal still gets nothing extra now that
+  // `opts.scallop` defaults to true (engraveGenerate.ts). #671's own spacing formula divides the
+  // finishing step-over by `sqrt(1 + slope²)`; at slope 0 that is `sqrt(1) = 1`, i.e. NO
+  // amplification, and the pass would contour the ENTIRE footprint at the SAME spacing the raster
+  // already covers it with — duplicated work for zero coverage gain. `maxGoalSlope(hf) > 0` (an
+  // epsilon past it, for float noise) is the only zero-tuning gate available here: it is the exact
+  // zero-crossing of the formula's own amplification term, not an arbitrary angle picked to "feel"
+  // right — NOT `steepestWallDeg` (#721's mold-draft angle), which also reads the footprint's own
+  // rim against the uncut stock top as a "wall": almost every real goal is sunk below the stock
+  // top somewhere at its edge, so that function is nearly always > 0 even when the goal's own
+  // surface is dead flat, which would defeat this gate's whole purpose. `maxGoalSlope` uses
+  // `slopeAt` — the SAME gradient lookup `scallopMoves` already calls per cell — which only
+  // compares a covered cell against its covered neighbours and never substitutes the stock top for
+  // a missing one, so the rim never reads as slope here.
+  //
+  // KNOWN LIMITATION: this is a WHOLE-JOB gate, not per-region — a goal with slope ANYWHERE still
+  // runs the full footprint-wide contour sweep, including over its own locally flat sub-areas (a
+  // flat plateau beside a sloped dome, say). Scoping it to just the sloped cells would need the
+  // gate re-applied per contour LEVEL inside `scallopMoves` itself, which is a larger, separate
+  // change from this fix.
+  //
+  // A NOTE ON THE CLEAR RING (#764, `clearAround: 'ring'`, on by default whenever a cutter
+  // diameter is known — effectively every real job): filling the ring down to a base plane makes
+  // the part's OWN edge a real, covered-to-covered wall (the part's top meets the ring's floor at
+  // a cliff), which `maxGoalSlope` correctly reads as slope — so even a flat-TOPPED part gets the
+  // scallop pass by default once it has a ring. This is NOT wasted duplicate work: that edge is
+  // the part's own side, not the ring's outer boundary `rimMoves` (#862) already laps (ring floor
+  // to stock top) — the raster's row ends alone would otherwise leave it terraced, same as any
+  // other wall this pass exists for. A goal with `surface.clearAround: 'none'` (or `'whole'`) is
+  // the only way to see this gate read exactly 0 on a truly flat part; pinned by two tests beside
+  // `generateGoalProgram`'s scallop-default cases (one ring off, one ring on).
   let scallop: Surface3dResult['scallop'] = null;
-  if (opts.scallop === true && hf.coveredCount > 0) {
+  if (opts.scallop === true && hf.coveredCount > 0 && maxGoalSlope(hf) > 1e-6) {
     const pass = scallopMoves(
       hf,
       tip,
@@ -1339,7 +1376,17 @@ export async function generateSurface3dIR(args: Surface3dArgs): Promise<Surface3
           `outline, spaced so the step measured along the surface is ${feeds.finishStepOver} mm` +
           (pass.clamped
             ? ` — on slopes past ${(Math.atan(Math.sqrt(MAX_SCALLOP_CROWDING * MAX_SCALLOP_CROWDING - 1)) * 180 / Math.PI).toFixed(0)}° the contour spacing stops shrinking (${MAX_SCALLOP_CROWDING}× at most).`
-            : '.'),
+            : '.') +
+          // #945 b — the raster's own flat-span cusp bound (#945 a1) does not hold on a slope; this
+          // pass holds the SAME along-surface step there instead, which is why it now runs by
+          // default wherever the goal has any slope. Hedged, not "stays under the band": a clamped
+          // run (above) still leaves more than that on the steepest slopes, and a job that set its
+          // own finishStepOverMm rather than taking the cusp derivation has no band to begin with —
+          // either way this pass still matches the flat-span step along the surface, which is the
+          // one thing it actually promises. Off with the goal's own `surface.scallop: false`.
+          ' On by default so the along-surface step on a slope matches the flat-span finishing ' +
+          'step-over instead of widening with the slope — off with the goal’s own ' +
+          '“surface.scallop: false”.',
       );
     }
   }
@@ -2695,6 +2742,31 @@ function slopeAt(hf: GoalHeightfield, i: number, j: number): number {
   const gx = g(h(i + 1, j), h(i - 1, j), 1);
   const gy = g(h(i, j + 1), h(i, j - 1), 1);
   return Math.hypot(gx, gy);
+}
+
+/**
+ * #945 b — the steepest slope ANY covered cell of the goal's own surface carries, by `slopeAt` —
+ * the same gradient lookup {@link scallopMoves} already calls per cell to space its contours.
+ * Used as the whole-job gate beside its call site (above): 0 exactly means the goal's own surface
+ * is flat everywhere the scallop pass would otherwise walk, so the pass is skipped rather than
+ * duplicating the raster's own flat-span coverage.
+ *
+ * Deliberately NOT {@link steepestWallDeg} (#721's mold-draft angle): that function also reads the
+ * footprint's own rim against the uncut stock top as a wall (correct for a mold's draft question),
+ * so it is almost never 0 even when the goal's own surface is dead flat — gating on it here would
+ * defeat the gate.
+ */
+function maxGoalSlope(hf: GoalHeightfield): number {
+  const { nx, ny, covered } = hf;
+  let worst = 0;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      if (covered[j * nx + i] !== 1) continue;
+      const s = slopeAt(hf, i, j);
+      if (s > worst) worst = s;
+    }
+  }
+  return worst;
 }
 
 /**

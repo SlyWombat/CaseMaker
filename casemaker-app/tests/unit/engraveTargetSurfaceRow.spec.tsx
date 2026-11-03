@@ -195,24 +195,37 @@ describe('#535 the goal’s operation controls', () => {
   });
 });
 
-// #671 — the two extra finishing passes: each checkbox sends its key (off is sent as undefined so
-// the document keeps the pre-#671 shape), the crease number appears only with the pencil pass on,
-// and the report speaks for the passes that ran.
-describe('#671 the extra finishing passes', () => {
-  it('sends the scallop and pencil choices, and off is undefined', () => {
+// #671/#945 b — the two extra finishing passes: the pencil pass is opt-in (off is sent as
+// undefined so the document keeps the pre-#671 shape); the scallop pass is opt-OUT since #945
+// (absent = ON, so its checkbox starts CHECKED and turning it off sends an explicit `false`, never
+// `undefined` — `undefined` there would mean back to the default, which is on). The crease number
+// appears only with the pencil pass on, and the report speaks for the passes that ran.
+describe('#671/#945 the extra finishing passes', () => {
+  it('scallop starts on (absent = on, #945); turning it off sends an explicit false, not undefined', () => {
     const { onChange } = row();
     openTechnical();
+    expect((screen.getByTestId('engrave-target-surface-scallop-0') as HTMLInputElement).checked).toBe(true);
     fireEvent.click(screen.getByTestId('engrave-target-surface-scallop-0'));
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { scallop: true } });
+    expect(onChange).toHaveBeenLastCalledWith({ surface: { scallop: false } });
+    // The pencil pass is unaffected: still opt-in, absent reads as off.
+    expect((screen.getByTestId('engrave-target-surface-pencil-0') as HTMLInputElement).checked).toBe(false);
     fireEvent.click(screen.getByTestId('engrave-target-surface-pencil-0'));
     expect(onChange).toHaveBeenLastCalledWith({ surface: { pencil: true } });
   });
 
-  it('turning a pass back off sends undefined, so the block drops the key', () => {
-    const { onChange } = row({ target: { surface: { scallop: true, pencil: true } } });
+  it('turning scallop back on from an explicit false sends undefined, restoring the default', () => {
+    const { onChange } = row({ target: { surface: { scallop: false, pencil: true } } });
     openTechnical();
+    expect((screen.getByTestId('engrave-target-surface-scallop-0') as HTMLInputElement).checked).toBe(false);
     fireEvent.click(screen.getByTestId('engrave-target-surface-scallop-0'));
     expect(onChange).toHaveBeenLastCalledWith({ surface: { scallop: undefined } });
+  });
+
+  it('turning the pencil pass back off sends undefined, so the block drops the key', () => {
+    const { onChange } = row({ target: { surface: { scallop: true, pencil: true } } });
+    openTechnical();
+    fireEvent.click(screen.getByTestId('engrave-target-surface-pencil-0'));
+    expect(onChange).toHaveBeenLastCalledWith({ surface: { pencil: undefined } });
   });
 
   it('offers the crease angle only with the pencil pass on, prefilled from the CAM’s default', () => {

@@ -843,9 +843,12 @@ export interface EngraveSurfaceSettings {
   /** Roughing allowance left on the goal surface, mm. Default: the shop's `finish.stockToLeaveMm`. */
   stockToLeaveMm?: Mm;
   /**
-   * #671 — add the SCALLOP pass after the parallel finish: offset contours of the goal's outline,
-   * spaced so the step measured ALONG THE SURFACE is `finishStepOverMm`. Absent = off, which is
-   * the rough + parallel finish every pre-#671 job already cut.
+   * #671/#945 b — the SCALLOP pass after the parallel finish: offset contours of the goal's
+   * outline, spaced so the step measured ALONG THE SURFACE is `finishStepOverMm`. ON BY DEFAULT
+   * (absent = on) since #945 — the parallel finish's row cusp is held to the leftover-visible band
+   * only on a flat span, and this pass is the slope-compensated fix for that. `false` opts out,
+   * restoring the pre-#945 rough + parallel finish. (It still adds nothing on a goal with no slope
+   * anywhere, even when on — see `maxGoalSlope`, surface3d.ts.)
    */
   scallop?: boolean;
   /**
