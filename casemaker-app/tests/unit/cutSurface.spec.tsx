@@ -1512,8 +1512,31 @@ describe('#948 the goal check’s line', () => {
     const coverage = screen.getByTestId('engrave-cut-goal-coverage');
     expect(coverage.textContent).toBe('Top-surface coverage: 83.58 % (the pass line is 95 %)');
     expect(screen.queryByTestId('engrave-cut-goal-reach')).toBeNull();
-    // The goal line itself is unchanged by the fact.
+    // The goal line itself is unchanged by the fact, and a COMPARED goal keeps the pass headline.
     expect(screen.getByTestId('engrave-cut-goal').textContent).toBe('Matches the design (goal)');
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('matches the design');
+  });
+
+  // #948 review (A) — THE HEADLINE. A goal report that did not run must not head the Cut step with
+  // "matches the design": the fourth cutVerdict state says the program checked and the goal was not
+  // compared, with the report's reason. Neutral: the step is not a green tick and stays open.
+  it('heads a goal that was never compared with the neutral fourth state, not the pass sentence', () => {
+    drawWithOracle({
+      ...OK_ORACLE,
+      goalCutInto: goal({
+        ok: true,
+        ran: false,
+        reason: 'a radial goal is sampled in its own map frame, which this run did not check',
+      }),
+    });
+    const summary = screen.getByTestId('engrave-cut-step-1-summary').textContent ?? '';
+    expect(summary).toContain(
+      'Program checked — the goal was not compared (a radial goal is sampled in its own map frame, which this run did not check)',
+    );
+    expect(summary).not.toContain('matches the design');
+    // Neutral styling: no done tick, and the step is the current one, so its body is open.
+    expect(screen.getByTestId('engrave-cut-step-1-title').textContent).not.toContain('✓');
+    expect((screen.getByTestId('engrave-cut-step-1') as HTMLDetailsElement).open).toBe(true);
   });
 
   // #948 review (A) — AN UNCHECKED GOAL IS NEVER A PASS MARK. `ok` stays true in the report (the run
