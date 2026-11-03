@@ -155,14 +155,15 @@ describe('#722 — every reader applies the one scale', () => {
   });
 
   it('the job size check reads the placed size: a goal past the blank is a per-side warning, fits once fitted', () => {
-    // #784 — a goal larger than the blank is INFORMED, not refused: it names what lies outside
-    // per side, and Generate cuts it clipped. The error is reserved for nothing being inside.
+    // #784/#949 — a goal larger than the blank names what lies outside per side, and Generate
+    // REFUSES it before building the toolpath (a clipped finish would run along the stock edge,
+    // where the mount holds it). The warning is the panel's row; the refusal is the CAM's.
     const big = validateGoalObject(goal(), STOCK);
     const outside = big.find((f) => f.code === 'goal-object-oversize');
     expect(outside?.severity).toBe('warning');
     expect(outside?.message).toContain('past the left edge');
     expect(outside?.message).toContain('past the right edge');
-    expect(outside?.message).toContain('clipped to the blank');
+    expect(outside?.message).toContain('refuses it before building the toolpath');
     const f = fitToStockScale({ x: 200, y: 100, z: 40 }, STOCK, 1)!;
     const fitted = validateGoalObject(goal({ scale: { x: f, y: f, z: f } }), STOCK);
     expect(fitted.map((x) => x.code)).not.toContain('goal-object-oversize');
