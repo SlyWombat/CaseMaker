@@ -684,6 +684,32 @@ writeFileSync(join(outDir, '941-chamfer-slot.job.json'), JSON.stringify(m1Sample
 console.log('\n#941 sample 5 job written: 941-chamfer-slot.job.json');
 
 // ---------------------------------------------------------------------------------------------
+// #936 — sample 1: the flagship text job on the stick (the job the maintainer cuts first)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * D's recipe (#936, 2026-11-02 22:40): the three lines read ALONG the 100 mm axis (rotation 90),
+ * fitted to the 36 mm face at 8 / 7 / 6 mm cap heights, centred at x 7 / 18 / 29 and y 50, at the
+ * app's own flagship depths 2 / 1 / 0.5. No cutter named — the app recommends (on the k3 export it
+ * picks flat-1.0; the fixture alone had picked the same).
+ */
+const m1Sample1 = defaultEngraveJob();
+m1Sample1.id = 'job-936-flagship-text';
+m1Sample1.name = 'Milestone 1 sample 1: flagship text on the stick';
+m1Sample1.facing = { enabled: false, depth: 0, source: 'user' };
+m1Sample1.stock = { ...M1_STICK, material: 'hardwood' };
+m1Sample1.toolKey = NO_TOOL_KEY;
+m1Sample1.labels = [
+  { id: 'case', text: 'CASE', font: 'sans-default', weight: 'bold', size: 8, position: { x: 7, y: 50 }, rotation: 90, depth: 2, enabled: true },
+  { id: 'maker', text: 'MAKER', font: 'sans-default', weight: 'bold', size: 7, position: { x: 18, y: 50 }, rotation: 90, depth: 1, enabled: true },
+  { id: 'first-chips', text: 'first chips', font: 'sans-default', weight: 'bold', size: 6, position: { x: 29, y: 50 }, rotation: 90, depth: 0.5, enabled: true },
+];
+m1Sample1.shapes = [];
+m1Sample1.workholding = { kind: 'vise', vise: { ...m1Base.workholding.vise } };
+writeFileSync(join(outDir, '936-flagship-text.job.json'), JSON.stringify(m1Sample1, null, 2) + '\n');
+console.log('\n#936 sample 1 job written: 936-flagship-text.job.json');
+
+// ---------------------------------------------------------------------------------------------
 // #185 — the V-groove reach test: HAND-WRITTEN, because the pipeline cannot generate it
 // ---------------------------------------------------------------------------------------------
 

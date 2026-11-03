@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 3,
+  "id": "job-936-flagship-text",
+  "name": "Milestone 1 sample 1: flagship text on the stick",
+  "machineId": "Z1",
+  "stock": {
+    "length": 36,
+    "width": 100,
+    "thickness": 36,
+    "material": "hardwood"
+  },
+  "labels": [
+    {
+      "id": "case",
+      "text": "CASE",
+      "font": "sans-default",
+      "weight": "bold",
+      "size": 8,
+      "position": {
+        "x": 7,
+        "y": 50
+      },
+      "rotation": 90,
+      "depth": 2,
+      "enabled": true
+    },
+    {
+      "id": "maker",
+      "text": "MAKER",
+      "font": "sans-default",
+      "weight": "bold",
+      "size": 7,
+      "position": {
+        "x": 18,
+        "y": 50
+      },
+      "rotation": 90,
+      "depth": 1,
+      "enabled": true
+    },
+    {
+      "id": "first-chips",
+      "text": "first chips",
+      "font": "sans-default",
+      "weight": "bold",
+      "size": 6,
+      "position": {
+        "x": 29,
+        "y": 50
+      },
+      "rotation": 90,
+      "depth": 0.5,
+      "enabled": true
+    }
+  ],
+  "shapes": [],
+  "toolKey": "",
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": 16,
+      "seat": "floor",
+      "fixedJawThickness": 10,
+      "movingJawThickness": 10,
+      "jawLength": 100,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 0.5
+    }
+  },
+  "minFloor": 1,
+  "edgeMargin": 1,
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "jawClearance": 1,
+  "customFonts": [],
+  "facing": {
+    "enabled": false,
+    "depth": 0,
+    "source": "user"
+  }
+}
