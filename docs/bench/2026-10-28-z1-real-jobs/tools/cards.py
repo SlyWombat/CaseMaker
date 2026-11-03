@@ -20,7 +20,7 @@ APPENDIX = [
 # so the same page gates the bench and shows what it cannot yet judge.
 SAMPLES = [
     ('S1', 936, 'Flagship text job on the stick', 'job file committed (card s1); the job the maintainer cuts first, at bench session S2'),
-    ('S2', 938, 'Hardwood flat-cutter feed coupon', 'four programs on disk (card s2); the row flips to measured when the bench fills the record'),
+    ('S2', 938, 'Hardwood flat-cutter feed coupon', 'four programs on disk (card s2, F400 the row’s own value); the row flips to measured when the bench fills the record'),
     ('S3', 939, 'Pocket and four bores on the 36 × 100 face', 'job file committed (card s3); cut at bench session S5'),
     ('S4', 940, 'Two-cutter job: pocket, then V text on its floor', 'job file committed (card s4); cut at bench session S5/S6'),
     ('S5', 941, 'Chamfer the top edges, then a through-slot', 'job file committed (card s5); cut at bench session S6'),
@@ -115,9 +115,9 @@ CARDS = [
     dict(id='s1', title='Sample 1: the flagship text job on the stick', job='../../936-flagship-text.job.json',
          kind='design', input='committed', material='hardwood', location='k3',
          source='Sample 1 (#936) — "CASE" / "MAKER" / "first chips" along the 100 mm axis, 8 / 7 / 6 mm, 2 / 1 / 0.5 mm deep'),
-    dict(id='s2', title='Hardwood feed coupon: F1000, the row’s own value', job='../../938-hardwood-flat-cutter-feed-coupon-F1000.job.json',
+    dict(id='s2', title='Hardwood feed coupon: F400, the seeded row’s own value', job='../../938-hardwood-flat-cutter-feed-coupon-F400.job.json',
          kind='design', input='committed', material='hardwood', location='k3',
-         source='Sample 2 (#938) — four cells F400/F700/F1000/F1200 on flat-1.0, 9 mm text, 1.0 mm deep'),
+         source='Sample 2 (#938) — four cells F250/F400/F700/F1000 on flat-1.0, 9 mm text, 1.0 mm deep, bracketing the seeded hardwood row’s own F400'),
     dict(id='s3', title='Sample 3: a pocket and four bores on the stick', job='../../939-pocket-bores.job.json',
          kind='design', input='committed', material='hardwood', location='k3',
          source='Sample 3 (#939) — a 20 × 10 × 3.0 pocket (r 2), a ⌀8 × 3.0 pocket and four ⌀3.2 × 6 bores'),

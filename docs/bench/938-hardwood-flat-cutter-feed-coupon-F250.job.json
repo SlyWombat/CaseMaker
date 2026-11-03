@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "name": "938 hardwood flat-cutter feed coupon F1200",
+  "name": "938 hardwood flat-cutter feed coupon F250",
   "machineId": "Z1",
   "stock": {
     "length": 36,
@@ -11,13 +11,13 @@
   "labels": [
     {
       "id": "938-hardwood-feed-lbl-0",
-      "text": "F1200",
+      "text": "F250",
       "font": "barlow",
       "weight": "bold",
       "size": 9,
       "position": {
         "x": 18,
-        "y": 68
+        "y": 20
       },
       "rotation": 0,
       "depth": 1,
@@ -63,6 +63,6 @@
   "combined": [],
   "traces": [],
   "cutOverride": {
-    "feed": 1200
+    "feed": 250
   }
 }

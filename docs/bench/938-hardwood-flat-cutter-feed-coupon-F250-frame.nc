@@ -9,7 +9,7 @@
 ;@MKR|TOOL|number=1|id=0|name=1 mm flat end|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=0|flutelength=0|diameter=1|tipdiameter=1|cornerradius=0|angle=0|halfAngle=0
 ;@CM|TOOL|key=flat-1.0
 ;@CM|START|tool=empty
-;@MKR|TIME|seconds=17
+;@MKR|TIME|seconds=16
 ; cycle estimate: cutting + rapids through the trapezoid, timed on Makera Z1's rapid model (1200 mm/min XY, 600 mm/min Z, 150 mm/s² accel, config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time
 ;@MKR|TOOLPATH|number=1|tool_number=1|name=Frame trace
 ;@MKR|END
@@ -21,13 +21,13 @@ G90 G21
 
 T1 M6
 G53 G0 Z-3
-G0 X1.89 Y63.381
+G0 X4.365 Y15.381
 S12000 M3
 G0 Z20
-G0 X34.11
-G0 Y72.62
-G0 X1.89
-G0 Y63.381
+G0 X31.635
+G0 Y24.62
+G0 X4.365
+G0 Y15.381
 G0 Z15
 M05
 G28

@@ -11,13 +11,25 @@
   "note": "Fill \"verdict\" (ok / poor / broke), \"cutOn\" (YYYY-MM-DD) and any note per program. If more than one program cut ok, mark exactly one \"chosen\": true. Then run scripts/feeds-readback.ts on this file.",
   "programs": [
     {
+      "program": "938-hardwood-feed-f250",
+      "values": [
+        250
+      ],
+      "ncFile": "938-hardwood-flat-cutter-feed-coupon-F250.nc",
+      "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F250-run-sheet.md",
+      "hash": "8f799996",
+      "verdict": null,
+      "chosen": false,
+      "note": ""
+    },
+    {
       "program": "938-hardwood-feed-f400",
       "values": [
         400
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F400.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F400-run-sheet.md",
-      "hash": "a34d64d3",
+      "hash": "2c36c38d",
       "verdict": null,
       "chosen": false,
       "note": ""
@@ -29,7 +41,7 @@
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F700.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F700-run-sheet.md",
-      "hash": "03b57830",
+      "hash": "30301b70",
       "verdict": null,
       "chosen": false,
       "note": ""
@@ -41,19 +53,7 @@
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F1000.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F1000-run-sheet.md",
-      "hash": "610a521e",
-      "verdict": null,
-      "chosen": false,
-      "note": ""
-    },
-    {
-      "program": "938-hardwood-feed-f1200",
-      "values": [
-        1200
-      ],
-      "ncFile": "938-hardwood-flat-cutter-feed-coupon-F1200.nc",
-      "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F1200-run-sheet.md",
-      "hash": "c7361569",
+      "hash": "960d405b",
       "verdict": null,
       "chosen": false,
       "note": ""

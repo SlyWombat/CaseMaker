@@ -1,6 +1,6 @@
 # Run sheet — 938 hardwood flat-cutter feed coupon F400
 
-Generated 2026-11-03 · file `938-hardwood-flat-cutter-feed-coupon-F400.nc` · sha256 `a34d64d3` · estimated cutting time 2 min 34 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time.)
+Generated 2026-11-03 · file `938-hardwood-flat-cutter-feed-coupon-F400.nc` · sha256 `2c36c38d` · estimated cutting time 2 min 21 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time.)
 
 ## 1 · What you need
 
@@ -43,16 +43,16 @@ Generated 2026-11-03 · file `938-hardwood-flat-cutter-feed-coupon-F400.nc` · s
 7. Rotation is measured, and a static .nc cannot compensate it (Smoothieware has no variables): apply it in Studio's dialogs, or re-post with the rotation baked into the geometry
 8. Z is always probed on the face to be cut: no fixture can supply it
 9. The blank's top is measured at 5 points across the cut — its centre, then both extents on each axis — because a printed blank’s colour line is a plane and its dome is extra material above it: one touch at the centre cannot tell you the floor at the ends of a line. Take them in the order below and write each reading down. — \_\_\_\_\_\_\_\_  *(surface Z at each point (mm), and how each was taken (probe / touch-off))*
-10. Surface touch 1 of 5: the cut area's centre, X 18 Y 20 — take the top there and record the reading.
-11. Surface touch 2 of 5: the cut area's left extent, X 3.876 Y 20 — take the top there and record the reading.
-12. Surface touch 3 of 5: the cut area's right extent, X 32.124 Y 20 — take the top there and record the reading.
-13. Surface touch 4 of 5: the cut area's front extent, X 18 Y 15.378 — take the top there and record the reading.
-14. Surface touch 5 of 5: the cut area's back extent, X 18 Y 24.622 — take the top there and record the reading.
+10. Surface touch 1 of 5: the cut area's centre, X 18 Y 36 — take the top there and record the reading.
+11. Surface touch 2 of 5: the cut area's left extent, X 3.876 Y 36 — take the top there and record the reading.
+12. Surface touch 3 of 5: the cut area's right extent, X 32.124 Y 36 — take the top there and record the reading.
+13. Surface touch 4 of 5: the cut area's front extent, X 18 Y 31.378 — take the top there and record the reading.
+14. Surface touch 5 of 5: the cut area's back extent, X 18 Y 40.622 — take the top there and record the reading.
 15. This blank states no colour split, so only the ceiling limits the floors: they must stay at most 35 mm below the top (the blank's underside, including its 1 mm margin). A surface spread wider than that band cannot keep every floor past the colour line and clear of the pocket at the same time. — **band 35 mm**
 16. Set Z0 from the LOWEST of these 5 readings, not from the registration touch above and not from the centre alone. Every programmed floor depth is measured from Z0, so at a higher touch the local floor is deeper by exactly its height above Z0: with Z0 at the lowest reading, the programmed depth is the SHALLOWEST floor and the programmed depth plus the spread is the deepest. — **Z0 = the lowest surface touch** — \_\_\_\_\_\_\_\_  *(the touch Z0 was set from, and the readings it came from)*
 17. **If the touches miss a fitted plane by more than 35 mm, do not cut. The app fits a plane to the readings and follows it when the leftover — the bow the tilt cannot explain — fits the band; it refuses that blank as: “this blank's top is not one plane: the touches miss the fitted plane by <residual> mm, wider than the band”.**
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-18 -108 72 126" class="run-sheet-svg" role="img" aria-label="Top view of the stock, the vise jaws and the work origin"><defs><marker id="run-sheet-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" class="run-sheet-arrowhead" /></marker></defs><rect data-stock="true" class="run-sheet-stock" x="0" y="-100" width="36" height="100" /><text class="run-sheet-label" x="18" y="-102" text-anchor="middle">36 × 100 mm stock</text><rect data-jaw-id="vise-fixed-jaw" class="run-sheet-jaw" x="-10" y="-90" width="10" height="100" /><text class="run-sheet-label" x="-5" y="-40" text-anchor="middle">Fixed jaw (left)</text><rect data-jaw-id="vise-moving-jaw" class="run-sheet-jaw" x="36" y="-90" width="10" height="100" /><text class="run-sheet-label" x="41" y="-40" text-anchor="middle">Moving jaw (right)</text><circle class="run-sheet-origin" cx="0" cy="0" r="1.2" /><text class="run-sheet-origin-label" x="1.6" y="3.2">X0 Y0 (front-left, top face)</text><line class="run-sheet-axis" x1="0" y1="0" x2="14" y2="0" marker-end="url(#run-sheet-arrow)" /><text class="run-sheet-axis-label" x="15" y="1.2">X</text><line class="run-sheet-axis" x1="0" y1="0" x2="0" y2="-14" marker-end="url(#run-sheet-arrow)" /><text class="run-sheet-axis-label" x="-1" y="-15">Y</text><rect data-item-id="938-hardwood-feed-lbl-0" class="run-sheet-item" x="3.8764285714285673" y="-24.622142857142858" width="28.24714285714286" height="9.244285714285716"><title>Engrave &quot;F400&quot;</title></rect><text class="run-sheet-item-depth" x="18" y="-20" text-anchor="middle" dominant-baseline="central">1 mm</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-18 -108 72 126" class="run-sheet-svg" role="img" aria-label="Top view of the stock, the vise jaws and the work origin"><defs><marker id="run-sheet-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" class="run-sheet-arrowhead" /></marker></defs><rect data-stock="true" class="run-sheet-stock" x="0" y="-100" width="36" height="100" /><text class="run-sheet-label" x="18" y="-102" text-anchor="middle">36 × 100 mm stock</text><rect data-jaw-id="vise-fixed-jaw" class="run-sheet-jaw" x="-10" y="-90" width="10" height="100" /><text class="run-sheet-label" x="-5" y="-40" text-anchor="middle">Fixed jaw (left)</text><rect data-jaw-id="vise-moving-jaw" class="run-sheet-jaw" x="36" y="-90" width="10" height="100" /><text class="run-sheet-label" x="41" y="-40" text-anchor="middle">Moving jaw (right)</text><circle class="run-sheet-origin" cx="0" cy="0" r="1.2" /><text class="run-sheet-origin-label" x="1.6" y="3.2">X0 Y0 (front-left, top face)</text><line class="run-sheet-axis" x1="0" y1="0" x2="14" y2="0" marker-end="url(#run-sheet-arrow)" /><text class="run-sheet-axis-label" x="15" y="1.2">X</text><line class="run-sheet-axis" x1="0" y1="0" x2="0" y2="-14" marker-end="url(#run-sheet-arrow)" /><text class="run-sheet-axis-label" x="-1" y="-15">Y</text><rect data-item-id="938-hardwood-feed-lbl-0" class="run-sheet-item" x="3.8764285714285673" y="-40.622142857142855" width="28.24714285714286" height="9.244285714285713"><title>Engrave &quot;F400&quot;</title></rect><text class="run-sheet-item-depth" x="18" y="-36" text-anchor="middle" dominant-baseline="central">1 mm</text></svg>
 
 ## 6 · Dry run
 
@@ -65,12 +65,14 @@ Generated 2026-11-03 · file `938-hardwood-flat-cutter-feed-coupon-F400.nc` · s
 
 ## 8 · Cut
 
-1. Spindle, feed, plunge, passes and step-down. Vacuum on. — **12000 RPM · 400 mm/min feed · 150 mm/min plunge · 4 × 0.3 mm passes · 0.45 mm step-over**
-2. Program 1, 938-hardwood-flat-cutter-feed-coupon-F400.nc — the cycle is 2 min 34 s: 9 % of it in air, 9 hops taking 3 s, and the feed running at 92 % of the rate it commands. The air path is 41.965 mm against a 26.478 mm lower bound for visiting its loop entries — 58 % past it. Those are the cycle estimate's own trapezoids on the job machine's rapid model — the same clock the file is posted with. — **9 % in air · 9 hops · feed at 92 %**
-3. The feed path sweeps 608.349 mm² of stock at up to 1 mm deep — the strip is Σ (path length × the cutter's width at that depth) on the feed moves; the sweep removed 126.4 mm³. — **608.349 mm² swept · 126.4 mm³ removed**
-4. the toolpath is ordered by proximity: the cutter finishes each contour to its depth before entering the next, takes each entry at the point nearest where it just was, and cuts the pocket rings inside-out so the wall is the last thing it touches. The file spends 41.965 mm in the air against 608.349 mm cutting (0.069 : 1). The previous ordering spent 323.006 mm (0.531 : 1) on the same cut. — **41.965 mm rapid · 608.349 mm cut**
-5. Engrave "F400" — **1 mm deep**
-6. Stay at the machine. Stop it if the sound changes, the blank moves, or the cutter loads up.
+1. Spindle, feed, plunge, passes and step-down. Vacuum on. — **12000 RPM · 400 mm/min feed · 150 mm/min plunge · 4 depth passes — 1 × 1 mm, 3 × 0.3 mm · 0.45 mm step-over**
+2. Program 1, 938-hardwood-flat-cutter-feed-coupon-F400.nc — the cycle is 2 min 21 s: 10 % of it in air, 15 hops taking 5 s, and the feed running at 94 % of the rate it commands. The air path is 76.443 mm against a 45.195 mm lower bound for visiting its loop entries — 69 % past it. Those are the cycle estimate's own trapezoids on the job machine's rapid model — the same clock the file is posted with. — **10 % in air · 15 hops · feed at 94 %**
+3. The feed path sweeps 575.704 mm² of stock at up to 1 mm deep — the strip is Σ (path length × the cutter's width at that depth) on the feed moves; the sweep removed 126.398 mm³. — **575.704 mm² swept · 126.398 mm³ removed**
+4. the toolpath is ordered by proximity: the cutter finishes each contour to its depth before entering the next, takes each entry at the point nearest where it just was, and cuts the pocket rings inside-out so the wall is the last thing it touches. The file spends 76.443 mm in the air against 575.704 mm cutting (0.133 : 1). The previous ordering spent 261.419 mm (0.454 : 1) on the same cut. — **76.443 mm rapid · 575.704 mm cut**
+5. Finish allowance: the roughing pass leaves 0.2 mm of stock on the walls and the floor (the seed this shop was started with). This file follows it with the finishing pass, at full depth. — **0.2 mm stock to leave**
+6. Engrave "F400" — roughing pass: leaves 0.2 mm of stock on the walls and the floor. — **rough to 0.8 mm deep · 0.2 mm stock left**
+7. Engrave "F400" — finishing pass: full depth along the walls and the floor, 0.2 mm below the roughing cut. — **1 mm deep · full depth**
+8. Stay at the machine. Stop it if the sound changes, the blank moves, or the cutter loads up.
 
 ## 9 · Warnings carried from the app
 
@@ -82,7 +84,7 @@ Generated 2026-11-03 · file `938-hardwood-flat-cutter-feed-coupon-F400.nc` · s
 ## 10 · Record afterwards
 
 1. Measured floor depth — Engrave "F400" — \_\_\_\_\_\_\_\_  *(measured depth (mm))*
-2. Wall-clock minutes the run took (start to finish) — the cycle estimate is 2 min 34 s. — \_\_\_\_\_\_\_\_  *(minutes)*
+2. Wall-clock minutes the run took (start to finish) — the cycle estimate is 2 min 21 s. — \_\_\_\_\_\_\_\_  *(minutes)*
 3. Is the text legible? — \_\_\_\_\_\_\_\_  *(yes / no)*
 4. Surface finish — \_\_\_\_\_\_\_\_  *(clean / fuzzy / burnt)*
 5. Anything that went wrong — \_\_\_\_\_\_\_\_  *(notes)*

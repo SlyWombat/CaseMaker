@@ -566,7 +566,7 @@ const M1_COUPON: CouponSpecFileSpread = {
   id: '938-hardwood-feed',
   title: '938 hardwood flat-cutter feed coupon',
   parameter: 'feed',
-  values: [400, 700, 1000, 1200],
+  values: [250, 400, 700, 1000],
   basePath: '938-stick-base.job.json',
   text: { size: 9, pitch: 16 },
   origin: { x: 18, y: 20 },
@@ -577,11 +577,12 @@ const M1_COUPON: CouponSpecFileSpread = {
   note:
     'Four cells down the 36 × 100 top face of a hardwood stick (Y 20 / 36 / 52 / 68), 9 mm text, ' +
     '1.0 mm deep, on flat-1.0 — the cutter the app recommends for text on this stick (read from ' +
-    'the k3 house export, owned cutters only) and the cell size the face allows. The values bracket ' +
-    'the SEEDED hardwood 0.8–1.6 row, which is also flat-1.0’s row: its starting F1000 is cut so ' +
-    'the readback can adopt it, which is what makes the row measured. The row measures FEED: every ' +
-    'other parameter comes from the feeds row unchanged. A 2 mm flat needs ≥13 mm cells and cannot ' +
-    'post on the 36 mm face, so it keeps its seeded row.',
+    'the k3 house export) and the cell size the face allows. The ladder brackets the row a 1 mm ' +
+    'cutter actually resolves to — the SEEDED hardwood 0.8–1.6 row, S12000 / F400 — with 250 below ' +
+    'it and 700 / 1000 above, so the row’s own F400 is cut and the sweep has a value either side of ' +
+    'it. That value is what the readback adopts, which is what makes the row measured. The row ' +
+    'measures FEED: every other parameter comes from the feeds row unchanged. A 2 mm flat needs ' +
+    '≥13 mm cells and cannot post on the 36 mm face, so it keeps its seeded row.',
 };
 
 writeFileSync(join(outDir, '938-hardwood-feed.json'), JSON.stringify(M1_COUPON, null, 2) + '\n');
