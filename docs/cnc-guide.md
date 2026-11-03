@@ -216,8 +216,9 @@ never faster than every 2 s, whatever a default says.
 
 ### The bed — profiles, the wizard, and what the findings mean
 
-> **Status: Available** — the bed profiles, the wizard, the bed mounts
-> and the job findings.
+> **Status: Partly available** — the bed profiles, the wizard and the job findings. The **bed
+> mounts** (a blank taped to the wasteboard, the L-bracket) are **Planned** again for Milestone 1:
+> the app offers the vise only as a holding until a bench session has run the other two.
 
 **A bed profile is the machine's bed as it physically is.** Not a drawing: one recorded
 description of the surface (the bare aluminium bed, an MDF wasteboard, a fixture plate, a vacuum
@@ -511,7 +512,10 @@ flat cutter and press Simulate again.
 > the as-cut preview, the run sheet, the status strip and Transcript dock and the
 > desktop build's own upload and run. The open work is named where
 > it appears: the day-1 runbook, the Z-chain and auto-level measurement, and the facing and
-> registration questions that remain.
+> registration questions that remain. **Milestone 1 runs one registration procedure** — the vise,
+> the wired V2 probe, the datum path. The 3D probe as a registration instrument, corner and centre
+> finding, a disc's rim, registration on tape or the bracket, the `G32` recipe and the facing
+> re-touch are **Planned** until a bench session observes each: the app names the refusal.
 
 This is a walkthrough of the default job, start to finish: a **hardwood blank** in the vise,
 with the name plate's three words engraved to different depths. It is written in the order the
