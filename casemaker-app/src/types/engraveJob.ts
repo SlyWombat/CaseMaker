@@ -262,6 +262,15 @@ export interface EngraveLabel {
    * (see `engine/cnc/engrave/inlay.ts`).
    */
   inlay?: InlayMark;
+  /**
+   * #940 — how a V-carved TEXT's depth follows the design, exactly as `EngraveShapeBase` states it
+   * for a region: absent reads as `'plane'`, the constant-floor cut, and `'variable'` cuts the
+   * medial-axis depth map. With the job's cutter named, the CAM already cuts a cone's V-carve
+   * without this field; in a multi-cutter job it is what tells the cutter plan the text wants the
+   * V-bit, so a pocket on the same blank can be cut by a flat in its own program. OPTIONAL and not
+   * defaulted, so every document written before the field round-trips unchanged.
+   */
+  vCarveDepth?: 'plane' | 'variable';
 }
 
 /**

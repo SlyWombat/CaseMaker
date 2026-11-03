@@ -24,7 +24,8 @@ import { createSimSession, type SimDesign, type SimFrame, type SimLoadOpts, type
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
-import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
+import { engraveGenerate as runEngraveGenerate, supportingFloors, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
+import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { portLevelPlanner } from './sim/levelPlannerPort';
 import type { PoolSizing } from '@/engine/jobs/poolSizing';
 import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
@@ -252,8 +253,11 @@ const api = {
     const tl = await getToplevel();
     // #922 — the context and the search's arguments are built in `smartPickRun.ts`, which the CLI
     // calls too; this handler only adds the worker's cancellation guard.
+    // #940 — the document's supporting floors, computed here where the toplevel lives; the one
+    // builder carries them into the candidate filter and the search.
+    const floors = supportingFloors(tl, toPartPlan(job));
     return runSmartPick(
-      { tl, job, tools, catalogue, conditions, shop, table: shop.feeds ?? null, onProgress },
+      { tl, job, tools, catalogue, conditions, shop, table: shop.feeds ?? null, onProgress, floors },
       () => latestEditGen > gen,
     );
   },
