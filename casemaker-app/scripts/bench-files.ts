@@ -643,7 +643,7 @@ m1Sample4.facing = { enabled: false, depth: 0, source: 'user' };
 m1Sample4.stock = { ...M1_STICK, material: 'hardwood' };
 m1Sample4.toolKey = NO_TOOL_KEY;
 m1Sample4.labels = [
-  { id: 'initials', text: 'CM', font: 'barlow', weight: 'bold', size: 10, position: { x: 18, y: 50 }, rotation: 0, depth: 6.8, enabled: true },
+  { id: 'initials', text: 'CM', font: 'barlow', weight: 'bold', size: 10, position: { x: 18, y: 50 }, rotation: 0, depth: 6.8, enabled: true, vCarveDepth: 'plane' },
 ];
 m1Sample4.shapes = [
   { id: 'pocket', kind: 'rect', position: { x: 18, y: 50 }, rotation: 0, depth: 6, enabled: true, width: 24, height: 24, cornerRadius: 3 },
