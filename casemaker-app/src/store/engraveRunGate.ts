@@ -213,7 +213,10 @@ function firstErrorOf(
       ...(d.stallMs === undefined ? null : { stallMs: d.stallMs }),
     };
   }
-  const own = v.generated?.errors.at(-1);
+  // The optional chain matters: a generated fixture (or a result stored before the field existed)
+  // can carry no `errors` array at all, and `.at` on undefined would throw instead of answering
+  // "no generated error" — the same `?? []` the codes loop above already uses.
+  const own = v.generated?.errors?.at(-1);
   if (own !== undefined) return { source: 'generate', code: own.stage, message: own.message };
   return null;
 }
