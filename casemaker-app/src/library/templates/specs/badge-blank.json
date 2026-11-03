@@ -2,7 +2,7 @@
   "id": "badge-blank",
   "order": 170,
   "name": "Name badge blank (two-colour)",
-  "description": "The 76 × 38 mm two-colour name-badge blank, ported from samples/badge-blank/make_badge.py: a magnet pocket in the back colour and a plain engraved face on the top colour. Engrave the name in the Engrave-text panel, then machine it on the CNC.",
+  "description": "The 76 × 38 mm two-colour name-badge blank: a magnet pocket in the back colour and a plain engraved face on the top colour. Engrave the name in the Engrave-text panel, then machine it on the CNC.",
   "estPrintMinutes": 35,
   "projectName": "Name badge blank",
   "emptyBoard": {

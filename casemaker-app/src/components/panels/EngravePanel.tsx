@@ -3428,13 +3428,15 @@ export function EngravePanel(): JSX.Element {
     title: string,
   ): JSX.Element => (
     <label style={FIELD_LABEL}>
-      <span>{label}</span>
+      {/* #934 UI-walk — the unit is part of the label (D3/P6): a bare number beside a bare word
+          made the operator guess which of these six lengths was mm (all of them). */}
+      <span>{label} mm</span>
       <input
         type="number"
         step="any"
         value={shownNumber(jobVise(job)[key])}
         data-testid={`engrave-vise-${key}`}
-        aria-label={`Vise ${label}`}
+        aria-label={`Vise ${label}, mm`}
         title={title}
         style={FIELD}
         onChange={(e) => {
@@ -4443,7 +4445,26 @@ export function EngravePanel(): JSX.Element {
             </option>
           ))}
       </select>
-      {job.sources?.tool && <SourceTag source={job.sources.tool} testid="engrave-tool-source" />}
+      {/* #934 UI-walk — a provenance CHIP beside the field was the defect (D2): the word stays, the
+          chip does not. The fact is the same, read as text. */}
+      {job.sources?.tool !== undefined && job.sources.tool !== 'user' && (
+        <span
+          data-testid="engrave-tool-source"
+          data-source={job.sources.tool}
+          style={{ ...MUTED, margin: 0 }}
+          title={
+            job.sources.tool === 'computed'
+              ? 'Computed from the feeds table — no one typed this.'
+              : job.sources.tool === 'catalogue'
+                ? "Makera's catalogue — their starting number for this cutter, not a measurement of this machine."
+                : job.sources.tool === 'measured'
+                  ? 'Taken at the bench.'
+                  : 'Typed here — not more trustworthy for that.'
+          }
+        >
+          {SOURCE_LABEL[job.sources.tool]}
+        </span>
+      )}
       {/* #434 — a drill's cutting end is a point, and the hole is its full diameter only a point
           length above the tip. The panel states the angle and where it came from, the same reading
           the worker plans and the simulation sweeps. */}
@@ -4534,12 +4555,12 @@ export function EngravePanel(): JSX.Element {
             {recPick !== null && recPickDisplay !== null ? (
               <>
                 <b>{recPickDisplay.name}</b>{' '}
-                <span style={{ ...TAG, marginLeft: 0 }} data-testid="engrave-tool-recommended-tag">
+                <span style={{ ...MUTED, margin: 0 }} data-testid="engrave-tool-recommended-tag">
                   recommended
                 </span>
                 {/* #766 D — this is the QUICK rule's answer while the measured search runs. */}
                 {measuredStatus === 'measuring' && (
-                  <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-pick-provisional">
+                  <span style={{ ...MUTED, margin: '0 0 0 4px' }} data-testid="engrave-pick-provisional">
                     {/* #785 — the search's own count, so "measuring" has a number. */}
                     provisional — {measuredProgress === null
                       ? 'measuring…'
@@ -4694,10 +4715,10 @@ export function EngravePanel(): JSX.Element {
         {feeds?.ok && (
           <span
             style={{
-              ...TAG,
-              marginLeft: 4,
-              // The row's own colours, so "Makera's numbers" never reads as a bench reading and a
-              // measured row never reads as a starting point (#310, the same rule as field tags).
+              // #934 UI-walk — the word, not a chip (D2); the row's own colours still keep
+              // "Makera's numbers" from reading as a bench reading (#310).
+              ...MUTED,
+              margin: '0 0 0 4px',
               color: SOURCE_COLOR[feeds.catalogue ? 'catalogue' : feeds.entry.status === 'measured' ? 'measured' : 'computed'],
             }}
             title={feeds.provenance}
@@ -4923,7 +4944,7 @@ export function EngravePanel(): JSX.Element {
 
       {/* 5 — sacrificial material (#213): a board under the part and/or strips beside it. */}
       <h3 style={SUBHEAD}>
-        Sacrificial material{' '}
+        Waste board{' '}
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-sac-badge">
           {sacrificialBadge(sac)}
         </span>
