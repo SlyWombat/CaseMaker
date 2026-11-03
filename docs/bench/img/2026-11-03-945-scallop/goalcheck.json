@@ -1,0 +1,39 @@
+{
+ "goalCells": 156996,
+ "pitchMm": 0.1,
+ "goalMinZ": -26.601,
+ "stockThickness": 36.0,
+ "passCoveragePct": 95.0,
+ "programs": [
+  {
+   "program": "Elephant-stick-scale.nc",
+   "cutter": "6*2*30.5mm Ball Nose Engraving",
+   "shape": "ball",
+   "cuttingDiameter": 2.0
+  },
+  {
+   "program": "Elephant-stick-scale-p2.nc",
+   "cutter": "6*0.5*30.5mm Ball Nose Engraving",
+   "shape": "ball",
+   "cuttingDiameter": 0.5
+  }
+ ],
+ "cutIntoPct": 0.0,
+ "cutIntoAreaMm2": 0.0,
+ "cutInto0p1Pct": 0.0,
+ "cutInto0p5AreaMm2": 0.0,
+ "maxCutIntoMm": 0.002,
+ "cutIntoVolumeMm3": 0.0,
+ "leftover0p1Pct": 15.85,
+ "leftover0p3Pct": 4.83,
+ "leftover1Pct": 1.41,
+ "maxLeftoverMm": 19.568,
+ "leftoverVolumeMm3": 188.9,
+ "idealCutter": 0.5,
+ "idealLeftover0p3Pct": 1.22,
+ "beyondReach0p1Pct": 14.9,
+ "beyondReach0p3Pct": 4.01,
+ "beyondReachVolumeMm3": 162.9,
+ "untouchedPct": 0.0,
+ "medianMm": 0.052
+}
