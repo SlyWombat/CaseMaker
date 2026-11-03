@@ -36,7 +36,7 @@ flips them.
 | 2 | Flat-cutter feeds coupon ladder bracketing the catalogue hardwood row → the first measured hardwood row → a two-line flat-cutter label | #938 (S4) | stick, vise, the recommended flat cutter | second |
 | 3 | Pocket-and-bores face: 20 × 10 × 3 rectangular pocket r2, ⌀8 × 3 round pocket, four ⌀3.2 bores 6 deep (bored) | #939 (S5) | stick (36 × 100 face), vise, flat cutter at the measured row | third |
 | 4 | Two-cutter job: 24 × 24 × 6 pocket with the flat, two initials V-carved 0.8 deep on its floor, the tool change through the app's prompt | #940 (S5/S6) | stick, vise, flat then V/chamfer | fourth |
-| 5 | Chamfer the four top edges 1 × 45°, then a 6 × 10 through-slot across the 36 mm width, open both sides | #941 (S6) | stick, vise, chamfer then flat | fifth |
+| 5 | Chamfer the four top edges 1 × 45°, then a 6 × 10 through-slot across the 36 mm width, open both sides | #941 (S6) | stick, vise, chamfer then flat — a rest pass follows only when the slot's cutter cannot reach the design's corners | fifth |
 
 Every sample: coupon first on the same stick, frame air-run, `M821` for the whole job, `M331` before play, one program
 at a time from the app with no hand command, calipers at the machine, photo beside a scale, transcript saved, results

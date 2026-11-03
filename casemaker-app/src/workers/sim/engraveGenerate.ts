@@ -104,6 +104,7 @@ import {
   type JobFinding,
 } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
+import { cutterReachesAllCorners, stockRimChamferIds } from '@/engine/cnc/engrave/cutterPlan';
 import { pcbIsolationFindings, pcbIsolationSubjects } from '@/workers/sim/pcbIsolation';
 import {
   restDepthShortfallFindings,
@@ -3735,7 +3736,7 @@ function restProgramFact(
 }
 
 /** The rest pair's story, assembled from the final posted programs and the measurements behind them. */
-function assembleRestFacts(link: RestLink, posted: readonly PostedProgram[]): RestPassFacts {
+function assembleRestFacts(link: RestLink, posted: readonly PostedProgram[], cornerRule: string | null): RestPassFacts {
   const roughOne = posted[link.roughIndex]!.one;
   const restOne = posted[link.restIndex]!.one;
   return {
@@ -3772,6 +3773,7 @@ function assembleRestFacts(link: RestLink, posted: readonly PostedProgram[]): Re
     restArea: link.regions.reduce((sum, r) => sum + r.area, 0),
     overlap: link.seam.overlap,
     seam: link.seam,
+    ...(cornerRule === null ? {} : { cornerRule }),
     thirdTool: thirdToolAdvice(
       link.left.restArea,
       link.rest1.cutArea,
@@ -7081,6 +7083,8 @@ export async function engraveGenerate(
   // on `restPass` for the sheet; nothing about program 1's geometry depends on them.
   const refs = setupPrograms(job);
   const setups = jobSetups(job);
+  // #941 — the bevels on the stock's own outline, segmented apart below.
+  const stockRimChamfers = stockRimChamferIds(job);
   const attempts: OneProgram[] = [];
   const posted: PostedProgram[] = [];
   const restFindings: JobFinding[] = [];
@@ -7125,9 +7129,25 @@ export async function engraveGenerate(
       // #786 slice 4a-2 — a surface ref is a SOLO program too: the rest pass measures flat
       // regions, and a curved surface is neither a rough nor a rest region.
       const solo = drill || ref.surface === true;
+      // #941 — A STOCK-RIM BEVEL IS ITS OWN PROGRAM, BEFORE THE CUT THAT FREES ITS EDGE. It owns
+      // items (the bevel), so the plan puts it first; the generator must keep it OUT of the
+      // rough/rest chain — otherwise the rough becomes a cone and the rest pass is measured from
+      // the bevel instead of the slot. A sole ref generates its own program, as a face does.
+      if (!drill && ref.surface !== true && ref.itemIds.some((id) => stockRimChamfers.has(id))) {
+        segments.push({ drill: false, refs: [ref] });
+        continue;
+      }
       const last = segments.at(-1);
       if (solo) segments.push({ drill: true, refs: [ref] });
-      else if (last !== undefined && last.drill === false && last.refs[0]?.faces !== true) last.refs.push(ref);
+      else if (
+        last !== undefined &&
+        last.drill === false &&
+        last.refs[0]?.faces !== true &&
+        // #941 — a bevel segment is CLOSED: the next cutter opens its own (the rough/rest chain),
+        // never joins the bevel.
+        !last.refs[0]?.itemIds.some((id) => stockRimChamfers.has(id))
+      )
+        last.refs.push(ref);
       else segments.push({ drill: false, refs: [ref] });
     }
 
@@ -7253,7 +7273,16 @@ export async function engraveGenerate(
   }
 
   const neckFiles = posted.flatMap((program) => (program.one.neckApart != null ? [{ ref: program.ref, one: program.one.neckApart }] : []));
-  const restPass = restLink === null ? null : assembleRestFacts(restLink, posted);
+  // #941 — WHY THIS REST PASS IS PLANNED, in the sheet's own words: the design's corners. The
+  // rest is offered only when the rough cutter cannot reproduce them (the plan's rule); the
+  // sentence travels so the operator reads the reason rather than inferring it from the file list.
+  const restCornerRule =
+    restLink === null || cutterReachesAllCorners(job, restLink.roughDiameter / 2)
+      ? null
+      : `The rest pass is planned because the design’s corners are sharper than the rough cutter’s radius: the ${Number(
+          restLink.roughDiameter.toFixed(2),
+        )} mm cutter cannot reproduce them, so the second program cuts the inside corners.`;
+  const restPass = restLink === null ? null : assembleRestFacts(restLink, posted, restCornerRule);
   // #768 — THE TOP-LEVEL FIELDS ARE THE FIRST POSTED PROGRAM, not the first ATTEMPT. The settle
   // walk above REGENERATES the programs whose vacuum span moved (a rest program the generator
   // dropped as empty leaves fewer files, so program 1 is re-made as the run's first/last word);
