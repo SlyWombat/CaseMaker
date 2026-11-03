@@ -29,6 +29,7 @@
       "overAt": null
     },
     "areaFloor": 0.03990025185160158,
+    "sliverWidthMm": 0.01,
     "frame": "work"
   },
   "surface": {
@@ -61,6 +62,7 @@
       "overAt": null
     },
     "areaFloor": 0.03990107159230209,
+    "sliverWidthMm": 0.01,
     "frame": "surface"
   }
 }
