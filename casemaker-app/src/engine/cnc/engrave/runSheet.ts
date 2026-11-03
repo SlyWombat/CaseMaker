@@ -246,6 +246,14 @@ export interface RunSheetDrillPlan {
  * describes in "Face the stock top"; the sections below number the ENGRAVING programs 1..n, so the
  * operator's "program 1" is the first file after the face, as the rest pass has always said.
  */
+/**
+ * #940 — a program's own feeds as the sheet prints them: the numbers the file runs, and the
+ * sentence that says which row answered (the #669 chamfer substitution included).
+ */
+export type RunSheetFeedsFacts =
+  | { ok: true; params: { rpm: number; feed: number; plungeFeed: number }; provenance: string }
+  | { ok: false };
+
 export interface RunSheetProgram {
   /** `'facing'` for the blank's skim; absent or `'engrave'` for a setup's program. */
   kind?: 'facing' | 'engrave';
@@ -271,6 +279,13 @@ export interface RunSheetProgram {
   frameError?: string | null;
   /** What the CAM did, for the run step's estimate. */
   cam: RunSheetCamSummary | null;
+  /**
+   * #940 — THIS program's own feeds, when the run resolved one: the sheet's per-program section
+   * states the numbers the file runs and where they came from (a chamfer's flat-row substitution
+   * included). Structurally the worker's `FeedsResult`, narrowed to what the sheet prints; absent
+   * on a stored result from before the field.
+   */
+  feeds?: RunSheetFeedsFacts | null;
   /**
    * #434 — the drill facts when THIS program is the drill bit's. Null on every other file. The
    * per-program section reads them from here, never from the top-level `drill` (which describes
@@ -3479,6 +3494,11 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
           ? 'no CAM summary was recorded'
           : `${cam.operations} operation${cam.operations === 1 ? '' : 's'} · about ${formatDuration(cam.estimatedSeconds)}`,
     },
+    // #940 — A LATER PROGRAM'S FEEDS ARE ITS OWN. Program 1's row is the sheet's opening feeds
+    // step; a second program on another cutter (the sample-4 V-bit) states the row it ran and
+    // where that row came from, so a substitution (a chamfer fed from a flat band at its base)
+    // is on the sheet rather than only in the receipt.
+    ...(program.feeds?.ok === true ? [programFeedsStep(program, number)] : []),
     ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
     ...(program.bore == null ? [] : boreSteps(program.bore)),
     ...(program.chamfer == null ? [] : chamferSteps(program.chamfer)),
@@ -3487,6 +3507,19 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
     ...throughCutSteps(program.through),
     ...neckSawSteps(program.neck),
   ];
+}
+
+/** #940 — the feeds row a later program ran, and the sentence naming where its numbers came from. */
+function programFeedsStep(program: RunSheetProgram, number: number): RunSheetStep {
+  const feeds = program.feeds as Extract<RunSheetFeedsFacts, { ok: true }>;
+  return {
+    text:
+      `The feeds program ${number} runs — ${cutterNameForKey(program.toolKey)}: ` +
+      feeds.provenance,
+    value:
+      `${feeds.params.rpm} RPM · ${fmtNum(feeds.params.feed)} mm/min feed · ` +
+      `${fmtNum(feeds.params.plungeFeed)} mm/min plunge`,
+  };
 }
 
 /**

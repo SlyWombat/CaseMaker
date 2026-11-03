@@ -559,6 +559,14 @@ export interface EngraveProgram {
    */
   threads?: ThreadMillPlan[] | null;
   /**
+   * #940 — THIS PROGRAM'S OWN FEEDS, when the run resolves one for it: the row's numbers and the
+   * sentence that says where they came from (a chamfer's flat-row substitution included). The
+   * top-level `feeds` is program 1's; a later program with its own cutter (the sample-4 V-bit on
+   * a different row) must not leave the sheet quoting program 1's numbers for it. Absent on a
+   * program that resolved none, and on a result stored before the field existed.
+   */
+  feeds?: FeedsResult | null;
+  /**
    * #669 — the chamfer facts when THIS program cuts a bevel. Null on every other file: the run
    * sheet's bevel step belongs to the program that cuts the edge.
    */
@@ -5393,6 +5401,8 @@ export async function generateGoalProgram(
     frameVerify: null,
     programHash: programHash(nc),
     cam,
+    // #940 — this program's own feeds, for the sheet's per-program section.
+    ...(resolved.ok ? { feeds: resolved } : {}),
   };
   const roughProgram: EngraveProgram | null =
     roughNc === null || roughIr === null
@@ -7354,6 +7364,8 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     surfaceCheck: one.surfaceCheck ?? null,
     // #848 — this file's own thread plans (null on a program that mills none).
     threads: one.threads ?? null,
+    // #940 — this file's own feeds (the top-level `feeds` is program 1's).
+    feeds: one.feeds ?? null,
     // #849 — the neck-only file is flagged; its own predictions ride #844's `predicted` above.
     ...(one.neckOnly === true ? { neckOnly: true } : {}),
   };

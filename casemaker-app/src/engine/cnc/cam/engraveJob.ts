@@ -955,8 +955,14 @@ export function generateEngrave(
     }
     const onePass: PreparedPass = {
       rings: ringsFor(label),
-      passes: zPasses(label.depth, params.stepDown),
-      stepMm: params.stepDown,
+      // #940 — A CONE'S V IS ONE FULL-DEPTH PASS. The flat row's step-down is a FLAT's rule: a
+      // cone's flank is the wall, so the deepest pass already opens the whole V and every
+      // shallower pass at the same rings re-traces air inside it (the sample-4 initials ran
+      // twelve passes, eleven of them empty, and a 9.5 min program was estimated at 1 h 53 min).
+      // A cone deeper than one step still cuts in one pass; the flank, not the tip, is what
+      // engages the material.
+      passes: cone === null ? zPasses(label.depth, params.stepDown) : [-label.depth],
+      stepMm: cone === null ? params.stepDown : label.depth,
     };
     if (!finishOn || finish === null) {
       return {
