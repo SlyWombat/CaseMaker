@@ -165,12 +165,13 @@ describe('#898 part 2 — stockBottomExclusion: the elephant’s underside, a na
     expect(excluded).toBeNull();
   });
 
-  it('the committed figure.stl proxy, at j29’s own stick placement: reported, not asserted either way', async () => {
+  it('the committed figure.stl proxy, at goalCorpus873’s j29-adapted stick placement: reported, not asserted either way', async () => {
     // #914's report-back promise ("report what is untested on the proxy"): this fixture is NOT
     // claimed to reproduce the real elephant's underside — it only states what the function finds
-    // on the shape this repo actually has, at the real elephant stick job's own placement (#945's
-    // j29: `goalCorpus873.spec.ts`), so a reader does not have to guess. C's own wording is a
-    // percent of the surface, so that is reported too, not just the raw area.
+    // on the shape this repo actually has, at `goalCorpus873.spec.ts`'s OWN j29-adapted placement
+    // (scale 0.6533, chosen for THIS committed proxy mesh — the real j29 elephant job scales its
+    // own local-only mesh by 0.8502, a different number for a different mesh), so a reader does
+    // not have to guess. C's own wording is a percent of the surface, so that is reported too.
     const bytes = readFileSync(here('figure.stl'));
     const read = await readTargetObjectFile(new File([bytes], 'figure.stl'), 'goal-figure-898');
     if (!read.ok) throw new Error(read.error);
@@ -197,7 +198,7 @@ describe('#898 part 2 — stockBottomExclusion: the elephant’s underside, a na
       positions[i + 2] = z;
     }
     const coverageMesh: CoverageMesh = { positions, indices: mesh.indices };
-    // j29's own stock: 36 mm thick — the plane this function anchors on, not the goal's own
+    // The real j29 stock is 36 mm thick — the plane this function anchors on, not the goal's own
     // lowest point (which sits a few mm clear of it; see this function's own doc for why that
     // distinction is the fix, not a style choice).
     const excluded = stockBottomExclusion(coverageMesh, 36);
@@ -205,7 +206,7 @@ describe('#898 part 2 — stockBottomExclusion: the elephant’s underside, a na
     const totalMm2 = facts.reduce((a, f) => a + f.areaMm2, 0);
     // eslint-disable-next-line no-console
     console.log(
-      `#898 figure.stl @ j29 scale, stock-bottom exclusion: ${
+      `#898 figure.stl @ goalCorpus873's j29-adapted placement, stock-bottom exclusion: ${
         excluded === null ? 'none found' : `${excluded.areaMm2.toFixed(1)} mm², ${((excluded.areaMm2 / totalMm2) * 100).toFixed(2)}% of the surface`
       }`,
     );

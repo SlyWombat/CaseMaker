@@ -70,7 +70,7 @@ import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import { HUMAN, type CommandOptions } from '../../scripts/lib/casemaker/output';
 import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
+import { planFlipSetups, programIndexesFor } from '@/engine/cnc/engrave/goalFlipSetups';
 import { readTargetObjectFile } from '@/engine/import/targetObject';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 
@@ -508,9 +508,18 @@ describe.skipIf(!HAVE_STICK)('#922 one pipeline — the stick goal job', () => {
  * the relief's ~7 mm depth, and setup 2's (the flipped side's) unbanded need is the stock's full
  * thickness (a flipped flush-top goal's farthest point is always the stock thickness away — #914's
  * own measurement on the real stick figure, 36 mm of 36 mm stock) — 10 mm here, comfortably inside
- * the owned ⌀3.175 ball's 21 mm usable band either way. A deeper goal would need `bandMm` wired into
- * each side's own goal copy first (`planFlipSetups` does not do this yet — #914's own report flags
- * it as an open risk for the real elephant/panther flip, separate from this program-identity case).
+ * the owned ⌀3.175 ball's 21 mm usable band either way, so this target carries no `cutWithinReach`.
+ *
+ * A DEEPER GOAL (the real elephant/panther) carries `cutWithinReach: true` through
+ * `planFlipSetups`'s `{...target}` spread into both side goals unchanged — but `engraveGenerate.ts`
+ * decides whether to apply ANY band by comparing the goal's own RAW height (`placedSize(goal).z`,
+ * the SAME number for every side) against the cutter's reach, never the SIDE's own
+ * position-adjusted need (`goalSideNeedMm`, which for a flipped side can reach the full stock
+ * thickness). A cutter whose reach exceeds the goal's raw depth but not the flipped side's real
+ * need (j29's own 30.5 mm ball against a 27 mm-deep goal in 36 mm stock) gets NO band on either
+ * side, so setup 2 would attempt the full unbanded depth with a cutter that cannot reach it — see
+ * #914's own report for this and the ring-severance question it is bound up with; neither is fixed
+ * here, and `engraveGenerate.ts`'s band trigger is shared, outside this issue's own scope.
  */
 async function flipGoalJobPath(): Promise<string> {
   const bytes = readFileSync(join(HERE, '..', 'fixtures', 'goals', 'relief-plate.stl'));
@@ -580,6 +589,14 @@ async function expectSameFlipGoal(): Promise<void> {
   // THE FIRST FACT: a two-setup job posts (at least) two programs from EACH door, not one.
   expect(worker.programs.length, 'flip-914: the flip plan is two setups, so at least two programs').toBeGreaterThanOrEqual(2);
   expect(cli.ncs, 'flip-914: both paths post the same number of programs').toHaveLength(worker.programs.length);
+  // PROVE SETUP 2 ACTUALLY POSTED, not just "two programs" (a facing file plus setup 1 alone would
+  // also satisfy that count): `programIndexesFor` (#898 part 2) on the worker's OWN posted list,
+  // its first exercise against real generator output rather than a synthetic array.
+  const setup2Id = job.setups![1]!.id;
+  expect(
+    programIndexesFor(setup2Id, worker.programs).length,
+    'flip-914: setup 2 (the flipped side) must own at least one of the posted programs',
+  ).toBeGreaterThanOrEqual(1);
   worker.programs.forEach((program, i) => {
     const cliNc = cli.ncs[i]!;
     if (program.nc === cliNc) return;

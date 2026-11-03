@@ -4,13 +4,14 @@
  * opt-in `reach` input, not a rewrite — a caller that does not ask for it sees today's
  * geometry-only numbers unchanged (`goalFlipPlan.spec.ts` pins that).
  *
- * THE SHAPE, on the committed proxy. `tests/fixtures/goals/figure.stl` at the real elephant stick
- * job's own placement (#945's j29: a 36 × 100 × 36 mm stick, `rotation: 90`, `scale: 0.6533`,
- * `tests/unit/goalCorpus873.spec.ts`'s own fixture) stands the figure on its stock exactly as the
- * real elephant/panther jobs do. At that scale the figure's own deepest point sits roughly 27 mm
- * below the stock top (the design note's own measured number) — deeper than a single setup's
- * usable band with a short cutter, so reach genuinely binds: a GEOMETRY-ONLY top setup claims
- * area a short-reach cutter cannot touch, and a reach-aware top setup must claim less of it.
+ * THE SHAPE, on the committed proxy. `tests/fixtures/goals/figure.stl` at `goalCorpus873.spec.ts`'s
+ * OWN j29-ADAPTED placement (a 36 × 100 × 36 mm stick, `rotation: 90`, `scale: 0.6533` — NOT the
+ * real j29 elephant job's own 0.8502: `goalCorpus873.spec.ts` chose 0.6533 for THIS committed
+ * proxy mesh to land at a comparable depth, since the real elephant mesh is local-only and never
+ * committed) stands the figure on its stock the same way the real elephant/panther jobs do. At
+ * that scale the figure's own deepest point sits roughly 27 mm below the stock top — deeper than
+ * a single setup's usable band with a short cutter, so reach genuinely binds: a GEOMETRY-ONLY top
+ * setup claims area a short-reach cutter cannot touch, and a reach-aware top setup must claim less.
  *
  * THE CUTTER is a ⌀3.175 mm ball with a 22 mm stated flute — the design note's own "owned ball,
  * 22 mm catalogue reach" figure — giving a 21 mm usable band (`GOAL_BAND_CLEARANCE_MM` = 1 mm).
@@ -80,7 +81,7 @@ const STICK_FACES = {
     'on a stick stock, left/right are the vise-jaw faces and front/back are the length-overhang ends — not cuttable surfaces',
 };
 
-/** The goal's triangles in setup 1's work frame — j29's own placement (#945), the real elephant
+/** The goal's triangles in setup 1's work frame — goalCorpus873.spec.ts's j29-adapted placement (#945), the real elephant
  *  stick job's scale and turn, substituting the committed figure.stl for the local-only mesh. */
 async function stickFigureMesh(): Promise<CoverageMesh> {
   const bytes = readFileSync(here('figure.stl'));
@@ -137,7 +138,7 @@ describe('#914 the reach-aware flip plan, on the stick-scale figure proxy', () =
 
     // eslint-disable-next-line no-console
     console.log(
-      `#914 figure.stl @ j29 scale: geometry-only top-only ${(geomTopFraction * 100).toFixed(1)}%, ` +
+      `#914 figure.stl @ goalCorpus873's j29-adapted placement: geometry-only top-only ${(geomTopFraction * 100).toFixed(1)}%, ` +
         `reach-aware (22 mm ball, 21 mm band) top-only ${(reachTopFraction * 100).toFixed(1)}%`,
     );
   });
@@ -185,7 +186,7 @@ describe('#914 the reach-aware flip plan, on the stick-scale figure proxy', () =
 
     // eslint-disable-next-line no-console
     console.log(
-      `#914 figure.stl @ j29 scale, RESTRICTED to top+bottom: top-only ${(topOnlyFraction * 100).toFixed(1)}%, ` +
+      `#914 figure.stl @ goalCorpus873's j29-adapted placement, RESTRICTED to top+bottom: top-only ${(topOnlyFraction * 100).toFixed(1)}%, ` +
         `top+bottom union ${(unionFraction * 100).toFixed(1)}%, stopped: ${reachAware.stopped} ` +
         `(top needs ${reachAware.sides[0]!.neededMm.toFixed(1)} mm, bottom needs ${reachAware.sides[1]!.neededMm.toFixed(1)} mm; ` +
         `top cuts to ${reachAware.sides[0]!.creditedMaxDepthMm.toFixed(1)} mm, bottom cuts to ${reachAware.sides[1]!.creditedMaxDepthMm.toFixed(1)} mm)`,
