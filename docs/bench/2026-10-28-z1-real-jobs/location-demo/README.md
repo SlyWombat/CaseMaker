@@ -1,0 +1,1 @@
+The demo location (`location.json`, "House + full Makera library (demo)", 134 cutters) and its Makera catalogue (`catalogue.json`, synced 2026-10-18: 129 cutters / 1328 feed rows) that the Z1 Demo Jobs page's demo cards run on, exactly as `tools/build.py` reads them; a hand-off for the measuring loop, not for main.

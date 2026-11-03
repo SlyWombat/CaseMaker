@@ -1,0 +1,4832 @@
+{
+ "kind": "casemaker-location",
+ "schemaVersion": 1,
+ "id": "loc-18df72f2aaf89730",
+ "name": "House + full Makera library (demo)",
+ "createdAt": "2026-10-17T22:52:43.292Z",
+ "migratedFrom": null,
+ "machines": [
+  {
+   "id": "machine-lejqjgb73q",
+   "profileId": "Z1",
+   "name": "Makera_Z1_010290",
+   "serial": null,
+   "firmware": null,
+   "address": {
+    "host": "192.168.10.43",
+    "port": 2222
+   },
+   "calibration": {
+    "frame": {
+     "anchor1": [
+      -190.89,
+      -193.83
+     ],
+     "anchor2Offset": [
+      88.5,
+      45
+     ],
+     "clearanceXY": [
+      -11.6,
+      -14.6
+     ],
+     "clearanceZ": -3,
+     "toolrackOffset": [
+      48.8,
+      181
+     ],
+     "toolrackZ": -108
+    },
+    "machineId": "Z1",
+    "measuredAt": "2026-10-18T18:32:51.642Z",
+    "softEndstop": {
+     "enabled": true,
+     "source": "config-get sd on 192.168.10.43",
+     "xMin": -207,
+     "yMin": -206,
+     "zMin": -102
+    },
+    "source": "config-get sd on 192.168.10.43"
+   },
+   "fixtures": {},
+   "margins": null,
+   "power": null,
+   "wasteboard": null,
+   "updatedAt": "2026-10-18T18:33:24.596Z"
+  }
+ ],
+ "tools": [],
+ "inventory": [
+  {
+   "id": "kz-corn-2-0-10-5",
+   "tool": {
+    "number": null,
+    "id": "111218203811",
+    "name": "TiN Coating Corn Bit - 1/8\" Shank 2mm * 10.5mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.5,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 2,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-CORN-2.0-10.5"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-CORN-2.0-10.5-10PCS. Label CN: \u7389\u7c73\u5200."
+  },
+  {
+   "id": "kz-drill-1-10",
+   "tool": {
+    "number": null,
+    "id": null,
+    "name": "TiN Coating Drill Bit - 1/8\" Shank 1mm * 10mm",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-DRILL-1-10"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-DRILL-1-10-10PCS. Label CN: \u94bb\u5934."
+  },
+  {
+   "id": "kz-drill-2-12",
+   "tool": {
+    "number": null,
+    "id": null,
+    "name": "TiN Coating Drill Bit - 1/8\" Shank 2mm * 12mm",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 2,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-DRILL-2-12"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-DRILL-2-12-10PCS. Label CN: \u94bb\u5934."
+  },
+  {
+   "id": "kz-engrave-30-0-3",
+   "tool": {
+    "number": null,
+    "id": "121011033830",
+    "name": "Single Flute Engraving Bit - 1/8\" Shank 30\u00b0 * 0.3mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.3,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-ENGRAVE-30-0.3"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-ENGRAVE-30-0.3-10PCS. Label CN: \u5e73\u5e95\u5c16\u5200."
+  },
+  {
+   "id": "kz-corn-3-0-12",
+   "tool": {
+    "number": null,
+    "id": null,
+    "name": "TiN Coating Corn Bit - 1/8\" Shank 3.0mm * 12mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.0,
+    "diameter": 3.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-CORN-3.0-12"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-CORN-3.0-12-10PCS. Label CN: \u7389\u7c73\u5200."
+  },
+  {
+   "id": "kz-drill-2-5-12",
+   "tool": {
+    "number": null,
+    "id": null,
+    "name": "TiN Coating Drill Bit - 1/8\" Shank 2.5mm * 12mm",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.5,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-DRILL-2.5-12"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-DRILL-2.5-12-10PCS. Label CN: \u94bb\u5934."
+  },
+  {
+   "id": "kz-o-flute-m-2-8",
+   "tool": {
+    "number": null,
+    "id": "112111203808",
+    "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank 2mm * 8mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 2,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-O-FLUTE-M-2-8"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-O-FLUTE-M-2-8. Label CN: \u91d1\u5c5e\u5355\u5203\u87ba\u65cb\u94e3\u5200. Metal line (-M-)."
+  },
+  {
+   "id": "kz-ball-nose-3-175-22",
+   "tool": {
+    "number": null,
+    "id": null,
+    "name": "Two Flute Ball Nose Bit - 1/8\" Shank 3.175mm * 22mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 1.5875,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 22.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-BALL-NOSE-3.175-22"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-BALL-NOSE-3.175-22. Label CN: \u7403\u5934\u5200."
+  },
+  {
+   "id": "kz-o-flute-2-12",
+   "tool": {
+    "number": null,
+    "id": "111011203812",
+    "name": "Spiral 'O' Single Flute Bit - 1/8\" Shank 2mm * 12mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-O-FLUTE-2-12"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-O-FLUTE-2-12. Label CN: \u5355\u5203\u87ba\u65cb\u94e3\u5200. In service: in the Z1 spindle since 2026-10-12 (bench cutter, replacing the 1x4 ball nose)."
+  },
+  {
+   "id": "kz-o-flute-3-175-25",
+   "tool": {
+    "number": null,
+    "id": "111011313825",
+    "name": "Spiral 'O' Single Flute Bit - 1/8\" Shank 3.175mm * 25mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 25.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-O-FLUTE-3.175-25"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-O-FLUTE-3.175-25. Label CN: \u5355\u5203\u87ba\u65cb\u94e3\u5200."
+  },
+  {
+   "id": "kz-o-flute-m-3-175-12",
+   "tool": {
+    "number": null,
+    "id": "112111313812",
+    "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank [diameter washed out on label; code says 3.175]mm * 12mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 5,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-O-FLUTE-M-3.175-12"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-O-FLUTE-M-3.175-12. Label CN: \u91d1\u5c5e\u5355\u5203\u87ba\u65cb\u94e3\u5200. Metal line (-M-)."
+  },
+  {
+   "id": "kz-ball-nose-2-12",
+   "tool": {
+    "number": null,
+    "id": "131012203812",
+    "name": "Two Flute Ball Nose Bit - 1/8\" Shank 2mm * 12mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 3.175,
+    "cornerRadius": 1.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-BALL-NOSE-2-12"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-BALL-NOSE-2-12. Label CN: \u7403\u5934\u5200."
+  },
+  {
+   "id": "kz-engrave-30-0-5",
+   "tool": {
+    "number": null,
+    "id": "121011053830",
+    "name": "Single Flute Engraving Bit - 1/8\" Shank 30\u00b0 * 0.5mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.5,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-ENGRAVE-30-0.5"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-ENGRAVE-30-0.5-10PCS. Label CN: \u5e73\u5e95\u5c16\u5200."
+  },
+  {
+   "id": "kz-corn-0-6-3",
+   "tool": {
+    "number": null,
+    "id": "111218063803",
+    "name": "TiN Coating Corn Bit - 1/8\" Shank 0.6mm * 3mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.6,
+    "diameter": 0.6,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-CORN-0.6-3"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-CORN-0.6-3-10PCS. Label CN: \u7389\u7c73\u5200."
+  },
+  {
+   "id": "kz-corn-1-7",
+   "tool": {
+    "number": null,
+    "id": "111218103807",
+    "name": "TiN Coating Corn Bit - 1/8\" Shank 1mm * 7mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 1.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 7.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-CORN-1-7"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-CORN-1-7-10PCS. Label CN: \u7389\u7c73\u5200."
+  },
+  {
+   "id": "kz-drill-3-12",
+   "tool": {
+    "number": null,
+    "id": "142212303812",
+    "name": "TiN Coating Drill Bit - 1/8\" Shank 3mm * 12mm",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.0,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-DRILL-3-12"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-DRILL-3-12-10PCS. Label CN: \u94bb\u5934."
+  },
+  {
+   "id": "kz-chamfer-90",
+   "tool": {
+    "number": null,
+    "id": "122111013890",
+    "name": "Chamfering Bit - 1/8\" Shank 90\u00b0",
+    "typeText": "Chamfer",
+    "shape": "chamfer",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.1,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": 90.0,
+    "halfAngle": null,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 4,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-CHAMFER-90"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow + orange. Makera C1-BIT-CHAMFER-90. Label CN: \u5012\u89d2\u5200. Two physical variants under one code (#381): 2\u00d7 yellow with collar, \u224840 mm overall, tip\u2192collar \u224817.5 mm; 2\u00d7 orange, \u224851 mm overall (ruler photo, \u00b12 mm)."
+  },
+  {
+   "id": "kz-engrave-m-30-0-2",
+   "tool": {
+    "number": null,
+    "id": "122111023830",
+    "name": "Single Flute Engraving Bit for Metal - 1/8\" Shank 30\u00b0 * 0.2mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.2,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-ENGRAVE-M-30-0.2"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: orange. Makera C1-BIT-ENGRAVE-M-30-0.2. Label CN: \u91d1\u5c5e\u5e73\u5e95\u5c16\u5200. Metal line (-M-)."
+  },
+  {
+   "id": "kz-engrave-m-30-0-3",
+   "tool": {
+    "number": null,
+    "id": "122111033830",
+    "name": "Single Flute Engraving Bit for Metal - 1/8\" Shank 30\u00b0 * 0.3mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.3,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 3,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-ENGRAVE-M-30-0.3"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: orange. Makera C1-BIT-ENGRAVE-M-30-0.3. Label CN: \u91d1\u5c5e\u5e73\u5e95\u5c16\u5200. Metal line (-M-)."
+  },
+  {
+   "id": "kz-o-flute-m-1-3",
+   "tool": {
+    "number": null,
+    "id": "112111103803",
+    "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank 1mm * 3mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 1.0,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 2,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-O-FLUTE-M-1-3"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: green. Makera C1-BIT-O-FLUTE-M-1-3. Label CN: \u91d1\u5c5e\u5355\u5203\u87ba\u65cb\u94e3\u5200. Metal line (-M-)."
+  },
+  {
+   "id": "kz-engrave-m-60-0-1",
+   "tool": {
+    "number": null,
+    "id": "122111013860",
+    "name": "Single Flute Engraving Bit for Metal - 1/8\" Shank 60\u00b0 * 0.1mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.1,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 30.0,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-ENGRAVE-M-60-0.1"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: orange. Makera C1-BIT-ENGRAVE-M-60-0.1. Label CN: \u91d1\u5c5e\u5e73\u5e95\u5c16\u5200. Metal line (-M-)."
+  },
+  {
+   "id": "kz-thread-m5-15",
+   "tool": {
+    "number": null,
+    "id": "152111403815",
+    "name": "Thread Milling Bit - 1/8\" Shank M5(d4) * 15mm",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": 4.0,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 15.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-THREAD-M5-15"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: blue. Makera C1-BIT-THREAD-M5-15. Label CN: \u87ba\u7eb9\u94e3\u5200 (thread milling cutter). Thread M5; cutter \u2300 from the label (d4), not the code."
+  },
+  {
+   "id": "kz-ball-nose-m-2-6",
+   "tool": {
+    "number": null,
+    "id": "132112203806",
+    "name": "Two Flute Ball Nose Bit for Metal - 1/8\" Shank 2mm * 6mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 3.175,
+    "cornerRadius": 1.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-BALL-NOSE-M-2-6"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: blue. Makera C1-BIT-BALL-NOSE-M-2-6. Label CN: \u91d1\u5c5e\u7403\u5934\u5200 (metal ball-nose cutter). Metal line (-M-)."
+  },
+  {
+   "id": "kz-ball-nose-m-1-3",
+   "tool": {
+    "number": null,
+    "id": "132112103803",
+    "name": "Two Flute Ball Nose Bit for Metal - 1/8\" Shank 1mm * 3mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 3.175,
+    "cornerRadius": 0.5,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-BALL-NOSE-M-1-3"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: blue. Makera C1-BIT-BALL-NOSE-M-1-3. Label CN: \u91d1\u5c5e\u7403\u5934\u5200 (metal ball-nose cutter). Metal line (-M-)."
+  },
+  {
+   "id": "kz-thread-m3-9",
+   "tool": {
+    "number": null,
+    "id": "152111243809",
+    "name": "Thread Milling Bit - 1/8\" Shank M3(d2.4mm) * 9mm",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.4,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 9.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-THREAD-M3-9"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: blue. Makera C1-BIT-THREAD-M3-9. Label CN: \u87ba\u7eb9\u94e3\u5200 (thread milling cutter). Thread M3; cutter \u2300 from the label (d2.4), not the code."
+  },
+  {
+   "id": "kz-o-flute-3-175-42",
+   "tool": {
+    "number": null,
+    "id": "111011313842",
+    "name": "Spiral 'O' Single Flute Bit - 1/8\" Shank 3.175mm * 42mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 42.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-O-FLUTE-3.175-42"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-O-FLUTE-3.175-42. Label CN: \u5355\u5203\u87ba\u65cb\u94e3\u5200 (single-flute spiral milling cutter)."
+  },
+  {
+   "id": "kz-ball-nose-m-3-175-10",
+   "tool": {
+    "number": null,
+    "id": "132112313810",
+    "name": "Two Flute Ball Nose Bit for Metal - 1/8\" Shank 3.175mm * 10mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 1.5875,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-BALL-NOSE-M-3.175-10"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: blue. Makera C1-BIT-BALL-NOSE-M-3.175-10. Label CN: \u91d1\u5c5e\u7403\u5934\u5200 (metal ball-nose cutter). Metal line (-M-)."
+  },
+  {
+   "id": "kz-ball-nose-1-4",
+   "tool": {
+    "number": null,
+    "id": "131012103804",
+    "name": "Two Flute Ball Nose Bit - 1/8\" Shank 1mm * 4mm",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 3.175,
+    "cornerRadius": 0.5,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 4.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-BALL-NOSE-1-4"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: yellow. Makera C1-BIT-BALL-NOSE-1-4. Label CN: \u7403\u5934\u5200 (ball-nose cutter). Back in its box (swapped out of the spindle 2026-10-12)."
+  },
+  {
+   "id": "kz-o-flute-m-1-5-6",
+   "tool": {
+    "number": null,
+    "id": "112111153806",
+    "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank 1.5mm * 6mm",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.5,
+    "diameter": 1.5,
+    "cornerRadius": 0.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [
+    {
+     "symbology": "qr",
+     "value": "C1-BIT-O-FLUTE-M-1.5-6"
+    }
+   ],
+   "addedAt": "2026-10-12T00:00:00.000Z",
+   "notes": "Case: green. Makera C1-BIT-O-FLUTE-M-1.5-6. Label CN: \u91d1\u5c5e\u5355\u5203\u87ba\u65cb\u94e3\u5200. Metal line (-M-)."
+  },
+  {
+   "id": "lib-132112153805",
+   "tool": {
+    "number": 1,
+    "id": "132112153805",
+    "name": "3.175*1.5*4.5mm Ball Nose(Metal)",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.5,
+    "diameter": 1.5,
+    "cornerRadius": 0.75,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 4.5,
+    "shoulderLength": 4.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-131012153808",
+   "tool": {
+    "number": 1,
+    "id": "131012153808",
+    "name": "3.175*1.5*8mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.5,
+    "diameter": 1.5,
+    "cornerRadius": 0.75,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.0,
+    "shoulderLength": 8.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-131012253815",
+   "tool": {
+    "number": 1,
+    "id": "131012253815",
+    "name": "3.175*2.5*15mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.5,
+    "diameter": 2.5,
+    "cornerRadius": 1.25,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 15.0,
+    "shoulderLength": 15.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-132112253808",
+   "tool": {
+    "number": 1,
+    "id": "132112253808",
+    "name": "3.175*2.5*7.5mm Ball Nose(Metal)",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.5,
+    "diameter": 2.5,
+    "cornerRadius": 1.25,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 7.5,
+    "shoulderLength": 7.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-131012313822",
+   "tool": {
+    "number": 1,
+    "id": "131012313822",
+    "name": "3.175*22mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": 1.5875,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 22.0,
+    "shoulderLength": 22.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-131022404512",
+   "tool": {
+    "number": 1,
+    "id": "131022404512",
+    "name": "4*12mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 4.0,
+    "tipDiameter": 4.0,
+    "diameter": 4.0,
+    "cornerRadius": 2.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-132122405012",
+   "tool": {
+    "number": 1,
+    "id": "132122405012",
+    "name": "4*12mm Ball Nose(Metal)",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 4.0,
+    "tipDiameter": 4.0,
+    "diameter": 4.0,
+    "cornerRadius": 2.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-131022404522",
+   "tool": {
+    "number": 1,
+    "id": "131022404522",
+    "name": "4*22mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 4.0,
+    "tipDiameter": 4.0,
+    "diameter": 4.0,
+    "cornerRadius": 2.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 22.0,
+    "shoulderLength": 22.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-131022406032",
+   "tool": {
+    "number": 1,
+    "id": "131022406032",
+    "name": "4*32mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 4.0,
+    "tipDiameter": 4.0,
+    "diameter": 4.0,
+    "cornerRadius": 2.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 32.0,
+    "shoulderLength": 32.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-131032605012",
+   "tool": {
+    "number": 1,
+    "id": "131032605012",
+    "name": "6*12mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 6.0,
+    "tipDiameter": 6.0,
+    "diameter": 6.0,
+    "cornerRadius": 3.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-132132605018",
+   "tool": {
+    "number": 1,
+    "id": "132132605018",
+    "name": "6*18mm Ball Nose(Metal)",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 6.0,
+    "tipDiameter": 6.0,
+    "diameter": 6.0,
+    "cornerRadius": 3.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 18.0,
+    "shoulderLength": 18.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-131032605022",
+   "tool": {
+    "number": 1,
+    "id": "131032605022",
+    "name": "6*22mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 6.0,
+    "tipDiameter": 6.0,
+    "diameter": 6.0,
+    "cornerRadius": 3.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 22.0,
+    "shoulderLength": 22.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-131032606032",
+   "tool": {
+    "number": 1,
+    "id": "131032606032",
+    "name": "6*32mm Ball Nose",
+    "typeText": "Ball Nose",
+    "shape": "ball",
+    "handleDiameter": 6.0,
+    "tipDiameter": 6.0,
+    "diameter": 6.0,
+    "cornerRadius": 3.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 32.0,
+    "shoulderLength": 32.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218073804",
+   "tool": {
+    "number": 3,
+    "id": "111218073804",
+    "name": "3.175*0.7*4mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.7,
+    "diameter": 0.7,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 4.0,
+    "shoulderLength": 4.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218083806",
+   "tool": {
+    "number": 3,
+    "id": "111218083806",
+    "name": "3.175*0.8*5.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.8,
+    "diameter": 0.8,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 5.5,
+    "shoulderLength": 5.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218093806",
+   "tool": {
+    "number": 3,
+    "id": "111218093806",
+    "name": "3.175*0.9*6mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.9,
+    "diameter": 0.9,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 6.0,
+    "shoulderLength": 6.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111011103803",
+   "tool": {
+    "number": 1,
+    "id": "111011103803",
+    "name": "3.175*1*3mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 1.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": 3.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218113807",
+   "tool": {
+    "number": 3,
+    "id": "111218113807",
+    "name": "3.175*1.1*7mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.1,
+    "diameter": 1.1,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 7.0,
+    "shoulderLength": 7.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218123807",
+   "tool": {
+    "number": 3,
+    "id": "111218123807",
+    "name": "3.175*1.2*7mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.2,
+    "diameter": 1.2,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 7.0,
+    "shoulderLength": 7.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218133808",
+   "tool": {
+    "number": 3,
+    "id": "111218133808",
+    "name": "3.175*1.3*7.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.3,
+    "diameter": 1.3,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 7.5,
+    "shoulderLength": 7.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218143808",
+   "tool": {
+    "number": 3,
+    "id": "111218143808",
+    "name": "3.175*1.4*7.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.4,
+    "diameter": 1.4,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 7.5,
+    "shoulderLength": 7.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218153809",
+   "tool": {
+    "number": 3,
+    "id": "111218153809",
+    "name": "3.175*1.5*8.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.5,
+    "diameter": 1.5,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.5,
+    "shoulderLength": 8.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111011153808",
+   "tool": {
+    "number": 1,
+    "id": "111011153808",
+    "name": "3.175*1.5*8mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.5,
+    "diameter": 1.5,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.0,
+    "shoulderLength": 8.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218163809",
+   "tool": {
+    "number": 3,
+    "id": "111218163809",
+    "name": "3.175*1.6*8.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.6,
+    "diameter": 1.6,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.5,
+    "shoulderLength": 8.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218173810",
+   "tool": {
+    "number": 3,
+    "id": "111218173810",
+    "name": "3.175*1.7*9.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.7,
+    "diameter": 1.7,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 9.5,
+    "shoulderLength": 9.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218183810",
+   "tool": {
+    "number": 3,
+    "id": "111218183810",
+    "name": "3.175*1.8*9.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.8,
+    "diameter": 1.8,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 9.5,
+    "shoulderLength": 9.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218193810",
+   "tool": {
+    "number": 3,
+    "id": "111218193810",
+    "name": "3.175*1.9*9.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.9,
+    "diameter": 1.9,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 9.5,
+    "shoulderLength": 9.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218313812",
+   "tool": {
+    "number": 3,
+    "id": "111218313812",
+    "name": "3.175*12mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111011313817",
+   "tool": {
+    "number": 1,
+    "id": "111011313817",
+    "name": "3.175*17mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 17.0,
+    "shoulderLength": 17.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218213811",
+   "tool": {
+    "number": 3,
+    "id": "111218213811",
+    "name": "3.175*2.1*10.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.1,
+    "diameter": 2.1,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.5,
+    "shoulderLength": 10.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218243811",
+   "tool": {
+    "number": 3,
+    "id": "111218243811",
+    "name": "3.175*2.4*10.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.4,
+    "diameter": 2.4,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.5,
+    "shoulderLength": 10.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218253811",
+   "tool": {
+    "number": 3,
+    "id": "111218253811",
+    "name": "3.175*2.5*10.5mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.5,
+    "diameter": 2.5,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.5,
+    "shoulderLength": 10.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-112111253812",
+   "tool": {
+    "number": 4,
+    "id": "112111253812",
+    "name": "3.175*2.5*12mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.5,
+    "diameter": 2.5,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111011253815",
+   "tool": {
+    "number": 1,
+    "id": "111011253815",
+    "name": "3.175*2.5*15mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.5,
+    "diameter": 2.5,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 15.0,
+    "shoulderLength": 15.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111218303812",
+   "tool": {
+    "number": 3,
+    "id": "111218303812",
+    "name": "3.175*3.0*12mm Corn",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.0,
+    "diameter": 3.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111011313832",
+   "tool": {
+    "number": 1,
+    "id": "111011313832",
+    "name": "3.175*32mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 32.0,
+    "shoulderLength": 32.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-112121405012",
+   "tool": {
+    "number": 4,
+    "id": "112121405012",
+    "name": "4*12mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 4.0,
+    "tipDiameter": 4.0,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-112121405017",
+   "tool": {
+    "number": 4,
+    "id": "112121405017",
+    "name": "4*17mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 4.0,
+    "tipDiameter": 4.0,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 17.0,
+    "shoulderLength": 17.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111021404522",
+   "tool": {
+    "number": 1,
+    "id": "111021404522",
+    "name": "4*22mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 4.0,
+    "tipDiameter": 4.0,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 22.0,
+    "shoulderLength": 22.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-112121405022",
+   "tool": {
+    "number": 4,
+    "id": "112121405022",
+    "name": "4*22mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 4.0,
+    "tipDiameter": 4.0,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 22.0,
+    "shoulderLength": 22.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111021405025",
+   "tool": {
+    "number": 1,
+    "id": "111021405025",
+    "name": "4*25mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 4.0,
+    "tipDiameter": 4.0,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 25.0,
+    "shoulderLength": 25.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111021405532",
+   "tool": {
+    "number": 1,
+    "id": "111021405532",
+    "name": "4*32mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 4.0,
+    "tipDiameter": 4.0,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 32.0,
+    "shoulderLength": 32.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-112131605017",
+   "tool": {
+    "number": 4,
+    "id": "112131605017",
+    "name": "6*17mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 6.0,
+    "tipDiameter": 6.0,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 17.0,
+    "shoulderLength": 17.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111031605022",
+   "tool": {
+    "number": 1,
+    "id": "111031605022",
+    "name": "6*22mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 6.0,
+    "tipDiameter": 6.0,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 22.0,
+    "shoulderLength": 22.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111031605525",
+   "tool": {
+    "number": 1,
+    "id": "111031605525",
+    "name": "6*25mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 6.0,
+    "tipDiameter": 6.0,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 25.0,
+    "shoulderLength": 25.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-112131605525",
+   "tool": {
+    "number": 4,
+    "id": "112131605525",
+    "name": "6*25mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 6.0,
+    "tipDiameter": 6.0,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 25.0,
+    "shoulderLength": 25.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-112131606030",
+   "tool": {
+    "number": 4,
+    "id": "112131606030",
+    "name": "6*30mm Flat End(Metal)",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 6.0,
+    "tipDiameter": 6.0,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 30.0,
+    "shoulderLength": 30.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-111031606032",
+   "tool": {
+    "number": 1,
+    "id": "111031606032",
+    "name": "6*32mm Flat End",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 6.0,
+    "tipDiameter": 6.0,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 32.0,
+    "shoulderLength": 32.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-122121015090",
+   "tool": {
+    "number": 6,
+    "id": "122121015090",
+    "name": "4mm*90\u00ba Chamfer",
+    "typeText": "Chamfer",
+    "shape": "chamfer",
+    "handleDiameter": 4.0,
+    "tipDiameter": 0.1,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": 90.0,
+    "halfAngle": null,
+    "fluteLength": 2.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-122131015090",
+   "tool": {
+    "number": 6,
+    "id": "122131015090",
+    "name": "6mm*90\u00ba Chamfer",
+    "typeText": "Chamfer",
+    "shape": "chamfer",
+    "handleDiameter": 6.0,
+    "tipDiameter": 0.1,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": 90.0,
+    "halfAngle": null,
+    "fluteLength": 3.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121011013830",
+   "tool": {
+    "number": 2,
+    "id": "121011013830",
+    "name": "3.175*0.1mm*30\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.1,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121011023830",
+   "tool": {
+    "number": 2,
+    "id": "121011023830",
+    "name": "3.175*0.2mm*30\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.2,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121011043830",
+   "tool": {
+    "number": 2,
+    "id": "121011043830",
+    "name": "3.175*0.4mm*30\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.4,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-122111043830",
+   "tool": {
+    "number": 2,
+    "id": "122111043830",
+    "name": "3.175*0.4mm*30\u00ba Engraving(Metal)",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.4,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-122111053830",
+   "tool": {
+    "number": 2,
+    "id": "122111053830",
+    "name": "3.175*0.5mm*30\u00ba Engraving(Metal)",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.5,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 5.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-122011034730",
+   "tool": {
+    "number": 5,
+    "id": "122011034730",
+    "name": "3.175mm Solder Mask Removal",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": null,
+    "tipDiameter": 0.3,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 3.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121021014230",
+   "tool": {
+    "number": 2,
+    "id": "121021014230",
+    "name": "4*0.1mm*30\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 4.0,
+    "tipDiameter": 0.1,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121021024230",
+   "tool": {
+    "number": 2,
+    "id": "121021024230",
+    "name": "4*0.2mm*30\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 4.0,
+    "tipDiameter": 0.2,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121021034230",
+   "tool": {
+    "number": 2,
+    "id": "121021034230",
+    "name": "4*0.3mm*30\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 4.0,
+    "tipDiameter": 0.3,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-122121034530",
+   "tool": {
+    "number": 2,
+    "id": "122121034530",
+    "name": "4*0.3mm*30\u00ba Engraving(Metal)",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 4.0,
+    "tipDiameter": 0.3,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121021044230",
+   "tool": {
+    "number": 2,
+    "id": "121021044230",
+    "name": "4*0.4mm*30\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 4.0,
+    "tipDiameter": 0.4,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-122121044530",
+   "tool": {
+    "number": 2,
+    "id": "122121044530",
+    "name": "4*0.4mm*30\u00ba Engraving(Metal)",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 4.0,
+    "tipDiameter": 0.4,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121021054230",
+   "tool": {
+    "number": 2,
+    "id": "121021054230",
+    "name": "4*0.5mm*30\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 4.0,
+    "tipDiameter": 0.5,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-122121054530",
+   "tool": {
+    "number": 2,
+    "id": "122121054530",
+    "name": "4*0.5mm*30\u00ba Engraving(Metal)",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 4.0,
+    "tipDiameter": 0.5,
+    "diameter": 4.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15.0,
+    "fluteLength": 6.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121032035020",
+   "tool": {
+    "number": 3,
+    "id": "121032035020",
+    "name": "6*0.3mm*20\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 6.0,
+    "tipDiameter": 0.3,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 10.0,
+    "fluteLength": 16.0,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121032045020",
+   "tool": {
+    "number": 3,
+    "id": "121032045020",
+    "name": "6*0.4mm*20\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 6.0,
+    "tipDiameter": 0.4,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 10.0,
+    "fluteLength": 15.8,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-121032055020",
+   "tool": {
+    "number": 3,
+    "id": "121032055020",
+    "name": "6*0.5mm*20\u00ba Engraving",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 6.0,
+    "tipDiameter": 0.5,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 10.0,
+    "fluteLength": 15.5,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212023804",
+   "tool": {
+    "number": 5,
+    "id": "142212023804",
+    "name": "3.175*0.2*3.5mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.2,
+    "diameter": 0.2,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.5,
+    "shoulderLength": 3.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212033806",
+   "tool": {
+    "number": 5,
+    "id": "142212033806",
+    "name": "3.175*0.3*5.5mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.3,
+    "diameter": 0.3,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 5.5,
+    "shoulderLength": 5.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212043807",
+   "tool": {
+    "number": 5,
+    "id": "142212043807",
+    "name": "3.175*0.4*7mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.4,
+    "diameter": 0.4,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 7.0,
+    "shoulderLength": 7.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212053809",
+   "tool": {
+    "number": 5,
+    "id": "142212053809",
+    "name": "3.175*0.5*8.5mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.5,
+    "diameter": 0.5,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.5,
+    "shoulderLength": 8.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212063810",
+   "tool": {
+    "number": 5,
+    "id": "142212063810",
+    "name": "3.175*0.6*9.5mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.6,
+    "diameter": 0.6,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 9.5,
+    "shoulderLength": 9.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212073810",
+   "tool": {
+    "number": 5,
+    "id": "142212073810",
+    "name": "3.175*0.7*10mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.7,
+    "diameter": 0.7,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": 10.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212083810",
+   "tool": {
+    "number": 5,
+    "id": "142212083810",
+    "name": "3.175*0.8*10mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.8,
+    "diameter": 0.8,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": 10.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212093810",
+   "tool": {
+    "number": 5,
+    "id": "142212093810",
+    "name": "3.175*0.9*10mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.9,
+    "diameter": 0.9,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": 10.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212103810",
+   "tool": {
+    "number": 5,
+    "id": "142212103810",
+    "name": "3.175*1*10mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.0,
+    "diameter": 1.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": 10.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212113810",
+   "tool": {
+    "number": 5,
+    "id": "142212113810",
+    "name": "3.175*1.1*10mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.1,
+    "diameter": 1.1,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": 10.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212123810",
+   "tool": {
+    "number": 5,
+    "id": "142212123810",
+    "name": "3.175*1.2*10mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.2,
+    "diameter": 1.2,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 10.0,
+    "shoulderLength": 10.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212133812",
+   "tool": {
+    "number": 5,
+    "id": "142212133812",
+    "name": "3.175*1.3*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.3,
+    "diameter": 1.3,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212143812",
+   "tool": {
+    "number": 5,
+    "id": "142212143812",
+    "name": "3.175*1.4*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.4,
+    "diameter": 1.4,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212153812",
+   "tool": {
+    "number": 5,
+    "id": "142212153812",
+    "name": "3.175*1.5*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.5,
+    "diameter": 1.5,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212163812",
+   "tool": {
+    "number": 5,
+    "id": "142212163812",
+    "name": "3.175*1.6*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.6,
+    "diameter": 1.6,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212173812",
+   "tool": {
+    "number": 5,
+    "id": "142212173812",
+    "name": "3.175*1.7*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.7,
+    "diameter": 1.7,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212183812",
+   "tool": {
+    "number": 5,
+    "id": "142212183812",
+    "name": "3.175*1.8*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.8,
+    "diameter": 1.8,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212193812",
+   "tool": {
+    "number": 5,
+    "id": "142212193812",
+    "name": "3.175*1.9*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 1.9,
+    "diameter": 1.9,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212313812",
+   "tool": {
+    "number": 5,
+    "id": "142212313812",
+    "name": "3.175*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 3.175,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212203812",
+   "tool": {
+    "number": 5,
+    "id": "142212203812",
+    "name": "3.175*2*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.0,
+    "diameter": 2.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212213812",
+   "tool": {
+    "number": 5,
+    "id": "142212213812",
+    "name": "3.175*2.1*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.1,
+    "diameter": 2.1,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212223812",
+   "tool": {
+    "number": 5,
+    "id": "142212223812",
+    "name": "3.175*2.2*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.2,
+    "diameter": 2.2,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212233812",
+   "tool": {
+    "number": 5,
+    "id": "142212233812",
+    "name": "3.175*2.3*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.3,
+    "diameter": 2.3,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212243812",
+   "tool": {
+    "number": 5,
+    "id": "142212243812",
+    "name": "3.175*2.4*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.4,
+    "diameter": 2.4,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212253812",
+   "tool": {
+    "number": 5,
+    "id": "142212253812",
+    "name": "3.175*2.5*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.5,
+    "diameter": 2.5,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212263812",
+   "tool": {
+    "number": 5,
+    "id": "142212263812",
+    "name": "3.175*2.6*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.6,
+    "diameter": 2.6,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212273812",
+   "tool": {
+    "number": 5,
+    "id": "142212273812",
+    "name": "3.175*2.7*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.7,
+    "diameter": 2.7,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212283812",
+   "tool": {
+    "number": 5,
+    "id": "142212283812",
+    "name": "3.175*2.8*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.8,
+    "diameter": 2.8,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-142212293812",
+   "tool": {
+    "number": 5,
+    "id": "142212293812",
+    "name": "3.175*2.9*12mm Drill",
+    "typeText": "Drill",
+    "shape": "drill",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2.9,
+    "diameter": 2.9,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-152111073803",
+   "tool": {
+    "number": 6,
+    "id": "152111073803",
+    "name": "3.175*M1*3mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 0.73,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 3.5,
+    "shoulderLength": 3.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-152111153806",
+   "tool": {
+    "number": 6,
+    "id": "152111153806",
+    "name": "3.175*M2*6mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 1.54,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 6.5,
+    "shoulderLength": 6.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-152111193808",
+   "tool": {
+    "number": 6,
+    "id": "152111193808",
+    "name": "3.175*M2.5*7.5mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 1.96,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 8.0,
+    "shoulderLength": 7.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-152111313812",
+   "tool": {
+    "number": 6,
+    "id": "152111313812",
+    "name": "3.175*M4*12mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 3.175,
+    "tipDiameter": null,
+    "diameter": 3.15,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 13.0,
+    "shoulderLength": 12.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-152131485018",
+   "tool": {
+    "number": 6,
+    "id": "152131485018",
+    "name": "6*M6*18mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 6.0,
+    "tipDiameter": null,
+    "diameter": 4.75,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 20.0,
+    "shoulderLength": 18.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-152131605024",
+   "tool": {
+    "number": 6,
+    "id": "152131605024",
+    "name": "6*M8*24mm Thread",
+    "typeText": "Thread",
+    "shape": "thread",
+    "handleDiameter": 6.0,
+    "tipDiameter": null,
+    "diameter": 6.0,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 26.0,
+    "shoulderLength": 24.0,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-161032055031",
+   "tool": {
+    "number": 1,
+    "id": "161032055031",
+    "name": "6*0.5*30.5mm Ball Nose Engraving",
+    "typeText": "Ball Nose Engraving",
+    "shape": "ball",
+    "handleDiameter": 6.0,
+    "tipDiameter": 0.5,
+    "diameter": 6.0,
+    "cornerRadius": 0.25,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 30.5,
+    "shoulderLength": 30.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-161032105031",
+   "tool": {
+    "number": 1,
+    "id": "161032105031",
+    "name": "6*1*30.5mm Ball Nose Engraving",
+    "typeText": "Ball Nose Engraving",
+    "shape": "ball",
+    "handleDiameter": 6.0,
+    "tipDiameter": 1.0,
+    "diameter": 6.0,
+    "cornerRadius": 0.5,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 30.5,
+    "shoulderLength": 30.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  },
+  {
+   "id": "lib-161032205031",
+   "tool": {
+    "number": 1,
+    "id": "161032205031",
+    "name": "6*2*30.5mm Ball Nose Engraving",
+    "typeText": "Ball Nose Engraving",
+    "shape": "ball",
+    "handleDiameter": 6.0,
+    "tipDiameter": 2.0,
+    "diameter": 6.0,
+    "cornerRadius": 1.0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 30.5,
+    "shoulderLength": 30.5,
+    "stickout": null,
+    "centreCutting": null
+   },
+   "origin": null,
+   "quantity": 1,
+   "codes": [],
+   "addedAt": "2026-10-29T00:00:00.000Z",
+   "notes": "Makera catalogue (full-library demo assumption)"
+  }
+ ],
+ "stock": [
+  {
+   "id": "stock-27tpsvq3oo",
+   "material": "plastic",
+   "form": "sheet",
+   "size": {
+    "length": 25.35,
+    "width": 76.0,
+    "thickness": 1.5,
+    "diameter": null,
+    "innerDiameter": null
+   },
+   "layers": [],
+   "capMm": null,
+   "capSource": null,
+   "finish": "finished",
+   "flatness": "unknown",
+   "domeHeight": null,
+   "conductive": false,
+   "quantity": 1,
+   "reservations": [],
+   "consumed": [],
+   "source": "purchased",
+   "notes": null,
+   "addedAt": "2026-10-18T18:34:58.641Z"
+  }
+ ],
+ "feeds": [
+  {
+   "id": "feed-softwood-flat-0.8-1.6",
+   "material": "softwood",
+   "edge": null,
+   "minDiameter": 0.8,
+   "maxDiameter": 1.6,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 500.0,
+    "plungeFeed": 200.0,
+    "stepDown": 0.5,
+    "stepOverFraction": 0.45,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": null,
+   "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+  },
+  {
+   "id": "feed-softwood-flat-1.6-3.2",
+   "material": "softwood",
+   "edge": null,
+   "minDiameter": 1.6,
+   "maxDiameter": 3.2,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 500.0,
+    "plungeFeed": 200.0,
+    "stepDown": 1.0,
+    "stepOverFraction": 0.45,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": null,
+   "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+  },
+  {
+   "id": "feed-hardwood-flat-0.8-1.6",
+   "material": "hardwood",
+   "edge": null,
+   "minDiameter": 0.8,
+   "maxDiameter": 1.6,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 400.0,
+    "plungeFeed": 150.0,
+    "stepDown": 0.3,
+    "stepOverFraction": 0.45,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": null,
+   "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+  },
+  {
+   "id": "feed-hardwood-flat-1.6-3.2",
+   "material": "hardwood",
+   "edge": null,
+   "minDiameter": 1.6,
+   "maxDiameter": 3.2,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 400.0,
+    "plungeFeed": 150.0,
+    "stepDown": 0.6,
+    "stepOverFraction": 0.45,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": null,
+   "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+  },
+  {
+   "id": "feed-mdf-flat-0.8-1.6",
+   "material": "mdf",
+   "edge": null,
+   "minDiameter": 0.8,
+   "maxDiameter": 1.6,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 500.0,
+    "plungeFeed": 200.0,
+    "stepDown": 0.5,
+    "stepOverFraction": 0.45,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": null,
+   "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+  },
+  {
+   "id": "feed-mdf-flat-1.6-3.2",
+   "material": "mdf",
+   "edge": null,
+   "minDiameter": 1.6,
+   "maxDiameter": 3.2,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 500.0,
+    "plungeFeed": 200.0,
+    "stepDown": 1.0,
+    "stepOverFraction": 0.45,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": null,
+   "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+  },
+  {
+   "id": "feed-pla-flat-0.8-1.6",
+   "material": "pla",
+   "edge": null,
+   "minDiameter": 0.8,
+   "maxDiameter": 1.6,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 500.0,
+    "plungeFeed": 200.0,
+    "stepDown": 0.3,
+    "stepOverFraction": 0.45,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": null,
+   "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+  },
+  {
+   "id": "feed-pla-flat-1.6-3.2",
+   "material": "pla",
+   "edge": null,
+   "minDiameter": 1.6,
+   "maxDiameter": 3.2,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 500.0,
+    "plungeFeed": 200.0,
+    "stepDown": 0.5,
+    "stepOverFraction": 0.45,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": null,
+   "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+  },
+  {
+   "id": "feed-pla-flat-0.5-0.8",
+   "material": "pla",
+   "edge": null,
+   "minDiameter": 0.5,
+   "maxDiameter": 0.8,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 500.0,
+    "plungeFeed": 200.0,
+    "stepDown": 0.2,
+    "stepOverFraction": 0.4,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": "The FINEST flat row (#410), for the 0.6 mm corn cutter; appended so a 0.8 mm cutter still takes the 0.8-1.6 mm row.",
+   "provenance": "PLACEHOLDER, nothing measured: the 0.8-1.6 mm row's own starting values (S12000, F500, F200 \u2014 the Z1's emitted defaults) with the step-down and step-over cut back for a 0.6 mm cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. #284 measures it."
+  },
+  {
+   "id": "feed-pla-v-0.3-0.5",
+   "material": "pla",
+   "edge": "v",
+   "minDiameter": 0.3,
+   "maxDiameter": 0.5,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 500.0,
+    "plungeFeed": 200.0,
+    "stepDown": 1.0,
+    "stepOverFraction": 0.6,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": null,
+   "provenance": "From the 2026-10-15 bench cut (#185, `docs/bench/185-v-groove.nc`): the hand file's own numbers \u2014 S12000, F500 along, F200 plunge, one pass to depth \u2014 cut a clean V groove in PLA (0.836 mm opening at 1.0 mm deep, the 30\u00b0 \u00d7 0.3 mm bit). Starting values, not a coupon measurement: #284 is what measures this row."
+  },
+  {
+   "id": "feed-petg-v-0.3-0.5",
+   "material": "petg",
+   "edge": "v",
+   "minDiameter": 0.3,
+   "maxDiameter": 0.5,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 500.0,
+    "plungeFeed": 200.0,
+    "stepDown": 1.0,
+    "stepOverFraction": 0.6,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "seeded",
+   "setAt": null,
+   "note": null,
+   "provenance": "OBSERVED 2026-10-17, not measured: the 30\u00b0 \u00d7 0.3 mm V-bit ran PETG at S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. #284 is what settles it."
+  },
+  {
+   "id": "feed-1nahr2h5ul",
+   "material": "plastic",
+   "edge": "v",
+   "minDiameter": 0.3,
+   "maxDiameter": 0.5,
+   "params": {
+    "rpm": 12000.0,
+    "feed": 1000.0,
+    "plungeFeed": 200.0,
+    "stepDown": 1.0,
+    "stepOverFraction": 0.6,
+    "peckFraction": 1.0,
+    "air": true
+   },
+   "source": "measured",
+   "setAt": "2026-10-18T20:03:37.788Z",
+   "note": "Laminate V row (#450): the 0.3-0.5 mm band; only the feed was swept, rpm/plunge/step-down are the PLA V row carried over.",
+   "provenance": "Measured 2026-10-18 by the maintainer (Dave) on the purchased two-colour laminate 76 x 25.35 x 1.5 with the yellow Single Flute Engraving Bit 30 deg x 0.3 mm: four cells F400/F600/F800/F1000 at S12000, F200 plunge, 0.1 mm deep, all clean by eye (no melt, no strings); chose 1000. Record docs/bench/450-laminate-v-feed-coupon-record.json, photo docs/bench/img/2026-10-18-laminate-V-feed-coupon.jpg."
+  }
+ ],
+ "defaults": {
+  "adaptive.cutFeed": {
+   "value": 600.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm/min",
+   "note": "placeholder, not measured; not a vendor number: the adaptive clearing feed until a measured row replaces it"
+  },
+  "adaptive.engagementFraction": {
+   "value": 0.1,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: the most new material a clearing move may take per mm of travel, as a fraction of the cutter diameter"
+  },
+  "adaptive.entryClearanceMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how far above the floor just cut a rapid down a cleared column stops, and the clearance every entry starts from"
+  },
+  "adaptive.entryFeed": {
+   "value": 200.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm/min",
+   "note": "placeholder, not measured; not a vendor number: the helix and ramp entry feed until a measured row replaces it"
+  },
+  "adaptive.helixDiameterFraction": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: the helix entry's diameter as a fraction of the cutter diameter; the helix is refused where its bore does not fit"
+  },
+  "adaptive.maxCells": {
+   "value": 12000000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "cells",
+   "note": "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"
+  },
+  "adaptive.neckAreaMm2": {
+   "value": 0.05,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm\u00b2",
+   "note": "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"
+  },
+  "adaptive.rampAngleDeg": {
+   "value": 2.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "deg",
+   "note": "chosen, not measured: the descent angle of the helix and ramp entries"
+  },
+  "adaptive.residualShare": {
+   "value": 0.005,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: the material adaptive clearing may leave as grid noise along the walls, as a share of the area to clear"
+  },
+  "adaptive.spindleRpm": {
+   "value": 12000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "rpm",
+   "note": "placeholder, not measured; not a vendor number: the adaptive spindle speed until a measured row replaces it"
+  },
+  "adaptive.stepDownMm": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the deepest level adaptive clearing cuts at once"
+  },
+  "bracket.armLengthXMm": {
+   "value": 85,
+   "source": "measured",
+   "setAt": "2026-10-18T21:04:37Z",
+   "unit": "mm",
+   "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera L Bracket, inside corner to the end of the scale arm (both arms 85)"
+  },
+  "bracket.armLengthYMm": {
+   "value": 85,
+   "source": "measured",
+   "setAt": "2026-10-18T21:04:37Z",
+   "unit": "mm",
+   "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera L Bracket, inside corner to the end of the other arm (both arms 85)"
+  },
+  "bracket.armWidthMm": {
+   "value": 15,
+   "source": "measured",
+   "setAt": "2026-10-18T21:04:37Z",
+   "unit": "mm",
+   "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera L Bracket arm, stock face to outside face"
+  },
+  "bracket.fitMm": {
+   "value": 0.1,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "default, not measured: how closely a corner pushed into the bracket repeats (the design's +/-0.1)"
+  },
+  "bracket.heightMm": {
+   "value": 15.05,
+   "source": "measured",
+   "setAt": "2026-10-18T21:04:37Z",
+   "unit": "mm",
+   "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera L Bracket, underside to top; the M5 heads sit in counterbores"
+  },
+  "bracket.originOffsetXMm": {
+   "value": 0.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "default, not measured: the stock's corner in the bracket from anchor 1 along X. 0 is Makera's own (Z1 QuickStart: work origin relative to Anchor 1, X offset 0); caliper the bracket's inside face to the anchor"
+  },
+  "bracket.originOffsetYMm": {
+   "value": 0.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "default, not measured: the stock's corner in the bracket from anchor 1 along Y. 0 is Makera's own (Z1 QuickStart: Y offset 0); caliper the bracket's inside face to the anchor"
+  },
+  "bracket.repeatMm": {
+   "value": 0.05,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "provisional, not measured: how closely a bracket seated on the anchor pins repeats; #208 B1 owes the pin-to-face measurement"
+  },
+  "clamp.refuseFraction": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"
+  },
+  "clamps.topHeightMm": {
+   "value": 10.05,
+   "source": "measured",
+   "setAt": "2026-10-18T21:04:37Z",
+   "unit": "mm",
+   "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera Top Clamp 5.05 thick + a standard M5 cap-screw head 5.0; the nose steps down to 3.6 and 1.05 (docs/bench/img/2026-10-18-top-clamp-stepped-nose.jpg)"
+  },
+  "clamps.topInFromCornerMm": {
+   "value": 15.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds"
+  },
+  "clamps.topLengthMm": {
+   "value": 65,
+   "source": "measured",
+   "setAt": "2026-10-18T21:04:37Z",
+   "unit": "mm",
+   "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera Top Clamp Set, end to end along the slot"
+  },
+  "clamps.topReachMm": {
+   "value": 8.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "default, not measured: how far a top clamp's nose reaches in over the stock from its edge"
+  },
+  "clamps.topWidthMm": {
+   "value": 20,
+   "source": "measured",
+   "setAt": "2026-10-18T21:04:37Z",
+   "unit": "mm",
+   "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera Top Clamp Set, across the slot"
+  },
+  "console.firstReplyMs": {
+   "value": 60000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: how long a typed console line waits for its first reply. Above the slowest lines timed on the bench (M491 about 32 s, $H about 31 s, 2026-10-15)"
+  },
+  "console.maxMs": {
+   "value": 120000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: the longest a console reply may run; never shorter than the first-reply wait"
+  },
+  "console.quietMs": {
+   "value": 800.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: the quiet gap that ends a console reply"
+  },
+  "drill.peckClearanceMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: after a peck the drill rapids back down to this far above the floor it just cut"
+  },
+  "drill.peckDiameters": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: each peck goes this many drill diameters deep before the drill retracts to clear chips"
+  },
+  "drill.plungeFeed": {
+   "value": 100.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm/min",
+   "note": "placeholder, not measured; not a vendor number: the drilling feed until a measured row replaces it"
+  },
+  "drill.pointAngleDeg": {
+   "value": 118.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "deg",
+   "note": "chosen, not measured: a twist drill's included point angle, used only when the drill's own record states none"
+  },
+  "drill.spindleRpm": {
+   "value": 10000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "rpm",
+   "note": "placeholder, not measured; not a vendor number: the drilling spindle speed until a measured row replaces it"
+  },
+  "engrave.blankBandFill": {
+   "value": 0.7,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"
+  },
+  "engrave.lostDetailWarnRatio": {
+   "value": 0.9,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: the share of an item's area a cutter must reach before the item is called detail-lost"
+  },
+  "engrave.newDrillDepthMm": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the depth a new hole starts at \u2014 deeper than an item's own starting depth because a hole that shallow shows nothing on the preview"
+  },
+  "engrave.newItemDepthMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the depth a new label, shape, combined shape, traced line or imported outline starts at, in the panel where the person then sets the depth that matters"
+  },
+  "engrave.newThreadDepthMm": {
+   "value": 5.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the threaded length a new thread item starts at"
+  },
+  "facing.marginMm": {
+   "value": 0.1,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: added to a probed top's high-to-low spread to fill in the facing depth, so the skim clears the highest point of the face"
+  },
+  "facing.retouchToleranceMm": {
+   "value": 0.1,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the +/- band around the top a facing skim was posted to leave; the post-facing re-touch accepts a measurement inside it, because a skim never removes exactly its nominal depth"
+  },
+  "facing.roughMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the facing depth filled in for rough stock \u2014 the heavy end of the 0.2 to 0.5 mm skim general practice uses; the person is asked and can change it"
+  },
+  "facing.unknownMm": {
+   "value": 0.2,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the facing depth filled in when the stock's finish is unknown \u2014 the light end of the same 0.2 to 0.5 mm skim"
+  },
+  "finish.stockToLeaveMm": {
+   "value": 0.2,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how much stock the roughing pass leaves on the walls and the floor for the finishing pass. 0.2 mm is about one printed layer at the common layer height. The first bench cut that inspects a finished floor replaces this"
+  },
+  "house.requestTimeoutMs": {
+   "value": 2000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: how long a house service request gets before it is called dead; a service on this machine or LAN answers in single-digit milliseconds, and the client compiled 2 s"
+  },
+  "import.dxfChordToleranceMm": {
+   "value": 0.02,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the most a flattened DXF arc may stray from the true arc; smaller is more points"
+  },
+  "import.traceDespecklePx": {
+   "value": 8.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "px",
+   "note": "chosen, not measured: the smallest ink blob or enclosed hole kept, in pixels of the source image; smaller specks are dropped before tracing"
+  },
+  "import.traceSimplifyPx": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "px",
+   "note": "chosen, not measured: how far a traced boundary's pixel staircase may be straightened, in pixels of the source image"
+  },
+  "import.traceThreshold": {
+   "value": 128.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "level",
+   "note": "chosen, not measured: the luminance a traced pixel must be darker than to count as ink; 0 to 255"
+  },
+  "laser.originUncertaintyMm": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how far the laser dot's origin may be from the stock's corner (the dot's size, and its offset from the spindle axis, are not measured); point-to-origin is refused for a job whose edge margin is tighter"
+  },
+  "machine.connectTimeoutMs": {
+   "value": 3000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: how long a TCP connect to the machine's command port may take before it is called unreachable; the bridge compiled 3 s"
+  },
+  "machine.discoveryWindowMs": {
+   "value": 3000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: how long the app listens for the machine's UDP broadcast before deciding it is not announcing itself; the protocol compiled 3 s"
+  },
+  "machine.identifyWindowMs": {
+   "value": 1500.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: how long each reply to the identify asks (M482.5, then M482.4) is waited for; the protocol compiled 1.5 s"
+  },
+  "machine.uploadInactivityMs": {
+   "value": 9000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: how long an upload waits for the machine's next frame before it cancels the transfer; the protocol compiled 9 s"
+  },
+  "margins.boundaryMarginMm": {
+   "value": 0.2,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how far every floor stays clear of a plane it must not cross; 0.2 is one printed layer at the common layer height. While it is the seed, a blank that states its print uses its own layer height instead"
+  },
+  "margins.breakthroughMm": {
+   "value": 0.3,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how far a through-cut may pass below the part's underside; seeds each new job"
+  },
+  "margins.edgeMarginMm": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how close an item may come to a stock edge; seeds each new job"
+  },
+  "margins.jawClearanceMm": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how far a cut's floor must stay above the vise jaws' tops; seeds each new job"
+  },
+  "margins.measuredThicknessToleranceMm": {
+   "value": 0.05,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "not measured: the +/- a caliper-measured stock thickness adds to a job's Z budget; provisional until the bench measures it (#208)"
+  },
+  "margins.minFloorMm": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: material that must remain under the deepest cut; seeds each new job, which then owns its own value"
+  },
+  "margins.zToleranceMm": {
+   "value": 0.05,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how far this machine is expected to put the blank and the registration out in Z; a job's recommendation adds the blank's own dome to it"
+  },
+  "offcut.minSideMm": {
+   "value": 20.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: an offcut is offered back to the shelf only when both its sides are at least this (Q3: only leftover stock that has some size to it)"
+  },
+  "offcut.offer": {
+   "value": true,
+   "source": "seeded",
+   "setAt": null,
+   "unit": null,
+   "note": "chosen, not measured: offer an offcut back to the shelf at the end of a run that split the stock (false: never ask)"
+  },
+  "plan.autoLevelPointSeconds": {
+   "value": 10.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "s",
+   "note": "chosen, not measured: one auto-level point; an estimate until #176 runs a grid here"
+  },
+  "plan.autoLevelPoints": {
+   "value": 9.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "points",
+   "note": "chosen, not measured: the auto-level grid's point count, Makera Studio's own 3 x 3 default"
+  },
+  "plan.autoLevelShallowMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: on stock not known flat, a cut shallower than this wants an auto-level grid (Makera Studio's own rule)"
+  },
+  "plan.clearanceSeconds": {
+   "value": 10.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "s",
+   "note": "chosen, not measured: the vacuum off and the clearance move after a cut (observed, not timed)"
+  },
+  "plan.finishSeconds": {
+   "value": 15.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "s",
+   "note": "chosen, not measured: the end of a job, M332, spindle off, G28 (observed, not timed)"
+  },
+  "plan.fitCutterSeconds": {
+   "value": 60.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "s",
+   "note": "chosen, not measured: fitting a cutter by hand at a bit change, from the plan of section 5.8; the first timed run replaces it"
+  },
+  "plan.fitProbeSeconds": {
+   "value": 45.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "s",
+   "note": "chosen, not measured: fitting the wired probe by hand, from the plan of section 5.8; the first timed run replaces it"
+  },
+  "plan.homeSeconds": {
+   "value": 27.5,
+   "source": "measured",
+   "setAt": "2026-10-15T23:37:01.349Z",
+   "unit": "s",
+   "note": "the mean of the five $H homes in the 2026-10-15 console trace: 27.0, 27.7, 29.4, 22.3 and 31.2 s (send to reply, 16:55, 17:14, 17:25, 19:14, 23:37)"
+  },
+  "plan.toolLengthSeconds": {
+   "value": 31.4,
+   "source": "measured",
+   "setAt": "2026-10-15T18:53:49.247Z",
+   "unit": "s",
+   "note": "the four complete M491 tool-length touches on the wired probe in the 2026-10-15 console trace, sent to Done ATC: 31.36, 31.25, 32.18 and 31.35 s (16:34, 16:55, 17:15, 18:53); a fifth at 18:58 ended early and is not counted"
+  },
+  "plan.touchSeconds": {
+   "value": 15.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "s",
+   "note": "chosen, not measured as the app's runner would take it: 15 s a touch, from the 2026-10-15 console trace's edge scans, driven by a console script, not the app runner. 32 touch-to-touch intervals under 20 s (G38.2 Z-5, 16:35:59 to 16:50:34): median 13.3 s, mean 14.0 s, range 10.4 to 19.7 s; the round trips between touches are included"
+  },
+  "power.cyclePauseSeconds": {
+   "value": 10.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "s",
+   "note": "chosen, not measured: how long a plug cycle leaves the machine off before switching it on again (power.sh on --cycle)"
+  },
+  "power.onWaitSeconds": {
+   "value": 180.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "s"
+  },
+  "power.pollSeconds": {
+   "value": 3.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "s",
+   "note": "chosen, not measured: the wait between checks while switching on waits for the controller to answer"
+  },
+  "power.probeGapSeconds": {
+   "value": 2.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "s",
+   "note": "chosen, not measured: the wait between those probes"
+  },
+  "power.probeTries": {
+   "value": 3.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "tries",
+   "note": "chosen, not measured: how many machine probes, all silent, before a powered machine counts as not answering (#416 review: one silent probe is a Wi-Fi blip as often as a dead controller)"
+  },
+  "registration.capBelowSurfaceMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.chuckAxisResidualMm": {
+   "value": 0.05,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "provisional, not measured: the chuck's runout where it locates the axis; #208 owes the bench measurement"
+  },
+  "registration.coarseStepMm": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.cornerClearanceMm": {
+   "value": 2.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.edgeMarginMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.fineStepMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.idlePollLimit": {
+   "value": 30.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "polls",
+   "note": "chosen, not measured: how many status polls the registration waits for Idle before a touch, about a second each, before it stops"
+  },
+  "registration.parkAboveSurfaceMm": {
+   "value": 3.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.probeResidualMm": {
+   "value": 0.02,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "assumed, not measured: the 3D probe's ball-contact scatter in X, Y and Z, and what is left after a touch. The wired probe measured 0.001 mm in Z (registration.wiredProbeZResidualMm); this stays the conservative figure until the 3D probe is measured the same way (2026-10-08, /Z1-Firmware-Dialect.md \u00a711.7)"
+  },
+  "registration.readingResolutionMm": {
+   "value": 0.05,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the depth two touch readings are told apart by (the machine's dial, not the probe's spec)"
+  },
+  "registration.scanInsideMm": {
+   "value": 3.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.scanMissMarginMm": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how far past the jaw tops a run-sheet scan touch may travel before it is called nothing; the cap that keeps a touch with nothing under it off the bed"
+  },
+  "registration.scanReachMm": {
+   "value": 5.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.surfaceBandMm": {
+   "value": 0.25,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.surfaceFastFeed": {
+   "value": 300.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm/min"
+  },
+  "registration.surfaceSeekMm": {
+   "value": 60.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.surfaceSlowFeed": {
+   "value": 100.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm/min"
+  },
+  "registration.surfaceSlowSeekMm": {
+   "value": 2.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how far the slow surface touch may travel. It starts 1 mm above the fast touch's hit, so it must travel more than that, and at most 2 mm (never more than 1 mm past the hit), so it stays a capped touch"
+  },
+  "registration.surfaceToleranceMm": {
+   "value": 0.4,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "registration.surfaceTouchCount": {
+   "value": 5.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "touches"
+  },
+  "registration.tipDiameterMm": {
+   "value": 2.0,
+   "source": "measured",
+   "setAt": "2026-10-15T19:03:20.874Z",
+   "unit": "mm",
+   "note": "the wired probe tip's outside diameter, as recorded with the 2026-10-15 bench scan: an opening must be wider than this to be entered at all"
+  },
+  "registration.tipRadiusMm": {
+   "value": 0.7,
+   "source": "measured",
+   "setAt": "2026-10-15T19:03:20.874Z",
+   "unit": "mm",
+   "note": "effective rim offset of the wired probe, from the 2026-10-15 bench scan (trace 18:59-19:03): the 38.1 mm blank read 39.5 mm wide, (39.5 - 38.1) / 2 = 0.70 mm, +/- 0.25 at a 0.5 mm step; the tip's outside diameter is 2.0 mm"
+  },
+  "registration.tipRadiusUncertaintyMm": {
+   "value": 0.25,
+   "source": "measured",
+   "setAt": "2026-10-15T19:03:20.874Z",
+   "unit": "mm",
+   "note": "the rim offset's own spread from the same 2026-10-15 bench scan: +/- 0.25 mm at a 0.5 mm step. It cancels in a centre between two walls, and doubles in a width between them"
+  },
+  "registration.touchFeed": {
+   "value": 150.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm/min"
+  },
+  "registration.viseJawResidualMm": {
+   "value": 0.05,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "provisional, not measured: the vise jaws' squareness across the jaws; #208 owes the bench measurement"
+  },
+  "registration.wiredProbeZResidualMm": {
+   "value": 0.001,
+   "source": "measured",
+   "setAt": "2026-10-08T00:00:00.000Z",
+   "unit": "mm",
+   "note": "the wired probe's repeatability in Z: five slow (F100) touches on the printed blank in the vise triggered within 0.001 mm of each other, fast (F300) within 0.004 mm and 2-6 um deep (/Z1-Firmware-Dialect.md \u00a711.7, runbook C4, 2026-10-08)"
+  },
+  "rest.overlapMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the LEAST the band both programs cut at the seam may be. The band itself is worked out per job from that job's own two cutters, and this is the floor under it \u2014 a 2 mm cutter at a 0.9 mm step-over leaves slivers 0.107 mm wide and a 0.6 mm rest cutter closes anything narrower, so the badge's pair needs about 0.493 mm. The first two-tool cut replaces this"
+  },
+  "rest.thirdToolPct": {
+   "value": 2.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "%",
+   "note": "chosen, not measured: the share of a job's own removal area that may still be standing after both programs have run before a third cutter is suggested"
+  },
+  "run.missLimit": {
+   "value": 3.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "polls"
+  },
+  "run.noProgressMs": {
+   "value": 30000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms"
+  },
+  "run.pollMs": {
+   "value": 2000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms"
+  },
+  "run.statusReplyMs": {
+   "value": 3000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: how long a status poll waits for its reply; the controller answers in 0.6 to 0.7 s (#386)"
+  },
+  "runSheet.blankToleranceMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how far a measured blank may differ from the job's stated size before the sheet tells the operator to change the job and regenerate"
+  },
+  "setups.minGripMm": {
+   "value": 3.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  },
+  "setups.remountMinutes": {
+   "value": 3.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "min"
+  },
+  "setups.reregisterMinutes": {
+   "value": 2.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "min"
+  },
+  "sim.budgetMs": {
+   "value": 60000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: the wall-clock limit one simulation load starts with. Past it the load is refused (or the worker killed), and Retry starts a load with twice this"
+  },
+  "sim.columnFlatPitchYMm": {
+   "value": 0.1,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the flat simulation grid's Y pitch; the oracle's band grows with the cell and the sim's memory and time with 1/pitch"
+  },
+  "sim.columnPitchXMm": {
+   "value": 0.1,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the simulation grid's X pitch; the sim's memory and time grow with 1/pitch"
+  },
+  "sim.defaultStockLengthMm": {
+   "value": 100.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, along X; 100 x 100 x 10 is the documented default (/Simulation.md \u00a76)"
+  },
+  "sim.defaultStockThicknessMm": {
+   "value": 10.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, in Z; 100 x 100 x 10 is the documented default (/Simulation.md \u00a76)"
+  },
+  "sim.defaultStockWidthMm": {
+   "value": 100.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, along Y; 100 x 100 x 10 is the documented default (/Simulation.md \u00a76)"
+  },
+  "sim.playbackSpeed": {
+   "value": 20.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: the playback multiplier a fresh simulation session starts at, as a multiple of wall-clock time; one of 1, 5, 20 or 100"
+  },
+  "sim.rotaryPitchDeg": {
+   "value": 0.25,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "deg",
+   "note": "chosen, not measured: the rotary simulation grid's theta pitch; the sim's memory and time grow with 1/pitch"
+  },
+  "sim.spindleOffProximityMm": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: how close a feed move with the spindle off may come to material still present at that point, or to the bed, before it is a fault"
+  },
+  "stop.abortReplyMs": {
+   "value": 60000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured as a bound: how long abort is given to answer (about 18 s observed on 2026-10-12, #303). The app's Stop and the bench harness's run share this one number (maintainer, 2026-10-16)"
+  },
+  "stop.idlePollMs": {
+   "value": 5000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "ms",
+   "note": "chosen, not measured: the wait between those polls; never under the 2 s status floor (#386)"
+  },
+  "stop.idlePolls": {
+   "value": 3.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "polls",
+   "note": "chosen, not measured: after abort, how many status polls look for Idle before M332; none reading Idle leaves the vacuum on and says so"
+  },
+  "tabs.count": {
+   "value": 4.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "tabs",
+   "note": "chosen, not measured: holding tabs per cut-out. Four is provisional \u2014 the first part cut with tabs replaces it"
+  },
+  "tabs.heightMm": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: material a holding tab leaves below the tab top. Provisional; on a 3.81 mm badge blank it leaves 1 mm under a 2.81 mm cut"
+  },
+  "tabs.widthMm": {
+   "value": 4.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: holding-tab width in material. The cutter's centre path stops two tool radii further apart. Provisional until the first tabbed cut"
+  },
+  "thread.bottomClearancePitches": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: how many pitches the tool tip runs below the last full thread"
+  },
+  "thread.chordToleranceMm": {
+   "value": 0.01,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the most a G1 chord may stray from the true helix; it sets the move count and the file size"
+  },
+  "thread.entryRampMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the axial drop over which the entry ramp reaches the pass radius; 0 is a flat radial entry"
+  },
+  "thread.feed": {
+   "value": 300.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm/min",
+   "note": "placeholder, not measured; not a vendor number: the helical cutting feed until a measured row replaces it"
+  },
+  "thread.pilotTipClearanceMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the pilot floor must sit this far below the tool tip so the tip does not bottom"
+  },
+  "thread.plungeFeed": {
+   "value": 100.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm/min",
+   "note": "placeholder, not measured; not a vendor number: the feed down the open pilot and the entry ramp until a measured row replaces it"
+  },
+  "thread.radialStepoverMm": {
+   "value": 0.2,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the most radial depth one thread pass takes; the last pass always lands on the major radius"
+  },
+  "thread.spindleRpm": {
+   "value": 10000.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "rpm",
+   "note": "placeholder, not measured; not a vendor number: the thread-milling spindle speed until a measured row replaces it"
+  },
+  "tools.runtimeWarnMinutes": {
+   "value": 600.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "min"
+  },
+  "tools.wearWeight.abrasive": {
+   "value": 5.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: a minute cutting PA-CF or PA-GF. Fibre-filled nylon is abrasive; five times plastic's wear is this app's choice (the maintainer asked for a heavier class in #456), not a bench measurement"
+  },
+  "tools.wearWeight.aluminium": {
+   "value": 3.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: a minute cutting 6061, 7075: three times the wear of plastic"
+  },
+  "tools.wearWeight.brass": {
+   "value": 2.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: a minute cutting brass: free-cutting, twice plastic"
+  },
+  "tools.wearWeight.copper": {
+   "value": 3.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: a minute cutting copper: gummy, as hard on a cutter as aluminium"
+  },
+  "tools.wearWeight.plastic": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: a minute cutting PLA, ABS, acrylic: the baseline"
+  },
+  "tools.wearWeight.wood": {
+   "value": 1.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: a minute cutting softwood, hardwood, MDF: about as hard on a cutter as plastic"
+  },
+  "vise.defaultStockProudMm": {
+   "value": 4.0,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the cap on the stock-derived proud height; #508 derives the real proud from the seat, so this is the no-stock placeholder and the pre-#508 lower bound"
+  },
+  "vise.minCoverageFraction": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "x",
+   "note": "chosen, not measured: the share of the stock's width the vise jaws must cover in Y before the short-jaw warning"
+  },
+  "vise.uncertaintyMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm",
+   "note": "chosen, not measured: the band every vise collision box is grown by before a check; covers clamping repeatability, the blank's dome and a hand-set origin's error (#391 review)"
+  },
+  "wasteboard.depthLimitMm": {
+   "value": 0.5,
+   "source": "seeded",
+   "setAt": null,
+   "unit": "mm"
+  }
+ }
+}
