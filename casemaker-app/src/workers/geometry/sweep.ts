@@ -31,7 +31,7 @@ import { CheckpointStore, checkpointStoreOf } from '@/engine/cnc/emulator/checkp
 import { eventLine, eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import { DIAGNOSTIC_CAP } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
-import type { ObstacleBox, Setup } from '@/engine/cnc/setup';
+import type { FixtureEnvelope, ObstacleBox, Setup, Workholding } from '@/engine/cnc/setup';
 import { holderOf, type Mill } from '@/engine/cnc/machine';
 import { inflate } from '@/engine/cnc/fixture';
 import { hasSacrificial, sacrificialBoxes } from '@/engine/cnc/sacrificial';
@@ -247,7 +247,7 @@ export function formatVolume(v: number): string {
  * so the fold is never calmer than what it hid. `sweep.ts` had no repeated-code gate before;
  * the fixture checks are the first that can fire once per checkpoint.
  */
-class DiagnosticFolder {
+export class DiagnosticFolder {
   private readonly counts = new Map<string, number>();
   private readonly worst = new Map<string, SweepDiagnostic['severity']>();
   private readonly kept: SweepDiagnostic[] = [];
@@ -603,6 +603,131 @@ export function boxSolid(tl: ManifoldToplevel, box: ObstacleBox): ManifoldInstan
   const placed = c.translate(box.min);
   c.delete();
   return placed;
+}
+
+/**
+ * The fixture's boxes, inflated by the envelope's uncertainty, with the tallest box named
+ * (#204/#923). Extracted so the column engine can build the identical obstacle set — same
+ * boxes, same inflation, same "which one is tallest" — without needing a Manifold handle: this
+ * is plain-data prep, done once per sweep before either engine's own hit test runs.
+ */
+export interface PreparedFixture {
+  /** Each obstacle box, already grown by `fixture.uncertainty` on every side. Empty when absent. */
+  boxes: ObstacleBox[];
+  /** The tallest box's top Z, or `-Infinity` when there is no fixture. */
+  top: number;
+  /** Which box is tallest (#314/#362: name the obstacle, not "an obstacle"). */
+  tallest: ObstacleBox | null;
+}
+export function prepareFixtureBoxes(fixture: FixtureEnvelope | undefined): PreparedFixture {
+  const boxes: ObstacleBox[] = [];
+  let top = Number.NEGATIVE_INFINITY;
+  let tallest: ObstacleBox | null = null;
+  if (fixture && fixture.boxes.length > 0) {
+    for (const raw of fixture.boxes) {
+      const box = inflate(raw, fixture.uncertainty);
+      boxes.push(box);
+      if (box.max[2] > top) {
+        top = box.max[2];
+        tallest = box;
+      }
+    }
+  }
+  return { boxes, top, tallest };
+}
+
+/**
+ * `holder-vs-fixture-unproven` (#314 review, folded into #362): a fixture box rises above the
+ * stock top and the collet nut's size is not known, so clearance to it cannot be proven. Pure
+ * arithmetic — no Manifold — extracted out of the exact sweeper's own check (#923) so the column
+ * engine raises the identical warning, with the identical wording, under the identical
+ * condition, rather than a similarly-named one that could drift from it.
+ */
+export function holderVsFixtureUnproven(opts: {
+  fixturePresent: boolean;
+  fixtureTop: number;
+  topZ: number;
+  tallest: ObstacleBox | null;
+  uncertainty: number;
+  /** Whether the holder's nut dimensions ARE known — true means nothing to warn about. */
+  holderKnown: boolean;
+}): SweepDiagnostic | null {
+  if (!opts.fixturePresent || opts.holderKnown || opts.fixtureTop <= opts.topZ) return null;
+  const name = opts.tallest?.label ?? 'an obstacle';
+  const rise = (opts.fixtureTop - opts.topZ).toFixed(3);
+  const band = opts.uncertainty;
+  const declaredTop = opts.tallest === null ? opts.topZ : opts.tallest.max[2] - band;
+  const liftedByBand = band > 0 && declaredTop <= opts.topZ;
+  return {
+    severity: 'warning',
+    code: 'holder-vs-fixture-unproven',
+    message: liftedByBand
+      ? `the ${name} is declared ${(opts.topZ - declaredTop).toFixed(3)} mm below the stock top, but the ` +
+        `${band} mm uncertainty band around it lifts its top ${rise} mm ABOVE — and the collet ` +
+        `nut's size is not known: clearance to it cannot be proven`
+      : `the ${name} rises ${rise} mm above the stock top and the collet nut's size is not ` +
+        `known: clearance to it cannot be proven`,
+  };
+}
+
+/**
+ * `fixture-unchecked` (#204/#923): no fixture is modelled, but the workholding has obstacles
+ * the probe plan already knows about — so the cutter's proximity to them is explicitly NOT
+ * checked, named rather than silently absent. Pure arithmetic, extracted for the column engine.
+ */
+export function fixtureUncheckedDiagnostic(workholding: Workholding, fixturePresent: boolean): SweepDiagnostic | null {
+  if (fixturePresent) return null;
+  const { labels } = obstructionLabels(workholding);
+  if (labels.length === 0) return null;
+  return {
+    severity: 'info',
+    code: 'fixture-unchecked',
+    message: `the ${workholding.kind} is not modelled as an obstacle yet: the cutter's proximity to ${labels.join(', ')} is NOT checked`,
+  };
+}
+
+/**
+ * Does a tool of the given radius, swept along (from)→(to) in XY and occupying Z from `zLo` up
+ * through `zHi`, overlap any of the given fixture boxes (#204/#923)? The exact sweeper answers
+ * this with a Manifold boolean on the tool's own region (a V-bit's cone, a trace's offset
+ * polygon, …); the column engine has no Manifold handle in its hot loop (by design — see the
+ * file header on why), so this answers the SAME question as a box-vs-box overlap: the move's own
+ * bounding box, grown by `radius` in X/Y and spanning `[zLo, zHi]` in Z, against each obstacle.
+ * That can only ADD a collision at a diagonal move's corners where the true swept capsule falls
+ * short of its bounding box — never miss a real one — which is the same conservative direction
+ * every uncertainty band in this file already takes. Returns the box with the most overlap (by
+ * volume of the two boxes' intersection), so the message can name it, matching `tool-into-fixture`'s
+ * own "name the box" rule; the returned volume is that same box-overlap figure, not the exact
+ * swept volume, and is reported as an upper bound.
+ */
+export function columnFixtureHit(
+  from: readonly [number, number],
+  to: readonly [number, number],
+  radius: number,
+  zLo: number,
+  zHi: number,
+  boxes: readonly ObstacleBox[],
+): { box: ObstacleBox; volume: number } | null {
+  const xMin = Math.min(from[0], to[0]) - radius;
+  const xMax = Math.max(from[0], to[0]) + radius;
+  const yMin = Math.min(from[1], to[1]) - radius;
+  const yMax = Math.max(from[1], to[1]) + radius;
+  let best: ObstacleBox | null = null;
+  let bestVolume = 0;
+  for (const b of boxes) {
+    const ox = Math.min(xMax, b.max[0]) - Math.max(xMin, b.min[0]);
+    if (ox <= 0) continue;
+    const oy = Math.min(yMax, b.max[1]) - Math.max(yMin, b.min[1]);
+    if (oy <= 0) continue;
+    const oz = Math.min(zHi, b.max[2]) - Math.max(zLo, b.min[2]);
+    if (oz <= 0) continue;
+    const volume = ox * oy * oz;
+    if (volume > bestVolume) {
+      bestVolume = volume;
+      best = b;
+    }
+  }
+  return best === null ? null : { box: best, volume: bestVolume };
 }
 
 /**
@@ -1258,18 +1383,14 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   const fixtureBoxes: { box: ObstacleBox; solid: ManifoldInstance }[] = [];
   let fixture: ManifoldInstance | null = null;
   let fixtureBB: Box | null = null;
-  let fixtureTop = Number.NEGATIVE_INFINITY;
-  /** The inflated box whose top IS `fixtureTop` — so the finding can name the obstacle, not "an obstacle". */
-  let tallestBox: ObstacleBox | null = null;
-  if (setup.fixture && setup.fixture.boxes.length > 0) {
-    for (const raw of setup.fixture.boxes) {
-      const box = inflate(raw, setup.fixture.uncertainty);
-      fixtureBoxes.push({ box, solid: boxSolid(tl, box) });
-      if (box.max[2] > fixtureTop) {
-        fixtureTop = box.max[2];
-        tallestBox = box;
-      }
-    }
+  // #923 — the box-prep (inflate, find the tallest) is the one part of this that is plain data,
+  // so it is a shared function the column engine calls too; only turning each box into a Manifold
+  // solid, below, stays here.
+  const prepared = prepareFixtureBoxes(setup.fixture);
+  const fixtureTop = prepared.top;
+  const tallestBox = prepared.tallest;
+  if (prepared.boxes.length > 0) {
+    for (const box of prepared.boxes) fixtureBoxes.push({ box, solid: boxSolid(tl, box) });
     // A single box aliases `fixture`; the union is a separate handle only when there is more
     // than one, so the delete below never touches a handle twice.
     fixture = fixtureBoxes.length === 1 ? (fixtureBoxes[0] as { solid: ManifoldInstance }).solid : tl.Manifold.union(fixtureBoxes.map((b) => b.solid));
@@ -1302,36 +1423,17 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // false — moot is not unknown. An obstacle that DOES rise above the top (a toe clamp on the
   // part, a tall fixture beside it, the rotary chuck) is the case the check exists for, and only
   // there is the unknown real. An unmeasured nut is a warning, never a refusal (#182).
-  const fixtureAboveStockTop = fixture !== null && fixtureTop > topZ;
-  if (fixtureAboveStockTop && holder === null) {
-    // WHICH obstacle, not "an obstacle" (#314 review, folded into #362). `fixtureBoxes` right here
-    // carries the id and the label, and the message was throwing them away — so the one case that
-    // most needs naming was also the one that said least. The jaws are why it matters: on a thin
-    // blank a vise's `defaultStockProud` is under a millimetre (the seated `thickness − 3.1`), so a
-    // jaw top can sit just BELOW the stock top, close enough that the band around it (`DEFAULT_UNCERTAINTY` — 2 mm while
-    // the jaws were unmeasured, 0.5 and calipered since 2026-10-15) lifts it above, and the finding
-    // then reads as a physical obstruction when what actually rose was the uncertainty. Say both
-    // numbers, and say which one did the rising.
-    const name = tallestBox?.label ?? 'an obstacle';
-    const rise = (fixtureTop - topZ).toFixed(3);
-    const band = setup.fixture?.uncertainty ?? 0;
-    const declaredTop = tallestBox === null ? topZ : tallestBox.max[2] - band;
-    const liftedByBand = band > 0 && declaredTop <= topZ;
-    fixtureDiag.push({
-      severity: 'warning',
-      code: 'holder-vs-fixture-unproven',
-      message: liftedByBand
-        // #363 (review nit) — "below the stock top" is measured FROM that top, `topZ`, not from the
-        // work origin. They coincide today (`stockFromSetup` anchors the part's top face at z = 0),
-        // but the text must state the distance it means rather than inherit it from an invariant
-        // three hundred lines away.
-        ? `the ${name} is declared ${(topZ - declaredTop).toFixed(3)} mm below the stock top, but the ` +
-          `${band} mm uncertainty band around it lifts its top ${rise} mm ABOVE — and the collet ` +
-          `nut's size is not known: clearance to it cannot be proven`
-        : `the ${name} rises ${rise} mm above the stock top and the collet nut's size is not ` +
-          `known: clearance to it cannot be proven`,
-    });
-  }
+  // #923 — extracted to `holderVsFixtureUnproven` (plain arithmetic), shared with the column
+  // engine; same inputs, same message, same condition (`fixtureTop > topZ && holder === null`).
+  const unproven = holderVsFixtureUnproven({
+    fixturePresent: fixture !== null,
+    fixtureTop,
+    topZ,
+    tallest: tallestBox,
+    uncertainty: setup.fixture?.uncertainty ?? 0,
+    holderKnown: holder !== null,
+  });
+  if (unproven) fixtureDiag.push(unproven);
 
   const t0 = performance.now();
   const total = timeline.checkpoints.length;
@@ -1583,16 +1685,10 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // planner's question, asked here instead of a list of kinds kept in this file. An empty answer
   // is real: a tape-down job has nothing above the part, and a nest wall or a chuck body stands
   // outside the part's own footprint, so neither belongs in an "unchecked" report.
-  if (!fixture) {
-    const { labels } = obstructionLabels(setup.workholding);
-    if (labels.length > 0) {
-      diagnostics.push({
-        severity: 'info',
-        code: 'fixture-unchecked',
-        message: `the ${setup.workholding.kind} is not modelled as an obstacle yet: the cutter's proximity to ${labels.join(', ')} is NOT checked`,
-      });
-    }
-  }
+  // #923 — extracted to `fixtureUncheckedDiagnostic` (plain arithmetic), shared with the column
+  // engine; same condition (`!fixture`), same obstruction lookup, same message.
+  const unchecked = fixtureUncheckedDiagnostic(setup.workholding, fixture !== null);
+  if (unchecked) diagnostics.push(unchecked);
   // #729 — A ROUND STOCK IN THE CHUCK. The rod runs X 0 → its length with X 0 at the jaws' face
   // (#714), so the chuck (jaws and body) is everything at X < 0. Neither is modelled as a solid
   // yet; the half-space is checked up to the JAWS' reach — half the jaw diameter above the axis, or
