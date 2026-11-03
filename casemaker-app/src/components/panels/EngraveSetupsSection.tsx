@@ -582,7 +582,9 @@ export function EngraveSetupsSection({
               itemName={itemName}
               candidateItems={candidates}
               tools={tools}
-              mountKinds={setup.mount.kind === 'tape' ? ['vise', 'bracket', 'tape'] : ['vise', 'bracket']}
+              // #934 — the setup editor offers the one mount the bench has registered on (vise);
+              // a job already on tape or in the bracket keeps its word but cannot be moved TO it.
+              mountKinds={setup.mount.kind === 'tape' || setup.mount.kind === 'bracket' ? [setup.mount.kind, 'vise'] : ['vise']}
               viseSource={jobVise(job).source}
               probeName={probeName}
               machineName={machineName}
@@ -598,15 +600,13 @@ export function EngraveSetupsSection({
               onRemoveSetup={() => removeSetup(index)}
               onReplace={(next) => replaceSetup(index, next)}
               onPreviewRemount={() => previewRemount(index)}
-              planRegistration={(seatZ, useTypedSeat) => {
+              planRegistration={() => {
                 const derived = derivedFor(setup, index);
                 if (!derived) return { kind: 'refused', reason: 'this setup has no cut item to register from yet' };
                 return planRegistrationAttempt({
                   job,
                   setup: derived,
                   mount: setup.mount,
-                  seatZ,
-                  useTypedSeat,
                   mountDatum,
                   mountDatumMismatch: mountDatumMismatchBy,
                   mountDatumMismatchName,

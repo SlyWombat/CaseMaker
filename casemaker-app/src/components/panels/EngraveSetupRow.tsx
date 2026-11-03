@@ -22,12 +22,10 @@ import { expandEngraveRow } from '@/store/engraveRowStore';
 import type { PlanMountTap, RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { FACES, type Face, type Mount, type MountSpec, type Setup, machineSize, setupPinReference } from '@/engine/cnc/setups';
 import type { SetupAuthoringFinding, SetupItemsReading } from '@/engine/cnc/setups';
-import { VISE_SEAT_MACHINE_Z } from '@/engine/cnc/fixture';
 import type { JobSetup, ViseParams } from '@/types/engraveJob';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, margin: '4px 0' };
-const FIELD: CSSProperties = { width: 90 };
 const TAG: CSSProperties = {
   fontSize: 10,
   padding: '1px 5px',
@@ -82,7 +80,7 @@ export interface EngraveSetupRowProps {
   onRemoveSetup: () => void;
   onReplace: (next: JobSetup) => void;
   onPreviewRemount: () => void;
-  planRegistration: (seatZ: string, useTypedSeat: boolean) => RegistrationAttempt;
+  planRegistration: () => RegistrationAttempt;
   /** #599 — run the standalone mount tap (no datum yet) and write the reading. */
   onTapJaw: (tap: { x: number; y: number; fromMachineZ: number }) => void;
   /** #637 — a tap is running somewhere in this window: the button is disabled, not orphaned. */
@@ -139,20 +137,6 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
       ? setupPinReference(setup, { x: mountedSize.x, y: mountedSize.y }, index)
       : null;
   const [open, setOpen] = useState(props.initiallyOpen === true);
-  // The shipped Z1 vise carries a known provisional seat aim (#559); a custom/measured fixture
-  // does not, so its field stays empty and the operator types the probe reading as before.
-  const shippedZ1Vise = setup.mount.kind === 'vise' && props.viseSource === 'default';
-  const [seatZ, setSeatZ] = useState('');
-  // #598 — the expert override: use the typed seat instead of the measured jaw-top datum. Off by default.
-  const [useTypedSeat, setUseTypedSeat] = useState(false);
-  // The field says where its aim came from: a default is an AIM, not a reading, and the probe still
-  // writes the true Z — so a shipped-vise default and a typed custom reading must read differently.
-  const seatTitle = shippedZ1Vise
-    ? `The Z1’s provisional vise-seat aim (${VISE_SEAT_MACHINE_Z} mm); the probe still measures the true Z. Override for a non-standard setup.`
-    : 'The machine Z of the surface the stock sits on — measured with one probe touch, never assumed.';
-  const seatHint = shippedZ1Vise
-    ? 'the Z1 vise’s provisional seat aim — the probe still measures the true Z; override for a non-standard setup'
-    : 'the measured surface under the stock; the section invents no number';
   const [preview, setPreview] = useState<{ for: string; value: RegistrationAttempt } | null>(null);
 
   // A plan is a statement about ONE mount and one item list. Change either and it stops describing
@@ -164,7 +148,7 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
   const candidates = useMemo(() => props.candidateItems, [props.candidateItems]);
 
   function planNow(): void {
-    setPreview({ for: signature, value: props.planRegistration(seatZ, useTypedSeat) });
+    setPreview({ for: signature, value: props.planRegistration() });
   }
 
   function approve(): void {
@@ -400,51 +384,9 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
 
               {editable && (
                 <>
-                  {setup.mount.kind === 'vise' && (
-                    <label style={FIELD_LABEL}>
-                      <input
-                        type="checkbox"
-                        checked={useTypedSeat}
-                        data-testid="engrave-setups-use-typed-seat"
-                        onChange={(e) => {
-                          setUseTypedSeat(e.target.checked);
-                          // #614 — the provisional aim counts only when the override is ticked: unticked
-                          // (datum absent) must plan to need-datum, not from the seeded default.
-                          if (e.target.checked && shippedZ1Vise && seatZ.trim() === '') {
-                            setSeatZ(String(VISE_SEAT_MACHINE_Z));
-                          }
-                          setPreview(null);
-                        }}
-                      />
-                      <span>Use a typed seat instead</span>
-                      {useTypedSeat && (
-                        <span style={{ ...MUTED, margin: 0 }}>expert override — the measured jaw top is ignored</span>
-                      )}
-                    </label>
-                  )}
-                  {(setup.mount.kind === 'tape' || useTypedSeat) && (
-                    <label style={FIELD_LABEL}>
-                      <span>Seat machine Z</span>
-                      <input
-                        type="number"
-                        step="any"
-                        value={seatZ}
-                        style={FIELD}
-                        data-testid={`engrave-setup-seat-${n}`}
-                        aria-label={`Setup ${n} seat machine Z`}
-                        title={seatTitle}
-                        onChange={(e) => {
-                          setSeatZ(e.target.value);
-                          setPreview(null);
-                        }}
-                      />
-                      {/* #726 P6 — the seat is a machine Z, millimetres like every other length. */}
-                      <span>mm</span>
-                      <span style={{ ...MUTED, margin: 0 }}>
-                        {seatHint}
-                      </span>
-                    </label>
-                  )}
+                  {/* #934 — THE TYPED SEAT IS HIDDEN. The datum path (tap the fixed jaw) is the
+                      one registration procedure on this machine; the seat field and its override
+                      return behind their own bench issue. */}
                   <button type="button" data-testid={`engrave-setup-plan-reg-${n}`} onClick={planNow}>
                     {setup.registration === undefined ? 'Plan registration' : 'Plan registration again'}
                   </button>

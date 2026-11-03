@@ -596,12 +596,28 @@ export function EngraveCutSurface({
   useEffect(() => {
     if (firstRegistration === null || chainReposted.current) return;
     if (registrationSurface === null || surfaceGate === null) return;
+    // #934 — A TILT WAITS FOR THE OPERATOR. A small tilt in the low-profile vise is a seating fault
+    // far more often than a blank property, so the automatic re-post does not fire: the operator
+    // re-seats and registers again, or chooses "Follow the tilt". Flat and dome keep the chain.
+    if (spreadAssessment?.verdict === 'tilt') return;
     chainReposted.current = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the one-shot post-registration re-post is guarded by `chainReposted`; the busy state it starts is the re-post's own, launched exactly once per clamping
     repost();
     // `repost` is re-created each render; the ref makes this a one-shot per clamping.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firstRegistration, registrationSurface, surfaceGate]);
+  }, [firstRegistration, registrationSurface, surfaceGate, spreadAssessment?.verdict]);
+
+  /** #934 — "Follow the tilt": the operator's choice runs the re-post the chain withheld. */
+  const followTilt = (): void => {
+    chainReposted.current = true;
+    repost();
+  };
+  /** #934 — "Register again": the registration's own Start is the control; press it where it stands. */
+  const registerAgain = (): void => {
+    const start = document.querySelector<HTMLButtonElement>('[data-testid="engrave-registration-start"]');
+    start?.scrollIntoView({ block: 'center' });
+    start?.click();
+  };
 
   const green = report.firstBlocking === null;
   const staleness = pkg === null ? null : packageStaleness(pkg, job);
@@ -1182,21 +1198,46 @@ export function EngraveCutSurface({
         {registrationSurface !== null && (
           <section style={BOX} data-testid="engrave-cut-repost">
             {surfaceGate !== null ? (
-              <>
-                <p style={{ fontSize: 12, color: '#f0d79b', margin: '0 0 6px' }}>
-                  The blank is tilted{tiltWords !== null ? ` (${tiltWords})` : ''} — the program was made for a flat blank.
-                </p>
-                <p style={WARN} data-testid="engrave-cut-repost-gate">{surfaceGate}.</p>
-                <button
-                  type="button"
-                  data-testid="engrave-cut-repost-button"
-                  disabled={reposting || !generatedReady}
-                  style={{ width: '100%', padding: 7, marginTop: 6 }}
-                  onClick={repost}
-                >
-                  {reposting ? 'Re-making…' : 'Re-make for the measured tilt…'}
-                </button>
-              </>
+              spreadAssessment?.verdict === 'tilt' ? (
+                <>
+                  {/* #934 — RE-SEAT BEFORE THE RE-POST. The automatic chain waits here: a tilt in
+                      the vise is a seating fault more often than a blank property. */}
+                  <p style={{ fontSize: 12, color: '#f0d79b', margin: '0 0 6px' }} data-testid="engrave-cut-reseat">
+                    Re-seat the blank (press down on the low side) and register again — or follow the
+                    tilt{tiltWords !== null ? ` (${tiltWords})` : ''}.
+                  </p>
+                  <p style={WARN} data-testid="engrave-cut-repost-gate">{surfaceGate}.</p>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                    <button type="button" data-testid="engrave-cut-reseat-register" onClick={registerAgain}>
+                      Register again
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="engrave-cut-reseat-follow"
+                      disabled={reposting || !generatedReady}
+                      onClick={followTilt}
+                    >
+                      {reposting ? 'Re-making…' : 'Follow the tilt…'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p style={{ fontSize: 12, color: '#f0d79b', margin: '0 0 6px' }}>
+                    The blank is tilted{tiltWords !== null ? ` (${tiltWords})` : ''} — the program was made for a flat blank.
+                  </p>
+                  <p style={WARN} data-testid="engrave-cut-repost-gate">{surfaceGate}.</p>
+                  <button
+                    type="button"
+                    data-testid="engrave-cut-repost-button"
+                    disabled={reposting || !generatedReady}
+                    style={{ width: '100%', padding: 7, marginTop: 6 }}
+                    onClick={repost}
+                  >
+                    {reposting ? 'Re-making…' : 'Re-make for the measured tilt…'}
+                  </button>
+                </>
+              )
             ) : (
               <p style={{ fontSize: 12, color: OK, margin: 0 }} data-testid="engrave-cut-repost-done">
                 Re-made for the measured tilt{tiltWords !== null ? ` (${tiltWords})` : ''}.

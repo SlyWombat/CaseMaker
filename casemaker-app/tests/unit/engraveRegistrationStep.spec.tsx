@@ -952,7 +952,9 @@ describe('#638 — the placement frame waits for the acceptance', () => {
   });
 });
 
-describe('#743 D-2 — a different-sized disc asks the operator, and never refuses', () => {
+// #934 — DISC REGISTRATION IS HIDDEN until its bench run: the planner refuses the rim routine by
+// name, so the resize question cannot arise. The branch returns behind its own issue.
+describe.skip('#743 D-2 — a different-sized disc asks the operator, and never refuses', () => {
   it('a disc 1.4 % large shows the question; the origin waits, and Resize scales the job', async () => {
     const plan = makeDiscPlan();
     const job = discJobWithPlan(plan);

@@ -201,7 +201,9 @@ describe('the surface spread on a bowed blank (#475)', () => {
 describe('#501 — the shape verdict and the console G32 recommendation', () => {
   const level = { toolRadiusMm: 0.15, clearanceMm: 3, points: 9 };
 
-  it('a tilt (plane holds, drop wider than the band) is named, with the G32 recipe sized to the cut + radius', () => {
+  // #934 — THE G32 RECIPE TEXT IS HIDDEN until its bench run (#501): the verdict still names the
+  // shape, but no grid is recommended. These two return behind the G32 bench issue.
+  it.skip('a tilt (plane holds, drop wider than the band) is named, with the G32 recipe sized to the cut + radius', () => {
     const plan = { ...run5Plan(), level };
     const a = assessSurfaceReadings(plan, RUN5);
     expect(a.ok).toBe(true);
@@ -223,7 +225,7 @@ describe('#501 — the shape verdict and the console G32 recommendation', () => 
     expect(a.recommendation).toBeNull();
   });
 
-  it('#631 — a dome is named, keeps its verdict, and offers the G32 recipe (upload FLAT)', () => {
+  it.skip('#631 — a dome is named, keeps its verdict, and offers the G32 recipe (upload FLAT)', () => {
     const a = assessSurfaceSpread(badgeJob(), NONPLANAR, { level });
     expect(a.verdict).toBe('dome');
     expect(a.ok).toBe(false);

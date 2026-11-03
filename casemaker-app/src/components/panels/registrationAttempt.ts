@@ -32,7 +32,6 @@ import { summarizePlan } from '@/engine/cnc/registration/summary';
 import {
   machineSize,
   referenceOpenings,
-  referenceRegistrationFor,
   registrationFor,
   type MountSpec,
   type Setup,
@@ -64,9 +63,6 @@ export function planRegistrationAttempt(args: {
   job: EngraveJob;
   setup: Setup;
   mount: MountSpec;
-  seatZ: string;
-  /** The expert override: use the typed seat even when a datum is present. */
-  useTypedSeat: boolean;
   mountDatum: MountDatum | null;
   /** #611 — the datum's `by` when it names a probe other than the one checked out (null otherwise). */
   mountDatumMismatch: string | null;
@@ -86,6 +82,42 @@ export function planRegistrationAttempt(args: {
   settings: ReturnType<typeof registrationSettings>['settings'];
 }): RegistrationAttempt {
   const { job, setup, mount, defaults, calibration } = args;
+  // #934 — REGISTRATION FROM EARLIER FEATURES is one of the branches the bench has not run; it is
+  // refused by name, not crashed on and not planned as if it were the datum path.
+  if (referenceOpenings(setup).openings.length > 0) {
+    return {
+      kind: 'refused',
+      reason: 'registration from earlier features has not been run on this machine yet — register from the fixed jaw and the front edge instead',
+    };
+  }
+  // #934 — THE BRANCHES THE BENCH HAS NOT RUN are refused HERE, at the operator seam, not inside
+  // the pure planner: the engine's own specs are the regression suite for the code we keep, and
+  // the operator path cannot reach these inputs once this refuses them.
+  if (args.probe?.instrument === 'xyz') {
+    return {
+      kind: 'refused',
+      reason: 'the 3D probe is not a registration instrument on this machine yet — fit the wired V2 probe and register again',
+    };
+  }
+  if (job.stock.shape === 'disc') {
+    return {
+      kind: 'refused',
+      reason: 'a disc’s rim registration has not been run on this machine yet — use a rectangular blank',
+    };
+  }
+  // tape and bracket registration are hidden: refused by name, never planned as the datum path
+  // would (and before any bracket datum work is attempted). The alias keeps the kept branch
+  // below type-checkable rather than narrowing `mount` away.
+  const mountKind: MountSpec['kind'] = mount.kind;
+  if (mountKind !== 'vise') {
+    return {
+      kind: 'refused',
+      reason:
+        mountKind === 'tape'
+          ? 'registration on tape has not been run on this machine yet — hold the blank in the vise'
+          : 'the bracket’s registration has not been run on this machine yet — hold the blank in the vise',
+    };
+  }
   // #845 — a stated machine has no clearance to seek from; the preview it places a tap with is
   // only run where a connected Makera machine exists, and the 0 is never used to place a touch.
   const seekFromMachineZ = clearanceZOf(jobMachine(job, calibration)) ?? 0;
@@ -128,55 +160,38 @@ export function planRegistrationAttempt(args: {
       // executor until the tap has an expected top).
       mountTap: tap,
     };
-  } else if (mount.kind === 'vise' && args.mountDatum !== null && !args.useTypedSeat) {
+  } else if (mount.kind === 'vise' && args.mountDatum !== null) {
     // #598 — the datum path: no seat input; the surface is the measured jaw top + the stock's proud
     // height (`registrationFor` works it out), and the probe is carried for the record. #599 — the
     // mount tap needs the fixed jaw's machine XY; without a frame there is nothing to tap.
     if (args.mountTap === null) {
-      return { kind: 'refused', reason: 'place the vise, or register once with the typed seat, so the app knows where the fixed jaw is' };
+      return { kind: 'refused', reason: 'place the vise, or register once from the fixed jaw, so the app knows where it is' };
     }
     input = { seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, mountDatum: args.mountDatum, surfaceTopZ: args.surfaceTopZ, probe: args.probe, mountTap: args.mountTap };
   } else {
-    // The seat path: tape always; a vise without a datum, or with the expert override, types the seat.
-    const seat = Number(args.seatZ);
-    if (args.seatZ.trim() === '' || !Number.isFinite(seat)) {
-      if (mount.kind === 'vise' && args.mountDatum === null && !args.useTypedSeat) {
-        // #611 — a datum tapped by a probe other than the one now checked out names which probe
-        // tapped it and offers the tap with the current probe; an absent datum keeps the plain ask.
-        if (args.mountDatumMismatch !== null) {
-          const current = args.probeName !== null ? `the ${args.probeName} now checked out` : 'the probe now checked out';
-          return {
-            kind: 'need-datum',
-            message: `the jaw top was tapped by ${args.mountDatumMismatchName}, not ${current} — tap the fixed jaw with the current probe first`,
-            mountTap: args.mountTap,
-          };
-        }
-        return {
-          kind: 'need-datum',
-          message: 'tap the jaw first — run the registration: its first touch is that tap',
-          mountTap: args.mountTap,
-        };
-      }
+    // The vise with no measured jaw-top datum: THE TAP IS THE PROCEDURE (#934 hides the typed-seat
+    // override, so there is no other path to a seat here).
+    // #611 — a datum tapped by a probe other than the one now checked out names which probe tapped
+    // it and offers the tap with the current probe; an absent datum keeps the plain ask.
+    if (args.mountDatumMismatch !== null) {
+      const current = args.probeName !== null ? `the ${args.probeName} now checked out` : 'the probe now checked out';
       return {
-        kind: 'need-seat',
-        message:
-          'Enter the seat’s machine Z first — the surface the stock sits on, measured with one probe touch. The section has no stored vise seat and will not invent one.',
+        kind: 'need-datum',
+        message: `the jaw top was tapped by ${args.mountDatumMismatchName}, not ${current} — tap the fixed jaw with the current probe first`,
+        mountTap: args.mountTap,
       };
     }
-    input = { seatMachineZ: seat, seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, probe: args.probe };
+    return {
+      kind: 'need-datum',
+      message: 'tap the jaw first — run the registration: its first touch is that tap',
+      mountTap: args.mountTap,
+    };
   }
 
-  // #743 D-2 — A DISC REGISTERS ON ITS RIM. The plan scans all four edges through the
-  // centre-lines (opposite pairs give the centre, the span gives the diameter); the stated
-  // diameter is the job's own, which the schema keeps equal to the box.
-  if (job.stock.shape === 'disc') {
-    input = { ...input, disc: { diameterMm: job.stock.diameter ?? job.stock.length } };
-  }
+  // #743 D-2 — the disc wiring stays in the planner; #934 refuses a disc at the top of this
+  // function, so the operator path never reaches the rim routine.
 
-  const result =
-    referenceOpenings(setup).openings.length > 0
-      ? referenceRegistrationFor(setup, mount, input, args.settings)
-      : registrationFor(setup, mount, input, args.settings).plan;
+  const result = registrationFor(setup, mount, input, args.settings).plan;
   if (!result.ok) return { kind: 'refused', reason: result.reason };
   return {
     kind: 'plan',

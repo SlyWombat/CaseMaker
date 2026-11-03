@@ -7,6 +7,11 @@
 // test — nothing on the pins, with or without the bracket at anchor 1, on the wasteboard or the
 // bare bed.
 
+// #934 — THE BED MOUNTS ARE HIDDEN from Holding until their bench runs (tape and bracket are
+// registration branches this machine has not run; the vise is the one procedure the milestone
+// ships). These specs exercise the hidden branch and return behind its own issue: skipped, not
+// deleted, so the coverage comes back with the code.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
@@ -156,7 +161,7 @@ afterEach(() => {
 });
 
 describe('#715 with nothing on the pins, the bed options are real choices', () => {
-  it('a plate takes the bed’s default mount: taped, with the house roll and its lines', () => {
+  it.skip('a plate takes the bed’s default mount: taped, with the house roll and its lines', () => {
     seedLocation(bedMachine());
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
@@ -195,7 +200,7 @@ describe('#715 with nothing on the pins, the bed options are real choices', () =
     expect(screen.getByTestId('engrave-setup-change-ledge')).toBeTruthy();
   });
 
-  it('a plate the bed can bracket takes the bracket: two clamps, the arms line, the picture’s handles', () => {
+  it.skip('a plate the bed can bracket takes the bracket: two clamps, the arms line, the picture’s handles', () => {
     seedLocation(bedMachine({ anchor: true }));
     openHolding(dj({ length: 100, width: 60, thickness: 6 }));
 
@@ -223,7 +228,7 @@ describe('#715 with nothing on the pins, the bed options are real choices', () =
     expect(screen.queryByTestId('engrave-setup-holding-checks')).toBeNull();
   });
 
-  it('#718 — a bed whose bracket is at anchor 2 writes the job at anchor 2', () => {
+  it.skip('#718 — a bed whose bracket is at anchor 2 writes the job at anchor 2', () => {
     seedLocation(bedMachine({ anchor: true, anchorAt: 2 }));
     openHolding(dj({ length: 100, width: 60, thickness: 6 }));
 
@@ -233,7 +238,7 @@ describe('#715 with nothing on the pins, the bed options are real choices', () =
     expect(screen.getByTestId('engrave-setup-bed-fields-bed-bracket').textContent).toContain('thin, at anchor 2');
   });
 
-  it('the bracket row says what it needs when the bed carries no bracket — and the way out fits one', () => {
+  it.skip('the bracket row says what it needs when the bed carries no bracket — and the way out fits one', () => {
     seedLocation(bedMachine());
     openHolding(dj({ length: 100, width: 60, thickness: 6 }));
 
@@ -257,7 +262,7 @@ describe('#715 the clamp handles and the board under', () => {
     openHolding(dj({ length: 100, width: 60, thickness: 6 }));
   }
 
-  it('a clamp dragged across the corner lands on the right edge, and the job stores it', () => {
+  it.skip('a clamp dragged across the corner lands on the right edge, and the job stores it', () => {
     bracketJob();
     const svg = RECT();
     vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
@@ -286,7 +291,7 @@ describe('#715 the clamp handles and the board under', () => {
     }
   });
 
-  it('+ clamp adds one on the longer free edge, and remove takes it away', () => {
+  it.skip('+ clamp adds one on the longer free edge, and remove takes it away', () => {
     bracketJob();
     fireEvent.click(screen.getByTestId('engrave-setup-clamp-add'));
 
@@ -303,7 +308,7 @@ describe('#715 the clamp handles and the board under', () => {
     if (removed.kind === 'bracket') expect(removed.bracket.clamps).toHaveLength(2);
   });
 
-  it('the board under is the field’s, and the hold stays taped while it changes', () => {
+  it.skip('the board under is the field’s, and the hold stays taped while it changes', () => {
     seedLocation(bedMachine());
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
@@ -317,7 +322,7 @@ describe('#715 the clamp handles and the board under', () => {
     expect(job().workholding.kind).toBe('tape');
   });
 
-  it('on the bare bed a through cut gets the thinnest board that passes, at its field', () => {
+  it.skip('on the bare bed a through cut gets the thinnest board that passes, at its field', () => {
     const tag: EngraveShape = {
       kind: 'rect',
       id: 'sh-tag',
@@ -344,7 +349,7 @@ describe('#715 the clamp handles and the board under', () => {
     );
   });
 
-  it('a board too small for the plate is refused at the field in the design’s sentence', () => {
+  it.skip('a board too small for the plate is refused at the field in the design’s sentence', () => {
     const tag: EngraveShape = {
       kind: 'rect',
       id: 'sh-tag',
@@ -376,7 +381,7 @@ describe('#715 the clamp handles and the board under', () => {
     );
   });
 
-  it('#513 a blank over a scar says so where its place is chosen — and only when it is over one', () => {
+  it.skip('#513 a blank over a scar says so where its place is chosen — and only when it is over one', () => {
     const machine = bedMachine();
     const profile = machine.bedProfiles![0]!;
     profile.surface = {
@@ -402,7 +407,7 @@ describe('#715 the clamp handles and the board under', () => {
     expect(screen.queryByTestId('engrave-setup-tape-scar')).toBeNull();
   });
 
-  it('a taped job reloads with its own hold: the position, the roll and the option checked', () => {
+  it.skip('a taped job reloads with its own hold: the position, the roll and the option checked', () => {
     const base = dj({ length: 76.2, width: 38.1, thickness: 3.81 });
     seedLocation(bedMachine());
     openHolding({

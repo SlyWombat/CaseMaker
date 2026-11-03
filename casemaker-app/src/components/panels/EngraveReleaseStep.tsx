@@ -214,6 +214,13 @@ export function EngraveReleaseStep({
   // the same function the store calls, so the button's disabled state and the start refusal agree.
   const firstRegistration = useFirstRegistration(job.id, target);
   const facingGate = facingRegistrationBlocker(job, programs, firstRegistration);
+  // #934 — THE POST-FACING RE-TOUCH IS HIDDEN until its bench run. A job that still has facing on
+  // cannot be released: the re-touch is what makes the engraving program's frame true, and the one
+  // registration procedure this milestone ships does not include it.
+  const hiddenRetouch =
+    job.facing?.enabled === true
+      ? 'the post-facing re-touch has not been run on this machine yet — turn facing off in Design and generate again'
+      : null;
   // #618 — whether the machine's run is suspended, so the Pause button becomes Resume. A boolean
   // selector: the run entry itself changes on every progress poll, and only this bit matters here.
   const runPaused = useMachineRunStore((s) => (target === null ? false : s.runs[machineKey(target)]?.paused === true));
@@ -266,7 +273,8 @@ export function EngraveReleaseStep({
     atMachine &&
     uploadsReady &&
     !record.spanClosing &&
-    facingGate === null;
+    facingGate === null &&
+    hiddenRetouch === null;
   const finished = record.files.filter((f) => f.done).length;
   const showUpload = (record.phase === 'idle' || record.phase === 'stopped' || record.phase === 'failed') && uploadsIncomplete;
 
@@ -281,11 +289,8 @@ export function EngraveReleaseStep({
         program turns it off. A Stop between programs sends M332 and homes.
       </p>
       {job.facing?.enabled === true && (
-        <p style={{ ...MUTED, color: '#f0d79b' }} data-testid="engrave-release-facing-note">
-          This job faces the stock first: program 1 is the face file, posted to the probed top and carrying the
-          vacuum’s ON word. After it, change to the ENGRAVING cutter — not the facing cutter — and re-touch the faced
-          surface with the probe: the program assumes the surface the skim left, and is posted to it, not
-          to the surface the face file found.
+        <p style={{ ...MUTED, color: '#f0b8a8' }} data-testid="engrave-release-facing-blocker">
+          The release is blocked — {hiddenRetouch}.
         </p>
       )}
 

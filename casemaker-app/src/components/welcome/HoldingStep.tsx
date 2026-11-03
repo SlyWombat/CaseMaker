@@ -1641,11 +1641,16 @@ export function HoldingStep({
   // The machine-only options have no way out when this build cannot drive a machine; a disabled
   // control with no escape is hidden (A10), not narrated. A writable mount the machine already
   // carries needs no escape and stays on offer.
+  // #934 — HOLDING OFFERS THE VISE ONLY. Registration on tape or in the bracket has not been run
+  // on this machine, so neither is an entry; the code stays behind this flag until each has a
+  // dated bench run. The rotary is unaffected (its programs carry their own bench refusal, #545).
+  const bedOffered = false;
   const shown = options.filter(
     (o) =>
-      canReachMachine ||
-      mechanismOf(o.mount) === 'vise' ||
-      (!o.disabled && now !== null && now.mount === mechanismOf(o.mount)),
+      (bedOffered || mechanismOf(o.mount) !== 'bed') &&
+      (canReachMachine ||
+        mechanismOf(o.mount) === 'vise' ||
+        (!o.disabled && now !== null && now.mount === mechanismOf(o.mount))),
   );
   // #715 — when the vise is not on the pins, its three seat choices are one line: none of them
   // can be used anyway, and the bed step's radio list is the two bed mounts' (mockup station 2).
@@ -1714,6 +1719,8 @@ export function HoldingStep({
   // leaves the operator where they were).
   const wantedBed = useRef<{ mount: BedMount; fromProfile: string | null } | null>(null);
   useEffect(() => {
+    // #934 — the bed mounts are not offered, so nothing may ARRIVE in one either.
+    if (!bedOffered) return;
     if (now === null || now.mount !== 'bed') return;
     if (bedArrived.current === now.profile.id) return;
     bedArrived.current = now.profile.id;

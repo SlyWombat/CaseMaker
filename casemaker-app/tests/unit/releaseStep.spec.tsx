@@ -505,7 +505,22 @@ describe('#469 the release step', () => {
     ]);
   }, 30000);
 
-  it('plays a faced run as face file then engraving, and asks for the engraving cutter and a measured re-touch', async () => {
+  // #934 — THE POST-FACING RE-TOUCH IS HIDDEN until its bench run. The faced-run branch below is
+  // skipped, not deleted, and returns behind its own issue; a job with facing on is refused at the
+  // release with the sentence this test pins.
+  it('#934 — a job with facing on is refused at the release, and nothing is played', async () => {
+    const job = facedJob();
+    seedRegistration(job);
+    renderStep(job, [FACE, engravingProgram()]);
+    expect((await screen.findByTestId('engrave-release-facing-blocker')).textContent).toContain(
+      'the post-facing re-touch has not been run on this machine yet',
+    );
+    // Nothing is at the machine and nothing plays: the refusal is the release's own sentence.
+    expect(screen.queryByTestId('engrave-release-start')).toBeNull();
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual([]);
+  }, 20000);
+
+  it.skip('plays a faced run as face file then engraving, and asks for the engraving cutter and a measured re-touch', async () => {
     // #473 — the face file is program 1 of the same list. The bit change after it is the one place
     // the order becomes physical: the engraving cutter goes in, and the faced top is measured.
     const NC_EN = 'G0 X1 Y1\nM332\nM02\n';
@@ -529,7 +544,7 @@ describe('#469 the release step', () => {
     expect(change).toContain('flat-1.0');
   }, 30000);
 
-  it('refuses a faced release with no first registration, then enables it when one is recorded (#494)', async () => {
+  it.skip('refuses a faced release with no first registration, then enables it when one is recorded (#494)', async () => {
     const job = facedJob();
     setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.666 }));
     renderStep(job, [FACE, engravingProgram()]);
@@ -555,7 +570,7 @@ describe('#469 the release step', () => {
     await waitFor(() => expect(start().disabled).toBe(false), { timeout: 5000 });
   }, 20000);
 
-  it('after the face file’s confirmed change, re-touches the faced top and writes Z0 before the engraving program (#494)', async () => {
+  it.skip('after the face file’s confirmed change, re-touches the faced top and writes Z0 before the engraving program (#494)', async () => {
     const job = facedJob();
     seedRegistration(job);
     setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.666 }));
@@ -599,7 +614,7 @@ describe('#469 the release step', () => {
     expect(notes).toContain('Z0 for flat-1.0 written');
   }, 30000);
 
-  it('a re-touch outside the band BLOCKS the engraving program and closes the span (#494)', async () => {
+  it.skip('a re-touch outside the band BLOCKS the engraving program and closes the span (#494)', async () => {
     const job = facedJob();
     seedRegistration(job);
     // The faced top should be at −56.672 ± the shop tolerance; this reading is 0.228 mm high.
@@ -623,7 +638,7 @@ describe('#469 the release step', () => {
     expect(screen.queryByTestId('engrave-release-operator-text')).toBeNull();
   }, 30000);
 
-  it('a failed cutter-length correction BLOCKS the engraving program and closes the span (#494)', async () => {
+  it.skip('a failed cutter-length correction BLOCKS the engraving program and closes the span (#494)', async () => {
     const job = facedJob();
     seedRegistration(job);
     // The re-touch is in band, but the cutter's M491 carries no PRB: Z0 cannot be written.

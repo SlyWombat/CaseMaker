@@ -89,7 +89,6 @@ import { faceUpOf, planFromSetups, setupsSettings } from '@/engine/cnc/setups';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { clearanceZOf, rotaryOf } from '@/engine/cnc/machine';
 import { planRegistrationAttempt } from './registrationAttempt';
-import { EngraveCentreFind } from './EngraveCentreFind';
 import { RotaryAxisTap } from '@/components/manage/RotaryAxisTap';
 import type { RegistrationAttempt } from './EngraveSetupRow';
 import {
@@ -235,8 +234,6 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       job,
       setup: derived,
       mount: setup0.mount,
-      seatZ: '',
-      useTypedSeat: false,
       mountDatum,
       mountDatumMismatch: mountDatumMismatchBy,
       mountDatumMismatchName,
@@ -833,11 +830,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             {summarizePlan(plan)}
           </p>
 
-          {/* #827 — THE CENTRE PATH: Studio's bore / boss / round-part routine, offered beside
-              the edge plan. Hidden while a registration run owns the machine. */}
-          {(phase === 'idle' || phase === 'failed' || phase === 'recorded') && (
-            <EngraveCentreFind target={target} plan={plan} settings={regSettings} probe={probe} />
-          )}
+          {/* #934 — THE CENTRE-FIND (bore / boss / round part) is a 3D-probe routine the bench has
+              not run; the planner refuses the instrument and the entry is hidden with it. The
+              component and its plan stay in the tree for the branch's own bench issue. */}
 
           {(phase === 'idle' || phase === 'failed' || phase === 'recorded') && target !== null && (
             <>

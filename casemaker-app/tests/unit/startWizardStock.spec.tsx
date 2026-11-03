@@ -252,10 +252,11 @@ describe('the material-first start (#418)', () => {
     await screen.findByTestId('engrave-setup-step-holding');
     const job = useEngraveJobStore.getState().job;
     expect(job.stock).toMatchObject({ length: 80, width: 50, thickness: 6 });
-    // The opening finish is "as bought" (#683, A8), so a made piece is rough unless said otherwise.
+    // The opening finish is the proposal's — the house's stick is planed stock (#934) — so a made
+    // piece is finished unless the operator says otherwise.
     // #930 — the step opens on the house's BLOCK (the 36 × 36 × 100 stick); typing over its
     // numbers keeps the form the operator was shown.
-    expect(job.stockEntry).toMatchObject({ kind: 'made', shelfId: null, form: 'block', finish: 'rough' });
+    expect(job.stockEntry).toMatchObject({ kind: 'made', shelfId: null, form: 'block', finish: 'finished' });
     // Non-square on purpose: an X/Y swap would show here. Length (X) is the blank's width, width (Y)
     // its height — `blankStockFor`'s mapping, read back the other way.
     expect(useProjectStore.getState().project.case.blank).toMatchObject({ width: 80, height: 50, thickness: 6 });
@@ -604,8 +605,8 @@ describe('stockEntry follows the stock (#418 review)', () => {
 describe('a mesh loaded as stock takes its finish default from the material (#463)', () => {
   // The classes a slicer can produce — PrusaSlicer's filament words, #456.
   const PRINTED = ['pla', 'petg', 'pet', 'abs', 'asa', 'hips', 'pa', 'pa-cf', 'pa-gf', 'pc', 'pp', 'tpu', 'pva'];
-  // Anything else is bought stock, and the step's opening finish is "as bought" (#683, A8) —
-  // the old "not known" default was the last option of the list.
+  // Anything else is bought stock, and the step's opening finish is the PROPOSAL's — the house's
+  // stick is planed stock (#934), so a loaded mesh of a bought material keeps that face.
   const NOT_PRINTED = ['softwood', 'hardwood', 'mdf', 'acrylic', 'aluminium-6061', 'brass'];
 
   /** Pick the material, load the same box as stock, and answer with the finish the step chose. */
@@ -623,8 +624,8 @@ describe('a mesh loaded as stock takes its finish default from the material (#46
     expect(await loadMesh(material)).toBe('printed');
   });
 
-  it.each(NOT_PRINTED)('%s: the finish stays as bought', async (material) => {
-    expect(await loadMesh(material)).toBe('rough');
+  it.each(NOT_PRINTED)('%s: the finish is the step’s opening one (planed stock)', async (material) => {
+    expect(await loadMesh(material)).toBe('finished');
   });
 });
 

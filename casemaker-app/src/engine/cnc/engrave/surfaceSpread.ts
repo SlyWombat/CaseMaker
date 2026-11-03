@@ -729,8 +729,14 @@ export function assessSurfaceReadings(
         ? 'tilt'
         : 'flat';
   const slopeDeg = fit === null ? 0 : r3((Math.atan(Math.hypot(fit.slopeX, fit.slopeY)) * 180) / Math.PI);
+  // #934 — THE G32 RECIPE TEXT IS HIDDEN until its bench run (#501): an unproven grid is not
+  // offered as a recommendation. The code stays behind this flag; the dome's accepted-floor route
+  // (`surfaceDomeGuidance`) is unaffected.
+  const g32Offered = false;
   const recommendation =
-    verdict === 'tilt' || verdict === 'dome' ? levelRecommendation(plan, verdict, tilt, slopeDeg) : null;
+    g32Offered && (verdict === 'tilt' || verdict === 'dome')
+      ? levelRecommendation(plan, verdict, tilt, slopeDeg)
+      : null;
 
   return {
     plan,

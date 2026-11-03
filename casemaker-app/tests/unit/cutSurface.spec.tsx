@@ -1134,6 +1134,34 @@ describe('#656 from the cutter prompt to the cut', () => {
     expect(generateSpy).toHaveBeenCalledWith(surface);
   });
 
+  // #934 — A TILT WAITS FOR THE OPERATOR: the automatic chain does not fire, the re-seat offer is
+  // shown, and "Follow the tilt" is what runs the re-post.
+  it('#934 — a measured tilt offers the re-seat first, and the chain waits for the operator', async () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    const generateSpy = vi.fn(async () => {});
+    useEngraveRunStore.setState({ generate: generateSpy as never });
+    const surface = { plane: { offset: 0, slopeX: 0.01, slopeY: 0 }, z0: -55 };
+    useEngraveRegistrationStore.getState().measureSurface(job.id, TARGET, {
+      verdict: 'tilt',
+      tilt: { xMm: 0.12, yMm: 0 },
+      recommendation: null,
+    } as unknown as SurfaceSpreadAssessment);
+    useEngraveRegistrationStore.getState().record(job.id, TARGET, {} as never, {} as never, surface);
+
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    await Promise.resolve();
+    expect(generateSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('engrave-cut-reseat').textContent).toContain(
+      'Re-seat the blank (press down on the low side) and register again — or follow the tilt',
+    );
+    // "Register again" is the registration's own Start; the offer sits beside it.
+    expect(screen.getByTestId('engrave-cut-reseat-register').textContent).toBe('Register again');
+
+    fireEvent.click(screen.getByTestId('engrave-cut-reseat-follow'));
+    await waitFor(() => expect(generateSpy).toHaveBeenCalledWith(surface));
+  });
+
   it('does not re-post when the package already follows the tilt', async () => {
     const job = plannedJob();
     const pkg = { ...frozen(job, [P1]), surface: { plane: { offset: 0, slopeX: 0.01, slopeY: 0 }, z0: -55 } };

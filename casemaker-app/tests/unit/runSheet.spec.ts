@@ -1642,7 +1642,9 @@ describe('the surface spread (#475)', () => {
     expect(all).not.toContain('Measured: lowest');
   });
 
-  it('#631 — a dome prints the G32 route (upload FLAT), not a dead-end refusal', () => {
+  // #934 — THE G32 RECIPE IS HIDDEN from the app until its bench run (#501); the run sheet cannot
+  // print what the surface no longer offers. Skipped, not deleted: these return with the route.
+  it.skip('#631 — a dome prints the G32 route (upload FLAT), not a dead-end refusal', () => {
     const job = dj();
     const plan = surfaceSpreadPlan(job)!;
     // A dome a plane cannot explain: the centre 2× the band above every extent, so the residual
@@ -1697,7 +1699,7 @@ describe('the surface spread (#475)', () => {
     expect(steps.some((s) => s.record === 'operator accepted the un-levelled floor (yes)')).toBe(true);
   });
 
-  it('#501 — a tilt is named with its slope, and the console G32 recipe is offered as the alternative', () => {
+  it.skip('#501 — a tilt is named with its slope, and the console G32 recipe is offered as the alternative', () => {
     const job = dj();
     const plan = surfaceSpreadPlan(job)!;
     const centreX = plan.touches[0]!.x;

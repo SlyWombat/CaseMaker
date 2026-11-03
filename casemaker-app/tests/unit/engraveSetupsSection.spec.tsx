@@ -8,7 +8,7 @@ import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngraveSetupsSection } from '@/components/panels/EngraveSetupsSection';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { useShopDefaultsStore, resetShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { resetShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { resetEngraveRows, useEngraveRowStore } from '@/store/engraveRowStore';
 import { useMachineStore, resetMachineStore } from '@/store/machineStore';
@@ -18,9 +18,7 @@ import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { resetRegistry, setInventoryEntries } from '@/engine/cnc/toolRegistry';
 import { orient } from '@/engine/cnc/setups/orient';
-import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { setHouseClientLoader, type HouseClient } from '@/platform/houseClient';
-import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { MachineObservation } from '@/platform/machineProbe';
 import type { LocationView } from '@/platform/locationClient';
 import type { EngraveCircleShape, EngraveDrillItem, EngraveJob, JobSetup } from '@/types/engraveJob';
@@ -52,14 +50,6 @@ const SETUP_ORIENTATION = {
   front: 'front',
   back: 'back',
 } as const;
-
-const CAL: MachineCalibration = {
-  machineId: 'Z1',
-  frame: { anchor1: [-190.89, -193.83], anchor2Offset: [88.5, 45], toolrackOffset: [48.8, 181], clearanceXY: [-5, -21], clearanceZ: -3, toolrackZ: -60 },
-  softEndstop: {} as MachineCalibration['softEndstop'],
-  source: 'config-get sd on 192.168.10.43',
-  measuredAt: '2026-10-07T18:00:00.000Z',
-};
 
 /** A machine observation whose address matches `DATUM_LOCATION`'s machine record (#598). */
 const OBS: MachineObservation = {
@@ -368,26 +358,22 @@ describe('#471 a saved list that no longer matches the document', () => {
 });
 
 describe('#471 registration — planned only after approval, refused with the engine’s reason', () => {
-  it('a vise setup plans from the stated seat and stores nothing until Approve', () => {
+  // #934 — THE TYPED SEAT IS HIDDEN. There is no override and no seat field; a vise with no
+  // measured jaw-top datum asks for the tap, which IS the registration procedure.
+  it('offers neither the typed-seat override nor the seat field, and asks for the jaw tap', () => {
     act(() => useEngraveJobStore.setState({ job: savedJob() }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
 
+    expect(screen.queryByTestId('engrave-setups-use-typed-seat')).toBeNull();
+    expect(screen.queryByTestId('engrave-setup-seat-1')).toBeNull();
     expect(screen.getByTestId('engrave-setup-reg-unplanned-1')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('engrave-setups-use-typed-seat'));
-    // #726 P6 — the expert seat is a machine Z, and says so in millimetres.
-    expect(screen.getByTestId('engrave-setup-seat-1').closest('label')?.textContent).toContain('mm');
-    fireEvent.change(screen.getByTestId('engrave-setup-seat-1'), { target: { value: '-66' } });
-    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
-    expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
 
-    fireEvent.click(screen.getByTestId('engrave-setup-approve-reg-1'));
-    const registration = useEngraveJobStore.getState().job.setups![0]!.registration;
-    expect(registration).toBeDefined();
-    expect(registration!.method).toBe('vise');
-    expect(registration!.expected).toContain('surface touch');
-    expect(screen.getByTestId('engrave-setup-reg-approved-1')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
+    expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain(
+      'tap the jaw first — run the registration',
+    );
+    expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
   it('asks to tap the fixed jaw instead of inventing a datum (a custom, non-Z1 vise)', () => {
@@ -401,39 +387,13 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
-  it('#614 a shipped-vise job with no datum and the override off plans to need-datum, not the seeded seat', () => {
+  it('#614 a shipped-vise job with no datum plans to need-datum, not a seeded seat', () => {
     act(() => useEngraveJobStore.setState({ job: savedJob() }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
     expect(screen.getByTestId('engrave-setup-reg-need-datum-1')).toBeTruthy();
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
-  });
-
-  it('defaults the vise seat to the shipped Z1 vise’s provisional aim (−55) behind the override', () => {
-    act(() => useEngraveJobStore.setState({ job: savedJob() }));
-    render(<EngraveSetupsSection />);
-    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
-
-    fireEvent.click(screen.getByTestId('engrave-setups-use-typed-seat'));
-    const seat = screen.getByTestId('engrave-setup-seat-1') as HTMLInputElement;
-    expect(seat.value).toBe('-55');
-
-    // It is an aim, not a stored reading: planning works with no typed value, and nothing is
-    // written until Approve.
-    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
-    expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
-  });
-
-  it('leaves the seat empty for a measured/custom vise behind the override', () => {
-    const job = savedJob();
-    jobVise(job).source = 'measured';
-    act(() => useEngraveJobStore.setState({ job }));
-    render(<EngraveSetupsSection />);
-    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
-    fireEvent.click(screen.getByTestId('engrave-setups-use-typed-seat'));
-    expect((screen.getByTestId('engrave-setup-seat-1') as HTMLInputElement).value).toBe('');
   });
 
   it('#598 a machine with a measured jaw-top datum plans from it, with no seat input', () => {
@@ -443,9 +403,9 @@ describe('#471 registration — planned only after approval, refused with the en
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
 
-    // No seat input is shown on the datum path; the override disclosure is still offered.
+    // No seat input is shown on the datum path (#934 removed the override entirely).
     expect(screen.queryByTestId('engrave-setup-seat-1')).toBeNull();
-    expect(screen.getByTestId('engrave-setups-use-typed-seat')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-setups-use-typed-seat')).toBeNull();
 
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
     expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
@@ -617,33 +577,25 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(screen.getByTestId('engrave-setup-probe-1').textContent).toBe('Makera Wired Probe V2');
   });
 
-  it('a bracket refuses without a measured seat, then plans once the setting exists', () => {
-    useSettingsStore.setState({ machineCalibration: CAL });
+  // #934 — THE BRACKET IS HIDDEN as a registration branch: the editor offers the vise, and a job
+  // that is already in a bracket is refused by name rather than planned.
+  it('offers the vise only, and refuses a job already in the bracket by name', () => {
     act(() => useEngraveJobStore.setState({ job: savedJob() }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
-    fireEvent.change(screen.getByTestId('engrave-setup-mount-1'), { target: { value: 'bracket' } });
-    expect(useEngraveJobStore.getState().job.setups![0]!.mount.kind).toBe('bracket');
+    const select = screen.getByTestId('engrave-setup-mount-1') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(['vise']);
 
+    cleanup();
+    const bracketed = savedJob();
+    bracketed.setups![0]!.mount = { kind: 'bracket' };
+    act(() => useEngraveJobStore.setState({ job: bracketed }));
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    // #607 — the bracket's tap cannot stand in for the FIRST seat measurement (its arm top is
-    // measured-only too, and no point is known clear of the slots until then), so the unmeasured
-    // seat keeps the sentence that says how to measure it.
-    // #509 — the sentence names the bed profile's seat, which is where the seat lives now.
-    expect(screen.getByTestId('engrave-setup-reg-refusal-1').textContent).toContain('the bed profile’s bracket seat');
-
-    act(() =>
-      useShopDefaultsStore.setState({
-        status: 'present',
-        defaults: ShopDefaultsSchema.parse({
-          'bracket.seatMachineZ': { value: -70.2, source: 'measured', setAt: '2026-10-16T10:00:00.000Z', unit: 'mm', note: 'one touch' },
-        }),
-      }),
+    expect(screen.getByTestId('engrave-setup-reg-refusal-1').textContent).toContain(
+      'the bracket’s registration has not been run on this machine yet',
     );
-    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent.length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByTestId('engrave-setup-approve-reg-1'));
-    expect(useEngraveJobStore.getState().job.setups![0]!.registration!.method).toBe('bracket');
   });
 
   it('changing the mount clears the approved registration and remount', () => {

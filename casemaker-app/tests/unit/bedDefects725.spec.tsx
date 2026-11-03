@@ -17,6 +17,11 @@
 // `machineChangeWizard.spec.tsx` / `machineChange.spec.ts`; the 3D fixture is pinned in
 // `engravePreview.spec.ts` (real Manifold).
 
+// #934 — THE BED MOUNTS ARE HIDDEN from Holding until their bench runs (tape and bracket are
+// registration branches this machine has not run; the vise is the one procedure the milestone
+// ships). These specs exercise the hidden branch and return behind its own issue: skipped, not
+// deleted, so the coverage comes back with the code.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
@@ -570,7 +575,7 @@ describe('#725 W1 — the panel’s Hold line is the mount’s', () => {
 });
 
 describe('#725 W10 — a measured vise is not an assertion', () => {
-  it('with nothing on the pins the bed’s default mount is taken', () => {
+  it.skip('with nothing on the pins the bed’s default mount is taken', () => {
     openHolding(withMeasuredVise(tapedJob({ shapes: [] })), bedMachine());
     expect(useEngraveJobStore.getState().job.workholding.kind).toBe('tape');
     expect((screen.getByTestId('engrave-setup-mount-bed-tape') as HTMLInputElement).checked).toBe(true);
@@ -615,7 +620,7 @@ describe('#725 P8/P9 — the picture’s words', () => {
 });
 
 describe('#725 B5 — asking for the bracket asks the wizard to fit it', () => {
-  it('the bracket row’s escape carries fitBracket from a vise job', () => {
+  it.skip('the bracket row’s escape carries fitBracket from a vise job', () => {
     const base = defaultEngraveJob();
     openHolding({ ...base, labels: [], stock: { ...base.stock, length: 100, width: 60, thickness: 6 } }, bedMachine({ vise: true }));
     fireEvent.click(screen.getByTestId('engrave-setup-change-bed-bracket'));
@@ -704,7 +709,7 @@ describe('#725 review — a rotary- prefix is not a fix', () => {
 });
 
 describe('#727 F9 — the tape inset is the shop’s', () => {
-  it('a new taped job starts from tape.insetMm, not the hard-coded 2 mm', () => {
+  it.skip('a new taped job starts from tape.insetMm, not the hard-coded 2 mm', () => {
     // The house tapes 6 mm in from every edge; a job arriving on the bed takes that, and its strips
     // line is computed from it.
     useShopDefaultsStore.setState({
@@ -782,7 +787,7 @@ describe('#730 — the bed facts follow the job’s machine', () => {
     });
   }
 
-  it('Holding’s picture and board sentence read the job’s machine too', () => {
+  it.skip('Holding’s picture and board sentence read the job’s machine too', () => {
     twoMachines();
     // The job runs on the second machine, whose bed is BARE; the house's first carries a
     // wasteboard. Reading machines[0] drew "Under it wasteboard" for a job that will be cut on a
