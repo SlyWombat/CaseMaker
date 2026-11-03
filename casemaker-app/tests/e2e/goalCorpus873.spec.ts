@@ -55,22 +55,36 @@ async function openFold(page: import('@playwright/test').Page, testid: string): 
   if ((await fold.getAttribute('open')) === null) await fold.locator('summary').click();
 }
 
-/** Generate, wait for the run to PASS, and open the folds its verdict is written behind. */
-async function generateAndRead(page: import('@playwright/test').Page): Promise<void> {
+/**
+ * Generate, wait for the run's own verdict, and open the folds its words live behind.
+ *
+ * #794/#948 — A PASS COLLAPSES TO THE READY CARD; A GOAL THAT MISSES THE PASS LINE DOES NOT. Both
+ * are truthful end states of this spec: the rows stay open and the oracle row crosses when the
+ * goal check's top-surface coverage is under the shop's line (the figure today), and the Ready
+ * card appears only when every tick passed (the relief). The card's presence is the pass; its
+ * absence beside a crossed oracle is the goal check's own failure, not a dead end.
+ */
+async function generateAndRead(page: import('@playwright/test').Page): Promise<'pass' | 'cross'> {
   await openCutterGroup(page);
   await page.getByTestId('engrave-tool').selectOption('flat-1.0');
   await page.getByTestId('engrave-generate').click();
 
-  // #794 — a run that passed collapses to ONE line, the Ready card, with the four ticks and the
-  // verdict behind its fold. The card appearing IS the verdict: every tick passed on it.
-  await expect(page.getByTestId('engrave-run-ready')).toBeVisible({ timeout: 550_000 });
-  await openFold(page, 'engrave-run-ready');
   const oracle = page.getByTestId('engrave-run-oracle');
-  await expect(oracle).toHaveAttribute('data-state', 'tick');
-  await expect(oracle).toContainText('matches the design');
+  await expect(oracle).toHaveAttribute('data-state', /^(tick|cross)$/, { timeout: 550_000 });
+  const verdict = (await oracle.getAttribute('data-state')) === 'tick' ? 'pass' : 'cross';
+  if (verdict === 'pass') {
+    await expect(page.getByTestId('engrave-run-ready')).toBeVisible();
+    await openFold(page, 'engrave-run-ready');
+    await expect(oracle).toHaveAttribute('data-state', 'tick');
+    await expect(oracle).toContainText('matches the design');
+  } else {
+    await expect(page.getByTestId('engrave-run-ready')).toHaveCount(0);
+    await expect(oracle).toContainText('does not match the design');
+  }
 
   // The goal's own sentence lives in the findings fold (#872).
   if ((await page.getByTestId('engrave-findings').count()) > 0) await openFold(page, 'engrave-findings');
+  return verdict;
 }
 
 /** The split, when the run states one: a warning with the shares, and the plan when it has one. */
@@ -89,11 +103,26 @@ test.describe('the goal corpus, desktop', () => {
 
   test('the figure: picked in the wizard, generated, and the panel states what the top leaves', async ({ page }) => {
     await wizardGoal(page, FIGURE, { length: 120, width: 80, thickness: 40 });
-    await generateAndRead(page);
+    const verdict = await generateAndRead(page);
     const split = await readSplit(page);
     expect(split).not.toBeNull();
     expect(split!).toMatch(/The top setup reproduces \d/);
     expect(split!).toMatch(/faces away from the tool/);
+
+    // #948 — THE GOAL CHECK'S OWN VERDICT, IN D'S WORDS. The figure's check finds a cell cut
+    // 0.023 mm into the design (at 65, 43.7), so the run is a truthful cross and Cut states the
+    // cut-into with its worst cell; the coverage fact below states the surface it measured.
+    expect(verdict, 'the figure is cut-into — a cross, not a ready program').toBe('cross');
+    // The findings fold leaves the Design panel scrolled and the sticky footer covers the mode
+    // tab's click point at this window; switch on the element itself — the Cut card is what this
+    // asserts, not the pointer.
+    await page.getByTestId('cnc-mode-cut').evaluate((el) => (el as HTMLElement).click());
+    await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
+    await expect(page.getByTestId('engrave-cut-goal')).toHaveAttribute('data-state', 'cut-into');
+    await expect(page.getByTestId('engrave-cut-goal')).toHaveText('Cuts 0.023 mm into the design at 65, 43.7');
+    await expect(page.getByTestId('engrave-cut-goal-coverage')).toHaveText(
+      /^Top-surface coverage: [\d.]+ % \(the pass line is 95 %\)$/,
+    );
   });
 
   test('the relief: picked in the wizard, generated, and no flip is proposed', async ({ page }) => {

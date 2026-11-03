@@ -23,30 +23,6 @@ import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.url));
 
-/** A status line with the monitor fields the state popover reads, for the machine observation. */
-const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
-
-/** Put a machine on screen without one — the observation a probe would have written. */
-async function rememberMachine(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate((line) => {
-    window.__caseMaker!.setMachine(
-      {
-        name: 'QA Z1',
-        host: '192.0.2.10',
-        port: 2222,
-        busy: false,
-        ip: null,
-        mac: null,
-        status: line,
-        profileId: 'Z1',
-        observedAt: '2026-10-25T00:00:00.000Z',
-        notes: [],
-      },
-      line,
-    );
-  }, STATUS);
-}
-
 // The surfacing CAM and the column sweep run in the worker; under swiftshader the whole run
 // takes tens of seconds, so these get well past Playwright's 30 s default.
 test.setTimeout(240_000);
@@ -136,13 +112,13 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   // The run's four rows tick; the oracle row is the goal program's own check.
   await expect(page.getByTestId('engrave-run-toolpath')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
 
-  // #688 — the Design footer states the check as ONE tick, not a paragraph. The long sentence
-  // (which dexel grid checked the surface program) moved to the simulation's own panel (#691);
-  // Cut's release line still states it, asserted further down.
+  // #948 — THE GOAL CHECK'S OWN VERDICT. The chamfered block's top surface finishes at 81.07 %
+  // coverage against the shop's 95 % pass line (zero cut-into), so the oracle row CROSSES. That is
+  // the truthful end state: the program runs, and the check says what the top setup leaves.
   const oracleRow = page.getByTestId('engrave-run-oracle');
-  await expect(oracleRow).toContainText('matches the design');
+  await expect(oracleRow).toHaveAttribute('data-state', 'cross', { timeout: 180_000 });
+  await expect(oracleRow).toContainText('does not match the design');
   await expect(oracleRow).not.toContainText('0.0000');
 
   // The goal row's own facts, after a Generate: the passes' layers and the sampled grid. The
@@ -160,26 +136,27 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   await expect(report).toContainText('Sampled on a');
   await expect(report).toContainText('mm grid');
 
-  // #535 — THE GOAL PROGRAM IS A RELEASE SOURCE. Cut freezes it, the one screen offers the press,
-  // and its check line is the surface sweep rather than a 2.5D comparison. E2E has no controller,
-  // so the machine is the observation a probe would have written — and the press is NOT pressed.
-  await rememberMachine(page);
+  // #535/#948 — THE GOAL PROGRAM IS A RELEASE SOURCE, AND ITS CHECK DECIDES THE PRESS. Cut freezes
+  // it (the package is current), but the failed goal check keeps the run from being offered: step 1
+  // states the failure in D's words — the measured coverage against the shop's pass line — and no
+  // start press is drawn. The check's own findings stay readable in the details fold.
   await page.getByTestId('cnc-mode-cut').click();
   await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
-  // #797 — ONE statement arms the press. It is step 1's; this job's current step is Register (no
-  // saved setup), so step 1 arrives folded, and the press inside step 3 is folded with it. The
-  // attribute is readable either way: disabled until the statement is given, enabled after.
-  const go = page.getByTestId('engrave-cut-go');
-  await expect(go).toBeDisabled();
-  const step1 = page.getByTestId('engrave-cut-step-1');
-  if (!(await step1.evaluate((el) => (el as HTMLDetailsElement).open))) {
-    await page.getByTestId('engrave-cut-step-1-summary').click();
-  }
-  await page.getByTestId('engrave-ack').check();
-  await expect(go).toBeEnabled();
-  await page.getByTestId('engrave-cut-step-3-summary').click();
-  await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('engrave-cut-confirm-oracle')).toContainText(
-    'No 2.5D check for a surface program — checked on the',
+  await expect(page.getByTestId('engrave-package')).toHaveAttribute('data-state', 'current');
+  await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'failed');
+  await expect(page.getByTestId('engrave-cut-verdict-line')).toHaveText('The simulation did not pass.');
+  await expect(page.getByTestId('engrave-cut-goal')).toHaveAttribute('data-state', 'coverage');
+  await expect(page.getByTestId('engrave-cut-goal')).toHaveText(
+    'Covers 81.07 % of the design’s top surface (the pass line is 95 %)',
   );
+  await expect(page.getByTestId('engrave-cut-goal-coverage')).toHaveText(
+    'Top-surface coverage: 81.07 % (the pass line is 95 %)',
+  );
+  // The failed verdict is the press's blocker: there is no start-cut button to arm.
+  await expect(page.getByTestId('engrave-cut-go')).toHaveCount(0);
+  // The check's own findings — why the top setup leaves the surface short — stay in the fold.
+  const details = page.getByTestId('engrave-cut-details');
+  if (!(await details.evaluate((el) => (el as HTMLDetailsElement).open))) await details.locator('summary').click();
+  await expect(details).toContainText(/The finish leaves [\d.]+ mm³/);
+  await expect(details).toContainText(/The top setup reproduces \d+ % of the goal's surface/);
 });
