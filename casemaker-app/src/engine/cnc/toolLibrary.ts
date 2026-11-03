@@ -120,6 +120,36 @@ export const ToolLibrarySchema = z.array(ToolLibraryEntrySchema).superRefine((li
 
 export type ToolLibraryEntry = z.infer<typeof ToolLibraryEntrySchema>;
 
+/**
+ * #922 — ONE PHYSICAL CUTTER, ONE ENTRY.
+ *
+ * The house serves the same cutter twice: a `cat:` definition from the catalogue and an `inv:`
+ * possession from the inventory (the elephant stick's ⌀0.5 ball is `cat:019c049a-…` and
+ * `inv:lib-161032055031`, physical id 161032055031). The app's registry and the CLI's
+ * `--location` one order the two differently, and a pick that takes the first equal-geometry
+ * candidate then posts the same program under different `;@CM|TOOL|key=` headers on the two
+ * doors.
+ *
+ * This is the one identity rule: dedupe by the physical cutter's `id`, keeping the OWNED key —
+ * `inv:` (the inventory), then `user:` — over the catalogue's `cat:` definition, and a `cat:`
+ * entry only when nothing owns the cutter. A cutter with no id is identified by its key, so
+ * distinct entries never collapse. The first occurrence's position is kept, so an already-unique
+ * list is returned unchanged.
+ */
+export function dedupeCutterEntries(entries: readonly ToolLibraryEntry[]): ToolLibraryEntry[] {
+  const rank = (key: string): number =>
+    key.startsWith('inv:') ? 3 : key.startsWith('user:') ? 2 : key.startsWith('cat:') ? 1 : 0;
+  const best = new Map<string, { entry: ToolLibraryEntry; rank: number }>();
+  for (const entry of entries) {
+    const id = typeof entry.tool.id === 'string' && entry.tool.id !== '' ? entry.tool.id : entry.key;
+    const r = rank(entry.key);
+    const held = best.get(id);
+    if (held === undefined) best.set(id, { entry, rank: r });
+    else if (r > held.rank) best.set(id, { entry, rank: r });
+  }
+  return [...best.values()].map((b) => b.entry);
+}
+
 export const TOOL_LIBRARY: readonly ToolLibraryEntry[] = [
   {
     key: 'flat-3.175x12-metal',

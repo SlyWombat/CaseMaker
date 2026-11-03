@@ -45,6 +45,7 @@ import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import { useLocationStore } from './locationStore';
 import { isVShape } from '@/engine/cnc/vProfile';import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { engraveShopOpts } from '@/engine/cnc/engrave/feeds';
 import {
   combineCopperSides,
   pcbCopperTopologyInputs,
@@ -79,7 +80,6 @@ import { shopDefault, useShopDefaultsStore } from './shopDefaultsStore';
 import { useFeedTableStore } from './feedTableStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useEngraveRegistrationStore } from './engraveRegistrationStore';
-import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import type { EngraveRunPhase } from './engraveRunGate';
 import {
   attributedDiagnostics,
@@ -508,56 +508,14 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     length: job.stock.length,
     width: job.stock.width,
   });
+    // #922 — THE ONE SHOP BUILDER. `engraveShopOpts` (`engine/cnc/engrave/feeds.ts`) is the builder
+    // the CLI's door uses, so the app's Generate and `casemaker cut` cannot send different shop
+    // numbers; the per-job facts the builder deliberately omits (the mount's obstacles, the bed's
+    // through-cut facts, the fitted surface) are added here.
     const shop: EngraveShopOpts = {
-      lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
-      peckClearanceMm: shopDefault('drill.peckClearanceMm').value,
-      defaults: shopDefaults,
-      // #450 slice 3 — the table the worker's `feedsFor` resolves against. Read from this realm,
-      // like the catalogue below and for the same reason: the worker cannot see the location, and
-      // a program built on the compiled rows would disagree with the panel's.
-      feeds: resolvedFeedsTable().table,
-      // #432 slice 2 — the cutter list the facing pass chooses from, sent for the same reason the
-      // catalogue is (the worker's registry is empty). The snapshotted list, not a re-read after the
-      // await: the facing tool must be one the picker this run was started from shows.
-      tools: getTools(),
-      // #432 review R10 — the bench's condition summaries, read in the SAME snapshot as the cutter
-      // list and for the same worker-realm reason: `toolCondition`'s map is main-thread state, and
-      // the worker's copy is empty. A broken cutter must be skipped by the pick the worker makes,
-      // not only by the one the panel shows.
-      conditions: inventoryConditions(),
+      ...engraveShopOpts(shopDefaults),
       mount,
       bed,
-      // #472 — the rest pass's two numbers, read from the location in the SAME snapshot as the
-      // others. The worker cannot import the defaults client (`houseClient` drags the transport
-      // into that realm), so the resolved values and their sources cross as plain data; absent,
-      // the generator uses its labelled fallback pair.
-      rest: {
-        overlap: shopDefault('rest.overlapMm'),
-        thirdToolPct: shopDefault('rest.thirdToolPct'),
-        // #847 — the depth past which a 3D finish's leftover is a visible ridge rather than a
-        // witness mark; the share half is `rest.thirdToolPct` above.
-        visibleDepth: shopDefault('rest.visibleDepthMm'),
-      },
-      // #250 — the finish pass's allowance, from the SAME snapshot and for the same worker-realm
-      // reason. The worker splits each flat region into a roughing pass that leaves this much on the
-      // walls and floor and a finishing pass at full depth; the source travels so the run sheet can
-      // say where the number came from. This line is what makes the shipped app use the finish pass;
-      // a caller that omits it (a preview, a direct-engine test) cuts in one pass as before.
-      finish: {
-        stockToLeaveMm: shopDefault('finish.stockToLeaveMm'),
-      },
-      // #535 — the goal operation's heightfield pitch, from the SAME snapshot and for the same
-      // worker-realm reason. A pure goal job samples its heightfield at this pitch unless the
-      // operation states its own; the source travels so the row and the run sheet print where the
-      // number came from. Absent, the CAM's labelled `DEFAULT_GRID_PITCH_MM`.
-      surfaceGrid: {
-        pitchMm: shopDefault('sim.columnFlatPitchYMm'),
-      },
-      // #434 — the drill numbers (`drill.peckDiameters`, `drill.peckClearanceMm`,
-      // `drill.pointAngleDeg`, `drill.plungeFeed`, `drill.spindleRpm`) from the SAME snapshot,
-      // with each one's source. A drill program's plan and its depth findings read this reading
-      // rather than re-resolving the location in the worker.
-      drill: drillSettings(shopDefaults),
       // #608 — the fitted tilt the Cut step re-posts against, when it re-generates after a
       // registration measured one. Absent/null posts flat, byte-for-byte as before.
       surface: surface === null ? undefined : { plane: surface.plane, z0: surface.z0 },
@@ -928,8 +886,21 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // (exactly what today did), and a later program with nothing predicted is not compared.
           const isFirst = index === firstEngravingIndex;
           const predicted = program.predicted ?? (isFirst ? generated.predicted : undefined);
-          if (predicted === undefined) return;
-          if (!isFirst && predicted.length === 0) return;
+          // #948 — A GOAL PROGRAM IS JUDGED AGAINST ITS GOAL, not only against the plan: the
+          // worker samples the goal's heightfield and pairs it with this program's live sweep.
+          // `surface3d` is set only on the goal path (the flat goal and the rotary relief), so an
+          // item job sends nothing and runs exactly as before.
+          // #948 — AND EVERY PROGRAM OF A GOAL JOB IS JUDGED, predicted items or not. A goal
+          // job's rest pass posts a file with no predicted regions (there is no 2.5D plan
+          // comparison for it), and the old early return skipped the oracle — so the run judged
+          // the finish program's sweep alone, and the run's one goal field (the page stamps every
+          // program onto it) never received the rest pass's cuts.
+          const goal = goalCheckForProgram(job, generated.surface3d != null, {
+            passCoverage: goalPassCoverage(shopDefaults),
+          });
+          const goalOnly = goal !== undefined && (predicted === undefined || predicted.length === 0);
+          if (predicted === undefined && !goalOnly) return;
+          if (!isFirst && predicted !== undefined && predicted.length === 0 && !goalOnly) return;
           // #924 activation — the program's own raw design items ride the same call `predicted`
           // does, so the app's OWN Generate runs the design-side check (#924) against this file's
           // sweep. Read off the generated program rather than the walk's `SweepProgram` view (which
@@ -939,16 +910,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // for V-carve/flat engrave items).
           const designItems =
             generated.programs[index]?.designItems ?? (isFirst ? generated.designItems : undefined);
-          // #948 — A GOAL PROGRAM IS JUDGED AGAINST ITS GOAL, not only against the plan: the
-          // worker samples the goal's heightfield and pairs it with this program's live sweep.
-          // `surface3d` is set only on the goal path (the flat goal and the rotary relief), so an
-          // item job sends nothing and runs exactly as before.
           // #948 — the pass line is the SHOP's `goal.passCoverage`, read here and handed over with
           // the goal, so the worker's check judges against the number the page's checker reads.
-          const goal = goalCheckForProgram(job, generated.surface3d != null, {
-            passCoverage: goalPassCoverage(shopDefaults),
-          });
-          const report = await client.simOracle([...predicted], undefined, designItems, goal);
+          const report = await client.simOracle([...(predicted ?? [])], undefined, designItems, goal);
           if (mine !== seq) return;
           oracles.push({ index, report });
         },

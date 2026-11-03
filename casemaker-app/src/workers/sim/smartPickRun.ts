@@ -23,7 +23,7 @@
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
-import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { dedupeCutterEntries, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { smartPickKey } from '@/engine/cnc/engrave/measuredPick';
@@ -68,7 +68,10 @@ export interface EngravePickInputs {
 export function pickContext(inputs: EngravePickInputs): EvalContext {
   return {
     tl: inputs.tl,
-    tools: inputs.tools,
+    // #922 — ONE PHYSICAL CUTTER, ONE CANDIDATE: the app's registry and the CLI's order the
+    // catalogue's `cat:` definition and the owned `inv:` possession of the same cutter
+    // differently; the identity rule keeps the owned key (see `dedupeCutterEntries`).
+    tools: dedupeCutterEntries(inputs.tools),
     catalogue: inputs.catalogue,
     shop: inputs.shop,
     calibration: null,
@@ -80,7 +83,7 @@ export function pickContext(inputs: EngravePickInputs): EvalContext {
 /** `candidatePlans` with the context's own filters — never the three-argument form. */
 export function pickCandidates(inputs: EngravePickInputs): CandidatePlan[] {
   const ctx = pickContext(inputs);
-  return candidatePlans(inputs.job, inputs.tools, inputs.catalogue, ctx.conditions, ctx.table, inputs.floors);
+  return candidatePlans(inputs.job, ctx.tools, inputs.catalogue, ctx.conditions, ctx.table, inputs.floors);
 }
 
 /** One plan, evaluated against the context the search itself uses. */
@@ -105,7 +108,7 @@ export function pickForEngrave(
   const ctx = pickContext(inputs);
   return smartPick(
     inputs.job,
-    inputs.tools,
+    ctx.tools,
     inputs.catalogue,
     evaluate ?? ((plan, level) => evaluatePlan(inputs.job, plan, ctx, { level })),
     {
