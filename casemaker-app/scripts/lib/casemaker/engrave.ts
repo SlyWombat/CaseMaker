@@ -550,6 +550,17 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * in too, so this is the one place the CLI assembles the bag the generator reads.
    */
   const shop: EngraveShopOpts = engraveShopOpts(shopDefaults);
+  /**
+   * #947 — THE SEARCH'S OWN SHOP, WITHOUT THE FINISH ALLOWANCE. The app's live recommendation
+   * (`engravePreviewStore.ts`'s `previewInputs`) has never put `finish` on the shop it hands the
+   * measured search — only the posted Generate reads it (`engraveRunStore.ts`'s own `shop`, which
+   * `shop` above now mirrors). Handing the search the FULL `shop` scores every candidate against
+   * an allowance the app's own picker never sees, so the two pickers can name different cutters
+   * for the identical job and location — C's #947 reproduction on k3: the app's ⌀3.175×32 flat
+   * against the CLI's ⌀3 corn plus a flat-1.0 rest. The posted program, once a cutter is chosen,
+   * still runs on the full `shop` below unchanged; this trims only what the search itself reads.
+   */
+  const pickShop: EngraveShopOpts = { ...shop, finish: undefined };
   if (boot.location !== null) {
     const where = boot.location;
     recordInput(where.path);
@@ -1525,7 +1536,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // reasons are printed here; the run writes the plan the search chose.
         const searchTools = searchToolsFor(job);
         const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation | Promise<PlanEvaluation> =>
-          evaluatePlan(job, plan, { tl, tools: searchTools, catalogue: catalogueRows, shop, calibration: null }, { level });
+          evaluatePlan(job, plan, { tl, tools: searchTools, catalogue: catalogueRows, shop: pickShop, calibration: null }, { level });
         const searchStart = Date.now();
         // #766 D — `smartPick` is async: the evaluator may be (the Design panel's worker one
         // yields between plans so an edit can cancel the run); the CLI's is synchronous.
@@ -1676,7 +1687,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const sub = setupWorkJob(parsed.job, tools, setupIndex);
         if (sub === null) continue;
         const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation | Promise<PlanEvaluation> =>
-          evaluatePlan(sub, plan, { tl, tools, catalogue: catalogueRows, shop, calibration: null }, { level });
+          evaluatePlan(sub, plan, { tl, tools, catalogue: catalogueRows, shop: pickShop, calibration: null }, { level });
         const pick = await smartPick(sub, tools, catalogueRows, evaluate);
         if (pick.refused === true) {
           out.progress(`  setup ${setupIndex + 1}      ${pick.reason}`);
