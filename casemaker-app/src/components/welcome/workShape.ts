@@ -14,6 +14,10 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { WORK_STOCK_MATERIAL, type StockProposal, type WorkShape } from '@/engine/cnc/stockProposal';
+import type { StockItem } from '@/platform/stockClient';
+
+/** A millimetre figure as the step's sentences print it: at most two decimals, zeros dropped. */
+const mm = (v: number): string => String(Number(v.toFixed(2)));
 import type { EngraveJob } from '@/types/engraveJob';
 import type { OperationChoice } from './OperationStep';
 
@@ -44,6 +48,44 @@ export const HOUSE_STOCK = {
   thickness: 36,
 } as const;
 
+/**
+ * #M1R §3.4 — THE HOUSE STOCK IS THE SHELF'S, NOT A CONSTANT. The house's stick is a SHOP fact (the
+ * location's `/stock`), and the app already loads it (`useStockStore`); a hard-coded 36 × 100 × 36
+ * asserts a blank the shelf may not hold, and would keep asserting it after the shop changed. This
+ * reads the shelf's own planed hardwood block — the M1 stick the bench cuts — and the sentence names
+ * the entry, so the wizard says where the blank came from rather than what a constant remembers.
+ *
+ * `null` when the shelf has no such entry: the caller then falls back to {@link houseStockProposal},
+ * which STATES the fallback. A shelf that has not loaded yet is indistinguishable from an empty one
+ * here — the wizard re-proposes when it does, and a job already started is never re-seeded.
+ */
+export function shelfHouseStockProposal(items: readonly StockItem[]): StockProposal | null {
+  const entry = items.find(
+    (s) =>
+      s.material === 'hardwood' &&
+      s.form === 'block' &&
+      s.finish === 'finished' &&
+      s.size.length != null &&
+      s.size.width != null &&
+      s.size.thickness != null,
+  );
+  if (entry === undefined) return null;
+  const length = entry.size.length as number;
+  const width = entry.size.width as number;
+  const thickness = entry.size.thickness as number;
+  return {
+    form: 'block',
+    material: 'hardwood',
+    length,
+    width,
+    thickness,
+    finish: 'finished',
+    sentence:
+      `The shelf’s stock: “${entry.id}”, a ${mm(length)} × ${mm(thickness)} × ${mm(width)} mm hardwood block, ` +
+      `planed, worked on its ${mm(length)} × ${mm(width)} face.`,
+  };
+}
+
 /** The blank step's proposal for the house stock, with the sentence that says where it came from. */
 export function houseStockProposal(): StockProposal {
   return {
@@ -65,10 +107,12 @@ export function proposedStockFor(
   work: WorkShape,
   job: EngraveJob,
   proposed: StockProposal | null,
+  /** The location's shelf, as the wizard has it: the house stock is a shop fact (#M1R §3.4). */
+  shelf: readonly StockItem[] = [],
 ): StockProposal | null {
   if (work.kind === 'mesh' || work.kind === 'pcb') return proposed;
   if (rotaryMapOf(job) !== null) return proposed;
-  return houseStockProposal();
+  return shelfHouseStockProposal(shelf) ?? houseStockProposal();
 }
 
 /**

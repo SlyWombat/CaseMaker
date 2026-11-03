@@ -337,7 +337,13 @@ export function StartWizard(): JSX.Element {
     void fontEpoch; // a parsed face changes the MEASUREMENT, not the choice or the job
     return workShapeFor(operationChoice, job);
   }, [operationChoice, job, fontEpoch]);
-  const proposal = useMemo(() => proposedStockFor(work, job, proposeStock(work)), [work, job]);
+  // #M1R §3.4 — the shelf is read REACTIVELY: the house stock is the shop's own entry, and the
+  // proposal must follow it when the shelf loads (or changes) while the wizard is open.
+  const shelfItems = useStockStore((s) => s.items);
+  const proposal = useMemo(
+    () => proposedStockFor(work, job, proposeStock(work), shelfItems),
+    [work, job, shelfItems],
+  );
   // #930 — whether the vise's jaws are the fixture over this blank: with no machine record the
   // app's own vise model is, and a bed job has no jaw tops to clear.
   const viseOnPins = useMemo(() => {
