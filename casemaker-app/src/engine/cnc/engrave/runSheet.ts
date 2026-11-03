@@ -2267,6 +2267,15 @@ function materialPositionSteps(
  */
 export interface RunSheetOptions {
   /**
+   * #921 — THE HEADER HASH, over the bytes the CALLER pins. The sheet prints a sha256 as the
+   * program's identity; a golden that pins the program's PATH bytes (its one
+   * `;@MKR|TIME|seconds=…` record excluded, so a pure estimator change cannot move the poster)
+   * hands the same stripped hash here, and an estimator-only change then moves the pinned TIME
+   * number and no sheet byte. Omitted, the full posted file's sha256 — the app's own sheet, and
+   * the number the operator can check against the file.
+   */
+  fileHash?: string;
+  /**
    * #491 — the colour word(s) for the job's cutter, from `caseWordsForKey(job.toolKey)`: `Yellow
    * case`, or both cases in condition order for an indifferent pick. Passed in, never read from
    * `toolCondition`'s map here: the sheet is pure data and builds in realms (the sim worker, the
@@ -4066,7 +4075,7 @@ export function buildRunSheet(
     machine: options.machineName ?? machine.name,
     generatedOn: now.toISOString().slice(0, 10),
     fileName: runSheetFileName(job.name),
-    fileHash: nc === null ? '' : sha256Hex(nc).slice(0, 8),
+    fileHash: options.fileHash ?? (nc === null ? '' : sha256Hex(nc).slice(0, 8)),
     estimatedTime: generated.cam ? formatDuration(generated.cam.estimatedSeconds) : 'unknown',
     estimatedTimeNote: rapidAssumptionNote(machine.rapidEstimate),
     ...(options.probeName !== undefined ? { probe: options.probeName } : {}),
