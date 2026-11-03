@@ -57,42 +57,20 @@ const HEALTH = {
   problems: [],
 };
 
-const BOARDS_AND_TAPE = {
-  tape: { widthMm: 20, thicknessMm: 0.2, provenance: 'typed' },
-  boards: [{ material: 'MDF', size: [100, 100, 2], count: 4 }],
-};
-
 /**
- * The fixture's machine, with nothing on the pins, its bed measured, the bracket at anchor 1 when
- * `anchor` — the same view bedDefects725.spec.ts serves for the #725 walks.
+ * The fixture's location as committed: its measured vise ON THE PINS and its bed. The vise mounts
+ * need the vise fitted; a bed-bracket view (nothing on the pins) would disable every one of them.
  */
-function locationView(opts: { anchor: boolean }): unknown {
-  const doc = JSON.parse(JSON.stringify(DOC)) as Doc;
-  const profile = doc.machines[0]!.bedProfiles![0]!;
-  profile.placements = ((profile.placements as unknown[]) ?? []).filter(
-    (pl) => ((pl as { where?: { kind?: string } }).where?.kind ?? '') !== 'pins',
-  );
-  if (opts.anchor) {
-    (profile.placements as unknown[]).push({
-      id: 'pl-bracket',
-      fixture: 'fx-bracket-thin',
-      where: { kind: 'anchor', anchor: 1, pins: null },
-      count: null,
-      frame: null,
-      provenance: {},
-    });
-  }
-  profile.surface = { ...(profile.surface as object), length: 300, width: 200, position: { frontLeft: [20, 30], frame: 'machine' } };
-  profile.consumables = BOARDS_AND_TAPE;
+function locationView(): unknown {
   return {
-    kind: doc.kind,
-    schemaVersion: doc.schemaVersion,
-    id: doc.id,
-    name: doc.name,
-    createdAt: doc.createdAt,
-    migratedFrom: doc.migratedFrom ?? null,
-    machines: doc.machines,
-    accessories: doc.accessories,
+    kind: DOC.kind,
+    schemaVersion: DOC.schemaVersion,
+    id: DOC.id,
+    name: DOC.name,
+    createdAt: DOC.createdAt,
+    migratedFrom: DOC.migratedFrom ?? null,
+    machines: DOC.machines,
+    accessories: DOC.accessories,
   };
 }
 
@@ -157,7 +135,7 @@ async function openCut(page: Page): Promise<void> {
 }
 
 test('#931 — a passed run: Cut says "matches the design", and Register unfolds', async ({ cm, page }) => {
-  await fakeHouse(page, locationView({ anchor: false }));
+  await fakeHouse(page, locationView());
   await cm.ready();
   await toDefaultJob(page);
   await generateTicks(page);
@@ -174,33 +152,39 @@ test('#931 — a passed run: Cut says "matches the design", and Register unfolds
 });
 
 test('#931 — a run that did not pass: the sentence, the fix that opens Holding, Register folded', async ({ cm, page }) => {
-  await fakeHouse(page, locationView({ anchor: true }));
+  await fakeHouse(page, locationView());
   await cm.ready();
-  // #725's walk: a pocket plate on the bracket bed, with a 70 × 30 tray whose far edge runs under
-  // the back clamps' noses — the verifier names the clamp and the run never posts a program.
-  await page.getByTestId('welcome-start-cnc').click();
-  await page.getByTestId('start-wizard-next').click();
-  await page.getByTestId('engrave-setup-what-pocket').click();
-  await page.getByTestId('start-wizard-operation-next').click();
-  await page.getByTestId('start-wizard-form-plate').click();
-  await page.getByTestId('start-wizard-make-length').fill('100');
-  await page.getByTestId('start-wizard-make-width').fill('60');
-  await page.getByTestId('start-wizard-make-thickness').fill('6');
-  await page.getByTestId('start-wizard-stock-next').click();
-  await expect(page.getByTestId('engrave-setup-mount-bed-bracket')).toBeChecked();
-  await page.getByTestId('engrave-setup-next').click();
-  await expect(page.getByTestId('engrave-panel')).toBeVisible();
-  await page.getByTestId('engrave-shape-name-0').fill('Tray');
-  await page.getByTestId('engrave-shape-width-0').fill('70');
-  await page.getByTestId('engrave-shape-height-0').fill('30');
-  await page.getByTestId('engrave-shape-x-0').fill('50');
-  await page.getByTestId('engrave-shape-y-0').fill('40');
-  await page.getByTestId('engrave-shape-depth-0').fill('2');
-  await page.waitForTimeout(1500);
-
-  await page.getByTestId('engrave-generate').click();
-  const design = page.getByTestId('engrave-run-errors');
-  await expect(design).toContainText('runs under the clamp', { timeout: 240_000 });
+  await toDefaultJob(page);
+  await generateTicks(page);
+  // #934 removes the entries that could reach a hold collision geometrically (the bed/bracket/tape
+  // mounts are hidden; facing on a proud blank is refused), so the run's error is seeded through
+  // the store module the dev server serves — the same seam `cutSurface.spec.tsx` uses. `findingFix`
+  // maps `tool-into-fixture` to Holding independently of the mount, so the press under test is the
+  // real one; D's unit seam pins the same mapping.
+  await page.evaluate(async () => {
+    const moduleUrl = '/src/store/engraveRunStore.ts';
+    const mod = (await import(/* @vite-ignore */ moduleUrl)) as {
+      useEngraveRunStore: { setState: (s: Record<string, unknown>) => void };
+    };
+    mod.useEngraveRunStore.setState({
+      simStatus: 'ready',
+      simDiagnostics: [
+        {
+          source: 'sweep',
+          severity: 'error',
+          code: 'tool-into-fixture',
+          checkpoint: 0,
+          message:
+            "the facing pass (flat-1.0): checkpoint 0: the cutter drives 0.477 mm³ into the fixture 'Vise moving jaw (right)' (vise-moving-jaw)",
+        },
+      ],
+      oracle: null,
+      phase: 'blocked',
+      staleSince: null,
+      simStopped: false,
+    });
+  });
+  await expect(page.getByTestId('engrave-run-errors')).toContainText('into the vise', { timeout: 30_000 });
   const designText = await text(page, 'engrave-run-errors');
 
   await openCut(page);
@@ -218,7 +202,7 @@ test('#931 — a run that did not pass: the sentence, the fix that opens Holding
 });
 
 test('#931 — a program never simulated: Cut says so in Design’s words', async ({ cm, page }) => {
-  await fakeHouse(page, locationView({ anchor: false }));
+  await fakeHouse(page, locationView());
   await cm.ready();
   await toDefaultJob(page);
   // A real run first, then the run fields cleared as a reload would leave them: the program (and
@@ -326,4 +310,88 @@ test('#931 — a stopped sweep: Cut and Design both say it stopped before it fin
   expect((await text(page, 'engrave-cut-verdict-line')).toLowerCase()).toContain('stopped before it finished');
   expect(designStopped.toLowerCase()).toContain('stopped before it finished');
   await expect(page.getByTestId('engrave-cut-step-1-summary')).toContainText('the simulation stopped before it finished');
+});
+
+// #934 — A MEASURED TILT WAITS FOR THE OPERATOR. The automatic re-post no longer fires on a tilt
+// verdict: step 2 offers the re-seat first, and "Follow the tilt" is the operator's choice that runs
+// the withheld re-post. The registration is seeded through the store module (the console fake models
+// one flat topZ, so a sloped reading set is a fixture change and a #934 follow-up); this is the same
+// seam D's `cutSurface.spec.tsx` uses for the re-seat unit case.
+test('#934 — a measured tilt offers the re-seat first, and Follow the tilt runs the re-post', async ({ cm, page }) => {
+  await fakeHouse(page, locationView());
+  await cm.ready();
+  await toDefaultJob(page);
+  await generateTicks(page);
+  // FREEZE THE FLAT PACKAGE FIRST: the re-post block compares the package against the measured
+  // surface, and the preflight refuses a green step 1 once a tilt is recorded against a flat
+  // program — by design — so the freeze has to happen before the registration exists.
+  await openCut(page);
+  await expect(page.getByTestId('engrave-package')).toHaveAttribute('data-state', 'current');
+
+  // Then a live observation at the fixture's address (Cut asks the registration store for THIS
+  // machine; a null target shows no registration at all) and the tilt: the machine's measured
+  // surface plus the fitted plane, the same seam `cutSurface.spec.tsx` uses.
+  await page.evaluate(() => {
+    const status = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
+    window.__caseMaker!.setMachine(
+      {
+        name: 'QA Z1',
+        host: '192.0.2.10',
+        port: 2222,
+        busy: false,
+        ip: null,
+        mac: null,
+        status,
+        profileId: 'Z1',
+        observedAt: '2026-10-25T00:00:00.000Z',
+        notes: [],
+      },
+      status,
+    );
+  });
+  await page.evaluate(async () => {
+    const regUrl = '/src/store/engraveRegistrationStore.ts';
+    const jobUrl = '/src/store/engraveJobStore.ts';
+    const reg = (await import(/* @vite-ignore */ regUrl)) as {
+      useEngraveRegistrationStore: {
+        getState: () => {
+          measureSurface: (...args: unknown[]) => void;
+          record: (...args: unknown[]) => void;
+        };
+      };
+    };
+    const jb = (await import(/* @vite-ignore */ jobUrl)) as {
+      useEngraveJobStore: { getState: () => { job: { id: string } } };
+    };
+    const job = jb.useEngraveJobStore.getState().job;
+    const target = { host: '192.0.2.10', port: 2222 };
+    reg.useEngraveRegistrationStore.getState().measureSurface(job.id, target, {
+      verdict: 'tilt',
+      tilt: { xMm: 0.12, yMm: 0 },
+      recommendation: null,
+    });
+    reg.useEngraveRegistrationStore.getState().record(job.id, target, { found: null }, { offset: { x: 0, y: 0 }, rotationDeg: null }, {
+      plane: { offset: 0, slopeX: 0.01, slopeY: 0 },
+      z0: 0,
+    });
+  });
+
+  // The surface re-renders against the seeded machine and registration: step 2 offers the re-seat.
+  await expect(page.getByTestId('engrave-cut-reseat')).toContainText(
+    'Re-seat the blank (press down on the low side) and register again — or follow the tilt',
+  );
+  await expect(page.getByTestId('engrave-cut-reseat-register')).toHaveText('Register again');
+  await expect(page.getByTestId('engrave-cut-reseat-follow')).toHaveText('Follow the tilt…');
+  // The chain withheld the re-post: the package is still the flat one, so nothing is "re-made" yet.
+  await expect(page.getByTestId('engrave-cut-repost-done')).toHaveCount(0);
+  // The surface-frame error keeps step 1 open, so Register is folded — unfold it to press the offer.
+  const step2 = page.getByTestId('engrave-cut-step-2');
+  if (!(await step2.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('engrave-cut-step-2-summary').click();
+  }
+  // The operator's choice runs it: the package is re-made against the measured plane.
+  await page.getByTestId('engrave-cut-reseat-follow').click();
+  await expect(page.getByTestId('engrave-cut-repost-done')).toContainText('Re-made for the measured tilt', {
+    timeout: 120_000,
+  });
 });

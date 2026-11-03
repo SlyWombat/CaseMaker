@@ -2,6 +2,11 @@
 // carries a bore (the bench fixture's ⌀8.88 at the plan's own centre), the panel finds it, shows
 // the centre and ⌀, and the press writes the G10 origin. Screenshots under
 // docs/bench/img/2026-10-31-probe-centre/.
+//
+// #934 HIDES THIS BRANCH'S ENTRIES (the code stays in src; the UI entry and the planner acceptance
+// are removed): `engrave-centre-find`, and the disc/reference registration it drives
+// (`engrave-registration-disc-question/-resize/-as-is`, `engrave-registration-g32`). Skipped for the
+// #934 batch; restore with the branch.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
@@ -35,7 +40,7 @@ async function rememberMachine(page: Page): Promise<void> {
   }, STATUS);
 }
 
-test('#827 — a bore’s centre becomes the origin from the Register step', async ({ cm, page }) => {
+test.skip('#827 — a bore’s centre becomes the origin from the Register step', async ({ cm, page }) => {
   const fake = await installFakeConsole(page);
   await cm.ready();
   await page.evaluate(async () => {
