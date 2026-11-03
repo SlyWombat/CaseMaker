@@ -77,7 +77,7 @@ import {
   type VCarvePlane,
 } from '@/engine/cnc/vCarveGeometry';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
-import { cutterOnMetalLine, cutterRefusedOnMaterial } from '@/engine/cnc/engrave/cutterMaterial';
+import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
@@ -1209,17 +1209,18 @@ function metalLineFindings(job: EngraveJob, tool: Tool | null, catalogue: readon
   // then false. The coverage rule is `catalogueCoverageFor`, the same one the feeds resolve with.
   const covered = catalogueCoverageFor(catalogue, job.stock.material, tool).kind === 'covered';
   if (!cutterOnMetalLine(tool, job.stock.material, covered)) return [];
-  const overridden = job.metalLineOverride === true;
+  // #954 — INFORM, DO NOT REFUSE. The "for Metal" line is a NAME, not a physical bar, and the
+  // premise of the old error was only ever "no feed row was written for this pair": the run now
+  // feeds it from the material's own starting band (`feedsFor` labels the numbers), so the finding
+  // states that fallback instead of stopping the job.
   return [
     {
-      severity: overridden ? 'warning' : 'error',
+      severity: 'info',
       code: 'tool-metal-line',
-      message: overridden
-        ? `${toolDisplayName(tool)} is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}: ` +
-          `chosen despite the material mismatch — feeds and speeds are a guess, and the bit can chip or snap.`
-        : `${toolDisplayName(tool)} is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}: ` +
-          `the bit's geometry and its coating are ground for metal, and no feed row was written for it on this material. ` +
-          `Pick a wood/plastic cutter for this blank, or change the stock to a metal before cutting.`,
+      message:
+        `${toolDisplayName(tool)} is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}. ` +
+        `Makera publishes no feed row for it on this material, so the feeds this run uses are this app’s ` +
+        `labelled starting point for the pair — measure them before trusting them.`,
     },
   ];
 }
@@ -6567,7 +6568,6 @@ async function generateFaceProgram(
         const d = statedCuttingSize(entry.tool) ?? 0;
         return d > 0 && d < currentD - 1e-9 && d <= narrowestChord + 1e-9;
       })
-      .filter((entry) => !cutterRefusedOnMaterial(entry.tool, job.stock.material, job.metalLineOverride, false))
       .sort((a, b) => (statedCuttingSize(b.tool) ?? 0) - (statedCuttingSize(a.tool) ?? 0));
     // Each failed frame's cuts go to the first finer cutter that makes them, in one program per
     // cutter at that face's index.
