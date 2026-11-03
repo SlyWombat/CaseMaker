@@ -47,26 +47,54 @@ test('#830 — the sweep names its stage, and a worker killed mid-sweep is repor
   await page.getByTestId('engrave-target-technical-0').click();
   await page.getByTestId('engrave-target-surface-gridPitchMm-0').fill('0.1');
 
-  await page.getByTestId('engrave-generate').click();
-  const progress = page.getByTestId('engrave-generate-progress');
-  await expect(progress).toBeVisible({ timeout: 120_000 });
-  // The simulation's own stage: which program of the sweep, never a bare "Working…".
-  await expect(progress).toContainText(/simulating program \d+ of \d+/i, { timeout: 120_000 });
-  fs.mkdirSync(OUT, { recursive: true });
-
   // Kill the worker the way the browser would (a wasm trap, an OOM kill) — NOT the app's Cancel —
-  // as soon as the stage is named. #889 made the sweep much faster (a level costs what it removes,
-  // and the moves are packed), and a screenshot of the stage sat here long enough for the run to
-  // reach "Program ready" first; the kill then hit an idle worker and no stop was reported. The
-  // stopped state is captured below (worker-stopped.png).
-  await page.evaluate(async () => {
+  // and do it IN THE PAGE, gated on the sweep's own stage text plus one settle tick. The stage
+  // word is painted just before the load call, and a kill that beat the call is swallowed (the
+  // sweep then runs on a fresh worker). A Playwright round trip after the stage is the #830 union
+  // flake at the other end: #889 made the sweep fast enough that the kill could land in the ORACLE
+  // that follows it, where the rejection is not a `SimulationStopped`, and the panel showed the raw
+  // sentence with no "The simulation stopped:" frame. In-page + 750 ms is inside the sweep — the
+  // 410 000-move goal it is scaled to runs for seconds — and never in the oracle.
+  const killed = page.evaluate(async () => {
     // A variable, so TypeScript does not try to resolve a dev-server URL at compile time.
     const moduleUrl = '/src/engine/jobs/simClient.ts';
     const client = (await import(/* @vite-ignore */ moduleUrl)) as {
       killSimWorkerForTest: (message: string) => void;
     };
-    client.killSimWorkerForTest('the simulation worker was killed by the test');
+    await new Promise<void>((resolve, reject) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        observer.disconnect();
+        reject(new Error('the sweep stage was never reported'));
+      }, 120_000);
+      const fire = (): void => {
+        const text = document.querySelector('[data-testid="engrave-generate-progress"]')?.textContent ?? '';
+        if (done || !/simulating program \d+ of \d+/i.test(text)) return;
+        // The stage word is painted just before the load is CALLED, so killing on this very tick
+        // can hit no pending call (the kill is then swallowed and the sweep runs on a fresh
+        // worker). One settle tick lands inside the sweep — the 410 000-move goal runs for
+        // seconds — and never in the oracle that follows it.
+        done = true;
+        observer.disconnect();
+        clearTimeout(timer);
+        setTimeout(() => {
+          client.killSimWorkerForTest('the simulation worker was killed by the test');
+          resolve();
+        }, 750);
+      };
+      const observer = new MutationObserver(fire);
+      observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+      fire();
+    });
   });
+
+  await page.getByTestId('engrave-generate').click();
+  const progress = page.getByTestId('engrave-generate-progress');
+  await expect(progress).toBeVisible({ timeout: 120_000 });
+  // The simulation's own stage: which program of the sweep, never a bare "Working…".
+  await expect(progress).toContainText(/simulating program \d+ of \d+/i, { timeout: 120_000 });
+  await killed;
+  fs.mkdirSync(OUT, { recursive: true });
 
   const error = page.getByTestId('engrave-generate-error');
   // #830 review — the worker's words sit inside the STOP frame, once, beside Generate.
