@@ -807,7 +807,12 @@ describe('#746 a setup’s later cutters cut the items they own, as those items'
     // states the plan, and the program names the operation. (The notch and label cutters own
     // vectors and text, not pockets, so they keep their rings.)
     expect(text, 'the recess is cleared adaptively (#666)').toContain('adaptive-clearing');
-    expect(nc[0]).toContain('(adaptive)');
+    // #922 — the CLI's shop now carries the location's real `finish.stockToLeaveMm` (the app always
+    // has; see 49b1ff2e, which split j13's program the same way), so the recess's rough pass leaves
+    // an allowance and runs a finish pass behind it: the label is `(rough, adaptive)`, not the bare
+    // `(adaptive)` a zero allowance would post. Either way the pass is adaptive, never the fallback
+    // ring (checked above and below), so the match only pins the suffix, not the optional kind.
+    expect(nc[0]).toContain('adaptive)');
     expect(text, 'the planner must not decline the recess').not.toContain('adaptive-fallback');
     // The 1.5 mm cutter owns four 4 mm notches. Its file must NOT carry the first cutter's through
     // depth — that was "rest of Bore ⌀14", refused at 10.3 mm — and its own floor is exactly 4 mm
