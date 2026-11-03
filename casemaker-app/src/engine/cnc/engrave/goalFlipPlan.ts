@@ -406,11 +406,29 @@ export function goalFlipPlan(input: FlipPlanInput): FlipPlan {
  */
 export function reachSidesSentence(plan: FlipPlan): string {
   const mm = (v: number): string => String(Number(v.toFixed(1)));
-  const sides = plan.sides.map((s) => `${sideWords(s.faceUp)} (${mm(s.creditedMaxDepthMm)} mm)`).join(', then ');
-  if (plan.reach === null) return sides;
-  const r = plan.reach;
-  const named = r.source === 'catalogue' ? ` (${r.catalogueName ?? "Makera's catalogue"})` : '';
-  return `${sides} — scored against ${mm(r.mm)} mm of reach${named}, a ${mm(r.bandMm)} mm usable band per side`;
+  let out = plan.sides.map((s) => `${sideWords(s.faceUp)} (${mm(s.creditedMaxDepthMm)} mm)`).join(', then ');
+  if (plan.reach !== null) {
+    const r = plan.reach;
+    const named = r.source === 'catalogue' ? ` (${r.catalogueName ?? "Makera's catalogue"})` : '';
+    out += ` — scored against ${mm(r.mm)} mm of reach${named}, a ${mm(r.bandMm)} mm usable band per side`;
+  }
+  // A face `dropped` for the SETUPS ENGINE'S own reason (not holdable) or a caller's own
+  // `candidateFaces` restriction (a stick's vise-jaw and overhang faces, named by the design
+  // note posted to #945) must be STATED here, not left silent in `dropped` alone — faces sharing
+  // one reason are named together, so a four-face stick restriction reads as one clause.
+  if (plan.dropped.length > 0) {
+    const byReason = new Map<string, Face[]>();
+    for (const d of plan.dropped) {
+      const faces = byReason.get(d.reason) ?? [];
+      faces.push(d.faceUp);
+      byReason.set(d.reason, faces);
+    }
+    const clauses = [...byReason.entries()].map(
+      ([reason, faces]) => `${faces.map(sideWords).join('/')} excluded: ${reason}`,
+    );
+    out += `; ${clauses.join('; ')}`;
+  }
+  return out;
 }
 
 /** The four faces a plan may turn the stock to, named for the panel. */

@@ -217,5 +217,10 @@ describe('#914 the reach-aware flip plan, on the stick-scale figure proxy', () =
     // Every stated depth is a side's own CREDITED cut — never more than the 21 mm band, unlike
     // the goal's raw `neededMm` (27/36 mm) which the sentence does NOT state.
     for (const side of plan.sides) expect(side.creditedMaxDepthMm).toBeLessThanOrEqual(21 + 1e-6);
+    // The brief's own requirement: the excluded faces are STATED in the sentence, not left silent
+    // in `dropped` alone.
+    expect(sentence).toMatch(/excluded/);
+    expect(sentence).toMatch(/left edge\/right edge\/front edge\/back edge/);
+    expect(sentence).toMatch(/vise-jaw faces/);
   });
 });
