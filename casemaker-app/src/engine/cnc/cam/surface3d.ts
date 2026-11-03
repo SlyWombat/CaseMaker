@@ -1578,6 +1578,40 @@ function ballRise(ball: boolean, radius: number, d: number): number {
 }
 
 /**
+ * #945 — WHERE A CELL'S SQUARE IS A WALL, NOT A SLOPE. Returns a per-cell flag (1 = wall): a cell
+ * whose 4-neighbourhood holds a step taller than `stepMm` is cut as a stepped column — the ball's
+ * whole square counts (the square rule, #909) — because the surface there is a face the heightfield
+ * represents as one cell's jump, and the material at the cell's own sample stands for its square.
+ * Everywhere else the ball is measured at the cell's CENTRE, the same sample the swept-top oracle
+ * stamps, which is what stops the finish riding (pitch/2)·tan θ high on a slope (#945).
+ */
+function wallCells(hf: GoalHeightfield, stepMm: number, wrapRows = false): Uint8Array {
+  const { nx, ny, z, topZ } = hf;
+  const wall = new Uint8Array(nx * ny);
+  const at = (i: number, j: number): number => {
+    if (i < 0 || i >= nx) return topZ;
+    const jj = wrapRows ? ((j % ny) + ny) % ny : j;
+    if (jj < 0 || jj >= ny) return topZ;
+    return z[jj * nx + i] as number;
+  };
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
+      const zk = z[k] as number;
+      if (
+        Math.abs(at(i + 1, j) - zk) > stepMm ||
+        Math.abs(at(i - 1, j) - zk) > stepMm ||
+        Math.abs(at(i, j + 1) - zk) > stepMm ||
+        Math.abs(at(i, j - 1) - zk) > stepMm
+      ) {
+        wall[k] = 1;
+      }
+    }
+  }
+  return wall;
+}
+
+/**
  * The gouge-safe tip field: the tool dropped onto the heightfield until it just touches.
  *
  * #723 — `wrapRows` reads the field's ROW axis as a cylinder's circumference (the rotary map):
@@ -1611,19 +1645,40 @@ export function finishTipField(
   const tip = new Float32Array(nx * ny);
   tip.fill(topZ);
   const span = Math.max(0, Math.ceil(tool.radius / pitch));
-  // Precompute the disc stencil: every CELL the tool's disc reaches, and the ball rise at the
-  // cell's NEAREST POINT (#909). A cell is a square, not a point: measuring to its centre made the
-  // knife edge at the rim — a wall cell one radius away flipped in and out on float noise, and on a
-  // ball's flank that is several millimetres of either clamp or gouge.
-  const stencil: { di: number; dj: number; rise: number }[] = [];
+  // Precompute the disc stencil: every cell the tool's disc reaches, and the ball's rise there.
+  //
+  // #945 — A BALL IS MEASURED AT THE CELL'S CENTRE (a flat keeps the cell SQUARE, #909). The
+  // swept-top oracle stamps a column at its CENTRE (`sweptPoint.ts`): the material a ball leaves a
+  // cell is a function of its surface at that cell's sample point, which IS the heightfield's own
+  // sample. Measuring the rise to the SQUARE's nearest point (p/2 closer) against the centre's
+  // value made the tip ride ≈ (pitch/2)·tan θ high per neighbour on a slope, and the max over the
+  // disc kept the highest one — E measured that as the leftover scaling with ≈ pitch·tan θ.
+  //
+  // At a WALL #945 keeps the square rule: the goal's step there is a face, the cell's value stands
+  // for its whole square, and the ball's lowest point over that square is what the conservative
+  // swept-top reads. The wall test is the cutter's own body: a step taller than its DIAMETER
+  // across one cell is a face the ball's flank cannot ride as a surface, however steep the goal's
+  // own slopes are.
+  //
+  // A FLAT always measures to the square: its disc cuts every column under it at the tip Z, so a
+  // cell the disc reaches only at a corner is cut too — excluding it would gouge a wall.
+  const wall = tool.ball ? wallCells(hf, tool.radius * 2, opts.wrapRows === true) : null;
+  const stencil: { di: number; dj: number; centreDist: number; rise: number; riseCentre: number }[] = [];
   for (let dj = -span; dj <= span; dj++) {
     for (let di = -span; di <= span; di++) {
-      const d = cellSquareDistance(di * pitch, dj * pitch, pitch);
-      if (d > tool.radius) continue;
-      stencil.push({ di, dj, rise: ballRise(tool.ball, tool.radius, d) });
+      const dSquare = cellSquareDistance(di * pitch, dj * pitch, pitch);
+      if (dSquare > tool.radius) continue;
+      const dCentre = Math.hypot(di * pitch, dj * pitch);
+      stencil.push({
+        di,
+        dj,
+        centreDist: dCentre,
+        rise: ballRise(tool.ball, tool.radius, dSquare),
+        riseCentre: ballRise(tool.ball, tool.radius, dCentre),
+      });
     }
   }
-  if (stencil.length === 0) stencil.push({ di: 0, dj: 0, rise: 0 });
+  if (stencil.length === 0) stencil.push({ di: 0, dj: 0, centreDist: 0, rise: 0, riseCentre: 0 });
   // #540 — the inner drop runs the stencil at every covered cell. Bound that work BEFORE the loop:
   // a large ball on a fine grid is billions of ops that would hang the worker. Over budget, refuse
   // honestly (stating the op count and the way out), as the exact sweep raises sweep-budget-exceeded.
@@ -1646,21 +1701,28 @@ export function finishTipField(
       for (const s of stencil) {
         const ii = i + s.di;
         const rawJ = j + s.dj;
+        let jj = rawJ;
         if (ii < 0 || ii >= nx) {
           // Off the grid in X is uncut stock at the top face — the tool rides on it.
           best = Math.max(best, topZ - s.rise);
           continue;
         }
         if (opts.wrapRows === true) {
-          const jj = ((rawJ % ny) + ny) % ny;
-          best = Math.max(best, (z[jj * nx + ii] as number) - s.rise);
-          continue;
-        }
-        if (rawJ < 0 || rawJ >= ny) {
+          jj = ((rawJ % ny) + ny) % ny;
+        } else if (rawJ < 0 || rawJ >= ny) {
           best = Math.max(best, topZ - s.rise);
           continue;
         }
-        best = Math.max(best, (z[rawJ * nx + ii] as number) - s.rise);
+        const sq = jj * nx + ii;
+        // A smooth cell whose CENTRE the disc cannot reach does not constrain the ball: the
+        // swept-top oracle does not stamp it, so neither does the tip.
+        if (wall !== null && wall[sq] !== 1 && s.centreDist > tool.radius) continue;
+        // A FLAT (#909) and a WALL (#945) read the cell's own value over its square.
+        if (wall === null || wall[sq] === 1) {
+          best = Math.max(best, (z[sq] as number) - s.rise);
+          continue;
+        }
+        best = Math.max(best, (z[sq] as number) - s.riseCentre);
       }
       tip[idx] = best;
     }
@@ -1810,6 +1872,10 @@ export function planGoalOvercut(
      * deeper and stay refused.
      */
     const skin = Math.max(0.01, r / 100);
+    // #945 — the same square/centre split the tip field cuts by: a ball is judged at a cell's
+    // CENTRE on smooth ground (the swept-top oracle's own sample) and over the cell's SQUARE at a
+    // wall, where the goal's step is a face and the cell's value stands for its whole square.
+    const wall = tool.ball ? wallCells(hf, r * 2) : null;
     const stampSegment = (sx: number, sy: number, sz: number, ex: number, ey: number, ez: number): void => {
       const dx = ex - sx;
       const dy = ey - sy;
@@ -1840,12 +1906,17 @@ export function planGoalOvercut(
           const k = j * nx + i;
           if (covered[k] === 0) continue;
           const cx = x0 + i * pitch;
+          // #945 — ball at a cell's CENTRE on smooth ground, over its SQUARE at a wall (#945's
+          // square/centre split, the same one the tip field cuts by); a flat always the square.
+          const centre = wall !== null && wall[k] !== 1;
           let best = Infinity;
           const consider = (tRaw: number): void => {
             if (!Number.isFinite(tRaw)) return;
             const t = Math.max(0, Math.min(1, tRaw));
-            const d = cellSquareDistance(cx - (sx + dx * t), cy - (sy + dy * t), pitch);
-            if (d > r - skin) return;
+            const d = centre
+              ? Math.hypot(cx - (sx + dx * t), cy - (sy + dy * t))
+              : cellSquareDistance(cx - (sx + dx * t), cy - (sy + dy * t), pitch);
+            if (d > (centre ? r : r - skin)) return;
             const reached = sz + dz * t + ballRise(tool.ball, r, d);
             if (reached < best) best = reached;
           };
