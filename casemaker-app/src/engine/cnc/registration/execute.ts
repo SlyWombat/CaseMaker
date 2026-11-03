@@ -253,9 +253,19 @@ function session(
     }
     if (line === 'G91') relative = true;
     if (line === 'G90') relative = false;
-    // #933 — the stop path's bookkeeping: what the probe touched, and when it was released.
+    // #933 — the stop path's bookkeeping: what the probe touched, and when it was released. A MISS
+    // reading (`:0`) leaves the stylus OPEN — there is nothing to back away from, so the release
+    // booking is cleared on the reading, not on the line. A reply with no PRB at all does not say
+    // (the controller did not answer a flag), so the booking stays: a release from an open stylus
+    // is a plain `G38.5` move, never the G0 that alarms.
     const probe = /^G38\.3 ([XYZ])(-?[\d.]+) F/.exec(line);
-    if (probe !== null) probeDown = { axis: probe[1] as 'X' | 'Y' | 'Z', travelSign: Math.sign(Number(probe[2])) };
+    if (probe !== null) {
+      const touched = lastPrb(reply)?.touched ?? null;
+      probeDown =
+        touched === false
+          ? null
+          : { axis: probe[1] as 'X' | 'Y' | 'Z', travelSign: Math.sign(Number(probe[2])) };
+    }
     if (/^G38\.5 /.test(line)) probeDown = null;
     return reply;
   }
