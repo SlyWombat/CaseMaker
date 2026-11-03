@@ -672,7 +672,10 @@ function sweepPlan(
         if (cut === null) cutsComplete = false;
         else addCut(id, cut);
       }
-      if (i === gen.programs.length - 1) report = session.oracle(gen.predicted);
+      // #924 activation — the run's own design items ride the same call `gen.predicted` already
+      // does; additive, so a goal/surface-3d/chamfer/drill-only run (whose `designItems` is always
+      // empty, #924's own scope) reads exactly as it did before this.
+      if (i === gen.programs.length - 1) report = session.oracle(gen.predicted, null, gen.designItems);
     } finally {
       session.dispose();
     }
