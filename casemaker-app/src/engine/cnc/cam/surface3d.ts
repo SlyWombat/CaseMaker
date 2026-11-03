@@ -2284,6 +2284,34 @@ function roughingMoves(
 }
 
 /**
+ * #945 — THE STAIRCASE, shared by every pass that connects two already drop-cutter-safe points
+ * with a straight feed (the finishing raster, the scallop contours, the pencil crease trace): a
+ * diagonal between them can dip below the goal partway along it once the wall between them is
+ * steeper than slope 1 (a raster/contour/crease step is a fraction of a mm; a goal wall a few mm
+ * deep over that step is routine — a crevice between a figure's legs, a contour crossing a step's
+ * edge, a crease running down one). Each point's OWN z is already its own drop-cutter-safe value
+ * for its footprint, so a corner at the HIGHER of the two — level first at that z, then straight
+ * down to the lower point (or straight up at the current xy, then level) — never goes below
+ * either point's own verified-safe height along the way; the level leg's own clearance error is
+ * the chord sagitta, step²/(8·r), negligible against the cutter. Below slope 1 the single
+ * diagonal stays (its interpolation error is smaller still, inside the overcut guard's own skin
+ * tolerance). Null below slope 1 or when the two points coincide in XY (a pure plunge/retract,
+ * already vertical).
+ */
+function staircaseCorner(
+  prevX: number,
+  prevY: number,
+  prevZ: number,
+  x: number,
+  y: number,
+  z: number,
+): { x: number; y: number; z: number } | null {
+  const lateral = Math.hypot(x - prevX, y - prevY);
+  if (!(lateral > 0) || Math.abs(z - prevZ) <= lateral) return null;
+  return z <= prevZ ? { x, y, z: prevZ } : { x: prevX, y: prevY, z };
+}
+
+/**
  * BALL-NOSE FINISHING raster (stage 2b). The tool follows the gouge-safe tip field in boustrophedon
  * scan lines spaced by the finishing step-over, sampled along each line at `alongStep` so the dexel
  * sim of the result tracks the goal within the step-over and the grid pitch.
@@ -2323,6 +2351,9 @@ export function finishingMoves(
       const cols = alongColumns(hf, iS, iE, alongStep, only, j);
       const ordered = flip ? [...cols].reverse() : cols;
       let open = false;
+      let prevX = 0;
+      let prevY = 0;
+      let prevZ = 0;
       for (const i of ordered) {
         const x = x0 + i * pitch;
         const z = tip[j * hf.nx + i] as number;
@@ -2331,8 +2362,13 @@ export function finishingMoves(
           moves.feed(x, y, z, feeds.plungeFeed);
           open = true;
         } else {
+          const corner = staircaseCorner(prevX, prevY, prevZ, x, y, z);
+          if (corner !== null) moves.feed(corner.x, corner.y, corner.z, feeds.feed);
           moves.feed(x, y, z, feeds.feed);
         }
+        prevX = x;
+        prevY = y;
+        prevZ = z;
       }
       if (open) moves.rapid(moves.lastX(), moves.lastY(), hopZ);
     }
@@ -2746,16 +2782,30 @@ function scallopMoves(
       const pts = decimateLoop(loop, alongStep);
       if (pts.length < 2) continue;
       const first = pts[0]!;
+      const firstZ = tipAt(hf, tip, first[0], first[1]);
       moves.push({ kind: 'rapid', x: first[0], y: first[1], z: hopZ });
-      moves.push({ kind: 'feed', x: first[0], y: first[1], z: tipAt(hf, tip, first[0], first[1]), f: feeds.plungeFeed });
+      moves.push({ kind: 'feed', x: first[0], y: first[1], z: firstZ, f: feeds.plungeFeed });
+      let prevX = first[0];
+      let prevY = first[1];
+      let prevZ = firstZ;
+      // #945 — a contour crossing a step (two decimated points either side of it) is the same
+      // steep-diagonal hazard the raster pass has; the shared staircase applies here too.
+      const stepTo = (x: number, y: number, z: number): void => {
+        const corner = staircaseCorner(prevX, prevY, prevZ, x, y, z);
+        if (corner !== null) moves.push({ kind: 'feed', x: corner.x, y: corner.y, z: corner.z, f: feeds.feed });
+        moves.push({ kind: 'feed', x, y, z, f: feeds.feed });
+        prevX = x;
+        prevY = y;
+        prevZ = z;
+      };
       for (let p = 1; p < pts.length; p++) {
         const q = pts[p]!;
-        moves.push({ kind: 'feed', x: q[0], y: q[1], z: tipAt(hf, tip, q[0], q[1]), f: feeds.feed });
+        stepTo(q[0], q[1], tipAt(hf, tip, q[0], q[1]));
       }
       // Close the loop: the contour is a closed curve, so the last point returns to the first.
       const last = pts[pts.length - 1]!;
       if (last[0] !== first[0] || last[1] !== first[1]) {
-        moves.push({ kind: 'feed', x: first[0], y: first[1], z: tipAt(hf, tip, first[0], first[1]), f: feeds.feed });
+        stepTo(first[0], first[1], firstZ);
       }
       moves.push({ kind: 'rapid', x: first[0], y: first[1], z: hopZ });
       contours++;
@@ -3042,11 +3092,23 @@ function pencilMoves(
   const paths = tracePencilPaths(pencilMarks(hf, creaseDeg), hf);
   for (const path of paths) {
     const first = path[0]!;
+    const firstZ = tipAt(hf, tip, first[0], first[1]);
     moves.push({ kind: 'rapid', x: first[0], y: first[1], z: hopZ });
-    moves.push({ kind: 'feed', x: first[0], y: first[1], z: tipAt(hf, tip, first[0], first[1]), f: feeds.plungeFeed });
+    moves.push({ kind: 'feed', x: first[0], y: first[1], z: firstZ, f: feeds.plungeFeed });
+    // #945 — a crease runs straight down a step as often as along it; the shared staircase
+    // applies here too (the raster pass's own note explains why).
+    let prevX = first[0];
+    let prevY = first[1];
+    let prevZ = firstZ;
     for (let p = 1; p < path.length; p++) {
       const q = path[p]!;
-      moves.push({ kind: 'feed', x: q[0], y: q[1], z: tipAt(hf, tip, q[0], q[1]), f: feeds.feed });
+      const z = tipAt(hf, tip, q[0], q[1]);
+      const corner = staircaseCorner(prevX, prevY, prevZ, q[0], q[1], z);
+      if (corner !== null) moves.push({ kind: 'feed', x: corner.x, y: corner.y, z: corner.z, f: feeds.feed });
+      moves.push({ kind: 'feed', x: q[0], y: q[1], z, f: feeds.feed });
+      prevX = q[0];
+      prevY = q[1];
+      prevZ = z;
     }
     const last = path[path.length - 1]!;
     moves.push({ kind: 'rapid', x: last[0], y: last[1], z: hopZ });

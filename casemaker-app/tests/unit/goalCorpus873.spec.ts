@@ -26,6 +26,7 @@ import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import { Z1 } from '@/engine/cnc/machine';
 import { createSimSession } from '@/workers/sim/session';
 import type { FlatField } from '@/workers/geometry/carriedField';
+import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 afterEach(() => clearTargetObjectMeshCache());
@@ -269,6 +270,66 @@ describe('#909 the goal corpus: the plan never cuts into the part', () => {
       expect(g.findings.some((f) => f.code === 'goal-overcut')).toBe(false);
     }, 240_000);
   }
+
+  // #945 — the centred, unrotated placement above never exercised a steep raster-column pair: the
+  // figure's own geometry at THAT placement happens not to put a near-vertical wall across two
+  // adjacent 0.1 mm finish columns. j29's placement (the stick-scale elephant job's own rotation
+  // and scale, laid on a 36 × 36 × 100 mm stick) does — this is the placement #945's cut-into was
+  // first measured at (`goal_check.py` and #924's `checkGoalCutInto` independently agreeing, ~8
+  // cells / up to ~1.3 mm), with a ball tool (the goal CAM's normal finishing cutter; `flat-1.0`
+  // above never exercises `ballRise`, so it would not catch this class at all).
+  it('figure.stl at j29’s placement, a ball tool: no cell of the plan reaches below the goal (#945)', async () => {
+    const imported = await read('figure.stl');
+    const stock = { length: 36, width: 100, thickness: 36 };
+    const target: EngraveTargetObject = {
+      id: imported.id,
+      name: imported.name,
+      format: imported.format,
+      sha256: imported.sha256,
+      data: imported.data,
+      size: imported.size,
+      position: { x: stock.length / 2, y: 50, z: 0 },
+      rotation: 90,
+      enabled: true,
+      role: 'goal',
+      scale: { x: 0.6533, y: 0.6533, z: 0.6533 },
+    };
+    // Makera's 6×2×30.5 mm Ball Nose Engraving bit — the cutter the elephant job's own toolKey
+    // names (`inv:lib-161032205031`), handed in directly (`job.tool` wins over the registry, #305
+    // design point 2) so this test needs no location document.
+    const ballTool: Tool = {
+      number: 1,
+      id: '161032205031',
+      name: '6*2*30.5mm Ball Nose Engraving',
+      typeText: 'Ball Nose Engraving',
+      shape: 'ball',
+      handleDiameter: 6,
+      tipDiameter: 2,
+      diameter: 6,
+      cornerRadius: 1,
+      angle: null,
+      halfAngle: null,
+      fluteLength: 30.5,
+      shoulderLength: 30.5,
+      stickout: null,
+      centreCutting: null,
+    };
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      name: target.name,
+      labels: [],
+      shapes: [],
+      drills: [],
+      stock: { ...stock, material: 'hardwood' },
+      toolKey: 'user:945-ball-30-5',
+      tool: ballTool,
+      targetObject: target,
+    };
+    const g = await generate(tl, job);
+    expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
+    expect(g.findings.some((f) => f.code === 'goal-overcut')).toBe(false);
+  }, 240_000);
 });
 
 describe('#873 the goal corpus: generated, swept, and measured against the goal', () => {

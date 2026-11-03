@@ -21,12 +21,18 @@ const backing = new Map<string, string>();
   },
 } as Storage;
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import {
   DEFAULT_GRID_PITCH_MM,
+  DEFAULT_MAX_FINISH_TIP_OPS,
   generateSurface3dIR,
   sampleGoalHeightfield,
   estimateGoalMoves,
   planGoalOvercut,
+  finishTipField,
+  finishingMoves,
   goalMemoryBudgetMb,
   GOAL_MEMORY_BUDGET_MB,
   GOAL_BYTES_PER_MOVE,
@@ -42,7 +48,7 @@ import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill as makeFlatTool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
-import { HOP_Z } from '@/engine/cnc/cam/ir';
+import { HOP_Z, SAFE_Z } from '@/engine/cnc/cam/ir';
 import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
 import { stubSetup, type Setup } from '@/engine/cnc/setup';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -680,6 +686,38 @@ describe('#909 the plan is judged against the goal', () => {
       hf.pitch,
     );
     expect(clean, JSON.stringify(clean)).toEqual({ worstMm: 0, cells: 0, at: null, stage: null });
+  });
+
+  // #945 — a cheaper, lower-level regression for the exact move class: a straight finish-raster
+  // diagonal between two adjacent 0.1 mm columns where the goal drops ~11 mm between them (the
+  // real segment measured at j29's placement was `G1 X11.476 Z-27.006` from (11.576, 37.031,
+  // -16.051) — a slope far past 1). `finishingMoves` must not emit that diagonal (its own
+  // staircase fix), and `planGoalOvercut`'s guard must not miss it either way (its own t-search
+  // fix) — this pins both halves without the full job/generate() pipeline the corpus test above
+  // (and `goalCorpus873.spec.ts`'s placed-figure case) goes through.
+  it('the finish raster on figure.stl at j29’s placement never gouges a steep column pair (#945)', () => {
+    const stl = readFileSync(fileURLToPath(new URL('../fixtures/goals/figure.stl', import.meta.url)));
+    const target: EngraveTargetObject = {
+      id: 'figure-945',
+      name: 'figure.stl',
+      format: 'stl',
+      sha256: 'figure-945',
+      data: Buffer.from(stl).toString('base64'),
+      size: { x: 1, y: 1, z: 1 }, // the parsed mesh's own bbox wins; this is the picker's stated size only
+      position: { x: 18, y: 50, z: 0 },
+      rotation: 90,
+      enabled: true,
+      role: 'goal',
+      scale: { x: 0.6533, y: 0.6533, z: 0.6533 },
+    };
+    const hf = sampleGoalHeightfield(target, { pitchMm: 0.1 });
+    // Makera's 6×2×30.5 mm Ball Nose Engraving bit — the elephant job's own cutter, tip radius 1 mm.
+    const ball: SurfaceTool = { radius: 1, ball: true };
+    const tip = finishTipField(hf, ball, DEFAULT_MAX_FINISH_TIP_OPS);
+    const moves = finishingMoves(hf, tip, FEEDS, hf.pitch, SAFE_Z, HOP_Z);
+    expect(moves.length).toBeGreaterThan(0);
+    const overcut = planGoalOvercut(hf, [{ moves, tool: ball }], hf.pitch);
+    expect(overcut, JSON.stringify(overcut)).toEqual({ worstMm: 0, cells: 0, at: null, stage: null });
   });
 });
 
