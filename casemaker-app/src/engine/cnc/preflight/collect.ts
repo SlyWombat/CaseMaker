@@ -42,7 +42,7 @@ import { validateSacrificial } from '@/engine/cnc/sacrificial';
 import { stockFromShelf } from '@/engine/cnc/stockStart';
 import type { Reachability } from '@/engine/cnc/engrave/reachability';
 import type { VerifyReport } from '@/engine/cnc/verify';
-import { gateViewFor, saveBlocker, type EngraveRunView } from '@/store/engraveRunGate';
+import { firstRunErrorSource, gateViewFor, saveBlocker, type EngraveRunView } from '@/store/engraveRunGate';
 import type { StockItem } from '@/platform/stockClient';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { PreflightCause, PreflightOwner, PreflightRow, PreflightScope } from './types';
@@ -274,11 +274,12 @@ export function collect(input: PreflightInput): PreflightRow[] {
     });
   }
 
-  // THE GENERATE'S OWN REFUSAL, under its own owner. `saveBlocker` reads `nc`, `findings` and
-  // `verify` and NOTHING ELSE of the generated result — never `ok`, never `errors` — so a Generate
-  // that stopped without producing a program is on the gate only as an error COUNT ("N errors
-  // outstanding") or as the bare "no program was produced", and WHY it stopped is nowhere. The
-  // Generate states it itself in `errors`, one sentence per stoppage, so it is carried here verbatim.
+  // THE GENERATE'S OWN REFUSAL, under its own owner. The Generate states in `errors` why it
+  // stopped, one sentence per stoppage, so it is carried here verbatim — with the guide-documented
+  // code, owner and cause a run-error line does not have. #949 — the gate now READS those entries
+  // too (they are run errors, their message the line), so the operator's run line and Cut both say
+  // the sentence; the hub states it ONCE, here, and the gate row below is skipped for a block from
+  // this source rather than letting the same failure appear under two codes.
   //
   // A FRAME THAT COULD NOT BE BUILT while the GENERATE stopped for its own reason is the case that
   // made this a code (review, 2026-10-16): the Generate keeps `nc`, leaves `frameVerify` null and
@@ -331,8 +332,9 @@ export function collect(input: PreflightInput): PreflightRow[] {
   //                                             outstanding" when an owner's rows carry errors,
   //                                             otherwise "no program was produced"
   //
-  // The REASON it produced none is not in that sentence — the gate does not read the Generate's
-  // `errors` — and is not claimed to be: it is the row above, in the Generate's own words.
+  // The REASON it produced none is not claimed in that sentence: it is the row above, in the
+  // Generate's own words (`errors` — #949 the gate reads them too, and this hub does not repeat
+  // that row for them).
   //
   // THE SECOND IS THE REVIEW'S FINDING (2026-10-16): a Generate that RAN and stopped — at the
   // findings, the feeds, the CAM, the post — leaves `nc` null and used to read as a clean gate. Every
@@ -345,14 +347,17 @@ export function collect(input: PreflightInput): PreflightRow[] {
     // `generated` field — see `NO_RUN_VIEW` for why that is safe in exactly these two states.
     // #724 W5 — the view carries the machine and the holding, so a rotary job's gate row says the
     // bench sentence rather than "no rotary module" about a profile that has one.
-    const block = saveBlocker(
-      gateViewFor(
-        gen === null ? NO_RUN_VIEW : { ...NO_RUN_VIEW, generated: gen },
-        jobMachine(input.job, input.calibration),
-        input.job.workholding.kind === 'rotary-chuck',
-      ),
+    const view = gateViewFor(
+      gen === null ? NO_RUN_VIEW : { ...NO_RUN_VIEW, generated: gen },
+      jobMachine(input.job, input.calibration),
+      input.job.workholding.kind === 'rotary-chuck',
     );
-    if (block !== null) {
+    const block = saveBlocker(view);
+    // #949 — ONE STATEMENT OF ONE FAILURE. When the gate's block comes from the Generate's own
+    // `errors` (its first error's SOURCE is the generate list), the `generate-stopped` / `no-frame`
+    // row above already carries that sentence with its code, owner and cause; a gate row here would
+    // be the same failure under a second code. Skipped by the SOURCE, never by comparing messages.
+    if (block !== null && firstRunErrorSource(view) !== 'generate') {
       rows.push({
         severity: 'error',
         // The gate states its block as a sentence and carries no code; this names that one block.

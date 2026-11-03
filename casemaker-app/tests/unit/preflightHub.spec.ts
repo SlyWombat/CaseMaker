@@ -196,8 +196,10 @@ describe('preflightHub: the (setup, tool) loop', () => {
     const [first, second] = hubFor(job, { generated }).scopes;
     // The scope with a program is not told its run stopped...
     expect(first!.rows.some((r) => r.code === 'generate-stopped')).toBe(false);
-    // ...but the scope with no program says both that it is missing and why.
-    expect(second!.rows.some((r) => r.code === 'no-generate')).toBe(true);
+    // ...and the scope with no program says WHY, once, in the Generate's own row. #949 — the gate
+    // reads the Generate's errors too, so its generic `no-generate` row is skipped for a block from
+    // that source rather than stating the same failure under a second code.
+    expect(second!.rows.some((r) => r.code === 'no-generate')).toBe(false);
     const stopped = second!.rows.find((r) => r.code === 'generate-stopped');
     expect(stopped?.owner).toBe('generate');
     expect(stopped?.message).toBe('the feeds refused the second setup');
