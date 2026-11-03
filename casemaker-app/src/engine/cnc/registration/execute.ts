@@ -56,7 +56,11 @@
  */
 
 import { controllerState } from '@/platform/machineUpload';
-import type { ConsoleSendResult, ConsoleTiming } from '@/platform/machineConsole';
+import { STATUS_POLL_TIMING, type ConsoleSendResult, type ConsoleTiming } from '@/platform/machineConsole';
+// #933 — the pure status-line parser and the work-offset reading (`MPos − WPos`). This module has no
+// socket in it (`protocol.ts`'s only import is the console gate), the same functions the status
+// strip and the machine store already call.
+import { readStatusLine, workOffset } from '@/platform/desktop/protocol';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { facingRetouchTolerance } from '@/engine/cnc/stockStart';
 import {
@@ -131,6 +135,18 @@ export interface ExecDeps {
    * it gets exactly the behaviour it had (the readings still come back in `RunResult`).
    */
   onTouch?: (touch: LiveTouch) => void;
+  /**
+   * #933 — the operator's Stop. Checked before every line the run sends, exactly as the run
+   * screen's player does (`machineRun.ts`): the line in flight finishes, but no further line goes
+   * out and the stop path releases the stylus before the run returns.
+   */
+  stopRequested?: () => boolean;
+  /**
+   * #933 — the work origin (G54 X/Y) this bed was last registered to, when the caller has one. The
+   * run checks the machine's own G54 against it before the first touch and stops with a sentence
+   * when they disagree; null/absent means there is nothing to compare (a first registration).
+   */
+  expectedG54?: { x: number; y: number } | null;
 }
 
 export interface Transcript {
@@ -166,6 +182,21 @@ export type RunResult =
  */
 export const MAX_IDLE_POLLS = 30;
 
+/**
+ * #933 — how many status polls a late `$H` is given before its home is called failed. The bench's
+ * homes are 22–31 s (2026-10-15) and a cold start's auto-home has never been timed, so the reply
+ * window is the console's, and this is the wait AFTER it for the controller to say Idle: 20 polls at
+ * the 3 s status window ≈ 60 s — bounded, and never a line sent into a moving machine.
+ */
+export const HOME_POLLS = 20;
+
+/**
+ * #933 — how far the machine's G54 may be from the bed's recorded origin before a run refuses to
+ * touch. A WRONG-ORIGIN guard, not a precision check: a different job's origin is tens of mm away,
+ * while a registration's own accuracy is sub-0.1 mm.
+ */
+export const G54_PREFLIGHT_MM = 1;
+
 const f = (n: number) => (Math.round(n * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '') || '0';
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -177,7 +208,16 @@ class Stop extends Error {}
  * machine's `toolChange.clearanceZ`), and a forgotten argument must be a typecheck error, never a
  * silent −3 that could send the head somewhere the machine does not call clear.
  */
-function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number = MAX_IDLE_POLLS) {
+function session(
+  deps: ExecDeps,
+  seekFromMachineZ: number,
+  idlePollLimit: number = MAX_IDLE_POLLS,
+  /**
+   * #933 — the run's probe is the 3D one (see {@link probeNeedsRelease}): a stop that lands with
+   * the stylus still deflected must release it before the epilogue's home, or that rapid alarms.
+   */
+  releaseProbeOnStop = false,
+) {
   // A bounded wait whatever the location says: a whole number of polls, at least one (#449).
   const idlePolls = Number.isInteger(idlePollLimit) && idlePollLimit >= 1 ? idlePollLimit : MAX_IDLE_POLLS;
   const transcript: Transcript[] = [];
@@ -186,8 +226,21 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
   let depth = 'at a safe height';
   /** #588 — whether the run reached its own home step before it stopped. */
   let homed = false;
+  /**
+   * #933 — the last probe move that went out and has NOT been released: its axis and the sign of
+   * the travel that deflected the stylus (a `G38.3` always moves INTO the material's direction).
+   * Cleared when a `G38.5` goes out. This is what lets a Stop between a triggered touch and its
+   * release still back the stylus off.
+   */
+  let probeDown: { axis: 'X' | 'Y' | 'Z'; travelSign: number } | null = null;
+
+  /** The operator's Stop, checked before every line the run sends (#933, `machineRun.ts`'s shape). */
+  function stoppedByOperator(): boolean {
+    return deps.stopRequested?.() === true;
+  }
 
   async function send(line: string, opts: { missOk?: boolean; timing?: Partial<ConsoleTiming> } = {}): Promise<string> {
+    if (stoppedByOperator()) throw new Stop('stopped: the operator pressed Stop');
     const r = await deps.console.send(line, opts.timing);
     const reply = r.kind === 'sent' || r.kind === 'timeout' ? r.text : r.detail;
     const carried = r.kind === 'sent' || r.kind === 'timeout' ? (r.carried?.text ?? '') : '';
@@ -200,6 +253,10 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
     }
     if (line === 'G91') relative = true;
     if (line === 'G90') relative = false;
+    // #933 — the stop path's bookkeeping: what the probe touched, and when it was released.
+    const probe = /^G38\.3 ([XYZ])(-?[\d.]+) F/.exec(line);
+    if (probe !== null) probeDown = { axis: probe[1] as 'X' | 'Y' | 'Z', travelSign: Math.sign(Number(probe[2])) };
+    if (/^G38\.5 /.test(line)) probeDown = null;
     return reply;
   }
 
@@ -217,13 +274,48 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
     }
   }
 
-  /** `?` until the machine reads Idle; stop if it never does. */
+  /** `?` until the machine reads Idle; stop if it never does. #933 — each poll on the STATUS window. */
   async function idle(): Promise<void> {
     for (let i = 0; i < idlePolls; i++) {
-      const state = controllerState(await send('?'));
+      const state = controllerState(await send('?', { timing: STATUS_POLL_TIMING }));
       if (state === 'Idle') return;
     }
     throw new Stop(`the machine did not read Idle in ${idlePolls} status polls`);
+  }
+
+  /**
+   * #933 — `$H`, BOUNDED. The home is the one line whose answer may outlive the console's window on
+   * a cold start (auto-home), and while it runs the controller is MOVING — so a timeout must not be
+   * answered with the stop path's recovery lines. Instead the status is polled (3 s window) until
+   * it reads Idle (the home finished — carry on) or Alarm (homing failed — stop), at most
+   * {@link HOME_POLLS} times; past that the run stops with the home named. The `$H` line itself
+   * keeps the console's own window: it is the shop's `console.firstReplyMs`, which states it sits
+   * above the slowest bench line ($H ~31 s, 2026-10-15).
+   */
+  async function home(): Promise<void> {
+    const r = await deps.console.send('$H');
+    const reply = r.kind === 'sent' || r.kind === 'timeout' ? r.text : r.detail;
+    transcript.push({ line: '$H', reply });
+    if (r.kind === 'sent') {
+      for (const text of [reply, r.carried?.text ?? '']) {
+        if (/\berror:/i.test(text)) throw new Stop(`$H: the controller answered ${text.trim()}`);
+        const alarm = /ALARM[^\n]*/i.exec(text)?.[0];
+        if (alarm) throw new Stop(`$H: ${alarm.trim()}`);
+      }
+      return;
+    }
+    if (r.kind !== 'timeout') throw new Stop(`$H: ${r.kind} — ${reply}`);
+    // A timeout is not a failed home: the queue may still be running. Wait for the controller's
+    // own State word rather than sending a recovery line into a moving machine.
+    for (let i = 0; i < HOME_POLLS; i++) {
+      const poll = await deps.console.send('?', STATUS_POLL_TIMING);
+      transcript.push({ line: '?', reply: poll.kind === 'sent' ? poll.text : poll.kind });
+      if (poll.kind !== 'sent') continue;
+      const state = controllerState(poll.text);
+      if (state === 'Idle') return;
+      if (state === 'Alarm') throw new Stop('$H: the machine is in alarm after homing — check the machine before anything moves');
+    }
+    throw new Stop(`$H did not answer and the machine did not read Idle in ${HOME_POLLS} status polls — home it by hand`);
   }
 
   /** Say how low the probe may be from here on (the stop message uses the latest), and narrate the step (#587). */
@@ -242,7 +334,8 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
   /** The machine's own State word, read fresh from `?` — null when it does not answer one. */
   async function readState(): Promise<string | null> {
     try {
-      const r = await deps.console.send('?');
+      // #933 — the status window, so a silent link costs 3 s here instead of the console's 60.
+      const r = await deps.console.send('?', STATUS_POLL_TIMING);
       transcript.push({ line: '?', reply: r.kind === 'sent' ? r.text : r.kind });
       return r.kind === 'sent' ? controllerState(r.text) : null;
     } catch {
@@ -261,8 +354,43 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
     // the console's whole 60 s first-reply window (the 2026-10-24 58 s park). A `?` that does not
     // answer reads null, which is never treated as an alarm.
     const inAlarm = (await readState()) === 'Alarm';
+    // #933 — THE STYLUS IS RELEASED BEFORE ANYTHING ELSE. A stop can land between a triggered
+    // `G38.3` and its `G38.5` — the operator's Stop is one way, a refused line is another — and the
+    // epilogue's home is a rapid. The release is a probe move, so it goes out under `G91` (an
+    // alarm is cleared first: the controller refuses motion while locked). When it cannot go out,
+    // the sentence says the stylus may still be down rather than pretending it is open.
+    let releaseNote: 'released' | 'down' | null = null;
+    let alarmCleared = false;
+    if (releaseProbeOnStop && probeDown !== null) {
+      if (inAlarm) {
+        alarmCleared = true;
+        try {
+          const x = await deps.console.send('$X');
+          transcript.push({ line: '$X', reply: x.kind === 'sent' ? x.text : x.kind });
+        } catch {
+          // The release below reports the state honestly; the operator has the recovery sentence.
+        }
+      }
+      try {
+        const rel = await deps.console.send('G91');
+        transcript.push({ line: 'G91', reply: rel.kind === 'sent' ? rel.text : rel.kind });
+        if (rel.kind === 'sent') {
+          relative = true;
+          const line = probeAwayLine(probeDown.axis, probeDown.travelSign < 0 ? PROBE_AWAY_MM : -PROBE_AWAY_MM);
+          const away = await deps.console.send(line);
+          transcript.push({ line, reply: away.kind === 'sent' ? away.text : away.kind });
+          releaseNote = away.kind === 'sent' ? 'released' : 'down';
+          if (away.kind === 'sent') probeDown = null;
+        } else {
+          releaseNote = 'down';
+        }
+      } catch {
+        releaseNote = 'down';
+      }
+    }
     if (relative) {
-      for (const line of inAlarm ? ['$X', 'G90'] : ['G90']) {
+      // #933 — the alarm was already cleared above when the release needed it; one `$X` per stop.
+      for (const line of inAlarm && !alarmCleared ? ['$X', 'G90'] : ['G90']) {
         try {
           const r = await deps.console.send(line);
           transcript.push({ line, reply: r.kind === 'sent' ? r.text : r.kind });
@@ -271,20 +399,26 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
         }
       }
     }
+    const probeWords =
+      releaseNote === 'released'
+        ? ' The stop released the stylus before stopping.'
+        : releaseNote === 'down'
+          ? ' The stylus may still be down — release it (G38.5) before any move.'
+          : '';
     // #588 — the recovery advice is only true when the machine is actually in alarm. A G38.3 miss is
     // a READING, not an alarm (#518), so a clean stop must not tell a beginner to clear an alarm that
     // is not there; a run that reached its own home step has nothing to recover at all.
-    if (homed) return `${reason}. Stopped — the probe may be ${depth}. Homed; nothing to recover.`;
+    if (homed) return `${reason}. Stopped — the probe may be ${depth}.${probeWords} Homed; nothing to recover.`;
     if (inAlarm) {
       return (
-        `${reason}. Stopped — the probe may be ${depth}, and the machine may be in alarm. ` +
+        `${reason}. Stopped — the probe may be ${depth}, and the machine may be in alarm.${probeWords} ` +
         `To recover: $X, then G90, then lift with G53 G0 Z${f(seekFromMachineZ)} before any XY move.`
       );
     }
-    return `${reason}. Stopped — the probe may be ${depth}. The machine is Idle; nothing to recover.`;
+    return `${reason}. Stopped — the probe may be ${depth}.${probeWords} The machine is Idle; nothing to recover.`;
   }
 
-  return { send, trySend, idle, stopped, at, saw, markHomed: () => { homed = true; }, transcript };
+  return { send, trySend, idle, home, stopped, at, saw, markHomed: () => { homed = true; }, transcript };
 }
 
 type Session = ReturnType<typeof session>;
@@ -792,15 +926,16 @@ export async function runMountTap(
    */
   probe: ProbeSpec | null = null,
 ): Promise<MountTapResult> {
-  const io = session(deps, seekFromMachineZ, settings.idlePollLimit);
+  const io = session(deps, seekFromMachineZ, settings.idlePollLimit, probeNeedsRelease(probe));
   const bad = settingsProblem(settings);
   if (bad !== null) return { ok: false, reason: `nothing was sent: ${bad}`, transcript: [] };
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
   let powered = false;
   try {
-    const status = await io.send('?');
+    // #933 — the opening poll is a STATUS poll: a silent link costs 3 s, not the console's 60.
+    const status = await io.send('?', { timing: STATUS_POLL_TIMING });
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
-    await io.send('$H');
+    await io.home();
     if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
       throw new Stop('stopped: the probe was not fitted');
     }
@@ -820,7 +955,7 @@ export async function runMountTap(
     }
     // #519 item 1 — the standalone tap's reading, as it lands.
     io.saw({ source: 'mount-tap', label: null, x: tap.x, y: tap.y, z: prb.z, touched: prb.touched, kind: null });
-    await io.send('$H');
+    await io.home();
     return { ok: true, z: prb.z, at: { x: tap.x, y: tap.y }, probe: { lengthZ: ref.z, rest }, transcript: io.transcript };
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
@@ -898,13 +1033,15 @@ const f4 = (n: number): string => String(Math.round(n * 1000) / 1000);
 export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Promise<CentreRunResult> {
   const plan = opts.plan;
   const release = opts.releaseMm ?? 3;
-  const io = session(deps, opts.seekFromMachineZ);
+  // #933 — centre-find is the 3D probe's routine: a stop with the ball deflected releases it.
+  const io = session(deps, opts.seekFromMachineZ, MAX_IDLE_POLLS, true);
   /** #789 — whether the probe's supply was (or may have been) switched on. */
   let powered = false;
   try {
-    const status = await io.send('?');
+    // #933 — the opening poll is a STATUS poll: a silent link costs 3 s, not the console's 60.
+    const status = await io.send('?', { timing: STATUS_POLL_TIMING });
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
-    await io.send('$H');
+    await io.home();
     await io.send('G54');
     await io.send('G92.1');
     if (
@@ -1113,13 +1250,15 @@ const f4r = (n: number): string => String(Math.round(n * 1000) / 1000);
  * ALL XY IS MACHINE: the tap happens beside the chuck, where the work frame means nothing yet.
  */
 export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Promise<RotaryTapResult> {
-  const io = session(deps, opts.seekFromMachineZ);
+  // #933 — the rotary tap is the 3D probe's routine: a stop with the ball deflected releases it.
+  const io = session(deps, opts.seekFromMachineZ, MAX_IDLE_POLLS, true);
   const release = opts.releaseMm ?? 3;
   let powered = false;
   try {
-    const status = await io.send('?');
+    // #933 — the opening poll is a STATUS poll: a silent link costs 3 s, not the console's 60.
+    const status = await io.send('?', { timing: STATUS_POLL_TIMING });
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
-    await io.send('$H');
+    await io.home();
     if (
       !(await deps.operator({
         kind: 'fit-probe',
@@ -1240,7 +1379,7 @@ export async function runRegistration(
   deps: ExecDeps,
   spreadPlan?: SurfaceSpreadPlan,
 ): Promise<RunResult> {
-  const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit);
+  const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
   const s = plan.settings;
   // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
   const bad = settingsProblem(s);
@@ -1248,11 +1387,32 @@ export async function runRegistration(
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
   let powered = false;
   try {
-    const status = await io.send('?');
+    // #933 — the opening poll is a STATUS poll: a silent link costs 3 s, not the console's 60.
+    const status = await io.send('?', { timing: STATUS_POLL_TIMING });
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
-    await io.send('$H');
+    await io.home();
     await io.send('G54');
     await io.send('G92.1');
+    // #933 — THE G54 PRE-FLIGHT, before any touch. Registration never seeds a work origin, so a
+    // stale or cleared G54 puts the first touch where the stock is not — the 2026-10-21 miss, which
+    // read as a planner fault. `workOffset` is `MPos − WPos`, the offset in force; it is compared
+    // with the origin this bed was last registered to when the caller has one.
+    if (deps.expectedG54 !== undefined && deps.expectedG54 !== null) {
+      const statusText = await io.send('?', { timing: STATUS_POLL_TIMING });
+      const off = workOffset(readStatusLine(statusText));
+      if (off.x === null || off.y === null) {
+        throw new Stop(
+          'the machine’s status line did not carry both positions, so the work origin (G54) could not be checked — connect again and retry',
+        );
+      }
+      const away = Math.hypot(off.x - deps.expectedG54.x, off.y - deps.expectedG54.y);
+      if (away > G54_PREFLIGHT_MM) {
+        throw new Stop(
+          `the machine’s work origin (G54 X${f(off.x)} Y${f(off.y)}) is ${f(away)} mm from the one this bed was registered to ` +
+            `(X${f(deps.expectedG54.x)} Y${f(deps.expectedG54.y)}) — re-establish the origin before registering, or register again to re-find it`,
+        );
+      }
+    }
     if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
       throw new Stop('stopped: the probe was not fitted');
     }
@@ -1491,7 +1651,7 @@ export async function runRegistration(
     }
 
     await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
-    await io.send('$H');
+    await io.home();
     io.markHomed();
 
     // #475/#608/#631 — the spread verdict. Z0 is the LOWEST touch (the colour line is a plane and
@@ -1569,13 +1729,14 @@ export async function retouchSurface(
       transcript: [],
     };
   }
-  const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit);
+  const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
   let powered = false;
   try {
-    const status = await io.send('?');
+    // #933 — the opening poll is a STATUS poll: a silent link costs 3 s, not the console's 60.
+    const status = await io.send('?', { timing: STATUS_POLL_TIMING });
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
-    await io.send('$H');
+    await io.home();
     await io.send('G54');
     await io.send('G92.1');
     if (
@@ -1615,7 +1776,7 @@ export async function retouchSurface(
       kind: null,
     });
     await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
-    await io.send('$H');
+    await io.home();
     return { ok: true, surface, outcome: { ...outcome, surfaceZ: surface.z }, transcript: io.transcript };
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
@@ -1661,7 +1822,7 @@ export async function applyCorrection(
     return { ok: false, reason: 'the origin is written only after the operator confirms the measured offset', transcript: [] };
   }
   try {
-    await io.send('$H');
+    await io.home();
     const fit =
       consent.cutter === undefined
         ? 'Take the probe out, fit the cutter, then continue.'
@@ -1673,7 +1834,7 @@ export async function applyCorrection(
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading for the cutter');
     const line = correctionLine(outcome, ref.z);
     await io.send(line);
-    await io.send('$H');
+    await io.home();
     return { ok: true, line, cutterRefZ: ref.z, transcript: io.transcript };
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };

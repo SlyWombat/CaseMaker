@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { consoleProblem } from '@/engine/cnc/consoleGate';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { viseTapPoint } from '@/engine/cnc/mounts/vise';
-import type { ConsoleSendResult } from '@/platform/machineConsole';
+import { STATUS_POLL_TIMING, type ConsoleSendResult, type ConsoleTiming } from '@/platform/machineConsole';
 import {
   applyCorrection,
   classifyTouch,
@@ -310,6 +310,8 @@ function fakeZ1(opts: {
   };
   let pending = 0;
   const lines: string[] = [];
+  /** #933 — the timing each line was sent with (the status window's own values are asserted). */
+  const timings: { line: string; timing?: Partial<ConsoleTiming> }[] = [];
   const xyMovesAtZ: number[] = [];
   const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
   const RIM = opts.rim ?? 0.7;
@@ -328,8 +330,9 @@ function fakeZ1(opts: {
     return null;
   };
   const console = {
-    async send(line: string): Promise<ConsoleSendResult> {
+    async send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult> {
       lines.push(line);
+      timings.push({ line, timing });
       if (line === '?') {
         if (opts.idle === false) return reply('<Run|MPos:0,0,0>');
         if (pending > 0) return (pending--, reply('<Run|MPos:0,0,0>'));
@@ -472,6 +475,7 @@ function fakeZ1(opts: {
     plunged: () => plunged,
     sideProbeZ: () => sideProbeZ,
     triggeredAt: () => triggered,
+    timings: () => timings,
     fitCutter: () => (tool = 'cutter'),
     mode: () => mode,
     alarmed: () => alarmed,
@@ -1101,6 +1105,9 @@ describe('#430 the executor, on a fake machine', () => {
       // #789 — the closing supply-off is best-effort by design (asserted below): its timeout is
       // not a step whose failure may be read as the run's.
       if (clean.lines[k] === 'M832') continue;
+      // #933 — an `$H` timeout is not a failed home: the run waits for the controller's State
+      // (see the #933 block's own cold-start test) and carries on, so it is not a stop step.
+      if (clean.lines[k] === '$H') continue;
       const z1 = fakeZ1({ actual: SHIFTED });
       let n = 0;
       const flaky = {
@@ -1825,4 +1832,209 @@ describe('#743 a disc registers on its rim (D-2)', () => {
     expect(o.centre.x).toBeCloseTo(15, 1);
   });
 
+});
+
+// #933 — THE RUN STOPS IN SECONDS. The status polls carry the 3 s window, a cold-start `$H` that
+// answers late is waited out on the controller's State rather than failed, an operator Stop flags
+// the executor at its next line and releases the stylus before anything else, and a stale work
+// origin is refused before the first touch. The fakes here are the ones the rest of this file
+// uses; only the console wrapper changes, per case.
+describe('#933 the run stops in seconds', () => {
+  /** A console that passes through to the fake, with `intercept` getting the first look. */
+  function around(
+    z1: ReturnType<typeof fakeZ1>,
+    intercept: (line: string, timing: Partial<ConsoleTiming> | undefined) => ConsoleSendResult | null,
+  ): { send: (line: string, timing?: Partial<ConsoleTiming>) => Promise<ConsoleSendResult> } {
+    return {
+      async send(line, timing) {
+        const hit = intercept(line, timing);
+        return hit ?? z1.console.send(line, timing);
+      },
+    };
+  }
+
+  it('polls `?` on the 3 s status window, and a machine that never reads Idle stops in polls, not minutes', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED });
+    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    const polls = z1.timings().filter((t) => t.line === '?');
+    expect(polls.length).toBeGreaterThan(0);
+    for (const p of polls) {
+      expect(p.timing?.firstReplyMs).toBe(STATUS_POLL_TIMING.firstReplyMs);
+      expect(p.timing?.maxMs).toBe(STATUS_POLL_TIMING.maxMs);
+    }
+    // A controller whose OPENING check reads Idle but which then never says Idle (or Alarm): the
+    // idle wait is bounded, and each poll is a 3 s window rather than the console's 60 — the whole
+    // wait is idlePollLimit × 3 s.
+    let answered = 0;
+    const busy = around(z1, (line) => {
+      if (line !== '?') return null;
+      answered += 1;
+      return { kind: 'sent', line, text: answered === 1 ? '<Idle|MPos:0,0,0>' : '<Run|MPos:0,0,0>', frames: 1, elapsedMs: 1 };
+    });
+    const r2 = await runRegistration(plan('vise'), { console: busy, operator: yes });
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.reason).toContain('did not read Idle in');
+    const polls2 = z1.timings().filter((t) => t.line === '?');
+    expect(polls2.length).toBeLessThanOrEqual(plan('vise').settings.idlePollLimit + 2);
+  });
+
+  it('a cold-start `$H` that answers late is waited out on the State, not failed', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED });
+    let homes = 0;
+    const lateHome = around(z1, (line) =>
+      line === '$H' ? ((homes += 1), { kind: 'timeout', line, detail: 'no answer yet', text: '' }) : null,
+    );
+    const r = await runRegistration(plan('vise'), { console: lateHome, operator: yes });
+    // Every home in this run answered late; the run read the State and carried on.
+    if (!r.ok) throw new Error(r.reason);
+    expect(homes).toBeGreaterThan(0);
+  });
+
+  it('a cold start whose home ends in Alarm stops with the home named', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED });
+    let homeSent = false;
+    const alarmAfterHome = around(z1, (line) => {
+      if (line === '$H') {
+        homeSent = true;
+        return { kind: 'timeout', line, detail: 'no answer yet', text: '' };
+      }
+      if (line === '?' && homeSent) return { kind: 'sent', line, text: '<Alarm|MPos:0,0,0>', frames: 1, elapsedMs: 1 };
+      return null;
+    });
+    const r = await runRegistration(plan('vise'), { console: alarmAfterHome, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('in alarm after homing');
+  });
+
+  it('the operator’s Stop stops the next line and releases the stylus before the epilogue', async () => {
+    // The 3D probe's plan: the stylus stays down, so a Stop between a touch and its release must be
+    // answered by the stop path's own `G38.5` — preceded by its `G91`, which the normal path never
+    // sends there.
+    const PROBE_3D: ProbeSpec = {
+      id: 'fx-probe-3d',
+      variant: '3d',
+      instrument: 'xyz',
+      tip: { diameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05 },
+    };
+    const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
+    const jaw: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+    const made = planRegistration(
+      input('vise', { probe: PROBE_3D, mountDatum: jaw, mountTap: tap, fixtureBelowSurfaceMs: undefined } as never),
+      registrationSettings(null, PROBE_3D).settings,
+    );
+    if (!made.ok) throw new Error(made.reason);
+    const z1 = fakeZ1({
+      actual: SHIFTED,
+      tap: { x: tap.x, y: tap.y, z: jaw.jawTopZ },
+      ballR: 1.5,
+      rim: 1.5,
+      stylusStaysDown: true,
+    });
+    // The press lands while the tap's touch is on the wire: once a probe has been sent, the very
+    // next line is refused.
+    const stopRequested = () => z1.lines.some((l) => l.startsWith('G38.3'));
+    const r = await runRegistration(made.plan, { console: z1.console, operator: yes, stopRequested });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('the operator pressed Stop');
+    expect(r.reason).toContain('released the stylus');
+    // The stop path's release: `G91` then the release, then the restored `G90` — the normal path
+    // would have sent the release without the extra `G91`.
+    const released = z1.lines.findIndex((l) => l.startsWith('G38.5'));
+    expect(released).toBeGreaterThan(0);
+    expect(z1.lines[released - 1]).toBe('G91');
+    expect(z1.lines[released + 1]).toBe('G90');
+    expect(z1.alarmed()).toBe(false);
+  });
+
+  it('an operator Stop in an alarm clears it ONCE, then releases the stylus', async () => {
+    // The tap's touch triggers and the controller alarms in the same reply (a `Probe fail`, which a
+    // miss-tolerant probe line carries as a reading). The Stop lands with the stylus down: the stop
+    // path clears the alarm once, releases, and restores G90 — never a second `$X`.
+    const PROBE_3D: ProbeSpec = {
+      id: 'fx-probe-3d',
+      variant: '3d',
+      instrument: 'xyz',
+      tip: { diameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05 },
+    };
+    const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
+    const jaw: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+    const made = planRegistration(
+      input('vise', { probe: PROBE_3D, mountDatum: jaw, mountTap: tap, fixtureBelowSurfaceMs: undefined } as never),
+      registrationSettings(null, PROBE_3D).settings,
+    );
+    if (!made.ok) throw new Error(made.reason);
+    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: tap.x, y: tap.y, z: jaw.jawTopZ }, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
+    let alarmed = false;
+    let probed = false;
+    const wire: string[] = [];
+    const console = {
+      async send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult> {
+        wire.push(line);
+        if (line.startsWith('G38.3') && !probed) {
+          probed = true;
+          alarmed = true;
+          return { kind: 'sent', line, text: '[PRB:-186.2,-180,-56.82:1]\nALARM: Probe fail', frames: 2, elapsedMs: 1 };
+        }
+        if (line === '?') {
+          return alarmed
+            ? { kind: 'sent', line, text: '<Alarm|MPos:0,0,0>', frames: 1, elapsedMs: 1 }
+            : z1.console.send(line, timing);
+        }
+        if (line === '$X') {
+          alarmed = false;
+          return { kind: 'sent', line, text: 'ok', frames: 1, elapsedMs: 1 };
+        }
+        return z1.console.send(line, timing);
+      },
+    };
+    const r = await runRegistration(made.plan, { console, operator: yes, stopRequested: () => probed });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('may be in alarm');
+    expect(r.reason).toContain('released the stylus');
+    expect(wire.filter((l) => l === '$X')).toHaveLength(1);
+    expect(wire.some((l) => l.startsWith('G38.5'))).toBe(true);
+    // The relative mode the release needed is put back, and the supply's OFF follows it.
+    expect(wire.slice(-2)).toEqual(['G90', 'M832']);
+  });
+
+  it('refuses a stale work origin before any touch, and passes a matching one', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED });
+    // The machine's G54 read back from a status line: `MPos − WPos`, so the status text states the
+    // offset directly (the fake's own motion model is not consulted for it).
+    const status = (off: { x: number; y: number }) =>
+      around(z1, (line) =>
+        line === '?'
+          ? { kind: 'sent', line, text: `<Idle|MPos:${off.x},${off.y},0|WPos:0,0,0>`, frames: 1, elapsedMs: 1 }
+          : null,
+      );
+    const good = await runRegistration(plan('vise'), {
+      console: status({ x: -150.25, y: -160.5 }),
+      operator: yes,
+      expectedG54: { x: -150, y: -160.5 },
+    });
+    if (!good.ok) throw new Error(good.reason);
+    const touchesBefore = z1.lines.filter((l) => l.startsWith('G38.3')).length;
+    expect(touchesBefore).toBeGreaterThan(0);
+    // 20 mm away is not this bed's origin: the run stops before a single probe move.
+    const z2 = fakeZ1({ actual: SHIFTED });
+    const stale = around(z2, (line) =>
+      line === '?'
+        ? { kind: 'sent', line, text: `<Idle|MPos:${-170},${-160.5},0|WPos:0,0,0>`, frames: 1, elapsedMs: 1 }
+        : null,
+    );
+    const bad = await runRegistration(plan('vise'), {
+      console: stale,
+      operator: yes,
+      expectedG54: { x: -150, y: -160.5 },
+    });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) {
+      expect(bad.reason).toContain('work origin');
+      expect(bad.reason).toContain('20 mm from the one this bed was registered to');
+    }
+    expect(z2.lines.filter((l) => l.startsWith('G38.3'))).toHaveLength(0);
+  });
 });

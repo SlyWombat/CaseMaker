@@ -179,6 +179,11 @@ interface FakeOptions {
   /** #475 — the surface the fake answers at each cut-extent touch, keyed by the sent XY. */
   spreadReadings?: readonly { x: number; y: number; z: number }[];
   /**
+   * #933 — HOLD the first `G38.3`'s reply until `release()` is called: the run is then mid-touch,
+   * which is what the Stop button must be able to interrupt.
+   */
+  holdTouch?: { release?: () => void };
+  /**
    * #743 — the piece is a DISC with these true spans, centred on the planned box: each rim edge is
    * where that span puts it, so a test can make the blank a little larger or smaller than stated.
    */
@@ -223,6 +228,12 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
           }
           if (line.startsWith('G38.3')) {
             g38 += 1;
+            if (opts.holdTouch !== undefined && g38 === 1) {
+              await new Promise<void>((resolve) => {
+                opts.holdTouch!.release = resolve;
+              });
+              return reply(`[PRB:${lastX},${lastY},${stockZ}:1]\nok`);
+            }
             if (opts.alarmAtFastTouch === true && g38 === 1) return (state = 'Alarm'), reply('ALARM: Probe fail');
             if (opts.missFastTouch === true && g38 === 1) return reply(`[PRB:${lastX},${lastY},${stockZ}:0]\nok`);
             // The first two are the surface seek's fast and slow touch, at the registration point.
@@ -689,6 +700,43 @@ describe('#495 — the registration step', () => {
     expect(sent.filter((l) => l === '$X')).toHaveLength(1);
     expect(sent.indexOf('$X')).toBeLessThan(sent.lastIndexOf('$H'));
     expect(sent).toContain('$H');
+    expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
+  });
+
+  it('#933 — the Stop is live mid-run: the flag stops the next line, the app never homes after it, and Home is its own press', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    const hold: { release?: () => void } = {};
+    install(plan, { holdTouch: hold });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-start'));
+    });
+    // The run is in flight on its first touch. The Stop is on screen even with no prompt pending.
+    expect(screen.getByTestId('engrave-registration-stop')).toBeTruthy();
+    await vi.waitFor(() => expect(sent.filter((l) => l.startsWith('G38.3'))).toHaveLength(1));
+
+    // Press it while the move is still on the wire; the stop's own session reads Idle, so nothing
+    // is aborted (`not-running`) — and the executor's flag stops the very next line.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-stop'));
+    });
+    expect(screen.getByTestId('engrave-registration-stop-outcome').textContent).toContain('nothing was moving');
+    await act(async () => {
+      hold.release?.();
+    });
+    await screen.findByTestId('engrave-registration-failed');
+    expect(screen.getByTestId('engrave-registration-failed').textContent).toContain('the operator pressed Stop');
+    // #933 — never homed by the app after an operator Stop: the run's own opening `$H` is the only one.
+    expect(sent.filter((l) => l === '$H')).toHaveLength(1);
+    // The Home press is offered, and is what sends the second `$H`.
+    expect(screen.getByTestId('engrave-registration-home')).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-home'));
+    });
+    expect(sent.filter((l) => l === '$H')).toHaveLength(2);
     expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
   });
 

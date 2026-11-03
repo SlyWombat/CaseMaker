@@ -55,7 +55,8 @@ import {
   type OperatorStep,
   type RunResult,
 } from '@/engine/cnc/registration/execute';
-import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
+import { attachConsole, STATUS_POLL_TIMING, type ConsoleHandle } from '@/platform/machineConsole';
+import { stopProgram, stopSettings, type StopOutcome } from '@/platform/machineStop';
 import { controllerState } from '@/platform/machineUpload';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import {
@@ -70,7 +71,14 @@ import { cuttingDiameter } from '@/engine/cnc/tool';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
-import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type MachineUpdate } from '@/store/locationStore';
+import {
+  createFirstBed,
+  machineAt,
+  saveMachineWithRetry,
+  useLocationStore,
+  visePlacementFrameOf,
+  type MachineUpdate,
+} from '@/store/locationStore';
 import {
   accessoryNameFor,
   bracketSeatDatumFor,
@@ -296,6 +304,12 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const scaleJobAboutStockCentre = useEngraveJobStore((s) => s.scaleJobAboutStockCentre);
   /** #587 — the executor's latest step narration, shown instead of a blanket "Talking…". */
   const [narration, setNarration] = useState<string | null>(null);
+  /**
+   * #933 — THE OPERATOR'S STOP. The flag is what the executor checks before every line; the
+   * outcome is what the stop's own session reported, shown beside the run's failed sentence.
+   */
+  const stopRef = useRef(false);
+  const [stopOutcome, setStopOutcome] = useState<StopOutcome | null>(null);
 
   const handleRef = useRef<ConsoleHandle | null>(null);
   const resolverRef = useRef<((ok: boolean) => void) | null>(null);
@@ -372,13 +386,61 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     resolverRef.current?.(ok);
   }
 
+  /**
+   * #933 — THE STOP PRESS. It sets the executor's flag FIRST — from that moment the run sends no
+   * further line — then answers a pending prompt (the executor's own stop path), then stops
+   * whatever is MOVING on a console of its own: the executor's session has a `G38.3` in flight, and
+   * a second `send` on that session would interleave on its single frame channel. What `abort` does
+   * to an in-flight probe move is the S1 question; the outcome says what the machine reported.
+   */
+  async function pressStop(): Promise<void> {
+    if (stopRef.current) return;
+    stopRef.current = true;
+    answer(false);
+    if (target === null) return;
+    setStopOutcome(null);
+    setStopOutcome(await stopProgram(target, undefined, stopSettings(useShopDefaultsStore.getState().defaults)));
+  }
+
+  /** #933 — the Home press after a Stop: the app never sends `$H` by itself after one. */
+  async function homeNow(): Promise<void> {
+    if (target === null) return;
+    const handle = attachConsole(target);
+    try {
+      setHomeNote(await homeAfterStop(handle));
+    } finally {
+      await handle.close();
+    }
+  }
+
+  /** #933 — what the stop reported, in the panel's words. */
+  function stopWords(o: StopOutcome): string {
+    switch (o.kind) {
+      case 'stopped':
+        return 'The stop was sent and the machine reads Idle.';
+      case 'draining':
+        return o.detail;
+      case 'not-running':
+        return 'The run stopped between moves — nothing was moving.';
+      case 'alarm':
+        return o.detail;
+      case 'timeout':
+        return `The stop was not answered: ${o.detail}`;
+      case 'error':
+        return `The stop failed: ${o.detail}`;
+      case 'unavailable':
+        return o.detail;
+    }
+  }
+
   /** Stop, then home. The executor's stop sentence has already cleared G90/$X where it could. */
   async function homeAfterStop(handle: ConsoleHandle): Promise<string> {
     try {
       // #588 — "in alarm" is the machine's State, not a sentence. `$X` to an Idle machine is a no-op
       // with no reply, so it would sit out the console's 60 s first-reply window before `$H` (the
       // 2026-10-24 58 s park). Read `?` and clear only a controller that answers `<Alarm|…>`.
-      const status = await handle.send('?');
+      // #933 — on the STATUS window: a silent link costs 3 s, not the console's 60.
+      const status = await handle.send('?', STATUS_POLL_TIMING);
       if (status.kind === 'sent' && controllerState(status.text) === 'Alarm') {
         await handle.send('$X');
       }
@@ -409,6 +471,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     setHomeNote(null);
     setError(null);
     setNarration(null);
+    stopRef.current = false;
+    setStopOutcome(null);
     // #638 — the plan this run is measured under travels with its result: a later setup edit must
     // not change what the record says was approved and run.
     runPlanRef.current = effectivePlan;
@@ -446,6 +510,17 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         effectivePlan,
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          // #933 — the operator's Stop: checked before every line, and the flag outlives the
+          // prompt it may also decline.
+          stopRequested: () => stopRef.current,
+          // #933 — THE G54 PRE-FLIGHT's expected origin, from the bed's own recorded placement:
+          // the fixed jaw face is the G54 X a registration writes, and the bar's start less this
+          // job's jaw start is its Y (`viseFrameFromRegistration`'s arithmetic, read backwards).
+          expectedG54: (() => {
+            const machine = machineAt(target);
+            const frame = machine === null ? null : visePlacementFrameOf(machine);
+            return frame === null ? null : { x: frame.fixedJawFaceX, y: frame.jawStartY - jobVise(job).jawStartY };
+          })(),
           // The at-machine tick already names the probe, so the executor's first prompt is answered
           // by it; every other step (the bracket's clamps, the cutter) is a fresh press.
           operator: (step) => (step.kind === 'fit-probe' ? Promise.resolve(true) : askOperator(step)),
@@ -498,7 +573,10 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         }
       }
       if (!r.ok) {
-        const note = await homeAfterStop(handle);
+        // #933 — AFTER AN OPERATOR STOP THE MACHINE IS NOT HOMED BY THE APP. `$H` is a rapid, and
+        // the whole point of a Stop is that nothing moves until the person says so; the panel
+        // offers Home as its own press. Every other failure keeps the #588 epilogue.
+        const note = stopRef.current ? null : await homeAfterStop(handle);
         if (!aliveRef.current) {
           handleRef.current = null;
           await handle.close();
@@ -643,7 +721,13 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     try {
       const a = await applyCorrection(
         result.outcome,
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
+        {
+          console: { send: (line, timing) => handle.send(line, timing) },
+          operator: askOperator,
+          // #933 — the Stop is live while the origin is written too: the button is on screen for
+          // the whole phase, and a press that did nothing would be a dead press.
+          stopRequested: () => stopRef.current,
+        },
         { confirmed: true },
       );
       if (!aliveRef.current) {
@@ -868,15 +952,25 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                   >
                     Continue
                   </button>
-                  <button
-                    type="button"
-                    data-testid="engrave-registration-stop"
-                    style={{ padding: 6 }}
-                    onClick={() => answer(false)}
-                  >
-                    Stop
-                  </button>
                 </div>
+              )}
+              {/* #933 — THE STOP IS LIVE FOR THE WHOLE RUN, not only at a prompt: a probe move in
+                  flight has no prompt to decline, and the press flags the executor and stops the
+                  machine on its own session. */}
+              <button
+                type="button"
+                data-testid="engrave-registration-stop"
+                style={{ padding: 6, marginTop: 6 }}
+                onClick={() => void pressStop()}
+              >
+                Stop
+              </button>
+              {/* #933 — what the stop's own session reported, while the run unwinds (the failed
+                  block shows the same line once it has). */}
+              {stopOutcome !== null && (
+                <p style={MUTED} data-testid="engrave-registration-stop-outcome">
+                  {stopWords(stopOutcome)}
+                </p>
               )}
             </div>
           )}
@@ -885,6 +979,24 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             <div data-testid="engrave-registration-failed" style={{ marginTop: 6 }}>
               <p style={{ fontSize: 12, color: BAD, margin: '0 0 4px' }}>{result.reason}</p>
               {homeNote !== null && <p style={MUTED}>{homeNote}</p>}
+              {stopOutcome !== null && (
+                <p style={MUTED} data-testid="engrave-registration-stop-outcome">
+                  {stopWords(stopOutcome)}
+                </p>
+              )}
+              {/* #933 — a stop outcome IS the record of the press (state, not the ref): the Home
+                  press is offered only when the machine's state is known and not still moving. */}
+              {stopOutcome !== null &&
+                (stopOutcome.kind === 'stopped' || stopOutcome.kind === 'not-running' || stopOutcome.kind === 'alarm') && (
+                  <button
+                    type="button"
+                    data-testid="engrave-registration-home"
+                    style={{ padding: 6, marginTop: 6 }}
+                    onClick={() => void homeNow()}
+                  >
+                    Home the machine
+                  </button>
+                )}
             </div>
           )}
 
