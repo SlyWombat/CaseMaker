@@ -71,6 +71,7 @@ import {
   surfaceRepostBlocker,
   withPeriod,
 } from '@/store/engraveRunGate';
+import { simErrors } from '@/engine/cnc/simGate';
 import { findingFix, fixActionLabel, fixIsOffered } from './findingFix';
 import { operatorRunError } from './runErrorWords';
 import { useStartWizardStore } from '@/store/startWizardStore';
@@ -364,9 +365,10 @@ function actualTimeSentence(run: RunRecord | null): string {
  * Design's four ticks derive the same facts (`EngravePanel.tsx`'s `rowSimulated`/`rowOracle`); this
  * is their one-sentence form, and the two surfaces must never disagree about the same run.
  *
- * THE ONE PLACE #925 JOINS THE GATE: when A's design-check severity lands, `passed` gains its term
- * in this function (`oracleOk && designCheck.ok`, or whatever #925 names it) — the summary, the
- * body sentence and the fix all read this verdict, so nothing else in the surface changes.
+ * #925 — THE DESIGN CHECK'S SEVERITY JOINS AT THE MARKED LINE: a finding of severity `error` (the
+ * sweep's unchecked-air and stall diagnostics are errors now) fails the run on its own, while a
+ * `warning` never does — it leaves the oracle's verdict standing. The summary, the body sentence
+ * and the fix all read this verdict, so nothing else in the surface changes.
  */
 type CutVerdict =
   | 'no-program'
@@ -384,8 +386,10 @@ function cutVerdict(v: {
   staleSince: number | null;
   /** The pipeline refused before a program existed (`generated.ok === false`). */
   runRefused: boolean;
-  /** Errors across the document findings, the verifier and the sweep (`runErrorCodes`). */
+  /** Errors in the document findings and the verifier (not the sweep's design check). */
   errorCount: number;
+  /** The design check's own errors — the sweep's diagnostics, severity `error` only (#925). */
+  designErrorCount: number;
   simStopped: boolean;
   /** The oracle's verdict, or null when no report was made (not run / not reached). */
   oracleOk: boolean | null;
@@ -398,7 +402,9 @@ function cutVerdict(v: {
   if (!v.hasProgram) return 'no-program';
   if (!v.packageCurrent) return 'stale';
   if (v.simStopped) return 'stopped';
-  // #925 joins HERE.
+  // #925 — THE DESIGN CHECK'S SEVERITY: only an ERROR fails. A warning the sweep raised (a note
+  // that did not undermine the verdict) leaves a passed oracle passed.
+  if (v.designErrorCount > 0) return 'failed';
   if (v.oracleOk !== null) return v.oracleOk ? 'passed' : 'failed';
   if (v.simStatus === 'ready') return 'not-checked';
   if (v.simStatus === 'refused' || v.simStatus === 'error') return 'failed';
@@ -837,13 +843,17 @@ export function EngraveCutSurface({
     error: runErrorText,
   };
   const firstError = firstRunError(runView);
-  const runErrorCount = runErrorCodes(runView).length;
+  // #925 — the sweep's errors are the design check's own, and the verdict names them at its marked
+  // line; the document and verifier errors are the rest.
+  const designErrorCount = simErrors(runSimDiagnostics).length;
+  const otherErrorCount = runErrorCodes({ ...runView, simDiagnostics: [] }).length;
   const verdict = cutVerdict({
     hasProgram: pkg !== null,
     packageCurrent,
     staleSince: staleSince ?? null,
     runRefused: generated !== null && !generated.ok,
-    errorCount: runErrorCount,
+    errorCount: otherErrorCount,
+    designErrorCount,
     simStopped: runSimStopped,
     oracleOk: runOracle === null ? null : runOracle.ok,
     simStatus: runSimStatus,

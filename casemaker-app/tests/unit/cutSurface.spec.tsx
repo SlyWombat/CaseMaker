@@ -1372,4 +1372,49 @@ describe('#931 the Cut step against the simulation', () => {
     expect(screen.getByTestId('engrave-cut-verdict').dataset.state).toBe('stopped');
     expect(screen.queryByTestId('engrave-cut-verdict-fix')).toBeNull();
   });
+
+  // #925 — THE DESIGN CHECK'S SEVERITY decides. The sweep's diagnostics are the design check's own
+  // errors now (air-moves-unchecked/sweep-stalled); an ERROR fails a run whose oracle passed, and a
+  // warning never does.
+  it('#925 — an error-severity design finding reads “did not pass”; a warning leaves the pass', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    const sweepDiag = (severity: 'error' | 'warning') => [
+      {
+        source: 'sweep' as const,
+        severity,
+        code: severity === 'error' ? 'air-moves-unchecked' : 'air-moves-note',
+        message:
+          severity === 'error'
+            ? '12 air move(s) near the stock not checked: more than 4000 in the job'
+            : 'a note from the sweep that does not undermine the verdict',
+      },
+    ];
+
+    useEngraveRunStore.setState({
+      simStatus: 'ready',
+      simDiagnostics: sweepDiag('error') as never,
+      oracle: OK_ORACLE as never,
+      phase: 'blocked',
+      staleSince: null,
+      simStopped: false,
+    });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('did not pass');
+    expect(screen.getByTestId('engrave-cut-verdict').dataset.state).toBe('failed');
+    expect(screen.getByTestId('engrave-cut-verdict-sentence').textContent).toContain('air move(s) near the stock not checked');
+
+    cleanup();
+    useEngraveRunStore.setState({
+      simStatus: 'ready',
+      simDiagnostics: sweepDiag('warning') as never,
+      oracle: OK_ORACLE as never,
+      phase: 'ready',
+      staleSince: null,
+      simStopped: false,
+    });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('matches the design');
+    expect(screen.queryByTestId('engrave-cut-verdict')).toBeNull();
+  });
 });
