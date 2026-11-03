@@ -1215,8 +1215,12 @@ export function EngravePanel(): JSX.Element {
     if ((setup.toolItems?.[laterKey]?.length ?? 0) > 0) return null;
     return toolDisplayName(later);
   };
+  // #940b — a LABEL can carry the variable V-carve too (the label row's own control), so the
+  // core-clearance chip below reads both item kinds.
   const isVariableCarve = (itemId: string): boolean =>
-    job.shapes.some((s) => s.id === itemId && s.enabled && !s.construction && s.vCarveDepth === 'variable');
+    [...job.labels, ...job.shapes].some(
+      (s) => s.id === itemId && s.enabled && !s.construction && s.vCarveDepth === 'variable',
+    );
   const restFor = (itemId: string): RestChoice | null => {
     const setupIndex = setups.findIndex((setup) => setup.itemIds.includes(itemId));
     if (setupIndex === -1) return null;
@@ -4100,6 +4104,16 @@ export function EngravePanel(): JSX.Element {
           key={label.id}
           label={label}
           index={i}
+          // #940b — the text's V-carve depth, when the job's cutter is a cone (the shape row's own
+          // rule): the level pitch, and the cutter that would pocket the variable cut's core.
+          vCarve={
+            cone === null
+              ? null
+              : {
+                  pitchMm: vCarvePitchMm,
+                  coreCutterName: label.vCarveDepth === 'variable' ? coreCutterFor(label.id) : null,
+                }
+          }
           maxDepth={maxDepth}
           maxDepthWhy={maxDepthWhy}
           findings={findingsFor(label.id)}
