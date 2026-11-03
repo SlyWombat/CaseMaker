@@ -73,8 +73,13 @@ import { dirname, join, basename, isAbsolute } from 'node:path';
 
 import { engraveGenerate, type EngraveGenerated, type EngraveShopOpts } from '../../../src/workers/sim/engraveGenerate';
 // #766 — the measured search: slice A scores a candidate plan, B chooses, C writes the sentences.
-import { evaluatePlan, type CandidatePlan, type PlanEvaluation } from '../../../src/workers/sim/planEvaluate';
-import { candidatePlans, smartPick } from '../../../src/engine/cnc/engrave/smartPick';
+// #922 — THE PICK IS THE APP'S OWN: one builder in smartPickRun.ts (the worker's caller uses it
+// too) supplies the conditions map, the feed table, the five-argument candidate list and the
+// evaluator context. This door no longer assembles its own.
+import { inventoryConditions } from '../../../src/engine/cnc/toolCondition';
+import { resolvedFeedsTable } from '../../../src/engine/cnc/feeds';
+import { drillSettings } from '../../../src/engine/cnc/cam/drillBit';
+import { pickCandidates, pickForEngrave } from '../../../src/workers/sim/smartPickRun';
 import { explainSmartPick } from '../../../src/engine/cnc/engrave/smartPickWords';
 import type { ToolLibraryEntry } from '../../../src/engine/cnc/toolLibrary';
 import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
@@ -551,16 +556,23 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    */
   const shop: EngraveShopOpts = engraveShopOpts(shopDefaults);
   /**
-   * #947 — THE SEARCH'S OWN SHOP, WITHOUT THE FINISH ALLOWANCE. The app's live recommendation
-   * (`engravePreviewStore.ts`'s `previewInputs`) has never put `finish` on the shop it hands the
-   * measured search — only the posted Generate reads it (`engraveRunStore.ts`'s own `shop`, which
-   * `shop` above now mirrors). Handing the search the FULL `shop` scores every candidate against
-   * an allowance the app's own picker never sees, so the two pickers can name different cutters
-   * for the identical job and location — C's #947 reproduction on k3: the app's ⌀3.175×32 flat
-   * against the CLI's ⌀3 corn plus a flat-1.0 rest. The posted program, once a cutter is chosen,
-   * still runs on the full `shop` below unchanged; this trims only what the search itself reads.
+   * #922/#947 — THE PICKER'S SHOP, FIELD FOR FIELD. The app's picker
+   * (`engravePreviewStore.ts`'s `previewInputs`) hands the measured search a shop WITHOUT the
+   * finish allowance (only the posted Generate reads it), with the tool-change cost, and without
+   * the fields only Generate reads. `pickForEngrave` searches with exactly this object on both
+   * doors, so the sample jobs' cutters agree (they did not while the CLI spread the full run shop
+   * in and merely trimmed `finish`). The posted program, once a cutter is chosen, still runs on
+   * the full `shop` above unchanged. The app's preview shop also carries per-job `bed` facts; the
+   * pick's score does not read them, and they are omitted here rather than built per job.
    */
-  const pickShop: EngraveShopOpts = { ...shop, finish: undefined };
+  const pickShop: EngraveShopOpts = {
+    tools: getTools(),
+    lostDetailWarnRatio: readDefault(shopDefaults, 'engrave.lostDetailWarnRatio').value,
+    toolChangeSeconds: readDefault(shopDefaults, 'toolChange.seconds').value,
+    drill: drillSettings(shopDefaults),
+    feeds: resolvedFeedsTable().table,
+    defaults: shopDefaults,
+  };
   if (boot.location !== null) {
     const where = boot.location;
     recordInput(where.path);
@@ -1497,7 +1509,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     const tools = searchToolsFor(job);
     const named = job.tool !== undefined && job.tool !== null ? job.tool : tools.find((e) => e.key === job.toolKey)?.tool;
     if (named === undefined || (named.shape !== 'drill' && named.shape !== 'thread')) return false;
-    return candidatePlans(job, tools, catalogueRows).some(
+    return pickCandidates({ tl, job, tools, catalogue: catalogueRows, conditions: inventoryConditions(), shop: pickShop }).some(
       (p) => p.cutters.length > 1 && p.cutters[0]?.key === job.toolKey,
     );
   }
@@ -1535,14 +1547,17 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // slice A simulates each one: fidelity, pinches, time, risk. The chosen plan and its
         // reasons are printed here; the run writes the plan the search chose.
         const searchTools = searchToolsFor(job);
-        const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation | Promise<PlanEvaluation> =>
-          evaluatePlan(job, plan, { tl, tools: searchTools, catalogue: catalogueRows, shop: pickShop, calibration: null }, { level });
         const searchStart = Date.now();
-        // #766 D — `smartPick` is async: the evaluator may be (the Design panel's worker one
-        // yields between plans so an edit can cancel the run); the CLI's is synchronous.
-        // #858 — a tool change costs the shop's `toolChange.seconds` (the seed, or the location's own).
-        const pick = await smartPick(job, searchTools, catalogueRows, evaluate, {
-          toolChangeSeconds: readDefault(shopDefaults, 'toolChange.seconds').value,
+        // #922 — THE APP'S OWN SEARCH: `pickForEngrave` builds the conditions map, the feed table
+        // and the evaluator context for both doors; `pickShop` carries the tool-change cost the
+        // panel's picker reads from the same setting.
+        const pick = await pickForEngrave({
+          tl,
+          job,
+          tools: searchTools,
+          catalogue: catalogueRows,
+          conditions: inventoryConditions(),
+          shop: pickShop,
         });
         const searchMs = Date.now() - searchStart;
         // #910 — every cutter refused before a plan existed: the reasons ARE the answer.
@@ -1686,9 +1701,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const setup = jobSetups(parsed.job)[setupIndex]!;
         const sub = setupWorkJob(parsed.job, tools, setupIndex);
         if (sub === null) continue;
-        const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation | Promise<PlanEvaluation> =>
-          evaluatePlan(sub, plan, { tl, tools, catalogue: catalogueRows, shop: pickShop, calibration: null }, { level });
-        const pick = await smartPick(sub, tools, catalogueRows, evaluate);
+        const pick = await pickForEngrave({
+          tl,
+          job: sub,
+          tools,
+          catalogue: catalogueRows,
+          conditions: inventoryConditions(),
+          shop: pickShop,
+        });
         if (pick.refused === true) {
           out.progress(`  setup ${setupIndex + 1}      ${pick.reason}`);
           continue;

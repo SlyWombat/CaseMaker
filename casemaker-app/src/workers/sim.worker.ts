@@ -28,7 +28,6 @@ import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type Engr
 import { portLevelPlanner } from './sim/levelPlannerPort';
 import type { PoolSizing } from '@/engine/jobs/poolSizing';
 import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
-import { evaluatePlan } from './sim/planEvaluate';
 import { runSmartPick, type EngravePickSummary } from './sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
@@ -251,10 +250,10 @@ const api = {
   ): Promise<EngravePickSummary | null> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     const tl = await getToplevel();
-    const ctx = { tl, tools, catalogue, shop, calibration: null, conditions, table: shop.feeds ?? null };
+    // #922 — the context and the search's arguments are built in `smartPickRun.ts`, which the CLI
+    // calls too; this handler only adds the worker's cancellation guard.
     return runSmartPick(
-      { job, tools, catalogue, conditions, shop, table: shop.feeds ?? null, onProgress },
-      (plan, level) => evaluatePlan(job, plan, ctx, { level }),
+      { tl, job, tools, catalogue, conditions, shop, table: shop.feeds ?? null, onProgress },
       () => latestEditGen > gen,
     );
   },
