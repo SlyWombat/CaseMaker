@@ -44,8 +44,8 @@ import {
   catalogueStandingFor,
   type FeedCatalogueRow,
 } from '@/engine/cnc/feeds';
-import { isMetalMaterial, MATERIAL_LABELS } from '@/engine/cnc/materials';
-import { isMetalTool } from '@/engine/cnc/registerCutter';
+import { MATERIAL_LABELS } from '@/engine/cnc/materials';
+import { cutterOnMetalLine } from './cutterMaterial';
 import { cuttingDiameter, cuttingForTrace } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { conditionRank, type ConditionSummary } from '@/engine/cnc/toolCondition';
@@ -134,18 +134,12 @@ export function chooseFacingTool(
     return { entry: null, reason: 'the tool list has no flat end mill, and a facing pass needs one' };
   }
 
-  // #405/#398 — the metal line is a property of the PAIR (the bit and the blank), and a metal bit
-  // will cut plastic badly at numbers nobody measured. It is a warning about the job's own cutter,
-  // but this pick has no warning channel, so the default simply does not make that choice.
-  const onLine = isMetalMaterial(material) ? flat : flat.filter((e) => !isMetalTool(e.tool));
-  if (onLine.length === 0) {
-    return {
-      entry: null,
-      reason:
-        `every flat end mill in the tool list is Makera's "for Metal" line, and ${label} is not a ` +
-        `metal — name a facing tool on the job if one of them is what you mean to use`,
-    };
-  }
+  // #954 — A "for Metal" CUTTER IS A LABELLED FALLBACK, NOT A REFUSAL. The line is a name (see
+  // `cutterMaterial.ts`), not a physical bar: a metal-line flat on wood or plastic is fed from the
+  // material's own starting band, and the run states that the numbers are a starting point to
+  // measure. So the pick considers every flat; the metal-line pair is exempt from the catalogue's
+  // material exclusion below, and only the feeds' own no-band refusal can stop it.
+  const onLine = flat;
 
   // #467/review R10 — skip broken cutters before the catalogue is asked, and say so if that is why
   // nothing is left. A worn cutter stays here; only an equal-diameter tie prefers a fresher one.
@@ -160,11 +154,16 @@ export function chooseFacingTool(
     };
   }
 
-  const standing = usable.map((entry) => ({
-    entry,
-    verdict: catalogueStandingFor(catalogueCoverageFor(catalogue, material, entry.tool), material, entry.tool.name),
-  }));
-  const eligible = standing.filter((s) => s.verdict.recommend);
+  const standing = usable.map((entry) => {
+    const coverage = catalogueCoverageFor(catalogue, material, entry.tool);
+    return {
+      entry,
+      verdict: catalogueStandingFor(coverage, material, entry.tool.name),
+      // #954 — the metal-line pair falls back, labelled, instead of being excluded by material.
+      fallback: cutterOnMetalLine(entry.tool, material, coverage.kind === 'covered'),
+    };
+  });
+  const eligible = standing.filter((s) => s.verdict.recommend || s.fallback);
   if (eligible.length === 0) {
     // The only `recommend: false` is "the catalogue lists it for other materials" (#455), whose
     // note is the vendor's own words — so the refusal can quote them instead of guessing.

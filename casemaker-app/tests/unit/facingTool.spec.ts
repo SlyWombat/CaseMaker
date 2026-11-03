@@ -71,15 +71,17 @@ describe('#432 chooseFacingTool — the default rule', () => {
     expect(chooseFacingTool([twin, FLAT_3], [], 'softwood').entry?.key).toBe('user:wide');
   });
 
-  it('never defaults to the metal line on a non-metal blank, and does on metal', () => {
-    expect(chooseFacingTool([METAL, FLAT_1], [], 'softwood').entry?.key).toBe('flat-1.0');
+  it('considers the metal line on a non-metal blank — the fallback is labelled, not excluded (#954)', () => {
+    // #954 — the "for Metal" line is a name, not a physical bar: the metal flat is the largest
+    // eligible cutter on a plastic blank too, and the run's feeds state the labelled fallback.
+    expect(chooseFacingTool([METAL, FLAT_1], [], 'softwood').entry?.key).toBe('flat-3.175x12-metal');
     expect(chooseFacingTool([METAL, FLAT_1], [], 'aluminium-6061').entry?.key).toBe('flat-3.175x12-metal');
   });
 
-  it('refuses when only metal-line flats exist, naming the line', () => {
+  it('picks a metal-line flat on its own, with no refusal sentence (#954)', () => {
     const pick = chooseFacingTool([METAL], [], 'softwood');
-    expect(pick.entry).toBeNull();
-    expect(pick.reason).toMatch(/for Metal/);
+    expect(pick.entry?.key).toBe('flat-3.175x12-metal');
+    expect(pick.reason).toBeNull();
   });
 
   it('refuses an empty list, and a list with no flat at all', () => {
@@ -176,13 +178,12 @@ describe('#432 chooseFacingTool — tool condition (review R10)', () => {
     expect(chooseFacingTool([FLAT_1, FLAT_3], [], 'softwood', null, new Map()).entry?.key).toBe('user:wide');
   });
 
-  it('still drops the metal line before it asks about condition', () => {
-    // The metal cutter is out on a plastic blank whatever the bench says about it; the broken
-    // non-metal flat then leaves nothing, and the reason names broken rather than the metal line.
+  it('a broken non-metal flat does not hide the metal-line fallback (#954)', () => {
+    // The metal cutter is eligible on a plastic blank now; with the 1 mm flat broken it is the
+    // pick, and no refusal sentence is involved at all.
     const conditions = conditionsOf(['flat-1.0', 'broken']);
     const pick = chooseFacingTool([METAL, FLAT_1], [], 'softwood', null, conditions);
-    expect(pick.entry).toBeNull();
-    expect(pick.reason).toMatch(/marked broken/);
-    expect(pick.reason).not.toMatch(/for Metal/);
+    expect(pick.entry?.key).toBe('flat-3.175x12-metal');
+    expect(pick.reason).toBeNull();
   });
 });

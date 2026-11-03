@@ -54,7 +54,7 @@ import { inlayPairConeTan } from './inlay';
 import { threadGeometry } from '@/engine/cnc/cam/threadMill';
 import { threadMillFit } from './threadFit';
 import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_FINISH_TIP_OPS, sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
-import { cutterRefusedOnMaterial } from './cutterMaterial';
+import { cutterOnMetalLine } from './cutterMaterial';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import { jobHasItems, pureGoalObject } from './jobSetup';
 import { goalSideNeedMm } from './goalReach';
@@ -509,8 +509,9 @@ export function materialRefusal(
    * #766 — OWNED CUTTERS ARE THE OPERATOR'S OWN. The catalogue's material list is advice for a
    * shop's own bit, not a veto: Makera lists the 0.6 mm corn for PCB and carbon fibre, and the
    * maintainer cuts PLA with it every day. With this set, an owned (`inv:`) cutter the catalogue
-   * would refuse by material is still a candidate — the simulatio decides — while a CATALOGUE
-   * cutter keeps the catalogue's own rule, and a broken or metal-line cutter is still refused.
+   * would refuse by material is still a candidate — the simulation decides — while a CATALOGUE
+   * cutter keeps the catalogue's own rule. A broken cutter is still refused; a metal-line cutter
+   * is not (#954 — it falls back, labelled, through the feeds).
    */
   opts?: { ownedVouches?: boolean },
 ): string | null {
@@ -518,12 +519,13 @@ export function materialRefusal(
   const condition = conditions?.get(entry.key) ?? null;
   if (condition !== null && condition.usable === 0) return `${entry.key} is marked broken`;
   const coverage = catalogueCoverageFor(catalogue, job.stock.material, tool);
-  if (cutterRefusedOnMaterial(tool, job.stock.material, job.metalLineOverride, coverage.kind === 'covered')) {
-    return `${entry.key} is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}`;
-  }
+  // #954 — a "for Metal" cutter on a non-metal blank is a LABELLED FALLBACK, not a refusal: the
+  // line is a name (see `cutterMaterial.ts`), `feedsFor` answers the pair from the material's own
+  // starting band and says so. It stays a candidate through both gates below.
+  const metalFallback = cutterOnMetalLine(tool, job.stock.material, coverage.kind === 'covered');
   const standing = catalogueStandingFor(coverage, job.stock.material, tool.name);
   const ownedVouches = opts?.ownedVouches === true && !entry.key.startsWith('cat:');
-  if (!standing.recommend && !ownedVouches) {
+  if (!standing.recommend && !ownedVouches && !metalFallback) {
     return standing.note ?? `${entry.key} is not listed for ${MATERIAL_LABELS[job.stock.material]}`;
   }
   // #762 — A BALL AND A THREAD ARE NOT RESOLVED BY `feedsFor`, and that is not a refusal of them:

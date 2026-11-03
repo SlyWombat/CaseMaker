@@ -96,7 +96,9 @@ import type { Tool, ToolShape } from './tool';
 import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
 import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
 import type { ClampDiagnostic, Mill } from './machine';
-import { MATERIAL_LABELS, STOCK_MATERIALS } from './materials';
+import { MATERIAL_LABELS, STOCK_MATERIALS, isMetalMaterial } from './materials';
+import { isVShape } from './vProfile';
+import { isMetalTool } from './registerCutter';
 import type { FieldSource, StockMaterial } from '@/types/engraveJob';
 
 export interface CutParams {
@@ -891,6 +893,28 @@ export function catalogueCoverageFor(
   return { kind: 'not-for-material', listedFor: [...new Set(rows.map((row) => row.material))] };
 }
 
+/**
+ * #954 — THE LABELLED FALLBACK BAND for a metal-line cutter on a blank Makera publishes no feed
+ * row for. The "for Metal" line is a NAME (see `cutterMaterial.ts`), not a physical bar: such a
+ * cutter is fed from the material's own starting row, and the sentence says so — the numbers are
+ * a labelled starting point to measure, never a vendor claim about the pair. Null when the pair
+ * has a vendor row (the finding's premise is false), the blank is metal, or the cutter is a V
+ * (dual-use; the name is not a signal — #575).
+ */
+export function metalLineFallbackNote(
+  tool: Tool,
+  material: StockMaterial,
+  catalogue: readonly FeedCatalogueRow[],
+): string | null {
+  if (!isMetalTool(tool) || isMetalMaterial(material) || isVShape(tool)) return null;
+  if (catalogueCoverageFor(catalogue, material, tool).kind === 'covered') return null;
+  return (
+    `Makera publishes no feed row for ${tool.name} in ${MATERIAL_LABELS[material]}, so these ` +
+    `numbers are this app’s starting point for the pair — a labelled fallback to measure, not a ` +
+    `vendor claim.`
+  );
+}
+
 /** "ABS", "ABS or acrylic", "PCB, Carbon Fiber or Brass" — the vendor's own words, joined for a sentence. */
 function listMaterials(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? 'no material';
@@ -1308,7 +1332,16 @@ function entryFor(
   const entry = table.find(
     (e) => e.material === material && (e.edge ?? 'flat') === edge && diameter >= e.minDiameter && diameter <= e.maxDiameter,
   );
-  if (entry) return { ok: true, entry, catalogueOnly: false };
+  if (entry) {
+    // #954 — a metal-line cutter with no vendor row for this blank is fed from the material's own
+    // band, and the row states that it is a labelled fallback rather than a vendor claim.
+    const fallback = metalLineFallbackNote(tool, material, snapshot.rows);
+    return {
+      ok: true,
+      entry: fallback === null ? entry : { ...entry, provenance: `${entry.provenance} ${fallback}` },
+      catalogueOnly: false,
+    };
+  }
   if (table.some((e) => e.material === material && (e.edge ?? 'flat') === edge)) {
     const refused: EntryChoice = {
       ok: false,
