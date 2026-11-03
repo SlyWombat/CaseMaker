@@ -148,6 +148,13 @@ export function runErrorCodes(v: EngraveRunView): string[] {
   for (const f of v.generated?.findings ?? []) if (f.severity === 'error') codes.push(f.code);
   for (const f of v.generated?.verify?.findings ?? []) if (f.severity === 'error') codes.push(f.code);
   for (const d of simErrors(v.simDiagnostics)) codes.push(d.code);
+  // #949 — A GENERATE THAT STOPPED BEFORE A FINDING EXISTED. `generated.errors` carries the
+  // generator's own refusals, each `{stage, message}`: the CAM's throws (an oversized goal refused
+  // before its toolpath), a post that could not write, a stage that stopped on its message. Without
+  // them a run that threw before raising a finding counted zero errors and the operator read
+  // "Not generated." with no words. The STAGE is the name such a failure carries; it is not a
+  // finding code and no Fix mapping matches it, so none draws a press that cannot do anything.
+  for (const e of v.generated?.errors ?? []) codes.push(e.stage);
   return codes;
 }
 
@@ -164,20 +171,59 @@ export function firstRunError(v: EngraveRunView): {
   message: string;
   stallMs?: number;
 } | null {
+  const first = firstErrorOf(v);
+  return first === null
+    ? null
+    : {
+        code: first.code,
+        message: first.message,
+        ...(first.stallMs === undefined ? null : { stallMs: first.stallMs }),
+      };
+}
+
+/** Where a run's first error came from — the four lists the gate reads, in its order. */
+export type RunErrorSource = 'finding' | 'verify' | 'sweep' | 'generate';
+
+/**
+ * #949 — THE FIRST ERROR AND ITS SOURCE. `firstRunError` has always said WHICH error; a caller that
+ * must not state the same failure twice also needs WHERE it came from — the preflight collector's
+ * `generate-stopped`/`no-frame` row already carries the Generate's own refusals, so the gate's row
+ * is skipped by its source, never by comparing two messages (the collector's own rule).
+ *
+ * A `generated.errors` entry is the generator's own `{stage, message}`: its stage is the code and
+ * its message the line, for ANY stage (a CAM throw, a post that could not write, a feeds stop).
+ * The LAST entry is the stoppage's own sentence — each `stop(...)` pushes one and returns at once,
+ * so the tail is why it returned (the same reading `collect()` makes). The other three lists keep
+ * their existing order, so every first-error choice they decided is unchanged.
+ */
+function firstErrorOf(
+  v: EngraveRunView,
+): { source: RunErrorSource; code: string; message: string; stallMs?: number } | null {
   for (const f of v.generated?.findings ?? []) {
-    if (f.severity === 'error') return { code: f.code, message: f.message };
+    if (f.severity === 'error') return { source: 'finding', code: f.code, message: f.message };
   }
   for (const f of v.generated?.verify?.findings ?? []) {
-    if (f.severity === 'error') return { code: f.code, message: f.message };
+    if (f.severity === 'error') return { source: 'verify', code: f.code, message: f.message };
   }
   for (const d of simErrors(v.simDiagnostics)) {
     return {
+      source: 'sweep',
       code: d.code,
       message: d.message,
       ...(d.stallMs === undefined ? null : { stallMs: d.stallMs }),
     };
   }
+  const own = v.generated?.errors.at(-1);
+  if (own !== undefined) return { source: 'generate', code: own.stage, message: own.message };
   return null;
+}
+
+/**
+ * #949 — the source of {@link firstRunError}, for a caller that must not repeat the Generate's own
+ * refusal under a second code. Null when the run has no error, exactly `firstRunError`'s null.
+ */
+export function firstRunErrorSource(v: EngraveRunView): RunErrorSource | null {
+  return firstErrorOf(v)?.source ?? null;
 }
 
 /**
