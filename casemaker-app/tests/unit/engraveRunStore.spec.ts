@@ -320,7 +320,7 @@ describe('engraveRunStore (#206)', () => {
       itemId,
       design: [[[0, 0], [5, 0], [5, 5], [0, 5]]],
       depth: 0.5,
-      r: 1,
+      cutter: { tipRadius: 1, tanHalf: 0, maxRadius: 1 },
     });
     const PRED = (itemId: string) => ({ depth: 0.5, itemId, polygons: [] });
 
