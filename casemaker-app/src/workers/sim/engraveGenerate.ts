@@ -64,7 +64,7 @@ import { drillBitIR, drillSettings, type DrillBitPlan, type DrillSettings } from
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
-import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { dedupeCutterEntries, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { itemLeftUncutMessage, vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
@@ -5497,7 +5497,10 @@ export async function generateGoalProgram(
     if (finishResidual.cells === 0 || !(finishTool.radius > 0)) return null;
     let best: RestCandidate | null = null;
     const seenRadius = new Set<number>();
-    for (const entry of shop.tools ?? []) {
+    // #922 — one entry per physical cutter, the owned key over the catalogue's definition: the
+    // rest pick takes the first candidate of a radius, and the two doors' registries order the
+    // duplicate `cat:`/`inv:` entries of the same ball differently.
+    for (const entry of dedupeCutterEntries(shop.tools ?? [])) {
       if (entry.key === job.toolKey) continue;
       const candidate = entry.tool;
       if (candidate.shape !== 'ball' && candidate.shape !== 'bull' && candidate.shape !== 'tapered-ball') continue;

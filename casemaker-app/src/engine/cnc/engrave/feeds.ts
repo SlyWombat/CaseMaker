@@ -49,6 +49,7 @@ import type { StockMaterial } from '@/types/engraveJob';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { getTools } from '@/engine/cnc/toolRegistry';
+import { dedupeCutterEntries } from '@/engine/cnc/toolLibrary';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
 
 /**
@@ -150,7 +151,9 @@ export function engraveShopOpts(defaults: ShopDefaults | null): {
     peckClearanceMm: readDefault(defaults, 'drill.peckClearanceMm').value,
     defaults,
     feeds: shopFeedsTable(),
-    tools: getTools(),
+    // #922 — one entry per physical cutter, the owned key over the catalogue's definition, so
+    // the app's `/tools`+inventory and the CLI's `--location` registry choose the same key.
+    tools: dedupeCutterEntries(getTools()),
     conditions: inventoryConditions(),
     rest: {
       overlap: readDefault(defaults, 'rest.overlapMm'),

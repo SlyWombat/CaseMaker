@@ -26,9 +26,22 @@
  * standing than the page's exact-point stamp), never on the verdict.
  */
 
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+
+import { bootstrap, loadCatalogue } from '@/platform/headless/bootstrap';
+import { setLocatedFeedTable } from '@/engine/cnc/feeds';
+import { getTools, resetRegistry, resolveTool, setRegistry } from '@/engine/cnc/toolRegistry';
+import { engraveShopOpts } from '@/engine/cnc/engrave/feeds';
+import { engraveGenerate } from '@/workers/sim/engraveGenerate';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
+import { combineOracles } from '@/store/engraveRunStore';
+import type { OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { CarriedField } from '@/workers/geometry/carriedField';
 
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
@@ -602,4 +615,104 @@ describe('#948 the run’s goal field is every program’s stamp', () => {
       session.dispose();
     }
   }, 240_000);
+});
+
+
+/** The demo page's full-library location and its shop-owned elephant (local-only). */
+const DEMO_LOCATION =
+  process.env.CASEMAKER_DEMO_LOCATION ?? join(homedir(), 'casemaker-manager', 'demo-build', 'location.json');
+const ELEPHANT = fileURLToPath(new URL('../../../samples/3d/lfs_elephant.stl', import.meta.url));
+const STICK_JOB = fileURLToPath(
+  new URL('../../../docs/bench/2026-10-28-z1-real-jobs/jobs/j29-elephant-stick.json', import.meta.url),
+);
+const HAVE_STICK = existsSync(DEMO_LOCATION) && existsSync(ELEPHANT);
+
+/**
+ * #948 — THE APP READS THE PAGE'S NUMBER ON THE TWO-PROGRAM STICK JOB.
+ *
+ * The elephant stick goal posts TWO programs — the ⌀2 ball finish and the ⌀0.5 rest — and the
+ * page's checker stamps BOTH onto ONE goal field (`np.minimum` per cell): 25345 of 156996 cells
+ * are more than 0.1 mm above the goal (0.16143723406965782 leftover, i.e. 83.86 % coverage, under
+ * the 95 % pass line). The finish alone reads 51.87 %; the rest alone would read a near-empty
+ * surface. The app must therefore judge the run's accumulated field, not the last program's own
+ * stamp — and the walk must run the goal check on EVERY program of a goal job, even one with no
+ * predicted regions (the rest program carries none). This test is that number, cell for cell.
+ *
+ * Local-only like F's identity case: the full-library location and the elephant mesh are never
+ * committed, so it skips on a checkout without them.
+ */
+describe.skipIf(!HAVE_STICK)('#948 the stick goal’s two programs read the page’s 83.86 %', () => {
+  it('the accumulated field of the finish and the rest reproduces goal_check.py on both programs', async () => {
+    const boot = await bootstrap({ location: DEMO_LOCATION });
+    const catalogue = loadCatalogue(join(dirname(DEMO_LOCATION), 'catalogue.json'));
+    setLocatedFeedTable((JSON.parse(readFileSync(DEMO_LOCATION, 'utf8')) as { feeds: [] }).feeds);
+    // The app's house: the catalogue's own `cat:` definitions beside the inventory, as `/tools`
+    // serves them — the same registry F's identity case builds.
+    const cat = (
+      JSON.parse(readFileSync(join(dirname(DEMO_LOCATION), 'catalogue.json'), 'utf8')) as {
+        tools: Parameters<typeof setRegistry>[0];
+      }
+    ).tools;
+    setRegistry([...cat, ...getTools()]);
+    try {
+      const doc = JSON.parse(readFileSync(STICK_JOB, 'utf8')) as { targetObject: { sha256?: string; data?: string } };
+      const bytes = readFileSync(ELEPHANT);
+      doc.targetObject.sha256 = createHash('sha256').update(bytes).digest('hex');
+      doc.targetObject.data = bytes.toString('base64');
+      const parsed = parseEngraveJob(doc);
+      if (!parsed.ok) throw new Error(parsed.errors.join('; '));
+      const job = parsed.job;
+      const tool = resolveTool(job.toolKey);
+      expect(tool).not.toBeNull();
+      const g = await engraveGenerate(
+        boot.manifold,
+        job,
+        tool as Tool,
+        catalogue?.rows ?? [],
+        null,
+        undefined,
+        engraveShopOpts(boot.location?.defaults ?? null),
+      );
+      expect(g.ok, g.ok ? '' : g.errors.map((e) => e.message).join('; ')).toBe(true);
+      if (!g.ok) return;
+      expect(g.programs.map((p) => p.toolKey)).toEqual(['inv:lib-161032205031', 'inv:lib-161032055031']);
+
+      const session = createSimSession(boot.manifold);
+      const reports: OracleReport[] = [];
+      try {
+        const setup = toSetup(job, Z1);
+        const goal = goalCheckForProgram(job, true, { passCoverage: 0.95 });
+        expect(goal !== undefined && 'target' in goal).toBe(true);
+        let priorFields: CarriedField[] = [];
+        for (let i = 0; i < g.programs.length; i++) {
+          const program = g.programs[i]!;
+          const cutTool = resolveTool(program.toolKey);
+          expect(cutTool).not.toBeNull();
+          const load = session.load(program.nc, setup, cutTool as Tool, Z1.id, i === 0 ? undefined : { priorFields });
+          expect(load.ok, load.ok ? '' : load.diagnostics.map((d) => d.code).join('; ')).toBe(true);
+          if (!load.ok) return;
+          // The run store hands the next program the earlier one's remaining top.
+          if (load.flatField !== null && load.flatField !== undefined) {
+            priorFields = [{ ...load.flatField, top: load.flatField.top.slice(), map: [1, 0, 0, 0, 1, 0], z: [1, 0] }];
+          }
+          // EVERY program of a goal job is judged, predicted regions or not (the rest has none).
+          reports.push(session.oracle(program.predicted ?? [], undefined, program.designItems, goalInputFor(session, goal as SimGoalCheck)));
+        }
+        expect(reports[0]?.goalCutInto?.ran).toBe(true);
+        expect(reports[1]?.goalCutInto?.ran).toBe(true);
+        const combined = combineOracles(reports, null).goalCutInto;
+        expect(combined?.ran).toBe(true);
+        expect(combined?.cutIntoFraction).toBe(0);
+        // The page's stamp on BOTH programs: 25345 of 156996 cells (coverage 83.86 %).
+        expect(combined?.goalCells).toBe(156996);
+        expect(Math.abs((combined?.leftoverFractions[0] ?? 0) - 25345 / 156996)).toBeLessThanOrEqual(1 / 156996);
+        // 83.86 % is under the 95 % pass line: the stick goal is not a pass from the top alone.
+        expect(combined?.ok).toBe(false);
+      } finally {
+        session.dispose();
+      }
+    } finally {
+      resetRegistry();
+    }
+  }, 1_200_000);
 });

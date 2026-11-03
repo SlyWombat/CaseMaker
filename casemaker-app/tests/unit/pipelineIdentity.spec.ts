@@ -53,6 +53,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { bootstrap, loadCatalogue, type HeadlessBootstrap } from '@/platform/headless/bootstrap';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import { engraveShopOpts } from '@/engine/cnc/engrave/feeds';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { resolvedFeedsTable, setLocatedFeedTable, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
@@ -131,27 +132,13 @@ function benchLocation(): string {
 }
 
 /**
- * The shop `engraveRunStore.ts` sends the worker for this location — one line per field, in the
- * store's order. This is the reference the CLI path has to match; a field the CLI omits is a
- * number the operator reads in the panel and the machine does not run.
+ * The shop the app's Generate sends the worker — THE ONE BUILDER (#922 review), not a
+ * transcription of it: `engraveShopOpts` (`engine/cnc/engrave/feeds.ts`) is the same call
+ * `engraveRunStore.ts` now makes and the CLI's door builds, so this spec compares the two doors'
+ * arguments, not the CLI against a hand copy that can drift.
  */
 function appShop(defaults: ShopDefaults | null): EngraveShopOpts {
-  return {
-    lostDetailWarnRatio: readDefault(defaults, 'engrave.lostDetailWarnRatio').value,
-    peckClearanceMm: readDefault(defaults, 'drill.peckClearanceMm').value,
-    defaults,
-    feeds: resolvedFeedsTable().table,
-    tools: getTools(),
-    conditions: inventoryConditions(),
-    rest: {
-      overlap: readDefault(defaults, 'rest.overlapMm'),
-      thirdToolPct: readDefault(defaults, 'rest.thirdToolPct'),
-      visibleDepth: readDefault(defaults, 'rest.visibleDepthMm'),
-    },
-    finish: { stockToLeaveMm: readDefault(defaults, 'finish.stockToLeaveMm') },
-    drill: drillSettings(defaults),
-    surfaceGrid: { pitchMm: readDefault(defaults, 'sim.columnFlatPitchYMm') },
-  };
+  return engraveShopOpts(defaults);
 }
 
 interface CliRun {
@@ -494,15 +481,15 @@ describe('#922 one pipeline', () => {
   }, 120_000);
 });
 
-// #922 — THE STICK GOAL JOB. RED on 2026-11-03 (cand/wave2), and the red is ONE LINE: both doors
-// post the same two programs (the ⌀2 ball and the ⌀0.5 rest), and the rest program differs only in
-// its `;@CM|TOOL|key=` header — the app names the catalogue's `cat:` definition, the CLI the
-// inventory's `inv:` possession, of the same physical cutter (id 161032055031). See
-// `expectSameStickGoal` for the registry difference and why it is order-sensitive. C's fix aligns
-// the two doors' cutter identity and flips this case to `it`; the full-library location and the
-// elephant mesh are local-only, so it skips without them.
+// #922 — THE STICK GOAL JOB. Was RED on 2026-11-03 (cand/wave2) on ONE line: both doors post the
+// same two programs (the ⌀2 ball and the ⌀0.5 rest), and the rest program differed only in its
+// `;@CM|TOOL|key=` header — the app named the catalogue's `cat:` definition, the CLI the
+// inventory's `inv:` possession, of the same physical cutter (id 161032055031). #922's identity
+// rule (`toolLibrary.ts`'s `dedupeCutterEntries`) keeps one entry per physical cutter, the owned
+// key over the catalogue's, so both doors now name the same cutter; see `expectSameStickGoal`.
+// The full-library location and the elephant mesh are local-only, so the case skips without them.
 describe.skipIf(!HAVE_STICK)('#922 one pipeline — the stick goal job', () => {
-  it.fails('j29-elephant-stick posts the same programs from both paths (red on 2026-11-03)', async () => {
+  it('j29-elephant-stick posts the same programs from both paths', async () => {
     await expectSameStickGoal();
   }, 600_000);
 });
