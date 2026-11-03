@@ -187,11 +187,24 @@ test('a 75 mm goal on a 43 × 32 blank: Lay it flat, a quarter turn on the X rin
   const undone = (await placement(page))!;
   expect(undone.turns).toEqual(before.turns);
 
-  // Generate goes through on the laid-flat goal (the Undo above put it back).
+  // #923 — THE REFUSAL IS THE POINT. The goal never fits the 32 mm blank: the path is clipped to
+  // the stock edge and the ⌀1 finish runs along the jaws, so the column engine's fixture check
+  // names the collision (thousands of tool-into-fixture findings). Before #923 this case ticked
+  // "simulated" on the same job — the silent pass the issue is about.
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-toolpath')).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
-  await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
-  await shoot(page, 'goal-laid-flat-generated.png');
+  await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'cross', { timeout: 300_000 });
+  // The operator's sentence, not the finding code: the first error names the jaw in words.
+  await expect(page.getByTestId('engrave-run-errors')).toContainText(/would cut .*into the vise/i, {
+    timeout: 60_000,
+  });
+  await shoot(page, 'goal-laid-flat-refused.png');
+
+  // Cut reads the same run (#931): "did not pass", and the hold is the offered fix.
+  await page.getByTestId('cnc-mode-cut').click();
+  await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
+  await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'failed');
+  await expect(page.getByTestId('engrave-cut-verdict-fix')).toHaveText('Open the Holding step');
 });
 // #876 — THE RING'S GRADUATED SCALE AND ZONE SNAP. The cursor's radius picks the precision, as
 // the maintainer asked (PrusaSlicer's model): a drag whose pointer stays on the scale band tracks
