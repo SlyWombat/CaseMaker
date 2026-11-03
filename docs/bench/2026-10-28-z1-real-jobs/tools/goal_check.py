@@ -149,6 +149,17 @@ def main():
     rgb[C & (dd < -0.1)] = (215, 30, 30)
     w = min(1000, nx * 2)
     Image.fromarray(np.flipud(rgb)).resize((w, max(1, int(w * ny / nx)))).save(os.path.join(out, 'goalcheck.png'))
+    # #945 — the GEOMETRIC floor as a second map, so "what the smallest chosen ball could leave"
+    # (idealLeftover) can be read beside "what the posted plan left" (the map above). Same palette:
+    # green within 0.1 mm of the goal, blue leftover (darker = more).
+    np.save(os.path.join(out, 'ideal.npy'), ideal)
+    Di = np.where(C, np.maximum(ideal, -T) - Gc, np.nan)
+    rgb2 = np.full((ny, nx, 3), 240, np.uint8)
+    di2 = np.nan_to_num(Di)
+    rgb2[C & (di2 <= 0.1)] = (120, 190, 120)
+    mi = C & (di2 > 0.1); ti = np.clip((di2 - 0.1) / 3, 0, 1)
+    rgb2[mi] = np.stack([150 * (1 - ti[mi]), 170 * (1 - ti[mi]) + 30, 230 - 60 * ti[mi]], -1).astype(np.uint8)
+    Image.fromarray(np.flipud(rgb2)).resize((w, max(1, int(w * ny / nx)))).save(os.path.join(out, 'ideal.png'))
     print(json.dumps(s))
 
 
