@@ -1493,6 +1493,27 @@ describe('#948 the goal check’s line', () => {
     expect(line.dataset.state).toBe('not-checked');
   });
 
+  // #948 review (wave2 T3) — A GOAL NOBODY COMPARED KEEPS STEP 1 OPEN, WITH ITS CARD. The
+  // 'goal-unchecked' headline is not a done tick, so step 1 stays the current step: its body is
+  // open, the details fold (the program's own four checks) is still in the card, and the summary
+  // states the headline the operator reads. The rotary goal is the live case — its report is
+  // `ran: false` — and the fold's `<summary>` must stay reachable inside the open step.
+  it('#948 review — the goal-unchecked state keeps step 1 open, with its details fold', () => {
+    drawWithOracle({
+      ...OK_ORACLE,
+      goalCutInto: goal({ ran: false, reason: 'a radial goal is sampled in its own map frame, which this run did not check' }),
+    });
+    expect(
+      (screen.getByTestId('engrave-cut-step-1') as HTMLDetailsElement).open,
+      'goal-unchecked is not a done tick: step 1 is the current step and stays open',
+    ).toBe(true);
+    const details = screen.getByTestId('engrave-cut-details') as HTMLDetailsElement;
+    expect(details.querySelector('summary')?.textContent).toBe('details');
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain(
+      'Program checked — the goal was not compared (a radial goal is sampled in its own map frame, which this run did not check)',
+    );
+  });
+
   it('a 2.5D run has no goal line at all', () => {
     drawWithOracle(OK_ORACLE);
     expect(screen.queryByTestId('engrave-cut-goal')).toBeNull();

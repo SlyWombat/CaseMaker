@@ -525,8 +525,18 @@ test('a part wider than the rod is clipped to it, warned on the run sheet, and S
   // prints, and the tally already counts them.)
   await page.getByTestId('cnc-mode-cut').click();
   await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
-  // Step 1's body folds away once the step is done; its summary opens it, then the findings fold.
-  await page.getByTestId('engrave-cut-step-1-summary').click();
+  // Step 1 is open while it is the CURRENT step, and a goal run whose report is `ran: false`
+  // reads 'goal-unchecked' — not a done tick, so step 1 is current and its body is already open
+  // (`Step` opens the current one). A summary click would CLOSE it and hide the findings fold
+  // below; unfold it only when the step is folded.
+  const step1 = page.getByTestId('engrave-cut-step-1');
+  if (!(await step1.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('engrave-cut-step-1-summary').click();
+  }
+  // #948 review — the goal no one compared is never a silent pass: the step's own line says so.
+  await expect(page.getByTestId('engrave-cut-step-1-summary')).toContainText(
+    'Program checked — the goal was not compared (',
+  );
   await page.getByTestId('engrave-cut-details').locator('summary').click();
   const warning = page.locator('[data-testid$="-goal-rotary-oversize"]');
   await expect(warning).toBeVisible();
