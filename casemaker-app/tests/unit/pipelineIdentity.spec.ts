@@ -27,6 +27,14 @@
 //
 // j13 IS COMMITTED SKIPPED: it is red today, and main stays green until Session B's fix lands
 // against it. Unskip the j13 case in the same change that makes the two paths agree.
+//
+// THE FIVE SAMPLE JOBS (docs/bench/936-flagship-text, 938-stick-base, 939-pocket-bores,
+// 940-two-cutter, 941-chamfer-slot) run the same comparison per program. Three of them name no
+// cutter: the APP's measured search (`smartPick`, the function the panel's picker runs) chooses the
+// plan and writes it into the job, exactly as the panel does before Generate; the CLI asks the same
+// function (engrave.ts's `chooseCutters`) on its side. A pick difference is a #922 finding too — the
+// two doors' shop objects feed the same search — and the failure message names the program and the
+// key so B can see which side took a different cutter.
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,15 +43,19 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { bootstrap, loadCatalogue } from '@/platform/headless/bootstrap';
+import { bootstrap, loadCatalogue, type HeadlessBootstrap } from '@/platform/headless/bootstrap';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { resolvedFeedsTable, setLocatedFeedTable } from '@/engine/cnc/feeds';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
-import { getTools, resetRegistry } from '@/engine/cnc/toolRegistry';
+import { NO_TOOL_KEY, getTools, resetRegistry } from '@/engine/cnc/toolRegistry';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
+import { smartPick } from '@/engine/cnc/engrave/smartPick';
+import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { engraveGenerate, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { evaluatePlan, type CandidatePlan, type PlanEvaluation } from '@/workers/sim/planEvaluate';
+import type { EngraveJob } from '@/types/engraveJob';
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import { HUMAN, type CommandOptions } from '../../scripts/lib/casemaker/output';
 import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
@@ -132,7 +144,8 @@ function appShop(defaults: ShopDefaults | null): EngraveShopOpts {
 interface CliRun {
   code: number;
   receipt: Receipt;
-  nc: string;
+  /** Every program the run wrote, in cut order. */
+  ncs: string[];
 }
 
 /** Run `casemaker cut <job> --location <the bench location>` exactly as the CLI does. */
@@ -151,10 +164,17 @@ async function cut(name: string, jobPath: string): Promise<CliRun> {
   expect(receipt, 'the command must emit a receipt').not.toBeNull();
   const r = parseReceipt(receipt!);
   const details = r.command === 'engrave' && r.details !== null && 'programs' in r.details ? r.details : null;
-  if (details === null || details.programs.length !== 1) {
-    throw new Error(`${name}: the CLI wrote ${details?.programs.length ?? 0} program(s), not one: ${JSON.stringify(r.refusals)}`);
+  // A REFUSAL is an outcome the caller compares (both doors stopping at the same stage is identity
+  // too — the stick base has nothing to cut). A successful run with no program is not.
+  if (details === null || details.programs.length === 0) {
+    if (code !== 0) return { code, receipt: r, ncs: [] };
+    throw new Error(`${name}: the CLI exited 0 and wrote no program: ${JSON.stringify(r.refusals)}`);
   }
-  return { code, receipt: r, nc: readFileSync(join(outDir, details.programs[0]!.ncFile), 'utf8') };
+  return {
+    code,
+    receipt: r,
+    ncs: details.programs.map((p) => readFileSync(join(outDir, p.ncFile), 'utf8')),
+  };
 }
 
 /** One line per posted number that can differ, so a failure reads without a 200 kB diff. */
@@ -210,13 +230,123 @@ async function expectSameProgram(name: string, jobPath: string): Promise<void> {
   }
   const cli = await cut(name, jobPath);
   expect(cli.code, `${name}: casemaker cut exited ${cli.code}: ${JSON.stringify(cli.receipt.refusals)}`).toBe(0);
-  if (worker.nc !== cli.nc) {
+  expect(cli.ncs, `${name}: both paths post the same number of programs`).toHaveLength(1);
+  const cliNc = cli.ncs[0]!;
+  if (worker.nc !== cliNc) {
     throw new Error(
       `${name}: the app and the CLI post different programs — worker ${summary(worker.nc)} | ` +
-        `CLI ${summary(cli.nc)}; first difference at ${firstDifference(worker.nc, cli.nc)}`,
+        `CLI ${summary(cliNc)}; first difference at ${firstDifference(worker.nc, cliNc)}`,
     );
   }
 }
+
+/**
+ * The five committed samples. Four are RED on 2026-11-03 and are declared `it.fails` so main stays
+ * green while the divergence is pinned: they run on every suite, and when B's #922 fix lands the
+ * case reports "unexpectedly passed" — the flip that must accompany the fix.
+ *
+ * What they find today (app's Generate vs `casemaker cut`, same job + location):
+ *   936 — the app posts flat-1.0 (⌀1 flat); the CLI picks inv:kz-engrave-m-60-0-1 (⌀0.1 60° V).
+ *   940 — same toolpath: the app picks inv:kz-o-flute-3-175-25, the CLI inv:kz-o-flute-3-175-42.
+ *   941 — the app picks inv:kz-o-flute-3-175-25, the CLI flat-3.175x12-metal.
+ * The picks diverge because the two doors ask `smartPick` with different shops/candidate inputs
+ * (the CLI's `chooseCutters` passes neither the conditions map nor the feed table); the app's
+ * worker call is mirrored field for field here (sim.worker.ts's `engraveSmartPick`).
+ *
+ * 938-stick-base is the BASE document the coupons are built from (no items, facing off): neither
+ * door posts a program, and the case asserts they stop together at `findings` — both refusing is
+ * identity as much as both posting. 939-pocket-bores is identical today.
+ */
+const SAMPLES = [
+  { name: '936-flagship-text', red: true },
+  { name: '938-stick-base', red: false },
+  { name: '939-pocket-bores', red: false },
+  { name: '940-two-cutter', red: true },
+  { name: '941-chamfer-slot', red: true },
+] as const;
+
+/**
+ * The job the APP hands the worker when a sample names no cutter: the panel's own measured search,
+ * with the same library, catalogue and shop the app sends, written into the document exactly as
+ * the panel writes its plan before Generate. The CLI asks the same `smartPick` on its side
+ * (engrave.ts's `chooseCutters`), so a pick difference is a #922 finding, not a spec bug.
+ */
+async function appPrepared(
+  job: EngraveJob,
+  shop: EngraveShopOpts,
+  tl: HeadlessBootstrap['manifold'],
+): Promise<EngraveJob> {
+  if (job.toolKey !== NO_TOOL_KEY) return job;
+  const tools = getTools();
+  // The worker's `engraveSmartPick` context, field for field (sim.worker.ts): the conditions map and
+  // the feed table are search inputs, not decoration — the CLI's `chooseCutters` passes neither.
+  const conditions = inventoryConditions();
+  const table = shop.feeds ?? null;
+  const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation | Promise<PlanEvaluation> =>
+    evaluatePlan(job, plan, { tl, tools, catalogue: [], shop, calibration: null, conditions, table }, { level });
+  const pick = await smartPick(job, tools, [], evaluate, {}, conditions, table);
+  if (!('runnable' in pick) || pick.runnable === null) {
+    throw new Error(`${job.name}: the app's search refuses the job: ${'reason' in pick ? pick.reason : 'no runnable plan'}`);
+  }
+  return writeSetupPlan(job, tools, 0, pick.runnable.plan.cutters);
+}
+
+/** Both paths for one committed sample, program by program. */
+async function expectSameSample(name: string): Promise<void> {
+  const jobPath = join(REPO, 'docs', 'bench', `${name}.job.json`);
+  const boot = await bootstrap({ location: benchLocation() });
+  const catalogue = loadCatalogue(join(SCRATCH, 'catalogue.json'));
+  setLocatedFeedTable((JSON.parse(readFileSync(benchLocation(), 'utf8')) as { feeds: [] }).feeds);
+  const parsed = parseEngraveJob(JSON.parse(readFileSync(jobPath, 'utf8')));
+  if (!parsed.ok) throw new Error(`${name}: ${parsed.errors.join('; ')}`);
+  const shop = appShop(boot.location?.defaults ?? null);
+  const job = await appPrepared(parsed.job, shop, boot.manifold);
+  const tool = jobTool(job);
+  if (tool === null) throw new Error(`${name}: the job's cutter ${job.toolKey} is not in the location's registry`);
+
+  // The CLI runs FIRST so its own outcome is in hand when the app's path stops: "the app refused,
+  // the CLI posted" is a #922 finding of its own, and the message has to say both.
+  const cli = await cut(name, jobPath);
+  const worker = await engraveGenerate(boot.manifold, job, tool, catalogue?.rows ?? [], null, undefined, shop);
+  if (!worker.ok || worker.programs.length === 0) {
+    // BOTH DOORS STOPPING AT THE SAME STAGE IS IDENTITY TOO. `938-stick-base` is the samples' base
+    // document — a 36 × 100 × 36 stick with no items and facing off — so neither door posts a
+    // program; the case pins that they refuse together at `findings`, not one refusing and one posting.
+    if (cli.code !== 0 && worker.stage === 'findings') {
+      expect(cli.receipt.refusals[0]?.reason ?? '', `${name}: both doors stop at findings`).toContain('findings');
+      return;
+    }
+    throw new Error(
+      `${name}: the app's path stopped at ${worker.stage} (${worker.errors.map((e) => e.message).join('; ') || 'no error message'}) ` +
+        `while the CLI ${cli.code === 0 ? `posted ${cli.ncs.length} program(s)` : `refused: ${JSON.stringify(cli.receipt.refusals)}`}`,
+    );
+  }
+  expect(cli.code, `${name}: casemaker cut exited ${cli.code}: ${JSON.stringify(cli.receipt.refusals)}`).toBe(0);
+  expect(cli.ncs, `${name}: both paths post the same number of programs`).toHaveLength(worker.programs.length);
+  worker.programs.forEach((program, i) => {
+    const cliNc = cli.ncs[i]!;
+    if (program.nc === cliNc) return;
+    const key = /^;@CM\|TOOL\|key=(.+)$/m.exec(program.nc)?.[1] ?? 'no key';
+    const cliKey = /^;@CM\|TOOL\|key=(.+)$/m.exec(cliNc)?.[1] ?? 'no key';
+    throw new Error(
+      `${name} program ${i + 1}: the app (${key}) and the CLI (${cliKey}) post different programs — ` +
+        `worker ${summary(program.nc)} | CLI ${summary(cliNc)}; first difference at ${firstDifference(program.nc, cliNc)}`,
+    );
+  });
+}
+
+describe('#922 one pipeline — the five bench samples', () => {
+  for (const sample of SAMPLES) {
+    const declare = sample.red ? it.fails : it;
+    declare(
+      `${sample.name} posts the same programs from both paths${sample.red ? ' (red today — a #922 finding for B)' : ''}`,
+      async () => {
+        await expectSameSample(sample.name);
+      },
+      300_000,
+    );
+  }
+});
 
 describe('#922 one pipeline', () => {
   it('the committed 10-24 badge job posts the same program from both paths', async () => {
