@@ -147,22 +147,40 @@ describe('#748 — an item on a pocket floor is planned and judged from that flo
     expect(cut?.vCarve?.surfaceOutset).toBeCloseTo(0.06699, 4);
   });
 
-  it('posts the labels the same toolpath as the top-face document (the CAM reads the plane radius)', () => {
+  it('posts the labels on the same XY path as the top-face document (the CAM reads the plane radius)', () => {
     const top = engraveRegions(tl, loadJob('j24-spoke-wrench-c.json'), ENGRAVER);
     const onFloor = engraveRegions(tl, spokeWrenchOnRecess(), ENGRAVER);
     const ir = (regions: readonly EngraveRegion[]) =>
       generateEngrave(tl, labelRegions(regions), ENGRAVER, PARAMS, Z1.rapidEstimate);
+    // #940 — THE Z PASSES ARE THE MATERIAL'S, so they differ by design: the `-c` document alone
+    // has the labels 4.25 mm down through solid stock, while the same labels on the recess floor
+    // cut 0.25 mm. The XY path (the plane radius, the rings) is what must not move with the floor.
     const moves = (irNow: ReturnType<typeof ir>, id: string) =>
       (irNow.operations.find((operation) => operation.labelId === id)?.moves ?? []).map((move) => [
         move.kind,
         r6(move.x),
         r6(move.y),
-        r6(move.z),
       ]);
     const topIr = ir(top.regions);
     const floorIr = ir(onFloor.regions);
+    // The RING GEOMETRY is what the floor must not change: the same feed vertices, even though
+    // the pass count (17 vs 1) moves the label order's cursor, and so each later label's entry
+    // point, between the two documents.
+    const vertices = (irNow: ReturnType<typeof ir>, id: string): string[] =>
+      [...new Set(moves(irNow, id).filter(([kind]) => kind === 'feed').map(([, x, y]) => `${x as number},${y as number}`))].sort();
     for (const id of ['lab-13G', 'lab-14G', 'lab-15G', 'lab-16G']) {
-      expect(moves(floorIr, id)).toEqual(moves(topIr, id));
+      expect(vertices(floorIr, id), id).toEqual(vertices(topIr, id));
+    }
+    // And the floor label takes the 0.25 mm of material in one 0.25 mm pass, not the top-face
+    // document's 17 passes of 4.25 mm of stock (the #940 pass rule: a cone steps on material).
+    const passes = (irNow: ReturnType<typeof ir>, id: string): number =>
+      new Set(
+        (irNow.operations.find((operation) => operation.labelId === id)?.moves ?? [])
+          .filter((move) => move.kind === 'feed')
+          .map((move) => r6(move.z)),
+      ).size;
+    for (const id of ['lab-13G', 'lab-14G', 'lab-15G', 'lab-16G']) {
+      expect(passes(floorIr, id), id).toBe(1);
     }
   });
 

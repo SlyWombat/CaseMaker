@@ -730,7 +730,7 @@ export function generateEngrave(
           `trace or cut deeper`,
       );
     }
-    const stepover = vCarveRowStepover(tool, params.stepOver, planeRadius, cone);
+    const stepover = vCarveRowStepover(tool, params.stepOver, planeRadius, cone, params.rowDiameter ?? null);
     if (stepover === null) {
       // The feeds gate validated the row against this same diameter before the CAM was reached,
       // so a null here is a programming error, not an operator's: say which numbers disagree.
@@ -953,16 +953,21 @@ export function generateEngrave(
       // pocket falls back to the rings below, and the report carries the planner's own sentence.
       adaptiveRefusal = { code: planned.code, reason: planned.reason };
     }
+    // #940 — A CONE STEPS BY ITS OWN ROW'S STEP-DOWN, AND NEVER BY A FLAT ROW'S. A V-carve
+    // descends in layers of the V row's step-down (Makera's V rows state 1.0 mm): the sample-4
+    // initials sit 0.8 mm into a pocket floor, so they take ONE pass — the flat row's 0.6 mm had
+    // run twelve identical rings, eleven of them cutting air inside the V the deepest opened, and
+    // a 9.5 min program was estimated at 1 h 53 min. A 2.5 mm V at 1.0 mm takes three passes.
+    // The layers are counted on the MATERIAL under the item (depth − floor), so a V on a pocket
+    // floor is not sent back up to the stock top.
+    const vFloor = label.vCarve?.floorDepth ?? 0;
+    const vMaterial = Math.max(label.depth - vFloor, 0);
+    const vPasses = zPasses(vMaterial, params.stepDown).map((z) => z - vFloor);
     const onePass: PreparedPass = {
       rings: ringsFor(label),
-      // #940 — A CONE'S V IS ONE FULL-DEPTH PASS. The flat row's step-down is a FLAT's rule: a
-      // cone's flank is the wall, so the deepest pass already opens the whole V and every
-      // shallower pass at the same rings re-traces air inside it (the sample-4 initials ran
-      // twelve passes, eleven of them empty, and a 9.5 min program was estimated at 1 h 53 min).
-      // A cone deeper than one step still cuts in one pass; the flank, not the tip, is what
-      // engages the material.
-      passes: cone === null ? zPasses(label.depth, params.stepDown) : [-label.depth],
-      stepMm: cone === null ? params.stepDown : label.depth,
+      passes: cone === null ? zPasses(label.depth, params.stepDown) : vPasses,
+      stepMm:
+        cone === null ? params.stepDown : vPasses.length === 1 ? vMaterial : params.stepDown,
     };
     if (!finishOn || finish === null) {
       return {

@@ -31,6 +31,59 @@ function vBit30(tip: number) {
   });
 }
 
+describe('#940 — a cone takes its own V row, and a chamfer falls back to the flat row', () => {
+  const CHAMFER = flatEndMill(3.175, {
+    name: '90° × 0.1 mm chamfer',
+    shape: 'chamfer',
+    typeText: 'Chamfer',
+    tipDiameter: 0.1,
+    angle: 90,
+  });
+  const flatRow: FeedsEntry = {
+    material: 'hardwood',
+    minDiameter: 1.6,
+    maxDiameter: 3.2,
+    params: { rpm: 12000, feed: 400, plungeFeed: 150, stepDown: 0.6, stepOverFraction: 0.45, peckFraction: 1, air: true },
+    status: 'unmeasured',
+    provenance: 'the starting table’s hardwood flat row',
+  };
+  const vRow: FeedsEntry = {
+    material: 'hardwood',
+    edge: 'v',
+    minDiameter: 0.1,
+    maxDiameter: 0.1,
+    params: { rpm: 12000, feed: 1000, plungeFeed: 500, stepDown: 1.0, stepOverFraction: 0.45, peckFraction: 1, air: true },
+    status: 'unmeasured',
+    provenance: 'Makera library rows for the two 0.1 mm-tip V cutters',
+  };
+
+  it('a chamfer takes the V row whose band covers its tip, with that row’s provenance', () => {
+    const out = feedsFor([], 'hardwood', CHAMFER, Z1, undefined, [flatRow, vRow]);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.params.feed).toBe(1000);
+    expect(out.params.plungeFeed).toBe(500);
+    // The row's own step-down: the flat row's 0.6 never applies to a cone.
+    expect(out.params.stepDown).toBe(1.0);
+    expect(out.params.rowDiameter).toBe(0.1);
+    expect(out.provenance).toContain('V row');
+    expect(out.provenance).toContain('Makera');
+    expect(out.provenance).not.toContain('cone’s 3.175 mm base');
+  });
+
+  it('with no V row covering the tip, #669’s flat row at the cone base answers — labelled, and the V step-down', () => {
+    const out = feedsFor([], 'hardwood', CHAMFER, Z1, undefined, [flatRow]);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.params.feed).toBe(400);
+    expect(out.params.rowDiameter).toBe(3.175);
+    expect(out.provenance).toContain("cone's 3.175 mm base");
+    // The substitution's flat step-down is not a cone's: the V rows' 1.0 mm seed sets the step.
+    expect(out.params.stepDown).toBe(1.0);
+    expect(out.provenance).toContain("V rows' 1 mm seed sets the step");
+  });
+});
+
 describe('#723 P2-3 — the surfacing feed row', () => {
   it('a ball or bull asks through a flat of its cutting diameter; a flat is its own row', () => {
     const ball = flatEndMill(3.175, { shape: 'ball', typeText: 'Ball Nose', tipDiameter: 2, cornerRadius: 1 });

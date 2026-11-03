@@ -107,6 +107,27 @@ describe('#940 a V-carved item on a pocket floor', () => {
     expect(plan.unassigned).toEqual([]);
   });
 
+  it('a cone steps by its V row\'s step-down: a 2.5 mm V takes three passes at 1.0 mm', async () => {
+    // #940 — the flat row's 0.6 mm never applies to a cone; a V row's own 1.0 mm does, so a
+    // shallow V is one pass and a deep one is several. A 2.5 mm V on the blank's top: 3 passes.
+    const base = sampleJob();
+    // The initials themselves, 2.5 mm deep on the blank's TOP (no pocket under them): 2.5 mm of
+    // material at the V row's 1.0 mm step-down is three passes.
+    const job: EngraveJob = {
+      ...base,
+      labels: base.labels.map((label) => ({ ...label, depth: 2.5 })),
+      shapes: [],
+      toolKey: V_KEY,
+      tool: ENGRAVER,
+    };
+    const g = await generate(tl, job, null, ROWS);
+    expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
+    expect(g.cam?.passes).toBe(3);
+    const zs = [...(g.nc ?? '').matchAll(/G1 Z(-[\d.]+)/g)].map((m) => Number(m[1]));
+    // The passes land at the row's step-down: −1.0, −2.0, then the depth itself, −2.5.
+    for (const z of [-1, -2, -2.5]) expect(zs.some((v) => Math.abs(v - z) < 1e-9)).toBe(true);
+  }, 240_000);
+
   it('the real job posts two programs: the pocket, then the V-carved initials on its floor', async () => {
     const job = sampleJob();
     const floors = supportingFloors(tl, toPartPlan(job));
