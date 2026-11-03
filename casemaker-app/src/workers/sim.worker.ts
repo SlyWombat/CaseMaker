@@ -31,6 +31,7 @@ import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
 import { evaluatePlan } from './sim/planEvaluate';
 import { runSmartPick, type EngravePickSummary } from './sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import type { PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import { readDesign } from '@/engine/import/design3mf';
 import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
@@ -298,8 +299,15 @@ const api = {
    * session owns the removal solid, so only the worker can run this. Throws when no swept
    * program is loaded; the main thread only calls it after a successful load.
    */
-  async simOracle(predicted: OraclePredicted[], pcb?: PcbCopperTopologyInput | null): Promise<OracleReport> {
-    return (await getSession()).oracle(predicted, pcb ?? null);
+  async simOracle(
+    predicted: OraclePredicted[],
+    pcb?: PcbCopperTopologyInput | null,
+    // #924 activation — the generator's own raw design items (`EngraveGenerated.designItems`),
+    // plain serializable data exactly like `predicted` above; additive, so a caller that still
+    // sends only `predicted` (every caller as of this commit) runs exactly as it did before.
+    designItems?: DesignCheckItem[],
+  ): Promise<OracleReport> {
+    return (await getSession()).oracle(predicted, pcb ?? null, designItems);
   },
   /**
    * Read a PrusaSlicer project (.3mf) as a blank-and-items patch (#410 item 4's second entry

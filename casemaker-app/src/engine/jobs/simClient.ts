@@ -20,6 +20,7 @@ import type { SimDesign } from '@/workers/sim/session';
 import type { EngraveProgress, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { EngravePickSummary } from '@/workers/sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import type { PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -584,7 +585,9 @@ export const simOracle = (
    * simulation at the copper's underside and folds its verdict into the report.
    */
   pcb?: PcbCopperTopologyInput | null,
-): Promise<OracleReport> => guarded(getSimApi().simOracle(predicted, pcb ?? null));
+  /** #924 activation — the generator's own raw design items; additive, plain serializable data. */
+  designItems?: DesignCheckItem[],
+): Promise<OracleReport> => guarded(getSimApi().simOracle(predicted, pcb ?? null, designItems));
 
 /**
  * Read a PrusaSlicer project (.3mf) as a blank-and-items patch (#410 item 4's second entry point).

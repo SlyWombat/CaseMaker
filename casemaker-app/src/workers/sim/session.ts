@@ -501,7 +501,15 @@ export interface SimSession {
    * lift subtracted at each XY and stamps `frame: 'surface'` on the report, so a program posted
    * against a tilted blank is compared with the flat prediction that blank's design is.
    */
-  oracle(predicted: readonly OraclePredicted[], pcb?: PcbCopperTopologyInput | null): OracleReport;
+  // #924 — the public type never grew the `designItems`/`goal` params `554b0f67`'s own
+  // implementation (just below) already takes; nothing called them with more than two arguments
+  // until this activation, so the mismatch went uncaught. Widened here to match.
+  oracle(
+    predicted: readonly OraclePredicted[],
+    pcb?: PcbCopperTopologyInput | null,
+    designItems?: readonly DesignCheckItem[],
+    goal?: { heightfield: GoalHeightfield; sweptTop: ResultTop; opts?: GoalCutIntoOptions },
+  ): OracleReport;
   /**
    * #857 — the region the CURRENT sweep has cut at or below `zSlice` (work frame), with the band
    * the oracle would judge it in: the same slice the volumetric comparison reads, handed to a
