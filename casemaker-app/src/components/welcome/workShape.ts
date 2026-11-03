@@ -48,7 +48,10 @@ export const HOUSE_STOCK = {
 export function houseStockProposal(): StockProposal {
   return {
     ...HOUSE_STOCK,
-    finish: 'rough',
+    // #934 — THE STICKS ARE TAKEN AS PLANED STOCK (maintainer, 2026-11-02): a finished face is cut
+    // as it is, so the first-job path does not face — and the post-facing re-touch, which this
+    // milestone hides until its bench run, is not on it. The operator can still choose "as bought".
+    finish: 'finished',
     sentence: 'The house’s stock: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
   };
 }

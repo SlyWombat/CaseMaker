@@ -197,6 +197,8 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     expect(job.labels[0]).toMatchObject({ text: 'Hello', depth: 2 });
     expect(job.stock.material).toBe('hardwood');
     expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([36, 100, 36]);
+    // …and a finished face is cut as it is: the first-job path does not face.
+    expect(job.facing).toEqual({ enabled: false, depth: 0.2, source: 'seed' });
   });
 
   it('a job that states its own material keeps it, and the blank is still the house’s stock', () => {
