@@ -9,15 +9,22 @@
 //      equivalent collision;
 //  (3) the acceptance's second fixture — a program whose floor sits well above the jaw tops
 //      passes both the 2D plan-view rule and this new 3D engine check, with the job's
-//      `jawClearance` left at its default (not forced to 0). The real #941 through-slot job
-//      (`docs/bench/941-*.job.json` on branch `938-hardwood-coupon`) was not available on origin
-//      at the time this landed (branch not pushed) — see the comment on issue #923 — so this uses
-//      a synthetic stand-in built to the same shape the manager described: a cut whose floor is
-//      well clear of the jaw tops. Session A reconciles against the real job once #938 lands.
+//      `jawClearance` left at its default (not forced to 0). Originally a synthetic stand-in
+//      (the real #941 job, `docs/bench/941-chamfer-slot.job.json` on branch `938-hardwood-coupon`,
+//      was not on origin when this first landed — see the comment on issue #923). Kept as an
+//      additional row, not replaced, once the real job landed (see (3b) below).
+//  (3b) the REAL #941 job, as committed on `main` — `jawClearance: 0` and `edgeMargin: 0`, so the
+//      2D plan-view rule is effectively off and this new engine check is the only jaw check the
+//      job gets. Run end to end through `engraveJobMain` (generate -> post -> simulate), exactly
+//      the pipeline the app and the bench CLI share.
 //  (4) `simCoverage`'s coverage sentence correctly names the engine and the obstacles actually
 //      tested, for both a column program and an exact-engine program.
 
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tl } from './helpers/manifoldExec';
 import { createSimSession } from '@/workers/sim/session';
 import { stubSetup, type Setup, type ObstacleBox } from '@/engine/cnc/setup';
@@ -25,6 +32,16 @@ import { viseEnvelope, DEFAULT_VISE } from '@/engine/cnc/fixture';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { prepareFixtureBoxes, holderVsFixtureUnproven, fixtureUncheckedDiagnostic, columnFixtureHit } from '@/workers/geometry/sweep';
 import { coverageDisclaimer, coverageSummaryLine, type SimCoverageInput } from '@/components/panels/simCoverage';
+import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
+import type { CommandOptions } from '../../scripts/lib/casemaker/output';
+import type { Receipt, EngraveDetails } from '../../src/platform/headless/receipt';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const APP = join(HERE, '..', '..');
+const REPO = join(APP, '..');
+
+/** The six fixture/holder codes #923 added or now raises from the column engine too. */
+const FIXTURE_CODES = ['tool-into-fixture', 'rapid-into-fixture', 'feed-into-fixture', 'holder-into-fixture', 'holder-vs-fixture-unproven', 'fixture-unchecked'];
 
 // ---------------------------------------------------------------------------------------
 // (1) The shared primitives, in isolation — no Manifold, no timeline.
@@ -154,6 +171,68 @@ describe('#923 acceptance: the column engine refuses a jaw collision, with the e
     // vise's shipped default, exactly as the acceptance asks.
     expect(fixtureSetup().fixture?.source).toBe('default');
     session.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// (3b) The REAL #941 job, run end to end through the app's own CLI pipeline — generate, post,
+// simulate, exactly as `scripts/lib/casemaker/engrave.ts` and the Simulate panel do. Confirms
+// #923's fix holds on the actual bench job, not only a hand-built fixture.
+// ---------------------------------------------------------------------------------------
+describe('#923 the REAL #941 job: chamfer + through-slot, jawClearance 0, edgeMargin 0', () => {
+  it('posts clean, with zero fixture/holder codes anywhere, including on the column-engine program', async () => {
+    const SCRATCH = mkdtempSync(join(tmpdir(), 'casemaker-923-941-'));
+    const outDir = join(SCRATCH, 'out');
+    mkdirSync(outDir, { recursive: true });
+    const jobPath = join(SCRATCH, 'job.json');
+    writeFileSync(jobPath, readFileSync(join(REPO, 'docs', 'bench', '941-chamfer-slot.job.json'), 'utf8'));
+
+    // The job's own tool is unnamed (`toolKey: ""`): the CAM search picks the house's real
+    // chamfer bit and O-flute flat for it. Pulled from the committed house inventory fixture
+    // (`fixtures/ball863/house-cutters.json`) rather than hand-built, so the dimensions are the
+    // real bench tools' own — `kz-chamfer-90` (the one #941's own issue text names) and
+    // `kz-o-flute-3-175-25` (the flat already owned by the fixture location's base inventory).
+    const houseFx = JSON.parse(readFileSync(join(HERE, 'fixtures', 'ball863', 'house-cutters.json'), 'utf8')) as {
+      inventory: { key: string; tool: unknown }[];
+    };
+    const house = (id: string): { key: string; tool: unknown } => houseFx.inventory.find((e) => e.key === `inv:${id}`)!;
+    const baseLocation = join(HERE, 'fixtures', 'location-doc.json');
+    const doc = JSON.parse(readFileSync(baseLocation, 'utf8')) as { tools: { key: string; provenance: string; origin: null; tool: unknown }[] };
+    doc.tools.push(
+      { key: 'inv:kz-chamfer-90', provenance: 'bench', origin: null, tool: house('kz-chamfer-90').tool },
+      { key: 'inv:kz-o-flute-3-175-25', provenance: 'bench', origin: null, tool: house('kz-o-flute-3-175-25').tool },
+    );
+    const location = join(SCRATCH, 'location.json');
+    writeFileSync(location, JSON.stringify(doc, null, 2) + '\n');
+
+    const held: { receipt: Receipt | null } = { receipt: null };
+    const options: CommandOptions = {
+      json: true,
+      now: new Date('2026-11-02T12:00:00.000Z'),
+      sink: { progress: () => {}, receipt: (r) => { held.receipt = r; } },
+    };
+    const code = await engraveJobMain([jobPath, '--out', outDir, '--location', location], options);
+    const receipt = held.receipt;
+    expect(code, JSON.stringify(receipt?.diagnostics ?? null)).toBe(0);
+    expect(receipt?.ok, JSON.stringify(receipt?.diagnostics ?? null)).toBe(true);
+
+    // Not one of the fixture/holder-into-fixture codes anywhere in the receipt — the slot's
+    // jawClearance:0 and edgeMargin:0 leave the 2D plan-view rule unable to refuse anything here,
+    // so this IS the check: both engines looked at the real jaws and found no collision.
+    const fixtureHits = (receipt?.diagnostics ?? []).filter((d) => FIXTURE_CODES.includes(d.code));
+    expect(fixtureHits, JSON.stringify(fixtureHits)).toEqual([]);
+
+    // Three posted programs (O-flute slot, 1mm rest, 0.1mm chamfer); every one's own sweep is
+    // error-free, and at least one of them ran on the COLUMN engine — the chamfer's cone routes
+    // there (`sweepsOnColumn`), so #923's new column-engine fixture check is genuinely exercised
+    // by this job, not only by the exact engine's programs.
+    if (receipt === null || receipt.command !== 'engrave') throw new Error(`expected an engrave receipt, got ${JSON.stringify(receipt)}`);
+    const details: EngraveDetails = receipt.details;
+    if (details.kind !== 'job') throw new Error(`expected a job receipt, got ${JSON.stringify(details)}`);
+    const programs = details.programs;
+    expect(programs.length).toBeGreaterThan(0);
+    for (const p of programs) expect(p.sim?.errorCount ?? 0, `${p.ncFile}: ${JSON.stringify(p.sim)}`).toBe(0);
+    expect(programs.some((p) => p.sim?.engine === 'column')).toBe(true);
   });
 });
 
