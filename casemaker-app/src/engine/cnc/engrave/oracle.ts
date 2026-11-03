@@ -273,6 +273,15 @@ export interface OracleReport {
    */
   areaFloor?: number;
   /**
+   * #947 gate statement 7 — the width a boundary disagreement had to clear before it counted
+   * (`ORACLE_SLIVER_WIDTH_MM`), so a reader of `worst`/`levels` knows the resolution those numbers
+   * were coarsened to, not just that they were. Set only where the sliver open actually ran — the
+   * flat comparison in `computeOracle`'s own `sliceCS !== null` branch; absent on a hand-built
+   * report (a test fixture) and on the rotary/column-dexel path, which is already resolution-aware
+   * by its own grid cell and never runs this open.
+   */
+  sliverWidthMm?: number;
+  /**
    * #743 P-5 — A PCB'S COPPER, judged by topology rather than by volume. Present only when the
    * run is a board: `ok` above is already `report.ok && copper.ok`, so the tick that reads `ok`
    * states the copper's verdict too. Absent on every other job.
@@ -836,6 +845,7 @@ export function computeOracle(
     levels,
     worst: { underCut: worstUnder, overCut: worstOver, underAt: worstUnderAt, overAt: worstOverAt },
     areaFloor,
+    sliverWidthMm: ORACLE_SLIVER_WIDTH_MM,
   };
 }
 

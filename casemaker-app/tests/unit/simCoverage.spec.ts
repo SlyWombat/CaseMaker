@@ -32,6 +32,16 @@ describe('coverageDisclaimer', () => {
     expect(s).not.toContain('0.100');
   });
 
+  it('names the sliver width past the band, when the oracle ran that check (#947)', () => {
+    const s = text({ oracleBand: 0.016, sliverWidthMm: 0.01 });
+    expect(s).toContain('Boundary slivers under 0.01 mm are not counted');
+  });
+
+  it('says nothing about a sliver width when the oracle report has none', () => {
+    const s = text({ oracleBand: 0.1 });
+    expect(s).not.toContain('Boundary slivers');
+  });
+
   it('names the obstacles it was given: fixture labels and sacrificial material', () => {
     const s = text({
       fixtureLabels: ['vise-jaw-front', 'vise-jaw-back'],
