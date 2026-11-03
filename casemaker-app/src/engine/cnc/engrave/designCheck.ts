@@ -565,6 +565,32 @@ export function vGrooveVolumeMm3(lengthMm: number, halfAngleDeg: number, depthMm
   return lengthMm * t * depthMm * depthMm + (Math.PI / 3) * t * t * depthMm * depthMm * depthMm;
 }
 
+/**
+ * The volume a real V cutter removes tracing a straight run of length `L` to tip depth `d`: a tip
+ * of radius `t0`, a flank widening by `tan(a)` per mm, and a body of radius `R` above the cone
+ * (`null` when the record states none, so the cone never stops). Each horizontal slice is a
+ * capsule of the cutter's radius at that height, `2ρL + πρ²`, integrated from the tip up:
+ *
+ *   cone part (0 ≤ h ≤ h1):  2L(t0·h1 + tan(a)·h1²/2) + π((t0 + tan(a)·h1)³ − t0³) / (3·tan(a))
+ *   body part (h1 < h ≤ d):  (2RL + πR²)(d − h1),   h1 = min(d, (R − t0) / tan(a))
+ */
+export function cappedVGrooveVolumeMm3(
+  lengthMm: number,
+  tipRadiusMm: number,
+  halfAngleDeg: number,
+  bodyRadiusMm: number | null,
+  depthMm: number,
+): number {
+  if (lengthMm < 0 || tipRadiusMm < 0 || halfAngleDeg <= 0 || halfAngleDeg >= 90 || depthMm <= 0) return 0;
+  const t = Math.tan((halfAngleDeg * Math.PI) / 180);
+  const hCap = bodyRadiusMm === null || bodyRadiusMm <= tipRadiusMm ? Infinity : (bodyRadiusMm - tipRadiusMm) / t;
+  const h1 = Math.min(depthMm, hCap);
+  const top = tipRadiusMm + t * h1;
+  const cone = 2 * lengthMm * (tipRadiusMm * h1 + (t * h1 * h1) / 2) + (Math.PI * (top ** 3 - tipRadiusMm ** 3)) / (3 * t);
+  const body = depthMm > h1 ? (2 * top * lengthMm + Math.PI * top * top) * (depthMm - h1) : 0;
+  return cone + body;
+}
+
 export interface VolumeAgreementOptions {
   /** Relative tolerance band, as a fraction of the analytic figure. Defaults to 2% — well inside the #741 gap (20-60%), well outside ordinary float/approximation drift. */
   toleranceFraction?: number;
