@@ -1474,7 +1474,7 @@ describe('#948 the goal check’s line', () => {
       band: 0.016,
       levels: [],
       worst: { underCut: 0, overCut: 0 },
-      goalCutInto: goal({ ok: false, maxCutIntoMm: 0.243, maxCutIntoAt: { x: 12.35, y: 8.1 } }),
+      goalCutInto: goal({ ok: false, cutIntoFraction: 0.0008, maxCutIntoMm: 0.243, maxCutIntoAt: { x: 12.35, y: 8.1 } }),
     });
     const line = screen.getByTestId('engrave-cut-goal');
     expect(line.textContent).toBe('Cuts 0.243 mm into the design at 12.35, 8.1');
@@ -1515,6 +1515,30 @@ describe('#948 the goal check’s line', () => {
     // The goal line itself is unchanged by the fact, and a COMPARED goal keeps the pass headline.
     expect(screen.getByTestId('engrave-cut-goal').textContent).toBe('Matches the design (goal)');
     expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('matches the design');
+  });
+
+  // #948 — THE REPORT'S OWN FAILURE when `ok` is false for COVERAGE, not for a cut into the part:
+  // j29 on the milestone's job reads ok false, zero cut-into cells, 46.49 % coverage, and the line
+  // used to fall through to the cut-into branch and print "Cuts 0 mm into the design". It states
+  // the coverage failure instead, with its own data-state; a cut-into keeps its branch.
+  it('states a coverage failure when ok is false with no cut-into cells', () => {
+    drawWithOracle({
+      ok: false,
+      band: 0.016,
+      levels: [],
+      worst: { underCut: 0, overCut: 0 },
+      goalCutInto: goal({
+        ok: false,
+        passCoverage: 0.95,
+        leftoverFractions: [0.5351, 0.2, 0.05],
+        cutIntoFraction: 0,
+        maxCutIntoMm: 0,
+      }),
+    });
+    const line = screen.getByTestId('engrave-cut-goal');
+    expect(line.textContent).toBe('Covers 46.49 % of the design’s top surface (the pass line is 95 %)');
+    expect(line.dataset.state).toBe('coverage');
+    expect(line.textContent).not.toContain('Cuts 0 mm');
   });
 
   // #948 review (A) — THE HEADLINE. A goal report that did not run must not head the Cut step with
