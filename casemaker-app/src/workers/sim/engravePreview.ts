@@ -491,7 +491,9 @@ function goalDrawingBody(
   // Both volumes are MESHED before anything is deleted: each boolean is lazy and shares the body
   // as a child, so forcing its mesh must happen while every input handle still exists.
   let part: NodeMeshOutput | null = null;
-  let removed: NodeMeshOutput | null = null;
+  // No initialiser: both branches assign it and the catch re-nulls it, so one here is a dead store
+  // (#919). `part` keeps its `null` — a throw before its branch leaves it unset.
+  let removed: NodeMeshOutput | null;
   try {
     if (mode === 'mold') {
       // The cavity is drawn where the cut is: the turned part clipped to the blank (#784 clips the

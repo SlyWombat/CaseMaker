@@ -217,7 +217,9 @@ function postRotary(
   // 3-axis mill, so a face pocket's step-over moves in Y. A move that CHANGES A is a turn, and a
   // turn is taken with the cutter over the axis at Y 0 — the column map's contract (R1/R6) is
   // about moves that interpolate A, and this file never does that off the axis.
-  let prevA: number | null = null;
+  // Declared without an initialiser: every operation starts by re-nulling it below, so a value
+  // given here would be a dead store (#919).
+  let prevA: number | null;
   for (const op of ir.operations) {
     // The emitter re-states A on every operation's first move, so each op starts a new word.
     prevA = null;
