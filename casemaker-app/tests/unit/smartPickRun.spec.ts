@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { smartPickKey } from '@/engine/cnc/engrave/measuredPick';
 import { runSmartPick, type SmartPickRequest } from '@/workers/sim/smartPickRun';
-import type { PlanEvaluation } from '@/workers/sim/planEvaluate';
+import type { EvalContext, PlanEvaluation } from '@/workers/sim/planEvaluate';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Tool, ToolShape } from '@/engine/cnc/tool';
@@ -74,8 +74,10 @@ function job(text = 'CASE'): EngraveJob {
   return base;
 }
 
-function request(j: EngraveJob = job()): SmartPickRequest {
-  return { job: j, tools: TOOLS, catalogue: [], conditions: null, shop: {}, table: null };
+function request(j: EngraveJob = job()): SmartPickRequest & { tl: EvalContext['tl'] } {
+  // The plan evaluator here is the test's own, so the manifold is never touched; the field is
+  // required by the shared inputs since #922.
+  return { tl: {} as EvalContext['tl'], job: j, tools: TOOLS, catalogue: [], conditions: null, shop: {}, table: null };
 }
 
 function evaluation(ids: readonly string[], over: Partial<PlanEvaluation> = {}): PlanEvaluation {
@@ -93,7 +95,7 @@ function evaluation(ids: readonly string[], over: Partial<PlanEvaluation> = {}):
 describe('#766 D the cancellable worker run', () => {
   it('answers with the chosen plan, its words and the job key the answer is for', async () => {
     const req = request();
-    const summary = await runSmartPick(req, () => evaluation(['one']), () => false, async () => {});
+    const summary = await runSmartPick(req, () => false, async () => {}, () => evaluation(['one']));
     expect(summary).not.toBeNull();
     expect(summary!.jobKey).toBe(smartPickKey(req.job, { tools: TOOLS, catalogue: [], conditions: null, shop: {} }));
     expect(summary!.cutters.length).toBeGreaterThan(0);
@@ -104,17 +106,12 @@ describe('#766 D the cancellable worker run', () => {
   it('stops between plan evaluations when a newer edit has arrived, and answers null', async () => {
     let stale = false;
     let evaluations = 0;
-    const summary = await runSmartPick(
-      request(),
-      () => {
-        evaluations += 1;
-        // The second plan evaluation is "in progress" when the edit lands.
-        if (evaluations === 2) stale = true;
-        return evaluation(['one']);
-      },
-      () => stale,
-      async () => {},
-    );
+    const summary = await runSmartPick(request(), () => stale, async () => {}, () => {
+      evaluations += 1;
+      // The second plan evaluation is "in progress" when the edit lands.
+      if (evaluations === 2) stale = true;
+      return evaluation(['one']);
+    });
     expect(summary).toBeNull();
     // The evaluation in progress finished; nothing after it started.
     expect(evaluations).toBe(2);
@@ -124,11 +121,11 @@ describe('#766 D the cancellable worker run', () => {
     const yields: number[] = [];
     await runSmartPick(
       request(),
-      () => evaluation(['one']),
       () => false,
       async () => {
         yields.push(1);
       },
+      () => evaluation(['one']),
     );
     expect(yields.length).toBeGreaterThan(1);
   });
@@ -138,11 +135,11 @@ describe('#766 D the cancellable worker run', () => {
     empty.labels = [];
     const summary = await runSmartPick(
       request(empty),
+      () => false,
+      async () => {},
       () => {
         throw new Error('nothing should be evaluated');
       },
-      () => false,
-      async () => {},
     );
     expect(summary).toBeNull();
   });

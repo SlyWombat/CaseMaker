@@ -27,10 +27,91 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { smartPickKey } from '@/engine/cnc/engrave/measuredPick';
-import { candidatePlans, smartPick, type CandidatePlan, type Evaluate } from '@/engine/cnc/engrave/smartPick';
+import {
+  candidatePlans,
+  smartPick,
+  type CandidatePlan,
+  type Evaluate,
+  type SmartPick,
+  type SmartPickOptions,
+  type SmartPickRefusal,
+} from '@/engine/cnc/engrave/smartPick';
 import { explainSmartPick, type SmartPickWords } from '@/engine/cnc/engrave/smartPickWords';
 import type { EngraveShopOpts } from './engraveGenerate';
-import type { PlanEvaluation } from './planEvaluate';
+import { evaluatePlan, type EvalContext, type PlanEvaluation } from './planEvaluate';
+
+/**
+ * #922 — THE PICK'S INPUTS, BUILT ONCE. The app's worker (`sim.worker.ts`'s `engraveSmartPick`) and
+ * `casemaker cut` (`engrave.ts`'s `chooseCutters`) both search through the builders below, so the
+ * conditions map, the shop's feed table, the five-argument candidate list and the plan-evaluator
+ * context cannot drift between the two doors. A three-argument `candidatePlans` call silently drops
+ * the conditions and feed-table filters; there is no such call on either side now.
+ */
+export interface EngravePickInputs {
+  tl: EvalContext['tl'];
+  job: EngraveJob;
+  tools: readonly ToolLibraryEntry[];
+  catalogue: readonly FeedCatalogueRow[];
+  conditions: ReadonlyMap<string, ConditionSummary> | null;
+  shop: EngraveShopOpts;
+  /** The caller's own table, when it is not the shop's `feeds` (the worker sends it explicitly). */
+  table?: readonly FeedsEntry[] | null;
+}
+
+/** The one plan-evaluator context: the search, the candidate filter and the evaluator share it. */
+export function pickContext(inputs: EngravePickInputs): EvalContext {
+  return {
+    tl: inputs.tl,
+    tools: inputs.tools,
+    catalogue: inputs.catalogue,
+    shop: inputs.shop,
+    calibration: null,
+    conditions: inputs.conditions,
+    table: inputs.table ?? inputs.shop.feeds ?? null,
+  };
+}
+
+/** `candidatePlans` with the context's own filters — never the three-argument form. */
+export function pickCandidates(inputs: EngravePickInputs): CandidatePlan[] {
+  const ctx = pickContext(inputs);
+  return candidatePlans(inputs.job, inputs.tools, inputs.catalogue, ctx.conditions, ctx.table);
+}
+
+/** One plan, evaluated against the context the search itself uses. */
+export function evaluatePickPlan(
+  inputs: EngravePickInputs,
+  plan: CandidatePlan,
+  level: 'coarse' | 'full',
+): PlanEvaluation | Promise<PlanEvaluation> {
+  return evaluatePlan(inputs.job, plan, pickContext(inputs), { level });
+}
+
+/**
+ * The engine's search for this job, with the context's conditions/table and the shop's own
+ * `toolChangeSeconds` (the app's picker and the CLI read it from the same location setting).
+ * `evaluate` is for the worker's cancellation guard; the CLI passes nothing.
+ */
+export function pickForEngrave(
+  inputs: EngravePickInputs,
+  opts: SmartPickOptions = {},
+  evaluate?: Evaluate,
+): Promise<SmartPick | SmartPickRefusal> {
+  const ctx = pickContext(inputs);
+  return smartPick(
+    inputs.job,
+    inputs.tools,
+    inputs.catalogue,
+    evaluate ?? ((plan, level) => evaluatePlan(inputs.job, plan, ctx, { level })),
+    {
+      ...(inputs.shop.toolChangeSeconds === undefined || inputs.shop.toolChangeSeconds === null
+        ? {}
+        : { toolChangeSeconds: inputs.shop.toolChangeSeconds }),
+      ...opts,
+    },
+    ctx.conditions,
+    ctx.table,
+  );
+}
 
 /** One cutter of the measured plan, as the panel writes it back into the job. */
 export interface EngravePickCutter {
@@ -98,34 +179,33 @@ const yieldToMessages = (): Promise<void> => new Promise((resolve) => setTimeout
  * Throws only for a genuine failure inside the evaluator.
  */
 export async function runSmartPick(
-  request: SmartPickRequest,
-  evaluate: PickEvaluator,
+  request: SmartPickRequest & { tl: EvalContext['tl'] },
   isStale: () => boolean,
   yieldTo: () => Promise<void> = yieldToMessages,
+  /** The worker passes nothing; a test may replace the plan evaluator. */
+  evaluate?: PickEvaluator,
 ): Promise<EngravePickSummary | null> {
-  const { job, tools, catalogue, conditions, shop } = request;
-  const table = request.table ?? shop.feeds ?? null;
-  if (candidatePlans(job, tools, catalogue, conditions, table).length === 0) return null;
-  const jobKey = smartPickKey(job, { tools, catalogue, conditions, shop });
+  const { job, tools, catalogue, shop } = request;
+  // The one builder (#922): the same context the CLI's door uses, with the worker's own table.
+  const inputs: EngravePickInputs = {
+    tl: request.tl,
+    job,
+    tools,
+    catalogue,
+    conditions: request.conditions ?? null,
+    shop,
+    table: request.table ?? null,
+  };
+  if (pickCandidates(inputs).length === 0) return null;
+  const jobKey = smartPickKey(job, { tools, catalogue, conditions: request.conditions, shop });
   const guarded: Evaluate = async (plan, level) => {
     await yieldTo();
     if (isStale()) throw new SupersededError();
-    return evaluate(plan, level);
+    return evaluate === undefined ? evaluatePickPlan(inputs, plan, level) : evaluate(plan, level);
   };
   let pick;
   try {
-    pick = await smartPick(
-      job,
-      tools,
-      catalogue,
-      guarded,
-      {
-        onProgress: request.onProgress,
-        ...(shop.toolChangeSeconds === undefined || shop.toolChangeSeconds === null ? {} : { toolChangeSeconds: shop.toolChangeSeconds }),
-      },
-      conditions,
-      table,
-    );
+    pick = await pickForEngrave(inputs, { onProgress: request.onProgress }, guarded);
   } catch (e) {
     if (e instanceof SupersededError) return null;
     throw e;

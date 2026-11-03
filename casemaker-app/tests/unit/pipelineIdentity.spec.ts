@@ -46,15 +46,14 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { bootstrap, loadCatalogue, type HeadlessBootstrap } from '@/platform/headless/bootstrap';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
-import { resolvedFeedsTable, setLocatedFeedTable } from '@/engine/cnc/feeds';
+import { resolvedFeedsTable, setLocatedFeedTable, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { NO_TOOL_KEY, getTools, resetRegistry } from '@/engine/cnc/toolRegistry';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
-import { smartPick } from '@/engine/cnc/engrave/smartPick';
 import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { engraveGenerate, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
-import { evaluatePlan, type CandidatePlan, type PlanEvaluation } from '@/workers/sim/planEvaluate';
+import { pickForEngrave } from '@/workers/sim/smartPickRun';
 import type { EngraveJob } from '@/types/engraveJob';
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import { HUMAN, type CommandOptions } from '../../scripts/lib/casemaker/output';
@@ -241,29 +240,42 @@ async function expectSameProgram(name: string, jobPath: string): Promise<void> {
 }
 
 /**
- * The five committed samples. Four are RED on 2026-11-03 and are declared `it.fails` so main stays
- * green while the divergence is pinned: they run on every suite, and when B's #922 fix lands the
- * case reports "unexpectedly passed" — the flip that must accompany the fix.
+ * The five committed samples — all identical from both doors since #922's pick was factored into
+ * `smartPickRun.ts`'s `pickForEngrave` (the app's worker and the CLI now build the conditions map,
+ * the feed table, the five-argument candidate list and the evaluator context in one place).
  *
- * What they find today (app's Generate vs `casemaker cut`, same job + location):
- *   936 — the app posts flat-1.0 (⌀1 flat); the CLI picks inv:kz-engrave-m-60-0-1 (⌀0.1 60° V).
- *   940 — same toolpath: the app picks inv:kz-o-flute-3-175-25, the CLI inv:kz-o-flute-3-175-42.
- *   941 — the app picks inv:kz-o-flute-3-175-25, the CLI flat-3.175x12-metal.
- * The picks diverge because the two doors ask `smartPick` with different shops/candidate inputs
- * (the CLI's `chooseCutters` passes neither the conditions map nor the feed table); the app's
- * worker call is mirrored field for field here (sim.worker.ts's `engraveSmartPick`).
+ * Before that change, three picked different cutters (936 flat-1.0 vs inv:kz-engrave-m-60-0-1;
+ * 940 25 mm vs 42 mm o-flute; 941 o-flute vs flat-3.175x12) — the divergence was pinned as
+ * `it.fails` from ce6c15c2 and these cases are the flip.
  *
  * 938-stick-base is the BASE document the coupons are built from (no items, facing off): neither
  * door posts a program, and the case asserts they stop together at `findings` — both refusing is
- * identity as much as both posting. 939-pocket-bores is identical today.
+ * identity as much as both posting.
  */
 const SAMPLES = [
-  { name: '936-flagship-text', red: true },
-  { name: '938-stick-base', red: false },
-  { name: '939-pocket-bores', red: false },
-  { name: '940-two-cutter', red: true },
-  { name: '941-chamfer-slot', red: true },
+  { name: '936-flagship-text' },
+  { name: '938-stick-base' },
+  { name: '939-pocket-bores' },
+  { name: '940-two-cutter' },
+  { name: '941-chamfer-slot' },
 ] as const;
+
+/**
+ * The shop the app's PICKER hands the search (`engravePreviewStore.ts`'s `previewInputs`): the run
+ * shop without the finish allowance (the picker has never seen it — C's #947 note), with the
+ * tool-change cost, and without the fields only Generate reads. The bed facts are omitted here
+ * (they gate findings, not the score) as are the mount facts.
+ */
+function appPickShop(defaults: ShopDefaults | null): EngraveShopOpts {
+  return {
+    tools: getTools(),
+    lostDetailWarnRatio: readDefault(defaults, 'engrave.lostDetailWarnRatio').value,
+    toolChangeSeconds: readDefault(defaults, 'toolChange.seconds').value,
+    drill: drillSettings(defaults),
+    feeds: resolvedFeedsTable().table,
+    defaults,
+  };
+}
 
 /**
  * The job the APP hands the worker when a sample names no cutter: the panel's own measured search,
@@ -275,16 +287,21 @@ async function appPrepared(
   job: EngraveJob,
   shop: EngraveShopOpts,
   tl: HeadlessBootstrap['manifold'],
+  catalogue: readonly FeedCatalogueRow[],
 ): Promise<EngraveJob> {
   if (job.toolKey !== NO_TOOL_KEY) return job;
   const tools = getTools();
-  // The worker's `engraveSmartPick` context, field for field (sim.worker.ts): the conditions map and
-  // the feed table are search inputs, not decoration — the CLI's `chooseCutters` passes neither.
-  const conditions = inventoryConditions();
-  const table = shop.feeds ?? null;
-  const evaluate = (plan: CandidatePlan, level: 'coarse' | 'full'): PlanEvaluation | Promise<PlanEvaluation> =>
-    evaluatePlan(job, plan, { tl, tools, catalogue: [], shop, calibration: null, conditions, table }, { level });
-  const pick = await smartPick(job, tools, [], evaluate, {}, conditions, table);
+  // #922 — THE SHARED SEARCH: `pickForEngrave` is the function the app's worker and the CLI both
+  // call; its inputs (conditions, feed table, evaluator context) have one home now. The catalogue
+  // rows are the house's — the panel's picker reads them too (feedCatalogueRows).
+  const pick = await pickForEngrave({
+    tl,
+    job,
+    tools,
+    catalogue,
+    conditions: inventoryConditions(),
+    shop,
+  });
   if (!('runnable' in pick) || pick.runnable === null) {
     throw new Error(`${job.name}: the app's search refuses the job: ${'reason' in pick ? pick.reason : 'no runnable plan'}`);
   }
@@ -299,8 +316,9 @@ async function expectSameSample(name: string): Promise<void> {
   setLocatedFeedTable((JSON.parse(readFileSync(benchLocation(), 'utf8')) as { feeds: [] }).feeds);
   const parsed = parseEngraveJob(JSON.parse(readFileSync(jobPath, 'utf8')));
   if (!parsed.ok) throw new Error(`${name}: ${parsed.errors.join('; ')}`);
-  const shop = appShop(boot.location?.defaults ?? null);
-  const job = await appPrepared(parsed.job, shop, boot.manifold);
+  const defaults = boot.location?.defaults ?? null;
+  const shop = appShop(defaults);
+  const job = await appPrepared(parsed.job, appPickShop(defaults), boot.manifold, catalogue?.rows ?? []);
   const tool = jobTool(job);
   if (tool === null) throw new Error(`${name}: the job's cutter ${job.toolKey} is not in the location's registry`);
 
@@ -337,9 +355,8 @@ async function expectSameSample(name: string): Promise<void> {
 
 describe('#922 one pipeline — the five bench samples', () => {
   for (const sample of SAMPLES) {
-    const declare = sample.red ? it.fails : it;
-    declare(
-      `${sample.name} posts the same programs from both paths${sample.red ? ' (red today — a #922 finding for B)' : ''}`,
+    it(
+      `${sample.name} posts the same programs from both paths`,
       async () => {
         await expectSameSample(sample.name);
       },
