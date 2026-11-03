@@ -3,7 +3,7 @@
   "title": "938 hardwood flat-cutter feed coupon",
   "parameter": "feed",
   "material": "hardwood",
-  "toolKey": "flat-1.0",
+  "toolKey": "inv:kz-corn-1-7",
   "cuttingDiameter": 1,
   "generatedOn": "2026-11-03",
   "cutOn": null,
@@ -17,7 +17,7 @@
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F250.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F250-run-sheet.md",
-      "hash": "8f799996",
+      "hash": "eb7f1bdf",
       "verdict": null,
       "chosen": false,
       "note": ""
@@ -29,7 +29,7 @@
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F400.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F400-run-sheet.md",
-      "hash": "2c36c38d",
+      "hash": "5a0f8433",
       "verdict": null,
       "chosen": false,
       "note": ""
@@ -41,7 +41,7 @@
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F700.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F700-run-sheet.md",
-      "hash": "30301b70",
+      "hash": "38cfbb6f",
       "verdict": null,
       "chosen": false,
       "note": ""
@@ -53,7 +53,7 @@
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F1000.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F1000-run-sheet.md",
-      "hash": "960d405b",
+      "hash": "31b0b23d",
       "verdict": null,
       "chosen": false,
       "note": ""

@@ -542,7 +542,7 @@ console.log('    npx tsx --tsconfig tsconfig.scripts.json scripts/engrave-job.ts
  * jaw on the 36 mm face (measured 2026-11-02; at 8 mm a 2 mm cutter loses 96 % of the cell).
  */
 const M1_STICK = { length: 36, width: 100, thickness: 36 } as const;
-const M1_STICK_CUTTER = 'flat-1.0';
+const M1_STICK_CUTTER = 'inv:kz-corn-1-7';
 
 const m1Base = defaultEngraveJob();
 m1Base.id = 'job-938-stick-base'; // stable, so regenerating does not churn the committed file
