@@ -119,10 +119,12 @@ describe('#659 the status monitor fields', () => {
 
   it('names the firmware’s halt reason in operator words', () => {
     // H:3 on the bench (2026-10-08) was PROBE_FAIL; H:11 is COVER_OPEN — the cover's own reading
-    // in this frame.
+    // in this frame. #932 — `Kernel.h` names code 3 `PROBE_FAIL` and the controller alarms
+    // "unexpected probe trigger" on it, so the words carry BOTH facts the one code covers: a touch
+    // that never triggered, and a trigger where none was expected.
     expect(readStatusLine('<Alarm|MPos:0,0,0|H:3>').monitor.halt).toEqual({
       code: 3,
-      words: 'a probe touch did not trigger',
+      words: 'the probe failed — a touch did not trigger, or it triggered when it should not have',
     });
     expect(readStatusLine('<Alarm|MPos:0,0,0|H:11>').monitor.halt?.words).toBe('the cover was opened');
     // A code the firmware's enum does not define is still reported — by its number, never guessed.
