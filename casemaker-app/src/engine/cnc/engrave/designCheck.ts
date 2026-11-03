@@ -355,6 +355,15 @@ export interface GoalCutIntoOptions {
 
 export interface GoalCutIntoReport {
   ok: boolean;
+  /**
+   * #948 — FALSE when the comparison could not run at all (no swept top to sample: a rotary or
+   * exact-engine sweep the caller could get no flat top from). The numeric fields are then zero
+   * and `ok` stays TRUE — an unchecked goal is a stated gap, not a pass and not a failure — and
+   * {@link reason} says why. Every report a comparison produced has this true.
+   */
+  ran: boolean;
+  /** Why the comparison did not run; null when {@link ran} is true. */
+  reason: string | null;
   /** Covered goal cells the comparison ran over. */
   goalCells: number;
   pitchMm: number;
@@ -365,6 +374,13 @@ export interface GoalCutIntoReport {
   /** `sum(max(0, goalTop - sweptTop)) * cellArea` over cut-into cells — volume over-cut into the part, mm³. */
   cutIntoVolumeMm3: number;
   maxCutIntoMm: number;
+  /**
+   * #948 — WHERE the deepest cut-into cell is, in the work frame (the goal cell's own sample
+   * point), so the Cut card can say "Cuts 0.42 mm into the design at 41.2, 25.3" rather than only
+   * how deep. Null when nothing was cut into — and null on an unchecked report, where there is no
+   * cell to name.
+   */
+  maxCutIntoAt: { x: number; y: number } | null;
   /** Share of covered cells left standing more than each of {@link GOAL_LEFTOVER_BANDS_MM} above the goal, 0-1, same order. */
   leftoverFractions: number[];
   leftoverVolumeMm3: number;
@@ -391,6 +407,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
   let cutIntoCells = 0;
   let cutIntoVolumeMm3 = 0;
   let maxCutInto = 0;
+  let maxCutIntoAt: { x: number; y: number } | null = null;
   const leftoverCounts = GOAL_LEFTOVER_BANDS_MM.map(() => 0);
   let leftoverVolumeMm3 = 0;
   let maxLeftover = 0;
@@ -412,7 +429,10 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
       if (d < -cutIntoFloorMm) {
         cutIntoCells++;
         cutIntoVolumeMm3 += -d * cellArea;
-        maxCutInto = Math.max(maxCutInto, -d);
+        if (-d > maxCutInto) {
+          maxCutInto = -d;
+          maxCutIntoAt = { x, y };
+        }
       }
       for (let b = 0; b < GOAL_LEFTOVER_BANDS_MM.length; b++) {
         if (d > GOAL_LEFTOVER_BANDS_MM[b]!) leftoverCounts[b]! += 1;
@@ -438,6 +458,8 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
 
   return {
     ok,
+    ran: true,
+    reason: null,
     goalCells: covered,
     pitchMm: goal.pitch,
     cutIntoFloorMm,
@@ -445,6 +467,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
     cutIntoAreaMm2: cutIntoAreaMm2(cutIntoCells, cellArea),
     cutIntoVolumeMm3,
     maxCutIntoMm: maxCutInto,
+    maxCutIntoAt,
     leftoverFractions,
     leftoverVolumeMm3,
     maxLeftoverMm: maxLeftover,
@@ -456,6 +479,34 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
 
 function cutIntoAreaMm2(cells: number, cellArea: number): number {
   return cells * cellArea;
+}
+
+/**
+ * #948 — a goal whose swept top the caller could not sample, STATED rather than skipped. The
+ * report carries `ran: false` and the reason, and `ok` is true: the run is not failed for a check
+ * that could not run, and it is never reported as a pass either (the sentence says what was not
+ * compared). A caller that can sample the swept top calls {@link checkGoalCutInto} instead.
+ */
+export function goalCutIntoUnchecked(reason: string): GoalCutIntoReport {
+  return {
+    ok: true,
+    ran: false,
+    reason,
+    goalCells: 0,
+    pitchMm: 0,
+    cutIntoFloorMm: GOAL_CUT_INTO_FLOOR_MM,
+    cutIntoFraction: 0,
+    cutIntoAreaMm2: 0,
+    cutIntoVolumeMm3: 0,
+    maxCutIntoMm: 0,
+    maxCutIntoAt: null,
+    leftoverFractions: GOAL_LEFTOVER_BANDS_MM.map(() => 0),
+    leftoverVolumeMm3: 0,
+    maxLeftoverMm: 0,
+    coverageFraction: 0,
+    medianDeltaMm: 0,
+    sentence: `goal check: not run — ${reason}. Nothing was compared against the goal here, so this is not a pass.`,
+  };
 }
 
 export { goalTopAt };

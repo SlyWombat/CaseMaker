@@ -50,7 +50,7 @@ import {
   type OracleSliceAt,
 } from '@/engine/cnc/engrave/oracle';
 import { computeCopperTopology, type PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
-import { checkDesignReach, checkGoalCutInto, type DesignCheckItem, type GoalCutIntoOptions } from '@/engine/cnc/engrave/designCheck';
+import { checkDesignReach, checkGoalCutInto, goalCutIntoUnchecked, type DesignCheckItem, type GoalCutIntoOptions } from '@/engine/cnc/engrave/designCheck';
 import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
@@ -469,6 +469,14 @@ export function denseFlatRoutesToColumn(timeline: Timeline, tool: Tool, opts?: S
   return isDenseForExactSweep(timeline) && !opts?.priorRemoval && cuttingRadiusForSweep(tool).ok;
 }
 
+/**
+ * #948 — what an oracle call needs to judge a goal: the goal's heightfield and the live sweep's
+ * top, or the reason the top could not be sampled (a rotary or exact-engine sweep).
+ */
+export type GoalCheckInput =
+  | { heightfield: GoalHeightfield; sweptTop: ResultTop; opts?: GoalCutIntoOptions }
+  | { unchecked: string };
+
 export interface SimSession {
   load(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult;
   /**
@@ -508,8 +516,16 @@ export interface SimSession {
     predicted: readonly OraclePredicted[],
     pcb?: PcbCopperTopologyInput | null,
     designItems?: readonly DesignCheckItem[],
-    goal?: { heightfield: GoalHeightfield; sweptTop: ResultTop; opts?: GoalCutIntoOptions },
+    goal?: GoalCheckInput,
   ): OracleReport;
+  /**
+   * #948 — THE LIVE SWEEP'S TOP, as a work-frame sampler the goal check reads: the highest column
+   * touching the queried point on the FLAT grid (the same grid `SimLoadOk.flatField` exposes),
+   * null outside it, and NULL when the live sweep has no flat top at all — an exact-engine sweep,
+   * or a rotary column whose grid is the map frame. A caller then states the goal check as
+   * UNCHECKED with a reason (`goalCutIntoUnchecked`); it never reports a silent pass.
+   */
+  sweptTop(): ResultTop | null;
   /**
    * #857 — the region the CURRENT sweep has cut at or below `zSlice` (work frame), with the band
    * the oracle would judge it in: the same slice the volumetric comparison reads, handed to a
@@ -1171,6 +1187,16 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * caller that starts supplying raw design geometry or a goal heightfield gets the check for
    * free, with no further change here.
    */
+  /** #948 — the goal check merges on its own, so a rotary report (no flat slice) can carry it. */
+  const withGoalCheck = (report: OracleReport, goal?: GoalCheckInput): OracleReport => {
+    if (goal === undefined) return report;
+    const goalCutInto =
+      'unchecked' in goal
+        ? goalCutIntoUnchecked(goal.unchecked)
+        : checkGoalCutInto(goal.heightfield, goal.sweptTop, goal.opts);
+    return { ...report, goalCutInto, ok: report.ok && goalCutInto.ok };
+  };
+
   const withDesignChecks = (
     report: OracleReport,
     sliceAt: OracleSliceAt,
@@ -1194,25 +1220,21 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
      */
     band: number,
     designItems?: readonly DesignCheckItem[],
-    goal?: { heightfield: GoalHeightfield; sweptTop: ResultTop; opts?: GoalCutIntoOptions },
+    goal?: GoalCheckInput,
   ): OracleReport => {
     let out = report;
     if (designItems !== undefined && designItems.length > 0) {
       const designCheck = checkDesignReach(tl, designItems, sliceAt, { band });
       out = { ...out, designCheck, ok: out.ok && designCheck.ok };
     }
-    if (goal !== undefined) {
-      const goalCutInto = checkGoalCutInto(goal.heightfield, goal.sweptTop, goal.opts);
-      out = { ...out, goalCutInto, ok: out.ok && goalCutInto.ok };
-    }
-    return out;
+    return withGoalCheck(out, goal);
   };
 
   const oracle = (
     predicted: readonly OraclePredicted[],
     pcb: PcbCopperTopologyInput | null = null,
     designItems?: readonly DesignCheckItem[],
-    goal?: { heightfield: GoalHeightfield; sweptTop: ResultTop; opts?: GoalCutIntoOptions },
+    goal?: GoalCheckInput,
   ): OracleReport => {
     // #623 — the frame the loaded program speaks. A flat post is judged exactly as it always was;
     // a surface post is read with its lift taken back out at each XY, which is the only way a
@@ -1236,7 +1258,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
           cutter,
           predicted,
         });
-        return { ...report, frame: surface === null ? 'work' : 'surface' };
+        return withGoalCheck({ ...report, frame: surface === null ? 'work' : 'surface' }, goal);
       }
       const band = columnOracleBand(worstContours(l.timeline), grid);
       const sliceAt = gridSliceAt(tl, grid);
@@ -1251,7 +1273,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // that; the per-face reports merge into the flat report's shape with every level and the worst
     // cut tagged with its face, so a refusal can name it.
     if (l.timeline.summary.rotary) {
-      return indexedFaceOracle(tl, l, predicted);
+      return withGoalCheck(indexedFaceOracle(tl, l, predicted), goal);
     }
     const removal = l.sweep.removal;
     if (!removal) throw new Error('oracle: the loaded program removed no material');
@@ -1278,6 +1300,38 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const bandMm = oracleBand(worstContours(l.timeline));
     if (!removal) return { region: null, bandMm };
     return { region: removalSliceAt(removal)(zSlice), bandMm };
+  };
+
+  /**
+   * #948 — the live sweep's top as a work-frame sampler, from the flat column grid's remaining
+   * top `h` (the same values `SimLoadOk.flatField` carries). The value is the HIGHEST column
+   * touching the queried point — the four whose centres bracket it — so a goal cell is only read
+   * as cut when the whole cell's square is below the goal. Null when the square runs off the
+   * grid.
+   *
+   * Why not the nearest column or a bilinear average: the goal grid's pitch is the sim's (0.1 mm)
+   * but its origin is generally offset by half a cell, so every goal cell lies exactly on the
+   * boundary between two columns. A nearest-column read then flips on float noise (the corpus
+   * relief test read a whole row one column off), and a bilinear average smears a vertical wall
+   * across both sides, inventing cut-into wherever the CAM cut a wall just outside the part. The
+   * highest touching column says only what the grid can prove: every column over this cell is
+   * below the goal. A rotary grid's `h` is a radius, not a Z, so it answers null there; an
+   * exact-engine sweep has no grid.
+   */
+  const sweptTop = (): ResultTop | null => {
+    const l = live;
+    if (l === null || l.kind !== 'column') return null;
+    const g = l.column.grid;
+    if (g.kind !== 'flat') return null;
+    return (x, y) => {
+      const fi = (x - g.u0) / g.du;
+      const fj = (y - g.v0) / g.dv;
+      const i0 = Math.floor(fi);
+      const j0 = Math.floor(fj);
+      if (i0 < 0 || j0 < 0 || i0 + 1 >= g.nu || j0 + 1 >= g.nv) return null;
+      const at = (i: number, j: number): number => g.h[j * g.nu + i]!;
+      return Math.max(at(i0, j0), at(i0 + 1, j0), at(i0, j0 + 1), at(i0 + 1, j0 + 1));
+    };
   };
 
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);
@@ -1397,6 +1451,6 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     };
   };
 
-  return { load, warmup, frameAt, stateAt, toolPath, simPath, oracle, levelCut, dispose, get loaded() { return live !== null; } };
+  return { load, warmup, frameAt, stateAt, toolPath, simPath, oracle, levelCut, sweptTop, dispose, get loaded() { return live !== null; } };
 }
 

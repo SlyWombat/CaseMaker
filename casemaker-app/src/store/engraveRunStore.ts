@@ -30,6 +30,7 @@ import {
 } from '@/platform/flightRecorder';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
+import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import type { ProgramOracle } from './engraveRunGate';
 import { forgetPoolSizing } from '@/engine/jobs/adaptivePool';
 import type { SimDiagnostic } from '@/workers/sim/session';
@@ -138,6 +139,8 @@ export type EngraveRunClient = {
     predicted: OraclePredicted[],
     pcb?: PcbCopperTopologyInput | null,
     designItems?: DesignCheckItem[],
+    /** #948 — the goal this program makes, when it is a goal program (see `simClient.simOracle`). */
+    goal?: SimGoalCheck | null,
   ) => Promise<OracleReport>;
   /**
    * #785 — stop the run's worker; the store has already orphaned the run (see `cancelGenerate`).
@@ -910,7 +913,12 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // for V-carve/flat engrave items).
           const designItems =
             generated.programs[index]?.designItems ?? (isFirst ? generated.designItems : undefined);
-          const report = await client.simOracle([...predicted], undefined, designItems);
+          // #948 — A GOAL PROGRAM IS JUDGED AGAINST ITS GOAL, not only against the plan: the
+          // worker samples the goal's heightfield and pairs it with this program's live sweep.
+          // `surface3d` is set only on the goal path (the flat goal and the rotary relief), so an
+          // item job sends nothing and runs exactly as before.
+          const goal = goalCheckForProgram(job, generated.surface3d != null);
+          const report = await client.simOracle([...predicted], undefined, designItems, goal);
           if (mine !== seq) return;
           oracles.push({ index, report });
         },

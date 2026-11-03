@@ -21,6 +21,7 @@ import type { EngraveProgress, EngraveShopOpts } from '@/workers/sim/engraveGene
 import type { EngravePickSummary } from '@/workers/sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
+import type { SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import type { PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -587,7 +588,13 @@ export const simOracle = (
   pcb?: PcbCopperTopologyInput | null,
   /** #924 activation — the generator's own raw design items; additive, plain serializable data. */
   designItems?: DesignCheckItem[],
-): Promise<OracleReport> => guarded(getSimApi().simOracle(predicted, pcb ?? null, designItems));
+  /**
+   * #948 — the goal this program makes, when it is a goal program: the worker samples the goal at
+   * the check's 0.1 mm grid (cached per session) and pairs it with the live sweep's top, so the
+   * report carries `goalCutInto`. Absent/`null` on every non-goal run, exactly as before.
+   */
+  goal?: SimGoalCheck | null,
+): Promise<OracleReport> => guarded(getSimApi().simOracle(predicted, pcb ?? null, designItems, goal ?? null));
 
 /**
  * Read a PrusaSlicer project (.3mf) as a blank-and-items patch (#410 item 4's second entry point).

@@ -44,6 +44,8 @@ import type { Tool } from '@/engine/cnc/tool';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { vCone, vDepthLimit } from '@/engine/cnc/vProfile';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { goalCheckForProgram } from '@/engine/cnc/engrave/goalCheckInput';
+import { goalInputFor } from './goalCheckField';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
 import {
   applyCutterPlanToJob,
@@ -675,7 +677,18 @@ function sweepPlan(
       // #924 activation — the run's own design items ride the same call `gen.predicted` already
       // does; additive, so a goal/surface-3d/chamfer/drill-only run (whose `designItems` is always
       // empty, #924's own scope) reads exactly as it did before this.
-      if (i === gen.programs.length - 1) report = session.oracle(gen.predicted, null, gen.designItems);
+      // #948 — a goal program's verdict is against its GOAL as well as the plan: the session's own
+      // swept top is paired with the goal's sampled heightfield (the same sampling the run's own
+      // oracle does), so a plan that gouges the goal cannot pass on the plan alone.
+      if (i === gen.programs.length - 1) {
+        const goal = goalCheckForProgram(applied, gen.surface3d != null);
+        report = session.oracle(
+          gen.predicted,
+          null,
+          gen.designItems,
+          goal === undefined ? undefined : goalInputFor(session, goal),
+        );
+      }
     } finally {
       session.dispose();
     }

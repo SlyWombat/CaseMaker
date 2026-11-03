@@ -21,6 +21,8 @@ import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
 import { createSimSession, type SimDesign, type SimFrame, type SimLoadOpts, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
+import type { SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
+import { goalInputFor } from './sim/goalCheckField';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
@@ -306,8 +308,13 @@ const api = {
     // plain serializable data exactly like `predicted` above; additive, so a caller that still
     // sends only `predicted` (every caller as of this commit) runs exactly as it did before.
     designItems?: DesignCheckItem[],
+    // #948 — the goal this program makes, when it is a goal program: the worker samples its
+    // heightfield (cached per session) and pairs it with the live sweep's own top, so the report
+    // carries `goalCutInto` — the swept surface compared with the goal, not only with the plan.
+    goal?: SimGoalCheck | null,
   ): Promise<OracleReport> {
-    return (await getSession()).oracle(predicted, pcb ?? null, designItems);
+    const live = await getSession();
+    return live.oracle(predicted, pcb ?? null, designItems, goal == null ? undefined : goalInputFor(live, goal));
   },
   /**
    * Read a PrusaSlicer project (.3mf) as a blank-and-items patch (#410 item 4's second entry
