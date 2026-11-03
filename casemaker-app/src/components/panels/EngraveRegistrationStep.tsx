@@ -130,6 +130,19 @@ export interface EngraveRegistrationStepProps {
   job: EngraveJob;
   /** Where the machine was last reached, or null. The step cannot do anything without one. */
   target: { host: string; port: number } | null;
+  /**
+   * #934 review (M3) — the cut surface's "Register again" presses THIS step's own Start through
+   * this binding. It is filled on every render with the same condition the button's `disabled`
+   * uses, so the offer can only press a button that would accept the press — a prop callback, not
+   * a DOM query into another component's controls.
+   */
+  startBinding?: RegistrationStartBinding;
+}
+
+/** The registration's own Start, offered to a parent (the cut surface's "Register again"). */
+export interface RegistrationStartBinding {
+  /** Press Start where it stands; false when it is not offered, or it is disabled. */
+  press: () => boolean;
 }
 
 type Phase = 'idle' | 'running' | 'measured' | 'writing' | 'recorded' | 'failed';
@@ -199,7 +212,7 @@ function marginRefusal(outcome: RegistrationOutcome): boolean {
   return measuredXY && !outcome.withinMargin;
 }
 
-export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStepProps): JSX.Element {
+export function EngraveRegistrationStep({ job, target, startBinding }: EngraveRegistrationStepProps): JSX.Element {
   const { plan, why } = approvedPlan(job);
   // #797 follow-up — THE REGISTER CARD HOLDS THE ACTION. With no approved plan, the planner's
   // proposal is computed HERE, from the same machine record, shop defaults and engine call the
@@ -339,6 +352,21 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   }, []);
 
   const busy = phase === 'running' || phase === 'writing';
+
+  // #934 review (M3) — THE OFFER PRESSES A BUTTON THAT IS ENABLED. The cut surface's "Register
+  // again" goes through this binding; it is refreshed after every render with the SAME condition
+  // the Start button's `disabled` uses, so the press is never swallowed by a disabled control and
+  // nothing reaches into this component's DOM. `press()` answers whether it pressed.
+  useEffect(() => {
+    if (startBinding === undefined) return;
+    startBinding.press = () => {
+      const offered =
+        plan !== null && target !== null && !busy && (phase === 'idle' || phase === 'failed' || phase === 'recorded');
+      if (!offered || !statementGiven) return false;
+      void start();
+      return true;
+    };
+  });
 
   // #527 — the viewport draws the machine layer's wired probe instead of the cutter while the run
   // is touching off. Only `running` is a probe run: `writing` has already asked for the cutter, and
