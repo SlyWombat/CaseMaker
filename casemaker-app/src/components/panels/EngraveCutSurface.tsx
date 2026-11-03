@@ -50,6 +50,7 @@ import {
   releaseFileName,
   type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
+import type { GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 import { DRY_RUN_SAFE_Z, dryRunProgramFor, type DryRunLevel } from '@/engine/cnc/engrave/dryRun';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -379,6 +380,42 @@ type CutVerdict =
   | 'not-checked'
   | 'simulating'
   | 'not-simulated';
+
+/**
+ * #948 — THE GOAL CHECK'S LINE, in the demo page's card's own words. The page prints the 3D goal
+ * verdict beside the 2.5D one ("Matches the design", "cut into the goal … deep"); the app's card
+ * says the same three facts in one line: a pass, the worst cut-into WITH where it is, or the check
+ * saying it did not run — never a silent pass. The report states all three (`runner.ts`'s
+ * `ran`/`reason`/`maxCutIntoAt`): an unchecked goal is `ran: false` with its reason, and a
+ * comparison that ran says where its deepest cut-into cell is. No report is not "not checked" — a
+ * 2.5D run has no goal line at all.
+ */
+interface GoalLine {
+  text: string;
+  state: 'match' | 'cut-into' | 'not-checked';
+}
+
+/** mm, up to three decimals with trailing zeros dropped — the page's own depth format. */
+const goalMm = (n: number): string => String(Number(n.toFixed(3)));
+
+function goalLine(report: GoalCutIntoReport | undefined): GoalLine | null {
+  if (report === undefined) return null;
+  if (!report.ran) {
+    return {
+      text: `Goal not checked: ${report.reason ?? 'the check did not run for this program'}`,
+      state: 'not-checked',
+    };
+  }
+  if (report.ok) return { text: 'Matches the design (goal)', state: 'match' };
+  const at = report.maxCutIntoAt;
+  return {
+    text:
+      at === null
+        ? `Cuts ${goalMm(report.maxCutIntoMm)} mm into the design`
+        : `Cuts ${goalMm(report.maxCutIntoMm)} mm into the design at ${goalMm(at.x)}, ${goalMm(at.y)}`,
+    state: 'cut-into',
+  };
+}
 
 function cutVerdict(v: {
   hasProgram: boolean;
@@ -859,6 +896,9 @@ export function EngraveCutSurface({
     simStatus: runSimStatus,
     phase: runPhase,
   });
+  // #948 — the goal check's line, under the gate's verdict (the cutVerdict three-state is not
+  // touched): a pass, the worst cut-into with its location, or why the check did not run.
+  const goal = goalLine(runOracle?.goalCutInto);
   const verdictFix = verdict === 'failed' && firstError !== null ? findingFix(firstError) : null;
   // The press does what the fix names: a wizard step opens where the fix lives; every other target
   // is a control in the Design panel, so the press shows it.
@@ -1068,6 +1108,19 @@ export function EngraveCutSurface({
             )}
           </div>
         ) : null}
+        {/* #948 — THE GOAL CHECK'S LINE, under the gate's verdict. The demo page's cards carry the
+            3D goal verdict beside the 2.5D one; this is the same reading in the page's words, so a
+            goal run says a pass, the worst cut-into and where it is, or that the check did not run
+            (never a silent pass). A 2.5D run has no goal report and gets no line. */}
+        {goal !== null && (
+          <p
+            style={goal.state === 'cut-into' ? WARN : goal.state === 'match' ? { ...MUTED, color: OK } : MUTED}
+            data-testid="engrave-cut-goal"
+            data-state={goal.state}
+          >
+            {goal.text}
+          </p>
+        )}
         {/* #695 — the frozen job's mount is gone from the machine. One sentence, one action; the
             same check the wizard makes (`profileHolds`) decides whether this is here at all. */}
         {mountMismatch && (
