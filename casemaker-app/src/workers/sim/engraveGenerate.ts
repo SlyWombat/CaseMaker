@@ -1510,6 +1510,8 @@ function vCarveFindings(
   designById: ReadonlyMap<string, Polygons>,
   surfaceById: ReadonlyMap<string, Polygons>,
   requestedStepOver: number | null,
+  /** #940 — the diameter that step-over was resolved against, for the V-carve pitch fraction. */
+  requestedRowDiameter: number | null,
   /**
    * #861 — the colour plane the job states (`colourBoundaryFor`), or null for a one-colour blank.
    * The merge warning is about a ridge of the TOP COLOUR below that plane: with no second colour
@@ -1542,7 +1544,7 @@ function vCarveFindings(
       // The CAM's fraction is `params.stepOver` over the diameter the row was resolved on — a
       // chamfer's base, an engraver's tip — never the tip width (#740). A row number that cannot
       // be expressed as a fraction raises no note: the feeds gate refuses it before the CAM.
-      const stepover = vCarveRowStepover(tool, requestedStepOver, plane.planeRadius, cone);
+      const stepover = vCarveRowStepover(tool, requestedStepOver, plane.planeRadius, cone, requestedRowDiameter);
       if (stepover !== null && stepover.clamped) {
         findings.push({
           severity: 'warning',
@@ -1903,9 +1905,14 @@ export function engraveRegions(
   // actually asked for rather than a constant copied from the seed. A refusal here raises nothing:
   // the feeds gate owns that sentence, and the note is skipped.
   let requestedStepOver: number | null = null;
+  /** #940 — the diameter that step-over's row was matched on (a V row's tip, a flat row's base). */
+  let requestedRowDiameter: number | null = null;
   if (cone !== null && tool !== null) {
     const requested = engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride);
-    if (requested.ok) requestedStepOver = requested.params.stepOver;
+    if (requested.ok) {
+      requestedStepOver = requested.params.stepOver;
+      requestedRowDiameter = requested.params.rowDiameter ?? null;
+    }
   }
 
   // #285 — the colour boundary, when the job states its print. PURE grid arithmetic (#285 review):
@@ -2258,6 +2265,7 @@ export function engraveRegions(
           designById,
           surfaceById,
           requestedStepOver,
+          requestedRowDiameter,
           colourBoundaryDepth,
         );
   // #741 — the depth rule runs whatever the tip's record state: a cutter with no stated tip still

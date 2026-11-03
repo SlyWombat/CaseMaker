@@ -4710,7 +4710,7 @@ export function buildRunSheet(
       const stepover =
         tool === null || params === null
           ? null
-          : vCarveRowStepover(tool, params.stepOver, plane.planeRadius, cone);
+          : vCarveRowStepover(tool, params.stepOver, plane.planeRadius, cone, params.rowDiameter ?? null);
       // The clamp sentence is the finding's own, not a softer paraphrase: the sheet, the panel and
       // §8 must agree that this is a note about a correct cut, not a fault. §8 carries the full
       // finding verbatim; this line states the same fact beside the item's numbers.

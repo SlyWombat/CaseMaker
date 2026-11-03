@@ -118,6 +118,14 @@ export interface CutParams {
    * Always `true` — every row in this table runs with it, and a coupon cannot measure it.
    */
   air: boolean;
+  /**
+   * #940 — THE DIAMETER THIS ROW WAS MATCHED ON, mm: a flat's cutting diameter, a V row's TIP, or
+   * — for #669's flat-row fallback — a chamfer's cone base. `stepOver` is
+   * `entry.stepOverFraction × rowDiameter`; the CAM reads a V-carve's fraction back against THIS
+   * number, never `feedRowDiameter(tool)`, which cannot know which row answered. Absent on a
+   * hand-built params object (a test), where the tool's own answer stands.
+   */
+  rowDiameter?: number;
 }
 
 /**
@@ -1167,6 +1175,13 @@ function catalogueProvenance(
 }
 
 /**
+ * #940 — THE STEP A CONE FALLS BACK TO when no V row answered it (a chamfer on #669's flat row):
+ * the V rows' own seed, 1.0 mm. The flat row's step-down is a flat's rule — its 0.6 mm would run a
+ * V-carve in 0.6 mm layers of the same rings, and a cone's flank is the wall.
+ */
+export const CONE_STEP_DOWN_FALLBACK_MM = 1.0;
+
+/**
  * The step-over and peck a catalogue-only answer gets, as fractions of the cutter diameter (#347).
  * Ours rather than the vendor's: no feeds table states a step-over or a peck at all.
  *
@@ -1466,6 +1481,14 @@ export type FeedsResult =
       params: CutParams;
       entry: FeedsEntry;
       /**
+       * #940 — THE DIAMETER THIS ROW WAS MATCHED ON: a flat's cutting diameter, a V row's TIP
+       * width, or — for #669's flat-row fallback — a chamfer's cone base. `params.stepOver` is
+       * `entry.stepOverFraction × rowDiameter`, and the CAM reads its V-carve fraction back
+       * against this number, never against `feedRowDiameter(tool)` (which cannot know which row
+       * answered: a chamfer matches a V row at its tip and falls back to a flat row at its base).
+       */
+      rowDiameter: number;
+      /**
        * The catalogue row that supplied numbers, or null when the entry answered on its own. The
        * panel reads it to say "Makera's numbers" rather than "computed".
        */
@@ -1571,23 +1594,31 @@ export function feedsFor(
   // cone whose header states no tip or angle.
   const usable = cuttingForTrace(tool);
   if (!usable.ok) return { ok: false, cause: 'cutter', reason: usable.reason };
-  // #669 — A CHAMFER BIT RESOLVES THE FLAT ROW FOR ITS CUTTING DIAMETER. The V rows are keyed to an
-  // engraver's TIP (0.3–0.5 mm); a chamfer's tip is a point or a small flat, a diameter no V row
-  // carries, and on wood there is no V row at all. What a chamfer pass actually engages is the
-  // cone's flank up to its cutting diameter, which is the width a flat row is written for, so that
-  // row's numbers stand — and {@link chamferProvenance}, below, is what names the row and the
-  // substitution rather than letting the row's own generic text stand in for it (#941).
+  // #940 — A CONE TAKES ITS OWN V ROW AT ITS TIP WHEN ONE COVERS IT. Makera's hardwood V rows
+  // are keyed to the cutter's TIP (0.1 mm for the sample-4 chamfer); the vendor's numbers for the
+  // cutter that cuts are better data than #669's substitution. A chamfer with no V row covering
+  // its tip falls back to the flat row at its cone base (#669) — the flank engages like a flat up
+  // to that diameter — and {@link chamferProvenance} names that substitution. An ENGRAVER has no
+  // fallback: a V row or the catalogue, else the refusal.
+  const coneShape = usable.tool.shape === 'v';
   const chamfer = tool.shape === 'chamfer';
-  const edge: 'flat' | 'v' = !chamfer && usable.tool.shape === 'v' ? 'v' : 'flat';
-  // A chamfer's row is matched on the cone's BASE (`diameter` — the shank Makera writes there),
-  // never `cuttingDiameter`, which answers with the TIP and would ask for a 0.2 mm flat row.
-  // `feedRowDiameter` is the one copy of that choice (#740): the CAM, the clamp note, the run sheet
-  // and the panel read the same diameter back when they turn `params.stepOver` into a fraction.
-  const diameter = feedRowDiameter(tool) ?? 0;
-
-  const choice = entryFor(snapshot, material, tool, diameter, machine, table, edge, refuseFraction);
+  // The width a V row is keyed to: an engraver's tip, a chamfer's tip; the cone's `diameter` is
+  // its shank and never matches a V row.
+  const tipDiameter = cuttingDiameter(tool) ?? 0;
+  const baseDiameter = feedRowDiameter(tool) ?? 0;
+  let edge: 'flat' | 'v' = coneShape ? 'v' : 'flat';
+  let diameter = coneShape ? tipDiameter : baseDiameter;
+  let choice = entryFor(snapshot, material, tool, diameter, machine, table, edge, refuseFraction);
+  if (!choice.ok && chamfer) {
+    // #669's fallback: the cone's flank engages like a flat end mill up to its BASE.
+    edge = 'flat';
+    diameter = baseDiameter;
+    choice = entryFor(snapshot, material, tool, diameter, machine, table, edge, refuseFraction);
+  }
   if (!choice.ok) return { ok: false, cause: choice.cause, reason: choice.reason };
   const { entry, catalogueOnly } = choice;
+  // #940 — a chamfer that took a V row is not a substitution: no #669 sentence.
+  const flatRowFallback = chamfer && edge === 'flat';
 
   // #310 — the catalogue rung. A row a coupon has measured is NOT eligible: "a catalogue row never
   // overrides a measured row" is the rule this tier exists under, and it is the difference between
@@ -1622,6 +1653,7 @@ export function feedsFor(
     stepOver: entry.params.stepOverFraction * diameter,
     peck: entry.params.peckFraction * diameter,
     air: entry.params.air,
+    rowDiameter: diameter,
   };
 
   // The four numbers Makera states, over the starting values — FIELD BY FIELD, and only where this
@@ -1663,6 +1695,15 @@ export function feedsFor(
     if (override.peck !== undefined) params.peck = override.peck;
     if (override.air !== undefined) params.air = override.air;
   }
+
+  // #940 — A CONE STEPS BY A V ROW'S STEP-DOWN. When the row that answered is a flat's (#669's
+  // fallback), its step-down is a flat's rule and never applies to a cone: the V rows' 1.0 mm
+  // seed sets the step, and the provenance says so.
+  const coneStepNote =
+    coneShape && edge === 'flat'
+      ? ` A cone steps by a V row's step-down; this row is a flat's, so the V rows' ${num3(CONE_STEP_DOWN_FALLBACK_MM)} mm seed sets the step.`
+      : '';
+  if (coneShape && edge === 'flat') params.stepDown = CONE_STEP_DOWN_FALLBACK_MM;
 
   // PROVISIONAL (#218): a profile cut is a full-width SLOT, both sides of the cutter engaged, so
   // half the row's pocketing step-down holds until the slotting coupon measures it (#248's path).
@@ -1746,6 +1787,8 @@ export function feedsFor(
     plungeFeed: fieldSource('plungeFeed'),
     peck: 'computed',
     air: 'computed',
+    // The matched diameter is this function's own bookkeeping, never a row's field.
+    rowDiameter: 'computed',
   };
 
   // The row answers this job only if at least one of its numbers survived (#325): a row we passed
@@ -1756,14 +1799,20 @@ export function feedsFor(
   // tool it is for (there is no generic-constant bug to fix there), and its `minDiameter`/
   // `maxDiameter` are both just the resolved diameter — not a band — so wrapping it in "the flat
   // X–X mm row" would read oddly over a sentence that was already specific.
+  const rowWords = chamfer && edge === 'v' && catalogueOnly === false
+    ? `Its V row answers it — the cutter's own ${num3(diameter)} mm tip band: `
+    : '';
   const provenance =
+    rowWords +
     (answered && row
       ? catalogueProvenance(row, tool, entry, ignored, snapshot, mappedFor)
-      : chamfer && catalogueOnly === false
+      : flatRowFallback && catalogueOnly === false
         ? chamferProvenance(tool, material, diameter, entry)
-        : entry.provenance) + (catalogueOnly === false ? '' : catalogueOnlyNote(entry, catalogueOnly));
+        : entry.provenance) +
+    coneStepNote +
+    (catalogueOnly === false ? '' : catalogueOnlyNote(entry, catalogueOnly));
 
   // The row DID answer (`answered`) rather than merely existing: a vendor row whose numbers were
   // all passed over supplied nothing, and the panel's "Makera's numbers" label would be false.
-  return { ok: true, params, entry, catalogue: answered ? row : null, sources, provenance, diagnostics };
+  return { ok: true, params, entry, rowDiameter: diameter, catalogue: answered ? row : null, sources, provenance, diagnostics };
 }

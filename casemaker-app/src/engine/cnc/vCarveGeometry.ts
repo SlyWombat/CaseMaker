@@ -333,8 +333,15 @@ export function vCarveRowStepover(
   rowStepOverMm: number,
   planeRadius: number,
   cone: VCone,
+  /**
+   * #940 — THE DIAMETER THE ROW WAS MATCHED ON, when the caller has it (`FeedsResult.rowDiameter`):
+   * a chamfer can now take a V row at its TIP (0.1 mm) and fall back to a flat row at its cone
+   * base (3.175 mm), so `feedRowDiameter(tool)` alone cannot say which diameter divided the row's
+   * step-over. Absent: the tool's own answer, exactly as before.
+   */
+  rowDiameter?: number | null,
 ): VCarveStepover | null {
-  const diameter = feedRowDiameter(tool);
+  const diameter = rowDiameter ?? feedRowDiameter(tool);
   if (diameter === null || !(diameter > 0)) return null;
   if (!Number.isFinite(rowStepOverMm) || !(rowStepOverMm > 0)) return null;
   const ratio = rowStepOverMm / diameter;
