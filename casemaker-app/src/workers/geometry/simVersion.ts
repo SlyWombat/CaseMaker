@@ -12,4 +12,6 @@
  * package that cannot show a version at all (frozen before this existed) is stale too, by the
  * same statement — see that file's header comment on `packageStaleness`.
  */
-export const SIMULATOR_VERSION = 1;
+// 1 — #925 introduced the version.
+// 2 — #947 opens boundary slivers before counting; #924 folds the design check into `ok`.
+export const SIMULATOR_VERSION = 2;

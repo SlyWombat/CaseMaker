@@ -20,6 +20,7 @@ import {
   jobFingerprint,
   packageHash,
   packageStaleness,
+  validatePackage,
   type PackageProgramInput,
 } from '@/engine/cnc/engrave/package';
 import { surfaceRepostBlocker } from '@/store/engraveRunGate';
@@ -249,12 +250,13 @@ describe('the package engine (#419 §4)', () => {
     // Frozen just now: current simulator, not stale.
     expect(packageStaleness(pkg, job)).toEqual({ stale: false, reason: null });
 
-    // The hash moves with the version: the current build's own version and the one before it (no
-    // version has existed below 1) are never mistaken for each other, even over the exact same job
-    // and programs. A version bump's own staleness behaviour is pinned in
-    // `packageSimVersionStaleness925.spec.ts`, which mocks the constant to exercise the bump itself
-    // — `SIMULATOR_VERSION` is 1 today, so there is no genuinely older version to freeze under here.
-    expect(packageHash(pkg.jobHash, pkg.programs, SIMULATOR_VERSION - 1)).not.toBe(pkg.hash);
+    // The hash moves with the version: a package frozen under version 1, over the exact same job
+    // and programs, reads stale under this build, named by the simulator, and is not tampered.
+    expect(SIMULATOR_VERSION).toBe(2);
+    const frozenUnderV1 = { ...pkg, hash: packageHash(pkg.jobHash, pkg.programs, 1) };
+    expect(frozenUnderV1.hash).not.toBe(pkg.hash);
+    expect(packageStaleness(frozenUnderV1, job)).toEqual({ stale: true, reason: 'the simulator changed since it was frozen' });
+    expect(validatePackage(frozenUnderV1)).toEqual({ ok: true, reason: null });
 
     // A package frozen before #925 (its hash has no version term at all) is NOT grandfathered in:
     // the gate reads current only when job, registration, program bytes AND simulator version all
