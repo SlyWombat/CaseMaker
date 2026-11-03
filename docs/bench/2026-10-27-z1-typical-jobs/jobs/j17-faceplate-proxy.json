@@ -59,11 +59,11 @@
    "clamps": [
     {
      "edge": "back",
-     "at": 100
+     "at": 22.5
     },
     {
-     "edge": "right",
-     "at": 50
+     "edge": "back",
+     "at": 89.5
     }
    ],
    "source": "default"
