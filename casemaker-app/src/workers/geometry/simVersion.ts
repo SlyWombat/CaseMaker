@@ -14,4 +14,5 @@
  */
 // 1 — #925 introduced the version.
 // 2 — #947 opens boundary slivers before counting; #924 folds the design check into `ok`.
-export const SIMULATOR_VERSION = 2;
+// 3 — #924 judges the raw outline with the cutter's own radius, at every level above the floor.
+export const SIMULATOR_VERSION = 3;
