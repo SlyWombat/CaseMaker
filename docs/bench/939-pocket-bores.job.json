@@ -67,6 +67,11 @@
   "breakthrough": 0.3,
   "jawClearance": 1,
   "customFonts": [],
+  "facing": {
+    "enabled": false,
+    "depth": 0,
+    "source": "user"
+  },
   "drills": [
     {
       "id": "bore-1",

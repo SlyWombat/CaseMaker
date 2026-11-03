@@ -547,6 +547,8 @@ const M1_STICK_CUTTER = 'flat-1.0';
 const m1Base = defaultEngraveJob();
 m1Base.id = 'job-938-stick-base'; // stable, so regenerating does not churn the committed file
 m1Base.name = 'Milestone 1 stick base (hardwood coupon + samples)';
+// #936: the sticks are planed stock — no facing pass, stated rather than left absent.
+m1Base.facing = { enabled: false, depth: 0, source: 'user' };
 m1Base.stock = { ...M1_STICK, material: 'hardwood' };
 m1Base.toolKey = M1_STICK_CUTTER;
 m1Base.labels = [];
@@ -603,6 +605,8 @@ console.log('    npx tsx --tsconfig tsconfig.scripts.json scripts/engrave-job.ts
 const m1Sample3 = defaultEngraveJob();
 m1Sample3.id = 'job-939-pocket-bores';
 m1Sample3.name = 'Milestone 1 sample 3: pocket and four bores on the stick';
+// #936: the sticks are planed stock — no facing pass, stated rather than left absent.
+m1Sample3.facing = { enabled: false, depth: 0, source: 'user' };
 m1Sample3.stock = { ...M1_STICK, material: 'hardwood' };
 m1Sample3.toolKey = 'inv:kz-corn-3-0-12';
 m1Sample3.labels = [];
@@ -634,6 +638,8 @@ console.log('\n#939 sample 3 job written: 939-pocket-bores.job.json');
 const m1Sample4 = defaultEngraveJob();
 m1Sample4.id = 'job-940-two-cutter';
 m1Sample4.name = 'Milestone 1 sample 4: pocket and V-carved initials on its floor';
+// #936: the sticks are planed stock — no facing pass, stated rather than left absent.
+m1Sample4.facing = { enabled: false, depth: 0, source: 'user' };
 m1Sample4.stock = { ...M1_STICK, material: 'hardwood' };
 m1Sample4.toolKey = NO_TOOL_KEY;
 m1Sample4.labels = [
@@ -661,6 +667,8 @@ console.log('\n#940 sample 4 job written: 940-two-cutter.job.json');
 const m1Sample5 = defaultEngraveJob();
 m1Sample5.id = 'job-941-chamfer-slot';
 m1Sample5.name = 'Milestone 1 sample 5: chamfer the top edges, then a through-slot';
+// #936: the sticks are planed stock — no facing pass, stated rather than left absent.
+m1Sample5.facing = { enabled: false, depth: 0, source: 'user' };
 m1Sample5.stock = { ...M1_STICK, material: 'hardwood' };
 m1Sample5.toolKey = NO_TOOL_KEY;
 m1Sample5.labels = [];

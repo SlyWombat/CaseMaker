@@ -1,6 +1,6 @@
 # Run sheet — 938 hardwood flat-cutter feed coupon F700
 
-Generated 2026-11-02 · file `938-hardwood-flat-cutter-feed-coupon-F700.nc` · sha256 `8dac55cb` · estimated cutting time 1 min 37 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time.)
+Generated 2026-11-03 · file `938-hardwood-flat-cutter-feed-coupon-F700.nc` · sha256 `03b57830` · estimated cutting time 1 min 49 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time.)
 
 ## 1 · What you need
 
@@ -57,30 +57,35 @@ Generated 2026-11-02 · file `938-hardwood-flat-cutter-feed-coupon-F700.nc` · s
 ## 6 · Dry run
 
 1. Load 938-hardwood-flat-cutter-feed-coupon-F700-frame.nc and run it. The cutter traces the job's outline in the air, 20 mm above the work — no Z offset to set. Watch that the trace stays over the blank and clear of the jaws. — **20 mm above the work**
-2. If the trace is not where the job should land, stop and change the job. Otherwise load 938-hardwood-flat-cutter-feed-coupon-F700.nc and cut.
+2. If the trace is not where the job should land, stop and change the job. Otherwise face the top and re-touch Z0 first (the next section), then load 938-hardwood-flat-cutter-feed-coupon-F700.nc and cut.
 
-## 7 · Cut
+## 7 · Face the stock top
+
+1. No facing pass — this job turns it off. By default the stock whose finish is not recorded is faced first: the finish is not known, so it is faced first. — **facing off**
+
+## 8 · Cut
 
 1. Spindle, feed, plunge, passes and step-down. Vacuum on. — **12000 RPM · 700 mm/min feed · 150 mm/min plunge · 4 × 0.3 mm passes · 0.45 mm step-over**
-2. Program 1, 938-hardwood-flat-cutter-feed-coupon-F700.nc — the cycle is 1 min 37 s: 12 % of it in air, 8 hops taking 3 s, and the feed running at 87 % of the rate it commands. The air path is 36.244 mm against a 25.191 mm lower bound for visiting its loop entries — 44 % past it. Those are the cycle estimate's own trapezoids on the job machine's rapid model — the same clock the file is posted with. — **12 % in air · 8 hops · feed at 87 %**
+2. Program 1, 938-hardwood-flat-cutter-feed-coupon-F700.nc — the cycle is 1 min 49 s: 11 % of it in air, 8 hops taking 3 s, and the feed running at 87 % of the rate it commands. The air path is 36.244 mm against a 25.191 mm lower bound for visiting its loop entries — 44 % past it. Those are the cycle estimate's own trapezoids on the job machine's rapid model — the same clock the file is posted with. — **11 % in air · 8 hops · feed at 87 %**
 3. The feed path sweeps 583.942 mm² of stock at up to 1 mm deep — the strip is Σ (path length × the cutter's width at that depth) on the feed moves; the sweep removed 123.218 mm³. — **583.942 mm² swept · 123.218 mm³ removed**
 4. the toolpath is ordered by proximity: the cutter finishes each contour to its depth before entering the next, takes each entry at the point nearest where it just was, and cuts the pocket rings inside-out so the wall is the last thing it touches. The file spends 36.244 mm in the air against 583.942 mm cutting (0.062 : 1). The previous ordering spent 298.983 mm (0.512 : 1) on the same cut. — **36.244 mm rapid · 583.942 mm cut**
 5. Engrave "F700" — **1 mm deep**
 6. Stay at the machine. Stop it if the sound changes, the blank moves, or the cutter loads up.
 
-## 8 · Warnings carried from the app
+## 9 · Warnings carried from the app
 
 1. the deepest cut is 1.000 mm below the stock top and tool "1 mm flat end" states no shoulder or flute length: holder clearance cannot be proven
 2. Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).
 3. Not checked: the spindle body, head and gantry; anything on the bed other than the declared stock, workholding and sacrificial material; the shank of “1 mm flat end” above the cutter, which states no shoulder or flute length.
 4. The modelled fixture is a shipped default.
 
-## 9 · Record afterwards
+## 10 · Record afterwards
 
 1. Measured floor depth — Engrave "F700" — \_\_\_\_\_\_\_\_  *(measured depth (mm))*
-2. Is the text legible? — \_\_\_\_\_\_\_\_  *(yes / no)*
-3. Surface finish — \_\_\_\_\_\_\_\_  *(clean / fuzzy / burnt)*
-4. Anything that went wrong — \_\_\_\_\_\_\_\_  *(notes)*
+2. Wall-clock minutes the run took (start to finish) — the cycle estimate is 1 min 49 s. — \_\_\_\_\_\_\_\_  *(minutes)*
+3. Is the text legible? — \_\_\_\_\_\_\_\_  *(yes / no)*
+4. Surface finish — \_\_\_\_\_\_\_\_  *(clean / fuzzy / burnt)*
+5. Anything that went wrong — \_\_\_\_\_\_\_\_  *(notes)*
 
 ---
 

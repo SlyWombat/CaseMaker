@@ -5,7 +5,7 @@
   "material": "hardwood",
   "toolKey": "flat-1.0",
   "cuttingDiameter": 1,
-  "generatedOn": "2026-11-02",
+  "generatedOn": "2026-11-03",
   "cutOn": null,
   "baseOverride": {},
   "note": "Fill \"verdict\" (ok / poor / broke), \"cutOn\" (YYYY-MM-DD) and any note per program. If more than one program cut ok, mark exactly one \"chosen\": true. Then run scripts/feeds-readback.ts on this file.",
@@ -17,7 +17,7 @@
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F400.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F400-run-sheet.md",
-      "hash": "2541e6f3",
+      "hash": "a34d64d3",
       "verdict": null,
       "chosen": false,
       "note": ""
@@ -29,7 +29,7 @@
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F700.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F700-run-sheet.md",
-      "hash": "8dac55cb",
+      "hash": "03b57830",
       "verdict": null,
       "chosen": false,
       "note": ""
@@ -41,7 +41,7 @@
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F1000.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F1000-run-sheet.md",
-      "hash": "22c00bed",
+      "hash": "610a521e",
       "verdict": null,
       "chosen": false,
       "note": ""
@@ -53,7 +53,7 @@
       ],
       "ncFile": "938-hardwood-flat-cutter-feed-coupon-F1200.nc",
       "sheetFile": "938-hardwood-flat-cutter-feed-coupon-F1200-run-sheet.md",
-      "hash": "0ad2b7cc",
+      "hash": "c7361569",
       "verdict": null,
       "chosen": false,
       "note": ""

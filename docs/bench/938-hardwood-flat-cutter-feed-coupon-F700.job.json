@@ -54,6 +54,11 @@
   },
   "breakthrough": 0.3,
   "jawClearance": 1,
+  "facing": {
+    "enabled": false,
+    "source": "user",
+    "depth": 0
+  },
   "shapes": [],
   "combined": [],
   "traces": [],
