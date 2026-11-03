@@ -342,7 +342,10 @@ describe('#785 — Generate', () => {
     const retry = await generateGoalProgram(tallJob(pitched), pitched, flat({ fluteLength: 40 }), [], null, {});
     expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(retry.findings.some((f) => f.code === 'goal-program-too-big')).toBe(false);
-  }, 120_000);
+    // #945 — the retry succeeds at the suggested (coarser, still large) pitch, so it runs the real
+    // finish + the overcut guard's now-wider per-cell candidate search; that costs real wall time
+    // at this job's move count, past the old 120 s bound.
+  }, 400_000);
 
   it('#888 a goal whose depth can be split in two under the budget carries the split, and the press builds it', async () => {
     // #889 — a roughing level costs what it removes and merges into one move per row, so a ramp
@@ -399,7 +402,9 @@ describe('#785 — Generate', () => {
     const stepped = { ...target, surface: { ...(target.surface ?? {}), roughStepDownMm: refusal!.suggestedStepDownMm } };
     const retry = await generateGoalProgram(tallJob(stepped), stepped, flat({ fluteLength: 40 }), [], null, {});
     expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
-  }, 120_000);
+    // #945 — same reason as the test above: the retry's real finish + overcut guard pass at this
+    // job's move count needs more than the old 120 s bound now.
+  }, 400_000);
 
   it('a goal within reach generates with no reach finding at all', async () => {
     const target = rampGoal({}, 8);
