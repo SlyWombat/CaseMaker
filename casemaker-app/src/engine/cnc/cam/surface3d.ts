@@ -1758,20 +1758,77 @@ export function planGoalOvercut(
       const iHi = Math.min(nx - 1, Math.ceil((Math.max(sx, ex) + r - x0) / pitch));
       const jLo = Math.max(0, Math.floor((Math.min(sy, ey) - r - y0) / pitch));
       const jHi = Math.min(ny - 1, Math.ceil((Math.max(sy, ey) + r - y0) / pitch));
+      // #945 — THE LATERAL-NEAREST POINT IS NOT ALWAYS THE WORST POINT. A segment that moves away
+      // from a cell while also descending (a steep link between two adjacent raster columns) can
+      // gouge the cell partway along its length, where the ball's edge is just inside reach (its
+      // rise is near 0) but the centre has already dropped a long way — deeper than at the single
+      // point closest in XY, which is what used to be evaluated here. Candidates, each clamped and
+      // re-checked against the REAL (square) distance below, so an approximation only adds a
+      // candidate to try, never changes what counts as a hit:
+      //   - t0: the old lateral-nearest point (kept; still often the worst point);
+      //   - 0, 1: the segment's own ends, the worst point for a non-ball tool (reached(t) is then
+      //     just z(t), linear, so its minimum over any sub-interval is always at an end);
+      //   - the two points where the cutter's disc just reaches the cell at all (point-centre
+      //     approximation; `skin` already absorbs the pitch/2 square correction) — the ball's rise
+      //     there is ~0, so this is where a steep descent gouges deepest;
+      //   - for a ball tool, the interior point minimising `z(t) + ballRise(d(t))` exactly (closed
+      //     form: z is linear and d² is quadratic in t, so the derivative solves to one root).
       for (let j = jLo; j <= jHi; j++) {
         const cy = y0 + j * pitch;
         for (let i = iLo; i <= iHi; i++) {
           const k = j * nx + i;
           if (covered[k] === 0) continue;
           const cx = x0 + i * pitch;
-          // The segment's nearest approach to this cell, clamped to its ends; the cell's SQUARE is
-          // what the cutter reaches, so the distance is measured to its nearest point (#909).
-          const t = len2 > 0 ? Math.max(0, Math.min(1, ((cx - sx) * dx + (cy - sy) * dy) / len2)) : 0;
-          const d = cellSquareDistance(cx - (sx + dx * t), cy - (sy + dy * t), pitch);
-          if (d > r - skin) continue;
-          const reached = sz + dz * t + ballRise(tool.ball, r, d);
-          if (reached < (cut[k] as number)) {
-            cut[k] = reached;
+          let best = Infinity;
+          const consider = (tRaw: number): void => {
+            if (!Number.isFinite(tRaw)) return;
+            const t = Math.max(0, Math.min(1, tRaw));
+            const d = cellSquareDistance(cx - (sx + dx * t), cy - (sy + dy * t), pitch);
+            if (d > r - skin) return;
+            const reached = sz + dz * t + ballRise(tool.ball, r, d);
+            if (reached < best) best = reached;
+          };
+          const t0 = len2 > 0 ? ((cx - sx) * dx + (cy - sy) * dy) / len2 : 0;
+          consider(t0);
+          consider(0);
+          consider(1);
+          if (len2 > 0) {
+            // Where the disc's edge (point-centre) reaches the cell at all: A t² + B t + C = 0.
+            const px = sx - cx;
+            const py = sy - cy;
+            const B = 2 * (px * dx + py * dy);
+            const C = px * px + py * py - r * r;
+            const disc = B * B - 4 * len2 * C;
+            if (disc > 0) {
+              const sq = Math.sqrt(disc);
+              const tLo = (-B - sq) / (2 * len2);
+              const tHi = (-B + sq) / (2 * len2);
+              consider(tLo);
+              consider(tHi);
+              if (tool.ball && r > 0) {
+                // The closed-form interior minimum of z(t) + ballRise(r, d(t)): with w = t − t0 and
+                // d(t)² = p² + len2·w² (p = the point's own perpendicular distance, at t0), solving
+                // d/dw [sz + dz·(t0+w) − √(r² − p² − len2·w²)] = 0 gives w = −dz·R0 / (L·√(len2+dz²))
+                // where R0² = r² − p², L = √len2 (negative when R0² < 0: the line never reaches the
+                // cell at t0's own perpendicular, so no interior root — the boundary candidates above
+                // already cover that case).
+                const qx = cx - (sx + dx * t0);
+                const qy = cy - (sy + dy * t0);
+                const p2 = qx * qx + qy * qy;
+                const r0sq = r * r - p2;
+                if (r0sq > 0) {
+                  const L = Math.sqrt(len2);
+                  const denom = L * Math.sqrt(len2 + dz * dz);
+                  if (denom > 0) {
+                    const w = (-dz * Math.sqrt(r0sq)) / denom;
+                    consider(t0 + w);
+                  }
+                }
+              }
+            }
+          }
+          if (best < (cut[k] as number)) {
+            cut[k] = best;
             cutStage[k] = Math.min(254, stageIndex);
           }
         }
