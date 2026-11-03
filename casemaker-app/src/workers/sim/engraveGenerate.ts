@@ -252,7 +252,7 @@ import { rotaryFreeSpan, freeEndSentence, jawsSentence, tailstockSentence, throu
 import { generateRotaryReliefIR, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePoint, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
-import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
+import { designCutterOf, type DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
@@ -2323,7 +2323,7 @@ export function engraveRegions(
         inner.delete();
         ring.delete();
         if (ringPolygons.length > 0 && c.depth > 0) {
-          cutoutAllowances.push({ itemId: c.id, design: ringPolygons, depth: c.depth, r: 0, allowOnly: true });
+          cutoutAllowances.push({ itemId: c.id, design: ringPolygons, depth: c.depth, allowOnly: true });
         }
       }
       outlineCS.delete();
@@ -2556,17 +2556,11 @@ export function engraveRegions(
   const isolationFrameIds = new Set(
     (job.combined ?? []).filter((c) => c.kind === 'frame' && c.isolation === true).map((c) => c.id),
   );
-  // #924 activation — one design-check item per region below, built from the SAME `design`/
-  // `depth` this region already carries (never a second derivation that could disagree with it).
-  // A V-carve's `r` is its OWN `planeRadius` (`vCarveById`'s, computed per item from its own
-  // depth/floor by `vCarvePlane`) — the cone's radius at the item's TOP surface, the WIDEST its
-  // cross-section gets while cutting this item, so it is the most conservative "cannot enter"
-  // bound for the independent check (never the cone's constant `tipRadius`, which is the radius
-  // only at the very floor and is too narrow a bound for material above it — using it understated
-  // the reach and read ordinary badge text as over-cut by tens of mm² in the first draft of this
-  // commit). A flat item's `r` is the cutter's own constant cutting radius. Left out (not pushed)
-  // when the design is empty, when this program's tool states no radius, when the item cuts no
-  // material (depth <= 0), or when the item is an isolation frame (above) — never guessed at.
+  // #924 — the design check's own inputs, never the CAM's: the item's outline AS DRAWN (its raw
+  // profile, not the measured opening `designOf` returns), the cutter as its Tool record states it,
+  // the surface it sits on and the job's colour boundary. The depth is the job's, except where the
+  // cone clamp above cut it shallower and said so; the item then carries the job's depth beside it.
+  const designCutter = tool === null ? null : designCutterOf(tool);
   const allDesignItems: DesignCheckItem[] = [];
   const regions: EngraveRegion[] = plan.engraves.map((e) => {
     const vCarve = vCarveById.get(e.id);
@@ -2580,9 +2574,22 @@ export function engraveRegions(
       vCarve !== undefined && vLimit !== null && vLimit.boundBy === 'cone' && material > vLimit.limitMm + 1e-9;
     const depth = clampToCone ? floor + vLimit.limitMm : e.depth;
     const design = designOf(e);
-    const designR = vCarve !== undefined ? vCarve.planeRadius : radius;
-    if (design.length > 0 && designR !== null && designR >= 0 && depth > 0 && !isolationFrameIds.has(e.id)) {
-      allDesignItems.push({ itemId: e.id, design, depth, r: designR });
+    if (designCutter !== null && depth > 0 && !isolationFrameIds.has(e.id)) {
+      const rawCS = executeProfile(tl, e.profile);
+      const raw = rawCS.toPolygons() as Polygons;
+      rawCS.delete();
+      if (raw.length > 0) {
+        allDesignItems.push({
+          itemId: e.id,
+          design: raw,
+          depth,
+          cutter: designCutter,
+          surfaceDepth: floor,
+          film: colourBoundaryDepth,
+          ...(e.variableDepth === true ? { variableDepth: true as const } : {}),
+          ...(clampToCone ? { jobDepth: e.depth } : {}),
+        });
+      }
     }
     return {
       id: e.id,
@@ -2623,7 +2630,7 @@ export function engraveRegions(
     const holePolygons = drillRadius === null ? [] : drillPolygons(tl, d.holes, drillRadius);
     // #924 hotfix — the hole explains the removal beside a neighbouring item but is not graded.
     if (holePolygons.length > 0 && depth > 0) {
-      allDesignItems.push({ itemId: d.id, design: holePolygons, depth, r: 0, allowOnly: true });
+      allDesignItems.push({ itemId: d.id, design: holePolygons, depth, allowOnly: true });
     }
     regions.push({
       id: d.id,
