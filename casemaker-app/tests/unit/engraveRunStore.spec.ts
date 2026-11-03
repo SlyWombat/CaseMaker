@@ -27,7 +27,8 @@ import {
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveGenerated, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
-import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
+import { goalCutIntoUnchecked, type DesignCheckItem, type GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
+import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 import {
   conditionForKey,
   resetInventoryConditions,
@@ -230,6 +231,43 @@ describe('engraveRunStore (#206)', () => {
       expect(s.oracle?.ok).toBe(true);
       expect(s.oraclePrograms).toHaveLength(2);
       expect(saveBlocker(gate.gateViewFor(s, null, false))).toBeNull();
+    });
+  });
+
+  // #948 — THE COMBINED REPORT CARRIES THE GOAL CHECK. A goal program's own oracle report holds
+  // `goalCutInto`, but the run's report is `combineOracles`' — and it used to drop the field, so
+  // the Cut card's goal line never mounted on a real run. The verdict is the FINAL surface's: a
+  // #869 rough/finish split posts two goal programs, both carry a check, and the rough's leftover
+  // is not the run's answer — the LAST program's report that carries one is taken.
+  describe('#948 the goal check on the combined report', () => {
+    const report = (over: Partial<OracleReport> = {}): OracleReport => ({
+      ok: true,
+      band: 0.016,
+      levels: [],
+      worst: { underCut: 0, overCut: 0 },
+      ...over,
+    });
+    const check = (reason: string): GoalCutIntoReport => goalCutIntoUnchecked(reason);
+
+    it('takes the LAST program’s check, not the first: the finish surface is the verdict', () => {
+      const combined = store.combineOracles([report({ goalCutInto: check('rough') }), report({ goalCutInto: check('finish') })], null);
+      expect(combined.goalCutInto).toBeDefined();
+      expect(combined.goalCutInto?.reason).toBe('finish');
+    });
+
+    it('carries the last report that has one when a later program does not', () => {
+      const combined = store.combineOracles([report({ goalCutInto: check('only') }), report()], null);
+      expect(combined.goalCutInto?.reason).toBe('only');
+    });
+
+    it('adds no key when no program has a goal check', () => {
+      const combined = store.combineOracles([report(), report()], null);
+      expect('goalCutInto' in combined).toBe(false);
+    });
+
+    it('a board’s copper report never supplies the goal check', () => {
+      const combined = store.combineOracles([report()], report({ goalCutInto: check('copper') }));
+      expect('goalCutInto' in combined).toBe(false);
     });
   });
 

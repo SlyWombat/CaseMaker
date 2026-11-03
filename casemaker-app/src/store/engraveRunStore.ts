@@ -241,6 +241,14 @@ export function combineOracles(reports: readonly OracleReport[], copper: OracleR
   if (first === null || all.length === 0) throw new Error('no oracle report to combine');
   const failing = reports.filter((r) => !r.ok);
   const locus = failing[0] ?? first;
+  // #948 — THE GOAL VERDICT IS THE FINAL SURFACE'S. A #869 rough/finish split posts two goal
+  // programs and BOTH carry a check; the rough's leftover is not the run's verdict, so the LAST
+  // program's report that carries one is taken (not the first that has one). The combined `ok`
+  // below already folds every program's `ok`, and each of those folds its own goal check.
+  const goal = reports.reduce<OracleReport | null>(
+    (last, r) => (r.goalCutInto === undefined ? last : r),
+    null,
+  );
   return {
     ok: failing.length === 0 && (copper === null || copper.ok),
     band: Math.max(...all.map((r) => r.band)),
@@ -256,6 +264,7 @@ export function combineOracles(reports: readonly OracleReport[], copper: OracleR
     ...(locus.areaFloor === undefined ? {} : { areaFloor: locus.areaFloor }),
     ...(locus.frame === undefined ? {} : { frame: locus.frame }),
     ...(copper?.copper === undefined ? {} : { copper: copper.copper }),
+    ...(goal?.goalCutInto === undefined ? {} : { goalCutInto: goal.goalCutInto }),
   };
 }
 
