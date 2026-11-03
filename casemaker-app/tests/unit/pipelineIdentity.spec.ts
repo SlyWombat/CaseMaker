@@ -52,7 +52,8 @@ import { NO_TOOL_KEY, getTools, resetRegistry } from '@/engine/cnc/toolRegistry'
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
-import { engraveGenerate, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { engraveGenerate, supportingFloors, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { pickForEngrave } from '@/workers/sim/smartPickRun';
 import type { EngraveJob } from '@/types/engraveJob';
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
@@ -301,6 +302,10 @@ async function appPrepared(
     catalogue,
     conditions: inventoryConditions(),
     shop,
+    // #940 — the document's supporting floors, exactly as the app's worker and the CLI both
+    // compute them where a Manifold toplevel is in hand: sample 4's initials are V-carved into a
+    // 6 mm pocket floor, and a cone's reach is measured from that floor, not the stock's top.
+    floors: supportingFloors(tl, toPartPlan(job)),
   });
   if (!('runnable' in pick) || pick.runnable === null) {
     throw new Error(`${job.name}: the app's search refuses the job: ${'reason' in pick ? pick.reason : 'no runnable plan'}`);
