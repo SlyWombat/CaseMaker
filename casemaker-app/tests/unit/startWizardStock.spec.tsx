@@ -37,6 +37,16 @@ vi.mock('@/platform/capabilities', async (orig) => {
 
 const SHELF = (locationDoc as { stock: unknown[] }).stock;
 
+/**
+ * #934 review — the same shelf with its aluminium plate taken as a FINISHED face. "As bought" on
+ * wood or metal is refused at the Stock step now (it would seed a facing pass, and the post-facing
+ * re-touch is hidden), so the journeys that are not about facing use a face the procedure takes.
+ */
+const SHELF_FINISHED = SHELF.map((s) => {
+  const item = s as { id: string; finish?: string };
+  return item.id === 'stock-plate1' ? { ...item, finish: 'finished' } : s;
+});
+
 /** The service's shelf: GET and POST, and every request logged. `null` = no service at all. */
 function fakeShelf(initial: unknown[] | null) {
   const items = JSON.parse(JSON.stringify(initial ?? [])) as Array<{ id: string }>;
@@ -141,7 +151,7 @@ function boxStl(name = 'blank.stl'): File {
 
 describe('the material-first start (#418)', () => {
   it('shelf stock → mount → an empty design, the part sized to the stock, nothing reserved', async () => {
-    const svc = fakeShelf(SHELF);
+    const svc = fakeShelf(SHELF_FINISHED);
     await toStockStep('pocket');
     chooseMaterial('aluminium-6061');
     const plate = await screen.findByTestId('start-wizard-shelf-item-stock-plate1');
@@ -174,7 +184,8 @@ describe('the material-first start (#418)', () => {
       shelfId: 'stock-plate1',
       file: null,
       form: 'plate',
-      finish: 'rough',
+      // #934 review — the surface the procedure takes; "as bought" is refused at the Stock step.
+      finish: 'finished',
       conductive: true,
     });
     // The vise followed the 5 mm plate (#344): the shipped 4 mm proud would not seat it.
@@ -512,7 +523,7 @@ describe('the material-first start (#418)', () => {
   });
 
   it('asks before replacing a job that has items, and Keep it leaves the job alone', async () => {
-    fakeShelf(SHELF);
+    fakeShelf(SHELF_FINISHED);
     const before = { ...defaultEngraveJob(), labels: defaultEngraveJob().labels.slice(0, 1) };
     useEngraveJobStore.setState({ job: before });
     await toStockStep();
@@ -537,7 +548,7 @@ describe('the material-first start (#418)', () => {
   });
 
   it('a job with only the demo lines starts without asking', async () => {
-    fakeShelf(SHELF);
+    fakeShelf(SHELF_FINISHED);
     await toStockStep();
     chooseMaterial('aluminium-6061');
     fireEvent.click(await screen.findByTestId('start-wizard-shelf-item-stock-plate1'));

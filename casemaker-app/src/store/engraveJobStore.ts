@@ -2958,6 +2958,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         }
         if (!planned.ok) return { ok: false, reason: planned.error };
         const plan = planned.plan;
+        // #934 review — THE FLIP IS REFUSED WHERE IT IS CHOSEN. A set with copper on both faces
+        // plans a second setup whose registration goes through the flip's second side, and that
+        // procedure has not been run on this machine. The import is the door that chose it, so the
+        // refusal is here rather than at registration after the job was planned and frozen; the
+        // registration's own refusal stays as the safety net for a job written before this.
+        if (plan.twoSided) {
+          return {
+            ok: false,
+            reason: 'the flip’s second-side registration has not been run on this machine yet — cut one side',
+          };
+        }
         // The stock the board is actually laid on: the fresh thickness, and any fit it needed.
         const stockPatch: PcbBlankPatch | null =
           freshPatch === null && fitPatch === null

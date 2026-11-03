@@ -18,11 +18,15 @@
 // The location is faked from the committed fixture (the measured vise or the bracket bed) exactly
 // as bedDefects725.spec.ts fakes it; `/tools` answers [] for the reason #930's walk records.
 
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 test.setTimeout(300_000);
@@ -134,6 +138,86 @@ async function openCut(page: Page): Promise<void> {
   if ((await ack.count()) > 0) await ack.check();
 }
 
+type V = [number, number, number];
+
+/** A binary STL of a closed box with a raised boss on its +Y face (goalTransform.spec.ts's column). */
+function tallStl(): Buffer {
+  const boxes: [number, number, number, number, number, number][] = [
+    [0, 30, 0, 20, 0, 75],
+    [8, 22, 20, 24, 20, 55],
+  ];
+  const tris: [V, V, V][] = [];
+  for (const [x0, x1, y0, y1, z0, z1] of boxes) {
+    const c: V[] = [
+      [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+      [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
+    ];
+    const q = (a: number, b: number, d: number, e: number): [V, V, V][] => [
+      [c[a]!, c[b]!, c[d]!],
+      [c[a]!, c[d]!, c[e]!],
+    ];
+    tris.push(...q(4, 5, 6, 7), ...q(0, 3, 2, 1), ...q(0, 1, 5, 4), ...q(2, 3, 7, 6), ...q(1, 2, 6, 5), ...q(3, 0, 4, 7));
+  }
+  const buf = Buffer.alloc(84 + tris.length * 50);
+  buf.writeUInt32LE(tris.length, 80);
+  let off = 84;
+  for (const t of tris) {
+    off += 12;
+    for (const v of t) {
+      buf.writeFloatLE(v[0], off);
+      buf.writeFloatLE(v[1], off + 4);
+      buf.writeFloatLE(v[2], off + 8);
+      off += 12;
+    }
+    off += 2;
+  }
+  return buf;
+}
+
+/** The 75 mm column standing on a 43 × 32 × 20 blank — the job #923's refusal was found on. */
+function tallJob(): EngraveJob {
+  const bytes = tallStl();
+  const target: EngraveTargetObject = {
+    id: 'goal-tall',
+    name: 'tall-column.stl',
+    format: 'stl',
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    data: bytes.toString('base64'),
+    size: { x: 30, y: 24, z: 75 },
+    position: { x: 21.5, y: 16, z: 0 },
+    rotation: 0,
+    enabled: true,
+    role: 'goal',
+  };
+  const job = defaultEngraveJob();
+  job.name = 'Tall goal';
+  job.stock = { ...job.stock, length: 43, width: 32, thickness: 20, material: 'softwood' };
+  job.labels = [];
+  job.shapes = [];
+  job.targetObject = target;
+  job.toolKey = 'flat-1.0';
+  return job;
+}
+
+/** Write the column to disk and open it through the app's own file menu — no store writes. */
+async function openTallJob(page: Page, job: EngraveJob): Promise<void> {
+  const dir = path.join(process.cwd(), 'test-results', 'cut-verdict-931');
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'tall-goal.job.json');
+  writeFileSync(file, JSON.stringify(job));
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    window.__caseMaker!.engraveReset();
+  });
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+  const menu = page.getByTestId('engrave-file-menu');
+  if (!(await menu.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('engrave-job-open').click()]);
+  await chooser.setFiles(file);
+  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Tall goal');
+}
+
 test('#931 — a passed run: Cut says "matches the design", and Register unfolds', async ({ cm, page }) => {
   await fakeHouse(page, locationView());
   await cm.ready();
@@ -199,6 +283,41 @@ test('#931 — a run that did not pass: the sentence, the fix that opens Holding
   await page.getByTestId('engrave-cut-verdict-fix').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+});
+
+// #931 review (M1) — THE FAILED VERDICT THROUGH THE APP'S OWN FAILURE. The walk above seeds the
+// diagnostic because #934 hid the bracket path that used to produce a real one. This case drives
+// the same chain — sweep → diagnostic → `firstRunError` → `runErrorWords` → `cutVerdict` — through
+// the REAL collision the engine finds for itself: #923's 75 mm column on a 43 × 32 blank, laid
+// flat by the app's own press and fitted to the stock (an oversized goal is now refused at the
+// CAM, #949, so the fitted one is the collision that remains). The ⌀1 finish runs at the stock
+// edge, where the jaws are; the column engine names the jaw and Cut reads "did not pass".
+test('#931 review — the real collision walk reaches Cut as “did not pass”', async ({ cm, page }) => {
+  test.setTimeout(600_000);
+  await cm.ready();
+  await openTallJob(page, tallJob());
+  await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
+  if ((await page.getByTestId('engrave-target-layflat-0').count()) === 0) {
+    await page.getByTestId('engrave-target-expand-0').click();
+  }
+  await page.getByTestId('engrave-target-layflat-0').click();
+
+  await page.getByTestId('engrave-generate').click();
+  await expect(page.getByTestId('engrave-run-toolpath')).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
+  await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'cross', { timeout: 300_000 });
+  // The operator's sentence, not the finding code: the first error names the jaw in words.
+  await expect(page.getByTestId('engrave-run-errors')).toContainText(/would cut .*into the vise/i, {
+    timeout: 60_000,
+  });
+  const designText = await text(page, 'engrave-run-errors');
+
+  await openCut(page);
+  await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'failed');
+  await expect(page.getByTestId('engrave-cut-verdict-line')).toHaveText('The simulation did not pass.');
+  // THE POINT OF #931, on a real failure: Cut's sentence is Design's own run error.
+  const sentence = await text(page, 'engrave-cut-verdict-sentence');
+  expect(designText, 'Design prints the sentence Cut shows').toContain(sentence);
+  await expect(page.getByTestId('engrave-cut-verdict-fix')).toHaveText('Open the Holding step');
 });
 
 test('#931 — a program never simulated: Cut says so in Design’s words', async ({ cm, page }) => {

@@ -18,6 +18,7 @@ import {
   ROD_VISE_MAX_LENGTH_MM,
   STOCK_SIZE_FIELDS,
   boxForForm,
+  facingShopFrom,
   formLabel,
   formSizeProblem,
   isJobForm,
@@ -39,8 +40,9 @@ import { featureSim } from '@/platform/features';
 import { stockProblem, type StockItem } from '@/platform/stockClient';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { newStockId, useStockStore } from '@/store/stockStore';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
-import { fmt } from './holdingMounts';
+import { facingForSeat, fmt } from './holdingMounts';
 import { NARROW_QUERY } from './wizardLayout';
 import { WizardFileField } from './WizardFileField';
 
@@ -367,6 +369,47 @@ function FormPicture({ form }: { form: JobStockForm }): JSX.Element {
   }
 }
 
+/**
+ * #934 review — THE MILESTONE'S ONE PROCEDURE, REFUSED WHERE IT IS CHOSEN. Two stock answers the
+ * wizard used to accept and the run refused LATER — after the job was planned, placed, frozen and
+ * registered:
+ *
+ *  - A DISC: its rim registration is planned but has not run on this machine, and the milestone
+ *    registers exactly one procedure (a rectangular blank in the vise, found with the wired V2
+ *    probe). The Stock step is the first place that can say so.
+ *  - "AS BOUGHT" ON WOOD OR METAL: the finish seeds a facing pass (decision Q6), and the
+ *    post-facing re-touch is hidden until its bench run — the milestone cuts the shelf's planed
+ *    stock as it is. The finish is chosen here, so the refusal belongs here.
+ *
+ * The late refusals (the planner's disc branch, the release step's facing blocker) stay as the
+ * safety net for a job written before this.
+ */
+const DISC_ENTRY_REFUSAL =
+  'a disc’s rim registration has not been run on this machine yet — this milestone registers one procedure: ' +
+  'a rectangular blank in the vise, found with the wired V2 probe; use a rectangular blank';
+const FACING_ENTRY_REFUSAL =
+  '“as bought” would face this blank, and the post-facing re-touch has not been run on this machine yet — ' +
+  'this milestone registers and cuts the shelf’s planed stock as it is; choose “finished face”';
+
+/**
+ * Why this stock answer cannot start the milestone's procedure at all, or null. The facing test is
+ * the SEAT-AWARE one (`facingForSeat`, the same function Create writes the job from): a thin blank
+ * whose pass cannot clear the jaws is seeded facing OFF, so "as bought" is a perfectly good answer
+ * there — only a finish that would really put a facing pass on the job is refused.
+ */
+function entryRefusal(choice: StockChoice, finish: JobStockFinish): string | null {
+  if (choice.stock.shape === 'disc') return DISC_ENTRY_REFUSAL;
+  // A rod or a tube is the ROTARY's stock: its top face is the chuck's question, not facing's.
+  if (choice.stock.shape === 'cylinder') return null;
+  const facing = facingForSeat(
+    finish,
+    choice.stock.material,
+    { thickness: choice.stock.thickness },
+    facingShopFrom(useShopDefaultsStore.getState().defaults),
+  );
+  return facing.enabled ? FACING_ENTRY_REFUSAL : null;
+}
+
 export function StartStockStep({
   onChange,
   seed,
@@ -434,6 +477,10 @@ export function StartStockStep({
       const item = shelf.find((i) => i.id === shelfId);
       if (!item) return { pending: null, problem: null, notes: [] };
       const r = stockFromShelf(item, machine);
+      if (r.ok) {
+        const refused = entryRefusal(r.choice, finish);
+        if (refused !== null) return { pending: null, problem: refused, notes: [] };
+      }
       return r.ok
         ? {
             pending: { kind: 'choice', choice: r.choice, saveToShelf: null },
@@ -464,6 +511,10 @@ export function StartStockStep({
         };
       }
       const r = stockFromFile({ ...read, material, finish }, machine);
+      if (r.ok) {
+        const refused = entryRefusal(r.choice, finish);
+        if (refused !== null) return { pending: null, problem: refused, notes: [] };
+      }
       return r.ok
         ? { pending: { kind: 'choice', choice: r.choice, saveToShelf: null }, problem: null, notes: r.choice.notes }
         : { pending: null, problem: r.reason, notes: [] };
@@ -497,6 +548,8 @@ export function StartStockStep({
     const id = save && canKeep ? newId : null;
     const r = stockFromMade(made, machine, id);
     if (!r.ok) return { pending: null, problem: r.reason, notes: [] };
+    const refused = entryRefusal(r.choice, finish);
+    if (refused !== null) return { pending: null, problem: refused, notes: [] };
     let item: StockItem | null = null;
     if (id !== null) {
       item = shelfItemFromMade(made, id, new Date().toISOString());

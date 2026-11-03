@@ -110,7 +110,7 @@ import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
 import { MachineStrip } from './MachineStrip';
 import { RunPlanView } from './RunPlanView';
-import { EngraveRegistrationStep } from './EngraveRegistrationStep';
+import { EngraveRegistrationStep, type RegistrationStartBinding } from './EngraveRegistrationStep';
 import { EngraveCutConfirm, DomeChoice, type DomeChoiceProps } from './EngraveCutConfirm';
 import { EngraveMachineRun } from './EngraveMachineRun';
 
@@ -555,6 +555,11 @@ export function EngraveCutSurface({
   const [freezeError, setFreezeError] = useState<string | null>(null);
   /** The Generate a freeze was attempted for; a re-render must not freeze the same one twice. */
   const attempted = useRef<EngraveGenerated | null>(null);
+  // #934 review (M3) — the registration's own Start, offered through `EngraveRegistrationStep`'s
+  // binding (a stable object, filled by the child with a press that only fires while its button is
+  // enabled), and the block the "Register again" press scrolls to. No DOM query.
+  const [registrationStart] = useState<RegistrationStartBinding>(() => ({ press: () => false }));
+  const registrationBlock = useRef<HTMLDivElement>(null);
 
   const target = useMemo(
     () => (machine === null ? null : { host: machine.host, port: machine.port }),
@@ -725,11 +730,15 @@ export function EngraveCutSurface({
     chainReposted.current = true;
     repost();
   };
-  /** #934 — "Register again": the registration's own Start is the control; press it where it stands. */
+  /**
+   * #934 review (M3) — "Register again" presses the registration's own Start THROUGH ITS BINDING,
+   * which answers false when the button is not offered or is disabled: the press is never a silent
+   * no-op on a disabled control, and no part of this surface reaches into another component's DOM.
+   * Either way the operator is taken to the registration, where the offer stands.
+   */
   const registerAgain = (): void => {
-    const start = document.querySelector<HTMLButtonElement>('[data-testid="engrave-registration-start"]');
-    start?.scrollIntoView({ block: 'center' });
-    start?.click();
+    registrationStart.press();
+    registrationBlock.current?.scrollIntoView?.({ block: 'center' });
   };
 
   const green = report.firstBlocking === null;
@@ -1347,7 +1356,10 @@ export function EngraveCutSurface({
         current={currentStep === 2}
         summary={step2Summary}
       >
-        <EngraveRegistrationStep job={job} target={target} />
+        {/* #934 review (M3) — the block "Register again" scrolls to; the child fills the binding. */}
+        <div ref={registrationBlock}>
+          <EngraveRegistrationStep job={job} target={target} startBinding={registrationStart} />
+        </div>
         {/* #608 / #796 — once the registration measured a tilt, the program made for a flat blank
             must be RE-MADE for the measured tilt before anything is uploaded. A re-make re-runs
             the whole pipeline with the fitted plane and freezes it; a flat fit never shows this

@@ -7,7 +7,8 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, type CaseMakerHandle } from './fixtures/caseMaker';
+import type { Page } from '@playwright/test';
 
 test.setTimeout(180_000);
 
@@ -21,6 +22,9 @@ const LONG_PLATE = {
   ...doc.stock[0],
   id: 'stock-long1',
   size: { length: 120, width: 60, thickness: 8 },
+  // #934 review: "as bought" metal is refused at the Stock step (it would seed a facing pass);
+  // the journey's plate is taken as the shelf's planed stock instead.
+  finish: 'finished',
   reservations: [],
 };
 const SHELF = [...doc.stock, LONG_PLATE];
@@ -95,4 +99,74 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
 
   // Named, not reserved: nothing was written to the shelf (Cut mode, #419, reserves).
   expect(writes).toEqual([]);
+});
+
+/** Walk from the welcome door to the Stock step; the shelf is answered, as above. */
+async function toStockStep(cm: CaseMakerHandle, page: Page): Promise<void> {
+  await page.route('**/api/v1/stock**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { etag: '"s-1"' },
+      body: JSON.stringify(SHELF),
+    });
+  });
+  await cm.ready();
+  await page.getByTestId('welcome-start-cnc').click();
+  await page.getByTestId('start-wizard-next').click();
+  await page.getByTestId('engrave-setup-what-pocket').click();
+  await page.getByTestId('start-wizard-operation-next').click();
+  await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
+}
+
+// #934 review — THE MILESTONE'S ONE PROCEDURE, REFUSED WHERE IT IS CHOSEN. A disc's rim
+// registration has not been run on this machine, and the run used to say so AFTER the job was
+// planned, placed, frozen and registered. The Stock step is the first place that can say it.
+test('#934 — a disc is refused at the Stock step, before the job exists', async ({ cm, page }) => {
+  await toStockStep(cm, page);
+
+  await page.getByTestId('start-wizard-form-disc').click();
+  await page.getByTestId('start-wizard-make-diameter').fill('100');
+  await page.getByTestId('start-wizard-make-thickness').fill('10');
+
+  const problem = page.getByTestId('start-wizard-stock-problem');
+  await expect(problem).toContainText('a disc’s rim registration has not been run on this machine yet');
+  await expect(problem).toContainText('use a rectangular blank');
+  // Next stays shut, so Holding — and the registration after it — is never reached.
+  await expect(page.getByTestId('start-wizard-stock-next')).toBeDisabled();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
+  await expect(page.getByTestId('engrave-setup-step-holding')).toHaveCount(0);
+  // No job carried the refused stock: nothing was seeded for a later step to refuse.
+  const job = await page.evaluate(() => JSON.parse(localStorage.getItem('casemaker.engraveJob.v3') ?? 'null'));
+  expect(job?.stockEntry ?? null).toBeNull();
+});
+
+// #934 review — "as bought" wood/metal seeds a facing pass, and the post-facing re-touch has not
+// been run on this machine. It used to be refused at RELEASE, after four ticks and a registration.
+test('#934 — “as bought” wood is refused at the Stock step; the same piece as a finished face goes on', async ({
+  cm,
+  page,
+}) => {
+  await toStockStep(cm, page);
+
+  await page.getByTestId('start-wizard-form-plate').click();
+  await page.getByTestId('start-wizard-stock-material').selectOption('softwood');
+  await page.getByTestId('start-wizard-make-length').fill('60');
+  await page.getByTestId('start-wizard-make-width').fill('40');
+  await page.getByTestId('start-wizard-make-thickness').fill('8');
+  // "As bought" is the finish that would seed a facing pass, and it is what is refused.
+  await page.getByTestId('start-wizard-stock-finish').selectOption('rough');
+  const problem = page.getByTestId('start-wizard-stock-problem');
+  await expect(problem).toContainText('post-facing re-touch has not been run on this machine yet');
+  await expect(problem).toContainText('choose “finished face”');
+  await expect(page.getByTestId('start-wizard-stock-next')).toBeDisabled();
+  await expect(page.getByTestId('engrave-setup-step-holding')).toHaveCount(0);
+
+  // The refusal is the finish's, not the stock's: taken as a finished face, the same piece goes on.
+  await page.getByTestId('start-wizard-stock-finish').selectOption('finished');
+  await expect(page.getByTestId('start-wizard-stock-problem')).toHaveCount(0);
+  await expect(page.getByTestId('start-wizard-stock-next')).toBeEnabled();
+  await page.getByTestId('start-wizard-stock-next').click();
+  await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
 });

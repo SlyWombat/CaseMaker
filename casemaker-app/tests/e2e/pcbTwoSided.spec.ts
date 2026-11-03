@@ -1,9 +1,11 @@
-// #743 P-8 — A BOARD WITH COPPER ON BOTH FACES, through the panel's own door.
+// #743 P-8 / #934 review — A BOARD WITH COPPER ON BOTH FACES IS REFUSED AT THE IMPORT.
 //
-// The unit spec pins the planner, the two setups, the programs, the registration on the drilled
-// holes and the per-face copper oracle. This is the DOOR in a real browser: the four files make a
-// two-setup job, the panel says so in the operator's words, the Setups section carries the flip,
-// and Generate posts and sweeps all five programs with the copper check passing on both faces.
+// The engineering of a two-setup board is pinned by the unit spec (`pcbTwoSided.spec`): the
+// planner, the setups, the programs, the registration on the drilled holes and the per-face copper
+// oracle. The flip's SECOND-SIDE REGISTRATION has not been run on this machine, so the milestone
+// refuses the flip where it is chosen — in this door, on the imported set — rather than at
+// registration after the job was planned and frozen. This is that refusal in a real browser: the
+// sentence appears beside the import, and no board, second setup or program exists to reach.
 //
 // The library is seeded (a PCB bench): a 0.1 mm engraver, the two drill sizes the tiny board's
 // holes are, and a 0.8 mm corn bit that reaches through the default plank.
@@ -16,7 +18,7 @@ const FIXTURES = path.resolve(process.cwd(), 'tests', 'unit', 'fixtures', 'pcb')
 const ROOT = path.resolve(process.cwd(), '..');
 const OUT = path.join(ROOT, 'docs', 'bench', 'img', '2026-10-31-pcb-two-sided');
 
-test('a two-layer Gerber set becomes a two-setup board that generates on both faces', async ({ cm, page }) => {
+test('a two-layer Gerber set is refused at the import, before any board or second setup exists', async ({ cm, page }) => {
   test.setTimeout(420_000);
   await cm.ready();
   await page.evaluate(async () => {
@@ -97,58 +99,23 @@ test('a two-layer Gerber set becomes a two-setup board that generates on both fa
     path.join(FIXTURES, 'tiny-Edge_Cuts.gbr'),
     path.join(FIXTURES, 'tiny-inside.drl'),
   ]);
+  // #934 review — THE FLIP IS REFUSED BY NAME WHERE IT IS CHOSEN. Nothing is written: the job is
+  // the one it was, there is no second setup, and there is no board to generate.
   const message = page.getByTestId('engrave-pcb-message');
-  await expect(message).toContainText(/Imported 4 files as the board/, { timeout: 120_000 });
-  await expect(message).toContainText(/copper on both faces, two isolations/);
-  await expect(message).toContainText(/setup 2 turns the board over/);
-  // 2 + 2 copper/outline vectors, 2 isolations, 8 holes, 1 cut-out.
-  await expect(message).toContainText(/15 items/);
-
-  // A board on the shipped plank is STATED, with its one-click fix (the panel's Add menu).
-  const notice = page.getByTestId('engrave-pcb-stock-notice');
-  await expect(notice).toContainText(/a circuit board is cut from copper-clad PCB/);
-  const menu = page.getByTestId('engrave-add-menu');
-  if (!(await menu.evaluate((el) => (el as HTMLDetailsElement).open))) {
-    await page.getByTestId('engrave-add-summary').click();
-  }
-  await page.getByTestId('engrave-pcb-use-stock').click();
-  await expect(notice).toHaveCount(0);
-
-  // Both faces' items are in the document, and both setups are the operator's.
-  const panel = (await page.getByTestId('engrave-panel').textContent()) ?? '';
-  expect(panel).toContain('Isolate the top copper');
-  expect(panel).toContain('Isolate the bottom copper');
-  expect(panel).toContain('Cut out the board');
-  // The Setups list lives in the Hold group, closed by default.
+  await expect(message).toContainText(/the flip’s second-side registration has not been run on this machine yet/, {
+    timeout: 120_000,
+  });
+  await expect(message).toContainText(/cut one side/);
+  await expect(page.getByTestId('engrave-pcb-stock-notice')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-pcb-alignment-notice')).toHaveCount(0);
   const hold = page.getByTestId('engrave-group-hold');
   if (!(await hold.evaluate((el) => (el as HTMLDetailsElement).open))) {
     await page.getByTestId('engrave-group-hold-summary').click();
   }
-  await expect(page.getByTestId('engrave-setup-2')).toBeVisible();
-  await expect(page.getByTestId('engrave-setup-face-words-2')).toContainText(/bottom/i);
-  // The row's body carries the flip as a derived remount to preview and approve.
-  await page.getByTestId('engrave-setup-expand-2').click();
-  await expect(page.getByTestId('engrave-setup-remount-2')).toBeVisible();
-  await expect(page.getByTestId('engrave-setup-remount-2')).toContainText(/Preview the remount/);
-  // The board's own checks: the flip does not put the holes off the board, and every role has a
-  // cutter, so nothing is refused or left unassigned.
-  await expect(page.locator('[data-code="item-off-board"]')).toHaveCount(0);
-  await expect(page.locator('[data-code="through-needs-board"]')).toHaveCount(0);
-  await expect(page.locator('[data-code="setup-items-unassigned"]')).toHaveCount(0);
-  // #743 P-8 — the board's holes are smaller than the probe reads: the import states the size it
-  // needs (with the numbers) and its alignment-hole offer beside the board.
-  await expect(page.getByTestId('engrave-pcb-alignment-notice')).toContainText(/needs holes of at least [\d.]+ mm/);
-  await expect(page.getByTestId('engrave-pcb-alignment-notice')).toContainText(/the board's largest is 1 mm/);
-  await expect(page.getByTestId('engrave-generate')).toBeEnabled();
+  await expect(page.getByTestId('engrave-setup-2')).toHaveCount(0);
+  const panel = (await page.getByTestId('engrave-panel').textContent()) ?? '';
+  expect(panel).not.toContain('Isolate the bottom copper');
 
-  // Generate: five programs, swept in cut order; the copper check reads each face in its own
-  // setup's frame and passes on both.
-  await page.getByTestId('engrave-generate').click();
-  await expect(page.getByTestId('engrave-run-oracle')).toContainText(/matches the design/, { timeout: 300_000 });
-  await expect(page.getByTestId('engrave-run-verified')).toContainText(/checked/);
-  await expect(page.getByTestId('engrave-run-simulated')).toContainText(/simulated/);
-
-  await page.getByTestId('viewport-fit').click();
   fs.mkdirSync(OUT, { recursive: true });
-  await page.screenshot({ path: path.join(OUT, 'two-sided.png') });
+  await page.screenshot({ path: path.join(OUT, 'two-sided-refused.png') });
 });

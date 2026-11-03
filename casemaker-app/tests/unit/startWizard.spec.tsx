@@ -483,15 +483,31 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
     }
   }
 
-  it('a rough piece is seeded facing on, with the shop’s rough skim', async () => {
+  // #934 review — THE FINISH IS REFUSED WHERE IT IS CHOSEN, not at the release after the job was
+  // planned, registered and frozen. A rough wood/metal piece would seed a facing pass, and the
+  // post-facing re-touch has not been run on this machine: the Stock step says so and Next stays
+  // shut, so no job (and no facing) is ever written.
+  it('an “as bought” piece that would be faced is refused at the Stock step', async () => {
     render(<StartWizard />);
     skipToStockStep();
     typePiece('rough');
-    await start();
 
-    const job = useEngraveJobStore.getState().job;
-    expect(job.stockEntry?.finish).toBe('rough');
-    expect(job.facing).toEqual({ enabled: true, depth: 0.5, source: 'seed' });
+    expect(screen.getByTestId('start-wizard-stock-problem').textContent).toContain(
+      'post-facing re-touch has not been run on this machine yet',
+    );
+    expect(screen.getByTestId('start-wizard-stock-problem').textContent).toContain('finished face');
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
+    // The refusal is at the entry: no job was replaced, and nothing was seeded.
+    expect(useEngraveJobStore.getState().job.stockEntry).toBeUndefined();
+    expect(useEngraveJobStore.getState().job.facing).toBeUndefined();
+  });
+
+  it('the same piece is taken as a finished face, which seeds no facing at all', async () => {
+    render(<StartWizard />);
+    skipToStockStep();
+    typePiece('finished');
+    await start();
+    expect(useEngraveJobStore.getState().job.stockEntry?.finish).toBe('finished');
   });
 
   it('a finished piece is seeded facing off — the face is cut as it is', async () => {

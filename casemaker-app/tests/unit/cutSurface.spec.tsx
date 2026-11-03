@@ -1162,6 +1162,38 @@ describe('#656 from the cutter prompt to the cut', () => {
     await waitFor(() => expect(generateSpy).toHaveBeenCalledWith(surface));
   });
 
+  // #934 review (M3) — THE OFFER PRESSES A BUTTON THAT IS ENABLED, and nothing else. "Register
+  // again" goes through the registration step's binding, whose condition is the Start button's own
+  // `disabled`: with the at-machine statement not given the press does nothing, and with it given
+  // the press starts a real run (a new run clears the last clamping before it moves).
+  it('#934 review — "Register again" presses the registration’s own Start only while it is enabled', async () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({ generate: vi.fn(async () => {}) as never, acknowledged: false });
+    const surface = { plane: { offset: 0, slopeX: 0.01, slopeY: 0 }, z0: -55 };
+    useEngraveRegistrationStore.getState().measureSurface(job.id, TARGET, {
+      verdict: 'tilt',
+      tilt: { xMm: 0.12, yMm: 0 },
+      recommendation: null,
+    } as unknown as SurfaceSpreadAssessment);
+    useEngraveRegistrationStore.getState().record(job.id, TARGET, {} as never, {} as never, surface);
+
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+
+    // The statement is not given: the Start is disabled, and the offer leaves the registration be.
+    expect((screen.getByTestId('engrave-registration-start') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-cut-reseat-register'));
+    expect(useEngraveRegistrationStore.getState().records[job.id]).toBeDefined();
+    expect(screen.getByTestId('engrave-registration').dataset.state).toBe('idle');
+
+    // Ticked, the button is enabled and the press reaches it: the run clears the clamped record.
+    fireEvent.click(screen.getByTestId('engrave-ack'));
+    expect((screen.getByTestId('engrave-registration-start') as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTestId('engrave-cut-reseat-register'));
+    expect(useEngraveRegistrationStore.getState().records[job.id]).toBeUndefined();
+    expect(screen.getByTestId('engrave-registration').dataset.state).toBe('busy');
+  });
+
   it('does not re-post when the package already follows the tilt', async () => {
     const job = plannedJob();
     const pkg = { ...frozen(job, [P1]), surface: { plane: { offset: 0, slopeX: 0.01, slopeY: 0 }, z0: -55 } };
