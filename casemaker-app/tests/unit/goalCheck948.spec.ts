@@ -31,9 +31,10 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import { checkGoalCutInto, goalCutIntoUnchecked } from '@/engine/cnc/engrave/designCheck';
-import { sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/cam/surface3d';
 import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
 import { Z1 } from '@/engine/cnc/machine';
+import type { Tool } from '@/engine/cnc/tool';
 import { createSimSession, type SimSession } from '@/workers/sim/session';
 import { clearGoalFieldCache, goalInputFor, GOAL_CHECK_MAX_CELLS, GOAL_CHECK_PITCH_MM } from '@/workers/sim/goalCheckField';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -139,6 +140,7 @@ describe('#948 the goal check’s plain input', () => {
       expect(report.ran).toBe(false);
       expect(report.ok).toBe(true); // never a failure — a stated gap
       expect(report.maxCutIntoAt).toBeNull();
+      expect(report.passCoverage).toBe(0.95);
       expect(report.sentence).toContain('not a pass');
     }
   });
@@ -157,6 +159,125 @@ describe('#948 the goal check’s plain input', () => {
     expect('unchecked' in input).toBe(true);
     if ('unchecked' in input) expect(input.unchecked).toContain('could not be sampled');
   });
+});
+
+describe('#948 the pass line — zero cut-into is not the whole verdict', () => {
+  /** A flat goal field where `1 − coverage` of the cells sit 0.5 above the swept top. */
+  function fieldWithCoverage(n: number, coverage: number): GoalHeightfield {
+    const z = new Float32Array(n * n).fill(-2);
+    const above = Math.round(n * n * (1 - coverage));
+    // The goal is DEEPER than the swept top on those cells: material stands 0.5 above the goal.
+    for (let k = 0; k < above; k++) z[k] = -2.5;
+    return {
+      nx: n,
+      ny: n,
+      x0: 0,
+      y0: 0,
+      pitch: 0.5,
+      topZ: 0,
+      minZ: -2,
+      z,
+      covered: new Uint8Array(n * n).fill(1),
+      coveredCount: n * n,
+      resolutionNote: '0.5 mm grid',
+    };
+  }
+
+  it('0 cut-into and 83.58 % coverage is NOT a pass, and the sentence says the coverage', () => {
+    // The demo page's j29 elephant card: 0 cut-into, 83.58 % top-surface coverage (its rule asks
+    // 95 %), which the page reads as Deviates while `ok` used to read it as a pass.
+    const report = checkGoalCutInto(fieldWithCoverage(100, 0.8358), () => -2);
+    expect(report.cutIntoFraction).toBe(0);
+    expect(report.passCoverage).toBe(0.95);
+    expect(report.ok).toBe(false);
+    expect(report.sentence).toContain('coverage');
+    expect(report.sentence).toContain('83.58');
+    expect(report.sentence).toContain('95');
+  });
+
+  it('full coverage at the goal still passes', () => {
+    const report = checkGoalCutInto(fieldWithCoverage(10, 1), () => -2);
+    expect(report.ok).toBe(true);
+    expect(report.passCoverage).toBe(0.95);
+  });
+
+  it('the pass line is the caller’s number, not a constant in the check', () => {
+    const goal = fieldWithCoverage(100, 0.8358);
+    expect(checkGoalCutInto(goal, () => -2, { passCoverage: 0.8 }).ok).toBe(true);
+    expect(checkGoalCutInto(goal, () => -2, { passCoverage: 0.9 }).ok).toBe(false);
+  });
+});
+
+describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
+  it('figure@j29 reads ok:false on coverage, and the sentence names it', async () => {
+    // The demo page's elephant stick job: a 0.6533-scaled figure laid on a 36 × 100 × 36 stick and
+    // surfaced by Makera's 2 mm ball. The page's own checker reported 0 cut-into with coverage
+    // well under its 95 % line — the case that read "Matches" in the app and "Deviates" on the page.
+    const stock = { length: 36, width: 100, thickness: 36 };
+    const imported = await read('figure.stl');
+    const target: EngraveTargetObject = {
+      id: imported.id,
+      name: imported.name,
+      format: imported.format,
+      sha256: imported.sha256,
+      data: imported.data,
+      size: imported.size,
+      position: { x: stock.length / 2, y: 50, z: 0 },
+      rotation: 90,
+      enabled: true,
+      role: 'goal',
+      scale: { x: 0.6533, y: 0.6533, z: 0.6533 },
+    };
+    const ballTool: Tool = {
+      number: 1,
+      id: '161032205031',
+      name: '6*2*30.5mm Ball Nose Engraving',
+      typeText: 'Ball Nose Engraving',
+      shape: 'ball',
+      handleDiameter: 6,
+      tipDiameter: 2,
+      diameter: 6,
+      cornerRadius: 1,
+      angle: null,
+      halfAngle: null,
+      fluteLength: 30.5,
+      shoulderLength: 30.5,
+      stickout: null,
+      centreCutting: null,
+    };
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      name: target.name,
+      labels: [],
+      shapes: [],
+      drills: [],
+      stock: { ...stock, material: 'hardwood' },
+      toolKey: 'user:945-ball-30-5',
+      tool: ballTool,
+      targetObject: target,
+    };
+    const g = await generate(tl, job);
+    expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc as string, toSetup(job, Z1), ballTool, Z1.id);
+      expect(load.ok).toBe(true);
+      const report = session.oracle(g.predicted, null, g.designItems, goalInputFor(session, goalCheckForProgram(job, true) as SimGoalCheck));
+      expect(report.goalCutInto?.ran).toBe(true);
+      // Nothing is cut INTO the goal; the run fails the pass line because too much of the goal's
+      // top surface is never reached from this side.
+      expect(report.goalCutInto?.cutIntoFraction).toBe(0);
+      expect(report.goalCutInto?.passCoverage).toBe(0.95);
+      expect(report.goalCutInto?.leftoverFractions[0]).toBeGreaterThan(0.05);
+      expect(report.goalCutInto?.ok).toBe(false);
+      expect(report.goalCutInto?.sentence).toContain('coverage');
+      expect(report.goalCutInto?.sentence).toContain('95');
+      expect(report.ok).toBe(false);
+    } finally {
+      session.dispose();
+    }
+  }, 600_000);
 });
 
 describe('#948 the live session’s swept top', () => {

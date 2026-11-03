@@ -172,6 +172,9 @@ def goal_verdict(rc, gc):
         return 'error', 'the goal check did not run', {}
     cut = gc['cutInto0p1Pct']
     cover = round(100.0 - gc['leftover0p1Pct'], 2)
+    # #948 — the pass line is the shop's `goal.passCoverage` (goal_check.py reads it from the same
+    # location), not a number this script owns. An older goalcheck.json has no key: the seed.
+    pass_pct = gc.get('passCoveragePct', 95.0)
     numbers = {'cutIntoPct': cut, 'cutIntoAreaMm2': gc['cutIntoAreaMm2'], 'maxCutIntoMm': gc['maxCutIntoMm'],
                'coveragePct': cover, 'leftover0p1Pct': gc['leftover0p1Pct'], 'leftover0p3Pct': gc['leftover0p3Pct'],
                'idealCutterMm': gc['idealCutter'], 'goalCells': gc['goalCells'],
@@ -179,8 +182,8 @@ def goal_verdict(rc, gc):
     problems = []
     if cut > 0:
         problems.append(f"cut into the goal on {cut} % of the surface, {gc['cutIntoAreaMm2']} mm², up to {gc['maxCutIntoMm']} mm deep")
-    if cover < 95:
-        problems.append(f"coverage {cover} % of the goal surface (the rule asks 95 %)")
+    if cover < pass_pct:
+        problems.append(f"coverage {cover} % of the goal surface (the rule asks {pass_pct:g} %)")
     if rc['verifierErrors']:
         problems.append(f"the verifier reports {rc['verifierErrors']} error(s)")
     if problems:

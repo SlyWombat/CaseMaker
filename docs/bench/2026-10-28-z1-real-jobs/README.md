@@ -16,9 +16,10 @@ card beside the simulated result**, and its verdict is computed, never judged by
   join the page as their job files are committed.
 
 Verdicts: **Matches the design** (verifier 0 errors; every measured item at its floor and nothing cut
-outside the design — 3D: zero cut-into the goal and coverage ≥ 95 %), **Deviates** (the number and
-where), **Refused** (the app's sentence), **Not checkable** (the interim check has no measurable item
-— chamfers and plain cut-outs need #924's oracle). Until #924 lands, the design check is this repo's
+outside the design — 3D: zero cut-into the goal and coverage ≥ the shop's `goal.passCoverage`, seeded
+95 % and read by both the app's goal check and `goal_check.py` from the location), **Deviates** (the
+number and where), **Refused** (the app's sentence), **Not checkable** (the interim check has no
+measurable item — chamfers and plain cut-outs need #924's oracle). Until #924 lands, the design check is this repo's
 own sweep against the job's design, and the page says so.
 
 **One command rebuilds the page on a given sha** (the worktree must be checked out at that sha; its

@@ -15,6 +15,7 @@
 
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { pureGoalObject } from './jobSetup';
+import type { GoalCutIntoOptions } from './designCheck';
 
 /**
  * The goal object's own sampling fields — `sampleGoalHeightfield`'s `Pick` plus the mould flag.
@@ -35,8 +36,13 @@ export type GoalCheckTarget = Pick<
   | 'goalMode'
 >;
 
-/** The goal check one oracle call carries: a target to sample, or the reason it cannot run. */
-export type SimGoalCheck = { target: GoalCheckTarget } | { unchecked: string };
+/**
+ * The goal check one oracle call carries: a target to sample, or the reason it cannot run — each
+ * with the check's own options (`passCoverage`, #948), which the caller reads from the shop.
+ */
+export type SimGoalCheck =
+  | { target: GoalCheckTarget; opts?: GoalCutIntoOptions }
+  | { unchecked: string; opts?: GoalCutIntoOptions };
 
 /**
  * The goal check a program's oracle call should carry, from the job and whether THIS program is a
@@ -48,15 +54,23 @@ export type SimGoalCheck = { target: GoalCheckTarget } | { unchecked: string };
  * comparison that did not happen. `undefined` for a program that is not a goal program at all: an
  * item job's oracle has no goal to compare with.
  */
-export function goalCheckForProgram(job: EngraveJob, goalProgram: boolean): SimGoalCheck | undefined {
+export function goalCheckForProgram(
+  job: EngraveJob,
+  goalProgram: boolean,
+  opts?: GoalCutIntoOptions,
+): SimGoalCheck | undefined {
   if (!goalProgram) return undefined;
   const goal = pureGoalObject(job);
   if (goal === null) {
     return {
       unchecked:
         'this goal is cut from more than one side, and a side’s sweep lives in that side’s own frame, so the document-frame goal was not compared',
+      ...(opts === undefined ? {} : { opts }),
     };
   }
   const { sha256, format, data, position, rotation, rotationX, rotationY, size, relief, scale, goalMode } = goal;
-  return { target: { sha256, format, data, position, rotation, rotationX, rotationY, size, relief, scale, goalMode } };
+  return {
+    target: { sha256, format, data, position, rotation, rotationX, rotationY, size, relief, scale, goalMode },
+    ...(opts === undefined ? {} : { opts }),
+  };
 }

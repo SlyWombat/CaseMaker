@@ -550,6 +550,16 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     fallback: 0.35,
   },
   // ── #926 (end)
+  // ── #948 (begin) — the goal pass line: the demo page's own rule (zero cut-into AND top-surface
+  // coverage ≥ 95 %). The check reads it through the goal options; `defaults.rs` seeds the same
+  // number, and the page's `goal_check.py` reads it from the location document.
+  'goal.passCoverage': {
+    label: 'goal top-surface coverage a run must reach (chosen)',
+    unit: 'x',
+    rule: z.number().min(0).max(1),
+    fallback: 0.95,
+  },
+  // ── #948 (end)
 };
 
 /**
@@ -733,6 +743,15 @@ export function machineTiming(map: ShopDefaults | null): MachineTiming {
  */
 export function efficiencyThresholds(map: ShopDefaults | null): { maxAirFraction: number } {
   return { maxAirFraction: readDefault(map, 'efficiency.maxAirFraction').value };
+}
+
+/**
+ * #948 — THE GOAL PASS LINE, as the oracle's goal check takes it: the shop's `goal.passCoverage`
+ * (0.95), or the labelled fallback when no location is loaded. Read here, on the thread that owns
+ * the defaults, and handed to the worker with the goal input.
+ */
+export function goalPassCoverage(map: ShopDefaults | null): number {
+  return readDefault(map, 'goal.passCoverage').value;
 }
 
 function firstIssue(error: z.ZodError): string {

@@ -88,7 +88,7 @@ export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInp
   } catch (e) {
     return { unchecked: `the goal could not be sampled (${e instanceof Error ? e.message : String(e)})` };
   }
-  return { heightfield, sweptTop };
+  return { heightfield, sweptTop, ...(goal.opts === undefined ? {} : { opts: goal.opts }) };
 }
 
 /** Test hook: a goal replaced under the same key must not serve a stale field. */
