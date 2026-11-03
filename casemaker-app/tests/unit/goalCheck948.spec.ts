@@ -539,3 +539,67 @@ describe('#948 the live session’s swept top', () => {
     }
   }, 240_000);
 });
+
+describe('#948 the run’s goal field is every program’s stamp', () => {
+  it('folds each program’s stamp across loads, and a blank load starts a new run', () => {
+    // `goal_check.py` stamps EVERY program of a run onto one field (`np.minimum` per cell). A goal
+    // run's last program judged alone answers a different question: a ⌀0.5 rest pass touches only
+    // the corners the finish left, so its own stamp reads most of the surface untouched. The
+    // session folds each program's stamp into the run's field as the oracle asks for it, and a
+    // load with no seed at all (a new run) begins clean.
+    const job = defaultEngraveJob();
+    const ball: Tool = {
+      number: 1,
+      id: 'ball2',
+      name: '2 mm ball',
+      typeText: 'Ball',
+      shape: 'ball',
+      handleDiameter: 6,
+      tipDiameter: 2,
+      diameter: 6,
+      cornerRadius: 1,
+      angle: null,
+      halfAngle: null,
+      fluteLength: 30,
+      shoulderLength: 30,
+      stickout: null,
+      centreCutting: null,
+    };
+    const nc = (y: number): string =>
+      ['G21 G90', 'S1000 M3', `G0 X10 Y${y} Z1`, 'G1 Z-0.5 F100', 'G1 X30 F300', 'G0 Z5', 'M2'].join('\n');
+    const goal = { nx: 41, ny: 31, x0: 0, y0: 0, pitch: 1 };
+    const session = createSimSession(tl);
+    try {
+      const loadA = session.load(nc(10), toSetup(job, Z1), ball, Z1.id);
+      expect(loadA.ok).toBe(true);
+      const fieldA = session.sweptFieldExact(goal);
+      expect(fieldA).not.toBeNull();
+      const at = (f: Float32Array, x: number, y: number): number => f[y * goal.nx + x]!;
+      expect(at(fieldA as Float32Array, 20, 10)).toBeLessThan(-0.4);
+      expect(at(fieldA as Float32Array, 20, 20)).toBe(0);
+      // The next program of the same run: its load carries the earlier program's remaining top,
+      // exactly as the run store's walk hands it over.
+      if (!loadA.ok || loadA.flatField === undefined || loadA.flatField === null) throw new Error('no flat field');
+      const carried = {
+        ...loadA.flatField,
+        top: loadA.flatField.top.slice(),
+        map: [1, 0, 0, 0, 1, 0] as const,
+        z: [1, 0] as const,
+      };
+      const loadB = session.load(nc(20), toSetup(job, Z1), ball, Z1.id, { priorFields: [carried] });
+      expect(loadB.ok).toBe(true);
+      const fieldB = session.sweptFieldExact(goal) as Float32Array;
+      // Program A's cut survives the fold; program B's cut is folded in — one field, both cuts.
+      expect(at(fieldB, 20, 10)).toBeLessThan(-0.4);
+      expect(at(fieldB, 20, 20)).toBeLessThan(-0.4);
+      // A load from the blank is a NEW run: it must not inherit the last run's cuts.
+      const loadC = session.load(nc(20), toSetup(job, Z1), ball, Z1.id);
+      expect(loadC.ok).toBe(true);
+      const fieldC = session.sweptFieldExact(goal) as Float32Array;
+      expect(at(fieldC, 20, 10)).toBe(0);
+      expect(at(fieldC, 20, 20)).toBeLessThan(-0.4);
+    } finally {
+      session.dispose();
+    }
+  }, 240_000);
+});

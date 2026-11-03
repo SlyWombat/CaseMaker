@@ -828,6 +828,19 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     hooks?.onDispose?.('sweep');
   };
 
+  /**
+   * #948 — THE RUN'S ONE GOAL FIELD, ACROSS ITS PROGRAMS.
+   *
+   * `goal_check.py` stamps EVERY program of a run onto ONE field (`np.minimum` per cell), and a
+   * goal run's last program judged alone answers a different question: a rest pass with a ⌀0.5
+   * ball touches only the corners the finish left, so its own stamp reads most of the surface at
+   * the stock's top. Each program's stamp is folded in (elementwise minimum) as the run's oracle
+   * asks for it, so the LAST program's report carries the run's combined field. A load that
+   * carries material from an earlier program is a later program of the same run and keeps the
+   * field; a load with no seed at all begins a new run (see `load`).
+   */
+  let exactRun: { key: string; field: Float32Array } | null = null;
+
   const load = (gcodeText: string, setupArg: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult => {
     dispose();
     // #623/#625/#628 — a program posted against the blank's fitted surface is judged in its SURFACE
@@ -857,6 +870,14 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const hasPrior = priorList.length > 0;
     const routingOpts: SimLoadOpts | undefined =
       opts === undefined ? undefined : { ...opts, priorRemoval: hasPrior ? priorList : undefined };
+    // #948 — A LOAD FROM THE BLANK BEGINS A NEW RUN. The page's checker stamps every program of a
+    // run onto one goal field; the session folds each program's stamp in as the run's oracle asks
+    // for it (`sweptFieldExact`). A load that carries material from an earlier program is a later
+    // program of the same run and keeps the field; a load with no seed at all starts clean, so a
+    // new run (or the Simulate panel's own load) cannot inherit the last run's cuts.
+    if (!hasPrior && opts?.carried == null && (opts?.priorFields?.length ?? 0) === 0 && (opts?.priorExactRemoval?.length ?? 0) === 0) {
+      exactRun = null;
+    }
     let machine: Mill | undefined;
     if (machineId !== null) {
       const base = MACHINES[machineId];
@@ -1375,7 +1396,22 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     if (l === null || l.kind !== 'column' || l.column.grid.kind !== 'flat') return null;
     const key = `${goal.nx},${goal.ny},${goal.x0},${goal.y0},${goal.pitch}`;
     if (exactFor === l && exactKey === key) return exactValue;
-    exactValue = exactSweptField(goal, l.timeline, l.tool);
+    const stamp = exactSweptField(goal, l.timeline, l.tool);
+    exactValue = stamp;
+    if (stamp !== null) {
+      // #948 — FOLD EACH PROGRAM'S STAMP INTO THE RUN'S ONE FIELD (the page's rule). A run's last
+      // program alone (a ⌀0.5 rest pass) reads only its own moves; the fold makes the report carry
+      // what every program of the run left, exactly as `goal_check.py` stamps them all onto one H.
+      if (exactRun !== null && exactRun.key === key) {
+        const acc = exactRun.field;
+        for (let k = 0; k < acc.length; k++) {
+          if (stamp[k]! < acc[k]!) acc[k] = stamp[k]!;
+        }
+        exactValue = acc;
+      } else {
+        exactRun = { key, field: stamp };
+      }
+    }
     exactFor = l;
     exactKey = key;
     return exactValue;
