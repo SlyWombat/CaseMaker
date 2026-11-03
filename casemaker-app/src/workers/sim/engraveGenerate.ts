@@ -174,6 +174,7 @@ import {
   generateSurface3dForGoal,
   generateSurface3dIR,
   estimateGoalMoves,
+  finishStepOverForCusp,
   goalMemoryBudgetMb,
   GOAL_BYTES_PER_MOVE,
   tipStencilCells,
@@ -4852,6 +4853,29 @@ export async function generateGoalProgram(
   const settings = goal.surface ?? {};
   const stockToLeaveMm = settings.stockToLeaveMm ?? shop.finish?.stockToLeaveMm.value;
   const gridPitchMm = settings.gridPitchMm ?? shop.surfaceGrid?.pitchMm.value ?? null;
+  // #755 — the grid this run samples at absent a finer finish step-over (the one further down
+  // re-reads the same fallback after the step-over below may have refined it). Hoisted here so
+  // #945's step-over derivation can floor to a whole multiple of it before either number is read
+  // again.
+  const basePitchMm = gridPitchMm ?? DEFAULT_GRID_PITCH_MM;
+  // #945 a1 — THE LEFTOVER BAND A FINISH STEP-OVER IS DERIVED AGAINST: the shop's own "does this
+  // leftover show" threshold (#847/#912's `rest.visibleDepthMm`), hoisted here from where the
+  // goal-rest sentences below read it — the same number, read once rather than resolved twice.
+  const visibleDepthMm = shop.rest?.visibleDepth.value ?? REST_MACHINING_FALLBACK.visibleDepth;
+  // #945 a1 — THE BALL FINISH'S OWN DEFAULT STEP-OVER, when the operation states none. A ball/bull
+  // cutter's row spacing is derived from its own radius and the band above — the cusp a FLAT span
+  // leaves between rows, held at or under that band ({@link finishStepOverForCusp}) — capped at
+  // today's 2.5D pocketing step-over so a cutter this derivation does not help (one whose radius is
+  // already comfortably under the band) never runs COARSER than before. A flat finishing cutter
+  // (no `ball`) keeps the 2.5D step-over outright: it drops onto the highest point under its disc
+  // rather than a ball's flank, so this cusp formula does not describe it, and the module's notes
+  // already flag a flat finish as a fallback on its own terms.
+  const cuspStepOverMm =
+    tool.shape === 'ball' || tool.shape === 'bull'
+      ? finishStepOverForCusp((cuttingDiameter(tool) ?? 0) / 2, visibleDepthMm, basePitchMm)
+      : null;
+  const defaultFinishStepOverMm =
+    cuspStepOverMm !== null ? Math.min(cuspStepOverMm, resolved.params.stepOver) : resolved.params.stepOver;
 
   // #764 — THE ITEM IS CLEARED AROUND, down to its base plane. Cut only inside the goal's own
   // footprint, the blank around the part keeps its full height and the part ends in a pit; the
@@ -4867,6 +4891,13 @@ export async function generateGoalProgram(
   // #888 — the ONE reader of the clear band (`goalClearBand`), shared with the top-face measure
   // that decides whether facing has anything to skim. The step-over widens the ring exactly as
   // this block always did.
+  // #945 — THE CLEAR RING KEEPS THE OLD STEP-OVER, deliberately not `defaultFinishStepOverMm`.
+  // The ring only has to be WIDE ENOUGH for its two fillets to meet (the comment above); the old,
+  // coarser 2.5D step-over is always at least as wide as the newly-derived one (the derivation
+  // only ever tightens), so sizing by it is still correct and never makes the band too narrow. It
+  // also keeps the clear band's extent — and so the heightfield's grid origin — exactly where it
+  // was before this fix, so a job that does not benefit from the finer finish (a flat cutter, or
+  // a ball already comfortably under the band) sees no change at all outside the finish raster.
   const ringStepOverMm = settings.finishStepOverMm ?? resolved.params.stepOver;
   const { clear, ringWidthMm } = goalClearBand(goal, {
     toolDiameterMm: cuttingDiameter(tool) ?? 0,
@@ -4891,10 +4922,9 @@ export async function generateGoalProgram(
     plungeFeed: resolved.params.plungeFeed,
     stepDown: settings.roughStepDownMm ?? resolved.params.stepDown,
     roughStepOver: settings.roughStepOverMm ?? resolved.params.stepOver,
-    // A ball finish wants a finer step-over than a flat pocket's; no measured 3D number exists yet
-    // (slice F), so the pocketing step-over stands as the labelled placeholder unless the goal
-    // operation states its own.
-    finishStepOver: settings.finishStepOverMm ?? resolved.params.stepOver,
+    // #945 — a ball finish's own derived step-over ({@link defaultFinishStepOverMm}), or the goal
+    // operation's own stated one.
+    finishStepOver: settings.finishStepOverMm ?? defaultFinishStepOverMm,
   };
 
   // #869 — THE GOAL'S FLAT ROUGH: a program of its own, with its own feeds. The measured search
@@ -4976,7 +5006,6 @@ export async function generateGoalProgram(
   // the finishing tip field's evaluation budget — and they relax it rather than refuse the job;
   // the run then says which pitch it settled on and why (inform, never refuse).
   const finishStepOverMm = feeds.finishStepOver;
-  const basePitchMm = gridPitchMm ?? DEFAULT_GRID_PITCH_MM;
   const refinedPitchMm = finishStepOverMm > 0 && finishStepOverMm < basePitchMm ? finishStepOverMm : basePitchMm;
   // #671 — the two extra finishing passes are OPT-IN: absent = today's rough + parallel finish.
   const scallop = settings.scallop === true;
@@ -5426,9 +5455,9 @@ export async function generateGoalProgram(
   const finishResidual = surfaceResidual(surfaced.heightfield, surfaced.finishTip, 0, REST_TOLERANCE_MM);
   // #847 follow-up — THE NOISE RULE. Nearly every organic goal leaves some material where its ball
   // could not enter, so "nothing owned takes it" is INFORMATION unless the leftover would show: a
-  // ridge deeper than the shop's `rest.visibleDepthMm`, or a leftover that is a real share of what
-  // the goal removes (`rest.thirdToolPct`, the same share the 2D rest pair uses for a third cutter).
-  const visibleDepthMm = shop.rest?.visibleDepth.value ?? REST_MACHINING_FALLBACK.visibleDepth;
+  // ridge deeper than the shop's `rest.visibleDepthMm` (hoisted above as `visibleDepthMm`, #945),
+  // or a leftover that is a real share of what the goal removes (`rest.thirdToolPct`, the same
+  // share the 2D rest pair uses for a third cutter).
   const visibleShare =
     (shop.rest?.thirdToolPct.value ?? REST_MACHINING_FALLBACK.thirdToolFraction * 100) / 100;
   const visibility = restResidualVisible(finishResidual, visibleDepthMm, visibleShare);
@@ -5465,13 +5494,24 @@ export async function generateGoalProgram(
       seenRadius.add(bucket);
       const restResolved = engraveFeedsFor(shop, catalogue, job.stock.material, feedsToolForSurface(candidate), mill, job.cutOverride);
       if (!restResolved.ok) continue;
+      // #945 — ONE RULE, TWO CALL SITES: the same `finishStepOverForCusp` derivation the main
+      // finish uses above (`defaultFinishStepOverMm`), against THIS candidate's OWN radius and
+      // the same leftover-visible band — not the candidate's catalogue step-over reused as-is.
+      // The rest ball's whole job is reaching into a concavity the finish's own ball could not;
+      // leaving its row-to-row cusp un-adapted defeats that job exactly where it matters most (a
+      // steep wall), which is why this was worth a second call site rather than folding the rest
+      // pass into the finish's own derivation above. Capped the same way, so a candidate this
+      // derivation does not help never runs coarser than its own feeds row did before.
+      const restCuspStepOverMm = finishStepOverForCusp(radius, visibleDepthMm, basePitchMm);
+      const restDefaultFinishStepOverMm =
+        restCuspStepOverMm !== null ? Math.min(restCuspStepOverMm, restResolved.params.stepOver) : restResolved.params.stepOver;
       const restFeeds: SurfaceFeeds = {
         feed: restResolved.params.feed,
         plungeFeed: restResolved.params.plungeFeed,
         stepDown: restResolved.params.stepDown,
         roughStepOver: restResolved.params.stepOver,
-        // The operation's own finishing step-over wins; else the smaller ball's own feeds row.
-        finishStepOver: settings.finishStepOverMm ?? restResolved.params.stepOver,
+        // The operation's own finishing step-over wins; else the rest ball's own derived default.
+        finishStepOver: settings.finishStepOverMm ?? restDefaultFinishStepOverMm,
       };
       let plan: SurfaceRestPlan;
       try {
@@ -5874,6 +5914,19 @@ export async function generateGoalProgram(
       // #721 — the run sheet and the row say a mold is a mold.
       notes: [
         ...surfaced.notes,
+        // #945 a1 — WHEN THE FINISH STEP-OVER WAS DERIVED, SAY SO AND SAY THE NUMBERS. The note
+        // two lines up ("the job's 2.5D feeds, reused unchanged") is no longer true of this value
+        // once the derivation ran, so it is corrected here with what actually set it. Gated on
+        // the derivation being what WON the `Math.min` in `defaultFinishStepOverMm` — when the
+        // 2.5D row was already tighter than the cusp bound, that row still stands unchanged, and
+        // this note must not claim a derivation that did not move anything.
+        ...(settings.finishStepOverMm === undefined && defaultFinishStepOverMm === cuspStepOverMm
+          ? [
+              `The finish step-over (${Number(defaultFinishStepOverMm.toFixed(3))} mm) is derived from the ` +
+                `${Number((finishTool.radius * 2).toFixed(2))} mm ball’s own radius and the ${Number(visibleDepthMm.toFixed(3))} mm leftover-visible band, ` +
+                'held at or under that band on a flat span, not the 2.5D pocketing step-over reused as-is.',
+            ]
+          : []),
         ...(isMold(goal)
           ? [
               "Made as a mould: the part's shape is cut as a cavity from the stock's top face, turned over so a casting reads the right way round.",
