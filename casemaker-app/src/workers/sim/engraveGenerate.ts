@@ -251,6 +251,7 @@ import { rotaryFreeSpan, freeEndSentence, jawsSentence, tailstockSentence, throu
 import { generateRotaryReliefIR, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePoint, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
+import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
@@ -514,6 +515,14 @@ export interface EngraveProgram {
    * for program 1 — and on a file with nothing to predict (a surface program's empty list).
    */
   predicted?: OraclePredicted[];
+  /**
+   * #924 activation — THIS PROGRAM'S OWN raw design items, independent of this program's CAM
+   * offsets: the design-side oracle's input (`session.oracle`'s `designItems` param), one entry
+   * per V-carve/flat engrave item this program actually cuts, keyed by `itemId` like `predicted`.
+   * Absent on a program with nothing the check is defined for (a drill, thread, chamfer, cut-out
+   * or surface/goal program), and on a result stored before the field existed.
+   */
+  designItems?: DesignCheckItem[];
   /**
    * #865 — THIS PROGRAM'S OWN GENERATED FINDINGS, exactly as its generation raised them. The run's
    * list is built from these: a program after the first one has them tagged `program N (cutter)`,
@@ -870,6 +879,16 @@ export interface EngraveGenerated {
    */
   predicted: OraclePredicted[];
   /**
+   * #924 activation — the raw design items this run's V-carve/flat engrave items can be checked
+   * against, independent of this document's own CAM offsets (#584/`grooveRadiusAt`): one entry
+   * per item the design-side check is defined for (`designCheck.ts`'s header states the scope),
+   * keyed by `itemId` the same way `predicted` is. Empty on a job with none (a pure drill/thread/
+   * chamfer/cut-out job), on every goal/surface-3d job (the chamfer band and the goal mesh are
+   * out of this check's scope — see #924's issue comment), and on a result stored before the
+   * field existed.
+   */
+  designItems: DesignCheckItem[];
+  /**
    * #748 — the floors this run's items sit on, mm below the top face (missing ids: the top face,
    * 0). Computed once for the WHOLE document and carried on every program, because a program's
    * sub-job holds only its own items: the run sheet reads this map to state a V-carve's floor
@@ -1100,6 +1119,14 @@ export interface EngraveRegions {
    */
   floors: Record<string, number>;
   predicted: OraclePredicted[];
+  /**
+   * #924 activation — one raw design item per V-carve/flat `regions` entry the design-side check
+   * is defined for (`designOf(e)` at the item's own target depth, eroded by the cone's tip radius
+   * or the flat cutter's own radius — never this document's CAM offsets). Empty on a job with no
+   * such item (drills/threads/chamfers/cut-outs only); those classes are out of this check's scope
+   * (see `designCheck.ts`'s header and #924's issue comment on chamfers).
+   */
+  designItems: DesignCheckItem[];
   /**
    * #737 — the neck this job leaves for sawing off, in map millimetres, or null when it has none.
    * Carried on the measured regions so `generateOneProgram` cuts exactly the span the findings
@@ -2483,6 +2510,18 @@ export function engraveRegions(
   // finding states the shortfall); a stated flute shorter than the cone keeps its refusal, so its
   // depth is left alone and `generateEngrave`'s guard still stops it.
   const vLimit = tool === null ? null : vDepthLimit(tool);
+  // #924 activation — one design-check item per region below, built from the SAME `design`/
+  // `depth` this region already carries (never a second derivation that could disagree with it).
+  // A V-carve's `r` is its OWN `planeRadius` (`vCarveById`'s, computed per item from its own
+  // depth/floor by `vCarvePlane`) — the cone's radius at the item's TOP surface, the WIDEST its
+  // cross-section gets while cutting this item, so it is the most conservative "cannot enter"
+  // bound for the independent check (never the cone's constant `tipRadius`, which is the radius
+  // only at the very floor and is too narrow a bound for material above it — using it understated
+  // the reach and read ordinary badge text as over-cut by tens of mm² in the first draft of this
+  // commit). A flat item's `r` is the cutter's own constant cutting radius. Left out (not pushed)
+  // when the design is empty, when this program's tool states no radius, or when the item cuts no
+  // material (depth <= 0) — never guessed at.
+  const allDesignItems: DesignCheckItem[] = [];
   const regions: EngraveRegion[] = plan.engraves.map((e) => {
     const vCarve = vCarveById.get(e.id);
     // #856 — the clamp is measured FROM THE FLOOR: the cone reaches `limit` mm of material above
@@ -2493,12 +2532,18 @@ export function engraveRegions(
     const material = e.depth - floor;
     const clampToCone =
       vCarve !== undefined && vLimit !== null && vLimit.boundBy === 'cone' && material > vLimit.limitMm + 1e-9;
+    const depth = clampToCone ? floor + vLimit.limitMm : e.depth;
+    const design = designOf(e);
+    const designR = vCarve !== undefined ? vCarve.planeRadius : radius;
+    if (design.length > 0 && designR !== null && designR >= 0 && depth > 0) {
+      allDesignItems.push({ itemId: e.id, design, depth, r: designR });
+    }
     return {
       id: e.id,
       text: regionText(itemById.get(e.id)),
       name: e.name,
-      depth: clampToCone ? floor + vLimit.limitMm : e.depth,
-      polygons: designOf(e),
+      depth,
+      polygons: design,
       ...(vCarve === undefined ? {} : { vCarve }),
       ...(e.inlay === undefined ? {} : { inlay: e.inlay }),
       ...(e.through === true ? { through: true as const } : {}),
@@ -2860,6 +2905,7 @@ export function engraveRegions(
     cores,
     floors: Object.fromEntries([...floorById].filter(([, floor]) => floor > 0)),
     predicted,
+    designItems: allDesignItems,
     neck,
     tool,
     radius,
@@ -4442,6 +4488,9 @@ function emptyGoalResult(): Omit<EngraveGenerated, 'ok' | 'stage' | 'findings' |
     facingError: null,
     facingCam: null,
     predicted: [],
+    // #924 activation — out of scope for every goal/surface-3d path: the goal mesh is not a
+    // V-carve/flat item (see `designCheck.ts`'s header).
+    designItems: [],
     programs: [],
     errors: [],
   };
@@ -6677,6 +6726,7 @@ export async function engraveGenerate(
       facingCam: null,
       surface: null,
       predicted: [],
+      designItems: [],
       programs: [],
       errors: [],
     };
@@ -6860,7 +6910,10 @@ export async function engraveGenerate(
       }
       // #849 — the neck-only file closes the run, after every face file.
       const neckFile = engraved.length > 0 && oneReady.neckApart != null ? [programOf(oneReady.neckApart, ref)] : [];
-      const facePrograms = neckFile.length === 0 ? faceOne.programs : withOwnPredicted(faceOne.programs, faceOne.predicted);
+      const facePrograms =
+        neckFile.length === 0
+          ? faceOne.programs
+          : withOwnDesignItems(withOwnPredicted(faceOne.programs, faceOne.predicted), faceOne.designItems);
       return {
         ...oneReady,
         surface: shop.surface ?? null,
@@ -6904,6 +6957,7 @@ export async function engraveGenerate(
       facingCam: null,
       surface: null,
       predicted: [],
+      designItems: [],
       programs: [],
       errors: [],
     };
@@ -7226,6 +7280,11 @@ function withOwnPredicted(programs: readonly EngraveProgram[], predicted: readon
   return programs.map((program, i) => (i === 0 ? { ...program, predicted: [...predicted] } : program));
 }
 
+/** #924 activation — `withOwnPredicted`'s sibling: program 0 takes the run's own design items too. */
+function withOwnDesignItems(programs: readonly EngraveProgram[], designItems: readonly DesignCheckItem[]): EngraveProgram[] {
+  return programs.map((program, i) => (i === 0 ? { ...program, designItems: [...designItems] } : program));
+}
+
 /** One program as the result's list entry, keyed by the FNV of its posted text (decision 3). */
 function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
   const nc = one.nc!;
@@ -7248,6 +7307,8 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     findings: one.findings,
     // #844 — the program's own predictions, so the run judges its own file.
     predicted: one.predicted,
+    // #924 activation — this program's own design items, same scope as `predicted` above.
+    designItems: one.designItems,
     drill: one.drill ?? null,
     finish: one.finish ?? null,
     through: one.through ?? null,
@@ -7405,7 +7466,7 @@ async function generateOneProgram(
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, profiles, throughMask, cuts, chamfers, cores, floors: floorById, predicted, findings, releasedPieces, neck } = engraveRegions(
+  const { plan, regions, profiles, throughMask, cuts, chamfers, cores, floors: floorById, predicted, designItems, findings, releasedPieces, neck } = engraveRegions(
     tl,
     job,
     tool,
@@ -7432,6 +7493,13 @@ async function generateOneProgram(
    * "left" and refuses a pair that cut exactly as planned.
    */
   let predictedForRun = predicted;
+  /**
+   * #924 activation — THIS PROGRAM'S OWN design items, filtered the same way `predictedForRun`
+   * is split below: a rough-only half of a rest pair deliberately stops short of the final floor,
+   * so an item that pass splits is DROPPED here (never re-derived at the shallower depth) rather
+   * than checked against a target it was never meant to reach this file.
+   */
+  let designItemsForRun = designItems;
   const errors: EngraveFailure[] = [];
   // #240 slice 2 — the map this job is authored on, or null for a flat job. Every rotary branch
   // below reads this ONE value, `rotaryMapOf`'s, so the CAM, the post, the verifier and the
@@ -7483,6 +7551,7 @@ async function generateOneProgram(
       facingError: extra?.facing?.error ?? null,
       facingCam: extra?.facing?.cam ?? null,
       predicted: predictedForRun,
+      designItems: designItemsForRun,
       errors,
     };
   };
@@ -8053,6 +8122,9 @@ async function generateOneProgram(
     ir = { ...ir, operations: renumber(ir.operations.filter((op) => op.labelId !== ROTARY_NECK_ID)) };
     neckPredicted = predictedForRun.filter((p) => p.itemId === ROTARY_NECK_ID);
     predictedForRun = predictedForRun.filter((p) => p.itemId !== ROTARY_NECK_ID);
+    // #924 activation — the neck is not a document engrave item (`designItemsForRun` never has
+    // this id), but the items file must not carry it either way; the neck-only file gets none.
+    designItemsForRun = designItemsForRun.filter((d) => d.itemId !== ROTARY_NECK_ID);
   }
 
   // #432 — FACING IS ITS OWN PROGRAM, and this one is untouched by it.
@@ -8106,6 +8178,12 @@ async function generateOneProgram(
         polygons: leave > 0 || r > 0 ? offset(offset(p.polygons, -(r + leave)), r) : p.polygons,
       };
     });
+    // #924 activation — a rough-only pass leaves the allowance by design: the design-side check
+    // asks whether the FINAL floor was reached, which a rough pass never claims, so its items are
+    // dropped from THIS program's designItems rather than failed on a target it is not cutting to
+    // (the finishing program that follows still carries them, unfiltered, since it reaches the
+    // real floor).
+    designItemsForRun = designItemsForRun.filter((d) => d.itemId === undefined || !split.has(d.itemId));
   }
 
   // 4. the depth limit and the setup. They are read by the facing file as well as by the verifier
@@ -8231,7 +8309,7 @@ async function generateOneProgram(
     });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: predictedForRun, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: predictedForRun, designItems: designItemsForRun, errors };
     }
 
     // 9. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
@@ -8270,7 +8348,7 @@ async function generateOneProgram(
       });
       if (neckVerify.findings.some((f) => f.severity === 'error')) {
         errors.push({ stage: 'verify', message: `the neck file: ${neckVerify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
-        return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc: postedNeck.text, verify: neckVerify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: neckPredicted, errors };
+        return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc: postedNeck.text, verify: neckVerify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: neckPredicted, designItems: [], errors };
       }
       neckApartOne = {
         ...emptyGoalResult(),
@@ -8347,6 +8425,9 @@ async function generateOneProgram(
       facingError: facing.error,
       facingCam: facing.cam,
       predicted: predictedForRun,
+      // #924 activation — this program's own design items, split the same way `predictedForRun` is
+      // above (rough-only items dropped, the neck item dropped).
+      designItems: designItemsForRun,
       // #737 — the neck this program leaves, for the run sheet's saw step. #849 — when the neck was
       // posted apart, its file carries it and this one cuts the items alone.
       neck: neckApartOne === null ? neckProgram : null,
