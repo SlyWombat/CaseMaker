@@ -65,7 +65,7 @@ import {
   type SurfaceSpreadAssessment,
   type SurfaceSpreadPlan,
 } from '@/engine/cnc/engrave/surfaceSpread';
-import { type EdgeScan, type RegistrationPlan, probeInstrumentOf } from './plan';
+import { type EdgeScan, type ProbeSpec, type RegistrationPlan, probeInstrumentOf } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { sideCentreWork, sideTouchAllowed, sideTouchSetup } from './probe3d';
 import { centrePair, readCentrePair, type CentreFindPlan, type CentrePairReading } from './centreFind';
@@ -299,6 +299,47 @@ function moveXY(plan: RegistrationPlan, x: number, y: number): string {
   return o ? `G53 G0 X${f(o.x + x)} Y${f(o.y + y)}` : `G0 X${f(x)} Y${f(y)}`;
 }
 
+/** #932 — the feed of a probe-away move: the bench's own 100 mm/min (10-30 survey's fix line). */
+const PROBE_AWAY_FEED = 100;
+
+/**
+ * #932 — how far a probe-away move backs the stylus off, mm. The 3 mm centre-find and the rotary
+ * tap already send (`CentreFindOptions.releaseMm`'s default), so the registration and the two
+ * routines that had the release cannot drift apart.
+ */
+const PROBE_AWAY_MM = 3;
+
+/**
+ * #932 — THE PROBE-AWAY LINE, built in one place: `G38.5 <axis><signed travel> F<feed>`, sent while
+ * `G91` is in force, after a TRIGGERED reading and BEFORE the first `G0`/`G53 G0`. The 3D probe's
+ * stylus stays deflected where the controller stopped the move; a rapid from there alarms
+ * `unexpected probe trigger` and cuts the probe's supply (10-30 survey :2033, 10-31 bore :503).
+ *
+ * A ZERO TRAVEL IS REFUSED BEFORE THE WIRE. The controller answers `G38.5 X0 Y F100` with
+ * `error:at least one of X Y or Z must be specified, and be > or < 0` (10-31 bore :495), and the
+ * contact then stays deflected for the next rapid — the exact alarm this release exists to prevent.
+ */
+function probeAwayLine(axis: 'X' | 'Y' | 'Z', travelMm: number, feed = PROBE_AWAY_FEED): string {
+  if (!Number.isFinite(travelMm)) throw new Stop(`nothing to release: the G38.5 ${axis} travel is not a number`);
+  const travel = Math.round(travelMm * 1000) / 1000;
+  if (travel === 0) {
+    throw new Stop(
+      `nothing to release: a G38.5 ${axis} of ${f(travelMm)} mm has no travel — the controller refuses a move with nothing to move`,
+    );
+  }
+  return `G38.5 ${axis}${travel > 0 ? f(travel) : `-${f(-travel)}`} F${f(feed)}`;
+}
+
+/**
+ * #932 — whether this probe needs the release. The 3D probe's stylus stays deflected after a
+ * touch; the wired V2 is a mechanical switch that returns, and has tolerated the plain retract in
+ * every bench run. WP-10's rule: the wired probe gets the release too only after an air run shows
+ * it is safe for it, then this gate comes out.
+ */
+function probeNeedsRelease(probe: ProbeSpec | null): boolean {
+  return probeInstrumentOf(probe) === 'xyz';
+}
+
 /**
  * One scan touch at `at`: XY at the park height, Idle, probe down at most to the cap, clear a miss, lift.
  * `travelHigh` (#427): the move that STARTS a scan on the bracket goes at the seek height (the plan's
@@ -319,7 +360,9 @@ async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: nu
   const reply = await io.send(`G38.3 Z-${f(s.parkAboveSurfaceMm + s.capBelowSurfaceMm)} F${f(s.touchFeed)}`, { missOk: true });
   const prb = lastPrb(reply);
   if (prb === null) throw new Stop(`the touch at ${f(x)}, ${f(y)} answered no probe reading`);
-  // A miss under G38.3 is a reading, not an alarm (#518): nothing to clear.
+  // A miss under G38.3 is a reading, not an alarm (#518): nothing to clear. #932 — a touch that DID
+  // land is released before the retract: a rapid from a deflected stylus alarms and cuts its supply.
+  if (prb.touched && probeNeedsRelease(plan.probe)) await io.send(probeAwayLine('Z', PROBE_AWAY_MM));
   await io.send('G90');
   await io.send(`G53 G0 Z${f(parkZ)}`);
   io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
@@ -429,8 +472,12 @@ async function scanEdgeSideways(
   io.at(`down toward ${what}, as low as machine Z ${f(setup.zMachine)} (a guarded descent)`);
   await io.send('G91');
   const downReply = await io.send(`G38.3 Z-${f(descentMm)} F${f(s.touchFeed)}`, { missOk: true });
-  await io.send('G90');
   const downPrb = lastPrb(downReply);
+  // #932 — the guarded descent met the stock: release the stylus before the `G90` and the retract.
+  if (downPrb !== null && downPrb.touched && probeNeedsRelease(plan.probe)) {
+    await io.send(probeAwayLine('Z', PROBE_AWAY_MM));
+  }
+  await io.send('G90');
   if (downPrb === null) throw new Stop(`the sideways descent on ${what} answered no probe reading`);
   if (downPrb.touched) {
     await io.send(`G53 G0 Z${f(surfaceZ + s.parkAboveSurfaceMm)}`);
@@ -454,6 +501,11 @@ async function scanEdgeSideways(
   await io.send('G91');
   const reply = await io.send(t.line);
   const prb = lastPrb(reply);
+  // #932 — a SIDEWAYS contact releases along the scan's axis, OPPOSITE the travel, before the
+  // retract; a miss touched nothing and needs none.
+  if (prb !== null && prb.touched && probeNeedsRelease(plan.probe)) {
+    await io.send(probeAwayLine(t.axis === 'x' ? 'X' : 'Y', t.travelMm < 0 ? PROBE_AWAY_MM : -PROBE_AWAY_MM));
+  }
   await io.send('G90');
   await io.send(`G53 G0 Z${f(surfaceZ + s.parkAboveSurfaceMm)}`);
   if (prb === null) throw new Stop(`the sideways touch on ${what} answered no probe reading`);
@@ -576,6 +628,8 @@ async function seekSurface(
     await io.send('G90');
     return null;
   }
+  // #932 — the fast touch ended on the stock: release the stylus before the relative lift.
+  if (probeNeedsRelease(plan.probe)) await io.send(probeAwayLine('Z', PROBE_AWAY_MM));
   await io.send(`G0 Z${f(SURFACE_LIFT_MM)}`);
   await io.idle();
   io.at(`as low as ${f(s.surfaceSlowSeekMm - SURFACE_LIFT_MM)} mm below the fast touch's reading (the slow surface touch)`);
@@ -586,6 +640,10 @@ async function seekSurface(
     opts.ceilingMm,
     opts.missOk === true,
   );
+  // #932 — the slow touch is the reading the caller keeps, and BOTH callers' next line is a rapid
+  // (`runRegistration`'s park lift, `retouchSurface`'s travel-height lift): release here, once,
+  // while the seek's `G91` is still in force. A miss (`missOk`) touched nothing.
+  if (slow !== null && probeNeedsRelease(plan.probe)) await io.send(probeAwayLine('Z', PROBE_AWAY_MM));
   await io.send('G90');
   return slow;
 }
@@ -674,7 +732,12 @@ async function mountTapTouch(
   settings: RegistrationSettings,
   floorZ: number,
   /** #615 — the machine Z the touch expects to meet, or null to descend the full height at the touch feed. */
-  expectZ: number | null = null,
+  expectZ: number | null,
+  /**
+   * #932 — the probe the run has checked out. Required (never defaulted) so a new caller cannot
+   * quietly drop the release: a triggered tap on the 3D probe leaves the stylus down for the lift.
+   */
+  probe: ProbeSpec | null,
 ): Promise<Prb | null> {
   await io.idle();
   await io.send(`G53 G0 Z${f(seekFromMachineZ)}`);
@@ -693,6 +756,8 @@ async function mountTapTouch(
         ? fast
         : lastPrb(await io.send(`G38.3 Z-${f(approachZ - floorZ)} F${f(settings.touchFeed)}`, { missOk: true }));
   }
+  // #932 — a triggered tap is released before the relative lift (the 3D probe's stylus is down).
+  if (prb !== null && prb.touched && probeNeedsRelease(probe)) await io.send(probeAwayLine('Z', PROBE_AWAY_MM));
   await io.send('G0 Z3');
   await io.send('G90');
   const after = await io.send('M119');
@@ -720,6 +785,12 @@ export async function runMountTap(
   workEnvelopeFloorZ: number,
   /** #607 — which mount's reference this is, for the miss sentence. The vise is the default. */
   mount: 'vise' | 'bracket' | 'rotary' = 'vise',
+  /**
+   * #932 — the checked-out probe, when the caller has one. The standalone tap releases a triggered
+   * touch for the 3D probe only (see {@link probeNeedsRelease}); its current caller carries no
+   * instrument, so the default is the wired probe's behaviour — unchanged from before this.
+   */
+  probe: ProbeSpec | null = null,
 ): Promise<MountTapResult> {
   const io = session(deps, seekFromMachineZ, settings.idlePollLimit);
   const bad = settingsProblem(settings);
@@ -740,7 +811,7 @@ export async function runMountTap(
     if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
-    const prb = await mountTapTouch(io, tap, seekFromMachineZ, settings, workEnvelopeFloorZ);
+    const prb = await mountTapTouch(io, tap, seekFromMachineZ, settings, workEnvelopeFloorZ, null, probe);
     if (prb === null || !prb.touched) {
       // The vise's sentence is the bench-tested one and stays byte for byte; the others name their
       // own reference the way the operator sees it.
@@ -875,8 +946,9 @@ export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Pr
         `the top touch found nothing between machine Z ${f(opts.seekFromMachineZ)} and ${f(bandBottom)} at the estimate — check the stock is under the probe`,
       );
     }
-    // #790 — a Z touch that ends on a surface is released before any G0.
-    await io.send(`G38.5 Z${f4(release)} F100`);
+    // #790 — a Z touch that ends on a surface is released before any G0. #932 — built by the one
+    // probe-away builder, so a zero `releaseMm` is a stop before the wire, not a firmware error.
+    await io.send(probeAwayLine('Z', release));
     await io.send('G90');
     const surfaceZ = r3(topPrb.z);
     // The work origin the moves ran in, derived exactly as the registration derives it: the touch's
@@ -905,7 +977,7 @@ export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Pr
         });
         const downPrb = lastPrb(down);
         if (downPrb !== null && downPrb.touched) {
-          await io.send(`G38.5 Z${f4(release)} F100`);
+          await io.send(probeAwayLine('Z', release));
           await io.send('G90');
           throw new Stop(
             plan.kind === 'bore'
@@ -930,7 +1002,7 @@ export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Pr
         }
         // #790 — PROBE-AWAY before any G0: the ball must release the wall first.
         await io.send('G91');
-        await io.send(`G38.5 ${word}${travelMm < 0 ? f4(release) : `-${f4(release)}`} F100`);
+        await io.send(probeAwayLine(axis === 'x' ? 'X' : 'Y', travelMm < 0 ? release : -release));
         await io.send('G90');
         // The PRB is machine XY; the work coordinate is it less the origin the moves ran in.
         const ballWork = r3((axis === 'x' ? prb.x : prb.y) - (axis === 'x' ? g54.x : g54.y));
@@ -1078,7 +1150,7 @@ export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Prom
         const down = await io.send(`G38.3 Z-${f(opts.parkAboveSurfaceMm)} F${f(opts.touchFeed)}`, { missOk: true });
         const downPrb = lastPrb(down);
         if (downPrb !== null && downPrb.touched) {
-          await io.send(`G38.5 Z${f4r(release)} F100`);
+          await io.send(probeAwayLine('Z', release));
           await io.send('G90');
           throw new Stop(`the descent beside the chuck at Y ${f(startY)} met material — the search starts inside something; check the module's position`);
         }
@@ -1095,7 +1167,7 @@ export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Prom
         }
         // #790 — PROBE-AWAY before any G0.
         await io.send('G91');
-        await io.send(`G38.5 Y${f4r(sign * release)} F100`);
+        await io.send(probeAwayLine('Y', sign * release));
         await io.send('G90');
         balls.push(r3(prb.y));
         io.saw({
@@ -1132,7 +1204,7 @@ export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Prom
       await io.send('G90');
       throw new Stop(`the crown touch found nothing down to machine Z ${f(bandBottom)} above the chuck's axis — check the module's position`);
     }
-    await io.send(`G38.5 Z${f4r(release)} F100`);
+    await io.send(probeAwayLine('Z', release));
     await io.send('G90');
     const crownZ = r3(crownPrb.z);
     await io.send(`G53 G0 Z${f(opts.seekFromMachineZ)}`);
@@ -1212,7 +1284,7 @@ export async function runRegistration(
     if (plan.mountTap !== null && tapExpectZ !== null) {
       const tap = plan.mountTap;
       const floorZ = tapExpectZ - MOUNT_TAP_FLOOR_MM;
-      const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, s, floorZ, tapExpectZ);
+      const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, s, floorZ, tapExpectZ, plan.probe);
       if (prb === null || !prb.touched || Math.abs(prb.z - tapExpectZ) > MOUNT_TAP_SLACK_MM) {
         const vise = tap.reference === undefined || tap.reference === 'vise-jaw-top';
         // #633 — a TOUCH outside the slack is not a miss. The fast stage meets the fixed jaw (or an

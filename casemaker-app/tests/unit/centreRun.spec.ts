@@ -233,3 +233,21 @@ describe('#827 runCentreFind on a round part', () => {
     if (!result.ok) expect(result.reason).toMatch(/increase the search radius/);
   });
 });
+
+// #932 — the zero-travel refusal lives in the one probe-away builder every `G38.5` goes through.
+// A release distance of 0 would put `G38.5 Z0` on the wire, which the controller refuses
+// (`error:at least one of X Y or Z must be specified, and be > or < 0`, 10-31 bore :495) — and the
+// contact then stays deflected for the next rapid, the alarm the release exists to prevent.
+describe('#932 a zero release distance', () => {
+  it('stops the run before a G38.5 is sent, naming the travel', async () => {
+    const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
+    const result = await runCentreFind(options({ kind: 'bore', radiusMm: 8.88 / 2 }, { releaseMm: 0 }), {
+      console: fake.console,
+      operator: yes,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('nothing to release');
+    expect(fake.lines.some((l) => l.startsWith('G38.5'))).toBe(false);
+  });
+});
