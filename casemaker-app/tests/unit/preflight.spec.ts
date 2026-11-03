@@ -71,6 +71,7 @@ function generatedWith(over: Partial<EngraveGenerated>): EngraveGenerated {
     facingError: null,
     facingCam: null,
     predicted: [],
+    designItems: [],
     programs: [],
     errors: [],
     ...over,

@@ -55,6 +55,7 @@ function generatedFor(job: EngraveJob): EngraveGenerated {
     facingError: null,
     facingCam: null,
     predicted: [],
+    designItems: [],
     programs: [
       {
         setupIndex: 1,
