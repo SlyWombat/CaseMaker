@@ -1379,9 +1379,9 @@ export function validateGoalObject(
         severity: 'warning',
         code: 'goal-object-oversize',
         message:
-          `The goal object "${target.name}" extends beyond the blank: ${list(sides)}. Generate cuts it ` +
-          `clipped to the blank, so the part outside the stock is not cut; move it inward or use a larger ` +
-          `stock to keep it whole.`,
+          `The goal object "${target.name}" extends beyond the blank: ${list(sides)}. Generate refuses it ` +
+          `before building the toolpath — a goal clipped to the stock would run its finish along the stock ` +
+          `edge, where the mount holds it. Move it inward or use a larger stock.`,
       });
     }
   }
