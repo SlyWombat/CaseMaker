@@ -1931,9 +1931,10 @@ describe('#933 the run stops in seconds', () => {
       rim: 1.5,
       stylusStaysDown: true,
     });
-    // The press lands while the tap's touch is on the wire: once a probe has been sent, the very
-    // next line is refused.
-    const stopRequested = () => z1.lines.some((l) => l.startsWith('G38.3'));
+    // The press lands once the tap has TOUCHED (the fast seek misses and the slow seek hits on this
+    // fixture, so the second probe line is the touch): the very next line — the touch's release —
+    // is refused by the flag, and the stop path must send it.
+    const stopRequested = () => z1.lines.filter((l) => l.startsWith('G38.3')).length >= 2;
     const r = await runRegistration(made.plan, { console: z1.console, operator: yes, stopRequested });
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -1946,6 +1947,43 @@ describe('#933 the run stops in seconds', () => {
     expect(z1.lines[released - 1]).toBe('G91');
     expect(z1.lines[released + 1]).toBe('G90');
     expect(z1.alarmed()).toBe(false);
+  });
+
+  it('a MISS reading books no release: a Stop after it sends no G38.5', async () => {
+    // The stylus came back open from the last touch (a `:0`), so there is nothing to back away
+    // from; the stop path must not book a release from the LINE alone.
+    const PROBE_3D: ProbeSpec = {
+      id: 'fx-probe-3d',
+      variant: '3d',
+      instrument: 'xyz',
+      tip: { diameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05 },
+    };
+    const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
+    const jaw: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+    const made = planRegistration(
+      input('vise', { probe: PROBE_3D, mountDatum: jaw, mountTap: tap, fixtureBelowSurfaceMs: undefined } as never),
+      registrationSettings(null, PROBE_3D).settings,
+    );
+    if (!made.ok) throw new Error(made.reason);
+    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: tap.x, y: tap.y, z: jaw.jawTopZ }, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
+    let probed = false;
+    const wire: string[] = [];
+    const console = {
+      async send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult> {
+        wire.push(line);
+        if (line.startsWith('G38.3') && !probed) {
+          probed = true;
+          return { kind: 'sent', line, text: '[PRB:-186.2,-180,-57.0:0]\nok', frames: 1, elapsedMs: 1 };
+        }
+        return z1.console.send(line, timing);
+      },
+    };
+    const r = await runRegistration(made.plan, { console, operator: yes, stopRequested: () => probed });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('the operator pressed Stop');
+    expect(r.reason).not.toContain('released the stylus');
+    expect(wire.some((l) => l.startsWith('G38.5'))).toBe(false);
   });
 
   it('an operator Stop in an alarm clears it ONCE, then releases the stylus', async () => {
