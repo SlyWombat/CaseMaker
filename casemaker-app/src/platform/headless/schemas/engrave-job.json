@@ -1722,6 +1722,14 @@
             "maxLength": 200,
             "type": "string"
           },
+          "vCarveDepth": {
+            "description": "A V-carved text's depth, as a region's: 'plane' (absent — the constant floor) or 'variable' (the medial-axis depth map). It also marks the text as V-bit work when the plan splits cutters.",
+            "enum": [
+              "plane",
+              "variable"
+            ],
+            "type": "string"
+          },
           "weight": {
             "description": "Stroke weight: regular or bold.",
             "enum": [

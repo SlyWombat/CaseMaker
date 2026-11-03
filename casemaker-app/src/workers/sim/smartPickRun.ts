@@ -56,6 +56,12 @@ export interface EngravePickInputs {
   shop: EngraveShopOpts;
   /** The caller's own table, when it is not the shop's `feeds` (the worker sends it explicitly). */
   table?: readonly FeedsEntry[] | null;
+  /**
+   * #940 — the document's SUPPORTING FLOORS (#748), computed where a Manifold toplevel is in hand:
+   * a cone's reach is the cut below its item's floor, not the stock-top depth. Carried on the one
+   * builder's inputs so the app's worker and the CLI cannot hand the search different floors.
+   */
+  floors?: ReadonlyMap<string, number> | null;
 }
 
 /** The one plan-evaluator context: the search, the candidate filter and the evaluator share it. */
@@ -74,7 +80,7 @@ export function pickContext(inputs: EngravePickInputs): EvalContext {
 /** `candidatePlans` with the context's own filters — never the three-argument form. */
 export function pickCandidates(inputs: EngravePickInputs): CandidatePlan[] {
   const ctx = pickContext(inputs);
-  return candidatePlans(inputs.job, inputs.tools, inputs.catalogue, ctx.conditions, ctx.table);
+  return candidatePlans(inputs.job, inputs.tools, inputs.catalogue, ctx.conditions, ctx.table, inputs.floors);
 }
 
 /** One plan, evaluated against the context the search itself uses. */
@@ -106,6 +112,8 @@ export function pickForEngrave(
       ...(inputs.shop.toolChangeSeconds === undefined || inputs.shop.toolChangeSeconds === null
         ? {}
         : { toolChangeSeconds: inputs.shop.toolChangeSeconds }),
+      // #940 — the same floors the candidate filter reads, from the inputs, never a second path.
+      ...(inputs.floors === undefined || inputs.floors === null ? {} : { floors: inputs.floors }),
       ...opts,
     },
     ctx.conditions,
@@ -153,6 +161,11 @@ export interface SmartPickRequest {
   table?: readonly FeedsEntry[] | null;
   /** #785 — the search's progress: the level being measured and the candidate about to be tried. */
   onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void;
+  /**
+   * #940 — the document's SUPPORTING FLOORS (#748), computed where a Manifold toplevel is in hand:
+   * a cone's reach is the cut below its item's floor, not the stock-top depth.
+   */
+  floors?: ReadonlyMap<string, number> | null;
 }
 
 /**
@@ -187,6 +200,7 @@ export async function runSmartPick(
 ): Promise<EngravePickSummary | null> {
   const { job, tools, catalogue, shop } = request;
   // The one builder (#922): the same context the CLI's door uses, with the worker's own table.
+  // #940 — the floors travel through it too, so the candidate list is the one the evaluator judges.
   const inputs: EngravePickInputs = {
     tl: request.tl,
     job,
@@ -195,6 +209,7 @@ export async function runSmartPick(
     conditions: request.conditions ?? null,
     shop,
     table: request.table ?? null,
+    floors: request.floors ?? null,
   };
   if (pickCandidates(inputs).length === 0) return null;
   const jobKey = smartPickKey(job, { tools, catalogue, conditions: request.conditions, shop });

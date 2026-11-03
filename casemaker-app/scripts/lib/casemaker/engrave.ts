@@ -140,7 +140,7 @@ import {
   type ReachRow,
 } from '../../../src/engine/cnc/engrave/reachability';
 import { MARGIN_DEFAULTS } from '../../../src/engine/cnc/engrave/depthBounds';
-import { engraveRegions, measureEngraving, raisedTextMeasure } from '../../../src/workers/sim/engraveGenerate';
+import { engraveRegions, measureEngraving, raisedTextMeasure, supportingFloors } from '../../../src/workers/sim/engraveGenerate';
 import { cuttingDiameter } from '../../../src/engine/cnc/tool';
 import type { CutParams, FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
 // #922 — the one call shape feeds/step-down/rpm resolution now goes through, and the table this
@@ -1509,7 +1509,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     const tools = searchToolsFor(job);
     const named = job.tool !== undefined && job.tool !== null ? job.tool : tools.find((e) => e.key === job.toolKey)?.tool;
     if (named === undefined || (named.shape !== 'drill' && named.shape !== 'thread')) return false;
-    return pickCandidates({ tl, job, tools, catalogue: catalogueRows, conditions: inventoryConditions(), shop: pickShop }).some(
+    return pickCandidates({
+      tl,
+      job,
+      tools,
+      catalogue: catalogueRows,
+      conditions: inventoryConditions(),
+      shop: pickShop,
+      // #940 — the same floors rule; the candidate list is the one the search would measure.
+      floors: supportingFloors(tl, toPartPlan(job)),
+    }).some(
       (p) => p.cutters.length > 1 && p.cutters[0]?.key === job.toolKey,
     );
   }
@@ -1551,6 +1560,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // #922 — THE APP'S OWN SEARCH: `pickForEngrave` builds the conditions map, the feed table
         // and the evaluator context for both doors; `pickShop` carries the tool-change cost the
         // panel's picker reads from the same setting.
+        // #940 — the document's supporting floors, so a V-carve's reach is measured from the
+        // floor it is cut into rather than from the stock top; the one builder carries them.
         const pick = await pickForEngrave({
           tl,
           job,
@@ -1558,6 +1569,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           catalogue: catalogueRows,
           conditions: inventoryConditions(),
           shop: pickShop,
+          floors: supportingFloors(tl, toPartPlan(job)),
         });
         const searchMs = Date.now() - searchStart;
         // #910 — every cutter refused before a plan existed: the reasons ARE the answer.
@@ -1701,6 +1713,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const setup = jobSetups(parsed.job)[setupIndex]!;
         const sub = setupWorkJob(parsed.job, tools, setupIndex);
         if (sub === null) continue;
+        // #922 — the same one builder on a dead-cutter substitution; #940 — the sub-job's floors.
         const pick = await pickForEngrave({
           tl,
           job: sub,
@@ -1708,6 +1721,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           catalogue: catalogueRows,
           conditions: inventoryConditions(),
           shop: pickShop,
+          floors: supportingFloors(tl, toPartPlan(sub)),
         });
         if (pick.refused === true) {
           out.progress(`  setup ${setupIndex + 1}      ${pick.reason}`);

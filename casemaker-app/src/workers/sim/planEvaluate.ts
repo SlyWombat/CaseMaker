@@ -59,6 +59,7 @@ import {
   engraveGenerate,
   measureEngraving,
   raisedTextRadius,
+  supportingFloors,
   type EngraveGenerated,
   type EngraveShopOpts,
 } from './engraveGenerate';
@@ -241,6 +242,21 @@ const partCache = new Map<string, { part: PartPlan; raisedOf: Map<string, PartPl
  * search pays for it once, not once per candidate).
  */
 const plugCache = new WeakMap<PartPlan, readonly InlayPlugMeasure[]>();
+/**
+ * #940 — the document's supporting floors (#748), once per plan: a cone's reach is measured from
+ * its item's floor, and the search must not pay for the containment test per candidate.
+ */
+const floorsCache = new WeakMap<PartPlan, ReadonlyMap<string, number>>();
+
+/** #940 — `supportingFloors`, memoised on the cached plan the same way the plug measure is. */
+function floorsOf(ctx: EvalContext, part: PartPlan): ReadonlyMap<string, number> {
+  let floors = floorsCache.get(part);
+  if (floors === undefined) {
+    floors = supportingFloors(ctx.tl, part);
+    floorsCache.set(part, floors);
+  }
+  return floors;
+}
 
 /** Test hook: drop every memoised verdict and per-cutter measure. */
 export function clearPlanEvaluations(): void {
@@ -432,7 +448,7 @@ function measureItems(
   swept: SweptRaised | null = null,
 ): EvaluatedItem[] {
   const { part, raisedOf } = partOf(job);
-  const work = kindedWork(job);
+  const work = kindedWork(job, floorsOf(ctx, part));
   const hasRest = plan.cutters.some((c) => c.items.length === 0);
   // #860 — A MALE INLAY HALF'S fidelity is not its cutaway's cut (which reproduces its own design
   // exactly, however thin the plug). It is the plug's BASE FACE — what planing reveals — as a
@@ -512,8 +528,13 @@ function measureItems(
 }
 
 /** The tighter reach margin over the plan, mm. */
-function measureReach(job: EngraveJob, plan: CandidatePlan, tools: readonly ToolLibraryEntry[]): number | null {
-  const work = kindedWork(job);
+function measureReach(
+  job: EngraveJob,
+  plan: CandidatePlan,
+  tools: readonly ToolLibraryEntry[],
+  floors?: ReadonlyMap<string, number> | null,
+): number | null {
+  const work = kindedWork(job, floors);
   let margin: number | null = null;
   for (const cutter of plan.cutters) {
     const tool = toolFor(tools, cutter.key);
@@ -546,7 +567,8 @@ function evaluateCoarse(job: EngraveJob, plan: CandidatePlan, ctx: EvalContext):
   if (job.setups !== undefined && job.setups.length > 1) {
     return { ...base, ok: false, refusal: 'a multi-setup job is not evaluated by one plan yet', items: [], seconds: null };
   }
-  const reach = measureReach(job, plan, ctx.tools);
+  // #940 — the floors are the plan's own: a cone's reach is the cut below its item's floor.
+  const reach = measureReach(job, plan, ctx.tools, floorsOf(ctx, partOf(job).part));
   return {
     ...base,
     ok: true,
@@ -744,7 +766,7 @@ function sweptRaisedDetails(
 ): SweptRaised {
   const out: SweptRaised = new Map();
   // The pinch half of the detail stays the model's, at the effective cutter of each item.
-  for (const w of kindedWork(job)) {
+  for (const w of kindedWork(job, floorsOf(ctx, part))) {
     const key = effectiveCutter(plan, w.id);
     const tool = key === null ? null : toolFor(ctx.tools, key);
     if (tool === null) continue;

@@ -356,14 +356,27 @@ function sideGoalObject(job: EngraveJob): EngraveTargetObject | null {
  * The depth each needs is the cutter's REACH, not the document's `depth` field: a through cut
  * reaches the stock's underside plus the breakthrough, a thread adds its run-out, and a chamfer is
  * as deep as its width.
+ *
+ * #940 — TWO CORRECTIONS FOR A V-CARVED ITEM ON A FLOOR:
+ *   - any EXPLICIT `vCarveDepth` is cone work. It used to be only `'variable'` (and an inlay), so
+ *     a constant-floor V-carve — `vCarveDepth: 'plane'`, the sample-4 initials 0.8 deep in a
+ *     6 mm pocket — could only ever be planned as a flat pocket. A document with no
+ *     `vCarveDepth` is unchanged: its text stays flat work.
+ *   - a CONE's reach is measured from the item's supporting FLOOR (#748), not from the stock top.
+ *     The initials sit on the pocket's 6 mm floor and cut 0.8; reading 6.8 refused every 0.3 mm
+ *     V-bit for a depth it never travels. `floors` is the document's own map
+ *     (`supportingFloors`); a caller that cannot compute it reads the old stock-top depth, and
+ *     every app path passes it.
  */
-export function kindedWork(job: EngraveJob): KindedItem[] {
+export function kindedWork(job: EngraveJob, floors?: ReadonlyMap<string, number> | null): KindedItem[] {
   const through = r3(job.stock.thickness + job.breakthrough);
   const out: KindedItem[] = [];
   const push = (id: string, name: string, kind: WorkKind, reachMm: number, why: string) =>
     out.push({ id, name, kind, reachMm: r3(reachMm), why });
   const isCone = (item: { inlay?: unknown; vCarveDepth?: string }): boolean =>
-    item.inlay !== undefined || item.vCarveDepth === 'variable';
+    item.inlay !== undefined || item.vCarveDepth !== undefined;
+  /** The cut a cone makes into its item's floor — the reach it must have, mm. */
+  const coneReach = (id: string, depth: number): number => Math.max(0, depth - (floors?.get(id) ?? 0));
 
   const goal = pureGoalObject(job) ?? sideGoalObject(job);
   if (goal !== null) {
@@ -380,12 +393,24 @@ export function kindedWork(job: EngraveJob): KindedItem[] {
   for (const label of job.labels) {
     if (!usable(label)) continue;
     const cone = isCone(label);
-    push(label.id, `"${label.text}"`, cone ? 'cone' : 'flat', label.depth, cone ? 'a V-carve / inlay is a cone' : 'text is a flat region');
+    push(
+      label.id,
+      `"${label.text}"`,
+      cone ? 'cone' : 'flat',
+      cone ? coneReach(label.id, label.depth) : label.depth,
+      cone ? 'a V-carve / inlay is a cone' : 'text is a flat region',
+    );
   }
   for (const shape of job.shapes) {
     if (!usable(shape)) continue;
     const cone = isCone(shape);
-    push(shape.id, shape.id, cone ? 'cone' : 'flat', shape.depth, cone ? 'a V-carve / inlay is a cone' : 'a region is a flat pocket');
+    push(
+      shape.id,
+      shape.id,
+      cone ? 'cone' : 'flat',
+      cone ? coneReach(shape.id, shape.depth) : shape.depth,
+      cone ? 'a V-carve / inlay is a cone' : 'a region is a flat pocket',
+    );
   }
   for (const item of job.combined ?? []) {
     if (!usable(item)) continue;
@@ -399,7 +424,7 @@ export function kindedWork(job: EngraveJob): KindedItem[] {
       item.id,
       item.id,
       cone ? 'cone' : 'flat',
-      item.depth,
+      cone ? coneReach(item.id, item.depth) : item.depth,
       isolation
         ? 'an isolation band is a cone’s flank'
         : cone
@@ -415,7 +440,13 @@ export function kindedWork(job: EngraveJob): KindedItem[] {
     // a flat end mill the generator then refused — j21-b's coaster inlay, and the same class in
     // j14's text. `EngraveVectorShape` extends `EngraveShapeBase`, so the marker is the shape's.
     const cone = isCone(vector);
-    push(vector.id, vector.name ?? vector.id, cone ? 'cone' : 'flat', vector.depth, cone ? 'a V-carve / inlay is a cone' : 'an imported outline is a flat region');
+    push(
+      vector.id,
+      vector.name ?? vector.id,
+      cone ? 'cone' : 'flat',
+      cone ? coneReach(vector.id, vector.depth) : vector.depth,
+      cone ? 'a V-carve / inlay is a cone' : 'an imported outline is a flat region',
+    );
   }
   for (const trace of job.traces ?? []) {
     if (!usable(trace)) continue;
@@ -532,6 +563,11 @@ export function planCutters(
   table?: readonly FeedsEntry[],
   /** The shop's `sim.columnFlatPitchYMm` (the goal finish's grid), for the ball's budget check. */
   gridPitchMm?: number | null,
+  /**
+   * #940 — the document's SUPPORTING FLOORS (#748, `supportingFloors`), so a cone's reach is the
+   * cut it makes below its item's floor rather than the stock-top depth. Absent: the old reading.
+   */
+  floors?: ReadonlyMap<string, number> | null,
 ): CutterPlan {
   // #834 — A JOB WHOSE WORK IS ON ITS FACES. The face pick is one flat end, and the plan's one
   // cutter owns no ITEMS (there are none): the indexed program cuts the face list the job states.
@@ -558,7 +594,7 @@ export function planCutters(
   const mixedFace = jobHasItems(job) ? faceCutterPick(job, tools, catalogue, conditions, table, true, true) : null;
   const faceToolKey = mixedFace === null ? undefined : mixedFace.entry.key;
 
-  const work = kindedWork(job);
+  const work = kindedWork(job, floors);
   const unassigned: CutterPlan['unassigned'] = [];
   const notes: string[] = [];
   const reachByKey = new Map(reach === null ? [] : reach.cutters.map((c) => [c.key, c]));

@@ -121,6 +121,12 @@ export interface SmartPickOptions {
    * plan's cost. Absent: the labelled fallback {@link TOOL_CHANGE_SECONDS}.
    */
   toolChangeSeconds?: number;
+  /**
+   * #940 — the document's SUPPORTING FLOORS (#748, `supportingFloors`), so a cone's reach is the
+   * cut it makes below its item's floor instead of the stock-top depth. The caller is the one with
+   * a Manifold toplevel; a caller with none leaves it absent and reads the old depth.
+   */
+  floors?: ReadonlyMap<string, number> | null;
 }
 
 /** One library cutter the search could not use, and why — the refusal's evidence (#910). */
@@ -202,8 +208,10 @@ export function rulePlanOf(
   catalogue: readonly FeedCatalogueRow[],
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[] | null,
+  /** #940 — the document's supporting floors (#748); a cone's reach is measured from its floor. */
+  floors?: ReadonlyMap<string, number> | null,
 ): CandidatePlan | null {
-  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined);
+  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors);
   if (base.cutters.length === 0) return null;
   return planFrom(base.cutters, tools, base.faceToolKey, base.goalRoughKey);
 }
@@ -243,6 +251,8 @@ export function candidatePlans(
   catalogue: readonly FeedCatalogueRow[],
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[] | null,
+  /** #940 — the document's supporting floors (#748), as `planCutters` takes them. */
+  floors?: ReadonlyMap<string, number> | null,
 ): CandidatePlan[] {
   const out: CandidatePlan[] = [];
   const seen = new Set<string>();
@@ -295,7 +305,7 @@ export function candidatePlans(
   // The kind plan: one cutter per kind, and — when the reach table is absent — no rest pair. It is
   // the rule-based answer; the search treats it as one candidate among the measured ones. A MIXED
   // NAMED job does not take it: that plan would replace the cutter the operator named.
-  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined);
+  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors);
   const basePlan = planFrom(base.cutters, tools, base.faceToolKey);
   // #842 — A MIXED JOB'S FACE CUTTER IS PART OF THE PLAN. The face rule names one; the search
   // also tries the other fitting face cutters, so a human finding a better one is a selector bug
@@ -711,10 +721,10 @@ export async function smartPick(
   const fullFinalists = Math.max(1, opts.fullFinalists ?? 3);
   const margin = opts.buyThisMargin ?? 0.02;
   const notes: string[] = [];
-  const rulePlan = rulePlanOf(job, tools, catalogue, conditions, table);
+  const rulePlan = rulePlanOf(job, tools, catalogue, conditions, table, opts.floors);
   // #834 — a face job's plans have no items to score; their fidelity is the face's (see fidelityOf).
   const exactWhenEmpty = faceWorkOf(job) !== null;
-  const plans = candidatePlans(job, tools, catalogue, conditions, table).slice(0, maxCandidates);
+  const plans = candidatePlans(job, tools, catalogue, conditions, table, opts.floors).slice(0, maxCandidates);
   if (plans.length === 0) {
     const candidates = candidateRefusals(job, tools, catalogue, conditions, table);
     // The sentence names every cutter of the right shape and why it is out; the wrong-shaped rest
