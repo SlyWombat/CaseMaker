@@ -607,7 +607,11 @@ export interface StatusMonitor {
 const HALT_WORDS: Readonly<Record<number, string>> = {
   1: 'the machine was halted by hand',
   2: 'homing failed',
-  3: 'a probe touch did not trigger',
+  // #932 — `Kernel.h` names code 3 `PROBE_FAIL` and says nothing more, and the controller's own
+  // alarm on it is `ALARM: unexpected probe trigger` (10-30 survey :2033, 10-31 bore :503). The
+  // same code also covers a `G38.3` that never triggered, so neither half alone is the reading:
+  // the old words ("a probe touch did not trigger") named only the second case of the two.
+  3: 'the probe failed — a touch did not trigger, or it triggered when it should not have',
   4: 'calibration failed',
   5: 'the tool changer could not home',
   6: 'the tool changer read an invalid tool',

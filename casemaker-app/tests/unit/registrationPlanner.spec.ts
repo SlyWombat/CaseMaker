@@ -262,6 +262,13 @@ function fakeZ1(opts: {
    */
   ballR?: number;
   /**
+   * #932 — the stylus STAYS where the controller stopped the move (the 3D probe does; the wired V2
+   * is a mechanical switch that returns). With this on, the fake enforces what the bench showed:
+   * a rapid from a deflected stylus alarms `unexpected probe trigger`, and a `G38.5` must reverse
+   * the axis and direction the stylus was deflected along — any other release alarms too.
+   */
+  stylusStaysDown?: boolean;
+  /**
    * #643 review — the head is still at the TRAVEL height when a scan begins: the park did not take
    * effect. Every XY move after a surface-height touch starts the next scan from the travel
    * height, so a descent must establish its own start absolutely.
@@ -288,6 +295,19 @@ function fakeZ1(opts: {
   let sawSurfaceTouch = false;
   /** #643 review — the machine Z the last sideways probe ran at. */
   let sideProbeZ: number | null = null;
+  /**
+   * #932 — where the stylus is still deflected after a triggered `G38.3`: the axis and the sign of
+   * the travel that deflected it. `null` when nothing is pressing on it. Only modelled when
+   * `stylusStaysDown` is set (the 3D probe); the wired probe returns by itself.
+   */
+  let deflected: { axis: 'x' | 'y' | 'z'; travelSign: number } | null = null;
+  /** #932 — the indices in `lines` of the probe moves that TRIGGERED (answered `:1`). */
+  const triggered: number[] = [];
+  /** #932 — the alarm the real controller raises on a move with the stylus still deflected. */
+  const alarmDeflected = (): ConsoleSendResult => {
+    alarmed = true;
+    return reply('ALARM: unexpected probe trigger');
+  };
   let pending = 0;
   const lines: string[] = [];
   const xyMovesAtZ: number[] = [];
@@ -331,6 +351,8 @@ function fakeZ1(opts: {
       if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
       let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
       if (m) {
+        // #932 — a rapid with the stylus still on the stock is the bench's alarm, not a move.
+        if (deflected !== null) return alarmDeflected();
         const target = Number(m[1]);
         // #643 — a rapid straight down INTO the stock is a crash, not a move. The executor's scan
         // descents must probe (G38.3) instead; this flag is what a spec asserts against.
@@ -341,6 +363,7 @@ function fakeZ1(opts: {
       // #427 — the bracket's moves are sent in machine coordinates.
       m = /^G53 G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
       if (m) {
+        if (deflected !== null) return alarmDeflected();
         xyMovesAtZ.push(pos.z);
         pos.x = Number(m[1]) + (xyMovesAtZ.length > 1 ? (opts.landShift ?? 0) : 0);
         pos.y = Number(m[2]);
@@ -350,6 +373,7 @@ function fakeZ1(opts: {
       }
       m = /^G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
       if (m) {
+        if (deflected !== null) return alarmDeflected();
         xyMovesAtZ.push(pos.z);
         if (mode === 'G90') {
           // `landShift` moves every XY move AFTER the surface one: a scan that lands somewhere else.
@@ -365,6 +389,7 @@ function fakeZ1(opts: {
       m = /^G0 Z(-?[\d.]+)$/.exec(line);
       if (m) {
         if (mode !== 'G91') throw new Error('a Z move in absolute work coordinates');
+        if (deflected !== null) return alarmDeflected();
         return (pos.z += Number(m[1])), reply('ok');
       }
       // #518 — the executor probes with G38.3: a miss is `[PRB:…:0]` and `ok`, never an alarm. A G38.2
@@ -379,7 +404,9 @@ function fakeZ1(opts: {
         if (hit !== null && hit >= target && hit <= pos.z) {
           pos.z = hit;
           lowest = Math.min(lowest, pos.z);
+          if (opts.stylusStaysDown === true) deflected = { axis: 'z', travelSign: -1 };
           if (Math.abs(hit - surface) < 1e-6) sawSurfaceTouch = true;
+          triggered.push(lines.length - 1);
           return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${hit.toFixed(3)}:1]\nok`);
         }
         pos.z = target;
@@ -406,7 +433,32 @@ function fakeZ1(opts: {
           pos.z < surface &&
           (travel > 0 ? startMachine < contactLow && endMachine >= contactLow : startMachine > contactHigh && endMachine <= contactHigh);
         pos[axis] = hits ? (travel > 0 ? contactLow : contactHigh) : endMachine;
+        if (hits) triggered.push(lines.length - 1);
+        if (hits && opts.stylusStaysDown === true) deflected = { axis, travelSign: Math.sign(travel) };
         return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:${hits ? 1 : 0}]\nok`);
+      }
+      // #932 — PROBE-AWAY (`G38.5 <axis><signed travel>`, under `G91`). With the 3D probe's
+      // stay-down stylus modelled, the release MUST reverse the axis and direction that deflected
+      // it; a release on another axis, or into the surface, is the controller's alarm. So a wrong
+      // release at any scan site fails the run here instead of passing silently.
+      m = /^G38\.5 ([XYZ])(-?[\d.]+) F[\d.]+$/.exec(line);
+      if (m) {
+        if (mode !== 'G91') throw new Error('the executor released in absolute mode');
+        const axis = m[1]!.toLowerCase() as 'x' | 'y' | 'z';
+        const travel = Number(m[2]);
+        if (travel === 0) return reply('error:at least one of X Y or Z must be specified, and be > or < 0');
+        if (deflected !== null && (deflected.axis !== axis || Math.sign(travel) !== -deflected.travelSign)) {
+          return alarmDeflected();
+        }
+        if (deflected !== null) {
+          // A probe-away move STOPS AS SOON AS THE STYLUS OPENS — microns of travel, not the
+          // commanded limit (the limit is the safety bound). Modelled as no movement, which is what
+          // the relative lift that follows assumes.
+          deflected = null;
+          return reply('ok');
+        }
+        pos[axis] += travel;
+        return reply('ok');
       }
       if (/^G10 L2 P1 /.test(line)) return reply('ok');
       return reply(`error:unexpected line ${line}`);
@@ -419,6 +471,7 @@ function fakeZ1(opts: {
     lowest: () => lowest,
     plunged: () => plunged,
     sideProbeZ: () => sideProbeZ,
+    triggeredAt: () => triggered,
     fitCutter: () => (tool = 'cutter'),
     mode: () => mode,
     alarmed: () => alarmed,
@@ -656,7 +709,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
   };
 
   it('finds the FREE front edge in ONE horizontal touch, and leaves the fixed-jaw edge to the Z scan', async () => {
-    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ }, ballR: 1.5, rim: 1.5 });
+    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ }, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
     const p = sidePlan();
     const seen: LiveTouch[] = [];
     const r = await runRegistration(p, { console: z1.console, operator: yes, onTouch: (t) => seen.push(t) });
@@ -685,7 +738,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
   it('#643 a blank that reaches the scan’s limit stops as "beyond the reach", never a plunge', async () => {
     // The stock sits 6 mm toward the front edge, so the front scan's 5 mm outward limit is OVER it.
     const reachesTheLimit = { ...BLANK, yMin: -6, yMax: 70.2 };
-    const z1 = fakeZ1({ actual: reachesTheLimit, tap: { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ }, ballR: 1.5, rim: 1.5 });
+    const z1 = fakeZ1({ actual: reachesTheLimit, tap: { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ }, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
     const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
     // The descent at the limit PROBED; it never rapid-moved down into the stock.
     expect(z1.plunged()).toBe(false);
@@ -710,7 +763,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
       instrumentSettings,
     );
     if (!planned.ok) throw new Error(planned.reason);
-    const z1 = fakeZ1({ actual: SHIFTED, ballR: 1.5, rim: 1.5 });
+    const z1 = fakeZ1({ actual: SHIFTED, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
     const r = await runRegistration(planned.plan, { console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
 
@@ -738,6 +791,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
       tap: { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ },
       ballR: 1.5,
       rim: 1.5,
+      stylusStaysDown: true,
       headAtTravelForScans: true,
     });
     const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
@@ -749,6 +803,111 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
     const front = r.outcome.edges.find((e) => e.edge === 'front')!;
     expect(front.problem).toBeNull();
     expect(front.foundAt).not.toBeNull();
+  });
+
+  // #932 — THE RELEASE BEFORE ANY RAPID AFTER A TOUCHED READING. The 3D probe's stylus stays
+  // deflected where the controller stopped the move; a `G0`/`G53 G0` from there alarms
+  // `unexpected probe trigger` and cuts the probe's supply (10-30 survey :2033, 10-31 bore :503).
+  // The fake is ARMED for this block (`stylusStaysDown`): a rapid from a deflected stylus, or a
+  // `G38.5` that is not the reverse of the deflection, alarms and the run stops — so an unreleased
+  // or wrongly released site cannot pass here.
+  describe('#932 the probe release', () => {
+    /** The release between a triggered probe line and the first rapid after it (null when none). */
+    function releaseAfter(lines: readonly string[], probeAt: number): string | null {
+      for (let i = probeAt + 1; i < lines.length; i++) {
+        if (/^G38\.5 /.test(lines[i]!)) return lines[i]!;
+        if (/^(G53 )?G0 /.test(lines[i]!)) return null;
+      }
+      return null;
+    }
+
+    const armed = (actual: ExpectedStock = SHIFTED, tap = { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ }) =>
+      fakeZ1({ actual, tap, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
+
+    it('releases EVERY triggered reading before any rapid; the sideways one reverses its own axis', async () => {
+      const z1 = armed();
+      const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
+      if (!r.ok) throw new Error(r.reason);
+      expect(z1.alarmed()).toBe(false);
+      const lines = z1.lines;
+      // The run touches the jaw top, the surface twice, the left edge, the front wall and the
+      // cut extents — every one of them a triggered reading that must be released.
+      const probes = z1.triggeredAt();
+      expect(probes.length).toBeGreaterThan(5);
+      for (const at of probes) {
+        expect(releaseAfter(lines, at), lines[at]).toMatch(/^G38\.5 /);
+      }
+      // Site 3 — the sideways contact is released along Y, OPPOSITE its travel.
+      const side = probes.find((at) => /^G38\.3 Y/.test(lines[at]!));
+      expect(side).toBeDefined();
+      const travel = Number(/^G38\.3 Y(-?[\d.]+) F/.exec(lines[side!]!)![1]);
+      expect(releaseAfter(lines, side!)).toBe(`G38.5 Y${travel < 0 ? 3 : -3} F100`);
+    });
+
+    it('site 5 (the mount tap) releases before its G0 Z3, and site 4 (the fast seek) before its G0 Z1', async () => {
+      const z1 = armed();
+      const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
+      if (!r.ok) throw new Error(r.reason);
+      const lines = z1.lines;
+      const probes = z1.triggeredAt();
+      // The tap is the first reading of the run; its retract is the relative `G0 Z3`.
+      const tap = probes[0]!;
+      expect(lines[tap]!).toMatch(/^G38\.3 Z-/);
+      expect(lines[tap + 1]).toBe('G38.5 Z3 F100');
+      expect(lines[tap + 2]).toBe('G0 Z3');
+      // The fast surface touch is the one whose lift is the relative `G0 Z1`.
+      const fastSeek = probes.find((at) => lines[at + 2] === 'G0 Z1');
+      expect(fastSeek).toBeDefined();
+      expect(lines[fastSeek! + 1]).toBe('G38.5 Z3 F100');
+    });
+
+    it('site 2 — the guarded descent that met the stock is released before its retract', async () => {
+      // The stock reaches the front scan's 5 mm limit, so the guarded descent (not the sideways
+      // move) meets it — the #643 case. Without the release the retract alarms (`armed`).
+      const reachesTheLimit = { ...BLANK, yMin: -6, yMax: 70.2 };
+      const z1 = armed(reachesTheLimit);
+      const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
+      if (!r.ok) throw new Error(r.reason);
+      expect(z1.alarmed()).toBe(false);
+      expect(z1.lines.filter((l) => /^G38\.3 Y/.test(l))).toHaveLength(0);
+      for (const at of z1.triggeredAt()) expect(releaseAfter(z1.lines, at)).toMatch(/^G38\.5 /);
+    });
+
+    it('a wired-probe plan sends no release at all — its stream is what it was before #932', async () => {
+      const z1 = fakeZ1({ actual: SHIFTED });
+      const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+      if (!r.ok) throw new Error(r.reason);
+      expect(z1.lines.some((l) => l.startsWith('G38.5'))).toBe(false);
+    });
+
+    it('the fake alarms on a release that is not the reverse of the deflection (why the sites mean something)', async () => {
+      /** The reply text of a line the fake answered (it always answers `sent`). */
+      const replied = (r: ConsoleSendResult): string => {
+        if (r.kind !== 'sent' && r.kind !== 'timeout') throw new Error(`the fake refused the line: ${r.kind}`);
+        return r.text;
+      };
+      const approach = async (z1: ReturnType<typeof fakeZ1>) => {
+        await z1.console.send('G53 G0 Z-50');
+        await z1.console.send('G90');
+        await z1.console.send('G0 X19.05 Y38.1');
+        await z1.console.send('G91');
+        expect(replied(await z1.console.send('G38.3 Z-10 F100'))).toContain(':1');
+      };
+      // The right release: the reverse of the Z descent, accepted.
+      const good = armed();
+      await approach(good);
+      expect(replied(await good.console.send('G38.5 Z3 F100'))).toBe('ok');
+      // Another axis, and the surface's own direction, are the controller's alarm.
+      for (const wrong of ['G38.5 X3 F100', 'G38.5 Z-3 F100']) {
+        const z1 = armed();
+        await approach(z1);
+        expect(replied(await z1.console.send(wrong))).toContain('ALARM');
+      }
+      // A rapid with the stylus still down is the same alarm, which is what an unreleased site does.
+      const rapid = armed();
+      await approach(rapid);
+      expect(replied(await rapid.console.send('G53 G0 Z-3'))).toContain('ALARM');
+    });
   });
 });
 
