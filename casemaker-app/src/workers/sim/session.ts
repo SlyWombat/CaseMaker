@@ -1330,10 +1330,11 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
 
   /**
    * #948 — the live sweep's top as a work-frame sampler, from the flat column grid's remaining
-   * top `h` (the same values `SimLoadOk.flatField` carries). The value is the HIGHEST column
-   * touching the queried point — the four whose centres bracket it — so a goal cell is only read
-   * as cut when the whole cell's square is below the goal. Null when the square runs off the
-   * grid.
+   * top `h` (the same values `SimLoadOk.flatField` carries). The value is the HIGHEST of the four
+   * columns whose centres bracket the queried point, so a goal cell is only read as cut when all
+   * four are below the goal — and a gouge up to one column (0.1 mm) wide is not seen at all
+   * (a stated limit, pinned by test; a two-column gouge reads as one line of cells). Null when
+   * the bracketing square runs off the grid.
    *
    * Why not the nearest column or a bilinear average: the goal grid's pitch is the sim's (0.1 mm)
    * but its origin is generally offset by half a cell, so every goal cell lies exactly on the
