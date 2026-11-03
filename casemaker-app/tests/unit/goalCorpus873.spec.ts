@@ -382,18 +382,27 @@ describe('#873 the goal corpus: generated, swept, and measured against the goal'
     const r = await runFixture('near-sphere.stl', { length: 60, width: 50, thickness: 32 });
     expect(r.ok).toBe(true);
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.134, 2); // today: 0.1341 (#909: the clamp is taken over the cutter's whole reach)
+    // Re-pinned by #945 b: the scallop pass is on by default for 3D goal surfacing, and this flat
+    // cutter's raster alone terraces the sphere's slopes (the module doc comment above) — the
+    // scallop's slope-compensated contours reach MORE of them, so the fraction rose. Verified by a
+    // true `git stash` toggle on this exact test: pre-#945-b code (today's old pin) measured
+    // 0.1341 here; with this fix's code, 0.1479 — a genuine +10 % relative gain for a flat tool,
+    // not noise. The cycle estimate rose with it (more contour moves to post).
+    expect(r.fraction).toBeCloseTo(0.148, 2); // today: 0.1479
     expect(r.facingAway).toBeGreaterThan(0);
-    expect(r.seconds).toBeLessThan(51_000); // today: 49 076 s
+    expect(r.seconds).toBeLessThan(27_000); // today: 24 623 s (was 23 535 s pre-#945-b, +4.6 %)
   }, 240_000);
 
   it('the figure: the top setup leaves most of the surface unreached — the case #872 answers', async () => {
     const r = await runFixture('figure.stl', { length: 100, width: 60, thickness: 40 });
     expect(r.ok).toBe(true);
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.139, 2); // today: 0.1386 (#909)
+    // Re-pinned by #945 b, same toggle as the near-sphere above: pre-#945-b code measured 0.1386
+    // here (the old pin); with this fix's code, 0.1714 — the flat tool's scallop contours reach
+    // real extra surface the raster's row ends missed, a +24 % relative gain.
+    expect(r.fraction).toBeCloseTo(0.171, 2); // today: 0.1714
     // Some of the unreached area faces away (legs, belly, tail underside) and some is shadowed.
     expect(r.facingAway).toBeGreaterThan(0);
-    expect(r.seconds).toBeLessThan(97_000); // today: 92 828 s
+    expect(r.seconds).toBeLessThan(68_000); // today: 63 664 s (was 59 716 s pre-#945-b, +6.6 %)
   }, 300_000);
 });

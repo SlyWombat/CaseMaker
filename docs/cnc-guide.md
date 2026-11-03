@@ -78,8 +78,10 @@ the files go to **Makera Studio** by hand. In both builds a person is at the mac
  Whether the grid compensates every move or only its endpoints is the bench question.
 - 3D surfacing from a **goal mesh** — now built (§5.4): a job whose only
  work is a `role: 'goal'` mesh — or a **PNG picture, carved as a relief** — generates a
- raster-roughing + ball-nose finishing program, with optional **scallop** (offset contours) and
- **pencil** (corner) finishing passes after it, and the goal row's **Technical** fold carries the
+ raster-roughing + ball-nose finishing program, with a **scallop** (offset contours) finishing
+ pass after it — ON BY DEFAULT since #945, so the raster's flat-span cusp bound also holds on a
+ slope; opt out per goal — and an optional **pencil** (corner) pass after that, and the goal row's
+ **Technical** fold carries the
  operation's cutter, step-down/step-overs, grid pitch, allowance, the two pass switches and the
  pencil crease angle (a picture adds its relief depth, direction and placed width). The measured 3D
  engagement feeds are still bench work. A heightfield has one top-Z per (x, y), so undercuts and
@@ -956,21 +958,24 @@ lowest Z (0.35 and up proposes flat), and the area that faces down above that lo
 proposes the flip). The row says which number decided it; nothing is written until the operator
 chooses.
 
-Two more finishing passes can be switched on in the goal's Technical fold, and they run in this
-order after the parallel finish:
+Two more finishing passes can be switched on (or, for the first, off) in the goal's Technical
+fold, and they run in this order after the parallel finish:
 
-- **scallop pass** — offset contours of the goal's outline, each projected onto the same
- gouge-safe tip field, spaced so the step measured ALONG THE SURFACE is the finishing step-over
- (`step-over / sqrt(1 + slope²)`, band by band; past about 82° a wall crowds the spacing at most
- 8× and the run sheet says when that bound was reached). It cleans the ridges the parallel raster
- leaves on slopes. It reuses the finishing step-over — there is no separate number.
-- **pencil pass** — one path along every concave crease sharper than the **pencil crease** angle
- (default 20°, stated as the CAM's default until typed): the heightfield's second difference
- across x, y or either diagonal marks a corner line, and each traced line is cut at the same
- gouge-safe drop. A dome and a ramp mark nothing; a wall's foot marks a line.
+- **scallop pass** — ON BY DEFAULT since #945 (absent = on; `false` opts out). Offset contours of
+ the goal's outline, each projected onto the same gouge-safe tip field, spaced so the step
+ measured ALONG THE SURFACE is the finishing step-over (`step-over / sqrt(1 + slope²)`, band by
+ band; past about 82° a wall crowds the spacing at most 8× and the run sheet says when that bound
+ was reached). The parallel raster's row cusp is held at or under the shop's leftover-visible band
+ only on a flat span; this pass is the slope-compensated fix for the same cusp on a slope, which is
+ why it defaults on. It adds nothing when the goal has no slope anywhere (also none on a goal
+ whose own surface is flat AND whose clear ring is off — a ring's own edge against the part counts
+ as slope too, see surface3d.ts). It reuses the finishing step-over — there is no separate number.
+- **pencil pass** — opt-in, absent = off. One path along every concave crease sharper than the
+ **pencil crease** angle (default 20°, stated as the CAM's default until typed): the heightfield's
+ second difference across x, y or either diagonal marks a corner line, and each traced line is cut
+ at the same gouge-safe drop. A dome and a ramp mark nothing; a wall's foot marks a line.
 
-Both are off unless the fold says otherwise, so a job that states neither cuts exactly as it
-did. The program's check (the material sweep on the flat dexel) records the passes it judged as
+The program's check (the material sweep on the flat dexel) records the passes it judged as
 well as the grid it ran on, and the run sheet states the contour and crease counts.
 
 **Two cutters, two programs.** A goal may rough with a **flat end mill** and finish with

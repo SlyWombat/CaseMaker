@@ -1066,16 +1066,18 @@ export function EngraveTargetObjectRow({
               min={0.01}
               onChange={(v) => setSurface({ finishStepOverMm: v })}
             />
-            {/* #671 — the two extra finishing passes, each opt-in. Absent reads as off, which is
-                the rough + parallel finish every pre-#671 job already cuts. */}
+            {/* #671/#945 b — the scallop pass is ON BY DEFAULT (absent = on); unchecking stores an
+                explicit `false` (opt-out), not an absent key, so a reset-to-defaults goal keeps the
+                pass. It adds nothing where the goal has no slope anywhere, even when on. The pencil
+                pass stays opt-in: absent reads as off. */}
             <label style={ROW_INLINE}>
               <input
                 type="checkbox"
-                checked={settings.scallop === true}
+                checked={settings.scallop !== false}
                 data-testid={`engrave-target-surface-scallop-${index}`}
                 aria-label="Add a scallop pass"
-                title="Also cut offset contours of the outline after the parallel finish, spaced so the step measured along the surface is the finishing step-over. It cleans the ridges the parallel finish leaves on slopes."
-                onChange={(e) => setSurface({ scallop: e.target.checked ? true : undefined })}
+                title="Also cut offset contours of the outline after the parallel finish, spaced so the step measured along the surface is the finishing step-over. It cleans the ridges the parallel finish leaves on slopes. On by default; adds nothing on a goal with no slope anywhere."
+                onChange={(e) => setSurface({ scallop: e.target.checked ? undefined : false })}
               />
               <span style={{ fontSize: 11, color: '#9aa4b0' }}>scallop pass</span>
             </label>

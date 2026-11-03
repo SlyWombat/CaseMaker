@@ -897,7 +897,7 @@ const surfaceSettingsSchema = z
     stockToLeaveMm: z.number().finite().min(0).max(2).optional().describe('Roughing allowance left on the goal surface, in millimetres; omit for the shop’s finish stock-to-leave.'),
     // #671 — the two extra finishing passes. Strict schema: a key not listed here is stripped, so
     // these MUST live here or the engine never sees them (the #219/#285 trap).
-    scallop: z.boolean().optional().describe('Add a scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface; omit for off.'),
+    scallop: z.boolean().optional().describe('A scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface, so the raster’s flat-span cusp bound also holds on a slope. On by default (#945); set false to omit it.'),
     pencil: z.boolean().optional().describe('Add a pencil pass along the concave creases after the scallop; omit for off.'),
     pencilCreaseDeg: z.number().finite().min(1).max(80).optional().describe('The crease angle the pencil pass follows, in degrees; omit for the CAM’s 20°.'),
   })

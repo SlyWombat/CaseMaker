@@ -135,7 +135,20 @@ describe('#869 the goal’s split, generated', () => {
     // (the compiled PLA row's 0.45 fraction of the 3 mm proxy), so the finish raster's row count —
     // and the posted file — changed. Verified against a clean revert: this job states no
     // `surface.finishStepOverMm`, and the old pin (`da7e66c7`) is exactly what `git stash` here
-    // reproduces.
+    // reproduces. Re-pinned AGAIN by #945 b: the scallop pass is on by default for 3D goal
+    // surfacing (opt-out via `surface.scallop: false`), and this ramp has slope — `maxGoalSlope`
+    // (surface3d.ts) reads nonzero — so the default run now also carries a scallop operation,
+    // which is a real, posted difference, not noise. The test right below this one pins that an
+    // explicit `scallop: false` reproduces THIS exact pre-#945-b byte, which is the cheap proof
+    // that the opt-out really does restore the old program rather than merely suppressing a note.
+    expect(programHash(out.nc!)).toBe('a3b08a73');
+  });
+
+  it('#945 b — an explicit scallop: false reproduces the pre-#945-b bytes exactly', async () => {
+    const job = goalJob({ surface: { scallop: false } });
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    expect(out.ok).toBe(true);
+    expect(out.surface3d?.scallop ?? null).toBeNull();
     expect(programHash(out.nc!)).toBe('c03b471f');
   });
 
@@ -186,7 +199,10 @@ describe('#869 the goal’s split, generated', () => {
     expect(out.programs).toHaveLength(2);
     expect(out.surface3d?.stepDownMm).toBeCloseTo(0.3, 6);
     expect(out.surface3d?.finishStepDownMm).toBeCloseTo(0.5, 6);
-  });
+    // #945 b — this ramp has slope, so the scallop pass now runs by default on the finish
+    // program; the default run's own cost (not this test's business — it only checks step-down
+    // facts) pushed the generate past the file's 180 s default test timeout on this box.
+  }, 240_000);
 
   it('a rough the library does not hold leaves one program and says which', async () => {
     const job = goalJob({ roughToolKey: 'inv:gone' });

@@ -5023,8 +5023,19 @@ export async function generateGoalProgram(
   // the run then says which pitch it settled on and why (inform, never refuse).
   const finishStepOverMm = feeds.finishStepOver;
   const refinedPitchMm = finishStepOverMm > 0 && finishStepOverMm < basePitchMm ? finishStepOverMm : basePitchMm;
-  // #671 — the two extra finishing passes are OPT-IN: absent = today's rough + parallel finish.
-  const scallop = settings.scallop === true;
+  // #671 — the pencil pass is OPT-IN: absent = no pencil pass.
+  // #945 b — THE SCALLOP PASS IS ON BY DEFAULT, OPT-OUT. The raster's own row-to-row cusp is held
+  // at or under the shop's leftover-visible band only on a FLAT span (`finishStepOverForCusp`'s own
+  // doc comment, #945 a1) — on a slope the cusp grows with the slope's secant cubed, and the
+  // scallop pass is the ALREADY-SLOPE-COMPENSATED fix for exactly that gap (#671's own spacing
+  // formula divides by sqrt(1 + slope²)). Absent carried the opposite meaning before this fix
+  // (`=== true`): a goal with any slope left most of its cusp uncorrected by default. `false`
+  // still turns it off — `generateSurface3dIR` also gates it on the heightfield actually having a
+  // slope anywhere (`maxGoalSlope`, surface3d.ts), so a goal with NO slope anywhere, including in
+  // its own clear ring (#764 — the ring's floor against the part is itself a wall `maxGoalSlope`
+  // sees, so a ring left at its 'ring' default still counts even when the part's own top is flat;
+  // see surface3d.ts's note beside that gate), still gets nothing extra even with this default on.
+  const scallop = settings.scallop !== false;
   const pencil = settings.pencil === true;
   const pencilCreaseDeg = settings.pencilCreaseDeg;
 

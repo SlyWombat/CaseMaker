@@ -251,7 +251,10 @@ describe('the relief rides the goal pipeline (#672)', () => {
   }
 
   it('generates the same goal program a mesh would: the surface check, the passes, the bbox', async () => {
-    const target = reliefTarget(rampPng(), { x: 25.6, y: 8 }, { maxDepthMm: 2 });
+    // #945 b — the ramp picture has real slope, so the scallop pass now runs by default; turned
+    // off here because this test is about mesh/picture PARITY (the check, the passes, the bbox),
+    // not about the scallop default.
+    const target = { ...reliefTarget(rampPng(), { x: 25.6, y: 8 }, { maxDepthMm: 2 }), surface: { scallop: false } };
     const job = reliefJob(target);
     const out = await generateGoalProgram(job, target, BALL, [], null, {
       surfaceGrid: { pitchMm: { value: 0.4, source: 'chosen' } },
