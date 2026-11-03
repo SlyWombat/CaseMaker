@@ -17,6 +17,7 @@ import {
   uploadBlocker,
   requiredAckCodes,
   runErrorCodes,
+  firstRunError,
   type EngraveRunView,
 } from '@/store/engraveRunStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -585,6 +586,26 @@ describe('engraveRunStore (#206)', () => {
     expect(runErrorCodes(view({ generated: withError }))).toEqual(['item-empty']);
     // #724 B2 — the first error's own sentence, not `1 error outstanding`.
     expect(saveBlocker(view({ generated: withError, simStatus: 'ready' }))).toBe('x');
+
+    // #949 — A GENERATE REFUSED BEFORE IT RAISED A FINDING IS STILL A RUN ERROR, with its own
+    // sentence as the line, for any stage: the CAM's oversized-goal refusal is the case that found
+    // this (it used to read "Not generated." with no words), and a post or feeds throw takes the
+    // same path. The stage is the code; no Fix mapping matches it, so no dead press is drawn.
+    const camRefused: EngraveGenerated = {
+      ...okGen,
+      ok: false,
+      nc: null,
+      findings: [],
+      errors: [{ stage: 'cam', message: 'The goal object "column.stl" is larger than the blank: 8 mm past the right edge.' }],
+    };
+    expect(runErrorCodes(view({ generated: camRefused }))).toEqual(['cam']);
+    expect(firstRunError(view({ generated: camRefused }))).toEqual({
+      code: 'cam',
+      message: 'The goal object "column.stl" is larger than the blank: 8 mm past the right edge.',
+    });
+    expect(saveBlocker(view({ generated: camRefused, simStatus: 'ready' }))).toBe(
+      'The goal object "column.stl" is larger than the blank: 8 mm past the right edge.',
+    );
 
     expect(saveBlocker(view({ generated: okGen, simStatus: 'ready', oracle: { ok: false, band: 0.016, levels: [], worst: { underCut: 2, overCut: 0 } } }))).toBe('the simulation does not match the prediction');
     expect(saveBlocker(view({ generated: okGen, staleSince: Date.now(), simStatus: 'ready' }))).toBe('the job or the machine frame changed since it was generated');

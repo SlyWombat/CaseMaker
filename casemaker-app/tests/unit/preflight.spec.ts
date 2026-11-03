@@ -270,10 +270,10 @@ describe('preflight: the program (the verifier, or the gate before one exists)',
   });
 
   it('BLOCKS a run that produced a program but not its frame file, and says why', () => {
-    // The review`s other finding (2026-10-16), and the one the gate CANNOT state: `saveBlocker` reads
-    // `nc`, `findings` and `verify` and never `ok` or `errors`, so with a program in hand it says
-    // nothing about the frame that was never built. The Generate states it in `errors`, and that
-    // sentence is what `no-frame` carries — byte for byte, under the Generate`s own tag.
+    // The review`s other finding (2026-10-16). The Generate states the frame fault in `errors`, and
+    // that sentence is what `no-frame` carries — byte for byte, under the Generate`s own tag. #949 —
+    // the gate now reads a generated error as a run error too, so `saveBlocker` states the same
+    // sentence rather than the generic "the simulation did not finish".
     // A program of ours that the verifier accepts, in the post's own order (#384/#396): the machine-
     // frame lift, then the spindle, then the moves. Asserted clean so the fixture cannot drift into
     // being a case this test is not about.
@@ -298,17 +298,18 @@ describe('preflight: the program (the verifier, or the gate before one exists)',
     expect(row.message).toBe(why);
     expect(row.severity).toBe('error');
 
-    // Why this had to be a row of its own: the gate is asked only when there is NO program, and
-    // asking it here would put a RUN`s sentence on a job nobody has run — this blank view says the
-    // simulation did not finish precisely because it holds no run.
+    // The collector`s gate row is still asked only when there is NO program (this run holds one),
+    // and #949 — the gate itself now states the Generate`s own reason instead of the generic
+    // "the simulation did not finish".
     expect(rows.some((r) => r.owner === 'engraveRunGate')).toBe(false);
-    expect(saveBlocker(viewWith(stopped))).toBe('the simulation did not finish');
+    expect(saveBlocker(viewWith(stopped))).toBe(why);
   });
 
   it('carries the Generate`s own reason when it stopped with no program at all', () => {
-    // `saveBlocker` answers "no program was produced" — true, and no help. WHY is only ever in the
-    // Generate`s `errors`, which the gate never reads, so the collector carries it: the two rows
-    // state two different things and both belong on the gate.
+    // The collector carries the Generate`s own `errors` under its own owner, byte for byte. #949 —
+    // the gate reads them too now (the run line and Cut say the same sentence), and the hub states
+    // ONE row for it: the gate`s own `no-generate` row is skipped when the block comes from this
+    // source, so the failure is not repeated under a second code.
     const why = 'the post refused: G53 is not supported by this dialect';
     const stopped = generatedWith({
       ok: false,
@@ -323,9 +324,10 @@ describe('preflight: the program (the verifier, or the gate before one exists)',
     expect(mine[0]!.code).toBe('generate-stopped');
     expect(mine[0]!.message).toBe(why);
 
-    const gate = rows.find((r) => r.owner === 'engraveRunGate')!;
-    expect(gate.code).toBe('no-generate');
-    expect(gate.message).toBe('no program was produced');
+    // One row for one failure: the collector's, in the Generate's own words — the gate's
+    // `no-generate` row is not added on top of it.
+    expect(rows.filter((r) => r.severity === 'error')).toHaveLength(1);
+    expect(rows.some((r) => r.owner === 'engraveRunGate')).toBe(false);
   });
 
   it('does not re-state a stoppage the verifier has already spoken for', () => {
