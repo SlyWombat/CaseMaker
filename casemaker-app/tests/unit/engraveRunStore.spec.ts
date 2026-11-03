@@ -27,6 +27,7 @@ import {
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveGenerated, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import {
   conditionForKey,
   resetInventoryConditions,
@@ -64,6 +65,7 @@ const NOTHING: EngraveGenerated = {
   facingError: null,
   facingCam: null,
   predicted: [],
+  // #924 activation — `EngraveGenerated` states the design items now; a run with none is empty.
   designItems: [],
   programs: [],
   errors: [],
@@ -101,6 +103,7 @@ function clean(): EngraveGenerated {
     facingError: null,
   facingCam: null,
     predicted: [],
+    // #924 activation — `EngraveGenerated` states the design items now; a run with none is empty.
     designItems: [],
     // #744 — a run of one program is the shape the walk reads; `nc` above is that program's file.
     programs: [
@@ -227,6 +230,103 @@ describe('engraveRunStore (#206)', () => {
       expect(s.oracle?.ok).toBe(true);
       expect(s.oraclePrograms).toHaveLength(2);
       expect(saveBlocker(gate.gateViewFor(s, null, false))).toBeNull();
+    });
+  });
+
+  // #924 activation — THE APP'S OWN GENERATE RUNS THE DESIGN CHECK. The generator gives each
+  // program its own raw design items (`EngraveProgram.designItems`, the raw-geometry sibling of the
+  // `predicted` list #844 forwards); the walk has to hand them to the oracle on the same call, or
+  // the check stays dormant on every real job (the whole point of the wiring). A result without
+  // them must behave exactly as it did before.
+  describe('#924 the oracle is handed the program’s own design items', () => {
+    const ITEM = (itemId: string): DesignCheckItem => ({
+      itemId,
+      design: [[[0, 0], [5, 0], [5, 5], [0, 5]]],
+      depth: 0.5,
+      r: 1,
+    });
+    const PRED = (itemId: string) => ({ depth: 0.5, itemId, polygons: [] });
+
+    type Call = {
+      predicted: readonly { itemId?: string }[];
+      designItems: readonly DesignCheckItem[] | undefined;
+    };
+
+    async function runCapturing(generated: EngraveGenerated): Promise<Call[]> {
+      const jobNow = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({ job: { ...jobNow, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+      const realLoad = useSimStore.getState().loadProgram;
+      useSimStore.setState({
+        loadProgram: async () => {
+          useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+          return swept();
+        },
+      });
+      const calls: Call[] = [];
+      setEngraveRunClientLoader(async () => ({
+        engraveGenerate: async () => generated,
+        simOracle: async (predicted, _pcb, designItems) => {
+          calls.push({ predicted, designItems });
+          return { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } } as never;
+        },
+      }));
+      try {
+        await useEngraveRunStore.getState().generate();
+      } finally {
+        useSimStore.setState({ loadProgram: realLoad });
+      }
+      return calls;
+    }
+
+    /** Two engraving programs, each with its own predictions, and the given design items. */
+    function twoFiles(items: {
+      first?: DesignCheckItem[];
+      second?: DesignCheckItem[];
+      runLevel?: DesignCheckItem[];
+    }): EngraveGenerated {
+      const base = clean();
+      return {
+        ...base,
+        predicted: [PRED('top-level')],
+        ...(items.runLevel === undefined ? {} : { designItems: items.runLevel }),
+        programs: [
+          {
+            ...base.programs[0]!,
+            programHash: 'p1',
+            predicted: [PRED('first')],
+            ...(items.first === undefined ? {} : { designItems: items.first }),
+          },
+          {
+            ...base.programs[0]!,
+            programHash: 'p2',
+            predicted: [PRED('second')],
+            ...(items.second === undefined ? {} : { designItems: items.second }),
+          },
+        ],
+      };
+    }
+
+    it('forwards each program’s own items on its own oracle call', async () => {
+      const calls = await runCapturing(twoFiles({ first: [ITEM('first-item')], second: [ITEM('second-item')] }));
+      expect(calls).toHaveLength(2);
+      expect(calls[0]!.designItems?.map((d) => d.itemId)).toEqual(['first-item']);
+      expect(calls[1]!.designItems?.map((d) => d.itemId)).toEqual(['second-item']);
+    });
+
+    it('a stored result with no per-program items hands program 1 the run’s own list, and later files none', async () => {
+      const calls = await runCapturing(twoFiles({ runLevel: [ITEM('run-item')] }));
+      expect(calls).toHaveLength(2);
+      expect(calls[0]!.designItems?.map((d) => d.itemId)).toEqual(['run-item']);
+      expect(calls[1]!.designItems).toBeUndefined();
+    });
+
+    it('a result with no items at all sends an empty list — the session runs no check, as before', async () => {
+      const calls = await runCapturing(twoFiles({}));
+      expect(calls).toHaveLength(2);
+      // `clean()`'s run states none, so program 1 gets the empty list (not undefined) and the
+      // session's own `length > 0` guard keeps the report exactly what it was before #924.
+      expect(calls[0]!.designItems).toEqual([]);
+      expect(calls[1]!.designItems).toBeUndefined();
     });
   });
 
