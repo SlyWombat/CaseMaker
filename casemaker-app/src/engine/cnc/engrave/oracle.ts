@@ -43,6 +43,7 @@ import { traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { CHUNK as SWEEP_CHUNK, FANOUT as SWEEP_FANOUT, SWEEP_TOLERANCES } from '@/workers/geometry/sweep';
 import type { CopperTopologyReport } from '@/engine/cnc/engrave/pcbTopology';
+import type { DesignCheckReport, GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
 import {
   cutterReach,
   rotaryFacetTerm,
@@ -287,6 +288,20 @@ export interface OracleReport {
    * states the copper's verdict too. Absent on every other job.
    */
   copper?: CopperTopologyReport;
+  /**
+   * #924 — the INDEPENDENT design-side check (`designCheck.ts`'s `checkDesignReach`), computed
+   * from the raw design rather than the CAM's own offsets/cone. `ok` above already folds this in
+   * when present (`report.ok && designCheck.ok`, same pattern as `copper`); absent when the caller
+   * did not supply raw design geometry for this run (today: no caller does yet — see
+   * `designCheck.ts`'s header for the wiring gap).
+   */
+  designCheck?: DesignCheckReport;
+  /**
+   * #924's 3D half — the swept surface compared against the GOAL heightfield (`checkGoalCutInto`),
+   * not the app's own cut plan (#909). Present only for a goal/surface job the caller supplied a
+   * {@link GoalHeightfield} and a result-top sampler for; `ok` folds this in the same way.
+   */
+  goalCutInto?: GoalCutIntoReport;
 }
 
 /**
@@ -648,7 +663,7 @@ function threadLevels(predicted: readonly OraclePredicted[]): number[] {
  * #584 — the axis-aligned bounds of a disagreement CrossSection, in work/job mm. Only asked of a
  * section with positive area, so the result is always finite.
  */
-function bboxOf(cs: CrossSectionInstance): OracleBbox {
+export function bboxOf(cs: CrossSectionInstance): OracleBbox {
   const b = cs.bounds();
   return { min: [b.min[0], b.min[1]], max: [b.max[0], b.max[1]] };
 }
