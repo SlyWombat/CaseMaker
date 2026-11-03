@@ -137,10 +137,10 @@ test('#897 — a mesh goal proposes its box, and is centred on the blank it land
   await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('30');
   await expect(page.getByTestId('start-wizard-make-thickness')).toHaveValue('7');
 
-  // #934 review — the proposed blank is "as bought", which would seed a facing pass; the
-  // post-facing re-touch has not been run on this machine, so the Stock step asks for the
-  // finished face before its Next opens.
-  await page.getByTestId('start-wizard-stock-finish').selectOption('finished');
+  // #934 review (wave3) — the mesh-sized blank is the WIZARD's proposal, so it arrives as the
+  // finished face (a rough one would seed a facing pass this milestone cannot run), and Next is
+  // open without the operator answering the finish question.
+  await expect(page.getByTestId('start-wizard-stock-finish')).toHaveValue('finished');
   // The hold follows from the blank, and the last step creates the goal.
   await page.getByTestId('start-wizard-stock-next').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();

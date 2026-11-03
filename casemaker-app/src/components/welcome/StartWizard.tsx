@@ -29,7 +29,7 @@ import { useStockStore } from '@/store/stockStore';
 import { expandEngraveRow } from '@/store/engraveRowStore';
 import { addOperationOfType, jobHasOperations } from '@/components/panels/operationTypes';
 import type { Project } from '@/types/project';
-import type { BracketHold, EngraveJob, JobStockEntry, RotaryChuck, StockHold, TapeHold } from '@/types/engraveJob';
+import type { BracketHold, EngraveJob, JobStockEntry, JobStockFinish, RotaryChuck, StockHold, TapeHold } from '@/types/engraveJob';
 import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { facingShopFrom, jobItemCount, rodDimsOf } from '@/engine/cnc/stockStart';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -143,6 +143,23 @@ async function seedStockFromProject(project: Project): Promise<void> {
   job.takeBlankStock(blank);
 }
 
+/**
+ * #934 review (wave3) — THE WIZARD NEVER REFUSES WHAT IT CARRIED IN. A seed the step is handed
+ * (the work's own proposal, the house constant, or a job with no stock answer of its own) may read
+ * "as bought"/"unknown", which would seed a facing pass — and this milestone cannot face (the
+ * post-facing re-touch has not run). Such a seed OPENS on the finished face instead; the Stock
+ * step's refusal is kept for an operator's own pick of "as bought".
+ */
+function proposedFinish(seed: Pick<StartStockSeed, 'finish' | 'material' | 'thickness'>): JobStockFinish {
+  const facing = facingForSeat(
+    seed.finish,
+    seed.material,
+    { thickness: seed.thickness },
+    facingShopFrom(useShopDefaultsStore.getState().defaults),
+  );
+  return facing.enabled ? 'finished' : seed.finish;
+}
+
 /** A job's own stock as the stock step's starting answers, when it is re-opened to edit it (#681). */
 function seedFromJob(job: EngraveJob): StartStockSeed {
   const entry = job.stockEntry;
@@ -154,14 +171,18 @@ function seedFromJob(job: EngraveJob): StartStockSeed {
   // frame the job holds, so an edit opens on the numbers the operator typed and not the axes.
   const rod = rodDimsOf(job.stock);
   const tube = entry?.form === 'tube';
+  const material = job.stock.material;
+  const thickness = rod !== null ? rod.length : job.stock.thickness;
   return {
     form: entry?.form ?? (rod !== null ? 'rod' : 'plate'),
-    material: job.stock.material,
+    material,
     length: rod !== null ? rod.diameter : job.stock.length,
     width: rod !== null ? rod.diameter : job.stock.width,
-    thickness: rod !== null ? rod.length : job.stock.thickness,
+    thickness,
     ...(tube ? { wall: job.stock.wall } : {}),
-    finish: entry?.finish ?? 'unknown',
+    // A job that has no stock answer yet carries "unknown"; that is the wizard's own default, not
+    // a choice, so it arrives as the finished face when it would otherwise be refused.
+    finish: entry?.finish ?? proposedFinish({ finish: 'unknown', material, thickness }),
     computed,
   };
 }
@@ -447,7 +468,15 @@ export function StartWizard(): JSX.Element {
   // started its job yet; an edited answer or a re-entry's job keeps what it has.
   const proposedSeed: StartStockSeed | null =
     !jobStarted && proposal !== null && proposalMaterial !== null
-      ? { ...proposal, material: proposalMaterial, computed: true }
+      ? {
+          ...proposal,
+          material: proposalMaterial,
+          // #934 review (wave3) — the work's own proposal is the WIZARD's answer: a blank it
+          // would seed facing on arrives as the finished face, so the step never refuses what it
+          // proposed (an operator's own "as bought" pick is still refused).
+          finish: proposedFinish({ finish: proposal.finish, material: proposalMaterial, thickness: proposal.thickness }),
+          computed: true,
+        }
       : null;
   const stockSeed = stockEdited && pending !== null ? (seedFromPending(pending) ?? seed) : (proposedSeed ?? seed);
   // The step this re-entry came to edit: Done applies it and returns. The stock step keeps its own
