@@ -403,11 +403,26 @@ type CutVerdict =
  */
 interface GoalLine {
   text: string;
-  state: 'match' | 'cut-into' | 'not-checked';
+  state: 'match' | 'cut-into' | 'coverage' | 'not-checked';
 }
 
 /** mm, up to three decimals with trailing zeros dropped — the page's own depth format. */
 const goalMm = (n: number): string => String(Number(n.toFixed(3)));
+
+/** The page's percentage rounding: two decimals, trailing zeros dropped. */
+const goalPct = (fraction: number): number => Math.round(fraction * 10000) / 100;
+
+/**
+ * The MEASURED top-surface coverage, in per cent — the page checker's own arithmetic on the
+ * report's `leftoverFractions[0]` (`round(100 − round(100 × leftover > 0.1 mm, 2), 2)`), or null
+ * when the report carries no leftover band. `passCoverage` is NOT this number: it is the shop's
+ * pass line the check judged against.
+ */
+function goalCoveragePct(report: GoalCutIntoReport): number | null {
+  const leftover = report.leftoverFractions[0];
+  if (leftover === undefined) return null;
+  return Math.round((100 - goalPct(leftover)) * 100) / 100;
+}
 
 function goalLine(report: GoalCutIntoReport | undefined): GoalLine | null {
   if (report === undefined) return null;
@@ -418,6 +433,20 @@ function goalLine(report: GoalCutIntoReport | undefined): GoalLine | null {
     };
   }
   if (report.ok) return { text: 'Matches the design (goal)', state: 'match' };
+  // #948 — THE REPORT'S OWN FAILURE. `ok` false with NO cut-into cells is the pass line's
+  // coverage failing, not a cut into the part: the cut-into branch would name a 0 mm cut that never
+  // happened. State the coverage the check measured against the line it judged, or the report's own
+  // sentence when the leftover band is missing.
+  if (report.maxCutIntoMm === 0) {
+    const coveragePct = goalCoveragePct(report);
+    return {
+      text:
+        coveragePct === null
+          ? report.sentence
+          : `Covers ${coveragePct} % of the design’s top surface (the pass line is ${goalPct(report.passCoverage)} %)`,
+      state: 'coverage',
+    };
+  }
   const at = report.maxCutIntoAt;
   return {
     text:
@@ -445,13 +474,9 @@ function goalLine(report: GoalCutIntoReport | undefined): GoalLine | null {
  * report carries a reach field.)
  */
 function goalCoverageFact(report: GoalCutIntoReport): string | null {
-  const leftover = report.leftoverFractions[0];
-  if (leftover === undefined) return null;
-  // The page's own two steps: leftover0p1 = round(share × 100, 2); coverage = round(100 − that, 2).
-  const leftoverPct = Math.round(leftover * 10000) / 100;
-  const coveragePct = Math.round((100 - leftoverPct) * 100) / 100;
-  const passPct = Math.round(report.passCoverage * 10000) / 100;
-  return `Top-surface coverage: ${coveragePct} % (the pass line is ${passPct} %)`;
+  const coveragePct = goalCoveragePct(report);
+  if (coveragePct === null) return null;
+  return `Top-surface coverage: ${coveragePct} % (the pass line is ${goalPct(report.passCoverage)} %)`;
 }
 
 function cutVerdict(v: {
@@ -1169,7 +1194,13 @@ export function EngraveCutSurface({
             (never a silent pass). A 2.5D run has no goal report and gets no line. */}
         {goal !== null && (
           <p
-            style={goal.state === 'cut-into' ? WARN : goal.state === 'match' ? { ...MUTED, color: OK } : MUTED}
+            style={
+              goal.state === 'cut-into' || goal.state === 'coverage'
+                ? WARN
+                : goal.state === 'match'
+                  ? { ...MUTED, color: OK }
+                  : MUTED
+            }
             data-testid="engrave-cut-goal"
             data-state={goal.state}
           >
