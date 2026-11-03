@@ -80,7 +80,7 @@ import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { cutterOnMetalLine, cutterRefusedOnMaterial } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
-import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
+import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, goalSideNeedMm, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { undersideClearBaseZ, undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
@@ -5034,8 +5034,16 @@ export async function generateGoalProgram(
   // number the refusal above reports (the chosen cutter's own flute, else Makera's catalogue row);
   // a longer cutter later deepens the band with the same choice standing, which is why the band is
   // derived here rather than stored on the job. Absent or zero band: no floor, the pre-#785 cut.
+  // #914 review — THE TRIGGER IS THE SIDE'S OWN NEED, not the goal's raw height. `placedSize(goal).z`
+  // is the same number for every side of a flipped goal regardless of where it sits; a side whose
+  // own placement is not flush with its work-Z = 0 (a flipped setup's goal, or any goal sunk below
+  // or raised above the stock top) can need MORE depth than its own height states — up to the full
+  // stock thickness for a flipped, originally-flush goal. `goalSideNeedMm` (the same reach-aware
+  // `goal-cut-top-band`/`goal-reach-short` finding above already reads) is the number that agrees
+  // with what this side's program actually has to reach; the two coincide exactly for the common
+  // case (a flush, un-flipped goal), so nothing changes there.
   const cutterReach = tool === null ? null : knownReach(tool, shop.tools ?? []);
-  const goalDepth = placedSize(goal).z;
+  const goalDepth = goalSideNeedMm(goal);
   const bandMm =
     cutterReach !== null && goalDepth > cutterReach.mm + 1e-9 && goal.cutWithinReach === true
       ? Number((cutterReach.mm - GOAL_BAND_CLEARANCE_MM).toFixed(3))
