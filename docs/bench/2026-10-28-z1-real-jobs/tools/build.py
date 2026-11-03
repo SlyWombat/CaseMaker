@@ -295,9 +295,11 @@ def run_card(c, args, sha, cat):
             # finish are two programs). A job with setups names each program's side.
             setups = (read_json(job) or {}).get('setups') or []
             first_id = setups[0].get('id') if setups else None
-            # The CLI writes <job>.nc, <job>-p2.nc, <job>-p3.nc ... in program order.
-            side1 = [os.path.join(rundir, p['name'] + ('.nc' if i == 0 else f'-p{i + 1}.nc'))
-                     for i, p in enumerate(rc['programs'])
+            # The receipt names each program's own file. (Reconstructing it from the job's display
+            # name gets `<name>.nc`, which does not exist — the files are slugified — and the `.nc`
+            # it falls back to is the alphabetically FIRST program, i.e. usually the rest pass.)
+            side1 = [os.path.join(rundir, p['ncFile'])
+                     for p in rc['programs']
                      if (not setups or p.get('setupId') in (None, first_id))]
             side1 = [f for f in side1 if os.path.exists(f)] or ncs[:1]
             subprocess.run([sys.executable, os.path.join(HERE, 'goal_check.py'), prefix,
