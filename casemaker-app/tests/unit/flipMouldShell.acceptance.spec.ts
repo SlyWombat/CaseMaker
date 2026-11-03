@@ -314,7 +314,10 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
     const settled = Number(out.surface3d!.gridPitchMm.toFixed(4));
     expect(f!.message).toContain(`known every ${settled} mm`);
     expect(out.surface3d!.gridPitchMm).toBeGreaterThan(0.005);
-  }, 120_000);
+    // #945 — the overcut guard now tries several candidate points per covered cell instead of
+    // one (it has to, to catch a steep column pair a single lateral-nearest point missed); at
+    // this stress case's cell count that costs real wall time, past the old 120 s bound.
+  }, 300_000);
 });
 
 // ── The pins ────────────────────────────────────────────────────────────────────────────────────

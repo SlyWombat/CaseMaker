@@ -125,8 +125,10 @@ describe('#869 the goal’s split, generated', () => {
     // is the post-#889 value; the split-vs-one-cutter difference is asserted below. Re-pinned when
     // #889 merged only LEVEL lines (a merged slope sweeps high in the column engine). Re-pinned
     // by #909: the single-cutter plan's rough is clamped over its ball's footprint. Re-pinned by
-    // #927: only the `;@MKR|TIME` line moved (266 s → 280 s).
-    expect(programHash(out.nc!)).toBe('aa35ab5a');
+    // #927: only the `;@MKR|TIME` line moved (266 s → 280 s). Re-pinned by #945: the finish
+    // raster now steps a steep column pair instead of posting it as one diagonal move — this
+    // fixture's ramp has at least one such pair.
+    expect(programHash(out.nc!)).toBe('da7e66c7');
   });
 
   it('a roughToolKey posts the flat’s rough first and the ball’s finish second', async () => {

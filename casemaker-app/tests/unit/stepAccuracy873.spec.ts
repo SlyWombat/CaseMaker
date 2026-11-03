@@ -635,8 +635,12 @@ describe('#873 STEP accuracy: one solid, two files, the same cut', () => {
     expect(a.moves).toBe(12_862);
     expect(b.moves).toBe(12_997);
     expect(a.moves - b.moves).toBe(-135);
-    expect(cmp.sharedUnique).toBe(9_735);
-    expect(cmp.identicalZ).toBe(1_075);
+    // #945 re-pinned sharedUnique and identicalZ only: the finish raster's new staircase corners
+    // (steep column pairs stepped instead of diagonalled) land at slightly different XY between
+    // STEP's and 3MF's own tessellations, so fewer of the two programs' points coincide exactly —
+    // move counts, maxDz and overBar (the real agreement bar) are unchanged.
+    expect(cmp.sharedUnique).toBe(9_407);
+    expect(cmp.identicalZ).toBe(747);
     expect(cmp.maxDz).toBeCloseTo(0.02, 4);
     expect(cmp.maxDzKey).toBe('1|G1|47.100|11.500');
     expect(cmp.overBar).toBe(0);
