@@ -92,6 +92,24 @@ class Grid:
             pts.append(rot(x, y, cx, cy, deg))
         return self.polygon(pts)
 
+    def round_rect(self, cx, cy, w, h, r, deg=0):
+        # A rect with rounded corners, as the app's `cornerRadius` makes it: four circular arcs of
+        # radius r centred `w/2 - r` / `h/2 - r` in from the corners, joined by the straight edges.
+        # Sampled as a polygon (a quarter arc every 5 degrees) so a rotated item costs nothing
+        # extra. #940 — the sample-4 pocket is r 3, and the old square mask called the four corner
+        # squares "material left" when the CAM had cut exactly the rounded design.
+        r = max(0.0, min(float(r), min(w, h) / 2))
+        ax, ay = w / 2 - r, h / 2 - r
+        pts = []
+        for sx, sy, a0 in ((1, 1, 0), (-1, 1, 90), (-1, -1, 180), (1, -1, 270)):
+            ccx, ccy = sx * ax, sy * ay
+            for k in range(0, 19):
+                a = math.radians(a0 + 90 * k / 18)
+                pts.append(rot(cx + ccx + r * math.cos(a), cy + ccy + r * math.sin(a), cx, cy, deg))
+        if r <= 0:
+            return self.rect(cx, cy, w, h, deg)
+        return self.polygon(pts)
+
     def polyline(self, pts, half):
         # A trace is a centreline: a thin band about it samples the groove's own bottom.
         img = Image.new('1', (self.nx, self.ny), 0)
@@ -131,6 +149,11 @@ def shape_mask(g, shape):
     cx, cy = p['x'], p['y']
     deg = shape.get('rotation') or 0
     if kind == 'rect':
+        # #940 — a rounded rect is the app's `cornerRadius`, not a square: the CAM cuts the arcs,
+        # and the four corner squares are not pocket at all.
+        radius = float(shape.get('cornerRadius') or 0)
+        if radius > 0:
+            return g.round_rect(cx, cy, shape['width'], shape['height'], radius, deg)
         return g.rect(cx, cy, shape['width'], shape['height'], deg)
     if kind == 'circle':
         return g.circle(cx, cy, shape['diameter'] / 2)
