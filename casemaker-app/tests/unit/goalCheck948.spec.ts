@@ -14,7 +14,7 @@
  *
  * The leftover bands and the pass line are read with the PAGE's own point rule (`sweptTopExact`,
  * `sweptPoint.ts`): the cutter stamped along the posted program at each goal cell's centre, which
- * reproduces `goal_check.py`'s coverage on the same program (relief 99.32 %, figure@j29 48.64 %)
+ * reproduces `goal_check.py`'s coverage on the same program (relief 99.32 %, figure@j29 52.49 %)
  * while cut-into stays on the conservative column read.
  *
  * The relief case's zero cut-into is not this spec's invention: the bench's own `goal_check.py`,
@@ -409,11 +409,14 @@ describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
       expect(report.goalCutInto?.sentence).toContain('95');
       expect(report.ok).toBe(false);
       // #948 — THE COVERAGE IS THE PAGE'S OWN READ, cell for cell. `goal_check.py` stamps the
-      // cutter along this posted program at each goal cell's centre: 11744 of 22865 cells are more
-      // than 0.1 mm above the goal (0.5136234419418325, i.e. 48.64 % coverage). The column grid's
-      // max-of-four read gave 30.71 % — 18 points away — so the leftover must use the page's rule.
+      // cutter along this posted program at each goal cell's centre: 10863 of 22865 cells are more
+      // than 0.1 mm above the goal (0.475092936802974, i.e. 52.49 % coverage). The program MOVED in
+      // the wave — B's ball-nose finish step-over rule (#945, 439774bf on cand/wave2) re-posts it —
+      // so the page's stamp was re-taken on the new program and never adjusted to the app. The
+      // column grid's max-of-four read gives 66.23 % leftover, i.e. 33.77 % coverage — 18.7 points
+      // away — so the leftover must use the page's rule.
       expect(
-        Math.abs((report.goalCutInto?.leftoverFractions[0] ?? 0) - 0.5136234419418325),
+        Math.abs((report.goalCutInto?.leftoverFractions[0] ?? 0) - 10863 / 22865),
       ).toBeLessThanOrEqual(1 / (report.goalCutInto?.goalCells ?? 1));
     } finally {
       session.dispose();
