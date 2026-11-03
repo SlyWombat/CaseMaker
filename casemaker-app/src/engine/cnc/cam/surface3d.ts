@@ -20,7 +20,10 @@
  *        but is clamped up to `H + allowance`, so a rough move never reaches the goal surface.
  *      - A BALL-NOSE FINISHING raster that follows the heightfield. The tip is the GOUGE-SAFE
  *        drop of the tool onto the field — the ball is lowered until it just touches, so it tracks
- *        the goal within the step-over and the grid pitch without cutting through it.
+ *        the goal within the step-over and the grid pitch without cutting through it. #945 — the
+ *        step-over ITSELF, when the caller states none, is derived from the ball's own radius and
+ *        the shop's leftover-visible band ({@link finishStepOverForCusp}), not the 2.5D pocketing
+ *        step-over reused as-is: the two numbers answer different questions.
  *      Both are emitted as linear feed/rapid moves (the IR is linear — no arcs, #172).
  *
  * WHAT A HEIGHTFIELD CANNOT DO: undercuts. A single top-Z per (x, y) cannot express an overhang,
@@ -702,6 +705,53 @@ export function surfaceToolFor(tool: Tool): SurfaceTool {
   const d = cuttingDiameter(tool);
   const radius = d !== null && d > 0 ? d / 2 : 0;
   return { radius, ball: tool.shape === 'ball' || tool.shape === 'bull' };
+}
+
+/**
+ * #945 a1 — THE STEP-OVER A BALL-NOSE FINISH NEEDS TO HOLD ITS ROW-TO-ROW CUSP AT OR UNDER A
+ * STATED BAND, mm. NOT a tuned constant: a closed-form consequence of the ball's own radius and
+ * the band, so a different cutter or a different band re-derives a different number.
+ *
+ * Between two adjacent raster rows spaced `s` apart over a FLAT span, the ball's spherical flank
+ * leaves a cusp standing between them — the sagitta of a chord `s` long on the ball's own circle
+ * of radius `r`:
+ *
+ *   cusp(s) = r − √(r² − (s/2)²)                              (the same sagitta `residueSliver`
+ *                                                                in restSettings.ts runs the
+ *                                                                other way: a step-over to a sliver)
+ *
+ * Holding `cusp(s) ≤ band` and solving for the largest such `s`:
+ *
+ *   √(r² − (s/2)²) ≥ r − band
+ *   (s/2)² ≤ r² − (r − band)² = 2·r·band − band²
+ *   s ≤ 2·√(2·r·band − band²)
+ *
+ * {@link rasterRows} spaces rows by `Math.round(stepOver / pitch)` cells, so passing the
+ * CONTINUOUS bound through unrounded can round UP past it (a 0.872 mm bound at a 0.1 mm pitch
+ * rounds to a 9-cell, 0.9 mm stride — 0.107 mm of cusp, over a 0.1 mm band). This floors the
+ * stride instead, so the stepover handed back reproduces the exact stride this function already
+ * verified: `Math.round(stride·pitch / pitch) === stride` for any `pitch > 0`.
+ *
+ * Returns null when the bound cannot be formed from this tool/band (no radius, no positive band,
+ * or a band at or past the radius — the chord never closes before the cusp reaches the whole
+ * radius). The caller then keeps whatever step-over it already had: a leftover this wide is a
+ * ball-radius question (a2 — a smaller cutter or a rest pass), not a row-spacing one, and no
+ * step-over closes it. A band that clears a FLAT span this way still leaves more cusp on a slope
+ * (the cusp grows roughly with the slope's secant cubed) — the remainder there is #671's scallop
+ * pass's question, not this one's.
+ */
+export function finishStepOverForCusp(radiusMm: number, bandMm: number, pitchMm: number): number | null {
+  if (!(radiusMm > 0) || !(bandMm > 0) || !(pitchMm > 0) || bandMm >= radiusMm) return null;
+  const idealMm = 2 * Math.sqrt(2 * radiusMm * bandMm - bandMm * bandMm);
+  // The `+ 1e-9` keeps a ratio that is EXACTLY a whole stride (0.6 / 0.1) from floor()ing down one
+  // notch on float noise (0.6 / 0.1 can land at 5.999999999999999): a false floor here is strictly
+  // more conservative than the bound asks for, never less, but it is not the bound this function
+  // promises, and an operator comparing two radii would see an unexplained one-cell jump.
+  const stride = Math.max(1, Math.floor(idealMm / pitchMm + 1e-9));
+  // Rounded: `stride * pitchMm` can itself land a float off (2 mm radius, 0.1 mm band/pitch gives
+  // 1.2000000000000002), and this value is printed on the run sheet (`GoalSurfaceFacts`), not only
+  // compared — an operator should not see that noise. The stride itself is untouched by this.
+  return Number((stride * pitchMm).toFixed(9));
 }
 
 /**
