@@ -149,6 +149,13 @@ export interface RunEnd {
   offcut: { item: StockItem; text: string; state: 'asked' | 'kept' | 'skipped' | 'failed' } | null;
   /** A stopped run's question: was the stock used? */
   stockQuestion: 'ask' | 'used' | 'not-used' | null;
+  /**
+   * #M1R §3.3 — THE MACHINE'S OWN ELAPSED for a run that FINISHED, seconds (the controller's `P:`
+   * time on the last progress frame). Set only on a real finish: a stopped, dry or unfinished run
+   * records nothing, and `null` says the controller did not report one. This is the actual the run
+   * record is checked against — the seam `machineElapsedFor` reads.
+   */
+  elapsedSeconds?: number | null;
 }
 
 /** The reads and writes the end of a run makes — the app's stores, replaceable in a test. */
@@ -340,7 +347,9 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
     if (offer.kind === 'offer') offcut = { item: offer.item, text: offer.text, state: 'asked' };
     else lines.push(`No offcut is offered: ${offer.reason}.`);
   }
-  return { kind: 'finished', lines, offcut, stockQuestion: null };
+  // #M1R §3.3 — the controller's own elapsed rides the end, so the run record can carry the
+  // actual the estimate is checked against (a dry run returned above and never reaches here).
+  return { kind: 'finished', lines, offcut, stockQuestion: null, elapsedSeconds: outcome.last.elapsedS };
 }
 
 /**
@@ -450,6 +459,29 @@ export interface MachineRunState {
 
 export function machineKey(target: { host: string; port: number }): string {
   return `${target.host}:${target.port}`;
+}
+
+/**
+ * #M1R §3.3 — THE MACHINE'S ELAPSED for this job's program, or null. The run record's `actualSeconds`
+ * had no real caller: the run store holds the controller's `P:` time (`RunEnd.elapsedSeconds`) and
+ * wrote it nowhere, so the done card read "No timed run recorded" and the readback printed "no
+ * actual" unless a human typed minutes. This is the one seam a record written AFTER a run reads.
+ *
+ * A run is this job's program's only when its context names the job AND its FNV program hash is the
+ * same file — a run of another job, another job's program, or a stopped one (whose end carries no
+ * elapsed) answers null, and the record keeps null rather than borrowing a clock that is not its own.
+ */
+export function machineElapsedFor(jobId: string, nc: string): number | null {
+  const hash = programHash(nc);
+  for (const entry of Object.values(useMachineRunStore.getState().runs)) {
+    if (entry.context?.jobId !== jobId) continue;
+    if (entry.programHash !== hash) continue;
+    if (entry.end?.kind !== 'finished') continue;
+    const seconds = entry.end.elapsedSeconds;
+    if (typeof seconds !== 'number' || !(seconds > 0)) continue;
+    return seconds;
+  }
+  return null;
 }
 
 /** The Stop/Pause flags a watch reads at its boundaries — outside zustand, so reading never re-renders. */

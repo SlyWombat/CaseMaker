@@ -14,7 +14,7 @@ import { useStockStore } from '@/store/stockStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { preflightHub } from '@/engine/cnc/preflight';
 import type { PreflightCause } from '@/engine/cnc/preflight';
-import { runContextFor } from '@/store/machineRunStore';
+import { machineElapsedFor, runContextFor } from '@/store/machineRunStore';
 import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { EngraveCutSurface } from './EngraveCutSurface';
 import { saveEngraveProgram, saveText } from '@/engine/exportTrigger';
@@ -3048,7 +3048,11 @@ export function EngravePanel(): JSX.Element {
       generated.nc,
       generated.frameNc,
       job.name,
-      serializeRunRecord(buildRunRecord(job, generated)),
+      // #M1R §3.3 — THE MACHINE'S OWN ELAPSED ride the record when this job's program has a
+      // FINISHED run: the done card, the sheet's last-run line and `readback run --list` then read
+      // the actual rather than "no timed run recorded". Before any run, or after a stopped one,
+      // the record keeps null — the operator's minutes stay the only clock it has.
+      serializeRunRecord(buildRunRecord(job, generated, new Date(), machineElapsedFor(job.id, generated.nc))),
       // #432 slice 3 — the facing file goes with them when the worker produced one: the run sheet's
       // facing section sends the operator to `<job>-face.nc`, so it has to be written here.
       generated.facingNc,

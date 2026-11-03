@@ -12,6 +12,8 @@ import { OPERATION_OPTIONS, OPERATION_TYPES } from '@/components/panels/operatio
 import { useEngraveJobStore, undoEngraveRemoval, resetEngraveRemovalUndo, REMOVAL_UNDO_MS } from '@/store/engraveJobStore';
 import { setEngraveRunClientLoader, useEngraveRunStore } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
+import { resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
+import { programHash } from '@/platform/machineRun';
 import { useSimStore } from '@/store/simStore';
 import { resetEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngravePackageStore } from '@/store/engravePackageStore';
@@ -1183,6 +1185,48 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     expect(runSheetFrameFileName(savedName)).toBe('Untitled-job-frame.nc');
     // §6 and the saved file agree about the name, which is the whole point of the shared sanitiser.
     expect(sheet.textContent).toContain(runSheetFrameFileName(savedName));
+  });
+
+  // #M1R §3.3 — THE RECORD CARRIES THE MACHINE'S ELAPSED. A finished run of THIS job's program
+  // leaves the controller's own time on the end; Save writes it into the run record's
+  // `actualSeconds`, which the done card, the sheet's last-run line and `readback run --list` read.
+  it('writes the machine’s own elapsed into the run record after a finished run', async () => {
+    const job = useEngraveJobStore.getState().job;
+    const nc = ';@MKR|BEGIN\nG21 G90\nM02';
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: readyGenerated(nc),
+        simStatus: 'ready',
+        simDiagnostics: [],
+        oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+        phase: 'ready',
+        acknowledged: true,
+      });
+      useMachineRunStore.setState({
+        runs: {
+          '192.0.2.10:2222': {
+            running: false,
+            filename: 'j.nc',
+            programHash: programHash(nc),
+            progress: null,
+            lines: [],
+            outcome: null,
+            stopAsked: false,
+            paused: false,
+            context: { nc, jobId: job.id },
+            end: { kind: 'finished', lines: [], offcut: null, stockQuestion: null, elapsedSeconds: 73.5 },
+            pendingStock: null,
+          },
+        },
+      });
+    });
+    render(<EngravePanel />);
+    openFileMenu();
+    fireEvent.click(screen.getByTestId('engrave-save'));
+    await waitFor(() => expect(vi.mocked(saveEngraveProgram)).toHaveBeenCalledTimes(1));
+    const record = JSON.parse(vi.mocked(saveEngraveProgram).mock.calls[0]![3] as string) as { actualSeconds: number | null };
+    expect(record.actualSeconds).toBe(73.5);
+    act(() => resetMachineRunStore());
   });
 
   it('prints the measured landing range from this job’s registration (#475)', async () => {

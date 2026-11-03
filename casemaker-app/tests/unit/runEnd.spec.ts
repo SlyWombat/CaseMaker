@@ -25,7 +25,7 @@ import { ShopDefaultsSchema, readDefault } from '@/platform/defaultsClient';
 import { StockItemSchema, type StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
 import { programHash, type RunOutcome } from '@/platform/machineRun';
-import { endOfRun, machineKey, resetMachineRunStore, setRunEndIO, useMachineRunStore, type RunContext, type RunEndIO } from '@/store/machineRunStore';
+import { endOfRun, machineElapsedFor, machineKey, resetMachineRunStore, setRunEndIO, useMachineRunStore, type RunContext, type RunEndIO } from '@/store/machineRunStore';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown; stock: unknown[] };
@@ -316,6 +316,34 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     expect(end.offcut?.state).toBe('asked');
     expect(end.offcut?.text).toContain('left over from the cut-out');
     expect(end.lines.join(' ')).toContain('× 3 for aluminium-6061');
+  });
+
+  // #M1R §3.3 — THE MACHINE'S ELAPSED ON THE END. The run record's `actualSeconds` had no real
+  // caller; the controller's own `P:` time is on the run's last frame and rides the end, and
+  // `machineElapsedFor` is the seam a record written after the run reads.
+  it('carries the controller’s elapsed on a finished end, and on no other', async () => {
+    const end = await endOfRun(TARGET, finished, ctx);
+    expect(end.elapsedSeconds).toBe(30);
+    const stopped = await endOfRun(TARGET, { kind: 'aborted', stop: { kind: 'stopped' } as never, last }, ctx);
+    expect(stopped.elapsedSeconds).toBeUndefined();
+  });
+
+  it('finds the elapsed for this job’s program only — another job, file or a stop reads null', async () => {
+    const end = await endOfRun(TARGET, finished, ctx);
+    const entry = (over: Record<string, unknown>) => ({
+      running: false, filename: 'j.nc', programHash: programHash(CUT_OUT), progress: null, lines: [],
+      outcome: finished, stopAsked: false, paused: false, context: ctx, end, pendingStock: null, ...over,
+    });
+    useMachineRunStore.setState({ runs: { 'm-1': entry({}) } });
+    expect(machineElapsedFor('job-1', CUT_OUT)).toBe(30);
+    // A run of another job, another file, or one that stopped is not this record's clock.
+    expect(machineElapsedFor('job-2', CUT_OUT)).toBeNull();
+    useMachineRunStore.setState({ runs: { 'm-1': entry({ programHash: programHash(`${CUT_OUT}\nM2`) }) } });
+    expect(machineElapsedFor('job-1', CUT_OUT)).toBeNull();
+    useMachineRunStore.setState({
+      runs: { 'm-1': entry({ end: { kind: 'stopped', lines: [], offcut: null, stockQuestion: 'ask' } }) },
+    });
+    expect(machineElapsedFor('job-1', CUT_OUT)).toBeNull();
   });
 
   it('#547 — a finished dry run records nothing: no finished hash, no stock, no runtime, no offcut', async () => {
