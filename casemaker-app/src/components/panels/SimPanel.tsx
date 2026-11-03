@@ -305,6 +305,9 @@ export function SimPanel() {
           outcome: run.simStatus === 'ready' ? 'swept' : run.pathOnly ? 'path-only' : 'refused',
           engine: run.simEngine ?? undefined,
           oracleBand: jobSurfaceRun ? undefined : run.oracle?.band,
+          // #947 — the sliver width the band coarsens to, when the flat comparison ran; the
+          // coverage sentence names it then (and says nothing where the field is absent).
+          sliverWidthMm: jobSurfaceRun ? undefined : run.oracle?.sliverWidthMm,
           ...(jobSurfaceRun || run.oracle?.copper === undefined ? {} : { copper: run.oracle.copper }),
           fixtureLabels:
             rotary === null

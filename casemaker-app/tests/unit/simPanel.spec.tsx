@@ -746,6 +746,32 @@ describe('SimPanel', () => {
       expect(oracle).not.toMatch(/\.\d{4}/);
     });
 
+    // #947 gate statement 7 — the band the coverage sentence states coarsens to a sliver width:
+    // the sentence names it when the oracle reports one, and says nothing about slivers when the
+    // report carries none (a hand-built report, or the rotary/column-dexel path).
+    it('#947 — names the boundary-sliver width when the oracle carries one', () => {
+      act(() => {
+        useEngraveRunStore.setState({
+          ...JOB_RUN,
+          oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 }, sliverWidthMm: 0.01 },
+        });
+      });
+      render(<SimPanel />);
+      expect(screen.getByTestId('sim-job-coverage').textContent ?? '').toContain(
+        'Boundary slivers under 0.01 mm are not counted',
+      );
+
+      cleanup();
+      act(() => {
+        useEngraveRunStore.setState({
+          ...JOB_RUN,
+          oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+        });
+      });
+      render(<SimPanel />);
+      expect(screen.getByTestId('sim-job-coverage').textContent ?? '').not.toContain('Boundary slivers');
+    });
+
     it('names the job’s cutter by its one display name in the shank caveat', () => {
       act(() => {
         useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: CHOSEN_TOOL });
