@@ -46,6 +46,12 @@ export interface PocketNode {
   remainder: string[];
   /** Narrowest width, so the cutter-sequence cost model (#961) can pick the largest flat that fits. */
   narrowest: number;
+  /**
+   * True for a pocket component at the model's bottom inside the silhouette (A's #958 D2, interface
+   * delta on comment 6620460283, e.g. the organizer's eleven through-holes at −22.80): the contour
+   * op frees it, not the pocket op's own floor pass.
+   */
+  through: boolean;
 }
 
 export interface RemainderRegion {
@@ -84,6 +90,12 @@ export interface FeatureTree {
     remainderArea: number;
     tolerances: FeatureTolerances;
     notes: string[];
+    /**
+     * A's #958 D2 (comment 6620460283): a would-be floor patch whose largest inscribed circle is
+     * under 0.25 mm diameter is listed here, never silently dropped — its area joins the
+     * neighbouring region instead of becoming its own `PocketNode`.
+     */
+    slivers: { z: number; area: number; centroid: [number, number]; bbox: { min: [number, number]; max: [number, number] } }[];
   };
 }
 
