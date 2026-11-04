@@ -3,10 +3,12 @@
  *
  * `cam/model/rowDropper.ts`'s `dropRow` against two analytic meshes: a smooth RAMP (where linear
  * interpolation between dropped points must stay close to the TRUE, closed-form ball-on-ramp
- * height — not a re-query of `dropCutterHeight`, whose own dense-but-discrete per-triangle
- * sampling, already parity-tested in `clSurface957.spec.ts`, is not exact enough at this
- * precision to serve as a second ground truth here) and a STEP (where no amount of subdivision
- * can close the departure, and the staircase rule must hold instead of a diagonal).
+ * height) and a STEP (where no amount of subdivision can close the departure, and the staircase
+ * rule must hold instead of a diagonal). `dropCutterHeight` is now EXACT (#957/#960's own
+ * unified closed-form contact, `dropcutter.ts`) — these fixtures used to need a finely
+ * tessellated ramp mesh and noise allowances on the step to work around that file's own
+ * dense-sampling error (0.02-0.1 mm on a large facet); both are gone, since both tests now hold
+ * to the real algorithmic precision, not a documented sampling limitation elsewhere.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -17,62 +19,10 @@ import type { FeatureSource, RemainderRegion } from '../../src/engine/cnc/cam/mo
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 
 // Every row queried below runs from x=0 to x=length — this margin extends BOTH meshes well past
-// that on every side (more than any cutter radius used here) so `dropCutterHeight` always has a
-// full neighbourhood of real triangles at the row's own endpoints: querying right at a mesh's own
-// edge changes the answer (the disc only rests on the material that is actually there), which is
-// an edge effect of this FIXTURE, not of `dropRow`'s own algorithm.
+// that on every side (more than any cutter radius used here) so a query never sits exactly at the
+// mesh's own edge, where the disc would rest only on the material actually there (a different,
+// legitimate answer, not what these fixtures mean to pose).
 const MESH_MARGIN_MM = 10;
-
-// `dropCutterHeight`'s own per-triangle sampling is a DENSE but FINITE grid (48 divisions,
-// `dropcutter.ts`'s own header) — on one giant triangle spanning this whole fixture, that grid's
-// own spacing (tens of mm apart) is coarser than the 3 mm ball this file drops, so most queries
-// have NO sampled point within the cutter's own reach at all and the true max is missed by a wide
-// margin (checked directly: a single 70x40 mm triangle read ~0.02-0.1 mm off the analytic answer,
-// advisor's own prediction). A pre-existing, documented limitation of that file, not this one's —
-// sidestepped here with a FINELY tessellated mesh (1 mm cells, well under the ball's own radius),
-// the same density a real STEP/mesh import already has.
-function tessellatedPlane(zAt: (x: number, y: number) => number, x0: number, x1: number, y0: number, y1: number, cellMm: number): FeatureSource {
-  const cols = Math.max(1, Math.round((x1 - x0) / cellMm));
-  const rows = Math.max(1, Math.round((y1 - y0) / cellMm));
-  const positions: number[] = [];
-  const indices: number[] = [];
-  const indexAt = new Map<string, number>();
-  const vertex = (i: number, j: number): number => {
-    const key = `${i},${j}`;
-    const existing = indexAt.get(key);
-    if (existing !== undefined) return existing;
-    const x = x0 + (i / cols) * (x1 - x0);
-    const y = y0 + (j / rows) * (y1 - y0);
-    const idx = positions.length / 3;
-    positions.push(x, y, zAt(x, y));
-    indexAt.set(key, idx);
-    return idx;
-  };
-  for (let i = 0; i < cols; i++) {
-    for (let j = 0; j < rows; j++) {
-      const a = vertex(i, j);
-      const b = vertex(i + 1, j);
-      const c = vertex(i + 1, j + 1);
-      const d = vertex(i, j + 1);
-      indices.push(a, b, c, a, c, d);
-    }
-  }
-  const flat = Float32Array.from(positions);
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (let k = 2; k < positions.length; k += 3) {
-    minZ = Math.min(minZ, positions[k]!);
-    maxZ = Math.max(maxZ, positions[k]!);
-  }
-  return {
-    triangles: {
-      positions: flat,
-      indices: Uint32Array.from(indices),
-      triangleCount: indices.length / 3,
-      bbox: { min: [x0, y0, minZ], max: [x1, y1, maxZ] },
-    },
-  };
-}
 
 /** A plane through the origin tilted about Y: z = slope * x, `half` wide in y, from x=0 to x=length. */
 function rampMesh(slope: number, length: number, half: number): FeatureSource {
@@ -80,17 +30,23 @@ function rampMesh(slope: number, length: number, half: number): FeatureSource {
   const x1 = length + MESH_MARGIN_MM;
   const y0 = -half - MESH_MARGIN_MM;
   const y1 = half + MESH_MARGIN_MM;
-  return tessellatedPlane((x) => slope * x, x0, x1, y0, y1, 1);
+  const z0 = slope * x0;
+  const z1 = slope * x1;
+  return {
+    triangles: {
+      positions: Float32Array.from([
+        x0, y0, z0, x1, y0, z1, x1, y1, z1,
+        x0, y0, z0, x1, y1, z1, x0, y1, z0,
+      ]),
+      indices: Uint32Array.from([0, 1, 2, 3, 4, 5]),
+      triangleCount: 2,
+      bbox: { min: [x0, y0, Math.min(z0, z1)], max: [x1, y1, Math.max(z0, z1)] },
+    },
+  };
 }
 
-/**
- * Two flat plateaus at `zTop`/`zBottom`, split at `x = at` — a GENUINE discontinuity, two
- * triangles each. Fine tessellation (`tessellatedPlane`, above) is the ramp's own fix for a
- * SLOPED triangle's sampling density; a FLAT triangle has no such problem (every point on it is
- * the same height, so `dropCutterHeight`'s own sampling is exact regardless of spacing) — and
- * tessellating the step itself would turn the true vertical wall this test needs into a finite,
- * if steep, SLOPE the ball could roll down smoothly, never exercising the staircase at all.
- */
+/** Two flat plateaus at `zTop`/`zBottom`, split at `x = at` — a GENUINE discontinuity, two
+ * triangles each, no shared vertex at the seam. */
 function stepMesh(at: number, length: number, half: number, zTop: number, zBottom: number): FeatureSource {
   const x0 = -MESH_MARGIN_MM;
   const x1 = length + MESH_MARGIN_MM;
@@ -140,11 +96,8 @@ describe('#960 dropRow() — smooth ramp', () => {
     for (const p of row) expect(p.z, `(${p.x}, ${p.y})`).toBeCloseTo(surface.dropCutter(p.x, p.y)!, 9);
   });
 
-  // `dropCutterHeight`'s own dense-but-discrete per-triangle sampling (a 48-point barycentric
-  // grid, `dropcutter.ts`'s own header) is not exact — re-querying it at arbitrary new (x, y)
-  // mixes its own sampling noise into what would otherwise be a bisection-convergence check. The
-  // CLOSED FORM a ball resting on a flat tilted plane must reach (the module's own documented
-  // `R(secθ − 1)` rise above the plane's height at the same (x, y)) is the real ground truth here.
+  // The CLOSED FORM a ball resting on a flat tilted plane must reach — the module's own
+  // documented `R(secθ − 1)` rise above the plane's height at the same (x, y).
   function ballTipOnFlatRamp(slopeDxDz: number, ballRadiusMm: number, x: number): number {
     const theta = Math.atan(Math.abs(slopeDxDz));
     const rise = ballRadiusMm * (1 / Math.cos(theta) - 1);
@@ -167,39 +120,60 @@ describe('#960 dropRow() — smooth ramp', () => {
         worst = Math.max(worst, Math.abs(interpolated - ballTipOnFlatRamp(slope, 3, x)));
       }
     }
-    // `dropCutterHeight`'s own sampling granularity on these (wide, margin-extended) triangles is
-    // a documented, separate limitation (advisor's review) — allowed for explicitly here, not
-    // folded silently into a looser claim about this function's own convergence.
-    expect(worst, 'worst departure from the analytic ball-on-ramp height, mm').toBeLessThanOrEqual(surface.toleranceMm + 0.02);
+    // `dropCutterHeight` is now exact (#957/#960's unified closed-form contact) — the earlier
+    // 0.02 mm allowance for its own sampling granularity on a large facet is gone; this is the
+    // real algorithmic tolerance now, not a documented limitation elsewhere.
+    expect(worst, 'worst departure from the analytic ball-on-ramp height, mm').toBeLessThanOrEqual(surface.toleranceMm);
   });
 });
 
 describe('#960 dropRow() — a real discontinuity (staircase, not a diagonal)', () => {
-  it('holds near the shallow plateau\'s own true height until the step — never a diagonal guess toward the deep side early', () => {
+  const R = 3;
+  // The ball's own TRUE CL across the step (the manager's own derivation, confirmed independently
+  // here): past the top plateau's own edge, the ball rests tangent to that edge — a quarter-circle
+  // of radius R, NOT an instant drop — down to z = zTop - R at the edge's own reach limit, d = R
+  // past x = 25 (x = 28 for this fixture); only THERE does a genuine vertical cliff to zBottom
+  // occur, since zTop - R (-3) stays well above zBottom (-10) for the whole curve.
+  function analyticStepCL(xStep: number, zTop: number, zBottom: number, x: number): number {
+    const d = x - xStep;
+    if (d < 0) return zTop;
+    if (d < R) return zTop - R + Math.sqrt(R * R - d * d);
+    return zBottom;
+  }
+
+  it('follows the TRUE analytic CL across the step — the quarter-circle edge contact up to x=28, the staircase only at the true cliff past it', () => {
     const geometry = stepMesh(25, 50, 10, 0, -10);
     const surface = clSurface(geometry, region(10, 50), ball6, 3);
     const row = dropRow(surface, [0, 0], [50, 0]);
-    // `dropCutterHeight`'s own sampling granularity (see the ramp test above), not this
-    // function's claim — a diagonal across the step would fall well past this well before x=25.
-    const NOISE_ALLOWANCE_MM = 0.05;
+    expect(row.length).toBeGreaterThan(2); // the edge curve itself forces real subdivision
+    // The staircase's own transition zone right at the true cliff (x = 28) is a HELD point
+    // (travel laterally at the shallow height) followed by a zero-length-in-XY drop — by design
+    // NOT a smooth approximation of the analytic curve in that razor-thin sliver (the "produces
+    // an actual vertical step" test below is what validates THAT shape is right). A tolerance
+    // band around x = 28 excludes only that known, deliberate construction, not the real
+    // curvature either side of it.
+    const CLIFF_ZONE_MM = 0.01;
+    let worst = 0;
     for (let i = 1; i < row.length; i++) {
       const a = row[i - 1]!;
       const b = row[i]!;
-      for (let t = 0; t <= 1; t += 0.1) {
+      for (let t = 0; t <= 1; t += 0.05) {
         const x = a.x + (b.x - a.x) * t;
-        if (x >= 25 - NOISE_ALLOWANCE_MM) continue; // at or past the step: the deep side is correct here
+        if (Math.abs(x - (25 + R)) <= CLIFF_ZONE_MM) continue;
         const interpolated = a.z + (b.z - a.z) * t;
-        expect(interpolated, `x=${x.toFixed(2)}`).toBeGreaterThanOrEqual(0 - NOISE_ALLOWANCE_MM);
+        worst = Math.max(worst, Math.abs(interpolated - analyticStepCL(25, 0, -10, x)));
       }
     }
+    expect(worst, 'worst departure from the true analytic step CL, mm').toBeLessThanOrEqual(surface.toleranceMm);
   });
 
-  it('produces an actual vertical step (two points at the same XY) right at the discontinuity, not a smoothed ramp between the two levels', () => {
+  it('produces an actual vertical step (two points at the same XY) right at the TRUE cliff (x = 25 + R = 28), not a smoothed ramp', () => {
     const geometry = stepMesh(25, 50, 10, 0, -10);
     const surface = clSurface(geometry, region(10, 50), ball6, 3);
     const row = dropRow(surface, [0, 0], [50, 0]);
-    const vertical = row.some((p, i) => i > 0 && p.x === row[i - 1]!.x && p.y === row[i - 1]!.y && Math.abs(p.z - row[i - 1]!.z) > 1);
-    expect(vertical, `row: ${JSON.stringify(row)}`).toBe(true);
+    const cliff = row.findIndex((p, i) => i > 0 && p.x === row[i - 1]!.x && p.y === row[i - 1]!.y && Math.abs(p.z - row[i - 1]!.z) > 1);
+    expect(cliff, `row: ${JSON.stringify(row)}`).toBeGreaterThan(0);
+    expect(row[cliff]!.x, 'the cliff sits at x = 25 + R, not at the mesh seam x = 25').toBeCloseTo(28, 1);
   });
 
   it('refuses a row whose own endpoint falls outside the surface\'s reach, rather than guessing', () => {
