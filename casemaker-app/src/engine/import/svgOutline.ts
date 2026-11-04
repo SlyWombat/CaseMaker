@@ -2,6 +2,7 @@ import { GLYPH_CHORD_TOLERANCE_MM } from '@/engine/compiler/glyphs';
 import { flattenCubic, flattenQuadratic } from '@/engine/compiler/curveFlatten';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import type { Vec2, Mm } from '@/types';
+import { strokeBand, type StrokeCap, type StrokeJoin } from './svgStroke';
 import { finalizeOutline, MAX_OUTLINE_FILE_BYTES, type OutlineParseResult, type OutlinePath } from './outlineTypes';
 
 /**
@@ -15,11 +16,11 @@ import { finalizeOutline, MAX_OUTLINE_FILE_BYTES, type OutlineParseResult, type 
  *
  * OUT, each reported in `notes` so the dialog can name it rather than silently dropping it:
  * `<text>`, `<image>`, gradients/patterns, clipping and masks. #664 — the drawing's STROKES (a
- * `<polyline>`/`<line>`, or any path/subpath that never `Z`s) import as LINES, not regions.
- * #678 — a stroke-only shape's CLOSED subpaths import as CLOSED lines: a stroked rectangle,
- * circle or outline is an "outline: on path" cut, which is the commonest thing an operator asks a
- * drawing to trace, and skipping it left advice ("fill it to import the region") nobody can act on.
- * DXF has no stroke concept; its closed loops stay regions.
+ * `<polyline>`/`<line>`, or any path/subpath that never `Z`s) are strokes; #968 — a stroke WITH A
+ * WIDTH is the painted BAND (a region), offset by `stroke-width` with its `stroke-linecap`/`-join`,
+ * inverted with `vector-effect="non-scaling-stroke"` honoured. Only a zero/hairline width keeps the
+ * #664/#678 centre-line reading: an open line, or a closed ring at #678's "outline: on path".
+ * This is the import Makera Studio's 2D area clearing needs (the coasters' bands, #955/#968).
  *
  * Coordinates: SVG user units are scaled to mm by the root's `width`/`height` and `viewBox`,
  * falling back to 96 px/inch when neither carries a physical unit. SVG's Y is down and the
@@ -29,6 +30,14 @@ import { finalizeOutline, MAX_OUTLINE_FILE_BYTES, type OutlineParseResult, type 
 
 /** CSS reference pixel: 96 px = 1 in, so 1 px = 25.4/96 mm. The SVG default when no unit. */
 const MM_PER_PX = 25.4 / 96;
+
+/**
+ * #968 — a stroke narrower than this (mm) stays a centre line. SVG has no hairline concept; a
+ * `stroke-width` of zero paints nothing, and a width that scales below a hundredth of a millimetre
+ * cannot be cut as a band by any cutter this shop owns. The line reading is kept for those, and
+ * the note says so.
+ */
+const HAIRLINE_MM = 0.01;
 
 /** Absolute length units SVG accepts, as mm per unit (CSS values; px is the 96 dpi pixel). */
 const LENGTH_MM: Record<string, number> = {
@@ -487,6 +496,37 @@ function prop(el: Element, style: Map<string, string>, name: string, inherited: 
   return inherited;
 }
 
+/**
+ * #968 — `stroke-width` in the element's LOCAL user units. A unitless number is user units (the
+ * stroke's own space, not the CSS px of a root `width`); a physical unit is converted to mm and
+ * back through the view scale. Absent → SVG's own default of 1 user unit.
+ */
+function strokeWidthUser(value: string | undefined, view: ViewTransform): number {
+  if (value === undefined) return 1;
+  const m = /^\s*([+-]?(?:\d*\.\d+|\d+\.?)(?:[eE][+-]?\d+)?)\s*([a-z%]*)\s*$/i.exec(value);
+  if (!m) return 1;
+  const v = parseFloat(m[1]!);
+  if (!Number.isFinite(v)) return 1;
+  const unit = (m[2] ?? '').toLowerCase();
+  if (unit === '' || unit === 'px') return v;
+  const mmPer = LENGTH_MM[unit];
+  if (mmPer === undefined) return v;
+  return view.scale > 0 ? (v * mmPer) / view.scale : v;
+}
+
+function capOf(value: string | undefined): StrokeCap {
+  return value === 'round' || value === 'square' ? value : 'butt';
+}
+
+function joinOf(value: string | undefined): StrokeJoin {
+  return value === 'round' || value === 'bevel' ? value : 'miter';
+}
+
+function miterLimitOf(value: string | undefined): number {
+  const n = parseFloat(value ?? '4');
+  return Number.isFinite(n) && n > 0 ? n : 4;
+}
+
 /** Has this element's own (non-inherited) `clip-path`/`mask`? */
 function hasClipOrMask(el: Element, style: Map<string, string>): boolean {
   return (
@@ -547,9 +587,12 @@ interface Collector {
   collected: { points: Vec2[]; rule: 'NonZero' | 'EvenOdd' }[];
   /**
    * #664/#678 — the drawing's STROKES (SVG user units, element transforms applied), imported as
-   * lines. `closed` is the drawing's own: a stroke-only shape's ring is a ring.
+   * lines. `closed` is the drawing's own: a stroke-only shape's ring is a ring. #968 — only a
+   * zero/hairline stroke reaches this list; a stroke with a width becomes a REGION in `collected`.
    */
   lines: { points: Vec2[]; closed: boolean }[];
+  /** #968 — how many stroke elements were imported as regions by their stroke width. */
+  strokeBands: number;
   rules: Set<'NonZero' | 'EvenOdd'>;
   notes: string[];
   /** Open subpaths SKIPPED because their shape is filled (SVG closes those to fill them). */
@@ -635,6 +678,10 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
   fill?: string;
   fillRule?: string;
   stroke?: string;
+  strokeWidth?: string;
+  strokeLinecap?: string;
+  strokeLinejoin?: string;
+  strokeMiterlimit?: string;
 }, c: Collector): void {
   const style = styleOf(el);
   const display = prop(el, style, 'display', undefined);
@@ -644,7 +691,21 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
   const fill = prop(el, style, 'fill', inherited.fill);
   const fillRule = prop(el, style, 'fill-rule', inherited.fillRule);
   const stroke = prop(el, style, 'stroke', inherited.stroke);
-  const childInherited = { fill, fillRule, stroke };
+  const strokeWidth = prop(el, style, 'stroke-width', inherited.strokeWidth);
+  const strokeLinecap = prop(el, style, 'stroke-linecap', inherited.strokeLinecap);
+  const strokeLinejoin = prop(el, style, 'stroke-linejoin', inherited.strokeLinejoin);
+  const strokeMiterlimit = prop(el, style, 'stroke-miterlimit', inherited.strokeMiterlimit);
+  // `vector-effect` is NOT inherited (SVG 1.1 §11.4), so it is read on the element itself.
+  const vectorEffect = el.getAttribute('vector-effect') ?? style.get('vector-effect');
+  const childInherited = {
+    fill,
+    fillRule,
+    stroke,
+    strokeWidth,
+    strokeLinecap,
+    strokeLinejoin,
+    strokeMiterlimit,
+  };
 
   const node = el.localName;
   // Never render defs/gradients/templates: they are referenced, not drawn, and we resolve no
@@ -688,8 +749,8 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
   }
 
   if (node === 'polyline' || node === 'line') {
-    // #664 — a polyline/line IS a stroke: import it as a line at its transformed points. Clipped
-    // or masked content stays out, exactly as for a shape.
+    // #664 — a polyline/line IS a stroke. #968 — when it carries a width, that width is a REGION
+    // (the painted band), not a centre line; a zero/hairline width keeps the line reading.
     if (hasClipOrMask(el, style)) {
       c.notes.push('Skipped a clipped or masked shape: clipping and masks are not supported.');
       return;
@@ -701,7 +762,26 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
             [num(el, 'x1'), num(el, 'y1')] as Vec2,
             [num(el, 'x2'), num(el, 'y2')] as Vec2,
           ];
-    if (pts.length >= 2) c.lines.push({ points: pts.map((p) => applyMat(localM, p)), closed: false });
+    if (pts.length >= 2) {
+      const placed = pts.map((p) => applyMat(localM, p));
+      const widthUser = strokeWidthUser(strokeWidth, view);
+      const widthViewport =
+        vectorEffect === 'non-scaling-stroke' ? widthUser : widthUser * matScale(localM);
+      const widthMm = widthViewport * view.scale;
+      if (stroke !== undefined && stroke !== 'none' && widthMm > HAIRLINE_MM) {
+        for (const band of strokeBand(placed, false, {
+          width: widthViewport,
+          cap: capOf(strokeLinecap),
+          join: joinOf(strokeLinejoin),
+          miterLimit: miterLimitOf(strokeMiterlimit),
+        })) {
+          c.collected.push({ points: band, rule: 'NonZero' });
+        }
+        c.strokeBands++;
+      } else {
+        c.lines.push({ points: placed, closed: false });
+      }
+    }
     return;
   }
 
@@ -724,9 +804,33 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
 
   const { rings, open } = shapeRings(el, node, tol);
   if (strokeOnly) {
-    // #664 — a stroke-only shape's subpaths are the drawing's strokes: they import as lines (the
-    // trace feature, wired). #678 — its CLOSED ones are rings, so they import as CLOSED lines: the
-    // cut is the ring, not a pocket. Nothing is skipped here any more.
+    // #664/#678 — a stroke-only shape's subpaths are the drawing's strokes. #968 — a stroke with a
+    // WIDTH paints a band, so it imports as REGIONS: one contour per open subpath (the band) and
+    // one keyhole annulus per closed ring. Only a zero/hairline width keeps the line reading.
+    const widthUser = strokeWidthUser(strokeWidth, view);
+    const widthViewport =
+      vectorEffect === 'non-scaling-stroke' ? widthUser : widthUser * matScale(localM);
+    const widthMm = widthViewport * view.scale;
+    if (widthMm > HAIRLINE_MM) {
+      const bandStyle = {
+        width: widthViewport,
+        cap: capOf(strokeLinecap),
+        join: joinOf(strokeLinejoin),
+        miterLimit: miterLimitOf(strokeMiterlimit),
+      };
+      for (const sub of open) {
+        for (const band of strokeBand(sub.map((p) => applyMat(localM, p)), false, bandStyle)) {
+          c.collected.push({ points: band, rule: 'NonZero' });
+        }
+      }
+      for (const ring of rings) {
+        for (const band of strokeBand(ring.map((p) => applyMat(localM, p)), true, bandStyle)) {
+          c.collected.push({ points: band, rule: 'NonZero' });
+        }
+      }
+      c.strokeBands++;
+      return;
+    }
     for (const sub of open) c.lines.push({ points: sub.map((p) => applyMat(localM, p)), closed: false });
     for (const ring of rings) c.lines.push({ points: ring.map((p) => applyMat(localM, p)), closed: true });
     return;
@@ -774,7 +878,7 @@ export function parseSvgOutline(text: string, sourceName = 'outline.svg'): Outli
 
   const notes: string[] = [];
   const view = resolveViewTransform(root, notes);
-  const c: Collector = { collected: [], lines: [], rules: new Set(), notes, openPaths: 0, sawCss: false };
+  const c: Collector = { collected: [], lines: [], strokeBands: 0, rules: new Set(), notes, openPaths: 0, sawCss: false };
   walk(root, IDENTITY, view, {}, c);
 
   if (c.sawCss) {
@@ -801,6 +905,11 @@ export function parseSvgOutline(text: string, sourceName = 'outline.svg'): Outli
       closed: line.closed,
     }));
   const deduped = [...new Set(c.notes)];
+  if (c.strokeBands > 0) {
+    deduped.push(
+      `${c.strokeBands} stroke${c.strokeBands === 1 ? '' : 's'} imported as region${c.strokeBands === 1 ? '' : 's'} by stroke width (the painted band).`,
+    );
+  }
   const openCount = paths.filter((path) => !path.closed).length;
   const closedCount = paths.length - openCount;
   if (paths.length > 0) {

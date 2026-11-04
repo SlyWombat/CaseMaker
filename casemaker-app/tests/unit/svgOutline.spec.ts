@@ -257,35 +257,41 @@ describe('parseSvgOutline (#217): Y flip and orientation', () => {
 });
 
 describe('parseSvgOutline (#217): out-of-scope content is reported', () => {
-  it('#678 — a stroke-only CLOSED shape imports as a closed line, not a skipped shape', () => {
-    const r = ok(parseSvgOutline(svg('<path d="M0 0 H10 V10 H0 Z" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 10"')));
-    expect(r.contours).toEqual([]);
-    expect(r.paths).toHaveLength(1);
-    expect(r.paths![0]!.closed).toBe(true);
-    expect(r.paths![0]!.points).toEqual([[-5, 5], [5, 5], [5, -5], [-5, -5]]);
-    expect(r.notes.some((n) => /1 closed path imported as line/i.test(n))).toBe(true);
+  it('#968 — a stroke-only CLOSED shape imports as its painted band, not a line', () => {
+    const r = ok(
+      parseSvgOutline(
+        svg('<path d="M0 0 H10 V10 H0 Z" fill="none" stroke="#000" stroke-width="2"/>', 'width="10mm" viewBox="0 0 10 10"'),
+      ),
+    );
+    expect(r.paths ?? []).toHaveLength(0);
+    expect(r.contours).toHaveLength(1);
+    // The 2 mm band around a 40 mm perimeter: w × length.
+    expect(ringArea(r.contours[0]!)).toBeCloseTo(2 * 40, 0);
+    expect(r.notes.some((n) => /imported as region/i.test(n))).toBe(true);
     expect(r.notes.some((n) => /Skipped a stroked closed shape/i.test(n))).toBe(false);
   });
 
-  it('#678 — a stroked <rect> imports as a closed ring, the headline case', () => {
+  it('#968 — a stroked <rect> imports as its painted band, the headline #678 case', () => {
     const r = ok(
       parseSvgOutline(
         svg('<rect x="0" y="0" width="10" height="6" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 6"'),
       ),
     );
-    expect(r.contours).toEqual([]);
-    expect(r.paths).toHaveLength(1);
-    expect(r.paths![0]!.closed).toBe(true);
-    // A rectangle is four corners; the ring closes implicitly (the flag, not a repeated point).
-    expect(r.paths![0]!.points).toHaveLength(4);
-    expect(r.width).toBeCloseTo(10, 6);
-    expect(r.height).toBeCloseTo(6, 6);
+    expect(r.contours).toHaveLength(1);
+    // The default 1 user-unit stroke: a 1 mm band around the 32 mm perimeter.
+    expect(ringArea(r.contours[0]!)).toBeCloseTo(32, 0);
+    // The band reaches half a width past the drawing on every side.
+    expect(r.width).toBeCloseTo(11, 6);
+    expect(r.height).toBeCloseTo(7, 6);
   });
 
-  it('text is reported and a stroke-only open path imports as a line (#664)', () => {
+  it('text is reported and a zero-width stroke-only open path imports as a line (#664)', () => {
     const r = ok(
       parseSvgOutline(
-        svg('<text x="0" y="5">Hi</text><path d="M0 0 L10 10" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 10"'),
+        svg(
+          '<text x="0" y="5">Hi</text><path d="M0 0 L10 10" fill="none" stroke="#000" stroke-width="0"/>',
+          'width="10mm" viewBox="0 0 10 10"',
+        ),
       ),
     );
     expect(r.contours).toEqual([]);
@@ -296,8 +302,12 @@ describe('parseSvgOutline (#217): out-of-scope content is reported', () => {
     expect(r.notes.some((n) => /open path.*imported as line/i.test(n))).toBe(true);
   });
 
-  it('#664 — a stroked polyline imports as a line, its points in the job frame', () => {
-    const r = ok(parseSvgOutline(svg('<polyline points="0,0 10,0 10,10" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 10"')));
+  it('#664 — a zero-width stroked polyline imports as a line, its points in the job frame', () => {
+    const r = ok(
+      parseSvgOutline(
+        svg('<polyline points="0,0 10,0 10,10" fill="none" stroke="#000" stroke-width="0"/>', 'width="10mm" viewBox="0 0 10 10"'),
+      ),
+    );
     expect(r.contours).toEqual([]);
     expect(r.paths).toHaveLength(1);
     expect(r.paths![0]!.closed).toBe(false);
@@ -311,13 +321,13 @@ describe('parseSvgOutline (#217): out-of-scope content is reported', () => {
     expect(r.notes.some((n) => /open subpath of a filled shape/i.test(n))).toBe(true);
   });
 
-  it('#664 — a filled shape and an open stroke share one centred frame', () => {
+  it('#664 — a filled shape and a zero-width open stroke share one centred frame', () => {
     // The fill spans x 0–10; the stroke runs from x 20 to 30, so the union is 0–30 wide and its
     // centre is x 15: the fill sits at −15…−5, the stroke at +5…+15.
     const r = ok(
       parseSvgOutline(
         svg(
-          '<path d="M0 0 H10 V10 H0 Z"/><path d="M20 0 L30 0" fill="none" stroke="#000"/>',
+          '<path d="M0 0 H10 V10 H0 Z"/><path d="M20 0 L30 0" fill="none" stroke="#000" stroke-width="0"/>',
           'width="30mm" viewBox="0 0 30 10"',
         ),
       ),
