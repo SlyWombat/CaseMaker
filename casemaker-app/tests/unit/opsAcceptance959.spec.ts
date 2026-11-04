@@ -580,6 +580,37 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     expect(swept, `facing cutter ${cutter}, swept ${(100 * swept).toFixed(1)} % of the rim/wall/island-top land`).toBeGreaterThanOrEqual(0.95);
   });
 
+  // The manager's #959 ruling: facing must not re-sweep a pocket's own deep interior — a root
+  // pocket's own first pass already engages it from the stock top, so facing it again is pure
+  // waste (E's organizer run on b37d6356: the facing pass alone cost 5,034 s, 24 % of why the
+  // part came in at 2.15x Makera, over the <= 2x line).
+  it('facing excludes a pocket big enough to erode cleanly — not re-sweeping what the pocket already removes', () => {
+    const { tree } = syntheticTreeFacingCoverage(1.2);
+    const result = planTray(tree);
+    const facing = result.ops.find((op) => op.region.id === 'facing')!;
+    expect(facing, 'facing is planned').toBeDefined();
+    // Pocket B spans (21,2)-(38,18): deep centre (29.5, 10) is 8+ mm from every wall, well past
+    // any cutter's own 2r exclusion margin (2 x 3 = 6 for a ⌀6 flat, 2 x 1.5875 = 3.175 for ⌀3.175).
+    const deepInB: [number, number] = [29.5, 10];
+    const moves = facing.outcome.ir.operations.flatMap((o) => o.moves);
+    const nearDeepPoint = moves.some((m) => m.x !== undefined && m.y !== undefined && Math.hypot(m.x - deepInB[0], m.y - deepInB[1]) < 1);
+    expect(nearDeepPoint, 'a facing move swept deep inside pocket B, which its own first pass already removes').toBe(false);
+  });
+
+  // The same exclusion, but for a pocket SMALLER than 2 cutter radii — erode(pocket, 2r) is
+  // empty, so excluding `eroded` alone would exclude nothing and face the whole small pocket
+  // anyway. The fallback must exclude the pocket's own RAW region instead.
+  it('facing excludes a pocket TOO SMALL to erode by 2r — the fallback excludes the raw region, not nothing', () => {
+    const tree = syntheticTreeWithLand(1.2); // the 10x10 pocket: erode(10x10, 6) for a ⌀6 flat is empty
+    const result = planTray(tree);
+    const facing = result.ops.find((op) => op.region.id === 'facing')!;
+    expect(facing, 'facing is planned').toBeDefined();
+    const deepInPocket: [number, number] = [5, 5]; // the small pocket's own centre
+    const moves = facing.outcome.ir.operations.flatMap((o) => o.moves);
+    const nearDeepPoint = moves.some((m) => m.x !== undefined && m.y !== undefined && Math.hypot(m.x - deepInPocket[0], m.y - deepInPocket[1]) < 1);
+    expect(nearDeepPoint, 'a facing move swept the small pocket\'s own centre, which its own first pass already removes').toBe(false);
+  });
+
   it('plans, posts and measures a synthetic one-pocket tree end to end — the pocket AND the contour', () => {
     const tree = syntheticTree();
     const result = planTray(tree);
