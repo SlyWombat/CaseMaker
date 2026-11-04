@@ -658,6 +658,19 @@ export interface EngraveTargetObject {
    * is gone — then the job says so and asks for an import again.
    */
   data?: string;
+  /**
+   * #963 (A's #958 amendment) — THE STEP FILE THIS GOAL WAS MADE FROM, kept whole so the planner
+   * can re-read its B-rep faces at plan time. The MESH is still what is shown and what the gate
+   * measures (`data`/`sha256`); but the faces the feature recognition needs index the RECOGNITION
+   * read of the B-rep (0.01 mm absolute chord, 2.5–3.3× the display read's triangles), so a
+   * per-triangle id stored beside the display STL would describe the wrong triangles. Re-reading
+   * the STEP is the only honest source, and a STEP file is usually smaller than its STL.
+   *
+   * ABSENT (not empty) for STL, OBJ, 3MF and PNG goals — the formats whose triangles are the
+   * model. Embedded beside `data` in a .cutjob and keyed into the blob store by its own `sha256`,
+   * so a moved job keeps it; a missing blob leaves the plan on the mesh-clustering path.
+   */
+  source?: EngraveTargetSource;
   /** Parsed bounding size in mm. */
   size: { x: Mm; y: Mm; z: Mm };
   position: { x: Mm; y: Mm; z: Mm };
@@ -843,6 +856,18 @@ export interface EngraveReliefSettings {
   maxDepthMm?: Mm;
   /** True puts BLACK at the top face; absent/false puts white there (the natural reading). */
   invert?: boolean;
+}
+
+/**
+ * #963 — a STEP goal's own file, kept for the planner (see {@link EngraveTargetObject.source}).
+ * A's #958 amendment: every field is exact — the STEP bytes are what the recognition read tessellates.
+ */
+export interface EngraveTargetSource {
+  format: 'step';
+  encoding: 'base64';
+  data: string;
+  /** SHA-256 of the STEP bytes, lowercase hex — its identity and the blob store's key. */
+  sha256: string;
 }
 
 /** The role an embedded mesh plays (#533): a part to position against, or a shape to make. */

@@ -326,6 +326,10 @@ export const ENGRAVE_JOB_REJECTED_KEY = `${ENGRAVE_JOB_KEY}.rejected`;
  */
 function withoutMeshData(job: EngraveJob): EngraveJob {
   if (job.targetObject === undefined || job.targetObject.data === undefined) return job;
+  // #963 — a STEP goal's `source` block is KEPT whole here, unlike the mesh: it is the file the
+  // planner re-reads (and is usually smaller than the STL it travels beside), so losing it from
+  // the reloaded job would lose feature recognition. The blob store holds it too, keyed by its own
+  // hash, for the copy that ever needs re-attaching.
   const { data: _data, ...target } = job.targetObject;
   return { ...job, targetObject: target };
 }
@@ -1477,13 +1481,22 @@ export type TargetBlobState = 'none' | 'loading' | 'ready' | 'missing' | 'unstor
  * the findings turn into a sentence. A write that dies with the tab still reads 'missing' on the
  * next start-up, as before.
  */
-function storeTargetMesh(sha256: string, data: string): void {
-  void putMeshBlob(sha256, data).catch(() => {
-    const s = useEngraveJobStore.getState();
-    if (s.job.targetObject?.sha256 === sha256 && s.job.targetObject.data !== undefined) {
-      useEngraveJobStore.setState({ targetBlob: 'unstored' });
-    }
-  });
+function storeTargetMesh(target: Pick<EngraveTargetObject, 'sha256' | 'data' | 'source'>): void {
+  const { sha256, data } = target;
+  if (data !== undefined) {
+    void putMeshBlob(sha256, data).catch(() => {
+      const s = useEngraveJobStore.getState();
+      if (s.job.targetObject?.sha256 === sha256 && s.job.targetObject.data !== undefined) {
+        useEngraveJobStore.setState({ targetBlob: 'unstored' });
+      }
+    });
+  }
+  // #963 — a STEP goal's source file, keyed by its own hash so a reloaded job can re-read the
+  // B-rep faces. A refusal is not the mesh's refusal: the planner falls back to mesh clustering,
+  // which is stated by the plan, not by the document's byte state.
+  if (target.source !== undefined) {
+    void putMeshBlob(target.source.sha256, target.source.data).catch(() => {});
+  }
 }
 
 /**
@@ -1501,7 +1514,7 @@ function syncTargetBlob(): void {
     void reattachTargetBlob();
   } else {
     useEngraveJobStore.setState({ targetBlob: 'ready' });
-    storeTargetMesh(target.sha256, target.data);
+    storeTargetMesh(target);
   }
 }
 
@@ -1552,7 +1565,7 @@ function initialTargetBlob(job: EngraveJob): TargetBlobState {
 export function adoptInitialTargetBlob(job: EngraveJob): void {
   const target = job.targetObject;
   if (target === undefined) return;
-  if (target.data !== undefined) storeTargetMesh(target.sha256, target.data);
+  if (target.data !== undefined) storeTargetMesh(target);
   else void reattachTargetBlob();
 }
 
@@ -2338,7 +2351,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // persisted copy keeps the hash and the blob store keeps the mesh.
       if (typeof target.data === 'string') {
         set({ targetBlob: 'ready' });
-        storeTargetMesh(target.sha256, target.data);
+        storeTargetMesh(target);
       } else {
         set({ targetBlob: 'loading' });
       }
@@ -2350,7 +2363,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // The bytes travel beside the job exactly as the single-object write's do (#720).
       if (typeof target.data === 'string') {
         set({ targetBlob: 'ready' });
-        storeTargetMesh(target.sha256, target.data);
+        storeTargetMesh(target);
       } else {
         set({ targetBlob: 'loading' });
       }
@@ -3373,7 +3386,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       const target = job.targetObject;
       if (target?.data !== undefined) {
         set({ targetBlob: 'ready' });
-        storeTargetMesh(target.sha256, target.data);
+        storeTargetMesh(target);
       } else {
         set({ targetBlob: target === undefined ? 'none' : 'loading' });
       }

@@ -1750,6 +1750,8 @@ export function EngravePanel(): JSX.Element {
         format: result.format,
         sha256: result.sha256,
         data: result.data,
+        // #963 — a STEP goal keeps its source file for the planner's feature recognition.
+        ...(result.source === undefined ? {} : { source: result.source }),
         size: result.size,
         position: { x: job.stock.length / 2, y: job.stock.width / 2, z: 0 },
         rotation: 0,

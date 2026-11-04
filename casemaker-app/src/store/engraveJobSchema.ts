@@ -929,6 +929,18 @@ const targetObjectSchema = z
       .min(1)
       .optional()
       .describe('Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.'),
+    // #963 (A's #958 amendment) — the STEP file a goal was made from, kept so the planner can
+    // re-read its B-rep faces; absent for every format whose triangles are the model.
+    source: z
+      .object({
+        format: z.literal('step').describe('The source format: always step.'),
+        encoding: z.literal('base64').describe('How `data` is encoded: always base64.'),
+        data: z.string().min(1).describe('Base64 of the STEP file the goal was imported from.'),
+        sha256: z.string().min(1).describe('SHA-256 of the STEP bytes, lowercase hex — its blob-store key.'),
+      })
+      .strict()
+      .optional()
+      .describe('The STEP file a goal was made from, for the planner’s feature recognition; omit for STL, OBJ, 3MF and PNG goals.'),
     size: z
       .object({
         x: z.number().finite().positive().describe('Mesh bounding-box size along X, in millimetres.'),

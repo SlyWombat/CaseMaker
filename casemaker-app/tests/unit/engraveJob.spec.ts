@@ -423,9 +423,40 @@ describe('3D primitives and the target object (#435)', () => {
       // #825 — 'obj' is a format now; a name no reader answers to is still refused.
       { ...targetObject, format: 'glb' },
       { ...targetObject, size: { x: 0, y: 8, z: 4 } },
+      // #963 — a STEP goal's source block is strict: every field is exact.
+      { ...targetObject, source: { format: 'step', encoding: 'base64', data: 'AAAA' } },
+      { ...targetObject, source: { format: 'step', encoding: 'hex', data: 'AAAA', sha256: 'b'.repeat(64) } },
+      { ...targetObject, source: { format: 'iges', encoding: 'base64', data: 'AAAA', sha256: 'b'.repeat(64) } },
     ]) {
       expect(parseEngraveJob({ ...job, targetObject: broken }).ok).toBe(false);
     }
+  });
+
+  it('round-trips a STEP goal’s source file (#963)', () => {
+    const job = defaultEngraveJob();
+    const source = { format: 'step' as const, encoding: 'base64' as const, data: 'ISO-10303-21;', sha256: 'b'.repeat(64) };
+    const targetObject = {
+      id: 'tgt-step',
+      name: 'tray.step',
+      format: 'stl' as const,
+      sha256: 'a'.repeat(64),
+      data: 'AAAA',
+      source,
+      size: { x: 10, y: 8, z: 4 },
+      position: { x: 5, y: 5, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal' as const,
+    };
+    const parsed = parseEngraveJob({ ...job, targetObject });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.targetObject?.source).toEqual(source);
+    // Absent, never empty, for a goal with no B-rep behind it.
+    const plain = parseEngraveJob({ ...job, targetObject: { ...targetObject, source: undefined } });
+    expect(plain.ok).toBe(true);
+    if (!plain.ok) return;
+    expect(plain.job.targetObject?.source).toBeUndefined();
   });
 });
 

@@ -6435,6 +6435,39 @@
           ],
           "type": "object"
         },
+        "source": {
+          "additionalProperties": false,
+          "description": "The STEP file a goal was made from, for the planner’s feature recognition; omit for STL, OBJ, 3MF and PNG goals.",
+          "properties": {
+            "data": {
+              "description": "Base64 of the STEP file the goal was imported from.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "encoding": {
+              "const": "base64",
+              "description": "How `data` is encoded: always base64.",
+              "type": "string"
+            },
+            "format": {
+              "const": "step",
+              "description": "The source format: always step.",
+              "type": "string"
+            },
+            "sha256": {
+              "description": "SHA-256 of the STEP bytes, lowercase hex — its blob-store key.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "format",
+            "encoding",
+            "data",
+            "sha256"
+          ],
+          "type": "object"
+        },
         "surface": {
           "additionalProperties": false,
           "description": "The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.",
@@ -6788,6 +6821,39 @@
               "x",
               "y",
               "z"
+            ],
+            "type": "object"
+          },
+          "source": {
+            "additionalProperties": false,
+            "description": "The STEP file a goal was made from, for the planner’s feature recognition; omit for STL, OBJ, 3MF and PNG goals.",
+            "properties": {
+              "data": {
+                "description": "Base64 of the STEP file the goal was imported from.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "encoding": {
+                "const": "base64",
+                "description": "How `data` is encoded: always base64.",
+                "type": "string"
+              },
+              "format": {
+                "const": "step",
+                "description": "The source format: always step.",
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the STEP bytes, lowercase hex — its blob-store key.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "format",
+              "encoding",
+              "data",
+              "sha256"
             ],
             "type": "object"
           },

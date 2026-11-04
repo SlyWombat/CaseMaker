@@ -924,8 +924,11 @@ with role **goal** — "this is the shape to *make*", as opposed to a reference 
 work against. A goal may be picked as STL, 3MF, OBJ, STEP/STP or — a picture relief — PNG; an OBJ
 has no unit of its own, so a `# units:` comment (mm, cm, m, in, ft, um) is read and its numbers
 scaled, every other OBJ is read as millimetres, and the door says which reading it got; a STEP is
-tessellated to a mesh at import by the OpenCascade WASM kernel, so the surfacing below
-reads the same heightfield every mesh goal gives. A job whose only work is a goal mesh generates a two-operation surfacing program: a
+tessellated to a mesh at import by the OpenCascade WASM kernel, so every mesh goal gives the
+same heightfield, and the STEP file itself is kept beside the mesh — the planner re-reads it for
+the model's flat faces, and the file is usually smaller than the mesh stored for the screen. A
+STEP goal moved to another machine keeps it: the file travels in the job. A job whose only work
+is a goal mesh generates a two-operation surfacing program: a
 **raster roughing** in step-down layers that clears the stock above the goal (leaving the
 roughing allowance), then a **ball-nose finishing** raster that follows the goal's top-Z
 heightfield gouge-safely. A goal with undercuts is sampled to its topmost surface — the honest

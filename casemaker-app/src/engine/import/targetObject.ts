@@ -42,6 +42,12 @@ export type TargetObjectRead =
        * formats whose numbers are already the app's millimetres by definition.
        */
       note?: string;
+      /**
+       * #963 (A's #958 amendment) — the STEP file itself, base64, with its own hash: the planner
+       * re-reads its B-rep faces at plan time. ABSENT for STL, OBJ, 3MF and PNG, whose triangles
+       * are the model.
+       */
+      source?: EngraveTargetObject['source'];
     }
   | { ok: false; error: string };
 
@@ -134,6 +140,8 @@ export async function readTargetObjectFile(
   // the binary STL, so the id/hash/embed contract below is the one every mesh already has. The
   // file's own name is kept, so the row still says which file was picked.
   let stored: ArrayBuffer = bytes;
+  // #963 — the STEP's own bytes, kept for the planner; the STL is what the job shows and stores.
+  let stepBytes: ArrayBuffer | null = null;
   let mesh: ParsedMesh;
   let note: string | undefined;
   try {
@@ -141,6 +149,7 @@ export async function readTargetObjectFile(
       const { stepToStl } = await import('./stepMesh');
       const converted = await stepToStl(bytes);
       stored = converted.stl;
+      stepBytes = bytes;
       mesh = converted.mesh;
     } else if (format === 'obj') {
       // #825 — the OBJ's own bytes are embedded (they are what the hash identifies), and the
@@ -173,12 +182,15 @@ export async function readTargetObjectFile(
   }
 
   let sha256: string;
+  let sourceSha256: string | null = null;
   try {
     // Lazy import so the headless graph (surface3d → targetObjectMesh, #534) never STATICALLY pulls
     // in meshStock → designImport → platform/features, which is browser-only (__FEATURE_SIM__,
     // window). This reader runs only in the browser file picker, where that chain is fine.
     const { sha256Hex } = await import('./meshStock');
     sha256 = await sha256Hex(stored);
+    // #963 — the STEP's hash is its OWN (the stored STL's identifies the mesh, not the file).
+    if (stepBytes !== null) sourceSha256 = await sha256Hex(stepBytes);
   } catch {
     return { ok: false, error: `${file.name} could not be hashed.` };
   }
@@ -194,6 +206,16 @@ export async function readTargetObjectFile(
     data: arrayBufferToBase64(stored),
     size,
     ...(note === undefined ? {} : { note }),
+    ...(stepBytes === null || sourceSha256 === null
+      ? {}
+      : {
+          source: {
+            format: 'step' as const,
+            encoding: 'base64' as const,
+            data: arrayBufferToBase64(stepBytes),
+            sha256: sourceSha256,
+          },
+        }),
   };
 }
 
@@ -231,6 +253,7 @@ export async function readGoalObjectFile(
       format: result.format,
       sha256: result.sha256,
       data: result.data,
+      ...(result.source === undefined ? {} : { source: result.source }),
       size: result.size,
       position: { x: stock.length / 2, y: stock.width / 2, z: 0 },
       rotation: 0,

@@ -8,6 +8,17 @@ import { describe, it, expect } from 'vitest';
 import { clearTargetObjectMeshCache, readTargetObjectFile, targetObjectMesh } from '@/engine/import/targetObject';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
 
+import fs from 'node:fs';
+import path from 'node:path';
+
+/** The committed STEP fixture (#774): a 20 × 10 × 5 mm box. */
+function STEP_FIXTURE(): ArrayBuffer {
+  const bytes = fs.readFileSync(path.resolve(__dirname, '../fixtures/step/box.step'));
+  const out = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(out).set(bytes);
+  return out;
+}
+
 const ASCII = `solid tet
 facet normal 0 0 1
   outer loop
@@ -91,6 +102,28 @@ describe('#435 — reading a target object', () => {
     expect(result.size).toEqual({ x: 10, y: 10, z: 6 });
     // The embedded payload is the file's bytes, base64'd, with no trimming at any size.
     expect(result.data.length).toBe(Math.ceil(big.length / 3) * 4);
+  });
+
+  it('#963 keeps a STEP goal’s source file beside the mesh it stored', async () => {
+    const step = new File([new Uint8Array(STEP_FIXTURE())], 'tray.step');
+    const result = await readTargetObjectFile(step, 'tgt-step');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The MESH is still what the job stores and shows...
+    expect(result.format).toBe('stl');
+    // ...and the STEP travels beside it, hashed by its own bytes, so the planner can re-read its
+    // B-rep faces at recognition spacing (A's #958 amendment).
+    expect(result.source?.format).toBe('step');
+    expect(result.source?.encoding).toBe('base64');
+    expect(result.source?.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.source?.sha256).not.toBe(result.sha256);
+    const bytes = base64ToArrayBuffer(result.source?.data ?? '');
+    expect(bytes.byteLength).toBe(STEP_FIXTURE().byteLength);
+    // An STL has no B-rep: no source block at all.
+    const stl = await readTargetObjectFile(new File([ASCII], 'tet.stl'), 'tgt-stl');
+    expect(stl.ok).toBe(true);
+    if (!stl.ok) return;
+    expect(stl.source).toBeUndefined();
   });
 
   it('decodes the embedded mesh, and the cache is keyed by the hash', () => {
