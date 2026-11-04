@@ -1,0 +1,94 @@
+{
+ "card": "synth-rect-b",
+ "referenced": false,
+ "pass": false,
+ "lines": [
+  {
+   "key": "coverage",
+   "rule": "≥ vendor − 1 point and ≥ 95.00 %",
+   "oursValue": null,
+   "vendorValue": null,
+   "ours": "not measured",
+   "vendor": null,
+   "state": "stated",
+   "note": "no vendor program beside it",
+   "number": 1
+  },
+  {
+   "key": "cutInto",
+   "rule": "0 at the 0.1 mm floor beyond the excluded shares",
+   "oursValue": null,
+   "vendorValue": null,
+   "ours": "not judged",
+   "vendor": null,
+   "state": "stated",
+   "note": "the checker has not applied the cut-into rule (0.1 mm floor with edge break, wall cells and wall shadow excluded) — cut-into is not judged",
+   "number": 2
+  },
+  {
+   "key": "cycle",
+   "rule": "≤ 2× the vendor's (goal 1.25×)",
+   "oursValue": 180.65657376533863,
+   "vendorValue": null,
+   "ours": "3.0 min",
+   "vendor": null,
+   "state": "stated",
+   "note": "no vendor program beside it",
+   "goalMet": false,
+   "number": 3
+  },
+  {
+   "key": "air",
+   "rule": "≤ vendor + 10 points",
+   "oursValue": 0.14777867404029535,
+   "vendorValue": null,
+   "ours": "14.78 %",
+   "vendor": null,
+   "state": "stated",
+   "note": "no vendor program beside it",
+   "number": 4
+  },
+  {
+   "key": "rapids",
+   "rule": "≤ 2× the vendor's",
+   "oursValue": 43.8489646772229,
+   "vendorValue": null,
+   "ours": "44",
+   "vendor": null,
+   "state": "stated",
+   "note": "no vendor program beside it",
+   "number": 5
+  },
+  {
+   "key": "cutters",
+   "rule": "≤ vendor + 1, and only the location's cutters for a bench card",
+   "oursValue": 2,
+   "vendorValue": null,
+   "ours": "2",
+   "vendor": null,
+   "state": "stated",
+   "note": "no vendor program beside it",
+   "number": 6
+  },
+  {
+   "key": "postsAsFiled",
+   "rule": "posts as filed, in the vendor’s holding, without changing the pitch",
+   "oursValue": true,
+   "vendorValue": null,
+   "ours": "yes — tape, 0.1 mm",
+   "vendor": null,
+   "state": "pass",
+   "note": null,
+   "number": 7
+  }
+ ],
+ "failing": [
+  "coverage",
+  "cutInto",
+  "cycle",
+  "air",
+  "rapids",
+  "cutters"
+ ],
+ "sentence": "Unreferenced — no vendor program beside this card, so it cannot be called a match"
+}
