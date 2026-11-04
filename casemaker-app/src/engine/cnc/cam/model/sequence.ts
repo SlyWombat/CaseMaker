@@ -181,7 +181,7 @@ export interface SequenceOptions {
 export interface ConsideredSequence {
   steps: { kind: PlannedOpKind; cutterKey: string }[];
   cost: number | null;
-  /** How many demanded pockets this candidate left uncut (0 = complete). */
+  /** How many demanded pockets this candidate left uncut, including the part's own unreachable ones. */
   unreachable: number;
   /** Of those, how many a cutter in the set could have covered — what the rank compares. */
   leftBehind: number;
