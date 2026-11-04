@@ -317,16 +317,25 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // never actually freed. These are magnitudes, already stock-top-relative — no `rebase` needed.
   const contourDepthMm = z0 - tree.contour.zTo;
 
-  // The manager's #959 ruling: the top land OUTSIDE every pocket's footprint — `tree.top.floors`
-  // is already that land (features/tree.ts's own "top land" step excludes a closed pocket's own
-  // outline from it already), faced by whichever flat covers it, through the SAME `pocket()` op
-  // and `link()` safety every other region uses — not a new op. Skipped when there is nothing to
-  // face: no land at all, or no skin above it worth a separate pass (the common stockTop ==
-  // partTop case this engine has run on so far).
-  const facingRegion: Polygons = tree.top.floors.flatMap((f) => f.polygons);
+  // The manager's #959 ruling: the top land OUTSIDE every pocket's footprint, faced through the
+  // SAME `pocket()` op and `link()` safety every other region uses — not a new op. `tree.top.floors`
+  // is NOT the right region for it (advisor's review on 9a5cc607): features/tree.ts's own "top
+  // land" step deliberately EXCLUDES an island's own top (so it is not faced either, there is
+  // nowhere else a skin over one gets cut) and, being a recognised shape, erodes away under a
+  // real cutter's own radius wherever the land is a wall or a rim narrower than that — exactly
+  // where this plan most needs it to still reach. Facing the WHOLE outline instead (the SAME
+  // open-edge overhang the open-shoulder fix already uses, `offset(outline, +2r)`) has neither
+  // problem and needs no ordering against the pockets: whichever runs first, the other cuts only
+  // air where they overlap. Computed per cutter (below, not here) since the margin is `r`-sized.
   const facingDepthMm = z0 - tree.top.z;
-  const hasFacing = facingRegion.length > 0 && facingDepthMm > 1e-6;
-  if (hasFacing) refById.set('facing', { id: 'facing', kind: 'pocket', bounds: boundsOfPolygons(facingRegion), topZ: rebase(z0), bottomZ: rebase(tree.top.z), obstacles: [], regionClearanceZ: Math.max(0, rebase(tree.frame.partTop)) + 5 });
+  const hasFacing = facingDepthMm > 1e-6;
+  if (hasFacing) {
+    refById.set('facing', {
+      id: 'facing', kind: 'pocket', bounds: boundsOfPolygons(tree.contour.outline),
+      topZ: rebase(z0), bottomZ: rebase(tree.top.z), obstacles: [],
+      regionClearanceZ: Math.max(0, rebase(tree.frame.partTop)) + 5,
+    });
+  }
 
   const features: SequenceFeature[] = [];
   if (hasFacing) features.push({ id: 'facing', kind: 'pocket', depthMm: facingDepthMm });
@@ -385,7 +394,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       });
     }
     if (id === 'facing') {
+      const toolRadius = (cuttingDiameter(cutter) ?? 0) / 2;
       const diameter = cuttingDiameter(cutter) ?? 1;
+      // `offset(outline, +2r)`: the same open-edge overhang the open-shoulder fix uses, so the
+      // facing cut reaches all the way to the true outer edge, past every island top and every
+      // wall/rim too narrow to survive `tree.top.floors`' own erosion. The overshoot past the
+      // true edge is air once the contour frees the part, same reasoning as the shoulder case.
+      const facingRegion = opts.offset(tree.contour.outline, 2 * toolRadius);
       return pocket({
         cutter,
         node: {
@@ -537,7 +552,38 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       programs.set(key, existing === undefined ? outcome.ir : concatToolpathIR(existing, outcome.ir));
     }
   }
+  const notes: string[] = [];
   if (deferredContour !== null) {
+    // Advisor's review on 9a5cc607: deferring the contour's OWN moves to the end of whatever
+    // cutter it was already assigned does NOT make it post last — `programs` keeps that cutter's
+    // position at its FIRST appearance (a Map key's insertion order never moves on a later
+    // `.set`), so a rest/finish/chamfer cutter after the primary still runs on an already-freed
+    // part; the tabs were doing all the actual holding. The real fix re-plans the contour with
+    // the LAST step's own cutter — a cutter already scheduled to run last stays last, no reorder
+    // needed and no extra tool change either, as long as its flute reaches the cut.
+    const lastStep = choice.steps.at(-1);
+    if (lastStep !== undefined && lastStep.cutter.key !== deferredContour.cutter) {
+      const lastTool = lastStep.cutter.tool;
+      const reaches = lastTool.fluteLength === null || lastTool.fluteLength >= contourDepthMm;
+      if (reaches) {
+        try {
+          const replanned = planRegion('contour', lastTool);
+          if (replanned !== null) {
+            deferredContour = replanned;
+            // `sequence[]` below reprices from the actual posted IR per cutter, so it is correct;
+            // `choice.cost` (sequence.ts's own internal breakdown) still prices the contour under
+            // its ORIGINAL cutter — stated, not silently left to disagree.
+            notes.push(`the freeing cut is posted with the LAST cutter (${lastStep.cutter.key}), not #961's own choice (${choice.cost.entries[0]?.cutterKey ?? 'unknown'}) — choice.cost's own breakdown still prices it under the original cutter`);
+          } else {
+            notes.push(`the freeing cut could not be re-planned with the LAST cutter (${lastStep.cutter.key}); posted with ${deferredContour.cutter} instead — it may not actually be the last thing this program cuts`);
+          }
+        } catch (err) {
+          notes.push(`the freeing cut could not be re-planned with the LAST cutter (${lastStep.cutter.key}: ${err instanceof Error ? err.message : String(err)}); posted with ${deferredContour.cutter} instead — it may not actually be the last thing this program cuts`);
+        }
+      } else {
+        notes.push(`the last cutter (${lastStep.cutter.key}) cannot reach the freeing cut's ${contourDepthMm.toFixed(2)} mm depth; posted with ${deferredContour.cutter} instead — it may not actually be the last thing this program cuts (route to the manager/C: a trailing revisit of ${deferredContour.cutter} is the only other option, and it breaks #419's one-program-per-cutter)`);
+      }
+    }
     const ref = refById.get('contour')!;
     ops.push({ kind: 'contour', region: ref, outcome: deferredContour });
     const key = deferredContour.cutter;
@@ -555,13 +601,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       : `${id}: not cut — needs a cutter ≤ ${node.narrowest.toFixed(2)} mm (house offers ${offered})`;
   });
 
-  const notes: string[] = [];
   for (const [id, message] of regionFailures) notes.push(`${id}: not cut — planning failed (${message})`);
-  if (deferredContour !== null && choice.steps.length > 1) {
-    notes.push(
-      `the freeing cut (contour) is posted LAST, after every rest/finish/chamfer step — this may add a tool change back to ${deferredContour.cutter} that #961's own cost (below) does not price`,
-    );
-  }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
     const ir = programs.get(entry.cutterKey);
