@@ -40,12 +40,21 @@ export interface ContourOpOptions {
   rapid: RapidEstimate;
 }
 
+// E's measurement on fb9fdaae: over 3,083 contour feeds, the minimum clearance to the outline was
+// 2.99704 mm against a stated 3 mm radius — 3 µm INSIDE it, at one segment, Clipper's own offset
+// rounding. A profile path that ever sits closer to the true outline than the cutter's own radius
+// cuts into whatever the outline is protecting there (the Manager's ruling on fb9fdaae: a gate
+// boundary-cell artefact explained the 134 adjudicated cells this round, but this 3 µm gap is real
+// and this op's own to fix). Guarding the OUTSIDE offset distance outward by a hair ensures the
+// path never sits inside the radius, whatever a real offset function's own rounding does.
+const PROFILE_OFFSET_GUARD_MM = 0.001;
+
 export function contour(opts: ContourOpOptions): OpOutcome {
   const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
   if (!(toolRadius > 0)) {
     throw new Error(`cam/model/ops/contour: ${opts.cutter.name || opts.cutter.shape} states no cutting diameter`);
   }
-  const path: Polygons = profilePath(opts.contour.outline, 'outside', toolRadius, 0, opts.offset);
+  const path: Polygons = profilePath(opts.contour.outline, 'outside', toolRadius, PROFILE_OFFSET_GUARD_MM, opts.offset);
   const cut: ProfileCut = {
     id: 'contour',
     name: 'Contour',
