@@ -60,12 +60,13 @@ describe('#959 contour()', () => {
     expect(op.depthPasses).toBe(3); // ceil(6 / 2.5) = 3
     expect(op.passStepMm).toBe(2.5);
     expect(op.moves.length).toBeGreaterThan(0);
-    // The path is offset OUTSIDE the outline by the tool radius (3 mm) PLUS the op's own 0.001 mm
-    // outward guard (E's measurement on fb9fdaae: Clipper's own offset rounding can land a real
-    // offset a few microns short of what was asked) — a corner at (20, 10) becomes (23.001,
-    // 13.001), not (17, 7) or a bare (23, 13).
+    // The path is offset OUTSIDE the outline by the tool radius (3 mm) PLUS the op's own
+    // ARC_CHORD_TOLERANCE_MM (0.005 mm) outward guard (E's measurement on fb9fdaae: Clipper's own
+    // round-join chord approximation can land a real offset a few microns short of what was
+    // asked, bounded by exactly that constant) — a corner at (20, 10) becomes (23.005, 13.005),
+    // not (17, 7) or a bare (23, 13).
     const xs = op.moves.map((m) => m.x);
-    expect(Math.max(...xs)).toBeCloseTo(23.001, 6);
+    expect(Math.max(...xs)).toBeCloseTo(23.005, 6);
     const deepest = Math.min(...op.moves.map((m) => m.z));
     expect(deepest).toBeCloseTo(-6, 9);
   });
@@ -82,12 +83,15 @@ describe('#959 contour()', () => {
   });
 
   // E's measurement on fb9fdaae: over 3,083 contour feeds, the minimum clearance to the true
-  // outline was 2.99704 mm against a stated 3 mm radius — 3 µm inside it at one segment, Clipper's
-  // own offset rounding, not this op's math. The op's own 0.001 mm outward guard must cover that,
-  // whatever a REAL offset function's own rounding does — reproduced here with a fake that shaves
-  // a few microns off every outward offset, the same direction Clipper's rounding went.
+  // outline was 2.99704 mm against a stated 3 mm radius — a 0.00296 mm deficit at one segment,
+  // Clipper's own round-join chord approximation, not this op's math. The op's own
+  // ARC_CHORD_TOLERANCE_MM (0.005 mm) outward guard must cover that, whatever a REAL offset
+  // function's own rounding does within its own stated bound — reproduced here with a fake that
+  // shaves E's own measured deficit off every outward offset, the same direction it went
+  // (advisor's review: an earlier version of this fixture shaved only 0.00003 mm, two orders of
+  // magnitude short of the real deficit, and an earlier 0.001 mm guard would not have covered it).
   it('the outside path never sits closer than the cutter radius to the true outline, even when the offset itself rounds a few microns short', () => {
-    const ROUNDING_DEFICIT_MM = 0.00003;
+    const ROUNDING_DEFICIT_MM = 0.00296;
     const fakeRectOffsetShortByRounding: OffsetFn = (region, delta) =>
       fakeRectOffset(region, delta > 0 ? delta - ROUNDING_DEFICIT_MM : delta);
     const c = contourOf({ outline: rect(20, 10), area: 200, zTo: -6, frees: true, shoulders: [] });

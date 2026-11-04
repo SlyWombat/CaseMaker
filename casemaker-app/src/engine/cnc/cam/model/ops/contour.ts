@@ -15,6 +15,7 @@
  * truth for information this file already has going in.
  */
 
+import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
@@ -41,13 +42,16 @@ export interface ContourOpOptions {
 }
 
 // E's measurement on fb9fdaae: over 3,083 contour feeds, the minimum clearance to the outline was
-// 2.99704 mm against a stated 3 mm radius — 3 µm INSIDE it, at one segment, Clipper's own offset
-// rounding. A profile path that ever sits closer to the true outline than the cutter's own radius
-// cuts into whatever the outline is protecting there (the Manager's ruling on fb9fdaae: a gate
-// boundary-cell artefact explained the 134 adjudicated cells this round, but this 3 µm gap is real
-// and this op's own to fix). Guarding the OUTSIDE offset distance outward by a hair ensures the
-// path never sits inside the radius, whatever a real offset function's own rounding does.
-const PROFILE_OFFSET_GUARD_MM = 0.001;
+// 2.99704 mm against a stated 3 mm radius — 3 µm INSIDE it, at one segment, Clipper's own ROUND
+// join. `makeClipperOffset` approximates that join with `segmentsForRadius`'s own chord-tolerance
+// bound (`arcResolution.ts`): a polygon with straight chords instead of a true arc sits INSIDE the
+// true circle by the chord's own sagitta at its midpoint, bounded by exactly `ARC_CHORD_TOLERANCE_MM`
+// by that function's own contract — advisor's review caught that an earlier, arbitrary 0.001 mm
+// guard (less than the measured 3 µm deficit) did not actually cover it. This is not a tuned
+// constant: it is the SAME bound the offset's own chord approximation is built to hold, so guarding
+// the requested offset distance outward by it guarantees the result never sits inside the true
+// radius, whatever a real offset function's own rounding does within that stated bound.
+const PROFILE_OFFSET_GUARD_MM = ARC_CHORD_TOLERANCE_MM;
 
 export function contour(opts: ContourOpOptions): OpOutcome {
   const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
