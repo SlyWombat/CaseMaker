@@ -3,6 +3,10 @@
 read from MAKERA'S OWN NC Z levels plus the goal heightfield — never from our engine's output.
 
 usage: nc-floor-levels.py <goal-prefix> <model-top-offset dz> <makera.nc> [--min-run 20] [--min-area 5]
+                          [--save DIR]
+
+--save DIR keeps every component's cell mask (uint8 .npy at the goal grid) plus a manifest, so the
+remainder can be pinned as relations to these components rather than as a count (A, #958).
 
 Method (stated on the issue):
 - floor candidates: per tool, the Z of every constant-Z feed move in the vendor's NC, summed by XY
@@ -73,12 +77,27 @@ def main():
     min_run = 20.0
     if '--min-run' in args:
         i = args.index('--min-run'); min_run = float(args[i + 1]); del args[i:i + 2]
+    save = None
+    if '--save' in args:
+        i = args.index('--save'); save = args[i + 1]; del args[i:i + 2]
     pre, dz, nc = args[0], float(args[1]), args[2]
+    part = os.path.basename(pre.rstrip('/'))
+    manifest = {'part': part, 'goalPrefix': os.path.abspath(pre), 'dz': dz, 'nc': os.path.abspath(nc),
+                'grid': None, 'floors': [], 'remainder': []}
+    if save:
+        os.makedirs(os.path.join(save, part, 'floors'), exist_ok=True)
+        os.makedirs(os.path.join(save, part, 'remainder'), exist_ok=True)
+    def keep(kind, name, mask, meta):
+        if save:
+            np.save(os.path.join(save, part, kind, name + '.npy'), mask.astype(np.uint8))
+            meta['mask'] = f'{kind}/{name}.npy'
+        return meta
     gh = json.load(open(pre + '.json'))
     nx, ny, p, x0, y0 = gh['nx'], gh['ny'], gh['pitch'], gh['x0'], gh['y0']
     Gz = np.fromfile(pre + '.bin', np.float32).reshape(ny, nx).astype(float) - dz
     C = np.fromfile(pre + '.cov', np.uint8).reshape(ny, nx) > 0
     a = p * p
+    manifest['grid'] = {'nx': nx, 'ny': ny, 'pitch': p, 'x0': x0, 'y0': y0, 'coveredCells': int(C.sum())}
     def xy(cx, cy): return (round(x0 + cx * p, 1), round(y0 + cy * p, 1))
     gx = np.zeros_like(Gz); gy = np.zeros_like(Gz)
     gx[:, :-1] = np.abs(np.diff(Gz, axis=1)) / p; gy[:-1, :] = np.abs(np.diff(Gz, axis=0)) / p
@@ -109,6 +128,12 @@ def main():
         for c in comps:
             b = c['bbox']
             print(f'   {c["cells"] * a:8.1f} mm2 centroid {xy(c["cx"], c["cy"])} bbox {xy(b[0], b[2])}..{xy(b[1], b[3])}')
+            ci = comps.index(c) + 1
+            manifest['floors'].append(keep('floors', f'z{z:+.2f}_c{ci}', c['mask'], {
+                'levelZ': z, 'component': ci, 'areaMm2': round(c['cells'] * a, 1),
+                'centroid': list(xy(c['cx'], c['cy'])),
+                'bbox': [list(xy(b[0], b[2])), list(xy(b[1], b[3]))],
+                'medianSlopeDeg': round(float(np.median(slope[c['mask']])), 1)}))
             for h in runs_label(C & ~c['mask'] & ~m):
                 if h['cells'] * a < 1.0:
                     continue
@@ -124,9 +149,26 @@ def main():
     rem = C & ~near & ~wall
     comps = [c for c in runs_label(rem) if c['cells'] * a >= 20]
     print(f'CURVED REMAINDER: {sum(c["cells"] for c in comps) * a:.1f} mm2 in {len(comps)} component(s) >= 20 mm2')
-    for c in comps[:20]:
+    if save:
+        np.save(os.path.join(save, part, 'remainder', 'union.npy'), rem.astype(np.uint8))
+        np.save(os.path.join(save, part, 'nearFloors.npy'), near.astype(np.uint8))
+        np.save(os.path.join(save, part, 'walls.npy'), (wall & C).astype(np.uint8))
+        manifest['remainderUnion'] = 'remainder/union.npy'
+        manifest['nearFloors'] = 'nearFloors.npy'
+        manifest['walls'] = 'walls.npy'
+        manifest['floorLevels'] = floors
+    for k, c in enumerate(comps, 1):
         print(f'   {c["cells"] * a:8.1f} mm2 at {xy(c["cx"], c["cy"])} z {Gz[c["mask"]].min():.2f}..{Gz[c["mask"]].max():.2f} '
               f'slope median {np.median(slope[c["mask"]]):.0f} deg')
+        manifest['remainder'].append(keep('remainder', f'r{k:02d}', c['mask'], {
+            'component': k, 'areaMm2': round(c['cells'] * a, 1),
+            'centroid': list(xy(c['cx'], c['cy'])),
+            'zRange': [round(float(Gz[c['mask']].min()), 2), round(float(Gz[c['mask']].max()), 2)],
+            'medianSlopeDeg': round(float(np.median(slope[c['mask']])), 1)}))
+    if save:
+        json.dump(manifest, open(os.path.join(save, part, 'manifest.json'), 'w'), indent=1)
+        print(f'saved: {os.path.join(save, part)} (manifest.json + {len(manifest["floors"])} floor masks, '
+              f'{len(manifest["remainder"])} remainder masks)')
 
 
 if __name__ == '__main__':
