@@ -125,4 +125,66 @@ describe('#959 pocket()', () => {
       }),
     ).toThrow(/no cutting diameter/);
   });
+
+  // E's run on 52590f76: 67.7 rapids/1,000 feed lines against Makera's 5.9 — one retract per ring.
+  it('rings of the same level are joined by a feed, not a retract — one plunge per level, not per ring', () => {
+    // A 20x10 rect with a 6mm flat and 1.2mm step-over leaves room for a second offset ring
+    // before the fake offset collapses it (step 0 at -3: 14x4; step 1 at -4.2: 11.6x1.6; step 2
+    // at -5.4: height goes negative, so pocketLoops stops there) — two rings, one level.
+    const out = pocket({
+      cutter: flat6, node: node(-2.5, 0), region: region(),
+      stepOverMm: 1.2, stepDownMm: 2.5,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      offset: fakeRectOffset, safeZMm: 10, hopZMm: 3,
+      toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+    });
+    expect(out.passes.length).toBeGreaterThanOrEqual(2);
+    const moves = out.ir.operations[0]!.moves;
+    const rapids = moves.filter((m) => m.kind === 'rapid');
+    expect(rapids).toHaveLength(1); // one level, so exactly one rapid-to-hop, not one per ring
+    expect(rapids[0]!.z).toBe(3);
+    // The move right after the first ring closes is a FEED into the next ring, not a rapid.
+    // Layout: rapid(0), plunge(1), ring 1's own 4 points as feeds (2..5) — 6 moves for a
+    // 4-vertex rectangle ring — then index 6 is the connecting move into ring 2.
+    const firstRapidIndex = moves.indexOf(rapids[0]!);
+    const afterFirstRing = moves[firstRapidIndex + 6];
+    expect(afterFirstRing?.kind).toBe('feed');
+  });
+
+  it('cleared grows conservatively as rings are traced, never claiming the whole region after only the outer ring', () => {
+    // A 30x30 region (wide in both dimensions, unlike the 20x10 fixture above) so the ⌀6 tool's
+    // first-ring sweep (2 x toolRadius = 6 mm in from every edge) leaves a real uncut interior —
+    // 20x10 is too narrow for this assertion: a 6 mm sweep from both long edges already meets in
+    // the middle of its 10 mm height, so "fully cleared after ring 1" would be the CORRECT
+    // conservative answer there, not a bug.
+    const wide: PocketNode = { ...node(-2.5, 0), region: rect(30, 30) };
+    const wideRef: RegionRef = { ...region(), bounds: { min: [0, 0], max: [30, 30] } };
+    const out = pocket({
+      cutter: flat6, node: wide, region: wideRef,
+      stepOverMm: 1.2, stepDownMm: 2.5,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      offset: fakeRectOffset, safeZMm: 10, hopZMm: 3,
+      toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+    });
+    expect(out.passes.length).toBeGreaterThanOrEqual(2);
+    const areaOf = (polys: readonly [number, number][][]): number => {
+      // Shoelace, outer minus holes — the same sign convention pocket.ts documents (CCW +, CW -).
+      let a = 0;
+      for (const ring of polys) {
+        let ringArea = 0;
+        for (let i = 0; i < ring.length; i++) {
+          const [x0, y0] = ring[i]!;
+          const [x1, y1] = ring[(i + 1) % ring.length]!;
+          ringArea += x0 * y1 - x1 * y0;
+        }
+        a += ringArea / 2;
+      }
+      return Math.abs(a);
+    };
+    const firstCleared = areaOf(out.passes[0]!.cleared.boundary);
+    const lastCleared = areaOf(out.passes[out.passes.length - 1]!.cleared.boundary);
+    const wholeRegion = areaOf(rect(30, 30));
+    expect(firstCleared).toBeLessThan(wholeRegion - 1e-6); // NOT the whole region after ring 1
+    expect(lastCleared).toBeGreaterThanOrEqual(firstCleared); // grows (or stays, never shrinks)
+  });
 });
