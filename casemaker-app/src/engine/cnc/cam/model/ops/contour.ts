@@ -9,7 +9,7 @@
 
 import type { Tool } from '@/engine/cnc/tool';
 import type { FeatureTree } from '../features';
-import type { OpOutcome, RegionRef } from '../linking';
+import type { OpOutcome, RegionRef } from '../plan';
 
 export interface ContourOpOptions {
   cutter: Tool;

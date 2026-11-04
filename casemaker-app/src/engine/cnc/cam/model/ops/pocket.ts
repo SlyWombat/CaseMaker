@@ -9,7 +9,7 @@
 
 import type { Tool } from '@/engine/cnc/tool';
 import type { PocketNode } from '../features';
-import type { OpOutcome, RegionRef } from '../linking';
+import type { OpOutcome, RegionRef } from '../plan';
 
 export interface PocketOpOptions {
   cutter: Tool;

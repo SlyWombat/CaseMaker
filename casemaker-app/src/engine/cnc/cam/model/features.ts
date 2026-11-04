@@ -9,7 +9,7 @@
 
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import type { RegionRef } from './linking';
+import type { RegionRef } from './plan';
 
 export interface FeatureSource {
   triangles: ParsedMesh;
@@ -98,9 +98,10 @@ export function recogniseFeatures(_src: FeatureSource, _frame: SetupFrame, _tol?
 
 /**
  * `RegionRef`s derived from a `FeatureTree` — A's N1: so #961/#962 read bounds/`topZ`/`bottomZ` from
- * the tree instead of re-deriving them. `obstacles` is filled in by `plan.ts` from the resolved
- * fixture envelope (§3.0's `ModelPlanInput.fixture`), not by this function, which has no fixture data.
+ * the tree instead of re-deriving them. `obstacles` and `regionClearanceZ` are filled in by
+ * `plan.ts` from the resolved fixture envelope (§3.0's `ModelPlanInput.fixture`), not by this
+ * function, which has no fixture data.
  */
-export function regionRefs(_tree: FeatureTree): Omit<RegionRef, 'obstacles'>[] {
+export function regionRefs(_tree: FeatureTree): Omit<RegionRef, 'obstacles' | 'regionClearanceZ'>[] {
   throw new Error('cam/model/features: regionRefs() not implemented (#958)');
 }

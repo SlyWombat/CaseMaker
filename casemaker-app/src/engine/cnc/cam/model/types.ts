@@ -1,18 +1,12 @@
 /**
  * cam/model/types.ts — the `ModelPlanInput`/`ModelPlanOutput` fields with no existing codebase
- * equivalent (§3.0 of `docs/design/cam-model-engine.md`). Everything here is genuinely new; a type
- * that already exists elsewhere (`Tool`, `ObstacleBox`, `FixtureEnvelope`, `CycleTerms`, `Mount`,
- * `ToolpathIR`, …) is imported from its own module in `plan.ts`, not redefined here.
+ * equivalent and no home in C's real #961 module (§3.0 of `docs/design/cam-model-engine.md`).
+ * `CutterCandidates` is C's own (`sequence.ts`), not redefined here; `Tool`, `ObstacleBox`,
+ * `FixtureEnvelope`, `CycleTerms`, `Mount`, `ToolpathIR` are imported from their own modules in
+ * `plan.ts`.
  */
 
-import type { Tool } from '@/engine/cnc/tool';
-import type { PlannedOp } from './linking';
-
-export interface CutterCandidates {
-  house: Tool[];
-  catalogue: Tool[];
-  pinned?: Partial<Record<PlannedOp['kind'], string>>;
-}
+import type { PlannedOpKind } from './sequence';
 
 export interface ModelTolerances {
   /** The finish tolerance — §2's `ARC_CHORD_TOLERANCE_MM`-derived adaptive-spacing basis. Per A's R3, this does NOT carry an edge-break leg; see `EdgeBreakSpec`. */
@@ -31,6 +25,6 @@ export interface EdgeBreakSpec {
 
 export interface ModelPlanProgress {
   setupIndex: number;
-  op: PlannedOp['kind'] | 'features' | 'clSurface' | 'sequence' | 'linking';
+  op: PlannedOpKind | 'features' | 'clSurface' | 'sequence' | 'linking';
   fraction: number;
 }

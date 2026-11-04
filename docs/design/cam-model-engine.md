@@ -12,10 +12,16 @@ contract plus §4's sequence/program shape) goes to the issue first, ahead of th
 
 ## 0. What this replaces, named exactly
 
-`generateGoalPrograms` (`engraveGenerate.ts:5987`) calls two functions for every 3D goal job:
-`generateSurface3dForGoal` (`:5232`, the rough/finish split) and `generateSurface3dIR` (`:6088`, the
-unsplit path) — both in `surface3d.ts` (3236 lines) and `rough3d.ts` (426 lines). `generateOneProgram`
-(`engraveGenerate.ts:7513`) never calls either today; plan v2 §5.4's "nothing new in
+`generateGoalProgram` (singular, `engraveGenerate.ts:4778`) calls `generateSurface3dForGoal` (the
+rough/finish split) for every 3D goal job — both in `surface3d.ts` (3236 lines) and `rough3d.ts`
+(426 lines). **Correction**: the note's earlier line said `generateGoalPrograms` (plural) called a
+second function, `generateSurface3dIR`, for an "unsplit path" — checked while wiring the skeleton,
+that call is actually inside `generateSurfacePrimitiveProgram` (cone/sphere primitives, #786), a
+DIFFERENT caller the note never otherwise discusses. **Open item, for the manager**: is primitive
+surfacing in scope for this rebuild (then it needs its own slice and owner), or does it keep a
+minimal surface module of its own after #966 retires the goal planners? Default, pending an answer:
+the latter — `generateSurfacePrimitiveProgram` is not wired to `cam/model/` by this note. See §8.
+`generateOneProgram` (`engraveGenerate.ts:7513`) calls neither today; plan v2 §5.4's "nothing new in
 `generateOneProgram`" is already true for the 3D path, not just a rule to keep going forward.
 
 The planning half of both files is built around one object, `GoalHeightfield` (`surface3d.ts:129`): the
@@ -343,10 +349,12 @@ interface SetupPlan {
                                        // per-slice export `clSurface(cutter, stepOver, region)`
                                        // (§3.0.1); this field is grid resolution, not the function
   ops: PlannedOp[]                    // §3.1-3.5, in execution order
-  sequence: { cutterKey: string; cost: CycleTerms; pinned: boolean; house: boolean }[]   // §4;
-                                       // `CycleTerms` is #927's EXISTING type (`ir.ts:692`'s
-                                       // `estimateCycleTerms` return shape) — not a new type, as the
-                                       // note's first draft wrongly assumed without checking.
+  sequence: { cutterKey: string; cost: CycleCost; pinned: boolean; house: boolean }[]   // §4; the
+                                       // PUBLIC `CycleCost` wrapper (§3.0.1): `{terms: CycleTerms,
+                                       // toolChangeSeconds, totalSeconds, toolChanges?}` — `terms`
+                                       // is #927's EXISTING type (`ir.ts:692`), computed by `plan.ts`
+                                       // from the posted IR, not C's #961 internal `CycleCost` (which
+                                       // has no `terms` field, just a summed `estimateSeconds`).
   linking: { rapidsCount: number; hopsCount: number; airFractionPct: number }           // §5
   programs: ToolpathIR[]              // one program per cutterKey in sequence[], in sequence order —
                                        // the #419 answer ("one program per tool"); built by grouping
@@ -370,88 +378,71 @@ interface PlannedOp {
 // 'clSurface' | 'sequence' | 'linking'; fraction: number }, the minimum D's progress bar needs.
 ```
 
-### 3.0.1 The shared op/linking contract (C's #961/#962 ask, #956 comment 6619787259)
+### 3.0.1 The shared op/linking contract — superseded by C's real #961/#962 code
 
-The contract between #959/#960's ops and #961/#962. **Not adopted unchanged — this note's first pass
-at it said so and that was false; the deviations are listed below the shapes, for C to confirm.** C's
-own comment stays the source of truth for *why* each one is needed; this note states the shapes.
+This section went through three drafts before landing on what is actually true, and what's true is
+code, not a sketch: C's #961 (`sequence.ts`, `cand/961` 3dee66ba) and #962 (`linking.ts`, `cand/962`
+366affdb) are real, tested, merged implementations — "stubs to fill in" was never the right frame for
+them, and the skeleton now carries their actual files, not a re-invented contract. This note states
+only the PUBLIC boundary `plan.ts` exposes, built on top of them; `sequence.ts`/`linking.ts`'s own
+richer internal shapes (`SequenceStep`, `CandidateSequence`, a module-internal `CycleCost` that sums
+to a bare `estimateSeconds: number`; `LinkPoint`, `MaterialField`, `PassLink`) are theirs to document,
+not duplicated here.
 
 ```ts
 interface OpOutcome {
-  ir: ToolpathIR                      // the op's moves; existing CamMove + estimate terms
-  cleared?: RegionAtZ[]               // what it removed, per depth (the material state's input)
-  cutter: string                      // ToolKey — no such type exists yet (checked: `roughToolKey` is
-                                       // a bare `string`, `types/engraveJob.ts:770`); not invented here
+  ir: ToolpathIR
+  cutter: string                      // ToolKey — no such type exists, `roughToolKey` is a bare
+                                       // `string` (`types/engraveJob.ts:770`); not invented here
+  passes: PassRef[]                   // in execution order — restored on C's objection (below)
+  cleared?: RegionAtZ[]               // what it removed, per depth
 }
-interface RegionAtZ { z: number; boundary: Polygon[] }   // outer boundary + holes at that Z
+interface RegionAtZ { z: number; boundary: Polygon[] }
 
-interface PassRef { z: number; boundary: Polygon[]; cleared: RegionAtZ }   // C's shape; nothing in
-                                       // this note's SetupPlan or link() reads it yet — its consumer
-                                       // is C's to name, not guessed here (see the deviations below)
+interface PassRef {
+  z: number; boundary: Polygon[]; cleared: RegionAtZ
+  entry: [number, number, number]; exit: [number, number, number]   // what linkPasses (linking.ts) joins
+}
 interface RegionRef {
   id: string
   kind: 'pocket' | 'island-top' | 'curved' | 'contour' | 'rim'
   bounds: Box2
   topZ: number
   bottomZ: number
-  obstacles: ObstacleBox[]            // the INFLATED boxes (by the fixture envelope's own
-                                       // `uncertainty`, §3.0 — the same inflation
-                                       // `prepareFixtureBoxes`/the sweep already applies) that reach
-                                       // this region's bounds — not the whole fixture; this is the
-                                       // #949 jaw-clearance data finally reaching linking (§5)
+  obstacles: ObstacleBox[]            // the fixture envelope's boxes, INFLATED (§3.0), that reach
+                                       // this region — the #949 jaw-clearance data
+  regionClearanceZ: number            // the lowest Z clearing every one of `obstacles` — C's ruled
+                                       // clearance name (below), what linking.ts's `clearanceZ` is
 }
-// NEW, no existing equivalent: `Polygon = [number, number][]` (one ring; `pocket.ts`'s `Polygons` is
-// `Polygon[]`) and `Box2 = { min: [number, number]; max: [number, number] }`.
-
-// Material-state queries, over EVERY op planned so far in this setup — not the current op's own
-// region. Backed by #957's CL surface (C's own line: "the CL surface is the backing store").
-// METHODS on a state object, not module-level functions (deviation 2 below) — a module function
-// would need mutable global state, which breaks the moment two candidate sequences are priced
-// side by side (§4) or a plan runs in a worker.
-interface MaterialState {
-  clearedAt(z: number): RegionAtZ | null
-  linkIsClear(from: Vec2, to: Vec2, z: number, cutter: Tool): boolean
-}
-
-interface LinkContext {
-  material: MaterialState
-  region: RegionRef
-  cutter: Tool
-  stayDownClearanceMm: number        // tentative names, C's to confirm — "the two clearance heights"
-  retractClearanceMm: number         // C's comment names without giving them names of their own
-}
-function link(context: LinkContext, from: Vec3, to: Vec3, z: number): CamMove[]
-// Vec3 = [number, number, number] (`@/types/units`, the same one `ObstacleBox` uses) — not a new
-// `Point3`, which this note's first pass at the contract invented without checking.
-// ONE pure linker, called by every rough/finish op alike (not one per op kind): `feed` at depth for a
-// stay-down link, `rapid` at the per-region clearance otherwise. #961's price and #962's moves read
-// the same calls, so they cannot diverge, and #926's `hopCount`/air fraction measure what was
-// actually posted, not a second estimate of it.
+interface CycleCost { terms: CycleTerms; toolChangeSeconds: number; totalSeconds: number; toolChanges?: number }
+// NEW, no existing equivalent: Polygon = [number, number][]; Box2 = { min, max: [number, number] }.
 ```
 
-**Deviations from C's comment (6619787259), to confirm, not assumed settled:**
-1. `Box3[]` → `ObstacleBox[]` (the existing type, `engine/cnc/setup.ts:134`), inflated — not a new
-   `Box3`, and not the un-inflated boxes (§3.0's fixture correction).
-2. `clearedAt`/`linkIsClear` are methods on `MaterialState`, not free functions, for the reason stated
-   above. `LinkContext.material` carries it; C's comment wrote them as bare signatures.
-3. `LinkContext` restores "the two clearance heights" C's comment names but doesn't name individually
-   — `stayDownClearanceMm`/`retractClearanceMm` here, tentatively; this note's first pass at the
-   contract dropped them, which was also wrong.
-4. `PassRef` is defined, matching C's shape exactly, but nothing in `SetupPlan` or `link()` consumes
-   it yet — flagged rather than silently dropped or invented a use for.
-5. **Naming collision, fixed**: `SetupPlan.clSurface` (§3.0, the per-cutter grid-resolution record)
-   and the per-slice export `clSurface(cutter, stepOver, region)` below shared one name. The function
-   keeps C's name; the `SetupPlan` field is renamed `clGrid`.
+**What this note got wrong twice, and the rulings that fixed it (all on #956, C and the manager):**
+1. **The clearance names.** This note invented `stayDownClearanceMm`/`retractClearanceMm`; C
+   objected — staying down is a material-state decision, not a height. **Ruled**: the two real
+   heights are `RegionRef.regionClearanceZ` (per region, above) and `ToolpathIR.safeZ` (existing
+   field, program-wide, between regions/ops). Neither name above survives.
+2. **`PassRef` had no consumer.** C's objection: without entry/exit per pass, `linking.ts`'s
+   `linkPasses` cannot find where one pass ends and the next begins — restored into `OpOutcome.passes`
+   above, matching C's exact shape.
+3. **`sequence[].cost`'s shape.** Ruled: the wrapper above (`terms`/`toolChangeSeconds`/
+   `totalSeconds`, `toolChanges` optional) — **not** a bare `CycleTerms`, and **not** C's internal
+   `sequence.ts` `CycleCost` (which has no `terms` field at all, just a summed `estimateSeconds`).
+   `plan.ts` computes `terms` itself from each cutter's concatenated posted `ToolpathIR`
+   (`estimateCycleTerms`, `ir.ts:692`) — independent of `sequence.ts`'s own internal accounting,
+   which only has to pick the cheapest sequence, not produce the public number.
+4. **`ObstacleBox[]`/methods-not-functions/the `clSurface`-vs-`clGrid` rename**: all confirmed as
+   this note stated (unchanged from the prior revision).
 
-**Per-slice minimum, C's own line, carried verbatim as what each module must export at minimum:**
-`#957`: `clSurface(cutter, stepOver, region)` plus a cheap `reach(cutter, feature)`/sample count, so
-#961 prunes before generating. `#959`: `rough(cutter, opts)` and `rest(prev, next, opts)`, the
-feature/region list, the CL difference per cutter. `#960`: `finish(cutter, scallop, slope)`, the
-flat-vs-ball slope classification, and the chamfer/edge-break rim as its own region.
+F's parity harness (`modelGolden.spec.ts`, `cand/964b`) validates exactly this shape — `setupIndex`,
+`features`, `clGrid`, `ops[].kind/region/outcome` (with `region.regionClearanceZ` and
+`outcome.passes[]`), `sequence[].cost` as the wrapper above, `linking`, `programs` (each `ToolpathIR`
+carrying its own `safeZ`), `totalCostSeconds` — and is the actual check, not this note's prose.
 
-This is the stable, serialisable shape every consumer below reads — not internal to `cam/model/` (F's
-point for #964: the parity harness asserts `SetupPlan` directly, and the run-sheet strings are read
-from it).
+**Per-slice minimum, C's own line:** `#957`: `clSurface(cutter, stepOver, region)` plus a cheap
+`reach(cutter, feature)`, so #961 prunes before generating. `#959`: `rough`/`rest`. `#960`: `finish`,
+the flat-vs-ball slope classification, the chamfer/edge-break rim as its own region.
 
 ### 3.1–3.5 The ops
 
@@ -547,15 +538,18 @@ each slice lands, not retrofitted at #966.
 
 ## 4. Cutter sequence by cost (#961, C)
 
-Candidate sequences (the Makera pattern: ⌀6 flat → ⌀3.175 flat → ⌀6 ball → chamfer) from
-`input.cutters`. Each candidate's `OpOutcome`s (§3.0.1) for the cutters it uses are grouped by cutter
-and concatenated with the existing `concatToolpathIR` (`ir.ts:1138`) into one `ToolpathIR` per cutter,
-then priced with the existing `estimateCycleTerms` (`ir.ts:692`, `CycleTerms` — §3.0's correction: this
-is #927's own type, not a new one) **on those posted moves** (A's review point 3 on #956: "cycle
-within 2× Makera is read off the app's own estimate on the posted file" — #927's method, not a
-separate cost model). The cheapest sequence that meets reach and
-scallop from `input.cutters` — **which candidates `cutters` holds depends on the card, ruled in §7
-(A's R5)**: the vendor's own cutter set for a simulation-only reference card, the house's cutters first
+**C's real `sequence.ts` (`cand/961`, landed) does the choosing**: `candidateSequences` builds the
+vendor-shaped candidates (largest flat roughs, a smaller flat rests corners it cannot enter, a ball
+finishes curved remainder, a chamfer breaks rims), pruned on geometry alone before any move is built
+(an opening/corner/depth/curvature refusal, each stated in words); `priceSequence` prices each
+survivor by #927's `estimateCycleTerms` on the posted moves plus the shop's `toolChange.seconds` per
+change after the loaded first cutter; `chooseSequence` ranks house before catalogue, rowed feeds
+before fallback, then price. `plan.ts` is the adapter: it builds the PUBLIC `sequence[].cost` wrapper
+(§3.0.1) by concatenating each winning cutter's `OpOutcome.ir`s with the existing `concatToolpathIR`
+(`ir.ts:1138`) and running `estimateCycleTerms` itself — independent of `sequence.ts`'s own internal
+per-step accounting, which only has to pick the winner. Candidate sequences — **which candidates
+`cutters` holds depends on the card, ruled in §7 (A's R5)**: the vendor's own cutter set for a
+simulation-only reference card, the house's cutters first
 and the catalogue second for a bench card. `CutterCandidates.house`/`sequence[].house` mean exactly
 what the caller put in `input.cutters.house` — **the engine does not know or care which card it is
 running**; for a reference card the caller fills `house` with the vendor's set (so `sequence[].house`
@@ -571,27 +565,23 @@ by a measured search — they are read from `sequence[]` (D's §3.6 above).
 
 ## 5. Linking (#962, C)
 
-`tour.ts` (116 lines: `nearestNeighbourOrder`, `twoOptOrder`, `tourNearest`) is **ordering only** — no
-clearance-plane or stay-down concept exists in it today (checked, not assumed). It is reusable as the
-region-order primitive inside `linking.ts`, but stay-down between adjacent passes and a clearance plane
-per region (not per move, per plan v2 §5) are net-new logic, not a reuse of `tour.ts` as it stands.
-
-**The real shape, per C's contract (§3.0.1), corrected from this note's earlier "entry/exit points"
-sketch**: `linking.ts` orders `RegionRef`s by `tour.ts`, then calls the **one pure `link()` function**
-— not a per-op decision — for every move between two cutting points, inside a region or between
-regions alike. `link()` reads `clearedAt(z)` (what every *preceding* op in this setup has already
-removed, not the current op's own region — without this, a stay-down link could cross a rough's
-standing ribs) and `linkIsClear(from, to, z, cutter)` to decide `feed` at depth (stay-down) vs `rapid`
-at the region's own clearance plane (retract), and reads `region.obstacles` (the #949 jaw-clearance
-boxes, §3.0) so a link never plans through a jaw. One implementation means #961's price and #962's
-moves cannot diverge (C's point 4) — #926's `hopCount`/air fraction measure the links `link()` actually
-produced, not a second estimate of them. **Vertical legs (plunges, the retract itself) use
-`feeds.plungeFeed`, not `feeds.feed`** — Review B's F8 found the old engine's staircase corner emitting
-a near-vertical leg at the cutting feed. `link()` is where every *retract/stay-down* vertical is
-decided — it is not the only place a vertical move is emitted (§2 corrects this: a CL path's own
-staircase fallback, inside a region's own drop-cutter sampling, emits one too), but it is the one place
-this rule must hold for every inter-region and inter-pass move, and §2's staircase carries the same
-rule for the sampling-level intra-region case. Neither needs to know about the other.
+**C's real `linking.ts` (`cand/962`, landed).** `tour.ts`'s `tourNearest` is lifted from loops to
+passes (`orderPasses`): nearest-neighbour + 2-opt, deterministic. The link decision itself (`link`)
+is prior-art-sourced and stated as such in the module: Kiri:Moto's short-hop rule (a planar move
+within 2 cutter diameters at the same Z stays down, as a hard permission guard, never a preference)
+and FreeCAD Path's `KeepToolDownRatio` (default 3.0 — a stay-down detour may cost up to 3× the direct
+distance) and collision-tested clear height. The material test is C's own: the caller supplies
+`MaterialField.topAt(x, y)` (the stock top after every preceding op); `linkIsClear` samples the WHOLE
+cutter disc along the segment, not the centreline, so a wall or ridge just inside the radius still
+blocks it — a link the field cannot prove clear always retracts, never "probably fine." A blocked
+short hop may still go around a `dogleg` waypoint when FreeCAD's ratio pays for the detour; otherwise
+`retract` goes to the region's own `clearanceZ` (`RegionRef.regionClearanceZ`, §3.0.1), traverses as a
+rapid, and plunges. **Vertical legs use `feeds.plungeFeed`, not `feeds.feed`** (Review B's F8: the old
+engine's staircase corner fed a near-vertical leg at the cutting feed) — every retract/plunge in
+`link()` is `plungeFeed`; §2's CL-surface staircase rule carries the equivalent rule for a vertical
+inside one region's own drop-cutter sampling, and the two don't need to know about each other.
+`linkPasses` orders and joins a whole op's passes in one call — the first pass has no incoming link,
+since the program's entry is the op's own start, not a link between regions.
 
 Target on the references (plan v2 §3): rapids per 1,000 feed lines ≤ 2× Makera's; air fraction ≤
 Makera's + 10 points. `linking`'s three numbers in `SetupPlan` (§3.0) are exactly what the run sheet's

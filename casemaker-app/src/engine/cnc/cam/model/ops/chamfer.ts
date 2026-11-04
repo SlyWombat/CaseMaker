@@ -10,7 +10,7 @@
 
 import type { Tool } from '@/engine/cnc/tool';
 import type { Rim } from '../features';
-import type { OpOutcome, RegionRef } from '../linking';
+import type { OpOutcome, RegionRef } from '../plan';
 import type { EdgeBreakSpec } from '../types';
 
 export interface ChamferOpOptions {

@@ -10,7 +10,7 @@
 import type { Tool } from '@/engine/cnc/tool';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
-import type { OpOutcome, RegionRef } from '../linking';
+import type { OpOutcome, RegionRef } from '../plan';
 
 export interface RoughOpOptions {
   cutter: Tool;
