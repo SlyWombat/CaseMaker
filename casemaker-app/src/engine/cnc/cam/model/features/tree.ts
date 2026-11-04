@@ -272,18 +272,7 @@ export function buildTree(
       return z;
     };
 
-    // ── The top land ──────────────────────────────────────────────────────────────────────
     const topZ = levels.length > 0 && Math.abs(levels[0]! - partTop) <= tol.levelMergeMm ? levels[0]! : partTop;
-    const topFloors = floors.filter((f) => Math.abs(levelOf((f.patch.zMin + f.patch.zMax) / 2) - topZ) <= tol.levelMergeMm);
-    const topUnion = tl.CrossSection.union(topFloors.map((f) => f.cs));
-    garbage.push(topUnion);
-    const topParts = topUnion.decompose();
-    garbage.push(...topParts);
-    const top = {
-      z: topZ,
-      floors: topParts.filter((part) => part.area() > AREA_EPS).map((part) => ({ polygons: toPolygons(part), area: part.area() })),
-      area: topUnion.area(),
-    };
 
     // ── Nodes per level ───────────────────────────────────────────────────────────────────
     const nodes: (TreeNode & { cs: CrossSection })[] = [];
@@ -454,6 +443,33 @@ export function buildTree(
       if (home !== undefined) r.in = home.id;
       for (const n of touching) if (n.floorZ > r.zBottom + tol.levelMergeMm) n.remainder.push(r.id);
     }
+
+    // ── The top land ──────────────────────────────────────────────────────────────────────
+    // The floors at the top level, LESS the island tops: a top-level floor part inside a CLOSED
+    // pocket's outline is that pocket's island (recorded there with `topZ` at the top), not land
+    // (#958 E's second run: the tray's two island tops at −1.20).
+    const topFloors = floors.filter((f) => Math.abs(levelOf((f.patch.zMin + f.patch.zMax) / 2) - topZ) <= tol.levelMergeMm);
+    const topUnion = tl.CrossSection.union(topFloors.map((f) => f.cs));
+    garbage.push(topUnion);
+    const topParts = topUnion.decompose();
+    garbage.push(...topParts);
+    // Closed pockets only: an open shoulder's outline can surround the real top plateau.
+    const nodeOuters = nodes.filter((n) => !n.open && !n.through).flatMap((n) => filledOuters(tl, n.cs));
+    garbage.push(...nodeOuters);
+    const landParts = topParts.filter((part) => {
+      if (part.area() <= AREA_EPS) return false;
+      return !nodeOuters.some((outer) => {
+        const inside = part.intersect(outer);
+        const share = inside.area() / part.area();
+        inside.delete();
+        return share > 0.5;
+      });
+    });
+    const top = {
+      z: topZ,
+      floors: landParts.map((part) => ({ polygons: toPolygons(part), area: part.area() })),
+      area: landParts.reduce((sum, part) => sum + part.area(), 0),
+    };
 
     // ── Undercuts ─────────────────────────────────────────────────────────────────────────
     const unreachable: BuiltTree['unreachable'] = [];

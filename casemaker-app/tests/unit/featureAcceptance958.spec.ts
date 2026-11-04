@@ -16,8 +16,11 @@
  * stock frame. With CM_958_OUT set, the remainder regions are written as JSON for E's relation
  * checks (1–4) against the heightfield masks.
  *
- * Tolerances (6620460283): depth ±0.01; area |Δ| ≤ max(1 %, 0.05 mm × perimeter); centroid
- * 0.2 mm; bbox 0.2 mm.
+ * Tolerances (6620460283): depth ±0.01 INCLUSIVE (E's window is ±0.01 about Makera's level, so a
+ * plane exactly 0.01 away is inside it); area |Δ| ≤ max(1 %, 0.05 mm × perimeter); centroid 0.2 mm;
+ * bbox 0.2 mm. After E's second run (6621355983), one more allowance, ONE-SIDED: E's ±0.01 window
+ * also takes in the tangent band where a filleted floor meets its wall (√(2r·0.01), 0.2 mm at r 2,
+ * 0.25 at r 3), so E's area may exceed the plane's by up to 0.25 mm × perimeter, never the reverse.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,6 +31,7 @@ import { tl } from './helpers/manifoldExec';
 import { stepToMesh } from '@/engine/import/stepMesh';
 import { recogniseFeatures, type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
+import { DEFAULT_FEATURE_TOLERANCES, classifyPatches, patchesFromFaces, type FrameMesh } from '@/engine/cnc/cam/model/features/patches';
 
 interface Part {
   area: number;
@@ -64,6 +68,10 @@ function partOf(polys: Polygons, area: number): Part {
 }
 
 const all = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...all(n.children)]);
+/** E's window, inclusive, plus float noise. */
+const LEVEL_TOL = 0.01 + 1e-6;
+/** The tangent band E's window takes in beyond a filleted floor's edge, mm (one-sided). */
+const TANGENT_BAND_MM = 0.25;
 const areaTol = (p: Part): number => Math.max(0.01 * p.area, 0.05 * p.perimeter);
 
 /** One expected floor part: a centroid (either coordinate may be unknown), an area range, a size. */
@@ -90,7 +98,7 @@ function expectParts(label: string, got: Part[], want: Want[]): void {
     const where = `${label} @ (${w.x ?? '?'}, ${w.y ?? '?'}) got (${p.centroid[0].toFixed(2)}, ${p.centroid[1].toFixed(2)}) ${p.area.toFixed(2)} mm²`;
     expect(dist(p), where).toBeLessThanOrEqual(0.2);
     const tol = areaTol(p);
-    expect(p.area, where).toBeGreaterThanOrEqual(w.area[0] - tol);
+    expect(p.area, where).toBeGreaterThanOrEqual(w.area[0] - tol - TANGENT_BAND_MM * p.perimeter);
     expect(p.area, where).toBeLessThanOrEqual(w.area[1] + tol);
     if (w.size !== undefined) {
       expect(Math.abs(p.size[0] - w.size[0]), where).toBeLessThanOrEqual(0.2);
@@ -108,19 +116,20 @@ function expectParts(label: string, got: Part[], want: Want[]): void {
  * The levels E flagged as slope crossings must stay absent.
  */
 const TRAY_CONFIRMED_EXTRA_DEPTHS: number[] = [];
-const ORGANIZER_CONFIRMED_EXTRA_DEPTHS: number[] = [];
+/** E's second run (6621355983): 0.60 (82.8 mm² in 15 flats) and 14.00 (59.5 mm², two flats) read flat. */
+const ORGANIZER_CONFIRMED_EXTRA_DEPTHS: number[] = [0.6, 14];
 
 function expectLevels(tree: FeatureTree, modelTop: number, want: number[], confirmed: number[], absent: number[]): void {
   const depths = tree.levels.map((z) => modelTop - z);
   const shown = depths.map((d) => d.toFixed(3)).join(', ');
-  for (const d of want) expect(depths.some((x) => Math.abs(x - d) <= 0.01), `level ${d} missing; levels ${shown}`).toBe(true);
-  for (const d of absent) expect(depths.some((x) => Math.abs(x - d) <= 0.01), `level ${d} must be absent; levels ${shown}`).toBe(false);
-  const extra = depths.filter((x) => !want.some((d) => Math.abs(x - d) <= 0.01));
-  const unconfirmed = extra.filter((x) => !confirmed.some((d) => Math.abs(x - d) <= 0.01));
+  for (const d of want) expect(depths.some((x) => Math.abs(x - d) <= LEVEL_TOL), `level ${d} missing; levels ${shown}`).toBe(true);
+  for (const d of absent) expect(depths.some((x) => Math.abs(x - d) <= LEVEL_TOL), `level ${d} must be absent; levels ${shown}`).toBe(false);
+  const extra = depths.filter((x) => !want.some((d) => Math.abs(x - d) <= LEVEL_TOL));
+  const unconfirmed = extra.filter((x) => !confirmed.some((d) => Math.abs(x - d) <= LEVEL_TOL));
   expect(unconfirmed.map((d) => d.toFixed(3)), `levels not in E's list and not yet confirmed flat by E; levels ${shown}`).toEqual([]);
 }
 
-const placedMeshes = new Map<FeatureTree, { positions: Float32Array; indices: Uint32Array }>();
+const placedMeshes = new Map<FeatureTree, { positions: Float32Array; indices: Uint32Array; faceId?: Uint32Array }>();
 
 async function placedTree(file: string, stock: [number, number], modelTop: number): Promise<FeatureTree> {
   const bytes = fs.readFileSync(file);
@@ -137,7 +146,7 @@ async function placedTree(file: string, stock: [number, number], modelTop: numbe
   }
   const mesh = { ...read.mesh, positions };
   const tree = recogniseFeatures({ triangles: mesh, faceId: read.faceId }, { up: [0, 0, 1], stockTop: 0 }, tl);
-  placedMeshes.set(tree, { positions, indices: read.mesh.indices });
+  placedMeshes.set(tree, { positions, indices: read.mesh.indices, ...(read.faceId ? { faceId: read.faceId } : {}) });
   return tree;
 }
 
@@ -146,7 +155,7 @@ function floorsAt(tree: FeatureTree, modelTop: number, depth: number): Part[] {
   const z = modelTop - depth;
   if (Math.abs(depth) < 1e-9) return tree.top.floors.map((f) => partOf(f.polygons, f.area));
   return all(tree.pockets)
-    .filter((n) => !n.through && Math.abs(n.floorZ - z) <= 0.01)
+    .filter((n) => !n.through && Math.abs(n.floorZ - z) <= LEVEL_TOL)
     .flatMap((n) => n.floors.map((f) => partOf(f.polygons, f.area)));
 }
 
@@ -186,6 +195,30 @@ function writeForE(tree: FeatureTree, name: string, modelTop: number, mesh: { po
   fs.writeFileSync(path.join(out, `${name}-floors.json`), JSON.stringify({ frame: 'stock', levels, slivers: tree.report.slivers }));
 }
 
+/**
+ * The plane-fit evidence for every floor patch at a level E does not list: its largest vertex
+ * deviation from the fitted plane and the spread of its triangles' normals. A planar B-rep face
+ * reads ~0 on both; a cylinder of R over a width w reads ≈ w²/(16R) and ≈ w/(2R) rad, which fails
+ * the 0.005 mm / 0.5° tests (#958 §3.1). Printed so a disputed level is settled by the geometry.
+ */
+function logExtraLevelFits(tree: FeatureTree, name: string, modelTop: number, mesh: FrameMesh, faceId: Uint32Array | undefined, listed: number[]): void {
+  if (faceId === undefined) return;
+  const tol = DEFAULT_FEATURE_TOLERANCES;
+  const patches = patchesFromFaces(mesh, faceId, tol);
+  classifyPatches(mesh, patches, tree.frame.partBottom, tol);
+  const extra = tree.levels.filter((z) => !listed.some((d) => Math.abs(modelTop - z - d) <= LEVEL_TOL));
+  const lines: string[] = [];
+  for (const z of extra) {
+    for (const patch of patches) {
+      if (patch.kind !== 'floor' || Math.abs((patch.zMin + patch.zMax) / 2 - z) > 0.01) continue;
+      lines.push(
+        `  depth ${(modelTop - z).toFixed(3)}: face patch ${patch.id}, ${patch.area.toFixed(2)} mm², ${patch.triangles.length} tris, plane dev ${patch.planeDevMm.toExponential(2)} mm, normal spread ${patch.normalSpreadDeg.toFixed(4)}°`,
+      );
+    }
+  }
+  console.log(`#958 ${name}: plane fits of the floor faces at levels E does not list\n${lines.join('\n')}`);
+}
+
 /** Every level with its floor parts, printed so a red run says what the tree found. */
 function logLevels(tree: FeatureTree, name: string, modelTop: number): void {
   const lines = tree.levels.map((z) => {
@@ -206,6 +239,8 @@ describe.skipIf(TRAY === undefined)('#958 acceptance — tool tray 70, top setup
     const t = await tree();
     logLevels(t, 'tray', TOP);
     writeForE(t, 'tray', TOP, placedMeshes.get(t)!);
+    const placed = placedMeshes.get(t)!;
+    logExtraLevelFits(t, 'tray', TOP, placed, placed.faceId, [0, 0.6, 3, 6]);
     expectLevels(t, TOP, [0, 0.6, 3, 6], TRAY_CONFIRMED_EXTRA_DEPTHS, []);
   });
 
@@ -269,6 +304,8 @@ describe.skipIf(ORGANIZER === undefined)('#958 acceptance — tool organizer, to
     const t = await tree();
     logLevels(t, 'organizer', TOP);
     writeForE(t, 'organizer', TOP, placedMeshes.get(t)!);
+    const placed = placedMeshes.get(t)!;
+    logExtraLevelFits(t, 'organizer', TOP, placed, placed.faceId, [0, 3, 4, 4.99, 6, 10, 22]);
     expectLevels(t, TOP, [0, 3, 4, 4.99, 6, 10, 22], ORGANIZER_CONFIRMED_EXTRA_DEPTHS, [3.83, 7.98]);
   });
 
