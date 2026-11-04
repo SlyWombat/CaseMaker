@@ -148,28 +148,41 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   // radius: eroding by exactly `r` the same amount it was extended leaves the fake outer boundary
   // at the true edge with zero margin (degenerate — a ledge exactly `r` wide swept barely at all);
   // `2r` leaves a real margin whatever the ledge's own width, so only the node's OTHER (real)
-  // walls end up deciding what the cutter can reach.
+  // walls end up deciding what the cutter can reach. The raw band runs the WHOLE outline's open
+  // edge, not just this node's own stretch of it (advisor's review on dd150a9b) — clipped to
+  // `near` (the node's own footprint, grown by the same 2r) before it is unioned in, or every
+  // OTHER open node on the part gets this one's band too.
   const region = opts.node.open && opts.openOutline !== undefined && opts.boolean !== undefined
     ? opts.boolean.union(
         opts.node.region,
-        opts.boolean.subtract(opts.offset(opts.openOutline, 2 * toolRadius), opts.openOutline),
+        (() => {
+          const wholeBand = opts.boolean.subtract(opts.offset(opts.openOutline, 2 * toolRadius), opts.openOutline);
+          const near = opts.offset(opts.node.region, 2 * toolRadius);
+          // A ∩ B = A \ (A \ B) — the only intersection `union`/`subtract` alone can express.
+          return opts.boolean.subtract(wholeBand, opts.boolean.subtract(wholeBand, near));
+        })(),
       )
     : opts.node.region;
 
   const open = fullyReachable(region, opts.offset, toolRadius);
 
   // A's review 6622610124, finding 1: the free space EVERY same-level or level-to-level link must
-  // stay inside — `region` eroded by the cutter radius (less a 0.01 mm chord grace, the same
-  // grace `pocketRedFirst959.spec.ts` checks the moves against). A point outside it (an island,
-  // the wall between two lobes, open air outside the node) is reported as never cut, so `link()`
-  // always retracts around it rather than feeding through it.
-  const freeSpace = opts.offset(region, -(toolRadius - 0.01));
+  // stay inside is `open` (finding 5's own reachable area), NOT a second erosion of `region` —
+  // `linkIsClear` already tests the whole cutter disc against this field, and a disc centred at
+  // `region` eroded once more only fits when its CENTRE is eroded a second time (advisor's review
+  // on dd150a9b): `erode(open, r) = erode(region, r)` (opening is idempotent), so testing the disc
+  // against `open` is exactly A's own centre-line criterion, not a stricter one that forces a
+  // retract on nearly every transition. A point outside `open` (an island, the wall between two
+  // lobes, open air outside the node) is reported as never cut, so `link()` retracts around it.
   const material: MaterialField = {
-    topAt: (x, y) => (pointInPolygons(freeSpace, x, y) ? opts.node.floorZ : Number.POSITIVE_INFINITY),
+    topAt: (x, y) => (pointInPolygons(open, x, y) ? opts.node.floorZ : Number.POSITIVE_INFINITY),
   };
   const linkOptions: LinkOptions = {
     material,
-    clearanceZ: opts.safeZMm,
+    // The REGION's own clearance plane (already above every obstacle IN this region), not the
+    // program-wide `safeZMm` — `RegionRef.regionClearanceZ`'s own doc in `plan.ts` draws this
+    // line; advisor's review on dd150a9b caught the two being swapped here.
+    clearanceZ: opts.region.regionClearanceZ,
     tool: { radiusMm: toolRadius },
     feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },
   };

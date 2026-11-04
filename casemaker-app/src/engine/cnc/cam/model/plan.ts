@@ -241,6 +241,8 @@ export interface PlanPocketsResult {
   sequence: SequencedCutter[];
   /** A feature no cutter in the chosen chain's budget covers, as a stated finding naming the limiting number — `SequenceChoice.unreachable`, turned into a sentence. */
   unreachable: string[];
+  /** Other stated findings — a skin above the part this plan does not fully face, and similar gaps that are not a refusal. */
+  notes: string[];
   /** The full picker result (`considered`, `cost`) — for a caller that wants more than `ops`/`unreachable`. */
   choice: SequenceChoice;
 }
@@ -259,8 +261,18 @@ export interface PlanPocketsResult {
  * signature — `chooseSequence` calls `planStep` once per candidate it prices, not just the winner.
  */
 export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions): PlanPocketsResult {
+  // ADVISOR'S REVIEW, most severe: there is no single Z datum without this. `zPasses`, SAFE_Z/
+  // HOP_Z (ir.ts) and the post's own `probed-top-face` convention all assume IR Z 0 is the STOCK
+  // top; `pocket()` instead used `node.floorZ`/`mouthZ` as literal move Z, on whatever absolute
+  // axis `recogniseFeatures` happened to place the mesh on (A's own red-first fixtures place it
+  // at `stockTop = 10`, not near 0 — "every real caller keeps stockTop near 0" was simply wrong).
+  // Every Z this function hands an op is rebased by `-stockTop` here, ONCE, so every op downstream
+  // shares the SAME Z 0 = stock top — not fixed by a per-caller convention, not assumed.
+  const z0 = tree.frame.stockTop;
+  const rebase = (z: number): number => z - z0;
+
   const refs = regionRefs(tree);
-  const refById = new Map(refs.map((r) => [r.id, { ...r, obstacles: [], regionClearanceZ: tree.frame.partTop + 5 }]));
+  const refById = new Map(refs.map((r) => [r.id, { ...r, obstacles: [], regionClearanceZ: rebase(tree.frame.partTop) + 5 }]));
 
   // A's review 6622610124, finding 2: a ROOT node's mouth is the STOCK's own top, not the
   // recognised part top — the tray's top land sits 1.2 mm below the stock surface, and without
@@ -280,8 +292,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // A's review 6622610124, most severe: `zPasses` counts down from Z 0, the STOCK top, not the
   // recognised part top — a `partTop - zTo` depth stopped the contour short by exactly the skin
   // between the stock and the part (1.2 mm on the tray, 0.8 mm on the organizer), so the part was
-  // never actually freed.
-  const contourDepthMm = tree.frame.stockTop - tree.contour.zTo;
+  // never actually freed. These are magnitudes, already stock-top-relative — no `rebase` needed.
+  const contourDepthMm = z0 - tree.contour.zTo;
 
   const features: SequenceFeature[] = [];
   for (const node of pocketNodes) {
@@ -294,7 +306,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       // exclude a cutter the extended region can serve.
       minOpeningMm: node.open ? null : node.narrowest,
       cornerRadiusMm: node.open ? null : node.narrowest / 2,
-      depthMm: node.mouthZ - node.floorZ,
+      // Measured below the STOCK top (`SequenceFeature.depthMm`'s own doc), not the node's own
+      // mouth — a nested node's flute reach is under-reported by `mouthZ - floorZ` alone.
+      depthMm: z0 - node.floorZ,
     });
   }
   for (const node of throughNodes) {
@@ -303,7 +317,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       kind: 'pocket',
       minOpeningMm: node.narrowest,
       cornerRadiusMm: node.narrowest / 2,
-      depthMm: tree.frame.stockTop - node.floorZ,
+      depthMm: z0 - node.floorZ,
     });
   }
   features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
@@ -343,7 +357,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         id,
         outline: throughNode.region,
         region: ref,
-        depthMm: tree.frame.stockTop - throughNode.floorZ,
+        depthMm: z0 - throughNode.floorZ,
         offset: opts.offset,
         params: cutParamsFor(cutter),
         rapid: opts.rapid,
@@ -352,9 +366,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     const node = pocketsById.get(id);
     if (node === undefined) return null;
     const diameter = cuttingDiameter(cutter) ?? 1;
+    // Rebased onto the SAME Z 0 = stock top every op shares (see this function's header note); a
+    // root's own mouth is the stock top itself (finding 2), a nested node's is its parent's floor,
+    // unaffected by the override — both still need the SAME `-z0` shift as `floorZ`.
+    const mouthZAbs = rootIds.has(node.id) ? z0 : node.mouthZ;
     return pocket({
       cutter,
-      node: rootIds.has(node.id) ? { ...node, mouthZ: tree.frame.stockTop } : node,
+      node: { ...node, mouthZ: rebase(mouthZAbs), floorZ: rebase(node.floorZ) },
       region: ref,
       stepOverMm: diameter / 4,
       stepDownMm: opts.stepDownMm,
@@ -362,7 +380,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       offset: opts.offset,
       // The SAME constants `contourOp` gets from `generateProfile` (ir.ts) — a pocket and the
       // contour in one cutter's program must agree on `safeZ`/`hopZ` (`concatToolpathIR` refuses
-      // otherwise), and a per-tree `partTop + N` value had no such guarantee.
+      // otherwise); both are only meaningful heights ABOVE the stock because every Z passed to
+      // either op is now on that SAME stock-top-relative axis.
       safeZMm: SAFE_Z,
       hopZMm: HOP_Z,
       toolNumber: cutter.number ?? 1,
@@ -411,7 +430,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       const id = step.regionIds[i]!;
       const outcome = outcomes[i]!;
       const ref = refById.get(id)!;
-      ops.push({ kind: id === 'contour' ? 'contour' : 'pocket', region: ref, outcome });
+      ops.push({ kind: id === 'contour' || throughById.has(id) ? 'contour' : 'pocket', region: ref, outcome });
       const key = outcome.cutter;
       const existing = programs.get(key);
       programs.set(key, existing === undefined ? outcome.ir : concatToolpathIR(existing, outcome.ir));
@@ -419,12 +438,21 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   }
 
   const offered = [...opts.houseFlats].map((t) => `⌀${cuttingDiameter(t)}`).join(', ');
+  // A's review 6622610124, finding 4: a through node's own limiting number was lost (the lookup
+  // only checked `pocketsById`) — the SAME sentence either kind of node gets.
   const unreachable = choice.unreachable.map((id) => {
-    const node = pocketsById.get(id);
+    const node = pocketsById.get(id) ?? throughById.get(id);
     return node === undefined
       ? `${id}: not cut`
       : `${id}: not cut — needs a cutter ≤ ${node.narrowest.toFixed(2)} mm (house offers ${offered})`;
   });
+
+  const notes: string[] = [];
+  if (pocketNodes.some((n) => rootIds.has(n.id)) && Math.abs(tree.frame.partTop - z0) > 1e-6) {
+    notes.push(
+      `a ${Math.abs(tree.frame.partTop - z0).toFixed(2)} mm skin sits above the part; this plan faces it only where a root pocket's own first pass already engages it — the top land OUTSIDE every pocket's footprint is not faced here (no separate facing op yet)`,
+    );
+  }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
     const ir = programs.get(entry.cutterKey);
@@ -445,5 +473,5 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     };
   });
 
-  return { ops, programs, sequence, unreachable, choice };
+  return { ops, programs, sequence, unreachable, notes, choice };
 }

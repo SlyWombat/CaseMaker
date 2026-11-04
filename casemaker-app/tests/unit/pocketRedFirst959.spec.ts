@@ -104,19 +104,22 @@ function inside(polys: Polygons, x: number, y: number): boolean {
 /**
  * Every horizontal FEED segment at `z` must keep the tool's centre inside the node's free space,
  * the region eroded by the cutter radius (less a 0.01 mm grace for offset chords). Returns the
- * offending segments, sampled every 0.05 mm.
+ * offending segments, sampled every 0.05 mm. `node.floorZ` is on `recogniseFeatures`'s own mesh
+ * axis; `planPocketsForTree` now rebases every move onto `Z 0 = stockTop` (plan.ts's header note
+ * on dd150a9b), so the floor it actually posts is `floorZ - stockTop`.
  */
-function linksOutsideFreeSpace(result: PlanPocketsResult, node: PocketNode, radius: number): string[] {
+function linksOutsideFreeSpace(result: PlanPocketsResult, node: PocketNode, radius: number, stockTop: number): string[] {
   const free = offset(node.region, -(radius - 0.01));
   const op = result.ops.find((o) => o.region.id === node.id);
   if (op === undefined) return [`no op for ${node.id}`];
+  const floorZ = node.floorZ - stockTop;
   const bad: string[] = [];
   let at: [number, number, number] | null = null;
   for (const operation of op.outcome.ir.operations) {
     for (const m of operation.moves) {
       if (!('x' in m) || m.x === undefined || m.y === undefined || m.z === undefined) continue;
       const next: [number, number, number] = [m.x, m.y, m.z];
-      if (at !== null && m.kind === 'feed' && Math.abs(at[2] - next[2]) < 1e-9 && Math.abs(next[2] - node.floorZ) < 1e-6) {
+      if (at !== null && m.kind === 'feed' && Math.abs(at[2] - next[2]) < 1e-9 && Math.abs(next[2] - floorZ) < 1e-6) {
         const len = Math.hypot(next[0] - at[0], next[1] - at[1]);
         const n = Math.max(1, Math.ceil(len / 0.05));
         for (let i = 1; i < n; i++) {
@@ -195,7 +198,7 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     const tree = treeOf(s, 10);
     const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - 6) < 1e-6 && n.islands.length === 2)!;
     expect(node, 'the floor node holds the island').toBeDefined();
-    const bad = linksOutsideFreeSpace(plan(tree, [flat(3, 1)]), node, 1.5);
+    const bad = linksOutsideFreeSpace(plan(tree, [flat(3, 1)]), node, 1.5, tree.frame.stockTop);
     expect(bad, `feeds that leave free space:\n${bad.slice(0, 5).join('\n')}`).toEqual([]);
   });
 
@@ -208,7 +211,7 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     const tree = treeOf(s, 10);
     const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - 6) < 1e-6)!;
     expect(node).toBeDefined();
-    const bad = linksOutsideFreeSpace(plan(tree, [flat(2, 1)]), node, 1);
+    const bad = linksOutsideFreeSpace(plan(tree, [flat(2, 1)]), node, 1, tree.frame.stockTop);
     expect(bad, `feeds that leave free space:\n${bad.slice(0, 5).join('\n')}`).toEqual([]);
   });
 
@@ -225,7 +228,7 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     expect(op, 'an op cuts the ledge').toBeDefined();
     // Swept, read from the moves (the op's own `cleared` overclaims, finding 5): ≥ 95 % of the ledge.
     const cutter = op!.outcome.cutter.includes('3.175') ? 3.175 / 2 : 3;
-    const swept = sweptFraction(result, ledge.id, ledge.floors.flatMap((f) => f.polygons), 7, cutter);
+    const swept = sweptFraction(result, ledge.id, ledge.floors.flatMap((f) => f.polygons), 7 - tree.frame.stockTop, cutter);
     expect(swept, `swept ${(100 * swept).toFixed(1)} % of the ${ledgeArea} mm² ledge`).toBeGreaterThanOrEqual(0.95);
   });
 
@@ -237,7 +240,7 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - 6) < 1e-6)!;
     const result = plan(tree, [flat(6, 1)]);
     const op = result.ops.find((o) => o.region.id === node.id)!;
-    const floor = op.outcome.cleared!.filter((c) => Math.abs(c.z - 6) < 1e-6).at(-1)!;
+    const floor = op.outcome.cleared!.filter((c) => Math.abs(c.z - (6 - tree.frame.stockTop)) < 1e-6).at(-1)!;
     const reachable = 400 - (36 - 9 * Math.PI);
     expect(areaOf(floor.boundary)).toBeLessThanOrEqual(reachable + 0.05);
   });
