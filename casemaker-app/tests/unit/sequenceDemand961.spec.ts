@@ -35,11 +35,14 @@ const TRAY_DEMAND: SequenceDemand = {
 const HOUSE: CutterCandidates = { house: [FLAT6, FLAT3175], catalogue: [] };
 
 describe('#961 the tray demand, as one SequenceDemand', () => {
-  it.fails('a single demand spanning 12.8 mm slots down to a ~1 mm pocket has no candidate sequence (raised for C, #956/#961)', () => {
+  it('the rest chain serves the spread: the largest flat, with a smaller one only for what it cannot reach, and the ~1 mm pocket stated', () => {
     const candidates = candidateSequences(TRAY_DEMAND, HOUSE);
-    // Today: []. The moment C's picker can serve a feature this narrow (without making it the
-    // WHOLE part's primary cutter), this assertion starts passing — promote to `it`.
     expect(candidates.length).toBeGreaterThan(0);
+    // The primary is the largest flat; the ~1 mm pocket is unreachable by every house flat and is
+    // STATED, never allowed to shrink the primary to it.
+    const best = candidates.find((c) => c.unreachable.length === 0) ?? candidates[0]!;
+    expect(best.steps[0]!.cutter.key).toBe('flat-6');
+    expect(candidates.every((c) => c.unreachable.includes('tiny-1'))).toBe(true);
   });
 
   it('removing the ~1 mm feature lets the same two house flats serve the rest (confirms the demand shape, not the picker, is the limit)', () => {
