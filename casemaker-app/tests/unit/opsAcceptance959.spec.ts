@@ -340,6 +340,10 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
       shadowNotScoredFraction: report.shadowNotScoredFraction,
       rawFraction: report.cutIntoFraction,
       maxMm: report.maxCutIntoMm,
+      // The manager's own ask on E's run: a depth alone does not say whether a residue is a real
+      // gouge or an artefact the rule should name — the coordinate is what lets a reader check it
+      // against the part's own feature layout.
+      maxAt: report.maxCutIntoAt,
     };
     const ours: ProgramScore = {
       label: name,
@@ -363,7 +367,8 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
       : `Coverage ${(measured.coverage * 100).toFixed(2)} % (vendor ${measured.scored.lines.find((l) => l.key === 'coverage')?.vendor ?? '—'}), ` +
         `cut-into adjudicated ${((measured.cutInto.adjudicatedFraction ?? 0) * 100).toFixed(2)} % ` +
         `(edge break ${((measured.cutInto.edgeBreakFraction ?? 0) * 100).toFixed(2)} %, wall cells ${((measured.cutInto.wallNotScoredFraction ?? 0) * 100).toFixed(2)} %, ` +
-        `wall shadow ${((measured.cutInto.shadowNotScoredFraction ?? 0) * 100).toFixed(2)} % not counted; max ${measured.cutInto.maxMm.toFixed(3)} mm). ` +
+        `wall shadow ${((measured.cutInto.shadowNotScoredFraction ?? 0) * 100).toFixed(2)} % not counted; max ${measured.cutInto.maxMm.toFixed(3)} mm` +
+        `${measured.cutInto.maxAt ? ` at ${measured.cutInto.maxAt.x.toFixed(1)}, ${measured.cutInto.maxAt.y.toFixed(1)}` : ''}). ` +
         `Seven lines: ${measured.scored.sentence}.`;
   console.log(
     `#959 ${name}: ${pocketOps} pocket + ${contourOps} contour op(s) planned (${unreachable.length} ` +

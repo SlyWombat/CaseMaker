@@ -66,6 +66,14 @@ export interface CutIntoScore {
   rawFraction: number | null;
   /** The deepest cut below the goal, mm (advisory). */
   maxMm: number;
+  /**
+   * WHERE the deepest ADJUDICATED cell is, in the work frame — present only when the checker ran
+   * on the real report (`GoalCutIntoReport.maxCutIntoAt`), which `cutIntoFromPage`'s page-JSON
+   * source never carries. Null when nothing survived adjudication; undefined when the source has
+   * no notion of a coordinate at all. A depth alone ("0.01 mm") does not say whether a residue is
+   * a real gouge or an artefact the rule should name — the location is what lets a reader check.
+   */
+  maxAt?: { x: number; y: number } | null;
 }
 
 /** How a program was posted — line 7's input. */
