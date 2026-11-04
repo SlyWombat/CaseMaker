@@ -35,13 +35,17 @@ function bisect(surface: ClSurface, a: DroppedPoint, b: DroppedPoint, depth: num
   const mx = (a.x + b.x) / 2;
   const my = (a.y + b.y) / 2;
   const mz = surface.dropCutter(mx, my);
-  // Past the surface's own reach (outside the footprint, or the mesh itself ends) — nothing to
-  // subdivide against; keep the chord as it stands rather than guessing a height that does not
-  // exist. The caller decides whether a row may cross out of reach at all (`dropRow`'s own
-  // endpoints must be within it).
+  // The manager's ruling on footprint vs links: a row is CUT only where `clSurface` answers; a
+  // stretch where it leaves the footprint and re-enters is a LINK, handed to `link()`'s own
+  // material-state read, never a straight chord guessed across it. `a` and `b` are both known
+  // reachable (every caller — `dropRow`'s own endpoints, or this function's own recursion — only
+  // ever bisects between two already-valid points), so a null HERE means the straight line
+  // between them crosses OUT of the footprint somewhere in between: exactly the footprint notch
+  // this rule exists to catch, not a reason to fall back on the chord and cut across it.
   if (mz === null) {
-    out.push(b);
-    return;
+    throw new Error(
+      `cam/model/rowDropper: the row leaves the surface's own reach between (${a.x}, ${a.y}) and (${b.x}, ${b.y}) — a footprint notch, not a straight chord to guess across. The caller clips a row into separate footprint intervals and hands the gap between them to link(), per the manager's ruling on footprint vs links.`,
+    );
   }
   const chordZ = (a.z + b.z) / 2;
   const departure = Math.abs(mz - chordZ);

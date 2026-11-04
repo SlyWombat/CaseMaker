@@ -182,3 +182,68 @@ describe('#960 dropRow() — a real discontinuity (staircase, not a diagonal)', 
     expect(() => dropRow(surface, [0, 0], [500, 0])).toThrow(/outside the surface's reach|must be within the surface's reach/);
   });
 });
+
+// The manager's ruling on footprint vs links: a row is CUT only where `clSurface` answers; a
+// straight line whose own ENDPOINTS are both reachable but which crosses OUT of the footprint in
+// between (a notch) must never be guessed across as one chord — that is the "cutting move across
+// unplanned ground" the ruling forbids. The caller (finish's own row-building, not yet built)
+// clips a row into separate footprint intervals and hands the gap to `link()`; `dropRow` itself
+// must refuse, not silently paper over it.
+describe('#960 dropRow() — a footprint notch between two otherwise-reachable points', () => {
+  function flatMeshWideOf(z: number, half: number): FeatureSource {
+    return {
+      triangles: {
+        positions: Float32Array.from([-half, -half, z, half, -half, z, half, half, z, -half, half, z]),
+        indices: Uint32Array.from([0, 1, 2, 0, 2, 3]),
+        triangleCount: 2,
+        bbox: { min: [-half, -half, z], max: [half, half, z] },
+      },
+    };
+  }
+
+  /** Two disjoint lobes of a footprint, [0,10] and [40,50] in x — the gap between them (x in
+   * (10, 40)) is real material (the mesh is one flat plane) but NOT part of this region's own
+   * footprint, exactly a notch a finish raster's own row must not cross as a straight chord. */
+  function twoLobeFootprint(): RemainderRegion {
+    return {
+      id: 'notched',
+      footprint: [[[0, -5], [10, -5], [10, 5], [0, 5]], [[40, -5], [50, -5], [50, 5], [40, 5]]],
+      area: 200,
+      zTop: 0,
+      zBottom: -10,
+      triangles: new Uint32Array(),
+      slopeDeg: [0, 0],
+      slopeMedianDeg: 0,
+      in: 'top',
+    };
+  }
+
+  it('throws rather than posting a straight chord across the notch', () => {
+    const geometry = flatMeshWideOf(0, 100);
+    const surface = clSurface(geometry, twoLobeFootprint(), ball6, 3);
+    // Both ends ARE reachable (each lobe's own interior) — `dropRow` must find the gap and throw,
+    // not accept a chord across it because the two endpoints alone looked fine. Either this
+    // function's own maxSpacing sampling lands in the gap directly, or (a narrower notch) a
+    // bisection midpoint does — both are the SAME rule, caught at a different stride.
+    expect(surface.dropCutter(5, 0)).not.toBeNull();
+    expect(surface.dropCutter(45, 0)).not.toBeNull();
+    expect(() => dropRow(surface, [5, 0], [45, 0])).toThrow(/footprint notch|outside the surface's reach/);
+  });
+
+  it('throws from the bisection itself when the row\'s own ends are one maxSpacing stride apart (so the maxSpacing loop never samples the gap directly)', () => {
+    const geometry = flatMeshWideOf(0, 100);
+    // A 0.2 mm-wide gap at x=25. Querying from 24.85 to 25.15 (0.3 mm apart, under the ball's own
+    // maxSpacing — `dropRow`'s maxSpacing loop then takes exactly ONE step straight to the far
+    // end, never sampling anywhere in between) isolates the BISECTION's own null-midpoint check
+    // as the one thing that can find this gap at all.
+    const notched: RemainderRegion = {
+      ...twoLobeFootprint(),
+      footprint: [[[0, -5], [24.9, -5], [24.9, 5], [0, 5]], [[25.1, -5], [50, -5], [50, 5], [25.1, 5]]],
+    };
+    const surface = clSurface(geometry, notched, ball6, 3);
+    expect(surface.dropCutter(24.85, 0)).not.toBeNull();
+    expect(surface.dropCutter(25.15, 0)).not.toBeNull();
+    expect(Math.hypot(25.15 - 24.85, 0)).toBeLessThan(surface.maxSpacingMm); // confirms the isolation above
+    expect(() => dropRow(surface, [24.85, 0], [25.15, 0])).toThrow(/footprint notch/);
+  });
+});
