@@ -33,6 +33,7 @@ import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/st
 import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore, saveBlocker } from '@/store/engraveRunStore';
+import { fixtureSetupPlan } from './fixtures/setupPlan';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
@@ -1464,6 +1465,32 @@ describe('#948 the goal check’s line', () => {
     });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
   }
+
+  // #963 — THE PROGRAMS THE PLAN PRICED: one row per program with its cutter, its ops and its own
+  // cost, the tool change before it, and the vendor's time beside the total when the plan has one.
+  it('lists the plan’s programs with their cutters, ops, times and the vendor total', () => {
+    draw({ job: plannedJob(), report: reportOf(), pkg: frozen(plannedJob(), [P1]), generated: generated([P1]), canDrive: true });
+    act(() => {
+      useEngraveRunStore.setState({
+        plan: {
+          ...fixtureSetupPlan(),
+          vendorSeconds: 47 * 60 + 36,
+          ops: [
+            { kind: 'pocket', outcome: { cutter: 'flat-6' } },
+            { kind: 'contour', outcome: { cutter: 'flat-6' } },
+            { kind: 'finish', outcome: { cutter: 'ball-6' } },
+          ],
+        } as never,
+      });
+    });
+    expect(screen.getByTestId('engrave-cut-plan-program-0').textContent).toContain(
+      'flat-6 — pockets, the outline · 18 min',
+    );
+    expect(screen.getByTestId('engrave-cut-plan-program-2').textContent).toContain('ball-6 — finishing · 15 min');
+    expect(screen.getByTestId('engrave-cut-plan-total').textContent).toBe(
+      'About 47 min 30 s in total (vendor: 47 min 36 s).',
+    );
+  });
 
   it('a passed goal check matches the design, in the page’s own words', () => {
     drawWithOracle({ ...OK_ORACLE, goalCutInto: goal() });

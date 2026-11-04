@@ -43,7 +43,7 @@ import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
 import { formatDuration, registrationTouches } from '@/engine/cnc/plan';
-import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { cutterNameForKey, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import {
   frozenReleaseSources,
   releaseCheck,
@@ -51,6 +51,7 @@ import {
   type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
 import { goalCoverageWords, goalRawWords, goalVerdictWords } from '@/engine/cnc/engrave/goalCheckWords';
+import { programRows } from '@/engine/cnc/engrave/planWords';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 import { DRY_RUN_SAFE_Z, dryRunProgramFor, type DryRunLevel } from '@/engine/cnc/engrave/dryRun';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -405,6 +406,16 @@ type CutVerdict =
  * #963 — the goal check's words live in `goalCheckWords.ts` so the Cut card and the run sheet print
  * the SAME lines. This module owns only the card's mark for them (`goalVerdictWords` states both).
  */
+/**
+ * #963 — A VENDOR'S OWN TIME for the same part, when the plan carries one (the reference cards'
+ * comparison, #955): read loosely until the plan output declares it — absent on every job with no
+ * vendor program to compare against.
+ */
+function vendorWords(plan: object): string | null {
+  const seconds = (plan as { vendorSeconds?: number }).vendorSeconds;
+  return seconds === undefined ? null : formatDuration(seconds);
+}
+
 function cutVerdict(v: {
   hasProgram: boolean;
   packageCurrent: boolean;
@@ -547,6 +558,9 @@ export function EngraveCutSurface({
   /** #656 — the verdict the one screen prints: the run store's oracle for the current package (a
    * re-post replaces it, and the sentence follows). */
   const runOracle = useEngraveRunStore((s) => s.oracle);
+  // #963 — the model engine's plan, for the per-program list: each program's cutter, its ops, its
+  // own cost and the tool change before it (one row per program, in execution order).
+  const runPlan = useEngraveRunStore((s) => s.plan);
   // #931 — the rest of the run's verdict, for step 1's one sentence: the sweep's own state and its
   // diagnostics (the collision's sentence lives there), and whether the pipeline ever posted.
   const runSimDiagnostics = useEngraveRunStore((s) => s.simDiagnostics);
@@ -1154,6 +1168,25 @@ export function EngraveCutSurface({
           <p style={MUTED} data-testid="engrave-cut-goal-coverage">
             {goalCoverage}
           </p>
+        )}
+        {/* #963 — THE PROGRAMS THE PLAN PRICED, one row each: cutter, the ops it runs, its time and
+            the tool change charged before it. The total sits at the bottom; a vendor's own time is
+            printed beside it when the plan carries one (the reference cards' comparison). */}
+        {runPlan !== null && runPlan.sequence.length > 0 && (
+          <div style={{ ...BOX, marginTop: 6 }} data-testid="engrave-cut-plan-programs">
+            <p style={{ ...MUTED, margin: '0 0 4px', color: '#c8d3de' }}>The programs, in cut order</p>
+            {programRows(runPlan).map((row) => (
+              <p key={row.index} style={{ ...MUTED, margin: 0 }} data-testid={`engrave-cut-plan-program-${row.index}`}>
+                {row.index > 0 && row.toolChangeSeconds > 0 ? `tool change ${formatDuration(row.toolChangeSeconds)} · ` : ''}
+                {cutterNameForKey(row.cutterKey)}
+                {row.ops === '' ? '' : ` — ${row.ops}`} · {formatDuration(row.seconds)}
+              </p>
+            ))}
+            <p style={{ ...MUTED, margin: '4px 0 0', color: '#c8d3de' }} data-testid="engrave-cut-plan-total">
+              About {formatDuration(runPlan.totalCostSeconds)} in total
+              {vendorWords(runPlan) === null ? '' : ` (vendor: ${vendorWords(runPlan)})`}.
+            </p>
+          </div>
         )}
         {/* #695 — the frozen job's mount is gone from the machine. One sentence, one action; the
             same check the wizard makes (`profileHolds`) decides whether this is here at all. */}

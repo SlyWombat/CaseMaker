@@ -106,3 +106,47 @@ const OP_WORDS: Record<PlannedOpKind | 'features' | 'clSurface' | 'sequence' | '
 export function progressWords(progress: ModelPlanProgress): string {
   return `${OP_WORDS[progress.op]} — ${Math.round(progress.fraction * 100)} %`;
 }
+
+/** One program in the plan, in the operator's words: its cutter, what it cuts, and its time. */
+export interface PlanProgramRow {
+  index: number;
+  cutterKey: string;
+  /** The ops this program runs, in execution order, as the operator reads them. */
+  ops: string;
+  seconds: number;
+  /** The tool change charged for this program, seconds (0 for the first). */
+  toolChangeSeconds: number;
+}
+
+const OP_WORDS_SHORT: Record<PlannedOpKind, string> = {
+  pocket: 'pockets',
+  contour: 'the outline',
+  rough: 'roughing',
+  rest: 'the rest',
+  finish: 'finishing',
+  pencil: 'creases',
+  chamfer: 'the edge break',
+};
+
+/**
+ * #963 — THE PROGRAMS FROM THE PLAN, one row each, in execution order: the cutter, the ops it
+ * runs, its own cost (`CycleCost.totalSeconds`) and the tool change charged before it. Built from
+ * `SetupPlan.sequence` and `SetupPlan.ops`, so the card never re-derives what the engine planned.
+ */
+export function programRows(plan: Pick<SetupPlan, 'sequence' | 'ops'>): PlanProgramRow[] {
+  return plan.sequence.map((entry, index) => {
+    const kinds: PlannedOpKind[] = [];
+    for (const op of plan.ops) {
+      if (op.outcome.cutter === entry.cutterKey) kinds.push(op.kind);
+    }
+    // A cutter that cuts nothing in `ops` (a plan whose ops were not reported) still names its
+    // kind from the sequence position, so the row is never blank.
+    return {
+      index,
+      cutterKey: entry.cutterKey,
+      ops: kinds.length === 0 ? '' : [...new Set(kinds)].map((k) => OP_WORDS_SHORT[k]).join(', '),
+      seconds: entry.cost.totalSeconds,
+      toolChangeSeconds: entry.cost.toolChangeSeconds,
+    };
+  });
+}
