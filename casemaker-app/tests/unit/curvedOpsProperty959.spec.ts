@@ -26,7 +26,8 @@ import { buildRandomPart, type PartKind, type RandomPart } from '../tools/random
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
-import type { ToolpathIR } from '@/engine/cnc/cam/ir';import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
+import { HOP_Z, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { stockDepthLimit, verifyProgram } from '@/engine/cnc/verify';import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { parseGcode, setupFromHeader, stubSetup } from '@/engine/cnc';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
 import { exactSweptField } from '@/workers/sim/sweptPoint';
@@ -111,7 +112,27 @@ describe('#964 the curved ops cut the design and leave the walls (#959/#960)', (
           for (const ir of setup.programs) {
             const posted = postZ1(ir, ctx, Z1);
             expect(posted.ok, `${kind} seed ${seed}: postZ1 refused — ${posted.ok ? '' : posted.errors.join('; ')}`).toBe(true);
-            if (posted.ok) programs.push({ ir, text: posted.text });
+            if (!posted.ok) continue;
+            // The machine's own verifier reads the posted text: a rapid at cut depth is the
+            // defect the figures' acceptance caught, and the synthetic kinds must catch it too.
+            const parsed = parseGcode(posted.text);
+            const stockPart = setupFromHeader(parsed.header).patch.part;
+            if (stockPart === undefined || stockPart.kind !== 'prism' || stockPart.outline.kind !== 'p-rect') {
+              throw new Error(`#964 curved property: a posted program carries no rectangular stock header`);
+            }
+            const setup = stubSetup(stockPart, { kind: 'tape-down', contact: stockPart.outline }, { startingTool: 1 }, Z1);
+            const verify = verifyProgram(posted.text, {
+              setup,
+              machine: Z1,
+              tool: ir.tool,
+              depthLimit: stockDepthLimit(part.stock, 0),
+              minRapidZ: HOP_Z,
+            });
+            expect(
+              verify.findings.filter((f) => f.severity === 'error'),
+              `${kind} seed ${seed}: verifier errors:\n${verify.findings.map((f) => `${f.code}: ${f.message} (line ${f.line ?? '?'})`).join('\n')}`,
+            ).toEqual([]);
+            programs.push({ ir, text: posted.text });
           }
         }
         expect(programs.length, `${kind} seed ${seed}: the plan posted no program`).toBeGreaterThan(0);
