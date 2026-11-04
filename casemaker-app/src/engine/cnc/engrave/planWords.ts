@@ -150,3 +150,22 @@ export function programRows(plan: Pick<SetupPlan, 'sequence' | 'ops'>): PlanProg
     };
   });
 }
+
+/**
+ * #963/#965 — ONE SETUP IN THE OPERATOR'S WORDS: which side it cuts, how deep that side goes, and
+ * the cutters it needs, each marked owned or not — the setups list the panel and the sheet print
+ * when a job is cut from more than one side. Built from the plan's own `perSetup` entry, so the
+ * list never re-derives what the engine planned for that side.
+ */
+export function setupSentence(
+  plan: SetupPlan,
+  side: 'top' | 'bottom',
+  label: (cutterKey: string) => string,
+): string {
+  const depth = Math.abs(plan.features.frame.partTop - plan.features.frame.partBottom);
+  const depthWords = Number.isFinite(depth) && depth > 0 ? `${Math.round(depth * 100) / 100} mm deep` : 'depth not stated';
+  const cutters = plan.sequence
+    .map((entry) => `${label(entry.cutterKey)} (${entry.house ? 'owned' : 'not owned'})`)
+    .join(' → ');
+  return `Setup ${plan.setupIndex + 1} (${side}): ${depthWords}, cut by ${cutters === '' ? 'no cutter' : cutters}.`;
+}

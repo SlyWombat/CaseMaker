@@ -96,6 +96,8 @@ import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
 import { cutterNameForKey, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import type { SetupPlan } from '@/engine/cnc/cam/model/plan';
 import { featureSentence, linkingSentence, sequenceSentence } from '@/engine/cnc/engrave/planWords';
+import { planNoteLines, type PlanNotesInput } from '@/engine/cnc/engrave/planNotes';
+import { setupSentence } from '@/engine/cnc/engrave/planWords';
 import { entryFor } from '@/engine/cnc/toolRegistry';
 import { finishSourceWords, type FinishSettingSource } from '@/engine/cnc/engrave/finishPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
@@ -603,6 +605,12 @@ export interface RunSheetGenerated {
    * or a result stored before #966's integration, has none, and its sheet reads as it did.
    */
   plan?: SetupPlan | null;
+  /**
+   * #963/#965 — EVERY setup's plan, in setup order, when the job is cut from more than one side:
+   * the sheet's setups list states each side's depth and the cutters it needs (owned or not).
+   * Omitted on a single-side job and on an older stored result.
+   */
+  plans?: readonly SetupPlan[];
   /**
    * #419 J3 — the run's programs in cut order (`EngraveGenerated.programs`). Present on every
    * generated result this build produces; OPTIONAL because a result stored by an older build (or a
@@ -3198,6 +3206,11 @@ function planSteps(plan: SetupPlan): RunSheetStep[] {
     },
   ];
   if (sequence !== null) steps.push({ text: `The cutters, in order: ${sequence}.`, value: sequence });
+  // #963 — what the plan could not cut (C's unplanned list) and "part not freed" when no freeing
+  // cut is posted. Read from the plan until `SetupPlan` declares them.
+  for (const note of planNoteLines(plan as PlanNotesInput)) {
+    steps.push({ text: `${note}`, value: note });
+  }
   steps.push({
     text: `Linking: ${linkingSentence(plan.linking)}.`,
     value:
@@ -4620,6 +4633,15 @@ export function buildRunSheet(
     if (surfaceFacts !== null) cutSteps.push(...surfaceSteps(surfaceFacts));
     // #963 — the model engine's own plan, in the same words the panel uses.
     if (generated.plan != null) cutSteps.push(...planSteps(generated.plan));
+    // #963/#965 — ONE LINE PER SETUP when the part is cut from more than one side: the side, its
+    // depth and the cutters it needs, owned or not.
+    if (generated.plans !== undefined && generated.plans.length > 1) {
+      const setups = jobSetups(job);
+      for (const setupPlan of generated.plans) {
+        const side = setups[setupPlan.setupIndex]?.orientation.top === 'bottom' ? 'bottom' : 'top';
+        cutSteps.push({ text: setupSentence(setupPlan, side, cutterNameForKey), value: `setup ${setupPlan.setupIndex + 1} (${side})` });
+      }
+    }
     // #487 — what the ordering did, in the operator's terms: air travel against cutting travel,
     // and the same program under the order this CAM used before it. "Optimised" that cannot be
     // checked on paper is a feeling; the two numbers are the check. A job whose CAM carried no

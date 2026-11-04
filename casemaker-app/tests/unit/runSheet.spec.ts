@@ -2567,6 +2567,28 @@ describe('#963 the plan on the sheet', () => {
       .sections.flatMap((sec) => sec.steps.map((step) => step.text))
       .join('\n');
 
+  it('states what the plan could not cut, and says when the part is not freed', () => {
+    const plan = {
+      ...fixtureSetupPlan(),
+      unplanned: [{ kind: 'contour', cutterKey: 'flat-6', regionIds: ['contour'], reason: 'flute too short' }],
+      freeing: null,
+    } as ReturnType<typeof fixtureSetupPlan>;
+    const text = allText(dj(), plan);
+    expect(text).toContain('contour: not cut — planning failed (flute too short)');
+    expect(text).toContain('The part is not freed — no freeing cut is posted.');
+  });
+
+  it('lists every setup when the part is cut from more than one side', () => {
+    const job = dj();
+    const top = fixtureSetupPlan();
+    const bottom = { ...fixtureSetupPlan({ setupIndex: 1 }), sequence: [fixtureSetupPlan().sequence[2]!] };
+    const text = buildRunSheet(job, { ...stubGenerated(job), plan: top, plans: [top, bottom] }, NO_SIM, NOW)
+      .sections.flatMap((sec) => sec.steps.map((step) => step.text))
+      .join('\n');
+    expect(text).toContain('Setup 1 (top): 6 mm deep, cut by flat-6 (owned)');
+    expect(text).toContain('Setup 2 (top): 6 mm deep, cut by ball-6 (owned).');
+  });
+
   it('states the features, the costed sequence and the linking facts', () => {
     const text = allText(dj(), fixtureSetupPlan());
     expect(text).toContain('The model engine recognised 6 pockets, 1 outer contour, 1 curved region.');

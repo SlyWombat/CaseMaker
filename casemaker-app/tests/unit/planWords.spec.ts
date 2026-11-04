@@ -8,6 +8,7 @@ import {
   linkingSentence,
   progressWords,
   sequenceSentence,
+  setupSentence,
   type PlanPocketLike,
 } from '@/engine/cnc/engrave/planWords';
 import { fixtureSetupPlan } from './fixtures/setupPlan';
@@ -65,5 +66,22 @@ describe('#963 the plan, in the operator’s words', () => {
     expect(progressWords({ setupIndex: 0, op: 'features', fraction: 0.4 })).toBe('Recognising the features — 40 %');
     expect(progressWords({ setupIndex: 0, op: 'finish', fraction: 0.8 })).toBe('Finishing — 80 %');
     expect(progressWords({ setupIndex: 1, op: 'linking', fraction: 1 })).toBe('Joining the passes — 100 %');
+  });
+});
+
+// #963/#965 — one line per setup: the side, its depth and the cutters it needs, owned or not.
+describe('#963 a setup, in the operator’s words', () => {
+  it('states the side, the depth and the cutters with ownership', () => {
+    const plan = fixtureSetupPlan();
+    plan.sequence = plan.sequence.map((entry, i) => ({ ...entry, house: i < 2 }));
+    expect(setupSentence(plan, 'top', (key) => key)).toBe(
+      'Setup 1 (top): 6 mm deep, cut by flat-6 (owned) → flat-3.175 (owned) → ball-6 (not owned) → v-90 (not owned).',
+    );
+  });
+
+  it('numbers the second side from the plan’s own setup index', () => {
+    const plan = fixtureSetupPlan({ setupIndex: 1 });
+    plan.sequence = [{ cutterKey: 'ball-6', cost: plan.sequence[2]!.cost, pinned: false, house: true }];
+    expect(setupSentence(plan, 'bottom', (key) => key)).toBe('Setup 2 (bottom): 6 mm deep, cut by ball-6 (owned).');
   });
 });

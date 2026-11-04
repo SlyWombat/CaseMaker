@@ -299,6 +299,11 @@ export interface EngraveRunState {
    */
   plan: SetupPlan | null;
   /**
+   * #963/#965 — EVERY setup's plan, in setup order: the multi-side parts (#965) list their sides
+   * from this; `plan` stays the first setup's, the one today's single-side cards describe.
+   */
+  plans: SetupPlan[];
+  /**
    * #963 — the plan's own progress while it runs (B's `ModelPlanProgress`), or null when the
    * engine is not reporting. One stage word and a fraction, from the engine, never the panel's guess.
    */
@@ -443,6 +448,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     error: null as string | null,
     progress: null as EngraveProgress | null,
     plan: null as SetupPlan | null,
+    plans: [] as SetupPlan[],
     planProgress: null as ModelPlanProgress | null,
     simProgram: null as { index: number; count: number } | null,
     simStopped: false,
@@ -482,6 +488,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // so the row, the sheet and the plan block always describe the same run.
       generated: get().generated,
       plan: get().plan,
+      plans: get().plans,
       // #785 — a name from the FIRST frame: the worker's own first stage can be seconds away (the
       // module and its wasm load), and "Working…" with no words is the complaint this issue is.
       progress: simulateOnly ? null : { stage: 'prepare', label: 'starting the worker' },
@@ -611,6 +618,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           ...empty,
           generated: get().generated,
           plan: get().plan,
+          plans: get().plans,
           phase: 'blocked',
           simStopped: inSimulation,
           error: inSimulation
@@ -672,7 +680,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // #963 — THE MODEL ENGINE'S PLAN, read loosely until the worker's result carries it
     // (#956/#966): the first setup's plan is the one the panel and the sheet describe today; a
     // multi-setup job (#965) picks its own side later.
-    const plan = ((generated as EngraveGenerated & { plan?: ModelPlanOutput | null }).plan?.perSetup[0]) ?? null;
+    const plans = (generated as EngraveGenerated & { plan?: ModelPlanOutput | null }).plan?.perSetup ?? [];
+    const plan = plans[0] ?? null;
 
     // The job may have been edited while generating: the result already describes an older job. So
     // may the machine's saved frame (#301), and so may the depth margins (#345): the program above
@@ -698,6 +707,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       set({
         generated,
         plan,
+        plans,
         planProgress: null,
         phase: 'blocked',
         staleSince: Date.now(),
@@ -708,7 +718,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       return;
     }
 
-    set({ generated, plan, progress: null, planProgress: null });
+    set({ generated, plan, plans, progress: null, planProgress: null });
     // #787 — every finding the run raised, small enough for the report to carry.
     for (const f of generated.findings) noteFinding(f);
     if (!generated.ok || generated.nc === null) {
@@ -1085,6 +1095,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     error: null,
     progress: null,
     plan: null,
+    plans: [],
     planProgress: null,
     simProgram: null,
     simStopped: false,
@@ -1130,6 +1141,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         ...empty,
         generated: get().generated,
         plan: get().plan,
+        plans: get().plans,
         // Back to what the panel showed before the press — not a blank slate the operator has to
         // reconstruct. A phase that was itself a run state reads as idle.
         phase:

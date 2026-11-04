@@ -36,6 +36,8 @@ import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds'
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { TOOL_GROUPS, cutterNameForKey, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { featureSentence, linkingSentence, progressWords, sequenceSentence } from '@/engine/cnc/engrave/planWords';
+import { planNoteLines, type PlanNotesInput } from '@/engine/cnc/engrave/planNotes';
+import { setupSentence } from '@/engine/cnc/engrave/planWords';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
 import { useHouseStore } from '@/store/houseStore';
@@ -2489,13 +2491,16 @@ export function EngravePanel(): JSX.Element {
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
   // #963 — the plan's costed sequence, each cutter named through the tool library (a catalogue id
   // resolves to the cutter's display name; a row this build cannot see says "unknown cutter").
-  const planSequence =
-    run.plan === null
-      ? null
-      : planSequenceWords(run.plan, (key) => {
-          const entry = tools.find((e) => e.key === key);
-          return entry === undefined ? cutterNameForKey(key) : toolDisplayName(entry.tool);
-        });
+  // #963 — one labeller for every cutter the plan names: the library's display name, or the
+  // key itself when this build cannot see the row.
+  const cutterLabel = (key: string): string => {
+    const entry = tools.find((e) => e.key === key);
+    return entry === undefined ? cutterNameForKey(key) : toolDisplayName(entry.tool);
+  };
+  const planSequence = run.plan === null ? null : planSequenceWords(run.plan, cutterLabel);
+  // #963 — WHAT THE PLAN COULD NOT CUT, in its own words (C's unplanned list, and "part not
+  // freed" when no freeing cut is posted). Read from the plan until `SetupPlan` declares them.
+  const planNotes = run.plan === null ? [] : planNoteLines(run.plan as PlanNotesInput);
 
   // ---- #419 §3: the mode, and the cut gate --------------------------------------------------
 
@@ -2590,7 +2595,7 @@ export function EngravePanel(): JSX.Element {
     if (!generated || (!generated.verify && generated.surface3d == null) || generated.nc === null) return;
     // #963 — the sheet reads the model engine's plan beside the program it describes; the plan is
     // the run store's own field, attached here because `generated` predates the engine's result.
-    const sheetGenerated = { ...generated, plan: state.plan };
+    const sheetGenerated = { ...generated, plan: state.plan, plans: state.plans };
     // `buildRunSheet` typesets every label to lay out the origin diagram, and `resolveFont`
     // throws unless the bundled faces are already parsed (#180). The sim worker loads them, but
     // that cache is per-realm — the main thread must load the job's faces itself first, exactly
@@ -5474,6 +5479,23 @@ export function EngravePanel(): JSX.Element {
                 <p style={{ margin: 0 }}>Recognised: {featureSentence(run.plan.features)}.</p>
                 {planSequence !== null && <p style={{ margin: 0 }}>Cutters: {planSequence}.</p>}
                 <p style={{ margin: 0 }}>Linking: {linkingSentence(run.plan.linking)}.</p>
+                {planNotes.map((line) => (
+                  <p key={line} style={{ margin: 0, color: SEVERITY_COLOR.warning }}>
+                    {line}
+                  </p>
+                ))}
+                {/* #963/#965 — THE SETUPS, when the part is cut from more than one side: each
+                    side's depth and the cutters it needs, owned or not. Today's single-side job
+                    prints no list; #965 fills the plans. */}
+                {run.plans.length > 1 &&
+                  run.plans.map((setupPlan) => {
+                    const side = jobSetups(job)[setupPlan.setupIndex]?.orientation.top === 'bottom' ? 'bottom' : 'top';
+                    return (
+                      <p key={setupPlan.setupIndex} style={{ margin: 0 }} data-testid={`engrave-run-plan-setup-${setupPlan.setupIndex}`}>
+                        {setupSentence(setupPlan, side, cutterLabel)}
+                      </p>
+                    );
+                  })}
               </div>
             )}
             {/* #893 — A PROGRAM WITH NO SIMULATION IS NOT A DEAD END: the sweep and the check

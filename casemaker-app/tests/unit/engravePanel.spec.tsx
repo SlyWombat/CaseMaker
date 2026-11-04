@@ -4650,7 +4650,15 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
           verify: null,
           programs: [],
         } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated,
-        plan: fixtureSetupPlan(),
+        plan: {
+          ...fixtureSetupPlan(),
+          unplanned: [{ kind: 'pocket', cutterKey: 'flat-6', regionIds: ['p2'], reason: 'planned nothing' }],
+          freeing: null,
+        } as import('@/engine/cnc/cam/model/plan').SetupPlan,
+        plans: [
+          fixtureSetupPlan(),
+          { ...fixtureSetupPlan({ setupIndex: 1 }), sequence: [fixtureSetupPlan().sequence[2]!] },
+        ],
         phase: 'blocked',
         staleSince: null,
       });
@@ -4662,6 +4670,11 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
       'Cutters: flat-6 (18 min) → flat-3.175 (11 min) → ball-6 (15 min) → v-90 (3 min) — about 47 min 30 s.',
     );
     expect(block).toContain('Linking: 384 rapids, 12 hops, 3.2 % of the cycle in air.');
+    expect(block).toContain('p2: not cut — planning failed (planned nothing)');
+    expect(block).toContain('The part is not freed — no freeing cut is posted.');
+    expect(block).toContain('Setup 1 (top): 6 mm deep, cut by flat-6 (owned)');
+    // The side comes from the job's own setups; this fixture job has none, so both read as top.
+    expect(screen.getByTestId('engrave-run-plan-setup-1').textContent).toContain('Setup 2 (top): 6 mm deep, cut by ball-6 (owned).');
   });
 
   it('#963 the progress line prints the plan’s own stage and percentage', async () => {
