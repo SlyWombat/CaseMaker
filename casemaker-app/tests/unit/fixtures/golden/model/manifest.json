@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "note": "Golden pins for the rebuilt engine's programs (#957-#966). Empty until the engine posts; a case is added only when its program passes the seven-line card, and its regeneration is CASEMAKER_UPDATE_GOLDEN=1 with the landing note naming what moved and why.",
+  "cases": []
+}

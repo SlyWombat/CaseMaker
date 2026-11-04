@@ -1,0 +1,21 @@
+{
+ "goalCells": 100,
+ "pitchMm": 0.1,
+ "cutIntoPct": 0.1,
+ "cutInto0p1Pct": 0.0,
+ "edgeBreakPct": 0.4,
+ "wallNotScoredPct": 0.2,
+ "shadowNotScoredPct": 0.1,
+ "maxCutIntoMm": 0.02,
+ "leftover0p1Pct": 1.0,
+ "leftover0p3Pct": 0.0,
+ "coverage0p1Pct": 99.0,
+ "programs": [
+  {
+   "program": "card.nc",
+   "tools": [
+    { "number": 1, "name": "3.175mm Flat End", "shape": "flat", "cuttingDiameter": 3.175 }
+   ]
+  }
+ ]
+}

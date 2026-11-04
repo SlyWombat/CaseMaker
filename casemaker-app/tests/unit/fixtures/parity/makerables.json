@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "injection": {
+    "env": "CM_MAKERABLES",
+    "default": ".scratch/makerables",
+    "note": "Evaluation-only vendor files (CC BY-NC-SA / CC BY-NC-ND / CC BY-ND / CC0). Never committed; the spec verifies every sha256 and skips when the directory is absent. The committed numbers are the page's own measurements (#955, 2026-11-03) under E's cut-into contract."
+  },
+  "cards": [
+    {
+      "card": "tray70-top",
+      "slug": "modular-stackable-tool-trays",
+      "licence": "CC BY-NC-SA",
+      "side": "top",
+      "holding": "Makera's own: bare bed, stock 110 × 140 × 27.2, model top 1.2 mm below the stock top",
+      "goalcheck": "runs/tray70-top-dz1.2/goalcheck.json",
+      "files": [
+        {
+          "role": "nc",
+          "path": "dl/modular-stackable-tool-trays/Tool_Tray_70mm_Top-msfi5w1b.nc",
+          "sha256": "67c2d2f9f3536ecc93fdfa7e67fb94c9826ef674bf3b8a1e85ce2795aae482ab"
+        },
+        {
+          "role": "goalcheck",
+          "path": "runs/tray70-top-dz1.2/goalcheck.json",
+          "sha256": "5659b52d71da69d0b50a08e9b3c505dd98934dfba3847eb8f9cf5c2d5bbcc0ea"
+        }
+      ],
+      "vendorScore": {
+        "coverage": 0.9952,
+        "cutInto": {
+          "adjudicatedFraction": 0,
+          "edgeBreakFraction": 0.0366,
+          "wallNotScoredFraction": 0.003,
+          "shadowNotScoredFraction": 0.0245,
+          "rawFraction": 0.0685,
+          "maxMm": 23.0
+        },
+        "cycleSeconds": 2854.54,
+        "rapidsPer1000FeedLines": 5.892915,
+        "cutters": 4
+      },
+      "vendorEstimateSeconds": 4542.483,
+      "source": ".scratch/makerables/README.md and runs/tray70-top-dz1.2/goalcheck.json; the excluded shares and the adjudicated 0.00 % are Session E's measured contract on #955 (2026-11-03); cycle from the NC header ;@MKR|TIME"
+    },
+    {
+      "card": "organizer-top",
+      "slug": "makera-tool-organizer",
+      "licence": "CC BY-NC-SA",
+      "side": "top",
+      "holding": "Makera's own: bare bed, stock 170 × 170 × 26.8, model top 0.8 mm below the stock top",
+      "goalcheck": "runs/organizer-top-dz0.8/goalcheck.json",
+      "files": [
+        {
+          "role": "nc",
+          "path": "dl/makera-tool-organizer/Tool_Organizer-msfgyhas.nc",
+          "sha256": "dc8c70aead44ff5fad5e7c01106ca45ba60b8eb71e80f1276bde912c7e928dad"
+        },
+        {
+          "role": "goalcheck",
+          "path": "runs/organizer-top-dz0.8/goalcheck.json",
+          "sha256": "0276fa95bed909ad3668089ce000dd951578b47bdcc1a480d4253ef4caa70592"
+        }
+      ],
+      "vendorScore": {
+        "coverage": 0.9898,
+        "cutInto": {
+          "adjudicatedFraction": null,
+          "edgeBreakFraction": null,
+          "wallNotScoredFraction": null,
+          "shadowNotScoredFraction": null,
+          "rawFraction": 0.0775,
+          "maxMm": 22.172
+        },
+        "cycleSeconds": 2866.95,
+        "rapidsPer1000FeedLines": 2.383393,
+        "cutters": 5
+      },
+      "vendorEstimateSeconds": 14625.906,
+      "source": ".scratch/makerables/README.md and runs/organizer-top-dz0.8/goalcheck.json; the cut-into decomposition under E's new checker is not published for the organizer yet, so those fields are null (the spec compares only what both sides state); cycle from the NC header ;@MKR|TIME"
+    }
+  ],
+  "ours": [
+    {
+      "card": "tray70-top",
+      "label": "Case Maker, tray70 top, tape 0.2 mm (wave-2 clone fc43a78c)",
+      "runDir": "runs/ours-tray70-p02-tape",
+      "ncFiles": [
+        "ours/tray70-top-p02-tape/tray70-top-p02-tape.nc",
+        "ours/tray70-top-p02-tape/tray70-top-p02-tape-p2.nc"
+      ],
+      "holding": "bed + tape",
+      "pitchMm": 0.2,
+      "cuttersOwned": true,
+      "postsAsFiled": {
+        "ok": true,
+        "note": "the run posted two programs on tape at 0.2 mm (README); its receipt was not kept in scratch"
+      },
+      "source": ".scratch/makerables/README.md, 'Case Maker on the same tray goal'"
+    }
+  ]
+}
