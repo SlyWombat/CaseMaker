@@ -137,6 +137,41 @@ describe('#958 the feature tree', () => {
     expect(tree.remainder).toHaveLength(1);
   });
 
+  it('sharp rims: the outline, each pocket mouth, the island top and the hole, each owned', () => {
+    const tree = block();
+    const sharp = tree.rims.filter((r) => r.kind === 'sharp');
+    // Outline (z 10), pocket A's mouth (10), pocket B's mouth (10), B's sub-pocket mouth (8),
+    // the island's top edge (8), the through hole's mouth (10).
+    expect(sharp).toHaveLength(6);
+    const nodes = all(tree.pockets);
+    const contour = sharp.filter((r) => r.of === 'contour');
+    expect(contour).toHaveLength(1);
+    close(contour[0]!.z, 10, 1e-6);
+    const through = nodes.find((n) => n.through)!;
+    expect(sharp.filter((r) => r.of === through.id)).toHaveLength(1);
+    // Every rim names a real owner.
+    const ids = new Set(nodes.map((n) => n.id));
+    for (const r of sharp) expect(r.of === 'contour' || ids.has(r.of), r.of).toBe(true);
+    expect(sharp.filter((r) => Math.abs(r.z - 8) < 1e-6)).toHaveLength(2);
+  });
+
+  it('a modelled chamfer round a pocket mouth is four chamfer rims with 1 × 1 legs', () => {
+    // A 10 × 10 × 4 pocket whose mouth is broken by a 1 mm 45° chamfer: a square frustum,
+    // 10 wide at z 9 and 12 wide at z 10 (a 4-sided cylinder, turned 45° to sit square).
+    const frustum = tl.Manifold.cylinder(1, 5 * Math.SQRT2, 6 * Math.SQRT2, 4).rotate([0, 0, 45]).translate([15, 15, 9]);
+    const s = tl.Manifold.cube([30, 30, 10])
+      .subtract(tl.Manifold.cube([10, 10, 4]).translate([10, 10, 6]))
+      .subtract(frustum);
+    const tree = recogniseFeatures({ triangles: parsed(s) }, { up: [0, 0, 1], stockTop: 10 }, tl);
+    const chamfers = tree.rims.filter((r) => r.kind === 'modelledChamfer');
+    expect(chamfers).toHaveLength(4);
+    for (const c of chamfers) {
+      close(c.z, 10, 1e-6);
+      close(c.legs![0], 1, 1e-6);
+      close(c.legs![1], 1, 1e-6);
+    }
+  });
+
   it('regionRefs names every node, remainder and the contour', () => {
     const tree = block();
     const refs = regionRefs(tree);

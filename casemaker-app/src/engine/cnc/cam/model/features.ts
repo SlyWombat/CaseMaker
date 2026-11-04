@@ -35,6 +35,7 @@ import {
   type FeatureTolerances,
   type FrameMesh,
 } from './features/patches';
+import { findRims } from './features/rims';
 import { buildTree, type TreeFloor, type TreeSliver } from './features/tree';
 
 export { DEFAULT_FEATURE_TOLERANCES, type FeatureTolerances };
@@ -173,11 +174,11 @@ export function recogniseFeatures(
   const adj = triangleAdjacency(mesh, tol.weldMm);
   const { surfaces, demoted } = remainderSurfaces(mesh, patches, adj, tol, path);
 
-  const built = buildTree(kernel, mesh, patches, surfaces, tol);
+  const rawRims = findRims(mesh, patches, adj, tol.levelMergeMm);
+  const built = buildTree(kernel, mesh, patches, surfaces, tol, rawRims);
   const notes = [...built.notes];
   if (demoted.length > 0) notes.push(`${demoted.length} near-flat tangent cap(s) merged into the curved remainder (D2)`);
   if (built.slivers.length > 0) notes.push(`${built.slivers.length} floor sliver(s) under ${tol.minFloorWidthMm} mm wide listed, not cut as pockets (D2)`);
-  notes.push('rims: not extracted yet (#958 d3)');
 
   const shoulders: string[] = [];
   const walk = (nodes: PocketNode[]): void => {
@@ -198,7 +199,7 @@ export function recogniseFeatures(
     top: built.top,
     contour: { ...built.contour, frees, shoulders },
     pockets: built.pockets,
-    rims: [],
+    rims: built.rims.map((r) => ({ id: r.id, polyline: r.polyline, z: r.z, of: r.of, kind: r.kind, ...(r.legs ? { legs: r.legs } : {}) })),
     remainder: built.remainder,
     unreachable: built.unreachable,
     report: {

@@ -24,6 +24,7 @@ import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 
 import type { FrameMesh, Patch, FeatureTolerances } from './patches';
+import type { RawRim } from './rims';
 
 type CrossSection = InstanceType<ManifoldToplevel['CrossSection']>;
 type Manifold = InstanceType<ManifoldToplevel['Manifold']>;
@@ -74,6 +75,11 @@ export interface TreeSliver {
   bbox: { min: [number, number]; max: [number, number] };
 }
 
+export interface TreeRim extends RawRim {
+  id: string;
+  of: string;
+}
+
 export interface BuiltTree {
   partTop: number;
   partBottom: number;
@@ -84,6 +90,7 @@ export interface BuiltTree {
   remainder: TreeRemainder[];
   unreachable: { footprint: Polygons; zRange: [number, number]; reason: 'undercut' }[];
   slivers: TreeSliver[];
+  rims: TreeRim[];
   notes: string[];
 }
 
@@ -224,6 +231,7 @@ export function buildTree(
   patches: readonly Patch[],
   surfaces: readonly number[][],
   tol: FeatureTolerances,
+  rawRims: readonly RawRim[] = [],
 ): BuiltTree {
   const notes: string[] = [];
   const p = mesh.positions;
@@ -462,6 +470,29 @@ export function buildTree(
     const outline = tl.CrossSection.union(outers);
     garbage.push(outline);
 
+    // ── Rims: the contour's when on the outline's boundary, else the node whose mouth is at the
+    // rim's height and whose region the rim borders ────────────────────────────────────────
+    const probe = (x: number, y: number): CrossSection =>
+      tl.CrossSection.square([0.1, 0.1], true).translate([x, y]);
+    const rims: TreeRim[] = [];
+    rawRims.forEach((raw, i) => {
+      const mid = raw.polyline[Math.floor(raw.polyline.length / 2)]!;
+      const a = raw.polyline[Math.max(0, Math.floor(raw.polyline.length / 2) - 1)]!;
+      const m: [number, number] = raw.polyline.length > 1 ? [(a[0] + mid[0]) / 2, (a[1] + mid[1]) / 2] : mid;
+      const sq = probe(m[0], m[1]);
+      const inOutline = sq.intersect(outline);
+      const onOutline = inOutline.area() < sq.area() - AREA_EPS;
+      inOutline.delete();
+      let of = 'contour';
+      if (!onOutline) {
+        const byMouth = nodes.filter((n) => Math.abs(n.mouthZ - raw.z) <= tol.levelMergeMm && overlaps(n.cs, sq));
+        const any = byMouth.length > 0 ? byMouth : nodes.filter((n) => overlaps(n.cs, sq));
+        of = any.sort((x, y) => y.floorZ - x.floorZ)[0]?.id ?? 'top';
+      }
+      sq.delete();
+      rims.push({ ...raw, id: `rim-${i}`, of });
+    });
+
     const strip = (n: TreeNode & { cs: CrossSection }): TreeNode => {
       const { cs: _cs, children, ...rest } = n;
       return { ...rest, children: children.map((c) => strip(c as TreeNode & { cs: CrossSection })) };
@@ -476,6 +507,7 @@ export function buildTree(
       remainder,
       unreachable,
       slivers,
+      rims,
       notes,
     };
   } finally {
