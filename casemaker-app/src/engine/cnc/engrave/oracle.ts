@@ -52,21 +52,22 @@ import {
   type ColumnCutter,
   type ColumnGrid,
 } from '@/workers/geometry/columnEngine';
+// The plain shapes and the area floor live in `oracleTypes.ts` so the gate can use them without
+// importing this file's CAM geometry (#924, #956 R1). Re-exported here for every existing importer.
+import {
+  ORACLE_AREA_FLOOR,
+  ORACLE_AREA_FLOOR_CELLS,
+  type OracleBbox,
+  type OraclePoint,
+  type OraclePolygon,
+  type OracleSliceAt,
+} from '@/engine/cnc/engrave/oracleTypes';
+
+export { ORACLE_AREA_FLOOR, ORACLE_AREA_FLOOR_CELLS };
+export type { OracleBbox, OraclePoint, OraclePolygon, OracleSliceAt };
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
-
-/** A point in the work frame, mm. */
-export type OraclePoint = [number, number];
-
-/** An axis-aligned region in the work frame, mm. */
-export interface OracleBbox {
-  min: OraclePoint;
-  max: OraclePoint;
-}
-
-/** A closed contour in the work frame, mm: outer contours CCW and holes CW. */
-export type OraclePolygon = OraclePoint[];
 
 /**
  * A V TRACE's cut, as the shape it is (#408): the cone, and the polylines it is dragged along.
@@ -304,20 +305,6 @@ export interface OracleReport {
   goalCutInto?: GoalCutIntoReport;
 }
 
-/**
- * Areas below this are slivers: a `subtract` of two coincident boundaries leaves a
- * floating-point-thin ring with a tiny non-zero area. Not a CAM defect. mm².
- */
-export const ORACLE_AREA_FLOOR = 1e-3;
-
-/**
- * #580 — the resolution-aware floor's cell count. The column engine cannot resolve a region
- * smaller than its grid cell, so a "worst under-cut" of one dexel is a disagreement, not material
- * left standing. The verdict uses the greater of {@link ORACLE_AREA_FLOOR} and the grid's cell
- * area × this count — a 2×2 cell block, the smallest region the grid can actually represent.
- */
-export const ORACLE_AREA_FLOOR_CELLS = 4;
-
 /** Slice this far ABOVE a floor Z so the slice is inside the pocket cut toward that floor, mm. */
 export const ORACLE_SLICE_LIFT_MM = 0.001;
 
@@ -375,16 +362,6 @@ export function oracleBand(contours: number): number {
  */
 export const ORACLE_SLIVER_WIDTH_MM = 2 * ARC_CHORD_TOLERANCE_MM;
 
-/**
- * What the engine that swept the run can say about one level, as a CrossSection the CALLER of
- * `sliceAt` owns and the oracle deletes. `null` means it cut nothing at or below this level — an
- * empty region, which the oracle reports as an area of 0 without asking a `CrossSection` to be
- * built from no polygons (`ofPolygons([])` throws).
- *
- * The argument is the SLICE height, i.e. the level's floor `z` plus `ORACLE_SLICE_LIFT_MM`: a
- * column whose floor is exactly the level must count, and float equality does not.
- */
-export type OracleSliceAt = (zSlice: number) => CrossSectionInstance | null;
 
 /** The exact sweeper's answer (#206): its cumulative removal solid, sliced. */
 export const removalSliceAt =

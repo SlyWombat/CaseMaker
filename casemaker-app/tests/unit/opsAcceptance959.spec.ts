@@ -5,6 +5,7 @@
  *   CM_959_TRAY_STEP=…/modular-stackable-tool-trays/<tray 70>.step \
  *   CM_959_ORGANIZER_STEP=…/makera-tool-organizer/<organizer>.step \
  *   CM_959_OUT=…/959-acceptance/ \
+ *   CM_MAKERABLES=…/.scratch/makerables   (optional: the vendor card beside ours) \
  *   npx vitest run tests/unit/opsAcceptance959.spec.ts
  *
  * **Partial by design, stated so rather than hidden**: #959 is four ops (pocket, contour, rough,
@@ -15,14 +16,18 @@
  * TOGETHER, through `plan.ts`'s own `planPocketsForTree` (NOT a copy of it — advisor's "measure the
  * product, not the test harness"), using #961's real `chooseSequence` rest chain — one cutter
  * sequence priced against both ops at once, not pocket planned in isolation. It posts the
- * resulting program(s) with the existing Z1 post (`postZ1`), and measures cycle/air/rapids/cutters
- * from the posted text (`measurePostedProgram`, `tests/tools/postedFacts.ts`) — the four of the
- * seven lines that need only the posted `.nc`, not the simulator. **Coverage and cut-into are NOT
- * reported here**: those two need a goal-check sweep against the posted program
- * (`measurePageCard`'s `goalcheck.json`), which needs the simulator run on this engine's output —
- * not built yet, named as the next integration point rather than faked. Rough/rest are not in this
- * program either, so the cycle number is a LOWER BOUND on the real one, not a comparable total —
- * printed as such, never asserted against Makera's 47.6 min.
+ * resulting program(s) with the existing Z1 post (`postZ1`), and measures ALL SEVEN lines of plan
+ * v2 §3: cycle/air/rapids/cutters from the posted text (`measurePostedProgram`,
+ * `tests/tools/postedFacts.ts`), and coverage/cut-into from the app's own goal check — the STEP's
+ * mesh sampled through `engrave/goalHeightfield.ts`, every posted program's moves stamped with its
+ * Tool-record cutter and accumulated across programs (`session.sweptFieldExact`, the same read the
+ * gate uses), then `checkGoalCutInto` with the edge-break allowance from the job's stated edge
+ * break and the chamfer Tool record (V2-2), scored through `tests/tools/sevenLines.ts` against the
+ * Makerables vendor card. **Red-first, by design**: the tray's coverage is expected to be well
+ * below Makera's 99.5 % until #960's ball finish lands — the number is the point, printed and
+ * written to the posted facts, not asserted as a pass. Rough/rest are not in this program either,
+ * so the cycle number is a LOWER BOUND on the real one, not a comparable total — printed as such,
+ * never asserted against Makera's 47.6 min.
  *
  * `planPocketsForTree`'s cutter choice IS #961's real sequence now (`chooseSequence`'s rest chain,
  * `maxCutters` = the vendor's own reference-set count + 1, `cutters.house` = that same set — A's R5
@@ -32,9 +37,12 @@
  *
  * With `CM_959_OUT` set, writes `plan.json` (a partial `ModelPlanOutput`, pocket+contour ops only)
  * for F's `modelGolden.spec.ts` validator to check the shape against, and
- * `<name>-posted-facts.json` with the measured numbers for the manager/E to read off a real run.
+ * `<name>-posted-facts.json` with all seven lines — the posted program facts, `coverage`, the
+ * `cutInto` block (adjudicated plus the three excluded shares) and the scored `sevenLines` card —
+ * for the manager/E to read off a real run.
  */
 
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -47,12 +55,24 @@ import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engi
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { Z1 } from '@/engine/cnc/machine';
-import { cuttingDiameter, flatEndMill } from '@/engine/cnc/tool';
+import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { pocket } from '@/engine/cnc/cam/model/ops/pocket';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
+import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SevenLineCard } from '../tools/sevenLines';
+import { makerablesRoot, readMakerablesManifest, resolveMakerablesCard } from '../tools/makerables';
+import { measureVendorCard } from '../tools/cardMeasurement';
 import { planPocketsForTree, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
+import { buildTimeline } from '@/engine/cnc/emulator/timeline';
+import { exactSweptField } from '@/workers/sim/sweptPoint';
+import { parseGcode, setupFromHeader, stubSetup } from '@/engine/cnc';
+import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { checkGoalCutInto, type GoalCutIntoOptions, type GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
+import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
+import { vToolAllowance } from '@/engine/cnc/engrave/edgeBreak';
+import { buildBinaryStl } from '@/workers/export/stlBinary';
+import type { EngraveTargetObject } from '@/types/engraveJob';
 
 /** Even-odd point membership over every ring (outers and holes alike) — the same rule
  * `pocketRedFirst959.spec.ts`'s own helper uses. */
@@ -121,7 +141,11 @@ function totalFeedLength(ir: ToolpathIR): number {
   return total;
 }
 
-async function placedTree(file: string, stock: [number, number], modelTop: number): Promise<{ tree: FeatureTree; mesh: { positions: Float32Array; indices: Uint32Array } }> {
+async function placedTree(file: string, stock: [number, number], modelTop: number): Promise<{
+  tree: FeatureTree;
+  mesh: { positions: Float32Array; indices: Uint32Array };
+  target: EngraveTargetObject;
+}> {
   const bytes = fs.readFileSync(file);
   const read = await stepToMesh(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'recognition');
   const { min, max } = read.mesh.bbox;
@@ -136,9 +160,25 @@ async function placedTree(file: string, stock: [number, number], modelTop: numbe
   }
   const mesh = { ...read.mesh, positions };
   const tree = recogniseFeatures({ triangles: mesh, faceId: read.faceId }, { up: [0, 0, 1], stockTop: 0 }, tl);
-  return { tree, mesh: { positions, indices: read.mesh.indices } };
+  // The GOAL's own door: the RAW mesh as a binary STL, placed by `position` exactly as the
+  // recognition mesh was shifted above (centre in XY, top at `modelTop`). `sampleGoalHeightfield`
+  // then reads the same surface in the posted program's work frame (Z 0 = stock top).
+  const stl = buildBinaryStl([{ positions: read.mesh.positions, indices: read.mesh.indices }]);
+  const sha256 = createHash('sha256').update(Buffer.from(stl)).digest('hex');
+  const target: EngraveTargetObject = {
+    id: sha256.slice(0, 16),
+    name: path.basename(file),
+    format: 'stl',
+    sha256,
+    data: Buffer.from(stl).toString('base64'),
+    size: { x: max[0] - min[0], y: max[1] - min[1], z: max[2] - min[2] },
+    position: { x: stock[0] / 2, y: stock[1] / 2, z: modelTop },
+    rotation: 0,
+    enabled: true,
+    role: 'goal',
+  };
+  return { tree, mesh: { positions, indices: read.mesh.indices }, target };
 }
-
 // Makera's own pattern on these parts (plan v2 §1): the largest flat roughs, a smaller flat rests
 // the corners it cannot enter. A's R5 ruling: a simulation-only reference card prices on the
 // VENDOR's own set.
@@ -168,7 +208,88 @@ function postedTextFor(cutterKey: string, merged: ToolpathIR, ctx: PostContext):
   return posted.text;
 }
 
-function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsResult): void {
+/** The vendor's 90° chamfer from the Makerables headers (⌀3.175, tip 0.1), the bit the job's
+ * edge break is cut with. The gate's allowance is sized from THIS Tool record and the job's stated
+ * edge break, never from the CAM's plan (A's R3); `vToolAllowance` is the app's own V reader. */
+function edgeBreakAllowance(): Pick<GoalCutIntoOptions, 'edgeBreak' | 'wallShadowRadiusMm'> {
+  const chamfer: Tool = {
+    ...flatEndMill(3.175, { number: 4, id: 'chamfer-90', name: '3.175mm*90º Chamfer' }),
+    typeText: 'V-Bit',
+    shape: 'chamfer',
+    tipDiameter: 0.1,
+    diameter: 3.175,
+    cornerRadius: 0,
+    angle: 90,
+    halfAngle: 45,
+  };
+  const allowance = vToolAllowance(chamfer);
+  if (allowance === null) throw new Error('#959: the chamfer Tool record states no cone');
+  return { edgeBreak: allowance, wallShadowRadiusMm: cuttingDiameter(FLAT6)! / 2 };
+}
+
+/**
+ * The gate's read of the posted programs: each program is loaded with its own Tool-record cutter
+ * and stamped at every goal cell centre by the app's exact sweep (`sweptFieldExact`), and the
+ * stamps are accumulated across programs by taking the lowest reach at each cell — the same fold
+ * `goalCheckField` performs within one run, applied across the runs this spec posts separately.
+ */
+function stampedTop(
+  runs: readonly { cutterKey: string; text: string; ir: ToolpathIR }[],
+  goal: GoalHeightfield,
+): ResultTop {
+  let acc: Float32Array | null = null;
+  for (const run of runs) {
+    const parsed = parseGcode(run.text);
+    const part = setupFromHeader(parsed.header).patch.part;
+    if (part === undefined || part.kind !== 'prism' || part.outline.kind !== 'p-rect') {
+      throw new Error(`#959 goal check: ${run.cutterKey}'s posted text carries no rectangular stock header`);
+    }
+    const setup = stubSetup(part, { kind: 'tape-down', contact: part.outline }, { startingTool: 1 }, Z1);
+    // `exactSweptField` is the read `session.sweptFieldExact` calls: the posted program stamped at
+    // every goal cell centre with the Tool-record cutter. Called on the program's own timeline
+    // rather than through a session, because a dense flat job routes to the exact engine and the
+    // session then has no column grid to read — the stamp itself is route-independent.
+    const timeline = buildTimeline(parsed, setup, Z1);
+    const stamp = exactSweptField(goal, timeline, run.ir.tool);
+    if (stamp === null) throw new Error(`#959 goal check: ${run.cutterKey} produced no exact stamp`);
+    if (acc === null) acc = Float32Array.from(stamp);
+    else for (let k = 0; k < acc.length; k++) if (stamp[k]! < acc[k]!) acc[k] = stamp[k]!;
+  }
+  if (acc === null) throw new Error('#959 goal check: no programs to stamp');
+  const field: Float32Array = acc;
+  return (x: number, y: number) => {
+    const i = Math.round((x - goal.x0) / goal.pitch);
+    const j = Math.round((y - goal.y0) / goal.pitch);
+    if (i < 0 || j < 0 || i >= goal.nx || j >= goal.ny) return null;
+    return field[j * goal.nx + i]!;
+  };
+}
+
+/** The vendor card beside ours, from the local Makerables references (the page's own measurement
+ * path). Absent on a machine without them: the card is then unreferenced, never guessed. */
+function vendorScoreFor(name: string): ProgramScore | null {
+  const cardId = name === 'tray' ? 'tray70-top' : name === 'organizer' ? 'organizer-top' : null;
+  if (cardId === null) return null;
+  const manifest = readMakerablesManifest();
+  const entry = manifest.cards.find((c) => c.card === cardId);
+  if (entry === undefined) return null;
+  const resolved = resolveMakerablesCard(entry, makerablesRoot());
+  if (!resolved.ok) return null;
+  return measureVendorCard({
+    card: cardId,
+    goalcheckPath: resolved.resolved.goalcheckPath,
+    ncFiles: resolved.resolved.ncFiles,
+  });
+}
+
+interface AcceptanceGoal {
+  /** The goal's own door: the STEP mesh as a placed target (see `placedTree`). */
+  target: EngraveTargetObject;
+  /** The stock the reference card is cut from, for the post's header (the stamp reads the same). */
+  stock: { length: number; width: number };
+}
+
+function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsResult, goal?: AcceptanceGoal): void {
   const { ops, programs, sequence, unreachable, notes } = result;
 
   const ctx: PostContext = {
@@ -176,7 +297,13 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
     // The TRUE stock thickness — `partTop - partBottom` undercounts by any skin between the
     // stock's own top and the recognised part top (advisor's review on 108e120c): the contour now
     // correctly cuts to `stockTop - zTo`, deeper than a `partTop`-based thickness would state.
-    stock: { length: 0, width: 0, thickness: tree.frame.stockTop - tree.frame.partBottom },
+    // Length/width are the reference card's stock when a goal is measured (the setup stub reads
+    // them from this header); the synthetic cases carry none and measure no goal.
+    stock: {
+      length: goal?.stock.length ?? 0,
+      width: goal?.stock.width ?? 0,
+      thickness: tree.frame.stockTop - tree.frame.partBottom,
+    },
     materialName: 'hardwood',
     zDatum: 'probed-top-face',
     origin: 'topFrontLeft',
@@ -188,20 +315,62 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
   // returns to for the freeing cut posts as its OWN run, never merged into its first one).
   const factsByRun = programs.map((run) => ({
     cutterKey: run.cutterKey,
-    merged: run.ir,
+    ir: run.ir,
     text: postedTextFor(run.cutterKey, run.ir, ctx),
   }));
   const facts = combinePostedFacts(factsByRun.map((f) => measurePostedProgram(f.text)));
 
+  // THE TWO GEOMETRY LINES (plan v2 §3, red-first): the goal heightfield from the same STEP, the
+  // posted programs stamped with their Tool-record cutters and accumulated, judged by the app's
+  // own goal check with the V2-2 edge-break allowance, then scored through the seven-line scorer
+  // against the Makerables vendor card. The tray's coverage is expected to be well below
+  // Makera's 99.5 % until #960's ball finish lands — the number is the point, not a pass gate.
+  let measured:
+    | { coverage: number; cutInto: CutIntoScore; report: GoalCutIntoReport; ours: ProgramScore; scored: SevenLineCard }
+    | null = null;
+  if (goal !== undefined) {
+    const field = sampleGoalHeightfield(goal.target, { pitchMm: 0.1, stockTopZ: 0 });
+    const top = stampedTop(factsByRun, field);
+    const report = checkGoalCutInto(field, top, { passCoverage: 0.95, ...edgeBreakAllowance() });
+    const coverage = 1 - (report.leftoverFractions[0] ?? 0);
+    const cutInto: CutIntoScore = {
+      adjudicatedFraction: report.adjudicatedFraction,
+      edgeBreakFraction: report.edgeBreakFraction,
+      wallNotScoredFraction: report.wallNotScoredFraction,
+      shadowNotScoredFraction: report.shadowNotScoredFraction,
+      rawFraction: report.cutIntoFraction,
+      maxMm: report.maxCutIntoMm,
+    };
+    const ours: ProgramScore = {
+      label: name,
+      coverage,
+      cutInto,
+      cycleSeconds: facts.cycleSeconds,
+      airFraction: facts.airFraction,
+      rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
+      cutters: facts.cutters.length,
+      cuttersOwned: null, // a simulation-only reference card prices on the vendor's own set (R5)
+      postsAsFiled: { ok: true, holding: "Makera's own: bare bed, tape-down", pitchMm: 0.1 },
+    };
+    measured = { coverage, cutInto, report, ours, scored: scoreSevenLines({ card: name, ours, vendor: vendorScoreFor(name) }) };
+  }
+
   const pocketOps = ops.filter((op) => op.kind === 'pocket').length;
   const contourOps = ops.filter((op) => op.kind === 'contour').length;
+  const geometry =
+    measured === null
+      ? 'Coverage/cut-into: not measured (this case carries no STEP goal).'
+      : `Coverage ${(measured.coverage * 100).toFixed(2)} % (vendor ${measured.scored.lines.find((l) => l.key === 'coverage')?.vendor ?? '—'}), ` +
+        `cut-into adjudicated ${((measured.cutInto.adjudicatedFraction ?? 0) * 100).toFixed(2)} % ` +
+        `(edge break ${((measured.cutInto.edgeBreakFraction ?? 0) * 100).toFixed(2)} %, wall cells ${((measured.cutInto.wallNotScoredFraction ?? 0) * 100).toFixed(2)} %, ` +
+        `wall shadow ${((measured.cutInto.shadowNotScoredFraction ?? 0) * 100).toFixed(2)} % not counted; max ${measured.cutInto.maxMm.toFixed(3)} mm). ` +
+        `Seven lines: ${measured.scored.sentence}.`;
   console.log(
     `#959 ${name}: ${pocketOps} pocket + ${contourOps} contour op(s) planned (${unreachable.length} ` +
       `unreachable: ${unreachable.join('; ') || 'none'}), ${programs.length} run(s) on ${new Set(programs.map((p) => p.cutterKey)).size} cutter(s). Posted-text facts ` +
       `(pocket + contour ONLY — not comparable to Makera's full cycle): cycle ` +
       `${facts.cycleSeconds.toFixed(1)} s, air ${(facts.airFraction * 100).toFixed(1)} %, ` +
-      `rapids/1000 ${facts.rapidsPer1000FeedLines.toFixed(0)}, cutters ${facts.cutters.length}. ` +
-      `Coverage/cut-into: not measured here — needs the simulator sweep (next integration point).` +
+      `rapids/1000 ${facts.rapidsPer1000FeedLines.toFixed(0)}, cutters ${facts.cutters.length}. ${geometry}` +
       (notes.length > 0 ? ` Notes: ${notes.join('; ')}` : ''),
   );
 
@@ -218,7 +387,7 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
         ops,
         sequence,
         linking: { rapidsCount: 0, hopsCount: 0, airFractionPct: facts.airFraction * 100 },
-        programs: factsByRun.map((f) => f.merged),
+        programs: factsByRun.map((f) => f.ir),
         totalCostSeconds: facts.cycleSeconds,
       },
     ],
@@ -226,10 +395,24 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
   fs.writeFileSync(path.join(out, `${name}-plan.json`), JSON.stringify(plan));
   fs.writeFileSync(
     path.join(out, `${name}-posted-facts.json`),
-    JSON.stringify({ unreachable, notes, cutterKeys: programs.map((p) => p.cutterKey), pocketOps, contourOps, ...facts }),
+    JSON.stringify({
+      unreachable,
+      notes,
+      cutterKeys: programs.map((p) => p.cutterKey),
+      pocketOps,
+      contourOps,
+      ...facts,
+      ...(measured === null
+        ? { coverage: null, cutInto: null, sevenLines: null, ours: null }
+        : {
+            coverage: measured.coverage,
+            cutInto: measured.cutInto,
+            sevenLines: measured.scored,
+            ours: measured.ours,
+          }),
+    }),
   );
 }
-
 /** A minimal, hand-built tree: one 20×10 pocket, floor at −3, no STEP needed — proves the plan →
  * post → measure plumbing itself, independent of the licensed Makerables parts this file otherwise
  * needs. A failure here means this spec is broken; a failure on the real tray/organizer means the
@@ -719,21 +902,21 @@ const ORGANIZER = process.env.CM_959_ORGANIZER_STEP;
 
 describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, pocket + contour', () => {
   it('plans and posts every non-through floored pocket and the outer contour, cycle/air/rapids/cutters measured from the posted text', async () => {
-    const { tree } = await placedTree(TRAY!, [110, 140], -1.2);
+    const { tree, target } = await placedTree(TRAY!, [110, 140], -1.2);
     const result = planTray(tree);
     expect(result.ops.length, `unreachable: ${result.unreachable.join('; ')}`).toBeGreaterThan(0);
     expect(result.ops.some((op) => op.kind === 'contour'), `unreachable: ${result.unreachable.join('; ')}`).toBe(true);
-    writeAcceptance('tray', tree, result);
+    writeAcceptance('tray', tree, result, { target, stock: { length: 110, width: 140 } });
   });
 });
 
 describe.skipIf(ORGANIZER === undefined)('#959 acceptance — tool organizer, pocket + contour', () => {
   it('plans and posts every non-through floored pocket and the outer contour, cycle/air/rapids/cutters measured from the posted text', async () => {
-    const { tree } = await placedTree(ORGANIZER!, [170, 170], -0.8);
+    const { tree, target } = await placedTree(ORGANIZER!, [170, 170], -0.8);
     const result = planTray(tree);
     expect(result.ops.length, `unreachable: ${result.unreachable.join('; ')}`).toBeGreaterThan(0);
     expect(result.ops.some((op) => op.kind === 'contour'), `unreachable: ${result.unreachable.join('; ')}`).toBe(true);
-    writeAcceptance('organizer', tree, result);
+    writeAcceptance('organizer', tree, result, { target, stock: { length: 170, width: 170 } });
   });
 });
 

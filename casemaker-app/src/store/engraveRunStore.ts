@@ -31,6 +31,7 @@ import {
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
+import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
 import { goalPassCoverage } from '@/platform/defaultsClient';
 import type { ProgramOracle } from './engraveRunGate';
 import { forgetPoolSizing } from '@/engine/jobs/adaptivePool';
@@ -759,6 +760,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // several programs and stays the run-level verdict it was.
     const oracles: { index: number; report: OracleReport }[] = [];
     let copperReport: OracleReport | null = null;
+    // #955/V2-2 — the edge-break allowance's GATE parameters, from the job's own edgeBreak and the
+    // tools this run posts (never from the CAM's plan, A's R3). No edge break → no allowance.
+    const goalEdge = goalEdgeBreakOptions(
+      job,
+      (key) => (key === job.toolKey ? tool : (entryFor(key)?.tool ?? null)),
+      generated.programs.map((p) => p.toolKey),
+    );
     let outcome: ProgramSweepOutcome;
     try {
       outcome = await sweepPrograms<SweepProgram & { setupIndex: number }>({
@@ -897,6 +905,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // program onto it) never received the rest pass's cuts.
           const goal = goalCheckForProgram(job, generated.surface3d != null, {
             passCoverage: goalPassCoverage(shopDefaults),
+            ...goalEdge,
           });
           const goalOnly = goal !== undefined && (predicted === undefined || predicted.length === 0);
           if (predicted === undefined && !goalOnly) return;
