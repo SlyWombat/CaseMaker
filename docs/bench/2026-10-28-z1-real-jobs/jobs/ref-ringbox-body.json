@@ -1,0 +1,70 @@
+{
+ "schemaVersion": 3,
+ "name": "Makerables reference: wooden ring box, the body \u2014 Makera Studio\u2019s own program beside ours",
+ "machineId": "Z1",
+ "stock": {
+  "length": 80,
+  "width": 80,
+  "thickness": 30,
+  "material": "hardwood"
+ },
+ "labels": [],
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 6,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "tape",
+  "tape": {
+   "width": 25,
+   "thickness": 0.1,
+   "inset": 2,
+   "where": null,
+   "squareTo": "front",
+   "source": "default"
+  }
+ },
+ "targetObject": {
+  "id": "g1",
+  "name": "RingBoxBody-mswj6tmr.stl",
+  "format": "stl",
+  "sha256": "314ccbe6ee68fce332651cdc9bb759d99b156b102f3040ef5f56246aa99d427b",
+  "size": {
+   "x": 50,
+   "y": 25,
+   "z": 50
+  },
+  "position": {
+   "x": 40,
+   "y": 40,
+   "z": 0
+  },
+  "rotation": 0,
+  "rotationX": 90,
+  "enabled": true,
+  "role": "goal",
+  "cutWithinReach": true
+ },
+ "toolKey": ""
+}

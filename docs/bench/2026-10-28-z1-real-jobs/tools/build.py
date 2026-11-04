@@ -651,9 +651,10 @@ def seven_lines(c):
         return (f"<details open><summary>The seven lines, ours and Makera’s</summary>"
                 f"<div class=\"tablewrap\"><table><tr><th>line</th><th>Makera Studio</th><th>Case Maker</th></tr>{body}</table></div>"
                 f"{allow}</details>")
-    ours_cut = (f"{n['cutIntoPct']} % · max {n['maxCutIntoMm']} mm" if 'cutIntoPct' in n
+    # A receipt carries the app's floats raw; print them as measured at the card's own precision.
+    ours_cut = (f"{f(n['cutIntoPct'], 2)} % · max {f(n['maxCutIntoMm'], 3)} mm" if 'cutIntoPct' in n
                 else 'refused — no program to score')
-    vend_cut = (f"{v['cutInto0p1Pct']} % · max {v['maxCutIntoMm']} mm" if v else 'not scored')
+    vend_cut = (f"{f(v['cutInto0p1Pct'], 2)} % · max {f(v['maxCutIntoMm'], 3)} mm" if v else 'not scored')
     rows = [
         ('coverage, top surface', f"{f(100 - v['leftover0p1Pct'], 2)} %" if v else 'not scored',
          f"{f(n['coveragePct'], 2)} %" if 'coveragePct' in n else 'refused — no program to score'),

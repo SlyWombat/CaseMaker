@@ -87,6 +87,59 @@ REFS = [
               'app’s own importer (#968). The drawing’s rounded frame carries a scale-1 matrix, so its '
               'band is 1 mm wide — twice the strokes’ — and it is INCLUDED at that stated width; its '
               'share of the design is one item of 50, and Studio engraves it in the same T2 pass.'),
+    dict(id='ref-ringbox',
+         title='Wooden Ring Box — the body, 3D feature',
+         maker='superGG', licence='CC BY-ND 4.0',
+         url='https://www.makerables.com/project/wooden-ring-box',
+         slug='wooden-ring-box',
+         material='hardwood', stock=(80.0, 80.0, 30.0), dz=5.0,
+         nc=('RingBoxBody-mswk2mfo.nc',
+             'edc2eed86304e67cc684fce1b546ed38b042963007a6ea4741c077cb6a51ab65'),
+         model=('RingBoxBody-mswj6tmr.stl',
+                '314ccbe6ee68fce332651cdc9bb759d99b156b102f3040ef5f56246aa99d427b'),
+         job='ref-ringbox-body.json',
+         note='The body of a two-part box; the lid is a separate 2D program on its own blank. The '
+              'published STEP stands with its 25 mm axis on Y (bbox 50 × 25 × 50): the job turns it '
+              'rotationX +90 so the 50 mm face is on the blank, which puts the box mouth up — the '
+              'NC\'s own cut confirms it (the opposite turn reads 78 % cut-into). The 3D contour '
+              'frees the part at Z −30, the blank\'s bottom, so the model top sits 5 mm under the '
+              'stock top (dz 5.0; ±0.5 either way reads 99 % cut-into or 99.98 % leftover).'),
+    dict(id='ref-toolholder',
+         title='Cutting Tool Holder — the bottom side, pockets + arch',
+         maker='Kalkalash', licence='CC BY-NC-ND 4.0',
+         url='https://www.makerables.com/project/cutting-tool-holder',
+         slug='cutting-tool-holder',
+         material='softwood', stock=(120.0, 160.0, 28.0), dz=2.5,
+         nc=('Bottom_makerastudio_TOP_20260717195037-mrp6ek38.nc',
+             '1c448ff29d34cb2438f52e13786c69c2852736c3783c8f8a8546e5ea34cb82e0'),
+         model=('bit_holder_rev2-mrp87ijk.stl',
+                '4c1dff858a1b1f28ab4a8866a8d4837d9638e9f34dbd55e67d7b6235b45058c5'),
+         job='ref-toolholder.json',
+         note='Side 1 (bottom) of a double-sided project; the top side is cut on a 108 × 138 × 25 '
+              'blank after the flip and is not scored here. The published STEP stands on its side — '
+              'bbox 138 (X) × 23 (Y) × 108 (Z), thickness on Y — and Studio\'s auto-rotate '
+              '(bAutoRotate is set in the .mks) lays it flat: rotationX −90 then rotationY 90 puts '
+              'the 108 mm side along the blank\'s 120 mm X and the 138 mm side along its 160 mm Y '
+              '(the in-plane 180 turns give the same field to 2e-6 mm). The model is centred in the '
+              '28 mm blank, its top 2.5 mm under the stock top (dz 2.5; 2.0 reads −0.5 mm '
+              'everywhere, 5.0 reads 2.5 mm leftover).'),
+    dict(id='ref-wildspirit',
+         title='Wild Spirit 3D Relief — the wolf, roughed with a flat, finished with a 30° engraver',
+         maker='Makerables', licence='CC0 1.0',
+         url='https://www.makerables.com/project/wild-spirit-3d-relief',
+         slug='wild-spirit-3d-relief',
+         material='abs', stock=(100.0, 100.0, 10.0), dz=0.5,
+         nc=('Wolf-mqql2lif.nc',
+             '82484c44d4af62901f12b845f6b3c15eecf34a9e5fa553f084b8e249bca8105b'),
+         model=('Wolf-mqql5otd.stl',
+                '51934927aadf5eb439bdd55d6e0f831660cbf06e5a3a21e4ec556dcf7cc46884'),
+         job='ref-wildspirit.json',
+         note='THE M3 SURFACING REFERENCE: a 3D relief roughed with a ⌀3.175 flat and finished with a '
+              '⌀3.175 / 0.3 mm tip / 30° engraving bit, whose pass is a V-cone (leg 5.37 mm). The '
+              '80 × 80 × 5 model is already flat in the published STL and sits with its top 0.5 mm '
+              'under the stock top (dz 0.5; at 0.0 the whole surface reads −0.499 mm). The blank is '
+              'epoxy tooling board; our job runs it as ABS, the nearest material the feed table '
+              'carries, and the card states that substitution.'),
     dict(id='ref-badge',
          title='Makera Badge 2D Pattern — the closed rings as regions, two-colour engraving',
          maker='Makera', licence='CC0 1.0',

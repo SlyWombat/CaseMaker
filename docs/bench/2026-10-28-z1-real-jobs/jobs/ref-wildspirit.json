@@ -1,0 +1,68 @@
+{
+ "schemaVersion": 3,
+ "name": "Makerables reference: Wild Spirit 3D relief, the wolf (Makera Studio\u2019s own program beside ours)",
+ "machineId": "Z1",
+ "stock": {
+  "length": 100,
+  "width": 100,
+  "thickness": 10,
+  "material": "abs"
+ },
+ "labels": [],
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 50
+    },
+    {
+     "edge": "right",
+     "at": 50
+    }
+   ],
+   "source": "default"
+  }
+ },
+ "targetObject": {
+  "id": "g1",
+  "name": "Wolf-mqql5otd.stl",
+  "format": "stl",
+  "sha256": "51934927aadf5eb439bdd55d6e0f831660cbf06e5a3a21e4ec556dcf7cc46884",
+  "size": {
+   "x": 80,
+   "y": 80,
+   "z": 5
+  },
+  "position": {
+   "x": 50,
+   "y": 50,
+   "z": 0
+  },
+  "rotation": 0,
+  "rotationX": 0,
+  "enabled": true,
+  "role": "goal",
+  "cutWithinReach": true
+ },
+ "toolKey": ""
+}

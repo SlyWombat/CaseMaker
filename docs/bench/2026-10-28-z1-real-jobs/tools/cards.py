@@ -153,4 +153,13 @@ CARDS = [
     dict(id='ref-badge', title='Reference: Makera badge — the drawn areas, two-colour engraving',
          job='ref-badge.json', kind='design', input='local', material='abs', vendor='ref-badge',
          source='Makerables — Makera Badge 2D Pattern (CC0 1.0); Makera Studio’s own NC'),
+    dict(id='ref-ringbox', title='Reference: wooden ring box, the body — Makera Studio’s program beside ours',
+         job='ref-ringbox-body.json', kind='goal', input='local', material='hardwood', vendor='ref-ringbox',
+         source='Makerables — Wooden ring box, superGG (CC BY-ND 4.0); Makera Studio’s own NC'),
+    dict(id='ref-toolholder', title='Reference: cutting tool holder, bottom side — Makera Studio’s program beside ours',
+         job='ref-toolholder.json', kind='goal', input='local', material='softwood', vendor='ref-toolholder',
+         source='Makerables — Cutting Tool Holder, Kalkalash (CC BY-NC-ND 4.0); Makera Studio’s own NC'),
+    dict(id='ref-wildspirit', title='Reference: Wild Spirit 3D relief, the wolf — Makera Studio’s program beside ours',
+         job='ref-wildspirit.json', kind='goal', input='local', material='abs', vendor='ref-wildspirit',
+         source='Makerables — Wild Spirit 3D Relief (CC0 1.0); Makera Studio’s own NC'),
 ]
