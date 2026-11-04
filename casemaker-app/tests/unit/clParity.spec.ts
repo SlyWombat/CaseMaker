@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { compareClSurface, loadClFixtures, type ClFixture } from '../tools/clParity';
+import { tsxArgs } from '../tools/tsxCli';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
@@ -199,10 +200,10 @@ describe('#964 the comparator', () => {
 // variable specifier there and the failure message names the offending samples.
 describe.skipIf(!HAVE_ENGINE)('#964 the rebuilt engine’s drop-cutter agrees to 0.001 mm (#957)', () => {
   it('every fixture and cutter agrees with OpenCamLib and PyCAM at every sample', () => {
-    const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
     // spawnSync, not execFileSync: a FAILING comparison exits non-zero, and the failure detail is
-    // in its stdout — execFileSync would replace it with "Command failed".
-    const run = spawnSync(npx, ['tsx', '--tsconfig', 'tsconfig.scripts.json', ENGINE_CHECK], {
+    // in its stdout — execFileSync would replace it with "Command failed". `process.execPath` +
+    // tsx's CLI, never `npx.cmd`: the .cmd shim needs a shell on Windows (EINVAL on Node >=20.12).
+    const run = spawnSync(process.execPath, tsxArgs(ENGINE_CHECK), {
       cwd: APP,
       encoding: 'utf8',
       env: process.env,

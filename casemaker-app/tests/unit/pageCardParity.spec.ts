@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { measurePageCard } from '../tools/cardMeasurement';
+import { tsxArgs } from '../tools/tsxCli';
 import { scoreSevenLines, type ProgramScore, type SevenLineCard } from '../tools/sevenLines';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -29,8 +30,9 @@ const APP = join(HERE, '..', '..');
 const CARD = join(HERE, 'fixtures', 'parity', 'card');
 
 const runCli = (args: readonly string[]): unknown => {
-  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const out = execFileSync(npx, ['tsx', '--tsconfig', 'tsconfig.scripts.json', 'tests/tools/seven-lines.ts', ...args], {
+  // `process.execPath` + tsx's CLI, never `npx.cmd`: the .cmd shim needs a shell on Windows
+  // (EINVAL on Node >=20.12) and a shell re-opens quoting for paths with spaces.
+  const out = execFileSync(process.execPath, tsxArgs('tests/tools/seven-lines.ts', args), {
     cwd: APP,
     encoding: 'utf8',
     env: process.env,
