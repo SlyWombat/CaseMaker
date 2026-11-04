@@ -1028,15 +1028,13 @@ the shop sets — "Top-surface coverage: 98.8 % (the pass line is 95 %)" and "Wh
 judged line: a part can pass on cut-into and still leave surface standing, and the coverage number
 is what says so.
 
-The goal row's **Technical** fold carries the operation's own numbers: the **cutter sequence**'s
-cutters (one program each), the **stock to leave**, and — under the row's "Last generated"
-sentence — what the engine used for the rough and finish step-down and step-over and the sampling
-spacing. Those are **the engine's numbers, not settings**: they follow from the cutter it chose
-and the slope it meets, and an operator-settable pitch was a budget by another name. The six
-legacy keys (`roughStepDownMm`, `roughStepOverMm`, `finishStepOverMm`, `gridPitchMm`, `scallop`,
-`pencil`, `pencilCreaseDeg`) still load from older job files and are no longer read. The stock to
-leave is the one surfacing number the operator still owns (default: the shop's
-`finish.stockToLeaveMm`) and the reset returns it. The feeds are the job's ordinary 2.5D feeds reused unchanged, a labelled
+The goal row's **Technical** fold no longer carries the surfacing numbers: the step-down,
+step-over, sampling spacing, stock to leave, scallop and pencil passes and the "Last generated"
+sentence all belonged to the pre-rebuild planner and are gone. What the engine used is stated
+where the plan is stated — the row's plan block and the run sheet name the features, the cutters
+and their times, and the linking facts. The six legacy keys (`roughStepDownMm`,
+`roughStepOverMm`, `finishStepOverMm`, `gridPitchMm`, `scallop`, `pencil`, `pencilCreaseDeg`) and
+`stockToLeaveMm` still load from older job files and are no longer read. The feeds are the job's ordinary 2.5D feeds reused unchanged, a labelled
 placeholder until the bench measures 3D engagement; a ball resolves its feeds through a
 flat proxy of its cutting diameter. The heightfield is **sampled**, so a goal program is
 simulated on the FLAT dexel and the run states the grid it ran on — "simulated on a 0.1 mm

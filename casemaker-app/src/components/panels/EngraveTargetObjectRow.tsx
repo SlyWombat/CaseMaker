@@ -1,6 +1,5 @@
 import { useEffect, useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
-import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
 import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/engrave/relief';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
@@ -36,7 +35,7 @@ import {
   resetRotationPatch,
 } from '@/engine/cnc/engrave/goalPlacement';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
-import { goalEdgeBreak, type EngraveSurfaceSettings, type EngraveTargetObject, type GoalUndersideKind } from '@/types/engraveJob';
+import { goalEdgeBreak, type EngraveTargetObject, type GoalUndersideKind } from '@/types/engraveJob';
 
 /**
  * The reference object the 3D primitives are positioned against (#435).
@@ -67,20 +66,6 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const ROW_INLINE: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 4 };
 const FIELD_LABEL: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
 const SOURCE_WORD: CSSProperties = { fontSize: 10, color: '#9aa4b0' };
-
-/** The shop-default sources, in the words the rest of the panel uses for them. */
-function shopSourceWords(source: string): string {
-  switch (source) {
-    case 'seeded':
-      return 'this shop’s seed';
-    case 'chosen':
-      return 'chosen for this shop';
-    case 'measured':
-      return 'measured at the bench';
-    default:
-      return 'the shipped fallback';
-  }
-}
 
 /** A goal cutter option: the job's cutter select, limited to what a 3D finish can use. */
 export interface SurfaceCutterOption {
@@ -132,8 +117,6 @@ export interface EngraveTargetObjectRowProps {
   findings: readonly JobFinding[];
   /** #535 — the goal operation's defaults; absent on a reference row. */
   surface?: SurfaceDefaults;
-  /** #535 — the last generated goal program's facts, or null before a Generate. */
-  surfaceFacts?: GoalSurfaceFacts | null;
   /** #535 — set the job's cutter from the goal row. */
   onCutterChange?: (key: string) => void;
   /** #672 — a PNG goal's relief facts; absent on a mesh or a reference. */
@@ -585,77 +568,6 @@ function cutterSentence(cutter: SurfaceDefaults['cutter']): string {
   return `One cutter cuts both passes. ${cutter.name} is a flat nose: its flat tip follows the surface in the finishing pass, so a curved surface finishes faceted.`;
 }
 
-/** One of the goal's four numbers, with its default and where the default lives. */
-function SurfaceField({
-  field,
-  label,
-  unit,
-  title,
-  index,
-  value,
-  fallback,
-  sourceWords,
-  min,
-  onChange,
-}: {
-  field: keyof EngraveSurfaceSettings;
-  label: string;
-  unit: string;
-  title: string;
-  index: number;
-  value: number | undefined;
-  fallback: number | null;
-  sourceWords: string;
-  min: number;
-  onChange: (value: number | undefined) => void;
-}): JSX.Element {
-  const shown = value ?? fallback;
-  return (
-    <div style={ROW_INLINE}>
-      <label style={FIELD_LABEL}>
-        <span>{label}</span>
-        <input
-          type="number"
-          step="any"
-          min={min}
-          value={shown === null ? '' : Number(shown.toFixed(3))}
-          disabled={fallback === null && value === undefined}
-          data-testid={`engrave-target-surface-${field}-${index}`}
-          aria-label={`Surface ${label}`}
-          title={title}
-          style={NUM}
-          onChange={(e) => {
-            const raw = e.target.value;
-            // Clearing the box returns the number to its default: an absent key is the default.
-            if (raw === '') {
-              onChange(undefined);
-              return;
-            }
-            const v = Number(raw);
-            if (!Number.isFinite(v) || v < min) return;
-            onChange(v);
-          }}
-        />
-        <span>{unit}</span>
-      </label>
-      <span data-testid={`engrave-target-surface-${field}-source-${index}`} style={SOURCE_WORD}>
-        {value !== undefined ? 'typed' : sourceWords}
-      </span>
-      {value !== undefined && (
-        <button
-          type="button"
-          data-testid={`engrave-target-surface-${field}-reset-${index}`}
-          aria-label={`Use the default ${label}`}
-          title="Use the default again."
-          onClick={() => onChange(undefined)}
-        >
-          ↺
-        </button>
-      )}
-    </div>
-  );
-}
-
 export function EngraveTargetObjectRow({
   target,
   index,
@@ -663,7 +575,6 @@ export function EngraveTargetObjectRow({
   onRemove,
   findings,
   surface,
-  surfaceFacts = null,
   relief = null,
   onCutterChange,
   stock,
@@ -678,14 +589,12 @@ export function EngraveTargetObjectRow({
   const convertedFromStep = /\.(step|stp)$/i.test(target.name);
   // #721 — a mold's cavity opens at the stock top, so its Z is not a placement.
   const moldGoal = goal && target.goalMode === 'mold' && target.format !== 'png';
-  const settings = target.surface ?? {};
   // #898 — the underside control (a part goal only) and, when nothing is chosen, the app's own
   // reading of the mesh. Cached on the mesh's facts, so a render does not re-measure it.
   const showsUnderside = goal && target.format !== 'png' && target.goalMode !== 'mold';
   const undersideOffer = showsUnderside ? goalUndersideCached(target) : null;
   const undersideChosen = showsUnderside ? undersideSentence(target) : null;
 
-  const setSurface = (patch: Partial<EngraveSurfaceSettings>): void => onChange({ surface: patch });
 
   const positionNum = (axis: 'x' | 'y' | 'z'): JSX.Element => (
     <label style={FIELD_LABEL}>
@@ -801,29 +710,9 @@ export function EngraveTargetObjectRow({
         </label>
       )}
 
-      {/* #764 — WHAT IS CLEARED AROUND AN ITEM GOAL. The goal is cut only inside its own footprint
-          otherwise, so the blank round it keeps its height and the part ends in a pit. The default
-          ring is one cutter diameter wide; a mold's rim is the stock top, so a mold has no choice. */}
-      {goal && target.format !== 'png' && target.goalMode !== 'mold' && (
-        <label style={ROW_INLINE}>
-          <span style={{ fontSize: 11, color: '#9aa4b0' }}>clear around</span>
-          <select
-            value={settings.clearAround ?? 'ring'}
-            data-testid={`engrave-target-clear-around-${index}`}
-            aria-label="Clear around the goal"
-            title="Cut the stock around the part down to the part's base plane, so the part is not left in a pit: a band one cutter diameter wide (the default), the whole blank, or nothing."
-            onChange={(e) =>
-              setSurface({
-                clearAround: e.target.value === 'ring' ? undefined : (e.target.value as 'whole' | 'none'),
-              })
-            }
-          >
-            <option value="ring">a ring around it</option>
-            <option value="whole">the whole blank</option>
-            <option value="none">nothing</option>
-          </select>
-        </label>
-      )}
+      {/* #966 — WHAT IS CLEARED AROUND A GOAL is the model engine's own decision now (the plan
+          clears around the part as part of its sequence); the old per-job switch had one reader,
+          the retired heightfield engine. */}
 
       {/* #898 — WHERE THE PART'S UNDERSIDE COMES FROM. Nothing chosen is today's cut (the mesh's
           own depth); the app proposes one of the three from the mesh — its flat bottom's share of
@@ -1028,48 +917,10 @@ export function EngraveTargetObjectRow({
               {cutterSentence(surface.cutter)}
             </p>
 
-            {/* #963 — THE ENGINE'S NUMBERS, NOT THE OPERATOR'S. The rough/finish step-down and
-                step-over, the grid pitch and the scallop/pencil passes are derived by the model
-                engine from the cutter and the slope; the sentence below says what it used. A
-                control here would be a budget by another name. */}
-            <SurfaceField
-              field="stockToLeaveMm"
-              label="stock to leave"
-              unit="mm"
-              title="The stock the roughing pass leaves on the goal surface for the finishing pass, mm. Zero finishes straight off the roughing cut."
-              index={index}
-              value={settings.stockToLeaveMm}
-              fallback={surface.stockToLeave.value}
-              sourceWords={shopSourceWords(surface.stockToLeave.source)}
-              min={0}
-              onChange={(v) => setSurface({ stockToLeaveMm: v })}
-            />
-
-            {surfaceFacts !== null && (
-              <p style={MUTED} data-testid={`engrave-target-surface-report-${index}`}>
-                Last generated:{' '}
-                {surfaceFacts.rough == null
-                  ? ''
-                  : `${surfaceFacts.rough.tool} roughs (${surfaceFacts.rough.kind === 'adaptive' ? 'adaptive' : 'raster'}) as program 1, then the ball finishes as program 2; `}
-                {surfaceFacts.roughingLayers} roughing layer
-                {surfaceFacts.roughingLayers === 1 ? '' : 's'} at{' '}
-                {Number(surfaceFacts.stepDownMm.toFixed(3))} mm step-down and{' '}
-                {Number(surfaceFacts.roughStepOverMm.toFixed(3))} mm step-over, leaving{' '}
-                {Number(surfaceFacts.stockToLeaveMm.toFixed(3))} mm; finishing at{' '}
-                {Number(surfaceFacts.finishStepOverMm.toFixed(3))} mm step-over
-                {surfaceFacts.rim == null
-                  ? ''
-                  : `, opening with ${surfaceFacts.rim.laps} rim lap${surfaceFacts.rim.laps === 1 ? '' : 's'} down the cleared band’s wall`}
-                {surfaceFacts.scallop == null
-                  ? ''
-                  : `, then a scallop pass on ${surfaceFacts.scallop.contours} contour${surfaceFacts.scallop.contours === 1 ? '' : 's'}`}
-                {surfaceFacts.pencil == null
-                  ? ''
-                  : `, then a pencil pass on ${surfaceFacts.pencil.paths} crease${surfaceFacts.pencil.paths === 1 ? '' : 's'} at ${Number(surfaceFacts.pencil.creaseDeg.toFixed(0))}°`}
-                .{' '}
-                {surfaceFacts.resolutionNote.charAt(0).toUpperCase() + surfaceFacts.resolutionNote.slice(1)}.
-              </p>
-            )}
+            {/* #966 — THE OLD ENGINE'S OWN NUMBERS ARE GONE. The step-down, step-over, sampling
+                grid, scallop/pencil passes, stock to leave and the "Last generated" sentence all
+                described the retired heightfield planner; the plan block states the model engine's
+                own sequence and numbers. */}
           </div>
         </details>
       )}

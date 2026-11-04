@@ -4434,7 +4434,6 @@ export function EngravePanel(): JSX.Element {
                   }
                 : undefined
             }
-            surfaceFacts={target.role === 'goal' ? (run.generated?.surface3d ?? null) : null}
             relief={reliefFacts}
             onCutterChange={(key) => setTool(key)}
           />

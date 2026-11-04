@@ -15,7 +15,6 @@ import {
   type ReliefRowFacts,
   type SurfaceDefaults,
 } from '@/components/panels/EngraveTargetObjectRow';
-import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
 import { resetEngraveRows } from '@/store/engraveRowStore';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
 import type { EngraveTargetObject } from '@/types/engraveJob';
@@ -52,27 +51,15 @@ const DEFAULTS: SurfaceDefaults = {
   stockToLeave: { value: 0.3, source: 'seeded' },
 };
 
-const FACTS: GoalSurfaceFacts = {
-  resolutionNote: 'sampled on a 0.1 mm grid',
-  gridPitchMm: 0.1,
-  gridCells: 120000,
-  stepDownMm: 0.5,
-  roughStepOverMm: 0.8,
-  finishStepOverMm: 0.4,
-  stockToLeaveMm: 0.3,
-  roughingLayers: 6,
-  notes: [],
-};
 
 interface RowOptions {
   target?: Partial<EngraveTargetObject>;
   surface?: SurfaceDefaults | undefined;
-  surfaceFacts?: GoalSurfaceFacts | null;
   relief?: ReliefRowFacts | null;
 }
 
 /** Render the row; returns the callbacks so a test can read what a control sent. */
-function row({ target = {}, surface = DEFAULTS, surfaceFacts = null, relief = null }: RowOptions = {}): {
+function row({ target = {}, surface = DEFAULTS, relief = null }: RowOptions = {}): {
   onChange: ReturnType<typeof vi.fn>;
   onRemove: ReturnType<typeof vi.fn>;
   onCutterChange: ReturnType<typeof vi.fn>;
@@ -88,7 +75,6 @@ function row({ target = {}, surface = DEFAULTS, surfaceFacts = null, relief = nu
       onChange={onChange}
       onRemove={onRemove}
       surface={surface}
-      surfaceFacts={surfaceFacts}
       relief={relief}
       onCutterChange={onCutterChange}
     />,
@@ -103,17 +89,6 @@ function openTechnical(): void {
 }
 
 describe('#535 the goal’s operation controls', () => {
-  it('shows the Technical fold on a goal row, and prefills the stock to leave from its default', () => {
-    row();
-    openTechnical();
-    expect((screen.getByTestId('engrave-target-surface-stockToLeaveMm-0') as HTMLInputElement).value).toBe(
-      '0.3',
-    );
-    expect(screen.getByTestId('engrave-target-surface-stockToLeaveMm-source-0').textContent).toBe(
-      'this shop’s seed',
-    );
-  });
-
   // #963 — THE RESOLUTIONS ARE THE ENGINE'S. A control for any of them would be a budget by
   // another name; the row states what the last program used instead (the report test below).
   it('offers no controls for the step-down, step-overs, grid pitch or finishing passes', () => {
@@ -130,8 +105,8 @@ describe('#535 the goal’s operation controls', () => {
     ]) {
       expect(screen.queryByTestId(testid)).toBeNull();
     }
-    // An old document's keys still load and simply say nothing on the row.
-    expect(screen.getByTestId('engrave-target-surface-stockToLeaveMm-0')).toBeTruthy();
+    // #966 — and so is the stock to leave: the engine owns it.
+    expect(screen.queryByTestId('engrave-target-surface-stockToLeaveMm-0')).toBeNull();
   });
 
   it('names the cutter and states what its shape does to the finish', () => {
@@ -142,33 +117,6 @@ describe('#535 the goal’s operation controls', () => {
     const note = screen.getByTestId('engrave-target-surface-cutter-note-0').textContent ?? '';
     expect(note).toContain('One cutter cuts both passes');
     expect(note).toContain('ball');
-  });
-
-  it('a typed stock to leave sends its key and words itself typed; the reset sends undefined', () => {
-    const { onChange } = row();
-    openTechnical();
-    const input = screen.getByTestId('engrave-target-surface-stockToLeaveMm-0');
-    fireEvent.change(input, { target: { value: '0.25' } });
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { stockToLeaveMm: 0.25 } });
-
-    // With a value stored, the word says who typed it and a reset appears; the reset is the
-    // `undefined` patch that removes the key.
-    cleanup();
-    resetEngraveRows();
-    const second = row({ target: { surface: { stockToLeaveMm: 0.25 } } });
-    openTechnical();
-    expect(screen.getByTestId('engrave-target-surface-stockToLeaveMm-source-0').textContent).toBe('typed');
-    fireEvent.click(screen.getByTestId('engrave-target-surface-stockToLeaveMm-reset-0'));
-    expect(second.onChange).toHaveBeenLastCalledWith({ surface: { stockToLeaveMm: undefined } });
-  });
-
-  it('clearing a box returns the number to its default', () => {
-    const { onChange } = row({ target: { surface: { stockToLeaveMm: 0.2 } } });
-    openTechnical();
-    fireEvent.change(screen.getByTestId('engrave-target-surface-stockToLeaveMm-0'), {
-      target: { value: '' },
-    });
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { stockToLeaveMm: undefined } });
   });
 
   // #963 — the edge break is `edgeBreak` now; the old name is mirrored while the pre-#966 engine
@@ -204,43 +152,10 @@ describe('#535 the goal’s operation controls', () => {
     expect(onCutterChange).toHaveBeenLastCalledWith('flat-3.175');
   });
 
-  it('quotes the last generated program’s levels and grid, and nothing before a Generate', () => {
-    row();
-    openTechnical();
-    expect(screen.queryByTestId('engrave-target-surface-report-0')).toBeNull();
-    cleanup();
-    resetEngraveRows();
-
-    row({ surfaceFacts: FACTS });
-    openTechnical();
-    const report = screen.getByTestId('engrave-target-surface-report-0').textContent ?? '';
-    expect(report).toContain('6 roughing layers');
-    expect(report).toContain('0.5 mm step-down');
-    expect(report).toContain('0.4 mm step-over');
-    expect(report).toContain('0.3 mm');
-    // The resolution sentence the engine produced, capitalised for the sentence position.
-    expect(report).toContain('Sampled on a 0.1 mm grid');
-  });
-
   it('a reference row has no Technical fold at all', () => {
     row({ target: { role: 'reference', surface: undefined }, surface: undefined });
     fireEvent.click(screen.getByTestId('engrave-target-expand-0'));
     expect(screen.queryByTestId('engrave-target-technical-0')).toBeNull();
-  });
-});
-
-// #671/#963 — the finishing passes are the engine's choice now; the row has no switch, but the
-// report still speaks for the passes the last program ran.
-describe('#963 the finishing passes are stated, not switched', () => {
-  it('reports the passes the last program ran', () => {
-    row({
-      target: { surface: { scallop: true, pencil: true } },
-      surfaceFacts: { ...FACTS, scallop: { contours: 12, stepOverMm: 0.4, clamped: false }, pencil: { paths: 3, creaseDeg: 20 } },
-    });
-    openTechnical();
-    const report = screen.getByTestId('engrave-target-surface-report-0').textContent ?? '';
-    expect(report).toContain('a scallop pass on 12 contours');
-    expect(report).toContain('a pencil pass on 3 creases at 20°');
   });
 });
 
@@ -300,35 +215,5 @@ describe('#672 the relief map', () => {
     row({ target: {}, relief: null });
     openTechnical();
     expect(screen.queryByTestId('engrave-target-relief-0')).toBeNull();
-  });
-});
-
-// #764 — the CLEAR-AROUND choice: what is cut around an item goal so it is not left in a pit. The
-// default is the ring, stored as an ABSENT key (so an untouched goal serialises as before); the
-// other two write their word, and choosing the ring again removes the key.
-describe('#764 the clear-around choice', () => {
-  it('sends ring / whole / nothing, with the default ring as an absent key', () => {
-    const { onChange } = row();
-    fireEvent.click(screen.getByTestId('engrave-target-expand-0'));
-    const select = screen.getByTestId('engrave-target-clear-around-0') as HTMLSelectElement;
-    expect(select.value).toBe('ring');
-    fireEvent.change(select, { target: { value: 'whole' } });
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { clearAround: 'whole' } });
-    fireEvent.change(select, { target: { value: 'none' } });
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { clearAround: 'none' } });
-    fireEvent.change(select, { target: { value: 'ring' } });
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { clearAround: undefined } });
-  });
-
-  it('shows a stored choice', () => {
-    row({ target: { surface: { clearAround: 'whole' } } });
-    fireEvent.click(screen.getByTestId('engrave-target-expand-0'));
-    expect((screen.getByTestId('engrave-target-clear-around-0') as HTMLSelectElement).value).toBe('whole');
-  });
-
-  it('is not offered for a mold — its rim is the stock top', () => {
-    row({ target: { goalMode: 'mold' } });
-    fireEvent.click(screen.getByTestId('engrave-target-expand-0'));
-    expect(screen.queryByTestId('engrave-target-clear-around-0')).toBeNull();
   });
 });
