@@ -970,6 +970,19 @@ function regionRefOf(id: string, kind: RegionKind, footprint: Polygons, topZ: nu
 export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): PlanCurvedResult {
   const ops: PlannedOp[] = [];
   const notes: string[] = [];
+  // THE CURVED PROPERTY SEEDS FOUND THIS: some stages legitimately have nothing to cut (the pencil
+  // on a surface with no creases, a rough whose mask is empty), and an op that emitted no moves was
+  // still pushed — then posted as a program `postZ1` refuses ("no operation with any moves").
+  // An op with no moves is not a program: it is dropped here WITH A NOTE, so the plan stays honest
+  // rather than posting an empty file. A stage that SHOULD have cut and did not still shows up as
+  // a coverage failure at the goal check — the drop does not hide it.
+  const pushStage = (kind: PlannedOp['kind'], ref: RegionRef, outcome: OpOutcome): void => {
+    if (outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
+      ops.push({ kind, region: ref, outcome });
+      return;
+    }
+    notes.push(`${kind} "${ref.id}" emitted no moves — nothing for it to cut`);
+  };
   const clGrid: PlanCurvedResult['clGrid'] = [];
   const noteGrid = (cutter: Tool, surface: ReturnType<typeof clSurface>): void => {
     const key = cutterKeyOf(cutter);
@@ -1020,7 +1033,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       rapid: opts.rapid,
       ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
     });
-    ops.push({ kind: 'rough', region: ref, outcome: roughOut });
+    pushStage('rough', ref, roughOut);
 
     // 2. REST BY CL DIFFERENCE, when the caller offers a smaller flat: the band the previous
     //    cutter left standing, where the smaller one can reach.
@@ -1046,7 +1059,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         rapid: opts.rapid,
         ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
       });
-      ops.push({ kind: 'rest', region: ref, outcome: restOut });
+      pushStage('rest', ref, restOut);
     }
 
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
@@ -1076,7 +1089,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       air: opts.air,
       rapid: opts.rapid,
     });
-    ops.push({ kind: 'finish', region: ref, outcome: finishOut });
+    pushStage('finish', ref, finishOut);
 
     // 4. PENCIL along the creases the ball's own CL surface leaves.
     const pencilOut = pencil({
@@ -1092,7 +1105,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       air: opts.air,
       rapid: opts.rapid,
     });
-    ops.push({ kind: 'pencil', region: ref, outcome: pencilOut });
+    pushStage('pencil', ref, pencilOut);
   }
 
   // 5. EVERY RIM the tree found, broken by the V at the job's stated edge break.
@@ -1120,7 +1133,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         params: cuts,
         rapid: opts.rapid,
       });
-      ops.push({ kind: 'chamfer', region: ref, outcome: out });
+      pushStage('chamfer', ref, out);
     }
   } else if (tree.rims.length > 0) {
     notes.push(`the job states no edge break — ${tree.rims.length} rim(s) stay sharp`);
