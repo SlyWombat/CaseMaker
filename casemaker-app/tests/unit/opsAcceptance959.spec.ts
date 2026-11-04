@@ -104,7 +104,10 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
 
   const ctx: PostContext = {
     jobName: `${name}-959`,
-    stock: { length: 0, width: 0, thickness: tree.frame.partTop - tree.frame.partBottom },
+    // The TRUE stock thickness — `partTop - partBottom` undercounts by any skin between the
+    // stock's own top and the recognised part top (advisor's review on 108e120c): the contour now
+    // correctly cuts to `stockTop - zTo`, deeper than a `partTop`-based thickness would state.
+    stock: { length: 0, width: 0, thickness: tree.frame.stockTop - tree.frame.partBottom },
     materialName: 'hardwood',
     zDatum: 'probed-top-face',
     origin: 'topFrontLeft',
@@ -223,6 +226,11 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     // depth = stockTop(0) - floorZ(-4.2) = 4.2, not partTop(-1.2) - floorZ(-4.2) = 3: the root
     // pocket's own first pass now faces the skin instead of engaging 1.2 mm deeper than planned.
     expect(pocketResult.outcome.ir.operations[0]!.depth).toBeCloseTo(4.2, 6);
+    // Advisor's review on 108e120c: this is the FIRST time a program deeper than `partTop -
+    // partBottom` (3) is actually posted — `postZ1` must accept the real 4.2 mm cut, not just
+    // plan it. A refusal here (a stock/depth mismatch, say) is exactly E's condition on both the
+    // tray and the organizer, so it must be caught here, not on dave-1.
+    expect(() => writeAcceptance('skin', tree, result)).not.toThrow();
   });
 
 

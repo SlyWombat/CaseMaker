@@ -23,7 +23,7 @@ import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engi
 import { recogniseFeatures, type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
 import { planPocketsForTree, type PlanPocketsResult } from '@/engine/cnc/cam/model/plan';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import type { RapidEstimate } from '@/engine/cnc/cam/ir';
+import { HOP_Z, type RapidEstimate } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 
@@ -103,23 +103,37 @@ function inside(polys: Polygons, x: number, y: number): boolean {
 
 /**
  * Every horizontal FEED segment at `z` must keep the tool's centre inside the node's free space,
- * the region eroded by the cutter radius (less a 0.01 mm grace for offset chords). Returns the
- * offending segments, sampled every 0.05 mm. `node.floorZ` is on `recogniseFeatures`'s own mesh
- * axis; `planPocketsForTree` now rebases every move onto `Z 0 = stockTop` (plan.ts's header note
- * on dd150a9b), so the floor it actually posts is `floorZ - stockTop`.
+ * the region eroded by the cutter radius (less a 0.01 mm grace for offset chords), AND no lateral
+ * rapid may run below `hopZMm` (advisor's review on dd150a9b and 9e976f0b: a datum error turns a
+ * SHOULD-retract into a feed at depth, which this file's own `floorZ` comparison can only catch
+ * when it is itself looking at the right Z — hence `feedsChecked`, so a datum bug cannot pass
+ * this check vacuously by finding nothing at `floorZ`). `node.floorZ` is on `recogniseFeatures`'s
+ * own mesh axis; `planPocketsForTree` rebases every move onto `Z 0 = stockTop` (plan.ts's header
+ * note on dd150a9b), so the floor it actually posts is `floorZ - stockTop`.
  */
-function linksOutsideFreeSpace(result: PlanPocketsResult, node: PocketNode, radius: number, stockTop: number): string[] {
+function linksOutsideFreeSpace(
+  result: PlanPocketsResult,
+  node: PocketNode,
+  radius: number,
+  stockTop: number,
+  hopZMm: number,
+): { bad: string[]; feedsChecked: number } {
   const free = offset(node.region, -(radius - 0.01));
   const op = result.ops.find((o) => o.region.id === node.id);
-  if (op === undefined) return [`no op for ${node.id}`];
+  if (op === undefined) return { bad: [`no op for ${node.id}`], feedsChecked: 0 };
   const floorZ = node.floorZ - stockTop;
   const bad: string[] = [];
+  let feedsChecked = 0;
   let at: [number, number, number] | null = null;
   for (const operation of op.outcome.ir.operations) {
     for (const m of operation.moves) {
       if (!('x' in m) || m.x === undefined || m.y === undefined || m.z === undefined) continue;
       const next: [number, number, number] = [m.x, m.y, m.z];
+      if (at !== null && m.kind === 'rapid' && (at[0] !== next[0] || at[1] !== next[1]) && Math.min(at[2], next[2]) < hopZMm - 1e-9) {
+        bad.push(`a lateral rapid runs at z as low as ${Math.min(at[2], next[2]).toFixed(2)}, below hopZ ${hopZMm}: (${at[0].toFixed(2)}, ${at[1].toFixed(2)}, ${at[2].toFixed(2)}) → (${next[0].toFixed(2)}, ${next[1].toFixed(2)}, ${next[2].toFixed(2)})`);
+      }
       if (at !== null && m.kind === 'feed' && Math.abs(at[2] - next[2]) < 1e-9 && Math.abs(next[2] - floorZ) < 1e-6) {
+        feedsChecked++;
         const len = Math.hypot(next[0] - at[0], next[1] - at[1]);
         const n = Math.max(1, Math.ceil(len / 0.05));
         for (let i = 1; i < n; i++) {
@@ -134,7 +148,7 @@ function linksOutsideFreeSpace(result: PlanPocketsResult, node: PocketNode, radi
       at = next;
     }
   }
-  return bad;
+  return { bad, feedsChecked };
 }
 
 /**
@@ -198,8 +212,9 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     const tree = treeOf(s, 10);
     const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - 6) < 1e-6 && n.islands.length === 2)!;
     expect(node, 'the floor node holds the island').toBeDefined();
-    const bad = linksOutsideFreeSpace(plan(tree, [flat(3, 1)]), node, 1.5, tree.frame.stockTop);
-    expect(bad, `feeds that leave free space:\n${bad.slice(0, 5).join('\n')}`).toEqual([]);
+    const { bad, feedsChecked } = linksOutsideFreeSpace(plan(tree, [flat(3, 1)]), node, 1.5, tree.frame.stockTop, HOP_Z);
+    expect(feedsChecked, 'the check actually looked at some feeds — a datum bug must not pass by finding none').toBeGreaterThan(0);
+    expect(bad, `feeds/rapids that leave free space or run below hopZ:\n${bad.slice(0, 5).join('\n')}`).toEqual([]);
   });
 
   it('(1) a same-level link stays in free space: a U pocket whose erosion splits into two lobes', () => {
@@ -211,8 +226,9 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     const tree = treeOf(s, 10);
     const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - 6) < 1e-6)!;
     expect(node).toBeDefined();
-    const bad = linksOutsideFreeSpace(plan(tree, [flat(2, 1)]), node, 1, tree.frame.stockTop);
-    expect(bad, `feeds that leave free space:\n${bad.slice(0, 5).join('\n')}`).toEqual([]);
+    const { bad, feedsChecked } = linksOutsideFreeSpace(plan(tree, [flat(2, 1)]), node, 1, tree.frame.stockTop, HOP_Z);
+    expect(feedsChecked, 'the check actually looked at some feeds — a datum bug must not pass by finding none').toBeGreaterThan(0);
+    expect(bad, `feeds/rapids that leave free space or run below hopZ:\n${bad.slice(0, 5).join('\n')}`).toEqual([]);
   });
 
   it('(3) an open shoulder narrower than the cutter is cleared (the tray’s ~3 mm ledge)', () => {
