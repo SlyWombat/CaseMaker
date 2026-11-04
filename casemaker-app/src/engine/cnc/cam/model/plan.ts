@@ -447,16 +447,33 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
 
   const ops: PlannedOp[] = [];
   const programs = new Map<string, ToolpathIR>();
+  // The manager's #959 ruling: the part's freeing cut (the outer contour) is posted LAST, after
+  // every rest/finish/chamfer step that still touches the part — #961's own chain assigns it to
+  // whichever cutter covers it (almost always the primary, since the contour feature's own
+  // minOpeningMm/cornerRadiusMm are unconstrained), which puts it in that cutter's FIRST step; a
+  // rest cutter running afterwards would then be milling a part no longer held to the stock.
+  // Deferred here, not re-sequenced in `sequence.ts`: it is an ASSEMBLY-order question (which
+  // operation is posted last), not a cutter-choice one, and the 4x6x1 default tabs stay on top of
+  // it regardless (belt and suspenders, per the ruling).
+  let deferredContour: OpOutcome | null = null;
   for (const step of choice.steps) {
     const outcomes = outcomeCache.get(stepSignature(step));
     if (outcomes === undefined || outcomes === null) continue; // chooseSequence only chose postable steps
     for (const { id, outcome } of outcomes) {
+      if (id === 'contour') { deferredContour = outcome; continue; }
       const ref = refById.get(id)!;
-      ops.push({ kind: id === 'contour' || throughById.has(id) ? 'contour' : 'pocket', region: ref, outcome });
+      ops.push({ kind: throughById.has(id) ? 'contour' : 'pocket', region: ref, outcome });
       const key = outcome.cutter;
       const existing = programs.get(key);
       programs.set(key, existing === undefined ? outcome.ir : concatToolpathIR(existing, outcome.ir));
     }
+  }
+  if (deferredContour !== null) {
+    const ref = refById.get('contour')!;
+    ops.push({ kind: 'contour', region: ref, outcome: deferredContour });
+    const key = deferredContour.cutter;
+    const existing = programs.get(key);
+    programs.set(key, existing === undefined ? deferredContour.ir : concatToolpathIR(existing, deferredContour.ir));
   }
 
   const offered = [...opts.houseFlats].map((t) => `⌀${cuttingDiameter(t)}`).join(', ');
@@ -476,6 +493,11 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     );
   }
   for (const [id, message] of regionFailures) notes.push(`${id}: not cut — planning failed (${message})`);
+  if (deferredContour !== null && choice.steps.length > 1) {
+    notes.push(
+      `the freeing cut (contour) is posted LAST, after every rest/finish/chamfer step — this may add a tool change back to ${deferredContour.cutter} that #961's own cost (below) does not price`,
+    );
+  }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
     const ir = programs.get(entry.cutterKey);

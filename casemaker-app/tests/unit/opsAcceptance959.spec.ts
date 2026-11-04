@@ -241,6 +241,40 @@ function syntheticTreeTwoPockets(): FeatureTree {
   };
 }
 
+/** Two pockets that force a REST chain: 'a' (narrowest 10) fits the house ⌀6, 'b' (narrowest 4)
+ * does not and needs the ⌀3.175 rest cutter — so the primary (⌀6) covers 'a' and the contour,
+ * the rest (⌀3.175) covers 'b', exactly the shape where the OLD contour-rides-in-the-primary
+ * ordering would free the part before 'b' was even cut. */
+function syntheticTreeRestChain(): FeatureTree {
+  // 'a' is large enough that FLAT3175 roughing it alone costs far more than FLAT6 roughing it
+  // plus a tool change to FLAT3175 for 'b' — the chain's own cost ranking must pick the two-cutter
+  // plan, not just happen to put the contour last within one cutter's own single step.
+  const rectA: [number, number][][] = [[[0, 0], [60, 0], [60, 40], [0, 40]]];
+  const rectB: [number, number][][] = [[[70, 0], [74, 0], [74, 4], [70, 4]]];
+  const outline: [number, number][][] = [[[0, 0], [74, 0], [74, 40], [0, 40]]];
+  const a: PocketNode = {
+    id: 'a', floorZ: -3, mouthZ: 0, open: false, through: false,
+    region: rectA, floors: [{ polygons: rectA, area: 2400 }],
+    islands: [], children: [], remainder: [], narrowest: 40,
+  };
+  const b: PocketNode = {
+    id: 'b', floorZ: -3, mouthZ: 0, open: false, through: false,
+    region: rectB, floors: [{ polygons: rectB, area: 16 }],
+    islands: [], children: [], remainder: [], narrowest: 4,
+  };
+  return {
+    frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: -3 },
+    levels: [-3],
+    top: { z: 0, floors: [], area: 0 },
+    contour: { outline, area: 2416, zTo: -3, frees: true, shoulders: [] },
+    pockets: [a, b],
+    rims: [],
+    remainder: [],
+    unreachable: [],
+    report: { source: 'mesh', patches: 1, planarArea: 2416, remainderArea: 0, tolerances: {} as never, slivers: [], notes: [] },
+  };
+}
+
 /** Wraps a real offset to throw for any region whose bounding width is `badWidth` — a stand-in
  * for a real Clipper failure on a specific region (an extended open shoulder, a degenerate
  * through hole), without needing a fixture that actually breaks Clipper. */
@@ -272,6 +306,25 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     expect(result.ops.some((op) => op.kind === 'contour'), 'the contour still plans').toBe(true);
     expect(result.ops.some((op) => op.region.id === 'bad-1'), 'the failing region is not planned').toBe(false);
     expect(result.notes.some((n) => n.startsWith('bad-1:') && n.includes('not cut')), `notes: ${result.notes.join('; ')}`).toBe(true);
+  });
+
+  // The manager's #959 ruling: the freeing cut runs LAST, after every rest/finish/chamfer step —
+  // never while a smaller rest cutter still has pockets of its own left to touch.
+  it('the freeing cut (contour) is posted LAST, after the rest chain\'s own pocket — never before it', () => {
+    const tree = syntheticTreeRestChain();
+    const result = planTray(tree);
+    expect(result.unreachable).toEqual([]);
+    // Confirms this actually exercises the cross-step reorder, not a one-cutter plan where the
+    // contour was already last within its own single step regardless.
+    expect(result.choice.steps.length, `steps: ${JSON.stringify(result.choice.steps.map((s) => ({ kind: s.kind, cutter: s.cutter.key, regionIds: s.regionIds })))}`).toBeGreaterThan(1);
+    expect(result.ops).toHaveLength(3); // a, b, contour
+    expect(result.ops.at(-1)!.kind).toBe('contour');
+    expect(result.ops.slice(0, -1).some((op) => op.kind === 'contour')).toBe(false);
+    // The contour's own cutter program ends with the contour operation, after whatever that
+    // cutter already posted — the extra tool change this can cost is stated, not hidden.
+    const contourOp = result.ops.at(-1)!;
+    const program = result.programs.get(contourOp.outcome.cutter)!;
+    expect(program.operations.at(-1)!.labelId).toBe('contour');
   });
 
 
