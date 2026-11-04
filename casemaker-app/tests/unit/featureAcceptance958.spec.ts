@@ -75,8 +75,13 @@ interface Want {
 }
 
 /** Greedy match by centroid distance on the known coordinates; then the area range and size. */
+const describeParts = (got: Part[]): string =>
+  got
+    .map((p) => `    ${p.area.toFixed(2)} mm² @ (${p.centroid[0].toFixed(2)}, ${p.centroid[1].toFixed(2)}) ${p.size[0].toFixed(2)} × ${p.size[1].toFixed(2)}`)
+    .join('\n');
+
 function expectParts(label: string, got: Part[], want: Want[]): void {
-  expect(got.length, `${label}: ${got.length} parts, want ${want.length}`).toBe(want.length);
+  expect(got.length, `${label}: ${got.length} parts, want ${want.length}; ours:\n${describeParts(got)}`).toBe(want.length);
   const free = [...got];
   for (const w of want) {
     const dist = (p: Part): number => Math.hypot(w.x === undefined ? 0 : p.centroid[0] - w.x, w.y === undefined ? 0 : p.centroid[1] - w.y);
@@ -94,6 +99,29 @@ function expectParts(label: string, got: Part[], want: Want[]): void {
   }
 }
 
+/**
+ * Levels (re-pinned after E's run, 6621257151): E's levels come from Makera's constant-Z feed
+ * moves of 20 mm or more, so a real flat Makera reaches another way (a short pass, a helix) is
+ * not in E's list. Every level E reads must be a level of the tree, within 0.01. A level of the
+ * tree that E doesn't list passes only once E's heightfield confirms it flat (cells within ±0.01 of
+ * it at slope ≤ 5°, the same rule E used for the listed levels) and the depth is added below.
+ * The levels E flagged as slope crossings must stay absent.
+ */
+const TRAY_CONFIRMED_EXTRA_DEPTHS: number[] = [];
+const ORGANIZER_CONFIRMED_EXTRA_DEPTHS: number[] = [];
+
+function expectLevels(tree: FeatureTree, modelTop: number, want: number[], confirmed: number[], absent: number[]): void {
+  const depths = tree.levels.map((z) => modelTop - z);
+  const shown = depths.map((d) => d.toFixed(3)).join(', ');
+  for (const d of want) expect(depths.some((x) => Math.abs(x - d) <= 0.01), `level ${d} missing; levels ${shown}`).toBe(true);
+  for (const d of absent) expect(depths.some((x) => Math.abs(x - d) <= 0.01), `level ${d} must be absent; levels ${shown}`).toBe(false);
+  const extra = depths.filter((x) => !want.some((d) => Math.abs(x - d) <= 0.01));
+  const unconfirmed = extra.filter((x) => !confirmed.some((d) => Math.abs(x - d) <= 0.01));
+  expect(unconfirmed.map((d) => d.toFixed(3)), `levels not in E's list and not yet confirmed flat by E; levels ${shown}`).toEqual([]);
+}
+
+const placedMeshes = new Map<FeatureTree, { positions: Float32Array; indices: Uint32Array }>();
+
 async function placedTree(file: string, stock: [number, number], modelTop: number): Promise<FeatureTree> {
   const bytes = fs.readFileSync(file);
   const read = await stepToMesh(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'recognition');
@@ -108,7 +136,9 @@ async function placedTree(file: string, stock: [number, number], modelTop: numbe
     positions[i + 2] = positions[i + 2]! + dz;
   }
   const mesh = { ...read.mesh, positions };
-  return recogniseFeatures({ triangles: mesh, faceId: read.faceId }, { up: [0, 0, 1], stockTop: 0 }, tl);
+  const tree = recogniseFeatures({ triangles: mesh, faceId: read.faceId }, { up: [0, 0, 1], stockTop: 0 }, tl);
+  placedMeshes.set(tree, { positions, indices: read.mesh.indices });
+  return tree;
 }
 
 /** Floor parts at a depth below the model top (top land at depth 0). */
@@ -120,12 +150,49 @@ function floorsAt(tree: FeatureTree, modelTop: number, depth: number): Part[] {
     .flatMap((n) => n.floors.map((f) => partOf(f.polygons, f.area)));
 }
 
-function writeRemainder(tree: FeatureTree, name: string): void {
+/**
+ * For E's relation checks, in the stock frame:
+ *   <name>-remainder.json  each region's footprint AND its triangles (xyz), so E can rasterise the
+ *                          surface's z on the heightfield grid and apply the same ±0.05 band to
+ *                          ours as to the masks before comparing areas and slopes (R4, slope)
+ *   <name>-floors.json     every floor part per level, and every level's depth, so E can check our
+ *                          levels against the heightfield and R1/R2 against our floors
+ */
+function writeForE(tree: FeatureTree, name: string, modelTop: number, mesh: { positions: Float32Array; indices: Uint32Array }): void {
   const out = process.env.CM_958_OUT;
   if (out === undefined) return;
   fs.mkdirSync(out, { recursive: true });
-  const regions = tree.remainder.map((r) => ({ id: r.id, area: r.area, zTop: r.zTop, zBottom: r.zBottom, slopeMedianDeg: r.slopeMedianDeg, footprint: r.footprint }));
-  fs.writeFileSync(path.join(out, `${name}-remainder.json`), JSON.stringify({ frame: 'stock', regions }, null, 1));
+  const regions = tree.remainder.map((r) => {
+    const triangles: number[][] = [];
+    for (const t of r.triangles) {
+      const tri: number[] = [];
+      for (let k = 0; k < 3; k++) {
+        const v = mesh.indices[3 * t + k]! * 3;
+        tri.push(mesh.positions[v]!, mesh.positions[v + 1]!, mesh.positions[v + 2]!);
+      }
+      triangles.push(tri);
+    }
+    return { id: r.id, area: r.area, zTop: r.zTop, zBottom: r.zBottom, slopeMedianDeg: r.slopeMedianDeg, footprint: r.footprint, triangles };
+  });
+  fs.writeFileSync(path.join(out, `${name}-remainder.json`), JSON.stringify({ frame: 'stock', regions }));
+  const levels = tree.levels.map((z) => ({
+    z,
+    depth: modelTop - z,
+    parts: (Math.abs(z - tree.top.z) < 1e-9 ? tree.top.floors : all(tree.pockets).filter((n) => !n.through && Math.abs(n.floorZ - z) <= 0.01).flatMap((n) => n.floors)).map((f) => ({
+      ...partOf(f.polygons, f.area),
+      polygons: f.polygons,
+    })),
+  }));
+  fs.writeFileSync(path.join(out, `${name}-floors.json`), JSON.stringify({ frame: 'stock', levels, slivers: tree.report.slivers }));
+}
+
+/** Every level with its floor parts, printed so a red run says what the tree found. */
+function logLevels(tree: FeatureTree, name: string, modelTop: number): void {
+  const lines = tree.levels.map((z) => {
+    const parts = Math.abs(z - tree.top.z) < 1e-9 ? tree.top.floors : all(tree.pockets).filter((n) => !n.through && Math.abs(n.floorZ - z) <= 0.01).flatMap((n) => n.floors);
+    return `  depth ${(modelTop - z).toFixed(3)} (z ${z.toFixed(3)}): ${parts.length} parts\n${describeParts(parts.map((f) => partOf(f.polygons, f.area)))}`;
+  });
+  console.log(`#958 ${name}: partTop ${tree.frame.partTop.toFixed(3)} partBottom ${tree.frame.partBottom.toFixed(3)}\n${lines.join('\n')}`);
 }
 
 const TRAY = process.env.CM_958_TRAY_STEP;
@@ -135,12 +202,11 @@ describe.skipIf(TRAY === undefined)('#958 acceptance — tool tray 70, top setup
   const TOP = -1.2;
   const tree = (): Promise<FeatureTree> => placedTree(TRAY!, [110, 140], TOP);
 
-  it('levels are exactly 0.00 / 0.60 / 3.00 / 6.00 below the model top', async () => {
+  it('every level E reads is a level of the tree; any other level is one E confirmed flat', async () => {
     const t = await tree();
-    writeRemainder(t, 'tray');
-    const depths = t.levels.map((z) => TOP - z);
-    expect(depths.length, `levels ${depths.map((d) => d.toFixed(3))}`).toBe(4);
-    [0, 0.6, 3, 6].forEach((d, i) => expect(Math.abs(depths[i]! - d), `level ${i}`).toBeLessThanOrEqual(0.01));
+    logLevels(t, 'tray', TOP);
+    writeForE(t, 'tray', TOP, placedMeshes.get(t)!);
+    expectLevels(t, TOP, [0, 0.6, 3, 6], TRAY_CONFIRMED_EXTRA_DEPTHS, []);
   });
 
   it('the floors at each level match E’s parts', async () => {
@@ -199,12 +265,11 @@ describe.skipIf(ORGANIZER === undefined)('#958 acceptance — tool organizer, to
   const TOP = -0.8;
   const tree = (): Promise<FeatureTree> => placedTree(ORGANIZER!, [170, 170], TOP);
 
-  it('levels are exactly 0 / 3 / 4 / 4.99 / 6 / 10 (not 3.83, not 7.98)', async () => {
+  it('every level E reads is a level of the tree (not 3.83, not 7.98); any other level is one E confirmed flat', async () => {
     const t = await tree();
-    writeRemainder(t, 'organizer');
-    const depths = t.levels.map((z) => TOP - z);
-    expect(depths.length, `levels ${depths.map((d) => d.toFixed(3))}`).toBe(6);
-    [0, 3, 4, 4.99, 6, 10].forEach((d, i) => expect(Math.abs(depths[i]! - d), `level ${i}`).toBeLessThanOrEqual(0.01));
+    logLevels(t, 'organizer', TOP);
+    writeForE(t, 'organizer', TOP, placedMeshes.get(t)!);
+    expectLevels(t, TOP, [0, 3, 4, 4.99, 6, 10, 22], ORGANIZER_CONFIRMED_EXTRA_DEPTHS, [3.83, 7.98]);
   });
 
   it('the floors at each level match E’s parts', async () => {
@@ -248,28 +313,17 @@ describe.skipIf(ORGANIZER === undefined)('#958 acceptance — tool organizer, to
     }
   });
 
-  it('eleven through features at 22.00', async () => {
+  it('eleven pockets with floors at 22.00 (the model is 26 thick, so they are not through)', async () => {
+    // Re-pinned after E's run (6621257151): the part's bottom is 26.0 below its top, at the stock's
+    // bottom. E's "−22.80" is Makera's contour depth on this side, not the model's bottom, so the
+    // eleven are floors at 22, read as floor parts like every other level.
     const t = await tree();
-    const through = all(t.pockets)
-      .filter((n) => n.through)
-      .map((n) => {
-        let area = 0;
-        for (const ring of n.region) {
-          let a = 0;
-          for (let i = 0; i < ring.length; i++) {
-            const [x0, y0] = ring[i]!;
-            const [x1, y1] = ring[(i + 1) % ring.length]!;
-            a += x0 * y1 - x1 * y0;
-          }
-          area += a / 2;
-        }
-        return partOf(n.region, Math.abs(area));
-      });
-    expect(Math.abs(t.frame.partBottom - (TOP - 22))).toBeLessThanOrEqual(0.01);
+    expect(Math.abs(t.frame.partBottom - (TOP - 26))).toBeLessThanOrEqual(0.01);
+    const through = floorsAt(t, TOP, 22);
     // E gives the eight at y 37.5 only as "x 20.5–150.5": the two ends are pinned, the six between
     // match on y, area and size alone. Fully placed parts first, so the greedy match takes them.
     const row = { y: 37.5, area: [165.9, 167.0] as [number, number], size: [12.8, 12.8] as [number, number] };
-    expectParts('through', through, [
+    expectParts('22', through, [
       { x: 108.5, y: 17.5, area: [103.0, 103.0] },
       { x: 128.5, y: 17.5, area: [103.0, 103.0] },
       { x: 150.5, y: 63.5, area: [77.7, 77.7] },

@@ -281,7 +281,7 @@ export function buildTree(
     garbage.push(...topParts);
     const top = {
       z: topZ,
-      floors: topParts.map((part) => ({ polygons: toPolygons(part), area: part.area() })),
+      floors: topParts.filter((part) => part.area() > AREA_EPS).map((part) => ({ polygons: toPolygons(part), area: part.area() })),
       area: topUnion.area(),
     };
 
@@ -320,7 +320,7 @@ export function buildTree(
           open,
           through: false,
           region: toPolygons(comp),
-          floors: floorParts.map((part) => ({ polygons: toPolygons(part), area: part.area() })),
+          floors: floorParts.filter((part) => part.area() > AREA_EPS).map((part) => ({ polygons: toPolygons(part), area: part.area() })),
           islands: [],
           children: [],
           remainder: [],

@@ -108,6 +108,9 @@ describe('#958 the feature tree', () => {
     close(r.zTop, 10, 1e-6);
     close(r.zBottom, 8, 0.01);
     expect(r.in).toBe('top');
+    // No floor at the part's top (the dish is cut into it, the land is the top): the land is
+    // the top level here, so it has one part. A part with no area is never listed.
+    expect(tree.top.floors.every((f) => f.area > 0)).toBe(true);
   });
 
   it('a slope crossing a level is not a pocket, and a sliver floor is listed, not a level (D2)', () => {
