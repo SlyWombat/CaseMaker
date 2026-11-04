@@ -15,6 +15,9 @@ import { expect, it } from 'vitest';
 
 import { checkGoalCutInto } from '@/engine/cnc/engrave/designCheck';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { buildTimeline, parseGcode, stubSetup } from '@/engine/cnc';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 
 const ROOT = process.env.CM_MAKERABLES ?? path.resolve(process.cwd(), '..', '.scratch/makerables');
 const HF = path.join(ROOT, 'hf');
@@ -27,6 +30,8 @@ const FILES = {
   goalMeta: [path.join(HF, 'tray70-top.json'), '42394bab61d9fe3a1508bab3b9a126bd3bd1232da2b4d93bca6a5ca425b9f04f'],
   swept: [path.join(RUN, 'goalcheck.npy'), '9e29b40aed3c3476ace5a2cefbb021ca8f2737bcb8321af9cf6aa11db75d299e'],
   checked: [path.join(RUN, 'goalcheck.json'), '5659b52d71da69d0b50a08e9b3c505dd98934dfba3847eb8f9cf5c2d5bbcc0ea'],
+  // #964 — the vendor NC itself, for the per-cell `who` map (the vendor runs four cutters).
+  nc: [path.join(ROOT, 'dl', 'modular-stackable-tool-trays', 'Tool_Tray_70mm_Top-msfi5w1b.nc'), '67c2d2f9f3536ecc93fdfa7e67fb94c9826ef674bf3b8a1e85ce2795aae482ab'],
 } as const;
 
 function sha(file: string): string {
@@ -64,6 +69,39 @@ function readNpy(file: string): { shape: [number, number]; data: Float64Array } 
   const slice = buf.buffer.slice(buf.byteOffset + start, buf.byteOffset + start + bytes);
   const data = descr === '<f8' ? new Float64Array(slice) : Float64Array.from(new Float32Array(slice));
   return { shape: [ny, nx], data };
+}
+
+/** The vendor NC's own tool records (`;@MKR|TOOL|…`), as Tool objects the stamp can use. */
+function vendorTools(ncText: string): Map<number, Tool> {
+  const out = new Map<number, Tool>();
+  for (const line of ncText.split('\n')) {
+    const m = /^;@MKR\|TOOL\|(.*)$/.exec(line.trim());
+    if (m === null) continue;
+    const kv = new Map<string, string>();
+    for (const part of m[1]!.split('|')) {
+      const i = part.indexOf('=');
+      if (i > 0) kv.set(part.slice(0, i), part.slice(i + 1));
+    }
+    const number = Number(kv.get('number'));
+    if (!Number.isFinite(number)) continue;
+    const name = kv.get('name') ?? `tool ${number}`;
+    const diameter = Number(kv.get('diameter') ?? kv.get('handlediameter') ?? 0);
+    const type = kv.get('type') ?? '';
+    const flute = Number(kv.get('flutelength') ?? 0);
+    const base = { number, name, fluteLength: Number.isFinite(flute) && flute > 0 ? flute : null };
+    if (type === 'Ball Nose') {
+      out.set(number, flatEndMill(diameter, { ...base, shape: 'ball', typeText: type, tipDiameter: diameter }));
+    } else if (type === 'V-Bit') {
+      const angle = Number(kv.get('angle') ?? 90);
+      out.set(number, flatEndMill(diameter, {
+        ...base, shape: 'chamfer', typeText: type,
+        tipDiameter: Number(kv.get('tipdiameter') ?? 0), angle, halfAngle: angle / 2,
+      }));
+    } else {
+      out.set(number, flatEndMill(diameter, { ...base }));
+    }
+  }
+  return out;
 }
 
 maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break at least E’s 3.66 %', () => {
@@ -107,15 +145,40 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
   });
 
   expect(r.cutIntoFraction * 100).toBeCloseTo(6.85, 1);
-  // E's 3.66 % gates each cell on `who` — its deepest cutter being the V. The app's ResultTop is
-  // heights only, so cells the flat/ball cut deepest inside the V's reach and leg are excused too:
-  // this reads ~4.95 %, an upper bound on the edge break. The judged line is unaffected (0), and
-  // the gap is stated on #964; a per-cell `who` map would close it and needs the session's engine.
-  expect(r.edgeBreakFraction * 100).toBeGreaterThanOrEqual(3.6);
+  // Without the `who` rule the allowance excuses cells on geometry alone: every cell within the
+  // V's reach and leg, whichever cutter took it deepest. That reads ~4.95 %, an upper bound.
+  expect(r.edgeBreakFraction * 100).toBeGreaterThan(4.5);
   expect(r.edgeBreakFraction * 100).toBeLessThan(5.2);
   expect(r.adjudicatedFraction * 100).toBeCloseTo(0, 6);
   expect(r.wallNotScoredFraction).toBeGreaterThan(0);
   expect(r.shadowNotScoredFraction).toBeGreaterThan(0);
   // The rule's point: the vendor's own program passes line 2 once its rim break is allowed.
   expect(r.ok).toBe(true);
+
+  // #964 — THE PAGE'S `who` RULE. E's 3.66 % excuses a cell only where the DEEPEST stamp in it
+  // is the V bit. The vendor NC runs four cutters (⌀6 flat, ⌀3.175 flat, ⌀6 ball, ⌀3.175 90°
+  // chamfer); stamping each checkpoint with the tool it actually ran gives that per-cell identity.
+  const ncText = readFileSync(FILES.nc[0], 'utf8');
+  const tools = vendorTools(ncText);
+  const slab = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [110, 140] as [number, number] }, thickness: 27.2 };
+  const timeline = buildTimeline(parseGcode(ncText), stubSetup(slab, { kind: 'tape-down', contact: slab.outline }));
+  const stamp = exactSweptFieldTooled(goal, timeline, (t) => (typeof t === 'number' ? tools.get(t) ?? null : null));
+  expect(stamp).not.toBeNull();
+  const who = (stamp as NonNullable<typeof stamp>).who;
+  const whoAt = (x: number, y: number): number | null => {
+    const i = Math.round((x - meta.x0) / meta.pitch);
+    const j = Math.round((y - meta.y0) / meta.pitch);
+    if (i < 0 || j < 0 || i >= meta.nx || j >= meta.ny) return null;
+    return who[j * meta.nx + i]!;
+  };
+  const gated = checkGoalCutInto(goal, top, {
+    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), toolNumber: 4 },
+    whoAt,
+    wallShadowRadiusMm: 3,
+  });
+  // E's own reading on this NC: edgeBreakPct 3.66, cutInto0p1Pct 0.
+  expect(gated.edgeBreakFraction * 100).toBeGreaterThan(3.5);
+  expect(gated.edgeBreakFraction * 100).toBeLessThan(3.85);
+  expect(gated.adjudicatedFraction * 100).toBeCloseTo(0, 6);
+  expect(gated.ok).toBe(true);
 });

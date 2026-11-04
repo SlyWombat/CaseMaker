@@ -181,11 +181,12 @@ describe('#961 choose by cost', () => {
   it('cost = #927 terms on the posted moves + toolChange.seconds per change after the first', () => {
     const candidates = candidateSequences(TRAY, { house: Object.values(VENDOR), catalogue: [] });
     const vendor = candidates.find((c) => c.steps.map((s) => s.cutter.key).join('+') === 't6+t6+t3+b6+c90')!;
-    const cost = priceSequence(vendor, opts());
-    expect(cost).not.toBeNull();
+    const priced = priceSequence(vendor, opts());
+    expect(priced).not.toBeNull();
     const terms = vendor.steps.map((s) => estimateCycleTerms(standIn(s), RAPID).totalSeconds);
-    expect(cost!.toolChanges).toBe(3); // the first cutter is loaded; three swaps
-    expect(cost!.totalSeconds).toBeCloseTo(
+    expect(priced!.failures).toEqual([]);
+    expect(priced!.cost.toolChanges).toBe(3); // the first cutter is loaded; three swaps
+    expect(priced!.cost.totalSeconds).toBeCloseTo(
       terms.reduce((a, b) => a + b, 0) + 3 * TOOL_CHANGE_SECONDS,
       6,
     );

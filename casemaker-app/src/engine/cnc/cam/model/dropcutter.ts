@@ -61,6 +61,7 @@
 
 import type { Tool } from '@/engine/cnc/tool';
 import { isVShape, vCone } from '@/engine/cnc/vProfile';
+import { binnedReachableTriangles, buildTriangleBins, type TriangleBins } from './triangleBins';
 
 /** A triangle-soup mesh: `positions` is 9 numbers (x0,y0,z0,x1,y1,z1,x2,y2,z2) per triangle, exactly `ParsedMesh`'s shape. */
 export interface DropCutterMesh {
@@ -350,9 +351,20 @@ function triangleContribution(tri: Tri, profile: CutterProfile, x: number, y: nu
  * triangle is within the cutter's reach. `profile` is this cutter's `profileOf(tool)` — callers that
  * query many points for the same cutter should compute it once.
  */
+/** Per-mesh bins, built on the first query and reused for the mesh's lifetime (#960). */
+const binsByMesh = new WeakMap<DropCutterMesh, TriangleBins>();
+function binsFor(mesh: DropCutterMesh): TriangleBins {
+  let bins = binsByMesh.get(mesh);
+  if (bins === undefined) {
+    bins = buildTriangleBins(mesh);
+    binsByMesh.set(mesh, bins);
+  }
+  return bins;
+}
+
 export function dropCutterHeight(profile: CutterProfile, mesh: DropCutterMesh, x: number, y: number): number | null {
   let best: number | null = null;
-  for (const t of reachableTriangles(mesh, x, y, profile.radiusMm)) {
+  for (const t of binnedReachableTriangles(binsFor(mesh), x, y, profile.radiusMm)) {
     const tri = triangleOf(mesh, t);
     const contribution = triangleContribution(tri, profile, x, y);
     if (contribution !== null && (best === null || contribution > best)) best = contribution;

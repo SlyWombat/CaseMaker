@@ -34,6 +34,12 @@ import { regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
 import { chooseSequence, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep } from './sequence';
 import { pocket } from './ops/pocket';
+import { clSurface } from './clsurface';
+import { rough } from './ops/rough';
+import { rest } from './ops/rest';
+import { finish } from './ops/finish';
+import { pencil } from './ops/pencil';
+import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
 
 /** One ring (outer boundary or a hole); `pocket.ts`'s `Polygons` is `Polygon[]`. NEW — no existing equivalent. */
@@ -664,4 +670,204 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   });
 
   return { ops, programs, sequence, unreachable, notes, choice };
+}
+
+/**
+ * #959's curved half — THE RULING'S PIPELINE, one op per stage, per `RemainderRegion` and rim.
+ *
+ * The manager's ruling on the curved regions: the FLAT Z-steps every curved region to its own CL
+ * surface, leaving one BAND above it (`bandMm` — the finish's promised scallop/stock-to-leave);
+ * where that band is all the finish needs (the shallow ground), the flat's own band step-over is
+ * the whole story, and where the surface is steep the flat roughs to the CL instead of trying to
+ * follow it. The BALL then runs ONE final level over the region (a single pass at the region's
+ * depth, not another Z-staircase) to take the band; a PENCIL pass follows each crease the ball's
+ * CL surface leaves; and where a smaller flat is offered (`restFlat`), a REST pass clears by CL
+ * difference between the two flats before the ball. Every rim the tree found is broken by the V
+ * at the job's stated edge break. The FIGS' goal path uses this same pipeline (`rough` first).
+ *
+ * These ops are entered into the acceptance spec in the same commit (the manager's rule after
+ * E's a46f0358 run): an op that is real is planned through the product path and measured there.
+ */
+export interface PlanCurvedOptions {
+  /** The mesh the tree's regions index into (`ModelPlanInput.geometry`). */
+  geometry: FeatureSource;
+  /** The real Clipper2 offset, or a test fake — the pocket op's own contract. */
+  offset: OffsetFn;
+  /** The three tools the curved pipeline uses: the flat roughs, the ball finishes, the V breaks rims. */
+  flat: Tool;
+  ball: Tool;
+  vbit: Tool;
+  /** An optional smaller flat for the rest pass by CL difference. */
+  restFlat?: Tool;
+  stepDownMm: number;
+  /** The band the finish promises, mm — the rough's stock-to-leave and the ball's scallop. */
+  bandMm: number;
+  /** The rings' spacing; absent → the flat's own radius. */
+  stepOverMm?: number;
+  feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
+  rapid: RapidEstimate;
+  spindleRpm: number;
+  air: boolean;
+  safeZMm: number;
+  hopZMm: number;
+  /** The job's own edge break — the chamfer's depth (A's R3). */
+  edgeBreak: EdgeBreakSpec;
+  toolNumberFor: (tool: Tool) => number;
+  startFrom?: readonly [number, number];
+}
+
+export interface PlanCurvedResult {
+  ops: PlannedOp[];
+  /** Statements the plan owes the operator: nothing here is silent. */
+  notes: string[];
+}
+
+function regionRefOf(id: string, kind: RegionKind, footprint: Polygons, topZ: number, bottomZ: number): RegionRef {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const ring of footprint) {
+    for (const [x, y] of ring) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  return {
+    id,
+    kind,
+    bounds: { min: [minX, minY], max: [maxX, maxY] },
+    topZ,
+    bottomZ,
+    obstacles: [],
+    regionClearanceZ: Math.max(0, topZ) + 5,
+  };
+}
+
+export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): PlanCurvedResult {
+  const ops: PlannedOp[] = [];
+  const notes: string[] = [];
+  const cuts: CutParams = {
+    rpm: opts.spindleRpm,
+    feed: opts.feeds.feedMmPerMin,
+    plungeFeed: opts.feeds.plungeFeedMmPerMin,
+    stepDown: opts.stepDownMm,
+    stepOver: opts.stepOverMm ?? (cuttingDiameter(opts.flat) ?? 1) / 2,
+    peck: 0,
+    air: opts.air,
+  };
+
+  for (const region of tree.remainder) {
+    const ref = regionRefOf(region.id, 'curved', region.footprint, region.zTop, region.zBottom);
+    const clFlat = clSurface(opts.geometry, region, opts.flat, cuts.stepOver);
+    // 1. The FLAT Z-steps the region to its own CL, leaving the band.
+    const roughOut = rough({
+      cutter: opts.flat,
+      region,
+      regionRef: ref,
+      clSurface: clFlat,
+      stepDownMm: opts.stepDownMm,
+      stockToLeaveMm: opts.bandMm,
+      stepOverMm: opts.stepOverMm,
+      feeds: opts.feeds,
+      offset: opts.offset,
+      safeZMm: opts.safeZMm,
+      hopZMm: opts.hopZMm,
+      toolNumber: opts.toolNumberFor(opts.flat),
+      spindleRpm: opts.spindleRpm,
+      air: opts.air,
+      rapid: opts.rapid,
+      ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+    });
+    ops.push({ kind: 'rough', region: ref, outcome: roughOut });
+
+    // 2. REST BY CL DIFFERENCE, when the caller offers a smaller flat: the band the previous
+    //    cutter left standing, where the smaller one can reach.
+    let finishCl = clFlat;
+    if (opts.restFlat !== undefined) {
+      const restCl = clSurface(opts.geometry, region, opts.restFlat, cuts.stepOver);
+      const restOut = rest({
+        cutter: opts.restFlat,
+        region,
+        regionRef: ref,
+        prevClSurface: clFlat,
+        clSurface: restCl,
+        stepDownMm: opts.stepDownMm,
+        stockToLeaveMm: opts.bandMm,
+        stepOverMm: opts.stepOverMm,
+        feeds: opts.feeds,
+        offset: opts.offset,
+        safeZMm: opts.safeZMm,
+        hopZMm: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(opts.restFlat),
+        spindleRpm: opts.spindleRpm,
+        air: opts.air,
+        rapid: opts.rapid,
+        ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+      });
+      ops.push({ kind: 'rest', region: ref, outcome: restOut });
+      finishCl = restCl;
+    }
+
+    // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
+    const depth = Math.max(opts.stepDownMm, region.zTop - region.zBottom);
+    const finishOut = finish({
+      cutter: opts.ball,
+      region,
+      regionRef: ref,
+      clSurface: finishCl,
+      kind: 'ball-scallop',
+      scallopMm: opts.bandMm,
+      stepDownMm: depth,
+      feeds: opts.feeds,
+      safeZMm: opts.safeZMm,
+      hopZMm: opts.hopZMm,
+      toolNumber: opts.toolNumberFor(opts.ball),
+      spindleRpm: opts.spindleRpm,
+      air: opts.air,
+      rapid: opts.rapid,
+    });
+    ops.push({ kind: 'finish', region: ref, outcome: finishOut });
+
+    // 4. PENCIL along the creases the ball's own CL surface leaves.
+    const pencilOut = pencil({
+      cutter: opts.ball,
+      region,
+      regionRef: ref,
+      clSurface: finishCl,
+      feeds: opts.feeds,
+      safeZMm: opts.safeZMm,
+      hopZMm: opts.hopZMm,
+      toolNumber: opts.toolNumberFor(opts.ball),
+      spindleRpm: opts.spindleRpm,
+      air: opts.air,
+      rapid: opts.rapid,
+    });
+    ops.push({ kind: 'pencil', region: ref, outcome: pencilOut });
+  }
+
+  // 5. EVERY RIM the tree found, broken by the V at the job's stated edge break.
+  for (const rim of tree.rims) {
+    const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rim.z, rim.z);
+    const out = chamfer({
+      cutter: opts.vbit,
+      rim,
+      region: ref,
+      edgeBreak: opts.edgeBreak,
+      offset: opts.offset,
+      params: cuts,
+      rapid: opts.rapid,
+    });
+    ops.push({ kind: 'chamfer', region: ref, outcome: out });
+  }
+
+  if (tree.remainder.length === 0) notes.push('no curved remainder regions — the rough/rest/finish/pencil stages have nothing to plan');
+  if (tree.rims.length === 0) notes.push('no rims — the chamfer stage has nothing to plan');
+  notes.push(
+    `the curved pipeline follows the ruling: the flat Z-steps each remainder region to its CL less ${opts.bandMm} mm, ` +
+      `the ball runs ONE final level, the pencil follows the creases${opts.restFlat === undefined ? ', and no rest flat was offered' : ', and a rest flat clears the CL difference first'}`,
+  );
+  return { ops, notes };
 }

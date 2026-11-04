@@ -54,7 +54,7 @@ import { checkDesignReach, checkGoalCutInto, goalCutIntoUnchecked, type DesignCh
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
-import { exactSweptField } from './sweptPoint';
+import { exactSweptFieldTooled } from './sweptPoint';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import type { CarriedField } from '../geometry/carriedField';
 
@@ -561,6 +561,13 @@ export interface SimSession {
    */
   sweptFieldExact(goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null;
   /**
+   * #964 — WHO left each cell's lowest reach: the tool number of the program folded deepest into
+   * {@link sweptFieldExact}'s field at that cell (0 = untouched), as a sampler on the goal's grid.
+   * The edge-break allowance gates on it: a cell is edge break only where the V bit is the
+   * deepest cutter (the page's `who` rule). Null on the same sessions/routes the field is null on.
+   */
+  sweptWhoExact(goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): ((x: number, y: number) => number | null) | null;
+  /**
    * #964 — whether {@link sweptFieldExact} can answer at all on this live sweep: a flat column or
    * an exact-engine sweep. Cheap and grid-free, so a caller can skip sampling the goal for a
    * rotary/refused session (`goalInputFor`).
@@ -863,7 +870,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * carries material from an earlier program is a later program of the same run and keeps the
    * field; a load with no seed at all begins a new run (see `load`).
    */
-  let exactRun: { key: string; field: Float32Array } | null = null;
+  let exactRun: { key: string; field: Float32Array; who: Uint8Array } | null = null;
 
   const load = (gcodeText: string, setupArg: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult => {
     dispose();
@@ -1431,31 +1438,61 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
   let exactFor: object | null = null;
   let exactKey = '';
   let exactValue: Float32Array | null = null;
-  const sweptFieldExact = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null => {
+  let exactWhoValue: Uint8Array | null = null;
+  /**
+   * #964 — the stamp WITH ITS IDENTITY. Each program's stamp records the tool number that left
+   * each cell's lowest reach (`exactSweptFieldTooled`); the fold carries that map alongside the
+   * field, so the edge-break allowance can require the deepest cutter to be the V (the page's
+   * `who` rule) instead of excusing every shallow cell near an edge.
+   */
+  const sweptStamp = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): { field: Float32Array; who: Uint8Array } | null => {
     const l = live;
     const source = stampSource();
     if (l === null || source === null) return null;
     const key = `${goal.nx},${goal.ny},${goal.x0},${goal.y0},${goal.pitch}`;
-    if (exactFor === l && exactKey === key) return exactValue;
-    const stamp = exactSweptField(goal, source.timeline, source.tool);
-    exactValue = stamp;
+    if (exactFor === l && exactKey === key) {
+      return exactValue === null || exactWhoValue === null ? null : { field: exactValue, who: exactWhoValue };
+    }
+    const stamp = exactSweptFieldTooled(goal, source.timeline, () => source.tool);
+    exactValue = stamp?.field ?? null;
+    exactWhoValue = stamp?.who ?? null;
     if (stamp !== null) {
       // #948 — FOLD EACH PROGRAM'S STAMP INTO THE RUN'S ONE FIELD (the page's rule). A run's last
       // program alone (a ⌀0.5 rest pass) reads only its own moves; the fold makes the report carry
       // what every program of the run left, exactly as `goal_check.py` stamps them all onto one H.
+      // #964 — the identity rides the same fold: a cell's `who` is the cutter that took it lowest.
       if (exactRun !== null && exactRun.key === key) {
         const acc = exactRun.field;
+        const whoAcc = exactRun.who;
         for (let k = 0; k < acc.length; k++) {
-          if (stamp[k]! < acc[k]!) acc[k] = stamp[k]!;
+          if (stamp.field[k]! < acc[k]!) {
+            acc[k] = stamp.field[k]!;
+            whoAcc[k] = stamp.who[k]!;
+          }
         }
         exactValue = acc;
+        exactWhoValue = whoAcc;
       } else {
-        exactRun = { key, field: stamp };
+        exactRun = { key, field: stamp.field, who: stamp.who };
       }
     }
     exactFor = l;
     exactKey = key;
-    return exactValue;
+    return exactValue === null || exactWhoValue === null ? null : { field: exactValue, who: exactWhoValue };
+  };
+  const sweptFieldExact = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null =>
+    sweptStamp(goal)?.field ?? null;
+  const sweptWhoExact = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): ((x: number, y: number) => number | null) | null => {
+    const stamp = sweptStamp(goal);
+    if (stamp === null) return null;
+    const { who } = stamp;
+    const { nx, ny, x0, y0, pitch } = goal;
+    return (x, y) => {
+      const i = Math.round((x - x0) / pitch);
+      const j = Math.round((y - y0) / pitch);
+      if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
+      return who[j * nx + i]!;
+    };
   };
 
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);
@@ -1586,6 +1623,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     levelCut,
     sweptTop,
     sweptFieldExact,
+    sweptWhoExact,
     canStampGoal,
     dispose,
     get loaded() {
