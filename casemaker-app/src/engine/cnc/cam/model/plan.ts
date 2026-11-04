@@ -196,6 +196,14 @@ export interface SetupPlan {
    */
   programs: ToolpathIR[];
   totalCostSeconds: number;
+  /**
+   * The plan's statements to the operator — every stage that found nothing to cut, a feeds
+   * substitution, a limit this entry does not yet cover. Stated, never silent: the check suite's
+   * own finding was that `planModelCam` computed these and dropped them.
+   */
+  notes: string[];
+  /** Features no cutter in the chain covers, each a sentence naming the limiting number. */
+  unreachable: string[];
 }
 
 /** Set only by specs for now (see this file's header). */
@@ -398,6 +406,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       linking: linkingStats(programs),
       programs,
       totalCostSeconds,
+      notes,
+      unreachable: result.unreachable,
     });
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
   }
