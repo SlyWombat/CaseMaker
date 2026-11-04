@@ -29,6 +29,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import render as R
 
 CUT_INTO = 0.01
+# #964 — THE STAMP'S FOOTPRINT EDGE IS STRICT, the app's own line (`sweptPoint.ts`,
+# `EDGE_EPS_MM`): a cell is cut only where its centre lies strictly inside the cutter's disc,
+# `distance < radius - EDGE_EPS`. `distance <= radius` charged cells centred exactly on the disc
+# edge — zero-measure contact — which is what the 134 contour-tangent tray cells were.
+EDGE_EPS = 1e-6
 
 # #948 — THE PASS LINE comes from the shop's own defaults (`goal.passCoverage`, seeded 0.95), the
 # same key the app's goal check reads, so the page's verdict and the app's cannot name different
@@ -82,7 +87,7 @@ def stamp(H, x0, y0, p, nc, who=None):
             cj = np.rint((q[:, 1] - y0) / p).astype(np.int64)[:, None] + oj[None, :]
             ok = (ci >= 0) & (ci < nx) & (cj >= 0) & (cj < ny)
             r = np.hypot(x0 + ci * p - q[:, 0:1], y0 + cj * p - q[:, 1:2])
-            ok &= r <= Rr
+            ok &= r < max(Rr - EDGE_EPS, 0.0)
             z = q[:, 2:3] + prof(r)
             idx = (cj * nx + ci)[ok]; zz = z[ok]
             if who is None:
@@ -216,7 +221,8 @@ def stamp_mkr(H, who, x0, y0, p, nc, tools, dz, known=None):
             ci = np.rint((s[:, 0] - x0) / p).astype(np.int64)[:, None] + oi[None, :]
             cj = np.rint((s[:, 1] - y0) / p).astype(np.int64)[:, None] + oj[None, :]
             ok = (ci >= 0) & (ci < nx) & (cj >= 0) & (cj < ny)
-            r = np.hypot(x0 + ci * p - s[:, 0:1], y0 + cj * p - s[:, 1:2]); ok &= r <= t['R']
+            r = np.hypot(x0 + ci * p - s[:, 0:1], y0 + cj * p - s[:, 1:2])
+            ok &= r < max(t['R'] - EDGE_EPS, 0.0)
             zz = s[:, 2:3] + t['prof'](r)
             idx = (cj * nx + ci)[ok]; z = zz[ok]
             put(Hf, Wf, idx, z, tn)
