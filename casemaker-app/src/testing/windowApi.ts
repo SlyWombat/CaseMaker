@@ -236,6 +236,18 @@ export interface CaseMakerTestApi {
    * or a reason the id is not a shipped stated preset.
    */
   statedMachineSeed(profileId: string): { machineId: string } | { reason: string };
+  /**
+   * #963 e2e — THE MODEL ENGINE'S PLAN, seeded onto the run store: the plan block, the progress
+   * line and the Cut card's per-program list are driven by it, so a spec never needs a real CAM
+   * run to state what the engine would say. `plan` is the first setup's plan; `plans` the whole
+   * list (two or more when the part is cut from several sides); `planProgress` puts the run in a
+   * working phase with that stage on the progress line. Testing surface only: no app code calls
+   * it, and `engraveReset` clears it.
+   */
+  seedPlan(
+    plan: unknown,
+    opts?: { plans?: unknown[]; planProgress?: unknown; generated?: boolean },
+  ): void;
   getEngraveRunState(): {
     phase: string;
     stale: boolean;
@@ -713,6 +725,30 @@ export function installCaseMakerTestApi(): void {
       // `jobMachine` resolves the model from.
       useEngraveJobStore.setState((s) => ({ job: { ...s.job, machineId: model.id } }));
       return { machineId: model.id };
+    },
+    seedPlan(plan, opts) {
+      useEngraveRunStore.setState({
+        plan: plan as never,
+        plans: (opts?.plans ?? [plan]) as never,
+        ...(opts?.planProgress === undefined ? {} : { planProgress: opts.planProgress as never }),
+        ...(opts?.planProgress === undefined ? {} : { phase: 'generating' as const }),
+        ...(opts?.generated === false
+          ? {}
+          : {
+              generated: {
+                ok: false,
+                stage: 'findings',
+                findings: [],
+                feeds: null,
+                cam: null,
+                nc: null,
+                verify: null,
+                programs: [],
+                errors: [],
+              } as never,
+              ...(opts?.planProgress === undefined ? { phase: 'blocked' as const } : {}),
+            }),
+      });
     },
     getEngraveRunState() {
       const r = useEngraveRunStore.getState();
