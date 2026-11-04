@@ -979,6 +979,52 @@ sequence posts its own program with its own feeds row, its own `surfaceCheck` an
 leave** above the surface, which the finish lifts. Surface **primitives** stay on a single
 cutter: the sequence is the goal's.
 
+**How the engine plans a part.** The engine reads the model before it cuts anything, and it says
+what it found. A **flat face** of the model becomes a **pocket** (with the islands standing in it
+named); the model's outer edge becomes the **outer contour**; every curved or sloped part is a
+**curved region**; and the edges where a face meets a wall are **rims** for the edge break. The
+goal row and the run sheet open with that count — "6 pockets, 1 outer contour, 1 curved region" —
+so what the program will cut is stated before it is posted, and a part the engine can only partly
+cut says so.
+
+**The cutter sequence, and why each cutter.** The engine prices whole sequences — the largest flat
+that clears the stock first (it removes material fastest), a smaller flat for what the first one
+cannot enter, a ball for the curves, a V-bit for the edges — and posts the cheapest that reaches
+the part. Each cutter is its own program, with its own feed row, its own tool change and its own
+check; the row and the sheet print the sequence with each cutter's estimated time and the total.
+A cutter you **pin** is used as pinned and marked so; with none pinned the choice is the engine's.
+
+**Stay-down linking.** Between neighbouring passes the cutter stays down and moves across at the
+cutting depth instead of retracting over the stock; it lifts only to travel to another region,
+and then only to that region's clearance height. The row and the sheet print what it cost —
+rapids, hops and the share of the cycle spent in air — so a program that spends more time
+travelling than cutting is visible before it runs.
+
+**The freeing cut comes last, with tabs.** The outer contour that separates the part from the
+stock is always the LAST cut: every pocket, rest and finish runs while the part is still held by
+the stock around it. Where the contour frees the part it leaves **tabs** — bridges of material on
+the outline named on the run sheet — and you cut them free by hand after the program ends. If no
+freeing cut is posted, the row and the sheet say **"The part is not freed — no freeing cut is
+posted."** rather than leaving you to discover it at the machine.
+
+**"Not cut" lines.** When the engine cannot cut part of the model it names it, never skips it
+quietly: **"`<region>`: not cut — needs a cutter ≤ N mm"** means no cutter in the set is narrow
+enough to enter that pocket or opening, and **"`<region>`: not cut — planning failed (reason)"**
+means the operation could not produce a path for that region, with the engine's reason. Either
+line means the part will have material there; scale the region, choose a smaller cutter, or
+accept the part as stated.
+
+**What the check says: judged and raw.** The goal check compares the simulated sweep with the
+model, and prints two readings of the same run. The **judged** line is the pass: "Matches the
+design (goal)", or "Cuts 0.24 mm into the design at 41.2, 25.3" — the deepest cut the check
+counts, after the cells it cannot fairly judge are set aside (a wall's own cell, the shadow behind
+a wall, and — when the job asks for an edge break — the rim the chamfer deliberately breaks). The
+**raw** line beside it, "raw, before exclusions: …", is the same sweep with nothing set aside, for
+a reader who wants the unvarnished number. The **top-surface coverage** and the **whole-surface
+reach** are printed against the pass line the shop sets, and neither is folded into the judged
+line: a part can pass on cut-into and still leave surface standing, and the coverage number is
+what says so.
+
 The goal row's **Technical** fold carries the operation's own numbers: the **cutter sequence**'s
 cutters (one program each), the **stock to leave**, and — under the row's "Last generated"
 sentence — what the engine used for the rough and finish step-down and step-over and the sampling
