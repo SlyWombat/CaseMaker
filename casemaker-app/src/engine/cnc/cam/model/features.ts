@@ -58,7 +58,11 @@ export interface PocketNode {
   floorZ: number;
   mouthZ: number;
   open: boolean;
-  /** A hole of the part's silhouette: no material at any height (D2). `floorZ` is the part bottom. */
+  /**
+   * A hole of the part's silhouette: no material at any height (A's #958 D2, 6620460283, e.g. the
+   * organizer's eleven through-holes at −22.80). `floorZ` is the part bottom; the contour op frees
+   * it, not the pocket op's own floor pass.
+   */
   through: boolean;
   /** Cleared area at `floorZ`, islands as holes. May extend below `floorZ` where remainder continues (A's N2) — the pocket op must not assume the whole region is floor. */
   region: Polygons;
@@ -70,12 +74,6 @@ export interface PocketNode {
   remainder: string[];
   /** The largest cutter diameter that can enter the region, mm. */
   narrowest: number;
-  /**
-   * True for a pocket component at the model's bottom inside the silhouette (A's #958 D2, interface
-   * delta on comment 6620460283, e.g. the organizer's eleven through-holes at −22.80): the contour
-   * op frees it, not the pocket op's own floor pass.
-   */
-  through: boolean;
 }
 
 export interface RemainderRegion {
@@ -116,14 +114,13 @@ export interface FeatureTree {
     planarArea: number;
     remainderArea: number;
     tolerances: FeatureTolerances;
-    slivers: TreeSliver[];
-    notes: string[];
     /**
      * A's #958 D2 (comment 6620460283): a would-be floor patch whose largest inscribed circle is
      * under 0.25 mm diameter is listed here, never silently dropped — its area joins the
      * neighbouring region instead of becoming its own `PocketNode`.
      */
-    slivers: { z: number; area: number; centroid: [number, number]; bbox: { min: [number, number]; max: [number, number] } }[];
+    slivers: TreeSliver[];
+    notes: string[];
   };
 }
 

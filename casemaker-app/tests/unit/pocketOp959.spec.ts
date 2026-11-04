@@ -46,7 +46,7 @@ const rapid: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 1
 function node(floorZ: number, mouthZ: number): PocketNode {
   return {
     id: 'p1', floorZ, mouthZ, open: false,
-    region: rect(20, 10), islands: [], children: [], remainder: [], narrowest: 10, through: false,
+    region: rect(20, 10), floors: [], islands: [], children: [], remainder: [], narrowest: 10, through: false,
   };
 }
 

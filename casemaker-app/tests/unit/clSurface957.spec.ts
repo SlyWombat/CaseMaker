@@ -93,10 +93,12 @@ function region(slopeDeg: [number, number]): RemainderRegion {
   return {
     id: 'r1',
     footprint: [],
+    area: 0,
     zTop: 0,
     zBottom: -1,
     triangles: new Uint32Array(),
     slopeDeg,
+    slopeMedianDeg: (slopeDeg[0] + slopeDeg[1]) / 2,
     in: 'top',
   };
 }
