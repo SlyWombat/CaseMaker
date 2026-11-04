@@ -20,18 +20,19 @@ function rect(w: number, h: number): Polygons {
   return [[[0, 0], [w, 0], [w, h], [0, h]]];
 }
 
-// Identical to camPocket.spec.ts's own fake: a rectangle shrinks by |delta| on every side.
+// A rectangle shrinks by |delta| for a NEGATIVE delta (erode), grows for a POSITIVE one (dilate) —
+// `fullyReachable`'s own `erode(region, r)` then `dilate(, r)` (finding 5) needs both directions,
+// unlike the shrink-only fake `camPocket.spec.ts` uses.
 function fakeRectOffset(region: Polygons, delta: number): Polygons {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const c of region) for (const [x, y] of c) {
     minX = Math.min(minX, x); minY = Math.min(minY, y);
     maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
   }
-  const s = Math.abs(delta);
-  const w = maxX - minX - 2 * s;
-  const h = maxY - minY - 2 * s;
+  const w = maxX - minX + 2 * delta;
+  const h = maxY - minY + 2 * delta;
   if (w <= 0 || h <= 0) return [];
-  return [[[minX + s, minY + s], [maxX - s, minY + s], [maxX - s, maxY - s], [minX + s, maxY - s]]];
+  return [[[minX - delta, minY - delta], [maxX + delta, minY - delta], [maxX + delta, maxY + delta], [minX - delta, maxY + delta]]];
 }
 
 const flat6: Tool = {
@@ -126,8 +127,16 @@ describe('#959 pocket()', () => {
     ).toThrow(/no cutting diameter/);
   });
 
-  // E's run on 52590f76: 67.7 rapids/1,000 feed lines against Makera's 5.9 — one retract per ring.
-  it('rings of the same level are joined by a feed, not a retract — one plunge per level, not per ring', () => {
+  // E's run on 52590f76: 67.7 rapids/1,000 feed lines against Makera's 5.9 — one retract per ring,
+  // unconditionally. A's review 6622610124 (finding 1) ruled that feed unsafe in general (it
+  // gouges an island or the wall between lobes), so every same-level transition now goes through
+  // `link()` (#962), which feeds ONLY when `linkIsClear` proves the cutter's whole disc stays
+  // within the node's free space — a retract is always safe, a hopeful feed is not. The 20x10
+  // fixture's rings sit close enough to the wall that `link()` cannot prove a few of its own
+  // transitions clear (A's own test fixtures are wider for exactly this reason); this test now
+  // checks the invariant that matters after the fix — no rapid travels laterally while still at a
+  // cutting depth, whatever the mix of feeds and retracts turns out to be.
+  it('rings of the same level are joined by a feed when link() proves it safe, a retract otherwise — never a diagonal move from depth', () => {
     // A 20x10 rect with a 6mm flat and 1.2mm step-over leaves room for a second offset ring
     // before the fake offset collapses it (step 0 at -3: 14x4; step 1 at -4.2: 11.6x1.6; step 2
     // at -5.4: height goes negative, so pocketLoops stops there) — two rings, one level.
@@ -141,14 +150,19 @@ describe('#959 pocket()', () => {
     expect(out.passes.length).toBeGreaterThanOrEqual(2);
     const moves = out.ir.operations[0]!.moves;
     const rapids = moves.filter((m) => m.kind === 'rapid');
-    expect(rapids).toHaveLength(1); // one level, so exactly one rapid-to-hop, not one per ring
-    expect(rapids[0]!.z).toBe(3);
-    // The move right after the first ring closes is a FEED into the next ring, not a rapid.
-    // Layout: rapid(0), plunge(1), ring 1's own 4 points as feeds (2..5) — 6 moves for a
-    // 4-vertex rectangle ring — then index 6 is the connecting move into ring 2.
-    const firstRapidIndex = moves.indexOf(rapids[0]!);
-    const afterFirstRing = moves[firstRapidIndex + 6];
-    expect(afterFirstRing?.kind).toBe('feed');
+    expect(rapids.length).toBeGreaterThanOrEqual(1); // at least the op's own opening plunge
+    expect(rapids[0]!.z).toBe(3); // the very first move is still the op's own rapid-to-hop
+    // No rapid changes X or Y while the move BEFORE it was still at a cutting depth (below the
+    // hop height) — `link()`'s own retract always goes straight up first.
+    for (let i = 1; i < moves.length; i++) {
+      const prev = moves[i - 1]!;
+      const cur = moves[i]!;
+      if (cur.kind !== 'rapid') continue;
+      const lateral = prev.x !== cur.x || prev.y !== cur.y;
+      if (lateral) expect(prev.z, `move ${i}: a rapid moved X/Y while still at depth ${prev.z}`).toBeGreaterThanOrEqual(3);
+    }
+    // Every retract goes back down to the SAME floor before resuming the cut.
+    expect(moves[moves.length - 1]!.z).toBeLessThanOrEqual(10);
   });
 
   it('cleared grows conservatively as rings are traced, never claiming the whole region after only the outer ring', () => {

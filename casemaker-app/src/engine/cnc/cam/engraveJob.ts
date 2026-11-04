@@ -233,6 +233,41 @@ export function makeClipperOffset(tl: ManifoldToplevel): OffsetFn {
   };
 }
 
+/** A pure boolean on `Polygons`, the same injected-kernel contract `OffsetFn` uses. */
+export type BooleanFn = (a: Polygons, b: Polygons) => Polygons;
+
+/**
+ * `a ∪ b`, via Clipper2's own union (`CrossSection.union`, Positive fill) — never hand-rolled.
+ * #959's #961 review, finding 3: an OPEN pocket node's region needs extending across its open
+ * edge before `pocketLoops` sees it (the node's own boundary there is not a real wall), and that
+ * needs a real boolean, not another offset call.
+ */
+export function makeClipperUnion(tl: ManifoldToplevel): BooleanFn {
+  const CS = tl.CrossSection;
+  return (a, b) => {
+    if (a.length === 0) return b;
+    if (b.length === 0) return a;
+    const out = CS.union(a, b);
+    const polygons = out.toPolygons() as Polygons;
+    out.delete();
+    return polygons;
+  };
+}
+
+/** `a \ b`, via Clipper2's own subtract (`CrossSection.subtract`). See {@link makeClipperUnion}. */
+export function makeClipperSubtract(tl: ManifoldToplevel): BooleanFn {
+  const CS = tl.CrossSection;
+  return (a, b) => {
+    if (a.length === 0 || b.length === 0) return a;
+    const cs = CS.ofPolygons(a);
+    const out = cs.subtract(b);
+    const polygons = out.toPolygons() as Polygons;
+    out.delete();
+    cs.delete();
+    return polygons;
+  };
+}
+
 /**
  * The negative cutting Z for each depth pass of a label, shallowest first.
  *

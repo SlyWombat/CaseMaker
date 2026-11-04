@@ -24,14 +24,17 @@ import type { EngraveJob } from '@/types/engraveJob';
 import type { Mount } from '@/engine/cnc/setups/types';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import type { ObstacleBox } from '@/engine/cnc/setup';
-import type { Tool } from '@/engine/cnc/tool';
-import { concatToolpathIR, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import type { CutParams } from '@/engine/cnc/feeds';
 import type { OffsetFn } from '@/engine/cnc/cam/pocket';
+import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './features';
 import { regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
-import type { CutterCandidates, PlannedOpKind } from './sequence';
+import { chooseSequence, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep } from './sequence';
 import { pocket } from './ops/pocket';
+import { contour as contourOp, throughHole } from './ops/contour';
 
 /** One ring (outer boundary or a hole); `pocket.ts`'s `Polygons` is `Polygon[]`. NEW — no existing equivalent. */
 export type Polygon = [number, number][];
@@ -196,71 +199,251 @@ const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [
 export interface PlanPocketsOptions {
   /** The real Clipper2 offset, or a test fake — `pocketLoops`' own contract, carried through unchanged. */
   offset: OffsetFn;
-  /** House cutters, largest first; this is NOT #961's real picker (see this function's own note). */
+  /** House cutters, largest first is NOT required — #961's `chooseSequence` ranks by cost, not list order. */
   houseFlats: readonly Tool[];
   stepDownMm: number;
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
   rapid: RapidEstimate;
+  /** The shop's `toolChange.seconds` (#858) — #961's own per-change allowance, not a default here. */
+  toolChangeSeconds: number;
   spindleRpm: number;
   air: boolean;
+  /** The card's "vendor + 1" cutter budget (`SequenceOptions.maxCutters`). Absent → no cap. */
+  maxCutters?: number;
+  /** Absent → {@link DEFAULT_RELEASE_TABS} (the part must stay held until the last cut touches it). */
+  tabs?: { count: number; width: number; height: number };
+  /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
+  boolean?: { union: BooleanFn; subtract: BooleanFn };
 }
+
+/**
+ * A's review 6622610124 raised a real sequencing question this default answers, stated here for
+ * the Manager/C to confirm rather than decided silently: #961's chain may add a rest flat AFTER
+ * this contour step runs (the tray's 3.6 mm channels need ⌀3.175, smaller than the primary that
+ * carries the contour), and the part must stay captured until the LAST cutter touches it. Of the
+ * three ways to guarantee that — run the contour last (an extra tool change #961 does not price),
+ * cut it with the chain's last cutter, or tab it — tabs cost the least to wire here: the contour
+ * keeps whatever position the chain gives it, and these four shallow bridges hold the part
+ * through every cut that follows. `{count: 0}` is no longer the default; it still frees the part
+ * outright when the caller states it explicitly.
+ */
+export const DEFAULT_RELEASE_TABS = { count: 4, width: 6, height: 1 };
 
 export interface PlanPocketsResult {
   ops: PlannedOp[];
   /** One program per cutter actually used, in `ops` order, concatenated. */
   programs: Map<string, ToolpathIR>;
-  /** A node too narrow for every cutter in `houseFlats`, as a stated finding naming the limiting number. */
-  skipped: string[];
+  /**
+   * `SetupPlan.sequence`'s own shape — `terms` computed HERE, from each cutter's concatenated
+   * posted `ToolpathIR` via #927's `estimateCycleTerms` (§3.0.1), not reused from `choice.cost`'s
+   * per-step sum (`sequence.ts`'s own internal accounting is a different, bare `estimateSeconds`).
+   */
+  sequence: SequencedCutter[];
+  /** A feature no cutter in the chosen chain's budget covers, as a stated finding naming the limiting number — `SequenceChoice.unreachable`, turned into a sentence. */
+  unreachable: string[];
+  /** The full picker result (`considered`, `cost`) — for a caller that wants more than `ops`/`unreachable`. */
+  choice: SequenceChoice;
 }
 
 /**
- * Every non-through floored `PocketNode` in a `FeatureTree`, cut with the largest `houseFlats`
- * entry that fits (by `node.narrowest`). **This is a placeholder for #961's real cutter sequence**
- * (`sequence.ts`'s `chooseSequence`), not a re-implementation of it: C's picker assigns ONE
- * primary (+ rest) cutter to every pocket feature in one `SequenceDemand`, which cannot serve a
- * part whose features span a range too wide for any single primary + rest pair (E's 6621584766 —
- * the tray's six ~1 mm features alongside its 6+ mm ones). Resolving that is #961's own call
- * (raised on #956/#961), not decided here by adding smaller cutters speculatively.
+ * Every non-through floored `PocketNode`, AND the outer contour, in a `FeatureTree`, planned
+ * TOGETHER through #961's real `chooseSequence` rest chain (`sequence.ts`) — one `SequenceDemand`
+ * covering both, so the chain's cutter choice is priced against the whole job, not pocket and
+ * contour separately. The manager's rule after E's a46f0358 run: an op that is real enters this
+ * function AND whatever acceptance spec plans through it in the same commit, so a real run
+ * exercises what the engine would actually post.
  *
- * Moved here from the acceptance spec (`opsAcceptance959.spec.ts`) so the product, not the test
- * harness, is what gets measured — the spec now calls this directly.
+ * `planStep` (the seam `chooseSequence` prices candidates through) dispatches each region id in a
+ * step to `pocket()` (a real `PocketNode`) or `contourOp()` (`id === 'contour'`, `regionRefs`' own
+ * reserved id for the tree's outer contour) and caches the resulting `OpOutcome`s by step
+ * signature — `chooseSequence` calls `planStep` once per candidate it prices, not just the winner.
  */
 export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions): PlanPocketsResult {
   const refs = regionRefs(tree);
-  const ops: PlannedOp[] = [];
-  const programs = new Map<string, ToolpathIR>();
-  const skipped: string[] = [];
-  const sorted = [...opts.houseFlats].sort((a, b) => (b.diameter ?? 0) - (a.diameter ?? 0));
+  const refById = new Map(refs.map((r) => [r.id, { ...r, obstacles: [], regionClearanceZ: tree.frame.partTop + 5 }]));
 
-  for (const node of allPockets(tree.pockets)) {
-    if (node.through || node.floors.length === 0) continue;
-    const ref = refs.find((r) => r.id === node.id);
-    if (ref === undefined) { skipped.push(`${node.id}: no RegionRef`); continue; }
-    const cutter = sorted.find((t) => node.narrowest >= (t.diameter ?? 0));
-    if (cutter === undefined) {
-      skipped.push(`${node.id}: not cut — needs a cutter ≤ ${node.narrowest.toFixed(2)} mm (house offers ${sorted.map((t) => `⌀${t.diameter}`).join(', ')})`);
-      continue;
+  // A's review 6622610124, finding 2: a ROOT node's mouth is the STOCK's own top, not the
+  // recognised part top — the tray's top land sits 1.2 mm below the stock surface, and without
+  // this the first pass engages 1.2 mm + one step-down with nothing faced first. A nested node's
+  // mouth is correctly its parent's own floor, so only roots get the override (below).
+  const rootIds = new Set(tree.pockets.map((n) => n.id));
+  const allNodes = allPockets(tree.pockets);
+  const pocketNodes = allNodes.filter((n) => !n.through && n.floors.length > 0);
+  const pocketsById = new Map(pocketNodes.map((n) => [n.id, n] as const));
+  // A's review 6622610124, finding 4: a through node used to be skipped with nothing in
+  // `unreachable` — it is cut by the SAME contour-op machinery as the outer release (a hole, cut
+  // INSIDE its own outline), as its own `SequenceFeature` so the chain can size it a cutter that
+  // fits its own narrowest opening, independent of whatever covers the outer contour.
+  const throughNodes = allNodes.filter((n) => n.through);
+  const throughById = new Map(throughNodes.map((n) => [n.id, n] as const));
+
+  // A's review 6622610124, most severe: `zPasses` counts down from Z 0, the STOCK top, not the
+  // recognised part top — a `partTop - zTo` depth stopped the contour short by exactly the skin
+  // between the stock and the part (1.2 mm on the tray, 0.8 mm on the organizer), so the part was
+  // never actually freed.
+  const contourDepthMm = tree.frame.stockTop - tree.contour.zTo;
+
+  const features: SequenceFeature[] = [];
+  for (const node of pocketNodes) {
+    features.push({
+      id: node.id,
+      kind: 'pocket',
+      // An OPEN node's OWN narrowest is measured against its unextended boundary, which is not
+      // the real constraint at an open edge (finding 3) — the extension this op applies (below)
+      // is what decides whether a cutter fits there, not this number; stating it here would
+      // exclude a cutter the extended region can serve.
+      minOpeningMm: node.open ? null : node.narrowest,
+      cornerRadiusMm: node.open ? null : node.narrowest / 2,
+      depthMm: node.mouthZ - node.floorZ,
+    });
+  }
+  for (const node of throughNodes) {
+    features.push({
+      id: node.id,
+      kind: 'pocket',
+      minOpeningMm: node.narrowest,
+      cornerRadiusMm: node.narrowest / 2,
+      depthMm: tree.frame.stockTop - node.floorZ,
+    });
+  }
+  features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
+  const demand = { features };
+
+  const cutters: CutterCandidates = { house: [...opts.houseFlats], catalogue: [] };
+
+  const cutParamsFor = (cutter: Tool): CutParams => ({
+    rpm: opts.spindleRpm,
+    feed: opts.feeds.feedMmPerMin,
+    plungeFeed: opts.feeds.plungeFeedMmPerMin,
+    stepDown: opts.stepDownMm,
+    stepOver: (cuttingDiameter(cutter) ?? 1) / 4,
+    peck: 0,
+    air: opts.air,
+  });
+
+  const planRegion = (id: string, cutter: Tool): OpOutcome | null => {
+    const ref = refById.get(id);
+    if (ref === undefined) return null;
+    if (id === 'contour') {
+      return contourOp({
+        cutter,
+        contour: tree.contour,
+        region: ref,
+        depthMm: contourDepthMm,
+        tabs: opts.tabs ?? DEFAULT_RELEASE_TABS,
+        offset: opts.offset,
+        params: cutParamsFor(cutter),
+        rapid: opts.rapid,
+      });
     }
-    const diameter = cutter.diameter ?? 1;
-    const outcome = pocket({
+    const throughNode = throughById.get(id);
+    if (throughNode !== undefined) {
+      return throughHole({
+        cutter,
+        id,
+        outline: throughNode.region,
+        region: ref,
+        depthMm: tree.frame.stockTop - throughNode.floorZ,
+        offset: opts.offset,
+        params: cutParamsFor(cutter),
+        rapid: opts.rapid,
+      });
+    }
+    const node = pocketsById.get(id);
+    if (node === undefined) return null;
+    const diameter = cuttingDiameter(cutter) ?? 1;
+    return pocket({
       cutter,
-      node,
-      region: { ...ref, obstacles: [], regionClearanceZ: tree.frame.partTop + 5 },
-      stepOverMm: Math.min(diameter / 4, diameter / 2),
+      node: rootIds.has(node.id) ? { ...node, mouthZ: tree.frame.stockTop } : node,
+      region: ref,
+      stepOverMm: diameter / 4,
       stepDownMm: opts.stepDownMm,
       feeds: opts.feeds,
       offset: opts.offset,
-      safeZMm: tree.frame.partTop + 10,
-      hopZMm: tree.frame.partTop + 3,
+      // The SAME constants `contourOp` gets from `generateProfile` (ir.ts) — a pocket and the
+      // contour in one cutter's program must agree on `safeZ`/`hopZ` (`concatToolpathIR` refuses
+      // otherwise), and a per-tree `partTop + N` value had no such guarantee.
+      safeZMm: SAFE_Z,
+      hopZMm: HOP_Z,
       toolNumber: cutter.number ?? 1,
       spindleRpm: opts.spindleRpm,
       air: opts.air,
       rapid: opts.rapid,
+      openOutline: node.open ? tree.contour.outline : undefined,
+      boolean: opts.boolean,
     });
-    ops.push({ kind: 'pocket', region: { ...ref, obstacles: [], regionClearanceZ: tree.frame.partTop + 5 }, outcome });
-    const key = outcome.cutter;
-    const existing = programs.get(key);
-    programs.set(key, existing === undefined ? outcome.ir : concatToolpathIR(existing, outcome.ir));
+  };
+
+  // `chooseSequence` calls `planStep` once per candidate it prices (not just the chosen one); a
+  // step's own signature (kind + cutter + regionIds) is stable across those calls, so the SAME
+  // step, priced more than once, is only ever planned once.
+  const outcomeCache = new Map<string, OpOutcome[] | null>();
+  const stepSignature = (step: SequenceStep): string => `${step.kind}:${step.cutter.key}:${step.regionIds.join(',')}`;
+
+  const planStep: SequenceOptions['planStep'] = (step) => {
+    let outcomes = outcomeCache.get(stepSignature(step));
+    if (outcomes === undefined) {
+      outcomes = [];
+      for (const id of step.regionIds) {
+        const outcome = planRegion(id, step.cutter.tool);
+        if (outcome === null) { outcomes = null; break; }
+        outcomes.push(outcome);
+      }
+      outcomeCache.set(stepSignature(step), outcomes);
+    }
+    if (outcomes === null || outcomes.length === 0) return null;
+    return outcomes.map((o) => o.ir).reduce((a, b) => concatToolpathIR(a, b));
+  };
+
+  const choice = chooseSequence(demand, cutters, {
+    rapid: opts.rapid,
+    toolChangeSeconds: opts.toolChangeSeconds,
+    planStep,
+    maxCutters: opts.maxCutters,
+  });
+
+  const ops: PlannedOp[] = [];
+  const programs = new Map<string, ToolpathIR>();
+  for (const step of choice.steps) {
+    const outcomes = outcomeCache.get(stepSignature(step));
+    if (outcomes === undefined || outcomes === null) continue; // chooseSequence only chose postable steps
+    for (let i = 0; i < step.regionIds.length; i++) {
+      const id = step.regionIds[i]!;
+      const outcome = outcomes[i]!;
+      const ref = refById.get(id)!;
+      ops.push({ kind: id === 'contour' ? 'contour' : 'pocket', region: ref, outcome });
+      const key = outcome.cutter;
+      const existing = programs.get(key);
+      programs.set(key, existing === undefined ? outcome.ir : concatToolpathIR(existing, outcome.ir));
+    }
   }
-  return { ops, programs, skipped };
+
+  const offered = [...opts.houseFlats].map((t) => `⌀${cuttingDiameter(t)}`).join(', ');
+  const unreachable = choice.unreachable.map((id) => {
+    const node = pocketsById.get(id);
+    return node === undefined
+      ? `${id}: not cut`
+      : `${id}: not cut — needs a cutter ≤ ${node.narrowest.toFixed(2)} mm (house offers ${offered})`;
+  });
+
+  const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
+    const ir = programs.get(entry.cutterKey);
+    const terms: CycleTerms = ir === undefined
+      ? { movesSeconds: 0, entrySeconds: 0, spinUpSeconds: 0, totalSeconds: 0 }
+      : estimateCycleTerms(ir, opts.rapid);
+    const stepCutter = choice.steps.find((s) => s.cutter.key === entry.cutterKey)?.cutter;
+    return {
+      cutterKey: entry.cutterKey,
+      cost: {
+        terms,
+        toolChangeSeconds: entry.toolChangeSeconds,
+        totalSeconds: terms.totalSeconds + entry.toolChanges * entry.toolChangeSeconds,
+        toolChanges: entry.toolChanges,
+      },
+      pinned: stepCutter?.pinned ?? false,
+      house: stepCutter?.house ?? false,
+    };
+  });
+
+  return { ops, programs, sequence, unreachable, choice };
 }

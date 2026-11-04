@@ -1,20 +1,25 @@
 /**
- * #959 RED-FIRST: three findings from A's review (#959 6622610124), each an `it.fails` naming its
- * finding. B flips each to `it` in the change that fixes it.
+ * #959 — four findings from A's review (#959 6622610124), pinned RED-FIRST as `it.fails` and now
+ * fixed (flipped to plain `it`, this commit):
+ *
+ *   (1) a same-level link must stay in the tool centre's free space (no feed across an island or
+ *       across the wall between two lobes) — `pocket.ts` now routes every same-level and
+ *       level-to-level transition through #962's real `link()`
+ *   (3) an open shoulder narrower than the cutter is still cleared (the tray's ~3 mm ledge) —
+ *       `pocket.ts` extends an OPEN node's region across its open edge with a real Clipper2
+ *       boolean before `pocketLoops` ever sees it
+ *   (5) `cleared` never claims a sharp inside corner a round tool cannot reach — `pocket.ts`'s
+ *       `cleared` is now the morphological OPENING (`dilate(erode(region, r), r)`), not a plain
+ *       erosion frame
  *
  * Unlike `pocketOp959.spec.ts` (a rectangle-only fake offset), these run the REAL path: Manifold-built
  * solids → `recogniseFeatures` (#958) → `planPocketsForTree` / `pocket` with the real Clipper2
  * offset (`makeClipperOffset`). The expected numbers are the solids' own dimensions.
- *
- *   (1) a same-level link must stay in the tool centre's free space (no feed across an island or
- *       across the wall between two lobes)
- *   (3) an open shoulder narrower than the cutter is still cleared (the tray's ~3 mm ledge)
- *   (5) `cleared` never claims a sharp inside corner a round tool cannot reach
  */
 import { describe, expect, it } from 'vitest';
 
 import { tl, type ManifoldInstance } from './helpers/manifoldExec';
-import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
+import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
 import { recogniseFeatures, type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
 import { planPocketsForTree, type PlanPocketsResult } from '@/engine/cnc/cam/model/plan';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
@@ -48,6 +53,7 @@ function flat(d: number, number: number): Tool {
 
 const rapid: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test fixture' };
 const offset = makeClipperOffset(tl);
+const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
 const all = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...all(n.children)]);
 
 function treeOf(solid: ManifoldInstance, stockTop: number): FeatureTree {
@@ -61,8 +67,11 @@ function plan(tree: FeatureTree, houseFlats: Tool[]): PlanPocketsResult {
     stepDownMm: 2,
     feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
     rapid,
+    toolChangeSeconds: 60,
     spindleRpm: 12000,
     air: true,
+    maxCutters: houseFlats.length + 1,
+    boolean,
   });
 }
 
@@ -176,7 +185,7 @@ function sweptFraction(result: PlanPocketsResult, nodeId: string, area: Polygons
 }
 
 describe('#959 red-first (A’s review 6622610124)', () => {
-  it.fails('(1) a same-level link stays in free space: a pocket with an island', () => {
+  it('(1) a same-level link stays in free space: a pocket with an island', () => {
     // 40 × 40 × 10 block; a 30 × 30 pocket 4 deep (floor z 6) with two 5 × 5 islands standing to
     // the top, on its diagonal.
     const s = tl.Manifold.cube([40, 40, 10])
@@ -190,7 +199,7 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     expect(bad, `feeds that leave free space:\n${bad.slice(0, 5).join('\n')}`).toEqual([]);
   });
 
-  it.fails('(1) a same-level link stays in free space: a U pocket whose erosion splits into two lobes', () => {
+  it('(1) a same-level link stays in free space: a U pocket whose erosion splits into two lobes', () => {
     // 40 × 30 × 10 block; a 30 × 20 pocket (floor z 6) with a 4 mm-wide wall rising from its
     // bottom edge to 4 mm short of its top edge: a U. Eroded past 2 mm, the U splits into its arms.
     const s = tl.Manifold.cube([40, 30, 10])
@@ -203,7 +212,7 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     expect(bad, `feeds that leave free space:\n${bad.slice(0, 5).join('\n')}`).toEqual([]);
   });
 
-  it.fails('(3) an open shoulder narrower than the cutter is cleared (the tray’s ~3 mm ledge)', () => {
+  it('(3) an open shoulder narrower than the cutter is cleared (the tray’s ~3 mm ledge)', () => {
     // A 40 × 30 × 7 base with a 34 × 24 × 3 plateau on top: a 3 mm-wide open ledge at z 7 all round.
     const s = tl.Manifold.cube([40, 30, 7]).add(tl.Manifold.cube([34, 24, 3]).translate([3, 3, 7]));
     const tree = treeOf(s, 10);
@@ -211,7 +220,7 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     expect(ledge, 'the tree reads an open shoulder at z 7').toBeDefined();
     const ledgeArea = 40 * 30 - 34 * 24;
     const result = plan(tree, [flat(6, 1), flat(3.175, 2)]);
-    expect(result.skipped.filter((s) => s.startsWith(ledge.id)), 'the ledge is not skipped').toEqual([]);
+    expect(result.unreachable.filter((s) => s.startsWith(ledge.id)), 'the ledge is not unreachable').toEqual([]);
     const op = result.ops.find((o) => o.region.id === ledge.id);
     expect(op, 'an op cuts the ledge').toBeDefined();
     // Swept, read from the moves (the op's own `cleared` overclaims, finding 5): ≥ 95 % of the ledge.
@@ -220,7 +229,7 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     expect(swept, `swept ${(100 * swept).toFixed(1)} % of the ${ledgeArea} mm² ledge`).toBeGreaterThanOrEqual(0.95);
   });
 
-  it.fails('(5) cleared never claims the sharp inside corners a round tool cannot reach', () => {
+  it('(5) cleared never claims the sharp inside corners a round tool cannot reach', () => {
     // A 20 × 20 pocket 4 deep with sharp corners, cut with a ⌀6 flat. Reachable = the opening:
     // 400 − 4·(r² − πr²/4) with r 3 = 400 − (36 − 9π) ≈ 392.27 mm².
     const s = tl.Manifold.cube([30, 30, 10]).subtract(tl.Manifold.cube([20, 20, 4]).translate([5, 5, 6]));
