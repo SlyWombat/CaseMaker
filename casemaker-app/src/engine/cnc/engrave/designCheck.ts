@@ -297,6 +297,84 @@ function rowsOf(segs: readonly Seg[], pitch: number): Rows {
   return rows;
 }
 
+/**
+ * Every lattice point within `t` of the outline's edge, as merged index ranges per row: exactly the
+ * points `edgeWithin(shape, x, y, t)` accepts, built once from the segments instead of searched per
+ * point (#924 follow-up: j02's reach loop asked 44 million points one by one, 54 s of the run).
+ *
+ * The points within `t` of one segment form its capsule, which is convex, so on a row it is one
+ * interval: the hull of the pieces where the nearest point is either end (two discs) or the
+ * segment's interior (the slab within `t` of the line). The closed test `≤ t` matches `segDist2`.
+ */
+function nearRowsOf(shape: Shape, t: number, pitch: number): Rows {
+  const out = new Map<number, [number, number][]>();
+  const t2 = t * t;
+  for (const [ax, ay, bx, by] of shape.segs) {
+    const jLo = Math.ceil((Math.min(ay, by) - t) / pitch - 0.5);
+    const jHi = Math.floor((Math.max(ay, by) + t) / pitch - 0.5);
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    for (let j = jLo; j <= jHi; j++) {
+      const y = (j + 0.5) * pitch;
+      let lo = Infinity;
+      let hi = -Infinity;
+      // The two end discs.
+      for (const [cx, cy] of [
+        [ax, ay],
+        [bx, by],
+      ] as const) {
+        const h2 = t2 - (y - cy) * (y - cy);
+        if (h2 >= 0) {
+          const h = Math.sqrt(h2);
+          lo = Math.min(lo, cx - h);
+          hi = Math.max(hi, cx + h);
+        }
+      }
+      // The slab: projection parameter in [0, 1] and distance to the line ≤ t. Both are linear in x
+      // on this row, so each is an interval (or all/none when its x coefficient is 0).
+      if (len2 > 0) {
+        let sLo = -Infinity;
+        let sHi = Infinity;
+        // s(x) = ((x − ax)·dx + (y − ay)·dy) / len2 ∈ [0, 1]
+        const s0 = ((y - ay) * dy) / len2 - (ax * dx) / len2;
+        const s1 = dx / len2;
+        const clamp = (c0: number, c1: number, min: number, max: number): void => {
+          // c0 + c1·x ∈ [min, max]
+          if (c1 === 0) {
+            if (c0 < min || c0 > max) {
+              sLo = Infinity;
+              sHi = -Infinity;
+            }
+            return;
+          }
+          const xa = (min - c0) / c1;
+          const xb = (max - c0) / c1;
+          sLo = Math.max(sLo, Math.min(xa, xb));
+          sHi = Math.min(sHi, Math.max(xa, xb));
+        };
+        clamp(s0, s1, 0, 1);
+        // signed distance to the line: ((x − ax)·dy − (y − ay)·dx) / len ∈ [−t, t]
+        const len = Math.sqrt(len2);
+        clamp((-ax * dy - (y - ay) * dx) / len, dy / len, -t, t);
+        if (sLo <= sHi) {
+          lo = Math.min(lo, sLo);
+          hi = Math.max(hi, sHi);
+        }
+      }
+      if (lo > hi) continue;
+      const k0 = Math.ceil(lo / pitch - 0.5);
+      const k1 = Math.floor(hi / pitch - 0.5) + 1;
+      if (k1 <= k0) continue;
+      const list = out.get(j);
+      if (list === undefined) out.set(j, [[k0, k1]]);
+      else list.push([k0, k1]);
+    }
+  }
+  for (const [j, list] of out) out.set(j, mergeRanges(list));
+  return out;
+}
+
 /** The union of sorted-or-not index ranges, merged. */
 function mergeRanges(ranges: [number, number][]): [number, number][] {
   if (ranges.length < 2) return ranges;
@@ -373,6 +451,13 @@ class PointBox {
     if (x > this.x1) this.x1 = x;
     if (y > this.y1) this.y1 = y;
   }
+  /** Every point of row `y` with index in [k0, k1), at once (the same bbox and count as one by one). */
+  addRange(k0: number, k1: number, y: number, pitch: number): void {
+    if (k1 <= k0) return;
+    this.add((k0 + 0.5) * pitch, y);
+    this.add((k1 - 0.5) * pitch, y);
+    this.n += k1 - k0 - 2;
+  }
   box(half: number): OracleBbox | null {
     return this.n === 0 ? null : { min: [this.x0 - half, this.y0 - half], max: [this.x1 + half, this.y1 + half] };
   }
@@ -442,6 +527,7 @@ export function checkDesignReach(
       const unreached = new PointBox();
       const tooFar = new PointBox();
       let deep = 0;
+      const near = reachHere ? nearRowsOf(p.shape, p.rRef + band, pitch) : null;
       for (let j = j0; j <= j1; j++) {
         const y = (j + 0.5) * pitch;
         const cutRow = mergeRanges(cut.get(j) ?? []);
@@ -450,11 +536,9 @@ export function checkDesignReach(
           deep += rangeCount(ownRow);
           // Only the outline's points the sweep did NOT remove can be unreached; of those, the ones
           // at least the cutter's radius (plus the band) from the edge are.
-          for (const [a, b] of subtractRanges(ownRow, cutRow)) {
-            for (let k = a; k < b; k++) {
-              const x = (k + 0.5) * pitch;
-              if (!edgeWithin(p.shape, x, y, p.rRef + band)) unreached.add(x, y);
-            }
+          const left = subtractRanges(ownRow, cutRow);
+          if (left.length > 0) {
+            for (const [a, b] of subtractRanges(left, near!.get(j) ?? [])) unreached.addRange(a, b, y, pitch);
           }
         }
         if (cutRow.length === 0) continue;
@@ -1037,3 +1121,4 @@ export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL
 }
 
 export { goalTopAt };
+
