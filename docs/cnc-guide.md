@@ -991,21 +991,24 @@ cut says so.
 that clears the stock first (it removes material fastest), a smaller flat for what the first one
 cannot enter, a ball for the curves, a V-bit for the edges — and posts the cheapest that reaches
 the part. Each cutter is its own program, with its own feed row, its own tool change and its own
-check; the row and the sheet print the sequence with each cutter's estimated time and the total.
-A cutter you **pin** is used as pinned and marked so; with none pinned the choice is the engine's.
+check; the row and the sheet print the sequence as "⌀6 flat (18 min) → ⌀6 ball (15 min) → V-bit
+(3 min) — about 36 min", each cutter's own time and the total. A cutter you **pin** is used as
+pinned and marked so; with none pinned the choice is the engine's. When the part is cut from more
+than one side the list opens with a line per setup — "Setup 1 (top): 6 mm deep, cut by ⌀6 flat
+(owned) → ⌀6 ball (owned)" — with each cutter marked owned or not.
 
 **Stay-down linking.** Between neighbouring passes the cutter stays down and moves across at the
 cutting depth instead of retracting over the stock; it lifts only to travel to another region,
 and then only to that region's clearance height. The row and the sheet print what it cost —
-rapids, hops and the share of the cycle spent in air — so a program that spends more time
+rapids, hops and the share of the cycle in air — so a program that spends more time
 travelling than cutting is visible before it runs.
 
 **The freeing cut comes last, with tabs.** The outer contour that separates the part from the
 stock is always the LAST cut: every pocket, rest and finish runs while the part is still held by
 the stock around it. Where the contour frees the part it leaves **tabs** — bridges of material on
 the outline named on the run sheet — and you cut them free by hand after the program ends. If no
-freeing cut is posted, the row and the sheet say **"The part is not freed — no freeing cut is
-posted."** rather than leaving you to discover it at the machine.
+freeing cut is posted, the row and the sheet say it plainly: The part is not freed — no freeing cut is posted. That sentence means the part will still be attached to the stock when the program
+ends.
 
 **"Not cut" lines.** When the engine cannot cut part of the model it names it, never skips it
 quietly: **"`<region>`: not cut — needs a cutter ≤ N mm"** means no cutter in the set is narrow
@@ -1015,15 +1018,15 @@ line means the part will have material there; scale the region, choose a smaller
 accept the part as stated.
 
 **What the check says: judged and raw.** The goal check compares the simulated sweep with the
-model, and prints two readings of the same run. The **judged** line is the pass: "Matches the
-design (goal)", or "Cuts 0.24 mm into the design at 41.2, 25.3" — the deepest cut the check
+model, and prints two readings of the same run. The **judged** line is the pass: "Matches the design (goal)", or "Cuts 0.24 mm into the design at 41.2, 25.3" — the deepest cut the check
 counts, after the cells it cannot fairly judge are set aside (a wall's own cell, the shadow behind
 a wall, and — when the job asks for an edge break — the rim the chamfer deliberately breaks). The
 **raw** line beside it, "raw, before exclusions: …", is the same sweep with nothing set aside, for
-a reader who wants the unvarnished number. The **top-surface coverage** and the **whole-surface
-reach** are printed against the pass line the shop sets, and neither is folded into the judged
-line: a part can pass on cut-into and still leave surface standing, and the coverage number is
-what says so.
+a reader who wants the unvarnished number. The **top-surface coverage** and the **whole-surface reach** are printed against the pass line
+the shop sets — "Top-surface coverage: 98.8 % (the pass line is 95 %)" and "Whole-surface reach:
+62 % from this setup (the remainder: under-faces and undercuts)" — and neither is folded into the
+judged line: a part can pass on cut-into and still leave surface standing, and the coverage number
+is what says so.
 
 The goal row's **Technical** fold carries the operation's own numbers: the **cutter sequence**'s
 cutters (one program each), the **stock to leave**, and — under the row's "Last generated"
