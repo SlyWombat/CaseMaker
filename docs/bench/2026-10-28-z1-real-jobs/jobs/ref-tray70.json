@@ -1,0 +1,61 @@
+{
+ "schemaVersion": 3,
+ "name": "Makerables reference: 70 mm tool tray, top side (Makera Studio\u2019s own program beside ours)",
+ "machineId": "Z1",
+ "stock": {
+  "length": 110,
+  "width": 140,
+  "thickness": 27.2,
+  "material": "hardwood"
+ },
+ "labels": [],
+ "toolKey": "inv:lib-161032205031",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 4,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "targetObject": {
+  "id": "g1",
+  "name": "70mm_Tool_Tray-msgtf7oi.stl",
+  "format": "stl",
+  "sha256": "f89683c8aaad50fb80c6553e4eed83fb7649c2d505650a5fa4e2529c969c203f",
+  "size": {
+   "x": 106,
+   "y": 136,
+   "z": 26
+  },
+  "position": {
+   "x": 55,
+   "y": 70,
+   "z": 0
+  },
+  "rotation": 0,
+  "enabled": true,
+  "role": "goal",
+  "cutWithinReach": true
+ }
+}

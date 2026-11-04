@@ -1,0 +1,72 @@
+{
+ "schemaVersion": 3,
+ "name": "Makerables reference: 70 mm tool tray, top side \u2014 tape, 0.2 mm grid (the operator\u2019s changes, stated)",
+ "machineId": "Z1",
+ "stock": {
+  "length": 110,
+  "width": 140,
+  "thickness": 27.2,
+  "material": "hardwood"
+ },
+ "labels": [],
+ "toolKey": "inv:lib-161032205031",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 6,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "tape",
+  "tape": {
+   "width": 25,
+   "thickness": 0.1,
+   "inset": 2,
+   "where": null,
+   "squareTo": "front",
+   "source": "default"
+  }
+ },
+ "targetObject": {
+  "id": "g1",
+  "name": "70mm_Tool_Tray-msgtf7oi.stl",
+  "format": "stl",
+  "sha256": "f89683c8aaad50fb80c6553e4eed83fb7649c2d505650a5fa4e2529c969c203f",
+  "size": {
+   "x": 106,
+   "y": 136,
+   "z": 26
+  },
+  "position": {
+   "x": 55,
+   "y": 70,
+   "z": 0
+  },
+  "rotation": 0,
+  "enabled": true,
+  "role": "goal",
+  "cutWithinReach": true,
+  "surface": {
+   "gridPitchMm": 0.2
+  }
+ }
+}

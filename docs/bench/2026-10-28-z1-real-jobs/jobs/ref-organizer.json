@@ -1,0 +1,61 @@
+{
+ "schemaVersion": 3,
+ "name": "Makerables reference: Makera tool organizer, top side",
+ "machineId": "Z1",
+ "stock": {
+  "length": 170,
+  "width": 170,
+  "thickness": 26.8,
+  "material": "hardwood"
+ },
+ "labels": [],
+ "toolKey": "inv:lib-161032205031",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 4,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "targetObject": {
+  "id": "g1",
+  "name": "Tool_Organizer_Z1-msfh3m77.stl",
+  "format": "stl",
+  "sha256": "50dcf301f424a5c231db27ef5bf052029ea016c7ee3167e1dbe2bc8afad6975b",
+  "size": {
+   "x": 161,
+   "y": 161,
+   "z": 26
+  },
+  "position": {
+   "x": 85,
+   "y": 85,
+   "z": 0
+  },
+  "rotation": 0,
+  "enabled": true,
+  "role": "goal",
+  "cutWithinReach": true
+ }
+}

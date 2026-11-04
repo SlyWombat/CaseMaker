@@ -49,6 +49,22 @@ Not reproducible here, so listed on the page and not cards: j06 (the wolf model 
 (rotary carving cannot be described yet), j09 (PCB, needs a login), j26 (posted NC halves with no
 design to check them against).
 
+## The reference section — Makera Studio's own programs (#955)
+
+The `ref-*` cards put a maker's published part beside ours: **Makera Studio's own NC**, scored on the
+same goal heightfield, the same checker and the same rule as our program, with the project's author
+and licence stated on the card and the seven lines of plan v2 §3 printed as a vendor-delta table
+(coverage, cut-into, cycle, air fraction, rapids per 1,000 feed moves, cutters, posts-as-filed).
+Vendor inputs are **evaluation-only downloads and are never committed**; the build finds them by file
+name and SHA-256 under `--makerables` (or `CM_MAKERABLES`), the same way the shop meshes are injected,
+and a card whose inputs are absent says so instead of guessing. The metadata (licences, sources,
+hashes, placements) is in `tools/references.py`; the parts that cannot yet be put beside ours are
+listed on the page with the reason.
+
+The cut-into line is `cutInto0p1Pct = 0`: a cell counts only when its swept top is more than 0.1 mm
+below the goal — the heightfield's own pitch — outside the edge-break allowance, the wall cells and the
+wall shadow, each printed on the card (the full rule is in `tools/README.md`).
+
 ---
 
 This run replaces `docs/bench/2026-10-27-z1-typical-jobs/` as the record of whether Case Maker can make the 18 typical jobs and the seven jobs of the second set. The 2026-10-27 run counted "a program was written and passed its own simulation" as success, and most of its inputs were stand-ins that did not resemble the parts. In this run, each job models the part in the maker's photo or file. Every card was then compared by eye with that photo. The cards were first run on 2026-10-28; the **2026-10-29 re-run on main 207e8a11** is the current verdict, and the first-run tables below are kept as history.

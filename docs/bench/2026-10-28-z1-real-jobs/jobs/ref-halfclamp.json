@@ -1,0 +1,68 @@
+{
+ "schemaVersion": 3,
+ "name": "Makerables reference: half-length top clamp (CC0) \u2014 Makera Studio\u2019s own program beside ours",
+ "machineId": "Z1",
+ "stock": {
+  "length": 100,
+  "width": 100,
+  "thickness": 5,
+  "material": "aluminium-6061"
+ },
+ "labels": [],
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 50
+    },
+    {
+     "edge": "right",
+     "at": 50
+    }
+   ],
+   "source": "default"
+  }
+ },
+ "targetObject": {
+  "id": "g1",
+  "name": "HalfLengthTopClamp-mqzf3671.stl",
+  "format": "stl",
+  "sha256": "4b299ef7c0c43d4e45a78d91570f349e5c272594163285c3f4574ea811376713",
+  "size": {
+   "x": 32.5,
+   "y": 5,
+   "z": 20
+  },
+  "position": {
+   "x": 24.0,
+   "y": 18.0,
+   "z": 0
+  },
+  "rotation": 0,
+  "rotationX": -90,
+  "enabled": true,
+  "role": "goal",
+  "cutWithinReach": true
+ },
+ "toolKey": ""
+}

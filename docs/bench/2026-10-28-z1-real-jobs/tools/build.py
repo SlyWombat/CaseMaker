@@ -28,6 +28,8 @@ W = os.path.dirname(HERE)                      # docs/bench/2026-10-28-z1-real-j
 JOBS = os.path.join(W, 'jobs')
 sys.path.insert(0, HERE)
 from cards import CARDS, APPENDIX, SAMPLES      # noqa: E402
+from references import REFS, PARKED, RAPID_XY_MM_MIN, RAPID_Z_MM_MIN   # noqa: E402
+REF_BY_ID = {r['id']: r for r in REFS}
 
 TOL = 0.02          # fraction of an item's area; the same 2 % the issue's verdict rule names
 NOISE = {'vise-default', 'sacrificial-default', 'plunge-unproven'}
@@ -47,6 +49,9 @@ def arg_parse():
     p.add_argument('--out', default=os.path.expanduser('~/casemaker-manager/demo-build'))
     p.add_argument('--meshes', default=os.environ.get('CM_MESHES', '/mnt/c/projects/Case Maker/samples/3d'),
                    help='where the shop-owned mesh files live (the committed 3D jobs carry no bytes)')
+    p.add_argument('--makerables', default=os.environ.get('CM_MAKERABLES', ''),
+                   help='the Makerables evaluation downloads (dl/<slug>/): vendor NCs and models, '
+                        'matched by name and sha256, never committed')
     p.add_argument('--only', help='comma-separated card ids (debug)')
     p.add_argument('--timeout', type=int, default=1800, help='seconds per job (default 1800)')
     return p.parse_args()
@@ -75,9 +80,59 @@ def read_json(path, default=None):
         return default
 
 
-def materialise_job(job_path, rundir, meshes):
-    """The committed 3D jobs carry no mesh bytes: the meshes are shop-owned local inputs. Put the
-    file the job names back in, by the job's own sha256, into the run directory (never the repo)."""
+def makerable(args, name, sha):
+    """The vendor input by name under --makerables, checked by sha256 before use. None when absent."""
+    if not getattr(args, '_mkr_index', None) and args.makerables and os.path.isdir(args.makerables):
+        idx = {}
+        for root, _, files in os.walk(args.makerables):
+            for f in files:
+                idx.setdefault(f, os.path.join(root, f))
+        args._mkr_index = idx
+    path = (getattr(args, '_mkr_index', None) or {}).get(name)
+    if not path:
+        return None
+    import hashlib
+    got = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    if got != sha:
+        raise SystemExit(f'{path}: sha256 {got} is not the reference\'s {sha}; refusing to score another download')
+    return path
+
+
+def vendor_stats(nc, cycle_s):
+    """Air fraction and rapids per 1,000 feed moves from the vendor's own file, on the app's Z1
+    rapid profile (5000 mm/min XY, 1000 Z). #964's scorer owns the shared implementation."""
+    import math
+    sys.path.insert(0, HERE)
+    from goal_check import mkr_moves          # noqa: E402
+    rap = feed = 0
+    rs = 0.0
+    for _tn, a, b, rapid in mkr_moves(nc):
+        dx = math.hypot(b[0] - a[0], b[1] - a[1]); dz = abs(b[2] - a[2])
+        if rapid:
+            rap += 1
+            rs += 60 * (dx / RAPID_XY_MM_MIN + dz / RAPID_Z_MM_MIN)
+        else:
+            feed += 1
+    return {'rapids': rap, 'feedMoves': feed, 'rapidSeconds': round(rs, 1),
+            'airFraction': round(rs / cycle_s, 4) if cycle_s else None,
+            'rapidsPer1k': round(rap / feed * 1000, 1) if feed else None}
+
+
+def our_cutters(ncs):
+    """The app's own cutter keys from the posted programs (`;@CM|TOOL|key=` headers)."""
+    keys = set()
+    for f in ncs:
+        for line in open(f, errors='replace'):
+            m = re.search(r';@CM\|TOOL\|key=(\S+)', line)
+            if m:
+                keys.add(m.group(1).strip())
+    return keys
+
+
+def materialise_job(job_path, rundir, meshes, args=None):
+    """The committed 3D jobs carry no mesh bytes: the meshes are shop-owned (or the vendor's
+    evaluation-only) local inputs. Put the file the job names back in, by the job's own sha256, into
+    the run directory (never the repo)."""
     import hashlib
     j = read_json(job_path)
     if not j:
@@ -86,6 +141,8 @@ def materialise_job(job_path, rundir, meshes):
     if not t or t.get('data') or not t.get('name'):
         return job_path
     src = os.path.join(meshes, t['name'])
+    if not os.path.exists(src) and args is not None:
+        src = makerable(args, t['name'], t.get('sha256')) or src
     raw = open(src, 'rb').read()
     got = hashlib.sha256(raw).hexdigest()
     if got != t.get('sha256'):
@@ -115,6 +172,15 @@ def load_receipt(rundir):
         out['code'] = None
     out['verifierErrors'] = sum(int((p.get('sim') or {}).get('errorCount') or 0) for p in out['programs'])
     out['seconds'] = sum(int((p.get('cam') or {}).get('estimatedSeconds') or 0) for p in out['programs'])
+    # #927's own terms, summed over the job's programs: the air/rapids lines (#955) read these.
+    eff = [(p.get('cam') or {}).get('efficiency') or {} for p in out['programs']]
+    cyc = sum(float(e.get('cycleSeconds') or 0) for e in eff)
+    rap = sum(float(e.get('rapidSeconds') or 0) for e in eff)
+    out['cycleSeconds'] = round(cyc, 1) if cyc else None
+    out['airFraction'] = round(rap / cyc, 4) if cyc else None
+    out['hops'] = sum(int(e.get('hopCount') or 0) for e in eff)
+    out['feedMoves'] = sum(int((p.get('cam') or {}).get('cuttingMoves') or 0) for p in out['programs'])
+    out['rapidsPer1k'] = round(out['hops'] / out['feedMoves'] * 1000, 1) if out['feedMoves'] else None
     times = [((p.get('sheet') or {}).get('estimatedTime')) for p in out['programs']]
     out['time'] = ' + '.join(t for t in times if t) or None
     return out
@@ -256,7 +322,7 @@ def run_card(c, args, sha, cat):
     card['figures'] = []
     card['problems'] = []
 
-    run_job = materialise_job(job, rundir, args.meshes)
+    run_job = materialise_job(job, rundir, args.meshes, args)
     job = run_job if run_job != job else job   # the design check and goal reader take the same bytes
     if not os.path.exists(receipt_path):
         r = sh(['npm', 'run', '-s', 'casemaker', '--', 'cut', run_job, '--out', rundir,
@@ -277,6 +343,10 @@ def run_card(c, args, sha, cat):
     card['warnings'] = rc['warnings']
     ncs = sorted(os.path.join(rundir, f) for f in os.listdir(rundir)
                  if f.endswith('.nc') and not f.endswith('-frame.nc'))
+    card['ours'] = {'airFraction': rc['airFraction'], 'rapidsPer1k': rc['rapidsPer1k'],
+                    'cycleSeconds': rc['cycleSeconds'], 'hops': rc['hops'],
+                    'feedMoves': rc['feedMoves'], 'cutters': len(our_cutters(ncs)) or len(ncs)}
+
 
     # Render before/after from the same sweep the checks use.
     subprocess.run([sys.executable, os.path.join(HERE, 'render.py'), '--location', loc, job, assets, *ncs],
@@ -285,15 +355,19 @@ def run_card(c, args, sha, cat):
     card['figures'].append(('After · independent sweep', inline_img(os.path.join(assets, 'after.png'))))
 
     kind = c['kind']
-    if kind == 'goal' and ncs:
-        # The goal check writes its own surfaces; Z 0 is the stock top for side 1 only.
-        prefix = os.path.join(rundir, 'goal')
+    prefix = os.path.join(rundir, 'goal')
+    gc = None
+    if kind == 'goal':
+        # The goal heightfield is the card's reference, and the vendor's program is scored against
+        # exactly the same surface: it is built whether or not the app wrote a program (#955).
         app = os.path.join(args.repo, 'casemaker-app')
-        hf = subprocess.run(['npx', '--no-install', 'tsx', '--tsconfig', 'tsconfig.app.json',
-                             os.path.join(HERE, 'goal-hf.mts'), app, job, prefix],
-                            cwd=app, capture_output=True, text=True, timeout=300)
-        gc = None
-        if hf.returncode == 0:
+        hf_ok = os.path.exists(prefix + '.bin') and os.path.exists(prefix + '.json')
+        if not hf_ok:
+            hf = subprocess.run(['npx', '--no-install', 'tsx', '--tsconfig', 'tsconfig.app.json',
+                                 os.path.join(HERE, 'goal-hf.mts'), app, job, prefix],
+                                cwd=app, capture_output=True, text=True, timeout=300)
+            hf_ok = hf.returncode == 0
+        if ncs and hf_ok:
             # Every program of the first setup sweeps the same side (a goal's flat rough and ball
             # finish are two programs). A job with setups names each program's side.
             setups = (read_json(job) or {}).get('setups') or []
@@ -316,28 +390,33 @@ def run_card(c, args, sha, cat):
                 gh = read_json(prefix + '.json') or {}
                 pitch = gc['pitchMm']
                 card['goalSize'] = {'x': round(gh.get('nx', 0) * pitch, 1), 'y': round(gh.get('ny', 0) * pitch, 1)}
-        if gc is None:
+            else:
+                card['verdict'], card['sentence'] = 'error', 'the goal check did not run'
+                return card
+    if kind == 'goal':
+        if ncs and gc is None and not os.path.exists(prefix + '.bin'):
             card['verdict'], card['sentence'] = 'error', 'the goal heightfield could not be sampled (not a mesh goal?)'
             return card
-        card['verdict'], card['sentence'], card['numbers'] = goal_verdict(rc, gc)
-        # The app's own second coverage number, from its `goal-unreached` warning: the share of the
-        # WHOLE goal surface this setup reproduces (top-facing and reachable), as against this card's
-        # top-heightfield coverage. Read from the receipt, never re-derived here.
-        reach = None
-        for w in rc['warnings']:
-            m = re.search(r"reproduces (\d+(?:\.\d+)?) % of the goal's surface", w)
-            if m:
-                reach = float(m.group(1))
-                break
-        card['numbers']['wholeSurfacePct'] = reach
-        if len(rc['programs']) > 1:
-            card['sentence'] += ' (goal check: side 1 only)'
-    elif kind == 'goal':
-        if rc['sentence']:
-            card['verdict'], card['sentence'] = 'refused', rc['sentence'] + (f" [{rc['code']}]" if rc['code'] else '')
+        if ncs and gc is not None:
+            card['verdict'], card['sentence'], card['numbers'] = goal_verdict(rc, gc)
+            # The app's own second coverage number, from its `goal-unreached` warning: the share of
+            # the WHOLE goal surface this setup reproduces (top-facing and reachable), as against this
+            # card's top-heightfield coverage. Read from the receipt, never re-derived here.
+            reach = None
+            for w in rc['warnings']:
+                m = re.search(r"reproduces (\d+(?:\.\d+)?) % of the goal's surface", w)
+                if m:
+                    reach = float(m.group(1))
+                    break
+            card['numbers']['wholeSurfacePct'] = reach
+            if len(rc['programs']) > 1:
+                card['sentence'] += ' (goal check: side 1 only)'
         else:
-            card['verdict'], card['sentence'] = 'error', 'no program was written'
-        card['numbers'] = {}
+            if rc['sentence']:
+                card['verdict'], card['sentence'] = 'refused', rc['sentence'] + (f" [{rc['code']}]" if rc['code'] else '')
+            else:
+                card['verdict'], card['sentence'] = 'error', 'no program was written'
+            card['numbers'] = {}
     else:
         dc = None
         p = subprocess.run([sys.executable, os.path.join(HERE, 'design_check.py'), '--location', loc,
@@ -353,6 +432,29 @@ def run_card(c, args, sha, cat):
                                 inline_img(os.path.join(rundir, 'overlay.png'))))
         card['verdict'], card['sentence'], card['numbers'] = design_verdict(rc, dc)
         card['design'] = dc
+
+    # #955 — the vendor's own program beside ours: the same goal heightfield, the same checker.
+    ref = REF_BY_ID.get(c.get('vendor')) if c.get('vendor') else None
+    if ref:
+        card['vendor'] = {'ref': ref}
+        nc = makerable(args, ref['nc'][0], ref['nc'][1])
+        if nc is None or not os.path.exists(prefix + '.bin'):
+            card['vendor']['missing'] = True
+        else:
+            vdir = os.path.join(rundir, 'vendor')
+            os.makedirs(vdir, exist_ok=True)
+            if not os.path.exists(os.path.join(vdir, 'goalcheck.json')):   # cached like the receipt
+                subprocess.run([sys.executable, os.path.join(HERE, 'goal_check.py'), prefix,
+                                str(job_stock(job)['thickness']), vdir, '--mkr', '--dz', str(ref['dz']), nc],
+                               check=False, capture_output=True, text=True)
+            gv = read_json(os.path.join(vdir, 'goalcheck.json'))
+            if gv:
+                card['vendor'].update({'numbers': gv, 'nc': ref['nc'][0],
+                                       'stats': vendor_stats(nc, gv.get('vendorSeconds'))})
+                card['figures'].append(('Makera Studio’s own program · deviation map (red = below the goal)',
+                                        inline_img(os.path.join(vdir, 'goalcheck.png'))))
+            else:
+                card['vendor']['failed'] = True
 
     if kind == 'reference':
         ref = c.get('reference') or {}
@@ -380,6 +482,45 @@ def run_card(c, args, sha, cat):
 
 def job_stock(job_path):
     return (read_json(job_path) or {}).get('stock') or {}
+
+
+def seven_lines(c):
+    """The plan-v2 §3 lines side by side: Makera Studio's own program and ours on the same goal.
+    Every number is printed as measured; a line ours cannot state reads 'refused', not a guess."""
+    v = (c.get('vendor') or {}).get('numbers') or {}
+    st = (c.get('vendor') or {}).get('stats') or {}
+    n = c.get('numbers') or {}
+    o = c.get('ours') or {}
+    def pct(x):
+        return '—' if x is None else f'{x * 100:.1f} %'
+    def f(x, d=1, unit=''):
+        return '—' if x is None else f'{x:.{d}f}{unit}'
+    ours_cut = (f"{n['cutIntoPct']} % · max {n['maxCutIntoMm']} mm" if 'cutIntoPct' in n
+                else 'refused — no program to score')
+    vend_cut = (f"{v['cutInto0p1Pct']} % · max {v['maxCutIntoMm']} mm" if v else 'not scored')
+    rows = [
+        ('coverage, top surface', f"{f(100 - v['leftover0p1Pct'], 2)} %" if v else 'not scored',
+         f"{f(n['coveragePct'], 2)} %" if 'coveragePct' in n else 'refused — no program to score'),
+        ('cut-into &gt; 0.1 mm (allowances stated below)', vend_cut, ours_cut),
+        ('cycle time', f"{f((v.get('vendorSeconds') or 0) / 60, 1)} min (the NC header)" if v else '—',
+         f(o['cycleSeconds'] / 3600, 1, ' h') if o.get('cycleSeconds') else (c.get('time') or 'refused — no program to score')),
+        ('air fraction', pct(st.get('airFraction')), pct(o.get('airFraction'))),
+        ('rapids per 1,000 feed moves', f(st.get('rapidsPer1k')) , f(o.get('rapidsPer1k'))),
+        ('cutters', str(len(((v.get('programs') or [{}])[0].get('tools') or []))) if v else '—',
+         str(o.get('cutters') or '—')),
+        ('posts as filed', 'yes — its own stock and holding' if v else '—',
+         {'match': 'yes', 'deviates': 'yes'}.get(str(c.get('verdict')), html.escape(str(c.get('verdict') or '—')))),
+    ]
+    body = ''.join(f'<tr><td>{k}</td><td>{a}</td><td>{b}</td></tr>' for k, a, b in rows)
+    allow = ''
+    if v:
+        allow = (f"<p class=\"notes\">The vendor’s excluded, unadjudicated share: edge break {v.get('edgeBreakPct')} % "
+                 f"(max {v.get('edgeBreakMaxMm')} mm), wall cells {v.get('wallNotScoredPct')} %, "
+                 f"wall shadow {v.get('shadowNotScoredPct')} %; raw cut-into below 0.01 mm {v.get('cutIntoInclEdgePct')} %. "
+                 f"The same rule scores both columns.</p>")
+    return (f"<details open><summary>The seven lines, ours and Makera’s</summary>"
+            f"<div class=\"tablewrap\"><table><tr><th>line</th><th>Makera Studio</th><th>Case Maker</th></tr>{body}</table></div>"
+            f"{allow}</details>")
 
 
 def page(cards, args, sha, loc, cat):
@@ -427,8 +568,13 @@ def page(cards, args, sha, loc, cat):
 <section class="panel"><h2>The rule</h2><div class="how">
   <p>A card stays only if its reference is objective and drawn on it, and its verdict is computed:
   <b>Matches the design</b> (verifier 0 errors, every measured item at its floor, nothing cut outside the design;
-  3D: zero cut-into the goal, coverage ≥ 95 %), <b>Deviates</b> (with the numbers and where), or <b>Refused</b>
-  (the app’s sentence). Photo-judged verdicts and material proxies are retired; the as-filed job is judged.</p>
+  3D: zero cut-into the goal beyond the edge-break allowance, coverage ≥ 95 %), <b>Deviates</b> (with the numbers
+  and where), or <b>Refused</b> (the app’s sentence). Photo-judged verdicts and material proxies are retired;
+  the as-filed job is judged. The 3D cut-into line counts a cell only when its swept top is more than 0.1 mm
+  below the goal — the goal heightfield’s own pitch — outside three stated classes: the <b>edge break</b> (a V
+  bit within its reach of a design edge, no deeper than its leg), <b>wall cells</b> (a vertical wall lands on one
+  side of a cell boundary or the other) and the <b>wall shadow</b> (material a cutter cannot reach behind a wall,
+  which the heightfield stamp nevertheless spreads over). Each excluded share is printed on the card.</p>
   <p>Not reproducible here, so not cards: {html.escape('; '.join(f'{a} — {b}' for a, b in APPENDIX))}.</p>
   <h3>The five hardwood samples (#936–#941, the 36 × 36 × 100 sticks)</h3>
   <p>A sample joins the card table below as soon as its job file is committed; until then this is what
@@ -438,6 +584,14 @@ def page(cards, args, sha, loc, cat):
   <tr><th>sample</th><th>issue</th><th>what it measures</th><th>state</th></tr>
   {''.join(f"<tr><td>{s}</td><td>#{n}</td><td>{html.escape(t)}</td><td>{html.escape(st)}</td></tr>" for s, n, t, st in SAMPLES)}
   </table></div>
+</div></section>
+<section class="panel"><h2>Reference section — Makera Studio’s own programs</h2><div class="how">
+  <p>Each <code>ref-*</code> card below is a maker’s published project with <b>Makera Studio’s own NC</b>
+  scored on the same goal heightfield, the same checker and the same rule as ours. The card states the
+  project, its author and its licence; the vendor’s files are evaluation-only downloads and are never
+  committed — the build finds them by sha256 when they are on this machine, and a card whose inputs are
+  absent says so instead of guessing.</p>
+  <p>Not yet beside ours: {'; '.join(f'<b>{html.escape(t)}</b> — {html.escape(w)}' for _i, t, w in PARKED)}.</p>
 </div></section>
 <section class="panel"><h2>All cards</h2><div class="tablewrap"><table>
 <tr><th>id</th><th>job</th><th>check</th><th>verdict</th><th>what the check says</th></tr>
@@ -482,13 +636,14 @@ def page(cards, args, sha, loc, cat):
                       f"<tr><th>item</th><th>kind</th><th>depth mm</th><th>left</th><th>deep/over</th><th>reach</th></tr>{irows}</table></div></details>")
         body.append(f'''<article class="job" id="{html.escape(c['id'])}">
   <div class="job-head">
-    <p class="eyebrow">{html.escape(c['material'])} · {html.escape(c['kind'])} check · {html.escape(c['job'])}{' · local-input' if c.get('input') == 'local' else ''} · {html.escape(str(c.get('locationName', '')))} ({c.get('locationCutters', 0)} cutters)</p>
+    <p class="eyebrow">{html.escape(c['material'])} · {html.escape(c['kind'])} check · {html.escape(c['job'])}{' · local-input' if c.get('input') == 'local' else ''}{(' · Makera Studio’s own NC · ' + html.escape((c.get('vendor') or {}).get('ref', {}).get('licence', ''))) if c.get('vendor') else ''} · {html.escape(str(c.get('locationName', '')))} ({c.get('locationCutters', 0)} cutters)</p>
     <h2>{html.escape(c['title'])}</h2>
     <p class="src">{html.escape(c['id'])} · source: {html.escape(c.get('source', ''))}</p>
   </div>
   <p><span class="pill {pill_cls}">{pill_txt}</span> <span class="notes">{html.escape(c.get('sentence') or '')}</span></p>
   <div class="frames">{figs}</div>
   <dl class="facts">{facts_html}</dl>
+  {seven_lines(c) if (c.get('vendor') or {}).get('numbers') else ''}
   {detail}
 </article>''')
     body.append('''<footer>Job files, the tools that build this page and its manifest are in

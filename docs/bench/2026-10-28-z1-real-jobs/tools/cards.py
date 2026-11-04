@@ -127,4 +127,22 @@ CARDS = [
     dict(id='s5', title='Sample 5: the top edges chamfered, then a through-slot', job='../../941-chamfer-slot.job.json',
          kind='design', input='committed', material='hardwood', location='k3',
          source='Sample 5 (#941) — a 1 × 45° bevel on the stock’s edges, then a 6 × 10 slot across the full 36 mm width (the cutter leaves the stock)'),
+    # #955 — the reference cards: a Makerables part, Makera Studio's own NC scored on the same goal
+    # heightfield as our program. Vendor inputs are evaluation-only local downloads (see
+    # references.py); the card says "inputs absent" when they are not on the machine.
+    dict(id='ref-tray70', title='Reference: tool tray 70 mm — Makera Studio’s program beside ours',
+         job='ref-tray70.json', kind='goal', input='local', material='hardwood', vendor='ref-tray70',
+         source='Makerables — Modular Stackable Tool Trays, treintjes92 (CC BY-NC-SA 4.0); Makera Studio’s own NC'),
+    dict(id='ref-tray70-tape', title='Reference: tool tray 70 mm, held on tape at a 0.2 mm grid (the operator’s changes, stated)',
+         job='ref-tray70-tape.json', kind='goal', input='local', material='hardwood', vendor='ref-tray70',
+         source='Makerables — Modular Stackable Tool Trays, treintjes92 (CC BY-NC-SA 4.0); Makera Studio’s own NC'),
+    dict(id='ref-organizer', title='Reference: Makera tool organizer — Makera Studio’s program beside ours',
+         job='ref-organizer.json', kind='goal', input='local', material='hardwood', vendor='ref-organizer',
+         source='Makerables — Makera Tool Organizer (CC BY-NC-SA 4.0); Makera Studio’s own NC'),
+    dict(id='ref-topclamp', title='Reference: Makera top clamp 3D feature — Makera Studio’s program beside ours',
+         job='ref-topclamp.json', kind='goal', input='local', material='aluminium-6061', vendor='ref-topclamp',
+         source='Makerables — Top Clamp 3D Feature (CC0 1.0); Makera Studio’s own NC'),
+    dict(id='ref-halfclamp', title='Reference: half-length top clamp — Makera Studio’s program beside ours',
+         job='ref-halfclamp.json', kind='goal', input='local', material='aluminium-6061', vendor='ref-halfclamp',
+         source='Makerables — Half-Length Top Clamp (CC0 1.0); Makera Studio’s own NC'),
 ]
