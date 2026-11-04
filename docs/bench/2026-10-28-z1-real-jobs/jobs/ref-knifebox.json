@@ -1,0 +1,70 @@
+{
+ "schemaVersion": 3,
+ "name": "Makerables reference: knife storage box (Makerables\u2014Modulink, CC0) \u2014 Makera Studio\u2019s own program beside ours",
+ "machineId": "Z1",
+ "stock": {
+  "length": 300,
+  "width": 150,
+  "thickness": 20,
+  "material": "hardwood"
+ },
+ "labels": [],
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 6,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "tape",
+  "tape": {
+   "width": 25,
+   "thickness": 0.1,
+   "inset": 2,
+   "where": null,
+   "squareTo": "front",
+   "source": "default"
+  }
+ },
+ "targetObject": {
+  "id": "g1",
+  "name": "15-2_-mpwewodq.stl",
+  "format": "stl",
+  "sha256": "158342e14c371093045f5a6f36e8341a2c430eb43ad2ed225e1e201ff7a46051",
+  "size": {
+   "x": 150,
+   "y": 100,
+   "z": 20
+  },
+  "position": {
+   "x": 150,
+   "y": 75,
+   "z": 0
+  },
+  "rotation": 0,
+  "rotationX": 0,
+  "enabled": true,
+  "role": "goal",
+  "cutWithinReach": true
+ },
+ "toolKey": ""
+}

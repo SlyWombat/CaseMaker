@@ -162,4 +162,10 @@ CARDS = [
     dict(id='ref-wildspirit', title='Reference: Wild Spirit 3D relief, the wolf — Makera Studio’s program beside ours',
          job='ref-wildspirit.json', kind='goal', input='local', material='abs', vendor='ref-wildspirit',
          source='Makerables — Wild Spirit 3D Relief (CC0 1.0); Makera Studio’s own NC'),
+    dict(id='ref-knifebox', title='Reference: knife storage box — Makera Studio’s program beside ours',
+         job='ref-knifebox.json', kind='goal', input='local', material='hardwood', vendor='ref-knifebox',
+         source='Makerables — Knife Storage Box, Modulink (CC0 1.0); Makera Studio’s own NC (a Carvera C1 program)'),
+    dict(id='ref-accuracy', title='Reference: CNC accuracy test sample — Makera Studio’s program beside ours',
+         job='ref-accuracy.json', kind='goal', input='local', material='aluminium-6061', vendor='ref-accuracy',
+         source='Makerables — CNC Accuracy Test Sample, Molodos (CC BY-NC-ND 4.0); Makera Studio’s own NC'),
 ]

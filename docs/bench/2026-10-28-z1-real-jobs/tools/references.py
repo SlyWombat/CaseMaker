@@ -140,6 +140,39 @@ REFS = [
               'under the stock top (dz 0.5; at 0.0 the whole surface reads −0.499 mm). The blank is '
               'epoxy tooling board; our job runs it as ABS, the nearest material the feed table '
               'carries, and the card states that substitution.'),
+    dict(id='ref-knifebox',
+         title='Knife Storage Box — the 3D feature and its contour',
+         maker='Modulink', licence='CC0 1.0',
+         url='https://www.makerables.com/project/knife-storage-box',
+         slug='knife-storage-box',
+         material='hardwood', stock=(300.0, 150.0, 20.0), dz=0.0,
+         nc=('15-2_F3_175T1-mpweudt3.nc',
+             '4b941add0eefd5bf290b2d99fd945e5b317e63931d016eafffb9dd5dc7a30663'),
+         model=('15-2_-mpwewodq.stl',
+                '158342e14c371093045f5a6f36e8341a2c430eb43ad2ed225e1e201ff7a46051'),
+         job='ref-knifebox.json',
+         note='A Carvera (C1) program — the Makerables project states that machine — so our column is '
+              'the Z1 app on the same blank and may refuse. One ⌀3.175 flat, a 3D feature and a 2D '
+              'contour, 52.0 min. The published STL’s 150 × 100 footprint sits at X 75–225, '
+              'Y 25–125 of a 300 × 150 × 20 blank; the model top is the stock top (dz 0.0; 0.5 '
+              'reads 99.77 % leftover, −0.5 reads 99.06 % cut-into).'),
+    dict(id='ref-accuracy',
+         title='CNC Accuracy Test Sample — pockets, holes, text and a slide test',
+         maker='Molodos', licence='CC BY-NC-ND 4.0',
+         url='https://www.makerables.com/project/cnc-accuracy-test-sample',
+         slug='cnc-accuracy-test-sample',
+         material='aluminium-6061', stock=(86.0, 56.0, 5.0), dz=1.0,
+         nc=('cnc_sample_5_0mm_6061-mr16l8sz.nc',
+             'dc603aeadae234c87b0516d4a71a9f225e240924b8d65f9afb64f10b412b86f1'),
+         model=('cnc_sample-mr16xrph.stl',
+                '3e87a660f5400fe4deaa38978b04d58e896a942abd03c34455a65d6c3716e941'),
+         job='ref-accuracy.json',
+         note='The Z1 accuracy plate: ten paths, four cutters (⌀2 and ⌀3.175 flats, a ⌀2 drill, an '
+              'engraver), 55.9 min. Its “[T1]Remove Top” faces 1 mm off the blank first, so the '
+              'model top sits 1 mm under the stock top (dz 1.0; 0.0 reads −1.0 mm everywhere, 2.0 '
+              'reads 1.0 mm leftover). The published input is a STEP; the model file is that STEP '
+              'converted with bin/step2stl.cjs (4,458 triangles, the published STEP’s sha256 '
+              'abd81e3f…). The 70 × 40 part sits at (43, 28) on the 86 × 56 × 5 blank.'),
     dict(id='ref-badge',
          title='Makera Badge 2D Pattern — the closed rings as regions, two-colour engraving',
          maker='Makera', licence='CC0 1.0',

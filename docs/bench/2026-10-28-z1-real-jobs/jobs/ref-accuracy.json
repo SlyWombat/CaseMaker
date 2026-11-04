@@ -1,0 +1,70 @@
+{
+ "schemaVersion": 3,
+ "name": "Makerables reference: CNC accuracy test sample (Makerables\u2014Molodos) \u2014 Makera Studio\u2019s own program beside ours",
+ "machineId": "Z1",
+ "stock": {
+  "length": 86,
+  "width": 56,
+  "thickness": 5,
+  "material": "aluminium-6061"
+ },
+ "labels": [],
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 6,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "tape",
+  "tape": {
+   "width": 25,
+   "thickness": 0.1,
+   "inset": 2,
+   "where": null,
+   "squareTo": "front",
+   "source": "default"
+  }
+ },
+ "targetObject": {
+  "id": "g1",
+  "name": "cnc_sample-mr16xrph.stl",
+  "format": "stl",
+  "sha256": "3e87a660f5400fe4deaa38978b04d58e896a942abd03c34455a65d6c3716e941",
+  "size": {
+   "x": 70,
+   "y": 40,
+   "z": 4
+  },
+  "position": {
+   "x": 43,
+   "y": 28,
+   "z": 0
+  },
+  "rotation": 0,
+  "rotationX": 0,
+  "enabled": true,
+  "role": "goal",
+  "cutWithinReach": true
+ },
+ "toolKey": ""
+}
