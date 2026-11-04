@@ -8,7 +8,7 @@
  *   - PyCAM (GPL-3.0) — flat, ball and bull, `pycamSamples` (a V cutter is OCL-only).
  * Both are numbers-only columns: no third-party code is copied or linked into the product. This module loads a
  * fixture and compares a candidate CL surface with it at the fixture's own sample points, within
- * the stated tolerance (one grid cell).
+ * the stated Z tolerance (0.001 mm; the XY placement is exact at the sample points).
  *
  * The comparator is deliberately independent of the engine: the spec hands it a `(x, y) => z`
  * function, so the same code will judge #957's implementation, a ported Kiri:Moto surface, or the
@@ -47,7 +47,13 @@ export interface ClFixture {
   mesh: { vertices: [number, number, number][]; triangles: [number, number, number][] };
   grid: { x0: number; x1: number; y0: number; y1: number; stepMm: number };
   cutters: ClCutterFixture[];
-  tolerance: { withinGridCells: number; note: string };
+  /**
+   * `zMm` is the Z agreement the engine must reach at each sample — 0.001 mm, tight enough to catch
+   * a per-facet approximation (B measured `dropCutterHeight` 0.007-0.09 mm low on large facets for
+   * a ball). `withinGridCells` states the XY placement tolerance: the samples ARE the grid points,
+   * and a candidate is evaluated at them, so XY is exact by construction.
+   */
+  tolerance: { zMm: number; withinGridCells: number; note: string };
   provenance: {
     opencamlib?: Record<string, string>;
     pycam?: Record<string, string> | null;
@@ -99,7 +105,7 @@ export function compareClSurface(
   fixture: ClFixture,
   shape: string,
   candidate: (x: number, y: number) => number | null,
-  toleranceMm: number = fixture.grid.stepMm * fixture.tolerance.withinGridCells,
+  toleranceMm: number = fixture.tolerance.zMm,
   source: 'opencamlib' | 'pycam' = 'opencamlib',
 ): ClComparison {
   const cutter = fixture.cutters.find((c) => c.shape === shape);

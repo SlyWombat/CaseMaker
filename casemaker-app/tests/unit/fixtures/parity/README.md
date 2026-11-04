@@ -43,4 +43,8 @@ tests. The two columns agree within one grid cell at every sample (a spec holds 
 (MIT) is the engine's port source, not a drop-cutter entry point; its output on the same meshes
 fills the `provenance.kiriMoto` slot when the port lands (#957/#959).
 
-The comparison tolerance is one grid cell, as plan v2 §3 and #957 state.
+The comparison tolerance is **0.001 mm in Z** at the fixtures' own sample points (the XY
+placement is the grid itself, exact by construction). It was tightened after B measured
+`dropCutterHeight`'s per-facet barycentric sampling reading 0.007-0.09 mm low on large facets for a
+ball: a one-grid-cell tolerance (1 mm) could not see it. `tests/tools/cl-engine-check.ts` runs the
+engine's own drop-cutter against every fixture and cutter when `cam/model/dropcutter.ts` exists.

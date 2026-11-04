@@ -180,8 +180,9 @@ for (const c of CASES) {
     grid: { ...c.grid, stepMm: STEP },
     cutters: measured,
     tolerance: {
+      zMm: 0.001,
       withinGridCells: 1,
-      note: 'the new engine’s CL height at each sample must agree with this reference within one grid cell (1 mm); the finishing specs also compare their scallop/step-over Z at the same points',
+      note: 'Z: the CL height at each sample must agree within 0.001 mm — a per-facet approximation must not hide behind the grid; XY: sample positions are the fixture grid, one cell is the placement tolerance',
     },
     provenance: {
       opencamlib: {
