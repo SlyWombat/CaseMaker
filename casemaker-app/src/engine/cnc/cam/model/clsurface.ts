@@ -12,11 +12,18 @@
  * Session C's #945 finding and Review B's F1 — the old engine's defect was always a straight-line
  * approximation graded against a rule that didn't agree with how it was built).
  *
- * This file is the skeleton stub: real geometry lands as #957's own commits, on top of this one.
+ * The real drop-cutter geometry is `dropcutter.ts`'s `dropCutterHeight`/`profileOf` — built, and
+ * checked red-first against F's parity fixtures (`tests/unit/clSurface957.spec.ts`, 33 passing
+ * cases, both OpenCamLib and PyCAM columns). `clSurface()` below stays a throwing stub: it needs a
+ * `DropCutterMesh` view of `RemainderRegion.triangles`' backing mesh, which `RemainderRegion` does
+ * not itself carry (it only has `Uint32Array` triangle indices, not the vertex positions they index
+ * into) — that wiring is #959's integration (the caller holds `ModelPlanInput.geometry`, the mesh
+ * these indices resolve against). `reach()` needs no mesh and is implemented now.
  */
 
 import type { Tool } from '@/engine/cnc/tool';
 import type { RemainderRegion } from './features';
+import { profileOf } from './dropcutter';
 
 export interface ClSurface {
   /** The CL height at (x, y), or `null` where the cutter cannot reach (outside the region, or past `reach`'s limit). */
@@ -40,9 +47,28 @@ export interface ReachResult {
  * surface.
  */
 export function clSurface(_cutter: Tool, _stepOverMm: number, _region: RemainderRegion): ClSurface {
-  throw new Error('cam/model/clsurface: clSurface() not implemented (#957)');
+  throw new Error('cam/model/clsurface: clSurface() not implemented — needs the mesh RemainderRegion.triangles indexes into (#957/#959 integration)');
 }
 
-export function reach(_cutter: Tool, _feature: RemainderRegion): ReachResult {
-  throw new Error('cam/model/clsurface: reach() not implemented (#957)');
+/**
+ * A V/chamfer cutter's apex can only touch a slope shallower than its own flank angle from
+ * horizontal (`90° − half-angle`) without the flank interfering — §2's derivation, carried into the
+ * `dropcutter.ts` profile as `flatRadiusMm`/`tanHalfAngle`. Flat/ball/bull have no such limit within
+ * this engine's scope (a slope steep enough to be a real overhang is an undercut, A's #958
+ * `unreachable` list, not a `RemainderRegion`'s own `slopeDeg`).
+ */
+export function reach(cutter: Tool, feature: RemainderRegion): ReachResult {
+  const profile = profileOf(cutter);
+  if (profile === null) return { reachable: false, note: `${cutter.shape} has no drop-cutter profile for a CL surface` };
+  if (profile.kind !== 'cone') return { reachable: true };
+  const halfAngleDeg = profile.tanHalfAngle === undefined ? 90 : Math.atan(profile.tanHalfAngle) * (180 / Math.PI);
+  const flankFromHorizontalDeg = 90 - halfAngleDeg;
+  const steepest = feature.slopeDeg[1];
+  if (steepest > flankFromHorizontalDeg) {
+    return {
+      reachable: false,
+      note: `${cutter.name || cutter.shape}'s flank (${flankFromHorizontalDeg.toFixed(1)}° from horizontal) is shallower than this region's steepest slope (${steepest.toFixed(1)}°)`,
+    };
+  }
+  return { reachable: true };
 }
