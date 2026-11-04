@@ -97,9 +97,11 @@ REFS = [
          nc=('MakeraBadge-mqqoiinw.nc',
              '616fdca6b9f3a7f15ef355a8cd9e21f37d16f8632464d4fd9422599110605b93'),
          job='ref-badge.json',
-         note='Studio’s T2 2D Pocket reveals the second colour at Z −0.1; its T1 flat then pockets '
-              'deeper (0.5–1.5) and frees the badge. The design comparison scores the T2 pass, which '
-              'is the operation our job performs, at the same 0.1 mm depth.'),
+         note='The milestone’s first vendor-level reading: 100 % of the design covered by both programs, '
+              '1.04× Makera’s cycle (31.1 vs 30.0 min), with one cutter to its three. Studio’s T2 2D '
+              'Pocket reveals the second colour at Z −0.1; its T1 flat then pockets deeper (0.5–1.5) and '
+              'frees the badge. The design comparison scores the T2 pass, which is the operation our job '
+              'performs, at the same 0.1 mm depth.'),
 ]
 # Parked with the reason, so the section says what it cannot yet put beside ours. Empty today.
 PARKED = []
