@@ -1493,6 +1493,30 @@ describe('#948 the goal check’s line', () => {
     expect(line.dataset.state).toBe('cut-into');
   });
 
+  it('prints the RAW reading beside the judged one — its own line, never the pass (#964)', () => {
+    drawWithOracle({
+      ...OK_ORACLE,
+      goalCutInto: goal({
+        ok: false,
+        // The top clamp's shape: 1.98 % raw, judged 0.05 % at a 0.165 mm maximum after the
+        // wall/shadow exclusions.
+        cutIntoFraction: 0.0198,
+        maxCutIntoMm: 2.448,
+        maxCutIntoAt: { x: 10, y: 10 },
+        adjudicatedFraction: 0.0005,
+        adjudicatedMaxMm: 0.165,
+        adjudicatedMaxAt: { x: 10, y: 10 },
+      }),
+    });
+    const judged = screen.getByTestId('engrave-cut-goal');
+    expect(judged.textContent).toBe('Cuts 0.165 mm into the design at 10, 10');
+    expect(judged.dataset.state).toBe('cut-into');
+    const raw = screen.getByTestId('engrave-cut-goal-raw');
+    expect(raw.textContent).toBe('raw, before exclusions: 1.98 % cut-into, max 2.448 mm at 10, 10');
+    // Never as the pass: the raw line is the muted fact, and the verdict line carries the state.
+    expect(raw.dataset.state).toBeUndefined();
+  });
+
   it('a check that did not run says why — never a silent pass', () => {
     drawWithOracle({
       ...OK_ORACLE,
