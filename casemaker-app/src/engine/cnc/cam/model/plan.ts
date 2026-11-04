@@ -24,9 +24,9 @@ import type { EngraveJob } from '@/types/engraveJob';
 import type { Mount } from '@/engine/cnc/setups/types';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import type { ObstacleBox } from '@/engine/cnc/setup';
-import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
-import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, type CutParams } from '@/engine/cnc/feeds';
+import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { readDefault, liveShopDefaults } from '@/platform/defaultsClient';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
@@ -216,14 +216,40 @@ export interface PlanModelCamOptions {
  */
 const MODEL_STOCK_TO_LEAVE_MM = 0.3;
 
-/** One cutter's resolved cut numbers, through the app's one feeds resolver (the labelled fallback table when no catalogue row answers). */
-function resolvedCutParams(input: ModelPlanInput, tool: Tool): CutParams {
+/**
+ * One cutter's resolved cut numbers, through the app's one feeds resolver (the labelled fallback
+ * table when no catalogue row answers).
+ *
+ * THE CHECK SUITE FOUND THIS: the compiled starting table tops out at 3.2 mm, and the house's
+ * primary ⌀6 has no row in a realm where no catalogue is installed (the specs, the hosted build) —
+ * every plan was refused at the first cutter. Refusing would be right if the numbers were a guess;
+ * they are not: the material's LARGEST covered row answers through a FLAT proxy at the row's own
+ * diameter (the same substitution #669 makes for a chamfer without a V row), which is a shallower
+ * step-down and a slower feed than this cutter could take — the conservative side. The
+ * substitution is returned so the plan STATES it, never posts it silently.
+ */
+function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: CutParams; substitution: string | null } {
   const resolved = feedsFor(feedCatalogueSnapshot(), input.stock.material, feedsToolForSurface(tool), Z1);
-  if (!resolved.ok) {
-    const label = tool.name || tool.id || `${tool.shape} cutter`;
-    throw new Error(`cam/model/plan: no feeds for ${label} in ${input.stock.material} — ${resolved.reason}`);
+  if (resolved.ok) return { params: resolved.params, substitution: null };
+  const rows = resolvedFeedsTable()
+    .table.filter((row) => row.material === input.stock.material && (row.edge ?? 'flat') === 'flat')
+    .sort((a, b) => b.maxDiameter - a.maxDiameter);
+  const largest = rows[0];
+  if (largest !== undefined) {
+    const proxy = flatEndMill(largest.maxDiameter, { number: tool.number, id: tool.id, name: tool.name });
+    const viaProxy = feedsFor(feedCatalogueSnapshot(), input.stock.material, proxy, Z1);
+    if (viaProxy.ok) {
+      return {
+        params: viaProxy.params,
+        substitution:
+          `${tool.name || tool.id || `${cuttingDiameter(tool)} mm cutter`}: no starting row covers its diameter — ` +
+          `${input.stock.material}'s largest covered row (${largest.maxDiameter} mm) answered, its step-down and feed ` +
+          'being the conservative side',
+      };
+    }
   }
-  return resolved.params;
+  const label = tool.name || tool.id || `${tool.shape} cutter`;
+  throw new Error(`cam/model/plan: no feeds for ${label} in ${input.stock.material} — ${resolved.reason}`);
 }
 
 /** §5's three numbers, read off the posted moves: a hop retracts to `hopZ`, a rapid to `safeZ`. */
@@ -298,7 +324,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       throw new Error('cam/model/plan: the part has curved remainder regions but the house states no ball nose — the finish stage cannot be planned');
     }
 
-    const pocketParams = resolvedCutParams(input, primary);
+    const { params: pocketParams, substitution } = resolvedCutParams(input, primary);
     const feeds = { feedMmPerMin: pocketParams.feed, plungeFeedMmPerMin: pocketParams.plungeFeed };
     opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.4 });
     const result = planTreePrograms(tree, {
@@ -353,6 +379,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
 
     const notes = [...result.notes];
+    if (substitution !== null) notes.push(substitution);
     if (input.fixture.envelope !== null) {
       notes.push(
         `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`,
