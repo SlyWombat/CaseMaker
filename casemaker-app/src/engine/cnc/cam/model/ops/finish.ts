@@ -48,7 +48,7 @@ export interface FinishOpOptions {
   kind: FinishKind;
   scallopMm: number;
   stepDownMm: number;
-  feedMmPerMin: number;
+  feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
   safeZMm: number;
   hopZMm: number;
   toolNumber: number;
@@ -98,15 +98,30 @@ function depthLevels(zTop: number, zBottom: number, stepDownMm: number): number[
 }
 
 /**
- * Ball-at-constant-scallop step-over on a FLAT span — the sagitta bound `surface3d.ts`'s own
- * `finishStepOverForCusp` derives (`#945 a1`), re-derived here without its `pitchMm` rounding
- * (this engine has no global grid to round a stride to). `null`'s own fallback there (a band at
- * or past the radius, no step-over closes it) becomes the cutter's own radius here — a single,
- * conservative pass, not a refusal; the region is what asked for a ball at all (#961's own pick).
+ * Ball-at-constant-scallop step-over, corrected for the region's own slope — derived from the
+ * sphere-centre geometry, not the flat-span sagitta bound a first attempt scaled by `cos(theta)`
+ * and got both the size and the sign wrong (`surface3d.ts`'s old `finishStepOverForCusp`, `#945
+ * a1`: measured 8x the stated band on the tray's own 18° slope). A SECOND attempt replaced the
+ * formula with a binary search over a densely-scanned "worst cusp between two adjacent rows"
+ * measurement — also wrong, not in the formula but in the measurement's own assumption that the
+ * row cleaning any given point is always one of its two immediate neighbours; near a row's own
+ * axis, the point is actually cleaned by the NEXT row over (advisor's review, after that attempt
+ * still measured 2.5x over band at a step-over of 2.25mm against a 3mm ball on 18°): the ball
+ * centres riding a slope of angle theta lie on a line parallel to the surface, at normal distance
+ * R; two centres `stepOverMm` apart horizontally are `stepOverMm * cos(theta)` apart ALONG that
+ * line; the normal-direction cusp between them is the sagitta `R - sqrt(R^2 - (d/2)^2)` for their
+ * half-spacing `d = stepOverMm * cos(theta)`, and the VERTICAL cusp (what `bandMm` states) is that
+ * normal cusp divided by `cos(theta)` again. Solving `bandMm = (R - sqrt(R^2 - (stepOverMm *
+ * cos(theta) / 2)^2)) / cos(theta)` for `stepOverMm` gives the closed form below. Measured
+ * red-first (`finishOp960.spec.ts`) against an ALL-rows cusp scan (not just the bracketing pair)
+ * on the tray's own 18° ramp: 1.4254mm step-over for a 3mm-radius ball and a 0.1mm band, cusp
+ * 0.1000mm — confirmed, not assumed.
  */
-function ballScallopStepOver(radiusMm: number, bandMm: number): number {
+function ballScallopStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg: number): number {
   if (!(radiusMm > 0) || !(bandMm > 0) || bandMm >= radiusMm) return Math.max(radiusMm, 0.1);
-  return 2 * Math.sqrt(2 * radiusMm * bandMm - bandMm * bandMm);
+  const cosTheta = Math.cos((steepestSlopeDeg * Math.PI) / 180);
+  const bandPrime = bandMm * cosTheta;
+  return cosTheta * 2 * Math.sqrt(Math.max(0, 2 * radiusMm * bandPrime - bandPrime * bandPrime));
 }
 
 /**
@@ -135,7 +150,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   }
   const stepOverMm =
     opts.kind === 'ball-scallop'
-      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm)
+      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1])
       : flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
 
   const levels = depthLevels(opts.region.zTop, opts.region.zBottom, opts.stepDownMm);
@@ -166,12 +181,22 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         if (prevExit === null) {
           moves.push({ kind: 'rapid', x: clamped[0]!.x, y: clamped[0]!.y, z: opts.hopZMm });
         } else {
-          moves.push({ kind: 'rapid', x: prevExit.x, y: prevExit.y, z: opts.hopZMm });
+          // Retract to the REGION's own clearance plane, not a bare `hopZMm` — C's point 3
+          // ruling (`RegionRef.regionClearanceZ`'s own doc) is the height that clears every
+          // obstacle THIS region's own fixture reaches, same convention `ops/pocket.ts` uses.
+          // Retract to the REGION's own clearance plane, not a bare `hopZMm` — C's point 3
+          // ruling (`RegionRef.regionClearanceZ`'s own doc) is the height that clears every
+          // obstacle THIS region's own fixture reaches, same convention `ops/pocket.ts` uses.
+          moves.push({ kind: 'rapid', x: prevExit.x, y: prevExit.y, z: opts.regionRef.regionClearanceZ });
+          moves.push({ kind: 'rapid', x: clamped[0]!.x, y: clamped[0]!.y, z: opts.regionRef.regionClearanceZ });
           moves.push({ kind: 'rapid', x: clamped[0]!.x, y: clamped[0]!.y, z: opts.hopZMm });
         }
-        moves.push({ kind: 'feed', x: clamped[0]!.x, y: clamped[0]!.y, z: clamped[0]!.z, f: opts.feedMmPerMin });
+        // The row's own FIRST feed is a PLUNGE (straight down from the hop height into material),
+        // never at the cutting feed — the same bug 9e976f0b fixed in `ops/pocket.ts`; every move
+        // after it is lateral, at the ordinary cutting feed.
+        moves.push({ kind: 'feed', x: clamped[0]!.x, y: clamped[0]!.y, z: clamped[0]!.z, f: opts.feeds.plungeFeedMmPerMin });
         for (let i = 1; i < clamped.length; i++) {
-          moves.push({ kind: 'feed', x: clamped[i]!.x, y: clamped[i]!.y, z: clamped[i]!.z, f: opts.feedMmPerMin });
+          moves.push({ kind: 'feed', x: clamped[i]!.x, y: clamped[i]!.y, z: clamped[i]!.z, f: opts.feeds.feedMmPerMin });
         }
         const entry: [number, number, number] = [clamped[0]!.x, clamped[0]!.y, clamped[0]!.z];
         const exitPoint = clamped[clamped.length - 1]!;

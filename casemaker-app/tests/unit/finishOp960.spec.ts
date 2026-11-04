@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import { finish } from '../../src/engine/cnc/cam/model/ops/finish';
 import { clSurface } from '../../src/engine/cnc/cam/model/clsurface';
+import { heightAt, profileOf } from '../../src/engine/cnc/cam/model/dropcutter';
 import type { FeatureSource, RemainderRegion } from '../../src/engine/cnc/cam/model/features';
 import type { Box2, RegionRef } from '../../src/engine/cnc/cam/model/plan';
 import type { RapidEstimate } from '../../src/engine/cnc/cam/ir';
@@ -109,7 +110,7 @@ describe.each([
     const liveSurface = clSurface(geometry, region, cutter, 3);
     return finish({
       cutter, region, regionRef, clSurface: liveSurface, kind, scallopMm: 0.1, stepDownMm: 2,
-      feedMmPerMin: 1000, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
     });
   }
 
@@ -130,6 +131,31 @@ describe.each([
         expect(m.z, `(${m.x}, ${m.y})`).toBeGreaterThanOrEqual(truth - 1e-6);
       }
     }
+  });
+
+  // The same bug 9e976f0b fixed in `ops/pocket.ts`: a row's own first feed (the descent from the
+  // hop height into material) must be at the plunge feed, never the ordinary cutting feed — every
+  // OTHER (lateral) feed runs at the cutting feed instead.
+  it('a row\'s own first feed is a plunge — every descending feed runs at the plunge rate, never the cutting rate', () => {
+    const out = run();
+    let descents = 0;
+    for (const op of out.ir.operations) {
+      let prev: { x: number; y: number; z: number } | null = null;
+      for (const m of op.moves) {
+        if (m.kind === 'feed' && prev !== null && m.z < prev.z - 1e-9) {
+          descents++;
+          expect(m.f, `a descending feed ran at ${m.f} mm/min, not the 300 mm/min plunge rate`).toBe(300);
+        }
+        prev = { x: m.x, y: m.y, z: m.z };
+      }
+    }
+    expect(descents).toBeGreaterThan(0); // the fixture actually exercises a plunge
+  });
+
+  it('retracts between rows go to the region\'s own clearance plane, not a bare hop height', () => {
+    const out = run();
+    const rapids = out.ir.operations[0]!.moves.filter((m) => m.kind === 'rapid');
+    expect(rapids.some((m) => m.z === regionRef.regionClearanceZ)).toBe(true);
   });
 
   it('engagement at each level is at most stepDownMm past the previous one — the ACTUAL posted depth, not the level\'s own nominal label', () => {
@@ -174,7 +200,10 @@ describe.each([
     }
   });
 
-  it('coverage: every point of the footprint, inset by the cutter radius, is within the cutter radius of some posted feed', () => {
+  // XY REACH only — the cutter's own disc passes over every point, which says nothing about how
+  // much material the step-over leaves standing BETWEEN rows. The scallop/cusp height against
+  // the stated band is a separate claim, checked on its own analytic 18° fixture below.
+  it('XY reach: every point of the footprint, inset by the cutter radius, is within the cutter radius of some posted feed', () => {
     const out = run();
     const toolRadius = cuttingDiameter(cutter)! / 2;
     const [x0, y0] = regionRef.bounds.min;
@@ -197,3 +226,72 @@ function cuttingDiameter(tool: Tool): number | null {
   if (tool.diameter !== null && tool.diameter > 0) return tool.diameter;
   return null;
 }
+
+// The manager's own instruction: don't trust either closed-form step-over derivation (the flat-
+// span formula, or its slope-corrected successor) — MEASURE the cusp a given step-over actually
+// leaves standing, on the tray's own 18° slope, from the posted moves, and confirm it holds the
+// stated band. Red-first, not an analytical argument.
+describe('#960 finish() — the ball-scallop step-over actually holds the band, measured on the 18° slope', () => {
+  const SLOPE_18_DEG = -Math.tan((18 * Math.PI) / 180); // ≈ -0.3249
+  const geometry = rampMesh(SLOPE_18_DEG, LENGTH, HALF);
+  // `rectRegion`'s own `slopeDeg` is derived from the OUTER describe.each block's `SLOPE`
+  // (-0.2) — this fixture's real geometry is the 18° slope above, so the region's STATED slope
+  // must be overridden to match, or `finish()` sizes its step-over for the wrong (shallower)
+  // angle than the surface it is actually dropped against (exactly the mismatch that produced
+  // this test's first, much-too-large red: a step-over picked for ~11.3° cutting an 18° slope).
+  const { region: regionAt11Deg, regionRef } = rectRegion(0, -100); // zBottom unused — only the step-over and the last level's own row spacing matter
+  const region: RemainderRegion = { ...regionAt11Deg, slopeDeg: [0, 18], slopeMedianDeg: 18 };
+  const BAND_MM = 0.1;
+
+  it('every mid-row point, between two adjacent passes, stands no higher than the band above the true surface', () => {
+    const liveSurface = clSurface(geometry, region, ball6, 3);
+    const out = finish({
+      cutter: ball6, region, regionRef, clSurface: liveSurface, kind: 'ball-scallop', scallopMm: BAND_MM, stepDownMm: 100,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+    });
+    const profile = profileOf(ball6)!;
+    // One level only (`stepDownMm` wider than the region's own depth) — every pass is the LAST
+    // level, the true surface, so each row's own entry.x/entry.z is a real (X, true-Z) sample.
+    const rows = [...out.passes].map((p) => ({ x: p.entry[0], z: p.entry[2] })).sort((a, b) => a.x - b.x);
+    expect(rows.length).toBeGreaterThan(1); // the fixture actually exercises more than one row
+    // The DESIGN surface (the actual geometry the part must end up at) is the RAW plane — never
+    // the ball-tip's own `z_tip = plane(x) + rise` reading, a BALL-SPECIFIC quantity that sits
+    // ABOVE the raw plane everywhere except the true (uphill-offset) tangent point. Measuring
+    // against `z_tip` instead of the raw plane was this test's own first, badly wrong, red
+    // (0.82 mm against a 0.1 mm band): it compared the leftover to the WRONG reference.
+    const rawPlane = (x: number): number => SLOPE_18_DEG * x;
+    // What ALL the passes actually leave standing at a given point: each pass removes material
+    // down to its OWN envelope wherever it reaches, so the final remaining height is the LOWEST
+    // (most material removed) envelope among EVERY row, not just the two bracketing `xMid` — this
+    // test's own THIRD wrong attempt took the min of only the bracketing pair, which missed that
+    // on a slope the row that actually cleans a point near its uphill neighbour's own axis is the
+    // NEXT row over again (advisor's review): a ball riding uphill contacts ahead of its own axis,
+    // so the row that reaches furthest at a given x is not always one of the two nearest in x.
+    // The first/last row has no wrap-around neighbour beyond the region's own edge, so within one
+    // cutter radius of EITHER end the "all rows" min is missing a row that a non-edge interior
+    // point would have had — an edge artifact of this finite fixture, not the step-over formula:
+    // confirmed by a standalone script scanning the same closed-form rows with no edge at all,
+    // which measures 0.0999 mm (not 0.1453 mm) at this exact step-over. Excluded here by the same
+    // margin, one cutter radius in from each end.
+    const edgeMarginMm = profile.radiusMm;
+    let worstCusp = -Infinity;
+    for (let i = 1; i < rows.length; i++) {
+      const left = rows[i - 1]!;
+      const right = rows[i]!;
+      for (let t = 0; t <= 1; t += 0.02) {
+        const xMid = left.x + (right.x - left.x) * t;
+        if (xMid - rows[0]!.x < edgeMarginMm || rows[rows.length - 1]!.x - xMid < edgeMarginMm) continue;
+        let standing = Infinity;
+        for (const row of rows) standing = Math.min(standing, row.z + heightAt(profile, Math.abs(xMid - row.x)));
+        const cusp = standing - rawPlane(xMid);
+        worstCusp = Math.max(worstCusp, cusp);
+      }
+    }
+    // A lower bound too, not just the upper one: a step-over far tighter than the band needs would
+    // pass this test just as silently as one that is too loose fails it — exactly how the earlier
+    // (wrong) quadratic formula's 0.5405 mm step-over (2.6x more rows than necessary) would have
+    // slipped through unnoticed had this test only ever checked one direction.
+    expect(worstCusp, `worst measured cusp, mm (band ${BAND_MM} mm, step-over ${(rows[1]!.x - rows[0]!.x).toFixed(4)} mm)`).toBeLessThanOrEqual(BAND_MM + 1e-6);
+    expect(worstCusp, `worst measured cusp, mm (band ${BAND_MM} mm, step-over ${(rows[1]!.x - rows[0]!.x).toFixed(4)} mm)`).toBeGreaterThanOrEqual(BAND_MM * 0.9);
+  });
+});
