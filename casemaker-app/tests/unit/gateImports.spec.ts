@@ -34,12 +34,12 @@
  *   - `designCheck.ts` — 4 files, **0 forbidden**. It was 71 / 4 via `oracle.ts` (`vProfile`,
  *     `engrave/partPlan`, `cam/ir` through `rotary/wrap`, `cam/tabSettings` through `stockStart` →
  *     `defaultsClient`); A's `oracleTypes.ts` split (#924) closed it, and it is a plain `it` now.
- *   - `goalCheckInput.ts` — 90 files, **4 forbidden** via `jobSetup.ts`: the same four (the CAM's
- *     `surface3d`/`relief` paths went with #967; `partPlan`, `vProfile`, `cam/ir`, `cam/tabSettings`
- *     remain) — A's `pureGoalObject` → `jobKind.ts` move is the flip.
+ *   - `goalCheckInput.ts` — 2 files, **0 forbidden**. It was 90 / 4 via `jobSetup.ts` (`partPlan`,
+ *     `vProfile`, `cam/ir`, `cam/tabSettings`; the `surface3d`/`relief` paths went with #967); A's
+ *     `pureGoalObject` → `jobKind.ts` move closed it, and it is a plain `it` now.
  *   - `goalCoverage.ts` — 1 file, 0; `goalHeightfield.ts` (the extracted module) — 16 files, 0.
- * The two failing cases are `it.fails` so main stays green; the change that fixes one flips it to
- * `it`, and this spec then guards it.
+ * Every gate root is a plain `it` now: each case was `it.fails` until the change that fixed it
+ * flipped it, and this spec guards it from here on.
  *
  * One more rule from A's R1: `cam/model/**` must NEVER import the extracted heightfield module —
  * the rebuild's point is that the engine stops planning on the field the gate measures with.
@@ -110,19 +110,19 @@ describe('#964 the gate roots and the graph’s rules', () => {
   });
 
   it('enters every module — the walk does not stop at placement', () => {
-    // This is A's finding: `jobSetup` is where the gate gets `pureGoalObject`, and its closure
-    // still reaches the CAM after #967 (`cam/ir`, `cam/tabSettings`). A stop-at-allowlist rule
-    // would hide exactly that.
-    const closure = closureOf('engine/cnc/engrave/goalCheckInput.ts');
-    expect(closure.files.has('engine/cnc/engrave/jobSetup.ts')).toBe(true);
+    // A's finding: `jobSetup` ("placement") reaches the CAM several hops in (`cam/ir` through
+    // `rotary/wrap`, `cam/tabSettings` through `mounts/bracket` → `defaultsClient`). A
+    // stop-at-allowlist rule would hide exactly that. The gate no longer imports it at all.
+    const closure = closureOf('engine/cnc/engrave/jobSetup.ts');
     expect(closure.files.has('engine/cnc/cam/ir.ts')).toBe(true);
     expect(closure.files.has('engine/cnc/cam/tabSettings.ts')).toBe(true);
+    expect(closureOf('engine/cnc/engrave/goalCheckInput.ts').files.has('engine/cnc/engrave/jobSetup.ts')).toBe(false);
   });
 });
 
 describe('#964 the gate’s value-import closure carries no CAM', () => {
-  // RED-FIRST: these three are the cuts that make the rule true. Flip each to `it` in the change
-  // that lands its fix (the failure message then names anything that regresses).
+  // These three were the cuts that made the rule true (#967, A's oracleTypes split, A's jobKind
+  // move), each red-first as `it.fails` until its fix landed. A failure names what regressed.
   it('goalCheckField — 17 files, 0 forbidden after #967 (was 47 / 9)', () => {
     const bad = forbiddenIn(closureOf('workers/sim/goalCheckField.ts'));
     expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
@@ -133,7 +133,7 @@ describe('#964 the gate’s value-import closure carries no CAM', () => {
     expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
   });
 
-  it.fails('goalCheckInput — 90 files, 4 forbidden; clean once pureGoalObject moves to jobKind.ts (A)', () => {
+  it('goalCheckInput — 2 files, 0 forbidden after pureGoalObject moved to jobKind.ts (was 90 / 4)', () => {
     const bad = forbiddenIn(closureOf('engine/cnc/engrave/goalCheckInput.ts'));
     expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
   });
