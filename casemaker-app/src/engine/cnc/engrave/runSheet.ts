@@ -94,6 +94,8 @@ import {
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
 import { cutterNameForKey, toolDisplayName } from '@/engine/cnc/toolDisplay';
+import type { SetupPlan } from '@/engine/cnc/cam/model/plan';
+import { featureSentence, linkingSentence, sequenceSentence } from '@/engine/cnc/engrave/planWords';
 import { entryFor } from '@/engine/cnc/toolRegistry';
 import { finishSourceWords, type FinishSettingSource } from '@/engine/cnc/engrave/finishPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
@@ -594,6 +596,12 @@ export interface RunSheetGenerated {
    * on a result stored by an older build, so the sheet then reads exactly as it did before.
    */
   surface3d?: GoalSurfaceFacts | null;
+  /**
+   * #963 — THE MODEL ENGINE'S PLAN (`cam/model/plan.ts`, #956 §3.0), when this run was planned by
+   * it: the recognised features, the costed sequence and the linking facts. OPTIONAL — a 2.5D run,
+   * or a result stored before #966's integration, has none, and its sheet reads as it did.
+   */
+  plan?: SetupPlan | null;
   /**
    * #419 J3 — the run's programs in cut order (`EngraveGenerated.programs`). Present on every
    * generated result this build produces; OPTIONAL because a result stored by an older build (or a
@@ -3148,6 +3156,33 @@ function drillPeckSteps(job: EngraveJob, feedsPeck: number | null): RunSheetStep
  * (the feeds, the undercuts a heightfield cannot express, the resolution, and a flat finishing
  * cutter). Every number is `surface3d`'s, printed rather than re-derived here.
  */
+/**
+ * #963 — THE PLAN IN THE OPERATOR'S WORDS: what the model engine recognised, the cutter sequence
+ * it priced, and how the passes are joined. The same sentences the panel prints, from one builder
+ * (`planWords.ts`), so the screen and the paper cannot disagree.
+ */
+function planSteps(plan: SetupPlan): RunSheetStep[] {
+  const sequence = sequenceSentence(
+    plan.sequence.map((entry) => ({ label: cutterNameForKey(entry.cutterKey), pinned: entry.pinned, cost: entry.cost })),
+    plan.totalCostSeconds,
+  );
+  const steps: RunSheetStep[] = [
+    {
+      text: `The model engine recognised ${featureSentence(plan.features)}.`,
+      value: featureSentence(plan.features),
+    },
+  ];
+  if (sequence !== null) steps.push({ text: `The cutters, in order: ${sequence}.`, value: sequence });
+  steps.push({
+    text: `Linking: ${linkingSentence(plan.linking)}.`,
+    value:
+      `${plan.linking.rapidsCount.toLocaleString('en-US')} rapids · ` +
+      `${plan.linking.hopsCount.toLocaleString('en-US')} hops · ` +
+      `${Math.round(plan.linking.airFractionPct * 10) / 10} % air`,
+  });
+  return steps;
+}
+
 function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
   const rough =
     facts.roughingLayers === 0
@@ -4558,6 +4593,8 @@ export function buildRunSheet(
     // against the cut that leaves the edge.
     if (generated.chamfer != null) cutSteps.push(...chamferSteps(generated.chamfer));
     if (surfaceFacts !== null) cutSteps.push(...surfaceSteps(surfaceFacts));
+    // #963 — the model engine's own plan, in the same words the panel uses.
+    if (generated.plan != null) cutSteps.push(...planSteps(generated.plan));
     // #487 — what the ordering did, in the operator's terms: air travel against cutting travel,
     // and the same program under the order this CAM used before it. "Optimised" that cannot be
     // checked on paper is a feeling; the two numbers are the check. A job whose CAM carried no

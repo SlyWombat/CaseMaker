@@ -31,6 +31,7 @@ import {
   type RunSheetStackUp,
 } from '@/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { fixtureSetupPlan } from './fixtures/setupPlan';
 
 // #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
 // These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
@@ -2555,4 +2556,26 @@ describe('#926 the sheet prints the efficiency measures and warns on the shop th
   });
 
 
+});
+
+// #963 — the model engine's plan, in the same words the panel prints: what it recognised, the
+// sequence it priced, and how the passes are joined. Absent plan = the sheet as it was.
+describe('#963 the plan on the sheet', () => {
+  const allText = (job: ReturnType<typeof dj>, plan: ReturnType<typeof fixtureSetupPlan> | null): string =>
+    buildRunSheet(job, { ...stubGenerated(job), plan }, NO_SIM, NOW)
+      .sections.flatMap((sec) => sec.steps.map((step) => step.text))
+      .join('\n');
+
+  it('states the features, the costed sequence and the linking facts', () => {
+    const text = allText(dj(), fixtureSetupPlan());
+    expect(text).toContain('The model engine recognised 6 pockets, 1 outer contour, 1 curved region.');
+    expect(text).toContain(
+      'The cutters, in order: flat-6 (18 min) → flat-3.175 (11 min) → ball-6 (15 min) → v-90 (3 min) — about 47 min 30 s.',
+    );
+    expect(text).toContain('Linking: 384 rapids, 12 hops, 3.2 % of the cycle in air.');
+  });
+
+  it('says nothing about a plan when the run carries none', () => {
+    expect(allText(dj(), null)).not.toContain('The model engine recognised');
+  });
 });

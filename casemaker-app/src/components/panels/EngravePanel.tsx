@@ -34,7 +34,8 @@ import {
 } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
-import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { TOOL_GROUPS, cutterNameForKey, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { featureSentence, linkingSentence, progressWords, sequenceSentence } from '@/engine/cnc/engrave/planWords';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
 import { useHouseStore } from '@/store/houseStore';
@@ -781,7 +782,7 @@ function timeLeftWords(projectionMs: number | null, progress: { done: number; to
 }
 
 function runProgressWords(
-  run: Pick<EngraveRunState, 'phase' | 'progress' | 'simProgram'>,
+  run: Pick<EngraveRunState, 'phase' | 'progress' | 'planProgress' | 'simProgram'>,
   simStatus: string,
   simPhase: string | null,
   simProgress: { done: number; total: number } | null,
@@ -797,7 +798,21 @@ function runProgressWords(
     return where;
   }
   if (run.phase === 'checking') return 'checking the result';
+  // #963 — the plan's own stage and fraction while the model engine works; the stage word comes
+  // from the engine (`ModelPlanProgress`), never from a name this panel invented.
+  if (run.planProgress !== null) return `${progressWords(run.planProgress)}…`;
   return run.progress === null ? 'Working…' : `${run.progress.label}…`;
+}
+
+/** #963 — the costed sequence in the operator's words, each cutter named by the library. */
+function planSequenceWords(
+  plan: Pick<EngraveRunState['plan'] & object, 'sequence' | 'totalCostSeconds'>,
+  label: (key: string) => string,
+): string | null {
+  return sequenceSentence(
+    plan.sequence.map((entry) => ({ label: label(entry.cutterKey), pinned: entry.pinned, cost: entry.cost })),
+    plan.totalCostSeconds,
+  );
 }
 
 /**
@@ -807,7 +822,7 @@ function runProgressWords(
  * (flipMouldShell) went from 71.7 s to locked past 18 minutes. Only this span reads those three
  * fields, so only this span re-renders; the panel around it is untouched.
  */
-function RunProgressLine({ run }: { run: Pick<EngraveRunState, 'phase' | 'progress' | 'simProgram'> }): JSX.Element {
+function RunProgressLine({ run }: { run: Pick<EngraveRunState, 'phase' | 'progress' | 'planProgress' | 'simProgram'> }): JSX.Element {
   const simStatus = useSimStore((s) => s.status);
   const simPhase = useSimStore((s) => s.phase);
   const simProgress = useSimStore((s) => s.progress);
@@ -2470,6 +2485,15 @@ export function EngravePanel(): JSX.Element {
   const poolSizing = run.generated !== null ? lastPoolSizing() : null;
   const simEnabled = featureSim;
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
+  // #963 — the plan's costed sequence, each cutter named through the tool library (a catalogue id
+  // resolves to the cutter's display name; a row this build cannot see says "unknown cutter").
+  const planSequence =
+    run.plan === null
+      ? null
+      : planSequenceWords(run.plan, (key) => {
+          const entry = tools.find((e) => e.key === key);
+          return entry === undefined ? cutterNameForKey(key) : toolDisplayName(entry.tool);
+        });
 
   // ---- #419 §3: the mode, and the cut gate --------------------------------------------------
 
@@ -2559,8 +2583,12 @@ export function EngravePanel(): JSX.Element {
   const runSheetBlocked = run.staleSince !== null;
 
   async function openRunSheet(): Promise<void> {
-    const generated = useEngraveRunStore.getState().generated;
+    const state = useEngraveRunStore.getState();
+    const generated = state.generated;
     if (!generated || (!generated.verify && generated.surface3d == null) || generated.nc === null) return;
+    // #963 — the sheet reads the model engine's plan beside the program it describes; the plan is
+    // the run store's own field, attached here because `generated` predates the engine's result.
+    const sheetGenerated = { ...generated, plan: state.plan };
     // `buildRunSheet` typesets every label to lay out the origin diagram, and `resolveFont`
     // throws unless the bundled faces are already parsed (#180). The sim worker loads them, but
     // that cache is per-realm — the main thread must load the job's faces itself first, exactly
@@ -2604,7 +2632,7 @@ export function EngravePanel(): JSX.Element {
     setSheet(
       buildRunSheet(
         job,
-        generated,
+        sheetGenerated,
         // #408 — the band the prediction was judged to, so the sheet states the tolerance behind its
         // "matches prediction" claim next to the engine sentence. Undefined until the check ran, and
         // the sheet then claims nothing about a comparison.
@@ -5433,6 +5461,16 @@ export function EngravePanel(): JSX.Element {
                   Generate again
                 </button>
               </p>
+            )}
+            {/* #963 — THE PLAN IN THE OPERATOR'S WORDS. The rebuilt engine says what it recognised,
+                which cutters it chose and what it costs, and how the passes are joined; the panel
+                prints those facts rather than a grid pitch the operator used to trade away. */}
+            {run.plan !== null && (
+              <div data-testid="engrave-run-plan" style={{ ...MUTED, margin: '0 0 6px', lineHeight: 1.5 }}>
+                <p style={{ margin: 0 }}>Recognised: {featureSentence(run.plan.features)}.</p>
+                {planSequence !== null && <p style={{ margin: 0 }}>Cutters: {planSequence}.</p>}
+                <p style={{ margin: 0 }}>Linking: {linkingSentence(run.plan.linking)}.</p>
+              </div>
             )}
             {/* #893 — A PROGRAM WITH NO SIMULATION IS NOT A DEAD END: the sweep and the check
                 re-run for the program on screen, without generating again. Shown for every such

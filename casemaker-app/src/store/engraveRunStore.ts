@@ -19,6 +19,8 @@ import { create } from 'zustand';
 import type { EngraveJob, EngraveMargins, EngraveTargetObject } from '@/types/engraveJob';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveGenerated, EngraveProgress, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import type { ModelPlanOutput, SetupPlan } from '@/engine/cnc/cam/model/plan';
+import type { ModelPlanProgress } from '@/engine/cnc/cam/model/types';
 import {
   noteFinding,
   noteProgress as noteFlightProgress,
@@ -289,6 +291,18 @@ export function combineOracles(reports: readonly OracleReport[], copper: OracleR
 export interface EngraveRunState {
   /** The last generated result — kept on screen while a newer run builds. */
   generated: EngraveGenerated | null;
+  /**
+   * #963 — THE MODEL ENGINE'S PLAN for the run on screen: the features it recognised, the costed
+   * cutter sequence and the linking facts (`cam/model/plan.ts`, #956 §3.0), or null for a run the
+   * rebuilt engine did not plan (a 2.5D job, or a build before #966's integration). The panel and
+   * the run sheet read their sentences from it; the goal check never does (A's R3).
+   */
+  plan: SetupPlan | null;
+  /**
+   * #963 — the plan's own progress while it runs (B's `ModelPlanProgress`), or null when the
+   * engine is not reporting. One stage word and a fraction, from the engine, never the panel's guess.
+   */
+  planProgress: ModelPlanProgress | null;
   oracle: OracleReport | null;
   /**
    * #844 — EVERY PROGRAM'S OWN VERDICT, in cut order, with the words that name it. `oracle` is the
@@ -428,6 +442,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     previousVerdict: null as boolean | null,
     error: null as string | null,
     progress: null as EngraveProgress | null,
+    plan: null as SetupPlan | null,
+    planProgress: null as ModelPlanProgress | null,
     simProgram: null as { index: number; count: number } | null,
     simStopped: false,
   };
@@ -612,7 +628,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // a count inside a stage is progress. #830 — every report re-arms the silence watchdog.
       const onProgress = (progress: EngraveProgress): void => {
         armStall();
-        if (mine === seq) set({ progress });
+        // #963 — THE PLAN'S OWN PROGRESS, read loosely until the worker's report carries it
+        // (#956/#966): one stage word and a fraction in the plan's terms, not the stage's.
+        const planProgress = (progress as EngraveProgress & { planProgress?: ModelPlanProgress }).planProgress;
+        if (mine === seq) set(planProgress === undefined ? { progress } : { progress, planProgress });
         if (lastStage !== progress.stage) {
           lastStage = progress.stage;
           noteStage('generate', progress.stage, progress.label);
@@ -646,6 +665,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     }
     if (mine !== seq) return;
 
+    // #963 — THE MODEL ENGINE'S PLAN, read loosely until the worker's result carries it
+    // (#956/#966): the first setup's plan is the one the panel and the sheet describe today; a
+    // multi-setup job (#965) picks its own side later.
+    const plan = ((generated as EngraveGenerated & { plan?: ModelPlanOutput | null }).plan?.perSetup[0]) ?? null;
+
     // The job may have been edited while generating: the result already describes an older job. So
     // may the machine's saved frame (#301), and so may the depth margins (#345): the program above
     // was gated against the one read at the top. All three compare the #581 FOLLOW-UP rule — the
@@ -669,6 +693,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // #581 — name which one moved; the generic sentence is only for a caller that cannot know.
       set({
         generated,
+        plan,
+        planProgress: null,
         phase: 'blocked',
         staleSince: Date.now(),
         staleReason: changedJob ? 'job' : changedMachine ? 'machine' : 'margins',
@@ -678,7 +704,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       return;
     }
 
-    set({ generated, progress: null });
+    set({ generated, plan, progress: null, planProgress: null });
     // #787 — every finding the run raised, small enough for the report to carry.
     for (const f of generated.findings) noteFinding(f);
     if (!generated.ok || generated.nc === null) {
@@ -1054,6 +1080,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     previousVerdict: null,
     error: null,
     progress: null,
+    plan: null,
+    planProgress: null,
     simProgram: null,
     simStopped: false,
     // #893 — THE RUN HOLDS THE MEASURED PICK: it writes the cutter plan into the job, and a job

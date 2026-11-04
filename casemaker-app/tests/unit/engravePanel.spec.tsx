@@ -28,6 +28,7 @@ import {
   type EngravePreviewClient,
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { fixtureSetupPlan } from './fixtures/setupPlan';
 import { jobVise, proudForSeat } from '@/engine/cnc/fixture';
 import { MARGIN_DEFAULTS, checkBounds, splitBound } from '@/engine/cnc/engrave/depthBounds';
 import { assessSurfaceSpread } from '@/engine/cnc/engrave/surfaceSpread';
@@ -4618,6 +4619,64 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     expect(goals[0]!.setupId).toBe(job.setups![0]!.id);
     expect(goals[1]!.setupId).toBe(job.setups![1]!.id);
     setEngraveRunClientLoader(null);
+  });
+
+  it('#963 the panel reads the model plan: the features, the costed sequence, the linking facts', async () => {
+    resetCncMode();
+    const goal: EngraveTargetObject = {
+      id: 'goal-plan',
+      name: 'tray.stl',
+      format: 'stl',
+      sha256: 'f'.repeat(64),
+      data: 'AAAA',
+      size: { x: 60, y: 40, z: 6 },
+      position: { x: 50, y: 30, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+    };
+    act(() => {
+      useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal } });
+    });
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: true,
+          stage: 'done',
+          findings: [],
+          feeds: null,
+          cam: null,
+          nc: null,
+          verify: null,
+          programs: [],
+        } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated,
+        plan: fixtureSetupPlan(),
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+    render(<EngravePanel />);
+    const block = screen.getByTestId('engrave-run-plan').textContent ?? '';
+    expect(block).toContain('Recognised: 6 pockets, 1 outer contour, 1 curved region.');
+    expect(block).toContain(
+      'Cutters: flat-6 (18 min) → flat-3.175 (11 min) → ball-6 (15 min) → v-90 (3 min) — about 47 min 30 s.',
+    );
+    expect(block).toContain('Linking: 384 rapids, 12 hops, 3.2 % of the cycle in air.');
+  });
+
+  it('#963 the progress line prints the plan’s own stage and percentage', async () => {
+    resetCncMode();
+    act(() => {
+      useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), labels: [], shapes: [] } });
+    });
+    act(() => {
+      useEngraveRunStore.setState({
+        phase: 'generating',
+        planProgress: { setupIndex: 0, op: 'finish', fraction: 0.8 },
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('Finishing — 80 %');
   });
 
   it('#888 the facing row is quiet while the main program is refused', async () => {
