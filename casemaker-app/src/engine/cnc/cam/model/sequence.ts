@@ -193,7 +193,30 @@ export interface ConsideredSequence {
   unreachable: number;
   /** Of those, how many a cutter in the set could have covered — what the rank compares. */
   leftBehind: number;
+  /** Steps the ops could not plan (their regions are stated unreachable by the chosen chain). */
+  unplanned: number;
   reason: string;
+}
+
+/**
+ * ONE STEP THE OPS COULD NOT PLAN (#960). A planStep that returns null or throws cuts nothing for
+ * its regions. The candidate still prices what it DID cut; these regions are stated unreachable
+ * with this reason, so a plan never silently loses part of the part. Only the PRIMARY step's
+ * failure disqualifies a candidate (nothing is planned at all).
+ */
+export interface SequenceStepFailure {
+  kind: PlannedOpKind;
+  cutterKey: string;
+  regionIds: string[];
+  reason: string;
+}
+
+/** A candidate's price plus the steps that could not be planned (none when it all planned). */
+export interface PricedSequence {
+  cost: SequenceCost;
+  /** The steps the ops DID plan, in execution order — what the caller posts. */
+  steps: SequenceStep[];
+  failures: SequenceStepFailure[];
 }
 
 /** What the picker returns: the chosen steps, their price, and the field they beat. */
@@ -207,9 +230,17 @@ export interface SequenceChoice {
    * The demand's freeing contour (its own step, always LAST), when the chain posts one: which
    * cutter takes it, whether that costs a RETURN tool change after the last pocket/rest step, and
    * whether the chain's last cutter could have taken the profile at all. The plan's note states
-   * which way the pick fell.
+   * which way the pick fell. Null when no freeing step is planned — including when the contour's
+   * own step failed (it is then in `unplanned`).
    */
   freeing: { cutterKey: string; extraToolChange: boolean; lastCutterEligible: boolean } | null;
+  /**
+   * #960 — steps the chosen chain's ops could not plan, in step order, each with its regions and
+   * the reason. Their regions are folded into `unreachable` too, so a caller that only reads that
+   * list still sees them; this list carries the WHY (a thrown op's message, or that it planned
+   * nothing). Empty when every step planned.
+   */
+  unplanned: SequenceStepFailure[];
 }
 
 const EPS = 1e-9;
@@ -592,31 +623,59 @@ export function candidateSequences(
 }
 
 /**
- * Price one candidate by #927's terms on its posted moves + the shop's allowance per change. Null
- * when any step cannot be planned — an unpostable candidate is not a cheap one.
+ * Price one candidate by #927's terms on its posted moves + the shop's allowance per change.
  *
- * A change is charged when the step's cutter DIFFERS from the previous step's: the first step's
- * cutter is loaded, and a cutter that comes BACK after another ran (the deferred freeing contour
- * returning to the primary, when the chain chose that) costs a second change to load it again.
- * Counting one change per cutter key — the older model — under-priced exactly that return.
+ * #960 — A STEP THAT CANNOT PLAN DOES NOT KILL THE CANDIDATE (B's per-region catch in `plan.ts`,
+ * carried into the price). The ops can refuse a step the geometry prune let through — today
+ * `rough()` on a curved remainder — by returning null or throwing. Only the PRIMARY step's
+ * failure disqualifies the candidate (it is the roughing; nothing is planned without it). Any
+ * later failed step plans nothing for its regions: they are recorded with the reason, the
+ * candidate is priced on what it DID cut, and the caller states them unreachable.
+ *
+ * A change is charged when the step's cutter DIFFERS from the previous PLANNED step's: the first
+ * step's cutter is loaded, and a cutter that comes BACK after another ran (the deferred freeing
+ * contour returning to the primary, when the chain chose that) costs a second change to load it
+ * again. Counting one change per cutter key — the older model — under-priced exactly that return.
  */
 export function priceSequence(
   sequence: CandidateSequence,
   opts: Pick<SequenceOptions, 'rapid' | 'toolChangeSeconds' | 'planStep'>,
-): SequenceCost | null {
+): PricedSequence | null {
   const seconds = new Map<string, number>();
   const order: string[] = [];
   const changes = new Map<string, number>();
+  const planned: SequenceStep[] = [];
+  const failures: SequenceStepFailure[] = [];
   let previous: string | null = null;
-  for (const step of sequence.steps) {
-    const ir = opts.planStep(step);
-    if (ir === null) return null;
+  for (let i = 0; i < sequence.steps.length; i++) {
+    const step = sequence.steps[i]!;
+    let ir: ToolpathIR | null;
+    let thrown: string | null = null;
+    try {
+      ir = opts.planStep(step);
+    } catch (e) {
+      ir = null;
+      thrown = e instanceof Error ? e.message : String(e);
+    }
+    if (ir === null) {
+      // The first step is the PRIMARY's (its pockets, or the curved remainder when there are no
+      // pockets): a candidate that cannot rough anything is not a plan. Later failures are stated.
+      if (i === 0) return null;
+      failures.push({
+        kind: step.kind,
+        cutterKey: step.cutter.key,
+        regionIds: [...step.regionIds],
+        reason: thrown ?? `the ${step.kind} op planned nothing for its regions`,
+      });
+      continue;
+    }
     const key = step.cutter.key;
     const total = estimateCycleTerms(ir, opts.rapid).totalSeconds;
     seconds.set(key, (seconds.get(key) ?? 0) + total);
     if (!order.includes(key)) order.push(key);
     if (previous !== null && previous !== key) changes.set(key, (changes.get(key) ?? 0) + 1);
     previous = key;
+    planned.push(step);
   }
   if (order.length === 0) return null;
   const entries: CycleCost[] = order.map((key) => {
@@ -633,34 +692,53 @@ export function priceSequence(
   const estimateSeconds = entries.reduce((sum, e) => sum + e.estimateSeconds, 0);
   const toolChanges = entries.reduce((sum, e) => sum + e.toolChanges, 0);
   return {
-    entries,
-    estimateSeconds,
-    toolChanges,
-    toolChangeSeconds: opts.toolChangeSeconds,
-    totalSeconds: entries.reduce((sum, e) => sum + e.totalSeconds, 0),
+    cost: {
+      entries,
+      estimateSeconds,
+      toolChanges,
+      toolChangeSeconds: opts.toolChangeSeconds,
+      totalSeconds: entries.reduce((sum, e) => sum + e.totalSeconds, 0),
+    },
+    steps: planned,
+    failures,
   };
 }
 
-/** The rank: house before catalogue, rowed feeds before fallback, then the price, then the key. */
-function rankOf(sequence: CandidateSequence, cost: SequenceCost): readonly [number, number, number, number, string] {
+/** A feasible candidate with its price and the steps that failed — what the rank compares. */
+interface RankedSequence {
+  sequence: CandidateSequence;
+  /** The steps the ops planned — what the chosen chain posts. */
+  steps: SequenceStep[];
+  cost: SequenceCost;
+  failures: SequenceStepFailure[];
+  /** `CandidateSequence.leftBehind` plus the failed POCKET/CONTOUR regions (#960). */
+  leftBehind: number;
+}
+
+/** The rank: coverage, then failed steps, then house/rowed, then the price, then the key. */
+function rankOf(ranked: RankedSequence): readonly [number, number, number, number, number, string] {
   // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
   // different part. "Complete" means every pocket a cutter in the set COULD cover is covered —
   // `leftBehind`, not `unreachable`, or the pockets no cutter can reach would tie every candidate
   // and price would decide (E's organizer run on ec77465a left 27 cuttable pockets that way).
-  // Within that, the old order stands (house before catalogue, rowed before fallback, then price).
-  const incomplete = sequence.leftBehind;
-  const catalogue = sequence.steps.filter((s) => !s.cutter.house).length;
-  const fallback = sequence.steps.filter((s) => s.cutter.feeds === 'fallback').length;
-  const signature = sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
-  return [incomplete, catalogue, fallback, cost.totalSeconds, signature] as const;
+  // #960 — next, a candidate whose steps ALL planned beats one whose op failed: the failure means
+  // features that other candidates cut, left uncut here. Within that, the old order stands (house
+  // before catalogue, rowed before fallback, then price).
+  const catalogue = ranked.sequence.steps.filter((s) => !s.cutter.house).length;
+  const fallback = ranked.sequence.steps.filter((s) => s.cutter.feeds === 'fallback').length;
+  const signature = ranked.sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
+  return [ranked.leftBehind, ranked.failures.length, catalogue, fallback, ranked.cost.totalSeconds, signature] as const;
 }
 
-function compareRank(a: readonly [number, number, number, number, string], b: readonly [number, number, number, number, string]): number {
-  for (let i = 0; i < 4; i++) {
+function compareRank(
+  a: readonly [number, number, number, number, number, string],
+  b: readonly [number, number, number, number, number, string],
+): number {
+  for (let i = 0; i < 5; i++) {
     if (a[i]! < b[i]!) return -1;
     if (a[i]! > b[i]!) return 1;
   }
-  return a[4]! < b[4]! ? -1 : a[4]! > b[4]! ? 1 : 0;
+  return a[5]! < b[5]! ? -1 : a[5]! > b[5]! ? 1 : 0;
 }
 
 /**
@@ -685,21 +763,46 @@ export function chooseSequence(
     );
   }
 
-  const priced = candidates.map((sequence) => ({ sequence, cost: priceSequence(sequence, opts) }));
+  const priced = candidates.map((sequence) => ({ sequence, priced: priceSequence(sequence, opts) }));
   // No local threshold between the two freeing-cut options: both are priced on the real steps
   // (the return change included) and the cheaper wins. plan v2's 3× stop rule is a package-vs-
   // vendor line on the reference card, not a per-profile gate here.
-  const considered: ConsideredSequence[] = priced.map(({ sequence, cost }) => ({
+  const considered: ConsideredSequence[] = priced.map(({ sequence, priced: price }) => ({
     steps: sequence.steps.map((s) => ({ kind: s.kind, cutterKey: s.cutter.key })),
-    cost: cost === null ? null : cost.totalSeconds,
+    cost: price === null ? null : price.cost.totalSeconds,
     unreachable: sequence.unreachable.length,
     leftBehind: sequence.leftBehind,
-    reason: cost === null ? 'an op in this sequence could not be planned' : '',
+    unplanned: price === null ? 0 : price.failures.length,
+    reason: price === null
+      ? 'the primary step could not be planned'
+      : price.failures.length > 0
+        ? `${price.failures.length} step${price.failures.length === 1 ? '' : 's'} could not be planned`
+        : '',
   }));
 
-  const feasible = priced
-    .filter((p): p is { sequence: CandidateSequence; cost: SequenceCost } => p.cost !== null)
-    .sort((a, b) => compareRank(rankOf(a.sequence, a.cost), rankOf(b.sequence, b.cost)));
+  // #960 — A FAILED STEP IS NOT A DISCOUNT. A candidate whose ops could not plan part of the part
+  // ranks as if that part were unreachable: its failed POCKET/CONTOUR regions count against
+  // `leftBehind` (an uncut cuttable feature), and the failed-step count breaks the next tie before
+  // price does — a plan that posts everything another candidate posts, and more, wins even when it
+  // is dearer (the same principle as `leftBehind`).
+  const demandFeatureIds = new Set(
+    demand.features.filter((f) => f.kind === 'pocket' || f.kind === 'contour').map((f) => f.id),
+  );
+  const feasible: RankedSequence[] = priced
+    .filter((p): p is { sequence: CandidateSequence; priced: PricedSequence } => p.priced !== null)
+    .map(({ sequence, priced: price }) => {
+      const failedFeatures = new Set(
+        price.failures.flatMap((f) => f.regionIds).filter((id) => demandFeatureIds.has(id)),
+      );
+      return {
+        sequence,
+        steps: price.steps,
+        cost: price.cost,
+        failures: price.failures,
+        leftBehind: sequence.leftBehind + failedFeatures.size,
+      };
+    })
+    .sort((a, b) => compareRank(rankOf(a), rankOf(b)));
 
   if (feasible.length === 0) {
     throw new Error(
@@ -709,7 +812,9 @@ export function chooseSequence(
   }
 
   const best = feasible[0]!;
-  const steps = best.sequence.steps;
+  // #960 — the steps the ops actually planned; a failed step is not posted (its regions are
+  // stated in `unreachable`/`unplanned` instead).
+  const steps = best.steps;
   const last = steps[steps.length - 1];
   const beforeLast = steps[steps.length - 2];
   const contourFeatures = demand.features.filter((f) => f.kind === 'contour');
@@ -728,11 +833,18 @@ export function chooseSequence(
           ? true
           : beforeLast.cutter.key === last.cutter.key || canFree(beforeLast.cutter.tool),
       };
+  // #960 — the failed steps' regions are part of what this plan does NOT cut: fold them into
+  // `unreachable` (so a caller that only reads that list still sees them) and keep the reasons in
+  // `unplanned` for the plan's own sentence.
+  const unreachable = [
+    ...new Set([...best.sequence.unreachable, ...best.failures.flatMap((f) => f.regionIds)]),
+  ];
   return {
     steps,
     cost: best.cost,
     considered,
-    unreachable: best.sequence.unreachable,
+    unreachable,
     freeing,
+    unplanned: best.failures,
   };
 }
