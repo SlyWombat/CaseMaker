@@ -68,6 +68,8 @@ function partOf(polys: Polygons, area: number): Part {
 }
 
 const all = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...all(n.children)]);
+/** Float dust on a comparison against a stated tolerance (E's fourth run: 0.2 read 0.20000000000000284). */
+const EPS = 1e-9;
 /** E's window, inclusive, plus float noise. */
 const LEVEL_TOL = 0.01 + 1e-6;
 /** The tangent band E's window takes in beyond a filleted floor's edge, mm (one-sided). */
@@ -85,7 +87,10 @@ interface Want {
 /** Greedy match by centroid distance on the known coordinates; then the area range and size. */
 const describeParts = (got: Part[]): string =>
   got
-    .map((p) => `    ${p.area.toFixed(2)} mm² @ (${p.centroid[0].toFixed(2)}, ${p.centroid[1].toFixed(2)}) ${p.size[0].toFixed(2)} × ${p.size[1].toFixed(2)}`)
+    .map(
+      (p) =>
+        `    ${p.area.toFixed(2)} mm² @ (${p.centroid[0].toFixed(2)}, ${p.centroid[1].toFixed(2)}) ${p.size[0].toFixed(2)} × ${p.size[1].toFixed(2)}, mean width 2A/P ${((2 * p.area) / p.perimeter).toFixed(3)} mm`,
+    )
     .join('\n');
 
 function expectParts(label: string, got: Part[], want: Want[]): void {
@@ -93,16 +98,23 @@ function expectParts(label: string, got: Part[], want: Want[]): void {
   const free = [...got];
   for (const w of want) {
     const dist = (p: Part): number => Math.hypot(w.x === undefined ? 0 : p.centroid[0] - w.x, w.y === undefined ? 0 : p.centroid[1] - w.y);
-    free.sort((a, b) => dist(a) - dist(b));
+    // Distance first; area breaks ties (the tray's 3.00 ledge and its middle channel floor share
+    // the centroid (55, 70)).
+    const mid = (w.area[0] + w.area[1]) / 2;
+    const key = (p: Part): number => dist(p) + Math.abs(Math.log(Math.max(p.area, 1e-9) / mid));
+    free.sort((a, b) => key(a) - key(b));
     const p = free.shift()!;
     const where = `${label} @ (${w.x ?? '?'}, ${w.y ?? '?'}) got (${p.centroid[0].toFixed(2)}, ${p.centroid[1].toFixed(2)}) ${p.area.toFixed(2)} mm²`;
-    expect(dist(p), where).toBeLessThanOrEqual(0.2);
+    expect(dist(p), where).toBeLessThanOrEqual(0.2 + EPS);
     const tol = areaTol(p);
     expect(p.area, where).toBeGreaterThanOrEqual(w.area[0] - tol - TANGENT_BAND_MM * p.perimeter);
     expect(p.area, where).toBeLessThanOrEqual(w.area[1] + tol);
     if (w.size !== undefined) {
-      expect(Math.abs(p.size[0] - w.size[0]), where).toBeLessThanOrEqual(0.2);
-      expect(Math.abs(p.size[1] - w.size[1]), where).toBeLessThanOrEqual(0.2);
+      // One-sided like the area: E's window widens each filleted edge by up to the tangent band.
+      for (const k of [0, 1] as const) {
+        expect(p.size[k] - w.size[k], where).toBeLessThanOrEqual(0.2 + EPS);
+        expect(w.size[k] - p.size[k], where).toBeLessThanOrEqual(0.2 + 2 * TANGENT_BAND_MM + EPS);
+      }
     }
   }
 }
@@ -205,12 +217,22 @@ function writeForE(tree: FeatureTree, name: string, modelTop: number, mesh: { po
  * reads ~0 on both; a cylinder of R over a width w reads ≈ w²/(16R) and ≈ w/(2R) rad, which fails
  * the 0.005 mm / 0.5° tests (#958 §3.1). Printed so a disputed level is settled by the geometry.
  */
-function logExtraLevelFits(tree: FeatureTree, name: string, modelTop: number, mesh: FrameMesh, faceId: Uint32Array | undefined, listed: number[]): void {
+function logExtraLevelFits(
+  tree: FeatureTree,
+  name: string,
+  modelTop: number,
+  mesh: FrameMesh,
+  faceId: Uint32Array | undefined,
+  listed: number[],
+  alsoAt: number[] = [],
+): void {
   if (faceId === undefined) return;
   const tol = DEFAULT_FEATURE_TOLERANCES;
   const patches = patchesFromFaces(mesh, faceId, tol);
   classifyPatches(mesh, patches, tree.frame.partBottom, tol);
-  const extra = tree.levels.filter((z) => !listed.some((d) => Math.abs(modelTop - z - d) <= LEVEL_TOL));
+  const extra = tree.levels.filter(
+    (z) => !listed.some((d) => Math.abs(modelTop - z - d) <= LEVEL_TOL) || alsoAt.some((d) => Math.abs(modelTop - z - d) <= LEVEL_TOL),
+  );
   const lines: string[] = [];
   for (const z of extra) {
     for (const patch of patches) {
@@ -227,7 +249,9 @@ function logExtraLevelFits(tree: FeatureTree, name: string, modelTop: number, me
 function logLevels(tree: FeatureTree, name: string, modelTop: number): void {
   const lines = tree.levels.map((z) => {
     const parts = Math.abs(z - tree.top.z) < 1e-9 ? tree.top.floors : all(tree.pockets).filter((n) => !n.through && Math.abs(n.floorZ - z) <= 0.01).flatMap((n) => n.floors);
-    return `  depth ${(modelTop - z).toFixed(3)} (z ${z.toFixed(3)}): ${parts.length} parts\n${describeParts(parts.map((f) => partOf(f.polygons, f.area)))}`;
+    const nodes = all(tree.pockets).filter((n) => !n.through && Math.abs(n.floorZ - z) <= LEVEL_TOL);
+    const nodeLine = nodes.map((n) => `${n.id}${n.open ? ' (open)' : ''} enters ⌀${n.narrowest.toFixed(2)}, ${n.floors.length} floor part(s)`).join('; ');
+    return `  depth ${(modelTop - z).toFixed(3)} (z ${z.toFixed(3)}): ${parts.length} parts${nodeLine ? ` — nodes: ${nodeLine}` : ''}\n${describeParts(parts.map((f) => partOf(f.polygons, f.area)))}`;
   });
   console.log(`#958 ${name}: partTop ${tree.frame.partTop.toFixed(3)} partBottom ${tree.frame.partBottom.toFixed(3)}\n${lines.join('\n')}`);
 }
@@ -244,7 +268,8 @@ describe.skipIf(TRAY === undefined)('#958 acceptance — tool tray 70, top setup
     logLevels(t, 'tray', TOP);
     writeForE(t, 'tray', TOP, placedMeshes.get(t)!);
     const placed = placedMeshes.get(t)!;
-    logExtraLevelFits(t, 'tray', TOP, placed, placed.faceId, [0, 0.6, 3, 6]);
+    // 3.00 too: the ledge's own face fit, the geometry behind pinning it (6621605514 reply).
+    logExtraLevelFits(t, 'tray', TOP, placed, placed.faceId, [0, 0.6, 3, 6], [3]);
     expectLevels(t, TOP, [0, 0.6, 3, 6], TRAY_CONFIRMED_EXTRA_DEPTHS, []);
   });
 
@@ -266,11 +291,15 @@ describe.skipIf(TRAY === undefined)('#958 acceptance — tool tray 70, top setup
       { y: 121.2, area: [7.3, 7.3] },
     ]);
     for (const p of sixty) expect(Math.abs(p.centroid[0] - 12.2), `0.60 x ${p.centroid[0].toFixed(2)}`).toBeLessThanOrEqual(0.5);
-    expectParts(
-      '3.00',
-      floorsAt(t, TOP, 3),
-      [28.8, 49.5, 70.0, 90.6, 111.2].map((y) => ({ x: 55.0, y, area: [27.8, 28.1] as [number, number], size: [3.6, 7.5] as [number, number] })),
-    );
+    // The 1,456.4 mm² rim-shaped component E flagged at −4.20 (6620425916) is pinned as a part:
+    // E's own area is ~3 mm × the outline's perimeter (2A/P ≈ 3.07 mm on ours), not the 0.1–0.2 mm
+    // fillet sliver first guessed, so it is the outer ledge, an OPEN shoulder (#958 6621605514 reply).
+    expectParts('3.00', floorsAt(t, TOP, 3), [
+      { x: 55.0, y: 70.0, area: [1456.4, 1456.4], size: [106, 136] },
+      ...[28.8, 49.5, 70.0, 90.6, 111.2].map((y) => ({ x: 55.0, y, area: [27.8, 28.1] as [number, number], size: [3.6, 7.5] as [number, number] })),
+    ]);
+    const ledge = all(t.pockets).find((n) => !n.through && Math.abs(n.floorZ - (TOP - 3)) <= LEVEL_TOL && n.floors.some((f) => f.area > 1000));
+    expect(ledge?.open, 'the 3.00 ledge is an open shoulder').toBe(true);
     // x 55.0 is the midpoint of E's bbox x 19.8–90.2, not a centroid E gave; the slots are
     // symmetric end to end, so the two coincide.
     expectParts(
