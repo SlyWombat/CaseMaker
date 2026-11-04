@@ -90,6 +90,14 @@ export interface BuiltTree {
 const toPolygons = (cs: CrossSection): Polygons =>
   cs.toPolygons().map((ring) => ring.map((p) => [p[0], p[1]] as [number, number]));
 
+/** An empty CrossSection (the constructor rejects an empty polygon list). */
+function emptySection(tl: ManifoldToplevel): CrossSection {
+  const unit = tl.CrossSection.square([1, 1]);
+  const empty = unit.subtract(unit);
+  unit.delete();
+  return empty;
+}
+
 /** The union of a set of triangles' XY projections, every triangle made CCW first. */
 function projectTriangles(tl: ManifoldToplevel, mesh: FrameMesh, tris: readonly number[]): CrossSection {
   const p = mesh.positions;
@@ -120,7 +128,7 @@ function projectTriangles(tl: ManifoldToplevel, mesh: FrameMesh, tris: readonly 
           ],
     );
   }
-  if (rings.length === 0) return new tl.CrossSection([]);
+  if (rings.length === 0) return emptySection(tl);
   return tl.CrossSection.ofPolygons(rings, 'Positive');
 }
 
@@ -336,9 +344,16 @@ export function buildTree(
     // ── Remainder regions (D1) ────────────────────────────────────────────────────────────
     const remainder: TreeRemainder[] = [];
     const remainderCs: CrossSection[] = [];
+    let degenerate = 0;
     for (const tris of surfaces) {
       const footprint = projectTriangles(tl, mesh, tris);
       garbage.push(footprint);
+      // A surface with no area in projection (a zero-area triangle a tessellator left at a pole)
+      // is not a region. Counted in the report.
+      if (footprint.area() <= AREA_EPS) {
+        degenerate++;
+        continue;
+      }
       let zTop = -Infinity;
       let zBottom = Infinity;
       const slopes: { deg: number; area: number }[] = [];
@@ -388,6 +403,8 @@ export function buildTree(
       remainderCs.push(footprint);
     }
 
+    if (degenerate > 0) notes.push(`${degenerate} curved surface(s) with no area in projection ignored`);
+
     // ── Relations: parents, mouths, islands, remainder membership ────────────────────────
     // Deepest first, so each node's parent is the nearest shallower node containing it.
     const ordered = [...nodes].sort((a, b) => a.floorZ - b.floorZ);
@@ -406,6 +423,11 @@ export function buildTree(
     }
     for (const node of nodes) {
       for (const hole of holesOf(tl, node.cs)) {
+        // A hole of the silhouette (a through feature) is no island: there is no material in it.
+        if (!overlaps(hole, silhouette)) {
+          hole.delete();
+          continue;
+        }
         let islandTop = node.floorZ;
         for (const f of floors) if (f.patch.zMax > islandTop && overlaps(f.cs, hole)) islandTop = f.patch.zMax;
         for (let i = 0; i < remainder.length; i++) {

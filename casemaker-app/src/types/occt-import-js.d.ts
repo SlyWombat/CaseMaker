@@ -12,6 +12,11 @@ declare module 'occt-import-js' {
     attributes: { position: { array: number[] }; normal?: { array: number[] } };
     /** Triangle indices, three per triangle. */
     index: { array: number[] };
+    /**
+     * The source B-rep's faces, as triangle ranges: triangles `first..last` (inclusive) came from
+     * one face (#958). The kernel's README documents it; the app reads it for feature recognition.
+     */
+    brep_faces?: { first: number; last: number; color: number[] | null }[];
   }
   export interface OcctReadResult {
     success: boolean;
