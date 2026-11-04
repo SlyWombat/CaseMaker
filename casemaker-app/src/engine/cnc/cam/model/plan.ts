@@ -26,13 +26,17 @@ import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import type { ObstacleBox } from '@/engine/cnc/setup';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
-import type { CutParams } from '@/engine/cnc/feeds';
+import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, type CutParams } from '@/engine/cnc/feeds';
+import { Z1 } from '@/engine/cnc/machine';
+import { readDefault, liveShopDefaults } from '@/platform/defaultsClient';
+import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
+import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './features';
-import { regionRefs } from './features';
+import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
-import { chooseSequence, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep } from './sequence';
+import { chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep } from './sequence';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
 import { rough } from './ops/rough';
@@ -202,8 +206,175 @@ export interface PlanModelCamOptions {
   onProgress?: (p: ModelPlanProgress) => void;
 }
 
-export async function planModelCam(_input: ModelPlanInput, _opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
-  throw new Error('cam/model/plan: planModelCam() not implemented (#956 skeleton — #957/#959/#960 fill it in)');
+/**
+ * The rough's stock-to-leave band, mm — the old engine's own `DEFAULT_STOCK_TO_LEAVE_MM`
+ * (`cam/surface3d.ts:74`). That file is #966's to delete, so the number is stated here as the
+ * entry's default until the band is an input field (§3.6 point 4's job fields, which #965 decides).
+ * It is the ROUGH's band only; the ball's promised cusp is the job's finish tolerance
+ * (`finishScallopMm`), because F's coverage line counts anything over 0.1 mm standing above the
+ * goal as leftover — a finish leaving the rough's band as its own scallop reads as uncovered.
+ */
+const MODEL_STOCK_TO_LEAVE_MM = 0.3;
+
+/** One cutter's resolved cut numbers, through the app's one feeds resolver (the labelled fallback table when no catalogue row answers). */
+function resolvedCutParams(input: ModelPlanInput, tool: Tool): CutParams {
+  const resolved = feedsFor(feedCatalogueSnapshot(), input.stock.material, feedsToolForSurface(tool), Z1);
+  if (!resolved.ok) {
+    const label = tool.name || tool.id || `${tool.shape} cutter`;
+    throw new Error(`cam/model/plan: no feeds for ${label} in ${input.stock.material} — ${resolved.reason}`);
+  }
+  return resolved.params;
+}
+
+/** §5's three numbers, read off the posted moves: a hop retracts to `hopZ`, a rapid to `safeZ`. */
+function linkingStats(programs: readonly ToolpathIR[]): SetupPlan['linking'] {
+  let rapidsCount = 0;
+  let hopsCount = 0;
+  let feedXy = 0;
+  let rapidXy = 0;
+  for (const ir of programs) {
+    let prev: { x: number; y: number } | null = null;
+    for (const operation of ir.operations) {
+      for (const move of operation.moves) {
+        const d = prev === null ? 0 : Math.hypot(move.x - prev.x, move.y - prev.y);
+        if (move.kind === 'rapid') {
+          if (move.z <= ir.hopZ + 1e-9) hopsCount++;
+          else rapidsCount++;
+          rapidXy += d;
+        } else {
+          feedXy += d;
+        }
+        prev = { x: move.x, y: move.y };
+      }
+    }
+  }
+  const total = feedXy + rapidXy;
+  return { rapidsCount, hopsCount, airFractionPct: total > 0 ? (rapidXy / total) * 100 : 0 };
+}
+
+/**
+ * THE ENTRY (#956 §3.0, filled in on F's check suite finding it still threw). One whole job — every
+ * setup, every feature the tree recognises — planned through the model engine and returned as
+ * #963's `SetupPlan`:
+ *
+ *   - the pocket chain by cost (`planPocketsForTree`), the curved remainder and the rims by the
+ *     ruling's pipeline, and the freeing contour LAST (`planTreePrograms`);
+ *   - programs ONE PER RUN, in execution order (a run starts when the cutter changes), each the
+ *     concatenation of its ops' IRs;
+ *   - cut numbers through the app's one feeds resolver (`feedsFor`), the shop's
+ *     `toolChange.seconds` through the labelled default, both the same calls the rest of the app
+ *     makes — this entry invents no numbers.
+ *
+ * STATED LIMITS, not silent ones: a fixture envelope is not yet wired into `RegionRef.obstacles`
+ * (the plan says so in its notes; the sweep still checks the posted program against the SAME
+ * envelope); `input.cutters.catalogue` is not in the pocket chain yet (`planPocketsForTree` takes
+ * house flats only) — the plan says that too when a caller supplies one.
+ */
+export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
+  const tl = await getToplevel();
+  const offset = makeClipperOffset(tl);
+  const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
+  const toolChangeSeconds = readDefault(liveShopDefaults(), 'toolChange.seconds').value;
+  const perSetup: SetupPlan[] = [];
+
+  for (let setupIndex = 0; setupIndex < input.setups.length; setupIndex++) {
+    opts.signal?.throwIfAborted();
+    const spec = input.setups[setupIndex]!;
+    opts.onProgress?.({ setupIndex, op: 'features', fraction: 0 });
+    const tree = recogniseFeatures(input.geometry, spec.frame, tl);
+
+    const flats = input.cutters.house
+      .filter((t) => t.shape === 'flat' && (cuttingDiameter(t) ?? 0) > 0)
+      .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0));
+    const primary = flats[0];
+    if (primary === undefined) {
+      throw new Error('cam/model/plan: the house states no flat end mill with a cutting diameter — a pocket cannot be planned without one');
+    }
+    const ball = input.cutters.house
+      .filter((t) => t.shape === 'ball' && (cuttingDiameter(t) ?? 0) > 0)
+      .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0))[0];
+    const vbit = input.cutters.house.find((t) => t.shape === 'chamfer') ?? input.cutters.house.find((t) => t.shape === 'engraving');
+    if (tree.remainder.length > 0 && ball === undefined) {
+      throw new Error('cam/model/plan: the part has curved remainder regions but the house states no ball nose — the finish stage cannot be planned');
+    }
+
+    const pocketParams = resolvedCutParams(input, primary);
+    const feeds = { feedMmPerMin: pocketParams.feed, plungeFeedMmPerMin: pocketParams.plungeFeed };
+    opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.4 });
+    const result = planTreePrograms(tree, {
+      offset,
+      pockets: {
+        houseFlats: flats,
+        stepDownMm: pocketParams.stepDown,
+        feeds,
+        rapid: Z1.rapidEstimate,
+        toolChangeSeconds,
+        spindleRpm: pocketParams.rpm,
+        air: true,
+        boolean,
+      },
+      curved: {
+        geometry: input.geometry,
+        flat: primary,
+        ...(ball === undefined ? {} : { ball }),
+        ...(vbit === undefined ? {} : { vbit }),
+        stepDownMm: pocketParams.stepDown,
+        bandMm: MODEL_STOCK_TO_LEAVE_MM,
+        finishScallopMm: input.tolerances.finishMm,
+        stepOverMm: pocketParams.stepOver,
+        feeds,
+        rapid: Z1.rapidEstimate,
+        spindleRpm: pocketParams.rpm,
+        air: true,
+        edgeBreak: input.edgeBreak,
+        toolNumberFor: (tool) => tool.number ?? 1,
+      },
+    });
+    opts.signal?.throwIfAborted();
+    opts.onProgress?.({ setupIndex, op: 'linking', fraction: 0.9 });
+
+    // Programs ONE PER RUN, in execution order — the same rule `planPocketsForTree` states: a run
+    // starts when the cutter key changes, so a cutter's two non-contiguous visits never merge.
+    const programs: ToolpathIR[] = [];
+    let run: { key: string; ir: ToolpathIR } | null = null;
+    for (const op of result.ops) {
+      if (run !== null && run.key !== op.outcome.cutter) {
+        programs.push(run.ir);
+        run = null;
+      }
+      run = run === null ? { key: op.outcome.cutter, ir: op.outcome.ir } : { key: run.key, ir: concatToolpathIR(run.ir, op.outcome.ir) };
+    }
+    if (run !== null) programs.push(run.ir);
+
+    let totalCostSeconds = 0;
+    for (let p = 0; p < programs.length; p++) {
+      totalCostSeconds += estimateCycleTerms(programs[p]!, Z1.rapidEstimate).totalSeconds;
+      if (p > 0) totalCostSeconds += toolChangeSeconds;
+    }
+
+    const notes = [...result.notes];
+    if (input.fixture.envelope !== null) {
+      notes.push(
+        `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`,
+      );
+    }
+    if (input.cutters.catalogue.length > 0) {
+      notes.push(`${input.cutters.catalogue.length} catalogue cutter(s) are not in the pocket chain yet — the house set is what it chooses from`);
+    }
+
+    perSetup.push({
+      setupIndex,
+      features: tree,
+      clGrid: result.clGrid,
+      ops: result.ops,
+      sequence: result.sequence,
+      linking: linkingStats(programs),
+      programs,
+      totalCostSeconds,
+    });
+    opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
+  }
+  return { perSetup };
 }
 
 const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...allPockets(n.children)]);
@@ -695,15 +866,24 @@ export interface PlanCurvedOptions {
   offset: OffsetFn;
   /** The three tools the curved pipeline uses: the flat roughs, the ball finishes, the V breaks rims. */
   flat: Tool;
-  ball: Tool;
+  /** The ball. Absent is allowed when the tree has no remainder to finish — the region loop refuses by name the moment one needs it. */
+  ball?: Tool;
   /** The V. Absent is allowed when the job states no edge break — the rim stage is then not planned at
    * all (the property specs' house holds no V and asks for none). */
   vbit?: Tool;
   /** An optional smaller flat for the rest pass by CL difference. */
   restFlat?: Tool;
   stepDownMm: number;
-  /** The band the finish promises, mm — the rough's stock-to-leave and the ball's scallop. */
+  /** The ROUGH's stock-to-leave band, mm — what the flat leaves standing for the ball. */
   bandMm: number;
+  /**
+   * The BALL's promised cusp, mm (#964 finding). Defaults to `bandMm` — the old conflation — but
+   * F's coverage line counts anything standing more than 0.1 mm above the goal as leftover, so a
+   * finish leaving the rough's 0.3 mm band as its own scallop reads as an uncovered surface even
+   * where every cell was swept. `planModelCam` passes the job's finish tolerance here; the rough's
+   * band stays its own number.
+   */
+  finishScallopMm?: number;
   /** The rings' spacing; absent → the flat's own radius. */
   stepOverMm?: number;
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
@@ -722,6 +902,8 @@ export interface PlanCurvedResult {
   ops: PlannedOp[];
   /** Statements the plan owes the operator: nothing here is silent. */
   notes: string[];
+  /** `SetupPlan.clGrid`'s entries — every CL surface this pipeline sampled, one per cutter that built one. */
+  clGrid: { cutterKey: string; toleranceMm: number; minSpacingMm: number; maxSpacingMm: number }[];
 }
 
 function regionRefOf(id: string, kind: RegionKind, footprint: Polygons, topZ: number, bottomZ: number): RegionRef {
@@ -751,6 +933,17 @@ function regionRefOf(id: string, kind: RegionKind, footprint: Polygons, topZ: nu
 export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): PlanCurvedResult {
   const ops: PlannedOp[] = [];
   const notes: string[] = [];
+  const clGrid: PlanCurvedResult['clGrid'] = [];
+  const noteGrid = (cutter: Tool, surface: ReturnType<typeof clSurface>): void => {
+    const key = cutterKeyOf(cutter);
+    if (clGrid.some((entry) => entry.cutterKey === key)) return;
+    clGrid.push({
+      cutterKey: key,
+      toleranceMm: surface.toleranceMm,
+      minSpacingMm: surface.minSpacingMm,
+      maxSpacingMm: surface.maxSpacingMm,
+    });
+  };
   const cuts: CutParams = {
     rpm: opts.spindleRpm,
     feed: opts.feeds.feedMmPerMin,
@@ -762,8 +955,15 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   };
 
   for (const region of tree.remainder) {
+    const ball = opts.ball;
+    if (ball === undefined) {
+      throw new Error(
+        `cam/model/plan: the remainder region "${region.id}" needs a ball nose to finish and the call states none`,
+      );
+    }
     const ref = regionRefOf(region.id, 'curved', region.footprint, region.zTop, region.zBottom);
     const clFlat = clSurface(opts.geometry, region, opts.flat, cuts.stepOver);
+    noteGrid(opts.flat, clFlat);
     // 1. The FLAT Z-steps the region to its own CL, leaving the band.
     const roughOut = rough({
       cutter: opts.flat,
@@ -790,6 +990,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     let finishCl = clFlat;
     if (opts.restFlat !== undefined) {
       const restCl = clSurface(opts.geometry, region, opts.restFlat, cuts.stepOver);
+      noteGrid(opts.restFlat, restCl);
       const restOut = rest({
         cutter: opts.restFlat,
         region,
@@ -816,17 +1017,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
     const depth = Math.max(opts.stepDownMm, region.zTop - region.zBottom);
     const finishOut = finish({
-      cutter: opts.ball,
+      cutter: ball,
       region,
       regionRef: ref,
       clSurface: finishCl,
       kind: 'ball-scallop',
-      scallopMm: opts.bandMm,
+      scallopMm: opts.finishScallopMm ?? opts.bandMm,
       stepDownMm: depth,
       feeds: opts.feeds,
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
-      toolNumber: opts.toolNumberFor(opts.ball),
+      toolNumber: opts.toolNumberFor(ball),
       spindleRpm: opts.spindleRpm,
       air: opts.air,
       rapid: opts.rapid,
@@ -835,14 +1036,14 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
 
     // 4. PENCIL along the creases the ball's own CL surface leaves.
     const pencilOut = pencil({
-      cutter: opts.ball,
+      cutter: ball,
       region,
       regionRef: ref,
       clSurface: finishCl,
       feeds: opts.feeds,
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
-      toolNumber: opts.toolNumberFor(opts.ball),
+      toolNumber: opts.toolNumberFor(ball),
       spindleRpm: opts.spindleRpm,
       air: opts.air,
       rapid: opts.rapid,
@@ -887,7 +1088,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     `the curved pipeline follows the ruling: the flat Z-steps each remainder region to its CL less ${opts.bandMm} mm, ` +
       `the ball runs ONE final level, the pencil follows the creases${opts.restFlat === undefined ? ', and no rest flat was offered' : ', and a rest flat clears the CL difference first'}`,
   );
-  return { ops, notes };
+  return { ops, notes, clGrid };
 }
 
 /**
@@ -918,6 +1119,10 @@ export interface PlanTreeResult {
   ops: PlannedOp[];
   /** One program per cutter, in the order the cutters are first posted. */
   programs: Map<string, ToolpathIR>;
+  /** `SetupPlan.sequence` — the pocket chain's priced cutters, unchanged from `planPocketsForTree`. */
+  sequence: SequencedCutter[];
+  /** `SetupPlan.clGrid` — the CL surfaces the curved stages sampled. */
+  clGrid: { cutterKey: string; toleranceMm: number; minSpacingMm: number; maxSpacingMm: number }[];
   unreachable: string[];
   notes: string[];
 }
@@ -945,6 +1150,8 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
   return {
     ops,
     programs,
+    sequence: pocketResult.sequence,
+    clGrid: curvedResult.clGrid,
     unreachable: pocketResult.unreachable,
     notes: [...pocketResult.notes, ...curvedResult.notes],
   };
