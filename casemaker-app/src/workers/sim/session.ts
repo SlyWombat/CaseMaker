@@ -283,6 +283,12 @@ interface LiveSwept {
   playback: Playback;
   timeline: Timeline;
   setup: Setup;
+  /**
+   * #964 — the cutter the program was loaded with. The exact sweep keeps no column grid, but its
+   * goal stamp is the same page's read as on any engine: the cutter stamped along the program's
+   * own timeline (`exactSweptField`). The tool record is what names that cutter.
+   */
+  tool: Tool;
 }
 /** A refused sweep keeps the runner's work: the path is drawable, the material is not (#194). */
 interface LivePath {
@@ -479,9 +485,11 @@ export type GoalCheckInput =
       heightfield: GoalHeightfield;
       /**
        * The conservative column read — the STATED DIAGNOSTIC since #945 (one column lenient, and
-       * it carries the half-cell slope bias). The verdict is the exact stamp below.
+       * it carries the half-cell slope bias). The verdict is the exact stamp below. #964: ABSENT
+       * on an exact-engine sweep, which keeps no column grid — the page's stamp alone is then the
+       * verdict, and the report states the column diagnostic absent rather than faking one.
        */
-      sweptTop: ResultTop;
+      sweptTop?: ResultTop;
       /** #948/#945 — the page's own point read: the verdict for cut-into and the bands alike. */
       sweptTopExact?: ResultTop;
       opts?: GoalCutIntoOptions;
@@ -544,10 +552,20 @@ export interface SimSession {
    * stamped along the program's cutting moves, exactly as `goal_check.py` computes it. Since #945
    * the VERDICT — cut-into, the leftover bands and the pass line — is this field, so the app and
    * the page cannot disagree about a cell; {@link sweptTop} is its stated conservative diagnostic.
-   * Null for a sweep the goal check does not run on (a rotary or exact-engine sweep), and when
-   * the session holds no tool to name the cutter.
+   *
+   * #964 — ROUTE-INDEPENDENT: a flat column and an exact-engine sweep both stamp from the
+   * program's own timeline with the load's cutter, so a flat job the exact sweeper took (no column
+   * grid, `sweptTop` null) is still checked. Null only for a sweep the goal check does not run on
+   * (a rotary grid's frame is the map, a refused sweep owns no material) and when the tool is
+   * unknown.
    */
   sweptFieldExact(goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null;
+  /**
+   * #964 — whether {@link sweptFieldExact} can answer at all on this live sweep: a flat column or
+   * an exact-engine sweep. Cheap and grid-free, so a caller can skip sampling the goal for a
+   * rotary/refused session (`goalInputFor`).
+   */
+  canStampGoal(): boolean;
   /**
    * #857 — the region the CURRENT sweep has cut at or below `zSlice` (work frame), with the band
    * the oracle would judge it in: the same slice the volumetric comparison reads, handed to a
@@ -1116,7 +1134,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         fixture,
       };
       diagnostics.push(...sweep.diagnostics.map(tagSweep));
-      live = { kind: 'swept', sweep, playback, timeline: surfaceTimeline, setup: setupArg };
+      live = { kind: 'swept', sweep, playback, timeline: surfaceTimeline, setup: setupArg, tool };
       return {
         ok: true,
         diagnostics,
@@ -1243,7 +1261,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const goalCutInto =
       'unchecked' in goal
         ? goalCutIntoUnchecked(goal.unchecked, goal.opts?.passCoverage)
-        : checkGoalCutInto(goal.heightfield, goal.sweptTop, {
+        : checkGoalCutInto(goal.heightfield, goal.sweptTop ?? null, {
             ...goal.opts,
             ...(goal.sweptTopExact === undefined ? {} : { leftoverTop: goal.sweptTopExact }),
           });
@@ -1394,15 +1412,32 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * same question the same way for leftover/coverage. The conservative `sweptTop` stays the
    * cut-into judge.
    */
+  /**
+   * #964 — the stamp is the page's own read of the PROGRAM, not of the engine: a flat column and
+   * an exact sweep both carry a timeline and the load's tool, so the same read answers on both.
+   * A rotary column's grid is the map frame and a refused sweep owns no material — null there.
+   */
+  const canStampGoal = (): boolean => {
+    const l = live;
+    return l !== null && (l.kind === 'swept' || (l.kind === 'column' && l.column.grid.kind === 'flat'));
+  };
+  const stampSource = (): { timeline: Timeline; tool: Tool } | null => {
+    const l = live;
+    if (l === null) return null;
+    if (l.kind === 'swept') return { timeline: l.timeline, tool: l.tool };
+    if (l.kind === 'column' && l.column.grid.kind === 'flat') return { timeline: l.timeline, tool: l.tool };
+    return null;
+  };
   let exactFor: object | null = null;
   let exactKey = '';
   let exactValue: Float32Array | null = null;
   const sweptFieldExact = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null => {
     const l = live;
-    if (l === null || l.kind !== 'column' || l.column.grid.kind !== 'flat') return null;
+    const source = stampSource();
+    if (l === null || source === null) return null;
     const key = `${goal.nx},${goal.ny},${goal.x0},${goal.y0},${goal.pitch}`;
     if (exactFor === l && exactKey === key) return exactValue;
-    const stamp = exactSweptField(goal, l.timeline, l.tool);
+    const stamp = exactSweptField(goal, source.timeline, source.tool);
     exactValue = stamp;
     if (stamp !== null) {
       // #948 — FOLD EACH PROGRAM'S STAMP INTO THE RUN'S ONE FIELD (the page's rule). A run's last
@@ -1551,6 +1586,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     levelCut,
     sweptTop,
     sweptFieldExact,
+    canStampGoal,
     dispose,
     get loaded() {
       return live !== null;

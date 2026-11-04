@@ -786,9 +786,10 @@ export interface GoalCutIntoReport {
   maxCutIntoAt: { x: number; y: number } | null;
   /**
    * #945 — THE CONSERVATIVE COLUMN READ BESIDE THE VERDICT, present only when the caller supplied
-   * the page's own stamp (the verdict above is then that stamp). It reads each cell as the HIGHEST
-   * of the four columns bracketing it, so it is one column lenient — blind to a gouge narrower
-   * than a cell — and carries the half-cell slope bias. A diagnostic, never the pass.
+   * the page's own stamp AND a column grid (the verdict above is then that stamp). It reads each
+   * cell as the HIGHEST of the four columns bracketing it, so it is one column lenient — blind to
+   * a gouge narrower than a cell — and carries the half-cell slope bias. A diagnostic, never the
+   * pass. #964: absent on an exact-engine sweep, which has no columns to read.
    */
   columnCutInto?: { fraction: number; maxMm: number; at: { x: number; y: number } | null };
   /** Share of covered cells left standing more than each of {@link GOAL_LEFTOVER_BANDS_MM} above the goal, 0-1, same order. */
@@ -885,9 +886,17 @@ function dilateCells(mask: Uint8Array, nx: number, ny: number, pitch: number, ra
  * Wall cells and the wall shadow are reported as unadjudicable shares beside the verdict, exactly
  * as E reports them. With no `edgeBreak` option the pre-V2-2 reading is returned to the bit.
  */
-export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opts: GoalCutIntoOptions = {}): GoalCutIntoReport {
+export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | null, opts: GoalCutIntoOptions = {}): GoalCutIntoReport {
   const cutIntoFloorMm = opts.cutIntoFloorMm ?? GOAL_CUT_INTO_FLOOR_MM;
   const passCoverage = opts.passCoverage ?? GOAL_PASS_COVERAGE_FALLBACK;
+  // #964 — an exact-engine sweep keeps no column grid, so the caller may bring ONLY the page's
+  // stamp (`leftoverTop`). With neither read there is nothing to compare; state it, never pass.
+  if (sweptTop === null && opts.leftoverTop === undefined) {
+    return goalCutIntoUnchecked(
+      'the goal check was given neither a swept top nor the page’s own stamp — there is nothing to compare the goal with',
+      passCoverage,
+    );
+  }
   const cellArea = goal.pitch * goal.pitch;
   const nx = goal.nx;
   const ny = goal.ny;
@@ -912,14 +921,14 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
   // of the four columns bracketing a cell (one column lenient, blind to a gouge narrower than a
   // cell) and carries the half-cell slope bias, which showed up as a cliff-edge phantom when it
   // was the verdict (the top-clamp card's 1,930 cells, #948).
-  const verdictTop = opts.leftoverTop ?? sweptTop;
+  const verdictTop = (opts.leftoverTop ?? sweptTop) as ResultTop;
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
       const k = j * nx + i;
       if (goal.covered[k] !== 1) continue;
       const x = goal.x0 + i * goal.pitch;
       const y = goal.y0 + j * goal.pitch;
-      const top = verdictTop(x, y) ?? (opts.leftoverTop === undefined ? null : sweptTop(x, y));
+      const top = verdictTop(x, y) ?? (sweptTop === null ? null : sweptTop(x, y));
       if (top === null) continue;
       covered++;
       const goalTop = goal.z[k] as number;
@@ -927,7 +936,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
       dOf[k] = d;
       sampled[k] = 1;
       deltas.push(d);
-      if (opts.leftoverTop !== undefined) {
+      if (opts.leftoverTop !== undefined && sweptTop !== null) {
         const cTop = sweptTop(x, y);
         if (cTop !== null && cTop - goalTop < -cutIntoFloorMm) {
           columnCells++;
@@ -1066,7 +1075,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
     cutIntoVolumeMm3,
     maxCutIntoMm: maxCutInto,
     maxCutIntoAt,
-    ...(opts.leftoverTop === undefined
+    ...(opts.leftoverTop === undefined || sweptTop === null
       ? {}
       : { columnCutInto: { fraction: columnCells / n, maxMm: columnMax, at: columnAt } }),
     leftoverFractions,
