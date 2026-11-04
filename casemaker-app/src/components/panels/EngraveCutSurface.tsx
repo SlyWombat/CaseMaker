@@ -496,6 +496,25 @@ function goalCoverageFact(report: GoalCutIntoReport): string | null {
   return `Top-surface coverage: ${coveragePct} % (the pass line is ${goalPct(report.passCoverage)} %)`;
 }
 
+/**
+ * #948 review §4.1 — THE WHOLE-SURFACE REACH FACT, one definition: the share of the goal's WHOLE
+ * surface reproduced within the 0.1 mm band after every setup the app proposed — the metric the
+ * pass line judges when the report carries it. A single top setup reads its top-surface number as
+ * its reach (stated); the excluded underside is named with its share, never silently subtracted.
+ */
+function goalWholeSurfaceFact(report: GoalCutIntoReport): string | null {
+  const whole = report.wholeSurface;
+  if (whole === undefined) return null;
+  const pct = Math.round(whole.fraction * 10000) / 100;
+  const setups =
+    whole.setups <= 1 ? 'one top setup, so the top surface is the whole surface' : `${whole.setups} setups`;
+  const excluded =
+    whole.excludedFace === null || whole.excludedCells === 0
+      ? ''
+      : `; ${whole.excludedFace} (${Math.round((whole.excludedCells / Math.max(whole.coveredCells, 1)) * 10000) / 100} % of the surface) excluded by design`;
+  return `Whole-surface reach: ${pct} % after ${setups} (the pass line is ${goalPct(report.passCoverage)} %)${excluded}`;
+}
+
 function cutVerdict(v: {
   hasProgram: boolean;
   packageCurrent: boolean;
@@ -1000,6 +1019,10 @@ export function EngraveCutSurface({
     runOracle?.goalCutInto !== undefined && runOracle.goalCutInto.ran
       ? goalCoverageFact(runOracle.goalCutInto)
       : null;
+  const goalWholeSurface =
+    runOracle?.goalCutInto !== undefined && runOracle.goalCutInto.ran
+      ? goalWholeSurfaceFact(runOracle.goalCutInto)
+      : null;
   const verdictFix = verdict === 'failed' && firstError !== null ? findingFix(firstError) : null;
   // The press does what the fix names: a wizard step opens where the fix lives; every other target
   // is a control in the Design panel, so the press shows it.
@@ -1244,6 +1267,11 @@ export function EngraveCutSurface({
         {goalCoverage !== null && (
           <p style={MUTED} data-testid="engrave-cut-goal-coverage">
             {goalCoverage}
+          </p>
+        )}
+        {goalWholeSurface !== null && (
+          <p style={MUTED} data-testid="engrave-cut-goal-whole-surface">
+            {goalWholeSurface}
           </p>
         )}
         {/* #695 — the frozen job's mount is gone from the machine. One sentence, one action; the

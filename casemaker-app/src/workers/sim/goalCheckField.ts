@@ -24,6 +24,8 @@
  */
 
 import { isMold, moldHeightfield, sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { GOAL_LEFTOVER_BANDS_MM } from '@/engine/cnc/engrave/designCheck';
+import { unionWholeSurface, type WholeSurfaceReach } from '@/engine/cnc/engrave/goalWholeSurface';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import type { GoalCheckTarget, SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import type { GoalCheckInput, SimSession } from './session';
@@ -114,12 +116,36 @@ export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInp
           if (i < 0 || j < 0 || i >= heightfield.nx || j >= heightfield.ny) return null;
           return field[j * heightfield.nx + i]!;
         };
+  // #948 review §4.1 — THE WHOLE-SURFACE FIELD, from today's single top setup: the same page-rule
+  // field the coverage is read from, turned into a reached mask (the surface stands within the
+  // first leftover band). `unionWholeSurface` takes the shape the #945 setup interface will hand;
+  // with one setup and no affine it is the identity, so the whole-surface reach IS the
+  // top-surface number — the report states that (one top setup).
+  const wholeSurface = field === null ? null : wholeSurfaceFor(heightfield, field);
   return {
     heightfield,
     ...(sweptTop === null ? {} : { sweptTop }),
     ...(sweptTopExact === null ? {} : { sweptTopExact }),
+    ...(wholeSurface === null ? {} : { wholeSurface }),
     ...(goal.opts === undefined ? {} : { opts: goal.opts }),
   };
+}
+
+/**
+ * #948 review §4.1 — one setup's reached mask on the goal's grid: 1 where the sweep stands within
+ * the first leftover band (0.1 mm) of the goal — the page's own coverage rule, cell for cell —
+ * unioned into the document frame. Single top setup today; the #945 setup interface adds the
+ * other setups' masks and their `toDocument` affines.
+ */
+function wholeSurfaceFor(goal: GoalHeightfield, field: Float32Array): WholeSurfaceReach | null {
+  const grid = { nx: goal.nx, ny: goal.ny, x0: goal.x0, y0: goal.y0, pitch: goal.pitch };
+  const reached = new Uint8Array(goal.nx * goal.ny);
+  const band = GOAL_LEFTOVER_BANDS_MM[0]!;
+  for (let k = 0; k < reached.length; k++) {
+    if (goal.covered[k] !== 1) continue;
+    if (field[k]! - (goal.z[k] as number) <= band) reached[k] = 1;
+  }
+  return unionWholeSurface(grid, [{ grid, covered: goal.covered, reached }]);
 }
 
 /** Test hook: a goal replaced under the same key must not serve a stale field. */

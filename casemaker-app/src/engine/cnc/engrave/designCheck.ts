@@ -31,6 +31,7 @@ import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { ORACLE_AREA_FLOOR, type OracleBbox, type OraclePolygon, type OracleSliceAt } from '@/engine/cnc/engrave/oracleTypes';
 import type { Tool } from '@/engine/cnc/tool';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import type { WholeSurfaceReach } from './goalWholeSurface';
 import { goalTopAt, type ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 
 // ---------------------------------------------------------------------------------------------
@@ -743,6 +744,12 @@ export interface GoalCutIntoOptions {
    */
   passCoverage?: number;
   /**
+   * #948 review §4.1 — THE WHOLE-SURFACE FIELD, when the caller formed it from every proposed
+   * setup's sweep (`unionWholeSurface`). The pass line judges THIS when present; absent, the
+   * top-surface coverage stands (today's single-setup read, which the caller states).
+   */
+  wholeSurface?: WholeSurfaceReach | null;
+  /**
    * #955/V2-2 — THE EDGE-BREAK ALLOWANCE, as GATE parameters (A's R3): the V bit's cutting reach
    * of a design edge and the cone's own leg, computed by the caller from the job's `edgeBreak`
    * field capped by the chamfer Tool record — never from the CAM's plan. Absent = no allowance and
@@ -812,6 +819,12 @@ export interface GoalCutIntoReport {
    * to know the constant; the measured value is `1 − leftoverFractions[0]`.
    */
   passCoverage: number;
+  /**
+   * #948 review §4.1 — the whole-surface read the pass line judged, when the caller formed it
+   * from every proposed setup's sweep (`unionWholeSurface`); absent when only the top surface was
+   * read. The Cut card prints it beside the top-surface number, one definition each.
+   */
+  wholeSurface?: WholeSurfaceReach;
   /** #955/V2-2 — share of covered cells excluded as EDGE BREAK (a V bit within its reach of a design edge, no deeper than its leg), 0-1. */
   edgeBreakFraction: number;
   /** #955 — share excluded as WALL CELLS (a cell straddling a wall step), 0-1. */
@@ -1070,7 +1083,12 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   const surfaceCoverage = 1 - (leftoverFractions[0] ?? 0);
   const passPct = Number((passCoverage * 100).toFixed(2));
   const surfacePct = Number((surfaceCoverage * 100).toFixed(2));
-  const coverageOk = surfaceCoverage + 1e-9 >= passCoverage;
+  // #948 review §4.1 — THE PASS LINE IS THE WHOLE-SURFACE REACH when the caller formed it from
+  // the proposed setups; absent, the top-surface read stands (a single top setup's own number).
+  const whole = opts.wholeSurface ?? null;
+  const judgedCoverage = whole === null ? surfaceCoverage : whole.fraction;
+  const judgedPct = Number((judgedCoverage * 100).toFixed(2));
+  const coverageOk = judgedCoverage + 1e-9 >= passCoverage;
   // #955/#964 — THE PASS IS THE PAGE'S LINE IN EVERY GOAL JOB: zero at the 0.1 mm floor after the
   // unadjudicable cells are excluded (E's `cutInto0p1Pct`; F's scorer line 2). Wall cells and the
   // wall shadow are the gate's rule whatever the job states; the edge-break allowance adds the
@@ -1081,12 +1099,25 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     edgeBreakCells + wallNotScoredCells + shadowNotScoredCells > 0
       ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted)`
       : '';
+  // The read's own words: which surface was judged, how many setups formed it, and — when a
+  // plan excludes one — the face it excludes, as a job fact with its share.
+  const excludedWords =
+    whole === null || whole.excludedFace === null
+      ? ''
+      : `; ${whole.excludedFace} (${Number(((whole.excludedCells / Math.max(whole.coveredCells, 1)) * 100).toFixed(2))} % of the surface) is excluded by design`;
+  const setupsWords =
+    whole === null
+      ? ''
+      : whole.setups <= 1
+        ? `; one top setup, so the top surface is the whole surface this setup can reach${excludedWords}`
+        : `; ${whole.setups} setups formed it${excludedWords}`;
+  const wholeClause = whole === null ? '' : ` (whole-surface coverage ${judgedPct} %${setupsWords})`;
   const sentence =
     judgedCells > 0
-      ? `goal check: ${(adjudicatedFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(adjudicatedCells, cellArea).toFixed(1)} mm²) cut into by up to ${adjudicatedMaxMm.toFixed(3)} mm — ${adjudicatedVolumeMm3.toFixed(1)} mm³ over-cut${excludedNote}.`
+      ? `goal check: ${(adjudicatedFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(adjudicatedCells, cellArea).toFixed(1)} mm²) cut into by up to ${adjudicatedMaxMm.toFixed(3)} mm — ${adjudicatedVolumeMm3.toFixed(1)} mm³ over-cut${excludedNote}${wholeClause}.`
       : coverageOk
-        ? `goal check: no cell cut more than 0.1 mm into the goal${excludedNote} (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
-        : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal).`;
+        ? `goal check: no cell cut more than 0.1 mm into the goal${excludedNote} (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm)${wholeClause}.`
+        : `goal check: coverage ${whole === null ? surfacePct : judgedPct} % of ${whole === null ? "the goal's top surface" : "the goal's whole surface"} — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal${setupsWords}).`;
 
   return {
     ok,
@@ -1108,6 +1139,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     maxLeftoverMm: maxLeftover,
     coverageFraction,
     passCoverage,
+    ...(whole === null ? {} : { wholeSurface: whole }),
     medianDeltaMm,
     edgeBreakFraction,
     wallNotScoredFraction,
