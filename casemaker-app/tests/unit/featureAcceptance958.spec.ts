@@ -116,8 +116,12 @@ function expectParts(label: string, got: Part[], want: Want[]): void {
  * The levels E flagged as slope crossings must stay absent.
  */
 const TRAY_CONFIRMED_EXTRA_DEPTHS: number[] = [];
-/** E's second run (6621355983): 0.60 (82.8 mm² in 15 flats) and 14.00 (59.5 mm², two flats) read flat. */
-const ORGANIZER_CONFIRMED_EXTRA_DEPTHS: number[] = [0.6, 14];
+/**
+ * E's second run (6621355983): 0.60 (82.8 mm² in 15 flats) and 14.00 (59.5 mm², two flats) read
+ * flat. 8.00: E's heightfield reads 85.9 mm² flat there; the third run's plane fit (6621468987)
+ * shows one STEP face, 66.00 mm², deviation 0, normal spread 0°: a modelled 1 mm flat, admitted.
+ */
+const ORGANIZER_CONFIRMED_EXTRA_DEPTHS: number[] = [0.6, 8, 14];
 
 function expectLevels(tree: FeatureTree, modelTop: number, want: number[], confirmed: number[], absent: number[]): void {
   const depths = tree.levels.map((z) => modelTop - z);
@@ -250,19 +254,25 @@ describe.skipIf(TRAY === undefined)('#958 acceptance — tool tray 70, top setup
       { x: 90.7, y: 70.0, area: [3069.1, 3069.1] },
       { x: 19.4, y: 70.2, area: [3006.6, 3006.6] },
     ]);
-    expectParts('0.60', floorsAt(t, TOP, 0.6), [
-      { x: 12.2, y: 18.3, area: [10.6, 10.6] },
-      { x: 12.2, y: 39.1, area: [9.4, 9.4] },
-      { x: 12.2, y: 59.6, area: [9.9, 9.9] },
-      { x: 12.2, y: 80.3, area: [9.0, 9.0] },
-      { x: 12.2, y: 100.7, area: [8.6, 8.6] },
-      { x: 12.2, y: 121.2, area: [7.3, 7.3] },
+    // E gives these six only as "x ≈ 12.2" with a y each (6620425916), so y is pinned to 0.2 mm
+    // and x to E's stated precision, 0.5 mm (third run: (12.57, 59.65) for the island pocket).
+    const sixty = floorsAt(t, TOP, 0.6);
+    expectParts('0.60', sixty, [
+      { y: 18.3, area: [10.6, 10.6] },
+      { y: 39.1, area: [9.4, 9.4] },
+      { y: 59.6, area: [9.9, 9.9] },
+      { y: 80.3, area: [9.0, 9.0] },
+      { y: 100.7, area: [8.6, 8.6] },
+      { y: 121.2, area: [7.3, 7.3] },
     ]);
+    for (const p of sixty) expect(Math.abs(p.centroid[0] - 12.2), `0.60 x ${p.centroid[0].toFixed(2)}`).toBeLessThanOrEqual(0.5);
     expectParts(
       '3.00',
       floorsAt(t, TOP, 3),
       [28.8, 49.5, 70.0, 90.6, 111.2].map((y) => ({ x: 55.0, y, area: [27.8, 28.1] as [number, number], size: [3.6, 7.5] as [number, number] })),
     );
+    // x 55.0 is the midpoint of E's bbox x 19.8–90.2, not a centroid E gave; the slots are
+    // symmetric end to end, so the two coincide.
     expectParts(
       '6.00',
       floorsAt(t, TOP, 6),
@@ -311,7 +321,8 @@ describe.skipIf(ORGANIZER === undefined)('#958 acceptance — tool organizer, to
 
   it('the floors at each level match E’s parts', async () => {
     const t = await tree();
-    expectParts('0', floorsAt(t, TOP, 0), [{ x: 85, y: 85, area: [10568.5, 10568.5] }]);
+    // E gives the land's area and count only, no centroid (6620425916).
+    expectParts('0', floorsAt(t, TOP, 0), [{ area: [10568.5, 10568.5] }]);
     expectParts('3', floorsAt(t, TOP, 3), [
       { x: 41.0, y: 129.0, area: [2487.7, 2487.7], size: [100.8, 100.8] },
       ...[73.2, 99.8, 45.9, 127.1].map((x) => ({ x, y: 87.5, area: [1182.6, 1278.9] as [number, number], size: [21.2, 65.8] as [number, number] })),
@@ -322,7 +333,10 @@ describe.skipIf(ORGANIZER === undefined)('#958 acceptance — tool organizer, to
       [102.4, 117.9, 133.4].map((x) => ({ x, y: 27.0, area: [13.1, 13.1] as [number, number], size: [4, 4] as [number, number] })),
     );
     expectParts('4.99', floorsAt(t, TOP, 4.99), [
-      ...[22.5, 59.9, 86.5, 113.1].map((x) => ({ x, y: 87.5, area: [118.8, 123.1] as [number, number] })),
+      // E's table grouped x 22.5 with the y 87.5 row; E confirmed its centroid is (22.5, 101.0)
+      // on the third run (#958, manager 2026-11-04).
+      ...[59.9, 86.5, 113.1].map((x) => ({ x, y: 87.5, area: [118.8, 123.1] as [number, number] })),
+      { x: 22.5, y: 101.0, area: [118.8, 123.1] },
       { x: 69.0, y: 147.5, area: [118.8, 123.1] },
       ...[
         [143.5, 11.5],
