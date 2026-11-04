@@ -1070,13 +1070,28 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // the surface at its downhill edge, and the ball followed that: 0.58 mm of material left over
     // the whole pocket. The finish and the pencil follow the BALL'S OWN CL surface; the flat's
     // stays the rough's (and the rest pass's) reference, which is what that CL difference is.
-    const clBall = clSurface(opts.geometry, region, ball, cuts.stepOver);
+    // THE FIGURE SEEDS FOUND THIS: the raster confined the ball's CENTRE to the region's own
+    // footprint, so a convex flank — the figure's bell, whose widest point is at its base — stood
+    // in its own shadow: any ball centred inside the part had to rest on the higher shoulder
+    // within its radius, and the skirt below read as 12.2 % left standing. A ball cuts a shoulder
+    // from OUTSIDE it: its centre may run up to one radius beyond the part while still touching
+    // it, so the finish's region is grown by exactly the ball's radius (the CL heights still come
+    // from the mesh, so the ball follows the design wherever it goes). The CL surface is sampled
+    // on the grown region too — dropping a row against a surface that does not reach its own
+    // endpoints is what `dropRow` refuses, by name.
+    const ballRadius = (cuttingDiameter(ball) ?? 0) / 2;
+    const grownFootprint = ballRadius > 0 ? opts.offset(region.footprint, ballRadius) : [];
+    const finishRegion = grownFootprint.length > 0 ? { ...region, footprint: grownFootprint } : region;
+    const finishRef = finishRegion === region
+      ? ref
+      : regionRefOf(region.id, 'curved', finishRegion.footprint, region.zTop, region.zBottom);
+    const clBall = clSurface(opts.geometry, finishRegion, ball, cuts.stepOver);
     noteGrid(ball, clBall);
     const depth = Math.max(opts.stepDownMm, region.zTop - region.zBottom);
     const finishOut = finish({
       cutter: ball,
-      region,
-      regionRef: ref,
+      region: finishRegion,
+      regionRef: finishRef,
       clSurface: clBall,
       kind: 'ball-scallop',
       scallopMm: opts.finishScallopMm ?? opts.bandMm,
