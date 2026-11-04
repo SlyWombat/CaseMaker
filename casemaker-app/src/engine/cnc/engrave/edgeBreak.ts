@@ -82,12 +82,14 @@ export function goalEdgeBreakOptions(
   if (stated === undefined) return wallShadowRadiusMm === undefined ? {} : { wallShadowRadiusMm };
 
   const pinned = stated.toolKey === undefined ? null : toolFor(stated.toolKey);
-  let allowance: { reachMm: number; legMm: number } | null = null;
+  let allowance: { reachMm: number; legMm: number; toolNumber?: number } | null = null;
   for (const tool of [pinned, ...tools]) {
     if (tool === null) continue;
     const candidate = vToolAllowance(tool);
     if (candidate !== null && (allowance === null || candidate.reachMm > allowance.reachMm)) {
-      allowance = candidate;
+      // #964 — the V's own tool number rides with the allowance: the check excuses a cell only
+      // where this cutter made its deepest stamp (the page's `who` rule).
+      allowance = { ...candidate, ...(tool.number === null || tool.number === undefined ? {} : { toolNumber: tool.number }) };
     }
   }
   return {
