@@ -77,13 +77,15 @@ the files go to **Makera Studio** by hand. In both builds a person is at the mac
  over a flat colour line) is refused, because following the top would cut through the line.
  Whether the grid compensates every move or only its endpoints is the bench question.
 - 3D surfacing from a **goal mesh** — now built (§5.4): a job whose only
- work is a `role: 'goal'` mesh — or a **PNG picture, carved as a relief** — generates a
- raster-roughing + ball-nose finishing program, with optional **scallop** (offset contours) and
- **pencil** (corner) finishing passes after it, and the goal row's **Technical** fold carries the
- operation's cutter, step-down/step-overs, grid pitch, allowance, the two pass switches and the
- pencil crease angle (a picture adds its relief depth, direction and placed width). The measured 3D
- engagement feeds are still bench work. A heightfield has one top-Z per (x, y), so undercuts and
- overhangs are unrepresentable — the honest 3-axis answer.
+ work is a `role: 'goal'` mesh — or a **PNG picture, carved as a relief** — is planned by the
+ model engine: the model's planar faces become pockets and contours, the curved remainder a
+ surface-following rough, and the finish runs flat where the slope admits it and ball at constant
+ scallop where it does not, with a pencil pass along the creases. The goal row states the features
+ it recognised, the **cutter sequence it chose** with its estimate, and the **stock it leaves** (a
+ picture adds its relief depth, direction and placed width); the step-downs, step-overs and
+ sampling spacing are the engine's, not the operator's. The measured 3D engagement feeds are still
+ bench work. A heightfield has one top-Z per (x, y), so undercuts and overhangs are
+ unrepresentable — the honest 3-axis answer.
 - V-carving a region whose groove at the colour plane is narrower than one machine step. The app
  states it as a warning (`vcarve-groove-too-narrow`, §8.1) and cuts the grooves; it does open
  regions otherwise.
@@ -956,48 +958,33 @@ lowest Z (0.35 and up proposes flat), and the area that faces down above that lo
 proposes the flip). The row says which number decided it; nothing is written until the operator
 chooses.
 
-Two more finishing passes can be switched on in the goal's Technical fold, and they run in this
-order after the parallel finish:
+The **scallop** and **pencil** finishing passes are the engine's decision, not switches: a
+flat-following finish holds its step ALONG THE SURFACE where the slope admits a flat; a ball
+finishes at constant scallop elsewhere; a pencil pass follows every concave crease the finish
+cutter can reach. The run sheet states the passes it ran, the contour and crease counts, and the
+step-over the finish used. (The pre-rebuild engine had a switch for each in the goal row's
+Technical fold; they are no longer read.)
 
-- **scallop pass** — offset contours of the goal's outline, each projected onto the same
- gouge-safe tip field, spaced so the step measured ALONG THE SURFACE is the finishing step-over
- (`step-over / sqrt(1 + slope²)`, band by band; past about 82° a wall crowds the spacing at most
- 8× and the run sheet says when that bound was reached). It cleans the ridges the parallel raster
- leaves on slopes. It reuses the finishing step-over — there is no separate number.
-- **pencil pass** — one path along every concave crease sharper than the **pencil crease** angle
- (default 20°, stated as the CAM's default until typed): the heightfield's second difference
- across x, y or either diagonal marks a corner line, and each traced line is cut at the same
- gouge-safe drop. A dome and a ramp mark nothing; a wall's foot marks a line.
+**A sequence of cutters, one program each.** A goal is cut by the **cutter sequence the engine
+prices cheapest** that still reaches the part: the largest flat that clears the stock, a smaller
+flat for what it cannot reach, a ball to finish the curves, a V-bit to break the edges — as the
+vendor CAMs do. The row and the run sheet state the sequence, each cutter's cost and the total
+estimate; a cutter the operator **pinned** (`roughToolKey`, or an edge break's `toolKey`) is
+honoured and labelled "pinned", and an absent key is the engine's own choice. Each cutter in the
+sequence posts its own program with its own feeds row, its own `surfaceCheck` and its own
+`T`/`M6`, so each file is swept and judged like every other. The rough leaves the **stock to
+leave** above the surface, which the finish lifts. Surface **primitives** stay on a single
+cutter: the sequence is the goal's.
 
-Both are off unless the fold says otherwise, so a job that states neither cuts exactly as it
-did. The program's check (the material sweep on the flat dexel) records the passes it judged as
-well as the grid it ran on, and the run sheet states the contour and crease counts.
-
-**Two cutters, two programs.** A goal may rough with a **flat end mill** and finish with
-the ball — real 3D practice, and the only way the adaptive clearing engine, which sweeps
-flat end mills only, reaches a goal at all. The measured cutter search offers both shapes for the
-goal's plan — the ball alone, and the same ball after a flat (each candidate sized nearest the
-ball's diameter first) — and the run's own measured cost, plus a stated allowance per tool change,
-decides. When the split is chosen the goal posts **two programs**: program 1 is the flat's rough,
-with its own feeds row (a flat takes a deeper step-down and a wider step-over than the ball),
-its own `surfaceCheck`, and its own `T`/`M6` — it is swept and judged like every file; program 2
-is the ball's finish, unchanged — the rim laps, the parallel raster and the scallop and
-pencil passes ride the FINISHING cutter. The rough leaves the roughing allowance above the
-surface, which is what the finish (and a later rest pass) lifts. The goal row and the run
-sheet state both cutters, the tool change, and which roughing pass ran and why — adaptive with
-its engagement cap, or the raster with the reason the adaptive route was not taken. A stated
-rough the shop cannot use (not in the library, not a flat end mill, or not feedable for the
-material) leaves the goal cut by one cutter and a warning says which. Surface **primitives** stay on a single cutter: the split is the goal's.
-
-The goal row's **Technical** fold carries the operation's own numbers: the **cutter** (unless the
-goal is split into a flat rough and the ball's finish, above, one cutter cuts both passes — a ball
-or bull nose finishes the surface round; a flat cutter finishes it faceted), the **roughing
-step-down** and **step-over**, the **finishing step-over**, the
-**heightfield grid pitch** and the **stock to leave**. Each is prefilled from the default the
-engine would otherwise use — the feeds row's step-down and step-over for the passes, the shop's
-`finish.stockToLeaveMm` for the allowance and `sim.columnFlatPitchYMm` for the grid — and the row
-says which default it is showing. A typed number overrides it for this goal alone; the reset
-returns the default. The feeds are the job's ordinary 2.5D feeds reused unchanged, a labelled
+The goal row's **Technical** fold carries the operation's own numbers: the **cutter sequence**'s
+cutters (one program each), the **stock to leave**, and — under the row's "Last generated"
+sentence — what the engine used for the rough and finish step-down and step-over and the sampling
+spacing. Those are **the engine's numbers, not settings**: they follow from the cutter it chose
+and the slope it meets, and an operator-settable pitch was a budget by another name. The six
+legacy keys (`roughStepDownMm`, `roughStepOverMm`, `finishStepOverMm`, `gridPitchMm`, `scallop`,
+`pencil`, `pencilCreaseDeg`) still load from older job files and are no longer read. The stock to
+leave is the one surfacing number the operator still owns (default: the shop's
+`finish.stockToLeaveMm`) and the reset returns it. The feeds are the job's ordinary 2.5D feeds reused unchanged, a labelled
 placeholder until the bench measures 3D engagement; a ball resolves its feeds through a
 flat proxy of its cutting diameter. The heightfield is **sampled**, so a goal program is
 simulated on the FLAT dexel and the run states the grid it ran on — "simulated on a 0.1 mm
@@ -1720,7 +1707,7 @@ simulation does report about one is the sweep's own list, next:
 | `goal-mold-no-draft` | warning | A mould's steepest cavity wall is past 85° from horizontal (a labelled default), so it has little or no draft and may hold the casting. | Give the part tapered sides, or cast in a flexible material. |
 | `goal-finish-finer-than-grid` | warning | A 3D goal's finishing step-over is finer than the heightfield grid the run settled on: the sampler follows the step-over, but its 4 000 000-cell cap can coarsen the pitch, and passes finer than the pitch buy at most the grid's own accuracy. The finding states both numbers. | Set a step-over at or above the settled pitch, or surface a smaller blank. |
 | `goal-object-no-toolpath` | info | A target object is marked as the shape to MAKE and fits the blank, but this job is the **mixed** path — a goal beside ordinary items — so only the item program cuts. The goal is validated and previewed; the roughing and ball-nose finishing passes are generated only for a **pure-goal** job, whose only work is the goal mesh. | Cut the goal in a job of its own (no items): the goal's row then carries the surfacing operation and its own controls. |
-| `goal-chamfer-no-cutter` | warning | A goal asks for its edges to be chamfered (`chamfer` on the target object) and no V program was posted: no V-bit has been chosen for it, the chosen key is not in the tool library, the record has no cone, or the V cannot be fed for this material. The goal is still surfaced; its edges are left square, and the sentence names which of those it is. | Choose a V-bit for the chamfer on the part’s row — the measured search fills this in when the library holds one. |
+| `goal-chamfer-no-cutter` | warning | A goal asks for its edges to be chamfered (`edgeBreak` on the target object; older files carry the same block as `chamfer`) and no V program was posted: no V-bit has been chosen for it, the chosen key is not in the tool library, the record has no cone, or the V cannot be fed for this material. The goal is still surfaced; its edges are left square, and the sentence names which of those it is. | Choose a V-bit on the part’s row (or pin one); the engine’s costed sequence fills it in when the library holds one. |
 | `goal-chamfer-no-rim` | warning | A goal asks for a 3D chamfer and the mesh has no TOP RIM to bevel — no edge where an up-facing top meets a wall (an open sheet, or a mesh whose edges are all between walls). The goal is surfaced; the edges are square, and the sentence carries the extractor’s own note. | Use a closed part mesh: the rim is the boundary of the surface the part stands on. |
 | `goal-rest-pass` | info | A 3D goal’s finish left material where the finishing ball could not enter a concavity tighter than itself, and a smaller OWNED ball cuts it as its own program after the finish. The pass is the same finishing raster over just the residual region, cut with that ball; the sentence names the ball, the volume the finish left, the moves and time, and the material the rest still leaves. | Nothing — the rest program follows the finish and loads its own cutter. |
 | `goal-rest-uncut` | info / warning | A 3D goal’s finish left material in a concavity tighter than the finishing ball, and no rest program was posted: no owned ball is smaller than the finishing one, the post refused the rest pass, or the only pass on offer was ABSURD — more than a minute of cutting for each mm³ it would take (the demo wolf’s ⌀0.5 pass wanted 6 h 53 min to take 803 mm³ to 717 mm³, about 4 min 48 s a cubic millimetre), so it is skipped rather than run. A rest pass is chosen by its outcome — the material it takes, the seconds it spends taking it, and whether the leftover it would leave would still show — never by the residual alone. INFO when the leftover would not show — no deeper than the shop’s `rest.visibleDepthMm` (0.1 mm seeded) and no more than `rest.thirdToolPct` (2 % seeded) of the material the goal removes; WARNING when either is past that (a ridge that reads as a step), or when a planned rest pass was refused by the post. The goal still posts; the sentence states the volume left, its depth and either the ball diameter that would reach it or the pass that was skipped, its time, what it would take and its rate. | Add a smaller ball to the tool library (Manage › Tools), or accept the finish as it is. |

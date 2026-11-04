@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-// #535 — a goal mesh's operation controls on its row: the cutter, the four surface numbers with
-// their defaults and sources, the reset that returns a number to its default, and the facts the
-// last generated program reported.
+// #535/#963 — a goal mesh's operation controls on its row: the cutter, the stock to leave (the
+// one surfacing number the operator still owns) with its default and source, the reset that
+// returns it to the default, and the facts the last generated program reported. #963 — the
+// engine's resolutions (step-down, step-overs, grid pitch, scallop/pencil passes) are NOT
+// controls; the spec pins their absence.
 //
 // Rendered DIRECTLY, not through `EngravePanel`: the row is a controlled component, and what is
 // worth pinning here is the patch each control sends (and the words it shows beside its defaults).
@@ -101,27 +103,35 @@ function openTechnical(): void {
 }
 
 describe('#535 the goal’s operation controls', () => {
-  it('shows the Technical fold on a goal row, and prefills each number from its default', () => {
+  it('shows the Technical fold on a goal row, and prefills the stock to leave from its default', () => {
     row();
     openTechnical();
-    const stepDown = screen.getByTestId('engrave-target-surface-roughStepDownMm-0') as HTMLInputElement;
-    expect(stepDown.value).toBe('0.5');
-    expect(screen.getByTestId('engrave-target-surface-roughStepDownMm-source-0').textContent).toBe(
-      'the feeds row',
-    );
-    expect((screen.getByTestId('engrave-target-surface-finishStepOverMm-0') as HTMLInputElement).value).toBe(
-      '0.8',
-    );
-    expect((screen.getByTestId('engrave-target-surface-gridPitchMm-0') as HTMLInputElement).value).toBe('0.1');
-    expect(screen.getByTestId('engrave-target-surface-gridPitchMm-source-0').textContent).toBe(
-      'chosen for this shop',
-    );
     expect((screen.getByTestId('engrave-target-surface-stockToLeaveMm-0') as HTMLInputElement).value).toBe(
       '0.3',
     );
     expect(screen.getByTestId('engrave-target-surface-stockToLeaveMm-source-0').textContent).toBe(
       'this shop’s seed',
     );
+  });
+
+  // #963 — THE RESOLUTIONS ARE THE ENGINE'S. A control for any of them would be a budget by
+  // another name; the row states what the last program used instead (the report test below).
+  it('offers no controls for the step-down, step-overs, grid pitch or finishing passes', () => {
+    row({ target: { surface: { scallop: true, pencil: true, gridPitchMm: 0.2 } } });
+    openTechnical();
+    for (const testid of [
+      'engrave-target-surface-roughStepDownMm-0',
+      'engrave-target-surface-roughStepOverMm-0',
+      'engrave-target-surface-finishStepOverMm-0',
+      'engrave-target-surface-gridPitchMm-0',
+      'engrave-target-surface-scallop-0',
+      'engrave-target-surface-pencil-0',
+      'engrave-target-surface-pencilCreaseDeg-0',
+    ]) {
+      expect(screen.queryByTestId(testid)).toBeNull();
+    }
+    // An old document's keys still load and simply say nothing on the row.
+    expect(screen.getByTestId('engrave-target-surface-stockToLeaveMm-0')).toBeTruthy();
   });
 
   it('names the cutter and states what its shape does to the finish', () => {
@@ -134,31 +144,55 @@ describe('#535 the goal’s operation controls', () => {
     expect(note).toContain('ball');
   });
 
-  it('a typed number sends its key and words itself typed; the reset sends undefined', () => {
+  it('a typed stock to leave sends its key and words itself typed; the reset sends undefined', () => {
     const { onChange } = row();
     openTechnical();
-    const input = screen.getByTestId('engrave-target-surface-roughStepDownMm-0');
+    const input = screen.getByTestId('engrave-target-surface-stockToLeaveMm-0');
     fireEvent.change(input, { target: { value: '0.25' } });
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { roughStepDownMm: 0.25 } });
+    expect(onChange).toHaveBeenLastCalledWith({ surface: { stockToLeaveMm: 0.25 } });
 
     // With a value stored, the word says who typed it and a reset appears; the reset is the
     // `undefined` patch that removes the key.
     cleanup();
     resetEngraveRows();
-    const second = row({ target: { surface: { roughStepDownMm: 0.25 } } });
+    const second = row({ target: { surface: { stockToLeaveMm: 0.25 } } });
     openTechnical();
-    expect(screen.getByTestId('engrave-target-surface-roughStepDownMm-source-0').textContent).toBe('typed');
-    fireEvent.click(screen.getByTestId('engrave-target-surface-roughStepDownMm-reset-0'));
-    expect(second.onChange).toHaveBeenLastCalledWith({ surface: { roughStepDownMm: undefined } });
+    expect(screen.getByTestId('engrave-target-surface-stockToLeaveMm-source-0').textContent).toBe('typed');
+    fireEvent.click(screen.getByTestId('engrave-target-surface-stockToLeaveMm-reset-0'));
+    expect(second.onChange).toHaveBeenLastCalledWith({ surface: { stockToLeaveMm: undefined } });
   });
 
   it('clearing a box returns the number to its default', () => {
-    const { onChange } = row({ target: { surface: { finishStepOverMm: 0.2 } } });
+    const { onChange } = row({ target: { surface: { stockToLeaveMm: 0.2 } } });
     openTechnical();
-    fireEvent.change(screen.getByTestId('engrave-target-surface-finishStepOverMm-0'), {
+    fireEvent.change(screen.getByTestId('engrave-target-surface-stockToLeaveMm-0'), {
       target: { value: '' },
     });
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { finishStepOverMm: undefined } });
+    expect(onChange).toHaveBeenLastCalledWith({ surface: { stockToLeaveMm: undefined } });
+  });
+
+  // #963 — the edge break is `edgeBreak` now; the old name is mirrored while the pre-#966 engine
+  // still reads it, and a value already stored under either name fills the box.
+  it('a typed edge break writes edgeBreak and mirrors the old chamfer name', () => {
+    const { onChange } = row();
+    openTechnical();
+    fireEvent.change(screen.getByTestId('engrave-target-chamfer-0'), { target: { value: '0.8' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      edgeBreak: { widthMm: 0.8 },
+      chamfer: { widthMm: 0.8 },
+    });
+    cleanup();
+    resetEngraveRows();
+    row({ target: { chamfer: { widthMm: 0.6 } } });
+    openTechnical();
+    expect((screen.getByTestId('engrave-target-chamfer-0') as HTMLInputElement).value).toBe('0.6');
+  });
+
+  it('clearing the edge break removes both names', () => {
+    const { onChange } = row({ target: { edgeBreak: { widthMm: 0.8 }, chamfer: { widthMm: 0.8 } } });
+    openTechnical();
+    fireEvent.change(screen.getByTestId('engrave-target-chamfer-0'), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ edgeBreak: undefined, chamfer: undefined });
   });
 
   it('picking another cutter tells the panel, which owns the job’s cutter', () => {
@@ -195,44 +229,9 @@ describe('#535 the goal’s operation controls', () => {
   });
 });
 
-// #671 — the two extra finishing passes: each checkbox sends its key (off is sent as undefined so
-// the document keeps the pre-#671 shape), the crease number appears only with the pencil pass on,
-// and the report speaks for the passes that ran.
-describe('#671 the extra finishing passes', () => {
-  it('sends the scallop and pencil choices, and off is undefined', () => {
-    const { onChange } = row();
-    openTechnical();
-    fireEvent.click(screen.getByTestId('engrave-target-surface-scallop-0'));
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { scallop: true } });
-    fireEvent.click(screen.getByTestId('engrave-target-surface-pencil-0'));
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { pencil: true } });
-  });
-
-  it('turning a pass back off sends undefined, so the block drops the key', () => {
-    const { onChange } = row({ target: { surface: { scallop: true, pencil: true } } });
-    openTechnical();
-    fireEvent.click(screen.getByTestId('engrave-target-surface-scallop-0'));
-    expect(onChange).toHaveBeenLastCalledWith({ surface: { scallop: undefined } });
-  });
-
-  it('offers the crease angle only with the pencil pass on, prefilled from the CAM’s default', () => {
-    row({ target: { surface: { pencil: true } } });
-    openTechnical();
-    const crease = screen.getByTestId('engrave-target-surface-pencilCreaseDeg-0') as HTMLInputElement;
-    expect(crease.value).toBe('20');
-    expect(screen.getByTestId('engrave-target-surface-pencilCreaseDeg-source-0').textContent).toContain(
-      'the CAM’s default',
-    );
-    fireEvent.change(crease, { target: { value: '30' } });
-    expect(screen.getByTestId('engrave-target-surface-pencilCreaseDeg-0')).toBeTruthy();
-  });
-
-  it('hides the crease field when the pencil pass is off', () => {
-    row({ target: { surface: { scallop: true } } });
-    openTechnical();
-    expect(screen.queryByTestId('engrave-target-surface-pencilCreaseDeg-0')).toBeNull();
-  });
-
+// #671/#963 — the finishing passes are the engine's choice now; the row has no switch, but the
+// report still speaks for the passes the last program ran.
+describe('#963 the finishing passes are stated, not switched', () => {
   it('reports the passes the last program ran', () => {
     row({
       target: { surface: { scallop: true, pencil: true } },

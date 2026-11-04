@@ -884,22 +884,25 @@ const primitiveSchema = z
  */
 /**
  * #535 — a goal mesh's surfacing settings. Every field OPTIONAL: an absent key is "use the
- * default" (the feeds row, or the shop's finish allowance and flat-grid pitch), so a document
- * that carries none round-trips as it was written. The bounds keep a hand-edited document from
- * asking for a grid of zero rows or a negative allowance, which the CAM could not run.
+ * default", so a document that carries none round-trips as it was written. The bounds keep a
+ * hand-edited document from asking for a grid of zero rows or a negative allowance, which the CAM
+ * could not run.
+ *
+ * #963 — THE SIX RESOLUTION KEYS ARE DEPRECATED. The rebuilt engine derives the grid spacing, the
+ * rough and finish step-overs and step-down, and the scallop/pencil passes itself; these keys stay
+ * only so the pre-#966 engine keeps loading old documents, and a model authoring a job should not
+ * set them. They disappear with the old engine (#966).
  */
 const surfaceSettingsSchema = z
   .object({
-    roughStepDownMm: z.number().finite().positive().max(20).optional().describe('Roughing step-down per Z layer, in millimetres; omit for the feeds row’s.'),
-    roughStepOverMm: z.number().finite().positive().max(20).optional().describe('Roughing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.'),
-    finishStepOverMm: z.number().finite().positive().max(20).optional().describe('Finishing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.'),
-    gridPitchMm: z.number().finite().min(0.02).max(2).optional().describe('Heightfield sampling pitch on both axes, in millimetres; omit for the shop’s flat-grid Y pitch.'),
+    roughStepDownMm: z.number().finite().positive().max(20).optional().describe('DEPRECATED: no longer read by the rebuilt engine, which derives the roughing step-down. Roughing step-down per Z layer, in millimetres.'),
+    roughStepOverMm: z.number().finite().positive().max(20).optional().describe('DEPRECATED: no longer read by the rebuilt engine, which derives the roughing step-over. Roughing raster pitch between scan lines, in millimetres.'),
+    finishStepOverMm: z.number().finite().positive().max(20).optional().describe('DEPRECATED: no longer read by the rebuilt engine, which derives the finishing step-over. Finishing raster pitch between scan lines, in millimetres.'),
+    gridPitchMm: z.number().finite().min(0.02).max(2).optional().describe('DEPRECATED: no longer read by the rebuilt engine, which samples at its own cutter-derived spacing. Heightfield sampling pitch on both axes, in millimetres.'),
     stockToLeaveMm: z.number().finite().min(0).max(2).optional().describe('Roughing allowance left on the goal surface, in millimetres; omit for the shop’s finish stock-to-leave.'),
-    // #671 — the two extra finishing passes. Strict schema: a key not listed here is stripped, so
-    // these MUST live here or the engine never sees them (the #219/#285 trap).
-    scallop: z.boolean().optional().describe('Add a scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface; omit for off.'),
-    pencil: z.boolean().optional().describe('Add a pencil pass along the concave creases after the scallop; omit for off.'),
-    pencilCreaseDeg: z.number().finite().min(1).max(80).optional().describe('The crease angle the pencil pass follows, in degrees; omit for the CAM’s 20°.'),
+    scallop: z.boolean().optional().describe('DEPRECATED: no longer read by the rebuilt engine, which adds the scallop pass where the slope needs it. Add a scallop pass after the parallel finish; omit for off.'),
+    pencil: z.boolean().optional().describe('DEPRECATED: no longer read by the rebuilt engine, which adds the pencil pass where a crease needs it. Add a pencil pass along the concave creases after the scallop; omit for off.'),
+    pencilCreaseDeg: z.number().finite().min(1).max(80).optional().describe('DEPRECATED: no longer read by the rebuilt engine, which owns the crease angle. The crease angle the pencil pass follows, in degrees.'),
   })
   .strict()
   .describe('A goal mesh’s surfacing settings; every key omitted takes its default.');
@@ -1065,26 +1068,42 @@ const targetObjectSchema = z
       .strict()
       .optional()
       .describe('A PNG goal’s relief map: its depth and direction (#672); omit for defaults.'),
-    // #829 — a GOAL's 3D chamfer: the bevel's width, and the V-bit the search chose to cut it.
-    chamfer: z
+    // #963 — the goal's edge break, under its own name; the gate's allowance reads the same field.
+    edgeBreak: z
       .object({
         widthMm: z.number().finite().positive().describe('The bevel’s width on the top face, in millimetres.'),
         toolKey: z
           .string()
           .min(1)
           .optional()
-          .describe('The V-bit’s library key; omit while none is chosen (no chamfer program is posted).'),
+          .describe('A pinned V-bit’s library key; omit for the engine’s costed choice.'),
       })
       .strict()
       .optional()
-      .describe('Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.'),
+      .describe('Break the goal mesh’s top rim with a V-bit after its surfacing program (#963, nee #829); omit for square edges.'),
+    // #829's name for `edgeBreak`, kept until the pre-#966 engine is removed. The old engine reads
+    // this one; the new one reads `edgeBreak`. A document must not carry both.
+    chamfer: z
+      .object({
+        widthMm: z.number().finite().positive().describe('DEPRECATED alias of `edgeBreak.widthMm`; the pre-#966 engine reads this. The bevel’s width on the top face, in millimetres.'),
+        toolKey: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('DEPRECATED alias of `edgeBreak.toolKey`; the pre-#966 engine reads this. The V-bit’s library key.'),
+      })
+      .strict()
+      .optional()
+      .describe('DEPRECATED: #829’s name for `edgeBreak`; the pre-#966 engine reads this. Omit when `edgeBreak` is set.'),
     // #869 — the flat end mill that roughs a goal as its own program, before the ball's finish.
+    // #963 — a PIN: the rebuilt engine chooses the sequence by cost and honours this key, labelled
+    // "pinned"; it no longer writes this field.
     roughToolKey: z
       .string()
       .min(1)
       .optional()
       .describe(
-        'The flat end mill’s library key for the goal’s roughing program (#869); omit to cut the goal with one cutter.',
+        'A PINNED flat end mill’s library key for the goal’s roughing program (#869, #963); omit for the engine’s costed choice.',
       ),
   })
   .strict()

@@ -6229,15 +6229,15 @@
             },
             "chamfer": {
               "additionalProperties": false,
-              "description": "Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.",
+              "description": "DEPRECATED: #829’s name for `edgeBreak`; the pre-#966 engine reads this. Omit when `edgeBreak` is set.",
               "properties": {
                 "toolKey": {
-                  "description": "The V-bit’s library key; omit while none is chosen (no chamfer program is posted).",
+                  "description": "DEPRECATED alias of `edgeBreak.toolKey`; the pre-#966 engine reads this. The V-bit’s library key.",
                   "minLength": 1,
                   "type": "string"
                 },
                 "widthMm": {
-                  "description": "The bevel’s width on the top face, in millimetres.",
+                  "description": "DEPRECATED alias of `edgeBreak.widthMm`; the pre-#966 engine reads this. The bevel’s width on the top face, in millimetres.",
                   "exclusiveMinimum": 0,
                   "type": "number"
                 }
@@ -6255,6 +6255,26 @@
               "description": "Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.",
               "minLength": 1,
               "type": "string"
+            },
+            "edgeBreak": {
+              "additionalProperties": false,
+              "description": "Break the goal mesh’s top rim with a V-bit after its surfacing program (#963, nee #829); omit for square edges.",
+              "properties": {
+                "toolKey": {
+                  "description": "A pinned V-bit’s library key; omit for the engine’s costed choice.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "widthMm": {
+                  "description": "The bevel’s width on the top face, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "widthMm"
+              ],
+              "type": "object"
             },
             "enabled": {
               "description": "False keeps the object in the document but out of the program.",
@@ -6350,7 +6370,7 @@
               "type": "number"
             },
             "roughToolKey": {
-              "description": "The flat end mill’s library key for the goal’s roughing program (#869); omit to cut the goal with one cutter.",
+              "description": "A PINNED flat end mill’s library key for the goal’s roughing program (#869, #963); omit for the engine’s costed choice.",
               "minLength": 1,
               "type": "string"
             },
@@ -6423,41 +6443,41 @@
               "description": "The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.",
               "properties": {
                 "finishStepOverMm": {
-                  "description": "Finishing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.",
+                  "description": "DEPRECATED: no longer read by the rebuilt engine, which derives the finishing step-over. Finishing raster pitch between scan lines, in millimetres.",
                   "exclusiveMinimum": 0,
                   "maximum": 20,
                   "type": "number"
                 },
                 "gridPitchMm": {
-                  "description": "Heightfield sampling pitch on both axes, in millimetres; omit for the shop’s flat-grid Y pitch.",
+                  "description": "DEPRECATED: no longer read by the rebuilt engine, which samples at its own cutter-derived spacing. Heightfield sampling pitch on both axes, in millimetres.",
                   "maximum": 2,
                   "minimum": 0.02,
                   "type": "number"
                 },
                 "pencil": {
-                  "description": "Add a pencil pass along the concave creases after the scallop; omit for off.",
+                  "description": "DEPRECATED: no longer read by the rebuilt engine, which adds the pencil pass where a crease needs it. Add a pencil pass along the concave creases after the scallop; omit for off.",
                   "type": "boolean"
                 },
                 "pencilCreaseDeg": {
-                  "description": "The crease angle the pencil pass follows, in degrees; omit for the CAM’s 20°.",
+                  "description": "DEPRECATED: no longer read by the rebuilt engine, which owns the crease angle. The crease angle the pencil pass follows, in degrees.",
                   "maximum": 80,
                   "minimum": 1,
                   "type": "number"
                 },
                 "roughStepDownMm": {
-                  "description": "Roughing step-down per Z layer, in millimetres; omit for the feeds row’s.",
+                  "description": "DEPRECATED: no longer read by the rebuilt engine, which derives the roughing step-down. Roughing step-down per Z layer, in millimetres.",
                   "exclusiveMinimum": 0,
                   "maximum": 20,
                   "type": "number"
                 },
                 "roughStepOverMm": {
-                  "description": "Roughing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.",
+                  "description": "DEPRECATED: no longer read by the rebuilt engine, which derives the roughing step-over. Roughing raster pitch between scan lines, in millimetres.",
                   "exclusiveMinimum": 0,
                   "maximum": 20,
                   "type": "number"
                 },
                 "scallop": {
-                  "description": "Add a scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface; omit for off.",
+                  "description": "DEPRECATED: no longer read by the rebuilt engine, which adds the scallop pass where the slope needs it. Add a scallop pass after the parallel finish; omit for off.",
                   "type": "boolean"
                 },
                 "stockToLeaveMm": {
@@ -6565,15 +6585,15 @@
               },
               "chamfer": {
                 "additionalProperties": false,
-                "description": "Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.",
+                "description": "DEPRECATED: #829’s name for `edgeBreak`; the pre-#966 engine reads this. Omit when `edgeBreak` is set.",
                 "properties": {
                   "toolKey": {
-                    "description": "The V-bit’s library key; omit while none is chosen (no chamfer program is posted).",
+                    "description": "DEPRECATED alias of `edgeBreak.toolKey`; the pre-#966 engine reads this. The V-bit’s library key.",
                     "minLength": 1,
                     "type": "string"
                   },
                   "widthMm": {
-                    "description": "The bevel’s width on the top face, in millimetres.",
+                    "description": "DEPRECATED alias of `edgeBreak.widthMm`; the pre-#966 engine reads this. The bevel’s width on the top face, in millimetres.",
                     "exclusiveMinimum": 0,
                     "type": "number"
                   }
@@ -6591,6 +6611,26 @@
                 "description": "Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.",
                 "minLength": 1,
                 "type": "string"
+              },
+              "edgeBreak": {
+                "additionalProperties": false,
+                "description": "Break the goal mesh’s top rim with a V-bit after its surfacing program (#963, nee #829); omit for square edges.",
+                "properties": {
+                  "toolKey": {
+                    "description": "A pinned V-bit’s library key; omit for the engine’s costed choice.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "widthMm": {
+                    "description": "The bevel’s width on the top face, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "widthMm"
+                ],
+                "type": "object"
               },
               "enabled": {
                 "description": "False keeps the object in the document but out of the program.",
@@ -6686,7 +6726,7 @@
                 "type": "number"
               },
               "roughToolKey": {
-                "description": "The flat end mill’s library key for the goal’s roughing program (#869); omit to cut the goal with one cutter.",
+                "description": "A PINNED flat end mill’s library key for the goal’s roughing program (#869, #963); omit for the engine’s costed choice.",
                 "minLength": 1,
                 "type": "string"
               },
@@ -6759,41 +6799,41 @@
                 "description": "The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.",
                 "properties": {
                   "finishStepOverMm": {
-                    "description": "Finishing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.",
+                    "description": "DEPRECATED: no longer read by the rebuilt engine, which derives the finishing step-over. Finishing raster pitch between scan lines, in millimetres.",
                     "exclusiveMinimum": 0,
                     "maximum": 20,
                     "type": "number"
                   },
                   "gridPitchMm": {
-                    "description": "Heightfield sampling pitch on both axes, in millimetres; omit for the shop’s flat-grid Y pitch.",
+                    "description": "DEPRECATED: no longer read by the rebuilt engine, which samples at its own cutter-derived spacing. Heightfield sampling pitch on both axes, in millimetres.",
                     "maximum": 2,
                     "minimum": 0.02,
                     "type": "number"
                   },
                   "pencil": {
-                    "description": "Add a pencil pass along the concave creases after the scallop; omit for off.",
+                    "description": "DEPRECATED: no longer read by the rebuilt engine, which adds the pencil pass where a crease needs it. Add a pencil pass along the concave creases after the scallop; omit for off.",
                     "type": "boolean"
                   },
                   "pencilCreaseDeg": {
-                    "description": "The crease angle the pencil pass follows, in degrees; omit for the CAM’s 20°.",
+                    "description": "DEPRECATED: no longer read by the rebuilt engine, which owns the crease angle. The crease angle the pencil pass follows, in degrees.",
                     "maximum": 80,
                     "minimum": 1,
                     "type": "number"
                   },
                   "roughStepDownMm": {
-                    "description": "Roughing step-down per Z layer, in millimetres; omit for the feeds row’s.",
+                    "description": "DEPRECATED: no longer read by the rebuilt engine, which derives the roughing step-down. Roughing step-down per Z layer, in millimetres.",
                     "exclusiveMinimum": 0,
                     "maximum": 20,
                     "type": "number"
                   },
                   "roughStepOverMm": {
-                    "description": "Roughing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.",
+                    "description": "DEPRECATED: no longer read by the rebuilt engine, which derives the roughing step-over. Roughing raster pitch between scan lines, in millimetres.",
                     "exclusiveMinimum": 0,
                     "maximum": 20,
                     "type": "number"
                   },
                   "scallop": {
-                    "description": "Add a scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface; omit for off.",
+                    "description": "DEPRECATED: no longer read by the rebuilt engine, which adds the scallop pass where the slope needs it. Add a scallop pass after the parallel finish; omit for off.",
                     "type": "boolean"
                   },
                   "stockToLeaveMm": {

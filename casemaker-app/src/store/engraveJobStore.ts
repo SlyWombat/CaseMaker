@@ -103,6 +103,7 @@ import type {
   FieldSource,
   FrozenPackage,
   EngraveGoalChamfer,
+  EngraveGoalEdgeBreak,
   JobRunLogEntry,
   JobSetup,
   JobSource,
@@ -268,7 +269,9 @@ export type TargetObjectPatch = Partial<
   surface?: Partial<EngraveSurfaceSettings>;
   /** #672 — a partial of a picture goal's relief map; `undefined` on a key clears it. */
   relief?: Partial<EngraveReliefSettings>;
-  /** #829 — a goal's 3D chamfer (`undefined` removes it: square edges). */
+  /** #963 — a goal's edge break (`undefined` removes both names: square edges). */
+  edgeBreak?: EngraveGoalEdgeBreak;
+  /** @deprecated #963 — #829's name; the row mirrors its write here until #966 removes the old engine. */
   chamfer?: EngraveGoalChamfer;
   /** #898 — the goal's underside choice (`undefined` removes it: the cut as the mesh is). */
   underside?: EngraveTargetObject['underside'];

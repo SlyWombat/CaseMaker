@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
-import { DEFAULT_PENCIL_CREASE_DEG, type GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
+import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
 import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/engrave/relief';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
@@ -36,7 +36,7 @@ import {
   resetRotationPatch,
 } from '@/engine/cnc/engrave/goalPlacement';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
-import type { EngraveSurfaceSettings, EngraveTargetObject, GoalUndersideKind } from '@/types/engraveJob';
+import { goalEdgeBreak, type EngraveSurfaceSettings, type EngraveTargetObject, type GoalUndersideKind } from '@/types/engraveJob';
 
 /**
  * The reference object the 3D primitives are positioned against (#435).
@@ -679,7 +679,6 @@ export function EngraveTargetObjectRow({
   // #721 — a mold's cavity opens at the stock top, so its Z is not a placement.
   const moldGoal = goal && target.goalMode === 'mold' && target.format !== 'png';
   const settings = target.surface ?? {};
-  const feedsWords = surface?.feeds?.typed === true ? 'typed here' : 'the feeds row';
   // #898 — the underside control (a part goal only) and, when nothing is chosen, the app's own
   // reading of the mesh. Cached on the mesh's facts, so a render does not re-measure it.
   const showsUnderside = goal && target.format !== 'png' && target.goalMode !== 'mold';
@@ -871,9 +870,10 @@ export function EngraveTargetObjectRow({
         </>
       )}
 
-      {/* #829 — CHAMFER THE PART'S EDGES: a V-bit follows the mesh's top rim after the surfacing
-          program. The width is the bevel's on the top face; the app chooses the V-bit by
-          simulation, so nothing is picked here. A mold's rim is a later slice. */}
+      {/* #829/#963 — CHAMFER THE PART'S EDGES: a V-bit follows the mesh's top rim after the
+          surfacing program. The width is the job's stated EDGE BREAK (`edgeBreak`, which the
+          gate's allowance also reads); the engine chooses the V-bit by cost, so nothing is picked
+          here. A mold's rim is a later slice. */}
       {goal && target.format !== 'png' && target.goalMode !== 'mold' && (
         <label style={ROW_INLINE}>
           <span style={{ fontSize: 11, color: '#9aa4b0' }}>chamfer the edges</span>
@@ -884,17 +884,15 @@ export function EngraveTargetObjectRow({
             style={{ width: 64 }}
             data-testid={`engrave-target-chamfer-${index}`}
             aria-label="Chamfer the part’s edges: the bevel’s width in millimetres"
-            title="Bevel the part’s top edges with a V-bit after the part is surfaced; the app chooses the V-bit by simulation. Leave it empty for square edges."
-            value={target.chamfer?.widthMm ?? ''}
+            title="Bevel the part’s top edges with a V-bit after the part is surfaced; the engine chooses the V-bit. Leave it empty for square edges."
+            value={goalEdgeBreak(target)?.widthMm ?? ''}
             onChange={(e) => {
               const raw = e.target.value.trim();
               const mm = Number(raw);
-              onChange({
-                chamfer:
-                  raw === '' || !(mm > 0)
-                    ? undefined
-                    : { ...(target.chamfer ?? { widthMm: mm }), widthMm: mm },
-              });
+              const next = raw === '' || !(mm > 0) ? undefined : { ...(goalEdgeBreak(target) ?? { widthMm: mm }), widthMm: mm };
+              // shortcut: both names are written while the pre-#966 engine still reads `chamfer`;
+              // #966 drops the mirror and the alias together.
+              onChange({ edgeBreak: next, chamfer: next === undefined ? undefined : { ...next } });
             }}
           />
           <span style={{ fontSize: 11, color: '#9aa4b0' }}>mm</span>
@@ -1030,92 +1028,10 @@ export function EngraveTargetObjectRow({
               {cutterSentence(surface.cutter)}
             </p>
 
-            <SurfaceField
-              field="roughStepDownMm"
-              label="roughing step-down"
-              unit="mm"
-              title="How deep each roughing Z layer steps, mm. Lighter layers leave less for the finishing pass."
-              index={index}
-              value={settings.roughStepDownMm}
-              fallback={surface.feeds?.stepDown ?? null}
-              sourceWords={feedsWords}
-              min={0.01}
-              onChange={(v) => setSurface({ roughStepDownMm: v })}
-            />
-            <SurfaceField
-              field="roughStepOverMm"
-              label="roughing step-over"
-              unit="mm"
-              title="The raster pitch between roughing scan lines, mm. It decides the ridges the finishing pass then removes."
-              index={index}
-              value={settings.roughStepOverMm}
-              fallback={surface.feeds?.stepOver ?? null}
-              sourceWords={feedsWords}
-              min={0.01}
-              onChange={(v) => setSurface({ roughStepOverMm: v })}
-            />
-            <SurfaceField
-              field="finishStepOverMm"
-              label="finishing step-over"
-              unit="mm"
-              title="The raster pitch between finishing scan lines, mm. The feeds row's step-over stands in for the 3D engagement number a bench cut measures."
-              index={index}
-              value={settings.finishStepOverMm}
-              fallback={surface.feeds?.stepOver ?? null}
-              sourceWords={feedsWords}
-              min={0.01}
-              onChange={(v) => setSurface({ finishStepOverMm: v })}
-            />
-            {/* #671 — the two extra finishing passes, each opt-in. Absent reads as off, which is
-                the rough + parallel finish every pre-#671 job already cuts. */}
-            <label style={ROW_INLINE}>
-              <input
-                type="checkbox"
-                checked={settings.scallop === true}
-                data-testid={`engrave-target-surface-scallop-${index}`}
-                aria-label="Add a scallop pass"
-                title="Also cut offset contours of the outline after the parallel finish, spaced so the step measured along the surface is the finishing step-over. It cleans the ridges the parallel finish leaves on slopes."
-                onChange={(e) => setSurface({ scallop: e.target.checked ? true : undefined })}
-              />
-              <span style={{ fontSize: 11, color: '#9aa4b0' }}>scallop pass</span>
-            </label>
-            <label style={ROW_INLINE}>
-              <input
-                type="checkbox"
-                checked={settings.pencil === true}
-                data-testid={`engrave-target-surface-pencil-${index}`}
-                aria-label="Add a pencil pass"
-                title="Also run one pass along every concave crease after the scallop — the corners the finishing raster leaves proud."
-                onChange={(e) => setSurface({ pencil: e.target.checked ? true : undefined })}
-              />
-              <span style={{ fontSize: 11, color: '#9aa4b0' }}>pencil pass</span>
-            </label>
-            {settings.pencil === true && (
-              <SurfaceField
-                field="pencilCreaseDeg"
-                label="pencil crease"
-                unit="°"
-                title="The pencil pass follows creases where the surface's slope changes by more than this across one grid cell, degrees."
-                index={index}
-                value={settings.pencilCreaseDeg}
-                fallback={DEFAULT_PENCIL_CREASE_DEG}
-                sourceWords="the CAM’s default"
-                min={1}
-                onChange={(v) => setSurface({ pencilCreaseDeg: v })}
-              />
-            )}
-            <SurfaceField
-              field="gridPitchMm"
-              label="grid pitch"
-              unit="mm"
-              title="The heightfield's sampling pitch on both axes, mm. Finer pitch follows detail and costs memory and time."
-              index={index}
-              value={settings.gridPitchMm}
-              fallback={surface.gridPitch.value}
-              sourceWords={shopSourceWords(surface.gridPitch.source)}
-              min={0.02}
-              onChange={(v) => setSurface({ gridPitchMm: v })}
-            />
+            {/* #963 — THE ENGINE'S NUMBERS, NOT THE OPERATOR'S. The rough/finish step-down and
+                step-over, the grid pitch and the scallop/pencil passes are derived by the model
+                engine from the cutter and the slope; the sentence below says what it used. A
+                control here would be a budget by another name. */}
             <SurfaceField
               field="stockToLeaveMm"
               label="stock to leave"

@@ -204,6 +204,7 @@ import type {
   SacrificialUnder,
   ViseParams,
 } from '@/types/engraveJob';
+import { goalEdgeBreak } from '@/types/engraveJob';
 
 /**
  * The Engrave panel (#205): stock, labels, tool, vise, cutting parameters, findings, generate.
@@ -2171,11 +2172,13 @@ export function EngravePanel(): JSX.Element {
   const measuredApplied =
     measuredNow !== null &&
     job.toolKey === measuredNow.cutters[0]?.key &&
-    // #829 — a goal's second cutter is its chamfer's V-bit; the plan is applied only when the
-    // goal already carries the key it measured (a plan with no V leaves it alone).
-    (job.targetObject?.chamfer === undefined ||
+    // #829/#963 — a goal's second cutter is its edge break's V-bit; the plan is applied only when
+    // the goal already carries the key it measured (a plan with no V leaves it alone). Both
+    // names read, so a document written under either one behaves the same.
+    (job.targetObject === undefined ||
+      goalEdgeBreak(job.targetObject) === undefined ||
       measuredNow.cutters[1] === undefined ||
-      job.targetObject.chamfer.toolKey === measuredNow.cutters[1].key) &&
+      goalEdgeBreak(job.targetObject)?.toolKey === measuredNow.cutters[1].key) &&
     // #869 — the goal's rough is the plan's own decision: the applied answer must be the one the
     // goal carries, and a plan with no rough matches only a goal with none.
     (job.targetObject?.roughToolKey ?? null) === (measuredNow.goalRoughKey ?? null) &&

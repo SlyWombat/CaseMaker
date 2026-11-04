@@ -698,10 +698,9 @@ export interface EngraveTargetObject {
    */
   role?: EngraveTargetRole;
   /**
-   * The goal operation's own settings (#535). OPTIONAL, and every field in it optional: absent
-   * means the engine's default for that number — the feeds row's step-down and step-over, the
-   * shop's `finish.stockToLeaveMm` and `sim.columnFlatPitchYMm` — so a document written before
-   * this block existed rounds-trips byte-for-byte and a goal left alone cuts the same program.
+   * The goal operation's own settings. OPTIONAL, and every field in it optional: absent means the
+   * shop's own number (see {@link EngraveSurfaceSettings}). #963 — the old planner's resolutions
+   * (grid pitch, step-overs, step-downs, scallop/pencil) are no longer job fields.
    */
   surface?: EngraveSurfaceSettings;
   /**
@@ -722,11 +721,14 @@ export interface EngraveTargetObject {
    */
   cutWithinReach?: boolean;
   /**
-   * #888 — CUT ONLY THIS SETUP'S DEPTH BAND. A goal split over two mountings (the budget split's
-   * top and bottom halves) names, on each side's copy, how deep from THAT setup's work top its
-   * program cuts; the sampler floors the heightfield there, so the first side leaves the material
-   * the second side takes. Absent (every goal written before the split) cuts the whole depth, and
-   * `cutWithinReach`'s cutter-derived band keeps its own meaning when this is absent.
+   * #888 — CUT ONLY THIS SETUP'S DEPTH BAND. A goal cut from two mountings names, on each side's
+   * copy, how deep from THAT setup's work top its program cuts, so the first side leaves the
+   * material the second side takes. Absent cuts the whole depth, and `cutWithinReach`'s
+   * cutter-derived band keeps its own meaning when this is absent.
+   *
+   * #963 — THE FIELD STAYS; ITS OLD PRODUCER DOES NOT. The budget split's "Split into two setups"
+   * press is gone with the budget family; whether the figures' multi-setup (#965) fills this field
+   * is that slice's decision, so the field is kept and nothing in this build writes it.
    */
   bandMm?: Mm;
   /**
@@ -751,32 +753,50 @@ export interface EngraveTargetObject {
    */
   relief?: EngraveReliefSettings;
   /**
-   * #829 — CHAMFER THE PART'S EDGES. Present on a GOAL while its top rim is beveled by a V-bit
-   * after the surfacing program: `widthMm` is the bevel's width on the top face, and `toolKey`
-   * names the V-bit the measured search chose for the second program. Absent — or a goal with no
-   * `toolKey` — means the part is surfaced and its edges are left square, stated in the run's
-   * findings. Optional, so every document written before the field existed round-trips unchanged.
+   * #963 — THE EDGE BREAK THE JOB ASKS FOR: the width of the top rim's bevel and the V-bit that
+   * cuts it (the goals' `chamfer` under its own name). Two readers take it, INDEPENDENTLY, and
+   * neither derives its number from the other's plan output (A's R3): the CAM's chamfer op sizes
+   * its cut from it, and the gate's edge-break allowance reads the same field through its own
+   * path, capped by the chamfer Tool record's geometry. Absent means the rim is left square.
+   */
+  edgeBreak?: EngraveGoalEdgeBreak;
+  /**
+   * @deprecated #963 — #829's name for {@link edgeBreak}; {@link goalEdgeBreak} reads either.
+   * Kept so every document written before the rename loads and the pre-#966 engine compiles;
+   * #966 deletes it.
    */
   chamfer?: EngraveGoalChamfer;
   /**
-   * #869 — THE FLAT THAT ROUGHS A GOAL, when it is not the ball that finishes it. Present on a
-   * GOAL while a flat end mill clears the stock as its own program before the ball's finishing
-   * program: a flat takes a deeper step-down and a wider step-over than the ball, so the rough is
-   * faster, and the adaptive clearing engine (flat end mills only) becomes available to it. The
-   * measured search chooses the key; absent (or a key the library does not hold) means the goal is
-   * cut by one cutter, as before. Optional, so every document written before the field existed
-   * round-trips unchanged.
+   * #869 — THE FLAT THAT ROUGHS A GOAL, when it is not the ball that finishes it. #963 — A PIN, not
+   * the search's verdict: the rebuilt engine chooses the cutter sequence by cost (#961), and a
+   * key here is HONOURED and labelled "pinned" on the plan; absent (or a key the library does not
+   * hold) means the engine's choice. The measured search no longer writes this field.
    */
   roughToolKey?: string;
 }
 
-/** #829 — the 3D chamfer a GOAL asks for: its bevel width, and the V-bit chosen to cut it. */
-export interface EngraveGoalChamfer {
+/**
+ * #963 — the goal's stated edge break, under either name: `edgeBreak` is canonical, `chamfer` is
+ * #829's name kept for documents and for the pre-#966 engine. One reader for both, so no caller
+ * decides precedence for itself.
+ */
+export function goalEdgeBreak(target: EngraveTargetObject): EngraveGoalEdgeBreak | undefined {
+  return target.edgeBreak ?? target.chamfer;
+}
+
+/** #963 — the edge break a GOAL asks for: its bevel width, and the V-bit that cuts it. */
+export interface EngraveGoalEdgeBreak {
   /** The bevel's width on the top face, mm, before the cone and the part's height clamp it. */
   widthMm: Mm;
-  /** The V-bit's library key; absent while none is chosen (no chamfer program is posted). */
+  /**
+   * The V-bit's library key. #963 — a PIN: the engine's costed sequence chooses the chamfer cutter
+   * and this key, when present, is honoured and labelled "pinned".
+   */
   toolKey?: string;
 }
+
+/** @deprecated #963 — #829's name for {@link EngraveGoalEdgeBreak}; kept until #966. */
+export type EngraveGoalChamfer = EngraveGoalEdgeBreak;
 
 /** #898 — where the part's underside comes from. See {@link EngraveTargetObject.underside}. */
 export type GoalUndersideKind = 'flat' | 'flipped-tabs' | 'plinth';
@@ -829,19 +849,18 @@ export interface EngraveReliefSettings {
 export type EngraveTargetRole = 'reference' | 'goal';
 
 /**
- * A goal mesh's surfacing settings (#535): the numbers the roughing and finishing passes run
- * with. Each one overrides the default named in its comment; `undefined` is "use that default",
- * never a zero.
+ * A goal mesh's surfacing settings: the numbers the OPERATOR owns — the stock left for the
+ * finish, and what is cleared around the part. Every field optional; `undefined` takes the default
+ * named in its comment.
+ *
+ * #963 — THE RESOLUTIONS BELOW ARE NO LONGER OPERATOR SETTINGS. The model engine derives each
+ * from the cutter it chose and the slope it meets, and states what it used on the plan; an
+ * operator-settable pitch was a budget by another name. The six `@deprecated` fields stay in the
+ * type (and the schema) only so the OLD engine keeps compiling and old documents still load
+ * until #966 deletes the old engine whole and them with it. Nothing in this build writes or shows
+ * them.
  */
 export interface EngraveSurfaceSettings {
-  /** Roughing step-down per Z layer, mm. Default: the feeds row's step-down. */
-  roughStepDownMm?: Mm;
-  /** Roughing raster pitch between scan lines, mm. Default: the feeds row's step-over. */
-  roughStepOverMm?: Mm;
-  /** Finishing raster pitch between scan lines, mm. Default: the feeds row's step-over. */
-  finishStepOverMm?: Mm;
-  /** Heightfield sampling pitch (both axes), mm. Default: the shop's `sim.columnFlatPitchYMm`. */
-  gridPitchMm?: Mm;
   /**
    * #764 — what is cleared AROUND an item goal, so the part is not left in a pit of stock. `'ring'`
    * (the default when absent) cuts a band at least one cutter diameter wide around the part down
@@ -851,18 +870,19 @@ export interface EngraveSurfaceSettings {
   clearAround?: 'ring' | 'whole' | 'none';
   /** Roughing allowance left on the goal surface, mm. Default: the shop's `finish.stockToLeaveMm`. */
   stockToLeaveMm?: Mm;
-  /**
-   * #671 — add the SCALLOP pass after the parallel finish: offset contours of the goal's outline,
-   * spaced so the step measured ALONG THE SURFACE is `finishStepOverMm`. Absent = off, which is
-   * the rough + parallel finish every pre-#671 job already cut.
-   */
+  /** @deprecated #963 — the engine derives the roughing step-down. Read only by the pre-#966 engine. */
+  roughStepDownMm?: Mm;
+  /** @deprecated #963 — the engine derives the roughing step-over. Read only by the pre-#966 engine. */
+  roughStepOverMm?: Mm;
+  /** @deprecated #963 — the engine derives the finishing step-over. Read only by the pre-#966 engine. */
+  finishStepOverMm?: Mm;
+  /** @deprecated #963 — the engine samples at its own cutter-derived spacing. Read only by the pre-#966 engine. */
+  gridPitchMm?: Mm;
+  /** @deprecated #963 — the engine adds the scallop pass where the slope needs it. Read only by the pre-#966 engine. */
   scallop?: boolean;
-  /**
-   * #671 — add the PENCIL pass after the scallop: one path along every concave crease sharper than
-   * `pencilCreaseDeg`. Absent = off.
-   */
+  /** @deprecated #963 — the engine adds the pencil pass where a crease needs it. Read only by the pre-#966 engine. */
   pencil?: boolean;
-  /** #671 — the crease angle the pencil pass follows, degrees. Default: the CAM's own 20°. */
+  /** @deprecated #963 — the engine owns the crease angle. Read only by the pre-#966 engine. */
   pencilCreaseDeg?: number;
 }
 
