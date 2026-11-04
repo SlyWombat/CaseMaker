@@ -180,11 +180,28 @@ async function placedTree(file: string, stock: [number, number], modelTop: numbe
   return { tree, mesh: { positions, indices: read.mesh.indices }, target };
 }
 // Makera's own pattern on these parts (plan v2 §1): the largest flat roughs, a smaller flat rests
-// the corners it cannot enter. A's R5 ruling: a simulation-only reference card prices on the
-// VENDOR's own set.
-const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
-const VENDOR_SET = [FLAT6, FLAT3175];
+// the corners it cannot enter, the ball finishes the curved remainder, the chamfer breaks the
+// rims. A's R5 ruling: a simulation-only reference card prices on the VENDOR's own set. E's own
+// tool-by-tool read of Makera's tray NC (2026-11-04): T1 6x32 flat, T2 3.175x25 flat, T3 6x32
+// ball, T4 3.175 90° chamfer (tip 0.1) — the real four, not the two this spec carried before: with
+// no ball or chamfer candidate, `chooseSequence` could never reproduce the 99.6 % of the scoop's
+// own cells E found the vendor's ⌀6 ball cutting, which is the coverage gap in one line.
+const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 32 });
+const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 25 });
+const BALL6: Tool = { ...flatEndMill(6, { number: 3, id: 'ball-6', name: 'ball-6', fluteLength: 32 }), typeText: 'Ball Nose', shape: 'ball' };
+/** The vendor's 90° chamfer from the Makerables headers (⌀3.175, tip 0.1) — the bit the job's edge
+ * break is cut with, and `edgeBreakAllowance` below's own source. */
+const CHAMFER3175: Tool = {
+  ...flatEndMill(3.175, { number: 4, id: 'chamfer-90', name: '3.175mm*90º Chamfer' }),
+  typeText: 'V-Bit',
+  shape: 'chamfer',
+  tipDiameter: 0.1,
+  diameter: 3.175,
+  cornerRadius: 0,
+  angle: 90,
+  halfAngle: 45,
+};
+const VENDOR_SET = [FLAT6, FLAT3175, BALL6, CHAMFER3175];
 const RAPID = Z1.rapidEstimate;
 
 function planTray(tree: FeatureTree): PlanPocketsResult {
@@ -208,21 +225,11 @@ function postedTextFor(cutterKey: string, merged: ToolpathIR, ctx: PostContext):
   return posted.text;
 }
 
-/** The vendor's 90° chamfer from the Makerables headers (⌀3.175, tip 0.1), the bit the job's
- * edge break is cut with. The gate's allowance is sized from THIS Tool record and the job's stated
- * edge break, never from the CAM's plan (A's R3); `vToolAllowance` is the app's own V reader. */
+/** The gate's allowance is sized from the vendor's own chamfer Tool record (`CHAMFER3175`, above)
+ * and the job's stated edge break, never from the CAM's plan (A's R3); `vToolAllowance` is the
+ * app's own V reader. */
 function edgeBreakAllowance(): Pick<GoalCutIntoOptions, 'edgeBreak' | 'wallShadowRadiusMm'> {
-  const chamfer: Tool = {
-    ...flatEndMill(3.175, { number: 4, id: 'chamfer-90', name: '3.175mm*90º Chamfer' }),
-    typeText: 'V-Bit',
-    shape: 'chamfer',
-    tipDiameter: 0.1,
-    diameter: 3.175,
-    cornerRadius: 0,
-    angle: 90,
-    halfAngle: 45,
-  };
-  const allowance = vToolAllowance(chamfer);
+  const allowance = vToolAllowance(CHAMFER3175);
   if (allowance === null) throw new Error('#959: the chamfer Tool record states no cone');
   return { edgeBreak: allowance, wallShadowRadiusMm: cuttingDiameter(FLAT6)! / 2 };
 }
