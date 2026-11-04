@@ -213,18 +213,6 @@ function boundsOfPolygons(polygons: Polygons): Box2 {
   return { min: [minX, minY], max: [maxX, maxY] };
 }
 
-/** Shoelace signed area — positive for a CCW ring, negative for CW. `pocket.ts`'s own winding
- * convention: an outer boundary is CCW, a hole (an island) is CW. */
-function signedArea(ring: readonly [number, number][]): number {
-  let a = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const [x0, y0] = ring[i]!;
-    const [x1, y1] = ring[(i + 1) % ring.length]!;
-    a += x0 * y1 - x1 * y0;
-  }
-  return a / 2;
-}
-
 export interface PlanPocketsOptions {
   /** The real Clipper2 offset, or a test fake — `pocketLoops`' own contract, carried through unchanged. */
   offset: OffsetFn;
@@ -434,44 +422,23 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       const rootPocketNodes = pocketNodes.filter((n) => rootIds.has(n.id));
       let facingRegion = grown;
       if (opts.boolean !== undefined) {
-        // EACH pocket judged on its own, not the union eroded as one: a part with 47 small
-        // pockets and a couple of large ones (the organizer) would otherwise erode the WHOLE
-        // union to nothing the moment ANY one pocket is smaller than 4r, excluding none of them
-        // — the Manager's own "stop at each land's own Z" read literally, one pocket at a time.
-        // Eroding by 2r (not subtracting the raw region) reaches exactly to the true wall, the
-        // same erode-then-dilate-adjacent math the open-shoulder fix uses in reverse: a flat
-        // offset by -2r shrinks a hole's boundary by 2r, and a tool of radius r standing r off
-        // THAT boundary lands exactly r in from the true wall — minus the r the tool's own disc
-        // reaches beyond its centre, zero overshoot, zero gap. A pocket smaller than 4r erodes to
-        // nothing; its own first pass already covers its WHOLE footprint regardless of size, so
-        // exclude the raw region there instead of excluding nothing.
+        // EACH pocket judged on its own, not the union eroded as one (the Manager's own "stop at
+        // each land's own Z", read literally — one pocket at a time, not the union as a whole).
+        // `erode(node.region, 2r)`, with its own island holes AS GIVEN, reaches exactly to every
+        // wall that bounds it — the outer AND each island's — the same erode-then-dilate-adjacent
+        // math the open-shoulder fix uses in reverse: a boundary shrunk by 2r, stood off by r,
+        // lands the tool centre exactly r in from the true wall, and the tool's own disc (radius
+        // r) reaches that last r on its own. A pocket (or the gap around its island) narrower than
+        // 2r on every side erodes to NOTHING — there is no point in it more than 2r from some
+        // wall, so there is no legitimate "deep interior" to exclude at all, and nothing is.
+        // Excluding its raw region instead (an earlier version of this fix did) would remove the
+        // SAME overhang a thin wall needs, and silently drop an island's own top wherever the
+        // surrounding pocket is this narrow — exactly what it is there to avoid.
         const excludeRegions: Polygons[] = [];
         for (const node of [...rootPocketNodes, ...throughNodes]) {
-          // Eroding `node.region` AS GIVEN risks a degenerate result once an island is big
-          // enough relative to the gap around it: eroding the solid by 2r also DILATES the
-          // island hole by 2r, and an island whose own footprint plus 2r reaches the outer
-          // boundary collapses the whole erosion (Clipper read it as consuming the island's own
-          // top, which must stay land — the fixture's own island, 4x4 inside a 16x16 pocket,
-          // hits exactly this). Eroding the OUTER ring(s) alone avoids it; each island is then
-          // carved back OUT of the result explicitly, so it is never excluded regardless of how
-          // that erosion behaves near it.
-          const outer = node.region.filter((ring) => signedArea(ring) > 0);
-          if (outer.length === 0) continue;
-          let eroded = opts.offset(outer, -2 * toolRadius);
-          if (eroded.length === 0) eroded = outer;
-          for (const island of node.islands) {
-            if (island.outline.length === 0) continue;
-            // `subtract(a, b)` needs `b` wound POSITIVE on its own (a standalone filled shape,
-            // not a hole nested inside another ring) — `features/tree.ts` does not populate
-            // `islands` yet, so there is no established convention to match; this reverses a
-            // CW ring rather than assume the caller already states it the way a standalone
-            // subtract operand needs. A CW `island.outline` otherwise reads as zero/negative
-            // area on its own, and `subtract` removes nothing — exactly the gap the island-top
-            // coverage test caught.
-            const standalone = island.outline.map((ring) => (signedArea(ring) < 0 ? [...ring].reverse() : ring));
-            eroded = opts.boolean.subtract(eroded, standalone);
-          }
-          excludeRegions.push(eroded);
+          if (node.region.length === 0) continue;
+          const eroded = opts.offset(node.region, -2 * toolRadius);
+          if (eroded.length > 0) excludeRegions.push(eroded);
         }
         if (excludeRegions.length > 0) {
           let union = excludeRegions[0]!;

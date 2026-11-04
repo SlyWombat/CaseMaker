@@ -344,6 +344,72 @@ function syntheticTreeFacingCoverage(skinMm: number): { tree: FeatureTree; landA
   return { tree, landArea };
 }
 
+/** Two 10x10 pockets with a 3 mm wall between them (1 mm rim all round) — EACH pocket, alone,
+ * erodes to nothing at 2r for a ⌀6 flat (10 - 2x6 < 0): advisor's review on 4355f5ef, red-first
+ * for "small pockets contribute no exclusion, so the wall between them is still fully land." */
+function syntheticTreeTwoSmallPocketsWall(skinMm: number): { tree: FeatureTree; landArea: Polygons } {
+  const outline: [number, number][][] = [[[0, 0], [25, 0], [25, 12], [0, 12]]];
+  const cRegion: [number, number][][] = [[[1, 1], [11, 1], [11, 11], [1, 11]]];
+  const dRegion: [number, number][][] = [[[14, 1], [24, 1], [24, 11], [14, 11]]];
+  const partTop = -skinMm;
+  const floorZ = partTop - 3;
+  const c: PocketNode = {
+    id: 'c', floorZ, mouthZ: partTop, open: false, through: false,
+    region: cRegion, floors: [{ polygons: cRegion, area: 100 }],
+    islands: [], children: [], remainder: [], narrowest: 10,
+  };
+  const d: PocketNode = {
+    id: 'd', floorZ, mouthZ: partTop, open: false, through: false,
+    region: dRegion, floors: [{ polygons: dRegion, area: 100 }],
+    islands: [], children: [], remainder: [], narrowest: 10,
+  };
+  const landArea: [number, number][][] = [[[11, 1], [14, 1], [14, 11], [11, 11]]]; // just the wall strip
+  const tree: FeatureTree = {
+    frame: { up: [0, 0, 1], stockTop: 0, partTop, partBottom: floorZ },
+    levels: [floorZ],
+    top: { z: partTop, floors: [], area: 0 },
+    contour: { outline, area: 300, zTo: floorZ, frees: true, shoulders: [] },
+    pockets: [c, d],
+    rims: [],
+    remainder: [],
+    unreachable: [],
+    report: { source: 'mesh', patches: 1, planarArea: 300, remainderArea: 0, tolerances: {} as never, slivers: [], notes: [] },
+  };
+  return { tree, landArea };
+}
+
+/** A 20x20 pocket with a 10x10 island centred in it (5 mm gap all round) — the GAP around the
+ * island, not the whole pocket, is narrower than 2r for a ⌀6 flat (5 < 6): erode(pocket WITH its
+ * island hole, 2r) is empty for this reason alone, even though the pocket itself is not small.
+ * Advisor's review on 4355f5ef, red-first for "the island top is still land when its own gap is
+ * this narrow — never silently dropped along with the rest of the pocket's exclusion." */
+function syntheticTreeBigPocketWithIsland(skinMm: number): { tree: FeatureTree; landArea: Polygons } {
+  const outline: [number, number][][] = [[[0, 0], [30, 0], [30, 30], [0, 30]]];
+  const pocketOuter: [number, number][] = [[5, 5], [25, 5], [25, 25], [5, 25]];
+  const islandOutline: [number, number][] = [[10, 10], [10, 20], [20, 20], [20, 10]];
+  const pocketRegion: [number, number][][] = [pocketOuter, islandOutline];
+  const partTop = -skinMm;
+  const floorZ = partTop - 3;
+  const node: PocketNode = {
+    id: 'p', floorZ, mouthZ: partTop, open: false, through: false,
+    region: pocketRegion, floors: [{ polygons: pocketRegion, area: 300 }],
+    islands: [{ outline: [islandOutline], topZ: partTop }], children: [], remainder: [], narrowest: 5,
+  };
+  const landArea: [number, number][][] = [[islandOutline[0]!, islandOutline[3]!, islandOutline[2]!, islandOutline[1]!]]; // the island top only
+  const tree: FeatureTree = {
+    frame: { up: [0, 0, 1], stockTop: 0, partTop, partBottom: floorZ },
+    levels: [floorZ],
+    top: { z: partTop, floors: [], area: 0 },
+    contour: { outline, area: 900, zTo: floorZ, frees: true, shoulders: [] },
+    pockets: [node],
+    rims: [],
+    remainder: [],
+    unreachable: [],
+    report: { source: 'mesh', patches: 1, planarArea: 900, remainderArea: 0, tolerances: {} as never, slivers: [], notes: [] },
+  };
+  return { tree, landArea };
+}
+
 /** Two pockets and an outline; `region` distinguishes them by width so a wrapped offset can throw
  * for one specific region on demand (below) — the manager's #959 ruling: a region that fails to
  * plan must not crash the whole plan. */
@@ -597,18 +663,29 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     expect(nearDeepPoint, 'a facing move swept deep inside pocket B, which its own first pass already removes').toBe(false);
   });
 
-  // The same exclusion, but for a pocket SMALLER than 2 cutter radii — erode(pocket, 2r) is
-  // empty, so excluding `eroded` alone would exclude nothing and face the whole small pocket
-  // anyway. The fallback must exclude the pocket's own RAW region instead.
-  it('facing excludes a pocket TOO SMALL to erode by 2r — the fallback excludes the raw region, not nothing', () => {
-    const tree = syntheticTreeWithLand(1.2); // the 10x10 pocket: erode(10x10, 6) for a ⌀6 flat is empty
+  // Advisor's review on 4355f5ef: a pocket (or an island's own gap) narrower than 2r erodes to
+  // NOTHING, and that is correct — every point in it is within 2r of SOME wall, so there is no
+  // legitimate "deep interior" to exclude. Excluding its raw region instead (4355f5ef's own
+  // first attempt) removes the overhang a thin wall needs AND silently drops an island's own
+  // top wherever the surrounding pocket is this narrow. Two red-first cases:
+  it('facing still reaches a wall between two pockets too small to erode individually', () => {
+    const { tree, landArea } = syntheticTreeTwoSmallPocketsWall(1.2);
     const result = planTray(tree);
     const facing = result.ops.find((op) => op.region.id === 'facing')!;
     expect(facing, 'facing is planned').toBeDefined();
-    const deepInPocket: [number, number] = [5, 5]; // the small pocket's own centre
-    const moves = facing.outcome.ir.operations.flatMap((o) => o.moves);
-    const nearDeepPoint = moves.some((m) => m.x !== undefined && m.y !== undefined && Math.hypot(m.x - deepInPocket[0], m.y - deepInPocket[1]) < 1);
-    expect(nearDeepPoint, 'a facing move swept the small pocket\'s own centre, which its own first pass already removes').toBe(false);
+    const radius = (facing.outcome.cutter.includes('3.175') ? 3.175 : 6) / 2;
+    const swept = sweptFraction(result.ops, 'facing', landArea, tree.top.z, radius);
+    expect(swept, `swept ${(100 * swept).toFixed(1)} % of the 3 mm wall between two 10x10 pockets`).toBeGreaterThanOrEqual(0.95);
+  });
+
+  it('facing still reaches an island top when the pocket around it is narrower than 2r', () => {
+    const { tree, landArea } = syntheticTreeBigPocketWithIsland(1.2);
+    const result = planTray(tree);
+    const facing = result.ops.find((op) => op.region.id === 'facing')!;
+    expect(facing, 'facing is planned').toBeDefined();
+    const radius = (facing.outcome.cutter.includes('3.175') ? 3.175 : 6) / 2;
+    const swept = sweptFraction(result.ops, 'facing', landArea, tree.top.z, radius);
+    expect(swept, `swept ${(100 * swept).toFixed(1)} % of the island top`).toBeGreaterThanOrEqual(0.95);
   });
 
   it('plans, posts and measures a synthetic one-pocket tree end to end — the pocket AND the contour', () => {
