@@ -77,7 +77,7 @@ def new_cells(facts):
     lines = {l['key']: l for l in facts.get('sevenLines', {}).get('lines', [])}
     return [
         pct(facts.get('coverage')),
-        f"{cut * 100:.2f} % · max {ci.get('maxMm') or 0:.3f} mm{where}",
+        f"{cut * 100:.2f} % adjudicated · raw max {ci.get('maxMm') or 0:.3f} mm{where}",
         f"{facts['cycleSeconds'] / 60:.1f} min",
         pct(facts.get('airFraction')),
         num(facts.get('rapidsPer1000FeedLines')),
