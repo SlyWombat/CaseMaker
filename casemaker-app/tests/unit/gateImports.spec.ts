@@ -28,16 +28,17 @@
  * `import { type X }` still emits a module load, so it is followed as a value edge. The fixture
  * pair under `fixtures/importGraph/` pins that distinction.
  *
- * TODAY (main aba577f9, 2026-11-04) the rule fails on THREE roots, each owned:
- *   - `goalCheckField.ts` — 9 forbidden files, first hop a value import of `cam/surface3d` (#967,
- *     C's extraction);
- *   - `designCheck.ts` — 4 forbidden files via `oracle.ts`: `vProfile`, `engrave/partPlan`,
- *     `cam/ir` (through `rotary/wrap`) and `cam/tabSettings` (through `stockStart` →
- *     `defaultsClient`) — A's `oracleTypes.ts` split (#924);
- *   - `goalCheckInput.ts` — 10 forbidden files via `jobSetup.ts` — A's `pureGoalObject` →
- *     `jobKind.ts` move.
- * `goalCoverage.ts` is clean (its only CAM touch is a declaration-level `import type`).
- * Each failing case is `it.fails` so main stays green; the change that fixes one flips it to
+ * MEASURED on this branch (main a17b27f4 + #967, 86d98612):
+ *   - `goalCheckField.ts` — 17 files, **0 forbidden**. It was 47 / 9 before #967; the extraction
+ *     is what closed it, and this case now guards it as a plain `it`.
+ *   - `designCheck.ts` — 71 files, **4 forbidden** via `oracle.ts`: `vProfile`,
+ *     `engrave/partPlan`, `cam/ir` (through `rotary/wrap`) and `cam/tabSettings` (through
+ *     `stockStart` → `defaultsClient`) — A's `oracleTypes.ts` split (#924) is the flip.
+ *   - `goalCheckInput.ts` — 90 files, **4 forbidden** via `jobSetup.ts`: the same four (the CAM's
+ *     `surface3d`/`relief` paths went with #967; `partPlan`, `vProfile`, `cam/ir`, `cam/tabSettings`
+ *     remain) — A's `pureGoalObject` → `jobKind.ts` move is the flip.
+ *   - `goalCoverage.ts` — 1 file, 0; `goalHeightfield.ts` (the extracted module) — 16 files, 0.
+ * The two failing cases are `it.fails` so main stays green; the change that fixes one flips it to
  * `it`, and this spec then guards it.
  *
  * One more rule from A's R1: `cam/model/**` must NEVER import the extracted heightfield module —
@@ -109,17 +110,19 @@ describe('#964 the gate roots and the graph’s rules', () => {
 
   it('enters every module — the walk does not stop at placement', () => {
     // This is A's finding: `jobSetup` is where the gate gets `pureGoalObject`, and its closure
-    // reaches the CAM. A stop-at-allowlist rule would hide exactly that.
+    // still reaches the CAM after #967 (`cam/ir`, `cam/tabSettings`). A stop-at-allowlist rule
+    // would hide exactly that.
     const closure = closureOf('engine/cnc/engrave/goalCheckInput.ts');
     expect(closure.files.has('engine/cnc/engrave/jobSetup.ts')).toBe(true);
-    expect(closure.files.has('engine/cnc/cam/surface3d.ts')).toBe(true);
+    expect(closure.files.has('engine/cnc/cam/ir.ts')).toBe(true);
+    expect(closure.files.has('engine/cnc/cam/tabSettings.ts')).toBe(true);
   });
 });
 
 describe('#964 the gate’s value-import closure carries no CAM', () => {
   // RED-FIRST: these three are the cuts that make the rule true. Flip each to `it` in the change
   // that lands its fix (the failure message then names anything that regresses).
-  it.fails('goalCheckField — clean once #967 extracts the heightfield module', () => {
+  it('goalCheckField — 17 files, 0 forbidden after #967 (was 47 / 9)', () => {
     const bad = forbiddenIn(closureOf('workers/sim/goalCheckField.ts'));
     expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
   });
@@ -129,7 +132,7 @@ describe('#964 the gate’s value-import closure carries no CAM', () => {
     expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
   });
 
-  it.fails('goalCheckInput — clean once pureGoalObject moves to jobKind.ts (A)', () => {
+  it.fails('goalCheckInput — 90 files, 4 forbidden; clean once pureGoalObject moves to jobKind.ts (A)', () => {
     const bad = forbiddenIn(closureOf('engine/cnc/engrave/goalCheckInput.ts'));
     expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
   });
