@@ -35,7 +35,8 @@ import {
 import { adaptiveSettings } from '@/engine/cnc/cam/adaptive';
 import { HOP_Z, SAFE_Z } from '@/engine/cnc/cam/ir';
 import { moveBuffersOf } from '@/engine/cnc/cam/moveWire';
-import type { GoalHeightfield, SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
+import type { SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 
 const MiB = 1024 * 1024;

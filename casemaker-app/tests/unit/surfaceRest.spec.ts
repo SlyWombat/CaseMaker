@@ -8,9 +8,9 @@ import {
   restResidualVisible,
   suggestedRestRadiusMm,
   surfaceResidual,
-  type GoalHeightfield,
   type SurfaceFeeds,
 } from '@/engine/cnc/cam/surface3d';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 
 /** The same V-valley as the residual spec: 1 mm of rise per 0.5 mm of X either side of centre. */

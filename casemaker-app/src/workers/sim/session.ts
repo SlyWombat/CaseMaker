@@ -51,7 +51,7 @@ import {
 } from '@/engine/cnc/engrave/oracle';
 import { computeCopperTopology, type PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import { checkDesignReach, checkGoalCutInto, goalCutIntoUnchecked, type DesignCheckItem, type GoalCutIntoOptions } from '@/engine/cnc/engrave/designCheck';
-import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { exactSweptField } from './sweptPoint';

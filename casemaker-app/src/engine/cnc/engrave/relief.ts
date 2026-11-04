@@ -2,9 +2,10 @@
  * #672 — THE IMAGE RELIEF'S ONE MAPPING, and nothing else.
  *
  * A greyscale image becomes a top-Z heightfield: every pixel's LUMINANCE maps to a depth below the
- * goal's top face, and the existing goal pipeline (`sampleGoalHeightfield` → `cam/surface3d.ts`)
- * roughs and finishes it like any mesh goal. This module owns the map itself so the sampler, the
- * row and the sheet cannot state different numbers:
+ * goal's top face, and the existing goal pipeline (`sampleGoalHeightfield` in
+ * `engrave/goalHeightfield.ts`, then the surface CAM) roughs and finishes it like any mesh goal.
+ * This module owns the map itself so the sampler, the row and the sheet cannot state different
+ * numbers:
  *
  *     white01 = luminance / 255                       (Rec.601; `import/png.ts` decodes)
  *     depth   = D × (invert ? white01 : 1 − white01)  black is deep by default

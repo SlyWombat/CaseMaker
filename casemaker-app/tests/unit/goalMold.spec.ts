@@ -20,11 +20,13 @@ const backing = new Map<string, string>();
 
 import {
   generateSurface3dIR,
-  moldHeightfield,
-  sampleGoalHeightfield,
   type SurfaceFeeds,
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
+import {
+  moldHeightfield,
+  sampleGoalHeightfield,
+} from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';

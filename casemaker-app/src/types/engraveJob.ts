@@ -815,7 +815,7 @@ export interface GoalUnderside {
 
 /**
  * #672 — how a picture's tones become depths. The map itself is one function
- * (`engine/cnc/cam/relief.ts`); these are its two numbers, both optional so a document that
+ * (`engine/cnc/engrave/relief.ts`); these are its two numbers, both optional so a document that
  * states neither takes the labelled defaults (`reliefNumbers`).
  */
 export interface EngraveReliefSettings {

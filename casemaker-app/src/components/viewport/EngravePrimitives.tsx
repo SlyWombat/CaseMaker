@@ -31,7 +31,7 @@ import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveRowStore } from '@/store/engraveRowStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import { targetPlacement } from '@/engine/cnc/engrave/targetScale';
-import { isMold } from '@/engine/cnc/cam/surface3d';
+import { isMold } from '@/engine/cnc/engrave/goalHeightfield';
 import type { EngravePrimitive, EngraveTargetObject } from '@/types/engraveJob';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngravePreviewGoal } from '@/workers/sim/engravePreview';

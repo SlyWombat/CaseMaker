@@ -19,7 +19,7 @@ import type { ThreeEvent } from '@react-three/fiber';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { rememberGoalPlacement } from '@/store/goalTransformUndo';
 import { useViewportStore } from '@/store/viewportStore';
-import { isMold } from '@/engine/cnc/cam/surface3d';
+import { isMold } from '@/engine/cnc/engrave/goalHeightfield';
 import { turnsFacing, turnsPatch, type FaceDirection } from '@/engine/cnc/engrave/goalOrientation';
 import { targetPlacement, targetScale, targetTurns } from '@/engine/cnc/engrave/targetScale';
 import type { EngraveTargetObject } from '@/types/engraveJob';

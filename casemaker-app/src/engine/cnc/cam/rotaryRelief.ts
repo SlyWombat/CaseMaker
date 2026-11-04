@@ -35,7 +35,7 @@
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { targetScale } from '@/engine/cnc/engrave/targetScale';
-import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_CELLS } from './surface3d';
+import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_CELLS, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 
 /**
  * A radius-per-(x, φ) field over the rotary map, in millimetres. `z[j*nx + i]` is the goal's
@@ -289,7 +289,6 @@ import {
   DEFAULT_STOCK_TO_LEAVE_MM,
   finishTipField,
   finishingMoves,
-  type GoalHeightfield,
   type SurfaceFeeds,
   type SurfaceTool,
 } from './surface3d';

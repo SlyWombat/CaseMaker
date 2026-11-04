@@ -14,7 +14,7 @@ import {
   rotateCoverageMesh,
   type CoverageMesh,
 } from '@/engine/cnc/engrave/goalCoverage';
-import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 
 /** A flat heightfield: every cell at `z`, all covered. */
 function fieldAt(z: number, nx = 11, ny = 11, x0 = 0, y0 = 0, pitch = 1): GoalHeightfield {

@@ -37,12 +37,14 @@ const backing = new Map<string, string>();
 
 import {
   generateSurface3dIR,
-  moldHeightfield,
-  sampleGoalHeightfield,
-  type GoalHeightfield,
   type SurfaceFeeds,
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
+import {
+  moldHeightfield,
+  sampleGoalHeightfield,
+  type GoalHeightfield,
+} from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { engraveGenerate, generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { createSimSession } from '@/workers/sim/session';

@@ -18,7 +18,7 @@ import { generate } from './helpers/engravePipeline';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { chooseLayFlat } from '@/engine/cnc/engrave/goalOrientation';
-import { sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { goalCoverage, type CoverageMesh, type ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { goalSurfaceOffer } from '@/engine/cnc/engrave/goalFlipFindings';
 import { clearTargetObjectMeshCache, readTargetObjectFile, targetObjectMesh } from '@/engine/import/targetObject';

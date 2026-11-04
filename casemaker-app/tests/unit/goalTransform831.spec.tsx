@@ -17,7 +17,7 @@ import {
   turnsPatch,
 } from '@/engine/cnc/engrave/goalOrientation';
 import { placedSize, rotationMatrix } from '@/engine/cnc/engrave/targetScale';
-import { sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { serializeJobFile } from '@/engine/cnc/engrave/jobFile';

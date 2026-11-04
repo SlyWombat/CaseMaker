@@ -167,8 +167,6 @@ import { targetRim } from '@/engine/cnc/engrave/targetRim';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, efficiencyOf, estimateCycleSeconds, estimateCycleTerms, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStatsOf, type CamMove, type CamOperation, type CamPassStep, type CycleTerms, type ProgramEfficiency, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
-  DEFAULT_GRID_PITCH_MM,
-  DEFAULT_MAX_CELLS,
   DEFAULT_MAX_FINISH_TIP_OPS,
   DEFAULT_STOCK_TO_LEAVE_MM,
   generateSurface3dForGoal,
@@ -179,18 +177,14 @@ import {
   GOAL_BYTES_PER_MOVE,
   tipStencilCells,
   type GoalMoveEstimate,
-  moldHeightfield,
   REST_TOLERANCE_MM,
   planSurfaceRest,
   restResidualVisible,
-  sampleGoalHeightfield,
   goalClearBand,
   suggestedRestRadiusMm,
   surfaceResidual,
   surfaceToolFor,
   planGoalOvercut,
-  type SampleGoalOpts,
-  isMold,
   steepestWallDeg,
   type GoalRestFacts,
   type GoalSurfaceFacts,
@@ -199,6 +193,14 @@ import {
   type Surface3dResult,
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
+import {
+  DEFAULT_GRID_PITCH_MM,
+  DEFAULT_MAX_CELLS,
+  moldHeightfield,
+  sampleGoalHeightfield,
+  isMold,
+  type SampleGoalOpts,
+} from '@/engine/cnc/engrave/goalHeightfield';
 import { type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
 import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';

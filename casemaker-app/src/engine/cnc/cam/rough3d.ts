@@ -25,7 +25,8 @@ import type { Polygons } from './pocket';
 import { planAdaptive, type AdaptiveProvenance, type AdaptiveSettings } from './adaptive';
 import { HOP_Z, SAFE_Z, type CamMove } from './ir';
 import { cuttingRadiusForSweep, type Tool } from '../tool';
-import type { GoalHeightfield, SurfaceFeeds } from './surface3d';
+import type { SurfaceFeeds } from './surface3d';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 
 const EPS = 1e-6;
 

@@ -25,7 +25,7 @@
  * mesh's uncovered cells are.
  */
 
-import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_CELLS, type GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_CELLS, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { EngraveConePrimitive, EngraveJob, EngravePrimitive, EngraveSpherePrimitive } from '@/types/engraveJob';
 
 /** The two shapes the flat region CAM cannot cut and the surface CAM can. */

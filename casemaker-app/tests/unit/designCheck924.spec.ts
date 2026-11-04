@@ -18,7 +18,7 @@ import {
   vGrooveVolumeMm3,
   type DesignCheckItem,
 } from '@/engine/cnc/engrave/designCheck';
-import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { ORACLE_AREA_FLOOR } from '@/engine/cnc/engrave/oracle';
 
 const CS = tl.CrossSection;

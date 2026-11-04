@@ -174,7 +174,7 @@ import { prismNumbers, type PrismCheck } from '@/engine/cnc/engrave/prism';
 import { jobFileName } from '@/engine/cnc/engrave/jobFile';
 import { decodePng } from '@/engine/import/png';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
-import { reliefNumbers } from '@/engine/cnc/cam/relief';
+import { reliefNumbers } from '@/engine/cnc/engrave/relief';
 import { saveJobFileText } from '@/store/engraveJobFileStore';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { setOperationIntake } from './operationIntake';

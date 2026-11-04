@@ -32,7 +32,7 @@
  * runs.
  */
 
-import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 
 /** A mesh's triangles, flat: `positions[i*3 + axis]`, three indices per triangle. */
 export interface CoverageMesh {

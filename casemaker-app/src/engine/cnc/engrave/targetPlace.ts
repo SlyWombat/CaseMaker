@@ -1,6 +1,6 @@
 /**
  * WHERE A TARGET MESH SITS IN THE WORK FRAME (#722, #723 part 2) — one definition, shared by the
- * goal sampler (`cam/surface3d.ts`) and the rim extractor (#829, `engrave/targetRim.ts`).
+ * goal sampler (`engrave/goalHeightfield.ts`) and the rim extractor (#829, `engrave/targetRim.ts`).
  *
  * The mesh's LOCAL points are scaled about its bbox centre (X/Y) and its top (Z), turned about
  * that same centre by the object's three Euler turns (Z first, then Y, then X — `rotationMatrix`'s

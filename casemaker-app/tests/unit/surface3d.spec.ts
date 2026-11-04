@@ -25,10 +25,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import {
-  DEFAULT_GRID_PITCH_MM,
   DEFAULT_MAX_FINISH_TIP_OPS,
   generateSurface3dIR,
-  sampleGoalHeightfield,
   estimateGoalMoves,
   planGoalOvercut,
   finishTipField,
@@ -36,10 +34,14 @@ import {
   goalMemoryBudgetMb,
   GOAL_MEMORY_BUDGET_MB,
   GOAL_BYTES_PER_MOVE,
-  type GoalHeightfield,
   type SurfaceFeeds,
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
+import {
+  DEFAULT_GRID_PITCH_MM,
+  sampleGoalHeightfield,
+  type GoalHeightfield,
+} from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';

@@ -49,7 +49,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import { checkGoalCutInto, goalCutIntoUnchecked } from '@/engine/cnc/engrave/designCheck';
-import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
 import { Z1 } from '@/engine/cnc/machine';

@@ -17,7 +17,7 @@ const backing = new Map<string, string>();
   },
 } as Storage;
 
-import { sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import {
   fitToStockScale,

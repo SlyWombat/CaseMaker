@@ -13,10 +13,10 @@ import { describe, expect, it } from 'vitest';
 import {
   generateSurface3dIR,
   surfaceResidual,
-  type GoalHeightfield,
   type SurfaceFeeds,
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { HOP_Z, SAFE_Z } from '@/engine/cnc/cam/ir';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { Tool } from '@/engine/cnc/tool';

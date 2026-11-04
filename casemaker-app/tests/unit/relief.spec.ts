@@ -12,8 +12,9 @@ import { describe, it, expect } from 'vitest';
 import { zlibSync } from 'fflate';
 
 import { decodePng, pngPixelSize } from '@/engine/import/png';
-import { DEFAULT_RELIEF_DEPTH_MM, reliefDepthMm, reliefNumbers } from '@/engine/cnc/cam/relief';
-import { sampleGoalHeightfield, generateSurface3dForGoal } from '@/engine/cnc/cam/surface3d';
+import { DEFAULT_RELIEF_DEPTH_MM, reliefDepthMm, reliefNumbers } from '@/engine/cnc/engrave/relief';
+import { generateSurface3dForGoal } from '@/engine/cnc/cam/surface3d';
+import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { validateJob } from '@/engine/cnc/engrave/jobSetup';

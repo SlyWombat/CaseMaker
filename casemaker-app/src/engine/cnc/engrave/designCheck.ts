@@ -37,7 +37,7 @@ import {
   type OraclePolygon,
   type OracleSliceAt,
 } from '@/engine/cnc/engrave/oracle';
-import type { GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { goalTopAt, type ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 
 type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;

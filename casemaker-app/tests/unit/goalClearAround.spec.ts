@@ -15,11 +15,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   generateSurface3dIR,
-  sampleGoalHeightfield,
-  type GoalHeightfield,
   type SurfaceFeeds,
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
+import {
+  sampleGoalHeightfield,
+  type GoalHeightfield,
+} from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';

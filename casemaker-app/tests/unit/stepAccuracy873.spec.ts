@@ -38,7 +38,7 @@ import { describe, expect, it } from 'vitest';
 
 import { generate } from './helpers/engravePipeline';
 import { tl } from './helpers/manifoldExec';
-import { sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { COVERAGE_DEFAULTS, goalCoverage, type CoverageMesh, type ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';

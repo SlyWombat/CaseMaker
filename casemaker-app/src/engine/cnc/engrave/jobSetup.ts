@@ -53,7 +53,7 @@ import { inlayGlueGap, inlayMarked, inlayNumbers } from './inlay';
 import { textureNumbers, textureStrokes } from './texture';
 import { fluteNumbers, fluteOperationName } from './flute';
 import { prismHeightRefusal, prismNumbers } from './prism';
-import { reliefNumbers } from '@/engine/cnc/cam/relief';
+import { reliefNumbers } from './relief';
 import { bracketSettings, defaultClampPlacements, validateBracketMount, type ClampPlacement, type StockSize } from '@/engine/cnc/mounts/bracket';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';

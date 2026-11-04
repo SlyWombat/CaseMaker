@@ -11,7 +11,7 @@ import { tl } from './helpers/manifoldExec';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { crossSectionPolylines, goalUndersideOffer, silhouettePlane, undersideClearBaseZ, undersideFloorZ, undersideSentence, UNDERSIDE_PLINTH_MM, UNDERSIDE_TAB_THICKNESS_MM } from '@/engine/cnc/engrave/goalUnderside';
 import { planUndersideFlip } from '@/engine/cnc/engrave/goalFlipSetups';
-import { sampleGoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';

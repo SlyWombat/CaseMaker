@@ -21,7 +21,7 @@
  * (The LEFTOVER bands are read with the page's own stamp and carry no such band.)
  */
 
-import { isMold, moldHeightfield, sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/cam/surface3d';
+import { isMold, moldHeightfield, sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import type { GoalCheckTarget, SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import type { GoalCheckInput, SimSession } from './session';

@@ -23,7 +23,7 @@ import { parseStl, type ParsedMesh } from './stlParser';
 import { objUnitSentence, parseObj } from './objParser';
 import { parse3MF } from './threeMfParser';
 import { decodePng } from './png';
-import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/cam/relief';
+import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/engrave/relief';
 
 export type TargetObjectFormat = EngraveTargetObject['format'];
 
