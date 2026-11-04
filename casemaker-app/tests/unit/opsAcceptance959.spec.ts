@@ -47,7 +47,8 @@ import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engi
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { Z1 } from '@/engine/cnc/machine';
-import { flatEndMill } from '@/engine/cnc/tool';
+import { cuttingDiameter, flatEndMill } from '@/engine/cnc/tool';
+import { pocket } from '@/engine/cnc/cam/model/ops/pocket';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { planPocketsForTree, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
@@ -103,6 +104,21 @@ function sweptFraction(ops: PlanPocketsResult['ops'], regionId: string, area: Po
     }
   }
   return total === 0 ? 0 : hit / total;
+}
+
+/** Sum of XY distance across every FEED move (never a rapid/hop) — the real posted path length
+ * a step-over change should shrink, same move-reading discipline `sweptFraction` above uses. */
+function totalFeedLength(ir: ToolpathIR): number {
+  let total = 0;
+  for (const operation of ir.operations) {
+    let at: [number, number] | null = null;
+    for (const m of operation.moves) {
+      if (!('x' in m) || m.x === undefined || m.y === undefined) { at = null; continue; }
+      if (at !== null && m.kind === 'feed') total += Math.hypot(m.x - at[0], m.y - at[1]);
+      at = [m.x, m.y];
+    }
+  }
+  return total;
 }
 
 async function placedTree(file: string, stock: [number, number], modelTop: number): Promise<{ tree: FeatureTree; mesh: { positions: Float32Array; indices: Uint32Array } }> {
@@ -344,71 +360,6 @@ function syntheticTreeFacingCoverage(skinMm: number): { tree: FeatureTree; landA
   return { tree, landArea };
 }
 
-/** Two 10x10 pockets with a 3 mm wall between them (1 mm rim all round) — EACH pocket, alone,
- * erodes to nothing at 2r for a ⌀6 flat (10 - 2x6 < 0): advisor's review on 4355f5ef, red-first
- * for "small pockets contribute no exclusion, so the wall between them is still fully land." */
-function syntheticTreeTwoSmallPocketsWall(skinMm: number): { tree: FeatureTree; landArea: Polygons } {
-  const outline: [number, number][][] = [[[0, 0], [25, 0], [25, 12], [0, 12]]];
-  const cRegion: [number, number][][] = [[[1, 1], [11, 1], [11, 11], [1, 11]]];
-  const dRegion: [number, number][][] = [[[14, 1], [24, 1], [24, 11], [14, 11]]];
-  const partTop = -skinMm;
-  const floorZ = partTop - 3;
-  const c: PocketNode = {
-    id: 'c', floorZ, mouthZ: partTop, open: false, through: false,
-    region: cRegion, floors: [{ polygons: cRegion, area: 100 }],
-    islands: [], children: [], remainder: [], narrowest: 10,
-  };
-  const d: PocketNode = {
-    id: 'd', floorZ, mouthZ: partTop, open: false, through: false,
-    region: dRegion, floors: [{ polygons: dRegion, area: 100 }],
-    islands: [], children: [], remainder: [], narrowest: 10,
-  };
-  const landArea: [number, number][][] = [[[11, 1], [14, 1], [14, 11], [11, 11]]]; // just the wall strip
-  const tree: FeatureTree = {
-    frame: { up: [0, 0, 1], stockTop: 0, partTop, partBottom: floorZ },
-    levels: [floorZ],
-    top: { z: partTop, floors: [], area: 0 },
-    contour: { outline, area: 300, zTo: floorZ, frees: true, shoulders: [] },
-    pockets: [c, d],
-    rims: [],
-    remainder: [],
-    unreachable: [],
-    report: { source: 'mesh', patches: 1, planarArea: 300, remainderArea: 0, tolerances: {} as never, slivers: [], notes: [] },
-  };
-  return { tree, landArea };
-}
-
-/** A 20x20 pocket with a 10x10 island centred in it (5 mm gap all round) — the GAP around the
- * island, not the whole pocket, is narrower than 2r for a ⌀6 flat (5 < 6): erode(pocket WITH its
- * island hole, 2r) is empty for this reason alone, even though the pocket itself is not small.
- * Advisor's review on 4355f5ef, red-first for "the island top is still land when its own gap is
- * this narrow — never silently dropped along with the rest of the pocket's exclusion." */
-function syntheticTreeBigPocketWithIsland(skinMm: number): { tree: FeatureTree; landArea: Polygons } {
-  const outline: [number, number][][] = [[[0, 0], [30, 0], [30, 30], [0, 30]]];
-  const pocketOuter: [number, number][] = [[5, 5], [25, 5], [25, 25], [5, 25]];
-  const islandOutline: [number, number][] = [[10, 10], [10, 20], [20, 20], [20, 10]];
-  const pocketRegion: [number, number][][] = [pocketOuter, islandOutline];
-  const partTop = -skinMm;
-  const floorZ = partTop - 3;
-  const node: PocketNode = {
-    id: 'p', floorZ, mouthZ: partTop, open: false, through: false,
-    region: pocketRegion, floors: [{ polygons: pocketRegion, area: 300 }],
-    islands: [{ outline: [islandOutline], topZ: partTop }], children: [], remainder: [], narrowest: 5,
-  };
-  const landArea: [number, number][][] = [[islandOutline[0]!, islandOutline[3]!, islandOutline[2]!, islandOutline[1]!]]; // the island top only
-  const tree: FeatureTree = {
-    frame: { up: [0, 0, 1], stockTop: 0, partTop, partBottom: floorZ },
-    levels: [floorZ],
-    top: { z: partTop, floors: [], area: 0 },
-    contour: { outline, area: 900, zTo: floorZ, frees: true, shoulders: [] },
-    pockets: [node],
-    rims: [],
-    remainder: [],
-    unreachable: [],
-    report: { source: 'mesh', patches: 1, planarArea: 900, remainderArea: 0, tolerances: {} as never, slivers: [], notes: [] },
-  };
-  return { tree, landArea };
-}
 
 /** Two pockets and an outline; `region` distinguishes them by width so a wrapped offset can throw
  * for one specific region on demand (below) — the manager's #959 ruling: a region that fails to
@@ -590,7 +541,7 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
   });
 
 
-  it('a skin between the stock top and the part top is faced by the pocket, and the contour still reaches the full depth down from the STOCK top', () => {
+  it('a skin between the stock top and the part top is faced separately, and the contour still reaches the full depth down from the STOCK top', () => {
     const tree = syntheticTreeWithSkin(1.2);
     const result = planTray(tree);
     const contourResult = result.ops.find((op) => op.kind === 'contour')!;
@@ -600,17 +551,19 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     // -4.2 (zTo, already expressed relative to the stock top): the old `partTop - zTo` depth
     // (3, not 4.2) stopped the contour 1.2 mm short of the real floor.
     expect(deepestContourZ).toBeCloseTo(tree.contour.zTo, 6);
-    // By region id, not kind: facing is ALSO a 'pocket'-kind op now (it covers the whole
-    // outline, not just `top.floors`' own leftover land — advisor's review on 9a5cc607), and
-    // this fixture's skin means facing exists here too, even though it has no separate land.
+    // The manager's own ruling: facing takes the skin, a root pocket's own mouth starts at
+    // `tree.top.z` (not the stock top) so it does not re-face the same layer a second time.
+    const facing = result.ops.find((op) => op.region.id === 'facing')!;
+    expect(facing, `ops: ${result.ops.map((o) => o.region.id).join(', ')}`).toBeDefined();
+    expect(facing.outcome.ir.operations[0]!.depth).toBeCloseTo(1.2, 6);
     const pocketResult = result.ops.find((op) => op.region.id === 'synthetic-1')!;
-    // depth = stockTop(0) - floorZ(-4.2) = 4.2, not partTop(-1.2) - floorZ(-4.2) = 3: the root
-    // pocket's own first pass now faces the skin instead of engaging 1.2 mm deeper than planned.
-    expect(pocketResult.outcome.ir.operations[0]!.depth).toBeCloseTo(4.2, 6);
-    // Advisor's review on 108e120c: this is the FIRST time a program deeper than `partTop -
-    // partBottom` (3) is actually posted — `postZ1` must accept the real 4.2 mm cut, not just
-    // plan it. A refusal here (a stock/depth mismatch, say) is exactly E's condition on both the
-    // tray and the organizer, so it must be caught here, not on dave-1.
+    // depth = top.z(-1.2) - floorZ(-4.2) = 3, not stockTop(0) - floorZ(-4.2) = 4.2: facing
+    // already took the skin, so the pocket's own first pass starts below it, not at the stock top.
+    expect(pocketResult.outcome.ir.operations[0]!.depth).toBeCloseTo(3, 6);
+    // Advisor's review on 108e120c: a program deeper than `partTop - partBottom` (3) is posted
+    // here (the contour's 4.2 mm) — `postZ1` must accept it, not just plan it. A refusal here
+    // (a stock/depth mismatch, say) is exactly E's condition on both the tray and the organizer,
+    // so it must be caught here, not on dave-1.
     expect(() => writeAcceptance('skin', tree, result)).not.toThrow();
   });
 
@@ -625,8 +578,17 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     expect(facing, `ops: ${result.ops.map((op) => op.region.id).join(', ')}`).toBeDefined();
     // depth = stockTop(0) - top.z(-1.2) = 1.2 — just the skin, not the pocket's own 4.2 mm.
     expect(facing!.outcome.ir.operations[0]!.depth).toBeCloseTo(1.2, 6);
+    // The manager's own clarification of "stop at each land's own Z": facing removes ONLY the
+    // skin between the stock top and the part's top land, one level, NEVER deeper — everything
+    // below the top land belongs to the pockets and the contour. Checked directly on the deepest
+    // move's own Z, not just the `depth` magnitude (which stockTop(0) - top.z(-1.2) and a
+    // double-counted depth could both satisfy by coincidence).
+    const deepestFacingZ = Math.min(...facing!.outcome.ir.operations.flatMap((o) => o.moves.map((m) => m.z)));
+    expect(deepestFacingZ).toBeCloseTo(tree.top.z, 6);
+    // depth = top.z(-1.2) - floorZ(-4.2) = 3, not stockTop(0) - floorZ(-4.2) = 4.2: facing
+    // already took the skin, so the pocket's own first pass starts below it.
     const pocketOp = result.ops.find((op) => op.region.id === 'p')!;
-    expect(pocketOp.outcome.ir.operations[0]!.depth).toBeCloseTo(4.2, 6);
+    expect(pocketOp.outcome.ir.operations[0]!.depth).toBeCloseTo(3, 6);
     expect(() => writeAcceptance('land', tree, result)).not.toThrow();
   });
 
@@ -646,47 +608,78 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     expect(swept, `facing cutter ${cutter}, swept ${(100 * swept).toFixed(1)} % of the rim/wall/island-top land`).toBeGreaterThanOrEqual(0.95);
   });
 
-  // The manager's #959 ruling: facing must not re-sweep a pocket's own deep interior — a root
-  // pocket's own first pass already engages it from the stock top, so facing it again is pure
-  // waste (E's organizer run on b37d6356: the facing pass alone cost 5,034 s, 24 % of why the
-  // part came in at 2.15x Makera, over the <= 2x line).
-  it('facing excludes a pocket big enough to erode cleanly — not re-sweeping what the pocket already removes', () => {
-    const { tree } = syntheticTreeFacingCoverage(1.2);
+  // The manager's instruction after E's faf7ad78 measurement: the real lever is the STEP-OVER
+  // (facing ran at 25 % of the cutter's own diameter where the raster allows 50 %) — red-first
+  // on the posted feed length before trusting it, not just "an op exists" (same discipline as
+  // the coverage test above).
+  it("facing posts a measurably SHORTER feed path at the cutter's own 50% step-over than it would at the old 25% one", () => {
+    const tree = syntheticTreeWithLand(1.2);
     const result = planTray(tree);
-    const facing = result.ops.find((op) => op.region.id === 'facing')!;
-    expect(facing, 'facing is planned').toBeDefined();
-    // Pocket B spans (21,2)-(38,18): deep centre (29.5, 10) is 8+ mm from every wall, well past
-    // any cutter's own 2r exclusion margin (2 x 3 = 6 for a ⌀6 flat, 2 x 1.5875 = 3.175 for ⌀3.175).
-    const deepInB: [number, number] = [29.5, 10];
-    const moves = facing.outcome.ir.operations.flatMap((o) => o.moves);
-    const nearDeepPoint = moves.some((m) => m.x !== undefined && m.y !== undefined && Math.hypot(m.x - deepInB[0], m.y - deepInB[1]) < 1);
-    expect(nearDeepPoint, 'a facing move swept deep inside pocket B, which its own first pass already removes').toBe(false);
+    const facingOp = result.ops.find((op) => op.region.id === 'facing')!;
+    expect(facingOp, `ops: ${result.ops.map((o) => o.region.id).join(', ')}`).toBeDefined();
+
+    const toolRadius = cuttingDiameter(FLAT6)! / 2; // 3 mm — the 50% ceiling `pocketLoops` allows
+    const facingRegionPolys = makeClipperOffset(tl)(tree.contour.outline, 2 * toolRadius);
+    const baseOpts = {
+      cutter: FLAT6,
+      node: {
+        id: 'facing', floorZ: tree.top.z, mouthZ: 0, open: false, through: false,
+        region: facingRegionPolys, floors: [], islands: [], children: [], remainder: [], narrowest: Infinity,
+      },
+      region: facingOp.region,
+      stepDownMm: 1.5,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      offset: makeClipperOffset(tl),
+      safeZMm: 5, hopZMm: 1, toolNumber: 1, spindleRpm: 12000, air: true, rapid: RAPID,
+    };
+    const atHalf = pocket({ ...baseOpts, stepOverMm: toolRadius });
+    const atOldQuarter = pocket({ ...baseOpts, stepOverMm: cuttingDiameter(FLAT6)! / 4 });
+    const halfLength = totalFeedLength(atHalf.ir);
+    const oldQuarterLength = totalFeedLength(atOldQuarter.ir);
+    expect(
+      halfLength,
+      `50% step-over posts ${halfLength.toFixed(1)} mm of feed vs the old 25%'s ${oldQuarterLength.toFixed(1)} mm — expected roughly half the rows, not a wash`,
+    ).toBeLessThan(oldQuarterLength);
+
+    // Tied to the real wiring, not just the lemma above: plan.ts's own facing op must actually
+    // BE the 50%-step-over program, not the old 25% one re-measured here by coincidence.
+    const postedLength = totalFeedLength(facingOp.outcome.ir);
+    expect(
+      postedLength,
+      `posted ${postedLength.toFixed(1)} mm; direct 50% call ${halfLength.toFixed(1)} mm; direct old-25% call ${oldQuarterLength.toFixed(1)} mm`,
+    ).toBeCloseTo(halfLength, 4);
   });
 
-  // Advisor's review on 4355f5ef: a pocket (or an island's own gap) narrower than 2r erodes to
-  // NOTHING, and that is correct — every point in it is within 2r of SOME wall, so there is no
-  // legitimate "deep interior" to exclude. Excluding its raw region instead (4355f5ef's own
-  // first attempt) removes the overhang a thin wall needs AND silently drops an island's own
-  // top wherever the surrounding pocket is this narrow. Two red-first cases:
-  it('facing still reaches a wall between two pockets too small to erode individually', () => {
-    const { tree, landArea } = syntheticTreeTwoSmallPocketsWall(1.2);
+  // Advisor's review on this revert: a root pocket's/wide through hole's own mouth is now
+  // `tree.top.z`, not the stock top — it ASSUMES facing already cleared the skin everywhere.
+  // That makes "facing posts first" a safety requirement, not just an efficiency nicety (a
+  // pocket posted before facing would take a first stepdown pass deeper than `stepDownMm`
+  // expects). Proven by the real `ops` array — which is also the real move order within a run,
+  // the same loop that builds `programs` — not by trusting `features`' own push order.
+  it('facing is posted BEFORE every pocket/through-hole whose mouth now assumes the skin is already gone', () => {
+    const tree = syntheticTreeWithLand(1.2);
     const result = planTray(tree);
-    const facing = result.ops.find((op) => op.region.id === 'facing')!;
-    expect(facing, 'facing is planned').toBeDefined();
-    const radius = (facing.outcome.cutter.includes('3.175') ? 3.175 : 6) / 2;
-    const swept = sweptFraction(result.ops, 'facing', landArea, tree.top.z, radius);
-    expect(swept, `swept ${(100 * swept).toFixed(1)} % of the 3 mm wall between two 10x10 pockets`).toBeGreaterThanOrEqual(0.95);
+    const facingIndex = result.ops.findIndex((op) => op.region.id === 'facing');
+    expect(facingIndex, `ops: ${result.ops.map((o) => o.region.id).join(', ')}`).toBeGreaterThanOrEqual(0);
+    for (let i = 0; i < result.ops.length; i++) {
+      const op = result.ops[i]!;
+      if (op.region.id === 'facing' || op.kind === 'contour') continue;
+      expect(
+        i,
+        `facing at ${facingIndex}, '${op.region.id}' at ${i} — posted order: ${result.ops.map((o) => o.region.id).join(', ')}`,
+      ).toBeGreaterThan(facingIndex);
+    }
   });
 
-  it('facing still reaches an island top when the pocket around it is narrower than 2r', () => {
-    const { tree, landArea } = syntheticTreeBigPocketWithIsland(1.2);
-    const result = planTray(tree);
-    const facing = result.ops.find((op) => op.region.id === 'facing')!;
-    expect(facing, 'facing is planned').toBeDefined();
-    const radius = (facing.outcome.cutter.includes('3.175') ? 3.175 : 6) / 2;
-    const swept = sweptFraction(result.ops, 'facing', landArea, tree.top.z, radius);
-    expect(swept, `swept ${(100 * swept).toFixed(1)} % of the island top`).toBeGreaterThanOrEqual(0.95);
-  });
+  // E's measurement on faf7ad78: excluding each pocket's own interior made BOTH reference parts
+  // SLOWER (the holed raster is many short feed segments, +58 %/+27 %) — reverted; facing covers
+  // the whole grown outline again, no exclusion (see the 'facing' dispatch's own comment). The
+  // three regressions this interior-exclusion fix (4355f5ef, faf7ad78) added — "excludes a pocket
+  // big enough to erode cleanly", "still reaches a wall between two pockets too small to erode
+  // individually", "still reaches an island top when the pocket around it is narrower than 2r" —
+  // guarded ONLY that exclusion logic, now reverted, so they are dropped rather than kept
+  // vacuously green (a pocket's own deep interior, a thin wall, a narrow island gap are all
+  // trivially "reached" once nothing is excluded at all).
 
   it('plans, posts and measures a synthetic one-pocket tree end to end — the pocket AND the contour', () => {
     const tree = syntheticTree();

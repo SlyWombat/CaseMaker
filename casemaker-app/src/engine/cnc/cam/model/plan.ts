@@ -339,8 +339,17 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // real cutter's own radius wherever the land is a wall or a rim narrower than that — exactly
   // where this plan most needs it to still reach. Facing the WHOLE outline instead (the SAME
   // open-edge overhang the open-shoulder fix already uses, `offset(outline, +2r)`) has neither
-  // problem and needs no ordering against the pockets: whichever runs first, the other cuts only
-  // air where they overlap. Computed per cutter (below, not here) since the margin is `r`-sized.
+  // problem. Computed per cutter (below, not here) since the margin is `r`-sized.
+  //
+  // Ordering now DOES matter (advisor's review on this revert): a root pocket's/wide through
+  // hole's own mouth is `tree.top.z`, not the stock top (below) — it assumes facing already took
+  // the skin everywhere, so facing posting AFTER one would hand it a first stepdown pass deeper
+  // than `stepDownMm` expects. This is pushed FIRST into `features`, below, which is enough: a
+  // flat tool covers facing unconditionally (no opening/corner/flute-depth constraint it can
+  // fail), so `chainFrom`'s own `addLink(primary)` always claims it on the first cutter's first
+  // link — and `regionIds`' own order-preserving filter over `pocketFeatures` then puts it ahead
+  // of every pocket/through-hole sharing that same step. See the regression test proving this by
+  // POSTED ORDER, not by trusting this push order alone, in `opsAcceptance959.spec.ts`.
   const facingDepthMm = z0 - tree.top.z;
   const hasFacing = facingDepthMm > 1e-6;
   if (hasFacing) {
@@ -409,43 +418,26 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     }
     if (id === 'facing') {
       const toolRadius = (cuttingDiameter(cutter) ?? 0) / 2;
-      const diameter = cuttingDiameter(cutter) ?? 1;
       // `offset(outline, +2r)`: the same open-edge overhang the open-shoulder fix uses, so the
       // facing cut reaches all the way to the true outer edge, past every island top and every
       // wall/rim too narrow to survive `tree.top.floors`' own erosion. The overshoot past the
       // true edge is air once the contour frees the part, same reasoning as the shoulder case.
-      const grown = opts.offset(tree.contour.outline, 2 * toolRadius);
-      // The manager's #959 ruling: exclude every root pocket's (and through hole's) own DEEP
-      // interior — its first pass already engages from the stock top (finding 2's own fix), so
-      // facing it again is pure waste. `erode(⋃ roots, 2r)` keeps a 2r margin around each one
-      // (the overhang a thin wall or rim still needs), only the interior past that is dropped.
-      const rootPocketNodes = pocketNodes.filter((n) => rootIds.has(n.id));
-      let facingRegion = grown;
-      if (opts.boolean !== undefined) {
-        // EACH pocket judged on its own, not the union eroded as one (the Manager's own "stop at
-        // each land's own Z", read literally — one pocket at a time, not the union as a whole).
-        // `erode(node.region, 2r)`, with its own island holes AS GIVEN, reaches exactly to every
-        // wall that bounds it — the outer AND each island's — the same erode-then-dilate-adjacent
-        // math the open-shoulder fix uses in reverse: a boundary shrunk by 2r, stood off by r,
-        // lands the tool centre exactly r in from the true wall, and the tool's own disc (radius
-        // r) reaches that last r on its own. A pocket (or the gap around its island) narrower than
-        // 2r on every side erodes to NOTHING — there is no point in it more than 2r from some
-        // wall, so there is no legitimate "deep interior" to exclude at all, and nothing is.
-        // Excluding its raw region instead (an earlier version of this fix did) would remove the
-        // SAME overhang a thin wall needs, and silently drop an island's own top wherever the
-        // surrounding pocket is this narrow — exactly what it is there to avoid.
-        const excludeRegions: Polygons[] = [];
-        for (const node of [...rootPocketNodes, ...throughNodes]) {
-          if (node.region.length === 0) continue;
-          const eroded = opts.offset(node.region, -2 * toolRadius);
-          if (eroded.length > 0) excludeRegions.push(eroded);
-        }
-        if (excludeRegions.length > 0) {
-          let union = excludeRegions[0]!;
-          for (const region of excludeRegions.slice(1)) union = opts.boolean.union(union, region);
-          facingRegion = opts.boolean.subtract(grown, union);
-        }
-      }
+      //
+      // E's measurement on faf7ad78: excluding each pocket's own interior made BOTH reference
+      // parts SLOWER (tray +165 s, organizer +155 s) — the holed raster this cut into the
+      // facing region, going around every pocket's own boundary, is many SHORT feed segments
+      // (+58 %/+27 % feed moves), and that cost more than the area it skipped saved. Reverted:
+      // facing covers the WHOLE grown outline again, no exclusion. The real lever E found in
+      // the posted program was the STEP-OVER: facing ran at 25 % of the cutter's own diameter
+      // (the same fraction a tight pocket needs for wall engagement), where an OPEN, single-pass
+      // facing cut can use far more of it. The manager's stated band was 50-60 %; `pocketLoops`
+      // itself refuses anything over 50 % by default (`maxStepOver = toolRadius`, #191 — past
+      // that, contour-parallel rings leave an uncut spine) and `pocket()` does not expose a
+      // higher one to ask for, so 50 % (= toolRadius, exactly the ceiling) is what this can
+      // actually post, not a choice within the band. Not a lookup of the real feeds row's own
+      // stepOverFraction (feeds.ts) either — wiring that in needs a material/tool lookup this
+      // function does not have today, named as the next integration point.
+      const facingRegion = opts.offset(tree.contour.outline, 2 * toolRadius);
       return pocket({
         cutter,
         node: {
@@ -453,7 +445,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
           region: facingRegion, floors: [], islands: [], children: [], remainder: [], narrowest: Infinity,
         },
         region: ref,
-        stepOverMm: diameter / 4,
+        stepOverMm: toolRadius,
         stepDownMm: opts.stepDownMm,
         feeds: opts.feeds,
         offset: opts.offset,
@@ -476,7 +468,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       if (throughNode.narrowest >= 2 * diameter) {
         return pocket({
           cutter,
-          node: { ...throughNode, mouthZ: rebase(z0), floorZ: rebase(throughNode.floorZ) },
+          // `tree.top.z`, not the stock top — facing already clears the skin above it everywhere,
+          // this hole's own footprint included (same reasoning as the root-pocket mouth, below).
+          node: { ...throughNode, mouthZ: rebase(tree.top.z), floorZ: rebase(throughNode.floorZ) },
           region: ref,
           stepOverMm: diameter / 4,
           stepDownMm: opts.stepDownMm,
@@ -505,9 +499,14 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     if (node === undefined) return null;
     const diameter = cuttingDiameter(cutter) ?? 1;
     // Rebased onto the SAME Z 0 = stock top every op shares (see this function's header note); a
-    // root's own mouth is the stock top itself (finding 2), a nested node's is its parent's floor,
-    // unaffected by the override — both still need the SAME `-z0` shift as `floorZ`.
-    const mouthZAbs = rootIds.has(node.id) ? z0 : node.mouthZ;
+    // root's own mouth is `tree.top.z`, not the stock top directly — facing (above) already
+    // clears the skin from the stock top down to the top land everywhere, including over every
+    // root pocket's own footprint, so a root pocket starting at the stock top too would re-face
+    // that same skin layer a second time (the manager's "pocket passes that overlap the faced
+    // land start below it"). `tree.top.z` equals the stock top when there is no skin, so this is
+    // the stock top again in that case — not a separate branch. A nested node's mouth is
+    // unaffected, its parent's own floor, as before.
+    const mouthZAbs = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
     return pocket({
       cutter,
       node: { ...node, mouthZ: rebase(mouthZAbs), floorZ: rebase(node.floorZ) },
@@ -616,7 +615,19 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   });
 
   const notes: string[] = [];
-  for (const [id, message] of regionFailures) notes.push(`${id}: not cut — planning failed (${message})`);
+  for (const [id, message] of regionFailures) {
+    notes.push(`${id}: not cut — planning failed (${message})`);
+    // A root pocket's/wide through hole's own mouth assumes facing already cleared the skin
+    // (above) — if facing itself is the region that failed, that assumption is now FALSE for
+    // every pocket this plan still posted, and nothing re-plans them at the stock top instead.
+    // Named here rather than silently trusted, per the advisor's review on this revert.
+    if (id === 'facing') {
+      notes.push(
+        'facing failed to plan but the skin is real (see above) — every pocket/through-hole posted still ' +
+          'assumes it is gone; their own first pass is deeper than it looks.',
+      );
+    }
+  }
   // #961's own pick between the two freeing-cut options (a return to the covering cutter, or the
   // chain's last cutter taking the profile itself) is priced in `choice.cost` either way; stated
   // here only when it actually cost something — a plain "no extra change" pick is not a finding.
