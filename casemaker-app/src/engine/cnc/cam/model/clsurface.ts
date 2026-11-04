@@ -21,9 +21,11 @@
  * these indices resolve against). `reach()` needs no mesh and is implemented now.
  */
 
+import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 import type { Tool } from '@/engine/cnc/tool';
-import type { RemainderRegion } from './features';
-import { profileOf } from './dropcutter';
+import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
+import type { FeatureSource, RemainderRegion } from './features';
+import { dropCutterHeight, profileOf, type DropCutterMesh } from './dropcutter';
 
 export interface ClSurface {
   /** The CL height at (x, y), or `null` where the cutter cannot reach (outside the region, or past `reach`'s limit). */
@@ -42,12 +44,47 @@ export interface ReachResult {
 }
 
 /**
- * Per-slice minimum (C's #956 comment 6619787259): `clSurface(cutter, stepOver, region)` plus a
- * cheap `reach`/sample-count check, so #961 can prune a candidate cutter before generating its full
- * surface.
+ * The manager's ruling on B's question (6621141190): `geometry` is `ModelPlanInput.geometry` (the
+ * FeatureSource #958's `FeatureTree` is built from) — the ONE mesh `RemainderRegion.triangles`
+ * indexes into, which `RemainderRegion` never carried on its own. `clSurface()` is a LAZY point
+ * query, not a pre-built adaptive grid: §2's own adaptive sampling (subdivide on departure from a
+ * straight-line interpolation, down to `minSpacingMm`, a staircase not a diagonal past a true
+ * discontinuity) is a PATH concern — the `finish()`/`rough()` row-dropper's job, walking along a
+ * raster row — not this interface's; `dropCutter` answers one (x, y) at a time, against every
+ * triangle of the WHOLE mesh (never just `region.triangles`) so a cutter overhanging the region's
+ * own edge still sees the wall/land beside it, not air past the region's own footprint boundary.
  */
-export function clSurface(_cutter: Tool, _stepOverMm: number, _region: RemainderRegion): ClSurface {
-  throw new Error('cam/model/clsurface: clSurface() not implemented — needs the mesh RemainderRegion.triangles indexes into (#957/#959 integration)');
+export function clSurface(geometry: FeatureSource, region: RemainderRegion, cutter: Tool, _stepOverMm: number): ClSurface {
+  const profile = profileOf(cutter);
+  if (profile === null) {
+    throw new Error(`cam/model/clsurface: ${cutter.name || cutter.shape} has no drop-cutter profile for a CL surface`);
+  }
+  const mesh: DropCutterMesh = geometry.triangles;
+  const toleranceMm = ARC_CHORD_TOLERANCE_MM;
+  // The sagitta bound (the same closed form `finishStepOverForCusp`, surface3d.ts, derives for the
+  // scallop band — here for the GEOMETRIC sampling tolerance instead): the largest spacing that
+  // keeps a straight-line interpolation within `toleranceMm` of the cutter's own curved profile. A
+  // flat/cone has no such curvature within its own flat/tip radius, so its own radius is the
+  // stated bound instead — this is the cutter's OWN worst case, not a claim that sampling this
+  // coarsely always finds a real surface discontinuity (the row-dropper's own job).
+  const maxSpacingMm =
+    profile.kind === 'arc' && profile.curveRadiusMm !== undefined && profile.curveRadiusMm > toleranceMm
+      ? 2 * Math.sqrt(2 * profile.curveRadiusMm * toleranceMm - toleranceMm * toleranceMm)
+      : profile.radiusMm;
+  let sampleCount = 0;
+  return {
+    dropCutter(x, y) {
+      if (!pointInPolygons(region.footprint, x, y)) return null;
+      sampleCount++;
+      return dropCutterHeight(profile, mesh, x, y);
+    },
+    toleranceMm,
+    minSpacingMm: toleranceMm,
+    maxSpacingMm,
+    get sampleCount() {
+      return sampleCount;
+    },
+  };
 }
 
 /**

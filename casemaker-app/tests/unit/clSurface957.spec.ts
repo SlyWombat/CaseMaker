@@ -11,9 +11,9 @@ import { describe, expect, it } from 'vitest';
 
 import { compareClSurface, loadClFixtures, type ClCutterFixture, type ClFixture } from '../tools/clParity';
 import { dropCutterHeight, profileOf, type DropCutterMesh } from '../../src/engine/cnc/cam/model/dropcutter';
-import { reach } from '../../src/engine/cnc/cam/model/clsurface';
-import type { RemainderRegion } from '../../src/engine/cnc/cam/model/features';
-import type { Tool, ToolShape } from '../../src/engine/cnc/tool';
+import { clSurface, reach } from '../../src/engine/cnc/cam/model/clsurface';
+import type { FeatureSource, RemainderRegion } from '../../src/engine/cnc/cam/model/features';
+import { flatEndMill, type Tool, type ToolShape } from '../../src/engine/cnc/tool';
 
 const fixtures = loadClFixtures();
 
@@ -120,5 +120,68 @@ describe('#957 reach()', () => {
 
   it('a flat cutter is always reachable by this check', () => {
     expect(reach(flat, region([0, 89])).reachable).toBe(true);
+  });
+});
+
+/** A flat plane at `z`, `half`×`half` wide and centred on the origin — two triangles. */
+function flatPlaneMesh(z: number, half: number): FeatureSource {
+  return {
+    triangles: {
+      positions: Float32Array.from([-half, -half, z, half, -half, z, half, half, z, -half, half, z]),
+      indices: Uint32Array.from([0, 1, 2, 0, 2, 3]),
+      triangleCount: 2,
+      bbox: { min: [-half, -half, z], max: [half, half, z] },
+    },
+  };
+}
+
+function regionWithFootprint(half: number, slopeDeg: [number, number] = [0, 0]): RemainderRegion {
+  return { ...region(slopeDeg), footprint: [[[-half, -half], [half, -half], [half, half], [-half, half]]] };
+}
+
+// The manager's ruling on B's clSurface question (6621141190): `clSurface(geometry, region,
+// cutter, …)` — a lazy point query against the WHOLE geometry (never just `region.triangles`),
+// never a pre-built adaptive grid (that is the finish/rough row-dropper's own job, #960).
+describe('#959 clSurface()', () => {
+  it('drops a flat cutter onto a flat plane exactly at the plane\'s own Z — the TIP height, not the ball centre', () => {
+    const geometry = flatPlaneMesh(-3, 50);
+    const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+    const surface = clSurface(geometry, regionWithFootprint(50), flat, 3);
+    expect(surface.dropCutter(0, 0)).toBeCloseTo(-3, 9);
+  });
+
+  it('a ball dropped on the same flat plane also posts exactly the plane\'s own Z, never the ball centre (which would be r above it)', () => {
+    const geometry = flatPlaneMesh(-3, 50);
+    const ball: Tool = { ...flatEndMill(6, { number: 1, id: 'ball-6', name: 'ball-6' }), shape: 'ball' };
+    const surface = clSurface(geometry, regionWithFootprint(50), ball, 3);
+    expect(surface.dropCutter(0, 0)).toBeCloseTo(-3, 9);
+  });
+
+  it('returns null outside the region\'s own footprint, even where the mesh itself still has material', () => {
+    const geometry = flatPlaneMesh(-3, 50);
+    const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+    // The region's own footprint is narrower (±10) than the mesh (±50): a query past ±10 must
+    // read null, not the plane's real height, however far the mesh itself still extends.
+    const surface = clSurface(geometry, regionWithFootprint(10), flat, 3);
+    expect(surface.dropCutter(0, 0)).toBeCloseTo(-3, 9);
+    expect(surface.dropCutter(20, 0)).toBeNull();
+  });
+
+  it('counts a sample only for a query the drop-cutter actually evaluated, not an out-of-footprint miss', () => {
+    const geometry = flatPlaneMesh(-3, 50);
+    const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+    const surface = clSurface(geometry, regionWithFootprint(10), flat, 3);
+    expect(surface.sampleCount).toBe(0);
+    surface.dropCutter(20, 0); // outside the footprint — no real evaluation
+    expect(surface.sampleCount).toBe(0);
+    surface.dropCutter(0, 0);
+    surface.dropCutter(1, 1);
+    expect(surface.sampleCount).toBe(2);
+  });
+
+  it('refuses a cutter with no drop-cutter profile (a drill has no stated diameter here)', () => {
+    const geometry = flatPlaneMesh(-3, 50);
+    const drill: Tool = { ...flatEndMill(6, { number: 1, id: 'drill', name: 'drill' }), shape: 'drill', diameter: null, tipDiameter: null };
+    expect(() => clSurface(geometry, regionWithFootprint(10), drill, 3)).toThrow(/no drop-cutter profile/);
   });
 });
