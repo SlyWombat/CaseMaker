@@ -181,7 +181,7 @@ describe('#961 the organizer demand: cover what a house cutter can cut', () => {
 
   it('every candidate prices the same demand; the primary alone is the one that leaves cuttable pockets', () => {
     const candidates = candidateSequences(DEMAND, HOUSE);
-    const only6 = candidates.find((c) => c.steps.length === 1)!;
+    const only6 = candidates.find((c) => !c.steps.some((s) => s.kind === 'rest'))!;
     const chain = candidates.find((c) => c.steps.some((s) => s.kind === 'rest'))!;
     expect(only6.unreachable).toHaveLength(43);
     expect(chain.unreachable).toHaveLength(16);
@@ -190,5 +190,55 @@ describe('#961 the organizer demand: cover what a house cutter can cut', () => {
     for (const c of candidates) expect(c.steps[0]!.cutter.key).toBe('flat-6');
     expect(only6.leftBehind).toBe(27);
     expect(chain.leftBehind).toBe(0);
+  });
+});
+
+describe('#961 the freeing cut is priced, not left as an unpriced return', () => {
+  it('the contour is its own LAST step; an unstated flute means the last cutter cannot take it, so the return change is charged', () => {
+    const choice = chooseSequence(DEMAND, HOUSE, opts());
+    const last = choice.steps[choice.steps.length - 1]!;
+    expect(last.kind).toBe('contour');
+    expect(last.cutter.key).toBe('flat-6');
+    expect(choice.freeing).toEqual({ cutterKey: 'flat-6', extraToolChange: true, lastCutterEligible: false });
+    // The cycle carries the change back: flat-6 is loaded first, then again after the rest.
+    const t6 = choice.cost.entries.find((e) => e.cutterKey === 'flat-6')!;
+    const t3 = choice.cost.entries.find((e) => e.cutterKey === 'flat-3.175')!;
+    expect(t6.toolChanges).toBe(1);
+    expect(t3.toolChanges).toBe(1);
+    expect(choice.cost.toolChanges).toBe(2);
+  });
+
+  it('a last cutter with a STATED flute long enough takes the profile when that is cheaper — no return change', () => {
+    const longFlute = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
+    const choice = chooseSequence(DEMAND, { house: [FLAT6, longFlute], catalogue: [] }, opts());
+    expect(choice.freeing).toEqual({ cutterKey: 'flat-3.175', extraToolChange: false, lastCutterEligible: true });
+    expect(choice.cost.toolChanges).toBe(1);
+    expect(choice.steps[choice.steps.length - 1]!.kind).toBe('contour');
+  });
+
+  it('the profile may be dearer and still win: both options are priced, the cheaper TOTAL decides — no local threshold', () => {
+    const longFlute = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
+    const choice = chooseSequence(
+      DEMAND,
+      { house: [FLAT6, longFlute], catalogue: [] },
+      // The ⌀3.175 profile costs 82 s against 22 s on the ⌀6 (more than 3×), but it saves a whole
+      // change (91.4 s), so the total is cheaper and it takes the cut. plan v2's 3× stop rule is a
+      // package-vs-vendor line on the reference card, not a per-profile gate here.
+      opts((step) => standIn(step, step.kind === 'contour' && step.cutter.key === 'flat-3.175' ? 70 : 10)),
+    );
+    expect(choice.freeing).toEqual({ cutterKey: 'flat-3.175', extraToolChange: false, lastCutterEligible: true });
+    expect(choice.cost.toolChanges).toBe(1);
+    // The real comparison is between the two COMPLETE chains (the rest step present), which
+    // differ only in the freeing step: the dearer profile still wins on the total.
+    const complete = choice.considered.filter((c) => c.steps.some((s) => s.kind === 'rest') && c.cost !== null);
+    const cheapest = (key: string): number => Math.min(...complete
+      .filter((c) => c.steps[c.steps.length - 1]!.cutterKey === key)
+      .map((c) => c.cost!));
+    expect(cheapest('flat-3.175')).toBeLessThan(cheapest('flat-6'));
+    expect(cheapest('flat-3.175')).toBeCloseTo(choice.cost.totalSeconds, 6);
+    // The primary alone is cheaper still, and still not chosen: 27 cuttable pockets are not a
+    // discount.
+    const incomplete = choice.considered.filter((c) => !c.steps.some((s) => s.kind === 'rest'));
+    expect(Math.min(...incomplete.map((c) => c.cost ?? Infinity))).toBeLessThan(choice.cost.totalSeconds);
   });
 });

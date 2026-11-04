@@ -518,10 +518,26 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     );
   }
   for (const [id, message] of regionFailures) notes.push(`${id}: not cut — planning failed (${message})`);
-  if (deferredContour !== null && choice.steps.length > 1) {
-    notes.push(
-      `the freeing cut (contour) is posted LAST, after every rest/finish/chamfer step — this may add a tool change back to ${deferredContour.cutter} that #961's own cost (below) does not price`,
-    );
+  // #961 now prices the deferral: the freeing step is the chain's own LAST step, its cutter is a
+  // chain cutter, and a return to it after the rests is charged as a tool change. The note states
+  // which way the pick fell, so a two-cutter plan says whether the cycle carries that change.
+  const chainCutterCount = new Set(choice.steps.filter((s) => s.kind !== 'contour').map((s) => s.cutter.key)).size;
+  if (deferredContour !== null && chainCutterCount > 1) {
+    const free = choice.freeing;
+    const lastChainCutter = [...choice.steps].reverse().find((s) => s.kind !== 'contour')?.cutter.key ?? 'the last step';
+    if (free !== null && !free.extraToolChange) {
+      notes.push(
+        `the freeing cut (contour) is posted LAST on ${deferredContour.cutter} — the chain's last cutter takes the profile too, so no extra tool change; its time is in the cycle`,
+      );
+    } else if (free !== null && free.lastCutterEligible) {
+      notes.push(
+        `the freeing cut (contour) is posted LAST on ${deferredContour.cutter} — a RETURN tool change back to it after ${lastChainCutter}, priced in the cycle (taking the profile with ${lastChainCutter} was dearer)`,
+      );
+    } else {
+      notes.push(
+        `the freeing cut (contour) is posted LAST on ${deferredContour.cutter} — a RETURN tool change back to it after ${lastChainCutter}, priced in the cycle; ${lastChainCutter} cannot take the profile (flute or stated shape)`,
+      );
+    }
   }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
