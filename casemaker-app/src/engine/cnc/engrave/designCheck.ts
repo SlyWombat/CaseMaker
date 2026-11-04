@@ -28,7 +28,7 @@
 
 import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM } from '@/engine/compiler/arcResolution';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
-import { ORACLE_AREA_FLOOR, type OracleBbox, type OraclePolygon, type OracleSliceAt } from '@/engine/cnc/engrave/oracle';
+import { ORACLE_AREA_FLOOR, type OracleBbox, type OraclePolygon, type OracleSliceAt } from '@/engine/cnc/engrave/oracleTypes';
 import type { Tool } from '@/engine/cnc/tool';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { goalTopAt, type ResultTop } from '@/engine/cnc/engrave/goalCoverage';
