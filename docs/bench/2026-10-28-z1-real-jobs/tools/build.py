@@ -52,8 +52,9 @@ def arg_parse():
     p.add_argument('--makerables', default=os.environ.get('CM_MAKERABLES', ''),
                    help='the Makerables evaluation downloads (dl/<slug>/): vendor NCs and models, '
                         'matched by name and sha256, never committed')
-    p.add_argument('--candidate', action='store_true',
-                   help='the app sha is a candidate branch, not main: the page says so')
+    p.add_argument('--candidate', action='store_true',                   help='the app sha is a candidate branch, not main: the page says so')
+    p.add_argument('--section-html', help='an extra HTML fragment appended before the page footer '
+                                          '(the candidate-engine section, tools/candidate_section.py)')
     p.add_argument('--only', help='comma-separated card ids (debug)')
     p.add_argument('--timeout', type=int, default=1800, help='seconds per job (default 1800)')
     return p.parse_args()
@@ -821,6 +822,8 @@ def page(cards, args, sha, loc, cat):
   {seven_lines(c) if vof(c).get('numbers') else ''}
   {detail}
 </article>''')
+    if getattr(args, 'section_html', None) and os.path.exists(args.section_html):
+        body.append(open(args.section_html).read())
     body.append('''<footer>Job files, the tools that build this page and its manifest are in
 docs/bench/2026-10-28-z1-real-jobs/ on main. The maintainer’s meshes (samples/3d) are local inputs,
 marked on their cards and never moved. No machine was used.</footer></div></body></html>''')
