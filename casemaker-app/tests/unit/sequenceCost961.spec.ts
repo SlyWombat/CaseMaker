@@ -191,18 +191,23 @@ describe('#961 choose by cost', () => {
     );
   });
 
-  it('prices every candidate the same way and returns the cheapest that posts', () => {
+  it('prices every candidate the same way and returns the cheapest COMPLETE that posts', () => {
     const ball3 = ball('b3', 3, { fluteLength: 30 });
     const choice = chooseSequence(
       TRAY,
       { house: [...Object.values(VENDOR), ball3], catalogue: [] },
       opts(),
     );
-    const costs = choice.considered
+    expect(choice.unreachable).toEqual([]);
+    const complete = choice.considered
+      .filter((c) => c.unreachable === 0)
       .map((c) => c.cost)
       .filter((c): c is number => c !== null);
-    expect(costs.length).toBeGreaterThan(1);
-    expect(Math.min(...costs)).toBeCloseTo(choice.cost.totalSeconds, 6);
+    expect(complete.length).toBeGreaterThan(1);
+    expect(Math.min(...complete)).toBeCloseTo(choice.cost.totalSeconds, 6);
+    // An incomplete prefix (the primary alone, its corner stated) is a different part, not a
+    // cheaper plan: it is priced but never chosen.
+    expect(choice.considered.some((c) => c.unreachable > 0)).toBe(true);
   });
 
   it('prefers a house cutter over a cheaper catalogue one', () => {

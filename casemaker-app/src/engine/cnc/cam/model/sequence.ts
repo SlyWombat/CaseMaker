@@ -1,11 +1,15 @@
 /**
  * #961 — THE CUTTER SEQUENCE, CHOSEN BY COST.
  *
- * The vendor's shape on the tray reference (plan v2 §1, #955): the LARGEST FLAT that fits the
- * pockets roughs them, a smaller flat rests the corners it cannot enter, a ball finishes the curved
- * remainder at the stated scallop, and a chamfer breaks the rims. Makera runs 4 cutters in
- * 47.6 min on that part; the sequence this module returns must stay at or under the vendor's count
- * + 1 and its price at or under 2× the vendor's cycle (plan v2 §3).
+ * The vendor's shape on the tray reference (plan v2 §1, #955): the LARGEST FLAT that fits the part
+ * roughs what it enters, each next SMALLER flat is added only for what the previous cannot reach
+ * (a tighter corner, a narrower opening — the op's "needs a cutter ≤ N mm" report) while it pays
+ * and the cutter budget allows, a ball finishes the curved remainder at the stated scallop, and a
+ * chamfer breaks the rims. Makera runs 4 cutters in 47.6 min on that part; the sequence this
+ * module returns must stay at or under the vendor's count + 1 and its price at or under 2× the
+ * vendor's cycle (plan v2 §3). A pocket no cutter in that budget enters is STATED
+ * (`unreachable`), never allowed to shrink the primary — E measured the vendor leaving the tray's
+ * ~1 mm features too.
  *
  * THE METHOD, and where it comes from (prior-art note on #961; Kiri:Moto, FreeCAD Path and
  * OpenCamLib are LOCAL REFERENCES only — the methods are re-implemented from their descriptions,
@@ -17,9 +21,10 @@
  *    loaded first cutter — the same model #858 uses (`planCostSeconds` in `smartPick.ts`), not a
  *    second time model.
  *  - candidates are pruned on GEOMETRY before any move is built (a flat that cannot enter the
- *    feature's inside corner, a flute shorter than the cut), so the expensive planner only sees
+ *    feature's opening/corner, a flute shorter than the cut), so the expensive planner only sees
  *    candidates that can physically cut the part. The families are the vendor's own: flat, rest,
- *    ball, chamfer.
+ *    ball, chamfer; the rest cutters form a CHAIN, one per prefix, and the price decides whether
+ *    the extra cutter earns its change.
  *  - a house cutter is preferred to a catalogue one, and a cutter with a real feeds row to one on
  *    the labelled fallback band (`fallback-fed after rowed`), before price decides. The caller
  *    decides what "house" means: on a simulation-only reference card it fills `house` with the
@@ -110,6 +115,12 @@ export interface SequenceStep {
 /** A candidate sequence, in execution order. */
 export interface CandidateSequence {
   steps: SequenceStep[];
+  /**
+   * Pockets this candidate does NOT cover, by feature id — the "needs a cutter ≤ N mm" features no
+   * cutter in this candidate's chain can enter. STATED, never a silent pass: the picker prefers a
+   * complete chain, and a demand whose every chain leaves one names it.
+   */
+  unreachable: string[];
 }
 
 /**
@@ -150,12 +161,19 @@ export interface SequenceOptions {
   planStep: PlanStep;
   /** Whether a cutter's feeds are rowed or the labelled fallback; absent → rowed. */
   feedsKind?: (tool: Tool) => 'row' | 'fallback';
+  /**
+   * The most cutters a chain may use, including the primary and the ball/chamfer — the card's
+   * "vendor + 1" budget. Absent → no cap; a chain past it is simply not generated.
+   */
+  maxCutters?: number;
 }
 
 /** One candidate the search looked at: its steps, its price or null, and why it did not win. */
 export interface ConsideredSequence {
   steps: { kind: PlannedOpKind; cutterKey: string }[];
   cost: number | null;
+  /** How many demanded pockets this candidate left uncut (0 = complete). */
+  unreachable: number;
   reason: string;
 }
 
@@ -164,6 +182,8 @@ export interface SequenceChoice {
   steps: SequenceStep[];
   cost: SequenceCost;
   considered: ConsideredSequence[];
+  /** The chosen chain's uncovered pockets, by feature id; empty when every pocket is covered. */
+  unreachable: string[];
 }
 
 const EPS = 1e-9;
@@ -191,39 +211,12 @@ function isChamfer(tool: Tool): boolean {
     && (tool.angle !== null || tool.halfAngle !== null);
 }
 
-/** Why a cutter cannot pass through the features' narrowest openings, or null when it can. */
-function openingRefusal(tool: Tool, features: readonly SequenceFeature[]): string | null {
-  const d = diameterOf(tool);
-  if (d === null) return 'it states no cutting diameter';
-  for (const feature of features) {
-    if (feature.minOpeningMm !== null && feature.minOpeningMm !== undefined
-        && d > feature.minOpeningMm + EPS) {
-      return `⌀${d} cannot enter the ${feature.minOpeningMm} mm opening`;
-    }
-  }
-  return null;
-}
-
 /** Why a cutter is too short to reach the features' floors, or null when it reaches them. */
 function depthRefusal(tool: Tool, features: readonly SequenceFeature[]): string | null {
   if (diameterOf(tool) === null) return 'it states no cutting diameter';
   for (const feature of features) {
     if (feature.depthMm > 0 && tool.fluteLength !== null && tool.fluteLength + EPS < feature.depthMm) {
       return `its ${tool.fluteLength} mm flute cannot reach the ${feature.depthMm} mm floor`;
-    }
-  }
-  return null;
-}
-
-/** Why a flat cannot reach the features' tightest inside corner, or null when it can. */
-function cornerRefusal(tool: Tool, features: readonly SequenceFeature[]): string | null {
-  const d = diameterOf(tool);
-  if (d === null) return 'it states no cutting diameter';
-  const radius = d / 2;
-  for (const feature of features) {
-    if (feature.cornerRadiusMm !== null && feature.cornerRadiusMm !== undefined
-        && radius > feature.cornerRadiusMm + EPS) {
-      return `⌀${d} cannot enter the ${feature.cornerRadiusMm} mm corner`;
     }
   }
   return null;
@@ -280,132 +273,190 @@ function choiceOf(cutter: CandidateCutter, pinned: boolean): CutterChoice {
   };
 }
 
-/** True when every pinned kind this candidate covers chose the pinned cutter. */
+/**
+ * True when every pinned kind this candidate covers carries the pinned cutter. A kind may appear
+ * on more than one step (a rest chain): the pinned key must be one of them, and only that step is
+ * labelled pinned; the others are the engine's own choice.
+ */
 function honoursPins(steps: readonly SequenceStep[], pinned: Partial<Record<PlannedOpKind, string>>): boolean {
-  for (const step of steps) {
-    const key = pinned[step.kind];
-    if (key !== undefined && key !== step.cutter.key) return false;
+  for (const kind of Object.keys(pinned) as PlannedOpKind[]) {
+    const key = pinned[kind]!;
+    if (!steps.some((s) => s.kind === kind && s.cutter.key === key)) return false;
   }
   return true;
 }
 
+/** Whether a flat can enter a feature's opening. */
+function entersFeature(tool: Tool, f: SequenceFeature): boolean {
+  const d = diameterOf(tool);
+  if (d === null) return false;
+  return !(f.minOpeningMm !== null && f.minOpeningMm !== undefined && d > f.minOpeningMm + EPS);
+}
+
+/** Whether a cutter's flute reaches a feature's floor. */
+function reachesFeature(tool: Tool, f: SequenceFeature): boolean {
+  if (diameterOf(tool) === null) return false;
+  return !(f.depthMm > 0 && tool.fluteLength !== null && tool.fluteLength + EPS < f.depthMm);
+}
+
+/** Whether a flat's radius fits a feature's tightest inside corner. */
+function fitsCorner(tool: Tool, f: SequenceFeature): boolean {
+  const d = diameterOf(tool);
+  if (d === null) return false;
+  return !(f.cornerRadiusMm !== null && f.cornerRadiusMm !== undefined && d / 2 > f.cornerRadiusMm + EPS);
+}
+
+/** A flat covers a pocket when it enters it, reaches its floor and fits its corner. */
+function coversFeature(tool: Tool, f: SequenceFeature): boolean {
+  return entersFeature(tool, f) && reachesFeature(tool, f) && fitsCorner(tool, f);
+}
+
+/** One link of a rest chain: a cutter and the pockets it is needed for. */
+interface ChainLink {
+  cutter: CandidateCutter;
+  regionIds: string[];
+}
+
 /**
- * The candidates worth pricing, vendor-shaped: for each flat that can rough the pockets, with and
- * without a smaller rest flat, crossed with each usable ball (when the part is curved) and each
- * usable chamfer (when it has rims). Pairs that cannot cut the part are pruned on geometry alone —
- * no IR is built for them.
+ * The candidates worth pricing — the vendor shape with a REST CHAIN (B's #961 tray demand).
+ *
+ * The largest flat that can rough the part starts; each next smaller flat is added ONLY when it
+ * covers a pocket the chain so far cannot (its opening, floor or inside corner — the op's "needs a
+ * cutter ≤ N mm" report), and it is added while the budget allows. EVERY prefix is a candidate, so
+ * one more cutter has to earn its change on price; a pocket no flat in the candidate set can cover
+ * is STATED in `unreachable` and never shrinks the primary (E measured the vendor leaving the
+ * tray's ~1 mm features: only the chamfer tip reaches them).
+ *
+ * Every candidate is crossed with each usable ball (when the part is curved) and each usable
+ * chamfer (when it has rims), and pruned on geometry alone before any IR is built.
  */
 export function candidateSequences(
   demand: SequenceDemand,
   cutters: CutterCandidates,
-  opts?: Pick<SequenceOptions, 'feedsKind'>,
+  opts?: Pick<SequenceOptions, 'feedsKind' | 'maxCutters'>,
 ): CandidateSequence[] {
   const features = demand.features;
   const pocketFeatures = features.filter((f) => f.kind === 'pocket' || f.kind === 'contour');
   const curvedFeatures = features.filter((f) => f.kind === 'curved');
   const rimFeatures = features.filter((f) => f.kind === 'rim');
   const pinned = cutters.pinned ?? {};
+  const maxCutters = opts?.maxCutters ?? Number.POSITIVE_INFINITY;
 
   const all = allCutters(cutters, opts);
-  // A primary flat must pass the pockets' openings and reach the deepest floor it roughs. Its
-  // RADIUS is not constrained by a corner: roughing a pocket with a corner it cannot enter is
-  // exactly what the rest cutter is for (the tray's ⌀6 → ⌀3.175 is this rule).
-  const roughFeatures = [...pocketFeatures, ...curvedFeatures];
-  const fitsPrimary = (tool: Tool): boolean =>
-    openingRefusal(tool, pocketFeatures) === null && depthRefusal(tool, roughFeatures) === null;
-  const flats = all.filter((c) => isFlat(c.tool) && fitsPrimary(c.tool));
+  const flatsDesc = all
+    .filter((c) => isFlat(c.tool) && diameterOf(c.tool) !== null)
+    .sort((a, b) => (diameterOf(b.tool) ?? 0) - (diameterOf(a.tool) ?? 0));
   const ballsAll = all.filter((c) => isBall(c.tool));
   const balls = ballsAll.filter((c) => ballRefusal(c.tool, curvedFeatures) === null);
   const chamfers = all.filter((c) => isChamfer(c.tool) && chamferRefusal(c.tool) === null);
 
-  // A part with pockets needs SOME round tool that reaches the corner. The vendor shape uses a
-  // flat; a ball is the fallback only when no flat fits (never on a part a flat can cut).
-  const roughs: CandidateCutter[] = flats.length > 0
-    ? flats
-    : ballsAll.filter((c) => fitsPrimary(c.tool));
+  // A primary must reach the curved remainder's floors and, when the part has pockets, rough at
+  // least one of them. A flat that fits no pocket is not a primary: the chain never shrinks the
+  // primary to a feature — it adds a smaller cutter for what the primary cannot reach.
+  const reachesCurved = (c: CandidateCutter): boolean => curvedFeatures.every((f) => reachesFeature(c.tool, f));
+  const canRoughPocket = (c: CandidateCutter): boolean =>
+    pocketFeatures.some((f) => entersFeature(c.tool, f) && reachesFeature(c.tool, f));
+  const primaries = flatsDesc.filter((c) => reachesCurved(c) && (pocketFeatures.length === 0 || canRoughPocket(c)));
+  // A part with pockets needs SOME round tool; a ball is the fallback only when no flat can.
+  const roughs: CandidateCutter[] = primaries.length > 0
+    ? primaries
+    : ballsAll.filter((c) => reachesCurved(c) && (pocketFeatures.length === 0 || canRoughPocket(c)));
 
   if (pocketFeatures.length > 0 && roughs.length === 0) return [];
   if (curvedFeatures.length > 0 && balls.length === 0) return [];
   if (rimFeatures.length > 0 && chamfers.length === 0) return [];
-
-  const flatChoices = roughs
-    .slice()
-    .sort((a, b) => (diameterOf(b.tool) ?? 0) - (diameterOf(a.tool) ?? 0));
-
-  // The rest cutter is a smaller flat that also fits the pockets' openings and tightest corner.
-  const restCandidates = all
-    .filter((c) => isFlat(c.tool)
-      && openingRefusal(c.tool, pocketFeatures) === null
-      && cornerRefusal(c.tool, pocketFeatures) === null
-      && depthRefusal(c.tool, pocketFeatures) === null)
-    .sort((a, b) => (diameterOf(b.tool) ?? 0) - (diameterOf(a.tool) ?? 0));
 
   const ballChoices: (CandidateCutter | null)[] = curvedFeatures.length > 0 ? balls : [null];
   const chamferChoices: (CandidateCutter | null)[] = rimFeatures.length > 0 ? chamfers : [null];
 
   const out: CandidateSequence[] = [];
   const seen = new Set<string>();
-
-  const add = (steps: SequenceStep[]): void => {
-    if (!honoursPins(steps, pinned)) return;
+  const add = (steps: SequenceStep[], unreachable: string[]): void => {
+    if (steps.length === 0 || !honoursPins(steps, pinned)) return;
     const signature = steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
     if (seen.has(signature)) return;
     seen.add(signature);
-    out.push({ steps });
+    out.push({ steps, unreachable });
   };
 
-  const flatSteps = (cutter: CandidateCutter, role: CutterRole): SequenceStep[] => {
-    const steps: SequenceStep[] = [];
-    const pinnedHere = (kind: PlannedOpKind): boolean => pinned[kind] === cutter.key;
-    if (pocketFeatures.length > 0) {
-      steps.push({
-        kind: 'pocket',
-        role,
-        cutter: choiceOf(cutter, pinnedHere('pocket')),
-        regionIds: pocketFeatures.map((f) => f.id),
-      });
-    }
-    if (curvedFeatures.length > 0) {
-      steps.push({
-        kind: 'rough',
-        role,
-        cutter: choiceOf(cutter, pinnedHere('rough')),
-        regionIds: curvedFeatures.map((f) => f.id),
-      });
-    }
-    return steps;
-  };
-
-  for (const primary of flatChoices) {
-    const pd = diameterOf(primary.tool) ?? 0;
-    // A corner tighter than the primary's radius is not left to the cost model: without a rest
-    // cutter that corner is uncut, so the rest step is REQUIRED. When the primary fits every
-    // corner the rest is optional and the price decides (usually against: a change costs 91.4 s).
-    const needsRest = pocketFeatures.some(
-      (f) => f.cornerRadiusMm !== null && f.cornerRadiusMm !== undefined
-        && pd / 2 > f.cornerRadiusMm + EPS,
-    );
-    const smaller = restCandidates.filter((r) => (diameterOf(r.tool) ?? 0) < pd - EPS);
-    const restOptions: (CandidateCutter | null)[] = needsRest ? smaller : [null, ...smaller];
-    if (needsRest && restOptions.length === 0) continue;
-    const base = flatSteps(primary, 'flat');
-    for (const rest of restOptions) {
-      if (rest !== null) {
-        const rd = diameterOf(rest.tool) ?? 0;
-        if (!(rd < pd - EPS)) continue;
-        if (cornerRefusal(rest.tool, pocketFeatures) !== null) continue;
+  /** The chain from one primary: each link names the pockets that cutter is needed for. */
+  const chainFrom = (primary: CandidateCutter): ChainLink[] => {
+    const chain: ChainLink[] = [];
+    const covered = new Set<string>();
+    const addLink = (cutter: CandidateCutter): void => {
+      const regionIds: string[] = [];
+      for (const f of pocketFeatures) {
+        if (covered.has(f.id)) continue;
+        if (coversFeature(cutter.tool, f)) {
+          covered.add(f.id);
+          regionIds.push(f.id);
+        }
       }
+      // The primary also names the pockets it can ROUGH even where its corner leaves a rest —
+      // the rest step names the same pocket again for the corner, and the ops union.
+      if (chain.length === 0) {
+        for (const f of pocketFeatures) {
+          if (!regionIds.includes(f.id) && entersFeature(cutter.tool, f) && reachesFeature(cutter.tool, f)) {
+            regionIds.push(f.id);
+          }
+        }
+      }
+      chain.push({ cutter, regionIds });
+    };
+    addLink(primary);
+    let last = diameterOf(primary.tool) ?? 0;
+    while (chain.length < maxCutters) {
+      const next = flatsDesc.find((c) => {
+        const d = diameterOf(c.tool) ?? 0;
+        if (!(d < last - EPS)) return false;
+        return pocketFeatures.some((f) => !covered.has(f.id) && coversFeature(c.tool, f));
+      });
+      if (next === undefined) break;
+      addLink(next);
+      last = diameterOf(next.tool) ?? 0;
+    }
+    return chain;
+  };
+
+  for (const primary of roughs) {
+    const chain = chainFrom(primary);
+    const primaryLink = chain[0]!;
+    for (let k = 1; k <= chain.length; k++) {
+      const links = chain.slice(0, k);
+      const base: SequenceStep[] = [];
+      if (primaryLink.regionIds.length > 0) {
+        base.push({
+          kind: 'pocket',
+          role: 'flat',
+          cutter: choiceOf(primaryLink.cutter, pinned.pocket === primaryLink.cutter.key),
+          regionIds: primaryLink.regionIds,
+        });
+      }
+      if (curvedFeatures.length > 0) {
+        base.push({
+          kind: 'rough',
+          role: 'flat',
+          cutter: choiceOf(primaryLink.cutter, pinned.rough === primaryLink.cutter.key),
+          regionIds: curvedFeatures.map((f) => f.id),
+        });
+      }
+      for (const link of links.slice(1)) {
+        base.push({
+          kind: 'rest',
+          role: 'rest',
+          cutter: choiceOf(link.cutter, pinned.rest === link.cutter.key),
+          regionIds: link.regionIds,
+        });
+      }
+      // The pockets this prefix covers; the rest are STATED for this candidate.
+      const coveredNow = new Set<string>();
+      for (const link of links) {
+        for (const f of pocketFeatures) if (coversFeature(link.cutter.tool, f)) coveredNow.add(f.id);
+      }
+      const unreachable = pocketFeatures.filter((f) => !coveredNow.has(f.id)).map((f) => f.id);
       for (const ball of ballChoices) {
         for (const chamfer of chamferChoices) {
           const steps = base.slice();
-          if (rest !== null) {
-            steps.push({
-              kind: 'rest',
-              role: 'rest',
-              cutter: choiceOf(rest, pinned.rest === rest.key),
-              regionIds: pocketFeatures.map((f) => f.id),
-            });
-          }
           if (ball !== null) {
             steps.push({
               kind: 'finish',
@@ -422,20 +473,13 @@ export function candidateSequences(
               regionIds: rimFeatures.map((f) => f.id),
             });
           }
-          if (steps.length > 0) add(steps);
+          add(steps, unreachable);
         }
       }
     }
   }
 
-  // The demanded kinds must all be present: a pin on a kind the candidate cannot serve drops it.
-  return out.filter((c) => {
-    const kinds = new Set(c.steps.map((s) => s.kind));
-    if (pocketFeatures.length > 0 && !kinds.has('pocket')) return false;
-    if (curvedFeatures.length > 0 && !kinds.has('finish')) return false;
-    if (rimFeatures.length > 0 && !kinds.has('chamfer')) return false;
-    return true;
-  });
+  return out;
 }
 
 /**
@@ -479,19 +523,23 @@ export function priceSequence(
 }
 
 /** The rank: house before catalogue, rowed feeds before fallback, then the price, then the key. */
-function rankOf(sequence: CandidateSequence, cost: SequenceCost): readonly [number, number, number, string] {
+function rankOf(sequence: CandidateSequence, cost: SequenceCost): readonly [number, number, number, number, string] {
+  // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
+  // different part. Within that, the old order stands (house before catalogue, rowed before
+  // fallback, then price).
+  const incomplete = sequence.unreachable.length > 0 ? 1 : 0;
   const catalogue = sequence.steps.filter((s) => !s.cutter.house).length;
   const fallback = sequence.steps.filter((s) => s.cutter.feeds === 'fallback').length;
   const signature = sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
-  return [catalogue, fallback, cost.totalSeconds, signature] as const;
+  return [incomplete, catalogue, fallback, cost.totalSeconds, signature] as const;
 }
 
-function compareRank(a: readonly [number, number, number, string], b: readonly [number, number, number, string]): number {
-  for (let i = 0; i < 3; i++) {
+function compareRank(a: readonly [number, number, number, number, string], b: readonly [number, number, number, number, string]): number {
+  for (let i = 0; i < 4; i++) {
     if (a[i]! < b[i]!) return -1;
     if (a[i]! > b[i]!) return 1;
   }
-  return a[3]! < b[3]! ? -1 : a[3]! > b[3]! ? 1 : 0;
+  return a[4]! < b[4]! ? -1 : a[4]! > b[4]! ? 1 : 0;
 }
 
 /**
@@ -520,6 +568,7 @@ export function chooseSequence(
   const considered: ConsideredSequence[] = priced.map(({ sequence, cost }) => ({
     steps: sequence.steps.map((s) => ({ kind: s.kind, cutterKey: s.cutter.key })),
     cost: cost === null ? null : cost.totalSeconds,
+    unreachable: sequence.unreachable.length,
     reason: cost === null ? 'an op in this sequence could not be planned' : '',
   }));
 
@@ -535,5 +584,5 @@ export function chooseSequence(
   }
 
   const best = feasible[0]!;
-  return { steps: best.sequence.steps, cost: best.cost, considered };
+  return { steps: best.sequence.steps, cost: best.cost, considered, unreachable: best.sequence.unreachable };
 }
