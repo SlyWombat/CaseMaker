@@ -106,6 +106,33 @@ is stated and offered a nearby line that clears it.
 **External assets.** Import an STL or 3MF mesh and use it as a reference overlay, subtract it from
 the shell (a custom cutout), or add it to the shell (a stiffener or extension).
 
+### Cutting a 3D part from a model
+
+Import the part as a **goal** (the **Surface a mesh** operation). The app reads the model before it
+cuts it and tells you what it found:
+
+- **What it recognised** — "6 pockets, 1 outer contour, 1 curved region". Flat faces become
+  pockets, the outer edge becomes the contour, and sloped or curved surfaces become curved
+  regions. If part of the model cannot be cut, the row says which part and why.
+- **The cutters it chose**, in order, with an estimate for each and for the whole job. The largest
+  flat that clears the stock cuts first, a smaller one takes what it cannot reach, a ball finishes
+  the curves, and a V-bit breaks the edges — the fastest sequence that still reaches the part. You
+  can pin a cutter if you want a particular one used; otherwise the choice is the app's.
+- **How the passes are joined** — the cutter stays down between neighbouring passes and lifts only
+  to travel to another region. The row states the rapids, hops and the share of the cycle spent in
+  air, so a program that travels more than it cuts is visible before it runs.
+
+The cut that frees the part from the stock always comes last, with tabs you cut by hand at the
+end — the part is held throughout. If no freeing cut is posted, the row says "The part is not
+freed" rather than leaving it to the machine.
+
+When you generate, the simulation checks the result against the model. The **judged** line is the
+verdict — "Matches the design", or the deepest cut and where it is, with the cells that cannot be
+fairly judged (a wall's own cell, the shadow behind a wall, a deliberate edge break) set aside. The
+**raw** line beside it is the same reading with nothing set aside. The **top-surface coverage** and
+**whole-surface reach** are printed against the shop's pass line, so a part that leaves surface
+standing is stated even when nothing was cut too deep.
+
 ### Common questions
 
 **Why doesn't my board's connector line up with the cutout?** Profiles are measured, not
