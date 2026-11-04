@@ -437,7 +437,9 @@ function goalLine(report: GoalCutIntoReport | undefined): GoalLine | null {
   // coverage failing, not a cut into the part: the cut-into branch would name a 0 mm cut that never
   // happened. State the coverage the check measured against the line it judged, or the report's own
   // sentence when the leftover band is missing.
-  if (report.maxCutIntoMm === 0) {
+  // #964 — the card names the cell the pass JUDGED, not the raw deepest one: with the wall and
+  // wall-shadow (and any edge break) exclusions the deepest raw cell can be unadjudicable.
+  if (report.adjudicatedMaxMm === 0) {
     const coveragePct = goalCoveragePct(report);
     return {
       text:
@@ -447,12 +449,12 @@ function goalLine(report: GoalCutIntoReport | undefined): GoalLine | null {
       state: 'coverage',
     };
   }
-  const at = report.maxCutIntoAt;
+  const at = report.adjudicatedMaxAt;
   return {
     text:
       at === null
-        ? `Cuts ${goalMm(report.maxCutIntoMm)} mm into the design`
-        : `Cuts ${goalMm(report.maxCutIntoMm)} mm into the design at ${goalMm(at.x)}, ${goalMm(at.y)}`,
+        ? `Cuts ${goalMm(report.adjudicatedMaxMm)} mm into the design`
+        : `Cuts ${goalMm(report.adjudicatedMaxMm)} mm into the design at ${goalMm(at.x)}, ${goalMm(at.y)}`,
     state: 'cut-into',
   };
 }

@@ -1438,6 +1438,10 @@ describe('#948 the goal check’s line', () => {
     cutIntoAreaMm2: 0,
     cutIntoVolumeMm3: 0,
     maxCutIntoMm: 0,
+    // #964 — the card names the cell the pass judged; the raw fields ride beside it.
+    adjudicatedFraction: 0,
+    adjudicatedMaxMm: 0,
+    adjudicatedMaxAt: null,
     leftoverFractions: [0, 0, 0],
     leftoverVolumeMm3: 0,
     maxLeftoverMm: 0,
@@ -1474,7 +1478,15 @@ describe('#948 the goal check’s line', () => {
       band: 0.016,
       levels: [],
       worst: { underCut: 0, overCut: 0 },
-      goalCutInto: goal({ ok: false, cutIntoFraction: 0.0008, maxCutIntoMm: 0.243, maxCutIntoAt: { x: 12.35, y: 8.1 } }),
+      goalCutInto: goal({
+        ok: false,
+        cutIntoFraction: 0.0008,
+        maxCutIntoMm: 0.243,
+        maxCutIntoAt: { x: 12.35, y: 8.1 },
+        adjudicatedFraction: 0.0008,
+        adjudicatedMaxMm: 0.243,
+        adjudicatedMaxAt: { x: 12.35, y: 8.1 },
+      }),
     });
     const line = screen.getByTestId('engrave-cut-goal');
     expect(line.textContent).toBe('Cuts 0.243 mm into the design at 12.35, 8.1');

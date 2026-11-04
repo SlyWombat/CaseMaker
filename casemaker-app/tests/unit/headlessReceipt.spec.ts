@@ -641,6 +641,7 @@ describe('#953 the receipt carries the goal report', () => {
     maxCutIntoMm: 0.21,
     maxCutIntoAt: { x: 4.5, y: -2 },
     adjudicatedFraction: 0.004,
+    adjudicatedMaxMm: 0.165,
     edgeBreakFraction: 0.0366,
     wallNotScoredFraction: 0.002,
     shadowNotScoredFraction: 0.001,
