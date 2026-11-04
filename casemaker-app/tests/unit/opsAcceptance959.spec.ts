@@ -949,8 +949,14 @@ describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, the WHOLE
     });
     const kinds = result.ops.map((op) => op.kind);
     expect(kinds, `unreachable: ${result.unreachable.join('; ')}`).toContain('pocket');
-    expect(kinds).toContain('rough');
     expect(kinds).toContain('finish');
+    // A STAGE THAT FINDS NOTHING IS DROPPED WITH A NOTE (#964) — the project path states an empty
+    // stage rather than listing one that posts nothing.
+    for (const stage of ['rough', 'pencil'] as const) {
+      if (!kinds.includes(stage)) {
+        expect(result.notes.join(' '), `${stage} was dropped without a note`).toContain(`${stage} "`);
+      }
+    }
     if (tree.rims.length > 0) expect(kinds).toContain('chamfer');
     // THE FREEING CUT IS LAST: nothing cuts a part the contour has just released.
     expect(kinds[kinds.length - 1]).toBe('contour');
@@ -1049,16 +1055,28 @@ describe('#959 acceptance — the curved pipeline (every op entered)', () => {
       toolNumberFor: (t: Tool) => (t.number ?? 1),
     };
     const noRest = planCurvedForTree(tree, base);
-    expect(noRest.ops.map((o) => o.kind)).toEqual(['rough', 'finish', 'pencil', 'chamfer']);
+    // A STAGE THAT FINDS NOTHING IS DROPPED WITH A NOTE (#964): an op with no moves is not a
+    // program — `postZ1` refuses one — so the pipeline states it instead of posting an empty file.
+    // The ramp has no crease on the ball's own CL, so the pencil is the stage that says so here.
+    const noRestKinds = noRest.ops.map((o) => o.kind);
+    for (const stage of ['rough', 'finish', 'chamfer'] as const) expect(noRestKinds).toContain(stage);
     for (const op of noRest.ops) {
-      if (op.kind === 'pencil') continue; // the ramp has no crease: stated by an empty pass, not a cut
       expect(op.outcome.ir.operations[0]!.moves.length, `${op.kind} posted no moves`).toBeGreaterThan(0);
+    }
+    if (!noRestKinds.includes('pencil')) {
+      expect(noRest.notes.join(' '), 'pencil was dropped without a note').toContain('pencil "');
     }
     const chamferZ = noRest.ops.find((o) => o.kind === 'chamfer')!.outcome.ir.operations[0]!.moves.filter((m) => m.kind === 'feed').map((m) => m.z);
     expect(Math.min(...chamferZ)).toBeCloseTo(-0.5, 6);
 
     const withRest = planCurvedForTree(tree, { ...base, restFlat: small });
-    expect(withRest.ops.map((o) => o.kind)).toEqual(['rough', 'rest', 'finish', 'pencil', 'chamfer']);
+    const withRestKinds = withRest.ops.map((o) => o.kind);
+    for (const stage of ['rough', 'finish', 'chamfer'] as const) expect(withRestKinds).toContain(stage);
+    for (const stage of ['rest', 'pencil'] as const) {
+      if (!withRestKinds.includes(stage)) {
+        expect(withRest.notes.join(' '), `${stage} was dropped without a note`).toContain(`${stage} "`);
+      }
+    }
     expect(withRest.notes.join(' ')).toContain('curved pipeline follows the ruling');
   }, 120_000);
 });
