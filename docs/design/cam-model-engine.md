@@ -764,76 +764,10 @@ boolean-on-sections lesson. Description only, no source copied.
 
 ## Status
 
-Posted 2026-11-03: the interface
-([6620007670](https://github.com/SlyWombat/CaseMaker/issues/956#issuecomment-6620007670)), the full
-note ([6620008609](https://github.com/SlyWombat/CaseMaker/issues/956#issuecomment-6620008609)), status
-([6620012713](https://github.com/SlyWombat/CaseMaker/issues/956#issuecomment-6620012713)).
-
-A reviewed 2026-11-04 ([6620070596](https://github.com/SlyWombat/CaseMaker/issues/956#issuecomment-6620070596)):
-approved the shape, six required changes (R1–R4, R6 on the gate/interface; R5 a ruling on cutter sets)
-and three non-blocking interface notes (N1–N3), plus the second-implementation and extraction rulings.
-The manager ruled on both; **this revision amends the note in place for all of it**:
-- R1 (§3.6.7), **twice-corrected**: first pass made the spec transitive with a named allowlist
-  (`oracle.ts` not a gate root; a carve-out for `cam/ir.ts`/`threadMill.ts` since `session.ts` —
-  allowed as the simulator — imports them). A's follow-up measurement replaced that allowlist outright:
-  stopping at an allowlisted module hides the CAM behind it (`jobSetup.ts` alone reaches 10 forbidden
-  files), and the `session.ts` carve-out was unnecessary — `goalCheckField.ts` only ever reaches it via
-  `import type`, which the spec already skips. **Final rule: every value import followed, no
-  allowlist**, green only after three named cuts (#967; A's `oracleTypes.ts` split; A's
-  `pureGoalObject`/`jobHasItems` move into a new `jobKind.ts`), A's replacement paragraph adopted
-  verbatim.
-- R2 (§2, §7): placement is shared on purpose, stated as such, checked separately against E's `--dz`.
-- R3 (§3.0, §7): the edge-break leg is never set from this engine's plan output — both the new
-  `ModelPlanInput.edgeBreak` (the CAM's own chamfer-sizing input) and the gate's allowance read the
-  same job field independently, through separate paths.
-- R4 (§7): "cut-into 0" is sequenced behind V2-2 and Makera's own **non-chamfer** NC reading 0 (0.44%
-  tray / 1.55% organizer named explicitly, not the all-tools reading) on the same checker.
-- R5 (§4, §7, ruled): simulation-only reference cards price on the vendor's cutter set (+1); bench
-  cards on the house's cutters only, with no vendor count to add one to.
-- R6 (§2), accepted by A on the follow-up with one wording fix: the maximum sample spacing comes from
-  each cutter's own sagitta on its contact radius for ball/bull/flat; the V cutter's `2·tol·tanα` bound
-  is confirmed right (the same "never miss a feature taller than tol" guarantee as the ball's, a tent
-  of half-width `Δ·tanα` instead of a cap of half-width `√(2RΔ)`) — flagged as costly (~10⁴ samples per
-  100 mm at 0.01 mm spacing) with a cheaper alternative (sampling at the mesh's own convex-edge
-  crossings) left for F's OCL fixtures to decide, not resolved here. Wording fix: the flat's
-  `maxSpacingMm = R` guarantees a sample on the plateau over *any* peak, not only one as wide as the
-  cutter. `minSpacingMm` is given a stated value (`ARC_CHORD_TOLERANCE_MM`) and its trade-off (an
-  uncut sliver of that width at a wall's foot) named, not left as an undefined floor.
-- N1–N3 (§1, §7): `Rim.id`, the `regionRefs(tree)` helper, a `PocketNode`'s sub-floor remainder, and
-  the tray's `setups = [top]` default with its underside unscored.
-- Second implementation (§2, §9, ruled): PyCAM joins OpenCamLib for flat/ball/bull; the V cutter on
-  OpenCamLib alone; both run offline by F, numbers only, no source in the tree.
-- Extraction (§8, ruled): filed as **#967** (C, measurement column, lands before #966), on A's four
-  conditions.
-
-A's follow-up on the amendment (6620322878) confirmed R2–R6 and both rulings satisfied, replaced R1's
-allowlist paragraph with the measured version above, and accepted R6 with the flat-cutter wording fix
-— **this revision applies both and A has nothing further blocking the maintainer's go.**
-
-The maintainer's go landed on #956 (comment 6620383859). Starting code, in the order given.
-
-**Correction found while building the `cam/model/` skeleton (B, 2026-11-04) — before any code was
-written, not after:** re-reading the full comment thread with pagination (every prior read of this
-issue used `gh issue view --comments | tail -N`, which silently drops the middle of a long thread)
-turned up C's #956 comment (6619787259, posted 2026-11-03, between the Makerables numbers and D's
-seams) in full for the first time. The manager's go-ahead said C's shared asks — `opOutcome`,
-`clearedAt`/`linkIsClear` over all prior ops, one pure `link()` — were "carried in §3.6/§5,
-confirmed"; they were not in the note at all. This revision adds C's contract in full as §3.0.1,
-reshapes `PlannedOp` around `RegionRef`/`OpOutcome` instead of a bare `regionId`/`passes[]`, and
-rewrites §4/§5 to call `link()`/`clearedAt`/`linkIsClear` instead of the earlier informal sketch.
-
-**A second, independent correction found in the same pass**: `ModelPlanInput.fixture` was typed as
-`ReturnType<typeof bracketMount>`, which answers `null` for a vise job (`jobSetup.ts:1069`'s own
-comment states this: a bracket program is checked against the bracket's arms, a vise program is not).
-The tray and organizer are vise jobs — this would have handed the engine no jaw-clearance data at all
-for exactly the reference cards §7 judges against. Corrected to `{ mount, obstacles: ObstacleBox[] }`,
-sourced from `viseEnvelope`/`bracketMount` by mount type (§3.0), and threaded through to
-`RegionRef.obstacles` (§3.0.1) so linking can see it.
-
-Both are posted to #956 with this revision, not held back, since code was about to start against the
-wrong shape. Open items: #957–#966 proceed in the manager's stated order; #964/#955/#967 continue as
-ruled.
-
-**Maintainer's ruling, 2026-11-04 (via the manager): Kiri:Moto is a local reference only; "port with
-attribution" withdrawn.** §9 now reads this as a ruling, not a pending default — this note already
-held the reference-only line throughout, so nothing else in it changes.
+The full history of this note's amendments (what changed, when, on whose review, and why) moved to
+its own comment — [6620931732](https://github.com/SlyWombat/CaseMaker/issues/956#issuecomment-6620931732)
+— once this file approached GitHub's comment-size cap. New status entries are appended there, not
+here. Current state, in brief: the maintainer's go landed (6620383859); the `cam/model/` skeleton is
+pushed and reconciled with C's real #961/#962 (`957-cl-surface` @ c792c0ec) and matches F's parity
+harness (`cand/964b` @ 9f65797a) field-for-field; #957's real CL-surface algorithm is next, on a
+branch off `cand/964`'s `a17b27f4`.
