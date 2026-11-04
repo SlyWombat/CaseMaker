@@ -459,7 +459,7 @@ describe('#948 the live session’s swept top', () => {
     const imported = await read('relief-plate.stl');
     const target = targetOf(imported, stock);
     const job = goalJob(target, stock);
-    const tool = flatEndMill(1, { name: '1 mm flat', fluteLength: 10 });
+    const tool = flatEndMill(1, { number: 1, name: '1 mm flat', fluteLength: 10 });
     const nc: string[] = ['G21 G90', 'S1000 M3', 'G0 Z5'];
     for (let row = 0; row < 40; row++) {
       const y = 12 + row * 0.5;
@@ -504,6 +504,18 @@ describe('#948 the live session’s swept top', () => {
       expect(report.goalCutInto?.cutIntoFraction).toBe(directReport.cutIntoFraction);
       // No column read exists on this engine, so the diagnostic is stated absent, not faked.
       expect(report.goalCutInto?.columnCutInto).toBeUndefined();
+
+      // #964 — a stated edge break's V number makes `goalInputFor` hand the check the per-cell
+      // identity: this program's only cutter is tool 1, so every stamped cell is its.
+      const withWho = goalInputFor(session, {
+        target: (check as Extract<SimGoalCheck, { target: unknown }>).target,
+        opts: { edgeBreak: { reachMm: 1, legMm: 1, toolNumber: 1 } },
+      });
+      expect('heightfield' in withWho).toBe(true);
+      if ('heightfield' in withWho) {
+        expect(withWho.opts?.whoAt).toBeTypeOf('function');
+        expect(withWho.opts!.whoAt!(30, 20)).toBe(1);
+      }
     } finally {
       session.dispose();
     }

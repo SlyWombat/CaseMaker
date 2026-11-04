@@ -748,7 +748,23 @@ export interface GoalCutIntoOptions {
    * field capped by the chamfer Tool record — never from the CAM's plan. Absent = no allowance and
    * the pre-V2-2 reading exactly, so a job with no edge break keeps every existing pin.
    */
-  edgeBreak?: { reachMm: number; legMm: number };
+  edgeBreak?: {
+    reachMm: number;
+    legMm: number;
+    /**
+     * #964 — THE PAGE'S `who` RULE: the tool NUMBER of the V bit the allowance is sized from.
+     * When stated (with `whoAt`), a cell is excused as edge break only where the DEEPEST stamp in
+     * that cell is this cutter — a cell a flat or a ball cut deepest is judged, not excused,
+     * exactly as `goal_check.py` gates on `who`. Absent: the geometry-only reading (the
+     * synthetic fixtures' pre-`who` behaviour).
+     */
+    toolNumber?: number;
+  };
+  /**
+   * #964 — the per-cell identity of the lowest stamp: the tool number that left it (0 = none),
+   * sampled on the same grid as the swept top. Needed only with `edgeBreak.toolNumber`.
+   */
+  whoAt?: (x: number, y: number) => number | null;
   /**
    * #955 — the largest cutting tool's radius, mm, for the wall-shadow exclusion. Absent = the
    * shadow class is reported as 0 (a caller with no tool set); the edge-break band still runs.
@@ -1014,7 +1030,14 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   for (let k = 0; k < cells; k++) {
     if (sampled[k] !== 1 || dOf[k]! >= -cutIntoFloorMm) continue;
     const depth = -dOf[k]!;
-    if (band !== null && band[k] === 1 && depth <= allowance!.legMm + 1e-9) {
+    // #964 — the page's `who` rule: with a stated V number, only a cell whose DEEPEST stamp is
+    // that cutter can be edge break. A cutter we cannot identify (no `whoAt`, or 0) is not
+    // excused — the conservative side: an uncounted excusal is a false pass.
+    const i = k % nx;
+    const j = (k - i) / nx;
+    const whoOk = band === null || allowance === undefined || allowance.toolNumber === undefined
+      || opts.whoAt?.(goal.x0 + i * goal.pitch, goal.y0 + j * goal.pitch) === allowance.toolNumber;
+    if (band !== null && band[k] === 1 && depth <= allowance!.legMm + 1e-9 && whoOk) {
       excluded[k] = 1;
       edgeBreakCells++;
       continue;

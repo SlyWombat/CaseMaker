@@ -114,11 +114,19 @@ export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInp
           if (i < 0 || j < 0 || i >= heightfield.nx || j >= heightfield.ny) return null;
           return field[j * heightfield.nx + i]!;
         };
+  // #964 — THE EDGE-BREAK ALLOWANCE'S `who` RULE. When the job's allowance states the V bit's
+  // tool number, the check excuses a cell only where that cutter left its deepest stamp; the
+  // session's stamp carries the identity. Without a stated number the allowance stays
+  // geometry-only (the synthetic fixtures' reading).
+  const whoAt =
+    goal.opts?.edgeBreak?.toolNumber === undefined ? null : live.sweptWhoExact(heightfield);
   return {
     heightfield,
     ...(sweptTop === null ? {} : { sweptTop }),
     ...(sweptTopExact === null ? {} : { sweptTopExact }),
-    ...(goal.opts === undefined ? {} : { opts: goal.opts }),
+    ...(goal.opts === undefined
+      ? {}
+      : { opts: whoAt === null ? goal.opts : { ...goal.opts, whoAt } }),
   };
 }
 
