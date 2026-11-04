@@ -373,6 +373,18 @@ export interface GoalCutIntoOptions {
    * `goal.passCoverage`; absent → {@link GOAL_PASS_COVERAGE_FALLBACK}.
    */
   passCoverage?: number;
+  /**
+   * #955/V2-2 — THE EDGE-BREAK ALLOWANCE, as GATE parameters (A's R3): the V bit's cutting reach
+   * of a design edge and the cone's own leg, computed by the caller from the job's `edgeBreak`
+   * field capped by the chamfer Tool record — never from the CAM's plan. Absent = no allowance and
+   * the pre-V2-2 reading exactly, so a job with no edge break keeps every existing pin.
+   */
+  edgeBreak?: { reachMm: number; legMm: number };
+  /**
+   * #955 — the largest cutting tool's radius, mm, for the wall-shadow exclusion. Absent = the
+   * shadow class is reported as 0 (a caller with no tool set); the edge-break band still runs.
+   */
+  wallShadowRadiusMm?: number;
 }
 
 export interface GoalCutIntoReport {
@@ -417,8 +429,68 @@ export interface GoalCutIntoReport {
    * to know the constant; the measured value is `1 − leftoverFractions[0]`.
    */
   passCoverage: number;
+  /** #955/V2-2 — share of covered cells excluded as EDGE BREAK (a V bit within its reach of a design edge, no deeper than its leg), 0-1. */
+  edgeBreakFraction: number;
+  /** #955 — share excluded as WALL CELLS (a cell straddling a wall step), 0-1. */
+  wallNotScoredFraction: number;
+  /** #955 — share excluded as WALL SHADOW (behind a wall, beyond the sweep's reach), 0-1. */
+  shadowNotScoredFraction: number;
+  /** #955 — the 0.1 mm-floor share AFTER the exclusions: the pass line's judged number, 0-1. */
+  adjudicatedFraction: number;
   medianDeltaMm: number;
   sentence: string;
+}
+
+/**
+ * #955/V2-2 — THE DESIGN EDGES a heightfield can see: a step deeper than 0.2 mm between
+ * neighbouring goal cells (a wall), or the model's silhouette (a covered cell beside an uncovered
+ * one). Both sides of a step are marked, as E's `goal_check.py` does.
+ */
+const GOAL_EDGE_STEP_MM = 0.2;
+
+function designEdgeCells(goal: GoalHeightfield): Uint8Array {
+  const { nx, ny, covered, z } = goal;
+  const wall = new Uint8Array(nx * ny);
+  // An uncovered cell reads as the stock below the goal: any covered neighbour then differs by far
+  // more than the step, which is the silhouette edge (#955's rim).
+  const outside = goal.minZ - 1;
+  const at = (k: number): number => (covered[k] === 1 ? (z[k] as number) : outside);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
+      if (i + 1 < nx && Math.abs(at(k) - at(k + 1)) > GOAL_EDGE_STEP_MM) {
+        wall[k] = 1;
+        wall[k + 1] = 1;
+      }
+      if (j + 1 < ny && Math.abs(at(k) - at(k + nx)) > GOAL_EDGE_STEP_MM) {
+        wall[k] = 1;
+        wall[k + nx] = 1;
+      }
+    }
+  }
+  return wall;
+}
+
+/** Every cell within `radiusMm` of a set cell (the disk dilation `goal_check.py` uses). */
+function dilateCells(mask: Uint8Array, nx: number, ny: number, pitch: number, radiusMm: number): Uint8Array {
+  const out = new Uint8Array(nx * ny);
+  const r = Math.ceil(radiusMm / pitch);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      if (mask[j * nx + i] !== 1) continue;
+      for (let dj = -r; dj <= r; dj++) {
+        const jj = j + dj;
+        if (jj < 0 || jj >= ny) continue;
+        for (let di = -r; di <= r; di++) {
+          const ii = i + di;
+          if (ii < 0 || ii >= nx) continue;
+          if (Math.hypot(di * pitch, dj * pitch) > radiusMm + 1e-9) continue;
+          out[jj * nx + ii] = 1;
+        }
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -429,16 +501,24 @@ export interface GoalCutIntoReport {
  * sweptTop - goalTop` over covered goal cells; `d < -CUT_INTO` is cut INTO the part, `d` above the
  * leftover bands is material left standing) so the app can read the same verdict in-app, for
  * #945/#946's pass criteria, rather than only the demo page's external tool.
+ *
+ * #955/V2-2 — THE EDGE-BREAK ALLOWANCE (E's `goal_check.py` rule, ported): a cell cut into by a V
+ * bit within that bit's reach of a design edge, and no deeper below the goal than the bit's leg, is
+ * EDGE BREAK and not cut-into. The bit's reach/leg are GATE parameters handed in by the caller from
+ * the job's `edgeBreak` field and the chamfer Tool record (A's R3); this function reads no CAM plan.
+ * Wall cells and the wall shadow are reported as unadjudicable shares beside the verdict, exactly
+ * as E reports them. With no `edgeBreak` option the pre-V2-2 reading is returned to the bit.
  */
 export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opts: GoalCutIntoOptions = {}): GoalCutIntoReport {
   const cutIntoFloorMm = opts.cutIntoFloorMm ?? GOAL_CUT_INTO_FLOOR_MM;
   const passCoverage = opts.passCoverage ?? GOAL_PASS_COVERAGE_FALLBACK;
   const cellArea = goal.pitch * goal.pitch;
+  const nx = goal.nx;
+  const ny = goal.ny;
+  const cells = nx * ny;
+  const dOf = new Float64Array(cells);
+  const sampled = new Uint8Array(cells);
   const deltas: number[] = [];
-  let cutIntoCells = 0;
-  let cutIntoVolumeMm3 = 0;
-  let maxCutInto = 0;
-  let maxCutIntoAt: { x: number; y: number } | null = null;
   const leftoverCounts = GOAL_LEFTOVER_BANDS_MM.map(() => 0);
   let leftoverVolumeMm3 = 0;
   let maxLeftover = 0;
@@ -446,9 +526,9 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
   let covered = 0;
 
   const leftoverTop = opts.leftoverTop ?? sweptTop;
-  for (let j = 0; j < goal.ny; j++) {
-    for (let i = 0; i < goal.nx; i++) {
-      const k = j * goal.nx + i;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
       if (goal.covered[k] !== 1) continue;
       const x = goal.x0 + i * goal.pitch;
       const y = goal.y0 + j * goal.pitch;
@@ -457,17 +537,11 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
       covered++;
       const goalTop = goal.z[k] as number;
       const d = top - goalTop; // + leftover, - cut-into, same sign convention as goal_check.py
+      dOf[k] = d;
+      sampled[k] = 1;
       deltas.push(d);
-      if (d < -cutIntoFloorMm) {
-        cutIntoCells++;
-        cutIntoVolumeMm3 += -d * cellArea;
-        if (-d > maxCutInto) {
-          maxCutInto = -d;
-          maxCutIntoAt = { x, y };
-        }
-      }
       // #948 — the leftover bands and the pass line read the page's own point of the sweep; the
-      // cut-into figures above stay on the conservative read.
+      // cut-into figures stay on the conservative read.
       const dLeft = (leftoverTop(x, y) ?? top) - goalTop;
       for (let b = 0; b < GOAL_LEFTOVER_BANDS_MM.length; b++) {
         if (dLeft > GOAL_LEFTOVER_BANDS_MM[b]!) leftoverCounts[b]! += 1;
@@ -481,9 +555,77 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
   }
 
   const n = Math.max(covered, 1);
+  // THE RAW CUT (before any exclusion) — the figure the report has always carried.
+  let rawCutCells = 0;
+  for (let k = 0; k < cells; k++) {
+    if (sampled[k] === 1 && dOf[k]! < -cutIntoFloorMm) rawCutCells++;
+  }
+
+  // #955/V2-2 — the allowance, only when the job states an edge break (no option = no exclusions).
+  let excluded: Uint8Array | null = null;
+  let edgeBreakCells = 0;
+  let wallNotScoredCells = 0;
+  let shadowNotScoredCells = 0;
+  const allowance = opts.edgeBreak;
+  if (allowance !== undefined && allowance.reachMm > 0 && allowance.legMm > 0) {
+    const wall = designEdgeCells(goal);
+    const band = dilateCells(wall, nx, ny, goal.pitch, allowance.reachMm);
+    const shadowRadius = opts.wallShadowRadiusMm;
+    const shadow =
+      shadowRadius !== undefined && shadowRadius > 0
+        ? dilateCells(wall, nx, ny, goal.pitch, shadowRadius)
+        : null;
+    excluded = new Uint8Array(cells);
+    for (let k = 0; k < cells; k++) {
+      if (sampled[k] !== 1 || dOf[k]! >= -cutIntoFloorMm) continue;
+      const depth = -dOf[k]!;
+      if (band[k] === 1 && depth <= allowance.legMm + 1e-9) {
+        excluded[k] = 1;
+        edgeBreakCells++;
+        continue;
+      }
+      if (wall[k] === 1) {
+        excluded[k] = 1;
+        wallNotScoredCells++;
+        continue;
+      }
+      if (shadow !== null && shadow[k] === 1 && wall[k] !== 1) {
+        excluded[k] = 1;
+        shadowNotScoredCells++;
+      }
+    }
+  }
+
+  // THE ADJUDICATED SET — what the pass and the sentence judge.
+  let cutIntoCells = 0;
+  let cutIntoVolumeMm3 = 0;
+  let maxCutInto = 0;
+  let maxCutIntoAt: { x: number; y: number } | null = null;
+  let adjudicated0p1Cells = 0;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
+      if (sampled[k] !== 1) continue;
+      if (dOf[k]! >= -cutIntoFloorMm) continue;
+      if (excluded !== null && excluded[k] === 1) continue;
+      cutIntoCells++;
+      const depth = -dOf[k]!;
+      cutIntoVolumeMm3 += depth * cellArea;
+      if (depth > maxCutInto) {
+        maxCutInto = depth;
+        maxCutIntoAt = { x: goal.x0 + i * goal.pitch, y: goal.y0 + j * goal.pitch };
+      }
+      if (depth > 0.1) adjudicated0p1Cells++;
+    }
+  }
+
   deltas.sort((a, b) => a - b);
   const medianDeltaMm = deltas.length === 0 ? 0 : deltas[Math.floor(deltas.length / 2)]!;
-  const cutIntoFraction = cutIntoCells / n;
+  const cutIntoFraction = rawCutCells / n;
+  const adjudicatedFraction = adjudicated0p1Cells / n;
+  const edgeBreakFraction = edgeBreakCells / n;
+  const wallNotScoredFraction = wallNotScoredCells / n;
+  const shadowNotScoredFraction = shadowNotScoredCells / n;
   const leftoverFractions = leftoverCounts.map((c) => c / n);
   const coverageFraction = withinBoth / n;
   // #948 — THE PASS LINE. The page's rule is zero cut-into AND top-surface coverage ≥ the pass
@@ -495,12 +637,24 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
   const passPct = Number((passCoverage * 100).toFixed(2));
   const surfacePct = Number((surfaceCoverage * 100).toFixed(2));
   const coverageOk = surfaceCoverage + 1e-9 >= passCoverage;
-  const ok = cutIntoCells === 0 && coverageOk;
+  // #955/V2-2 — WITH AN EDGE BREAK THE PASS IS THE PAGE'S LINE: zero at the 0.1 mm floor after the
+  // three exclusions (E's `cutInto0p1Pct`; F's scorer line 2). Without one the pre-V2-2 reading
+  // stands exactly: zero at the check's own floor (0.01 mm by default). The 0.01 residue a V bit
+  // leaves inside the 0.1 band is the advisory figure, never the verdict.
+  const allowanceActive = allowance !== undefined && allowance.reachMm > 0 && allowance.legMm > 0;
+  const judgedCells = allowanceActive ? adjudicated0p1Cells : cutIntoCells;
+  const judgedFloor = allowanceActive ? 0.1 : cutIntoFloorMm;
+  const ok = judgedCells === 0 && coverageOk;
+  const excludedNote =
+    edgeBreakCells + wallNotScoredCells + shadowNotScoredCells > 0
+      ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted)`
+      : '';
+  const adjudicatedCutFraction = cutIntoCells / n;
   const sentence =
-    cutIntoCells > 0
-      ? `goal check: ${(cutIntoFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(cutIntoCells, cellArea).toFixed(1)} mm²) cut into by up to ${maxCutInto.toFixed(3)} mm — ${cutIntoVolumeMm3.toFixed(1)} mm³ over-cut.`
+    judgedCells > 0
+      ? `goal check: ${(adjudicatedCutFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(cutIntoCells, cellArea).toFixed(1)} mm²) cut into by up to ${maxCutInto.toFixed(3)} mm — ${cutIntoVolumeMm3.toFixed(1)} mm³ over-cut.`
       : coverageOk
-        ? `goal check: no cell cut more than ${cutIntoFloorMm} mm into the goal (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
+        ? `goal check: no cell cut more than ${judgedFloor} mm into the goal${excludedNote} (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
         : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal).`;
 
   return {
@@ -521,6 +675,10 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
     coverageFraction,
     passCoverage,
     medianDeltaMm,
+    edgeBreakFraction,
+    wallNotScoredFraction,
+    shadowNotScoredFraction,
+    adjudicatedFraction,
     sentence,
   };
 }
@@ -554,6 +712,10 @@ export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL
     coverageFraction: 0,
     passCoverage,
     medianDeltaMm: 0,
+    edgeBreakFraction: 0,
+    wallNotScoredFraction: 0,
+    shadowNotScoredFraction: 0,
+    adjudicatedFraction: 0,
     sentence: `goal check: not run — ${reason}. Nothing was compared against the goal here, so this is not a pass.`,
   };
 }

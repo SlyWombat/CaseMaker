@@ -102,6 +102,10 @@
             "goal": {
               "description": "The run’s combined goal check, for a goal job; omitted otherwise.",
               "properties": {
+                "adjudicatedFraction": {
+                  "description": "Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number.",
+                  "type": "number"
+                },
                 "columnCutInto": {
                   "anyOf": [
                     {
@@ -157,6 +161,10 @@
                   "description": "Share of the goal’s covered cells cut below it by more than the floor, 0–1.",
                   "type": "number"
                 },
+                "edgeBreakFraction": {
+                  "description": "Share of covered cells excluded as EDGE BREAK (a V bit within its reach of a design edge, no deeper than its leg), 0–1.",
+                  "type": "number"
+                },
                 "leftoverFractions": {
                   "description": "Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.",
                   "items": {
@@ -187,7 +195,7 @@
                       "type": "null"
                     }
                   ],
-                  "description": "Where the deepest cut is, in the work frame, or null when nothing was cut into."
+                  "description": "Where the deepest cut is, in the work frame, or null when nothing was cut into. When the edge-break allowance applies this is the deepest ADJUDICATED cut (after the exclusions)."
                 },
                 "maxCutIntoMm": {
                   "description": "The deepest cut into the goal, mm.",
@@ -216,6 +224,14 @@
                   "description": "The report’s own sentence, as the Cut card prints it.",
                   "minLength": 1,
                   "type": "string"
+                },
+                "shadowNotScoredFraction": {
+                  "description": "Share of covered cells excluded as WALL SHADOW (behind a wall, beyond the sweep’s reach), 0–1.",
+                  "type": "number"
+                },
+                "wallNotScoredFraction": {
+                  "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
+                  "type": "number"
                 },
                 "wholeSurface": {
                   "anyOf": [
@@ -296,6 +312,10 @@
                 "cutIntoFraction",
                 "maxCutIntoMm",
                 "maxCutIntoAt",
+                "adjudicatedFraction",
+                "edgeBreakFraction",
+                "wallNotScoredFraction",
+                "shadowNotScoredFraction",
                 "leftoverFractions",
                 "passCoverage",
                 "wholeSurface",
@@ -643,6 +663,10 @@
                       {
                         "description": "The goal check’s report.",
                         "properties": {
+                          "adjudicatedFraction": {
+                            "description": "Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number.",
+                            "type": "number"
+                          },
                           "columnCutInto": {
                             "anyOf": [
                               {
@@ -698,6 +722,10 @@
                             "description": "Share of the goal’s covered cells cut below it by more than the floor, 0–1.",
                             "type": "number"
                           },
+                          "edgeBreakFraction": {
+                            "description": "Share of covered cells excluded as EDGE BREAK (a V bit within its reach of a design edge, no deeper than its leg), 0–1.",
+                            "type": "number"
+                          },
                           "leftoverFractions": {
                             "description": "Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.",
                             "items": {
@@ -728,7 +756,7 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "Where the deepest cut is, in the work frame, or null when nothing was cut into."
+                            "description": "Where the deepest cut is, in the work frame, or null when nothing was cut into. When the edge-break allowance applies this is the deepest ADJUDICATED cut (after the exclusions)."
                           },
                           "maxCutIntoMm": {
                             "description": "The deepest cut into the goal, mm.",
@@ -757,6 +785,14 @@
                             "description": "The report’s own sentence, as the Cut card prints it.",
                             "minLength": 1,
                             "type": "string"
+                          },
+                          "shadowNotScoredFraction": {
+                            "description": "Share of covered cells excluded as WALL SHADOW (behind a wall, beyond the sweep’s reach), 0–1.",
+                            "type": "number"
+                          },
+                          "wallNotScoredFraction": {
+                            "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
+                            "type": "number"
                           },
                           "wholeSurface": {
                             "anyOf": [
@@ -837,6 +873,10 @@
                           "cutIntoFraction",
                           "maxCutIntoMm",
                           "maxCutIntoAt",
+                          "adjudicatedFraction",
+                          "edgeBreakFraction",
+                          "wallNotScoredFraction",
+                          "shadowNotScoredFraction",
                           "leftoverFractions",
                           "passCoverage",
                           "wholeSurface",

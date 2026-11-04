@@ -154,6 +154,7 @@ import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
 import { efficiencyThresholds, goalPassCoverage, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
+import { goalEdgeBreakOptions } from '../../../src/engine/cnc/engrave/edgeBreak';
 import { goalInputFor } from '../../../src/workers/sim/goalCheckField';
 import type { OracleReport } from '../../../src/engine/cnc/engrave/oracle';
 import { bootstrap, loadCatalogue, type LoadedCatalogue } from '../../../src/platform/headless/bootstrap';
@@ -1053,6 +1054,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // the run store's rule, so the CLI and the Cut card judge the same file the same way.
     const goalCheck = goalCheckForProgram(job, generated.surface3d != null, {
       passCoverage: goalPassCoverage(shopDefaults),
+      // #955/V2-2 — the edge-break allowance's GATE parameters, from the job's edgeBreak and the
+      // tools this run posts (never the CAM's plan, A's R3). No edge break → no allowance.
+      ...goalEdgeBreakOptions(
+        job,
+        (key) => (key === job.toolKey ? tool : (entryFor(key)?.tool ?? null)),
+        generated.programs.map((p) => p.toolKey),
+      ),
     });
     const goalOracles: { index: number; report: OracleReport }[] = [];
     const firstEngraving = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
