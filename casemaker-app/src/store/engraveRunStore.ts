@@ -478,7 +478,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     set({
       ...empty,
       phase: simulateOnly ? 'simulating' : 'generating',
+      // The previous result stays on screen while a newer run builds — its plan stays with it,
+      // so the row, the sheet and the plan block always describe the same run.
       generated: get().generated,
+      plan: get().plan,
       // #785 — a name from the FIRST frame: the worker's own first stage can be seconds away (the
       // module and its wasm load), and "Working…" with no words is the complaint this issue is.
       progress: simulateOnly ? null : { stage: 'prepare', label: 'starting the worker' },
@@ -607,6 +610,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         set({
           ...empty,
           generated: get().generated,
+          plan: get().plan,
           phase: 'blocked',
           simStopped: inSimulation,
           error: inSimulation
@@ -1125,6 +1129,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       set({
         ...empty,
         generated: get().generated,
+        plan: get().plan,
         // Back to what the panel showed before the press — not a blank slate the operator has to
         // reconstruct. A phase that was itself a run state reads as idle.
         phase:
