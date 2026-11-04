@@ -12,13 +12,15 @@
  * 0.1 mm, capped at 20 M cells. What the check does with the pair is `designCheck.ts`'s
  * `checkGoalCutInto`, ported from the same run's `goal_check.py`.
  *
- * LENIENT DIRECTION, STATED: the swept top for CUT-INTO is the HIGHEST of the four columns whose
- * centres bracket a goal cell (`session.sweptTop`), so a cell reads cut only when all four are
- * below the goal. A gouge up to one column (0.1 mm) wide is therefore NOT seen — a fine V-tip or
- * ball mark of one column's width leaves a neighbour at the goal's level and the cell reads
- * clean; a gouge two columns wide reads as one line of cells. `GoalCutIntoReport.pitchMm` states
- * the resolution it was judged at; the positive control is a cutter-footprint plunge, far wider.
- * (The LEFTOVER bands are read with the page's own stamp and carry no such band.)
+ * #945 — ONE VERDICT, THE PAGE'S OWN POINT READ. `checkGoalCutInto` judges cut-into, the leftover
+ * bands and the pass line off the exact stamp (`sweptPoint.ts`, handed over as `sweptTopExact`),
+ * the same field the page's `goal_check.py` computes, and reports the conservative column read
+ * beside it as a stated diagnostic (`GoalCutIntoReport.columnCutInto`). That read is the HIGHEST
+ * of the four columns bracketing a cell (`session.sweptTop`): it is one column lenient — blind to
+ * a gouge narrower than a cell — and it carries the half-cell slope bias the contact-point finish
+ * no longer has, which showed up as a cliff-edge phantom when it was the verdict (the top-clamp
+ * card's 1,930 cells, #948). `pitchMm` states the resolution; the positive controls pin a 0.2 mm
+ * plunge (both reads) and a sub-column gouge (the stamp alone).
  */
 
 import { isMold, moldHeightfield, sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';

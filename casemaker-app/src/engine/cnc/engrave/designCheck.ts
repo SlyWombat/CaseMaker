@@ -415,6 +415,13 @@ export interface GoalCutIntoReport {
    * cell to name.
    */
   maxCutIntoAt: { x: number; y: number } | null;
+  /**
+   * #945 — THE CONSERVATIVE COLUMN READ BESIDE THE VERDICT, present only when the caller supplied
+   * the page's own stamp (the verdict above is then that stamp). It reads each cell as the HIGHEST
+   * of the four columns bracketing it, so it is one column lenient — blind to a gouge narrower
+   * than a cell — and carries the half-cell slope bias. A diagnostic, never the pass.
+   */
+  columnCutInto?: { fraction: number; maxMm: number; at: { x: number; y: number } | null };
   /** Share of covered cells left standing more than each of {@link GOAL_LEFTOVER_BANDS_MM} above the goal, 0-1, same order. */
   leftoverFractions: number[];
   leftoverVolumeMm3: number;
@@ -524,15 +531,26 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
   let maxLeftover = 0;
   let withinBoth = 0;
   let covered = 0;
+  let columnCells = 0;
+  let columnMax = 0;
+  let columnAt: { x: number; y: number } | null = null;
 
-  const leftoverTop = opts.leftoverTop ?? sweptTop;
+  // #945 — ONE VERDICT, THE PAGE'S OWN POINT READ. When the caller supplies the exact stamp (the
+  // app's goal jobs do; `sweptPoint.ts`), cut-into is judged on it exactly as `goal_check.py` does
+  // — the cutter's own surface at the goal cell's centre, every program of the run folded in (the
+  // session's accumulated field) — so the app and the page cannot disagree about a cell. The
+  // conservative column read (`sweptTop`) stays beside it as the diagnostic: it reads the HIGHEST
+  // of the four columns bracketing a cell (one column lenient, blind to a gouge narrower than a
+  // cell) and carries the half-cell slope bias, which showed up as a cliff-edge phantom when it
+  // was the verdict (the top-clamp card's 1,930 cells, #948).
+  const verdictTop = opts.leftoverTop ?? sweptTop;
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
       const k = j * nx + i;
       if (goal.covered[k] !== 1) continue;
       const x = goal.x0 + i * goal.pitch;
       const y = goal.y0 + j * goal.pitch;
-      const top = sweptTop(x, y);
+      const top = verdictTop(x, y) ?? (opts.leftoverTop === undefined ? null : sweptTop(x, y));
       if (top === null) continue;
       covered++;
       const goalTop = goal.z[k] as number;
@@ -540,9 +558,19 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
       dOf[k] = d;
       sampled[k] = 1;
       deltas.push(d);
-      // #948 — the leftover bands and the pass line read the page's own point of the sweep; the
-      // cut-into figures stay on the conservative read.
-      const dLeft = (leftoverTop(x, y) ?? top) - goalTop;
+      if (opts.leftoverTop !== undefined) {
+        const cTop = sweptTop(x, y);
+        if (cTop !== null && cTop - goalTop < -cutIntoFloorMm) {
+          columnCells++;
+          if (goalTop - cTop > columnMax) {
+            columnMax = goalTop - cTop;
+            columnAt = { x, y };
+          }
+        }
+      }
+      // #948/#945 — the leftover bands, the pass line and the cut-into verdict all read the page's
+      // own point of the sweep (the same field, one model).
+      const dLeft = (verdictTop(x, y) ?? top) - goalTop;
       for (let b = 0; b < GOAL_LEFTOVER_BANDS_MM.length; b++) {
         if (dLeft > GOAL_LEFTOVER_BANDS_MM[b]!) leftoverCounts[b]! += 1;
       }
@@ -669,6 +697,9 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop, opt
     cutIntoVolumeMm3,
     maxCutIntoMm: maxCutInto,
     maxCutIntoAt,
+    ...(opts.leftoverTop === undefined
+      ? {}
+      : { columnCutInto: { fraction: columnCells / n, maxMm: columnMax, at: columnAt } }),
     leftoverFractions,
     leftoverVolumeMm3,
     maxLeftoverMm: maxLeftover,

@@ -475,9 +475,12 @@ describe('#948 the live session’s swept top', () => {
       expect(input.heightfield.pitch).toBe(GOAL_CHECK_PITCH_MM);
       expect(GOAL_CHECK_MAX_CELLS).toBe(20_000_000);
 
+      // #945 — the session's verdict is the page's exact stamp; mirror its input on the direct
+      // call so the two are the same comparison, not one on the column read and one on the stamp.
       const direct = checkGoalCutInto(
         sampleGoalHeightfield(target, { pitchMm: GOAL_CHECK_PITCH_MM, maxCells: GOAL_CHECK_MAX_CELLS }),
         top as NonNullable<ReturnType<SimSession['sweptTop']>>,
+        'sweptTopExact' in input && input.sweptTopExact !== undefined ? { leftoverTop: input.sweptTopExact } : {},
       );
       const report = session.oracle(g.predicted, null, g.designItems, input);
       expect(report.goalCutInto).toBeDefined();
