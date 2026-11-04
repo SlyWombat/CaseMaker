@@ -121,7 +121,15 @@ function ballScallopStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg:
   if (!(radiusMm > 0) || !(bandMm > 0) || bandMm >= radiusMm) return Math.max(radiusMm, 0.1);
   const cosTheta = Math.cos((steepestSlopeDeg * Math.PI) / 180);
   const bandPrime = bandMm * cosTheta;
-  return cosTheta * 2 * Math.sqrt(Math.max(0, 2 * radiusMm * bandPrime - bandPrime * bandPrime));
+  const spacing = cosTheta * 2 * Math.sqrt(Math.max(0, 2 * radiusMm * bandPrime - bandPrime * bandPrime));
+  // THE PROPERTY SEEDS FOUND THIS: as the steepest slope approaches vertical the closed form
+  // collapses to ZERO — and `finish()`'s raster advances `x += stepOverMm`, so the op never
+  // returns. A vertical face is not finished by spending raster rows on it at all (the wall is the
+  // rough's and the contour's cut, and the band the ball promises is undefined there), so the
+  // spacing is floored at a tenth of the ball's own radius: fine enough that every slope the
+  // formula is defined on still meets its cusp, coarse enough that the raster is bounded. The
+  // 90° wall in the sloped seed is what exposed it.
+  return Math.max(spacing, radiusMm / 10);
 }
 
 /**
