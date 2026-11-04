@@ -13,12 +13,17 @@ will live in its own directory and carry the same artefacts as the 10-24 badge p
   - `clGrid[]`: `cutterKey`, `toleranceMm`, `minSpacingMm`, `maxSpacingMm` — all required;
   - `ops[]`: `kind` (pocket | contour | rough | rest | finish | pencil | chamfer) + `region` +
     `outcome`, all required; `region` is `{ id, kind (pocket | island-top | curved | contour |
-    rim), bounds, topZ, bottomZ, obstacles }`; `outcome` is `{ ir, cutter, cleared? }` — `cleared`
-    is the one optional field the note leaves optional;
-  - `sequence[]`: `cutterKey`, `cost` (#927's `CycleTerms`: `movesSeconds`, `entrySeconds`,
-    `spinUpSeconds`, `totalSeconds`), `pinned`, `house` — all required;
+    rim), bounds, topZ, bottomZ, obstacles, regionClearanceZ }`; `outcome` is `{ ir, cutter,
+    passes, cleared? }` — `cleared` is the one optional field the note leaves optional, and
+    `passes[]` are `PassRef` (`{ z, boundary, cleared, entry, exit }`, entry/exit as `Vec3`);
+  - `sequence[]`: `cutterKey`, `cost` (a `CycleCost`: `{ terms: CycleTerms, toolChangeSeconds,
+    totalSeconds }`, with `terms` carrying `movesSeconds`/`entrySeconds`/`spinUpSeconds`/
+    `totalSeconds`; `toolChanges` is carried when the skeleton states it), `pinned`, `house` —
+    all required;
   - `linking`: `rapidsCount`, `hopsCount`, `airFractionPct` — all required;
-  - `programs` is `ToolpathIR[]`, one per cutter in sequence order; `totalCostSeconds` is a number.
+  - `programs` is `ToolpathIR[]`, one per cutter in sequence order, each carrying its own `safeZ`
+    (the program-wide clearance; the per-region one is `RegionRef.regionClearanceZ`);
+    `totalCostSeconds` is a number.
 - `estimate.json` — #927's cycle terms and the program facts the seven-line scorer reads
   (rapids per 1,000 feed lines, cutters, air fraction);
 - `card.json` — the reference card and the seven lines, as `tests/tools/seven-lines.ts` prints them.
